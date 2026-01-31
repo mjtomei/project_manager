@@ -29,14 +29,23 @@ class VanillaBackend(Backend):
     def is_merged(self, workdir, branch, base_branch):
         # Fetch latest state from remote
         git_ops.run_git("fetch", "origin", cwd=workdir, check=False)
-        result = git_ops.run_git(
-            "branch", "-r", "--merged", f"origin/{base_branch}",
-            cwd=workdir, check=False,
-        )
-        if result.returncode != 0:
-            return False
-        merged = [b.strip() for b in result.stdout.splitlines()]
-        return f"origin/{branch}" in merged
+        # Check both local and remote branches merged into base
+        for ref in (branch, f"origin/{branch}"):
+            # Does this ref exist?
+            exists = git_ops.run_git(
+                "rev-parse", "--verify", ref, cwd=workdir, check=False,
+            )
+            if exists.returncode != 0:
+                continue
+            # Is it an ancestor of (i.e. merged into) base?
+            # merge-base --is-ancestor exits 0 if ref is ancestor of base
+            result = git_ops.run_git(
+                "merge-base", "--is-ancestor", ref, base_branch,
+                cwd=workdir, check=False,
+            )
+            if result.returncode == 0:
+                return True
+        return False
 
     def pr_instructions(self, branch, title, base_branch, pr_id):
         return (
