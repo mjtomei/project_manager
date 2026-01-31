@@ -36,38 +36,60 @@ def cli():
 
 
 @cli.command()
-@click.argument("repo_url")
+@click.argument("repo_url", metavar="TARGET_REPO_URL")
 @click.option("--name", default=None, help="Project name (defaults to repo name)")
-@click.option("--base-branch", default="main", help="Base branch")
-@click.option("--dir", "directory", default=".", help="Directory to initialize in")
-def init(repo_url: str, name: str, base_branch: str, directory: str):
-    """Initialize a new PM repo (separate from the target codebase).
+@click.option("--base-branch", default="main", help="Base branch of target repo")
+@click.option("--dir", "directory", default=None, help="Directory for PM repo (default: <name>-pm)")
+@click.option("--pm-remote", default=None, help="Git remote URL for the PM repo itself")
+def init(repo_url: str, name: str, base_branch: str, directory: str, pm_remote: str):
+    """Create a new PM repo for managing a target codebase.
 
-    The PM repo holds project.yaml and plans/. It is owned by PMs.
-    The target codebase (repo_url) is where actual code PRs go.
+    TARGET_REPO_URL is the codebase where code PRs will be opened.
+
+    This creates a SEPARATE git repo for project management state
+    (project.yaml, plans/). Only PMs touch this repo directly.
     Contributors interact via GitHub issues or in person.
+
+    \b
+    Examples:
+      pm init git@github.com:org/myapp.git
+      pm init git@github.com:org/myapp.git --pm-remote git@github.com:org/myapp-pm.git
+      pm init git@github.com:org/myapp.git --dir ~/projects/myapp-pm
     """
-    root = Path(directory).resolve()
     if name is None:
         name = repo_url.rstrip("/").split("/")[-1].replace(".git", "")
+
+    if directory is None:
+        directory = f"{name}-pm"
+    root = Path(directory).resolve()
+
+    if (root / "project.yaml").exists():
+        click.echo(f"PM repo already exists at {root}", err=True)
+        raise SystemExit(1)
 
     data = store.init_project(root, name, repo_url, base_branch)
 
     # Initialize PM repo as its own git repo
     if not git_ops.is_git_repo(root):
         git_ops.run_git("init", cwd=root, check=False)
-        # Create .gitignore for the PM repo
         gitignore = root / ".gitignore"
         if not gitignore.exists():
-            gitignore.write_text("# PM repo — only project.yaml and plans/ matter\n")
+            gitignore.write_text("")
         git_ops.run_git("add", "-A", cwd=root, check=False)
         git_ops.run_git("commit", "-m", "pm: init project", cwd=root, check=False)
 
-    click.echo(f"Initialized PM repo for '{name}' in {root}")
+    if pm_remote:
+        git_ops.run_git("remote", "add", "origin", pm_remote, cwd=root, check=False)
+        click.echo(f"  pm remote: {pm_remote}")
+
+    click.echo(f"Created PM repo at {root}")
     click.echo(f"  target repo: {repo_url}")
     click.echo(f"  base branch: {base_branch}")
-    click.echo(f"\nThis is a separate repo from the target codebase.")
-    click.echo(f"Push this PM repo to share state with other PMs.")
+    if not pm_remote:
+        click.echo(f"\nTo share with other PMs, create a remote repo and run:")
+        click.echo(f"  cd {root}")
+        click.echo(f"  git remote add origin <your-pm-repo-url>")
+        click.echo(f"  git push -u origin master")
 
 
 # --- Plan commands ---
