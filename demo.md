@@ -1,6 +1,7 @@
 # pm demo walkthrough
 
 This walks through using `pm` to manage the project-manager project itself.
+Uses the vanilla backend — no GitHub CLI required.
 
 ## Install
 
@@ -20,8 +21,8 @@ pm
 ```
 
 Since there's no PM repo yet, this prints the help message. At the bottom
-it detects you're in a git repo and prints the exact `pm init` command
-with your remote URL and branch pre-filled. Run that command.
+it detects your git repo and prints the exact `pm init` command with your
+remote URL, branch, and auto-detected backend pre-filled. Run that command.
 
 Then `cd` into the PM repo directory it created.
 
@@ -83,7 +84,8 @@ pm prompt pr-001
 ```
 
 Shows the generated prompt with context, dependency status, guardrails,
-and instructions. This is what you'd paste into a Claude Code session.
+and instructions. With the vanilla backend, instructions tell Claude to
+push the branch and let the human handle the merge.
 
 ## 6. Simulate a PR lifecycle
 
@@ -98,12 +100,16 @@ pm pr done pr-001
 pm pr list
 ```
 
-pr-001 is now `in_review`. In a real workflow, after it merges on GitHub:
+pr-001 is now `in_review`. To simulate a merge, edit project.yaml and
+set pr-001's status to `merged`, then check what's unblocked:
 
 ```bash
-# Simulate: manually edit project.yaml to set pr-001 status to "merged"
-# (In real use, pm pr sync checks GitHub automatically)
+# After editing project.yaml:
+pm pr ready
 ```
+
+With a real repo and workdir, `pm pr sync` would detect the merge
+automatically via `git branch --merged`.
 
 ## 7. Add a second plan
 
@@ -156,7 +162,8 @@ pm pr graph
 ## Tips
 
 - **All mutations auto-commit** to the PM repo's git history
-- **Multi-machine**: push the PM repo to GitHub, clone on other machines
+- **Multi-machine**: push the PM repo to a remote, clone on other machines
 - **`pm pr ready`** is the key command — run it after every sync to see what's actionable
 - **`pm pr start`** does the full setup: clone, branch, prompt generation
 - **`pm prompt`** regenerates the prompt without cloning (for re-runs)
+- **Backends**: vanilla is auto-detected for non-GitHub URLs; use `--backend github` to override

@@ -1,6 +1,7 @@
 """Claude prompt generation with guardrails."""
 
 from pm_core import store
+from pm_core.backend import get_backend
 
 
 def generate_prompt(data: dict, pr_id: str) -> str:
@@ -30,6 +31,9 @@ def generate_prompt(data: dict, pr_id: str) -> str:
     description = pr.get("description", "").strip()
     base_branch = data.get("project", {}).get("base_branch", "main")
 
+    backend = get_backend(data)
+    instructions = backend.pr_instructions(branch, title, base_branch, pr_id)
+
     prompt = f"""You are working on PR {pr_id}: "{title}"
 
 ## Context
@@ -44,10 +48,6 @@ This PR is part of the plan "{plan_name}" ({plan_id}).
 - Before referencing any existing code (imports, function calls, class usage), read the actual source to verify it exists and has the expected interface. Do not assume.
 
 ## Instructions
-- Work in the current directory (already on branch {branch})
-- When done, commit your changes, push the branch, and create a PR:
-  git push -u origin {branch}
-  gh pr create --title "{title}" --base {base_branch}
-- Then tell the human you're done so they can run: pm pr done {pr_id}
+{instructions}
 """
     return prompt.strip()

@@ -7,7 +7,8 @@ from pathlib import Path
 
 import click
 
-from pm_core import store, graph, git_ops, gh_ops, prompt_gen
+from pm_core import store, graph, git_ops, prompt_gen
+from pm_core.backend import detect_backend, get_backend
 
 
 _project_override: Path | None = None
@@ -94,19 +95,27 @@ def cli(project_dir: str | None):
 @click.option("--base-branch", default="main", help="Base branch of target repo")
 @click.option("--dir", "directory", default=None, help="Directory for PM repo (default: <name>-pm)")
 @click.option("--pm-remote", default=None, help="Git remote URL for the PM repo itself")
-def init(repo_url: str, name: str, base_branch: str, directory: str, pm_remote: str):
+@click.option("--backend", "backend_override", default=None,
+              type=click.Choice(["vanilla", "github"]),
+              help="Hosting backend (auto-detected from URL if not set)")
+def init(repo_url: str, name: str, base_branch: str, directory: str,
+         pm_remote: str, backend_override: str):
     """Create a new PM repo for managing a target codebase.
 
     TARGET_REPO_URL is the codebase where code PRs will be opened.
 
     This creates a SEPARATE git repo for project management state
     (project.yaml, plans/). Only PMs touch this repo directly.
-    Contributors interact via GitHub issues or in person.
+    Contributors interact via issues or in person.
+
+    The hosting backend is auto-detected from the URL:
+      - github.com URLs use the 'github' backend (gh CLI integration)
+      - Everything else uses the 'vanilla' backend (pure git)
 
     \b
     Examples:
       pm init git@github.com:org/myapp.git
-      pm init git@github.com:org/myapp.git --pm-remote git@github.com:org/myapp-pm.git
+      pm init git@myhost.com:org/myapp.git --backend vanilla
       pm init git@github.com:org/myapp.git --dir ~/projects/myapp-pm
     """
     if name is None:
@@ -120,7 +129,8 @@ def init(repo_url: str, name: str, base_branch: str, directory: str, pm_remote: 
         click.echo(f"PM repo already exists at {root}", err=True)
         raise SystemExit(1)
 
-    data = store.init_project(root, name, repo_url, base_branch)
+    backend = backend_override or detect_backend(repo_url)
+    data = store.init_project(root, name, repo_url, base_branch, backend=backend)
 
     # Initialize PM repo as its own git repo
     if not git_ops.is_git_repo(root):
@@ -138,6 +148,7 @@ def init(repo_url: str, name: str, base_branch: str, directory: str, pm_remote: 
     click.echo(f"Created PM repo at {root}")
     click.echo(f"  target repo: {repo_url}")
     click.echo(f"  base branch: {base_branch}")
+    click.echo(f"  backend: {backend}")
     if not pm_remote:
         click.echo(f"\nTo share with other PMs, create a remote repo and run:")
         click.echo(f"  cd {root}")
@@ -405,19 +416,20 @@ def pr_done(pr_id: str):
 
 @pr.command("sync")
 def pr_sync():
-    """Sync PR merge status from GitHub.
+    """Check for merged PRs and unblock dependents.
 
-    Checks the target repo (not the PM repo) for merged PRs.
-    Needs at least one workdir to exist, or uses gh with --repo flag.
+    Uses the configured backend (vanilla or github) to detect merges.
+    Needs at least one workdir to exist (created by 'pm pr start').
     """
     root = state_root()
     data = store.load(root)
     project_name = data["project"]["name"]
-    repo_url = data["project"]["repo"]
+    base_branch = data["project"].get("base_branch", "main")
     prs = data.get("prs") or []
+    backend = get_backend(data)
     updated = 0
 
-    # Find any existing workdir to run gh commands from
+    # Find any existing workdir to check merge status from
     workdirs_base = Path.home() / ".pm-workdirs" / project_name
     target_workdir = None
     if workdirs_base.exists():
@@ -427,8 +439,7 @@ def pr_sync():
                 break
 
     if not target_workdir:
-        click.echo("No workdirs found. Run 'pm pr start' on a PR first to create one.", err=True)
-        click.echo("(gh needs a local clone of the target repo to check PR status)")
+        click.echo("No workdirs found. Run 'pm pr start' on a PR first.", err=True)
         raise SystemExit(1)
 
     for pr_entry in prs:
@@ -436,7 +447,7 @@ def pr_sync():
             continue
         branch = pr_entry.get("branch", "")
 
-        if gh_ops.is_pr_merged(str(target_workdir), branch):
+        if backend.is_merged(str(target_workdir), branch, base_branch):
             pr_entry["status"] = "merged"
             click.echo(f"  ✅ {pr_entry['id']}: merged")
             updated += 1
@@ -497,43 +508,84 @@ def check_cmd():
 
 
 def _detect_git_repo() -> dict | None:
-    """If cwd is a git repo, return info about it (remote URL, name, default branch)."""
+    """Detect the git state of cwd. Returns None if not a git repo.
+
+    Return dict has 'type' key:
+      - 'local': git repo with no remote
+      - 'github': git repo with a github.com remote
+      - 'vanilla': git repo with a non-GitHub remote
+    """
     cwd = Path.cwd()
     if not git_ops.is_git_repo(cwd):
         return None
-    result = git_ops.run_git("remote", "get-url", "origin", cwd=cwd, check=False)
-    if result.returncode != 0 or not result.stdout.strip():
-        return None
-    remote_url = result.stdout.strip()
-    # Derive repo name
-    name = remote_url.rstrip("/").split("/")[-1].replace(".git", "")
-    # Get default branch
+
     branch_result = git_ops.run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=cwd, check=False)
     branch = branch_result.stdout.strip() if branch_result.returncode == 0 else "main"
-    return {"url": remote_url, "name": name, "branch": branch, "cwd": str(cwd)}
+
+    result = git_ops.run_git("remote", "get-url", "origin", cwd=cwd, check=False)
+    if result.returncode != 0 or not result.stdout.strip():
+        return {"url": None, "name": cwd.name, "branch": branch, "cwd": str(cwd), "type": "local"}
+
+    remote_url = result.stdout.strip()
+    name = remote_url.rstrip("/").split("/")[-1].replace(".git", "")
+    backend_type = detect_backend(remote_url)
+    return {"url": remote_url, "name": name, "branch": branch, "cwd": str(cwd), "type": backend_type}
 
 
 def _repo_specific_guidance(repo_info: dict) -> str:
-    """Generate repo-specific setup guidance."""
+    """Generate repo-specific setup guidance based on detected git state."""
     name = repo_info["name"]
-    url = repo_info["url"]
     branch = repo_info["branch"]
-    pm_dir = Path(repo_info["cwd"]).parent / f"{name}-pm"
+    repo_type = repo_info["type"]
+    cwd = repo_info["cwd"]
 
-    return f"""
-DETECTED REPO: {name}
-  remote: {url}
+    if repo_type == "local":
+        return f"""
+DETECTED: local git repo '{name}' (no remote)
   branch: {branch}
 
-  No PM repo found for this project. To set one up:
+  You can still use pm for local project management.
+  Point the target repo at this directory:
 
-    pm init {url} --base-branch {branch}
-    cd {pm_dir}
+    pm init {cwd} --base-branch {branch}
 
   Or if a PM repo already exists elsewhere:
 
     export PM_PROJECT=/path/to/{name}-pm
 """
+
+    url = repo_info["url"]
+    pm_dir = Path(cwd).parent / f"{name}-pm"
+    backend = repo_type  # 'github' or 'vanilla'
+
+    lines = f"""
+DETECTED REPO: {name}
+  remote: {url}
+  branch: {branch}
+  backend: {backend}
+
+  No PM repo found for this project. To set one up:
+
+    pm init {url} --base-branch {branch}
+    cd {pm_dir}
+"""
+
+    if backend == "github":
+        lines += """
+  The github backend will be auto-selected (uses gh CLI for PR management).
+  Make sure 'gh' is installed and authenticated: gh auth status
+"""
+    else:
+        lines += """
+  The vanilla backend will be auto-selected (pure git, no external tools).
+  Merge detection uses 'git branch --merged'. No gh CLI required.
+"""
+
+    lines += f"""  Or if a PM repo already exists elsewhere:
+
+    export PM_PROJECT=/path/to/{name}-pm
+"""
+    return lines
 
 
 HELP_TEXT = """\
@@ -544,7 +596,7 @@ sessions, and provides an interactive terminal dashboard.
 
 GETTING STARTED
   1. Create a PM repo (separate from your target codebase):
-       pm init git@github.com:org/myapp.git
+       pm init <target-repo-url>
 
   2. Add a plan:
        pm plan add "Add authentication"
@@ -562,7 +614,7 @@ GETTING STARTED
   6. When Claude is done, mark it:
        pm pr done pr-001
 
-  7. Check GitHub for merges and unblock dependents:
+  7. Check for merges and unblock dependents:
        pm pr sync
 
 COMMANDS
@@ -577,7 +629,7 @@ COMMANDS
   pm pr ready                   Show PRs ready to start
   pm pr start <pr-id>           Clone, branch, print Claude prompt
   pm pr done <pr-id>            Mark PR as in_review
-  pm pr sync                    Check GitHub for merged PRs
+  pm pr sync                    Check for merged PRs
   pm pr cleanup <pr-id>         Remove workdir for merged PR
 
   pm prompt <pr-id>             Print Claude prompt for a PR
@@ -585,11 +637,16 @@ COMMANDS
 
 OPTIONS
   -C <path>                     Path to PM repo (or set PM_PROJECT env var)
+  --backend vanilla|github      Override auto-detected backend at init time
+
+BACKENDS
+  vanilla   Pure git. No external tools. Merge detection via git branch --merged.
+  github    Uses gh CLI for PR creation and merge detection. Auto-selected for
+            github.com URLs.
 
 NOTES
   The PM repo is separate from the target codebase. Only PMs touch it.
-  State is stored in project.yaml and plans/, auto-committed to git.
-  Contributors interact via GitHub issues or in person.\
+  State is stored in project.yaml and plans/, auto-committed to git.\
 """
 
 

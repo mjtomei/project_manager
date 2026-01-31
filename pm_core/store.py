@@ -87,19 +87,21 @@ def slugify(text: str) -> str:
     return s.strip("-")[:50]
 
 
-def init_project(root: Path, name: str, repo: str, base_branch: str = "main") -> dict:
+def init_project(root: Path, name: str, repo: str, base_branch: str = "main",
+                  backend: str = "vanilla") -> dict:
     """Create initial project.yaml in a new PM repo.
 
     The PM repo is separate from the target codebase repo.
     It contains only project.yaml and plans/ — the source of truth
     for project state, owned by PMs. Contributors interact via
-    GitHub issues or in person, never touching this repo directly.
+    issues or in person, never touching this repo directly.
     """
     data = {
         "project": {
             "name": name,
             "repo": repo,
             "base_branch": base_branch,
+            "backend": backend,
         },
         "plans": [],
         "prs": [],
