@@ -457,10 +457,48 @@ def check_cmd():
         raise SystemExit(1)
 
 
-@cli.command("help")
-def help_cmd():
-    """Show help and getting started guide."""
-    click.echo("""pm — Project Manager for Claude Code sessions
+def _detect_git_repo() -> dict | None:
+    """If cwd is a git repo, return info about it (remote URL, name, default branch)."""
+    cwd = Path.cwd()
+    if not git_ops.is_git_repo(cwd):
+        return None
+    result = git_ops.run_git("remote", "get-url", "origin", cwd=cwd, check=False)
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    remote_url = result.stdout.strip()
+    # Derive repo name
+    name = remote_url.rstrip("/").split("/")[-1].replace(".git", "")
+    # Get default branch
+    branch_result = git_ops.run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=cwd, check=False)
+    branch = branch_result.stdout.strip() if branch_result.returncode == 0 else "main"
+    return {"url": remote_url, "name": name, "branch": branch, "cwd": str(cwd)}
+
+
+def _repo_specific_guidance(repo_info: dict) -> str:
+    """Generate repo-specific setup guidance."""
+    name = repo_info["name"]
+    url = repo_info["url"]
+    branch = repo_info["branch"]
+    pm_dir = Path(repo_info["cwd"]).parent / f"{name}-pm"
+
+    return f"""
+DETECTED REPO: {name}
+  remote: {url}
+  branch: {branch}
+
+  No PM repo found for this project. To set one up:
+
+    pm init {url} --base-branch {branch}
+    cd {pm_dir}
+
+  Or if a PM repo already exists elsewhere:
+
+    export PM_PROJECT=/path/to/{name}-pm
+"""
+
+
+HELP_TEXT = """\
+pm — Project Manager for Claude Code sessions
 
 Manages a graph of PRs derived from plans, orchestrates parallel Claude Code
 sessions, and provides an interactive terminal dashboard.
@@ -512,8 +550,22 @@ OPTIONS
 NOTES
   The PM repo is separate from the target codebase. Only PMs touch it.
   State is stored in project.yaml and plans/, auto-committed to git.
-  Contributors interact via GitHub issues or in person.
-""")
+  Contributors interact via GitHub issues or in person.\
+"""
+
+
+@cli.command("help")
+def help_cmd():
+    """Show help and getting started guide."""
+    click.echo(HELP_TEXT)
+
+    # Check if we're in a git repo without a PM repo
+    try:
+        state_root()
+    except FileNotFoundError:
+        repo_info = _detect_git_repo()
+        if repo_info:
+            click.echo(_repo_specific_guidance(repo_info))
 
 
 def main():
