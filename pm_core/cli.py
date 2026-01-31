@@ -13,16 +13,55 @@ from pm_core import store, graph, git_ops, gh_ops, prompt_gen
 _project_override: Path | None = None
 
 
+def _normalize_repo_url(url: str) -> str:
+    """Normalize git remote URL for comparison.
+
+    git@github.com:org/repo.git -> github.com/org/repo
+    https://github.com/org/repo.git -> github.com/org/repo
+    """
+    url = url.strip().rstrip("/")
+    if url.endswith(".git"):
+        url = url[:-4]
+    # SSH format: git@host:path
+    if ":" in url and "@" in url.split(":")[0]:
+        _, rest = url.split(":", 1)
+        host = url.split("@")[1].split(":")[0]
+        return f"{host}/{rest}"
+    # HTTPS format
+    for prefix in ("https://", "http://"):
+        if url.startswith(prefix):
+            return url[len(prefix):]
+    return url
+
+
+def _verify_pm_repo_matches_cwd(pm_root: Path) -> None:
+    """Warn if the PM repo targets a different repo than the current git repo."""
+    cwd = Path.cwd()
+    if not git_ops.is_git_repo(cwd):
+        return
+    cwd_remote = git_ops.run_git("remote", "get-url", "origin", cwd=cwd, check=False)
+    if cwd_remote.returncode != 0 or not cwd_remote.stdout.strip():
+        return
+    try:
+        data = store.load(pm_root)
+    except Exception:
+        return
+    pm_target = data.get("project", {}).get("repo", "")
+    if not pm_target:
+        return
+    if _normalize_repo_url(cwd_remote.stdout.strip()) != _normalize_repo_url(pm_target):
+        click.echo(
+            f"Warning: PM repo targets {pm_target}\n"
+            f"         but you're in a repo with remote {cwd_remote.stdout.strip()}\n",
+            err=True,
+        )
+
+
 def state_root() -> Path:
     """Get the project root containing project.yaml."""
     if _project_override:
+        _verify_pm_repo_matches_cwd(_project_override)
         return _project_override
-    # Check PM_PROJECT env var
-    env = os.environ.get("PM_PROJECT")
-    if env:
-        p = Path(env).resolve()
-        if (p / "project.yaml").exists():
-            return p
     return store.find_project_root()
 
 
