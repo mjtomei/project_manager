@@ -14,7 +14,10 @@ def find_project_root(start: Optional[str] = None) -> Path:
     for d in [p, *p.parents]:
         if (d / "project.yaml").exists():
             return d
-    raise FileNotFoundError("No project.yaml found in any parent directory")
+    raise FileNotFoundError(
+        "No project.yaml found. Either cd into your PM repo, "
+        "use 'pm -C /path/to/pm-repo', or set PM_PROJECT=/path/to/pm-repo"
+    )
 
 
 def load(root: Optional[Path] = None) -> dict:

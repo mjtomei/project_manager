@@ -10,15 +10,25 @@ import click
 from pm_core import store, graph, git_ops, gh_ops, prompt_gen
 
 
+_project_override: Path | None = None
+
+
 def state_root() -> Path:
     """Get the project root containing project.yaml."""
+    if _project_override:
+        return _project_override
+    # Check PM_PROJECT env var
+    env = os.environ.get("PM_PROJECT")
+    if env:
+        p = Path(env).resolve()
+        if (p / "project.yaml").exists():
+            return p
     return store.find_project_root()
 
 
 def load_and_sync() -> tuple[dict, Path]:
     """Load state, optionally syncing from git first."""
     root = state_root()
-    # Try to pull latest state (non-fatal if not a git repo or offline)
     git_ops.sync_state(root)
     return store.load(root), root
 
@@ -30,9 +40,13 @@ def save_and_push(data: dict, root: Path, message: str = "pm: update state") -> 
 
 
 @click.group()
-def cli():
+@click.option("-C", "project_dir", default=None, envvar="PM_PROJECT",
+              help="Path to PM repo (or set PM_PROJECT env var)")
+def cli(project_dir: str | None):
     """pm — Project Manager for Claude Code sessions."""
-    pass
+    global _project_override
+    if project_dir:
+        _project_override = Path(project_dir).resolve()
 
 
 @cli.command()
