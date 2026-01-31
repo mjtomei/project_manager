@@ -2,30 +2,28 @@
 
 This walks through using `pm` to manage the project-manager project itself.
 
-## Prerequisites
+## Install
 
 ```bash
-# Install pm
 ./install.sh
 
 # Make sure ~/.local/bin is on your PATH
 export PATH="$HOME/.local/bin:$PATH"
-
-# Verify
-pm help
 ```
 
-## 1. Create the PM repo
+## 1. Get repo-specific setup instructions
 
-The PM repo is separate from the source code. It holds only project state.
+From the project-manager source repo, run:
 
 ```bash
-# From anywhere — this creates a new directory
-pm init git@github.com:org/project-manager.git --name project-manager --base-branch master
-
-# It creates project-manager-pm/ with a git repo inside
-cd project-manager-pm
+pm
 ```
+
+Since there's no PM repo yet, this prints the help message. At the bottom
+it detects you're in a git repo and prints the exact `pm init` command
+with your remote URL and branch pre-filled. Run that command.
+
+Then `cd` into the PM repo directory it created.
 
 ## 2. Add a plan
 
@@ -33,11 +31,16 @@ cd project-manager-pm
 pm plan add "Build the Project Manager tool"
 ```
 
-This creates `plans/plan-001.md` — edit it to describe the plan:
+This creates `plans/plan-001.md`. Edit it to describe the plan:
 
 ```bash
 cat plans/plan-001.md
-# Edit it with your editor if you want
+```
+
+Check it was tracked:
+
+```bash
+pm plan list
 ```
 
 ## 3. Add PRs with dependencies
@@ -58,87 +61,51 @@ pm pr add "TUI detail panel and command bar" --plan plan-001 --depends-on pr-006
 pm pr add "TUI app shell and background sync" --plan plan-001 --depends-on "pr-004,pr-007"
 ```
 
-## 4. View the graph
+## 4. Explore the graph
 
 ```bash
+# Dependency tree
 pm pr graph
-```
 
-You should see a layered dependency tree with status icons.
+# All PRs with status
+pm pr list
 
-## 5. See what's ready
-
-```bash
+# What can be started right now
 pm pr ready
 ```
 
-Should show pr-001, pr-002, pr-003 — they have no dependencies.
+`pr ready` should show pr-001, pr-002, pr-003 — they have no dependencies.
 
-## 6. List everything
+## 5. See what a Claude prompt looks like
 
 ```bash
+pm prompt pr-001
+```
+
+Shows the generated prompt with context, dependency status, guardrails,
+and instructions. This is what you'd paste into a Claude Code session.
+
+## 6. Simulate a PR lifecycle
+
+Since we don't have the real target repo to clone, we can still exercise
+the state transitions:
+
+```bash
+# Mark pr-001 as done (normally you'd run pm pr start first)
+pm pr done pr-001
+
+# Check status changed
 pm pr list
 ```
 
-Shows all PRs with status, dependencies, and which machine is working on them.
-
-## 7. Start a PR
+pr-001 is now `in_review`. In a real workflow, after it merges on GitHub:
 
 ```bash
-pm pr start pr-001
+# Simulate: manually edit project.yaml to set pr-001 status to "merged"
+# (In real use, pm pr sync checks GitHub automatically)
 ```
 
-This will:
-- Clone the target repo into `~/.pm-workdirs/project-manager/pr-001/`
-- Create branch `pm/pr-001-core-data-model`
-- Mark it `in_progress` with your hostname
-- Print a Claude Code prompt with context, guardrails, and instructions
-
-Copy that prompt into a Claude Code session in the workdir.
-
-## 8. Start parallel work
-
-On the same or different machine:
-
-```bash
-pm pr start pr-002
-pm pr start pr-003
-```
-
-Each gets its own workdir and branch. `pm pr list` shows all three in_progress.
-
-## 9. Mark work done
-
-After Claude finishes and pushes a PR:
-
-```bash
-pm pr done pr-001
-```
-
-Marks it `in_review`.
-
-## 10. Sync merges from GitHub
-
-After PRs get reviewed and merged on GitHub:
-
-```bash
-pm pr sync
-```
-
-This checks GitHub for merged PRs, updates their status, and shows you
-which PRs are now unblocked.
-
-## 11. Get a prompt without starting
-
-If you already have a workdir set up:
-
-```bash
-pm prompt pr-004
-```
-
-Just prints the prompt — useful for re-running or pasting into a new session.
-
-## 12. Add a second plan
+## 7. Add a second plan
 
 ```bash
 pm plan add "Harden and polish for real use"
@@ -147,28 +114,49 @@ pm pr add "Error handling" --plan plan-002 --depends-on pr-004
 pm pr add "Shell completion" --plan plan-002 --depends-on pr-004
 ```
 
-Now `pm pr graph` shows a bigger tree spanning both plans.
-
-## 13. Clean up
-
-After a PR is merged and you don't need the workdir:
+Check the expanded graph:
 
 ```bash
-pm pr cleanup pr-001
+pm pr graph
+pm pr list
 ```
 
-## 14. Use plan review to decompose with Claude
+## 8. Use plan review to decompose with Claude
 
 ```bash
 pm plan review plan-002
 ```
 
-This prints a prompt you can paste into Claude. Claude outputs YAML-formatted
-PRs with dependencies that you can then add with `pm pr add`.
+This prints a prompt designed for Claude to break the plan into PRs with
+dependencies in YAML format. You'd paste Claude's output back as
+`pm pr add` commands.
+
+## 9. Check ready PRs across plans
+
+```bash
+pm pr ready
+```
+
+Shows all PRs across both plans whose dependencies are satisfied.
+
+## 10. Working from other directories
+
+You don't need to stay in the PM repo. From anywhere:
+
+```bash
+# One-off
+pm -C /path/to/project-manager-pm pr list
+
+# Or set it once per shell
+export PM_PROJECT=/path/to/project-manager-pm
+pm pr list
+pm pr graph
+```
 
 ## Tips
 
-- **From anywhere**: use `pm -C /path/to/pm-repo` or `export PM_PROJECT=/path/to/pm-repo`
+- **All mutations auto-commit** to the PM repo's git history
 - **Multi-machine**: push the PM repo to GitHub, clone on other machines
-- **All mutations auto-commit**: every `pm` command that changes state commits and pushes
-- **Check `pm pr ready`** after each sync to see what's unblocked
+- **`pm pr ready`** is the key command — run it after every sync to see what's actionable
+- **`pm pr start`** does the full setup: clone, branch, prompt generation
+- **`pm prompt`** regenerates the prompt without cloning (for re-runs)
