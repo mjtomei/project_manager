@@ -448,5 +448,73 @@ def tui_cmd():
     app.run()
 
 
+@cli.command("_check", hidden=True)
+def check_cmd():
+    """Check if a PM repo is reachable (used by the bash entrypoint)."""
+    try:
+        state_root()
+    except FileNotFoundError:
+        raise SystemExit(1)
+
+
+@cli.command("help")
+def help_cmd():
+    """Show help and getting started guide."""
+    click.echo("""pm — Project Manager for Claude Code sessions
+
+Manages a graph of PRs derived from plans, orchestrates parallel Claude Code
+sessions, and provides an interactive terminal dashboard.
+
+GETTING STARTED
+  1. Create a PM repo (separate from your target codebase):
+       pm init git@github.com:org/myapp.git
+
+  2. Add a plan:
+       pm plan add "Add authentication"
+
+  3. Break the plan into PRs:
+       pm pr add "Add user model" --plan plan-001
+       pm pr add "Auth middleware" --plan plan-001 --depends-on pr-001
+
+  4. See what's ready to work on:
+       pm pr ready
+
+  5. Start a PR (clones target repo, creates branch, prints Claude prompt):
+       pm pr start pr-001
+
+  6. When Claude is done, mark it:
+       pm pr done pr-001
+
+  7. Check GitHub for merges and unblock dependents:
+       pm pr sync
+
+COMMANDS
+  pm init <target-repo-url>     Create a new PM repo
+  pm plan add <name>            Add a plan
+  pm plan list                  List plans
+  pm plan review <plan-id>      Generate prompt to decompose plan into PRs
+
+  pm pr add <title>             Add a PR  [--plan, --depends-on, --description]
+  pm pr list                    List PRs with status
+  pm pr graph                   Show dependency tree
+  pm pr ready                   Show PRs ready to start
+  pm pr start <pr-id>           Clone, branch, print Claude prompt
+  pm pr done <pr-id>            Mark PR as in_review
+  pm pr sync                    Check GitHub for merged PRs
+  pm pr cleanup <pr-id>         Remove workdir for merged PR
+
+  pm prompt <pr-id>             Print Claude prompt for a PR
+  pm tui                        Launch interactive dashboard
+
+OPTIONS
+  -C <path>                     Path to PM repo (or set PM_PROJECT env var)
+
+NOTES
+  The PM repo is separate from the target codebase. Only PMs touch it.
+  State is stored in project.yaml and plans/, auto-committed to git.
+  Contributors interact via GitHub issues or in person.
+""")
+
+
 def main():
     cli()
