@@ -48,7 +48,7 @@
 \fancyhead[R]{\textcolor{gray}{\small Engineering Management}}
 \fancyfoot[R]{\thepage}
 \fancyfoot[C]{}
-\fancyfoot[L]{\textcolor{gray}{\small Draft --- \today}}
+\fancyfoot[L]{}
 
 \newcounter{note}
 \stepcounter{note}
@@ -88,30 +88,27 @@
 \maketitle
 
 \begin{abstract}
-Organizations rely on opacity --- implicit systems of credit, funding,
-access, and decision-making understood by insiders but invisible to
-outsiders and unaccountable to anyone. Machine intelligence is ending
-this arrangement. AI systems already reconstruct what institutions are
-actually doing regardless of what those institutions claim. This paper
-argues that organizations face a choice: adopt structured transparency
-on their own terms, or have it imposed from outside. We describe an
-architecture for \emph{open-sourcing the institution itself} ---
-governance, resource flows, decision history, and credit assignment ---
-using version-controlled repositories, automated integrity checks, and
-machine-readable organizational state. Management becomes engineering:
-both positive reinforcement (recognition, credit, visibility) and
-negative reinforcement (integrity checks, conflict detection, staleness
-warnings) are code in the repository, auditable by anyone. We present
-the design of a research lab built on these principles and discuss its
-applicability to any organization that manages resources and produces
-work products.
+Organizational opacity is becoming unsustainable. Machine intelligence is
+making institutional internals legible to outsiders whether institutions
+cooperate or not. The costs of the opaque institutions we have --- excess
+management, bureaucratic overhead, nepotism, lost productivity --- are
+measured in trillions.
+
+This paper proposes an alternative: open-source the institution itself.
+Not just the research outputs, but the governance, resource flows,
+decision history, and credit assignment. The concrete architecture ---
+an organization repo with integrity checks, an automated recognition
+system, and a recursive project management layer --- is implementable
+with existing tools. The key insight is that integrity checks are to
+organizational state what tests are to code: they hold the institution
+accountable to its own stated rules.
+
+Management becomes engineering. The structure is the product. The
+tooling described here is open source: \url{https://github.com/[repo-pending]}.
+The first organization to fully open-source itself will make every opaque
+institution around it look like a liability.
 \end{abstract}
 
-\vspace{2em}
-\begin{versionhistory}
-    \vhEntry{v0.1}{31/01/2026}{---}{Initial working draft}
-    \vhEntry{v0.2}{31/01/2026}{---}{Added Related Work, Limitations, Conclusion; trimmed recognition section; addressed reviewer feedback}
-\end{versionhistory}
 \clearpage
 
 \tableofcontents
@@ -151,10 +148,7 @@ Machine intelligence is making organizational opacity increasingly
 difficult to maintain. AI systems can aggregate public filings, leaked
 documents, employment records, financial data, and published research
 into coherent pictures of what organizations are actually doing ---
-regardless of what those organizations say they're doing. The trend is
-toward increasing institutional legibility: not that all institutions are
-already fully transparent to machines, but that the cost of piercing
-opacity is dropping rapidly for anyone motivated to do so.
+regardless of what those organizations say they're doing.
 
 Organizations that don't open up voluntarily will have their opacity
 pierced by others. Companies are deploying blockchain-based supply chain
@@ -252,13 +246,6 @@ Most ``open science'' initiatives open-source the outputs (papers, data,
 code) but keep the institution opaque. This lab open-sources the
 institution itself: governance, resource flows, decision history, credit
 assignment. The structure is the product.
-
-This isn't all-or-nothing. An organization doesn't have to go from
-political hell to fully open overnight. The move can be done gradually.
-Start by making governance documents public. Then resource tracking. Then
-decision rationale. Each step is independently useful and each step makes
-the next one easier. The tools described here support any point on that
-spectrum.
 
 %% ============================================================
 \section{Architecture}
@@ -640,24 +627,23 @@ risks (see Section~\ref{sec:limitations}).
 \label{sec:conclusion}
 %% ============================================================
 
-Organizational opacity is becoming unsustainable. Machine intelligence is
-making institutional internals legible to outsiders whether institutions
-cooperate or not. The costs of the opaque institutions we have --- excess
-management, bureaucratic overhead, nepotism, lost productivity --- are
-measured in trillions.
-
-This paper proposes an alternative: open-source the institution itself.
-Not just the research outputs, but the governance, resource flows,
-decision history, and credit assignment. The concrete architecture ---
-an organization repo with integrity checks, an automated recognition
-system, and a recursive project management layer --- is implementable
-with existing tools. The key insight is that integrity checks are to
-organizational state what tests are to code: they hold the institution
-accountable to its own stated rules.
-
-Management becomes engineering. The structure is the product. The first
-organization to fully open-source itself will make every opaque
-institution around it look like a liability.
+Organizations rely on opacity --- implicit systems of credit, funding,
+access, and decision-making understood by insiders but invisible to
+outsiders and unaccountable to anyone. Machine intelligence is ending
+this arrangement. AI systems already reconstruct what institutions are
+actually doing regardless of what those institutions claim. This paper
+argues that organizations face a choice: adopt structured transparency
+on their own terms, or have it imposed from outside. We describe an
+architecture for \emph{open-sourcing the institution itself} ---
+governance, resource flows, decision history, and credit assignment ---
+using version-controlled repositories, automated integrity checks, and
+machine-readable organizational state. Management becomes engineering:
+both positive reinforcement (recognition, credit, visibility) and
+negative reinforcement (integrity checks, conflict detection, staleness
+warnings) are code in the repository, auditable by anyone. We present
+the design of a research lab built on these principles and discuss its
+applicability to any organization that manages resources and produces
+work products.
 
 %% ============================================================
 %% Bibliography

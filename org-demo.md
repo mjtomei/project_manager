@@ -142,10 +142,21 @@ pm pr list
 pm pr start pr-001
 ```
 
-Simulate doing the work in the workdir:
+`pm pr start` prints the workdir path — grab it from the output or from
+`project.yaml`. Navigate there and simulate doing the work:
 
 ```bash
-WORKDIR=$(grep 'workdir:' project.yaml | head -1 | sed 's/.*workdir: //')
+# The workdir path is printed by pm pr start and stored in project.yaml.
+# Extract it with python for reliability:
+WORKDIR=$(python3 -c "
+import yaml
+with open('project.yaml') as f:
+    data = yaml.safe_load(f)
+for pr in data['prs']:
+    if pr['id'] == 'pr-001' and pr.get('workdir'):
+        print(pr['workdir'])
+        break
+")
 cd "$WORKDIR"
 
 mkdir -p checks
@@ -174,9 +185,19 @@ git add -A && git commit -m "Add integrity checks framework"
 Push the branch back to the org repo and merge:
 
 ```bash
-git push origin HEAD
+git push origin pm/pr-001-write-integrity-checks-framework
 cd $WORK/open-lab-org
 git merge pm/pr-001-write-integrity-checks-framework
+cd "$WORKDIR"
+```
+
+Update the workdir's local main so `pm pr sync` can detect the merge
+(the vanilla backend checks `merge-base --is-ancestor` against the local
+`main` ref):
+
+```bash
+git checkout main && git pull origin main
+git checkout pm/pr-001-write-integrity-checks-framework
 cd $WORK/open-lab-org-pm
 ```
 
