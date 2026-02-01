@@ -112,14 +112,22 @@ def _resolve_repo_id(data: dict, workdir: Path, root: Path) -> None:
         save_and_push(data, root, "pm: cache repo_id")
 
 
-@click.group()
+@click.group(invoke_without_command=True)
 @click.option("-C", "project_dir", default=None, envvar="PM_PROJECT",
               help="Path to PM repo (or set PM_PROJECT env var)")
-def cli(project_dir: str | None):
+@click.pass_context
+def cli(ctx, project_dir: str | None):
     """pm — Project Manager for Claude Code sessions."""
     global _project_override
     if project_dir:
         _project_override = Path(project_dir).resolve()
+    if ctx.invoked_subcommand is None:
+        # No subcommand: launch TUI if project found, else show help
+        try:
+            state_root()
+            ctx.invoke(tui_cmd)
+        except (FileNotFoundError, SystemExit):
+            ctx.invoke(help_cmd)
 
 
 @cli.command()

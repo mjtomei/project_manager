@@ -17,8 +17,7 @@ Every command below is runnable. Run from the scratchpad directory.
 REPO=~/project-manager
 
 cd $REPO
-./install.sh
-export PATH="$HOME/.local/bin:$PATH"
+./install.sh --local
 
 WORK=$(mktemp -d)/org-demo
 mkdir -p $WORK

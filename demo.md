@@ -1,21 +1,17 @@
 # pm demo walkthrough
 
 This walks through using `pm` to manage the project-manager project itself.
-The source repo is both the tool and the target codebase. Uses the vanilla
-backend — no GitHub CLI required.
-
-Every command below is runnable. Expected output is noted after each step.
+The source repo is both the tool and the target codebase. It uses the vanilla
+git backend and doesn't require the Github CLI.
 
 ## Install
 
 ```bash
 # Set REPO to wherever you cloned project-manager
-# Set REPO to wherever you cloned project-manager
 REPO=~/project-manager
 
 cd $REPO
-./install.sh
-export PATH="$HOME/.local/bin:$PATH"
+./install.sh --local
 ```
 
 ## 1. First-run help and repo detection
