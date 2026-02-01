@@ -138,16 +138,12 @@ def push_pm_branch(pm_root: Path, backend: str = "vanilla") -> dict:
 
     result_info = {"branch": branch_name, "original_branch": original_branch}
 
-    if backend == "local":
-        # Local only — no push, just leave branch
-        run_git("checkout", original_branch, cwd=repo_root, check=False)
-
-    elif backend == "github":
+    if backend == "github":
         # Push and create PR
         push_result = run_git("push", "-u", "origin", branch_name, cwd=repo_root, check=False)
         if push_result.returncode != 0:
             result_info["error"] = f"Push failed: {push_result.stderr.strip()}"
-            run_git("checkout", original_branch, cwd=repo_root, check=False)
+            _checkout_and_restore_pm(repo_root, original_branch, branch_name, add_path)
             return result_info
 
         import subprocess as sp
@@ -163,14 +159,30 @@ def push_pm_branch(pm_root: Path, backend: str = "vanilla") -> dict:
         else:
             result_info["pr_error"] = pr_result.stderr.strip()
 
-        run_git("checkout", original_branch, cwd=repo_root, check=False)
+        _checkout_and_restore_pm(repo_root, original_branch, branch_name, add_path)
         pull_rebase(repo_root)
 
-    else:
+    elif backend == "vanilla":
         # vanilla: push to remote, no PR creation
         push_result = run_git("push", "-u", "origin", branch_name, cwd=repo_root, check=False)
         if push_result.returncode != 0:
             result_info["push_error"] = push_result.stderr.strip()
-        run_git("checkout", original_branch, cwd=repo_root, check=False)
+        _checkout_and_restore_pm(repo_root, original_branch, branch_name, add_path)
+
+    else:
+        # local: no push, just leave the commit on the branch
+        _checkout_and_restore_pm(repo_root, original_branch, branch_name, add_path)
 
     return result_info
+
+
+def _checkout_and_restore_pm(repo_root: Path, original_branch: str, sync_branch: str, add_path: str) -> None:
+    """Switch back to original branch and restore pm files from the sync branch.
+
+    When pm/ files are only tracked on the sync branch, checking out the
+    original branch removes them from the working tree. We restore them
+    so the user can keep working.
+    """
+    run_git("checkout", original_branch, cwd=repo_root, check=False)
+    # Restore pm files from the sync branch into the working tree
+    run_git("checkout", sync_branch, "--", add_path, cwd=repo_root, check=False)
