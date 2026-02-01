@@ -103,10 +103,14 @@ with existing tools. The key insight is that integrity checks are to
 organizational state what tests are to code: they hold the institution
 accountable to its own stated rules.
 
-Management becomes engineering. The structure is the product. The
-tooling described here is open source: \url{https://github.com/mjtomei/project_manager}.
-The first organization to fully open-source itself will make every opaque
-institution around it look like a liability.
+Machine intelligence will make individual contribution legible whether institutions
+cooperate or not. The choice is between a raw meritocracy where
+legibility serves only those at the top, or a system of explicit
+sharing built on honest data about who does what. Transparent
+institutions are the infrastructure for the second option --- you
+cannot build fair redistribution on opaque foundations. The tooling
+described here is open source:
+\url{https://github.com/mjtomei/project_manager}.
 \end{abstract}
 
 \clearpage
@@ -136,6 +140,18 @@ positive reinforcement (recognition, credit, visibility) and negative
 reinforcement (integrity checks, conflict detection, staleness warnings)
 become auditable systems rather than unaccountable discretion.
 
+Transparent institutions will reveal what opaque ones currently hide:
+that contribution is unevenly distributed. This visibility is a
+feature, not a bug. Opaque institutions obscure both freeloading and
+unrecognized contribution --- they protect the people coasting and
+punish the people carrying the load. As machine intelligence reshapes the nature of
+work~\cite{amodei2026}, organizations will need to decouple
+compensation from output, but you cannot do that honestly without
+knowing what the output actually is. This is not a surveillance
+argument. It is the observation that honest conversations about
+contribution require honest data, and honest data requires transparent
+systems.
+
 The lab is managed through changes to a public management project on
 GitHub.
 
@@ -145,7 +161,7 @@ GitHub.
 %% ============================================================
 
 Machine intelligence is making organizational opacity increasingly
-difficult to maintain. AI systems can aggregate public filings, leaked
+difficult to maintain. Machine intelligence can aggregate public filings, leaked
 documents, employment records, financial data, and published research
 into coherent pictures of what organizations are actually doing ---
 regardless of what those organizations say they're doing.
@@ -172,7 +188,7 @@ analogous to the law enforcement technique of reconstructing evidence
 from public sources to avoid revealing classified intelligence methods.
 When institutions are opaque, anyone with resources builds their own
 apparatus to see through them. But it's not only the powerful who gain
-this capability. The same AI tools that let investors reconstruct an
+this capability. The same tools that let investors reconstruct an
 institution's internals are available to employees, researchers, and the
 public. An individual can now aggregate an organization's public filings,
 job postings, Glassdoor reviews, published outputs, and financial records
@@ -236,6 +252,14 @@ measured by PISA scores~\cite{nepotism_hc2020}. Funding decisions happen
 behind closed doors. Credit assignment is political. Access to resources
 depends on who you know, not what you contribute.
 
+These costs become especially dangerous heading into machine-intelligence-driven economic
+disruption. If we cannot see who contributes what inside our
+institutions, we have no foundation for the redistribution that machine-intelligence
+productivity gains will require. Amodei~\cite{amodei2026} argues that
+society will need to pay people even when they are not providing
+traditional economic value. That is not possible to do fairly --- or
+even to do at all --- without transparent systems that make
+contribution legible in the first place.
 
 %% ============================================================
 \section{Open-Sourcing the Institution}
@@ -319,7 +343,7 @@ or on-demand) and surface issues that humans should look at.
 \label{sec:checks}
 
 Integrity checks are to organizational state what tests are to code.
-When AI agents produce code, tests check that the code does what it
+When machine intelligence produces code, tests check that the code does what it
 claims. When an organization produces documents, decisions, and resource
 allocations, integrity checks do the same thing: they verify
 organizational state against the organization's own stated rules and
@@ -416,7 +440,7 @@ management tool that maintains a \texttt{project.yaml} file,
 \texttt{plans/} directory, and a dependency graph (the ``tech tree'')
 of everything that needs to happen. \texttt{pm} tracks what needs to be
 built, in what order, what's blocked, what's ready, and who's working on
-what. It generates prompts for AI coding agents and detects when branches
+what. It generates prompts for machine intelligence coding agents and detects when branches
 merge, automatically unblocking downstream work.
 
 The pm repo integrates with a recursive tech tree system. The lab's
@@ -483,7 +507,7 @@ problem Bernstein identified, by making transparency symmetric. When
 every member has the same machine-intelligence-assisted access to
 organizational state that executives and project managers have, the power
 asymmetry that drives hiding behavior is substantially reduced. A tech
-worker with AI tools can read governance documents, audit resource flows,
+worker with machine intelligence tools can read governance documents, audit resource flows,
 and assess organizational health with nearly the same capability as the
 people nominally in charge. The mechanism described here is more
 symmetric than prior transparency systems precisely because machine
@@ -630,7 +654,7 @@ risks (see Section~\ref{sec:limitations}).
 Organizations rely on opacity --- implicit systems of credit, funding,
 access, and decision-making understood by insiders but invisible to
 outsiders and unaccountable to anyone. Machine intelligence is ending
-this arrangement. AI systems already reconstruct what institutions are
+this arrangement. Machine intelligence already reconstructs what institutions are
 actually doing regardless of what those institutions claim. This paper
 argues that organizations face a choice: adopt structured transparency
 on their own terms, or have it imposed from outside. We describe an
@@ -747,6 +771,10 @@ Research.''
 ``Nepotism, Human Capital and Economic Development,''
 \emph{Journal of Economic Behavior \& Organization}, 2020.
 \url{https://www.sciencedirect.com/science/article/abs/pii/S0167268120304431}
+
+\bibitem{amodei2026}
+D.~Amodei, ``The Adolescence of Technology,'' 2026.
+\url{https://darioamodei.com/essay/the-adolescence-of-technology}
 
 \end{thebibliography}
 
