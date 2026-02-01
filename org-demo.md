@@ -3,10 +3,9 @@
 This demo shows how to set up and manage an open-source research lab using `pm`
 and local git repos. It creates everything from scratch — no GitHub required.
 
-Two repos are created:
+One repo is created:
 
-1. **`open-lab-org`** — the organization repo (docs, members, checks, archive)
-2. **`open-lab-org-pm`** — the PM repo managing organizational work
+1. **`open-lab-org`** — the organization repo (docs, members, checks, archive, and `pm/` for project management)
 
 Every command below is runnable. Run from the scratchpad directory.
 
@@ -82,23 +81,22 @@ cat > docs/onboarding.md << 'EOF'
 EOF
 
 git add -A && git commit -m "Initial org structure with governance docs"
-cd $WORK
 ```
 
-## 3. Initialize the PM repo
+## 3. Initialize the PM directory
 
 ```bash
-pm init ./open-lab-org \
+pm init . \
   --name open-lab-org \
   --base-branch main \
-  --backend vanilla \
-  --dir ./open-lab-org-pm
+  --backend local
 ```
+
+This creates `pm/` inside the org repo.
 
 ## 4. Add a plan
 
 ```bash
-cd open-lab-org-pm
 pm plan add "Bootstrap lab governance"
 ```
 
@@ -145,14 +143,14 @@ pm pr start pr-001
 ```
 
 `pm pr start` prints the workdir path — grab it from the output or from
-`project.yaml`. Navigate there and simulate doing the work:
+`pm/project.yaml`. Navigate there and simulate doing the work:
 
 ```bash
-# The workdir path is printed by pm pr start and stored in project.yaml.
+# The workdir path is printed by pm pr start and stored in pm/project.yaml.
 # Extract it with python for reliability:
 WORKDIR=$(python3 -c "
 import yaml
-with open('project.yaml') as f:
+with open('pm/project.yaml') as f:
     data = yaml.safe_load(f)
 for pr in data['prs']:
     if pr['id'] == 'pr-001' and pr.get('workdir'):
@@ -194,13 +192,13 @@ cd "$WORKDIR"
 ```
 
 Update the workdir's local main so `pm pr sync` can detect the merge
-(the vanilla backend checks `merge-base --is-ancestor` against the local
+(the local backend checks `merge-base --is-ancestor` against the local
 `main` ref):
 
 ```bash
 git checkout main && git pull origin main
 git checkout pm/pr-001-write-integrity-checks-framework
-cd $WORK/open-lab-org-pm
+cd $WORK/open-lab-org
 ```
 
 Mark done and sync:
@@ -210,7 +208,17 @@ pm pr done pr-001
 pm pr sync
 ```
 
-## 8. Show newly unblocked PRs
+## 8. Push pm state
+
+Commit the pm/ changes:
+
+```bash
+pm push
+# Use the branch name from the output:
+git merge pm/sync-<timestamp>
+```
+
+## 9. Show newly unblocked PRs
 
 ```bash
 pm pr ready
@@ -220,10 +228,10 @@ pm pr list
 pr-003 (resource tracking) should now be ready since its only dependency
 (pr-001) is merged. pr-004 is still blocked waiting on pr-002.
 
-## 9. Clean up
+## 10. Clean up
 
 ```bash
 pm pr cleanup pr-001
-cd $WORK && rm -rf open-lab-org open-lab-org-pm
+cd $WORK && rm -rf open-lab-org
 rm -rf ~/.pm-workdirs/open-lab-org-*
 ```

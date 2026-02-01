@@ -278,11 +278,11 @@ assignment. The structure is the product.
 %% ============================================================
 
 Here is what it looks like when an organization has no secrets from
-itself. Higher-level units (the lab itself, divisions within it) have two
-repos: a project management repo (managed by \texttt{pm}) and an
-organization repo. Individual research projects below them may only have
-a pm repo and their code repo. The two-repo structure is for
-organizational layers that need to track more than just a tech tree.
+itself. Higher-level units (the lab itself, divisions within it) have
+two layers of state: an organization repo and a project management
+layer (managed by \texttt{pm}). Individual research projects below them
+may only need the pm layer and their code repo. The organizational layer
+is for units that need to track more than just a tech tree.
 
 \subsection{The Organization Repo}
 \label{sec:org-repo}
@@ -294,8 +294,8 @@ analyses, meeting notes, governance decisions, and anything else that
 should be visible and version-controlled but doesn't need wide release as
 a standalone project.
 
-It also includes pointers to all the other repos in the organization ---
-the pm repo, the individual project repos, external dependencies --- in
+It also includes pointers to the other repos and projects in the
+organization --- individual project repos, external dependencies --- in
 \texttt{docs/} so it can act as a central dispatch.
 
 \begin{lstlisting}
@@ -403,7 +403,7 @@ PR to \texttt{docs/}; sustained contribution over time; a PR that
 unblocks several downstream projects; a grant's deliverables all
 completed with the full funding-to-output chain visible.
 
-Because everything in the org repo and pm repo is readable text and
+Because the org repo and pm state are readable text and
 structured data, anyone can ask an LLM to assess contributions
 holistically --- reading a member's directory, their PRs, the projects
 they've touched, the discussions they've participated in. This is closer
@@ -430,38 +430,40 @@ optimizing productivity --- it will surface what looks like inefficiency
 but is actually useful exploration, and the organization should
 understand that distinction.
 
-\subsection{The Project Management Repo}
-\label{sec:pm-repo}
+\subsection{The Project Management Layer}
+\label{sec:pm}
 
-Separate from the org repo. Managed by
+Managed by
 \texttt{pm}\footnote{\texttt{pm} is an open-source CLI tool for managing
 dependency graphs of work items across parallel contributors. Source and
-documentation: \url{https://github.com/mjtomei/project_manager}}, a project
-management tool that maintains a \texttt{project.yaml} file,
+documentation: \url{https://github.com/mjtomei/project_manager}}, the
+project management layer maintains a \texttt{project.yaml} file,
 \texttt{plans/} directory, and a dependency graph (the ``tech tree'')
 of everything that needs to happen. \texttt{pm} tracks what needs to be
 built, in what order, what's blocked, what's ready, and who's working on
 what. It generates prompts for machine intelligence coding agents and detects when branches
-merge, automatically unblocking downstream work.
+merge, automatically unblocking downstream work. The pm state can live
+inside the organization repo or in a standalone repository --- the
+tooling is agnostic.
 
-The pm repo integrates with a recursive tech tree system. The lab's
+The pm layer integrates with a recursive tech tree system. The lab's
 top-level tree connects the organizational layer to all the research
 projects below it. In \emph{prescriptive} mode, a parent tree suggests
 work to child projects (the child opts in and can accept or decline). In
 \emph{descriptive} mode, a parent tree observes child projects without
 directing them --- a read-only aggregation that requires no coordination.
 
-The org repo and pm repo are separate concerns: the org repo is the
-record of what the organization is and has done; the pm repo is the plan
-for what it's doing next. Setting up a new organization requires
-initializing both: \texttt{pm init} for the pm repo, and creating the
-org repo with the directory structure described in
-Section~\ref{sec:org-repo}. A walkthrough demonstrating the full setup
---- from empty repos to a working organization with integrity checks,
-member directories, and a populated tech tree --- is forthcoming as a
-companion to this paper.
+The organization repo and the pm layer serve separate concerns: the org
+repo is the record of what the organization is and has done; the pm
+layer is the plan for what it's doing next. Setting up a new
+organization requires initializing both: \texttt{pm init} for the pm
+layer, and creating the org repo with the directory structure described
+in Section~\ref{sec:org-repo}. A walkthrough demonstrating the full
+setup --- from an empty repo to a working organization with integrity
+checks, member directories, and a populated tech tree --- is forthcoming
+as a companion to this paper.
 
-The pm repo will expose what looks like inefficiency --- blocked work,
+The pm layer will expose what looks like inefficiency --- blocked work,
 stalled plans, idle projects. Some of that is real inefficiency. Some of
 it is useful exploration. The visibility lets the organization have
 honest conversations about what's happening.

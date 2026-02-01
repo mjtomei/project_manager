@@ -25,20 +25,40 @@ class Backend(ABC):
         ...
 
 
-class VanillaBackend(Backend):
+class LocalBackend(Backend):
+    """Local-only git, no remote. Merge detection uses local refs only."""
+
     def is_merged(self, workdir, branch, base_branch):
-        # Fetch latest state from remote
+        exists = git_ops.run_git(
+            "rev-parse", "--verify", branch, cwd=workdir, check=False,
+        )
+        if exists.returncode != 0:
+            return False
+        result = git_ops.run_git(
+            "merge-base", "--is-ancestor", branch, base_branch,
+            cwd=workdir, check=False,
+        )
+        return result.returncode == 0
+
+    def pr_instructions(self, branch, title, base_branch, pr_id):
+        return (
+            f"- Work in the current directory (already on branch {branch})\n"
+            f"- When done, commit your changes\n"
+            f"- Then tell the human you're done so they can run: pm pr done {pr_id}"
+        )
+
+
+class VanillaBackend(Backend):
+    """Vanilla git with a remote. Fetches from origin for merge detection."""
+
+    def is_merged(self, workdir, branch, base_branch):
         git_ops.run_git("fetch", "origin", cwd=workdir, check=False)
-        # Check both local and remote branches merged into base
         for ref in (branch, f"origin/{branch}"):
-            # Does this ref exist?
             exists = git_ops.run_git(
                 "rev-parse", "--verify", ref, cwd=workdir, check=False,
             )
             if exists.returncode != 0:
                 continue
-            # Is it an ancestor of (i.e. merged into) base?
-            # merge-base --is-ancestor exits 0 if ref is ancestor of base
             result = git_ops.run_git(
                 "merge-base", "--is-ancestor", ref, base_branch,
                 cwd=workdir, check=False,
@@ -72,17 +92,29 @@ class GitHubBackend(Backend):
 
 
 _BACKENDS = {
+    "local": LocalBackend,
     "vanilla": VanillaBackend,
     "github": GitHubBackend,
 }
 
 
 def detect_backend(remote_url: str) -> str:
-    """Auto-detect backend from remote URL."""
+    """Auto-detect backend from remote URL.
+
+    Returns 'local' for local paths, 'github' for github.com URLs,
+    'vanilla' for other remote URLs.
+    """
     if not remote_url:
-        return "vanilla"
+        return "local"
+    # Check for remote URL patterns first
     if "github.com" in remote_url.lower():
         return "github"
+    if "://" in remote_url or remote_url.startswith("git@"):
+        return "vanilla"
+    # Local paths (absolute, relative, or . )
+    from pathlib import Path
+    if Path(remote_url).exists():
+        return "local"
     return "vanilla"
 
 

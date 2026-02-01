@@ -1,8 +1,11 @@
 # pm demo walkthrough
 
 This walks through using `pm` to manage the project-manager project itself.
-The source repo is both the tool and the target codebase. It uses the vanilla
-git backend and doesn't require the Github CLI.
+The source repo is both the tool and the target codebase.
+
+Since this is a GitHub repo, `pm` would auto-select the `github` backend,
+which uses `gh pr view` to detect merges. This demo uses `--backend local`
+instead so that merge detection works locally without creating real PRs.
 
 ## Install
 
@@ -16,7 +19,7 @@ cd $REPO
 
 ## 1. First-run help and repo detection
 
-Before creating a PM repo, run `pm` from inside the target codebase to
+Before creating a PM directory, run `pm` from inside the target codebase to
 see the help text and repo-specific setup guidance:
 
 ```bash
@@ -24,54 +27,37 @@ cd $REPO
 pm
 ```
 
-Since no PM repo exists yet, this prints the full help text followed by
-detected repo information and a suggested `pm init` command. The backend
-(vanilla or github) is auto-detected from the remote URL.
+## 2. Initialize the PM directory
 
-Also try the explicit help variants — all three should produce the same output:
-
-```bash
-pm help
-pm -h
-```
-
-## 2. Initialize the PM repo
-
-Use the init command suggested by the help output, or run this directly.
-The `--dir` flag places the PM repo next to (not inside) the source repo:
+By default, `pm init` creates a `pm/` directory inside the current repo.
+We pass `--backend local` to override the auto-detected `github` backend
+so we can simulate merges locally (see step 10):
 
 ```bash
-PM_REPO=${REPO}-pm
+cd $REPO
 
 pm init $REPO \
   --base-branch master \
-  --backend vanilla \
-  --dir $PM_REPO
+  --backend local
 ```
 
 Expected output:
-- Creates a new git repo at the PM repo path
+- Creates `pm/` inside the repo
 - Shows target repo, base branch, and backend
-- Suggests how to add a remote for multi-machine sync
+- Suggests using `pm push` to share changes
 
-Verify the PM repo was created:
-
-```bash
-cd $PM_REPO
-ls
-```
-
-You should see `project.yaml` and `plans/`. Check that it's a git repo
-with an initial commit:
+Verify the PM directory was created:
 
 ```bash
-git log --oneline
+ls pm/
 ```
+
+You should see `project.yaml` and `plans/`.
 
 Inspect the project config:
 
 ```bash
-cat project.yaml
+cat pm/project.yaml
 ```
 
 ## 3. Add a plan
@@ -84,7 +70,7 @@ Check it was created:
 
 ```bash
 pm plan list
-cat plans/plan-001.md
+cat pm/plans/plan-001.md
 ```
 
 The plan file is a markdown stub — in a real workflow you'd fill it in
@@ -144,7 +130,7 @@ Shows the generated prompt including:
 - PR title and plan context
 - Task description (empty for now — you'd set it via `--description` on `pm pr add`)
 - Guardrails (test-first, verify-before-import)
-- Backend-specific instructions (vanilla: push branch, tell human to run `pm pr done`)
+- Backend-specific instructions (local: commit, tell human to run `pm pr done`)
 
 Try a PR with dependencies to see the dependency context section:
 
@@ -221,10 +207,10 @@ git checkout master
 git merge pm/pr-001-core-data-model-and-yaml-store
 ```
 
-Now go back to the PM repo and sync:
+Now go back to the repo and sync:
 
 ```bash
-cd $PM_REPO
+cd $REPO
 pm pr sync
 ```
 
@@ -243,7 +229,23 @@ pr-005 should now show as ready (its only dependency was pr-001).
 pr-002 and pr-003 were already ready (no dependencies).
 pr-004 is still blocked — it depends on pr-001, pr-002, and pr-003.
 
-## 11. Start parallel work
+## 11. Push pm state
+
+After making changes, use `pm push` to commit them:
+
+```bash
+pm push
+```
+
+With the `local` backend, this creates a `pm/sync-<timestamp>` branch
+with the pm/ changes committed. Merge it to apply (use the branch name
+from the output):
+
+```bash
+git merge pm/sync-<timestamp>
+```
+
+## 12. Start parallel work
 
 Start multiple PRs at once — each gets its own workdir:
 
@@ -265,7 +267,7 @@ ls ~/.pm-workdirs/project-manager-*/
 You should see separate directories for each branch, named
 `<branch-slug>-<base-commit-hash>`.
 
-## 12. Clean up a merged PR's workdir
+## 13. Clean up a merged PR's workdir
 
 After pr-001 was merged in step 10, its workdir is no longer needed:
 
@@ -284,7 +286,7 @@ pm pr list
 
 pr-001's workdir is gone. The other two are still there.
 
-## 13. Add a second plan with cross-plan dependencies
+## 14. Add a second plan with cross-plan dependencies
 
 Plans are independent scopes of work, but PRs can depend on PRs from
 any plan:
@@ -304,69 +306,56 @@ pm plan list
 pm pr list
 ```
 
-## 14. Use plan review to decompose with Claude
+## 15. Use plan review to decompose with Claude
 
 ```bash
 pm plan review plan-002
 ```
 
 This prints a prompt designed for pasting into a Claude session. It includes:
-- The plan content (from `plans/plan-002.md`)
+- The plan content (from `pm/plans/plan-002.md`)
 - All existing PRs and their statuses (so Claude doesn't duplicate work)
 - Output format instructions (YAML list of PRs with dependencies)
 
 In a real workflow, you'd:
-1. Edit `plans/plan-002.md` to describe what "Harden and polish" means
+1. Edit `pm/plans/plan-002.md` to describe what "Harden and polish" means
 2. Run `pm plan review plan-002` and paste the output to Claude
 3. Claude outputs `pm pr add` commands which you paste back into the terminal
 
-## 15. Working from other directories
+## 16. Working from other directories
 
-You don't have to stay in the PM repo. Use `-C` or `PM_PROJECT`:
+`pm` auto-detects `pm/` walking up from cwd. You can also use `-C`:
 
 ```bash
-# One-off from the target source repo
-cd $REPO
-pm -C $PM_REPO pr list
-pm -C $PM_REPO pr ready
-pm -C $PM_REPO pr graph
+cd /tmp
+pm -C $REPO/pm pr list
+pm -C $REPO/pm pr ready
 ```
 
 Or set it once per shell session:
 
 ```bash
-export PM_PROJECT=$PM_REPO
+export PM_PROJECT=$REPO/pm
 pm pr list
 pm pr ready
 ```
 
-## 16. Verify auto-commit history
-
-Every mutation to project state is auto-committed in the PM repo's git history:
-
-```bash
-cd $PM_REPO
-git log --oneline
-```
-
-You should see commits for every `pm plan add`, `pm pr add`, `pm pr start`,
-`pm pr done`, `pm pr sync`, and `pm pr cleanup` command you ran.
-
 ## 17. Clean up the demo
 
 ```bash
-rm -rf $PM_REPO
+cd $REPO
+rm -rf pm/
 rm -rf ~/.pm-workdirs/project-manager-*
 ```
 
 ## Tips
 
-- **All mutations auto-commit** to the PM repo's git history
-- **Multi-machine**: push the PM repo to a remote, clone on other machines
+- **Mutations only write files** — no auto-commits. Use `pm push` to share.
+- **`pm push`** creates a branch with pm/ changes (and pushes/creates PR for github backend)
 - **`pm pr ready`** is the key command — run it after every sync
 - **`pm pr start`** does the full setup: clone, branch, prompt generation
 - **`pm prompt`** regenerates the prompt without cloning (for re-runs)
 - **`--description`** on `pm pr add` fills in the Task section of the Claude prompt
 - **Workdir naming**: `~/.pm-workdirs/<project>-<root-hash>/<branch>-<base-hash>/`
   ensures no collisions across projects or branches
-- **Backends**: vanilla is auto-detected for non-GitHub URLs; use `--backend github` to override
+- **Backends**: `local` for no remote, `vanilla` for git with remote, `github` for GitHub repos

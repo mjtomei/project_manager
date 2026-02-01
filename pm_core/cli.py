@@ -82,9 +82,8 @@ def load_and_sync() -> tuple[dict, Path]:
 
 
 def save_and_push(data: dict, root: Path, message: str = "pm: update state") -> None:
-    """Save state and auto-commit/push."""
+    """Save state. Use 'pm push' to commit and share changes."""
     store.save(data, root)
-    git_ops.auto_commit_state(root, message)
 
 
 def _workdirs_dir(data: dict) -> Path:
@@ -134,24 +133,25 @@ def cli(ctx, project_dir: str | None):
 @click.argument("repo_url", metavar="TARGET_REPO_URL")
 @click.option("--name", default=None, help="Project name (defaults to repo name)")
 @click.option("--base-branch", default="main", help="Base branch of target repo")
-@click.option("--dir", "directory", default=None, help="Directory for PM repo (default: <name>-pm)")
-@click.option("--pm-remote", default=None, help="Git remote URL for the PM repo itself")
+@click.option("--dir", "directory", default=None,
+              help="Directory for PM state (default: pm/ inside cwd)")
 @click.option("--backend", "backend_override", default=None,
-              type=click.Choice(["vanilla", "github"]),
+              type=click.Choice(["local", "vanilla", "github"]),
               help="Hosting backend (auto-detected from URL if not set)")
 def init(repo_url: str, name: str, base_branch: str, directory: str,
-         pm_remote: str, backend_override: str):
-    """Create a new PM repo for managing a target codebase.
+         backend_override: str):
+    """Create a PM directory for managing a target codebase.
 
     TARGET_REPO_URL is the codebase where code PRs will be opened.
 
-    This creates a SEPARATE git repo for project management state
-    (project.yaml, plans/). Only PMs touch this repo directly.
-    Contributors interact via issues or in person.
+    By default, creates a pm/ directory inside the current repo to hold
+    project.yaml and plans/. Use --dir to place it elsewhere (which
+    creates a standalone PM repo with its own git history).
 
     The hosting backend is auto-detected from the URL:
       - github.com URLs use the 'github' backend (gh CLI integration)
-      - Everything else uses the 'vanilla' backend (pure git)
+      - Other remote URLs use the 'vanilla' backend (git with remote)
+      - Local paths use the 'local' backend (git, no remote)
 
     \b
     Examples:
@@ -163,38 +163,68 @@ def init(repo_url: str, name: str, base_branch: str, directory: str,
         name = repo_url.rstrip("/").split("/")[-1].replace(".git", "")
 
     if directory is None:
-        directory = f"{name}-pm"
+        directory = "pm"
     root = Path(directory).resolve()
 
     if (root / "project.yaml").exists():
-        click.echo(f"PM repo already exists at {root}", err=True)
+        click.echo(f"PM directory already exists at {root}", err=True)
+        click.echo(f"To start fresh, remove it: rm -rf {root}", err=True)
         raise SystemExit(1)
 
     backend = backend_override or detect_backend(repo_url)
     data = store.init_project(root, name, repo_url, base_branch, backend=backend)
 
-    # Initialize PM repo as its own git repo
-    if not git_ops.is_git_repo(root):
-        git_ops.run_git("init", cwd=root, check=False)
-        gitignore = root / ".gitignore"
-        if not gitignore.exists():
-            gitignore.write_text("")
-        git_ops.run_git("add", "-A", cwd=root, check=False)
-        git_ops.run_git("commit", "-m", "pm: init project", cwd=root, check=False)
+    # For external dirs (--dir pointing outside a git repo), init as standalone git repo
+    if not store.is_internal_pm_dir(root):
+        if not git_ops.is_git_repo(root):
+            git_ops.run_git("init", cwd=root, check=False)
+            gitignore = root / ".gitignore"
+            if not gitignore.exists():
+                gitignore.write_text("")
+            git_ops.run_git("add", "-A", cwd=root, check=False)
+            git_ops.run_git("commit", "-m", "pm: init project", cwd=root, check=False)
 
-    if pm_remote:
-        git_ops.run_git("remote", "add", "origin", pm_remote, cwd=root, check=False)
-        click.echo(f"  pm remote: {pm_remote}")
-
-    click.echo(f"Created PM repo at {root}")
+    click.echo(f"Created PM directory at {root}")
     click.echo(f"  target repo: {repo_url}")
     click.echo(f"  base branch: {base_branch}")
     click.echo(f"  backend: {backend}")
-    if not pm_remote:
-        click.echo(f"\nTo share with other PMs, create a remote repo and run:")
-        click.echo(f"  cd {root}")
-        click.echo(f"  git remote add origin <your-pm-repo-url>")
-        click.echo(f"  git push -u origin master")
+    click.echo(f"\nRun 'pm push' to commit and share changes.")
+
+
+@cli.command("push")
+def push_cmd():
+    """Commit pm changes to a branch and optionally push/create a PR.
+
+    Creates a pm/sync-<timestamp> branch with pm state changes committed.
+
+    Backend behavior:
+      local:   commits on branch locally (merge manually)
+      vanilla: commits and pushes branch to remote
+      github:  commits, pushes, and creates a PR via gh
+    """
+    root = state_root()
+    data = store.load(root)
+    backend = data.get("project", {}).get("backend", "vanilla")
+    result = git_ops.push_pm_branch(root, backend=backend)
+
+    if "error" in result:
+        click.echo(result["error"], err=True)
+        if "branch" not in result:
+            raise SystemExit(1)
+
+    if "branch" in result:
+        click.echo(f"Created branch: {result['branch']}")
+        if result.get("pr_url"):
+            click.echo(f"PR created: {result['pr_url']}")
+        elif result.get("pr_error"):
+            click.echo(f"PR creation failed: {result['pr_error']}", err=True)
+        elif result.get("push_error"):
+            click.echo(f"Push failed: {result['push_error']}", err=True)
+        elif backend == "vanilla":
+            click.echo("Pushed branch to remote. Merge it to apply changes.")
+        elif backend == "local":
+            click.echo("Committed locally. Merge the branch to apply changes:")
+            click.echo(f"  git merge {result['branch']}")
 
 
 # --- Plan commands ---
@@ -628,18 +658,15 @@ def _repo_specific_guidance(repo_info: dict) -> str:
 DETECTED: local git repo '{name}' (no remote)
   branch: {branch}
 
-  You can still use pm for local project management.
-  Point the target repo at this directory:
+  To set up project management:
 
+    cd {cwd}
     pm init {cwd} --base-branch {branch}
 
-  Or if a PM repo already exists elsewhere:
-
-    export PM_PROJECT=/path/to/{name}-pm
+  This creates pm/ inside your repo with the 'local' backend.
 """
 
     url = repo_info["url"]
-    pm_dir = Path(cwd).parent / f"{name}-pm"
     backend = repo_type  # 'github' or 'vanilla'
 
     lines = f"""
@@ -648,10 +675,12 @@ DETECTED REPO: {name}
   branch: {branch}
   backend: {backend}
 
-  No PM repo found for this project. To set one up:
+  No PM directory found for this project. To set one up:
 
+    cd {cwd}
     pm init {url} --base-branch {branch}
-    cd {pm_dir}
+
+  This creates pm/ inside your repo. Use 'pm push' to share changes.
 """
 
     if backend == "github":
@@ -665,9 +694,9 @@ DETECTED REPO: {name}
   Merge detection uses 'git branch --merged'. No gh CLI required.
 """
 
-    lines += f"""  Or if a PM repo already exists elsewhere:
+    lines += f"""  Or use a standalone PM repo:
 
-    export PM_PROJECT=/path/to/{name}-pm
+    pm init {url} --base-branch {branch} --dir /path/to/{name}-pm
 """
     return lines
 
@@ -679,7 +708,8 @@ Manages a graph of PRs derived from plans, orchestrates parallel Claude Code
 sessions, and provides an interactive terminal dashboard.
 
 GETTING STARTED
-  1. Create a PM repo (separate from your target codebase):
+  1. From your target repo, create a PM directory:
+       cd /path/to/your/repo
        pm init <target-repo-url>
 
   2. Add a plan:
@@ -698,11 +728,15 @@ GETTING STARTED
   6. When Claude is done, mark it:
        pm pr done pr-001
 
-  7. Check for merges and unblock dependents:
+  7. Commit and share pm/ changes:
+       pm push
+
+  8. Check for merges and unblock dependents:
        pm pr sync
 
 COMMANDS
-  pm init <target-repo-url>     Create a new PM repo
+  pm init <target-repo-url>     Create pm/ directory (or --dir for standalone)
+  pm push                       Commit pm/ changes to a branch and create PR
   pm plan add <name>            Add a plan
   pm plan list                  List plans
   pm plan review <plan-id>      Generate prompt to decompose plan into PRs
@@ -720,17 +754,18 @@ COMMANDS
   pm tui                        Launch interactive dashboard
 
 OPTIONS
-  -C <path>                     Path to PM repo (or set PM_PROJECT env var)
-  --backend vanilla|github      Override auto-detected backend at init time
+  -C <path>                     Path to PM directory (or set PM_PROJECT env var)
+  --backend local|vanilla|github  Override auto-detected backend at init time
 
 BACKENDS
-  vanilla   Pure git. No external tools. Merge detection via git branch --merged.
+  local     Local git only, no remote. 'pm push' commits on a branch locally.
+  vanilla   Git with a remote. 'pm push' creates a branch and pushes it.
   github    Uses gh CLI for PR creation and merge detection. Auto-selected for
             github.com URLs.
 
 NOTES
-  The PM repo is separate from the target codebase. Only PMs touch it.
-  State is stored in project.yaml and plans/, auto-committed to git.\
+  By default, pm/ lives inside your target repo. Mutations only write files;
+  use 'pm push' to commit and share changes.\
 """
 
 

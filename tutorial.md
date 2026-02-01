@@ -56,7 +56,7 @@ a mobile web dashboard for `pm`.
 
 ---
 
-## Phase 2: Initialize the PM repo
+## Phase 2: Initialize the PM directory
 
 ```bash
 cd $REPO
@@ -66,26 +66,21 @@ pm
 This detects the repo and suggests an init command. Run it:
 
 ```bash
-PM_REPO=${REPO}-pm
-
 pm init $REPO \
   --base-branch master \
-  --backend vanilla \
-  --dir $PM_REPO
-
-cd $PM_REPO
+  --backend local
 ```
 
 Verify:
 
 ```bash
 pm plan list
-git log --oneline
+ls pm/
 ```
 
-Empty plans, one init commit. This is your project management state —
-separate from the codebase, version-controlled, auto-committed on
-every change.
+Empty plans, project.yaml and plans/ in pm/. This is your project
+management state — version-controlled inside your repo. Use `pm push`
+to commit and share changes.
 
 ---
 
@@ -101,7 +96,7 @@ pm plan add "Mobile web dashboard for pm"
 Now edit the plan file to describe what you want:
 
 ```bash
-$EDITOR plans/plan-001.md
+$EDITOR pm/plans/plan-001.md
 ```
 
 Write something like:
@@ -138,11 +133,10 @@ pm plan list
 git log --oneline
 ```
 
-The plan file edit isn't auto-committed (only `pm` commands auto-commit),
-so commit it yourself:
+Commit the plan with `pm push`:
 
 ```bash
-git add plans/plan-001.md && git commit -m "plan-001: flesh out mobile dashboard plan"
+pm push
 ```
 
 ---
@@ -251,7 +245,7 @@ git add -A && git commit -m "web server skeleton" && git push -u origin pm/pr-00
 Then mark it done:
 
 ```bash
-cd $PM_REPO
+cd $REPO
 pm pr done pr-001
 ```
 
@@ -302,7 +296,7 @@ a working dashboard. Test it:
 
 ```bash
 # From the workdir where the server code lives
-python -m pm_web.server --pm-repo $PM_REPO --port 8443
+python -m pm_web.server --pm-dir $REPO/pm --port 8443
 
 # On your machine, open https://localhost:8443
 # You should be redirected to the key install page
@@ -383,14 +377,13 @@ middle. No accounts. Just your devices, your mesh, your keys.
 Check the final state:
 
 ```bash
-cd $PM_REPO
+cd $REPO
 pm pr list
 pm pr graph
-git log --oneline
 ```
 
-Every step of the project is recorded in the PM repo's git history.
-Every PR, every status change, every merge detection.
+Every step of the project is recorded in pm/project.yaml.
+Use `pm push` to commit all changes, then review the git history.
 
 Clean up workdirs for merged PRs:
 
@@ -417,7 +410,7 @@ By this point you've used every part of the `pm` workflow:
 6. **Track** — Used `pm pr done` and `pm pr sync` to track progress
    and unblock downstream work
 7. **Ship** — Went from plan to deployed, tested feature
-8. **Audit** — Used the PM repo's git history as a record of decisions
+8. **Audit** — Used `pm push` and git history as a record of decisions
 
 Now do it on your own repo. Run `pm` from your project directory and
 follow the guidance it prints.

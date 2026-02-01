@@ -9,15 +9,26 @@ import yaml
 
 
 def find_project_root(start: Optional[str] = None) -> Path:
-    """Walk up from start (or cwd) to find directory containing project.yaml."""
+    """Walk up from start (or cwd) to find directory containing project.yaml.
+
+    Looks for pm/project.yaml first (PM dir inside target repo),
+    then falls back to project.yaml (standalone PM repo) for backward compat.
+    """
     p = Path(start) if start else Path.cwd()
     for d in [p, *p.parents]:
+        if (d / "pm" / "project.yaml").exists():
+            return d / "pm"
         if (d / "project.yaml").exists():
             return d
     raise FileNotFoundError(
-        "No project.yaml found. Either cd into your PM repo, "
-        "use 'pm -C /path/to/pm-repo', or set PM_PROJECT=/path/to/pm-repo"
+        "No project.yaml found. Either cd into your repo, "
+        "use 'pm -C /path/to/pm-dir', or set PM_PROJECT=/path/to/pm-dir"
     )
+
+
+def is_internal_pm_dir(root: Path) -> bool:
+    """Check if the PM dir is inside a target repo (pm/ subdir) vs standalone."""
+    return root.name == "pm" and (root.parent / ".git").exists()
 
 
 def load(root: Optional[Path] = None) -> dict:

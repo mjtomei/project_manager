@@ -1,12 +1,41 @@
 """GitHub CLI wrapper for PR operations."""
 
 import json
+import shutil
 import subprocess
+import sys
 from typing import Optional
+
+
+def _check_gh():
+    """Check that gh CLI is installed and authenticated. Exit with guidance if not."""
+    if not shutil.which("gh"):
+        print(
+            "Error: The github backend requires the GitHub CLI (gh).\n"
+            "Install it: https://cli.github.com\n"
+            "Or use --backend vanilla when running pm init.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    result = subprocess.run(
+        ["gh", "auth", "status"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(
+            "Error: gh CLI is not authenticated.\n"
+            "Run: gh auth login\n"
+            "Or use --backend vanilla when running pm init.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
 
 
 def run_gh(*args: str, cwd: Optional[str] = None, check: bool = True) -> subprocess.CompletedProcess:
     """Run a gh CLI command."""
+    _check_gh()
     return subprocess.run(
         ["gh", *args],
         cwd=cwd,

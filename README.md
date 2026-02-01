@@ -35,19 +35,18 @@ for this by abstracting git hosting behind a minimal pluggable interface.
 
 ## Architecture
 
-**Two repos, cleanly separated:**
+**pm/ directory inside your repo:**
 
-- **PM repo** — a dedicated git repo containing `project.yaml` and `plans/`.
+- **pm/** — a directory containing `project.yaml` and `plans/`.
   This is the source of truth for project state. Only PMs touch it directly.
-  Auto-committed on every mutation, pushed for multi-machine sync.
+  Use `pm push` to commit and share changes.
 
 - **Target repo** — the actual codebase where code PRs go. Contributors
-  (human or AI) interact with it normally. They never touch the PM repo.
+  (human or AI) interact with it normally. They don't touch `pm/` directly.
 
-This separation means contributors can work however they want — through
-PRs, direct pushes, or any other workflow — without interfering with
-project management state. It also means the PM repo is access-controlled:
-the people steering the project are the only ones who can change the plan.
+You can also use `--dir` to place the PM state in a standalone repo.
+Either way, mutations only write files — no auto-commits. Use `pm push`
+to create a branch with your changes and optionally push/create a PR.
 
 ## Install
 
@@ -66,7 +65,7 @@ Add `~/.local/bin` to your PATH if it isn't already.
 pm
 
 # This detects your repo and prints a tailored pm init command.
-# Run it, then cd into the new PM repo.
+# Run it — creates pm/ inside your repo.
 
 # Add a plan and break it into PRs:
 pm plan add "Add authentication"
