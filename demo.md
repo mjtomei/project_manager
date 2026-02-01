@@ -10,7 +10,8 @@ Every command below is runnable. Expected output is noted after each step.
 
 ```bash
 # Set REPO to wherever you cloned project-manager
-REPO=~/claude-work/project-manager
+# Set REPO to wherever you cloned project-manager
+REPO=~/project-manager
 
 cd $REPO
 ./install.sh

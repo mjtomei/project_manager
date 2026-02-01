@@ -13,11 +13,14 @@ Every command below is runnable. Run from the scratchpad directory.
 ## Setup
 
 ```bash
-REPO=~/claude-work/project-manager
+# Set REPO to wherever you cloned project-manager
+REPO=~/project-manager
+
+cd $REPO
+./install.sh
 export PATH="$HOME/.local/bin:$PATH"
 
-WORK=/tmp/claude-1000/-home-matt-claude-work-project-manager/242774a5-0ada-4187-ab7f-7c9889d9a3c9/scratchpad/org-demo
-rm -rf $WORK
+WORK=$(mktemp -d)/org-demo
 mkdir -p $WORK
 cd $WORK
 ```
