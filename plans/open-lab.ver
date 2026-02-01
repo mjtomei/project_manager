@@ -1,0 +1,14 @@
+\begin {longtable}{@{}ll>{\hsize =\vhAuthorColWidth }X>{\hsize =\vhChangeColWidth }X@{}}
+\textbf {\vhversionname }
+ & \textbf {\vhdatename }
+ & \textbf {\vhauthorname }
+ & \textbf {\vhchangename }\\[1ex]
+v0.1
+ & 31/01/2026
+ & \listset {---}
+ & Initial working draft\\
+v0.2
+ & 31/01/2026
+ & \listset {---}
+ & Added Related Work, Limitations, Conclusion; trimmed recognition section; addressed reviewer feedback\\
+\end {longtable}

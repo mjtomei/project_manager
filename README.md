@@ -30,22 +30,8 @@ time. They won't be the interfaces we use forever. As machine intelligences
 become real contributors to codebases, teams will build version control
 workflows that suit both humans and machines: faster merge cycles,
 machine-readable status, automated dependency resolution, interfaces that
-can handle dozens of concurrent contributors without friction.
-
-`pm` prepares for this by abstracting git hosting behind a minimal pluggable
-interface. A backend needs exactly two methods: detect if a branch is merged,
-and generate instructions for the agent doing the work. Today there are two:
-
-- **vanilla** — pure git, no external tools. Merge detection via
-  `git branch --merged`. Works with any git remote: self-hosted,
-  Gitea, Forgejo, bare repos, local repos, anything.
-
-- **github** — uses the `gh` CLI for PR creation and merge detection.
-  Auto-selected when the target repo is on github.com.
-
-The backend is auto-detected from the remote URL at `pm init` time.
-Override with `--backend`. To add a new one, subclass `Backend` in
-`pm_core/backend.py` and implement two methods.
+can handle dozens of concurrent contributors without friction. `pm` prepares 
+for this by abstracting git hosting behind a minimal pluggable interface. 
 
 ## Architecture
 
@@ -100,7 +86,7 @@ pm pr done pr-001     # marks in_review
 pm pr sync            # detects merged branches, unblocks dependents
 ```
 
-See [demo.md](demo.md) for a full walkthrough.
+See [demo.md](demo.md) for a full walkthrough you can run targeting this repo recrusively.
 
 ## Commands
 

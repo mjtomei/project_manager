@@ -50,6 +50,14 @@ def _verify_pm_repo_matches_cwd(pm_root: Path) -> None:
     pm_target = data.get("project", {}).get("repo", "")
     if not pm_target:
         return
+    # If pm_target is a local path, check if cwd is that path
+    pm_target_path = Path(pm_target)
+    if pm_target_path.is_absolute() and pm_target_path.exists():
+        try:
+            if cwd.resolve() == pm_target_path.resolve():
+                return
+        except OSError:
+            pass
     if _normalize_repo_url(cwd_remote.stdout.strip()) != _normalize_repo_url(pm_target):
         click.echo(
             f"Warning: PM repo targets {pm_target}\n"
@@ -77,6 +85,31 @@ def save_and_push(data: dict, root: Path, message: str = "pm: update state") -> 
     """Save state and auto-commit/push."""
     store.save(data, root)
     git_ops.auto_commit_state(root, message)
+
+
+def _workdirs_dir(data: dict) -> Path:
+    """Return the workdirs base path for this project.
+
+    Uses <name>-<repo_id[:8]> to avoid collisions between projects
+    with the same name. repo_id is the root commit hash of the target
+    repo, cached in project.yaml on first pr start.
+    """
+    project = data.get("project", {})
+    name = project.get("name", "unknown")
+    repo_id = project.get("repo_id")
+    if repo_id:
+        return Path.home() / ".pm-workdirs" / f"{name}-{repo_id[:8]}"
+    return Path.home() / ".pm-workdirs" / name
+
+
+def _resolve_repo_id(data: dict, workdir: Path, root: Path) -> None:
+    """Resolve and cache the target repo's root commit hash."""
+    if data.get("project", {}).get("repo_id"):
+        return
+    result = git_ops.run_git("rev-list", "--max-parents=0", "HEAD", cwd=workdir, check=False)
+    if result.returncode == 0 and result.stdout.strip():
+        data["project"]["repo_id"] = result.stdout.strip().splitlines()[0]
+        save_and_push(data, root, "pm: cache repo_id")
 
 
 @click.group()
@@ -366,28 +399,58 @@ def pr_start(pr_id: str, workdir: str):
 
     repo_url = data["project"]["repo"]
     base_branch = data["project"].get("base_branch", "main")
-    project_name = data["project"]["name"]
+    branch = pr_entry.get("branch", f"pm/{pr_id}")
 
     if workdir:
         work_path = Path(workdir).resolve()
     else:
-        work_path = Path.home() / ".pm-workdirs" / project_name / pr_id
+        # Check if we already have a workdir for this PR
+        existing_workdir = pr_entry.get("workdir")
+        if existing_workdir and Path(existing_workdir).exists():
+            work_path = Path(existing_workdir)
+        else:
+            # Need to clone first, then figure out the final path
+            # Clone to a temp location under the project dir
+            project_dir = _workdirs_dir(data)
+            project_dir.mkdir(parents=True, exist_ok=True)
+            tmp_path = project_dir / f".tmp-{pr_id}"
+            if tmp_path.exists():
+                shutil.rmtree(tmp_path)
+            click.echo(f"Cloning {repo_url}...")
+            git_ops.clone(repo_url, tmp_path, branch=base_branch)
 
-    if work_path.exists():
-        click.echo(f"Work directory already exists: {work_path}")
-        click.echo("Updating branch...")
+            # Cache repo_id now that we have a clone
+            _resolve_repo_id(data, tmp_path, root)
+
+            # Get the base commit hash for the branch directory name
+            base_hash = git_ops.run_git(
+                "rev-parse", "--short=8", "HEAD", cwd=tmp_path, check=False
+            ).stdout.strip()
+
+            # Final path: <project_dir>/<branch_slug>-<base_hash>
+            # Re-resolve project_dir since _resolve_repo_id may have updated data
+            branch_slug = store.slugify(branch.replace("/", "-"))
+            dir_name = f"{branch_slug}-{base_hash}" if base_hash else branch_slug
+            final_project_dir = _workdirs_dir(data)
+            final_project_dir.mkdir(parents=True, exist_ok=True)
+            work_path = final_project_dir / dir_name
+
+            if work_path.exists():
+                shutil.rmtree(tmp_path)
+            else:
+                shutil.move(str(tmp_path), str(work_path))
+
+    if work_path.exists() and git_ops.is_git_repo(work_path):
+        click.echo(f"Updating {work_path}...")
         git_ops.pull_rebase(work_path)
-    else:
-        click.echo(f"Cloning {repo_url} to {work_path}...")
-        git_ops.clone(repo_url, work_path, branch=base_branch)
 
-    branch = pr_entry.get("branch", f"pm/{pr_id}")
     click.echo(f"Checking out branch {branch}...")
     git_ops.checkout_branch(work_path, branch, create=True)
 
     # Update state
     pr_entry["status"] = "in_progress"
     pr_entry["agent_machine"] = platform.node()
+    pr_entry["workdir"] = str(work_path)
     save_and_push(data, root, f"pm: start {pr_id}")
 
     click.echo(f"\nPR {pr_id} is now in_progress on {platform.node()}")
@@ -423,20 +486,25 @@ def pr_sync():
     """
     root = state_root()
     data = store.load(root)
-    project_name = data["project"]["name"]
     base_branch = data["project"].get("base_branch", "main")
     prs = data.get("prs") or []
     backend = get_backend(data)
     updated = 0
 
     # Find any existing workdir to check merge status from
-    workdirs_base = Path.home() / ".pm-workdirs" / project_name
     target_workdir = None
-    if workdirs_base.exists():
-        for d in workdirs_base.iterdir():
-            if d.is_dir() and git_ops.is_git_repo(d):
-                target_workdir = d
-                break
+    for p in prs:
+        wd = p.get("workdir")
+        if wd and Path(wd).exists() and git_ops.is_git_repo(wd):
+            target_workdir = wd
+            break
+    if not target_workdir:
+        workdirs_base = _workdirs_dir(data)
+        if workdirs_base.exists():
+            for d in workdirs_base.iterdir():
+                if d.is_dir() and git_ops.is_git_repo(d):
+                    target_workdir = str(d)
+                    break
 
     if not target_workdir:
         click.echo("No workdirs found. Run 'pm pr start' on a PR first.", err=True)
@@ -446,8 +514,11 @@ def pr_sync():
         if pr_entry.get("status") not in ("in_review", "in_progress"):
             continue
         branch = pr_entry.get("branch", "")
+        # Prefer PR's own workdir if it exists
+        wd = pr_entry.get("workdir")
+        check_dir = wd if (wd and Path(wd).exists()) else target_workdir
 
-        if backend.is_merged(str(target_workdir), branch, base_branch):
+        if backend.is_merged(str(check_dir), branch, base_branch):
             pr_entry["status"] = "merged"
             click.echo(f"  ✅ {pr_entry['id']}: merged")
             updated += 1
@@ -471,14 +542,19 @@ def pr_cleanup(pr_id: str):
     """Remove work directory for a merged PR."""
     root = state_root()
     data = store.load(root)
-    project_name = data["project"]["name"]
-    work_path = Path.home() / ".pm-workdirs" / project_name / pr_id
+    pr_entry = store.get_pr(data, pr_id)
 
-    if work_path.exists():
+    work_path = None
+    if pr_entry and pr_entry.get("workdir"):
+        work_path = Path(pr_entry["workdir"])
+
+    if work_path and work_path.exists():
         shutil.rmtree(work_path)
         click.echo(f"Removed {work_path}")
+        pr_entry["workdir"] = None
+        save_and_push(data, root, f"pm: cleanup {pr_id}")
     else:
-        click.echo(f"No work directory found at {work_path}")
+        click.echo(f"No work directory found for {pr_id}.")
 
 
 @cli.command("prompt")

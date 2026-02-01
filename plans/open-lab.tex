@@ -1,0 +1,767 @@
+\documentclass[11pt]{article}
+\usepackage[inner=2.5cm, top=2.5cm, bottom=2.5cm, outer=4cm, marginparwidth=3cm]{geometry}
+\geometry{letterpaper}
+
+\usepackage{float, graphicx, caption, amssymb}
+\usepackage[numbers]{natbib}
+\usepackage[dvipsnames]{xcolor}
+\usepackage{tabulary, booktabs}
+\usepackage{fancyhdr}
+\usepackage[scaled]{helvet}
+\renewcommand*\familydefault{\sfdefault}
+
+\usepackage[ddmmyyyy,hhmmss]{datetime}
+
+\definecolor{tealgreen}{RGB}{0, 102, 102}
+\definecolor{midnightgreen}{RGB}{0, 64, 77}
+
+\usepackage{titlesec}
+\titleformat{\section}
+{\color{midnightgreen}\normalfont\Large\bfseries}
+{\color{midnightgreen}\thesection}{1em}{}
+
+\titleformat{\subsection}
+{\color{tealgreen}\normalfont\large\bfseries}
+{\color{tealgreen}\thesubsection}{1em}{}
+
+\titleformat{\subsubsection}
+{\color{tealgreen}\normalfont\normalsize\bfseries}
+{\color{tealgreen}\thesubsubsection}{1em}{}
+
+\usepackage{vhistory}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=midnightgreen,
+    citecolor=tealgreen,
+    urlcolor=tealgreen
+}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.8em plus 0.1em minus 0.2em}
+
+\pagestyle{fancy}
+\fancyhead{}
+\fancyfoot{}
+\setlength{\headheight}{14pt}
+\fancyhead[R]{\textcolor{gray}{\small Engineering Management}}
+\fancyfoot[R]{\thepage}
+\fancyfoot[C]{}
+\fancyfoot[L]{\textcolor{gray}{\small Draft --- \today}}
+
+\newcounter{note}
+\stepcounter{note}
+
+\renewcommand{\abstractname}{Summary}
+
+\newcommand{\Note}[1]{%
+    \marginpar{%
+        \tiny{\color{tealgreen}{\thenote\ #1}}%
+    }%
+    \stepcounter{note}%
+}
+
+\newcommand{\MNote}[1]{%
+    \marginpar{%
+        \tiny{\color{tealgreen}{#1}}%
+    }%
+}
+
+% Code/directory listing style
+\usepackage{listings}
+\lstset{
+    basicstyle=\ttfamily\small,
+    breaklines=true,
+    frame=none,
+    xleftmargin=1em,
+    aboveskip=0.5em,
+    belowskip=0.5em
+}
+
+\begin{document}
+
+\title{\textcolor{midnightgreen}{Engineering Management}\\\large Open-Sourcing the Institution}
+\author{}
+\date{January 31, 2026}
+
+\maketitle
+
+\begin{abstract}
+Organizations rely on opacity --- implicit systems of credit, funding,
+access, and decision-making understood by insiders but invisible to
+outsiders and unaccountable to anyone. Machine intelligence is ending
+this arrangement. AI systems already reconstruct what institutions are
+actually doing regardless of what those institutions claim. This paper
+argues that organizations face a choice: adopt structured transparency
+on their own terms, or have it imposed from outside. We describe an
+architecture for \emph{open-sourcing the institution itself} ---
+governance, resource flows, decision history, and credit assignment ---
+using version-controlled repositories, automated integrity checks, and
+machine-readable organizational state. Management becomes engineering:
+both positive reinforcement (recognition, credit, visibility) and
+negative reinforcement (integrity checks, conflict detection, staleness
+warnings) are code in the repository, auditable by anyone. We present
+the design of a research lab built on these principles and discuss its
+applicability to any organization that manages resources and produces
+work products.
+\end{abstract}
+
+\vspace{2em}
+\begin{versionhistory}
+    \vhEntry{v0.1}{31/01/2026}{---}{Initial working draft}
+    \vhEntry{v0.2}{31/01/2026}{---}{Added Related Work, Limitations, Conclusion; trimmed recognition section; addressed reviewer feedback}
+\end{versionhistory}
+\clearpage
+
+\tableofcontents
+\clearpage
+
+%% ============================================================
+\section{Introduction}
+\label{sec:intro}
+%% ============================================================
+
+We need a research lab where the lab itself is open source. Not just the
+research outputs --- the organizational structure, decision-making
+processes, resource allocation, and governance are all visible, forkable,
+and improvable by anyone.
+
+Management becomes engineering. The
+difference is that engineering tradeoffs are made explicit: documented,
+versioned, debatable, auditable. Management tradeoffs currently live in
+the discretion of whoever holds a management title, invisible to the
+people affected by them. Making them explicit infrastructure --- resource
+allocation rules, credit assignment criteria, accountability mechanisms
+as code in a repo --- doesn't eliminate the tradeoffs. It makes them
+visible so the people affected can participate in deciding them. Both
+positive reinforcement (recognition, credit, visibility) and negative
+reinforcement (integrity checks, conflict detection, staleness warnings)
+become auditable systems rather than unaccountable discretion.
+
+The lab is managed through changes to a public management project on
+GitHub.
+
+%% ============================================================
+\section{The End of Organizational Opacity}
+\label{sec:opacity}
+%% ============================================================
+
+Machine intelligence is making organizational opacity increasingly
+difficult to maintain. AI systems can aggregate public filings, leaked
+documents, employment records, financial data, and published research
+into coherent pictures of what organizations are actually doing ---
+regardless of what those organizations say they're doing. The trend is
+toward increasing institutional legibility: not that all institutions are
+already fully transparent to machines, but that the cost of piercing
+opacity is dropping rapidly for anyone motivated to do so.
+
+Organizations that don't open up voluntarily will have their opacity
+pierced by others. Companies are deploying blockchain-based supply chain
+verification because they can't verify what opaque suppliers claim about
+sourcing and labor practices --- a market projected to grow from \$2.9
+billion to \$44.3 billion by 2034~\cite{marketus2024}. The era of
+``trust us, it works'' is ending across investment --- venture investors
+now conduct spot-checks by contacting claimed customers directly and
+demanding bank statements behind reported revenue, because they can no
+longer take institutional self-reporting at face
+value~\cite{triunity2025}. Self-insured employers are building internal
+claims analytics because they can't trust insurer-reported numbers ---
+medical billing errors account for an estimated \$68 billion in
+unnecessary healthcare costs annually, and half of those who dispute
+denied claims get them reversed, suggesting the denials were wrong in the
+first place~\cite{ajmc2024}.
+
+This is parallel construction at organizational scale --- building an
+independent picture of an institution's internals from external data,
+analogous to the law enforcement technique of reconstructing evidence
+from public sources to avoid revealing classified intelligence methods.
+When institutions are opaque, anyone with resources builds their own
+apparatus to see through them. But it's not only the powerful who gain
+this capability. The same AI tools that let investors reconstruct an
+institution's internals are available to employees, researchers, and the
+public. An individual can now aggregate an organization's public filings,
+job postings, Glassdoor reviews, published outputs, and financial records
+into a picture that used to require a dedicated analyst team. The opacity
+that once protected mismanagement from scrutiny above also protected it
+from scrutiny below. Both protections are ending at the same time.
+
+The result is a world where the people running opaque organizations are
+the last to know what everyone else --- funders, competitors, and their
+own staff --- already sees. The question is not whether your organization
+will become transparent. It is whether you will be the one who decides
+how.
+
+%% ============================================================
+\section{The Cost of Opaque Institutions}
+\label{sec:cost}
+%% ============================================================
+
+The economic costs of organizational opacity are substantial, though
+precise measurement is difficult. The estimates below draw from a mix of
+peer-reviewed research, industry surveys, and trade publications of
+varying methodological rigor.
+
+By one estimate, excess management and bureaucracy cost the U.S.\ economy
+more than \$3 trillion per year --- roughly 17\% of GDP~\cite{hamel2016}.
+The Fortune 500 alone may account for \$480 billion in back-office
+inefficiencies~\cite{ssonetwork}. The average firm spends between 1.3\%
+and 3.3\% of its total wage bill on regulatory compliance, with aggregate
+compliance costs ranging from \$103 billion to \$289 billion
+annually~\cite{cato}. In one Australian study, non-administrative staff
+reported spending 6.4 hours per week --- 16\% of a standard work week ---
+complying with internal regulation, and the cost of self-imposed internal
+rules exceeded the cost of government regulation by more than two to
+one~\cite{deloitte}.
+
+Nepotism and favoritism compound these costs. Nearly 75\% of employees
+report having worked in a toxic workplace, with poor leadership ---
+including favoritism and lack of accountability --- cited as the top
+cause by 79\% of them~\cite{ihire2025}. Toxic culture is 10 times more
+important than compensation in predicting turnover; by one estimate
+(originally from SHRM, cited in~\cite{sull2022b}), toxic culture cost
+U.S.\ employers nearly \$50 billion per year before the Great
+Resignation. When unqualified hires hold leadership roles through
+connections rather than competence, the remaining staff pick up the
+slack, leading to burnout and further turnover. The organizational
+knowledge needed to actually run the institution is never written down
+--- it lives in the heads of whoever happens to be politically connected
+enough to stay.
+
+The same patterns appear in public institutions. Researchers receiving
+federal grants spend over 44\% of their time on administrative tasks
+rather than research --- a figure that has remained stubbornly consistent
+across FDP surveys in 2005, 2012, and
+2018~\cite{fdp2018}. Universities absorb \$6.8 billion per year in
+unreimbursed overhead costs~\cite{aau}. Nepotism in public institutions
+creates wasteful overstaffing where unneeded positions are created to
+employ relatives --- documented across municipalities as a drag on
+economic development~\cite{nepotism2020}. Perceived nepotism is
+negatively associated with educational investment across countries, as
+measured by PISA scores~\cite{nepotism_hc2020}. Funding decisions happen
+behind closed doors. Credit assignment is political. Access to resources
+depends on who you know, not what you contribute.
+
+
+%% ============================================================
+\section{Open-Sourcing the Institution}
+\label{sec:open}
+%% ============================================================
+
+Most ``open science'' initiatives open-source the outputs (papers, data,
+code) but keep the institution opaque. This lab open-sources the
+institution itself: governance, resource flows, decision history, credit
+assignment. The structure is the product.
+
+This isn't all-or-nothing. An organization doesn't have to go from
+political hell to fully open overnight. The move can be done gradually.
+Start by making governance documents public. Then resource tracking. Then
+decision rationale. Each step is independently useful and each step makes
+the next one easier. The tools described here support any point on that
+spectrum.
+
+%% ============================================================
+\section{Architecture}
+\label{sec:arch}
+%% ============================================================
+
+Here is what it looks like when an organization has no secrets from
+itself. Higher-level units (the lab itself, divisions within it) have two
+repos: a project management repo (managed by \texttt{pm}) and an
+organization repo. Individual research projects below them may only have
+a pm repo and their code repo. The two-repo structure is for
+organizational layers that need to track more than just a tech tree.
+
+\subsection{The Organization Repo}
+\label{sec:org-repo}
+
+A GitHub repo that is the public record of the organization. This is
+where things live that don't belong in any individual project but need to
+be tracked: documents, small scripts, spreadsheets, test programs,
+analyses, meeting notes, governance decisions, and anything else that
+should be visible and version-controlled but doesn't need wide release as
+a standalone project.
+
+It also includes pointers to all the other repos in the organization ---
+the pm repo, the individual project repos, external dependencies --- in
+\texttt{docs/} so it can act as a central dispatch.
+
+\begin{lstlisting}
+org-repo/
+|-- docs/                        # golden copy of project state
+|   |-- governance/              # decision-making processes, roles
+|   |-- research-agenda/         # what the lab works on and why
+|   |-- resources/               # grant tracking, allocation records
+|   `-- onboarding/              # how to join, how things work
+|-- members/
+|   |-- alice/                   # Alice's working directory
+|   |   |-- notes/               # her meeting notes, scratch work
+|   |   |-- scripts/             # one-off analysis scripts
+|   |   `-- proposals/           # drafts she's working on
+|   |-- bob/
+|   |   |-- notes/
+|   |   |-- data/                # small datasets, spreadsheets
+|   |   `-- experiments/         # test programs, prototypes
+|   `-- ...
+|-- checks/                      # integrity checks (see below)
+`-- archive/                     # completed work, historical records
+\end{lstlisting}
+
+\textbf{Member directories.} Every member gets their own directory ---
+their workspace within the org. They can put anything there: notes,
+scripts, Excel sheets, draft proposals, experimental code. Their work is
+visible to the rest of the organization without requiring them to publish
+it anywhere else.
+
+When a member wants to promote something to the project-wide golden copy,
+they open a PR moving or copying it into \texttt{docs/}. The PR is a
+request for the organization to recognize and adopt the work. Other
+members review it, and the merge is the organization saying ``yes, this
+is now part of our shared state.''
+
+\textbf{The \texttt{docs/} directory.} The golden copy --- the
+authoritative state of the project. Nothing gets into \texttt{docs/}
+without a PR. The PR history in \texttt{docs/} is the lab's
+institutional memory.
+
+\textbf{The \texttt{checks/} directory.} Automated integrity checks that
+project managers create and maintain. These run against the repo (via CI
+or on-demand) and surface issues that humans should look at.
+
+\subsection{Integrity Checks}
+\label{sec:checks}
+
+Integrity checks are to organizational state what tests are to code.
+When AI agents produce code, tests check that the code does what it
+claims. When an organization produces documents, decisions, and resource
+allocations, integrity checks do the same thing: they verify
+organizational state against the organization's own stated rules and
+surface inconsistencies for human judgment.
+
+This applies to any organization that manages resources --- public or
+private, academic or corporate. The checks maintain a history of both
+automated and human-assisted audits. Every check run is logged. When a
+human reviews an issue surfaced by a check and makes a judgment call,
+that judgment is recorded too. Over time this builds an audit trail
+showing not just the current state but how the organization has responded
+to issues as they were discovered --- an accountability mechanism that
+persists regardless of personnel changes.
+
+Examples:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Consistency}: does the resource allocation in
+    \texttt{docs/resources/} add up? Do budget numbers match grant
+    amounts recorded in governance decisions?
+
+    \item \textbf{Staleness}: are there proposals sitting for months
+    with no PR to \texttt{docs/}? Governance documents referencing
+    people who are no longer active?
+
+    \item \textbf{Completeness}: does every active grant have an
+    allocation record? Does every research project in the agenda have
+    a corresponding pm instance?
+
+    \item \textbf{Conflict}: contradictory statements across governance
+    documents? Two proposals allocating the same funds differently?
+
+    \item \textbf{Attribution}: does every work product have clear
+    attribution? Documents referencing work without crediting the
+    contributor?
+\end{itemize}
+
+These checks can be simple scripts, LLM-powered analyses, or structured
+validators. They're not gates --- they surface issues for human judgment,
+same as a test suite surfaces failures for a developer to evaluate. The
+checks themselves are in the repo, subject to the same review process as
+everything else.
+
+\subsection{Automated Recognition}
+\label{sec:recognition}
+
+The same infrastructure that detects problems also recognizes
+achievements. In traditional organizations, recognition flows through
+managers, shaped by who is visible, who is in the right social circle,
+who shares the manager's background. Automated recognition replaces this
+with a read operation on organizational state that's already being
+maintained.
+
+Examples: milestone completion across a tech tree; a new member's first
+PR to \texttt{docs/}; sustained contribution over time; a PR that
+unblocks several downstream projects; a grant's deliverables all
+completed with the full funding-to-output chain visible.
+
+Because everything in the org repo and pm repo is readable text and
+structured data, anyone can ask an LLM to assess contributions
+holistically --- reading a member's directory, their PRs, the projects
+they've touched, the discussions they've participated in. This is closer
+to what a thoughtful colleague would say if they'd been paying attention
+to everything, which no human can do at organizational scale.
+
+This avoids the problems of fixed metrics. Lines of code, commit
+frequency, and citation counts reward the metric instead of the work.
+LLM-based assessment introduces its own risks --- LLMs have predictable
+biases toward verbose, confident, and recently-active contributors, and
+their evaluation can be anticipated and gamed. The game doesn't
+disappear; it becomes a meta-game. But because the recognition criteria,
+prompts, and outputs are all in the repo, anyone can see how the game is
+being played. The meta-game itself is auditable --- if someone is
+optimizing for the evaluator rather than doing useful work, that pattern
+is visible in the same data the evaluator reads. You can write integrity
+checks against the meta-game the same way you write them against the
+organization's primary state.
+
+The point is that the organization notices what its members accomplish
+without requiring self-promotion or managerial attention. The system does
+the noticing. People decide what to do with it. This is not a tool for
+optimizing productivity --- it will surface what looks like inefficiency
+but is actually useful exploration, and the organization should
+understand that distinction.
+
+\subsection{The Project Management Repo}
+\label{sec:pm-repo}
+
+Separate from the org repo. Managed by
+\texttt{pm}\footnote{\texttt{pm} is an open-source CLI tool for managing
+dependency graphs of work items across parallel contributors. Source and
+documentation: \url{https://github.com/[repo-pending]}}, a project
+management tool that maintains a \texttt{project.yaml} file,
+\texttt{plans/} directory, and a dependency graph (the ``tech tree'')
+of everything that needs to happen. \texttt{pm} tracks what needs to be
+built, in what order, what's blocked, what's ready, and who's working on
+what. It generates prompts for AI coding agents and detects when branches
+merge, automatically unblocking downstream work.
+
+The pm repo integrates with a recursive tech tree system. The lab's
+top-level tree connects the organizational layer to all the research
+projects below it. In \emph{prescriptive} mode, a parent tree suggests
+work to child projects (the child opts in and can accept or decline). In
+\emph{descriptive} mode, a parent tree observes child projects without
+directing them --- a read-only aggregation that requires no coordination.
+
+The org repo and pm repo are separate concerns: the org repo is the
+record of what the organization is and has done; the pm repo is the plan
+for what it's doing next. Setting up a new organization requires
+initializing both: \texttt{pm init} for the pm repo, and creating the
+org repo with the directory structure described in
+Section~\ref{sec:org-repo}. A walkthrough demonstrating the full setup
+--- from empty repos to a working organization with integrity checks,
+member directories, and a populated tech tree --- is forthcoming as a
+companion to this paper.
+
+The pm repo will expose what looks like inefficiency --- blocked work,
+stalled plans, idle projects. Some of that is real inefficiency. Some of
+it is useful exploration. The visibility lets the organization have
+honest conversations about what's happening.
+
+%% ============================================================
+\section{Relationship to Existing Institutions}
+\label{sec:existing}
+%% ============================================================
+
+The lab is additive, not exclusionary. Researchers can participate while
+holding positions at existing institutions. Grants can come from
+traditional funders and flow through traditional fiscal sponsors. The
+transparency is about what happens with the resources, not about
+requiring new channels.
+
+As long as existing power structures persist, people will interface with
+governments through existing institutions for taxes, employment law, visa
+sponsorship, and compliance. A researcher receiving a stipend still files
+taxes through their employer. A grant still goes through a fiscal
+sponsor. The open layer sits on top of these structures, making decisions
+and flows visible without pretending the underlying structures don't
+exist.
+
+This also matters for funders. All else equal, an organization where a
+machine intelligence can read and verify what's actually happening is
+less risky to fund than an opaque one. As this kind of transparency
+becomes feasible, it will increasingly be expected --- not because anyone
+mandates it, but because the alternative becomes an obviously worse bet.
+
+%% ============================================================
+\section{Limitations and Open Questions}
+\label{sec:limitations}
+%% ============================================================
+
+\textbf{The transparency paradox.} Bernstein~\cite{bernstein2012}
+demonstrated that factory workers were more productive when given privacy
+from management observation. This is a genuine finding, but the
+mechanism matters: Bernstein's workers had no control over the
+observation system and no ability to use it themselves. Transparency was
+asymmetric --- management watched workers, not the reverse. In that
+configuration, transparency is surveillance, and surveillance induces
+hiding behavior. This project is specifically an attempt at solving the
+problem Bernstein identified, by making transparency symmetric. When
+every member has the same machine-intelligence-assisted access to
+organizational state that executives and project managers have, the power
+asymmetry that drives hiding behavior is substantially reduced. A tech
+worker with AI tools can read governance documents, audit resource flows,
+and assess organizational health with nearly the same capability as the
+people nominally in charge. The mechanism described here is more
+symmetric than prior transparency systems precisely because machine
+intelligence makes organizational legibility available to everyone, not
+just to those with management titles. Nevertheless, the risk of chilling
+effects on exploratory work remains real. Members might avoid speculative
+projects that could look unproductive. The member directories are
+designed to mitigate this --- they are personal workspaces where
+incomplete and exploratory work is expected --- but the tension between
+organizational legibility and individual creative freedom requires
+ongoing attention.
+
+\textbf{Legitimate uses of opacity.} Not all organizational opacity is
+pathological. Trade secrets, negotiating positions, personnel matters,
+and shielding individuals from external pressure are cases where some
+degree of opacity serves legitimate purposes. The architecture described
+here does not require total transparency --- the org can choose what is
+world-readable and what is member-only. But the paper's argument is
+strongest for governance, resource allocation, and credit assignment,
+where opacity more often enables abuse than serves legitimate ends.
+
+\textbf{LLM gaming and bias.} The automated recognition system inherits
+the risks of algorithmic management documented by
+Kellogg~et~al.~\cite{kellogg2020}. LLMs have predictable biases and
+their assessments can be gamed by those who understand the model's
+preferences. Making the recognition infrastructure open and auditable means the
+meta-game --- gaming the evaluator rather than doing the work --- is
+itself visible and auditable. This does not eliminate strategic behavior,
+but it makes each layer of strategy legible to anyone who cares to look.
+Formal analysis of these recursive gaming surfaces is future work.
+
+\textbf{No empirical validation.} This paper describes an architecture,
+not empirical results. The claims about cost reduction, improved
+fairness, and organizational health are predictions, not measurements. A
+pilot deployment (even at small scale: 5--10 people for 3--6 months)
+measuring administrative overhead, perceived fairness, and contribution
+distribution would substantially strengthen the argument. Formal
+modeling --- agent-based simulation of organizational dynamics under
+transparent vs.\ opaque regimes, game-theoretic analysis of strategic
+behavior, principal-agent models adapted to symmetric transparency ---
+is also future work. This is a design proposal; the empirical and
+theoretical validation comes next.
+
+\textbf{Cost figures.} The economic estimates in Section~\ref{sec:cost}
+draw from sources of varying rigor. They
+indicate the scale of the problem but should not be treated as precise
+measurements. In particular, the \$3 trillion figure from
+Hamel~\cite{hamel2016} is based on extrapolation from exemplar companies,
+not a comprehensive economic study.
+
+%% ============================================================
+\section{Related Work}
+\label{sec:related}
+%% ============================================================
+
+The idea of making organizational governance explicit and transparent has
+a substantial history. This section positions the present work relative
+to prior approaches and identifies what is genuinely new.
+
+\textbf{Commons governance.} Ostrom~\cite{ostrom1990} established eight
+design principles for self-governing institutions managing shared
+resources: clearly defined boundaries, proportional costs and benefits,
+collective choice arrangements, monitoring, graduated sanctions, conflict
+resolution mechanisms, minimal recognition of rights to organize, and
+nested enterprises. The architecture described in this paper instantiates
+several of these principles --- integrity checks as monitoring,
+governance-as-code as collective choice arrangements, the recursive tech
+tree as nested enterprises --- in a version-controlled, machine-readable
+form. Ostrom's framework provides the theoretical grounding; we provide a
+concrete implementation using modern software infrastructure.
+
+\textbf{Self-management frameworks.} Holacracy~\cite{robertson2015}
+encodes governance rules explicitly, replacing traditional management
+hierarchy with a constitution that defines roles, accountabilities, and
+decision-making processes. Laloux~\cite{laloux2014} surveys organizations
+operating with radical transparency, including Buurtzorg and Morning
+Star. Our approach shares the goal of making governance rules explicit
+but differs in two ways: the rules are stored in Git (not a proprietary
+constitution), making them forkable and diffable; and machine
+intelligence is used to check organizational state against the rules,
+rather than relying solely on human process adherence. Holacracy's
+adoption difficulties --- Zappos being the most prominent case --- also
+illustrate that rigid governance frameworks can fail when they don't
+accommodate organizational ambiguity. Our approach is deliberately
+flexible: governance documents are prose, not a fixed schema.
+
+\textbf{Decentralized Autonomous Organizations (DAOs).} DAOs encode
+governance in smart contracts on a blockchain, making institutional rules
+machine-readable and forkable~\cite{rozas2021}. The goals overlap
+significantly with ours. The key differences are infrastructural: our
+approach uses Git, which is universally understood by developers, does
+not require tokens or chain infrastructure, and integrates with existing
+development tools. DAOs also have a well-documented history of governance
+failures --- including the 2016 DAO exploit, where transparent
+machine-readable rules were used against the organization, and
+persistent voter apathy in token-based governance. We take these as
+evidence that governance transparency is necessary but not sufficient;
+the integrity checks and recognition system described in
+Section~\ref{sec:arch} are designed to address some of these failure modes.
+
+\textbf{Open-source governance.} The open-source software movement
+provides decades of evidence on transparent organizational
+structures~\cite{raymond1999}. Research on open-source governance shows
+both the power of open contribution models and their failure modes:
+hidden hierarchies, burnout among maintainers, and difficulty with
+accountability when no one is formally in charge. Buffer's radical
+transparency experiment (public salaries and open financials since 2013)
+provides real-world data on organizational transparency in a corporate
+setting. Valve's nominally flat structure produced documented problems
+with clique-based resource allocation despite apparent openness --- a
+cautionary tale that motivates our integrity checks, which are designed
+precisely to surface hidden power structures that persist even under
+nominal transparency.
+
+\textbf{The transparency paradox.} Bernstein~\cite{bernstein2012} found
+that factory workers were more productive when given privacy from
+management observation, showing that transparency can reduce performance
+by inducing hiding behavior. This is an important counterpoint, but the
+mechanism matters: Bernstein's workers had no control over the
+transparency system and no ability to use it themselves. The transparency
+was asymmetric --- management watched workers, not the reverse. This
+project is specifically an attempt at solving that problem by making
+transparency symmetric: machine intelligence gives every member the same
+ability to read and audit organizational state that was previously
+reserved for management. The remaining risk --- that even symmetric
+transparency produces chilling effects on exploratory work --- is
+addressed in Section~\ref{sec:limitations}.
+
+\textbf{Algorithmic management.} Kellogg et~al.~\cite{kellogg2020}
+provide a systematic review of algorithmic management in the workplace,
+documenting how automated systems can reproduce or amplify existing
+power asymmetries. The automated recognition system described in
+Section~\ref{sec:recognition} is an instance of algorithmic management
+and inherits these risks. We address this by making the recognition
+infrastructure itself open and auditable --- the criteria are code, not
+black-box algorithms --- but acknowledge that this does not eliminate all
+risks (see Section~\ref{sec:limitations}).
+
+%% ============================================================
+\section{Conclusion}
+\label{sec:conclusion}
+%% ============================================================
+
+Organizational opacity is becoming unsustainable. Machine intelligence is
+making institutional internals legible to outsiders whether institutions
+cooperate or not. The costs of the opaque institutions we have --- excess
+management, bureaucratic overhead, nepotism, lost productivity --- are
+measured in trillions.
+
+This paper proposes an alternative: open-source the institution itself.
+Not just the research outputs, but the governance, resource flows,
+decision history, and credit assignment. The concrete architecture ---
+an organization repo with integrity checks, an automated recognition
+system, and a recursive project management layer --- is implementable
+with existing tools. The key insight is that integrity checks are to
+organizational state what tests are to code: they hold the institution
+accountable to its own stated rules.
+
+Management becomes engineering. The structure is the product. The first
+organization to fully open-source itself will make every opaque
+institution around it look like a liability.
+
+%% ============================================================
+%% Bibliography
+%% ============================================================
+
+\clearpage
+\begin{thebibliography}{99}
+
+\bibitem{ostrom1990}
+E.~Ostrom, \emph{Governing the Commons: The Evolution of Institutions
+for Collective Action}. Cambridge University Press, 1990.
+
+\bibitem{robertson2015}
+B.~J.~Robertson, \emph{Holacracy: The New Management System for a
+Rapidly Changing World}. Henry Holt, 2015.
+
+\bibitem{laloux2014}
+F.~Laloux, \emph{Reinventing Organizations}. Nelson Parker, 2014.
+
+\bibitem{rozas2021}
+D.~Rozas, A.~Tenorio-Forn\'{e}s, S.~Djunadi, and J.~Hassan,
+``Analysis of the Potentials of Blockchain Technology for Commons
+Governance,'' 2021.
+
+\bibitem{raymond1999}
+E.~S.~Raymond, \emph{The Cathedral and the Bazaar}. O'Reilly, 1999.
+
+\bibitem{bernstein2012}
+E.~S.~Bernstein, ``The Transparency Paradox: A Role for Privacy in
+Organizational Learning and Operational Control,''
+\emph{Administrative Science Quarterly}, vol.~57, no.~2, pp.~181--216,
+2012.
+
+\bibitem{kellogg2020}
+K.~C.~Kellogg, M.~A.~Valentine, and A.~Christin, ``Algorithms at
+Work: The New Contested Terrain of Control,'' \emph{Academy of
+Management Annals}, vol.~14, no.~1, pp.~366--410, 2020.
+
+\bibitem{marketus2024}
+Market.us, ``Blockchain for Supply Chain Traceability Market Size,'' 2024.
+\url{https://market.us/report/blockchain-for-supply-chain-traceability-market/}
+
+\bibitem{triunity2025}
+Triunity Capital Ventures, ``Due Diligence in 2025: What Investors
+Really Want to Know About Your AI Startup.''
+\url{https://triunitycapitalventures.com/due-diligence-in-2025-what-investors-really-want-to-know-about-your-ai-startup/}
+
+\bibitem{ajmc2024}
+AJMC, ``Survey Exposes Pervasive Billing Errors, Aggressive Tactics in
+US Health Insurance,'' 2024.
+\url{https://www.ajmc.com/view/survey-exposes-pervasive-billing-errors-aggressive-tactics-in-us-health-insurance}
+
+\bibitem{hamel2016}
+G.~Hamel, ``Excess Management Is Costing the U.S.\ \$3~Trillion Per
+Year,'' \emph{Harvard Business Review}, 2016.
+\url{https://hbr.org/2016/09/excess-management-is-costing-the-us-3-trillion-per-year}
+
+\bibitem{ssonetwork}
+SSO Network, ``Fortune 500: \$480~Billion in Back Office Inefficiencies
+a Year.''
+\url{https://www.ssonetwork.com/continuous-improvement-process-improvement/articles/480-billion-in-back-office-inefficiencies-how-to}
+
+\bibitem{cato}
+NBER / Cato, ``The Cost of Regulatory Compliance in the United States.''
+\url{https://www.cato.org/research-briefs-economic-policy/cost-regulatory-compliance-united-states}
+
+\bibitem{deloitte}
+Deloitte Australia, ``Get Out of Your Own Way --- Unleashing
+Productivity,'' cited in \emph{Consultancy.uk}.
+\url{https://www.consultancy.uk/news/973/deloitte-compliance-costs-australian-economy-250-billion}
+
+\bibitem{ihire2025}
+iHire, ``Toxic Workplace Trends Report,'' February 2025 ($n=2{,}285$
+across 57 industries).
+\url{https://www.ihire.com/about/press/ihire-toxic-workplace-trends-report-pr}
+
+\bibitem{sull2022b}
+D.~Sull, C.~Sull, W.~Cipolli, and C.~Brighenti, ``Why Every Leader
+Needs to Worry About Toxic Culture,'' \emph{MIT Sloan Management Review},
+March 2022. \$50B figure originally from SHRM, ``The High Cost of a
+Toxic Workplace Culture,'' 2019.
+\url{https://sloanreview.mit.edu/article/why-every-leader-needs-to-worry-about-toxic-culture/}
+
+\bibitem{fdp2018}
+S.~L.~Schneider, ``2018 FDP Faculty Workload Survey: Research Report:
+Primary Findings,'' Federal Demonstration Partnership Foundation, 2020.
+\url{https://thefdp.org/wp-content/uploads/FDP-FWS-2018-Primary-Report.pdf}
+
+\bibitem{aau}
+Association of American Universities, ``Frequently Asked Questions about
+Facilities and Administrative Costs of Federally Sponsored University
+Research.''
+\url{https://www.aau.edu/key-issues/frequently-asked-questions-about-facilities-and-administrative-costs}
+
+\bibitem{nepotism2020}
+``Nepotism, Political Competition and Overemployment,''
+\emph{Journal of Public Economic Theory}, 2020.
+\url{https://www.tandfonline.com/doi/full/10.1080/2474736X.2020.1781542}
+
+\bibitem{nepotism_hc2020}
+``Nepotism, Human Capital and Economic Development,''
+\emph{Journal of Economic Behavior \& Organization}, 2020.
+\url{https://www.sciencedirect.com/science/article/abs/pii/S0167268120304431}
+
+\end{thebibliography}
+
+\end{document}
