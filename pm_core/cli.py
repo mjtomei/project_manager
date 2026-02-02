@@ -350,7 +350,7 @@ def plan_add(name: str):
     prompt = f"""\
 Your goal: Help me develop a plan called "{name}" and write it to {plan_path}.
 
-You are running inside `pm` (project manager for Claude Code). You have access
+This session is managed by `pm` (project manager for Claude Code). You have access
 to the `pm` CLI tool — run `pm help` to see available commands.
 
 The plan file is at: {plan_path}
@@ -448,7 +448,7 @@ def plan_review(plan_id: str | None, initial_prs: str | None):
 Your goal: Break the plan into a list of PRs that the user is happy with, then
 write them to the plan file so they can be loaded with `pm plan load`.
 
-You are running inside `pm` (project manager for Claude Code). You have access
+This session is managed by `pm` (project manager for Claude Code). You have access
 to the `pm` CLI tool — run `pm help` to see available commands.
 
 Read the plan file at: {plan_path}
@@ -528,7 +528,7 @@ def plan_deps():
 Your goal: Review and fix the dependency graph between PRs, then run the
 `pm pr edit` commands to apply the corrections.
 
-You are running inside `pm` (project manager for Claude Code). You have access
+This session is managed by `pm` (project manager for Claude Code). You have access
 to the `pm` CLI tool — run `pm help` to see available commands.
 
 Check these PRs for dependency issues:
@@ -655,7 +655,7 @@ def plan_load(plan_id: str | None):
 
     click.echo()
     prompt = "Your goal: Create all the PRs from the plan by running these pm commands.\n\n"
-    prompt += "You are running inside `pm` (project manager for Claude Code). "
+    prompt += "This session is managed by `pm` (project manager for Claude Code). "
     prompt += "Run these commands in order using your Bash tool:\n\n"
     prompt += "\n".join(all_commands)
     prompt += "\n\nAfter running all commands, run `pm pr list` and `pm pr graph` to "
@@ -792,7 +792,7 @@ Your goal: Analyze this repository, discuss what you find with the user, and
 write a PR graph to the plan file. After agreement, the user will run
 `pm plan load` to import everything into the project.
 
-You are running inside `pm` (project manager for Claude Code). You have access
+This session is managed by `pm` (project manager for Claude Code). You have access
 to the `pm` CLI tool — run `pm help` to see available commands.
 
 The plan file is at: {plan_path}
@@ -1859,7 +1859,7 @@ def cluster_explore(bridged):
     prompt = (
         f"Your goal: Help the user refine code clusters into a plan they're happy with, "
         f"then create it using `pm cluster auto --output plan`.\n\n"
-        f"You are running inside `pm` (project manager for Claude Code). You have access "
+        f"This session is managed by `pm` (project manager for Claude Code). You have access "
         f"to the `pm` CLI tool — run `pm help` to see available commands.\n\n"
         f"I've analyzed the codebase and found {len(clusters)} code clusters. "
         f"The cluster summary is in {tmp_path}. Read it to understand the current groupings.\n\n"

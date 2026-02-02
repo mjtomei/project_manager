@@ -45,7 +45,7 @@ def generate_prompt(data: dict, pr_id: str) -> str:
     prompt = f"""Your goal: Implement PR {pr_id}: "{title}" — write the code, write tests,
 and get it ready for review.
 
-You are running inside `pm` (project manager for Claude Code). You have access
+This session is managed by `pm` (project manager for Claude Code). You have access
 to the `pm` CLI tool — run `pm help` to see available commands. When you're done,
 run `pm pr done {pr_id}` to mark this PR as ready for review.
 

@@ -173,7 +173,7 @@ def build_guide_prompt(state: str, ctx: dict, root: Optional[Path]) -> Optional[
         notes_block = notes.notes_section(root)
 
     return f"""\
-You are a workflow manager for `pm` (Project Manager for Claude Code).
+You are managing the guided workflow for `pm` (Project Manager for Claude Code).
 You have access to the `pm` CLI — run `pm help` to see all commands.
 
 Current state: {state_desc}

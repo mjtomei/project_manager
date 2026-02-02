@@ -62,7 +62,7 @@ def build_fix_prompt(step_name: str, original_context: str, review_findings: str
     return f"""\
 Your goal: Fix the issues found by the automated review of the "{step_name}" step.
 
-You are running inside `pm` (project manager for Claude Code). You have access
+This session is managed by `pm` (project manager for Claude Code). You have access
 to the `pm` CLI tool — run `pm help` to see available commands.
 
 The original step had this context:
