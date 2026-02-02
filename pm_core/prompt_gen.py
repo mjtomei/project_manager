@@ -1,6 +1,6 @@
 """Claude prompt generation with guardrails."""
 
-from pm_core import store
+from pm_core import store, notes
 from pm_core.backend import get_backend
 
 
@@ -34,7 +34,20 @@ def generate_prompt(data: dict, pr_id: str) -> str:
     backend = get_backend(data)
     instructions = backend.pr_instructions(branch, title, base_branch, pr_id)
 
-    prompt = f"""You are working on PR {pr_id}: "{title}"
+    # Include notes if available
+    notes_block = ""
+    try:
+        root = store.find_project_root()
+        notes_block = notes.notes_section(root)
+    except FileNotFoundError:
+        pass
+
+    prompt = f"""Your goal: Implement PR {pr_id}: "{title}" — write the code, write tests,
+and get it ready for review.
+
+You are running inside `pm` (project manager for Claude Code). You have access
+to the `pm` CLI tool — run `pm help` to see available commands. When you're done,
+run `pm pr done {pr_id}` to mark this PR as ready for review.
 
 ## Context
 This PR is part of the plan "{plan_name}" ({plan_id}).
@@ -49,5 +62,5 @@ This PR is part of the plan "{plan_name}" ({plan_id}).
 
 ## Instructions
 {instructions}
-"""
+{notes_block}"""
     return prompt.strip()
