@@ -84,22 +84,24 @@ to commit and share changes.
 
 ---
 
-## Phase 3: Write a plan
+## Phase 3: Develop a plan with Claude
 
-A plan is a high-level goal. Write it in prose — Claude will help
-decompose it into PRs later.
+A plan is a high-level goal. `pm plan add` creates the plan entry and
+launches Claude directly to develop the plan together.
 
 ```bash
 pm plan add "Mobile web dashboard for pm"
 ```
 
-Now edit the plan file to describe what you want:
+Claude opens interactively. Describe what you want at a high level — for example:
 
-```bash
-$EDITOR pm/plans/plan-001.md
-```
+> I want a lightweight web dashboard I can check from my phone. It should
+> show the tech tree, PR statuses, and what's ready to work on. It should
+> be self-hosted with per-device auth via pre-shared keys. Python/Flask,
+> no JS framework, no build step.
 
-Write something like:
+Iterate with Claude until the plan is solid, then ask Claude to write it
+to the plan file. The result should look something like:
 
 ```markdown
 # Mobile web dashboard for pm
@@ -126,16 +128,10 @@ Optimized for phone screens. Designed to be self-hosted by individuals.
 - Serve over HTTPS even locally (self-signed cert is fine for now)
 ```
 
-Save and check that the plan is tracked:
+Check that the plan is tracked and commit it:
 
 ```bash
 pm plan list
-git log --oneline
-```
-
-Commit the plan with `pm push`:
-
-```bash
 pm push
 ```
 
@@ -143,18 +139,20 @@ pm push
 
 ## Phase 4: Decompose the plan into PRs
 
-Ask Claude to break the plan into a dependency graph:
+Use `pm plan review` to launch Claude to break the plan into PRs.
+Claude writes a `## PRs` section directly into the plan file:
 
 ```bash
-pm plan review plan-001
+pm plan review
 ```
 
-This prints a prompt. Paste it into a Claude session. Claude will output
-a YAML list of PRs with dependencies. Review it, adjust, then translate
-into `pm pr add` commands.
+Claude adds structured PR entries to the plan file. Then load them:
 
-Or, if you want to set up the tree yourself, here's a reasonable
-decomposition:
+```bash
+pm plan load
+```
+
+For this tutorial, a reasonable decomposition looks like:
 
 ```bash
 # Layer 0: foundations (no dependencies, all parallel)
@@ -204,7 +202,22 @@ pm pr add "Public deployment on remote host" \
   --description "Deploy to an EC2 instance (or any remote host). Systemd unit file. Verify it works over cellular with device key auth. Document the deploy process."
 ```
 
-Now look at what you've built:
+Now review the dependency graph with Claude:
+
+```bash
+pm plan deps
+```
+
+Claude opens interactively to check for missing or incorrect dependencies
+and runs `pm pr edit` commands if anything needs fixing.
+For example, Claude might suggest:
+
+```bash
+# Example fix if Claude finds a missing constraint
+pm pr edit pr-005 --depends-on "pr-001,pr-003"
+```
+
+Look at the final graph:
 
 ```bash
 pm pr graph
@@ -225,17 +238,11 @@ Pick a ready PR and start it:
 pm pr start pr-001
 ```
 
-This clones the repo, creates a branch, and prints a Claude prompt.
-Open a Claude Code session in the workdir:
+This clones the repo, creates a branch, and launches Claude directly.
+If you're in a tmux session (via `pm session`), each PR gets its own
+tmux window. Otherwise Claude runs in the current terminal.
 
-```bash
-# Use the workdir path from the pr start output
-cd ~/.pm-workdirs/project-manager-*/pm-pr-001-*
-claude
-```
-
-Paste the prompt. Let Claude build it. Review the code. When you're
-satisfied:
+Let Claude build it. Review the code. When you're satisfied:
 
 ```bash
 # From the workdir, push the branch
@@ -400,17 +407,17 @@ pm pr cleanup pr-002
 By this point you've used every part of the `pm` workflow:
 
 1. **Explore** — Used Claude to understand a codebase before planning
-2. **Plan** — Created a plan document describing a goal in prose
-3. **Decompose** — Broke the plan into a dependency graph of PRs
-   (manually or with `pm plan review` + Claude)
-4. **Visualize** — Used `pm pr graph` and `pm pr ready` to see the
+2. **Plan** — Used `pm plan add` to launch Claude and develop a plan collaboratively
+3. **Decompose** — Used `pm plan review` + `pm plan load` to have Claude create PRs
+4. **Dependencies** — Used `pm plan deps` to have Claude verify the graph
+5. **Visualize** — Used `pm pr graph` and `pm pr ready` to see the
    tech tree and decide what to work on
-5. **Execute** — Used `pm pr start` to set up workdirs with Claude
+6. **Execute** — Used `pm pr start` to set up workdirs with Claude
    prompts, ran parallel Claude sessions
-6. **Track** — Used `pm pr done` and `pm pr sync` to track progress
+7. **Track** — Used `pm pr done` and `pm pr sync` to track progress
    and unblock downstream work
-7. **Ship** — Went from plan to deployed, tested feature
-8. **Audit** — Used `pm push` and git history as a record of decisions
+8. **Ship** — Went from plan to deployed, tested feature
+9. **Audit** — Used `pm push` and git history as a record of decisions
 
 Now do it on your own repo. Run `pm` from your project directory and
 follow the guidance it prints.

@@ -57,11 +57,14 @@ Inspect the project config:
 cat pm/project.yaml
 ```
 
-## 3. Add a plan
+## 3. Create a plan with Claude
 
 ```bash
 pm plan add "Build the Project Manager tool"
 ```
+
+This creates the plan entry and launches Claude directly to develop the plan.
+If the Claude CLI isn't installed, it prints the prompt to paste manually.
 
 Check it was created:
 
@@ -70,15 +73,28 @@ pm plan list
 cat pm/plans/plan-001.md
 ```
 
-The plan file is a markdown stub — in a real workflow you'd fill it in
-with goals, scope, and constraints before using `pm plan review` to
-have Claude break it into PRs.
+In a real workflow Claude opens interactively — describe what you want at a
+high level, and iterate until Claude writes the final plan to the file.
+For this demo, the plan stub is fine.
 
-## 4. Add PRs with dependencies
+## 4. Break the plan into PRs
 
-Build a dependency graph in layers. PRs in the same layer can be worked
-on in parallel. Since there's only one plan, `--plan` is inferred
-automatically. Each PR becomes the **active PR** when created:
+Use `pm plan review` to launch Claude to decompose the plan into PRs.
+Claude writes a `## PRs` section directly into the plan file. Since there's
+only one plan, it's auto-selected:
+
+```bash
+pm plan review
+```
+
+Claude adds structured PR entries to the plan file. Then load them into pm:
+
+```bash
+pm plan load
+```
+
+For this demo, simulate by running these commands manually. Since there's
+only one plan, `--plan` is inferred automatically:
 
 ```bash
 # Layer 0: no dependencies, can all be worked in parallel
@@ -98,6 +114,24 @@ pm pr add "TUI app shell and background sync" --depends-on "pr-004,pr-007"
 
 Each PR gets an auto-generated branch name like `pm/pr-001-core-data-model-and-yaml-store`.
 The last one created (pr-008) is now the active PR.
+
+## 4b. Review dependencies
+
+Use `pm plan deps` to generate a prompt that asks Claude to verify the
+dependency graph — catching missing constraints, unnecessary deps, or cycles:
+
+```bash
+pm plan deps
+```
+
+If Claude finds issues, it outputs `pm pr edit` commands to fix them:
+
+```bash
+# Example: Claude might suggest adding a missing dependency
+pm pr edit pr-005 --depends-on "pr-001,pr-002"
+```
+
+In this demo the dependencies are already correct, so there's nothing to fix.
 
 ## 5. Explore the graph
 
@@ -162,7 +196,7 @@ It will:
 - Clone the target repo into `~/.pm-workdirs/project_manager-<hash>/<branch-slug>-<hash>/`
 - Create branch `pm/pr-001-core-data-model-and-yaml-store`
 - Mark pr-001 as `in_progress` with your hostname
-- Print the full Claude prompt
+- Launch Claude in a tmux window (if in tmux) or in the current terminal
 
 Note the workdir path from the output — you'll need it for step 10.
 
@@ -318,7 +352,7 @@ pm plan list
 pm pr list
 ```
 
-## 15. Use plan review to decompose with Claude
+## 15. Use the full plan workflow on the second plan
 
 With two plans, specify which one to review:
 
@@ -329,12 +363,15 @@ pm plan review plan-002
 This prints a prompt designed for pasting into a Claude session. It includes:
 - The plan content (from `pm/plans/plan-002.md`)
 - All existing PRs and their statuses (so Claude doesn't duplicate work)
-- Output format instructions (YAML list of PRs with dependencies)
+- Output format: `pm pr add` commands you can run directly
 
 In a real workflow, you'd:
 1. Edit `pm/plans/plan-002.md` to describe what "Harden and polish" means
+   (or use the prompt from `pm plan add` to develop it with Claude)
 2. Run `pm plan review plan-002` and paste the output to Claude
-3. Claude outputs `pm pr add` commands which you paste back into the terminal
+3. Run the `pm pr add` commands Claude outputs
+4. Run `pm plan deps` and paste the output to Claude to verify dependencies
+5. Run any `pm pr edit` commands Claude suggests to fix dependency issues
 
 ## 16. Working from other directories
 
@@ -364,6 +401,8 @@ rm -rf ~/.pm-workdirs/project_manager-*
 
 ## Tips
 
+- **Plan workflow**: `pm plan add` → develop with Claude → `pm plan review` → `pm plan load` → `pm plan deps` → verify dependencies
+- **Session workflow**: `pm session` starts tmux with TUI + notes editor
 - **Active PR** — the last created or started PR. Used as default for most commands.
   Change it with `pm pr select <pr-id>`. Shown as `*` in `pm pr list`.
 - **Most arguments are optional** — pm infers from active PR, cwd, or single matches
@@ -373,6 +412,7 @@ rm -rf ~/.pm-workdirs/project_manager-*
 - **`pm pr start`** does the full setup: clone, branch, prompt generation
 - **`pm prompt`** regenerates the prompt without cloning (for re-runs)
 - **`pm pr done`** / **`pm prompt`** auto-select from cwd if you're inside a workdir
+- **`pm pr edit`** updates title, description, or dependencies on existing PRs
 - **`--description`** on `pm pr add` fills in the Task section of the Claude prompt
 - **Workdir naming**: `~/.pm-workdirs/<project>-<root-hash>/<branch>-<base-hash>/`
   ensures no collisions across projects or branches

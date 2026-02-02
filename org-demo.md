@@ -94,13 +94,26 @@ pm init . \
 
 This creates `pm/` inside the org repo.
 
-## 4. Add a plan
+## 4. Create a plan with Claude
 
 ```bash
 pm plan add "Bootstrap lab governance"
 ```
 
-## 5. Add PRs with dependencies
+This launches Claude directly to develop the plan. In a real workflow you'd
+discuss the plan with Claude and have it write the plan file. For this
+demo, the stub is fine. (If Claude CLI isn't installed, it prints the prompt.)
+
+## 5. Break the plan into PRs
+
+Launch Claude to decompose the plan into PRs:
+
+```bash
+pm plan review
+```
+
+Claude writes a `## PRs` section to the plan file. Then load them with
+`pm plan load`. For this demo, simulate by running commands manually:
 
 Layer 0 — foundational work (no dependencies):
 
@@ -127,6 +140,15 @@ pm pr add "Set up recognition criteria" \
   --depends-on "pr-001,pr-002" \
   --description "Create docs/recognition.md defining how contributions are recognized. Needs both checks and member directory."
 ```
+
+Review the dependency graph with Claude:
+
+```bash
+pm plan deps
+```
+
+Claude opens interactively to review. If it finds issues it runs
+`pm pr edit` commands. In this demo the graph is correct.
 
 ## 6. View the dependency structure
 
