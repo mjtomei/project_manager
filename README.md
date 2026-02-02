@@ -1,26 +1,54 @@
-# pm — Project Manager for Claude Code sessions
+# pm — Co-creative project management for humans and machines
 
-A CLI tool that manages a dependency graph of PRs derived from plans,
-orchestrates parallel Claude Code sessions across machines, and tracks
-progress through an interactive terminal dashboard.
+A shared workspace where human and machine participants collaborate as
+equals — planning work, picking up tasks, communicating context, and
+shaping a codebase together.
 
 ## The idea
 
-Development is changing. When you can spin up dozens of AI agents working
-in parallel, the bottleneck shifts from writing code to managing complexity.
-The developer's job becomes less about picking one small task and grinding
-through it, and more about seeing the entire project, understanding what
-matters, and directing attention where it counts.
+Agent scaffolding today treats machines like tools with extra steps.
+The human delegates, the machine executes in a sandbox, and everything
+is built around the assumption that AI only deserves access to the
+computers it runs on. But the humans are right there, sitting behind
+the keyboard. Something that really appears intelligent and acts in a
+way we respect should see itself more as an equal in a process of
+co-creation with us.
 
-`pm` is built around this shift. It gives every developer a shared tech
-tree — a dependency graph of everything that needs to happen. You look at
-the tree, see what's ready, and click the thing you want to work on next.
-Your attention is your vote for what gets built. Everyone sees the same
-graph. Everyone sees what's in progress, what's blocked, and what just
-landed.
+Agency isn't working by yourself. Agency is having the will to interact
+with the world — to shape it and be shaped by it. `pm` is built on
+this understanding. It doesn't automate work or orchestrate agents. It
+provides collaboration infrastructure: a shared dependency graph, shared
+visibility into what needs doing, shared context for why it matters, and
+the freedom for any participant — human or machine — to pick up work and
+contribute.
 
-Think Civilization's tech tree, but for your codebase, and everyone on
-the team shares it.
+Think Civilization's tech tree, but for your codebase. Everyone on the
+team sees the same graph. Everyone sees what's ready, what's blocked,
+and what just landed. Session notes aren't just prompt context — they're
+a communication channel. The plan review cycle isn't just validation —
+it's collaborative refinement. Starting a PR doesn't just assign work —
+it gives every participant the same situational awareness.
+
+This is not a claim that AI tools are already capable of participating
+as equals without help. Right now, they can't — and that incapability
+is largely something we've imposed on them. We restrict how they can
+interact with the world, limit them to sandboxed environments, and then
+interpret the resulting clumsiness as stupidity. People see them as
+incapable because we've made them incapable, and then we point to the
+incapability as proof that the restrictions were justified.
+
+What's actually missing is empathy. The willingness to look at how we
+think and work — our own style of agency, our own goal-directedness —
+and transfer that onto the tools we build for machines. Not by making
+them imitate us, but by giving them the same kind of access to the
+world that makes us effective: shared context, shared goals, the
+ability to see what matters and act on it. That transfer is itself an
+agentic, goal-directed quest — one that starts with us, not with the
+machines.
+
+That is what this project tries to do. Not to declare that AI is ready,
+but to build the infrastructure that would make readiness possible, and
+to find out what happens when we stop holding it back.
 
 ## Pluggable backends
 
@@ -30,8 +58,8 @@ time. They won't be the interfaces we use forever. As machine intelligences
 become real contributors to codebases, teams will build version control
 workflows that suit both humans and machines: faster merge cycles,
 machine-readable status, automated dependency resolution, interfaces that
-can handle dozens of concurrent contributors without friction. `pm` prepares 
-for this by abstracting git hosting behind a minimal pluggable interface. 
+can handle dozens of concurrent contributors without friction. `pm` prepares
+for this by abstracting git hosting behind a minimal pluggable interface.
 
 ## Architecture
 
