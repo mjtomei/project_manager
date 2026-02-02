@@ -188,9 +188,14 @@ class TechTree(Widget):
                     for dx, ch in enumerate(bl):
                         if x + dx < len(grid[0]):
                             grid[y + dy][x + dx] = ch
+                            is_border = (dy == 0 or dy == len(box_lines) - 1
+                                         or dx == 0 or dx == len(bl) - 1)
                             if is_selected:
-                                style_grid[y + dy][x + dx] = "bold reverse"
-                            elif dy == 0 or dy == len(box_lines) - 1:
+                                if is_border:
+                                    style_grid[y + dy][x + dx] = "bold cyan"
+                                else:
+                                    style_grid[y + dy][x + dx] = node_style
+                            elif is_border:
                                 style_grid[y + dy][x + dx] = border
                             else:
                                 style_grid[y + dy][x + dx] = node_style
@@ -219,6 +224,8 @@ class TechTree(Widget):
         return output
 
     def on_key(self, event) -> None:
+        if not self.has_focus:
+            return
         if not self._ordered_ids:
             return
 
