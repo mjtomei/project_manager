@@ -11,6 +11,7 @@ from pm_core import store, graph, git_ops, prompt_gen, notes
 from pm_core.backend import detect_backend, get_backend
 from pm_core.claude_launcher import find_claude, find_editor, launch_claude, launch_claude_print
 from pm_core import tmux as tmux_mod
+from pm_core import pane_layout
 from pm_core.plan_parser import parse_plan_prs
 from pm_core import review as review_mod
 from pm_core import guide as guide_mod
@@ -1357,33 +1358,105 @@ def pr_cleanup(pr_id: str | None):
 
 @cli.command("session")
 def session_cmd():
-    """Start a tmux session with TUI + notes editor."""
+    """Start a tmux session with TUI + notes editor.
+
+    If no project exists yet, starts pm guide instead of the TUI so
+    the guided workflow can initialize the project inside tmux.
+    """
     if not tmux_mod.has_tmux():
         click.echo("tmux is required for 'pm session'. Install it first.", err=True)
         raise SystemExit(1)
 
-    root = state_root()
-    data = store.load(root)
-    project_name = data.get("project", {}).get("name", "unknown")
-    session_name = f"pm-{project_name}"
+    # Check if project exists
+    try:
+        root = state_root()
+        data = store.load(root)
+        has_project = True
+    except (FileNotFoundError, SystemExit):
+        root = None
+        data = None
+        has_project = False
 
-    # Ensure notes file exists
-    notes.ensure_notes_file(root)
-    notes_path = root / notes.NOTES_FILENAME
+    if has_project:
+        project_name = data.get("project", {}).get("name", "unknown")
+    else:
+        # Derive session name from cwd
+        project_name = Path.cwd().name
+
+    session_name = f"pm-{project_name}"
 
     if tmux_mod.session_exists(session_name):
         click.echo(f"Attaching to existing session '{session_name}'...")
         tmux_mod.attach(session_name)
         return
 
+    cwd = str(root) if root else str(Path.cwd())
+    expected_root = root or (Path.cwd() / "pm")
+    notes_path = expected_root / notes.NOTES_FILENAME
     editor = find_editor()
 
-    # Create session with TUI in the first pane
-    click.echo(f"Creating tmux session '{session_name}'...")
-    tmux_mod.create_session(session_name, str(root), f"pm tui")
+    # Clear stale pane registry and bump generation to invalidate old EXIT traps
+    import time as _time
+    generation = str(int(_time.time()))
+    pane_layout.save_registry(session_name, {
+        "session": session_name, "window": "0", "panes": [],
+        "user_modified": False, "generation": generation,
+    })
 
-    # Split right pane with editor on notes file
-    tmux_mod.split_pane(session_name, "h", f"{editor} {notes_path}")
+    # Always create session with TUI in the left pane
+    click.echo(f"Creating tmux session '{session_name}'...")
+    tmux_mod.create_session(session_name, cwd, "pm tui")
+
+    # Get the TUI pane ID and window ID
+    import subprocess as _sp
+    tui_pane = _sp.run(
+        ["tmux", "list-panes", "-t", session_name, "-F", "#{pane_id}"],
+        capture_output=True, text=True,
+    ).stdout.strip().splitlines()[0]
+    window_id = tmux_mod.get_window_id(session_name)
+
+    # Register TUI pane in layout registry
+    pane_layout.register_pane(session_name, window_id, tui_pane, "tui", "pm tui")
+
+    def _wrap(cmd: str) -> str:
+        """Wrap a pane command in bash with an EXIT trap for rebalancing."""
+        escaped = cmd.replace("'", "'\\''")
+        return (f"bash -c 'trap \"pm _pane-exited {session_name} {window_id} {generation} $TMUX_PANE\" EXIT; "
+                f"{escaped}'")
+
+    if has_project:
+        # Existing project: TUI (left) | notes editor (right)
+        notes.ensure_notes_file(root)
+        notes_pane = tmux_mod.split_pane(session_name, "h", _wrap(f"pm notes {notes_path}"))
+        pane_layout.register_pane(session_name, window_id, notes_pane, "notes", "pm notes")
+    else:
+        # Setup: TUI (top-left) | guide (right, focused)
+        #         notes (bottom-left) |
+        # Register notes before guide so guide (newest) gets the largest area
+        notes_path.parent.mkdir(parents=True, exist_ok=True)
+        if not notes_path.exists():
+            notes_path.write_text(notes.NOTES_WELCOME)
+        notes_pane = tmux_mod.split_pane_at(tui_pane, "v", _wrap(f"pm notes {notes_path}"), background=True)
+        pane_layout.register_pane(session_name, window_id, notes_pane, "notes", "pm notes")
+        guide_pane = tmux_mod.split_pane(session_name, "h", _wrap("pm guide"))
+        pane_layout.register_pane(session_name, window_id, guide_pane, "guide", "pm guide")
+
+    # Apply initial balanced layout
+    pane_layout.rebalance(session_name, window_id)
+
+    if not has_project:
+        tmux_mod.select_pane(guide_pane)
+
+    # Bind prefix-R to rebalance in this session
+    import subprocess as _sp
+    _sp.run(["tmux", "bind-key", "-T", "prefix", "R",
+             "run-shell", "pm rebalance"], check=False)
+
+    # Global hook for kill-pane detection. The after-kill-pane hook
+    # doesn't know which pane was killed, so _pane-closed reconciles
+    # all registries against live tmux panes.
+    _sp.run(["tmux", "set-hook", "-g", "after-kill-pane",
+             "run-shell", "pm _pane-closed"], check=False)
 
     tmux_mod.attach(session_name)
 
@@ -1719,7 +1792,9 @@ def cluster_auto(threshold, max_commits, weights, output_fmt):
 
 
 @cluster.command("explore")
-def cluster_explore():
+@click.option("--bridged", is_flag=True, default=False,
+              help="Launch in a bridge pane (for agent orchestration)")
+def cluster_explore(bridged):
     """Interactively explore code clusters with Claude."""
     import tempfile
     from pm_core.cluster import extract_chunks, compute_edges, agglomerative_cluster, pre_partition
@@ -1775,7 +1850,7 @@ def cluster_explore():
         f.write(summary)
         f.write("\n\n--- Cluster Data ---\n")
         f.write(f"Total chunks: {len(chunks)}\n")
-        f.write(f"Total edges: {len(edges)}\n")
+        f.write(f"Partitions: {len(partitions)} ({', '.join(partitions.keys())})\n")
         f.write(f"Clusters: {len(clusters)}\n")
         f.write(f"Threshold: 0.15\n")
         f.write(f"Weights: {w}\n")
@@ -1803,6 +1878,34 @@ def cluster_explore():
         click.echo(f"\nCluster summary written to: {tmp_path}")
         raise SystemExit(1)
 
+    if bridged:
+        import time
+        from pm_core.claude_launcher import launch_bridge_in_tmux
+
+        if not tmux_mod.in_tmux():
+            click.echo("--bridged requires running inside tmux.", err=True)
+            raise SystemExit(1)
+
+        import subprocess as _sp
+        session_name = _sp.run(
+            ["tmux", "display-message", "-p", "#{session_name}"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+
+        socket_path = launch_bridge_in_tmux(prompt, cwd=str(repo_root), session_name=session_name)
+
+        # Wait for socket to appear
+        for _ in range(50):
+            if os.path.exists(socket_path):
+                break
+            time.sleep(0.1)
+        else:
+            click.echo(f"Timed out waiting for bridge socket: {socket_path}", err=True)
+            raise SystemExit(1)
+
+        click.echo(f"Bridge socket: {socket_path}")
+        return
+
     launch_claude(prompt, cwd=str(repo_root))
 
 
@@ -1819,10 +1922,35 @@ def _in_pm_tmux_session() -> bool:
     return session_name.startswith("pm-")
 
 
-@cli.command("guide")
+@cli.group(invoke_without_command=True)
 @click.option("--step", default=None, help="Force a specific workflow step")
-def guide_cmd(step):
+@click.pass_context
+def guide(ctx, step):
     """Guided workflow — walks through init -> plan -> PRs -> start."""
+    if ctx.invoked_subcommand is not None:
+        return
+    _run_guide(step)
+
+
+@guide.command("done", hidden=True)
+def guide_done_cmd():
+    """Mark the current guide step as completed."""
+    try:
+        root = state_root()
+    except (FileNotFoundError, SystemExit):
+        root = None
+
+    if root is None:
+        click.echo("No project found.", err=True)
+        raise SystemExit(1)
+
+    state, _ctx = guide_mod.detect_state(root)
+    guide_mod.mark_step_completed(root, state)
+    desc = guide_mod.STEP_DESCRIPTIONS.get(state, state)
+    click.echo(f"Step completed: {desc}")
+
+
+def _run_guide(step):
     from pm_core.claude_launcher import find_claude, _skip_permissions
 
     # Detect state
@@ -1841,7 +1969,7 @@ def guide_cmd(step):
             except Exception:
                 pass
     else:
-        state, ctx = guide_mod.detect_state(root)
+        state, ctx = guide_mod.resolve_guide_step(root)
 
     root = ctx.get("root", root)
 
@@ -1890,10 +2018,10 @@ def guide_cmd(step):
     if _in_pm_tmux_session():
         escaped = prompt.replace("'", "'\\''")
         skip = " --dangerously-skip-permissions" if _skip_permissions() else ""
-        cmd = f"claude{skip} '{escaped}' ; pm guide"
+        cmd = f"claude{skip} '{escaped}' ; pm guide done ; pm guide"
         if post_hook:
             # For deps review, set the flag via a pm command inline
-            cmd = f"claude{skip} '{escaped}' ; python -c \"from pm_core.guide import set_deps_reviewed; from pathlib import Path; set_deps_reviewed(Path('{root}'))\" ; pm guide"
+            cmd = f"claude{skip} '{escaped}' ; pm guide done ; python -c \"from pm_core.guide import set_deps_reviewed; from pathlib import Path; set_deps_reviewed(Path('{root}'))\" ; pm guide"
         os.execvp("bash", ["bash", "-c", cmd])
     else:
         launch_claude(prompt)
@@ -1904,6 +2032,112 @@ def guide_cmd(step):
         next_desc = guide_mod.STEP_DESCRIPTIONS.get(next_state, next_state)
         click.echo(f"\nNext step: {next_desc}")
         click.echo("Run 'pm guide' to continue.")
+
+
+@cli.command("notes")
+@click.argument("notes_file", default=None, required=False)
+@click.option("--disable-splash", is_flag=True, help="Disable the splash screen for this repo.")
+def notes_cmd(notes_file: str | None, disable_splash: bool):
+    """Open the session notes file in your editor.
+
+    Shows a welcome splash screen before opening the editor.
+    Use --disable-splash to permanently disable it for this repo.
+    """
+    if notes_file is None:
+        try:
+            root = state_root()
+        except (FileNotFoundError, SystemExit):
+            root = Path.cwd() / "pm"
+        notes_file = str(root / notes.NOTES_FILENAME)
+    path = Path(notes_file)
+    pm_dir = path.parent
+    no_splash_marker = pm_dir / ".no-notes-splash"
+    editor = find_editor()
+
+    if disable_splash:
+        no_splash_marker.touch()
+        click.echo("Splash screen disabled for this repo.")
+        return
+
+    # Ensure file exists
+    if not path.exists():
+        pm_dir.mkdir(parents=True, exist_ok=True)
+        path.write_text("")
+
+    # Skip splash if disabled
+    if no_splash_marker.exists():
+        os.execvp(editor, [editor, notes_file])
+
+    # Show the welcome content as a splash screen
+    import sys
+    sys.stdout.write("\033[2J\033[H")  # clear + home
+    sys.stdout.write(notes.NOTES_WELCOME)
+    sys.stdout.flush()
+
+    # Wait for a single keypress (raw mode)
+    import tty
+    import termios
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        sys.stdin.read(1)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+    os.execvp(editor, [editor, notes_file])
+
+
+
+@cli.command("_pane-exited", hidden=True)
+@click.argument("session")
+@click.argument("window")
+@click.argument("generation")
+@click.argument("pane_id", default="")
+def pane_exited_cmd(session: str, window: str, generation: str, pane_id: str):
+    """Internal: handle pane exit — unregister and rebalance."""
+    pane_layout.handle_pane_exited(session, window, generation, pane_id)
+
+
+@cli.command("_pane-closed", hidden=True)
+def pane_closed_cmd():
+    """Internal: handle pane close from global tmux hook."""
+    pane_layout.handle_any_pane_closed()
+
+
+@cli.command("_pane-opened", hidden=True)
+@click.argument("session")
+@click.argument("window")
+@click.argument("pane_id")
+def pane_opened_cmd(session: str, window: str, pane_id: str):
+    """Internal: handle tmux after-split-window hook."""
+    pane_layout.handle_pane_opened(session, window, pane_id)
+
+
+@cli.command("rebalance")
+def rebalance_cmd():
+    """Re-enable auto-balanced layout and rebalance panes.
+
+    Use this after manually resizing panes to switch back to
+    automatic layout management.
+    """
+    if not tmux_mod.in_tmux():
+        click.echo("Must be run from within a tmux session.", err=True)
+        raise SystemExit(1)
+
+    session = tmux_mod.get_session_name()
+    window = tmux_mod.get_window_id(session)
+
+    data = pane_layout.load_registry(session)
+    if not data["panes"]:
+        click.echo("No panes registered for this session.", err=True)
+        raise SystemExit(1)
+
+    data["user_modified"] = False
+    pane_layout.save_registry(session, data)
+
+    pane_layout.rebalance(session, window)
+    click.echo("Layout rebalanced.")
 
 
 def main():

@@ -1,11 +1,14 @@
 """Guided workflow — state detection + prompt composition for pm guide."""
 
+import json
 import subprocess
 from pathlib import Path
 from typing import Optional
 
 from pm_core import store, graph, notes
 from pm_core.plan_parser import parse_plan_prs
+
+GUIDE_STATE_FILE = ".guide-state"
 
 
 STEP_ORDER = [
@@ -29,6 +32,61 @@ STEP_DESCRIPTIONS = {
     "all_in_progress": "All PRs are in progress",
     "all_done": "All PRs are done",
 }
+
+
+def get_completed_step(root: Path) -> str | None:
+    """Read the last completed step from .guide-state, or None if not tracked."""
+    state_file = root / GUIDE_STATE_FILE
+    if not state_file.exists():
+        return None
+    try:
+        data = json.loads(state_file.read_text())
+        return data.get("completed_step")
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def mark_step_completed(root: Path, state: str) -> None:
+    """Write the completed step to .guide-state."""
+    state_file = root / GUIDE_STATE_FILE
+    state_file.write_text(json.dumps({"completed_step": state}) + "\n")
+
+    # Ensure .guide-state is in .gitignore
+    gitignore = root / ".gitignore"
+    gitignore_content = gitignore.read_text() if gitignore.exists() else ""
+    if GUIDE_STATE_FILE not in gitignore_content:
+        with open(gitignore, "a") as f:
+            if gitignore_content and not gitignore_content.endswith("\n"):
+                f.write("\n")
+            f.write(f"{GUIDE_STATE_FILE}\n")
+
+
+def resolve_guide_step(root: Optional[Path]) -> tuple[str, dict]:
+    """Detect state with completion tracking to avoid skipping steps.
+
+    Compares artifact-based detection against the last completed step.
+    If detection jumped ahead (e.g. plan file exists but step wasn't completed),
+    falls back to the step after the last completed one.
+    """
+    detected_state, ctx = detect_state(root)
+    if root is None:
+        return detected_state, ctx
+
+    completed = get_completed_step(root)
+    if completed is None:
+        return detected_state, ctx
+
+    completed_idx = STEP_ORDER.index(completed) if completed in STEP_ORDER else -1
+    detected_idx = STEP_ORDER.index(detected_state) if detected_state in STEP_ORDER else -1
+
+    # If detection jumped ahead of what was completed, stay on next step
+    next_step_idx = completed_idx + 1
+    if detected_idx > next_step_idx and next_step_idx < len(STEP_ORDER):
+        corrected = STEP_ORDER[next_step_idx]
+        # Re-derive context for the corrected state
+        return corrected, ctx
+
+    return detected_state, ctx
 
 
 def detect_state(root: Optional[Path]) -> tuple[str, dict]:
@@ -125,6 +183,7 @@ Step {n} of {total} in the setup workflow.
 {notes_block}
 IMPORTANT — When this step is complete and the user is satisfied:
 - Confirm what was accomplished
+- Run `pm guide done` to record completion
 - Then exit the session (Ctrl+C or /exit)
 - The workflow will automatically continue with the next step."""
 
