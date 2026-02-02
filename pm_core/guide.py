@@ -196,12 +196,13 @@ def _step_instructions(state: str, ctx: dict, root: Optional[Path]) -> Optional[
 Run `pm init` to initialize the project. This will auto-detect the repo from
 the current directory.
 
-After init completes, discuss the repository with the user:
-- What is this project about?
-- What are the goals for the upcoming work?
-- Any important context or constraints?
+After init completes, explore the codebase yourself — read the README, look at
+the directory structure, check recent git history. Build your own understanding
+of the project, then share what you've found with the user and ask about their
+goals for upcoming work. Use your judgment about what's worth asking vs. what
+you can figure out from the code.
 
-This conversation will help inform the plan in the next step."""
+This conversation will inform the plan in the next step."""
 
     if state == "initialized":
         plan_path = "<will be created>"
@@ -214,11 +215,10 @@ Create a plan for this project. Run:
 
 This creates plan file at {plan_path} and launches a planning session.
 
-Discuss with the user what work needs to be done. Write a detailed plan to the
-plan file. The plan needs enough detail that the next step can break it into
-individual PRs.
-
-Include scope, goals, key design decisions, and any constraints."""
+Based on what you know about the codebase and the conversation so far, draft
+a plan and write it to the plan file. Then walk the user through it and refine
+based on their feedback. The plan needs enough detail that the next step can
+break it into individual PRs."""
 
     if state == "has_plan_draft":
         plan_entry = ctx.get("plan", {})
@@ -228,10 +228,9 @@ The plan exists but hasn't been broken into PRs yet.
 
 Read the plan file at: {plan_path}
 
-Propose a set of PRs that implement this plan. Discuss the breakdown with the
-user — ask about anything ambiguous (scope, ordering, parallelism).
-
-Once agreed, write a "## PRs" section to the plan file with this format:
+Break the plan into PRs. Propose your best decomposition to the user, then
+refine based on their feedback. When agreed, write a "## PRs" section to the
+plan file with this format:
 
 ### PR: <title>
 - **description**: What this PR does
@@ -263,23 +262,19 @@ Guidelines:
         pr_list_str = "\n".join(pr_lines)
 
         return f"""\
-Review the dependency graph between PRs and fix any issues.
-
-Check for:
-1. Missing dependencies — if PR B can't start until PR A is done, add it
-2. Wrong dependencies — if a dependency isn't actually needed, remove it
-3. Circular dependencies — flag any cycles
+Review the dependency graph between PRs — look for missing dependencies,
+unnecessary ones, and cycles. Read the plan file for context on what each
+PR involves.
 
 PRs:
 {pr_list_str}
 
-Discuss any proposed changes with the user before applying them.
-
-When the user agrees, run `pm pr edit` commands to apply fixes:
+Present your analysis and proposed fixes to the user. Once agreed, apply
+changes with `pm pr edit`:
   pm pr edit pr-001 --depends-on pr-002,pr-003
   pm pr edit pr-004 --depends-on ""
 
-After applying changes, run `pm pr graph` to show the final dependency tree."""
+Then run `pm pr graph` to show the final dependency tree."""
 
     if state == "ready_to_work":
         ready = ctx.get("ready", [])
