@@ -6,3 +6,4 @@ __pycache__/
 *~
 .venv/
 pm.egg-info/
+.pane-registry.json

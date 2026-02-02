@@ -1,0 +1,408 @@
+"""Automatic tmux pane layout management.
+
+Tracks pm-created panes in a registry and rebalances layouts using a
+recursive binary split algorithm. Newer panes get priority for larger areas.
+"""
+
+import json
+import logging
+import os
+import time
+from pathlib import Path
+
+_logger = logging.getLogger("pm.pane_layout")
+_log_configured = False
+
+
+def _ensure_logging():
+    """Set up file logging on first call."""
+    global _log_configured
+    if _log_configured:
+        return
+    _log_configured = True
+    log_path = registry_dir() / "layout.log"
+    handler = logging.FileHandler(log_path)
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S"
+    ))
+    _logger.addHandler(handler)
+    _logger.setLevel(logging.DEBUG)
+
+
+def registry_dir() -> Path:
+    """Return the directory for pane registry files."""
+    d = Path.home() / ".pm-pane-registry"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def registry_path(session: str) -> Path:
+    """Return the registry file path for a session."""
+    return registry_dir() / f"{session}.json"
+
+
+def load_registry(session: str) -> dict:
+    """Load the pane registry for a session."""
+    path = registry_path(session)
+    if path.exists():
+        return json.loads(path.read_text())
+    return {"session": session, "window": "0", "panes": [], "user_modified": False}
+
+
+def save_registry(session: str, data: dict) -> None:
+    """Save the pane registry for a session."""
+    registry_path(session).write_text(json.dumps(data, indent=2) + "\n")
+
+
+def register_pane(session: str, window: str, pane_id: str, role: str, cmd: str) -> None:
+    """Register a new pane in the registry."""
+    _ensure_logging()
+    data = load_registry(session)
+    data["window"] = window
+    order = max((p["order"] for p in data["panes"]), default=-1) + 1
+    data["panes"].append({
+        "id": pane_id,
+        "role": role,
+        "order": order,
+        "cmd": cmd,
+    })
+    save_registry(session, data)
+    _logger.info("register_pane: %s role=%s order=%d (total=%d)",
+                 pane_id, role, order, len(data["panes"]))
+
+
+def unregister_pane(session: str, pane_id: str) -> None:
+    """Remove a pane from the registry."""
+    _ensure_logging()
+    data = load_registry(session)
+    before = len(data["panes"])
+    data["panes"] = [p for p in data["panes"] if p["id"] != pane_id]
+    after = len(data["panes"])
+    save_registry(session, data)
+    _logger.info("unregister_pane: %s removed=%s (before=%d after=%d)",
+                 pane_id, before != after, before, after)
+
+
+def _reconcile_registry(session: str, window: str) -> list[str]:
+    """Remove registry panes that no longer exist in tmux. Returns removed IDs."""
+    _ensure_logging()
+    from pm_core import tmux as tmux_mod
+
+    data = load_registry(session)
+    # Always use the registry's window, not the caller's — the caller may
+    # have a stale window ID from an old session.
+    reg_window = data.get("window", window)
+    live_panes = tmux_mod.get_pane_indices(session, reg_window)
+    live_ids = {pid for pid, _ in live_panes}
+
+    # If we got zero live panes but the registry has panes, the window
+    # probably doesn't exist (session was killed). Don't wipe the registry.
+    if not live_ids and data["panes"]:
+        _logger.info("reconcile: no live panes found for %s:%s, skipping "
+                     "(window may not exist)", session, reg_window)
+        return []
+
+    removed = []
+    surviving = []
+    for p in data["panes"]:
+        if p["id"] in live_ids:
+            surviving.append(p)
+        else:
+            removed.append(p["id"])
+
+    if removed:
+        data["panes"] = surviving
+        save_registry(session, data)
+        _logger.info("reconcile: removed dead panes %s, %d remaining",
+                     removed, len(surviving))
+    else:
+        _logger.debug("reconcile: all %d registry panes still alive", len(data["panes"]))
+
+    return removed
+
+
+# --- Layout string generation ---
+
+def _checksum(layout_body: str) -> str:
+    """Compute tmux layout checksum (16-bit).
+
+    tmux uses a simple 16-bit checksum (csum in layout_checksum()).
+    Algorithm: for each char, csum = (csum >> 1) + ((csum & 1) << 15) + ord(char)
+    Result is formatted as 4 hex digits.
+    """
+    csum = 0
+    for ch in layout_body:
+        csum = ((csum >> 1) + ((csum & 1) << 15) + ord(ch)) & 0xFFFF
+    return f"{csum:04x}"
+
+
+def _layout_node(panes, x, y, w, h, force_axis=None):
+    """Recursively build tmux layout string body.
+
+    panes: list of pane indices (ints), ordered oldest→newest.
+    force_axis: 'h' to force horizontal, 'v' to force vertical, None for auto.
+    Returns the layout body string for this subtree.
+    """
+    if len(panes) == 1:
+        return f"{w}x{h},{x},{y},{panes[0]}"
+
+    # Split: older group gets fewer panes (left/top, smaller area),
+    # newer group gets more space (right/bottom).
+    mid = (len(panes) + 1) // 2
+    older = panes[:mid]
+    newer = panes[mid:]
+
+    if force_axis == 'h':
+        split_h = True
+    elif force_axis == 'v':
+        split_h = False
+    else:
+        split_h = w >= h
+
+    # Opposite axis for child groups so they don't keep splitting the same way
+    child_axis = 'v' if split_h else 'h'
+
+    if split_h:
+        # Horizontal split (left | right) — older left, newer right
+        # tmux uses { } for horizontal (left/right) splits
+        # Even split — newer pane(s) have fewer in the group so each gets more space
+        left_w = (w - 1) // 2
+        right_w = w - left_w - 1
+        left_w = max(1, left_w)
+        right_w = max(1, right_w)
+        left = _layout_node(older, x, y, left_w, h, child_axis if len(older) > 1 else None)
+        right = _layout_node(newer, x + left_w + 1, y, right_w, h, child_axis if len(newer) > 1 else None)
+        return f"{w}x{h},{x},{y}{{{left},{right}}}"
+    else:
+        # Vertical split (top / bottom) — older top, newer bottom
+        # tmux uses [ ] for vertical (top/bottom) splits
+        # Even split — newer pane(s) have fewer in the group so each gets more space
+        top_h = (h - 1) // 2
+        bot_h = h - top_h - 1
+        top_h = max(1, top_h)
+        bot_h = max(1, bot_h)
+        top = _layout_node(older, x, y, w, top_h, child_axis if len(older) > 1 else None)
+        bot = _layout_node(newer, x, y + top_h + 1, w, bot_h, child_axis if len(newer) > 1 else None)
+        return f"{w}x{h},{x},{y}[{top},{bot}]"
+
+
+def compute_layout(n_panes: int, width: int, height: int) -> str:
+    """Return a tmux layout string for N panes.
+
+    Panes are indexed 0..n_panes-1, with higher indices being newer
+    and getting priority for larger areas.
+    """
+    if n_panes < 1:
+        return ""
+    pane_indices = list(range(n_panes))
+    body = _layout_node(pane_indices, 0, 0, width, height)
+    return f"{_checksum(body)},{body}"
+
+
+def rebalance(session: str, window: str) -> bool:
+    """Load registry, compute layout, apply via tmux select-layout.
+
+    Returns True if layout was applied, False otherwise.
+    """
+    _ensure_logging()
+    from pm_core import tmux as tmux_mod
+
+    # Clean stale entries before computing layout
+    _reconcile_registry(session, window)
+
+    data = load_registry(session)
+    if data.get("user_modified"):
+        _logger.info("rebalance: skipping, user_modified=True")
+        return False
+
+    panes = sorted(data["panes"], key=lambda p: p["order"])
+    if len(panes) < 1:
+        _logger.info("rebalance: no panes in registry")
+        return False
+
+    width, height = tmux_mod.get_window_size(session, window)
+    _logger.info("rebalance: window %s size=%dx%d, %d panes",
+                 window, width, height, len(panes))
+    if width <= 0 or height <= 0:
+        _logger.warning("rebalance: invalid window size")
+        return False
+
+    # Get live pane IDs from tmux in their current tmux order
+    pane_indices = tmux_mod.get_pane_indices(session, window)
+    live_ids = {pid for pid, _ in pane_indices}
+    tmux_order = [pid for pid, _ in pane_indices]  # current tmux index order
+    _logger.debug("rebalance: tmux pane order: %s", tmux_order)
+
+    # Desired order: registered panes first (by order), then any
+    # unregistered tmux panes appended at the end.  The layout string
+    # MUST cover every live tmux pane or select-layout will reject it.
+    desired_order = [p["id"] for p in panes if p["id"] in live_ids]
+    registered_set = set(desired_order)
+    for pid in tmux_order:
+        if pid not in registered_set:
+            desired_order.append(pid)
+            _logger.debug("rebalance: including unregistered tmux pane %s", pid)
+
+    if len(desired_order) < 1:
+        _logger.warning("rebalance: no matching panes found")
+        return False
+
+    if len(desired_order) == 1:
+        _logger.info("rebalance: only 1 pane, nothing to layout")
+        return True
+
+    _logger.info("rebalance: layout for %d panes (registered=%d, total_tmux=%d)",
+                 len(desired_order), len(registered_set), len(tmux_order))
+
+    # Reorder panes in tmux to match registry order using swap-pane.
+    # tmux assigns layout positions by pane index order, so we need
+    # the tmux order to match our desired order.
+    current = list(tmux_order)
+    for i, desired_id in enumerate(desired_order):
+        if i >= len(current):
+            break
+        if current[i] != desired_id:
+            # Find where desired_id currently is
+            j = current.index(desired_id) if desired_id in current else -1
+            if j > i:
+                _logger.debug("rebalance: swapping %s (pos %d) with %s (pos %d)",
+                              current[i], i, desired_id, j)
+                tmux_mod.swap_pane(desired_id, current[i])
+                current[i], current[j] = current[j], current[i]
+
+    # Use simple sequential indices for the layout string since panes
+    # are now in the correct tmux order
+    pane_nums = [int(pid.lstrip("%")) for pid in desired_order]
+
+    body = _layout_node(pane_nums, 0, 0, width, height)
+    layout_str = f"{_checksum(body)},{body}"
+    _logger.info("rebalance: applying layout: %s", layout_str)
+
+    ok = tmux_mod.apply_layout(session, window, layout_str)
+    if not ok:
+        _logger.warning("rebalance: apply_layout failed")
+    return ok
+
+
+def check_user_modified(session: str, window: str) -> bool:
+    """Check if the user has manually modified the layout.
+
+    Compares actual pane geometry against expected layout. If different,
+    sets user_modified flag in registry.
+    """
+    from pm_core import tmux as tmux_mod
+
+    data = load_registry(session)
+    if data.get("user_modified"):
+        return True
+
+    panes = sorted(data["panes"], key=lambda p: p["order"])
+    if len(panes) < 2:
+        return False
+
+    current = tmux_mod.get_pane_geometries(session, window)
+    if not current:
+        return False
+
+    # Check pane count matches
+    pane_indices = tmux_mod.get_pane_indices(session, window)
+    id_to_index = {pid: idx for pid, idx in pane_indices}
+
+    registered_live = [p for p in panes if p["id"] in id_to_index]
+    if len(registered_live) != len(current):
+        data["user_modified"] = True
+        save_registry(session, data)
+        return True
+
+    return False
+
+
+def handle_pane_exited(session: str, window: str, generation: str,
+                       pane_id: str = "") -> None:
+    """Handle a pane-exited event from a bash EXIT trap.
+
+    The generation arg is a timestamp from when the session was created.
+    If it doesn't match the current registry generation, this is a stale
+    trap from a previous session and we ignore it.
+    pane_id is the $TMUX_PANE of the exiting pane (e.g. '%42').
+    """
+    _ensure_logging()
+    _logger.info("handle_pane_exited called: session=%s window=%s gen=%s pane=%s",
+                 session, window, generation, pane_id)
+
+    data = load_registry(session)
+
+    # Ignore stale traps from old sessions
+    reg_gen = data.get("generation", "")
+    if reg_gen and reg_gen != generation:
+        _logger.info("handle_pane_exited: stale trap (gen %s != registry %s), ignoring",
+                     generation, reg_gen)
+        return
+
+    if data.get("user_modified"):
+        _logger.info("handle_pane_exited: user_modified, skipping")
+        if pane_id:
+            unregister_pane(session, pane_id)
+        return
+
+    # Directly unregister the pane that exited
+    if pane_id:
+        before = len(data["panes"])
+        unregister_pane(session, pane_id)
+        data = load_registry(session)
+        if len(data["panes"]) == before:
+            _logger.info("handle_pane_exited: pane %s was not in registry", pane_id)
+            return
+    else:
+        _logger.info("handle_pane_exited: no pane_id, using reconciliation")
+        time.sleep(0.5)
+        removed = _reconcile_registry(session, window)
+        if not removed:
+            _logger.info("handle_pane_exited: no panes were removed from registry")
+            return
+
+    # Brief wait for tmux to finish removing the pane, then rebalance.
+    reg_window = data.get("window", window)
+    rebalance(session, reg_window)
+
+
+def handle_any_pane_closed() -> None:
+    """Handle a pane-close event when we don't know which pane died.
+
+    Called from global tmux hooks (after-kill-pane). Reconciles all
+    registries and rebalances any that changed.
+    """
+    _ensure_logging()
+    _logger.info("handle_any_pane_closed called")
+
+    for path in registry_dir().glob("*.json"):
+        try:
+            data = json.loads(path.read_text())
+        except (json.JSONDecodeError, KeyError):
+            continue
+        session = data.get("session", "")
+        window = data.get("window", "0")
+        if not session:
+            continue
+        if data.get("user_modified"):
+            continue
+
+        removed = _reconcile_registry(session, window)
+        if removed:
+            _logger.info("handle_any_pane_closed: session=%s removed=%s, rebalancing",
+                         session, removed)
+            rebalance(session, window)
+
+
+def handle_pane_opened(session: str, window: str, pane_id: str) -> None:
+    """Handle pane-opened event: if not in registry, mark user_modified."""
+    _ensure_logging()
+    _logger.info("handle_pane_opened called: session=%s window=%s pane_id=%s",
+                 session, window, pane_id)
+
+    data = load_registry(session)
+    known_ids = {p["id"] for p in data["panes"]}
+    if pane_id not in known_ids:
+        _logger.info("handle_pane_opened: unknown pane %s, setting user_modified", pane_id)
+        data["user_modified"] = True
+        save_registry(session, data)
