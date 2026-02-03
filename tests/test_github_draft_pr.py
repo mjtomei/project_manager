@@ -111,6 +111,52 @@ class TestPrStartCreatesDraftPr:
         assert pr["gh_pr"] == "https://github.com/owner/repo/pull/42"
         assert pr["gh_pr_number"] == 42
 
+    def test_creates_empty_commit_before_draft_pr(self, tmp_project, mock_gh_ops):
+        """pr_start should create an empty commit to enable draft PR creation."""
+        runner = CliRunner()
+
+        # Track run_git calls separately to verify empty commit
+        run_git_calls = []
+        original_run_git = git_ops.run_git
+
+        def tracking_run_git(*args, **kwargs):
+            run_git_calls.append((args, kwargs))
+            return mock.Mock(returncode=0, stdout="abc12345\n", stderr="")
+
+        with mock.patch.multiple(
+            git_ops,
+            clone=mock.DEFAULT,
+            checkout_branch=mock.DEFAULT,
+            pull_rebase=mock.DEFAULT,
+            is_git_repo=mock.Mock(return_value=True),
+            run_git=tracking_run_git,
+        ):
+            with mock.patch.object(cli, "state_root", return_value=tmp_project["pm_dir"]):
+                with mock.patch.object(cli, "find_claude", return_value=None):
+                    with mock.patch.object(cli, "_workdirs_dir", return_value=tmp_project["workdir"].parent):
+                        with mock.patch("shutil.rmtree"):
+                            with mock.patch("shutil.move"):
+                                result = runner.invoke(cli.pr, ["start", "pr-001", "--workdir", str(tmp_project["workdir"])])
+
+        # Find the commit call in run_git calls
+        commit_calls = [
+            call for call in run_git_calls
+            if len(call[0]) >= 2 and call[0][0] == "commit"
+        ]
+        assert len(commit_calls) >= 1, f"Expected at least one git commit call, got: {run_git_calls}"
+
+        # Verify the commit is an empty commit with proper message
+        commit_call = commit_calls[0]
+        args = commit_call[0]
+        assert "--allow-empty" in args
+        assert "-m" in args
+        # Find the message after -m
+        msg_idx = args.index("-m") + 1
+        commit_msg = args[msg_idx]
+        assert "Start work on:" in commit_msg
+        assert "Test PR" in commit_msg
+        assert "pr-001" in commit_msg
+
     def test_skips_draft_pr_if_already_exists(self, tmp_project, mock_git_ops, mock_gh_ops):
         """pr_start should skip draft PR creation if gh_pr already set."""
         # Set gh_pr in project.yaml

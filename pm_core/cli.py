@@ -1199,15 +1199,22 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
     click.echo(f"Checking out branch {branch}...")
     git_ops.checkout_branch(work_path, branch, create=True)
 
-    # For GitHub backend: push branch and create draft PR
+    # For GitHub backend: create initial commit, push branch, and create draft PR
     backend_name = data["project"].get("backend", "vanilla")
     if backend_name == "github" and not pr_entry.get("gh_pr"):
+        # Create an empty commit to enable draft PR creation
+        title = pr_entry.get("title", pr_id)
+        commit_msg = f"Start work on: {title}\n\nPR: {pr_id}"
+        git_ops.run_git(
+            "commit", "--allow-empty", "-m", commit_msg,
+            cwd=work_path, check=False
+        )
+
         click.echo(f"Pushing branch {branch} to remote...")
         push_result = git_ops.run_git("push", "-u", "origin", branch, cwd=work_path, check=False)
         if push_result.returncode == 0:
             click.echo("Creating draft PR...")
             from pm_core import gh_ops
-            title = pr_entry.get("title", pr_id)
             description = pr_entry.get("description", "")
             pr_info = gh_ops.create_draft_pr(str(work_path), title, base_branch, description)
             if pr_info:
