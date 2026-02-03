@@ -306,6 +306,10 @@ class TechTree(Widget):
         y = row * (NODE_H + V_GAP) + 1
 
         # Create a region for the node and scroll it into view
+        # The scrollable container is the parent, so scroll there
         from textual.geometry import Region
         node_region = Region(x, y, NODE_W, NODE_H)
-        self.scroll_to_region(node_region)
+        if self.parent:
+            self.parent.scroll_to_region(node_region)
+        else:
+            self.scroll_to_region(node_region)
