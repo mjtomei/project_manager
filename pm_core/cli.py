@@ -1500,74 +1500,34 @@ def pr_sync_github():
     For each PR with a GitHub PR number, fetches the current state
     from GitHub and updates the local status accordingly:
     - MERGED → merged
-    - CLOSED → (unchanged, warns user)
+    - CLOSED → closed (then auto-removed after 3 seconds)
     - OPEN + draft → in_progress
     - OPEN + ready → in_review
     """
     root = state_root()
     data = store.load(root)
-    prs = data.get("prs") or []
 
     backend_name = data["project"].get("backend", "vanilla")
     if backend_name != "github":
         click.echo("This command only works with the GitHub backend.", err=True)
         raise SystemExit(1)
 
-    from pm_core import gh_ops
+    # Use the shared sync function which handles auto-removal of closed PRs
+    result = pr_sync_mod.sync_from_github(root, data, save_state=True)
 
-    updated = 0
-    for pr_entry in prs:
-        gh_pr_number = pr_entry.get("gh_pr_number")
-        if not gh_pr_number:
-            continue
+    if result.error:
+        click.echo(f"Error: {result.error}", err=True)
+        raise SystemExit(1)
 
-        pr_id = pr_entry["id"]
-        old_status = pr_entry.get("status", "pending")
-
-        # Fetch PR info from GitHub
-        try:
-            result = subprocess.run(
-                ["gh", "pr", "view", str(gh_pr_number), "--json", "state,isDraft,mergedAt"],
-                capture_output=True, text=True
-            )
-            if result.returncode != 0:
-                click.echo(f"  ⚠️  {pr_id}: Could not fetch GitHub PR #{gh_pr_number}")
-                continue
-
-            import json
-            info = json.loads(result.stdout)
-            gh_state = info.get("state")
-            is_draft = info.get("isDraft", False)
-            merged_at = info.get("mergedAt")
-
-            # Determine new status
-            if gh_state == "MERGED" or merged_at:
-                new_status = "merged"
-            elif gh_state == "CLOSED":
-                new_status = "closed"
-            elif gh_state == "OPEN":
-                new_status = "in_progress" if is_draft else "in_review"
-            else:
-                click.echo(f"  ⚠️  {pr_id}: Unknown GitHub state '{gh_state}'")
-                continue
-
-            if new_status != old_status:
-                pr_entry["status"] = new_status
-                click.echo(f"  ✓ {pr_id}: {old_status} → {new_status}")
-                updated += 1
-            else:
-                click.echo(f"  · {pr_id}: {old_status} (unchanged)")
-
-        except Exception as e:
-            click.echo(f"  ⚠️  {pr_id}: Error fetching status: {e}")
-            continue
-
-    if updated:
-        save_and_push(data, root, f"pm: sync-github - {updated} PRs updated")
+    if result.updated_count > 0:
+        click.echo(f"Updated {result.updated_count} PR(s).")
+        if result.merged_prs:
+            click.echo(f"  Merged: {', '.join(result.merged_prs)}")
+        if result.closed_prs:
+            click.echo(f"  Closed: {', '.join(result.closed_prs)} (will be removed in 3s)")
         trigger_tui_refresh()
-        click.echo(f"\nUpdated {updated} PR(s).")
     else:
-        click.echo("\nNo status changes.")
+        click.echo("No status changes.")
 
 
 @pr.command("cleanup")

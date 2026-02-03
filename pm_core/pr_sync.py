@@ -18,6 +18,51 @@ from pm_core.backend import get_backend
 
 _log = logging.getLogger("pm.pr_sync")
 
+
+def _trigger_tui_refresh() -> None:
+    """Send refresh key to TUI pane if running in a pm session."""
+    try:
+        import subprocess
+        import hashlib
+
+        # Get current working directory to compute session name
+        cwd = Path.cwd()
+
+        # Find the pm root to get repo_id
+        try:
+            root = store.find_project_root()
+            data = store.load(root, validate=False)
+            repo_id = data.get("project", {}).get("repo_id", "")
+            name = data.get("project", {}).get("name", "unknown")
+            if repo_id:
+                session_hash = repo_id[:8]
+            else:
+                session_hash = hashlib.sha256(str(root).encode()).hexdigest()[:8]
+            session_name = f"pm-{name}-{session_hash}"
+        except Exception:
+            return
+
+        # Find TUI pane in the session
+        result = subprocess.run(
+            ["tmux", "list-panes", "-t", session_name, "-F", "#{pane_id}:#{pane_current_command}"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode != 0:
+            return
+
+        for line in result.stdout.strip().split("\n"):
+            if ":pm" in line or ":python" in line:
+                pane_id = line.split(":")[0]
+                subprocess.run(
+                    ["tmux", "send-keys", "-t", f"{session_name}:{pane_id}", "r"],
+                    check=False, timeout=5
+                )
+                _log.debug("Sent refresh to TUI pane %s", pane_id)
+                break
+    except Exception as e:
+        _log.debug("Could not trigger TUI refresh: %s", e)
+
+
 # Minimum interval between syncs (in seconds)
 # For manual refresh, we use a shorter interval
 MIN_SYNC_INTERVAL_SECONDS = 60  # 1 minute for manual triggers
@@ -32,6 +77,7 @@ class SyncResult:
         synced: bool,
         updated_count: int = 0,
         merged_prs: Optional[list[str]] = None,
+        closed_prs: Optional[list[str]] = None,
         ready_prs: Optional[list[dict]] = None,
         error: Optional[str] = None,
         skipped_reason: Optional[str] = None,
@@ -39,6 +85,7 @@ class SyncResult:
         self.synced = synced
         self.updated_count = updated_count
         self.merged_prs = merged_prs or []
+        self.closed_prs = closed_prs or []
         self.ready_prs = ready_prs or []
         self.error = error
         self.skipped_reason = skipped_reason
@@ -314,6 +361,9 @@ def sync_from_github(
                     merged_prs.append(pr_id)
                 elif new_status == "closed":
                     closed_prs.append(pr_id)
+            elif new_status == "closed":
+                # Already closed, still schedule for removal
+                closed_prs.append(pr_id)
 
         except subprocess.TimeoutExpired:
             _log.warning("Timeout fetching GitHub PR #%s for %s", gh_pr_number, pr_id)
@@ -326,8 +376,48 @@ def sync_from_github(
     if save_state and updated:
         store.save(data, root)
 
+    # Schedule removal of closed PRs after 3 seconds using a background process
+    if closed_prs and save_state:
+        import subprocess
+        import json
+        # Spawn a background process that sleeps then removes the PRs
+        script = f'''
+import time
+import json
+from pathlib import Path
+time.sleep(3)
+try:
+    import sys
+    sys.path.insert(0, "{Path(__file__).parent.parent}")
+    from pm_core import store
+    root = Path("{root}")
+    data = store.load(root)
+    closed_ids = {json.dumps(closed_prs)}
+    original_count = len(data.get("prs", []))
+    data["prs"] = [p for p in data.get("prs", []) if p["id"] not in closed_ids]
+    if len(data["prs"]) < original_count:
+        store.save(data, root)
+        # Trigger TUI refresh via tmux
+        import subprocess as sp
+        # Find pm session and send refresh key
+        result = sp.run(["tmux", "list-sessions", "-F", "#{{session_name}}"], capture_output=True, text=True)
+        for session in result.stdout.strip().split("\\n"):
+            if session.startswith("pm-"):
+                sp.run(["tmux", "send-keys", "-t", session, "r"], capture_output=True)
+                break
+except Exception:
+    pass  # Silently fail
+'''
+        subprocess.Popen(
+            ["python3", "-c", script],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,  # Detach from parent
+        )
+
     return SyncResult(
         synced=True,
         updated_count=updated,
         merged_prs=merged_prs,
+        closed_prs=closed_prs,
     )
