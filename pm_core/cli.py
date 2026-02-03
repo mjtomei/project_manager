@@ -2161,7 +2161,12 @@ def _run_guide(step, fresh=False):
         else:
             post_cmd = "pm guide done"
 
-        cmd = f"{save_cmd}{claude_cmd} ; {post_cmd} ; {loop_guard} && pm guide"
+        # Capture claude's exit code to handle session resume failures properly.
+        # If claude fails (e.g., "No conversation found"), clear the stale session.
+        # If claude succeeds, run post_cmd. Either way, continue to loop_guard.
+        # This prevents infinite loops trying to resume non-existent sessions.
+        clear_cmd = f"pm _clear-session '{session_key}' '{root}'" if root else "true"
+        cmd = f"{save_cmd}{claude_cmd} ; claude_rc=$? ; if [ $claude_rc -ne 0 ]; then {clear_cmd}; else {post_cmd}; fi ; {loop_guard} && pm guide"
 
         # Log the full command for debugging
         import logging as _logging
@@ -2245,6 +2250,23 @@ def save_session_cmd(session_key: str, session_id: str, pm_root: str):
     from pm_core.claude_launcher import save_session
     try:
         save_session(Path(pm_root), session_key, session_id)
+    except Exception:
+        pass  # Best effort
+
+
+@cli.command("_clear-session", hidden=True)
+@click.argument("session_key")
+@click.argument("pm_root")
+def clear_session_cmd(session_key: str, pm_root: str):
+    """Internal: clear a stale session from the registry.
+
+    Called when claude --resume fails (e.g., session no longer exists).
+    This prevents infinite loops trying to resume a non-existent session.
+    """
+    from pm_core.claude_launcher import clear_session
+    try:
+        clear_session(Path(pm_root), session_key)
+        click.echo(f"Cleared stale session: {session_key}", err=True)
     except Exception:
         pass  # Best effort
 
