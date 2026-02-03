@@ -12,11 +12,11 @@ from pm_core import graph as graph_mod
 
 
 STATUS_ICONS = {
-    "pending": "⏳",
-    "in_progress": "🔨",
-    "in_review": "👀",
-    "merged": "✅",
-    "blocked": "🚫",
+    "pending": "○",
+    "in_progress": "●",
+    "in_review": "◎",
+    "merged": "✓",
+    "blocked": "✗",
 }
 
 STATUS_STYLES = {
