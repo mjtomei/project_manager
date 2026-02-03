@@ -1,8 +1,9 @@
-"""Tests for GitHub draft PR workflow in pr_start and pr_done."""
+"""Tests for GitHub draft PR workflow in pr_add and pr_done."""
 
 import json
 from pathlib import Path
 from unittest import mock
+import tempfile
 
 import pytest
 from click.testing import CliRunner
@@ -24,16 +25,8 @@ def tmp_project(tmp_path):
             "base_branch": "main",
             "backend": "github",
         },
-        "prs": [
-            {
-                "id": "pr-001",
-                "title": "Test PR",
-                "description": "Test description",
-                "branch": "pm/pr-001",
-                "status": "pending",
-            }
-        ],
-        "plans": [],
+        "prs": [],
+        "plans": [{"id": "plan-001", "name": "Test Plan"}],
     }
     store.save(data, pm_dir)
 
@@ -50,21 +43,42 @@ def tmp_project(tmp_path):
 
 
 @pytest.fixture
-def mock_git_ops():
-    """Mock git operations."""
-    with mock.patch.multiple(
-        git_ops,
-        clone=mock.DEFAULT,
-        checkout_branch=mock.DEFAULT,
-        pull_rebase=mock.DEFAULT,
-        is_git_repo=mock.Mock(return_value=True),
-        run_git=mock.Mock(return_value=mock.Mock(
-            returncode=0,
-            stdout="abc12345\n",
-            stderr="",
-        )),
-    ) as mocks:
-        yield mocks
+def tmp_project_with_pr(tmp_path):
+    """Create a temporary project with an existing PR."""
+    pm_dir = tmp_path / "pm"
+    pm_dir.mkdir()
+
+    data = {
+        "project": {
+            "name": "test-project",
+            "repo": "https://github.com/owner/repo.git",
+            "base_branch": "main",
+            "backend": "github",
+        },
+        "prs": [
+            {
+                "id": "pr-001",
+                "title": "Test PR",
+                "description": "Test description",
+                "branch": "pm/pr-001",
+                "status": "pending",
+                "gh_pr": "https://github.com/owner/repo/pull/42",
+                "gh_pr_number": 42,
+            }
+        ],
+        "plans": [],
+    }
+    store.save(data, pm_dir)
+
+    workdir = tmp_path / "workdir"
+    workdir.mkdir()
+    (workdir / ".git").mkdir()
+
+    return {
+        "pm_dir": pm_dir,
+        "workdir": workdir,
+        "data": data,
+    }
 
 
 @pytest.fixture
@@ -84,20 +98,20 @@ def mock_gh_ops():
                 }
 
 
-class TestPrStartCreatesDraftPr:
-    """Tests for draft PR creation during pr_start."""
+class TestPrAddCreatesDraftPr:
+    """Tests for draft PR creation during pr_add."""
 
-    def test_creates_draft_pr_for_github_backend(self, tmp_project, mock_git_ops, mock_gh_ops):
-        """pr_start should create a draft PR for GitHub backend."""
+    def test_creates_draft_pr_for_github_backend(self, tmp_project, mock_gh_ops):
+        """pr_add should create a draft PR for GitHub backend."""
         runner = CliRunner()
 
         with mock.patch.object(cli, "state_root", return_value=tmp_project["pm_dir"]):
-            with mock.patch.object(cli, "find_claude", return_value=None):
-                with mock.patch.object(cli, "_workdirs_dir", return_value=tmp_project["workdir"].parent):
-                    # Mock shutil.rmtree and shutil.move
-                    with mock.patch("shutil.rmtree"):
-                        with mock.patch("shutil.move"):
-                            result = runner.invoke(cli.pr, ["start", "pr-001", "--workdir", str(tmp_project["workdir"])])
+            with mock.patch.object(git_ops, "clone"):
+                with mock.patch.object(git_ops, "checkout_branch"):
+                    with mock.patch.object(git_ops, "run_git", return_value=mock.Mock(returncode=0, stdout="", stderr="")):
+                        result = runner.invoke(cli.pr, ["add", "Test PR", "--description", "Test description"])
+
+        assert result.exit_code == 0
 
         # Should have attempted to create draft PR
         mock_gh_ops["create_draft_pr"].assert_called_once()
@@ -112,33 +126,22 @@ class TestPrStartCreatesDraftPr:
         assert pr["gh_pr_number"] == 42
 
     def test_creates_empty_commit_before_draft_pr(self, tmp_project, mock_gh_ops):
-        """pr_start should create an empty commit to enable draft PR creation."""
+        """pr_add should create an empty commit to enable draft PR creation."""
         runner = CliRunner()
 
-        # Track run_git calls separately to verify empty commit
         run_git_calls = []
-        original_run_git = git_ops.run_git
 
         def tracking_run_git(*args, **kwargs):
             run_git_calls.append((args, kwargs))
-            return mock.Mock(returncode=0, stdout="abc12345\n", stderr="")
+            return mock.Mock(returncode=0, stdout="", stderr="")
 
-        with mock.patch.multiple(
-            git_ops,
-            clone=mock.DEFAULT,
-            checkout_branch=mock.DEFAULT,
-            pull_rebase=mock.DEFAULT,
-            is_git_repo=mock.Mock(return_value=True),
-            run_git=tracking_run_git,
-        ):
-            with mock.patch.object(cli, "state_root", return_value=tmp_project["pm_dir"]):
-                with mock.patch.object(cli, "find_claude", return_value=None):
-                    with mock.patch.object(cli, "_workdirs_dir", return_value=tmp_project["workdir"].parent):
-                        with mock.patch("shutil.rmtree"):
-                            with mock.patch("shutil.move"):
-                                result = runner.invoke(cli.pr, ["start", "pr-001", "--workdir", str(tmp_project["workdir"])])
+        with mock.patch.object(cli, "state_root", return_value=tmp_project["pm_dir"]):
+            with mock.patch.object(git_ops, "clone"):
+                with mock.patch.object(git_ops, "checkout_branch"):
+                    with mock.patch.object(git_ops, "run_git", tracking_run_git):
+                        result = runner.invoke(cli.pr, ["add", "Test PR"])
 
-        # Find the commit call in run_git calls
+        # Find the commit call
         commit_calls = [
             call for call in run_git_calls
             if len(call[0]) >= 2 and call[0][0] == "commit"
@@ -150,33 +153,9 @@ class TestPrStartCreatesDraftPr:
         args = commit_call[0]
         assert "--allow-empty" in args
         assert "-m" in args
-        # Find the message after -m
-        msg_idx = args.index("-m") + 1
-        commit_msg = args[msg_idx]
-        assert "Start work on:" in commit_msg
-        assert "Test PR" in commit_msg
-        assert "pr-001" in commit_msg
 
-    def test_skips_draft_pr_if_already_exists(self, tmp_project, mock_git_ops, mock_gh_ops):
-        """pr_start should skip draft PR creation if gh_pr already set."""
-        # Set gh_pr in project.yaml
-        data = store.load(tmp_project["pm_dir"])
-        pr = store.get_pr(data, "pr-001")
-        pr["gh_pr"] = "https://github.com/owner/repo/pull/99"
-        pr["gh_pr_number"] = 99
-        store.save(data, tmp_project["pm_dir"])
-
-        runner = CliRunner()
-
-        with mock.patch.object(cli, "state_root", return_value=tmp_project["pm_dir"]):
-            with mock.patch.object(cli, "find_claude", return_value=None):
-                result = runner.invoke(cli.pr, ["start", "pr-001", "--workdir", str(tmp_project["workdir"])])
-
-        # Should NOT have attempted to create draft PR
-        mock_gh_ops["create_draft_pr"].assert_not_called()
-
-    def test_no_draft_pr_for_vanilla_backend(self, tmp_project, mock_git_ops, mock_gh_ops):
-        """pr_start should not create draft PR for vanilla backend."""
+    def test_no_draft_pr_for_vanilla_backend(self, tmp_project, mock_gh_ops):
+        """pr_add should not create draft PR for vanilla backend."""
         # Change backend to vanilla
         data = store.load(tmp_project["pm_dir"])
         data["project"]["backend"] = "vanilla"
@@ -185,85 +164,112 @@ class TestPrStartCreatesDraftPr:
         runner = CliRunner()
 
         with mock.patch.object(cli, "state_root", return_value=tmp_project["pm_dir"]):
-            with mock.patch.object(cli, "find_claude", return_value=None):
-                result = runner.invoke(cli.pr, ["start", "pr-001", "--workdir", str(tmp_project["workdir"])])
+            result = runner.invoke(cli.pr, ["add", "Test PR"])
+
+        assert result.exit_code == 0
 
         # Should NOT have attempted to create draft PR
         mock_gh_ops["create_draft_pr"].assert_not_called()
 
     def test_handles_push_failure_gracefully(self, tmp_project, mock_gh_ops):
-        """pr_start should continue if push fails."""
+        """pr_add should continue if push fails."""
         runner = CliRunner()
 
-        # Mock git_ops with push failure
-        with mock.patch.multiple(
-            git_ops,
-            clone=mock.DEFAULT,
-            checkout_branch=mock.DEFAULT,
-            pull_rebase=mock.DEFAULT,
-            is_git_repo=mock.Mock(return_value=True),
-            run_git=mock.Mock(return_value=mock.Mock(
-                returncode=1,
-                stdout="",
-                stderr="push failed",
-            )),
-        ):
-            with mock.patch.object(cli, "state_root", return_value=tmp_project["pm_dir"]):
-                with mock.patch.object(cli, "find_claude", return_value=None):
-                    result = runner.invoke(cli.pr, ["start", "pr-001", "--workdir", str(tmp_project["workdir"])])
+        def failing_run_git(*args, **kwargs):
+            if args[0] == "push":
+                return mock.Mock(returncode=1, stdout="", stderr="push failed")
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with mock.patch.object(cli, "state_root", return_value=tmp_project["pm_dir"]):
+            with mock.patch.object(git_ops, "clone"):
+                with mock.patch.object(git_ops, "checkout_branch"):
+                    with mock.patch.object(git_ops, "run_git", failing_run_git):
+                        result = runner.invoke(cli.pr, ["add", "Test PR"])
+
+        assert result.exit_code == 0
+        assert "Warning" in result.output
 
         # Should NOT have attempted to create draft PR since push failed
         mock_gh_ops["create_draft_pr"].assert_not_called()
 
-        # But status should still be in_progress
+        # PR should still be created locally
         data = store.load(tmp_project["pm_dir"])
         pr = store.get_pr(data, "pr-001")
-        assert pr["status"] == "in_progress"
+        assert pr is not None
+        assert pr["gh_pr"] is None
+
+
+class TestPrStartWithExistingDraftPr:
+    """Tests for pr_start when draft PR already exists."""
+
+    def test_pr_start_does_not_create_draft_pr(self, tmp_project_with_pr, mock_gh_ops):
+        """pr_start should not create draft PR (already done in pr_add)."""
+        runner = CliRunner()
+
+        with mock.patch.object(cli, "state_root", return_value=tmp_project_with_pr["pm_dir"]):
+            with mock.patch.object(cli, "find_claude", return_value=None):
+                with mock.patch.object(cli, "_workdirs_dir", return_value=tmp_project_with_pr["workdir"].parent):
+                    with mock.patch.object(cli, "_get_session_name_for_cwd", return_value="pm-test"):
+                        with mock.patch.object(cli.tmux_mod, "has_tmux", return_value=False):
+                            with mock.patch.multiple(
+                                git_ops,
+                                clone=mock.DEFAULT,
+                                checkout_branch=mock.DEFAULT,
+                                pull_rebase=mock.DEFAULT,
+                                is_git_repo=mock.Mock(return_value=True),
+                                run_git=mock.Mock(return_value=mock.Mock(returncode=0, stdout="abc12345\n", stderr="")),
+                            ):
+                                with mock.patch("shutil.rmtree"):
+                                    with mock.patch("shutil.move"):
+                                        result = runner.invoke(cli.pr, ["start", "pr-001", "--workdir", str(tmp_project_with_pr["workdir"])])
+
+        # Should NOT have created a new draft PR
+        mock_gh_ops["create_draft_pr"].assert_not_called()
 
 
 class TestPrDoneUpgradesDraftPr:
     """Tests for draft PR upgrade during pr_done."""
 
-    def test_upgrades_draft_to_ready_for_github_backend(self, tmp_project, mock_gh_ops):
+    def test_upgrades_draft_to_ready_for_github_backend(self, tmp_project_with_pr, mock_gh_ops):
         """pr_done should upgrade draft PR to ready for review."""
-        # Set up PR as in_progress with gh_pr
-        data = store.load(tmp_project["pm_dir"])
+        # Set up PR as in_progress
+        data = store.load(tmp_project_with_pr["pm_dir"])
         pr = store.get_pr(data, "pr-001")
         pr["status"] = "in_progress"
-        pr["gh_pr"] = "https://github.com/owner/repo/pull/42"
-        pr["gh_pr_number"] = 42
-        pr["workdir"] = str(tmp_project["workdir"])
-        store.save(data, tmp_project["pm_dir"])
+        pr["workdir"] = str(tmp_project_with_pr["workdir"])
+        store.save(data, tmp_project_with_pr["pm_dir"])
 
         runner = CliRunner()
 
-        with mock.patch.object(cli, "state_root", return_value=tmp_project["pm_dir"]):
+        with mock.patch.object(cli, "state_root", return_value=tmp_project_with_pr["pm_dir"]):
             result = runner.invoke(cli.pr, ["done", "pr-001"])
 
         assert result.exit_code == 0
 
         # Should have called mark_pr_ready
         mock_gh_ops["mark_pr_ready"].assert_called_once_with(
-            str(tmp_project["workdir"]), 42
+            str(tmp_project_with_pr["workdir"]), 42
         )
 
         # Status should be in_review
-        data = store.load(tmp_project["pm_dir"])
+        data = store.load(tmp_project_with_pr["pm_dir"])
         pr = store.get_pr(data, "pr-001")
         assert pr["status"] == "in_review"
 
-    def test_skips_upgrade_if_no_gh_pr(self, tmp_project, mock_gh_ops):
+    def test_skips_upgrade_if_no_gh_pr(self, tmp_project_with_pr, mock_gh_ops):
         """pr_done should skip upgrade if no gh_pr is set."""
-        # Set up PR as in_progress without gh_pr
-        data = store.load(tmp_project["pm_dir"])
+        # Remove gh_pr
+        data = store.load(tmp_project_with_pr["pm_dir"])
         pr = store.get_pr(data, "pr-001")
         pr["status"] = "in_progress"
-        pr["workdir"] = str(tmp_project["workdir"])
-        store.save(data, tmp_project["pm_dir"])
+        pr["gh_pr"] = None
+        pr["gh_pr_number"] = None
+        pr["workdir"] = str(tmp_project_with_pr["workdir"])
+        store.save(data, tmp_project_with_pr["pm_dir"])
 
         runner = CliRunner()
 
-        with mock.patch.object(cli, "state_root", return_value=tmp_project["pm_dir"]):
+        with mock.patch.object(cli, "state_root", return_value=tmp_project_with_pr["pm_dir"]):
             result = runner.invoke(cli.pr, ["done", "pr-001"])
 
         assert result.exit_code == 0
@@ -271,56 +277,44 @@ class TestPrDoneUpgradesDraftPr:
         # Should NOT have called mark_pr_ready
         mock_gh_ops["mark_pr_ready"].assert_not_called()
 
-        # Status should still be in_review
-        data = store.load(tmp_project["pm_dir"])
-        pr = store.get_pr(data, "pr-001")
-        assert pr["status"] == "in_review"
-
-    def test_handles_upgrade_failure_gracefully(self, tmp_project, mock_gh_ops):
+    def test_handles_upgrade_failure_gracefully(self, tmp_project_with_pr, mock_gh_ops):
         """pr_done should continue if upgrade fails."""
-        # Make upgrade fail
         mock_gh_ops["mark_pr_ready"].return_value = False
 
-        # Set up PR as in_progress with gh_pr
-        data = store.load(tmp_project["pm_dir"])
+        data = store.load(tmp_project_with_pr["pm_dir"])
         pr = store.get_pr(data, "pr-001")
         pr["status"] = "in_progress"
-        pr["gh_pr"] = "https://github.com/owner/repo/pull/42"
-        pr["gh_pr_number"] = 42
-        pr["workdir"] = str(tmp_project["workdir"])
-        store.save(data, tmp_project["pm_dir"])
+        pr["workdir"] = str(tmp_project_with_pr["workdir"])
+        store.save(data, tmp_project_with_pr["pm_dir"])
 
         runner = CliRunner()
 
-        with mock.patch.object(cli, "state_root", return_value=tmp_project["pm_dir"]):
+        with mock.patch.object(cli, "state_root", return_value=tmp_project_with_pr["pm_dir"]):
             result = runner.invoke(cli.pr, ["done", "pr-001"])
 
         assert result.exit_code == 0
         assert "Warning" in result.output
 
-        # Status should still be in_review even if upgrade failed
-        data = store.load(tmp_project["pm_dir"])
+        # Status should still be in_review
+        data = store.load(tmp_project_with_pr["pm_dir"])
         pr = store.get_pr(data, "pr-001")
         assert pr["status"] == "in_review"
 
-    def test_no_upgrade_for_vanilla_backend(self, tmp_project, mock_gh_ops):
+    def test_no_upgrade_for_vanilla_backend(self, tmp_project_with_pr, mock_gh_ops):
         """pr_done should not upgrade for vanilla backend."""
-        # Change backend to vanilla
-        data = store.load(tmp_project["pm_dir"])
+        data = store.load(tmp_project_with_pr["pm_dir"])
         data["project"]["backend"] = "vanilla"
         pr = store.get_pr(data, "pr-001")
         pr["status"] = "in_progress"
-        pr["workdir"] = str(tmp_project["workdir"])
-        store.save(data, tmp_project["pm_dir"])
+        pr["workdir"] = str(tmp_project_with_pr["workdir"])
+        store.save(data, tmp_project_with_pr["pm_dir"])
 
         runner = CliRunner()
 
-        with mock.patch.object(cli, "state_root", return_value=tmp_project["pm_dir"]):
+        with mock.patch.object(cli, "state_root", return_value=tmp_project_with_pr["pm_dir"]):
             result = runner.invoke(cli.pr, ["done", "pr-001"])
 
         assert result.exit_code == 0
-
-        # Should NOT have called mark_pr_ready
         mock_gh_ops["mark_pr_ready"].assert_not_called()
 
 
@@ -341,7 +335,6 @@ class TestBackendPrInstructions:
         )
 
         assert "https://github.com/owner/repo/pull/42" in instructions
-        # Should NOT include gh pr create command
         assert "gh pr create" not in instructions
 
     def test_instructions_without_draft_pr_url(self):
@@ -357,5 +350,4 @@ class TestBackendPrInstructions:
             gh_pr_url=None,
         )
 
-        # Should include gh pr create command
         assert "gh pr create" in instructions

@@ -961,6 +961,45 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
         "agent_machine": None,
         "gh_pr": None,
     }
+
+    # For GitHub backend: create branch, push, and create draft PR
+    backend_name = data["project"].get("backend", "vanilla")
+    if backend_name == "github":
+        repo_url = data["project"]["repo"]
+        base_branch = data["project"].get("base_branch", "main")
+
+        # Clone to temp directory
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir) / "repo"
+            click.echo(f"Cloning {repo_url}...")
+            git_ops.clone(repo_url, tmp_path, branch=base_branch)
+
+            # Create and checkout the branch
+            click.echo(f"Creating branch {branch}...")
+            git_ops.checkout_branch(tmp_path, branch, create=True)
+
+            # Create empty commit
+            commit_msg = f"Start work on: {title}\n\nPR: {pr_id}"
+            git_ops.run_git("commit", "--allow-empty", "-m", commit_msg, cwd=tmp_path)
+
+            # Push branch
+            click.echo(f"Pushing branch {branch}...")
+            push_result = git_ops.run_git("push", "-u", "origin", branch, cwd=tmp_path, check=False)
+            if push_result.returncode != 0:
+                click.echo(f"Warning: Failed to push branch: {push_result.stderr}", err=True)
+            else:
+                # Create draft PR
+                click.echo("Creating draft PR on GitHub...")
+                from pm_core import gh_ops
+                pr_info = gh_ops.create_draft_pr(str(tmp_path), title, base_branch, desc)
+                if pr_info:
+                    entry["gh_pr"] = pr_info["url"]
+                    entry["gh_pr_number"] = pr_info["number"]
+                    click.echo(f"Draft PR created: {pr_info['url']}")
+                else:
+                    click.echo("Warning: Failed to create draft PR.", err=True)
+
     if data.get("prs") is None:
         data["prs"] = []
     data["prs"].append(entry)
@@ -971,6 +1010,8 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
     click.echo(f"  branch: {branch}")
     if deps:
         click.echo(f"  depends_on: {', '.join(deps)}")
+    if entry.get("gh_pr"):
+        click.echo(f"  draft PR: {entry['gh_pr']}")
 
 
 @pr.command("edit")
@@ -1199,33 +1240,6 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
     click.echo(f"Checking out branch {branch}...")
     git_ops.checkout_branch(work_path, branch, create=True)
 
-    # For GitHub backend: create initial commit, push branch, and create draft PR
-    backend_name = data["project"].get("backend", "vanilla")
-    if backend_name == "github" and not pr_entry.get("gh_pr"):
-        # Create an empty commit to enable draft PR creation
-        title = pr_entry.get("title", pr_id)
-        commit_msg = f"Start work on: {title}\n\nPR: {pr_id}"
-        git_ops.run_git(
-            "commit", "--allow-empty", "-m", commit_msg,
-            cwd=work_path, check=False
-        )
-
-        click.echo(f"Pushing branch {branch} to remote...")
-        push_result = git_ops.run_git("push", "-u", "origin", branch, cwd=work_path, check=False)
-        if push_result.returncode == 0:
-            click.echo("Creating draft PR...")
-            from pm_core import gh_ops
-            description = pr_entry.get("description", "")
-            pr_info = gh_ops.create_draft_pr(str(work_path), title, base_branch, description)
-            if pr_info:
-                pr_entry["gh_pr"] = pr_info["url"]
-                pr_entry["gh_pr_number"] = pr_info["number"]
-                click.echo(f"Draft PR created: {pr_info['url']}")
-            else:
-                click.echo("Warning: Failed to create draft PR. You can create it manually later.", err=True)
-        else:
-            click.echo("Warning: Failed to push branch. Draft PR not created.", err=True)
-
     # Update state
     pr_entry["status"] = "in_progress"
     pr_entry["agent_machine"] = platform.node()
@@ -1253,8 +1267,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
         escaped_prompt = prompt.replace("'", "'\\''")
         cmd = f"claude '{escaped_prompt}'"
 
-        # Get the expected pm session name for this project
-        session_name = _get_session_name_for_cwd()
+        # Get session name for this workdir (unique per PR)
+        session_name = _get_session_name_for_path(work_path, pr_id)
 
         # Create session if it doesn't exist
         if not tmux_mod.session_exists(session_name):
@@ -2472,10 +2486,23 @@ def _tui_history_file(session: str) -> Path:
     return TUI_HISTORY_DIR / f"{session}.json"
 
 
+def _get_session_name_for_path(path: str | Path, name: str | None = None) -> str:
+    """Generate a pm session name for a specific path.
+
+    Args:
+        path: The directory path to hash
+        name: Optional name prefix (defaults to directory name)
+    """
+    import hashlib
+    path_str = str(path)
+    if name is None:
+        name = Path(path).name
+    path_hash = hashlib.md5(path_str.encode()).hexdigest()[:8]
+    return f"pm-{name}-{path_hash}"
+
+
 def _get_session_name_for_cwd() -> str:
     """Generate the expected session name for the current working directory."""
-    import hashlib
-
     try:
         root = state_root()
         data = store.load(root)
@@ -2485,8 +2512,7 @@ def _get_session_name_for_cwd() -> str:
         project_name = Path.cwd().name
         cwd = str(Path.cwd())
 
-    path_hash = hashlib.md5(cwd.encode()).hexdigest()[:8]
-    return f"pm-{project_name}-{path_hash}"
+    return _get_session_name_for_path(cwd, project_name)
 
 
 def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
