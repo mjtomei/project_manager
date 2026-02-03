@@ -2282,5 +2282,218 @@ def rebalance_cmd():
     click.echo("Layout rebalanced.")
 
 
+@cli.group()
+def tui():
+    """Control and monitor the TUI from the command line."""
+    pass
+
+
+TUI_HISTORY_FILE = Path.home() / ".pm-pane-registry" / "tui-history.json"
+TUI_MAX_FRAMES = 50
+
+
+def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
+    """Find the TUI pane in a pm session.
+
+    Returns (pane_id, session_name) or (None, None) if not found.
+
+    If session is provided, uses that. Otherwise:
+    - If in a pm- tmux session, uses current session
+    - Otherwise, searches for any pm- session with a TUI pane
+    """
+    import subprocess
+
+    # If session specified, use it
+    if session:
+        data = pane_layout.load_registry(session)
+        for pane in data.get("panes", []):
+            if pane.get("role") == "tui":
+                return pane.get("id"), session
+        return None, None
+
+    # If in a pm session, use current
+    if tmux_mod.in_tmux():
+        current_session = tmux_mod.get_session_name()
+        if current_session.startswith("pm-"):
+            data = pane_layout.load_registry(current_session)
+            for pane in data.get("panes", []):
+                if pane.get("role") == "tui":
+                    return pane.get("id"), current_session
+
+    # Search for any pm session with a TUI
+    result = subprocess.run(
+        ["tmux", "list-sessions", "-F", "#{session_name}"],
+        capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        return None, None
+
+    for sess in result.stdout.strip().splitlines():
+        if sess.startswith("pm-"):
+            data = pane_layout.load_registry(sess)
+            for pane in data.get("panes", []):
+                if pane.get("role") == "tui":
+                    return pane.get("id"), sess
+
+    return None, None
+
+
+def _capture_tui_frame(pane_id: str) -> str:
+    """Capture the current TUI pane content."""
+    import subprocess
+    result = subprocess.run(
+        ["tmux", "capture-pane", "-t", pane_id, "-p"],
+        capture_output=True, text=True
+    )
+    return result.stdout
+
+
+def _load_tui_history() -> list:
+    """Load TUI frame history."""
+    if not TUI_HISTORY_FILE.exists():
+        return []
+    try:
+        import json
+        return json.loads(TUI_HISTORY_FILE.read_text())
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def _save_tui_history(history: list) -> None:
+    """Save TUI frame history."""
+    import json
+    TUI_HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    TUI_HISTORY_FILE.write_text(json.dumps(history, indent=2))
+
+
+def _add_frame_to_history(frame: str, pane_id: str) -> None:
+    """Add a frame to history, keeping only the last N frames."""
+    from datetime import datetime, timezone
+    history = _load_tui_history()
+    history.append({
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "pane_id": pane_id,
+        "content": frame,
+    })
+    # Keep only last N frames
+    if len(history) > TUI_MAX_FRAMES:
+        history = history[-TUI_MAX_FRAMES:]
+    _save_tui_history(history)
+
+
+@tui.command("view")
+@click.option("--no-history", is_flag=True, help="Don't add this frame to history")
+@click.option("--session", "-s", default=None, help="Specify pm session name")
+def tui_view(no_history: bool, session: str | None):
+    """View current TUI output.
+
+    Captures the current TUI pane content and displays it.
+    Also adds the frame to history for later review (unless --no-history).
+    """
+    pane_id, sess = _find_tui_pane(session)
+    if not pane_id:
+        click.echo("No TUI pane found. Is there a pm tmux session running?", err=True)
+        raise SystemExit(1)
+
+    frame = _capture_tui_frame(pane_id)
+    if not no_history:
+        _add_frame_to_history(frame, pane_id)
+
+    click.echo(f"[Session: {sess}, Pane: {pane_id}]")
+    click.echo(frame)
+
+
+@tui.command("history")
+@click.option("--frames", "-n", default=5, help="Number of frames to show")
+@click.option("--all", "show_all", is_flag=True, help="Show all frames")
+def tui_history(frames: int, show_all: bool):
+    """View recent TUI frames from history.
+
+    Shows the last N captured frames with timestamps.
+    """
+    history = _load_tui_history()
+    if not history:
+        click.echo("No TUI history found.")
+        return
+
+    if show_all:
+        frames = len(history)
+
+    recent = history[-frames:]
+    for i, entry in enumerate(recent):
+        timestamp = entry.get("timestamp", "unknown")
+        content = entry.get("content", "")
+        click.echo(f"{'=' * 60}")
+        click.echo(f"Frame {len(history) - len(recent) + i + 1}/{len(history)} @ {timestamp}")
+        click.echo(f"{'=' * 60}")
+        click.echo(content)
+        click.echo()
+
+
+@tui.command("send")
+@click.argument("keys")
+@click.option("--session", "-s", default=None, help="Specify pm session name")
+def tui_send(keys: str, session: str | None):
+    """Send keys to the TUI.
+
+    KEYS can be single characters, key names, or sequences:
+      - Single keys: g, x, r, q
+      - Special keys: Enter, Escape, Up, Down, Left, Right, Tab
+      - Ctrl combinations: C-c, C-d
+      - Sequences: "gr" sends 'g' then 'r'
+
+    Examples:
+      pm tui send g          # Press 'g' (launch guide)
+      pm tui send x          # Press 'x' (dismiss guide)
+      pm tui send r          # Press 'r' (refresh)
+      pm tui send Enter      # Press Enter
+      pm tui send C-c        # Press Ctrl+C
+    """
+    import subprocess
+    pane_id, sess = _find_tui_pane(session)
+    if not pane_id:
+        click.echo("No TUI pane found. Is there a pm tmux session running?", err=True)
+        raise SystemExit(1)
+
+    subprocess.run(["tmux", "send-keys", "-t", pane_id, keys], check=True)
+    click.echo(f"Sent keys '{keys}' to TUI pane {pane_id} (session: {sess})")
+
+
+@tui.command("keys")
+def tui_keys():
+    """Show available TUI keybindings."""
+    click.echo("""\
+TUI Keybindings:
+
+Navigation:
+  Up/Down, j/k     Navigate PR list
+  Enter            Select/expand PR
+
+Actions:
+  g                Launch guide pane
+  n                Open notes
+  c                Copy prompt to clipboard
+  l                Launch Claude for selected PR
+  r                Refresh state
+
+Guide Mode:
+  x                Dismiss guide view
+
+General:
+  q                Quit TUI
+  ?                Show help
+""")
+
+
+@tui.command("clear-history")
+def tui_clear_history():
+    """Clear the TUI frame history."""
+    if TUI_HISTORY_FILE.exists():
+        TUI_HISTORY_FILE.unlink()
+        click.echo("TUI history cleared.")
+    else:
+        click.echo("No history to clear.")
+
+
 def main():
     cli()
