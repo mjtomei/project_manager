@@ -18,4 +18,4 @@ dependencies = [
 packages = ["pm_core", "pm_core.tui", "pm_core.cluster"]
 
 [project.scripts]
-pm = "pm_core.cli:main"
+pm = "pm_core.wrapper:main"
