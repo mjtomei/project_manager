@@ -124,8 +124,11 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
 
     # Try to resume existing session, or generate new session ID
     session_id = None
+    is_resuming = False
     if resume:
         session_id = load_session(pm_root, session_key)
+        if session_id:
+            is_resuming = True
 
     # If no existing session, generate a new UUID
     if not session_id:
@@ -137,7 +140,10 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
     cmd = [claude]
     if _skip_permissions():
         cmd.append("--dangerously-skip-permissions")
-    cmd.extend(["--session-id", session_id])
+    if is_resuming:
+        cmd.extend(["--resume", session_id])
+    else:
+        cmd.extend(["--session-id", session_id])
     cmd.append(prompt)
 
     _log.info("launch_claude: %s (cwd=%s, session_key=%s, session_id=%s)",
