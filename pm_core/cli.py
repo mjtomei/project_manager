@@ -5,6 +5,7 @@ import logging
 import os
 import platform
 import shutil
+import subprocess
 from pathlib import Path
 
 import click
@@ -960,7 +961,47 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
         "description": desc,
         "agent_machine": None,
         "gh_pr": None,
+        "gh_pr_number": None,
     }
+
+    # For GitHub backend: create branch, push, and create draft PR
+    backend_name = data["project"].get("backend", "vanilla")
+    if backend_name == "github":
+        repo_url = data["project"]["repo"]
+        base_branch = data["project"].get("base_branch", "main")
+
+        # Clone to temp directory
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir) / "repo"
+            click.echo(f"Cloning {repo_url}...")
+            git_ops.clone(repo_url, tmp_path, branch=base_branch)
+
+            # Create and checkout the branch
+            click.echo(f"Creating branch {branch}...")
+            git_ops.checkout_branch(tmp_path, branch, create=True)
+
+            # Create empty commit
+            commit_msg = f"Start work on: {title}\n\nPR: {pr_id}"
+            git_ops.run_git("commit", "--allow-empty", "-m", commit_msg, cwd=tmp_path)
+
+            # Push branch
+            click.echo(f"Pushing branch {branch}...")
+            push_result = git_ops.run_git("push", "-u", "origin", branch, cwd=tmp_path, check=False)
+            if push_result.returncode != 0:
+                click.echo(f"Warning: Failed to push branch: {push_result.stderr}", err=True)
+            else:
+                # Create draft PR
+                click.echo("Creating draft PR on GitHub...")
+                from pm_core import gh_ops
+                pr_info = gh_ops.create_draft_pr(str(tmp_path), title, base_branch, desc)
+                if pr_info:
+                    entry["gh_pr"] = pr_info["url"]
+                    entry["gh_pr_number"] = pr_info["number"]
+                    click.echo(f"Draft PR created: {pr_info['url']}")
+                else:
+                    click.echo("Warning: Failed to create draft PR.", err=True)
+
     if data.get("prs") is None:
         data["prs"] = []
     data["prs"].append(entry)
@@ -971,6 +1012,8 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
     click.echo(f"  branch: {branch}")
     if deps:
         click.echo(f"  depends_on: {', '.join(deps)}")
+    if entry.get("gh_pr"):
+        click.echo(f"  draft PR: {entry['gh_pr']}")
 
 
 @pr.command("edit")
@@ -1225,22 +1268,29 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
         click.echo(prompt)
         return
 
-    if tmux_mod.in_tmux():
-        # Create a new tmux window for this PR
+    # Try to launch in the pm tmux session
+    if tmux_mod.has_tmux():
         pr_title = pr_entry.get("title", pr_id)
         window_name = store.slugify(pr_title)[:20]
         escaped_prompt = prompt.replace("'", "'\\''")
         cmd = f"claude '{escaped_prompt}'"
+
+        # Get session name for this workdir (unique per PR)
+        session_name = _get_session_name_for_path(work_path, pr_id)
+
+        # Create session if it doesn't exist
+        if not tmux_mod.session_exists(session_name):
+            click.echo(f"Creating pm session '{session_name}'...")
+            tmux_mod.create_session(session_name, str(work_path), "bash")
+            # Forward key environment variables
+            for env_key in ("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS", "PM_PROJECT", "EDITOR", "PATH"):
+                val = os.environ.get(env_key)
+                if val:
+                    subprocess.run(["tmux", "set-environment", "-t", session_name, env_key, val], check=False)
+
         try:
-            session = os.environ.get("TMUX", "").split(",")[-1] if os.environ.get("TMUX") else ""
-            # Get current session name
-            import subprocess
-            session_name = subprocess.run(
-                ["tmux", "display-message", "-p", "#{session_name}"],
-                capture_output=True, text=True
-            ).stdout.strip()
             tmux_mod.new_window(session_name, window_name, cmd, str(work_path))
-            click.echo(f"Launched Claude in tmux window '{window_name}'")
+            click.echo(f"Launched Claude in tmux window '{window_name}' (session: {session_name})")
         except Exception as e:
             click.echo(f"Failed to create tmux window: {e}", err=True)
             click.echo("Launching Claude in current terminal...")
@@ -1298,6 +1348,19 @@ def pr_done(pr_id: str | None):
     if pr_entry.get("status") == "pending":
         click.echo(f"PR {pr_id} is pending — start it first with: pm pr start {pr_id}", err=True)
         raise SystemExit(1)
+
+    # For GitHub backend: upgrade draft PR to ready for review
+    backend_name = data["project"].get("backend", "vanilla")
+    gh_pr_number = pr_entry.get("gh_pr_number")
+    workdir = pr_entry.get("workdir")
+
+    if backend_name == "github" and gh_pr_number and workdir:
+        from pm_core import gh_ops
+        click.echo(f"Marking PR #{gh_pr_number} as ready for review...")
+        if gh_ops.mark_pr_ready(workdir, gh_pr_number):
+            click.echo("Draft PR upgraded to ready for review.")
+        else:
+            click.echo("Warning: Failed to upgrade draft PR. It may already be ready or was closed.", err=True)
 
     pr_entry["status"] = "in_review"
     save_and_push(data, root, f"pm: done {pr_id}")
@@ -1981,11 +2044,7 @@ def cluster_explore(bridged, fresh):
             click.echo("--bridged requires running inside tmux.", err=True)
             raise SystemExit(1)
 
-        import subprocess as _sp
-        session_name = _sp.run(
-            ["tmux", "display-message", "-p", "#{session_name}"],
-            capture_output=True, text=True,
-        ).stdout.strip()
+        session_name = tmux_mod.get_session_name()
 
         socket_path = launch_bridge_in_tmux(prompt, cwd=str(repo_root), session_name=session_name)
 
@@ -2011,12 +2070,7 @@ def _in_pm_tmux_session() -> bool:
     """Check if we're in a tmux session created by pm (named pm-*)."""
     if not tmux_mod.in_tmux():
         return False
-    import subprocess as _sp
-    result = _sp.run(
-        ["tmux", "display-message", "-p", "#{session_name}"],
-        capture_output=True, text=True,
-    )
-    session_name = result.stdout.strip()
+    session_name = tmux_mod.get_session_name()
     return session_name.startswith("pm-")
 
 
@@ -2439,10 +2493,23 @@ def _tui_history_file(session: str) -> Path:
     return TUI_HISTORY_DIR / f"{session}.json"
 
 
+def _get_session_name_for_path(path: str | Path, name: str | None = None) -> str:
+    """Generate a pm session name for a specific path.
+
+    Args:
+        path: The directory path to hash
+        name: Optional name prefix (defaults to directory name)
+    """
+    import hashlib
+    path_str = str(path)
+    if name is None:
+        name = Path(path).name
+    path_hash = hashlib.md5(path_str.encode()).hexdigest()[:8]
+    return f"pm-{name}-{path_hash}"
+
+
 def _get_session_name_for_cwd() -> str:
     """Generate the expected session name for the current working directory."""
-    import hashlib
-
     try:
         root = state_root()
         data = store.load(root)
@@ -2452,8 +2519,7 @@ def _get_session_name_for_cwd() -> str:
         project_name = Path.cwd().name
         cwd = str(Path.cwd())
 
-    path_hash = hashlib.md5(cwd.encode()).hexdigest()[:8]
-    return f"pm-{project_name}-{path_hash}"
+    return _get_session_name_for_path(cwd, project_name)
 
 
 def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:

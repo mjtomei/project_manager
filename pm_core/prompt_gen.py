@@ -32,7 +32,8 @@ def generate_prompt(data: dict, pr_id: str) -> str:
     base_branch = data.get("project", {}).get("base_branch", "main")
 
     backend = get_backend(data)
-    instructions = backend.pr_instructions(branch, title, base_branch, pr_id)
+    gh_pr_url = pr.get("gh_pr")  # URL of draft PR if created
+    instructions = backend.pr_instructions(branch, title, base_branch, pr_id, gh_pr_url)
 
     # Include notes if available
     notes_block = ""

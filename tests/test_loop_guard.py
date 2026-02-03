@@ -62,13 +62,13 @@ class TestLoopGuard:
         assert "Loop guard triggered" in result.output
 
     def test_old_timestamps_ignored(self, loop_file):
-        """Timestamps older than 10 seconds should be ignored."""
+        """Timestamps older than 30 seconds should be ignored."""
         runner = CliRunner()
         loop_path = loop_file / ".pm-pane-registry" / "loop-test-loop.json"
 
-        # All timestamps are old
+        # All timestamps are old (outside the 30-second window)
         now = time.time()
-        timestamps = [now - 20, now - 18, now - 15, now - 12, now - 11]
+        timestamps = [now - 60, now - 50, now - 45, now - 40, now - 35]
         loop_path.write_text(json.dumps(timestamps))
 
         with patch.object(Path, 'home', return_value=loop_file):

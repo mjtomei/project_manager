@@ -20,8 +20,17 @@ class Backend(ABC):
         ...
 
     @abstractmethod
-    def pr_instructions(self, branch: str, title: str, base_branch: str, pr_id: str) -> str:
-        """Return instructions for Claude on how to finalize work."""
+    def pr_instructions(self, branch: str, title: str, base_branch: str, pr_id: str,
+                        gh_pr_url: str | None = None) -> str:
+        """Return instructions for Claude on how to finalize work.
+
+        Args:
+            branch: The feature branch name
+            title: PR title
+            base_branch: Target branch (e.g., main)
+            pr_id: PM's internal PR ID (e.g., pr-001)
+            gh_pr_url: GitHub PR URL if a draft PR was already created
+        """
         ...
 
 
@@ -40,7 +49,7 @@ class LocalBackend(Backend):
         )
         return result.returncode == 0
 
-    def pr_instructions(self, branch, title, base_branch, pr_id):
+    def pr_instructions(self, branch, title, base_branch, pr_id, gh_pr_url=None):
         return (
             f"- Work in the current directory (already on branch {branch})\n"
             f"- When done, commit your changes\n"
@@ -67,7 +76,7 @@ class VanillaBackend(Backend):
                 return True
         return False
 
-    def pr_instructions(self, branch, title, base_branch, pr_id):
+    def pr_instructions(self, branch, title, base_branch, pr_id, gh_pr_url=None):
         return (
             f"- Work in the current directory (already on branch {branch})\n"
             f"- When done, commit and push your changes:\n"
@@ -81,7 +90,17 @@ class GitHubBackend(Backend):
         from pm_core import gh_ops
         return gh_ops.is_pr_merged(workdir, branch)
 
-    def pr_instructions(self, branch, title, base_branch, pr_id):
+    def pr_instructions(self, branch, title, base_branch, pr_id, gh_pr_url=None):
+        if gh_pr_url:
+            # Draft PR already exists - just push commits
+            return (
+                f"- Work in the current directory (already on branch {branch})\n"
+                f"- A draft PR has been created and the branch pushed: {gh_pr_url}\n"
+                f"- When done, commit your changes and push:\n"
+                f"    git push origin {branch}\n"
+                f"- Then tell the human you're done so they can run: pm pr done {pr_id}"
+            )
+        # Fallback for when draft PR wasn't created (e.g., push failed)
         return (
             f"- Work in the current directory (already on branch {branch})\n"
             f"- When done, commit your changes, push the branch, and create a PR:\n"

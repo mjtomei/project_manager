@@ -66,9 +66,15 @@ def kill_session(name: str) -> None:
 
 
 def new_window(session: str, name: str, cmd: str, cwd: str) -> None:
-    """Create a new tmux window with the given name, running cmd."""
+    """Create a new tmux window with the given name, running cmd.
+
+    Uses 'session:' format to ensure numeric session names aren't
+    interpreted as window indices.
+    """
+    # Use session: format to explicitly target session, not window index
+    target = f"{session}:"
     subprocess.run(
-        ["tmux", "new-window", "-t", session, "-n", name, "-c", cwd, cmd],
+        ["tmux", "new-window", "-t", target, "-n", name, "-c", cwd, cmd],
         check=True,
     )
 
@@ -153,11 +159,25 @@ def apply_layout(session: str, window: str, layout_string: str) -> bool:
 
 
 def get_session_name() -> str:
-    """Get the current tmux session name (must be called from within tmux)."""
-    result = subprocess.run(
-        ["tmux", "display-message", "-p", "#{session_name}"],
-        capture_output=True, text=True,
-    )
+    """Get the current tmux session name (must be called from within tmux).
+
+    Uses $TMUX_PANE to target the specific pane, which is more reliable
+    than display-message without a target (which uses "current client"
+    and can return wrong session in background processes).
+    """
+    pane = os.environ.get("TMUX_PANE")
+    if pane:
+        # Target the specific pane to get accurate session name
+        result = subprocess.run(
+            ["tmux", "display-message", "-p", "-t", pane, "#{session_name}"],
+            capture_output=True, text=True,
+        )
+    else:
+        # Fallback to current client
+        result = subprocess.run(
+            ["tmux", "display-message", "-p", "#{session_name}"],
+            capture_output=True, text=True,
+        )
     return result.stdout.strip()
 
 
