@@ -113,9 +113,11 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
     """Run claude interactively with a prompt. Returns exit code.
 
     Attempts to resume a previous session if one exists for session_key.
-    Always captures stderr (via --verbose) to extract session_id for
-    future resumption.
+    Uses --verbose and captures stderr to a temp file to extract session_id
+    for future resumption.
     """
+    import tempfile
+
     claude = find_claude()
     if not claude:
         raise FileNotFoundError("claude CLI not found. Install it first.")
@@ -125,49 +127,65 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
     if resume:
         resume_id = load_session(pm_root, session_key)
 
-    cmd = [claude, "--verbose"]
+    # Build base command
+    base_args = ["--verbose"]
     if _skip_permissions():
-        cmd.append("--dangerously-skip-permissions")
-    if resume_id:
-        cmd.extend(["--resume", resume_id])
-    cmd.append(prompt)
+        base_args.append("--dangerously-skip-permissions")
 
-    _log.info("launch_claude: %s (cwd=%s, session_key=%s, resume_id=%s)",
-              cmd[:3], cwd, session_key, resume_id)
+    # Create temp file for stderr capture
+    # Use bash with tee to show stderr on terminal AND capture to file
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.log', delete=False, prefix='pm-claude-') as f:
+        stderr_file = f.name
 
-    # Use Popen to capture stderr while passing stdin/stdout through
-    proc = subprocess.Popen(
-        cmd, cwd=cwd,
-        stdin=None, stdout=None,  # inherit terminal
-        stderr=subprocess.PIPE,
-    )
-    _, stderr_bytes = proc.communicate()
-    stderr_text = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
-    returncode = proc.returncode
+    try:
+        # Build command with stderr tee
+        args_str = " ".join(base_args)
+        if resume_id:
+            args_str += f" --resume {resume_id}"
+        escaped_prompt = prompt.replace("'", "'\\''")
 
-    # If resume failed, retry without --resume
-    if resume_id and returncode != 0:
-        _log.warning("Resume failed (rc=%d), retrying fresh", returncode)
-        cmd_fresh = [claude, "--verbose"]
-        if _skip_permissions():
-            cmd_fresh.append("--dangerously-skip-permissions")
-        cmd_fresh.append(prompt)
-        proc = subprocess.Popen(
-            cmd_fresh, cwd=cwd,
-            stdin=None, stdout=None,
-            stderr=subprocess.PIPE,
-        )
-        _, stderr_bytes = proc.communicate()
-        stderr_text = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
-        returncode = proc.returncode
+        # Use bash to run claude with stderr going to both terminal and file
+        bash_cmd = f"claude {args_str} '{escaped_prompt}' 2> >(tee '{stderr_file}' >&2)"
 
-    # Extract and save session_id
-    sid = _parse_session_id(stderr_text)
-    if sid:
-        save_session(pm_root, session_key, sid)
-        _log.info("Saved session_id=%s for key=%s", sid, session_key)
-    else:
-        _log.debug("No session_id found in stderr (%d bytes)", len(stderr_text))
+        _log.info("launch_claude: claude %s (cwd=%s, session_key=%s, resume_id=%s)",
+                  args_str[:50], cwd, session_key, resume_id)
+
+        result = subprocess.run(["bash", "-c", bash_cmd], cwd=cwd)
+        returncode = result.returncode
+
+        # Read captured stderr
+        stderr_text = ""
+        try:
+            stderr_text = Path(stderr_file).read_text()
+        except Exception as e:
+            _log.debug("Failed to read stderr file: %s", e)
+
+        # If resume failed, retry without --resume
+        if resume_id and returncode != 0:
+            _log.warning("Resume failed (rc=%d), retrying fresh", returncode)
+            args_str = " ".join(base_args)
+            bash_cmd = f"claude {args_str} '{escaped_prompt}' 2> >(tee '{stderr_file}' >&2)"
+            result = subprocess.run(["bash", "-c", bash_cmd], cwd=cwd)
+            returncode = result.returncode
+            try:
+                stderr_text = Path(stderr_file).read_text()
+            except Exception:
+                pass
+
+        # Extract and save session_id
+        sid = _parse_session_id(stderr_text)
+        if sid:
+            save_session(pm_root, session_key, sid)
+            _log.info("Saved session_id=%s for key=%s", sid, session_key)
+        else:
+            _log.debug("No session_id found in stderr (%d bytes)", len(stderr_text))
+
+    finally:
+        # Clean up temp file
+        try:
+            Path(stderr_file).unlink(missing_ok=True)
+        except Exception:
+            pass
 
     return returncode
 
