@@ -2046,6 +2046,24 @@ def guide_done_cmd():
     desc = guide_mod.STEP_DESCRIPTIONS.get(state, state)
     click.echo(f"Step completed: {desc}")
 
+    # Trigger TUI refresh so it picks up the step change immediately
+    _refresh_tui_if_running()
+
+
+def _refresh_tui_if_running():
+    """Send refresh key to TUI pane if one is running."""
+    import subprocess
+    try:
+        pane_id, _ = _find_tui_pane()
+        if pane_id:
+            subprocess.run(
+                ["tmux", "send-keys", "-t", pane_id, "r"],
+                capture_output=True,
+                timeout=2,
+            )
+    except Exception:
+        pass  # Best effort - don't fail if TUI isn't running
+
 
 def _run_guide(step, fresh=False):
     from pm_core.claude_launcher import find_claude, _skip_permissions, load_session, save_session
