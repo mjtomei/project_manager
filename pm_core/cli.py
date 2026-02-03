@@ -1056,8 +1056,10 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
 @click.option("--title", default=None, help="New title")
 @click.option("--depends-on", "depends_on", default=None, help="Comma-separated PR IDs (replaces existing)")
 @click.option("--description", "desc", default=None, help="New description")
-def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | None):
-    """Edit an existing PR's title, description, or dependencies."""
+@click.option("--status", default=None, type=click.Choice(["pending", "in_progress", "in_review", "merged"]),
+              help="New status (pending, in_progress, in_review, merged)")
+def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | None, status: str | None):
+    """Edit an existing PR's title, description, dependencies, or status."""
     root = state_root()
     data = store.load(root)
     pr_entry = store.get_pr(data, pr_id)
@@ -1075,6 +1077,10 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
     if desc is not None:
         pr_entry["description"] = desc
         changes.append("description updated")
+    if status is not None:
+        old_status = pr_entry.get("status", "pending")
+        pr_entry["status"] = status
+        changes.append(f"status: {old_status} → {status}")
     if depends_on is not None:
         if depends_on == "":
             pr_entry["depends_on"] = []
@@ -1090,7 +1096,7 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
             changes.append(f"depends_on={', '.join(deps)}")
 
     if not changes:
-        click.echo("Nothing to change. Use --title, --depends-on, or --description.", err=True)
+        click.echo("Nothing to change. Use --title, --depends-on, --description, or --status.", err=True)
         raise SystemExit(1)
 
     save_and_push(data, root, f"pm: edit {pr_id}")
@@ -1485,6 +1491,84 @@ def pr_sync():
         click.echo("\nNewly ready PRs:")
         for p in ready:
             click.echo(f"  ⏳ {p['id']}: {p.get('title', '???')}")
+
+
+@pr.command("sync-github")
+def pr_sync_github():
+    """Fetch and update PR statuses from GitHub.
+
+    For each PR with a GitHub PR number, fetches the current state
+    from GitHub and updates the local status accordingly:
+    - MERGED → merged
+    - CLOSED → (unchanged, warns user)
+    - OPEN + draft → in_progress
+    - OPEN + ready → in_review
+    """
+    root = state_root()
+    data = store.load(root)
+    prs = data.get("prs") or []
+
+    backend_name = data["project"].get("backend", "vanilla")
+    if backend_name != "github":
+        click.echo("This command only works with the GitHub backend.", err=True)
+        raise SystemExit(1)
+
+    from pm_core import gh_ops
+
+    updated = 0
+    for pr_entry in prs:
+        gh_pr_number = pr_entry.get("gh_pr_number")
+        if not gh_pr_number:
+            continue
+
+        pr_id = pr_entry["id"]
+        old_status = pr_entry.get("status", "pending")
+
+        # Fetch PR info from GitHub
+        try:
+            result = subprocess.run(
+                ["gh", "pr", "view", str(gh_pr_number), "--json", "state,isDraft,mergedAt"],
+                capture_output=True, text=True
+            )
+            if result.returncode != 0:
+                click.echo(f"  ⚠️  {pr_id}: Could not fetch GitHub PR #{gh_pr_number}")
+                continue
+
+            import json
+            info = json.loads(result.stdout)
+            gh_state = info.get("state")
+            is_draft = info.get("isDraft", False)
+            merged_at = info.get("mergedAt")
+
+            # Determine new status
+            if gh_state == "MERGED" or merged_at:
+                new_status = "merged"
+            elif gh_state == "CLOSED":
+                click.echo(f"  ⚠️  {pr_id}: GitHub PR #{gh_pr_number} is CLOSED (not merged)")
+                continue
+            elif gh_state == "OPEN":
+                new_status = "in_progress" if is_draft else "in_review"
+            else:
+                click.echo(f"  ⚠️  {pr_id}: Unknown GitHub state '{gh_state}'")
+                continue
+
+            if new_status != old_status:
+                pr_entry["status"] = new_status
+                click.echo(f"  ✓ {pr_id}: {old_status} → {new_status}")
+                updated += 1
+            else:
+                click.echo(f"  · {pr_id}: {old_status} (unchanged)")
+
+        except Exception as e:
+            click.echo(f"  ⚠️  {pr_id}: Error fetching status: {e}")
+            continue
+
+    if updated:
+        save_and_push(data, root, f"pm: sync-github - {updated} PRs updated")
+        trigger_tui_refresh()
+        click.echo(f"\nUpdated {updated} PR(s).")
+    else:
+        click.echo("\nNo status changes.")
 
 
 @pr.command("cleanup")

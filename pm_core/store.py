@@ -31,13 +31,34 @@ def is_internal_pm_dir(root: Path) -> bool:
     return root.name == "pm" and (root.parent / ".git").exists()
 
 
-def load(root: Optional[Path] = None) -> dict:
-    """Load project.yaml from root directory."""
+def load(root: Optional[Path] = None, validate: bool = True) -> dict:
+    """Load project.yaml from root directory.
+
+    Args:
+        root: Directory containing project.yaml
+        validate: If True, validate PR statuses and fix invalid ones
+    """
     if root is None:
         root = find_project_root()
     path = root / "project.yaml"
     with open(path) as f:
-        return yaml.safe_load(f)
+        data = yaml.safe_load(f)
+
+    if validate:
+        _validate_pr_statuses(data)
+
+    return data
+
+
+def _validate_pr_statuses(data: dict) -> None:
+    """Validate and fix PR statuses in loaded data."""
+    from pm_core.pr_utils import VALID_PR_STATES
+
+    for pr in data.get("prs") or []:
+        status = pr.get("status")
+        if status not in VALID_PR_STATES:
+            # Default invalid statuses to "pending"
+            pr["status"] = "pending"
 
 
 def save(data: dict, root: Optional[Path] = None) -> None:
