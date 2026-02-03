@@ -1418,8 +1418,11 @@ def session_cmd():
         # Derive session name from cwd
         project_name = Path.cwd().name
 
-    session_name = f"pm-{project_name}"
+    # Include path hash to support multiple sessions for repos with same name in different dirs
+    import hashlib
     cwd = str(root) if root else str(Path.cwd())
+    path_hash = hashlib.md5(cwd.encode()).hexdigest()[:8]
+    session_name = f"pm-{project_name}-{path_hash}"
     expected_root = root or (Path.cwd() / "pm")
     notes_path = expected_root / notes.NOTES_FILENAME
 
