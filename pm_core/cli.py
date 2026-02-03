@@ -5,6 +5,7 @@ import logging
 import os
 import platform
 import shutil
+import subprocess
 from pathlib import Path
 
 import click
@@ -219,10 +220,29 @@ def init(repo_url: str | None, name: str, base_branch: str, directory: str,
     # Auto-detect repo URL from cwd if not specified
     if repo_url is None:
         if git_ops.is_git_repo(cwd):
-            result = git_ops.run_git("remote", "get-url", "origin", cwd=cwd, check=False)
-            if result.returncode == 0 and result.stdout.strip():
-                repo_url = result.stdout.strip()
+            remotes = git_ops.list_remotes(cwd)
+            if remotes:
+                # Use backend_override hint if available for better selection
+                selection = git_ops.select_remote(remotes, preferred_backend=backend_override)
+                if "selected" in selection and selection["selected"]:
+                    _, repo_url = selection["selected"]
+                elif "ambiguous" in selection:
+                    # Let user choose from ambiguous remotes
+                    click.echo("Multiple git remotes found:")
+                    for i, (name, url) in enumerate(selection["ambiguous"], 1):
+                        click.echo(f"  {i}. {name}: {url}")
+                    click.echo()
+                    choice = click.prompt(
+                        "Choose a remote",
+                        type=click.IntRange(1, len(selection["ambiguous"])),
+                        default=1,
+                    )
+                    _, repo_url = selection["ambiguous"][choice - 1]
+                else:
+                    # No remotes selected - use local path
+                    repo_url = str(cwd)
             else:
+                # No remotes - use local path
                 repo_url = str(cwd)
         else:
             click.echo("No TARGET_REPO_URL provided and not in a git repo.", err=True)
@@ -941,7 +961,47 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
         "description": desc,
         "agent_machine": None,
         "gh_pr": None,
+        "gh_pr_number": None,
     }
+
+    # For GitHub backend: create branch, push, and create draft PR
+    backend_name = data["project"].get("backend", "vanilla")
+    if backend_name == "github":
+        repo_url = data["project"]["repo"]
+        base_branch = data["project"].get("base_branch", "main")
+
+        # Clone to temp directory
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir) / "repo"
+            click.echo(f"Cloning {repo_url}...")
+            git_ops.clone(repo_url, tmp_path, branch=base_branch)
+
+            # Create and checkout the branch
+            click.echo(f"Creating branch {branch}...")
+            git_ops.checkout_branch(tmp_path, branch, create=True)
+
+            # Create empty commit
+            commit_msg = f"Start work on: {title}\n\nPR: {pr_id}"
+            git_ops.run_git("commit", "--allow-empty", "-m", commit_msg, cwd=tmp_path)
+
+            # Push branch
+            click.echo(f"Pushing branch {branch}...")
+            push_result = git_ops.run_git("push", "-u", "origin", branch, cwd=tmp_path, check=False)
+            if push_result.returncode != 0:
+                click.echo(f"Warning: Failed to push branch: {push_result.stderr}", err=True)
+            else:
+                # Create draft PR
+                click.echo("Creating draft PR on GitHub...")
+                from pm_core import gh_ops
+                pr_info = gh_ops.create_draft_pr(str(tmp_path), title, base_branch, desc)
+                if pr_info:
+                    entry["gh_pr"] = pr_info["url"]
+                    entry["gh_pr_number"] = pr_info["number"]
+                    click.echo(f"Draft PR created: {pr_info['url']}")
+                else:
+                    click.echo("Warning: Failed to create draft PR.", err=True)
+
     if data.get("prs") is None:
         data["prs"] = []
     data["prs"].append(entry)
@@ -952,6 +1012,8 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
     click.echo(f"  branch: {branch}")
     if deps:
         click.echo(f"  depends_on: {', '.join(deps)}")
+    if entry.get("gh_pr"):
+        click.echo(f"  draft PR: {entry['gh_pr']}")
 
 
 @pr.command("edit")
@@ -1143,9 +1205,15 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
         raise SystemExit(1)
 
     if pr_entry.get("status") == "in_progress":
-        click.echo(f"PR {pr_id} is already in_progress on {pr_entry.get('agent_machine', '???')}.", err=True)
-        click.echo("Use --workdir to reuse the existing workdir, or 'pm prompt' to regenerate the prompt.", err=True)
-        raise SystemExit(1)
+        # If already in_progress, reuse existing workdir if available
+        existing_workdir = pr_entry.get("workdir")
+        if existing_workdir and Path(existing_workdir).exists():
+            click.echo(f"PR {pr_id} is already in_progress, reusing existing workdir.")
+            workdir = existing_workdir  # Set workdir so it gets used below
+        else:
+            click.echo(f"PR {pr_id} is already in_progress on {pr_entry.get('agent_machine', '???')}.", err=True)
+            click.echo("No existing workdir found. Use 'pm prompt' to regenerate the prompt.", err=True)
+            raise SystemExit(1)
 
     if pr_entry.get("status") == "merged":
         click.echo(f"PR {pr_id} is already merged.", err=True)
@@ -1221,22 +1289,29 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
         click.echo(prompt)
         return
 
-    if tmux_mod.in_tmux():
-        # Create a new tmux window for this PR
+    # Try to launch in the pm tmux session
+    if tmux_mod.has_tmux():
         pr_title = pr_entry.get("title", pr_id)
         window_name = store.slugify(pr_title)[:20]
         escaped_prompt = prompt.replace("'", "'\\''")
         cmd = f"claude '{escaped_prompt}'"
+
+        # Get session name for this workdir (unique per PR)
+        session_name = _get_session_name_for_path(work_path, pr_id)
+
+        # Create session if it doesn't exist
+        if not tmux_mod.session_exists(session_name):
+            click.echo(f"Creating pm session '{session_name}'...")
+            tmux_mod.create_session(session_name, str(work_path), "bash")
+            # Forward key environment variables
+            for env_key in ("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS", "PM_PROJECT", "EDITOR", "PATH"):
+                val = os.environ.get(env_key)
+                if val:
+                    subprocess.run(["tmux", "set-environment", "-t", session_name, env_key, val], check=False)
+
         try:
-            session = os.environ.get("TMUX", "").split(",")[-1] if os.environ.get("TMUX") else ""
-            # Get current session name
-            import subprocess
-            session_name = subprocess.run(
-                ["tmux", "display-message", "-p", "#{session_name}"],
-                capture_output=True, text=True
-            ).stdout.strip()
             tmux_mod.new_window(session_name, window_name, cmd, str(work_path))
-            click.echo(f"Launched Claude in tmux window '{window_name}'")
+            click.echo(f"Launched Claude in tmux window '{window_name}' (session: {session_name})")
         except Exception as e:
             click.echo(f"Failed to create tmux window: {e}", err=True)
             click.echo("Launching Claude in current terminal...")
@@ -1294,6 +1369,19 @@ def pr_done(pr_id: str | None):
     if pr_entry.get("status") == "pending":
         click.echo(f"PR {pr_id} is pending — start it first with: pm pr start {pr_id}", err=True)
         raise SystemExit(1)
+
+    # For GitHub backend: upgrade draft PR to ready for review
+    backend_name = data["project"].get("backend", "vanilla")
+    gh_pr_number = pr_entry.get("gh_pr_number")
+    workdir = pr_entry.get("workdir")
+
+    if backend_name == "github" and gh_pr_number and workdir:
+        from pm_core import gh_ops
+        click.echo(f"Marking PR #{gh_pr_number} as ready for review...")
+        if gh_ops.mark_pr_ready(workdir, gh_pr_number):
+            click.echo("Draft PR upgraded to ready for review.")
+        else:
+            click.echo("Warning: Failed to upgrade draft PR. It may already be ready or was closed.", err=True)
 
     pr_entry["status"] = "in_review"
     save_and_push(data, root, f"pm: done {pr_id}")
@@ -1597,6 +1685,9 @@ def _detect_git_repo() -> dict | None:
       - 'local': git repo with no remote
       - 'github': git repo with a github.com remote
       - 'vanilla': git repo with a non-GitHub remote
+
+    Uses improved remote detection that prefers 'origin' but also considers
+    other remotes when 'origin' doesn't exist.
     """
     cwd = Path.cwd()
     if not git_ops.is_git_repo(cwd):
@@ -1605,11 +1696,20 @@ def _detect_git_repo() -> dict | None:
     branch_result = git_ops.run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=cwd, check=False)
     branch = branch_result.stdout.strip() if branch_result.returncode == 0 else "main"
 
-    result = git_ops.run_git("remote", "get-url", "origin", cwd=cwd, check=False)
-    if result.returncode != 0 or not result.stdout.strip():
+    remotes = git_ops.list_remotes(cwd)
+    if not remotes:
         return {"url": None, "name": cwd.name, "branch": branch, "cwd": str(cwd), "type": "local"}
 
-    remote_url = result.stdout.strip()
+    # Select the best remote (prefers origin, then github.com URLs)
+    selection = git_ops.select_remote(remotes, preferred_backend="github")
+    if "selected" in selection and selection["selected"]:
+        _, remote_url = selection["selected"]
+    elif "ambiguous" in selection and selection["ambiguous"]:
+        # For display purposes, just pick the first ambiguous option
+        _, remote_url = selection["ambiguous"][0]
+    else:
+        return {"url": None, "name": cwd.name, "branch": branch, "cwd": str(cwd), "type": "local"}
+
     name = remote_url.rstrip("/").split("/")[-1].replace(".git", "")
     backend_type = detect_backend(remote_url)
     return {"url": remote_url, "name": name, "branch": branch, "cwd": str(cwd), "type": backend_type}
@@ -1965,11 +2065,7 @@ def cluster_explore(bridged, fresh):
             click.echo("--bridged requires running inside tmux.", err=True)
             raise SystemExit(1)
 
-        import subprocess as _sp
-        session_name = _sp.run(
-            ["tmux", "display-message", "-p", "#{session_name}"],
-            capture_output=True, text=True,
-        ).stdout.strip()
+        session_name = tmux_mod.get_session_name()
 
         socket_path = launch_bridge_in_tmux(prompt, cwd=str(repo_root), session_name=session_name)
 
@@ -1995,12 +2091,7 @@ def _in_pm_tmux_session() -> bool:
     """Check if we're in a tmux session created by pm (named pm-*)."""
     if not tmux_mod.in_tmux():
         return False
-    import subprocess as _sp
-    result = _sp.run(
-        ["tmux", "display-message", "-p", "#{session_name}"],
-        capture_output=True, text=True,
-    )
-    session_name = result.stdout.strip()
+    session_name = tmux_mod.get_session_name()
     return session_name.startswith("pm-")
 
 
@@ -2315,8 +2406,8 @@ def clear_session_cmd(session_key: str, pm_root: str):
 def loop_guard_cmd(loop_id: str):
     """Internal: guard against rapid restart loops.
 
-    Tracks timestamps of restarts. If 5 restarts happen in <7 seconds,
-    exits with code 1 to break the loop. Always sleeps 1 second.
+    Tracks timestamps of restarts. If 5 restarts happen in <30 seconds,
+    exits with code 1 to break the loop. Always sleeps 5 seconds.
     """
     import time
     loop_file = Path.home() / ".pm-pane-registry" / f"loop-{loop_id}.json"
@@ -2334,14 +2425,14 @@ def loop_guard_cmd(loop_id: str):
         except Exception:
             timestamps = []
 
-    # Keep only timestamps from the last 10 seconds
-    timestamps = [t for t in timestamps if now - t < 10]
+    # Keep only timestamps from the last 60 seconds
+    timestamps = [t for t in timestamps if now - t < 60]
     timestamps.append(now)
 
-    # Check for rapid restarts: 5+ restarts in <7 seconds
+    # Check for rapid restarts: 5+ restarts in <30 seconds
     if len(timestamps) >= 5:
         oldest_recent = timestamps[-5]
-        if now - oldest_recent < 7:
+        if now - oldest_recent < 30:
             click.echo(f"Loop guard triggered: {len(timestamps)} restarts in {now - oldest_recent:.1f}s", err=True)
             click.echo("Breaking loop to prevent runaway restarts.", err=True)
             # Clear the timestamps so next manual run works
@@ -2353,7 +2444,7 @@ def loop_guard_cmd(loop_id: str):
     loop_file.write_text(json.dumps(timestamps))
 
     # Sleep before allowing restart
-    time.sleep(1)
+    time.sleep(5)
 
 
 @cli.command("_pane-exited", hidden=True)
@@ -2423,10 +2514,23 @@ def _tui_history_file(session: str) -> Path:
     return TUI_HISTORY_DIR / f"{session}.json"
 
 
+def _get_session_name_for_path(path: str | Path, name: str | None = None) -> str:
+    """Generate a pm session name for a specific path.
+
+    Args:
+        path: The directory path to hash
+        name: Optional name prefix (defaults to directory name)
+    """
+    import hashlib
+    path_str = str(path)
+    if name is None:
+        name = Path(path).name
+    path_hash = hashlib.md5(path_str.encode()).hexdigest()[:8]
+    return f"pm-{name}-{path_hash}"
+
+
 def _get_session_name_for_cwd() -> str:
     """Generate the expected session name for the current working directory."""
-    import hashlib
-
     try:
         root = state_root()
         data = store.load(root)
@@ -2436,8 +2540,7 @@ def _get_session_name_for_cwd() -> str:
         project_name = Path.cwd().name
         cwd = str(Path.cwd())
 
-    path_hash = hashlib.md5(cwd.encode()).hexdigest()[:8]
-    return f"pm-{project_name}-{path_hash}"
+    return _get_session_name_for_path(cwd, project_name)
 
 
 def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:

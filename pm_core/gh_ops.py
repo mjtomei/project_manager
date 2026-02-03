@@ -93,3 +93,50 @@ def list_prs(workdir: str, state: str = "open") -> list[dict]:
     if result.returncode == 0 and result.stdout.strip():
         return json.loads(result.stdout)
     return []
+
+
+def create_draft_pr(workdir: str, title: str, base: str, body: str = "") -> Optional[dict]:
+    """Create a draft GitHub PR, return dict with url and number.
+
+    Returns None if creation fails. Returns dict with 'url' and 'number' on success.
+    """
+    result = run_gh(
+        "pr", "create",
+        "--draft",
+        "--title", title,
+        "--base", base,
+        "--body", body,
+        cwd=workdir,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+
+    pr_url = result.stdout.strip()
+    # Extract PR number from URL (e.g., https://github.com/owner/repo/pull/123)
+    try:
+        pr_number = int(pr_url.rstrip("/").split("/")[-1])
+    except (ValueError, IndexError):
+        # If we can't parse the number, fetch it via API
+        pr_info = get_pr_status(workdir, "HEAD")
+        pr_number = pr_info.get("number") if pr_info else None
+
+    return {"url": pr_url, "number": pr_number}
+
+
+def mark_pr_ready(workdir: str, pr_ref: str | int) -> bool:
+    """Mark a draft PR as ready for review.
+
+    Args:
+        workdir: Path to the git repo
+        pr_ref: PR number or branch name
+
+    Returns:
+        True if successful, False otherwise.
+    """
+    result = run_gh(
+        "pr", "ready", str(pr_ref),
+        cwd=workdir,
+        check=False,
+    )
+    return result.returncode == 0

@@ -32,7 +32,8 @@ def generate_prompt(data: dict, pr_id: str) -> str:
     base_branch = data.get("project", {}).get("base_branch", "main")
 
     backend = get_backend(data)
-    instructions = backend.pr_instructions(branch, title, base_branch, pr_id)
+    gh_pr_url = pr.get("gh_pr")  # URL of draft PR if created
+    instructions = backend.pr_instructions(branch, title, base_branch, pr_id, gh_pr_url)
 
     # Include notes if available
     notes_block = ""
@@ -59,6 +60,7 @@ This PR is part of the plan "{plan_name}" ({plan_id}).
 ## Guardrails
 - Write unit tests for every phase of your work. Do not defer testing.
 - Before referencing any existing code (imports, function calls, class usage), read the actual source to verify it exists and has the expected interface. Do not assume.
+- **Crash recovery**: This session may be resuming after a crash. Before starting work, check `git status` and `git log` to see if previous work exists on this branch. If commits or changes already exist, continue from where the previous session left off rather than starting from scratch.
 
 ## Instructions
 {instructions}
