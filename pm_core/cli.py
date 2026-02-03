@@ -9,7 +9,7 @@ from pathlib import Path
 
 import click
 
-from pm_core import store, graph, git_ops, prompt_gen, notes
+from pm_core import store, graph, git_ops, prompt_gen, notes, pr_sync
 
 # Set up logging to file for debugging
 _log_dir = Path.home() / ".pm-pane-registry"
@@ -1028,6 +1028,13 @@ def pr_list():
     """List all PRs with status."""
     root = state_root()
     data = store.load(root)
+
+    # Sync to detect merged PRs (if interval allows)
+    data, result = pr_sync.sync_prs_quiet(root, data)
+    if result.synced and result.updated_count > 0:
+        click.echo(f"Synced: {result.updated_count} PR(s) merged")
+        store.save(data, root)
+
     prs = data.get("prs") or []
     if not prs:
         click.echo("No PRs.")
@@ -1056,6 +1063,13 @@ def pr_graph():
     """Show static dependency graph."""
     root = state_root()
     data = store.load(root)
+
+    # Sync to detect merged PRs (if interval allows)
+    data, result = pr_sync.sync_prs_quiet(root, data)
+    if result.synced and result.updated_count > 0:
+        click.echo(f"Synced: {result.updated_count} PR(s) merged")
+        store.save(data, root)
+
     prs = data.get("prs") or []
     click.echo(graph.render_static_graph(prs))
 
@@ -1065,6 +1079,13 @@ def pr_ready():
     """List PRs ready to start (all deps merged)."""
     root = state_root()
     data = store.load(root)
+
+    # Sync to detect merged PRs (if interval allows)
+    data, result = pr_sync.sync_prs_quiet(root, data)
+    if result.synced and result.updated_count > 0:
+        click.echo(f"Synced: {result.updated_count} PR(s) merged")
+        store.save(data, root)
+
     prs = data.get("prs") or []
     ready = graph.ready_prs(prs)
     if not ready:

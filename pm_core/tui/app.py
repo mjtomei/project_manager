@@ -28,7 +28,7 @@ from textual.reactive import reactive
 from textual.timer import Timer
 from textual.widgets import Header, Footer, Static, Label
 
-from pm_core import store, graph as graph_mod, git_ops, prompt_gen, notes, guide
+from pm_core import store, graph as graph_mod, git_ops, prompt_gen, notes, guide, pr_sync
 from pm_core.claude_launcher import find_claude, find_editor
 from pm_core import tmux as tmux_mod
 from pm_core import pane_layout
@@ -304,7 +304,8 @@ class ProjectManagerApp(App):
         self._setup_frame_watchers()
 
         self._load_state()
-        self._sync_timer = self.set_interval(30, self._background_sync)
+        # Background sync interval: 5 minutes for automatic PR sync
+        self._sync_timer = self.set_interval(300, self._background_sync)
 
         # Capture initial frame after state is loaded and rendered
         self.call_after_refresh(self._capture_frame, "mount")
@@ -444,8 +445,12 @@ class ProjectManagerApp(App):
         # Not in guide mode - do normal sync
         await self._do_normal_sync()
 
-    async def _do_normal_sync(self) -> None:
-        """Perform normal git sync."""
+    async def _do_normal_sync(self, is_manual: bool = False) -> None:
+        """Perform normal PR sync to detect merged PRs.
+
+        Args:
+            is_manual: True if triggered by user (r key), False for periodic background sync
+        """
         if not self._root:
             return
         try:
@@ -454,13 +459,40 @@ class ProjectManagerApp(App):
             prs = self._data.get("prs") or []
             status_bar.update_status(project.get("name", "???"), project.get("repo", "???"), "pulling", pr_count=len(prs))
 
-            sync_status = git_ops.sync_state(self._root)
+            # Use shorter interval for manual refresh, longer for background
+            min_interval = (
+                pr_sync.MIN_SYNC_INTERVAL_SECONDS if is_manual
+                else pr_sync.MIN_BACKGROUND_SYNC_INTERVAL_SECONDS
+            )
+
+            # Perform PR sync to detect merged PRs
+            result = pr_sync.sync_prs(
+                self._root,
+                self._data,
+                min_interval_seconds=min_interval,
+            )
+
+            # Reload data after sync
             self._data = store.load(self._root)
             self._update_display()
 
             prs = self._data.get("prs") or []
+
+            # Determine sync status message
+            if result.was_skipped:
+                sync_status = "no-op"
+            elif result.error:
+                sync_status = "error"
+                _log.warning("PR sync error: %s", result.error)
+            elif result.updated_count > 0:
+                sync_status = "synced"
+                self.log_message(f"Synced: {result.updated_count} PR(s) merged")
+            else:
+                sync_status = "synced"
+
             status_bar.update_status(project.get("name", "???"), project.get("repo", "???"), sync_status, pr_count=len(prs))
         except Exception as e:
+            _log.exception("Sync error")
             self.log_message(f"Sync error: {e}")
 
     def log_message(self, msg: str) -> None:
@@ -705,7 +737,9 @@ class ProjectManagerApp(App):
         if self._current_guide_step is not None:
             self.log_message(f"Refreshed - Guide step: {guide.STEP_DESCRIPTIONS.get(self._current_guide_step, self._current_guide_step)}")
         else:
-            self.log_message("Refreshed")
+            # Trigger PR sync on manual refresh (non-blocking)
+            self.call_later(lambda: self.run_worker(self._do_normal_sync(is_manual=True)))
+            self.log_message("Refreshing...")
 
     def action_restart(self) -> None:
         """Restart the TUI by exec'ing a fresh pm _tui process."""
