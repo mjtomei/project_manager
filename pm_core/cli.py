@@ -1016,6 +1016,23 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
                     entry["gh_pr"] = pr_info["url"]
                     entry["gh_pr_number"] = pr_info["number"]
                     click.echo(f"Draft PR created: {pr_info['url']}")
+
+                    # Use GitHub PR number for local pr_id
+                    gh_number = pr_info["number"]
+                    existing_ids = {p["id"] for p in (data.get("prs") or [])}
+                    gh_pr_id = f"pr-{gh_number:03d}"
+                    if gh_pr_id in existing_ids:
+                        # Conflict: append suffix to make unique
+                        gh_pr_id = f"pr-{gh_number:03d}-gh"
+                        if gh_pr_id in existing_ids:
+                            # Still conflict: use sequential ID as fallback
+                            click.echo(f"Note: Using sequential ID {pr_id} (GitHub #{gh_number} conflicts)")
+                        else:
+                            pr_id = gh_pr_id
+                            entry["id"] = pr_id
+                    else:
+                        pr_id = gh_pr_id
+                        entry["id"] = pr_id
                 else:
                     click.echo("Warning: Failed to create draft PR.", err=True)
 
