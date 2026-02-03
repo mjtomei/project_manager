@@ -45,7 +45,10 @@ def load_registry(session: str) -> dict:
     """Load the pane registry for a session."""
     path = registry_path(session)
     if path.exists():
-        return json.loads(path.read_text())
+        try:
+            return json.loads(path.read_text())
+        except (json.JSONDecodeError, ValueError):
+            pass
     return {"session": session, "window": "0", "panes": [], "user_modified": False}
 
 

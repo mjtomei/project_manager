@@ -9,7 +9,7 @@ import click
 
 from pm_core import store, graph, git_ops, prompt_gen, notes
 from pm_core.backend import detect_backend, get_backend
-from pm_core.claude_launcher import find_claude, find_editor, launch_claude, launch_claude_print
+from pm_core.claude_launcher import find_claude, find_editor, launch_claude, launch_claude_print, clear_session
 from pm_core import tmux as tmux_mod
 from pm_core import pane_layout
 from pm_core.plan_parser import parse_plan_prs
@@ -243,11 +243,15 @@ def init(repo_url: str | None, name: str, base_branch: str, directory: str,
     # Ensure notes.txt is gitignored (it's local/clone-specific)
     gitignore = root / ".gitignore"
     gitignore_content = gitignore.read_text() if gitignore.exists() else ""
-    if "notes.txt" not in gitignore_content:
+    additions = []
+    for fname in ("notes.txt", ".pm-sessions.json"):
+        if fname not in gitignore_content:
+            additions.append(fname)
+    if additions:
         with open(gitignore, "a") as f:
             if gitignore_content and not gitignore_content.endswith("\n"):
                 f.write("\n")
-            f.write("notes.txt\n")
+            f.write("\n".join(additions) + "\n")
 
     # For external dirs (--dir pointing outside a git repo), init as standalone git repo
     if not store.is_internal_pm_dir(root):
@@ -317,7 +321,8 @@ def plan():
 
 @plan.command("add")
 @click.argument("name")
-def plan_add(name: str):
+@click.option("--new", "fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
+def plan_add(name: str, fresh: bool):
     """Create a new plan and launch Claude to develop it."""
     root = state_root()
     data = store.load(root)
@@ -366,8 +371,11 @@ any constraints.
 
     claude = find_claude()
     if claude:
+        session_key = f"plan:add:{plan_id}"
+        if fresh:
+            clear_session(root, session_key)
         click.echo("Launching Claude...")
-        launch_claude(prompt)
+        launch_claude(prompt, session_key=session_key, pm_root=root, resume=not fresh)
         # Background review
         check_prompt = review_mod.REVIEW_PROMPTS["plan-add"].format(path=plan_path)
         click.echo("Reviewing results... (background)")
@@ -395,7 +403,8 @@ def plan_list():
 @plan.command("review")
 @click.argument("plan_id", default=None, required=False)
 @click.option("--prs", "initial_prs", default=None, help="Seed the conversation with an initial PR list")
-def plan_review(plan_id: str | None, initial_prs: str | None):
+@click.option("--new", "fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
+def plan_review(plan_id: str | None, initial_prs: str | None, fresh: bool):
     """Launch Claude to break a plan into PRs (written to plan file).
 
     If PLAN_ID is omitted, auto-selects when there's exactly one plan.
@@ -479,8 +488,11 @@ After writing, the user can run `pm plan load` to create all PRs at once.
 
     claude = find_claude()
     if claude:
+        session_key = f"plan:review:{plan_id}"
+        if fresh:
+            clear_session(root, session_key)
         click.echo(f"Launching Claude to review plan {plan_id}...")
-        launch_claude(prompt)
+        launch_claude(prompt, session_key=session_key, pm_root=root, resume=not fresh)
         # Background review
         check_prompt = review_mod.REVIEW_PROMPTS["plan-review"].format(path=plan_path)
         click.echo("Reviewing results... (background)")
@@ -558,7 +570,7 @@ dependency tree.
     claude = find_claude()
     if claude:
         click.echo("Launching Claude to review dependencies...")
-        launch_claude(prompt)
+        launch_claude(prompt, session_key="plan:deps", pm_root=root)
         # Background review
         check_prompt = review_mod.REVIEW_PROMPTS["plan-deps"]
         click.echo("Reviewing results... (background)")
@@ -721,8 +733,11 @@ def _run_fix_command(step_name: str, review_path_str: str):
 
     claude = find_claude()
     if claude:
+        # Use review file path as unique key component
+        review_key = review_path.stem  # e.g. "plan-add-20240101-120000"
+        session_key = f"fix:{step_name.replace(' ', '-')}:{review_key}"
         click.echo(f"Launching Claude to fix issues from review...")
-        launch_claude(prompt)
+        launch_claude(prompt, session_key=session_key, pm_root=root)
     else:
         click.echo("Claude CLI not found. Copy-paste this prompt:")
         click.echo(f"---\n{prompt}\n---")
@@ -834,8 +849,9 @@ the PRs in the project.
 
     claude = find_claude()
     if claude:
+        session_key = f"plan:import:{plan_id}"
         click.echo("Launching Claude...")
-        launch_claude(prompt)
+        launch_claude(prompt, session_key=session_key, pm_root=root)
         # Background review
         check_prompt = review_mod.REVIEW_PROMPTS["plan-import"].format(path=plan_path)
         click.echo("Reviewing results... (background)")
@@ -1050,7 +1066,8 @@ def pr_ready():
 @pr.command("start")
 @click.argument("pr_id", default=None, required=False)
 @click.option("--workdir", default=None, help="Custom work directory")
-def pr_start(pr_id: str | None, workdir: str):
+@click.option("--new", "fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
+def pr_start(pr_id: str | None, workdir: str, fresh: bool):
     """Start working on a PR: clone, branch, print prompt.
 
     If PR_ID is omitted, uses the active PR if it's pending/ready, or
@@ -1191,10 +1208,16 @@ def pr_start(pr_id: str | None, workdir: str):
         except Exception as e:
             click.echo(f"Failed to create tmux window: {e}", err=True)
             click.echo("Launching Claude in current terminal...")
-            launch_claude(prompt, cwd=str(work_path))
+            session_key = f"pr:start:{pr_id}"
+            if fresh:
+                clear_session(root, session_key)
+            launch_claude(prompt, cwd=str(work_path), session_key=session_key, pm_root=root, resume=not fresh)
     else:
+        session_key = f"pr:start:{pr_id}"
+        if fresh:
+            clear_session(root, session_key)
         click.echo("Launching Claude...")
-        launch_claude(prompt, cwd=str(work_path))
+        launch_claude(prompt, cwd=str(work_path), session_key=session_key, pm_root=root, resume=not fresh)
 
 
 @pr.command("done")
@@ -1407,8 +1430,14 @@ def session_cmd():
     click.echo(f"Creating tmux session '{session_name}'...")
     tmux_mod.create_session(session_name, cwd, "pm tui")
 
-    # Get the TUI pane ID and window ID
+    # Forward key environment variables into the tmux session
     import subprocess as _sp
+    for env_key in ("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS", "PM_PROJECT", "EDITOR", "PATH"):
+        val = os.environ.get(env_key)
+        if val:
+            _sp.run(["tmux", "set-environment", "-t", session_name, env_key, val], check=False)
+
+    # Get the TUI pane ID and window ID
     tui_pane = _sp.run(
         ["tmux", "list-panes", "-t", session_name, "-F", "#{pane_id}"],
         capture_output=True, text=True,
@@ -1794,7 +1823,8 @@ def cluster_auto(threshold, max_commits, weights, output_fmt):
 @cluster.command("explore")
 @click.option("--bridged", is_flag=True, default=False,
               help="Launch in a bridge pane (for agent orchestration)")
-def cluster_explore(bridged):
+@click.option("--new", "fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
+def cluster_explore(bridged, fresh):
     """Interactively explore code clusters with Claude."""
     import tempfile
     from pm_core.cluster import extract_chunks, compute_edges, agglomerative_cluster, pre_partition
@@ -1906,7 +1936,10 @@ def cluster_explore(bridged):
         click.echo(f"Bridge socket: {socket_path}")
         return
 
-    launch_claude(prompt, cwd=str(repo_root))
+    session_key = "cluster:explore"
+    if fresh:
+        clear_session(root, session_key)
+    launch_claude(prompt, cwd=str(repo_root), session_key=session_key, pm_root=root, resume=not fresh)
 
 
 def _in_pm_tmux_session() -> bool:
@@ -1924,12 +1957,13 @@ def _in_pm_tmux_session() -> bool:
 
 @cli.group(invoke_without_command=True)
 @click.option("--step", default=None, help="Force a specific workflow step")
+@click.option("--new", "fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
 @click.pass_context
-def guide(ctx, step):
+def guide(ctx, step, fresh):
     """Guided workflow — walks through init -> plan -> PRs -> start."""
     if ctx.invoked_subcommand is not None:
         return
-    _run_guide(step)
+    _run_guide(step, fresh=fresh)
 
 
 @guide.command("done", hidden=True)
@@ -1944,14 +1978,27 @@ def guide_done_cmd():
         click.echo("No project found.", err=True)
         raise SystemExit(1)
 
-    state, _ctx = guide_mod.detect_state(root)
+    started = guide_mod.get_started_step(root)
+    if started is None:
+        click.echo("No guide step has been started yet.", err=True)
+        raise SystemExit(1)
+
+    completed = guide_mod.get_completed_step(root)
+    started_idx = guide_mod.STEP_ORDER.index(started) if started in guide_mod.STEP_ORDER else 0
+    completed_idx = guide_mod.STEP_ORDER.index(completed) if completed in guide_mod.STEP_ORDER else -1
+
+    if completed_idx >= started_idx:
+        click.echo("Already completed.")
+        return
+
+    state = started
     guide_mod.mark_step_completed(root, state)
     desc = guide_mod.STEP_DESCRIPTIONS.get(state, state)
     click.echo(f"Step completed: {desc}")
 
 
-def _run_guide(step):
-    from pm_core.claude_launcher import find_claude, _skip_permissions
+def _run_guide(step, fresh=False):
+    from pm_core.claude_launcher import find_claude, _skip_permissions, load_session, save_session
 
     # Detect state
     try:
@@ -1975,10 +2022,14 @@ def _run_guide(step):
 
     # Terminal states
     if state == "all_done":
+        if root:
+            guide_mod.mark_step_started(root, state)
         click.echo("All PRs are merged. Project complete!")
         return
 
     if state == "all_in_progress":
+        if root:
+            guide_mod.mark_step_started(root, state)
         click.echo("All PRs are in progress or waiting for review.")
         click.echo("Run 'pm pr list' to see status, or 'pm pr sync' to check for merges.")
         return
@@ -2004,6 +2055,9 @@ def _run_guide(step):
     n = guide_mod.step_number(state)
     click.echo(f"Step {n}: {step_desc}")
 
+    if root:
+        guide_mod.mark_step_started(root, state)
+
     claude = find_claude()
     if not claude:
         click.echo("\nClaude CLI not found. Copy-paste this prompt into Claude Code:\n")
@@ -2015,16 +2069,34 @@ def _run_guide(step):
     if state == "needs_deps_review" and root:
         post_hook = lambda: guide_mod.set_deps_reviewed(root)
 
+    session_key = f"guide:{state}"
+
+    if fresh and root:
+        clear_session(root, session_key)
+
     if _in_pm_tmux_session():
         escaped = prompt.replace("'", "'\\''")
         skip = " --dangerously-skip-permissions" if _skip_permissions() else ""
-        cmd = f"claude{skip} '{escaped}' ; pm guide done ; pm guide"
+        resume_flag = ""
+        if root and not fresh:
+            resume_id = load_session(root, session_key)
+            if resume_id:
+                resume_flag = f" --resume {resume_id}"
+        cmd = f"claude --verbose{skip}{resume_flag} '{escaped}' ; pm guide done ; pm guide"
         if post_hook:
-            # For deps review, set the flag via a pm command inline
-            cmd = f"claude{skip} '{escaped}' ; pm guide done ; python -c \"from pm_core.guide import set_deps_reviewed; from pathlib import Path; set_deps_reviewed(Path('{root}'))\" ; pm guide"
+            cmd = f"claude --verbose{skip}{resume_flag} '{escaped}' ; pm guide done ; python -c \"from pm_core.guide import set_deps_reviewed; from pathlib import Path; set_deps_reviewed(Path('{root}'))\" ; pm guide"
+        # Log the full command for debugging
+        import logging as _logging
+        _log = _logging.getLogger("pm.guide")
+        _log.info("guide chain: skip_permissions=%s env=%s", _skip_permissions(),
+                   os.environ.get("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS"))
+        _log.info("guide chain cmd: claude%s '...' ; pm guide done ; pm guide", skip)
+        # Also print to stderr so it's visible in the pane
+        import sys
+        print(f"[pm guide] skip_permissions={_skip_permissions()} flag='{skip.strip()}'", file=sys.stderr)
         os.execvp("bash", ["bash", "-c", cmd])
     else:
-        launch_claude(prompt)
+        launch_claude(prompt, session_key=session_key, pm_root=root, resume=not fresh)
         if post_hook:
             post_hook()
         # Print next step

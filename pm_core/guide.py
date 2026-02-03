@@ -46,19 +46,56 @@ def get_completed_step(root: Path) -> str | None:
         return None
 
 
+def get_started_step(root: Path) -> str | None:
+    """Read the last started step from .guide-state, or None if not tracked."""
+    state_file = root / GUIDE_STATE_FILE
+    if not state_file.exists():
+        return None
+    try:
+        data = json.loads(state_file.read_text())
+        return data.get("started_step")
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def mark_step_started(root: Path, state: str) -> None:
+    """Record which step is about to be launched."""
+    state_file = root / GUIDE_STATE_FILE
+    data = {}
+    if state_file.exists():
+        try:
+            data = json.loads(state_file.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass
+    data["started_step"] = state
+    state_file.write_text(json.dumps(data) + "\n")
+
+
 def mark_step_completed(root: Path, state: str) -> None:
     """Write the completed step to .guide-state."""
     state_file = root / GUIDE_STATE_FILE
-    state_file.write_text(json.dumps({"completed_step": state}) + "\n")
+    data = {}
+    if state_file.exists():
+        try:
+            data = json.loads(state_file.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass
+    data["completed_step"] = state
+    state_file.write_text(json.dumps(data) + "\n")
 
-    # Ensure .guide-state is in .gitignore
+    # Ensure guide files are in .gitignore
     gitignore = root / ".gitignore"
     gitignore_content = gitignore.read_text() if gitignore.exists() else ""
-    if GUIDE_STATE_FILE not in gitignore_content:
-        with open(gitignore, "a") as f:
-            if gitignore_content and not gitignore_content.endswith("\n"):
-                f.write("\n")
-            f.write(f"{GUIDE_STATE_FILE}\n")
+    additions = []
+    for fname in (GUIDE_STATE_FILE, "guide-notes.md", ".pm-sessions.json"):
+        if fname not in gitignore_content:
+            additions.append(fname)
+    if additions:
+        suffix = ""
+        if gitignore_content and not gitignore_content.endswith("\n"):
+            suffix = "\n"
+        suffix += "\n".join(additions) + "\n"
+        gitignore.write_text(gitignore_content + suffix)
 
 
 def resolve_guide_step(root: Optional[Path]) -> tuple[str, dict]:
@@ -67,24 +104,40 @@ def resolve_guide_step(root: Optional[Path]) -> tuple[str, dict]:
     Compares artifact-based detection against the last completed step.
     If detection jumped ahead (e.g. plan file exists but step wasn't completed),
     falls back to the step after the last completed one.
+
+    Also uses started_step as a floor when completed_step is None - if a step
+    was started but not completed (e.g. user killed the pane), we stay on that
+    step rather than jumping ahead based on artifacts.
     """
     detected_state, ctx = detect_state(root)
     if root is None:
         return detected_state, ctx
 
     completed = get_completed_step(root)
+    started = get_started_step(root)
+    detected_idx = STEP_ORDER.index(detected_state) if detected_state in STEP_ORDER else -1
+
+    # If no step completed but one was started, use started as the floor
+    if completed is None and started is not None:
+        started_idx = STEP_ORDER.index(started) if started in STEP_ORDER else -1
+        if detected_idx > started_idx and started_idx >= 0:
+            # Detection jumped ahead of the started step - stay on started
+            _, fresh_ctx = detect_state(root)
+            return started, fresh_ctx
+        return detected_state, ctx
+
     if completed is None:
         return detected_state, ctx
 
     completed_idx = STEP_ORDER.index(completed) if completed in STEP_ORDER else -1
-    detected_idx = STEP_ORDER.index(detected_state) if detected_state in STEP_ORDER else -1
 
     # If detection jumped ahead of what was completed, stay on next step
     next_step_idx = completed_idx + 1
     if detected_idx > next_step_idx and next_step_idx < len(STEP_ORDER):
         corrected = STEP_ORDER[next_step_idx]
-        # Re-derive context for the corrected state
-        return corrected, ctx
+        # Re-derive context for the corrected state by re-detecting
+        _, fresh_ctx = detect_state(root)
+        return corrected, fresh_ctx
 
     return detected_state, ctx
 
@@ -100,8 +153,10 @@ def detect_state(root: Optional[Path]) -> tuple[str, dict]:
 
     try:
         data = store.load(root)
-    except Exception:
+    except FileNotFoundError:
         return "no_project", {}
+    except Exception as exc:
+        raise RuntimeError(f"Failed to load project data from {root}: {exc}") from exc
 
     plans = data.get("plans") or []
     prs = data.get("prs") or []
@@ -155,6 +210,23 @@ def step_number(state: str) -> int:
         return 0
 
 
+def _upcoming_steps_section(state: str) -> str:
+    """Return a description of what comes after the current step."""
+    interactive_steps = [s for s in STEP_ORDER if s not in ("all_in_progress", "all_done")]
+    try:
+        idx = interactive_steps.index(state)
+    except ValueError:
+        return ""
+    remaining = interactive_steps[idx + 1:]
+    if not remaining:
+        return ""
+    lines = []
+    for s in remaining:
+        desc = STEP_DESCRIPTIONS.get(s, s)
+        lines.append(f"  - {desc}")
+    return "\n## What comes next (DO NOT do these now)\n" + "\n".join(lines) + "\n\nStay focused on the current step. The steps above will each run in their own session.\n"
+
+
 def build_guide_prompt(state: str, ctx: dict, root: Optional[Path]) -> Optional[str]:
     """Build combined manager + step prompt for the given state.
 
@@ -172,6 +244,16 @@ def build_guide_prompt(state: str, ctx: dict, root: Optional[Path]) -> Optional[
     if root:
         notes_block = notes.notes_section(root)
 
+    guide_notes_block = ""
+    if root:
+        guide_notes_path = root / "guide-notes.md"
+        if guide_notes_path.exists():
+            content = guide_notes_path.read_text().strip()
+            if content:
+                guide_notes_block = f"\n## Context from previous steps\n{content}\n"
+
+    upcoming_block = _upcoming_steps_section(state)
+
     return f"""\
 You are managing the guided workflow for `pm` (Project Manager for Claude Code).
 You have access to the `pm` CLI — run `pm help` to see all commands.
@@ -180,7 +262,7 @@ Current state: {state_desc}
 Step {n} of {total} in the setup workflow.
 
 {step_instructions}
-{notes_block}
+{notes_block}{guide_notes_block}{upcoming_block}
 IMPORTANT — When this step is complete and the user is satisfied:
 - Confirm what was accomplished
 - Run `pm guide done` to record completion
@@ -202,7 +284,10 @@ of the project, then share what you've found with the user and ask about their
 goals for upcoming work. Use your judgment about what's worth asking vs. what
 you can figure out from the code.
 
-This conversation will inform the plan in the next step."""
+Before finishing, write a summary of the project context and the user's goals
+to pm/guide-notes.md. This is critical — the next step runs in a new session
+that won't have this conversation's context. This file is the only way to pass
+information forward between guide steps."""
 
     if state == "initialized":
         plan_path = "<will be created>"
@@ -218,7 +303,10 @@ This creates plan file at {plan_path} and launches a planning session.
 Based on what you know about the codebase and the conversation so far, draft
 a plan and write it to the plan file. Then walk the user through it and refine
 based on their feedback. The plan needs enough detail that the next step can
-break it into individual PRs."""
+break it into individual PRs.
+
+Before finishing, update pm/guide-notes.md with any decisions or context from
+this conversation that the next step will need."""
 
     if state == "has_plan_draft":
         plan_entry = ctx.get("plan", {})
@@ -301,6 +389,10 @@ Explain the next steps to the user and offer to start the first ready PR."""
 def run_non_interactive_step(state: str, ctx: dict, root: Path) -> bool:
     """Run a non-interactive step directly. Returns True if handled."""
     if state == "has_plan_prs":
+        # Guard against duplicate runs — only load if no PRs exist yet
+        data = ctx.get("data") or store.load(root)
+        if data.get("prs"):
+            return True
         plan_entry = ctx.get("plan", {})
         plan_id = plan_entry.get("id")
         cmd = ["pm", "plan", "load"]
