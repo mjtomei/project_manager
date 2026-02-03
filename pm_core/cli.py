@@ -1459,22 +1459,16 @@ def session_cmd():
         notes_pane = tmux_mod.split_pane(session_name, "h", _wrap(f"pm notes {notes_path}"))
         pane_layout.register_pane(session_name, window_id, notes_pane, "notes", "pm notes")
     else:
-        # Setup: TUI (top-left) | guide (right, focused)
-        #         notes (bottom-left) |
-        # Register notes before guide so guide (newest) gets the largest area
+        # Setup: TUI (left) | notes (right)
+        # The TUI will auto-launch the guide pane when it detects setup state
         notes_path.parent.mkdir(parents=True, exist_ok=True)
         if not notes_path.exists():
             notes_path.write_text(notes.NOTES_WELCOME)
-        notes_pane = tmux_mod.split_pane_at(tui_pane, "v", _wrap(f"pm notes {notes_path}"), background=True)
+        notes_pane = tmux_mod.split_pane(session_name, "h", _wrap(f"pm notes {notes_path}"))
         pane_layout.register_pane(session_name, window_id, notes_pane, "notes", "pm notes")
-        guide_pane = tmux_mod.split_pane(session_name, "h", _wrap("pm guide"))
-        pane_layout.register_pane(session_name, window_id, guide_pane, "guide", "pm guide")
 
     # Apply initial balanced layout
     pane_layout.rebalance(session_name, window_id)
-
-    if not has_project:
-        tmux_mod.select_pane(guide_pane)
 
     # Bind prefix-R to rebalance in this session
     import subprocess as _sp
