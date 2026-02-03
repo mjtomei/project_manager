@@ -38,7 +38,7 @@ STATUS_BG = {
 
 # Node dimensions
 NODE_W = 24
-NODE_H = 4
+NODE_H = 5  # 5 lines: top border, id, title, status, bottom border
 H_GAP = 6
 V_GAP = 2
 
