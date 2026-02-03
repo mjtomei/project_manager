@@ -2088,7 +2088,10 @@ def _run_guide(step, fresh=False):
             session_flag = f" --session-id {session_id}"
             save_cmd = f"pm _save-session '{session_key}' '{session_id}' '{root}' ; "
 
-        loop_guard = f"pm _loop-guard guide-{state}"
+        # Include project path hash in loop guard to make it project-specific
+        import hashlib
+        project_hash = hashlib.md5(str(root).encode()).hexdigest()[:8] if root else "unknown"
+        loop_guard = f"pm _loop-guard guide-{project_hash}-{state}"
 
         claude_cmd = f"claude{skip}{session_flag} '{escaped}'"
 
@@ -2288,8 +2291,14 @@ def tui():
     pass
 
 
-TUI_HISTORY_FILE = Path.home() / ".pm-pane-registry" / "tui-history.json"
+TUI_HISTORY_DIR = Path.home() / ".pm-pane-registry" / "tui-history"
 TUI_MAX_FRAMES = 50
+
+
+def _tui_history_file(session: str) -> Path:
+    """Get the TUI history file for a specific session."""
+    TUI_HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+    return TUI_HISTORY_DIR / f"{session}.json"
 
 
 def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
@@ -2348,28 +2357,29 @@ def _capture_tui_frame(pane_id: str) -> str:
     return result.stdout
 
 
-def _load_tui_history() -> list:
-    """Load TUI frame history."""
-    if not TUI_HISTORY_FILE.exists():
+def _load_tui_history(session: str) -> list:
+    """Load TUI frame history for a session."""
+    history_file = _tui_history_file(session)
+    if not history_file.exists():
         return []
     try:
         import json
-        return json.loads(TUI_HISTORY_FILE.read_text())
+        return json.loads(history_file.read_text())
     except (json.JSONDecodeError, OSError):
         return []
 
 
-def _save_tui_history(history: list) -> None:
-    """Save TUI frame history."""
+def _save_tui_history(session: str, history: list) -> None:
+    """Save TUI frame history for a session."""
     import json
-    TUI_HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
-    TUI_HISTORY_FILE.write_text(json.dumps(history, indent=2))
+    history_file = _tui_history_file(session)
+    history_file.write_text(json.dumps(history, indent=2))
 
 
-def _add_frame_to_history(frame: str, pane_id: str) -> None:
+def _add_frame_to_history(session: str, frame: str, pane_id: str) -> None:
     """Add a frame to history, keeping only the last N frames."""
     from datetime import datetime, timezone
-    history = _load_tui_history()
+    history = _load_tui_history(session)
     history.append({
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "pane_id": pane_id,
@@ -2378,7 +2388,7 @@ def _add_frame_to_history(frame: str, pane_id: str) -> None:
     # Keep only last N frames
     if len(history) > TUI_MAX_FRAMES:
         history = history[-TUI_MAX_FRAMES:]
-    _save_tui_history(history)
+    _save_tui_history(session, history)
 
 
 @tui.command("view")
@@ -2397,7 +2407,7 @@ def tui_view(no_history: bool, session: str | None):
 
     frame = _capture_tui_frame(pane_id)
     if not no_history:
-        _add_frame_to_history(frame, pane_id)
+        _add_frame_to_history(sess, frame, pane_id)
 
     click.echo(f"[Session: {sess}, Pane: {pane_id}]")
     click.echo(frame)
@@ -2406,20 +2416,27 @@ def tui_view(no_history: bool, session: str | None):
 @tui.command("history")
 @click.option("--frames", "-n", default=5, help="Number of frames to show")
 @click.option("--all", "show_all", is_flag=True, help="Show all frames")
-def tui_history(frames: int, show_all: bool):
+@click.option("--session", "-s", default=None, help="Specify pm session name")
+def tui_history(frames: int, show_all: bool, session: str | None):
     """View recent TUI frames from history.
 
     Shows the last N captured frames with timestamps.
     """
-    history = _load_tui_history()
+    pane_id, sess = _find_tui_pane(session)
+    if not sess:
+        click.echo("No pm tmux session found.", err=True)
+        raise SystemExit(1)
+
+    history = _load_tui_history(sess)
     if not history:
-        click.echo("No TUI history found.")
+        click.echo(f"No TUI history found for session {sess}.")
         return
 
     if show_all:
         frames = len(history)
 
     recent = history[-frames:]
+    click.echo(f"[Session: {sess}]")
     for i, entry in enumerate(recent):
         timestamp = entry.get("timestamp", "unknown")
         content = entry.get("content", "")
@@ -2486,13 +2503,20 @@ General:
 
 
 @tui.command("clear-history")
-def tui_clear_history():
-    """Clear the TUI frame history."""
-    if TUI_HISTORY_FILE.exists():
-        TUI_HISTORY_FILE.unlink()
-        click.echo("TUI history cleared.")
+@click.option("--session", "-s", default=None, help="Specify pm session name")
+def tui_clear_history(session: str | None):
+    """Clear the TUI frame history for a session."""
+    pane_id, sess = _find_tui_pane(session)
+    if not sess:
+        click.echo("No pm tmux session found.", err=True)
+        raise SystemExit(1)
+
+    history_file = _tui_history_file(sess)
+    if history_file.exists():
+        history_file.unlink()
+        click.echo(f"TUI history cleared for session {sess}.")
     else:
-        click.echo("No history to clear.")
+        click.echo(f"No history to clear for session {sess}.")
 
 
 def main():
