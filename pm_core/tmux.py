@@ -153,11 +153,25 @@ def apply_layout(session: str, window: str, layout_string: str) -> bool:
 
 
 def get_session_name() -> str:
-    """Get the current tmux session name (must be called from within tmux)."""
-    result = subprocess.run(
-        ["tmux", "display-message", "-p", "#{session_name}"],
-        capture_output=True, text=True,
-    )
+    """Get the current tmux session name (must be called from within tmux).
+
+    Uses $TMUX_PANE to target the specific pane, which is more reliable
+    than display-message without a target (which uses "current client"
+    and can return wrong session in background processes).
+    """
+    pane = os.environ.get("TMUX_PANE")
+    if pane:
+        # Target the specific pane to get accurate session name
+        result = subprocess.run(
+            ["tmux", "display-message", "-p", "-t", pane, "#{session_name}"],
+            capture_output=True, text=True,
+        )
+    else:
+        # Fallback to current client
+        result = subprocess.run(
+            ["tmux", "display-message", "-p", "#{session_name}"],
+            capture_output=True, text=True,
+        )
     return result.stdout.strip()
 
 

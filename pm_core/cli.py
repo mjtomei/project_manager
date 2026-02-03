@@ -1253,13 +1253,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
         escaped_prompt = prompt.replace("'", "'\\''")
         cmd = f"claude '{escaped_prompt}'"
         try:
-            session = os.environ.get("TMUX", "").split(",")[-1] if os.environ.get("TMUX") else ""
-            # Get current session name
-            import subprocess
-            session_name = subprocess.run(
-                ["tmux", "display-message", "-p", "#{session_name}"],
-                capture_output=True, text=True
-            ).stdout.strip()
+            # Get current session name (uses $TMUX_PANE for accuracy)
+            session_name = tmux_mod.get_session_name()
             tmux_mod.new_window(session_name, window_name, cmd, str(work_path))
             click.echo(f"Launched Claude in tmux window '{window_name}'")
         except Exception as e:
@@ -2015,11 +2010,7 @@ def cluster_explore(bridged, fresh):
             click.echo("--bridged requires running inside tmux.", err=True)
             raise SystemExit(1)
 
-        import subprocess as _sp
-        session_name = _sp.run(
-            ["tmux", "display-message", "-p", "#{session_name}"],
-            capture_output=True, text=True,
-        ).stdout.strip()
+        session_name = tmux_mod.get_session_name()
 
         socket_path = launch_bridge_in_tmux(prompt, cwd=str(repo_root), session_name=session_name)
 
@@ -2045,12 +2036,7 @@ def _in_pm_tmux_session() -> bool:
     """Check if we're in a tmux session created by pm (named pm-*)."""
     if not tmux_mod.in_tmux():
         return False
-    import subprocess as _sp
-    result = _sp.run(
-        ["tmux", "display-message", "-p", "#{session_name}"],
-        capture_output=True, text=True,
-    )
-    session_name = result.stdout.strip()
+    session_name = tmux_mod.get_session_name()
     return session_name.startswith("pm-")
 
 
