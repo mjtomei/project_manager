@@ -95,9 +95,9 @@ class GitHubBackend(Backend):
             # Draft PR already exists - just push commits
             return (
                 f"- Work in the current directory (already on branch {branch})\n"
-                f"- A draft PR has been created: {gh_pr_url}\n"
-                f"- When done, commit your changes and push the branch:\n"
-                f"    git push -u origin {branch}\n"
+                f"- A draft PR has been created and the branch pushed: {gh_pr_url}\n"
+                f"- When done, commit your changes and push:\n"
+                f"    git push origin {branch}\n"
                 f"- Then tell the human you're done so they can run: pm pr done {pr_id}"
             )
         # Fallback for when draft PR wasn't created (e.g., push failed)
