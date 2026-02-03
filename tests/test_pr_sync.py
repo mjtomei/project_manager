@@ -56,6 +56,36 @@ def tmp_pm_root_with_prs(tmp_path):
     return root
 
 
+@pytest.fixture
+def tmp_pm_root_github(tmp_path):
+    """Create a temporary PM root with GitHub backend and gh_pr_number fields."""
+    root = tmp_path / "pm"
+    root.mkdir()
+    (root / "project.yaml").write_text(
+        "project:\n"
+        "  name: test-project\n"
+        "  repo: https://github.com/test/repo.git\n"
+        "  base_branch: main\n"
+        "  backend: github\n"
+        "prs:\n"
+        "  - id: pr-001\n"
+        "    title: First PR\n"
+        "    status: in_progress\n"
+        "    branch: pm/pr-001-first\n"
+        "    gh_pr_number: 101\n"
+        "  - id: pr-002\n"
+        "    title: Second PR\n"
+        "    status: in_review\n"
+        "    branch: pm/pr-002-second\n"
+        "    gh_pr_number: 102\n"
+        "  - id: pr-003\n"
+        "    title: Third PR\n"
+        "    status: pending\n"
+        "    branch: pm/pr-003-third\n"
+    )
+    return root
+
+
 class TestLastSyncTimestamp:
     """Tests for timestamp tracking."""
 
@@ -330,9 +360,19 @@ class TestSyncResult:
         result = pr_sync.SyncResult(synced=True)
         assert result.updated_count == 0
         assert result.merged_prs == []
+        assert result.closed_prs == []
         assert result.ready_prs == []
         assert result.error is None
         assert result.skipped_reason is None
+
+    def test_sync_result_closed_prs(self):
+        """SyncResult tracks closed PRs."""
+        result = pr_sync.SyncResult(
+            synced=True,
+            updated_count=2,
+            closed_prs=["pr-001", "pr-002"]
+        )
+        assert result.closed_prs == ["pr-001", "pr-002"]
 
 
 class TestMinIntervalConstants:
@@ -383,3 +423,119 @@ class TestCLIIntegration:
         final_data = store.load(tmp_pm_root_with_prs)
         pr_001_final = next(p for p in final_data["prs"] if p["id"] == "pr-001")
         assert pr_001_final["status"] == "merged"
+
+
+class TestSyncFromGitHub:
+    """Tests for sync_from_github function."""
+
+    def test_sync_from_github_requires_github_backend(self, tmp_pm_root):
+        """sync_from_github returns error for non-GitHub backends."""
+        result = pr_sync.sync_from_github(tmp_pm_root)
+
+        assert result.synced is False
+        assert "GitHub" in result.error
+
+    def test_sync_from_github_detects_merged(self, tmp_pm_root_github):
+        """sync_from_github detects merged PRs from GitHub API."""
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = json.dumps({
+            "state": "MERGED",
+            "isDraft": False,
+            "mergedAt": "2024-01-15T10:00:00Z"
+        })
+
+        with patch("subprocess.run", return_value=mock_result), \
+             patch("subprocess.Popen"):  # Don't actually spawn background process
+            result = pr_sync.sync_from_github(tmp_pm_root_github, save_state=False)
+
+        assert result.synced is True
+        assert "pr-001" in result.merged_prs
+
+    def test_sync_from_github_detects_closed(self, tmp_pm_root_github):
+        """sync_from_github detects closed PRs from GitHub API."""
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = json.dumps({
+            "state": "CLOSED",
+            "isDraft": False,
+            "mergedAt": None
+        })
+
+        with patch("subprocess.run", return_value=mock_result), \
+             patch("subprocess.Popen"):  # Don't actually spawn background process
+            result = pr_sync.sync_from_github(tmp_pm_root_github, save_state=False)
+
+        assert result.synced is True
+        assert "pr-001" in result.closed_prs
+
+    def test_sync_from_github_detects_draft_as_in_progress(self, tmp_pm_root_github):
+        """sync_from_github sets draft PRs to in_progress."""
+        data = store.load(tmp_pm_root_github)
+        # Set pr-001 to in_review first
+        data["prs"][0]["status"] = "in_review"
+        store.save(data, tmp_pm_root_github)
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = json.dumps({
+            "state": "OPEN",
+            "isDraft": True,
+            "mergedAt": None
+        })
+
+        with patch("subprocess.run", return_value=mock_result), \
+             patch("subprocess.Popen"):
+            result = pr_sync.sync_from_github(tmp_pm_root_github, save_state=False)
+
+        assert result.synced is True
+        assert result.updated_count >= 1
+
+    def test_sync_from_github_detects_ready_as_in_review(self, tmp_pm_root_github):
+        """sync_from_github sets ready PRs to in_review."""
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = json.dumps({
+            "state": "OPEN",
+            "isDraft": False,
+            "mergedAt": None
+        })
+
+        with patch("subprocess.run", return_value=mock_result), \
+             patch("subprocess.Popen"):
+            result = pr_sync.sync_from_github(tmp_pm_root_github, save_state=False)
+
+        assert result.synced is True
+        # pr-001 was in_progress, should change to in_review
+        assert result.updated_count >= 1
+
+    def test_sync_from_github_skips_prs_without_gh_pr_number(self, tmp_pm_root_github):
+        """sync_from_github skips PRs without gh_pr_number."""
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = json.dumps({
+            "state": "MERGED",
+            "isDraft": False,
+            "mergedAt": "2024-01-15T10:00:00Z"
+        })
+
+        with patch("subprocess.run", return_value=mock_result), \
+             patch("subprocess.Popen"):
+            result = pr_sync.sync_from_github(tmp_pm_root_github, save_state=False)
+
+        # pr-003 has no gh_pr_number, should not appear in results
+        assert "pr-003" not in result.merged_prs
+        assert "pr-003" not in result.closed_prs
+
+    def test_sync_from_github_handles_api_errors(self, tmp_pm_root_github):
+        """sync_from_github handles GitHub API errors gracefully."""
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stdout = ""
+
+        with patch("subprocess.run", return_value=mock_result):
+            result = pr_sync.sync_from_github(tmp_pm_root_github, save_state=False)
+
+        # Should still return synced=True but with no updates
+        assert result.synced is True
+        assert result.updated_count == 0
