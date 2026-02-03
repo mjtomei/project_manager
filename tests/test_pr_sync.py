@@ -150,7 +150,8 @@ class TestShouldSync:
     def test_should_sync_handles_naive_datetime(self, tmp_pm_root):
         """should_sync handles naive datetime (no timezone) in stored timestamp."""
         data = store.load(tmp_pm_root)
-        # Store naive datetime string (no +00:00 suffix)
+        # Intentionally use naive datetime (no timezone) to test that the code
+        # handles timestamps stored without timezone info gracefully
         old = datetime.now() - timedelta(seconds=120)
         data["project"]["last_pr_sync"] = old.isoformat()
 

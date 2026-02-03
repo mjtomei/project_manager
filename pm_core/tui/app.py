@@ -738,7 +738,9 @@ class ProjectManagerApp(App):
             self.log_message(f"Refreshed - Guide step: {guide.STEP_DESCRIPTIONS.get(self._current_guide_step, self._current_guide_step)}")
         else:
             # Trigger PR sync on manual refresh (non-blocking)
-            self.call_later(lambda: self.run_worker(self._do_normal_sync(is_manual=True)))
+            async def do_refresh():
+                await self._do_normal_sync(is_manual=True)
+            self.run_worker(do_refresh())
             self.log_message("Refreshing...")
 
     def action_restart(self) -> None:
