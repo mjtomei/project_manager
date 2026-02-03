@@ -30,8 +30,10 @@ def load_session(root: Path, key: str) -> str | None:
         return None
     try:
         data = json.loads(path.read_text())
+        if not isinstance(data, dict):
+            return None
         entry = data.get(key)
-        if entry:
+        if entry and isinstance(entry, dict):
             return entry.get("session_id")
     except (json.JSONDecodeError, OSError):
         pass
@@ -44,7 +46,9 @@ def save_session(root: Path, key: str, session_id: str) -> None:
     data = {}
     if path.exists():
         try:
-            data = json.loads(path.read_text())
+            loaded = json.loads(path.read_text())
+            if isinstance(loaded, dict):
+                data = loaded
         except (json.JSONDecodeError, OSError):
             pass
     data[key] = {

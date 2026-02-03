@@ -129,7 +129,11 @@ def resolve_guide_step(root: Optional[Path]) -> tuple[str, dict]:
     if completed is None:
         return detected_state, ctx
 
-    completed_idx = STEP_ORDER.index(completed) if completed in STEP_ORDER else -1
+    # Treat invalid completed_step as if it were None
+    if completed not in STEP_ORDER:
+        return detected_state, ctx
+
+    completed_idx = STEP_ORDER.index(completed)
 
     # If detection jumped ahead of what was completed, stay on next step
     next_step_idx = completed_idx + 1
