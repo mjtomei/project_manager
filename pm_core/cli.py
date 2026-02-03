@@ -2069,31 +2069,35 @@ def _run_guide(step, fresh=False):
         clear_session(root, session_key)
 
     if _in_pm_tmux_session():
+        import uuid as uuid_mod
         escaped = prompt.replace("'", "'\\''")
         skip = " --dangerously-skip-permissions" if _skip_permissions() else ""
-        resume_flag = ""
-        if root and not fresh:
-            resume_id = load_session(root, session_key)
-            if resume_id:
-                resume_flag = f" --resume {resume_id}"
 
-        # Build command chain with:
-        # 1. Capture stderr to temp file while showing on terminal (via tee)
-        # 2. Extract session_id after claude exits
-        # 3. Loop guard before restarting
-        stderr_file = f"/tmp/pm-claude-stderr-$$.log"
-        extract_cmd = f"pm _extract-session '{session_key}' {stderr_file} '{root}'"
-        cleanup_cmd = f"rm -f {stderr_file}"
+        # Get or create session ID
+        session_id = None
+        session_flag = ""
+        if root and not fresh:
+            session_id = load_session(root, session_key)
+            if session_id:
+                session_flag = f" --resume {session_id}"
+
+        # If no existing session, generate new UUID and save it
+        save_cmd = ""
+        if not session_id and root:
+            session_id = str(uuid_mod.uuid4())
+            session_flag = f" --session-id {session_id}"
+            save_cmd = f"pm _save-session '{session_key}' '{session_id}' '{root}' ; "
+
         loop_guard = f"pm _loop-guard guide-{state}"
 
-        claude_cmd = f"claude --verbose{skip}{resume_flag} '{escaped}' 2> >(tee {stderr_file} >&2)"
+        claude_cmd = f"claude{skip}{session_flag} '{escaped}'"
 
         if post_hook:
             post_cmd = f"pm guide done ; python -c \"from pm_core.guide import set_deps_reviewed; from pathlib import Path; set_deps_reviewed(Path('{root}'))\""
         else:
             post_cmd = "pm guide done"
 
-        cmd = f"{claude_cmd} ; {extract_cmd} ; {cleanup_cmd} ; {post_cmd} ; {loop_guard} && pm guide"
+        cmd = f"{save_cmd}{claude_cmd} ; {post_cmd} ; {loop_guard} && pm guide"
 
         # Log the full command for debugging
         import logging as _logging
@@ -2101,9 +2105,6 @@ def _run_guide(step, fresh=False):
         _log.info("guide chain: skip_permissions=%s env=%s", _skip_permissions(),
                    os.environ.get("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS"))
         _log.info("guide chain cmd: %s", cmd[:100] + "...")
-        # Also print to stderr so it's visible in the pane
-        import sys
-        print(f"[pm guide] skip_permissions={_skip_permissions()} flag='{skip.strip()}'", file=sys.stderr)
         os.execvp("bash", ["bash", "-c", cmd])
     else:
         launch_claude(prompt, session_key=session_key, pm_root=root, resume=not fresh)
@@ -2171,21 +2172,15 @@ def notes_cmd(notes_file: str | None, disable_splash: bool):
 
 
 
-@cli.command("_extract-session", hidden=True)
+@cli.command("_save-session", hidden=True)
 @click.argument("session_key")
-@click.argument("stderr_file")
+@click.argument("session_id")
 @click.argument("pm_root")
-def extract_session_cmd(session_key: str, stderr_file: str, pm_root: str):
-    """Internal: extract session_id from stderr file and save to registry."""
-    from pm_core.claude_launcher import _parse_session_id, save_session
-    stderr_path = Path(stderr_file)
-    if not stderr_path.exists():
-        return
+def save_session_cmd(session_key: str, session_id: str, pm_root: str):
+    """Internal: save a session ID to the registry."""
+    from pm_core.claude_launcher import save_session
     try:
-        stderr_text = stderr_path.read_text()
-        sid = _parse_session_id(stderr_text)
-        if sid:
-            save_session(Path(pm_root), session_key, sid)
+        save_session(Path(pm_root), session_key, session_id)
     except Exception:
         pass  # Best effort
 
