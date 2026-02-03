@@ -2325,8 +2325,8 @@ def clear_session_cmd(session_key: str, pm_root: str):
 def loop_guard_cmd(loop_id: str):
     """Internal: guard against rapid restart loops.
 
-    Tracks timestamps of restarts. If 5 restarts happen in <7 seconds,
-    exits with code 1 to break the loop. Always sleeps 1 second.
+    Tracks timestamps of restarts. If 5 restarts happen in <30 seconds,
+    exits with code 1 to break the loop. Always sleeps 5 seconds.
     """
     import time
     loop_file = Path.home() / ".pm-pane-registry" / f"loop-{loop_id}.json"
@@ -2344,14 +2344,14 @@ def loop_guard_cmd(loop_id: str):
         except Exception:
             timestamps = []
 
-    # Keep only timestamps from the last 10 seconds
-    timestamps = [t for t in timestamps if now - t < 10]
+    # Keep only timestamps from the last 60 seconds
+    timestamps = [t for t in timestamps if now - t < 60]
     timestamps.append(now)
 
-    # Check for rapid restarts: 5+ restarts in <7 seconds
+    # Check for rapid restarts: 5+ restarts in <30 seconds
     if len(timestamps) >= 5:
         oldest_recent = timestamps[-5]
-        if now - oldest_recent < 7:
+        if now - oldest_recent < 30:
             click.echo(f"Loop guard triggered: {len(timestamps)} restarts in {now - oldest_recent:.1f}s", err=True)
             click.echo("Breaking loop to prevent runaway restarts.", err=True)
             # Clear the timestamps so next manual run works
@@ -2363,7 +2363,7 @@ def loop_guard_cmd(loop_id: str):
     loop_file.write_text(json.dumps(timestamps))
 
     # Sleep before allowing restart
-    time.sleep(1)
+    time.sleep(5)
 
 
 @cli.command("_pane-exited", hidden=True)
