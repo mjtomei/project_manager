@@ -1246,17 +1246,30 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
         click.echo(prompt)
         return
 
-    if tmux_mod.in_tmux():
-        # Create a new tmux window for this PR
+    # Try to launch in the pm tmux session
+    if tmux_mod.has_tmux():
         pr_title = pr_entry.get("title", pr_id)
         window_name = store.slugify(pr_title)[:20]
         escaped_prompt = prompt.replace("'", "'\\''")
         cmd = f"claude '{escaped_prompt}'"
+
+        # Get the expected pm session name for this project
+        session_name = _get_session_name_for_cwd()
+
+        # Create session if it doesn't exist
+        if not tmux_mod.session_exists(session_name):
+            click.echo(f"Creating pm session '{session_name}'...")
+            tmux_mod.create_session(session_name, str(work_path), "bash")
+            # Forward key environment variables
+            import subprocess as _sp
+            for env_key in ("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS", "PM_PROJECT", "EDITOR", "PATH"):
+                val = os.environ.get(env_key)
+                if val:
+                    _sp.run(["tmux", "set-environment", "-t", session_name, env_key, val], check=False)
+
         try:
-            # Get current session name (uses $TMUX_PANE for accuracy)
-            session_name = tmux_mod.get_session_name()
             tmux_mod.new_window(session_name, window_name, cmd, str(work_path))
-            click.echo(f"Launched Claude in tmux window '{window_name}'")
+            click.echo(f"Launched Claude in tmux window '{window_name}' (session: {session_name})")
         except Exception as e:
             click.echo(f"Failed to create tmux window: {e}", err=True)
             click.echo("Launching Claude in current terminal...")
