@@ -11,6 +11,7 @@ from pathlib import Path
 import click
 
 from pm_core import store, graph, git_ops, prompt_gen, notes
+from pm_core import pr_sync as pr_sync_mod
 
 # Set up logging to file for debugging
 _log_dir = Path.home() / ".pm-pane-registry"
@@ -102,6 +103,20 @@ def load_and_sync() -> tuple[dict, Path]:
 def save_and_push(data: dict, root: Path, message: str = "pm: update state") -> None:
     """Save state. Use 'pm push' to commit and share changes."""
     store.save(data, root)
+
+
+def trigger_tui_refresh() -> None:
+    """Send refresh key to TUI pane in the pm session for the current directory."""
+    try:
+        if not tmux_mod.has_tmux():
+            return
+        # Use _find_tui_pane which correctly matches session by cwd
+        tui_pane, session = _find_tui_pane()
+        if tui_pane and session:
+            tmux_mod.send_keys_literal(tui_pane, "r")
+            _log.debug("Sent refresh to TUI pane %s in session %s", tui_pane, session)
+    except Exception as e:
+        _log.debug("Could not trigger TUI refresh: %s", e)
 
 
 def _workdirs_dir(data: dict) -> Path:
@@ -381,6 +396,7 @@ def plan_add(name: str, fresh: bool):
     save_and_push(data, root, f"pm: add plan {plan_id}")
     click.echo(f"Created plan {plan_id}: {name}")
     click.echo(f"  Plan file: {plan_path}")
+    trigger_tui_refresh()
 
     notes_block = notes.notes_section(root)
     prompt = f"""\
@@ -830,6 +846,7 @@ def _run_plan_import(name: str):
     save_and_push(data, root, f"pm: add plan {plan_id}")
     click.echo(f"Created plan {plan_id}: {name}")
     click.echo(f"  Plan file: {plan_path}")
+    trigger_tui_refresh()
 
     notes_block = notes.notes_section(root)
 
@@ -999,6 +1016,23 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
                     entry["gh_pr"] = pr_info["url"]
                     entry["gh_pr_number"] = pr_info["number"]
                     click.echo(f"Draft PR created: {pr_info['url']}")
+
+                    # Use GitHub PR number for local pr_id
+                    gh_number = pr_info["number"]
+                    existing_ids = {p["id"] for p in (data.get("prs") or [])}
+                    gh_pr_id = f"pr-{gh_number:03d}"
+                    if gh_pr_id in existing_ids:
+                        # Conflict: append suffix to make unique
+                        gh_pr_id = f"pr-{gh_number:03d}-gh"
+                        if gh_pr_id in existing_ids:
+                            # Still conflict: use sequential ID as fallback
+                            click.echo(f"Note: Using sequential ID {pr_id} (GitHub #{gh_number} conflicts)")
+                        else:
+                            pr_id = gh_pr_id
+                            entry["id"] = pr_id
+                    else:
+                        pr_id = gh_pr_id
+                        entry["id"] = pr_id
                 else:
                     click.echo("Warning: Failed to create draft PR.", err=True)
 
@@ -1014,6 +1048,7 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
         click.echo(f"  depends_on: {', '.join(deps)}")
     if entry.get("gh_pr"):
         click.echo(f"  draft PR: {entry['gh_pr']}")
+    trigger_tui_refresh()
 
 
 @pr.command("edit")
@@ -1021,8 +1056,10 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
 @click.option("--title", default=None, help="New title")
 @click.option("--depends-on", "depends_on", default=None, help="Comma-separated PR IDs (replaces existing)")
 @click.option("--description", "desc", default=None, help="New description")
-def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | None):
-    """Edit an existing PR's title, description, or dependencies."""
+@click.option("--status", default=None, type=click.Choice(["pending", "in_progress", "in_review", "merged", "closed"]),
+              help="New status (pending, in_progress, in_review, merged, closed)")
+def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | None, status: str | None):
+    """Edit an existing PR's title, description, dependencies, or status."""
     root = state_root()
     data = store.load(root)
     pr_entry = store.get_pr(data, pr_id)
@@ -1040,6 +1077,10 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
     if desc is not None:
         pr_entry["description"] = desc
         changes.append("description updated")
+    if status is not None:
+        old_status = pr_entry.get("status", "pending")
+        pr_entry["status"] = status
+        changes.append(f"status: {old_status} → {status}")
     if depends_on is not None:
         if depends_on == "":
             pr_entry["depends_on"] = []
@@ -1055,11 +1096,12 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
             changes.append(f"depends_on={', '.join(deps)}")
 
     if not changes:
-        click.echo("Nothing to change. Use --title, --depends-on, or --description.", err=True)
+        click.echo("Nothing to change. Use --title, --depends-on, --description, or --status.", err=True)
         raise SystemExit(1)
 
     save_and_push(data, root, f"pm: edit {pr_id}")
     click.echo(f"Updated {pr_id}: {', '.join(changes)}")
+    trigger_tui_refresh()
 
 
 @pr.command("select")
@@ -1083,6 +1125,7 @@ def pr_select(pr_id: str):
     data["project"]["active_pr"] = pr_id
     save_and_push(data, root)
     click.echo(f"Active PR: {pr_id} ({pr_entry.get('title', '???')})")
+    trigger_tui_refresh()
 
 
 @pr.command("list")
@@ -1090,6 +1133,13 @@ def pr_list():
     """List all PRs with status."""
     root = state_root()
     data = store.load(root)
+
+    # Sync to detect merged PRs (if interval allows)
+    data, result = pr_sync_mod.sync_prs_quiet(root, data)
+    if result.synced and result.updated_count > 0:
+        click.echo(f"Synced: {result.updated_count} PR(s) merged")
+        store.save(data, root)
+
     prs = data.get("prs") or []
     if not prs:
         click.echo("No PRs.")
@@ -1118,6 +1168,13 @@ def pr_graph():
     """Show static dependency graph."""
     root = state_root()
     data = store.load(root)
+
+    # Sync to detect merged PRs (if interval allows)
+    data, result = pr_sync_mod.sync_prs_quiet(root, data)
+    if result.synced and result.updated_count > 0:
+        click.echo(f"Synced: {result.updated_count} PR(s) merged")
+        store.save(data, root)
+
     prs = data.get("prs") or []
     click.echo(graph.render_static_graph(prs))
 
@@ -1127,6 +1184,13 @@ def pr_ready():
     """List PRs ready to start (all deps merged)."""
     root = state_root()
     data = store.load(root)
+
+    # Sync to detect merged PRs (if interval allows)
+    data, result = pr_sync_mod.sync_prs_quiet(root, data)
+    if result.synced and result.updated_count > 0:
+        click.echo(f"Synced: {result.updated_count} PR(s) merged")
+        store.save(data, root)
+
     prs = data.get("prs") or []
     ready = graph.ready_prs(prs)
     if not ready:
@@ -1254,6 +1318,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
     pr_entry["workdir"] = str(work_path)
     data["project"]["active_pr"] = pr_id
     save_and_push(data, root, f"pm: start {pr_id}")
+    trigger_tui_refresh()
 
     click.echo(f"\nPR {pr_id} is now in_progress on {platform.node()}")
     click.echo(f"Work directory: {work_path}")
@@ -1365,6 +1430,7 @@ def pr_done(pr_id: str | None):
     pr_entry["status"] = "in_review"
     save_and_push(data, root, f"pm: done {pr_id}")
     click.echo(f"PR {pr_id} marked as in_review.")
+    trigger_tui_refresh()
 
 
 @pr.command("sync")
@@ -1415,6 +1481,7 @@ def pr_sync():
 
     if updated:
         save_and_push(data, root, f"pm: sync - {updated} PRs merged")
+        trigger_tui_refresh()
     else:
         click.echo("No new merges detected.")
 
@@ -1424,6 +1491,43 @@ def pr_sync():
         click.echo("\nNewly ready PRs:")
         for p in ready:
             click.echo(f"  ⏳ {p['id']}: {p.get('title', '???')}")
+
+
+@pr.command("sync-github")
+def pr_sync_github():
+    """Fetch and update PR statuses from GitHub.
+
+    For each PR with a GitHub PR number, fetches the current state
+    from GitHub and updates the local status accordingly:
+    - MERGED → merged
+    - CLOSED → closed (then auto-removed after 3 seconds)
+    - OPEN + draft → in_progress
+    - OPEN + ready → in_review
+    """
+    root = state_root()
+    data = store.load(root)
+
+    backend_name = data["project"].get("backend", "vanilla")
+    if backend_name != "github":
+        click.echo("This command only works with the GitHub backend.", err=True)
+        raise SystemExit(1)
+
+    # Use the shared sync function which handles auto-removal of closed PRs
+    result = pr_sync_mod.sync_from_github(root, data, save_state=True)
+
+    if result.error:
+        click.echo(f"Error: {result.error}", err=True)
+        raise SystemExit(1)
+
+    if result.updated_count > 0:
+        click.echo(f"Updated {result.updated_count} PR(s).")
+        if result.merged_prs:
+            click.echo(f"  Merged: {', '.join(result.merged_prs)}")
+        if result.closed_prs:
+            click.echo(f"  Closed: {', '.join(result.closed_prs)} (will be removed in 3s)")
+        trigger_tui_refresh()
+    else:
+        click.echo("No status changes.")
 
 
 @pr.command("cleanup")
@@ -1474,8 +1578,76 @@ def pr_cleanup(pr_id: str | None):
         click.echo(f"Removed {work_path}")
         pr_entry["workdir"] = None
         save_and_push(data, root, f"pm: cleanup {pr_id}")
+        trigger_tui_refresh()
     else:
         click.echo(f"No work directory found for {pr_id}.")
+
+
+@pr.command("close")
+@click.argument("pr_id", default=None, required=False)
+@click.option("--keep-github", is_flag=True, help="Don't close the GitHub PR")
+@click.option("--keep-branch", is_flag=True, help="Don't delete the remote branch")
+def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool):
+    """Close and remove a PR from the project.
+
+    Removes the PR entry from project.yaml. By default also closes the
+    GitHub PR and deletes the remote branch if they exist.
+
+    If PR_ID is omitted, uses the active PR.
+    """
+    root = state_root()
+    data = store.load(root)
+
+    if pr_id is None:
+        pr_id = data.get("project", {}).get("active_pr")
+        if not pr_id:
+            click.echo("No active PR. Specify a PR ID.", err=True)
+            raise SystemExit(1)
+        click.echo(f"Using active PR: {pr_id}")
+
+    pr_entry = store.get_pr(data, pr_id)
+    if not pr_entry:
+        prs = data.get("prs") or []
+        click.echo(f"PR {pr_id} not found.", err=True)
+        if prs:
+            click.echo(f"Available PRs: {', '.join(p['id'] for p in prs)}", err=True)
+        raise SystemExit(1)
+
+    # Close GitHub PR if exists
+    gh_pr_number = pr_entry.get("gh_pr_number")
+    if gh_pr_number and not keep_github:
+        click.echo(f"Closing GitHub PR #{gh_pr_number}...")
+        try:
+            delete_flag = [] if keep_branch else ["--delete-branch"]
+            result = subprocess.run(
+                ["gh", "pr", "close", str(gh_pr_number), *delete_flag],
+                capture_output=True, text=True
+            )
+            if result.returncode == 0:
+                click.echo(f"GitHub PR #{gh_pr_number} closed.")
+            else:
+                click.echo(f"Warning: Could not close GitHub PR: {result.stderr.strip()}", err=True)
+        except Exception as e:
+            click.echo(f"Warning: Could not close GitHub PR: {e}", err=True)
+
+    # Remove workdir if exists
+    workdir = pr_entry.get("workdir")
+    if workdir and Path(workdir).exists():
+        shutil.rmtree(workdir)
+        click.echo(f"Removed workdir: {workdir}")
+
+    # Remove PR from list
+    prs = data.get("prs") or []
+    data["prs"] = [p for p in prs if p["id"] != pr_id]
+
+    # Update active_pr if needed
+    if data.get("project", {}).get("active_pr") == pr_id:
+        remaining = data.get("prs") or []
+        data["project"]["active_pr"] = remaining[0]["id"] if remaining else None
+
+    save_and_push(data, root, f"pm: close {pr_id}")
+    click.echo(f"Removed {pr_id}: {pr_entry.get('title', '???')}")
+    trigger_tui_refresh()
 
 
 @cli.command("session")
@@ -1942,6 +2114,7 @@ def cluster_auto(threshold, max_commits, weights, output_fmt):
         plans = data.setdefault("plans", [])
         plans.append({"id": plan_id, "name": plan_name, "file": plan_file, "status": "draft"})
         save_and_push(data, root, f"pm: cluster auto → {plan_id}")
+        trigger_tui_refresh()
 
         click.echo(f"Plan written to {plan_path}")
         click.echo(f"  Plan ID: {plan_id}")

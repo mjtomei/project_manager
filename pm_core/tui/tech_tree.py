@@ -16,6 +16,7 @@ STATUS_ICONS = {
     "in_progress": "●",
     "in_review": "◎",
     "merged": "✓",
+    "closed": "✗",
     "blocked": "✗",
 }
 
@@ -24,6 +25,7 @@ STATUS_STYLES = {
     "in_progress": "bold yellow",
     "in_review": "bold cyan",
     "merged": "bold green",
+    "closed": "dim red",
     "blocked": "bold red",
 }
 
@@ -33,6 +35,7 @@ STATUS_BG = {
     "in_progress": "on #333300",  # subtle yellow
     "in_review": "on #003333",    # subtle cyan
     "merged": "on #003300",       # subtle green
+    "closed": "on #220000",       # dim red
     "blocked": "on #330000",      # subtle red
 }
 
@@ -79,6 +82,7 @@ class TechTree(Widget):
         self._prs = prs
         self.prs = prs
         self._recompute()
+        self.refresh(layout=True)
 
     def _recompute(self) -> None:
         """Recompute layout positions."""
@@ -288,3 +292,27 @@ class TechTree(Widget):
             self.selected_index = new_index
             self.post_message(PRSelected(self._ordered_ids[new_index]))
             self.refresh()
+            # Scroll to keep selected node visible
+            self._scroll_selected_into_view()
+
+    def _scroll_selected_into_view(self) -> None:
+        """Scroll the parent container to keep the selected node visible."""
+        if not self._ordered_ids:
+            return
+        pr_id = self._ordered_ids[self.selected_index]
+        if pr_id not in self._node_positions:
+            return
+
+        col, row = self._node_positions[pr_id]
+        # Calculate pixel position of the node
+        x = col * (NODE_W + H_GAP) + 2
+        y = row * (NODE_H + V_GAP) + 1
+
+        # Create a region for the node and scroll it into view
+        # The scrollable container is the parent, so scroll there
+        from textual.geometry import Region
+        node_region = Region(x, y, NODE_W, NODE_H)
+        if self.parent:
+            self.parent.scroll_to_region(node_region)
+        else:
+            self.scroll_to_region(node_region)

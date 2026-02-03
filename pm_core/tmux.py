@@ -48,9 +48,17 @@ def split_pane(session: str, direction: str, cmd: str) -> str:
 
 
 def send_keys(pane_target: str, keys: str) -> None:
-    """Send keys to a tmux pane."""
+    """Send keys to a tmux pane (followed by Enter)."""
     subprocess.run(
         ["tmux", "send-keys", "-t", pane_target, keys, "Enter"],
+        check=True,
+    )
+
+
+def send_keys_literal(pane_target: str, keys: str) -> None:
+    """Send literal keys to a tmux pane (no Enter appended)."""
+    subprocess.run(
+        ["tmux", "send-keys", "-t", pane_target, keys],
         check=True,
     )
 
