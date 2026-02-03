@@ -308,6 +308,9 @@ class ProjectManagerApp(App):
         # Background sync interval: 5 minutes for automatic PR sync
         self._sync_timer = self.set_interval(300, self._background_sync)
 
+        # Do a full GitHub sync on startup (non-blocking)
+        self.run_worker(self._startup_github_sync())
+
         # Capture initial frame after state is loaded and rendered
         self.call_after_refresh(self._capture_frame, "mount")
 
@@ -520,6 +523,39 @@ class ProjectManagerApp(App):
             log.update("")
         except Exception:
             pass
+
+    async def _startup_github_sync(self) -> None:
+        """Perform a full GitHub API sync on startup.
+
+        This fetches actual PR state from GitHub (merged, closed, draft status)
+        rather than just checking git merge status.
+        """
+        if not self._root:
+            return
+
+        backend_name = self._data.get("project", {}).get("backend", "vanilla")
+        if backend_name != "github":
+            return
+
+        try:
+            self.log_message("Syncing with GitHub...")
+            result = pr_sync.sync_from_github(self._root, self._data, save_state=True)
+
+            if result.synced and result.updated_count > 0:
+                # Reload data after sync
+                self._data = store.load(self._root)
+                self._update_display()
+                self.log_message(f"GitHub sync: {result.updated_count} PR(s) updated")
+            elif result.error:
+                _log.warning("GitHub sync error: %s", result.error)
+            else:
+                self.log_message("GitHub sync: up to date")
+
+            self.set_timer(2.0, self._clear_log_message)
+        except Exception as e:
+            _log.exception("GitHub sync error")
+            self.log_message(f"GitHub sync error: {e}")
+            self.set_timer(3.0, self._clear_log_message)
 
     # --- Message handlers ---
 

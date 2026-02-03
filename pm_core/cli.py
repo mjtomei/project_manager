@@ -1056,8 +1056,8 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
 @click.option("--title", default=None, help="New title")
 @click.option("--depends-on", "depends_on", default=None, help="Comma-separated PR IDs (replaces existing)")
 @click.option("--description", "desc", default=None, help="New description")
-@click.option("--status", default=None, type=click.Choice(["pending", "in_progress", "in_review", "merged"]),
-              help="New status (pending, in_progress, in_review, merged)")
+@click.option("--status", default=None, type=click.Choice(["pending", "in_progress", "in_review", "merged", "closed"]),
+              help="New status (pending, in_progress, in_review, merged, closed)")
 def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | None, status: str | None):
     """Edit an existing PR's title, description, dependencies, or status."""
     root = state_root()
@@ -1544,8 +1544,7 @@ def pr_sync_github():
             if gh_state == "MERGED" or merged_at:
                 new_status = "merged"
             elif gh_state == "CLOSED":
-                click.echo(f"  ⚠️  {pr_id}: GitHub PR #{gh_pr_number} is CLOSED (not merged)")
-                continue
+                new_status = "closed"
             elif gh_state == "OPEN":
                 new_status = "in_progress" if is_draft else "in_review"
             else:

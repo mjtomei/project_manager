@@ -16,6 +16,7 @@ STATUS_ICONS = {
     "in_progress": "●",
     "in_review": "◎",
     "merged": "✓",
+    "closed": "✗",
     "blocked": "✗",
 }
 
@@ -24,6 +25,7 @@ STATUS_STYLES = {
     "in_progress": "bold yellow",
     "in_review": "bold cyan",
     "merged": "bold green",
+    "closed": "dim red",
     "blocked": "bold red",
 }
 
@@ -33,6 +35,7 @@ STATUS_BG = {
     "in_progress": "on #333300",  # subtle yellow
     "in_review": "on #003333",    # subtle cyan
     "merged": "on #003300",       # subtle green
+    "closed": "on #220000",       # dim red
     "blocked": "on #330000",      # subtle red
 }
 

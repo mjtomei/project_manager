@@ -229,3 +229,105 @@ def sync_prs_quiet(
 
     result = sync_prs(root, data, min_interval_seconds, force, save_state=False)
     return data, result
+
+
+def sync_from_github(
+    root: Path,
+    data: Optional[dict] = None,
+    save_state: bool = True,
+) -> SyncResult:
+    """Fetch and update PR statuses directly from GitHub API.
+
+    This does a full sync using the GitHub API (via gh CLI) to get
+    accurate PR state including:
+    - MERGED → merged
+    - CLOSED → closed
+    - OPEN + draft → in_progress
+    - OPEN + ready → in_review
+
+    Only works with the GitHub backend and PRs that have gh_pr_number set.
+
+    Args:
+        root: Path to PM project root
+        data: Project data (if None, will be loaded from root)
+        save_state: If True, save changes to project.yaml
+
+    Returns:
+        SyncResult with sync outcome details
+    """
+    import subprocess
+    import json
+
+    if data is None:
+        data = store.load(root)
+
+    backend_name = data.get("project", {}).get("backend", "vanilla")
+    if backend_name != "github":
+        return SyncResult(
+            synced=False,
+            error="GitHub sync only works with the GitHub backend"
+        )
+
+    prs = data.get("prs") or []
+    updated = 0
+    merged_prs = []
+    closed_prs = []
+
+    for pr_entry in prs:
+        gh_pr_number = pr_entry.get("gh_pr_number")
+        if not gh_pr_number:
+            continue
+
+        pr_id = pr_entry["id"]
+        old_status = pr_entry.get("status", "pending")
+
+        try:
+            result = subprocess.run(
+                ["gh", "pr", "view", str(gh_pr_number), "--json", "state,isDraft,mergedAt"],
+                capture_output=True, text=True, timeout=30
+            )
+            if result.returncode != 0:
+                _log.warning("Could not fetch GitHub PR #%s for %s", gh_pr_number, pr_id)
+                continue
+
+            info = json.loads(result.stdout)
+            gh_state = info.get("state")
+            is_draft = info.get("isDraft", False)
+            merged_at = info.get("mergedAt")
+
+            # Determine new status
+            if gh_state == "MERGED" or merged_at:
+                new_status = "merged"
+            elif gh_state == "CLOSED":
+                new_status = "closed"
+            elif gh_state == "OPEN":
+                new_status = "in_progress" if is_draft else "in_review"
+            else:
+                _log.warning("Unknown GitHub state '%s' for %s", gh_state, pr_id)
+                continue
+
+            if new_status != old_status:
+                pr_entry["status"] = new_status
+                updated += 1
+                _log.info("PR %s: %s → %s (from GitHub)", pr_id, old_status, new_status)
+                if new_status == "merged":
+                    merged_prs.append(pr_id)
+                elif new_status == "closed":
+                    closed_prs.append(pr_id)
+
+        except subprocess.TimeoutExpired:
+            _log.warning("Timeout fetching GitHub PR #%s for %s", gh_pr_number, pr_id)
+        except Exception as e:
+            _log.warning("Error fetching GitHub status for %s: %s", pr_id, e)
+
+    # Update timestamp
+    set_last_sync_timestamp(data, datetime.now(timezone.utc))
+
+    if save_state and updated:
+        store.save(data, root)
+
+    return SyncResult(
+        synced=True,
+        updated_count=updated,
+        merged_prs=merged_prs,
+    )
