@@ -1,5 +1,6 @@
 """Click CLI definitions for pm."""
 
+import logging
 import os
 import platform
 import shutil
@@ -8,6 +9,15 @@ from pathlib import Path
 import click
 
 from pm_core import store, graph, git_ops, prompt_gen, notes
+
+# Set up logging to file for debugging
+_log_dir = Path.home() / ".pm-pane-registry"
+_log_dir.mkdir(parents=True, exist_ok=True)
+_log_handler = logging.FileHandler(_log_dir / "cli.log")
+_log_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S"))
+_log = logging.getLogger("pm.cli")
+_log.addHandler(_log_handler)
+_log.setLevel(logging.DEBUG)
 from pm_core.backend import detect_backend, get_backend
 from pm_core.claude_launcher import find_claude, find_editor, launch_claude, launch_claude_print, clear_session
 from pm_core import tmux as tmux_mod
@@ -1380,20 +1390,25 @@ def pr_cleanup(pr_id: str | None):
 
 
 def _restore_session_panes(session_name: str, has_project: bool, root: Path | None,
-                           notes_path: Path, old_registry: dict) -> None:
+                           notes_path: Path, old_registry: dict, roles_alive: set) -> None:
     """Restore missing panes in an existing session.
 
-    Called when user runs 'pm session' but the TUI pane has been killed.
-    Recreates the TUI and notes panes to restore the expected layout.
+    Called when user runs 'pm session' but the TUI pane is missing.
+    Recreates TUI and notes panes to restore the expected layout.
     """
     import time as _time
     import subprocess as _sp
 
-    cwd = str(root) if root else str(Path.cwd())
-    window_id = tmux_mod.get_window_id(session_name)
+    _log.info("_restore_session_panes called: session=%s has_project=%s roles_alive=%s",
+              session_name, has_project, roles_alive)
 
-    # Clear stale pane registry and bump generation
+    window_id = tmux_mod.get_window_id(session_name)
+    _log.info("window_id: %s", window_id)
+
+    # Bump generation to invalidate old EXIT traps
     generation = str(int(_time.time()))
+
+    # Start fresh registry
     pane_layout.save_registry(session_name, {
         "session": session_name, "window": window_id, "panes": [],
         "user_modified": False, "generation": generation,
@@ -1404,21 +1419,28 @@ def _restore_session_panes(session_name: str, has_project: bool, root: Path | No
         return (f"bash -c 'trap \"pm _pane-exited {session_name} {window_id} {generation} $TMUX_PANE\" EXIT; "
                 f"{escaped}'")
 
-    # Get existing panes to find one to split from
     live_panes = tmux_mod.get_pane_indices(session_name)
-    if not live_panes:
-        # No panes at all - need to create a new window
-        _sp.run(["tmux", "new-window", "-t", session_name, "-n", "main", "pm tui"], check=False)
+    _log.info("live_panes in restore: %s", live_panes)
+
+    base_pane = live_panes[0][0] if live_panes else None
+    _log.info("base_pane: %s", base_pane)
+
+    # Create TUI pane
+    if base_pane is None:
+        _log.info("no base pane, creating new window")
+        _sp.run(["tmux", "new-window", "-t", session_name, "-n", "main", _wrap("pm tui")], check=False)
         window_id = tmux_mod.get_window_id(session_name)
         tui_pane = _sp.run(
             ["tmux", "list-panes", "-t", session_name, "-F", "#{pane_id}"],
             capture_output=True, text=True,
         ).stdout.strip().splitlines()[0]
     else:
-        # Split from existing pane to create TUI
-        base_pane = live_panes[0][0]
-        tui_pane = tmux_mod.split_pane_at(base_pane, "h", _wrap("pm tui"))
+        _log.info("splitting from base_pane %s to create TUI", base_pane)
+        tui_pane = tmux_mod.split_pane_at(base_pane, "h", _wrap("pm tui"), background=True)
+        _log.info("created tui_pane: %s, swapping with base_pane", tui_pane)
+        tmux_mod.swap_pane(tui_pane, base_pane)
 
+    _log.info("registering TUI pane: %s", tui_pane)
     pane_layout.register_pane(session_name, window_id, tui_pane, "tui", "pm tui")
 
     # Create notes pane
@@ -1430,7 +1452,8 @@ def _restore_session_panes(session_name: str, has_project: bool, root: Path | No
             notes_path.write_text(notes.NOTES_WELCOME)
 
     notes_pane = tmux_mod.split_pane_at(tui_pane, "h", _wrap(f"pm notes {notes_path}"))
-    pane_layout.register_pane(session_name, window_id, notes_pane, "notes", "pm notes")
+    _log.info("created notes_pane: %s", notes_pane)
+    pane_layout.register_pane(session_name, window_id, notes_pane, "notes", f"pm notes {notes_path}")
 
     # Rebalance layout
     pane_layout.rebalance(session_name, window_id)
@@ -1467,6 +1490,9 @@ def session_cmd():
         project_name = Path.cwd().name
 
     session_name = f"pm-{project_name}"
+    cwd = str(root) if root else str(Path.cwd())
+    expected_root = root or (Path.cwd() / "pm")
+    notes_path = expected_root / notes.NOTES_FILENAME
 
     if tmux_mod.session_exists(session_name):
         # Check if the session has the expected panes
@@ -1478,19 +1504,23 @@ def session_cmd():
         live_pane_ids = {p[0] for p in live_panes}
         roles_alive = {p["role"] for p in registered_panes if p["id"] in live_pane_ids}
 
+        _log.info("session exists: %s", session_name)
+        _log.info("live_panes: %s", live_panes)
+        _log.info("registered_panes: %s", registered_panes)
+        _log.info("live_pane_ids: %s", live_pane_ids)
+        _log.info("roles_alive: %s", roles_alive)
+
         # If TUI is missing, we need to restore the session
         if "tui" not in roles_alive:
+            _log.info("TUI missing, restoring panes")
             click.echo(f"Session '{session_name}' exists but TUI pane is missing. Restoring...")
-            _restore_session_panes(session_name, has_project, root, notes_path, registry)
+            _restore_session_panes(session_name, has_project, root, notes_path, registry, roles_alive)
         else:
+            _log.info("TUI present, just attaching")
             click.echo(f"Attaching to existing session '{session_name}'...")
 
         tmux_mod.attach(session_name)
         return
-
-    cwd = str(root) if root else str(Path.cwd())
-    expected_root = root or (Path.cwd() / "pm")
-    notes_path = expected_root / notes.NOTES_FILENAME
     editor = find_editor()
 
     # Clear stale pane registry and bump generation to invalidate old EXIT traps
