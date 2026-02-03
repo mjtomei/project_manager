@@ -10,7 +10,8 @@ from pathlib import Path
 
 import click
 
-from pm_core import store, graph, git_ops, prompt_gen, notes, pr_sync
+from pm_core import store, graph, git_ops, prompt_gen, notes
+from pm_core import pr_sync as pr_sync_mod
 
 # Set up logging to file for debugging
 _log_dir = Path.home() / ".pm-pane-registry"
@@ -1092,7 +1093,7 @@ def pr_list():
     data = store.load(root)
 
     # Sync to detect merged PRs (if interval allows)
-    data, result = pr_sync.sync_prs_quiet(root, data)
+    data, result = pr_sync_mod.sync_prs_quiet(root, data)
     if result.synced and result.updated_count > 0:
         click.echo(f"Synced: {result.updated_count} PR(s) merged")
         store.save(data, root)
@@ -1127,7 +1128,7 @@ def pr_graph():
     data = store.load(root)
 
     # Sync to detect merged PRs (if interval allows)
-    data, result = pr_sync.sync_prs_quiet(root, data)
+    data, result = pr_sync_mod.sync_prs_quiet(root, data)
     if result.synced and result.updated_count > 0:
         click.echo(f"Synced: {result.updated_count} PR(s) merged")
         store.save(data, root)
@@ -1143,7 +1144,7 @@ def pr_ready():
     data = store.load(root)
 
     # Sync to detect merged PRs (if interval allows)
-    data, result = pr_sync.sync_prs_quiet(root, data)
+    data, result = pr_sync_mod.sync_prs_quiet(root, data)
     if result.synced and result.updated_count > 0:
         click.echo(f"Synced: {result.updated_count} PR(s) merged")
         store.save(data, root)
