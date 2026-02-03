@@ -142,9 +142,10 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
         cmd.append("--dangerously-skip-permissions")
     if is_resuming:
         cmd.extend(["--resume", session_id])
+        # Don't pass prompt when resuming - Claude already has the conversation
     else:
         cmd.extend(["--session-id", session_id])
-    cmd.append(prompt)
+        cmd.append(prompt)
 
     _log.info("launch_claude: %s (cwd=%s, session_key=%s, session_id=%s)",
               cmd[:2], cwd, session_key, session_id[:8] + "...")
