@@ -1141,9 +1141,15 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
         raise SystemExit(1)
 
     if pr_entry.get("status") == "in_progress":
-        click.echo(f"PR {pr_id} is already in_progress on {pr_entry.get('agent_machine', '???')}.", err=True)
-        click.echo("Use --workdir to reuse the existing workdir, or 'pm prompt' to regenerate the prompt.", err=True)
-        raise SystemExit(1)
+        # If already in_progress, reuse existing workdir if available
+        existing_workdir = pr_entry.get("workdir")
+        if existing_workdir and Path(existing_workdir).exists():
+            click.echo(f"PR {pr_id} is already in_progress, reusing existing workdir.")
+            workdir = existing_workdir  # Set workdir so it gets used below
+        else:
+            click.echo(f"PR {pr_id} is already in_progress on {pr_entry.get('agent_machine', '???')}.", err=True)
+            click.echo("No existing workdir found. Use 'pm prompt' to regenerate the prompt.", err=True)
+            raise SystemExit(1)
 
     if pr_entry.get("status") == "merged":
         click.echo(f"PR {pr_id} is already merged.", err=True)
