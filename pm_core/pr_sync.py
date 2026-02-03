@@ -361,9 +361,6 @@ def sync_from_github(
                     merged_prs.append(pr_id)
                 elif new_status == "closed":
                     closed_prs.append(pr_id)
-            elif new_status == "closed":
-                # Already closed, still schedule for removal
-                closed_prs.append(pr_id)
 
         except subprocess.TimeoutExpired:
             _log.warning("Timeout fetching GitHub PR #%s for %s", gh_pr_number, pr_id)

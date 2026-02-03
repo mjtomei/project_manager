@@ -1616,7 +1616,6 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool):
     # Close GitHub PR if exists
     gh_pr_number = pr_entry.get("gh_pr_number")
     if gh_pr_number and not keep_github:
-        from pm_core import gh_ops
         click.echo(f"Closing GitHub PR #{gh_pr_number}...")
         try:
             delete_flag = [] if keep_branch else ["--delete-branch"]
