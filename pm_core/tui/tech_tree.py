@@ -12,11 +12,11 @@ from pm_core import graph as graph_mod
 
 
 STATUS_ICONS = {
-    "pending": "⏳",
-    "in_progress": "🔨",
-    "in_review": "👀",
-    "merged": "✅",
-    "blocked": "🚫",
+    "pending": "○",
+    "in_progress": "●",
+    "in_review": "◎",
+    "merged": "✓",
+    "blocked": "✗",
 }
 
 STATUS_STYLES = {
@@ -38,7 +38,7 @@ STATUS_BG = {
 
 # Node dimensions
 NODE_W = 24
-NODE_H = 4
+NODE_H = 5  # 5 lines: top border, id, title, status, bottom border
 H_GAP = 6
 V_GAP = 2
 

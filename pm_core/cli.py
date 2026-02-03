@@ -219,10 +219,29 @@ def init(repo_url: str | None, name: str, base_branch: str, directory: str,
     # Auto-detect repo URL from cwd if not specified
     if repo_url is None:
         if git_ops.is_git_repo(cwd):
-            result = git_ops.run_git("remote", "get-url", "origin", cwd=cwd, check=False)
-            if result.returncode == 0 and result.stdout.strip():
-                repo_url = result.stdout.strip()
+            remotes = git_ops.list_remotes(cwd)
+            if remotes:
+                # Use backend_override hint if available for better selection
+                selection = git_ops.select_remote(remotes, preferred_backend=backend_override)
+                if "selected" in selection and selection["selected"]:
+                    _, repo_url = selection["selected"]
+                elif "ambiguous" in selection:
+                    # Let user choose from ambiguous remotes
+                    click.echo("Multiple git remotes found:")
+                    for i, (name, url) in enumerate(selection["ambiguous"], 1):
+                        click.echo(f"  {i}. {name}: {url}")
+                    click.echo()
+                    choice = click.prompt(
+                        "Choose a remote",
+                        type=click.IntRange(1, len(selection["ambiguous"])),
+                        default=1,
+                    )
+                    _, repo_url = selection["ambiguous"][choice - 1]
+                else:
+                    # No remotes selected - use local path
+                    repo_url = str(cwd)
             else:
+                # No remotes - use local path
                 repo_url = str(cwd)
         else:
             click.echo("No TARGET_REPO_URL provided and not in a git repo.", err=True)
@@ -1609,6 +1628,9 @@ def _detect_git_repo() -> dict | None:
       - 'local': git repo with no remote
       - 'github': git repo with a github.com remote
       - 'vanilla': git repo with a non-GitHub remote
+
+    Uses improved remote detection that prefers 'origin' but also considers
+    other remotes when 'origin' doesn't exist.
     """
     cwd = Path.cwd()
     if not git_ops.is_git_repo(cwd):
@@ -1617,11 +1639,20 @@ def _detect_git_repo() -> dict | None:
     branch_result = git_ops.run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=cwd, check=False)
     branch = branch_result.stdout.strip() if branch_result.returncode == 0 else "main"
 
-    result = git_ops.run_git("remote", "get-url", "origin", cwd=cwd, check=False)
-    if result.returncode != 0 or not result.stdout.strip():
+    remotes = git_ops.list_remotes(cwd)
+    if not remotes:
         return {"url": None, "name": cwd.name, "branch": branch, "cwd": str(cwd), "type": "local"}
 
-    remote_url = result.stdout.strip()
+    # Select the best remote (prefers origin, then github.com URLs)
+    selection = git_ops.select_remote(remotes, preferred_backend="github")
+    if "selected" in selection and selection["selected"]:
+        _, remote_url = selection["selected"]
+    elif "ambiguous" in selection and selection["ambiguous"]:
+        # For display purposes, just pick the first ambiguous option
+        _, remote_url = selection["ambiguous"][0]
+    else:
+        return {"url": None, "name": cwd.name, "branch": branch, "cwd": str(cwd), "type": "local"}
+
     name = remote_url.rstrip("/").split("/")[-1].replace(".git", "")
     backend_type = detect_backend(remote_url)
     return {"url": remote_url, "name": name, "branch": branch, "cwd": str(cwd), "type": backend_type}
@@ -2327,8 +2358,8 @@ def clear_session_cmd(session_key: str, pm_root: str):
 def loop_guard_cmd(loop_id: str):
     """Internal: guard against rapid restart loops.
 
-    Tracks timestamps of restarts. If 5 restarts happen in <7 seconds,
-    exits with code 1 to break the loop. Always sleeps 1 second.
+    Tracks timestamps of restarts. If 5 restarts happen in <30 seconds,
+    exits with code 1 to break the loop. Always sleeps 5 seconds.
     """
     import time
     loop_file = Path.home() / ".pm-pane-registry" / f"loop-{loop_id}.json"
@@ -2346,14 +2377,14 @@ def loop_guard_cmd(loop_id: str):
         except Exception:
             timestamps = []
 
-    # Keep only timestamps from the last 10 seconds
-    timestamps = [t for t in timestamps if now - t < 10]
+    # Keep only timestamps from the last 60 seconds
+    timestamps = [t for t in timestamps if now - t < 60]
     timestamps.append(now)
 
-    # Check for rapid restarts: 5+ restarts in <7 seconds
+    # Check for rapid restarts: 5+ restarts in <30 seconds
     if len(timestamps) >= 5:
         oldest_recent = timestamps[-5]
-        if now - oldest_recent < 7:
+        if now - oldest_recent < 30:
             click.echo(f"Loop guard triggered: {len(timestamps)} restarts in {now - oldest_recent:.1f}s", err=True)
             click.echo("Breaking loop to prevent runaway restarts.", err=True)
             # Clear the timestamps so next manual run works
@@ -2365,7 +2396,7 @@ def loop_guard_cmd(loop_id: str):
     loop_file.write_text(json.dumps(timestamps))
 
     # Sleep before allowing restart
-    time.sleep(1)
+    time.sleep(5)
 
 
 @cli.command("_pane-exited", hidden=True)
