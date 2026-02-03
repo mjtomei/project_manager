@@ -1180,6 +1180,26 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
     click.echo(f"Checking out branch {branch}...")
     git_ops.checkout_branch(work_path, branch, create=True)
 
+    # For GitHub backend: push branch and create draft PR
+    backend_name = data["project"].get("backend", "vanilla")
+    if backend_name == "github" and not pr_entry.get("gh_pr"):
+        click.echo(f"Pushing branch {branch} to remote...")
+        push_result = git_ops.run_git("push", "-u", "origin", branch, cwd=work_path, check=False)
+        if push_result.returncode == 0:
+            click.echo("Creating draft PR...")
+            from pm_core import gh_ops
+            title = pr_entry.get("title", pr_id)
+            description = pr_entry.get("description", "")
+            pr_info = gh_ops.create_draft_pr(str(work_path), title, base_branch, description)
+            if pr_info:
+                pr_entry["gh_pr"] = pr_info["url"]
+                pr_entry["gh_pr_number"] = pr_info["number"]
+                click.echo(f"Draft PR created: {pr_info['url']}")
+            else:
+                click.echo("Warning: Failed to create draft PR. You can create it manually later.", err=True)
+        else:
+            click.echo("Warning: Failed to push branch. Draft PR not created.", err=True)
+
     # Update state
     pr_entry["status"] = "in_progress"
     pr_entry["agent_machine"] = platform.node()
@@ -1273,6 +1293,19 @@ def pr_done(pr_id: str | None):
     if pr_entry.get("status") == "pending":
         click.echo(f"PR {pr_id} is pending — start it first with: pm pr start {pr_id}", err=True)
         raise SystemExit(1)
+
+    # For GitHub backend: upgrade draft PR to ready for review
+    backend_name = data["project"].get("backend", "vanilla")
+    gh_pr_number = pr_entry.get("gh_pr_number")
+    workdir = pr_entry.get("workdir")
+
+    if backend_name == "github" and gh_pr_number and workdir:
+        from pm_core import gh_ops
+        click.echo(f"Marking PR #{gh_pr_number} as ready for review...")
+        if gh_ops.mark_pr_ready(workdir, gh_pr_number):
+            click.echo("Draft PR upgraded to ready for review.")
+        else:
+            click.echo("Warning: Failed to upgrade draft PR. It may already be ready or was closed.", err=True)
 
     pr_entry["status"] = "in_review"
     save_and_push(data, root, f"pm: done {pr_id}")
