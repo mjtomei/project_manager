@@ -27,6 +27,15 @@ STATUS_STYLES = {
     "blocked": "bold red",
 }
 
+# Subtle background tints for status
+STATUS_BG = {
+    "pending": "",                # no background
+    "in_progress": "on #333300",  # subtle yellow
+    "in_review": "on #003333",    # subtle cyan
+    "merged": "on #003300",       # subtle green
+    "blocked": "on #330000",      # subtle red
+}
+
 # Node dimensions
 NODE_W = 24
 NODE_H = 4
@@ -123,9 +132,15 @@ class TechTree(Widget):
         total_h = max_row * (NODE_H + V_GAP)
         total_w = max_col * (NODE_W + H_GAP)
 
-        # Build a character grid
-        grid = [[" "] * (total_w + 4) for _ in range(total_h + 2)]
-        style_grid = [[""] * (total_w + 4) for _ in range(total_h + 2)]
+        # Build a character grid with increased margins to prevent overlapping
+        grid = [[" "] * (total_w + 10) for _ in range(total_h + 4)]
+        style_grid = [[""] * (total_w + 10) for _ in range(total_h + 4)]
+
+        # Safe write helper to prevent out-of-bounds access
+        def safe_write(y: int, x: int, char: str, style: str = "") -> None:
+            if 0 <= y < len(grid) and 0 <= x < len(grid[0]):
+                grid[y][x] = char
+                style_grid[y][x] = style
 
         # Compute pixel positions
         def node_pos(pr_id):
@@ -147,12 +162,8 @@ class TechTree(Widget):
 
                     if arrow_end_x > arrow_start_x:
                         for x in range(arrow_start_x, arrow_end_x + 1):
-                            if 0 <= arrow_y < len(grid) and 0 <= x < len(grid[0]):
-                                grid[arrow_y][x] = "─"
-                                style_grid[arrow_y][x] = "dim"
-                        if 0 <= arrow_y < len(grid) and 0 <= arrow_end_x < len(grid[0]):
-                            grid[arrow_y][arrow_end_x] = "▶"
-                            style_grid[arrow_y][arrow_end_x] = "dim"
+                            safe_write(arrow_y, x, "─", "dim")
+                        safe_write(arrow_y, arrow_end_x, "▶", "dim")
 
         # Draw nodes
         for pr_id, (col, row) in self._node_positions.items():
@@ -165,40 +176,50 @@ class TechTree(Widget):
             icon = STATUS_ICONS.get(status, "?")
             is_selected = (self._ordered_ids[self.selected_index] == pr_id if self._ordered_ids else False)
             node_style = STATUS_STYLES.get(status, "white")
+            bg_style = STATUS_BG.get(status, "")
 
-            # Box characters
+            # Box characters - double-line for selected, single-line otherwise
             border = "bold white" if is_selected else "dim"
-            top = "┌" + "─" * (NODE_W - 2) + "┐"
-            bot = "└" + "─" * (NODE_W - 2) + "┘"
+            if is_selected:
+                top = "╔" + "═" * (NODE_W - 2) + "╗"
+                bot = "╚" + "═" * (NODE_W - 2) + "╝"
+                side = "║"
+            else:
+                top = "┌" + "─" * (NODE_W - 2) + "┐"
+                bot = "└" + "─" * (NODE_W - 2) + "┘"
+                side = "│"
 
-            id_line = f"│ {pr_id:<{NODE_W - 4}} │"
-            title = pr.get("title", "???")[:NODE_W - 4]
-            title_line = f"│ {title:<{NODE_W - 4}} │"
+            id_line = f"{side} {pr_id:<{NODE_W - 4}} {side}"
+            title = pr.get("title", "???")
+            max_title_len = NODE_W - 4
+            if len(title) > max_title_len:
+                title = title[:max_title_len - 1] + "…"  # Unicode ellipsis
+            title_line = f"{side} {title:<{NODE_W - 4}} {side}"
             status_text = f"{icon} {status}"
             machine = pr.get("agent_machine")
             if machine:
                 avail = NODE_W - 4 - len(status_text) - 1
                 if avail > 3:
                     status_text += f" {machine[:avail]}"
-            status_line = f"│ {status_text:<{NODE_W - 4}} │"
+            status_line = f"{side} {status_text:<{NODE_W - 4}} {side}"
 
             box_lines = [top, id_line, title_line, status_line, bot]
             for dy, bl in enumerate(box_lines):
-                if y + dy < len(grid):
-                    for dx, ch in enumerate(bl):
-                        if x + dx < len(grid[0]):
-                            grid[y + dy][x + dx] = ch
-                            is_border = (dy == 0 or dy == len(box_lines) - 1
-                                         or dx == 0 or dx == len(bl) - 1)
-                            if is_selected:
-                                if is_border:
-                                    style_grid[y + dy][x + dx] = "bold cyan"
-                                else:
-                                    style_grid[y + dy][x + dx] = node_style
-                            elif is_border:
-                                style_grid[y + dy][x + dx] = border
-                            else:
-                                style_grid[y + dy][x + dx] = node_style
+                for dx, ch in enumerate(bl):
+                    is_border = (dy == 0 or dy == len(box_lines) - 1
+                                 or dx == 0 or dx == len(bl) - 1)
+                    if is_selected:
+                        if is_border:
+                            style = "bold cyan"
+                        else:
+                            # Interior of selected box: node style + background
+                            style = f"{node_style} {bg_style}".strip()
+                    elif is_border:
+                        style = border
+                    else:
+                        # Interior of unselected box: node style + background
+                        style = f"{node_style} {bg_style}".strip()
+                    safe_write(y + dy, x + dx, ch, style)
 
         # Convert grid to Rich Text
         output = Text()

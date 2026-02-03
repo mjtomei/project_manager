@@ -44,12 +44,18 @@ GUIDE_SETUP_STEPS = {"no_project", "initialized", "has_plan_draft", "has_plan_pr
 class StatusBar(Static):
     """Top status bar showing project info and sync state."""
 
-    def update_status(self, project_name: str, repo: str, sync_state: str) -> None:
-        sync_icons = {"synced": "[green]synced[/green]", "pulling": "[yellow]pulling...[/yellow]"}
+    def update_status(self, project_name: str, repo: str, sync_state: str, pr_count: int = 0) -> None:
+        sync_icons = {
+            "synced": "[green]synced[/green]",
+            "pulling": "[yellow]pulling...[/yellow]",
+            "no-op": "[dim]up to date[/dim]",
+            "error": "[red]sync error[/red]",
+        }
         sync_display = sync_icons.get(sync_state, f"[red]{sync_state}[/red]")
         from rich.markup import escape
         safe_repo = escape(repo)
-        self.update(f" Project: [bold]{project_name}[/bold]    repo: [cyan]{safe_repo}[/cyan]    {sync_display}")
+        pr_info = f"[bold]{pr_count}[/bold] PRs" if pr_count else ""
+        self.update(f" Project: [bold]{project_name}[/bold]    {pr_info}    repo: [cyan]{safe_repo}[/cyan]    {sync_display}")
 
 
 class LogLine(Static):
@@ -391,11 +397,13 @@ class ProjectManagerApp(App):
             return
 
         project = self._data.get("project", {})
+        prs = self._data.get("prs") or []
         status_bar = self.query_one("#status-bar", StatusBar)
         status_bar.update_status(
             project.get("name", "???"),
             project.get("repo", "???"),
             "synced",
+            pr_count=len(prs),
         )
 
         tree = self.query_one("#tech-tree", TechTree)
@@ -444,13 +452,15 @@ class ProjectManagerApp(App):
         try:
             status_bar = self.query_one("#status-bar", StatusBar)
             project = self._data.get("project", {})
-            status_bar.update_status(project.get("name", "???"), project.get("repo", "???"), "pulling")
+            prs = self._data.get("prs") or []
+            status_bar.update_status(project.get("name", "???"), project.get("repo", "???"), "pulling", pr_count=len(prs))
 
             sync_status = git_ops.sync_state(self._root)
             self._data = store.load(self._root)
             self._update_display()
 
-            status_bar.update_status(project.get("name", "???"), project.get("repo", "???"), sync_status)
+            prs = self._data.get("prs") or []
+            status_bar.update_status(project.get("name", "???"), project.get("repo", "???"), sync_status, pr_count=len(prs))
         except Exception as e:
             self.log_message(f"Sync error: {e}")
 
