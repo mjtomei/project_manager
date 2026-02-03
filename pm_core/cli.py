@@ -105,6 +105,20 @@ def save_and_push(data: dict, root: Path, message: str = "pm: update state") -> 
     store.save(data, root)
 
 
+def trigger_tui_refresh() -> None:
+    """Send refresh key to TUI pane in the pm session for the current directory."""
+    try:
+        if not tmux_mod.has_tmux():
+            return
+        # Use _find_tui_pane which correctly matches session by cwd
+        tui_pane, session = _find_tui_pane()
+        if tui_pane and session:
+            tmux_mod.send_keys_literal(tui_pane, "r")
+            _log.debug("Sent refresh to TUI pane %s in session %s", tui_pane, session)
+    except Exception as e:
+        _log.debug("Could not trigger TUI refresh: %s", e)
+
+
 def _workdirs_dir(data: dict) -> Path:
     """Return the workdirs base path for this project.
 
@@ -382,6 +396,7 @@ def plan_add(name: str, fresh: bool):
     save_and_push(data, root, f"pm: add plan {plan_id}")
     click.echo(f"Created plan {plan_id}: {name}")
     click.echo(f"  Plan file: {plan_path}")
+    trigger_tui_refresh()
 
     notes_block = notes.notes_section(root)
     prompt = f"""\
@@ -831,6 +846,7 @@ def _run_plan_import(name: str):
     save_and_push(data, root, f"pm: add plan {plan_id}")
     click.echo(f"Created plan {plan_id}: {name}")
     click.echo(f"  Plan file: {plan_path}")
+    trigger_tui_refresh()
 
     notes_block = notes.notes_section(root)
 
@@ -1015,6 +1031,7 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
         click.echo(f"  depends_on: {', '.join(deps)}")
     if entry.get("gh_pr"):
         click.echo(f"  draft PR: {entry['gh_pr']}")
+    trigger_tui_refresh()
 
 
 @pr.command("edit")
@@ -1061,6 +1078,7 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
 
     save_and_push(data, root, f"pm: edit {pr_id}")
     click.echo(f"Updated {pr_id}: {', '.join(changes)}")
+    trigger_tui_refresh()
 
 
 @pr.command("select")
@@ -1084,6 +1102,7 @@ def pr_select(pr_id: str):
     data["project"]["active_pr"] = pr_id
     save_and_push(data, root)
     click.echo(f"Active PR: {pr_id} ({pr_entry.get('title', '???')})")
+    trigger_tui_refresh()
 
 
 @pr.command("list")
@@ -1276,6 +1295,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
     pr_entry["workdir"] = str(work_path)
     data["project"]["active_pr"] = pr_id
     save_and_push(data, root, f"pm: start {pr_id}")
+    trigger_tui_refresh()
 
     click.echo(f"\nPR {pr_id} is now in_progress on {platform.node()}")
     click.echo(f"Work directory: {work_path}")
@@ -1387,6 +1407,7 @@ def pr_done(pr_id: str | None):
     pr_entry["status"] = "in_review"
     save_and_push(data, root, f"pm: done {pr_id}")
     click.echo(f"PR {pr_id} marked as in_review.")
+    trigger_tui_refresh()
 
 
 @pr.command("sync")
@@ -1437,6 +1458,7 @@ def pr_sync():
 
     if updated:
         save_and_push(data, root, f"pm: sync - {updated} PRs merged")
+        trigger_tui_refresh()
     else:
         click.echo("No new merges detected.")
 
@@ -1496,6 +1518,7 @@ def pr_cleanup(pr_id: str | None):
         click.echo(f"Removed {work_path}")
         pr_entry["workdir"] = None
         save_and_push(data, root, f"pm: cleanup {pr_id}")
+        trigger_tui_refresh()
     else:
         click.echo(f"No work directory found for {pr_id}.")
 
@@ -1964,6 +1987,7 @@ def cluster_auto(threshold, max_commits, weights, output_fmt):
         plans = data.setdefault("plans", [])
         plans.append({"id": plan_id, "name": plan_name, "file": plan_file, "status": "draft"})
         save_and_push(data, root, f"pm: cluster auto → {plan_id}")
+        trigger_tui_refresh()
 
         click.echo(f"Plan written to {plan_path}")
         click.echo(f"  Plan ID: {plan_id}")

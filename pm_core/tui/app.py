@@ -84,6 +84,7 @@ class ProjectManagerApp(App):
     }
     #tree-container {
         width: 2fr;
+        height: 100%;
         overflow: auto auto;
     }
     #detail-container {
@@ -481,16 +482,25 @@ class ProjectManagerApp(App):
             # Determine sync status message
             if result.was_skipped:
                 sync_status = "no-op"
+                if is_manual:
+                    self.log_message("Already up to date")
             elif result.error:
                 sync_status = "error"
                 _log.warning("PR sync error: %s", result.error)
+                self.log_message(f"Sync error: {result.error}")
             elif result.updated_count > 0:
                 sync_status = "synced"
                 self.log_message(f"Synced: {result.updated_count} PR(s) merged")
             else:
                 sync_status = "synced"
+                if is_manual:
+                    self.log_message("Refreshed")
 
             status_bar.update_status(project.get("name", "???"), project.get("repo", "???"), sync_status, pr_count=len(prs))
+
+            # Clear log message after 1 second for manual refresh
+            if is_manual:
+                self.set_timer(1.0, self._clear_log_message)
         except Exception as e:
             _log.exception("Sync error")
             self.log_message(f"Sync error: {e}")
@@ -500,6 +510,14 @@ class ProjectManagerApp(App):
         try:
             log = self.query_one("#log-line", LogLine)
             log.update(f" {msg}")
+        except Exception:
+            pass
+
+    def _clear_log_message(self) -> None:
+        """Clear the log line message."""
+        try:
+            log = self.query_one("#log-line", LogLine)
+            log.update("")
         except Exception:
             pass
 
