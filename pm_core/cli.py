@@ -5,6 +5,7 @@ import logging
 import os
 import platform
 import shutil
+import subprocess
 from pathlib import Path
 
 import click
@@ -960,6 +961,7 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
         "description": desc,
         "agent_machine": None,
         "gh_pr": None,
+        "gh_pr_number": None,
     }
 
     # For GitHub backend: create branch, push, and create draft PR
@@ -1275,11 +1277,10 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
             click.echo(f"Creating pm session '{session_name}'...")
             tmux_mod.create_session(session_name, str(work_path), "bash")
             # Forward key environment variables
-            import subprocess as _sp
             for env_key in ("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS", "PM_PROJECT", "EDITOR", "PATH"):
                 val = os.environ.get(env_key)
                 if val:
-                    _sp.run(["tmux", "set-environment", "-t", session_name, env_key, val], check=False)
+                    subprocess.run(["tmux", "set-environment", "-t", session_name, env_key, val], check=False)
 
         try:
             tmux_mod.new_window(session_name, window_name, cmd, str(work_path))
