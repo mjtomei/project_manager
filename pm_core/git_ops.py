@@ -186,3 +186,95 @@ def _checkout_and_restore_pm(repo_root: Path, original_branch: str, sync_branch:
     run_git("checkout", original_branch, cwd=repo_root, check=False)
     # Restore pm files from the sync branch into the working tree
     run_git("checkout", sync_branch, "--", add_path, cwd=repo_root, check=False)
+
+
+def list_remotes(path: Path) -> dict[str, str]:
+    """List all git remotes and their URLs.
+
+    Returns a dict mapping remote name to URL (e.g., {'origin': 'git@github.com:...'}).
+    Returns empty dict if not a git repo or no remotes exist.
+    """
+    if not is_git_repo(path):
+        return {}
+
+    result = run_git("remote", "-v", cwd=path, check=False)
+    if result.returncode != 0 or not result.stdout.strip():
+        return {}
+
+    remotes = {}
+    for line in result.stdout.strip().split("\n"):
+        # Format: "origin\tgit@github.com:org/repo.git (fetch)"
+        parts = line.split()
+        if len(parts) >= 2 and "(fetch)" in line:
+            name = parts[0]
+            url = parts[1]
+            remotes[name] = url
+    return remotes
+
+
+def select_remote(
+    remotes: dict[str, str],
+    preferred_backend: Optional[str] = None,
+) -> dict:
+    """Select the best remote from a dict of remotes.
+
+    Selection logic:
+    1. If no remotes, return {"selected": None}
+    2. If only one remote, return {"selected": (name, url)}
+    3. If 'origin' exists and matches preferred_backend (or no preference), prefer it
+    4. If any remote matches preferred_backend, prefer the first match
+    5. If 'origin' exists, prefer it
+    6. Otherwise, return {"ambiguous": [(name, url), ...]} for user selection
+
+    Args:
+        remotes: Dict mapping remote name to URL
+        preferred_backend: Optional backend to prefer ('github', 'vanilla', 'local')
+
+    Returns:
+        Dict with either "selected" key (name, url) tuple or None,
+        or "ambiguous" key with list of (name, url) tuples
+    """
+    if not remotes:
+        return {"selected": None}
+
+    # Single remote - easy choice
+    if len(remotes) == 1:
+        name, url = list(remotes.items())[0]
+        return {"selected": (name, url)}
+
+    # Import here to avoid circular import
+    from pm_core.backend import detect_backend
+
+    def matches_backend(url: str, backend: str) -> bool:
+        """Check if URL matches the preferred backend."""
+        if backend == "github":
+            return "github.com" in url.lower()
+        elif backend == "vanilla":
+            # Any remote URL (not local path)
+            return "://" in url or url.startswith("git@")
+        return True  # 'local' or None matches anything
+
+    # Check if 'origin' exists and matches preferred backend
+    if "origin" in remotes:
+        origin_url = remotes["origin"]
+        if preferred_backend is None or matches_backend(origin_url, preferred_backend):
+            return {"selected": ("origin", origin_url)}
+
+    # Look for remotes matching preferred backend
+    if preferred_backend:
+        matching = [
+            (name, url) for name, url in remotes.items()
+            if matches_backend(url, preferred_backend)
+        ]
+        if len(matching) == 1:
+            return {"selected": matching[0]}
+        if matching:
+            # Multiple matches - still ambiguous
+            return {"ambiguous": matching}
+
+    # Fall back to origin if it exists (even if backend doesn't match)
+    if "origin" in remotes:
+        return {"selected": ("origin", remotes["origin"])}
+
+    # Multiple remotes, no clear winner
+    return {"ambiguous": list(remotes.items())}
