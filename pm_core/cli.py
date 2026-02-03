@@ -1540,6 +1540,74 @@ def pr_cleanup(pr_id: str | None):
         click.echo(f"No work directory found for {pr_id}.")
 
 
+@pr.command("close")
+@click.argument("pr_id", default=None, required=False)
+@click.option("--keep-github", is_flag=True, help="Don't close the GitHub PR")
+@click.option("--keep-branch", is_flag=True, help="Don't delete the remote branch")
+def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool):
+    """Close and remove a PR from the project.
+
+    Removes the PR entry from project.yaml. By default also closes the
+    GitHub PR and deletes the remote branch if they exist.
+
+    If PR_ID is omitted, uses the active PR.
+    """
+    root = state_root()
+    data = store.load(root)
+
+    if pr_id is None:
+        pr_id = data.get("project", {}).get("active_pr")
+        if not pr_id:
+            click.echo("No active PR. Specify a PR ID.", err=True)
+            raise SystemExit(1)
+        click.echo(f"Using active PR: {pr_id}")
+
+    pr_entry = store.get_pr(data, pr_id)
+    if not pr_entry:
+        prs = data.get("prs") or []
+        click.echo(f"PR {pr_id} not found.", err=True)
+        if prs:
+            click.echo(f"Available PRs: {', '.join(p['id'] for p in prs)}", err=True)
+        raise SystemExit(1)
+
+    # Close GitHub PR if exists
+    gh_pr_number = pr_entry.get("gh_pr_number")
+    if gh_pr_number and not keep_github:
+        from pm_core import gh_ops
+        click.echo(f"Closing GitHub PR #{gh_pr_number}...")
+        try:
+            delete_flag = [] if keep_branch else ["--delete-branch"]
+            result = subprocess.run(
+                ["gh", "pr", "close", str(gh_pr_number), *delete_flag],
+                capture_output=True, text=True
+            )
+            if result.returncode == 0:
+                click.echo(f"GitHub PR #{gh_pr_number} closed.")
+            else:
+                click.echo(f"Warning: Could not close GitHub PR: {result.stderr.strip()}", err=True)
+        except Exception as e:
+            click.echo(f"Warning: Could not close GitHub PR: {e}", err=True)
+
+    # Remove workdir if exists
+    workdir = pr_entry.get("workdir")
+    if workdir and Path(workdir).exists():
+        shutil.rmtree(workdir)
+        click.echo(f"Removed workdir: {workdir}")
+
+    # Remove PR from list
+    prs = data.get("prs") or []
+    data["prs"] = [p for p in prs if p["id"] != pr_id]
+
+    # Update active_pr if needed
+    if data.get("project", {}).get("active_pr") == pr_id:
+        remaining = data.get("prs") or []
+        data["project"]["active_pr"] = remaining[0]["id"] if remaining else None
+
+    save_and_push(data, root, f"pm: close {pr_id}")
+    click.echo(f"Removed {pr_id}: {pr_entry.get('title', '???')}")
+    trigger_tui_refresh()
+
+
 @cli.command("session")
 def session_cmd():
     """Start a tmux session with TUI + notes editor.
