@@ -157,9 +157,9 @@ class TestSelectRemote:
             "bitbucket": "git@bitbucket.org:org/repo.git",
         }
         result = select_remote(remotes, preferred_backend="github")
-        # No github remote and no origin - still falls back to origin check
-        # which fails, so returns ambiguous
-        assert result == {"selected": ("gitlab", "git@gitlab.com:org/repo.git")} or "ambiguous" in result
+        # No github remote and no origin - returns ambiguous with all remotes
+        assert "ambiguous" in result
+        assert len(result["ambiguous"]) == 2
 
     def test_vanilla_backend_matches_any_remote(self):
         """Vanilla backend matches any remote URL (SSH or HTTPS)."""
@@ -167,8 +167,7 @@ class TestSelectRemote:
             "gitlab": "git@gitlab.com:org/repo.git",
             "bitbucket": "https://bitbucket.org/org/repo.git",
         }
-        # Vanilla matches both, but first one alphabetically wins?
-        # Actually, since both match, it's ambiguous
+        # Vanilla matches both remotes, so the result is ambiguous
         result = select_remote(remotes, preferred_backend="vanilla")
         assert "ambiguous" in result
         assert len(result["ambiguous"]) == 2
@@ -229,3 +228,13 @@ class TestSelectRemoteEdgeCases:
         urls = [url for _, url in result["ambiguous"]]
         assert "git@gitlab.com:org/repo.git" not in urls
         assert len(result["ambiguous"]) == 2
+
+    def test_file_url_not_matched_as_vanilla(self):
+        """file:// URLs should not be matched as vanilla backend."""
+        remotes = {
+            "local": "file:///path/to/repo",
+            "remote": "git@github.com:org/repo.git",
+        }
+        result = select_remote(remotes, preferred_backend="vanilla")
+        # Only the git@ remote matches vanilla, so it should be selected
+        assert result == {"selected": ("remote", "git@github.com:org/repo.git")}

@@ -250,8 +250,12 @@ def select_remote(
         if backend == "github":
             return "github.com" in url.lower()
         elif backend == "vanilla":
-            # Any remote URL (not local path)
-            return "://" in url or url.startswith("git@")
+            # Any remote URL (not local path): known remote protocols or SSH-style URL
+            lower_url = url.lower()
+            return (
+                lower_url.startswith(("http://", "https://", "git://", "ssh://"))
+                or url.startswith("git@")
+            )
         return True  # 'local' or None matches anything
 
     # Check if 'origin' exists and matches preferred backend
