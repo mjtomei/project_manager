@@ -1973,9 +1973,20 @@ def guide_done_cmd():
         raise SystemExit(1)
 
     started = guide_mod.get_started_step(root)
+
+    # Bug fix: If started is None but pm dir exists, we're completing step 1
+    # This happens when the guide started with no pm dir (root was None),
+    # then pm init created the directory, and now we're completing.
     if started is None:
-        click.echo("No guide step has been started yet.", err=True)
-        raise SystemExit(1)
+        # Check if detection shows we've moved past no_project
+        detected, _ = guide_mod.detect_state(root)
+        if detected != "no_project":
+            # We've progressed, so no_project must have been the started step
+            started = "no_project"
+            guide_mod.mark_step_started(root, started)
+        else:
+            click.echo("No guide step has been started yet.", err=True)
+            raise SystemExit(1)
 
     completed = guide_mod.get_completed_step(root)
     started_idx = guide_mod.STEP_ORDER.index(started) if started in guide_mod.STEP_ORDER else 0
@@ -1984,6 +1995,17 @@ def guide_done_cmd():
     if completed_idx >= started_idx:
         click.echo("Already completed.")
         return
+
+    # Bug fix: Verify that detection shows progress before marking complete
+    # This prevents marking a step complete when artifacts weren't created
+    detected, _ = guide_mod.detect_state(root)
+    detected_idx = guide_mod.STEP_ORDER.index(detected) if detected in guide_mod.STEP_ORDER else 0
+
+    if detected_idx <= started_idx:
+        # Detection hasn't moved forward - step isn't actually complete
+        click.echo(f"Step not complete: detection still shows '{guide_mod.STEP_DESCRIPTIONS.get(detected, detected)}'")
+        click.echo("Complete the step's tasks before running 'pm guide done'.")
+        raise SystemExit(1)
 
     state = started
     guide_mod.mark_step_completed(root, state)
@@ -2031,7 +2053,12 @@ def _run_guide(step, fresh=False):
     # Non-interactive steps
     if state == "has_plan_prs":
         click.echo("Loading PRs from plan file...")
+        # Bug fix: Track non-interactive steps like any other step
+        if root:
+            guide_mod.mark_step_started(root, state)
         guide_mod.run_non_interactive_step(state, ctx, root)
+        if root:
+            guide_mod.mark_step_completed(root, state)
         # Auto-chain
         if _in_pm_tmux_session():
             os.execvp("pm", ["pm", "guide"])

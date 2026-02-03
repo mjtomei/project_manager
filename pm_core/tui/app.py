@@ -22,13 +22,17 @@ from textual.reactive import reactive
 from textual.timer import Timer
 from textual.widgets import Header, Footer, Static, Label
 
-from pm_core import store, graph as graph_mod, git_ops, prompt_gen, notes
+from pm_core import store, graph as graph_mod, git_ops, prompt_gen, notes, guide
 from pm_core.claude_launcher import find_claude, find_editor
 from pm_core import tmux as tmux_mod
 from pm_core import pane_layout
 from pm_core.tui.tech_tree import TechTree, PRSelected, PRActivated
 from pm_core.tui.detail_panel import DetailPanel
 from pm_core.tui.command_bar import CommandBar, CommandSubmitted
+from pm_core.tui.guide_progress import GuideProgress
+
+# Guide steps that indicate setup is still in progress
+GUIDE_SETUP_STEPS = {"no_project", "initialized", "has_plan_draft", "has_plan_prs", "needs_deps_review"}
 
 
 class StatusBar(Static):
@@ -93,6 +97,16 @@ class ProjectManagerApp(App):
         width: auto;
         padding: 1 2;
     }
+    GuideProgress {
+        height: auto;
+        width: auto;
+        padding: 1 2;
+    }
+    #guide-progress-container {
+        width: 100%;
+        height: 100%;
+        display: none;
+    }
     """
 
     BINDINGS = [
@@ -109,13 +123,14 @@ class ProjectManagerApp(App):
         Binding("ctrl+r", "restart", "Restart", show=False),
         Binding("slash", "focus_command", "Command", show=True),
         Binding("escape", "unfocus_command", "Back", show=False),
+        Binding("x", "dismiss_guide", "Dismiss Guide", show=False),
     ]
 
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """Disable single-key shortcuts when command bar is focused."""
         if action in ("start_pr", "done_pr", "copy_prompt", "launch_claude",
                        "edit_plan", "launch_guide", "launch_notes", "refresh",
-                       "rebalance", "quit"):
+                       "rebalance", "quit", "dismiss_guide"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus:
                 _log.debug("check_action: blocked %s (command bar focused)", action)
@@ -128,12 +143,17 @@ class ProjectManagerApp(App):
         self._root: Path | None = None
         self._sync_timer: Timer | None = None
         self._detail_visible = False
+        self._guide_auto_launched = False
+        self._guide_dismissed = False
+        self._current_guide_step: str | None = None
 
     def compose(self) -> ComposeResult:
         yield StatusBar(id="status-bar")
         with Horizontal(id="main-area"):
             with Vertical(id="tree-container"):
                 yield TechTree(id="tech-tree")
+            with Vertical(id="guide-progress-container"):
+                yield GuideProgress(id="guide-progress")
             with Vertical(id="detail-container"):
                 yield DetailPanel(id="detail-panel")
         yield LogLine(id="log-line")
@@ -154,7 +174,56 @@ class ProjectManagerApp(App):
             self._update_display()
         except FileNotFoundError:
             _log.warning("no project.yaml found")
-            self.log_message("No project.yaml found. Run 'pm init' first.")
+            self._root = None
+            self._data = {}
+
+        # Detect guide step and decide which view to show
+        state, _ = guide.resolve_guide_step(self._root)
+        if state in GUIDE_SETUP_STEPS and not self._guide_dismissed:
+            self._show_guide_view(state)
+        else:
+            self._show_normal_view()
+
+    def _show_guide_view(self, state: str) -> None:
+        """Show the guide progress view during setup steps."""
+        self._current_guide_step = state
+
+        # Update guide progress widget
+        guide_widget = self.query_one("#guide-progress", GuideProgress)
+        guide_widget.update_step(state)
+
+        # Show guide progress, hide tech tree
+        tree_container = self.query_one("#tree-container")
+        guide_container = self.query_one("#guide-progress-container")
+        tree_container.styles.display = "none"
+        guide_container.styles.display = "block"
+
+        # Update status bar for guide mode
+        status_bar = self.query_one("#status-bar", StatusBar)
+        step_num = guide.step_number(state)
+        total = len(GUIDE_SETUP_STEPS) + 1  # +1 for ready_to_work as the "done" state
+        status_bar.update(f" [bold]pm Guide[/bold]    Step {step_num}/{total}: [cyan]{guide.STEP_DESCRIPTIONS.get(state, state)}[/cyan]    [dim]Press x to dismiss[/dim]")
+
+        self.log_message(f"Guide step {step_num}/{total}: {guide.STEP_DESCRIPTIONS.get(state, state)}")
+
+        # Auto-launch guide pane if in tmux and not already launched
+        if not self._guide_auto_launched and tmux_mod.in_tmux():
+            self._guide_auto_launched = True
+            # Use call_later to launch after UI is ready
+            self.call_later(self._auto_launch_guide)
+
+    def _auto_launch_guide(self) -> None:
+        """Auto-launch the guide pane."""
+        _log.info("auto-launching guide pane")
+        self._launch_pane("pm guide", "guide")
+
+    def _show_normal_view(self) -> None:
+        """Show the normal tech tree view."""
+        tree_container = self.query_one("#tree-container")
+        guide_container = self.query_one("#guide-progress-container")
+        tree_container.styles.display = "block"
+        guide_container.styles.display = "none"
+        self._current_guide_step = None
 
     def _update_display(self) -> None:
         """Refresh all widgets with current data."""
@@ -173,7 +242,40 @@ class ProjectManagerApp(App):
         tree.update_prs(self._data.get("prs") or [])
 
     async def _background_sync(self) -> None:
-        """Pull latest state from git."""
+        """Pull latest state from git or check guide progress."""
+        # If guide was dismissed, do normal sync
+        if self._guide_dismissed:
+            await self._do_normal_sync()
+            return
+
+        # Check current guide state
+        try:
+            self._root = store.find_project_root()
+            self._data = store.load(self._root)
+        except FileNotFoundError:
+            self._root = None
+            self._data = {}
+
+        state, _ = guide.resolve_guide_step(self._root)
+
+        # If we're in guide mode, check for state changes
+        if self._current_guide_step is not None:
+            if state not in GUIDE_SETUP_STEPS:
+                # Guide is complete, switch to normal view
+                if self._data:
+                    self._update_display()
+                self._show_normal_view()
+                self.log_message("Guide complete! Showing tech tree.")
+            elif state != self._current_guide_step:
+                # Step changed, update the guide view
+                self._show_guide_view(state)
+            return
+
+        # Not in guide mode - do normal sync
+        await self._do_normal_sync()
+
+    async def _do_normal_sync(self) -> None:
+        """Perform normal git sync."""
         if not self._root:
             return
         try:
@@ -376,6 +478,15 @@ class ProjectManagerApp(App):
         _log.info("action: launch_guide")
         self._launch_pane("pm guide", "guide")
 
+    def action_dismiss_guide(self) -> None:
+        """Dismiss the guide progress view and show the tech tree."""
+        if self._current_guide_step is None:
+            return  # Not in guide mode
+        _log.info("action: dismiss_guide from step %s", self._current_guide_step)
+        self._guide_dismissed = True
+        self._show_normal_view()
+        self.log_message("Guide dismissed. Press 'g' to launch guide pane.")
+
     def action_launch_notes(self) -> None:
         _log.info("action: launch_notes")
         root = self._root or (Path.cwd() / "pm")
@@ -396,7 +507,10 @@ class ProjectManagerApp(App):
 
     def action_refresh(self) -> None:
         self._load_state()
-        self.log_message("Refreshed")
+        if self._current_guide_step is not None:
+            self.log_message(f"Refreshed - Guide step: {guide.STEP_DESCRIPTIONS.get(self._current_guide_step, self._current_guide_step)}")
+        else:
+            self.log_message("Refreshed")
 
     def action_restart(self) -> None:
         """Restart the TUI by exec'ing a fresh pm tui process."""
