@@ -77,8 +77,6 @@ class GuideProgress(Widget):
         output.append("\n")
         output.append("Press ", style="dim")
         output.append("g", style="bold")
-        output.append(" to relaunch guide    ", style="dim")
-        output.append("x", style="bold")
-        output.append(" to dismiss\n", style="dim")
+        output.append(" to dismiss guide view\n", style="dim")
 
         return output

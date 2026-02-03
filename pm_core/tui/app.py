@@ -128,21 +128,20 @@ class ProjectManagerApp(App):
         Binding("p", "copy_prompt", "Copy Prompt", show=True),
         Binding("c", "launch_claude", "Claude", show=True),
         Binding("e", "edit_plan", "Edit Plan", show=True),
-        Binding("g", "launch_guide", "Guide", show=True),
+        Binding("g", "toggle_guide", "Guide", show=True),
         Binding("n", "launch_notes", "Notes", show=True),
         Binding("r", "refresh", "Refresh", show=True),
         Binding("b", "rebalance", "Rebalance", show=True),
         Binding("ctrl+r", "restart", "Restart", show=False),
         Binding("slash", "focus_command", "Command", show=True),
         Binding("escape", "unfocus_command", "Back", show=False),
-        Binding("x", "dismiss_guide", "Dismiss Guide", show=False),
     ]
 
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """Disable single-key shortcuts when command bar is focused."""
         if action in ("start_pr", "done_pr", "copy_prompt", "launch_claude",
-                       "edit_plan", "launch_guide", "launch_notes", "refresh",
-                       "rebalance", "quit", "dismiss_guide"):
+                       "edit_plan", "toggle_guide", "launch_notes", "refresh",
+                       "rebalance", "quit"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus:
                 _log.debug("check_action: blocked %s (command bar focused)", action)
@@ -363,7 +362,7 @@ class ProjectManagerApp(App):
         status_bar = self.query_one("#status-bar", StatusBar)
         step_num = guide.step_number(state)
         total = len(GUIDE_SETUP_STEPS) + 1  # +1 for ready_to_work as the "done" state
-        status_bar.update(f" [bold]pm Guide[/bold]    Step {step_num}/{total}: [cyan]{guide.STEP_DESCRIPTIONS.get(state, state)}[/cyan]    [dim]Press x to dismiss[/dim]")
+        status_bar.update(f" [bold]pm Guide[/bold]    Step {step_num}/{total}: [cyan]{guide.STEP_DESCRIPTIONS.get(state, state)}[/cyan]    [dim]Press g to dismiss[/dim]")
 
         self.log_message(f"Guide step {step_num}/{total}: {guide.STEP_DESCRIPTIONS.get(state, state)}")
 
@@ -662,18 +661,26 @@ class ProjectManagerApp(App):
             _log.exception("failed to launch %s pane", role)
             self.log_message(f"Error: {e}")
 
-    def action_launch_guide(self) -> None:
-        _log.info("action: launch_guide")
-        self._launch_pane("pm guide", "guide")
-
-    def action_dismiss_guide(self) -> None:
-        """Dismiss the guide progress view and show the tech tree."""
-        if self._current_guide_step is None:
-            return  # Not in guide mode
-        _log.info("action: dismiss_guide from step %s", self._current_guide_step)
-        self._guide_dismissed = True
-        self._show_normal_view()
-        self.log_message("Guide dismissed. Press 'g' to launch guide pane.")
+    def action_toggle_guide(self) -> None:
+        """Toggle between guide progress view and tech tree view."""
+        if self._guide_dismissed:
+            # Restore guide view if we're in a guide setup step
+            state, _ = guide.resolve_guide_step(self._root)
+            if state in GUIDE_SETUP_STEPS:
+                _log.info("action: toggle_guide - restoring guide view for step %s", state)
+                self._guide_dismissed = False
+                self._show_guide_view(state)
+                self._launch_pane("pm guide", "guide")
+            else:
+                # Not in guide setup steps, just launch the guide pane
+                _log.info("action: toggle_guide - launching guide pane (not in setup steps)")
+                self._launch_pane("pm guide", "guide")
+        elif self._current_guide_step is not None:
+            # Guide view is showing, dismiss it
+            _log.info("action: toggle_guide - dismissing guide from step %s", self._current_guide_step)
+            self._guide_dismissed = True
+            self._show_normal_view()
+            self.log_message("Guide dismissed. Press 'g' to restore.")
 
     def action_launch_notes(self) -> None:
         _log.info("action: launch_notes")
