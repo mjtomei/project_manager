@@ -1412,17 +1412,9 @@ def session_cmd():
         data = None
         has_project = False
 
-    if has_project:
-        project_name = data.get("project", {}).get("name", "unknown")
-    else:
-        # Derive session name from cwd
-        project_name = Path.cwd().name
-
-    # Include path hash to support multiple sessions for repos with same name in different dirs
-    import hashlib
+    # Generate session name with path hash (uses helper to ensure consistency)
     cwd = str(root) if root else str(Path.cwd())
-    path_hash = hashlib.md5(cwd.encode()).hexdigest()[:8]
-    session_name = f"pm-{project_name}-{path_hash}"
+    session_name = _get_session_name_for_cwd()
     expected_root = root or (Path.cwd() / "pm")
     notes_path = expected_root / notes.NOTES_FILENAME
 
@@ -2370,6 +2362,23 @@ def _tui_history_file(session: str) -> Path:
     return TUI_HISTORY_DIR / f"{session}.json"
 
 
+def _get_session_name_for_cwd() -> str:
+    """Generate the expected session name for the current working directory."""
+    import hashlib
+
+    try:
+        root = state_root()
+        data = store.load(root)
+        project_name = data.get("project", {}).get("name", "unknown")
+        cwd = str(root)
+    except (FileNotFoundError, SystemExit):
+        project_name = Path.cwd().name
+        cwd = str(Path.cwd())
+
+    path_hash = hashlib.md5(cwd.encode()).hexdigest()[:8]
+    return f"pm-{project_name}-{path_hash}"
+
+
 def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     """Find the TUI pane in a pm session.
 
@@ -2377,7 +2386,8 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
 
     If session is provided, uses that. Otherwise:
     - If in a pm- tmux session, uses current session
-    - Otherwise, searches for any pm- session with a TUI pane
+    - Otherwise, tries to find session matching current directory
+    - Falls back to searching for any pm- session with a TUI pane
     """
     import subprocess
 
@@ -2398,7 +2408,15 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
                 if pane.get("role") == "tui":
                     return pane.get("id"), current_session
 
-    # Search for any pm session with a TUI
+    # Try to find session matching current directory first
+    expected_session = _get_session_name_for_cwd()
+    if tmux_mod.session_exists(expected_session):
+        data = pane_layout.load_registry(expected_session)
+        for pane in data.get("panes", []):
+            if pane.get("role") == "tui":
+                return pane.get("id"), expected_session
+
+    # Fall back to searching for any pm session with a TUI
     result = subprocess.run(
         ["tmux", "list-sessions", "-F", "#{session_name}"],
         capture_output=True, text=True
