@@ -2519,5 +2519,84 @@ def tui_clear_history(session: str | None):
         click.echo(f"No history to clear for session {sess}.")
 
 
+@tui.command("test")
+@click.argument("test_id", required=False)
+@click.option("--list", "list_tests_flag", is_flag=True, help="List available tests")
+@click.option("--session", "-s", default=None, help="Specify pm session name")
+def tui_test(test_id: str | None, list_tests_flag: bool, session: str | None):
+    """Run TUI regression tests using Claude as the test executor.
+
+    These tests launch Claude with a specific test prompt that instructs it
+    to interact with the TUI and tmux, verify behavior, and report results.
+
+    Examples:
+        pm tui test --list              # List available tests
+        pm tui test pane-layout         # Run pane layout test
+        pm tui test session-resume      # Run session resume test
+    """
+    from pm_core import tui_tests
+
+    if list_tests_flag:
+        tests = tui_tests.list_tests()
+        click.echo("Available TUI tests:\n")
+        for t in tests:
+            click.echo(f"  {t['id']:20} {t['name']}")
+            click.echo(f"  {' '*20} {t['description']}\n")
+        return
+
+    if not test_id:
+        click.echo("Usage: pm tui test <test_id>")
+        click.echo("Run 'pm tui test --list' to see available tests.")
+        raise SystemExit(1)
+
+    prompt = tui_tests.get_test_prompt(test_id)
+    if not prompt:
+        click.echo(f"Unknown test: {test_id}", err=True)
+        click.echo("Run 'pm tui test --list' to see available tests.")
+        raise SystemExit(1)
+
+    # Verify we have a TUI session
+    pane_id, sess = _find_tui_pane(session)
+    if not sess:
+        click.echo("No pm tmux session found. Start one with 'pm session'.", err=True)
+        raise SystemExit(1)
+
+    # Add session context to the prompt
+    full_prompt = f"""\
+## Session Context
+
+You are testing against tmux session: {sess}
+The TUI pane ID is: {pane_id}
+
+To interact with this session, use commands like:
+- pm tui view -s {sess}
+- pm tui send <keys> -s {sess}
+- tmux list-panes -t {sess} -F "#{{pane_id}} #{{pane_width}}x#{{pane_height}} #{{pane_current_command}}"
+- cat ~/.pm-pane-registry/{sess}.json
+
+{prompt}
+"""
+
+    test_info = tui_tests.ALL_TESTS[test_id]
+    click.echo(f"Running test: {test_info['name']}")
+    click.echo(f"Session: {sess}")
+    click.echo("-" * 60)
+
+    # Launch Claude with the test prompt
+    claude = find_claude()
+    if not claude:
+        click.echo("Claude CLI not found.", err=True)
+        raise SystemExit(1)
+
+    import subprocess
+    cmd = [claude]
+    if os.environ.get("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS") == "true":
+        cmd.append("--dangerously-skip-permissions")
+    cmd.append(full_prompt)
+
+    result = subprocess.run(cmd)
+    raise SystemExit(result.returncode)
+
+
 def main():
     cli()
