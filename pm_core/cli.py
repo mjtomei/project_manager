@@ -1379,6 +1379,66 @@ def pr_cleanup(pr_id: str | None):
         click.echo(f"No work directory found for {pr_id}.")
 
 
+def _restore_session_panes(session_name: str, has_project: bool, root: Path | None,
+                           notes_path: Path, old_registry: dict) -> None:
+    """Restore missing panes in an existing session.
+
+    Called when user runs 'pm session' but the TUI pane has been killed.
+    Recreates the TUI and notes panes to restore the expected layout.
+    """
+    import time as _time
+    import subprocess as _sp
+
+    cwd = str(root) if root else str(Path.cwd())
+    window_id = tmux_mod.get_window_id(session_name)
+
+    # Clear stale pane registry and bump generation
+    generation = str(int(_time.time()))
+    pane_layout.save_registry(session_name, {
+        "session": session_name, "window": window_id, "panes": [],
+        "user_modified": False, "generation": generation,
+    })
+
+    def _wrap(cmd: str) -> str:
+        escaped = cmd.replace("'", "'\\''")
+        return (f"bash -c 'trap \"pm _pane-exited {session_name} {window_id} {generation} $TMUX_PANE\" EXIT; "
+                f"{escaped}'")
+
+    # Get existing panes to find one to split from
+    live_panes = tmux_mod.get_pane_indices(session_name)
+    if not live_panes:
+        # No panes at all - need to create a new window
+        _sp.run(["tmux", "new-window", "-t", session_name, "-n", "main", "pm tui"], check=False)
+        window_id = tmux_mod.get_window_id(session_name)
+        tui_pane = _sp.run(
+            ["tmux", "list-panes", "-t", session_name, "-F", "#{pane_id}"],
+            capture_output=True, text=True,
+        ).stdout.strip().splitlines()[0]
+    else:
+        # Split from existing pane to create TUI
+        base_pane = live_panes[0][0]
+        tui_pane = tmux_mod.split_pane_at(base_pane, "h", _wrap("pm tui"))
+
+    pane_layout.register_pane(session_name, window_id, tui_pane, "tui", "pm tui")
+
+    # Create notes pane
+    if has_project and root:
+        notes.ensure_notes_file(root)
+    else:
+        notes_path.parent.mkdir(parents=True, exist_ok=True)
+        if not notes_path.exists():
+            notes_path.write_text(notes.NOTES_WELCOME)
+
+    notes_pane = tmux_mod.split_pane_at(tui_pane, "h", _wrap(f"pm notes {notes_path}"))
+    pane_layout.register_pane(session_name, window_id, notes_pane, "notes", "pm notes")
+
+    # Rebalance layout
+    pane_layout.rebalance(session_name, window_id)
+
+    # Select the TUI pane
+    tmux_mod.select_pane(tui_pane)
+
+
 @cli.command("session")
 def session_cmd():
     """Start a tmux session with TUI + notes editor.
@@ -1409,7 +1469,22 @@ def session_cmd():
     session_name = f"pm-{project_name}"
 
     if tmux_mod.session_exists(session_name):
-        click.echo(f"Attaching to existing session '{session_name}'...")
+        # Check if the session has the expected panes
+        live_panes = tmux_mod.get_pane_indices(session_name)
+        registry = pane_layout.load_registry(session_name)
+        registered_panes = registry.get("panes", [])
+
+        # Find which registered panes are still alive
+        live_pane_ids = {p[0] for p in live_panes}
+        roles_alive = {p["role"] for p in registered_panes if p["id"] in live_pane_ids}
+
+        # If TUI is missing, we need to restore the session
+        if "tui" not in roles_alive:
+            click.echo(f"Session '{session_name}' exists but TUI pane is missing. Restoring...")
+            _restore_session_panes(session_name, has_project, root, notes_path, registry)
+        else:
+            click.echo(f"Attaching to existing session '{session_name}'...")
+
         tmux_mod.attach(session_name)
         return
 
