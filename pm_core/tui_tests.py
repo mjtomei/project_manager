@@ -33,6 +33,7 @@ You have access to these commands:
 ## Test Procedure
 
 1. First, record the original state:
+   - Run `pm tui clear-frames` to start with empty frame buffer
    - Run `pm tui view` to see the TUI
    - Run `tmux list-panes` to see all panes and their sizes
    - Check the pane registry - note the pane order (by "order" field)
@@ -60,6 +61,7 @@ You have access to these commands:
    - Pane registry matches actual tmux panes
    - Layout is reasonably balanced (no tiny or huge panes)
    - TUI remains responsive
+   - Check `pm tui frames` to see captured state changes during the test
 
 4. RESTORE ORIGINAL STATE:
    - Kill and relaunch panes in the correct order to restore original pane order
@@ -273,7 +275,9 @@ The fix should:
 
 - `pm tui view` - See current TUI state
 - `pm tui send <keys>` - Send keystrokes (R=restart, g=guide, n=notes, x=dismiss)
-- `pm tui frames` - View captured frames
+- `pm tui frames` - View captured frames (automatically recorded on UI changes)
+- `pm tui frames --all` - View all captured frames
+- `pm tui clear-frames` - Clear frame buffer to start fresh
 - `tmux list-panes -t <session> -F "#{pane_id} #{pane_title}"` - List panes
 - `cat ~/.pm-pane-registry/<session>.json` - View pane registry
 - `tmux display-message -p "#{session_name}"` - Get current session name
@@ -283,6 +287,7 @@ The fix should:
 ### Scenario A: Restart TUI while guide is running
 
 1. SETUP:
+   - Run `pm tui clear-frames` to start with empty frame buffer
    - Run `pm tui view` to verify TUI is running
    - Get session name: `tmux display-message -p "#{session_name}"`
    - Check pane registry: `cat ~/.pm-pane-registry/<session>.json`
@@ -307,6 +312,8 @@ The fix should:
    - Run `pm tui view` - TUI should be responsive
    - The original guide pane should still be there
    - No duplicate guide panes should exist
+   - Run `pm tui frames --all` to see state transitions during restart
+   - Frame triggers should show "mount" after restart, content should be consistent
 
 ### Scenario B: Restart TUI after guide is done
 
@@ -382,7 +389,9 @@ duplicate panes. The fix should detect existing panes and focus them instead.
 
 - `pm tui view` - See current TUI state
 - `pm tui send <keys>` - Send keystrokes to TUI
-- `pm tui frames` - View captured frames
+- `pm tui frames` - View captured frames (automatically recorded on UI changes)
+- `pm tui frames --all` - View all captured frames with triggers
+- `pm tui clear-frames` - Clear frame buffer to start fresh
 - `tmux list-panes -t <session> -F "#{pane_id} #{pane_current_command}"` - List panes
 - `cat ~/.pm-pane-registry/<session>.json` - View pane registry
 - `tmux display-message -p "#{session_name}"` - Get session name
@@ -391,8 +400,9 @@ duplicate panes. The fix should detect existing panes and focus them instead.
 
 ### Setup
 
-1. Get session name: `tmux display-message -p "#{session_name}"`
-2. Record initial state:
+1. Run `pm tui clear-frames` to start with empty frame buffer
+2. Get session name: `tmux display-message -p "#{session_name}"`
+3. Record initial state:
    - `tmux list-panes -t <session> -F "#{pane_id}"` - count panes
    - `cat ~/.pm-pane-registry/<session>.json` - note registered panes
 
@@ -450,6 +460,42 @@ duplicate panes. The fix should detect existing panes and focus them instead.
    - Check focused pane changed to guide
    - Press 'n' - should focus notes pane
    - Check focused pane changed to notes
+   - Run `pm tui frames` to verify the TUI logged "Focused existing X pane" messages
+
+### Scenario E: Command bar with status command
+
+The TUI has a command bar (focused with '/') that can run pm commands.
+Test that the command bar properly executes commands.
+
+1. First, make sure TUI pane is focused (press Escape to unfocus command bar if needed)
+2. Focus command bar: `pm tui send /`
+3. Type status command: `pm tui send status`
+4. Press Enter: `pm tui send Enter`
+5. Wait 1 second
+6. Check `pm tui view` - log line should show command output or status info
+7. Pane count should be unchanged (status doesn't create panes)
+
+### Scenario F: Command bar with sync command
+
+Test another command bar command:
+
+1. Focus TUI pane
+2. `pm tui send /` to focus command bar
+3. `pm tui send sync` to type sync command
+4. `pm tui send Enter` to execute
+5. Wait 2 seconds
+6. Check `pm tui view` - should see sync result in log line
+7. Pane count should be unchanged
+
+### Scenario G: Command bar escape to cancel
+
+Test that Escape cancels command input:
+
+1. Focus command bar: `pm tui send /`
+2. Type partial command: `pm tui send stat`
+3. Press Escape: `pm tui send Escape`
+4. Command bar should unfocus without executing
+5. TUI should return to normal state
 
 ## Expected Behavior
 
@@ -468,6 +514,9 @@ Scenario A (guide dedup): [PASS/FAIL] - <pane counts: before/after 'g' presses>
 Scenario B (notes dedup): [PASS/FAIL] - <pane counts: before/after 'n' presses>
 Scenario C (rapid presses): [PASS/FAIL] - <pane count unchanged? Y/N>
 Scenario D (focus switching): [PASS/FAIL] - <focus changed correctly? Y/N>
+Scenario E (cmd bar status): [PASS/FAIL] - <status output visible? Y/N>
+Scenario F (cmd bar sync): [PASS/FAIL] - <sync output visible? Y/N>
+Scenario G (cmd bar escape): [PASS/FAIL] - <escape cancels input? Y/N>
 
 Details:
 <observations, any duplicate panes created, log messages seen>
@@ -479,6 +528,17 @@ Pane counts:
 - After notes launch: <N>
 - After notes re-press: <N>
 - After rapid presses: <N>
+
+Command bar tests:
+- Command bar focused with '/': Y/N
+- Status command output visible: Y/N
+- Sync command output visible: Y/N
+- Escape cancels without executing: Y/N
+
+Frame analysis:
+- Total frames captured: <N>
+- Key triggers seen: <list of triggers from pm tui frames --all>
+- "Focused existing" messages in log line: Y/N
 
 OVERALL: [PASS/FAIL]
 ```
@@ -505,6 +565,11 @@ ALL_TESTS = {
         "name": "TUI Restart Pane Deduplication",
         "prompt": TUI_RESTART_PANE_DEDUP_TEST,
         "description": "Test that restarting TUI doesn't create duplicate panes",
+    },
+    "launch-dedup": {
+        "name": "Pane Launch Deduplication",
+        "prompt": PANE_LAUNCH_DEDUP_TEST,
+        "description": "Test that pane launch keys (g, n) don't create duplicates",
     },
 }
 
