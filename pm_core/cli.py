@@ -1,5 +1,6 @@
 """Click CLI definitions for pm."""
 
+import json
 import logging
 import os
 import platform
@@ -1389,79 +1390,6 @@ def pr_cleanup(pr_id: str | None):
         click.echo(f"No work directory found for {pr_id}.")
 
 
-def _restore_session_panes(session_name: str, has_project: bool, root: Path | None,
-                           notes_path: Path, old_registry: dict, roles_alive: set) -> None:
-    """Restore missing panes in an existing session.
-
-    Called when user runs 'pm session' but the TUI pane is missing.
-    Recreates TUI and notes panes to restore the expected layout.
-    """
-    import time as _time
-    import subprocess as _sp
-
-    _log.info("_restore_session_panes called: session=%s has_project=%s roles_alive=%s",
-              session_name, has_project, roles_alive)
-
-    window_id = tmux_mod.get_window_id(session_name)
-    _log.info("window_id: %s", window_id)
-
-    # Bump generation to invalidate old EXIT traps
-    generation = str(int(_time.time()))
-
-    # Start fresh registry
-    pane_layout.save_registry(session_name, {
-        "session": session_name, "window": window_id, "panes": [],
-        "user_modified": False, "generation": generation,
-    })
-
-    def _wrap(cmd: str) -> str:
-        escaped = cmd.replace("'", "'\\''")
-        return (f"bash -c 'trap \"pm _pane-exited {session_name} {window_id} {generation} $TMUX_PANE\" EXIT; "
-                f"{escaped}'")
-
-    live_panes = tmux_mod.get_pane_indices(session_name)
-    _log.info("live_panes in restore: %s", live_panes)
-
-    base_pane = live_panes[0][0] if live_panes else None
-    _log.info("base_pane: %s", base_pane)
-
-    # Create TUI pane
-    if base_pane is None:
-        _log.info("no base pane, creating new window")
-        _sp.run(["tmux", "new-window", "-t", session_name, "-n", "main", _wrap("pm tui")], check=False)
-        window_id = tmux_mod.get_window_id(session_name)
-        tui_pane = _sp.run(
-            ["tmux", "list-panes", "-t", session_name, "-F", "#{pane_id}"],
-            capture_output=True, text=True,
-        ).stdout.strip().splitlines()[0]
-    else:
-        _log.info("splitting from base_pane %s to create TUI", base_pane)
-        tui_pane = tmux_mod.split_pane_at(base_pane, "h", _wrap("pm tui"), background=True)
-        _log.info("created tui_pane: %s, swapping with base_pane", tui_pane)
-        tmux_mod.swap_pane(tui_pane, base_pane)
-
-    _log.info("registering TUI pane: %s", tui_pane)
-    pane_layout.register_pane(session_name, window_id, tui_pane, "tui", "pm tui")
-
-    # Create notes pane
-    if has_project and root:
-        notes.ensure_notes_file(root)
-    else:
-        notes_path.parent.mkdir(parents=True, exist_ok=True)
-        if not notes_path.exists():
-            notes_path.write_text(notes.NOTES_WELCOME)
-
-    notes_pane = tmux_mod.split_pane_at(tui_pane, "h", _wrap(f"pm notes {notes_path}"))
-    _log.info("created notes_pane: %s", notes_pane)
-    pane_layout.register_pane(session_name, window_id, notes_pane, "notes", f"pm notes {notes_path}")
-
-    # Rebalance layout
-    pane_layout.rebalance(session_name, window_id)
-
-    # Select the TUI pane
-    tmux_mod.select_pane(tui_pane)
-
-
 @cli.command("session")
 def session_cmd():
     """Start a tmux session with TUI + notes editor.
@@ -1469,6 +1397,7 @@ def session_cmd():
     If no project exists yet, starts pm guide instead of the TUI so
     the guided workflow can initialize the project inside tmux.
     """
+    _log.info("session_cmd started")
     if not tmux_mod.has_tmux():
         click.echo("tmux is required for 'pm session'. Install it first.", err=True)
         raise SystemExit(1)
@@ -1494,6 +1423,7 @@ def session_cmd():
     expected_root = root or (Path.cwd() / "pm")
     notes_path = expected_root / notes.NOTES_FILENAME
 
+    _log.info("checking if session exists: %s", session_name)
     if tmux_mod.session_exists(session_name):
         # Check if the session has the expected panes
         live_panes = tmux_mod.get_pane_indices(session_name)
@@ -1505,22 +1435,21 @@ def session_cmd():
         roles_alive = {p["role"] for p in registered_panes if p["id"] in live_pane_ids}
 
         _log.info("session exists: %s", session_name)
-        _log.info("live_panes: %s", live_panes)
-        _log.info("registered_panes: %s", registered_panes)
-        _log.info("live_pane_ids: %s", live_pane_ids)
         _log.info("roles_alive: %s", roles_alive)
 
-        # If TUI is missing, we need to restore the session
+        # If TUI is missing, kill the broken session and let normal init recreate it
         if "tui" not in roles_alive:
-            _log.info("TUI missing, restoring panes")
-            click.echo(f"Session '{session_name}' exists but TUI pane is missing. Restoring...")
-            _restore_session_panes(session_name, has_project, root, notes_path, registry, roles_alive)
+            _log.info("TUI missing, killing broken session to recreate")
+            click.echo(f"Session '{session_name}' is broken. Recreating...")
+            tmux_mod.kill_session(session_name)
+            # Fall through to normal creation code below
         else:
             _log.info("TUI present, just attaching")
             click.echo(f"Attaching to existing session '{session_name}'...")
+            tmux_mod.attach(session_name)
+            return
 
-        tmux_mod.attach(session_name)
-        return
+    _log.info("session does not exist or was killed, creating new session")
     editor = find_editor()
 
     # Clear stale pane registry and bump generation to invalidate old EXIT traps
@@ -1532,8 +1461,9 @@ def session_cmd():
     })
 
     # Always create session with TUI in the left pane
+    _log.info("creating tmux session: %s cwd=%s", session_name, cwd)
     click.echo(f"Creating tmux session '{session_name}'...")
-    tmux_mod.create_session(session_name, cwd, "pm tui")
+    tmux_mod.create_session(session_name, cwd, "pm _tui")
 
     # Forward key environment variables into the tmux session
     import subprocess as _sp
@@ -1548,9 +1478,10 @@ def session_cmd():
         capture_output=True, text=True,
     ).stdout.strip().splitlines()[0]
     window_id = tmux_mod.get_window_id(session_name)
+    _log.info("created tui_pane=%s window_id=%s", tui_pane, window_id)
 
     # Register TUI pane in layout registry
-    pane_layout.register_pane(session_name, window_id, tui_pane, "tui", "pm tui")
+    pane_layout.register_pane(session_name, window_id, tui_pane, "tui", "pm _tui")
 
     def _wrap(cmd: str) -> str:
         """Wrap a pane command in bash with an EXIT trap for rebalancing."""
@@ -1558,6 +1489,7 @@ def session_cmd():
         return (f"bash -c 'trap \"pm _pane-exited {session_name} {window_id} {generation} $TMUX_PANE\" EXIT; "
                 f"{escaped}'")
 
+    _log.info("has_project=%s, creating notes pane", has_project)
     if has_project:
         # Existing project: TUI (left) | notes editor (right)
         notes.ensure_notes_file(root)
@@ -1571,9 +1503,11 @@ def session_cmd():
             notes_path.write_text(notes.NOTES_WELCOME)
         notes_pane = tmux_mod.split_pane(session_name, "h", _wrap(f"pm notes {notes_path}"))
         pane_layout.register_pane(session_name, window_id, notes_pane, "notes", "pm notes")
+    _log.info("created notes_pane=%s", notes_pane)
 
     # Apply initial balanced layout
     pane_layout.rebalance(session_name, window_id)
+    _log.info("rebalanced layout, attaching to session")
 
     # Bind prefix-R to rebalance in this session
     import subprocess as _sp
@@ -1623,9 +1557,9 @@ def prompt(pr_id: str | None):
     click.echo(prompt_gen.generate_prompt(data, pr_id))
 
 
-@cli.command("tui")
+@cli.command("_tui", hidden=True)
 def tui_cmd():
-    """Launch the interactive TUI."""
+    """Launch the interactive TUI (internal command)."""
     from pm_core.tui.app import ProjectManagerApp
     app = ProjectManagerApp()
     app.run()
@@ -2649,6 +2583,162 @@ def tui_clear_history(session: str | None):
         click.echo(f"TUI history cleared for session {sess}.")
     else:
         click.echo(f"No history to clear for session {sess}.")
+
+
+# --- Frame capture commands ---
+
+def _capture_config_file(session: str) -> Path:
+    """Get the capture config file path for a session."""
+    return _log_dir / f"{session}-capture.json"
+
+
+def _capture_frames_file(session: str) -> Path:
+    """Get the captured frames file path for a session."""
+    return _log_dir / f"{session}-frames.json"
+
+
+@tui.command("capture")
+@click.option("--frame-rate", "-r", type=int, default=None,
+              help="Record every Nth change (1=all changes)")
+@click.option("--buffer-size", "-b", type=int, default=None,
+              help="Max frames to keep in buffer")
+@click.option("--session", "-s", default=None, help="Specify pm session name")
+def tui_capture_config(frame_rate: int | None, buffer_size: int | None, session: str | None):
+    """Configure frame capture settings.
+
+    Frame capture is always enabled. Use this to adjust:
+    - frame-rate: Record every Nth change (default: 1 = record all)
+    - buffer-size: How many frames to keep (default: 100)
+
+    The TUI will pick up config changes on its next sync cycle (~30s)
+    or immediately if you press 'r' to refresh.
+
+    Examples:
+        pm tui capture --frame-rate 1 --buffer-size 200
+        pm tui capture -r 5 -b 50
+    """
+    pane_id, sess = _find_tui_pane(session)
+    if not sess:
+        click.echo("No pm tmux session found.", err=True)
+        raise SystemExit(1)
+
+    config_file = _capture_config_file(sess)
+
+    # Load existing config or defaults
+    config = {"frame_rate": 1, "buffer_size": 100}
+    if config_file.exists():
+        try:
+            config = json.loads(config_file.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # Update with provided values
+    if frame_rate is not None:
+        if frame_rate < 1:
+            click.echo("frame-rate must be >= 1", err=True)
+            raise SystemExit(1)
+        config["frame_rate"] = frame_rate
+    if buffer_size is not None:
+        if buffer_size < 1:
+            click.echo("buffer-size must be >= 1", err=True)
+            raise SystemExit(1)
+        config["buffer_size"] = buffer_size
+
+    # Save config
+    config_file.write_text(json.dumps(config, indent=2))
+    click.echo(f"Capture config for session {sess}:")
+    click.echo(f"  frame_rate:  {config['frame_rate']} (record every {config['frame_rate']} change(s))")
+    click.echo(f"  buffer_size: {config['buffer_size']} frames")
+    click.echo("\nTUI will pick up changes on next sync or press 'r' to refresh.")
+
+
+@tui.command("frames")
+@click.option("--count", "-n", type=int, default=5, help="Number of frames to show")
+@click.option("--all", "show_all", is_flag=True, help="Show all frames")
+@click.option("--session", "-s", default=None, help="Specify pm session name")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+def tui_frames(count: int, show_all: bool, session: str | None, as_json: bool):
+    """View captured TUI frames.
+
+    Shows frames captured when the TUI changes (based on frame_rate setting).
+    Each frame includes timestamp, trigger, and content.
+
+    Examples:
+        pm tui frames              # Show last 5 frames
+        pm tui frames -n 20        # Show last 20 frames
+        pm tui frames --all        # Show all frames
+        pm tui frames --json       # Output as JSON for scripting
+    """
+    pane_id, sess = _find_tui_pane(session)
+    if not sess:
+        click.echo("No pm tmux session found.", err=True)
+        raise SystemExit(1)
+
+    frames_file = _capture_frames_file(sess)
+    if not frames_file.exists():
+        click.echo(f"No captured frames for session {sess}.")
+        return
+
+    try:
+        data = json.loads(frames_file.read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        click.echo(f"Error reading frames: {e}", err=True)
+        raise SystemExit(1)
+
+    frames = data.get("frames", [])
+    if not frames:
+        click.echo(f"No frames captured yet for session {sess}.")
+        return
+
+    if as_json:
+        if show_all:
+            click.echo(json.dumps(data, indent=2))
+        else:
+            output = {**data, "frames": frames[-count:]}
+            click.echo(json.dumps(output, indent=2))
+        return
+
+    # Show summary
+    click.echo(f"[Session: {sess}]")
+    click.echo(f"Total changes: {data.get('total_changes', '?')}")
+    click.echo(f"Frame rate: {data.get('frame_rate', '?')} | Buffer size: {data.get('buffer_size', '?')}")
+    click.echo(f"Frames captured: {len(frames)}")
+    click.echo()
+
+    if show_all:
+        count = len(frames)
+
+    recent = frames[-count:]
+    for i, frame in enumerate(recent):
+        frame_num = len(frames) - len(recent) + i + 1
+        timestamp = frame.get("timestamp", "unknown")
+        trigger = frame.get("trigger", "unknown")
+        change_num = frame.get("change_number", "?")
+        content = frame.get("content", "")
+
+        click.echo("=" * 60)
+        click.echo(f"Frame {frame_num}/{len(frames)} | Change #{change_num} | {trigger}")
+        click.echo(f"Time: {timestamp}")
+        click.echo("=" * 60)
+        click.echo(content)
+        click.echo()
+
+
+@tui.command("clear-frames")
+@click.option("--session", "-s", default=None, help="Specify pm session name")
+def tui_clear_frames(session: str | None):
+    """Clear captured frames for a session."""
+    pane_id, sess = _find_tui_pane(session)
+    if not sess:
+        click.echo("No pm tmux session found.", err=True)
+        raise SystemExit(1)
+
+    frames_file = _capture_frames_file(sess)
+    if frames_file.exists():
+        frames_file.unlink()
+        click.echo(f"Captured frames cleared for session {sess}.")
+    else:
+        click.echo(f"No frames to clear for session {sess}.")
 
 
 @tui.command("test")

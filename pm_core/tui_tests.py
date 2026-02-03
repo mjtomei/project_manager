@@ -20,21 +20,25 @@ There have been bugs where:
 ## Available Tools
 
 You have access to these commands:
-- `pm tui view` - See current TUI state
+- `pm tui view` - See current TUI state (also adds to legacy history)
 - `pm tui send <keys>` - Send keystrokes to TUI (g=guide, n=notes, r=refresh, x=dismiss)
-- `pm tui history` - See recent TUI frames
+- `pm tui frames` - View automatically captured frames (captured on every UI change)
+- `pm tui frames --all` - View all captured frames
+- `pm tui capture --frame-rate N --buffer-size N` - Configure capture settings
+- `pm tui clear-frames` - Clear captured frames
 - `tmux list-panes -t <session> -F "#{pane_id} #{pane_width}x#{pane_height}"` - List panes with sizes
 - `tmux kill-pane -t <pane_id>` - Kill a specific pane
 - `cat ~/.pm-pane-registry/<session>.json` - View pane registry
 
 ## Test Procedure
 
-1. First, understand the current state:
+1. First, record the original state:
    - Run `pm tui view` to see the TUI
    - Run `tmux list-panes` to see all panes and their sizes
-   - Check the pane registry to see what panes are registered
+   - Check the pane registry - note the pane order (by "order" field)
+   - SAVE THIS STATE - you must restore it at the end
 
-2. Test at least TWO of these scenarios (choose based on current state):
+2. Example scenarios, test as many as you think are useful:
 
    a) Kill guide pane via tmux, relaunch via TUI 'g' key:
       - Note current pane IDs and sizes
@@ -56,6 +60,16 @@ You have access to these commands:
    - Pane registry matches actual tmux panes
    - Layout is reasonably balanced (no tiny or huge panes)
    - TUI remains responsive
+
+4. RESTORE ORIGINAL STATE:
+   - Kill and relaunch panes in the correct order to restore original pane order
+   - For example, if you tested guide then notes, you need to:
+     * Kill the notes pane you created
+     * Kill the guide pane you created
+     * Relaunch notes first (press 'n')
+     * Relaunch guide second (press 'g')
+   - This ensures the registry order matches the original
+   - Verify final state matches original state
 
 ## Expected Behavior
 
@@ -81,8 +95,6 @@ OVERALL: [PASS/FAIL]
 ```
 
 Use PASS if behavior matches expected, FAIL if there are bugs or unexpected behavior.
-
-Begin testing now. Be thorough but efficient.
 """
 
 
@@ -101,6 +113,8 @@ The pm guide uses Claude's --session-id flag to enable session resume. When you:
 
 - `pm tui view` - See current TUI state
 - `pm tui send <keys>` - Send keystrokes (g=guide, x=dismiss)
+- `pm tui frames` - View automatically captured frames
+- `pm tui frames --all` - View all captured frames
 - `cat pm/.pm-sessions.json` - View session registry
 - `tmux capture-pane -t <pane_id> -p` - Capture any pane's content
 
@@ -145,6 +159,332 @@ OVERALL: [PASS/FAIL]
 """
 
 
+GUIDE_PROGRESS_WIDGET_TEST = """\
+You are testing the GuideProgress widget in the pm TUI. Your goal is to verify
+that the widget correctly displays step progress indicators as the user moves
+through the guide workflow.
+
+## Background
+
+The TUI displays a GuideProgress widget during the setup steps (no_project through
+ready_to_work). This widget shows:
+- A list of numbered steps with descriptions
+- Markers indicating status: checkmark for completed, arrow for current, circle for future
+- The current step highlighted
+
+The frame capture system automatically records TUI state on every change, so you
+can verify the widget updated correctly by examining captured frames.
+
+## Available Tools
+
+- `pm tui view` - See current TUI state
+- `pm tui send <keys>` - Send keystrokes to TUI (g=guide, n=notes, r=refresh, x=dismiss)
+- `pm tui frames` - View recently captured frames (shows last 5)
+- `pm tui frames --all` - View all captured frames
+- `pm tui frames -n 10` - View last 10 frames
+- `pm tui clear-frames` - Clear captured frames (useful to start fresh)
+- `pm tui capture --frame-rate 1` - Ensure all changes are captured
+
+## Test Procedure
+
+1. SETUP: Clear frames to start fresh
+   - Run `pm tui clear-frames`
+   - Run `pm tui view` to see initial state
+   - Verify you see the GuideProgress widget (should show "Guide Workflow" header)
+
+2. VERIFY INITIAL STATE:
+   - The current step should have a right-pointing arrow marker (unicode U+25B6)
+   - Previous steps should have checkmarks (U+2713)
+   - Future steps should have empty circles (U+25CB)
+   - Check `pm tui frames` to see the captured initial frame
+
+3. TEST STEP TRANSITION (if possible):
+   - If the guide is on step 1 (no_project), you can complete it by ensuring
+     a pm directory with project.yaml exists
+   - Press 'r' to refresh the TUI
+   - Check frames to see if the widget updated:
+     * Previous step should now show checkmark
+     * New current step should show arrow
+   - Run `pm tui frames -n 3` to compare before/after states
+
+4. TEST DISMISS AND RESTORE:
+   - Press 'x' to dismiss the guide view
+   - Verify TUI switches to tech tree view
+   - Press 'g' to launch guide pane
+   - Verify guide progress widget is still visible (or explain if behavior differs)
+
+5. VERIFY FRAME CAPTURE TRIGGERS:
+   - Each state change should have triggered a frame capture
+   - Run `pm tui frames --all` and check the "trigger" field in each frame
+   - Expected triggers: "mount", "show_guide_view:*", "guide_step:*", etc.
+
+## Expected Behavior
+
+From pm_core/tui/guide_progress.py:
+- INTERACTIVE_STEPS excludes terminal states (all_in_progress, all_done)
+- MARKER_COMPLETED = checkmark, MARKER_CURRENT = arrow, MARKER_FUTURE = circle
+- Widget updates via update_step() method which triggers refresh()
+
+From pm_core/tui/app.py:
+- GuideProgress widget is in #guide-progress-container
+- Shown when state is in GUIDE_SETUP_STEPS and not dismissed
+- Frame capture triggers on guide step changes via watcher
+
+## Reporting
+
+After running your tests, report your findings in this format:
+
+```
+TEST RESULTS
+============
+Initial display: [PASS/FAIL] - Widget shows correct markers
+Step transition: [PASS/FAIL] - Markers update on step change (or N/A if couldn't test)
+Dismiss/restore: [PASS/FAIL] - View switching works correctly
+Frame capture: [PASS/FAIL] - Changes are captured with correct triggers
+
+Details:
+<observations about widget behavior, any issues found>
+
+Frame Analysis:
+<summary of captured frames and what they show>
+
+OVERALL: [PASS/FAIL]
+```
+"""
+
+
+TUI_RESTART_PANE_DEDUP_TEST = """\
+You are testing that restarting the TUI does not create duplicate panes. Your goal
+is to verify that when the TUI restarts (e.g., via 'R' key or crash recovery), it
+reuses existing panes rather than launching new ones.
+
+## Background
+
+The TUI auto-launches certain panes (like guide) when conditions are met. There's a
+bug where restarting the TUI while guide is running causes a SECOND guide pane to
+be created, leaving the user with duplicate panes.
+
+The fix should:
+- Check if a pane for the task already exists before launching
+- If it exists, switch focus to it instead of creating a new one
+- Use the same task identification as session resume (pane registry role field)
+
+## Available Tools
+
+- `pm tui view` - See current TUI state
+- `pm tui send <keys>` - Send keystrokes (R=restart, g=guide, n=notes, x=dismiss)
+- `pm tui frames` - View captured frames
+- `tmux list-panes -t <session> -F "#{pane_id} #{pane_title}"` - List panes
+- `cat ~/.pm-pane-registry/<session>.json` - View pane registry
+- `tmux display-message -p "#{session_name}"` - Get current session name
+
+## Test Procedure
+
+### Scenario A: Restart TUI while guide is running
+
+1. SETUP:
+   - Run `pm tui view` to verify TUI is running
+   - Get session name: `tmux display-message -p "#{session_name}"`
+   - Check pane registry: `cat ~/.pm-pane-registry/<session>.json`
+   - Count panes with role "guide" - should be 0 or 1
+   - List all panes: `tmux list-panes -t <session> -F "#{pane_id}"`
+   - Record initial pane count
+
+2. LAUNCH GUIDE (if not running):
+   - Press 'g' to launch guide pane
+   - Wait 2 seconds for guide to start
+   - Check registry again - should have exactly 1 guide pane
+   - Record pane count (should be initial + 1 if guide wasn't running)
+
+3. RESTART TUI:
+   - Press 'R' to restart the TUI
+   - Wait 2 seconds for TUI to restart
+   - Check registry - should still have exactly 1 guide pane (NOT 2)
+   - Count panes - should be same as before restart
+   - If there are 2 guide panes, the test FAILS
+
+4. VERIFY:
+   - Run `pm tui view` - TUI should be responsive
+   - The original guide pane should still be there
+   - No duplicate guide panes should exist
+
+### Scenario B: Restart TUI after guide is done
+
+1. SETUP (skip if guide is already done):
+   - This scenario tests behavior when guide workflow is complete
+   - If you can't complete the guide, note this as N/A
+
+2. RESTART TUI:
+   - Press 'R' to restart
+   - Wait 2 seconds
+   - Run `pm tui view`
+
+3. VERIFY:
+   - TUI should show normal tech tree view (not guide progress)
+   - No new guide pane should be auto-launched
+   - Check registry for guide panes - should be 0
+
+### Scenario C: Manual guide launch deduplication
+
+1. With guide already running (from Scenario A):
+   - Press 'g' to try launching guide again
+   - This should NOT create a second guide pane
+   - Instead, it should focus the existing guide pane (or do nothing)
+
+2. VERIFY:
+   - Check registry - still exactly 1 guide pane
+   - Pane count unchanged
+
+## Expected Behavior
+
+The TUI should:
+1. Before launching a pane, check if one with that role already exists in registry
+2. If it exists and the pane is still alive, focus it instead of creating new
+3. Only create a new pane if none exists or the existing one is dead
+
+## Reporting
+
+```
+TEST RESULTS
+============
+Scenario A (restart with guide): [PASS/FAIL] - <pane count before/after>
+Scenario B (restart after done): [PASS/FAIL or N/A] - <description>
+Scenario C (manual dedup): [PASS/FAIL] - <guide pane count>
+
+Details:
+<observations, pane counts, any duplicate panes found>
+
+Registry states:
+<before restart>
+<after restart>
+
+OVERALL: [PASS/FAIL]
+```
+"""
+
+
+PANE_LAUNCH_DEDUP_TEST = """\
+You are testing that the TUI pane launch commands don't create duplicate panes.
+Your goal is to verify that pressing 'g' (guide), 'n' (notes), or other pane
+launch keys when that pane is already open focuses the existing pane instead
+of creating a new one.
+
+## Background
+
+The TUI has several keybindings that launch panes:
+- 'g' - Launch guide pane
+- 'n' - Launch notes pane
+
+Previously, pressing these keys when the pane was already open would create
+duplicate panes. The fix should detect existing panes and focus them instead.
+
+## Available Tools
+
+- `pm tui view` - See current TUI state
+- `pm tui send <keys>` - Send keystrokes to TUI
+- `pm tui frames` - View captured frames
+- `tmux list-panes -t <session> -F "#{pane_id} #{pane_current_command}"` - List panes
+- `cat ~/.pm-pane-registry/<session>.json` - View pane registry
+- `tmux display-message -p "#{session_name}"` - Get session name
+
+## Test Procedure
+
+### Setup
+
+1. Get session name: `tmux display-message -p "#{session_name}"`
+2. Record initial state:
+   - `tmux list-panes -t <session> -F "#{pane_id}"` - count panes
+   - `cat ~/.pm-pane-registry/<session>.json` - note registered panes
+
+### Scenario A: Guide pane deduplication
+
+1. If guide pane is NOT running:
+   - Press 'g' to launch guide
+   - Wait 2 seconds
+   - Count panes - should be initial + 1
+   - Check registry - should have 1 guide pane
+
+2. With guide pane running:
+   - Press 'g' again
+   - Wait 1 second
+   - Count panes - should be SAME as before (no new pane)
+   - Check registry - should still have exactly 1 guide pane
+   - The TUI log should say "Focused existing guide pane"
+
+3. Press 'g' a third time:
+   - Same verification - no new panes created
+
+### Scenario B: Notes pane deduplication
+
+1. If notes pane is NOT running:
+   - Press 'n' to launch notes
+   - Wait 1 second
+   - Count panes and check registry
+
+2. With notes pane running:
+   - Press 'n' again
+   - Wait 1 second
+   - Count panes - should be SAME (no new pane)
+   - Check registry - should still have exactly 1 notes pane
+
+3. Press 'n' a third time:
+   - Same verification
+
+### Scenario C: Multiple rapid presses
+
+1. With both guide and notes running, record pane count
+2. Rapidly send multiple commands:
+   - `pm tui send g`
+   - `pm tui send n`
+   - `pm tui send g`
+   - `pm tui send n`
+3. Wait 2 seconds
+4. Count panes - should be SAME as before
+5. Check registry - should still have exactly 1 of each role
+
+### Scenario D: Focus switching
+
+1. With guide and notes both running:
+   - Note which pane is currently focused (use `tmux display-message -p "#{pane_id}"`)
+   - Press 'g' - should focus guide pane
+   - Check focused pane changed to guide
+   - Press 'n' - should focus notes pane
+   - Check focused pane changed to notes
+
+## Expected Behavior
+
+From pm_core/tui/app.py _launch_pane():
+- Calls pane_layout.find_live_pane_by_role() to check for existing pane
+- If found, calls tmux_mod.select_pane() to focus it
+- Only creates new pane if no existing live pane found
+- Logs "Focused existing {role} pane" when reusing
+
+## Reporting
+
+```
+TEST RESULTS
+============
+Scenario A (guide dedup): [PASS/FAIL] - <pane counts: before/after 'g' presses>
+Scenario B (notes dedup): [PASS/FAIL] - <pane counts: before/after 'n' presses>
+Scenario C (rapid presses): [PASS/FAIL] - <pane count unchanged? Y/N>
+Scenario D (focus switching): [PASS/FAIL] - <focus changed correctly? Y/N>
+
+Details:
+<observations, any duplicate panes created, log messages seen>
+
+Pane counts:
+- Initial: <N>
+- After guide launch: <N>
+- After guide re-press: <N>
+- After notes launch: <N>
+- After notes re-press: <N>
+- After rapid presses: <N>
+
+OVERALL: [PASS/FAIL]
+```
+"""
+
+
 ALL_TESTS = {
     "pane-layout": {
         "name": "Pane Layout Refresh",
@@ -155,6 +495,16 @@ ALL_TESTS = {
         "name": "Guide Session Resume",
         "prompt": GUIDE_SESSION_RESUME_TEST,
         "description": "Test that guide sessions are saved and resumed correctly",
+    },
+    "guide-progress": {
+        "name": "Guide Progress Widget",
+        "prompt": GUIDE_PROGRESS_WIDGET_TEST,
+        "description": "Test that guide progress widget displays correct step indicators",
+    },
+    "restart-dedup": {
+        "name": "TUI Restart Pane Deduplication",
+        "prompt": TUI_RESTART_PANE_DEDUP_TEST,
+        "description": "Test that restarting TUI doesn't create duplicate panes",
     },
 }
 

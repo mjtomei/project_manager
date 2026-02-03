@@ -60,6 +60,11 @@ def attach(name: str) -> None:
     subprocess.run(["tmux", "attach-session", "-t", name], check=True)
 
 
+def kill_session(name: str) -> None:
+    """Kill a tmux session."""
+    subprocess.run(["tmux", "kill-session", "-t", name], check=False)
+
+
 def new_window(session: str, name: str, cmd: str, cwd: str) -> None:
     """Create a new tmux window with the given name, running cmd."""
     subprocess.run(

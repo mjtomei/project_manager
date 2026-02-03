@@ -86,6 +86,33 @@ def unregister_pane(session: str, pane_id: str) -> None:
                  pane_id, before != after, before, after)
 
 
+def find_live_pane_by_role(session: str, role: str) -> str | None:
+    """Find a live pane with the given role, or None if not found.
+
+    Checks both the registry and tmux to ensure the pane actually exists.
+    Returns the pane ID if found and alive, None otherwise.
+    """
+    _ensure_logging()
+    from pm_core import tmux as tmux_mod
+
+    data = load_registry(session)
+    # Find pane with this role in registry
+    for pane in data.get("panes", []):
+        if pane.get("role") == role:
+            pane_id = pane.get("id")
+            if pane_id:
+                # Check if pane is actually alive in tmux
+                live_panes = tmux_mod.get_pane_indices(session)
+                live_ids = {p[0] for p in live_panes}
+                if pane_id in live_ids:
+                    _logger.info("find_live_pane_by_role: %s -> %s (alive)", role, pane_id)
+                    return pane_id
+                else:
+                    _logger.info("find_live_pane_by_role: %s -> %s (dead)", role, pane_id)
+    _logger.info("find_live_pane_by_role: %s -> None", role)
+    return None
+
+
 def _reconcile_registry(session: str, window: str) -> list[str]:
     """Remove registry panes that no longer exist in tmux. Returns removed IDs."""
     _ensure_logging()

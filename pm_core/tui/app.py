@@ -1,10 +1,12 @@
 """Textual TUI App for Project Manager."""
 
+import json
 import logging
 import os
 import shlex
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 _log_dir = Path.home() / ".pm-pane-registry"
@@ -14,6 +16,10 @@ _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s",
 _log = logging.getLogger("pm.tui")
 _log.addHandler(_handler)
 _log.setLevel(logging.DEBUG)
+
+# Frame capture defaults
+DEFAULT_FRAME_RATE = 1  # Record every change
+DEFAULT_FRAME_BUFFER_SIZE = 100
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -146,6 +152,122 @@ class ProjectManagerApp(App):
         self._guide_auto_launched = False
         self._guide_dismissed = False
         self._current_guide_step: str | None = None
+        # Frame capture state (always enabled)
+        self._frame_rate: int = DEFAULT_FRAME_RATE
+        self._frame_buffer_size: int = DEFAULT_FRAME_BUFFER_SIZE
+        self._frame_buffer: list[dict] = []
+        self._frame_change_count: int = 0
+        self._last_frame_content: str | None = None
+        self._session_name: str | None = None
+
+    # --- Frame capture methods ---
+
+    def _get_capture_config_path(self) -> Path:
+        """Get path to frame capture config file for this session."""
+        session = self._session_name or "default"
+        return _log_dir / f"{session}-capture.json"
+
+    def _get_frames_path(self) -> Path:
+        """Get path to captured frames file for this session."""
+        session = self._session_name or "default"
+        return _log_dir / f"{session}-frames.json"
+
+    def _load_capture_config(self) -> None:
+        """Load frame capture config from file (for dynamic updates)."""
+        config_path = self._get_capture_config_path()
+        if config_path.exists():
+            try:
+                config = json.loads(config_path.read_text())
+                new_rate = config.get("frame_rate", DEFAULT_FRAME_RATE)
+                new_size = config.get("buffer_size", DEFAULT_FRAME_BUFFER_SIZE)
+                if new_rate != self._frame_rate or new_size != self._frame_buffer_size:
+                    _log.debug("capture config updated: rate=%d, size=%d", new_rate, new_size)
+                    self._frame_rate = new_rate
+                    self._frame_buffer_size = new_size
+                    # Trim buffer if size reduced
+                    if len(self._frame_buffer) > self._frame_buffer_size:
+                        self._frame_buffer = self._frame_buffer[-self._frame_buffer_size:]
+                        self._save_frames()
+            except (json.JSONDecodeError, OSError) as e:
+                _log.warning("failed to load capture config: %s", e)
+
+    def _capture_frame(self, trigger: str = "unknown") -> None:
+        """Capture the current TUI frame if conditions are met.
+
+        Args:
+            trigger: Description of what triggered this capture (for debugging)
+        """
+        # Get current pane content via tmux
+        if not tmux_mod.in_tmux():
+            return
+
+        try:
+            pane_id = os.environ.get("TMUX_PANE", "")
+            if not pane_id:
+                return
+
+            result = subprocess.run(
+                ["tmux", "capture-pane", "-t", pane_id, "-p"],
+                capture_output=True, text=True, timeout=5
+            )
+            content = result.stdout
+
+            # Check if content actually changed
+            if content == self._last_frame_content:
+                return
+
+            self._last_frame_content = content
+            self._frame_change_count += 1
+
+            # Only record every Nth change based on frame_rate
+            if self._frame_change_count % self._frame_rate != 0:
+                _log.debug("frame change %d skipped (rate=%d)",
+                          self._frame_change_count, self._frame_rate)
+                return
+
+            # Add to buffer
+            frame = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "change_number": self._frame_change_count,
+                "trigger": trigger,
+                "content": content,
+            }
+            self._frame_buffer.append(frame)
+
+            # Trim buffer if needed
+            if len(self._frame_buffer) > self._frame_buffer_size:
+                self._frame_buffer = self._frame_buffer[-self._frame_buffer_size:]
+
+            self._save_frames()
+            _log.debug("frame %d captured (trigger=%s)", self._frame_change_count, trigger)
+
+        except Exception as e:
+            _log.warning("frame capture failed: %s", e)
+
+    def _save_frames(self) -> None:
+        """Save frame buffer to file."""
+        try:
+            frames_path = self._get_frames_path()
+            frames_path.write_text(json.dumps({
+                "frame_rate": self._frame_rate,
+                "buffer_size": self._frame_buffer_size,
+                "total_changes": self._frame_change_count,
+                "frames": self._frame_buffer,
+            }, indent=2))
+        except OSError as e:
+            _log.warning("failed to save frames: %s", e)
+
+    def _on_guide_step_changed(self, step: str) -> None:
+        """Called when guide progress step changes."""
+        self.call_after_refresh(self._capture_frame, f"guide_step:{step}")
+
+    def _on_tree_selection_changed(self, index: int) -> None:
+        """Called when tech tree selection changes."""
+        self.call_after_refresh(self._capture_frame, f"tree_selection:{index}")
+
+    def _on_tree_prs_changed(self, prs: list) -> None:
+        """Called when tech tree PR list changes."""
+        self.call_after_refresh(self._capture_frame, f"tree_prs:{len(prs)}")
 
     def compose(self) -> ComposeResult:
         yield StatusBar(id="status-bar")
@@ -161,8 +283,41 @@ class ProjectManagerApp(App):
 
     def on_mount(self) -> None:
         _log.info("TUI mounted")
+        # Get session name for frame capture file naming
+        if tmux_mod.in_tmux():
+            try:
+                result = subprocess.run(
+                    ["tmux", "display-message", "-p", "#{session_name}"],
+                    capture_output=True, text=True, timeout=5
+                )
+                self._session_name = result.stdout.strip()
+            except Exception:
+                pass
+        # Load any existing capture config
+        self._load_capture_config()
+        # Set up watchers on child widgets for frame capture
+        self._setup_frame_watchers()
+
         self._load_state()
         self._sync_timer = self.set_interval(30, self._background_sync)
+
+        # Capture initial frame after state is loaded and rendered
+        self.call_after_refresh(self._capture_frame, "mount")
+
+    def _setup_frame_watchers(self) -> None:
+        """Set up watchers on child widgets to capture frames on change."""
+        try:
+            guide_widget = self.query_one("#guide-progress", GuideProgress)
+            self.watch(guide_widget, "current_step", self._on_guide_step_changed)
+        except Exception as e:
+            _log.debug("could not watch guide-progress: %s", e)
+
+        try:
+            tree_widget = self.query_one("#tech-tree", TechTree)
+            self.watch(tree_widget, "selected_index", self._on_tree_selection_changed)
+            self.watch(tree_widget, "prs", self._on_tree_prs_changed)
+        except Exception as e:
+            _log.debug("could not watch tech-tree: %s", e)
 
     def _load_state(self) -> None:
         """Load project state from disk."""
@@ -212,6 +367,9 @@ class ProjectManagerApp(App):
             # Use call_later to launch after UI is ready
             self.call_later(self._auto_launch_guide)
 
+        # Capture frame after view change (use call_after_refresh to ensure screen is updated)
+        self.call_after_refresh(self._capture_frame, f"show_guide_view:{state}")
+
     def _auto_launch_guide(self) -> None:
         """Auto-launch the guide pane."""
         _log.info("auto-launching guide pane")
@@ -224,6 +382,8 @@ class ProjectManagerApp(App):
         tree_container.styles.display = "block"
         guide_container.styles.display = "none"
         self._current_guide_step = None
+        # Capture frame after view change (use call_after_refresh to ensure screen is updated)
+        self.call_after_refresh(self._capture_frame, "show_normal_view")
 
     def _update_display(self) -> None:
         """Refresh all widgets with current data."""
@@ -243,6 +403,9 @@ class ProjectManagerApp(App):
 
     async def _background_sync(self) -> None:
         """Pull latest state from git or check guide progress."""
+        # Reload capture config in case it was updated via CLI
+        self._load_capture_config()
+
         # If guide was dismissed, do normal sync
         if self._guide_dismissed:
             await self._do_normal_sync()
@@ -307,6 +470,7 @@ class ProjectManagerApp(App):
         detail = self.query_one("#detail-panel", DetailPanel)
         detail.update_pr(pr, self._data.get("prs"))
         self.log_message(f"Selected: {message.pr_id}")
+        self.call_after_refresh(self._capture_frame, f"pr_selected:{message.pr_id}")
 
     def on_pr_activated(self, message: PRActivated) -> None:
         pr = store.get_pr(self._data, message.pr_id)
@@ -314,6 +478,7 @@ class ProjectManagerApp(App):
         detail.update_pr(pr, self._data.get("prs"))
         container = self.query_one("#detail-container")
         container.styles.display = "block"
+        self.call_after_refresh(self._capture_frame, f"pr_activated:{message.pr_id}")
 
     def on_command_submitted(self, message: CommandSubmitted) -> None:
         """Handle commands typed in the command bar."""
@@ -454,11 +619,24 @@ class ProjectManagerApp(App):
         return session, window
 
     def _launch_pane(self, cmd: str, role: str) -> None:
-        """Launch a wrapped pane, register it, and rebalance."""
+        """Launch a wrapped pane, register it, and rebalance.
+
+        If a pane with this role already exists and is alive, focuses it instead
+        of creating a duplicate.
+        """
         info = self._get_session_and_window()
         if not info:
             return
         session, window = info
+
+        # Check if a pane with this role already exists
+        existing_pane = pane_layout.find_live_pane_by_role(session, role)
+        if existing_pane:
+            _log.info("pane with role=%s already exists: %s, focusing", role, existing_pane)
+            tmux_mod.select_pane(existing_pane)
+            self.log_message(f"Focused existing {role} pane")
+            return
+
         data = pane_layout.load_registry(session)
         gen = data.get("generation", "0")
         escaped = cmd.replace("'", "'\\''")
@@ -513,15 +691,15 @@ class ProjectManagerApp(App):
             self.log_message("Refreshed")
 
     def action_restart(self) -> None:
-        """Restart the TUI by exec'ing a fresh pm tui process."""
+        """Restart the TUI by exec'ing a fresh pm _tui process."""
         _log.info("action: restart")
         self.exit()
         import shutil
         pm = shutil.which("pm")
         if pm:
-            os.execvp(pm, [pm, "tui"])
+            os.execvp(pm, [pm, "_tui"])
         else:
-            os.execvp(sys.executable, [sys.executable, "-m", "pm_core.cli", "tui"])
+            os.execvp(sys.executable, [sys.executable, "-m", "pm_core.cli", "_tui"])
 
     def action_focus_command(self) -> None:
         _log.debug("action: focus_command")
