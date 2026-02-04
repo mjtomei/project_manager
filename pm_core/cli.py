@@ -100,6 +100,16 @@ def load_and_sync() -> tuple[dict, Path]:
     return store.load(root), root
 
 
+def _pr_id_num(pr_id: str) -> int:
+    """Extract numeric part from pr-NNN id for sorting."""
+    # pr-001 → 1, pr-010 → 10
+    parts = pr_id.split("-")
+    try:
+        return int(parts[1])
+    except (IndexError, ValueError):
+        return 0
+
+
 def save_and_push(data: dict, root: Path, message: str = "pm: update state") -> None:
     """Save state. Use 'pm push' to commit and share changes."""
     store.save(data, root)
@@ -314,6 +324,10 @@ def init(repo_url: str | None, name: str, base_branch: str, directory: str,
     click.echo(f"  base branch: {base_branch}")
     click.echo(f"  backend: {backend}")
     click.echo()
+
+    # Import existing GitHub PRs if using the GitHub backend
+    if backend == "github":
+        _import_github_prs(root, data)
 
     if no_import:
         click.echo("Run 'pm plan import' to bootstrap a PR graph from this repo.")
@@ -818,6 +832,77 @@ def plan_load_fix(review_path: str):
     _run_fix_command("plan load", review_path)
 
 
+def _import_github_prs(root: Path, data: dict) -> None:
+    """Import existing GitHub PRs into yaml during init."""
+    from pm_core import gh_ops
+
+    # Determine repo directory for gh CLI
+    if store.is_internal_pm_dir(root):
+        repo_dir = str(root.parent)
+    else:
+        repo_url = data["project"].get("repo", "")
+        if repo_url and Path(repo_url).is_dir():
+            repo_dir = repo_url
+        else:
+            repo_dir = str(Path.cwd())
+
+    click.echo("Checking for existing GitHub PRs...")
+    try:
+        gh_prs = gh_ops.list_prs(repo_dir, state="open")
+    except SystemExit:
+        click.echo("  Skipping PR import (gh CLI not available).")
+        return
+
+    if not gh_prs:
+        click.echo("  No open PRs found.")
+        return
+
+    if data.get("prs") is None:
+        data["prs"] = []
+
+    imported = 0
+    for gh_pr in gh_prs:
+        branch = gh_pr.get("headRefName", "")
+        number = gh_pr.get("number")
+        title = gh_pr.get("title", "")
+        is_draft = gh_pr.get("isDraft", False)
+        gh_s = gh_pr.get("state", "OPEN")
+
+        if gh_s == "MERGED":
+            status = "merged"
+        elif gh_s == "CLOSED":
+            status = "closed"
+        elif gh_s == "OPEN":
+            status = "in_progress" if is_draft else "in_review"
+        else:
+            status = "pending"
+
+        existing_ids = {p["id"] for p in data["prs"]}
+        pr_id = f"pr-{number:03d}"
+        if pr_id in existing_ids:
+            pr_id = store.next_pr_id(data)
+
+        entry = {
+            "id": pr_id,
+            "plan": None,
+            "title": title,
+            "branch": branch,
+            "status": status,
+            "depends_on": [],
+            "description": gh_pr.get("body", "") or "",
+            "agent_machine": None,
+            "gh_pr": gh_pr.get("url", ""),
+            "gh_pr_number": number,
+        }
+        data["prs"].append(entry)
+        imported += 1
+        click.echo(f"  + {pr_id}: {title} [{status}] (#{number})")
+
+    if imported:
+        store.save(data, root)
+        click.echo(f"  Imported {imported} PR(s) from GitHub.")
+
+
 def _run_plan_import(name: str):
     """Core logic for plan import — used by both `plan import` and `init`."""
     root = state_root()
@@ -942,7 +1027,8 @@ def pr():
 @click.option("--plan", "plan_id", default=None, help="Associated plan ID")
 @click.option("--depends-on", "depends_on", default=None, help="Comma-separated PR IDs")
 @click.option("--description", "desc", default="", help="PR description")
-def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
+@click.option("--no-draft", is_flag=True, default=False, help="Skip creating a draft PR on GitHub")
+def pr_add(title: str, plan_id: str, depends_on: str, desc: str, no_draft: bool):
     """Add a new PR to the project."""
     root = state_root()
     data = store.load(root)
@@ -983,7 +1069,7 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
 
     # For GitHub backend: create branch, push, and create draft PR
     backend_name = data["project"].get("backend", "vanilla")
-    if backend_name == "github":
+    if backend_name == "github" and not no_draft:
         repo_url = data["project"]["repo"]
         base_branch = data["project"].get("base_branch", "main")
 
@@ -1235,6 +1321,9 @@ def pr_list():
     if not prs:
         click.echo("No PRs.")
         return
+
+    # Sort newest first (by gh_pr_number descending, then pr id descending)
+    prs = sorted(prs, key=lambda p: (p.get("gh_pr_number") or _pr_id_num(p["id"])), reverse=True)
 
     active_pr = data.get("project", {}).get("active_pr")
     status_icons = {
@@ -1619,6 +1708,116 @@ def pr_sync_github():
         trigger_tui_refresh()
     else:
         click.echo("No status changes.")
+
+
+@pr.command("import-github")
+@click.option("--state", "gh_state", default="all", help="GitHub PR state to import: open, closed, merged, all")
+def pr_import_github(gh_state: str):
+    """Import existing GitHub PRs into the project yaml.
+
+    Fetches PRs from GitHub and creates yaml entries for any not already
+    tracked. Matches existing entries by branch name or GH PR number.
+    Skips PRs that are already in the yaml.
+
+    \b
+    Examples:
+      pm pr import-github              # import all PRs
+      pm pr import-github --state open # only open PRs
+    """
+    root = state_root()
+    data = store.load(root)
+
+    backend_name = data["project"].get("backend", "vanilla")
+    if backend_name != "github":
+        click.echo("This command only works with the GitHub backend.", err=True)
+        raise SystemExit(1)
+
+    # Determine repo directory for gh CLI
+    if store.is_internal_pm_dir(root):
+        repo_dir = str(root.parent)
+    else:
+        repo_url = data["project"].get("repo", "")
+        if repo_url and Path(repo_url).is_dir():
+            repo_dir = repo_url
+        else:
+            repo_dir = str(Path.cwd())
+
+    from pm_core import gh_ops
+
+    click.echo("Fetching PRs from GitHub...")
+    gh_prs = gh_ops.list_prs(repo_dir, state=gh_state)
+    if not gh_prs:
+        click.echo("No PRs found on GitHub.")
+        return
+
+    # Build lookup of existing entries by branch and gh_pr_number
+    existing_branches = {p.get("branch") for p in (data.get("prs") or [])}
+    existing_gh_numbers = {p.get("gh_pr_number") for p in (data.get("prs") or []) if p.get("gh_pr_number")}
+
+    if data.get("prs") is None:
+        data["prs"] = []
+
+    imported = 0
+    skipped = 0
+    for gh_pr in gh_prs:
+        branch = gh_pr.get("headRefName", "")
+        number = gh_pr.get("number")
+        title = gh_pr.get("title", "")
+
+        # Skip if already tracked
+        if branch in existing_branches or number in existing_gh_numbers:
+            skipped += 1
+            continue
+
+        # Map GitHub state to local status
+        gh_s = gh_pr.get("state", "OPEN")
+        is_draft = gh_pr.get("isDraft", False)
+        if gh_s == "MERGED":
+            status = "merged"
+        elif gh_s == "CLOSED":
+            status = "closed"
+        elif gh_s == "OPEN":
+            status = "in_progress" if is_draft else "in_review"
+        else:
+            status = "pending"
+
+        # Generate a pr_id based on the GH PR number
+        existing_ids = {p["id"] for p in data["prs"]}
+        pr_id = f"pr-{number:03d}"
+        if pr_id in existing_ids:
+            pr_id = f"pr-{number:03d}-gh"
+        if pr_id in existing_ids:
+            # Fall back to sequential
+            pr_id = store.next_pr_id(data)
+
+        url = gh_pr.get("url", "")
+        body = gh_pr.get("body", "") or ""
+
+        entry = {
+            "id": pr_id,
+            "plan": None,
+            "title": title,
+            "branch": branch,
+            "status": status,
+            "depends_on": [],
+            "description": body,
+            "agent_machine": None,
+            "gh_pr": url,
+            "gh_pr_number": number,
+        }
+        data["prs"].append(entry)
+        existing_ids.add(pr_id)
+        existing_branches.add(branch)
+        existing_gh_numbers.add(number)
+        imported += 1
+        click.echo(f"  + {pr_id}: {title} [{status}] (#{number})")
+
+    if imported:
+        save_and_push(data, root, "pm: import github PRs")
+        click.echo(f"\nImported {imported} PR(s), skipped {skipped} already tracked.")
+        trigger_tui_refresh()
+    else:
+        click.echo(f"No new PRs to import ({skipped} already tracked).")
 
 
 @pr.command("cleanup")

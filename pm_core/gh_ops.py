@@ -86,7 +86,7 @@ def list_prs(workdir: str, state: str = "open") -> list[dict]:
     result = run_gh(
         "pr", "list",
         "--state", state,
-        "--json", "number,title,headRefName,state,url",
+        "--json", "number,title,headRefName,state,url,body,isDraft",
         cwd=workdir,
         check=False,
     )
