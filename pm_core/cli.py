@@ -1096,8 +1096,99 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
             changes.append(f"depends_on={', '.join(deps)}")
 
     if not changes:
-        click.echo("Nothing to change. Use --title, --depends-on, --description, or --status.", err=True)
-        raise SystemExit(1)
+        # No flags given — open in $EDITOR
+        import tempfile
+        editor = os.environ.get("EDITOR", os.environ.get("VISUAL", "vi"))
+        current_title = pr_entry.get("title", "")
+        current_desc = pr_entry.get("description", "")
+        current_deps = ", ".join(pr_entry.get("depends_on") or [])
+        current_status = pr_entry.get("status", "pending")
+
+        template = (
+            f"# Editing {pr_id}\n"
+            f"# Lines starting with # are ignored.\n"
+            f"# Save and exit to apply changes. Exit without saving to cancel.\n"
+            f"\n"
+            f"title: {current_title}\n"
+            f"status: {current_status}\n"
+            f"depends_on: {current_deps}\n"
+            f"\n"
+            f"# Description (everything below this line):\n"
+            f"{current_desc}\n"
+        )
+
+        with tempfile.NamedTemporaryFile(suffix=".md", mode="w", delete=False) as f:
+            f.write(template)
+            tmp_path = f.name
+
+        try:
+            mtime_before = os.path.getmtime(tmp_path)
+            ret = subprocess.call([editor, tmp_path])
+            if ret != 0:
+                click.echo("Editor exited with error. No changes made.", err=True)
+                raise SystemExit(1)
+            mtime_after = os.path.getmtime(tmp_path)
+            if mtime_before == mtime_after:
+                click.echo("No changes made.")
+                raise SystemExit(0)
+
+            with open(tmp_path) as f:
+                raw = f.read()
+        finally:
+            os.unlink(tmp_path)
+
+        # Parse the edited file
+        desc_lines = []
+        in_desc = False
+        new_title = current_title
+        new_status = current_status
+        new_deps_str = current_deps
+        for line in raw.splitlines():
+            if line.startswith("#"):
+                if "description" in line.lower() and "below" in line.lower():
+                    in_desc = True
+                continue
+            if in_desc:
+                desc_lines.append(line)
+            elif line.startswith("title:"):
+                new_title = line[len("title:"):].strip()
+            elif line.startswith("status:"):
+                new_status = line[len("status:"):].strip()
+            elif line.startswith("depends_on:"):
+                new_deps_str = line[len("depends_on:"):].strip()
+
+        new_desc = "\n".join(desc_lines).strip()
+
+        if new_title != current_title:
+            pr_entry["title"] = new_title
+            changes.append(f"title={new_title}")
+        if new_desc != current_desc.strip():
+            pr_entry["description"] = new_desc
+            changes.append("description updated")
+        if new_status != current_status:
+            valid = {"pending", "in_progress", "in_review", "merged", "closed"}
+            if new_status not in valid:
+                click.echo(f"Invalid status '{new_status}'. Must be one of: {', '.join(sorted(valid))}", err=True)
+                raise SystemExit(1)
+            pr_entry["status"] = new_status
+            changes.append(f"status: {current_status} → {new_status}")
+        if new_deps_str != current_deps:
+            if not new_deps_str:
+                pr_entry["depends_on"] = []
+                changes.append("depends_on cleared")
+            else:
+                deps = [d.strip() for d in new_deps_str.split(",")]
+                existing_ids = {p["id"] for p in (data.get("prs") or [])}
+                unknown = [d for d in deps if d not in existing_ids]
+                if unknown:
+                    click.echo(f"Unknown PR IDs: {', '.join(unknown)}", err=True)
+                    raise SystemExit(1)
+                pr_entry["depends_on"] = deps
+                changes.append(f"depends_on={', '.join(deps)}")
+
+        if not changes:
+            click.echo("No changes made.")
+            raise SystemExit(0)
 
     save_and_push(data, root, f"pm: edit {pr_id}")
     click.echo(f"Updated {pr_id}: {', '.join(changes)}")

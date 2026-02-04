@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-007
+  active_pr: pr-010
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
 plans:
@@ -74,7 +74,7 @@ prs:
   plan: plan-001
   title: Add automatic PR sync on TUI refresh and periodic background check
   branch: pm/pr-006-add-automatic-pr-sync-on-tui-refresh-and-periodic-
-  status: in_review
+  status: merged
   depends_on: []
   description: 'Currently pm pr sync must be run manually. Add: (1) automatic sync
     when TUI refreshes (r key), (2) periodic background sync every 5 minutes in TUI,
@@ -87,7 +87,7 @@ prs:
   plan: plan-001
   title: 'GitHub backend: Create draft PR at start, upgrade on done'
   branch: pm/pr-007-github-backend-create-draft-pr-at-start-upgrade-on
-  status: in_progress
+  status: merged
   depends_on: []
   description: 'Change GitHub backend flow: (1) pm pr start creates a draft PR immediately
     after first push, stores gh_pr number in project.yaml, (2) pm pr done upgrades
@@ -97,32 +97,22 @@ prs:
   agent_machine: spark-424d
   gh_pr: null
   workdir: /home/matt/.pm-workdirs/project-manager-828c8d0a/pm-pr-007-github-backend-create-draft-pr-at-start--5545faf2
-- id: pr-008
-  plan: plan-001
-  title: Defer focus change until pane is fully open
-  branch: pm/pr-008-defer-focus-change-until-pane-is-fully-open
-  status: pending
-  depends_on: []
-  description: When launching a pane (guide, notes, etc.), focus changes before the
-    pane is ready. Should wait for pane to be fully open before changing focus to
-    it.
-  agent_machine: null
-  gh_pr: null
 - id: pr-009
   plan: plan-001
   title: Auto-rebalance after pane launch
   branch: pm/pr-009-auto-rebalance-after-pane-launch
-  status: pending
+  status: merged
   depends_on: []
   description: After launching a new pane, the layout should automatically rebalance.
     Currently requires manual 'b' keypress to rebalance.
-  agent_machine: null
+  agent_machine: spark-424d
   gh_pr: null
+  workdir: /home/matt/.pm-workdirs/project-manager-828c8d0a/pm-pr-009-auto-rebalance-after-pane-launch-8a71ed5f
 - id: pr-010
   plan: plan-001
   title: Isolate workdir pm state from main repo
   branch: pm/pr-010-isolate-workdir-pm-state-from-main-repo
-  status: pending
+  status: merged
   depends_on: []
   description: 'Agents in workdirs can modify pm/project.yaml and push to GitHub,
     which then gets synced to the main TUI causing unexpected state changes (test
@@ -143,5 +133,6 @@ prs:
 
     Recommended: Option 1 - exclude pm/ from workdir clones since agents only need
     the code, not the project management state.'
-  agent_machine: null
+  agent_machine: spark-424d
   gh_pr: null
+  workdir: /home/matt/.pm-workdirs/project-manager-828c8d0a/pm-pr-010-isolate-workdir-pm-state-from-main-repo-8a71ed5f
