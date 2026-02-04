@@ -130,7 +130,7 @@ described here is open source:
 Organizations are approaching a forced transition. Machine intelligence
 is making institutional internals legible to outsiders whether
 institutions cooperate or not. Nation-state actors are driving the cost of maintaining corporate
-secrecy far above its competitive value --- the 2025
+secrecy further above its competitive value --- the 2025
 Notepad++ supply chain compromise ran undetected for six months, and the
 tj-actions/changed-files attack exposed secrets across 23{,}000
 repositories through a single compromised CI/CD
@@ -181,7 +181,7 @@ difficult to maintain. It can aggregate public filings, leaked
 documents, employment records, financial data, and published research
 into coherent pictures of what organizations are actually doing ---
 regardless of what those organizations say they're
-doing~\cite{fmi2024,kim2024}.
+doing~\cite{fmi2024}.
 
 Organizations that don't open up voluntarily will have their opacity
 pierced by others. Companies are deploying blockchain-based supply chain
@@ -263,7 +263,11 @@ The defender must protect every surface. As machine intelligence makes
 both sides faster, the asymmetry does not shrink --- it compounds. A
 system that can audit a million lines of code for vulnerabilities in
 hours helps the defender, but it helps the attacker more, because the
-attacker only needs one of those vulnerabilities to succeed.
+attacker only needs one of those vulnerabilities to succeed. An attacker 
+can take a generated list of exploits, most of them being hallucinations, and
+come away with a successfully compromised system. A defender has to 
+carefully consider each one and correctly identify and fix the real 
+vulnerabilities without adding new ones in order to be protected.
 
 This asymmetry also means that a corporation's home country defense
 budget is irrelevant. A company headquartered in the country with the
@@ -384,8 +388,8 @@ contribution legible in the first place.
 Excess management \& bureaucracy (U.S.) & \$3T/yr (\texttildelow17\% GDP) & \cite{hamel2016} \\
 Fortune 500 back-office inefficiencies & \$480B/yr & \cite{ssonetwork} \\
 Regulatory compliance (U.S.\ aggregate) & \$103--289B/yr & \cite{cato} \\
-Toxic workplace culture (U.S.) & \$50B/yr & \cite{sull2022b} \\
-Hospital claims overturn spending & \$19.7B (2022) & \cite{aha2024} \\
+Toxic workplace culture (U.S.) & \$223B/5yr & \cite{sull2022b} \\
+Hospital claims overturn spending & \$19.7B (2022) & \cite{premier2024} \\
 Unreimbursed university overhead & \$6.8B/yr & \cite{aau} \\
 \midrule
 \multicolumn{3}{l}{\textit{Markets responding to opacity}} \\
@@ -701,6 +705,7 @@ measurements. In particular, the \$3 trillion figure from
 Hamel~\cite{hamel2016} is based on extrapolation from exemplar companies,
 not a comprehensive economic study.
 
+\iffalse
 %% ============================================================
 \section{Related Work}
 \label{sec:related}
@@ -788,6 +793,7 @@ and inherits these risks. We address this by making the recognition
 infrastructure itself open and auditable --- the criteria are code, not
 black-box algorithms --- but acknowledge that this does not eliminate all
 risks (see Section~\ref{sec:limitations}).
+\fi
 
 %% ============================================================
 \section{Conclusion}
@@ -890,7 +896,7 @@ across 57 industries).
 \bibitem{sull2022b}
 D.~Sull, C.~Sull, W.~Cipolli, and C.~Brighenti, ``Why Every Leader
 Needs to Worry About Toxic Culture,'' \emph{MIT Sloan Management Review},
-March 2022. \$50B figure originally from SHRM, ``The High Cost of a
+March 2022. \$223B/5yr turnover figure from SHRM, ``The High Cost of a
 Toxic Workplace Culture,'' 2019.
 \url{https://sloanreview.mit.edu/article/why-every-leader-needs-to-worry-about-toxic-culture/}
 
@@ -926,14 +932,14 @@ D.~Amodei, ``The Adolescence of Technology,'' 2026.
 \url{https://darioamodei.com/essay/the-adolescence-of-technology}
 
 \bibitem{fmi2024}
-Future Market Insights, ``Open Source Intelligence (OSINT) Market
-Size, Share \& Trends,'' 2024.
-\url{https://www.futuremarketinsights.com/reports/open-source-intelligence-market}
+Market Research Future, ``Open Source Intelligence (OSINT) Market
+Size, Share \& Growth Report,'' 2024.
+\url{https://www.marketresearchfuture.com/reports/open-source-intelligence-market-4545}
 
-\bibitem{kim2024}
-A.~Kim, M.~Muhn, and V.~Nikolaev, ``Financial Statement Analysis with
-Large Language Models,'' \emph{Chicago Booth Research Paper}, 2024.
-\url{https://bfi.uchicago.edu/working-paper/financial-statement-analysis-with-large-language-models/}
+\bibitem{premier2024}
+Premier, Inc., ``Trend Alert: Private Payers Retain Profits by
+Refusing or Delaying Legitimate Medical Claims,'' 2024.
+\url{https://premierinc.com/newsroom/blog/trend-alert-private-payers-retain-profits-by-refusing-or-delaying-legitimate-medical-claims}
 
 \bibitem{tjactions2025}
 Wiz Threat Research, ``GitHub Action tj-actions/changed-files Supply
