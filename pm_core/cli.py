@@ -743,7 +743,7 @@ def plan_load(plan_id: str | None):
     claude = find_claude()
     if claude:
         click.echo("Launching Claude to create PRs...")
-        output = launch_claude_print(prompt, cwd=str(root))
+        output = launch_claude_print(prompt, cwd=str(root), message="Creating PRs from plan")
         click.echo(output)
         # Background review
         check_prompt = review_mod.REVIEW_PROMPTS["plan-load"].format(path=plan_path)
@@ -982,7 +982,13 @@ new recommended work. For merged/open PRs reference the original number
 (e.g. "Original: #42"). Group related PRs together with dependencies
 flowing top to bottom.
 
-Once written, tell the user to run `pm plan load {plan_id}` to create all
+Phase 4 — Verify file references (do this immediately after writing):
+Re-read the plan file you just wrote. For every path listed in a **files**
+field, verify the file actually exists in the repo (use ls or read). If a
+path is wrong, find the correct path and update the plan file. Report any
+corrections you made.
+
+Once verified, tell the user to run `pm plan load {plan_id}` to create all
 the PRs in the project.
 {notes_block}"""
 

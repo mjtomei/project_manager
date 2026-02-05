@@ -169,8 +169,17 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
     return returncode
 
 
-def launch_claude_print(prompt: str, cwd: str | None = None) -> str:
-    """Run claude -p (non-interactive print mode). Returns stdout."""
+def launch_claude_print(prompt: str, cwd: str | None = None,
+                        message: str = "Claude is working") -> str:
+    """Run claude -p (non-interactive print mode). Returns stdout.
+
+    Shows a spinner on stderr while waiting for Claude to finish.
+    """
+    import sys
+    import threading
+    import time
+    import itertools
+
     claude = find_claude()
     if not claude:
         raise FileNotFoundError("claude CLI not found. Install it first.")
@@ -178,12 +187,33 @@ def launch_claude_print(prompt: str, cwd: str | None = None) -> str:
     if _skip_permissions():
         cmd.append("--dangerously-skip-permissions")
     cmd.extend(["-p", prompt])
-    result = subprocess.run(
-        cmd,
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-    )
+
+    done = threading.Event()
+
+    def _spinner():
+        frames = itertools.cycle(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
+        while not done.is_set():
+            frame = next(frames)
+            sys.stderr.write(f"\r{frame} {message}...")
+            sys.stderr.flush()
+            done.wait(0.1)
+        sys.stderr.write("\r" + " " * (len(message) + 6) + "\r")
+        sys.stderr.flush()
+
+    spinner_thread = threading.Thread(target=_spinner, daemon=True)
+    spinner_thread.start()
+
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+        )
+    finally:
+        done.set()
+        spinner_thread.join()
+
     return result.stdout
 
 
