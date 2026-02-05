@@ -736,6 +736,23 @@ class ProjectManagerApp(App):
         else:
             self.log_message("No PR selected")
 
+    def _get_pane_split_direction(self) -> str:
+        """Return 'v' if pane is taller than wide, else 'h'."""
+        pane_id = os.environ.get("TMUX_PANE", "")
+        if not pane_id:
+            return "h"
+        result = subprocess.run(
+            ["tmux", "display", "-t", pane_id, "-p", "#{pane_width} #{pane_height}"],
+            capture_output=True, text=True
+        )
+        parts = result.stdout.strip().split()
+        if len(parts) == 2:
+            width, height = int(parts[0]), int(parts[1])
+            # Use vertical split if pane is taller than wide (accounting for ~2:1 char aspect ratio)
+            if height > width // 2:
+                return "v"
+        return "h"
+
     def action_edit_plan(self) -> None:
         """Edit the selected PR in an interactive editor."""
         _log.info("action: edit_plan")
@@ -752,7 +769,8 @@ class ProjectManagerApp(App):
                 ["tmux", "display-message", "-p", "#{session_name}"],
                 capture_output=True, text=True
             ).stdout.strip()
-            tmux_mod.split_pane(session_name, "h", f"pm pr edit {pr_id}")
+            direction = self._get_pane_split_direction()
+            tmux_mod.split_pane(session_name, direction, f"pm pr edit {pr_id}")
             self.log_message(f"Editing {pr_id}")
         except Exception as e:
             self.log_message(f"Error: {e}")
