@@ -90,14 +90,11 @@ def find_claude() -> str | None:
 def _skip_permissions() -> bool:
     """Check if skip-permissions is enabled for current session.
 
-    Looks for ~/.pm/sessions/{session}/dangerously-skip-permissions file.
-    Falls back to CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS env var for compatibility.
+    Looks for ~/.pm/sessions/{session-tag}/dangerously-skip-permissions
+    file containing exactly 'true'.
     """
     from pm_core.paths import skip_permissions_enabled
-    if skip_permissions_enabled():
-        return True
-    # Fallback to env var for backwards compatibility
-    return os.environ.get("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS") == "true"
+    return skip_permissions_enabled()
 
 
 def find_editor() -> str:

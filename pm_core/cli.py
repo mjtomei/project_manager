@@ -2920,33 +2920,19 @@ def _tui_history_file(session: str) -> Path:
     return TUI_HISTORY_DIR / f"{session}.json"
 
 
-def _get_session_name_for_path(path: str | Path, name: str | None = None) -> str:
-    """Generate a pm session name for a specific path.
-
-    Args:
-        path: The directory path to hash
-        name: Optional name prefix (defaults to directory name)
-    """
-    import hashlib
-    path_str = str(path)
-    if name is None:
-        name = Path(path).name
-    path_hash = hashlib.md5(path_str.encode()).hexdigest()[:8]
-    return f"pm-{name}-{path_hash}"
-
-
 def _get_session_name_for_cwd() -> str:
-    """Generate the expected session name for the current working directory."""
-    try:
-        root = state_root()
-        data = store.load(root)
-        project_name = data.get("project", {}).get("name", "unknown")
-        cwd = str(root)
-    except (FileNotFoundError, SystemExit):
-        project_name = Path.cwd().name
-        cwd = str(Path.cwd())
+    """Generate the expected session name for the current working directory.
 
-    return _get_session_name_for_path(cwd, project_name)
+    Uses GitHub repo name (without org/user) if available, otherwise directory name.
+    Hash is based on git root path for consistency across subdirectories.
+    """
+    from pm_core.paths import get_session_tag
+    tag = get_session_tag()
+    if tag:
+        return f"pm-{tag}"
+
+    # Fallback if not in a git repo
+    return f"pm-{Path.cwd().name}-00000000"
 
 
 def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
@@ -3492,7 +3478,7 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
     git_ops.checkout_branch(work_path, branch, create=True)
 
     # Build the prompt
-    prompt = _build_meta_prompt(task, work_path, install_info, branch, base_ref)
+    prompt = _build_meta_prompt(task, work_path, install_info, branch, base_ref, session_tag)
 
     # Check for existing window
     window_name = f"meta:{branch.split('/')[-1][:15]}"
@@ -3519,13 +3505,13 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
     set_override_path(session_tag, work_path)
     click.echo(f"Set session override: ~/.pm/sessions/{session_tag}/override")
 
-    # Build command with PM_SESSION env var and cleanup on exit
+    # Build command with cleanup on exit
     escaped_prompt = prompt.replace("'", "'\\''")
-    skip_flag = " --dangerously-skip-permissions" if skip_permissions_enabled() else ""
-    # Set PM_SESSION so child processes know which session they're in
+    # Check skip-permissions file (must contain 'true')
+    skip_flag = " --dangerously-skip-permissions" if skip_permissions_enabled(session_tag) else ""
     # When Claude exits, clear the session config
     clear_cmd = f"rm -rf ~/.pm/sessions/{session_tag}"
-    cmd = f"PM_SESSION={session_tag} claude{skip_flag} '{escaped_prompt}' ; {clear_cmd}"
+    cmd = f"claude{skip_flag} '{escaped_prompt}' ; {clear_cmd}"
 
     # Try to launch in tmux
     if tmux_mod.has_tmux():
@@ -3581,7 +3567,7 @@ def _detect_pm_install() -> dict:
     return info
 
 
-def _build_meta_prompt(task: str, work_path: Path, install_info: dict, branch_name: str, base_ref: str) -> str:
+def _build_meta_prompt(task: str, work_path: Path, install_info: dict, branch_name: str, base_ref: str, session_tag: str) -> str:
     """Build prompt for meta-development session."""
     task_section = f"""
 ## Task
@@ -3654,15 +3640,10 @@ The TUI runs in a tmux session. You can interact with it programmatically:
 - `tmux list-panes -t <session> -F "#{{pane_id}} #{{pane_width}}x#{{pane_height}}"` — List panes
 - `cat ~/.pm/pane-registry/<session>.json` — View pane registry (tracks pane roles/order)
 
-**Session configuration** — Per-session config is stored in `~/.pm/sessions/$PM_SESSION/`:
+**Session configuration** — Per-session config is stored in `~/.pm/sessions/{session_tag}/`:
 ```bash
-# Enable debug logging for this meta session
-touch ~/.pm/sessions/$PM_SESSION/debug
-
-# Enable skip-permissions for this meta session
-touch ~/.pm/sessions/$PM_SESSION/dangerously-skip-permissions
-```
-The `PM_SESSION` env var identifies this session (set automatically when meta launches).
+# Enable debug logging for this session
+echo true > ~/.pm/sessions/{session_tag}/debug
 
 **Logs** — When debug is enabled, logs are written to `~/.pm/pane-registry/`:
 - `tui.log` — TUI events and actions
@@ -3685,7 +3666,7 @@ python3 -m pytest tests/ -x -q
 
 3. For TUI changes, restart the TUI (`q` to detach, `pm session` to reattach).
 
-The override is stored at `~/.pm/sessions/$PM_SESSION/override` and is automatically
+The override is stored at `~/.pm/sessions/{session_tag}/override` and is automatically
 cleared when this Claude session exits.
 
 **To install permanently** (make changes the default for all sessions):

@@ -5,11 +5,12 @@ All pm-related directories now live under ~/.pm/:
 - ~/.pm/workdirs/       - PR and meta workdirs
 - ~/.pm/sessions/       - Per-session config (overrides, debug, dangerously-skip-permissions)
 
-Session-specific files use PM_SESSION env var to identify the current session.
+Session tags are derived from the git repo (GitHub repo name or directory name + hash).
 """
 
+import hashlib
 import logging
-import os
+import subprocess
 from pathlib import Path
 
 
@@ -39,24 +40,99 @@ def sessions_dir() -> Path:
 
     Contains per-session configuration files:
     - {session-tag}/override  - Path to workdir for installation override
-    - {session-tag}/debug     - If exists, enable debug logging
-    - {session-tag}/dangerously-skip-permissions - If exists, skip Claude permissions
+    - {session-tag}/debug     - If contains 'true', enable debug logging
+    - {session-tag}/dangerously-skip-permissions - If contains 'true', skip Claude permissions
     """
     d = pm_home() / "sessions"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
-def get_session_tag() -> str | None:
-    """Get the current session tag from PM_SESSION env var."""
-    return os.environ.get("PM_SESSION")
+def _find_git_root(start_path: Path | None = None) -> Path | None:
+    """Find the git repository root from the given path or cwd.
+
+    Walks up the directory tree looking for .git directory.
+    """
+    path = start_path or Path.cwd()
+    path = path.resolve()
+
+    while path != path.parent:
+        if (path / ".git").exists():
+            return path
+        path = path.parent
+
+    # Check root directory too
+    if (path / ".git").exists():
+        return path
+    return None
+
+
+def _get_github_repo_name(git_root: Path) -> str | None:
+    """Extract GitHub repo name (without org/user) from git remote.
+
+    Returns None if not a GitHub repo or can't determine name.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=git_root,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return None
+
+        url = result.stdout.strip()
+        # Handle various GitHub URL formats:
+        # https://github.com/user/repo.git
+        # git@github.com:user/repo.git
+        # https://github.com/user/repo
+        if "github.com" not in url:
+            return None
+
+        # Extract repo name from URL
+        if url.endswith(".git"):
+            url = url[:-4]
+
+        # Get the last path component (repo name)
+        repo_name = url.rstrip("/").split("/")[-1]
+        # Also handle git@github.com:user/repo format
+        if ":" in repo_name:
+            repo_name = repo_name.split(":")[-1].split("/")[-1]
+
+        return repo_name if repo_name else None
+    except (subprocess.SubprocessError, OSError):
+        return None
+
+
+def get_session_tag(start_path: Path | None = None) -> str | None:
+    """Generate session tag from the current git repository.
+
+    Format: {repo_name}-{hash} where:
+    - repo_name is GitHub repo name (without org/user) or directory name
+    - hash is MD5 of the git root path (8 chars)
+
+    Works from any subdirectory of the repo.
+    Returns None if not in a git repository.
+    """
+    git_root = _find_git_root(start_path)
+    if not git_root:
+        return None
+
+    # Try to get GitHub repo name first, fall back to directory name
+    repo_name = _get_github_repo_name(git_root) or git_root.name
+
+    # Generate hash from git root path
+    path_hash = hashlib.md5(str(git_root).encode()).hexdigest()[:8]
+
+    return f"{repo_name}-{path_hash}"
 
 
 def session_dir(session_tag: str | None = None) -> Path | None:
     """Get the directory for a specific session's config files.
 
-    If session_tag is None, uses get_session_tag() to find current session.
-    Returns None if no session is active.
+    If session_tag is None, derives it from the current git repo.
+    Returns None if no session can be determined.
     """
     tag = session_tag or get_session_tag()
     if not tag:
@@ -66,15 +142,27 @@ def session_dir(session_tag: str | None = None) -> Path | None:
     return d
 
 
-def debug_enabled() -> bool:
+def _check_flag_file(session_tag: str | None, filename: str) -> bool:
+    """Check if a flag file exists and contains 'true'."""
+    sd = session_dir(session_tag)
+    if not sd:
+        return False
+    flag_file = sd / filename
+    if not flag_file.exists():
+        return False
+    try:
+        content = flag_file.read_text().strip()
+        return content == "true"
+    except (OSError, IOError):
+        return False
+
+
+def debug_enabled(session_tag: str | None = None) -> bool:
     """Check if debug mode is enabled for current session.
 
-    Looks for ~/.pm/sessions/{session-tag}/debug file.
+    Looks for ~/.pm/sessions/{session-tag}/debug file containing 'true'.
     """
-    sd = session_dir()
-    if sd:
-        return (sd / "debug").exists()
-    return False
+    return _check_flag_file(session_tag, "debug")
 
 
 def set_debug(session_tag: str, enabled: bool = True) -> None:
@@ -83,20 +171,18 @@ def set_debug(session_tag: str, enabled: bool = True) -> None:
     if sd:
         debug_file = sd / "debug"
         if enabled:
-            debug_file.touch()
+            debug_file.write_text("true\n")
         elif debug_file.exists():
             debug_file.unlink()
 
 
-def skip_permissions_enabled() -> bool:
+def skip_permissions_enabled(session_tag: str | None = None) -> bool:
     """Check if dangerously-skip-permissions mode is enabled for current session.
 
-    Looks for ~/.pm/sessions/{session-tag}/dangerously-skip-permissions file.
+    Looks for ~/.pm/sessions/{session-tag}/dangerously-skip-permissions
+    file containing exactly 'true'.
     """
-    sd = session_dir()
-    if sd:
-        return (sd / "dangerously-skip-permissions").exists()
-    return False
+    return _check_flag_file(session_tag, "dangerously-skip-permissions")
 
 
 def set_skip_permissions(session_tag: str, enabled: bool = True) -> None:
@@ -105,7 +191,7 @@ def set_skip_permissions(session_tag: str, enabled: bool = True) -> None:
     if sd:
         skip_file = sd / "dangerously-skip-permissions"
         if enabled:
-            skip_file.touch()
+            skip_file.write_text("true\n")
         elif skip_file.exists():
             skip_file.unlink()
 
@@ -141,7 +227,7 @@ def configure_logger(name: str, log_file: str) -> logging.Logger:
 def get_override_path(session_tag: str | None = None) -> Path | None:
     """Get the override installation path for a session, or None if not set.
 
-    If session_tag is None, uses get_session_tag() to find current session.
+    If session_tag is None, derives it from the current git repo.
     """
     sd = session_dir(session_tag)
     if not sd:
@@ -169,30 +255,3 @@ def clear_session(session_tag: str) -> None:
     if sd.exists():
         import shutil
         shutil.rmtree(sd)
-
-
-# Legacy compatibility - keep old function names working
-def active_overrides_dir() -> Path:
-    """Deprecated: use sessions_dir() instead."""
-    return sessions_dir()
-
-
-def get_active_override(session_tag: str) -> Path | None:
-    """Deprecated: use get_override_path() instead."""
-    return get_override_path(session_tag)
-
-
-def set_active_override(session_tag: str, workdir: Path) -> None:
-    """Deprecated: use set_override_path() instead."""
-    set_override_path(session_tag, workdir)
-
-
-def clear_active_override(session_tag: str) -> None:
-    """Deprecated: use clear_session() instead."""
-    sd = sessions_dir() / session_tag
-    override_file = sd / "override"
-    if override_file.exists():
-        override_file.unlink()
-    # Clean up empty session dir
-    if sd.exists() and not any(sd.iterdir()):
-        sd.rmdir()

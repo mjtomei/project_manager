@@ -4,52 +4,91 @@ When running from a directory containing pm_core (e.g., a workdir clone),
 this wrapper uses the local version instead of the installed one. This
 enables testing changes in PR workdirs without reinstalling.
 
-The wrapper also checks ~/.pm/active/ for meta session overrides, allowing
+The wrapper also checks ~/.pm/sessions/ for session overrides, allowing
 pm meta sessions to redirect the installation to their working directory.
 """
+import hashlib
 import os
+import subprocess
 import sys
 from pathlib import Path
 
 
+def _find_git_root() -> Path | None:
+    """Find the git repository root from cwd."""
+    path = Path.cwd().resolve()
+
+    while path != path.parent:
+        if (path / ".git").exists():
+            return path
+        path = path.parent
+
+    if (path / ".git").exists():
+        return path
+    return None
+
+
+def _get_github_repo_name(git_root: Path) -> str | None:
+    """Extract GitHub repo name (without org/user) from git remote."""
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=git_root,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return None
+
+        url = result.stdout.strip()
+        if "github.com" not in url:
+            return None
+
+        if url.endswith(".git"):
+            url = url[:-4]
+
+        repo_name = url.rstrip("/").split("/")[-1]
+        if ":" in repo_name:
+            repo_name = repo_name.split(":")[-1].split("/")[-1]
+
+        return repo_name if repo_name else None
+    except (subprocess.SubprocessError, OSError):
+        return None
+
+
+def _get_session_tag() -> str | None:
+    """Generate session tag from current git repository."""
+    git_root = _find_git_root()
+    if not git_root:
+        return None
+
+    repo_name = _get_github_repo_name(git_root) or git_root.name
+    path_hash = hashlib.md5(str(git_root).encode()).hexdigest()[:8]
+
+    return f"{repo_name}-{path_hash}"
+
+
 def _find_active_override() -> str | None:
-    """Check for an active meta session override.
+    """Check for an active session override.
 
-    First checks PM_SESSION env var for current session, then looks for
-    override file in ~/.pm/sessions/{session}/override.
+    Derives session tag from current git repo and checks for override file.
     """
-    sessions_dir = Path.home() / ".pm" / "sessions"
-    if not sessions_dir.exists():
+    session_tag = _get_session_tag()
+    if not session_tag:
         return None
 
-    # If PM_SESSION is set, check that specific session
-    session_tag = os.environ.get("PM_SESSION")
-    if session_tag:
-        override_file = sessions_dir / session_tag / "override"
-        if override_file.exists():
-            try:
-                content = override_file.read_text().strip()
-                if content:
-                    p = Path(content)
-                    if p.exists() and (p / "pm_core").is_dir():
-                        return str(p)
-            except (OSError, IOError):
-                pass
+    override_file = Path.home() / ".pm" / "sessions" / session_tag / "override"
+    if not override_file.exists():
         return None
 
-    # No specific session - check all sessions for any active override
-    for session_dir in sessions_dir.iterdir():
-        if session_dir.is_dir():
-            override_file = session_dir / "override"
-            if override_file.exists():
-                try:
-                    content = override_file.read_text().strip()
-                    if content:
-                        p = Path(content)
-                        if p.exists() and (p / "pm_core").is_dir():
-                            return str(p)
-                except (OSError, IOError):
-                    pass
+    try:
+        content = override_file.read_text().strip()
+        if content:
+            p = Path(content)
+            if p.exists() and (p / "pm_core").is_dir():
+                return str(p)
+    except (OSError, IOError):
+        pass
     return None
 
 
@@ -72,11 +111,11 @@ def main():
     """Entry point that prefers local pm_core.
 
     Priority order:
-    1. Active meta session override (from ~/.pm/active/meta-*)
+    1. Active session override (from ~/.pm/sessions/{tag}/override)
     2. Local pm_core in cwd or parent directories
     3. Installed pm_core
     """
-    # First check for active meta session override
+    # First check for active session override
     override_root = _find_active_override()
     if override_root and override_root not in sys.path:
         sys.path.insert(0, override_root)
