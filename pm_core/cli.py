@@ -3446,10 +3446,11 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
             branch = f"meta/session-{timestamp}"
 
     # Create workdir per session using branch slug
+    # branch is like "meta/foo" -> branch_slug is "meta-foo" (already has meta- prefix)
     from pm_core.paths import workdirs_base
     branch_slug = branch.replace('/', '-')
     meta_base = workdirs_base()
-    work_path = meta_base / f"meta-{branch_slug}"
+    work_path = meta_base / branch_slug
 
     if not work_path.exists():
         click.echo(f"Cloning pm from {PM_REPO_URL}...")
@@ -3651,15 +3652,15 @@ The TUI runs in a tmux session. You can interact with it programmatically:
 - `tmux list-panes -t <session> -F "#{{pane_id}} #{{pane_width}}x#{{pane_height}}"` — List panes
 - `cat ~/.pm/pane-registry/<session>.json` — View pane registry (tracks pane roles/order)
 
-**Session configuration** — Per-session config is stored in `~/.pm/sessions/{session}/`:
+**Session configuration** — Per-session config is stored in `~/.pm/sessions/$PM_SESSION/`:
 ```bash
 # Enable debug logging for this meta session
-touch ~/.pm/sessions/{branch_slug}/debug
+touch ~/.pm/sessions/$PM_SESSION/debug
 
 # Enable skip-permissions for this meta session
-touch ~/.pm/sessions/{branch_slug}/dangerously-skip-permissions
+touch ~/.pm/sessions/$PM_SESSION/dangerously-skip-permissions
 ```
-The session tag is available as `$PM_SESSION` in your shell.
+The `PM_SESSION` env var identifies this session (set automatically when meta launches).
 
 **Logs** — When debug is enabled, logs are written to `~/.pm/pane-registry/`:
 - `tui.log` — TUI events and actions
