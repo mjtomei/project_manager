@@ -54,11 +54,11 @@ Part of plan "{plan_name}" ({plan_id}).
 ## Task
 {description}
 
-## Tips
-- This session may be resuming after a restart. Check `git status` and `git log` to see if previous work exists on this branch — if so, continue from there.
-- Before referencing existing code (imports, function calls, class usage), read the source to verify the interface.
-
 ## Workflow
+- First, check `git status` and `git log` — this branch may already have work on it. Continue from where it left off.
 {instructions}
+
+## Tips
+- Before referencing existing code (imports, function calls, class usage), read the source to verify the interface.
 {notes_block}"""
     return prompt.strip()
