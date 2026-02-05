@@ -193,7 +193,7 @@ pm pr start
 ```
 
 It will:
-- Clone the target repo into `~/.pm-workdirs/project_manager-<hash>/<branch-slug>-<hash>/`
+- Clone the target repo into `~/.pm/workdirs/project_manager-<hash>/<branch-slug>-<hash>/`
 - Create branch `pm/pr-001-core-data-model-and-yaml-store`
 - Mark pr-001 as `in_progress` with your hostname
 - Launch Claude in a tmux window (if in tmux) or in the current terminal
@@ -241,7 +241,7 @@ Use the workdir path printed by `pm pr start` in step 7:
 
 ```bash
 # The glob matches the workdir created in step 7
-cd ~/.pm-workdirs/project_manager-*/pm-pr-001-*
+cd ~/.pm/workdirs/project_manager-*/pm-pr-001-*
 
 git checkout pm/pr-001-core-data-model-and-yaml-store
 touch demo-file.txt && git add demo-file.txt && git commit -m "demo work"
@@ -299,12 +299,12 @@ pm pr list
 
 All started PRs should show `in_progress` with your hostname. pr-003 is
 now the active PR (last started). Each has its own workdir under
-`~/.pm-workdirs/project_manager-<hash>/`.
+`~/.pm/workdirs/project_manager-<hash>/`.
 
 Check the workdir structure:
 
 ```bash
-ls ~/.pm-workdirs/project_manager-*/
+ls ~/.pm/workdirs/project_manager-*/
 ```
 
 You should see separate directories for each branch, named
@@ -324,7 +324,7 @@ This removes the workdir and clears the path from project.yaml.
 Verify:
 
 ```bash
-ls ~/.pm-workdirs/project_manager-*/
+ls ~/.pm/workdirs/project_manager-*/
 pm pr list
 ```
 
@@ -396,7 +396,7 @@ pm pr ready
 ```bash
 cd $REPO
 rm -rf pm/
-rm -rf ~/.pm-workdirs/project_manager-*
+rm -rf ~/.pm/workdirs/project_manager-*
 ```
 
 ## Tips
@@ -414,7 +414,7 @@ rm -rf ~/.pm-workdirs/project_manager-*
 - **`pm pr done`** / **`pm prompt`** auto-select from cwd if you're inside a workdir
 - **`pm pr edit`** updates title, description, or dependencies on existing PRs
 - **`--description`** on `pm pr add` fills in the Task section of the Claude prompt
-- **Workdir naming**: `~/.pm-workdirs/<project>-<root-hash>/<branch>-<base-hash>/`
+- **Workdir naming**: `~/.pm/workdirs/<project>-<root-hash>/<branch>-<base-hash>/`
   ensures no collisions across projects or branches
 - **Backends**: `local` for no remote, `vanilla` for git with remote, `github` for GitHub repos
 - **Error messages** list available IDs when you specify one that doesn't exist

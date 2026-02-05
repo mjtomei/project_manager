@@ -8,13 +8,8 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-_log_dir = Path.home() / ".pm-pane-registry"
-_log_dir.mkdir(parents=True, exist_ok=True)
-_handler = logging.FileHandler(_log_dir / "claude_launcher.log")
-_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S"))
-_log = logging.getLogger("pm.claude_launcher")
-_log.addHandler(_handler)
-_log.setLevel(logging.DEBUG)
+from pm_core.paths import configure_logger
+_log = configure_logger("pm.claude_launcher", "claude_launcher.log")
 
 SESSION_REGISTRY = ".pm-sessions.json"
 
@@ -93,7 +88,15 @@ def find_claude() -> str | None:
 
 
 def _skip_permissions() -> bool:
-    """Check if CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS is set to 'true'."""
+    """Check if skip-permissions is enabled for current session.
+
+    Looks for ~/.pm/sessions/{session}/dangerously-skip-permissions file.
+    Falls back to CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS env var for compatibility.
+    """
+    from pm_core.paths import skip_permissions_enabled
+    if skip_permissions_enabled():
+        return True
+    # Fallback to env var for backwards compatibility
     return os.environ.get("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS") == "true"
 
 

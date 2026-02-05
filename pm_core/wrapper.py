@@ -3,9 +3,54 @@
 When running from a directory containing pm_core (e.g., a workdir clone),
 this wrapper uses the local version instead of the installed one. This
 enables testing changes in PR workdirs without reinstalling.
+
+The wrapper also checks ~/.pm/active/ for meta session overrides, allowing
+pm meta sessions to redirect the installation to their working directory.
 """
 import os
 import sys
+from pathlib import Path
+
+
+def _find_active_override() -> str | None:
+    """Check for an active meta session override.
+
+    First checks PM_SESSION env var for current session, then looks for
+    override file in ~/.pm/sessions/{session}/override.
+    """
+    sessions_dir = Path.home() / ".pm" / "sessions"
+    if not sessions_dir.exists():
+        return None
+
+    # If PM_SESSION is set, check that specific session
+    session_tag = os.environ.get("PM_SESSION")
+    if session_tag:
+        override_file = sessions_dir / session_tag / "override"
+        if override_file.exists():
+            try:
+                content = override_file.read_text().strip()
+                if content:
+                    p = Path(content)
+                    if p.exists() and (p / "pm_core").is_dir():
+                        return str(p)
+            except (OSError, IOError):
+                pass
+        return None
+
+    # No specific session - check all sessions for any active override
+    for session_dir in sessions_dir.iterdir():
+        if session_dir.is_dir():
+            override_file = session_dir / "override"
+            if override_file.exists():
+                try:
+                    content = override_file.read_text().strip()
+                    if content:
+                        p = Path(content)
+                        if p.exists() and (p / "pm_core").is_dir():
+                            return str(p)
+                except (OSError, IOError):
+                    pass
+    return None
 
 
 def find_local_pm_core():
@@ -24,16 +69,30 @@ def find_local_pm_core():
 
 
 def main():
-    """Entry point that prefers local pm_core."""
-    # Check for local pm_core before importing cli
-    local_root = find_local_pm_core()
-    if local_root and local_root not in sys.path:
-        # Prepend local directory so it takes precedence
-        sys.path.insert(0, local_root)
-        # Clear any cached pm_core imports so we get the local one
+    """Entry point that prefers local pm_core.
+
+    Priority order:
+    1. Active meta session override (from ~/.pm/active/meta-*)
+    2. Local pm_core in cwd or parent directories
+    3. Installed pm_core
+    """
+    # First check for active meta session override
+    override_root = _find_active_override()
+    if override_root and override_root not in sys.path:
+        sys.path.insert(0, override_root)
         to_remove = [k for k in sys.modules if k == 'pm_core' or k.startswith('pm_core.')]
         for k in to_remove:
             del sys.modules[k]
+    else:
+        # Check for local pm_core before importing cli
+        local_root = find_local_pm_core()
+        if local_root and local_root not in sys.path:
+            # Prepend local directory so it takes precedence
+            sys.path.insert(0, local_root)
+            # Clear any cached pm_core imports so we get the local one
+            to_remove = [k for k in sys.modules if k == 'pm_core' or k.startswith('pm_core.')]
+            for k in to_remove:
+                del sys.modules[k]
 
     # Now import and run the real CLI
     from pm_core.cli import main as cli_main

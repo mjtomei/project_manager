@@ -28,7 +28,7 @@ You have access to these commands:
 - `pm tui clear-frames` - Clear captured frames
 - `tmux list-panes -t <session> -F "#{pane_id} #{pane_width}x#{pane_height}"` - List panes with sizes
 - `tmux kill-pane -t <pane_id>` - Kill a specific pane
-- `cat ~/.pm-pane-registry/<session>.json` - View pane registry
+- `cat ~/.pm/pane-registry/<session>.json` - View pane registry
 
 ## Test Procedure
 
@@ -303,7 +303,7 @@ The fix should:
 - `pm tui frames --all` - View all captured frames
 - `pm tui clear-frames` - Clear frame buffer to start fresh
 - `tmux list-panes -t <session> -F "#{pane_id} #{pane_title}"` - List panes
-- `cat ~/.pm-pane-registry/<session>.json` - View pane registry
+- `cat ~/.pm/pane-registry/<session>.json` - View pane registry
 - `tmux display-message -p "#{session_name}"` - Get current session name
 
 ## Test Procedure
@@ -314,7 +314,7 @@ The fix should:
    - Run `pm tui clear-frames` to start with empty frame buffer
    - Run `pm tui view` to verify TUI is running
    - Get session name: `tmux display-message -p "#{session_name}"`
-   - Check pane registry: `cat ~/.pm-pane-registry/<session>.json`
+   - Check pane registry: `cat ~/.pm/pane-registry/<session>.json`
    - Count panes with role "guide" - should be 0 or 1
    - List all panes: `tmux list-panes -t <session> -F "#{pane_id}"`
    - Record initial pane count
@@ -417,7 +417,7 @@ duplicate panes. The fix should detect existing panes and focus them instead.
 - `pm tui frames --all` - View all captured frames with triggers
 - `pm tui clear-frames` - Clear frame buffer to start fresh
 - `tmux list-panes -t <session> -F "#{pane_id} #{pane_current_command}"` - List panes
-- `cat ~/.pm-pane-registry/<session>.json` - View pane registry
+- `cat ~/.pm/pane-registry/<session>.json` - View pane registry
 - `tmux display-message -p "#{session_name}"` - Get session name
 
 ## Test Procedure
@@ -428,7 +428,7 @@ duplicate panes. The fix should detect existing panes and focus them instead.
 2. Get session name: `tmux display-message -p "#{session_name}"`
 3. Record initial state:
    - `tmux list-panes -t <session> -F "#{pane_id}"` - count panes
-   - `cat ~/.pm-pane-registry/<session>.json` - note registered panes
+   - `cat ~/.pm/pane-registry/<session>.json` - note registered panes
 
 ### Scenario A: Guide pane deduplication
 

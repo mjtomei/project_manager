@@ -13,14 +13,9 @@ import click
 from pm_core import store, graph, git_ops, prompt_gen, notes
 from pm_core import pr_sync as pr_sync_mod
 
-# Set up logging to file for debugging
-_log_dir = Path.home() / ".pm-pane-registry"
-_log_dir.mkdir(parents=True, exist_ok=True)
-_log_handler = logging.FileHandler(_log_dir / "cli.log")
-_log_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S"))
-_log = logging.getLogger("pm.cli")
-_log.addHandler(_log_handler)
-_log.setLevel(logging.DEBUG)
+# Set up logging (only writes to file when PM_DEBUG=1)
+from pm_core.paths import configure_logger, pane_registry_dir
+_log = configure_logger("pm.cli", "cli.log")
 from pm_core.backend import detect_backend, get_backend
 from pm_core.claude_launcher import find_claude, find_editor, launch_claude, launch_claude_print, clear_session
 from pm_core import tmux as tmux_mod
@@ -145,9 +140,11 @@ def _workdirs_dir(data: dict) -> Path:
     project = data.get("project", {})
     name = project.get("name", "unknown")
     repo_id = project.get("repo_id")
+    from pm_core.paths import workdirs_base
+    base = workdirs_base()
     if repo_id:
-        return Path.home() / ".pm-workdirs" / f"{name}-{repo_id[:8]}"
-    return Path.home() / ".pm-workdirs" / name
+        return base / f"{name}-{repo_id[:8]}"
+    return base / name
 
 
 def _resolve_repo_id(data: dict, workdir: Path, root: Path) -> None:
@@ -1397,6 +1394,17 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
         click.echo(f"PR {pr_id} is already merged.", err=True)
         raise SystemExit(1)
 
+    # Fast path: if window already exists, just switch to it
+    if tmux_mod.has_tmux():
+        pm_session = _get_session_name_for_cwd()
+        if tmux_mod.session_exists(pm_session):
+            window_name = _pr_display_id(pr_entry)
+            existing = tmux_mod.find_window_by_name(pm_session, window_name)
+            if existing:
+                tmux_mod.select_window(pm_session, existing["index"])
+                click.echo(f"Switched to existing window '{window_name}' (session: {pm_session})")
+                return
+
     repo_url = data["project"]["repo"]
     base_branch = data["project"].get("base_branch", "main")
     branch = pr_entry.get("branch", f"pm/{pr_id}")
@@ -2265,6 +2273,7 @@ COMMANDS
   pm guide                      Guided workflow (init → plan → PRs → start)
   pm prompt [pr-id]             Print Claude prompt for a PR
   pm tui                        Launch interactive dashboard
+  pm meta [task]                Work on pm itself (meta-development session)
   pm getting-started            Show getting started guide
 
 OPTIONS
@@ -2582,6 +2591,11 @@ def guide_done_cmd():
         click.echo("Already completed.")
         return
 
+    # Special handling: needs_deps_review step has no artifact - it's done when user says so
+    # Set the flag before detection check so detection can move forward
+    if started == "needs_deps_review":
+        guide_mod.set_deps_reviewed(root)
+
     # Bug fix: Verify that detection shows progress before marking complete
     # This prevents marking a step complete when artifacts weren't created
     detected, _ = guide_mod.detect_state(root)
@@ -2719,11 +2733,6 @@ def _run_guide(step, fresh=False):
             session_flag = f" --session-id {session_id}"
             save_cmd = f"pm _save-session '{session_key}' '{session_id}' '{root}' ; "
 
-        # Include project path hash in loop guard to make it project-specific
-        import hashlib
-        project_hash = hashlib.md5(str(root).encode()).hexdigest()[:8] if root else "unknown"
-        loop_guard = f"pm _loop-guard guide-{project_hash}-{state}"
-
         # Don't pass prompt when resuming - Claude continues from previous conversation
         if "--resume" in session_flag:
             claude_cmd = f"claude{skip}{session_flag}"
@@ -2736,12 +2745,10 @@ def _run_guide(step, fresh=False):
         else:
             post_cmd = "pm guide done"
 
-        # Capture claude's exit code to handle session resume failures properly.
-        # If claude fails (e.g., "No conversation found"), clear the stale session.
-        # If claude succeeds, run post_cmd. Either way, continue to loop_guard.
-        # This prevents infinite loops trying to resume non-existent sessions.
+        # Simple exit behavior: mark done on success, clear session on failure, then exit.
+        # User notices the pane closed and manually restarts if needed.
         clear_cmd = f"pm _clear-session '{session_key}' '{root}'" if root else "true"
-        cmd = f"{save_cmd}{claude_cmd} ; claude_rc=$? ; if [ $claude_rc -ne 0 ]; then {clear_cmd}; else {post_cmd}; fi ; {loop_guard} && pm guide"
+        cmd = f"{save_cmd}{claude_cmd} ; claude_rc=$? ; if [ $claude_rc -ne 0 ]; then {clear_cmd}; else {post_cmd}; fi"
 
         # Log the full command for debugging
         import logging as _logging
@@ -2846,52 +2853,6 @@ def clear_session_cmd(session_key: str, pm_root: str):
         pass  # Best effort
 
 
-@cli.command("_loop-guard", hidden=True)
-@click.argument("loop_id")
-def loop_guard_cmd(loop_id: str):
-    """Internal: guard against rapid restart loops.
-
-    Tracks timestamps of restarts. If 5 restarts happen in <30 seconds,
-    exits with code 1 to break the loop. Always sleeps 5 seconds.
-    """
-    import time
-    loop_file = Path.home() / ".pm-pane-registry" / f"loop-{loop_id}.json"
-    loop_file.parent.mkdir(parents=True, exist_ok=True)
-
-    now = time.time()
-    timestamps = []
-
-    if loop_file.exists():
-        try:
-            import json
-            timestamps = json.loads(loop_file.read_text())
-            if not isinstance(timestamps, list):
-                timestamps = []
-        except Exception:
-            timestamps = []
-
-    # Keep only timestamps from the last 60 seconds
-    timestamps = [t for t in timestamps if now - t < 60]
-    timestamps.append(now)
-
-    # Check for rapid restarts: 5+ restarts in <30 seconds
-    if len(timestamps) >= 5:
-        oldest_recent = timestamps[-5]
-        if now - oldest_recent < 30:
-            click.echo(f"Loop guard triggered: {len(timestamps)} restarts in {now - oldest_recent:.1f}s", err=True)
-            click.echo("Breaking loop to prevent runaway restarts.", err=True)
-            # Clear the timestamps so next manual run works
-            loop_file.unlink(missing_ok=True)
-            raise SystemExit(1)
-
-    # Save updated timestamps
-    import json
-    loop_file.write_text(json.dumps(timestamps))
-
-    # Sleep before allowing restart
-    time.sleep(5)
-
-
 @cli.command("_pane-exited", hidden=True)
 @click.argument("session")
 @click.argument("window")
@@ -2949,7 +2910,7 @@ def tui():
     pass
 
 
-TUI_HISTORY_DIR = Path.home() / ".pm-pane-registry" / "tui-history"
+TUI_HISTORY_DIR = pane_registry_dir() / "tui-history"
 TUI_MAX_FRAMES = 50
 
 
@@ -3448,6 +3409,291 @@ To interact with this session, use commands like:
 
     result = subprocess.run(cmd)
     raise SystemExit(result.returncode)
+
+
+PM_REPO_URL = "https://github.com/mjtomei/project_manager.git"
+
+
+@cli.command("meta")
+@click.argument("task", default="")
+@click.option("--branch", "-b", default=None, help="Branch name (auto-generated if not specified)")
+@click.option("--tag", "-t", default=None, help="Start from a specific tag instead of master")
+def meta_cmd(task: str, branch: str | None, tag: str | None):
+    """Work on pm itself — opens Claude session targeting the pm codebase.
+
+    Clones the pm repo from GitHub, pulls the latest master (or a specific tag),
+    creates a feature branch, and launches Claude with context about pm's
+    architecture and how to test changes.
+
+    Examples:
+        pm meta "Add a graph zoom feature"
+        pm meta --branch fix-window-detection
+        pm meta --tag v1.0.0 "Backport a fix"
+    """
+    import re
+
+    # Detect current installation for context
+    install_info = _detect_pm_install()
+
+    # Generate branch name first (determines workdir name)
+    if not branch:
+        if task:
+            # Slugify the task description
+            slug = re.sub(r'[^a-z0-9]+', '-', task.lower())[:40].strip('-')
+            branch = f"meta/{slug}"
+        else:
+            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            branch = f"meta/session-{timestamp}"
+
+    # Create workdir per session using branch slug
+    from pm_core.paths import workdirs_base
+    branch_slug = branch.replace('/', '-')
+    meta_base = workdirs_base()
+    work_path = meta_base / f"meta-{branch_slug}"
+
+    if not work_path.exists():
+        click.echo(f"Cloning pm from {PM_REPO_URL}...")
+        meta_base.mkdir(parents=True, exist_ok=True)
+        git_ops.clone(PM_REPO_URL, work_path)
+
+        # Determine base ref
+        if tag:
+            base_ref = tag
+        else:
+            # Check if master exists, otherwise use main
+            result = git_ops.run_git("branch", "-r", "--list", "origin/master", cwd=work_path, check=False)
+            base_ref = "master" if result.stdout.strip() else "main"
+    else:
+        click.echo(f"Using existing workdir: {work_path}")
+        # Fetch latest
+        click.echo("Fetching latest from origin...")
+        git_ops.run_git("fetch", "origin", cwd=work_path, check=False)
+
+        if tag:
+            base_ref = tag
+        else:
+            result = git_ops.run_git("branch", "-r", "--list", "origin/master", cwd=work_path, check=False)
+            base_ref = "master" if result.stdout.strip() else "main"
+
+    # Checkout base and create branch
+    if tag:
+        click.echo(f"Checking out tag {tag}...")
+        git_ops.run_git("checkout", tag, cwd=work_path, check=True)
+    else:
+        click.echo(f"Checking out {base_ref}...")
+        git_ops.run_git("checkout", base_ref, cwd=work_path, check=True)
+        click.echo(f"Pulling latest {base_ref}...")
+        git_ops.pull_rebase(work_path)
+
+    click.echo(f"Creating branch {branch} from {base_ref}...")
+    git_ops.checkout_branch(work_path, branch, create=True)
+
+    # Build the prompt
+    prompt = _build_meta_prompt(task, work_path, install_info, branch, base_ref)
+
+    # Check for existing window
+    window_name = f"meta:{branch.split('/')[-1][:15]}"
+    if tmux_mod.has_tmux():
+        pm_session = _get_session_name_for_cwd()
+        if tmux_mod.session_exists(pm_session):
+            existing = tmux_mod.find_window_by_name(pm_session, window_name)
+            if existing:
+                tmux_mod.select_window(pm_session, existing["index"])
+                click.echo(f"Switched to existing window '{window_name}'")
+                return
+
+    # Launch Claude
+    claude = find_claude()
+    if not claude:
+        click.echo("Claude CLI not found.", err=True)
+        click.echo("\nPrompt:")
+        click.echo("-" * 60)
+        click.echo(prompt)
+        raise SystemExit(1)
+
+    # Set active override so the wrapper uses this workdir's pm_core
+    from pm_core.paths import set_override_path, skip_permissions_enabled
+    set_override_path(branch_slug, work_path)
+    click.echo(f"Set session override: ~/.pm/sessions/{branch_slug}/override")
+
+    # Build command with PM_SESSION env var and cleanup on exit
+    escaped_prompt = prompt.replace("'", "'\\''")
+    skip_flag = " --dangerously-skip-permissions" if skip_permissions_enabled() else ""
+    # Set PM_SESSION so child processes know which session they're in
+    # When Claude exits, clear the session config
+    clear_cmd = f"rm -rf ~/.pm/sessions/{branch_slug}"
+    cmd = f"PM_SESSION={branch_slug} claude{skip_flag} '{escaped_prompt}' ; {clear_cmd}"
+
+    # Try to launch in tmux
+    if tmux_mod.has_tmux():
+        pm_session = _get_session_name_for_cwd()
+        if tmux_mod.session_exists(pm_session):
+            try:
+                tmux_mod.new_window(pm_session, window_name, cmd, str(work_path))
+                click.echo(f"Launched meta session in window '{window_name}'")
+                return
+            except Exception as e:
+                click.echo(f"Failed to create tmux window: {e}", err=True)
+
+    # Fallback: launch interactively
+    click.echo("Launching Claude...")
+    import subprocess
+    result = subprocess.run(f"cd '{work_path}' && {cmd}", shell=True)
+    # The clear_cmd in the shell command handles cleanup
+    raise SystemExit(result.returncode)
+
+
+def _detect_pm_install() -> dict:
+    """Detect how pm is installed and return info for reinstalling."""
+    info = {
+        "type": "unknown",
+        "path": None,
+        "editable": False,
+        "test_command": "python3 -m pytest tests/ -x -q",
+        "install_command": None,
+    }
+
+    try:
+        import pm_core
+        pm_path = Path(pm_core.__file__).parent.parent
+        info["path"] = str(pm_path)
+
+        # Check if it's an editable install
+        site_packages = Path(pm_core.__file__).parent
+        while site_packages.name != "site-packages" and site_packages != site_packages.parent:
+            site_packages = site_packages.parent
+
+        if site_packages.name != "site-packages":
+            # Not in site-packages = probably editable or dev install
+            info["editable"] = True
+            info["type"] = "editable"
+            info["install_command"] = f"pip install -e {pm_path}"
+        else:
+            info["type"] = "pip"
+            info["install_command"] = f"pip install {pm_path}"
+
+    except ImportError:
+        pass
+
+    return info
+
+
+def _build_meta_prompt(task: str, work_path: Path, install_info: dict, branch_name: str, base_ref: str) -> str:
+    """Build prompt for meta-development session."""
+    task_section = f"""
+## Task
+
+{task}
+
+**First**: Search the codebase and git history to check if this has already been
+implemented or if there's existing code that addresses this. Report your findings
+before making any changes.
+""" if task else """
+## Task
+
+You are ready to work on pm improvements. The user will describe what they want
+to change. Before implementing, always check if the issue has already been
+addressed in the codebase or git history or if there is any similar 
+functionality you can start from or code you can reuse.
+"""
+
+    return f"""\
+You are working on `pm` — the project manager tool for Claude Code sessions.
+This is a meta-development session: you're improving pm while it may be running.
+
+## Codebase
+
+Working directory: {work_path}
+Branch: {branch_name}
+Based on: {base_ref}
+Repo: https://github.com/mjtomei/project_manager
+
+This is a fresh clone from the upstream pm repository.
+
+## Before starting
+
+IMPORTANT: Before implementing changes, check if the issue has already been
+addressed in the upstream repository:
+
+1. Pull the latest: `git fetch origin && git log origin/{base_ref} --oneline -20`
+2. Search for related commits: `git log --oneline --all --grep="<keyword>"`
+3. Check open issues/PRs: `gh issue list` and `gh pr list`
+
+If the fix already exists upstream, tell the user they can update their
+installation instead of reimplementing.
+
+## Key files
+
+- pm_core/cli.py — Main CLI commands (Click-based)
+- pm_core/tui/app.py — Interactive TUI (Textual-based)
+- pm_core/tui/tech_tree.py — PR dependency graph widget
+- pm_core/tmux.py — Tmux session/window/pane management
+- pm_core/pane_layout.py — Pane registry and auto-rebalancing
+- pm_core/store.py — YAML state management (project.yaml)
+- pm_core/guide.py — Guided workflow state machine
+- pm_core/prompt_gen.py — Claude prompt generation
+- pm_core/paths.py — Centralized path management (~/.pm/)
+
+## Debugging the TUI
+
+The TUI runs in a tmux session. You can interact with it programmatically:
+
+**Frame buffer** — The TUI captures frames on every UI change:
+- `pm tui view` — Capture and display current TUI state
+- `pm tui frames` — View last 5 captured frames
+- `pm tui frames --all` — View all captured frames with triggers
+- `pm tui clear-frames` — Clear the frame buffer
+
+**Sending keystrokes**:
+- `pm tui send <keys>` — Send keystrokes to the TUI (e.g., `pm tui send g` for guide)
+
+**Tmux inspection**:
+- `tmux list-panes -t <session> -F "#{{pane_id}} #{{pane_width}}x#{{pane_height}}"` — List panes
+- `cat ~/.pm/pane-registry/<session>.json` — View pane registry (tracks pane roles/order)
+
+**Session configuration** — Per-session config is stored in `~/.pm/sessions/{session}/`:
+```bash
+# Enable debug logging for this meta session
+touch ~/.pm/sessions/{branch_slug}/debug
+
+# Enable skip-permissions for this meta session
+touch ~/.pm/sessions/{branch_slug}/dangerously-skip-permissions
+```
+The session tag is available as `$PM_SESSION` in your shell.
+
+**Logs** — When debug is enabled, logs are written to `~/.pm/pane-registry/`:
+- `tui.log` — TUI events and actions
+- `cli.log` — CLI command execution
+- `layout.log` — Pane layout rebalancing
+- `claude_launcher.log` — Claude session launches
+
+## Testing changes
+
+1. Run tests from this workdir:
+```bash
+python3 -m pytest tests/ -x -q
+```
+
+2. To test changes live, reinstall pm from this workdir:
+```bash
+./install.sh --local --force
+```
+
+This creates a venv at ~/.local/share/pm/venv and symlinks ~/.local/bin/pm to it.
+After reinstalling, changes take effect for new `pm` invocations.
+For TUI changes, restart the TUI (`q` to detach, `pm session` to reattach).
+
+## Contributing changes upstream
+
+If the changes are improvements or bug fixes others would benefit from, they
+can be contributed back to the main pm repository:
+
+1. Commit the changes with a clear message
+2. Push the branch: `git push -u origin {branch_name}`
+3. Create a PR: `gh pr create --title "..." --body "..."`
+
+The main pm repo is: https://github.com/mjtomei/project_manager
+"""
 
 
 def main():

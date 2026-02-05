@@ -15,25 +15,30 @@ _log_configured = False
 
 
 def _ensure_logging():
-    """Set up file logging on first call."""
+    """Set up file logging on first call (only when PM_DEBUG=1)."""
     global _log_configured
     if _log_configured:
         return
     _log_configured = True
-    log_path = registry_dir() / "layout.log"
-    handler = logging.FileHandler(log_path)
-    handler.setFormatter(logging.Formatter(
-        "%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S"
-    ))
-    _logger.addHandler(handler)
-    _logger.setLevel(logging.DEBUG)
+
+    from pm_core.paths import debug_enabled
+    if debug_enabled():
+        log_path = registry_dir() / "layout.log"
+        handler = logging.FileHandler(log_path)
+        handler.setFormatter(logging.Formatter(
+            "%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S"
+        ))
+        _logger.addHandler(handler)
+        _logger.setLevel(logging.DEBUG)
+    else:
+        _logger.addHandler(logging.NullHandler())
+        _logger.setLevel(logging.WARNING)
 
 
 def registry_dir() -> Path:
     """Return the directory for pane registry files."""
-    d = Path.home() / ".pm-pane-registry"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    from pm_core.paths import pane_registry_dir
+    return pane_registry_dir()
 
 
 def registry_path(session: str) -> Path:

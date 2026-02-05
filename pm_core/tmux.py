@@ -239,3 +239,36 @@ def swap_pane(src_pane: str, dst_pane: str) -> None:
         ["tmux", "swap-pane", "-s", src_pane, "-t", dst_pane, "-d"],
         check=True,
     )
+
+
+def list_windows(session: str) -> list[dict]:
+    """List windows in a session. Returns list of {id, index, name}."""
+    result = subprocess.run(
+        ["tmux", "list-windows", "-t", session, "-F", "#{window_id} #{window_index} #{window_name}"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return []
+    windows = []
+    for line in result.stdout.strip().splitlines():
+        parts = line.split(None, 2)
+        if len(parts) >= 3:
+            windows.append({"id": parts[0], "index": parts[1], "name": parts[2]})
+    return windows
+
+
+def find_window_by_name(session: str, name: str) -> dict | None:
+    """Find a window by name. Returns {id, index, name} or None."""
+    for w in list_windows(session):
+        if w["name"] == name:
+            return w
+    return None
+
+
+def select_window(session: str, window: str) -> bool:
+    """Select (switch to) a window by index or name. Returns True on success."""
+    result = subprocess.run(
+        ["tmux", "select-window", "-t", f"{session}:{window}"],
+        capture_output=True,
+    )
+    return result.returncode == 0

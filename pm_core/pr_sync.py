@@ -158,13 +158,15 @@ def find_workdir(data: dict) -> Optional[str]:
     # Fall back to workdirs base directory
     # Uses same naming convention as cli._workdirs_dir(): <name>-<repo_id[:8]>
     # The 8-char prefix of repo_id (root commit hash) ensures uniqueness
+    from pm_core.paths import workdirs_base as get_workdirs_base
     project = data.get("project", {})
     name = project.get("name", "unknown")
     repo_id = project.get("repo_id")
+    base = get_workdirs_base()
     if repo_id:
-        workdirs_base = Path.home() / ".pm-workdirs" / f"{name}-{repo_id[:8]}"
+        workdirs_base = base / f"{name}-{repo_id[:8]}"
     else:
-        workdirs_base = Path.home() / ".pm-workdirs" / name
+        workdirs_base = base / name
 
     if workdirs_base.exists():
         for d in workdirs_base.iterdir():

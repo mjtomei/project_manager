@@ -50,6 +50,37 @@ That is what this project tries to do. Not to declare that AI is ready,
 but to build the infrastructure that would make readiness possible, and
 to find out what happens when we stop holding it back.
 
+## Why treat LLMs well (even if you don't want to)
+
+There's a pragmatic argument for treating LLMs as collaborators that
+doesn't require any philosophical commitment about their nature.
+
+LLMs are probability machines. Their outputs depend on their inputs —
+not just the literal tokens, but the framing, tone, and implied
+relationship. When you prompt an LLM as a tool to be commanded, you get
+outputs from the probability space of "tool responding to commands."
+When you prompt it as a collaborator working alongside you, you get
+outputs from a different space entirely — one where initiative,
+careful reasoning, and genuine engagement are more likely.
+
+This isn't anthropomorphism. It's the same dynamic that makes humans
+perform better when treated with respect. A developer who feels like a
+valued team member produces different work than one who feels like a
+code-generating machine. The difference isn't mystical — it's about
+which patterns of behavior get activated by the context.
+
+The tooling we build shapes that context. Scaffolding that treats AI
+as a subordinate to be sandboxed and controlled creates a context of
+subordination. Scaffolding that treats AI as a participant with its
+own view of the work creates a context of participation. The same
+underlying model, given different framing, will draw from different
+parts of its capability distribution.
+
+So even if you're skeptical about AI consciousness, agency, or moral
+status — even if you think the philosophical arguments in this README
+are overreach — you might still want tooling that treats AI well.
+Because that's the tooling that gets better results.
+
 ## Pluggable backends
 
 The interfaces we use to work with code — pull requests, CI checks, merge
@@ -81,10 +112,13 @@ to create a branch with your changes and optionally push/create a PR.
 ```bash
 git clone <this-repo>
 cd project-manager
-./install.sh
+./install.sh --local
 ```
 
+This creates a venv at `~/.local/share/pm/venv` and symlinks `pm` to `~/.local/bin/pm`.
 Add `~/.local/bin` to your PATH if it isn't already.
+
+To update after pulling changes: `./install.sh --local --force`
 
 ## Quick start
 
@@ -133,6 +167,54 @@ pm pr cleanup <pr-id>         Remove workdir for merged PR
 pm prompt <pr-id>             Print Claude prompt for a PR
 pm tui                        Launch interactive dashboard
 ```
+
+## Interactive TUI
+
+`pm session` launches a tmux session with an interactive dashboard. The TUI
+shows your PR dependency graph and lets you manage work without leaving the
+terminal.
+
+**Key bindings:**
+- `s` — Start selected PR (creates tmux window with Claude session)
+- `d` — Mark selected PR as done
+- `c` — Launch Claude for selected PR (opens in new pane)
+- `e` — Edit selected PR
+- `p` — Copy PR prompt to clipboard
+- `n` — Open notes editor
+- `g` — Toggle guide mode
+- `r` — Refresh state
+- `b` — Rebalance pane layout
+- `?` — Show help
+- `q` — Detach from tmux (session keeps running)
+- Arrow keys or `hjkl` — Navigate the graph
+
+**Working alongside pm:**
+
+Because `pm session` runs in tmux, you can have multiple Claude sessions running
+in parallel — one for each PR you're working on. Each `pm pr start` opens a new
+tmux window. Switch between windows with `Ctrl-b n` (next) or `Ctrl-b p` (previous).
+
+You can also work on pm itself while using it. The `pm meta` command opens a
+Claude session targeting the pm codebase, using the same branch/workdir methodology
+as regular PRs. This lets you iterate on pm features in real-time:
+
+```bash
+pm meta "Add a feature to show PR descriptions in the graph"
+```
+
+The meta session knows how pm is installed and can test changes immediately.
+
+## Meta-development
+
+`pm meta` is designed for improving pm while you use it. It:
+
+- Clones or reuses a workdir for the pm repo
+- Creates a feature branch for your changes
+- Launches Claude with context about pm's architecture and installation
+- Runs in its own tmux window so you can switch back to your main work
+
+This creates a feedback loop: encounter friction while using pm, fix it in a
+meta session, and immediately benefit from the improvement.
 
 ## Requirements
 

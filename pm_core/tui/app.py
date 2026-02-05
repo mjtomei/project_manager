@@ -9,13 +9,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-_log_dir = Path.home() / ".pm-pane-registry"
-_log_dir.mkdir(parents=True, exist_ok=True)
-_handler = logging.FileHandler(_log_dir / "tui.log")
-_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S"))
-_log = logging.getLogger("pm.tui")
-_log.addHandler(_handler)
-_log.setLevel(logging.DEBUG)
+from pm_core.paths import configure_logger
+_log = configure_logger("pm.tui", "tui.log")
 
 # Frame capture defaults
 DEFAULT_FRAME_RATE = 1  # Record every change
@@ -165,6 +160,7 @@ class HelpScreen(ModalScreen):
             yield Label("  [bold]/[/]  Open command bar", classes="help-row")
             yield Label("  [bold]g[/]  Toggle guide view", classes="help-row")
             yield Label("  [bold]n[/]  Open notes", classes="help-row")
+            yield Label("  [bold]m[/]  Meta: work on pm itself", classes="help-row")
             yield Label("  [bold]b[/]  Rebalance panes", classes="help-row")
             yield Label("Other", classes="help-section")
             yield Label("  [bold]r[/]  Refresh / sync with GitHub", classes="help-row")
@@ -246,6 +242,7 @@ class ProjectManagerApp(App):
         Binding("e", "edit_plan", "Edit PR", show=True),
         Binding("g", "toggle_guide", "Guide", show=True),
         Binding("n", "launch_notes", "Notes", show=True),
+        Binding("m", "launch_meta", "Meta", show=True),
         Binding("r", "refresh", "Refresh", show=True),
         Binding("b", "rebalance", "Rebalance", show=True),
         Binding("ctrl+r", "restart", "Restart", show=False),
@@ -257,8 +254,8 @@ class ProjectManagerApp(App):
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """Disable single-key shortcuts when command bar is focused or in guide mode."""
         if action in ("start_pr", "done_pr", "copy_prompt", "launch_claude",
-                       "edit_plan", "toggle_guide", "launch_notes", "refresh",
-                       "rebalance", "quit", "show_help"):
+                       "edit_plan", "toggle_guide", "launch_notes", "launch_meta",
+                       "refresh", "rebalance", "quit", "show_help"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus:
                 _log.debug("check_action: blocked %s (command bar focused)", action)
@@ -720,7 +717,7 @@ class ProjectManagerApp(App):
         try:
             # Run as subprocess so it goes through the full CLI
             result = subprocess.run(
-                [sys.executable, "-m", "pm_core.cli"] + parts,
+                [sys.executable, "-m", "pm_core"] + parts,
                 cwd=str(self._root) if self._root else None,
                 capture_output=True,
                 text=True,
@@ -903,6 +900,12 @@ class ProjectManagerApp(App):
         root = self._root or (Path.cwd() / "pm")
         notes_path = root / notes.NOTES_FILENAME
         self._launch_pane(f"pm notes {notes_path}", "notes")
+
+    def action_launch_meta(self) -> None:
+        """Launch a meta-development session to work on pm itself."""
+        _log.info("action: launch_meta")
+        self._run_command("meta")
+        self.log_message("Launched meta session for pm development")
 
     def action_rebalance(self) -> None:
         _log.info("action: rebalance")

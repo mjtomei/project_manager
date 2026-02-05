@@ -255,5 +255,5 @@ pr-003 (resource tracking) should now be ready since its only dependency
 ```bash
 pm pr cleanup pr-001
 cd $WORK && rm -rf open-lab-org
-rm -rf ~/.pm-workdirs/open-lab-org-*
+rm -rf ~/.pm/workdirs/open-lab-org-*
 ```

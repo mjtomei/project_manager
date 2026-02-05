@@ -6,6 +6,7 @@ project:
   active_pr: pr-010
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
+  last_pr_sync: '2026-02-05T14:10:45.478994+00:00'
 plans:
 - id: plan-001
   name: Import from existing repo
@@ -69,7 +70,7 @@ prs:
     preferring remotes matching the detected backend.
   agent_machine: spark-424d
   gh_pr: null
-  workdir: /home/matt/.pm-workdirs/project-manager-828c8d0a/pm-pr-005-improve-git-remote-detection-in-pm-init-5545faf2
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-005-improve-git-remote-detection-in-pm-init-5545faf2
 - id: pr-006
   plan: plan-001
   title: Add automatic PR sync on TUI refresh and periodic background check
@@ -82,7 +83,7 @@ prs:
     API calls.'
   agent_machine: spark-424d
   gh_pr: null
-  workdir: /home/matt/.pm-workdirs/project-manager-828c8d0a/pm-pr-006-add-automatic-pr-sync-on-tui-refresh-and-5545faf2
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-006-add-automatic-pr-sync-on-tui-refresh-and-5545faf2
 - id: pr-007
   plan: plan-001
   title: 'GitHub backend: Create draft PR at start, upgrade on done'
@@ -96,7 +97,7 @@ prs:
     native draft PR workflow.'
   agent_machine: spark-424d
   gh_pr: null
-  workdir: /home/matt/.pm-workdirs/project-manager-828c8d0a/pm-pr-007-github-backend-create-draft-pr-at-start--5545faf2
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-007-github-backend-create-draft-pr-at-start--5545faf2
 - id: pr-009
   plan: plan-001
   title: Auto-rebalance after pane launch
@@ -107,7 +108,7 @@ prs:
     Currently requires manual 'b' keypress to rebalance.
   agent_machine: spark-424d
   gh_pr: null
-  workdir: /home/matt/.pm-workdirs/project-manager-828c8d0a/pm-pr-009-auto-rebalance-after-pane-launch-8a71ed5f
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-009-auto-rebalance-after-pane-launch-8a71ed5f
 - id: pr-010
   plan: plan-001
   title: Isolate workdir pm state from main repo
@@ -135,4 +136,4 @@ prs:
     the code, not the project management state.'
   agent_machine: spark-424d
   gh_pr: null
-  workdir: /home/matt/.pm-workdirs/project-manager-828c8d0a/pm-pr-010-isolate-workdir-pm-state-from-main-repo-8a71ed5f
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-010-isolate-workdir-pm-state-from-main-repo-8a71ed5f
