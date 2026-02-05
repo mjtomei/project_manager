@@ -27,6 +27,7 @@ from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
 from textual.timer import Timer
 from textual.widgets import Header, Footer, Static, Label
+from textual.screen import ModalScreen
 
 from pm_core import store, graph as graph_mod, git_ops, prompt_gen, notes, guide, pr_sync
 from pm_core.claude_launcher import find_claude, find_editor
@@ -61,6 +62,67 @@ class StatusBar(Static):
 class LogLine(Static):
     """Single-line log output above the command bar."""
     pass
+
+
+class HelpScreen(ModalScreen):
+    """Modal help screen showing available keybindings."""
+
+    BINDINGS = [
+        Binding("escape", "dismiss", "Close"),
+        Binding("question_mark", "dismiss", "Close"),
+        Binding("q", "dismiss", "Close"),
+    ]
+
+    CSS = """
+    HelpScreen {
+        align: center middle;
+    }
+    #help-container {
+        width: 50;
+        height: auto;
+        max-height: 80%;
+        background: $surface;
+        border: solid $primary;
+        padding: 1 2;
+    }
+    #help-title {
+        text-align: center;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+    .help-section {
+        margin-top: 1;
+        text-style: bold;
+        color: $primary;
+    }
+    .help-row {
+        height: 1;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="help-container"):
+            yield Label("Keyboard Shortcuts", id="help-title")
+            yield Label("PR Actions", classes="help-section")
+            yield Label("  [bold]s[/]  Start selected PR", classes="help-row")
+            yield Label("  [bold]d[/]  Mark PR as done", classes="help-row")
+            yield Label("  [bold]c[/]  Launch Claude for PR", classes="help-row")
+            yield Label("  [bold]p[/]  Copy prompt to clipboard", classes="help-row")
+            yield Label("  [bold]e[/]  Edit PR's plan file", classes="help-row")
+            yield Label("Navigation", classes="help-section")
+            yield Label("  [bold]/[/]  Open command bar", classes="help-row")
+            yield Label("  [bold]g[/]  Toggle guide view", classes="help-row")
+            yield Label("  [bold]n[/]  Open notes", classes="help-row")
+            yield Label("  [bold]r[/]  Refresh / sync", classes="help-row")
+            yield Label("  [bold]b[/]  Rebalance panes", classes="help-row")
+            yield Label("Other", classes="help-section")
+            yield Label("  [bold]?[/]  Show this help", classes="help-row")
+            yield Label("  [bold]q[/]  Quit", classes="help-row")
+            yield Label("")
+            yield Label("[dim]Press Esc or ? to close[/]", classes="help-row")
+
+    def action_dismiss(self) -> None:
+        self.app.pop_screen()
 
 
 class ProjectManagerApp(App):
@@ -136,13 +198,14 @@ class ProjectManagerApp(App):
         Binding("ctrl+r", "restart", "Restart", show=False),
         Binding("slash", "focus_command", "Command", show=True),
         Binding("escape", "unfocus_command", "Back", show=False),
+        Binding("question_mark", "show_help", "Help", show=True),
     ]
 
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """Disable single-key shortcuts when command bar is focused."""
         if action in ("start_pr", "done_pr", "copy_prompt", "launch_claude",
                        "edit_plan", "toggle_guide", "launch_notes", "refresh",
-                       "rebalance", "quit"):
+                       "rebalance", "quit", "show_help"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus:
                 _log.debug("check_action: blocked %s (command bar focused)", action)
@@ -819,3 +882,7 @@ class ProjectManagerApp(App):
             cmd_bar.value = ""
             tree = self.query_one("#tech-tree", TechTree)
             tree.focus()
+
+    def action_show_help(self) -> None:
+        _log.debug("action: show_help")
+        self.push_screen(HelpScreen())

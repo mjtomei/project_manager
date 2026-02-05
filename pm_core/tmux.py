@@ -27,7 +27,7 @@ def session_exists(name: str) -> bool:
 def create_session(name: str, cwd: str, cmd: str) -> None:
     """Create a detached tmux session running cmd."""
     subprocess.run(
-        ["tmux", "new-session", "-d", "-s", name, "-c", cwd, cmd],
+        ["tmux", "new-session", "-d", "-s", name, "-n", "main", "-c", cwd, cmd],
         check=True,
     )
 

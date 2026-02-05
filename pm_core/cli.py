@@ -1497,40 +1497,25 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
 
     # Try to launch in the pm tmux session
     if tmux_mod.has_tmux():
-        pr_title = pr_entry.get("title", pr_id)
-        window_name = store.slugify(pr_title)[:20]
-        escaped_prompt = prompt.replace("'", "'\\''")
-        cmd = f"claude '{escaped_prompt}'"
+        pm_session = _get_session_name_for_cwd()
+        if tmux_mod.session_exists(pm_session):
+            window_name = _pr_display_id(pr_entry)
+            escaped_prompt = prompt.replace("'", "'\\''")
+            cmd = f"claude '{escaped_prompt}'"
+            try:
+                tmux_mod.new_window(pm_session, window_name, cmd, str(work_path))
+                click.echo(f"Launched Claude in tmux window '{window_name}' (session: {pm_session})")
+                return
+            except Exception as e:
+                click.echo(f"Failed to create tmux window: {e}", err=True)
+                click.echo("Launching Claude in current terminal...")
 
-        # Get session name for this workdir (unique per PR)
-        session_name = _get_session_name_for_path(work_path, pr_id)
-
-        # Create session if it doesn't exist
-        if not tmux_mod.session_exists(session_name):
-            click.echo(f"Creating pm session '{session_name}'...")
-            tmux_mod.create_session(session_name, str(work_path), "bash")
-            # Forward key environment variables
-            for env_key in ("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS", "PM_PROJECT", "EDITOR", "PATH"):
-                val = os.environ.get(env_key)
-                if val:
-                    subprocess.run(["tmux", "set-environment", "-t", session_name, env_key, val], check=False)
-
-        try:
-            tmux_mod.new_window(session_name, window_name, cmd, str(work_path))
-            click.echo(f"Launched Claude in tmux window '{window_name}' (session: {session_name})")
-        except Exception as e:
-            click.echo(f"Failed to create tmux window: {e}", err=True)
-            click.echo("Launching Claude in current terminal...")
-            session_key = f"pr:start:{pr_id}"
-            if fresh:
-                clear_session(root, session_key)
-            launch_claude(prompt, cwd=str(work_path), session_key=session_key, pm_root=root, resume=not fresh)
-    else:
-        session_key = f"pr:start:{pr_id}"
-        if fresh:
-            clear_session(root, session_key)
-        click.echo("Launching Claude...")
-        launch_claude(prompt, cwd=str(work_path), session_key=session_key, pm_root=root, resume=not fresh)
+    # Fall through: launch interactively in current terminal
+    session_key = f"pr:start:{pr_id}"
+    if fresh:
+        clear_session(root, session_key)
+    click.echo("Launching Claude...")
+    launch_claude(prompt, cwd=str(work_path), session_key=session_key, pm_root=root, resume=not fresh)
 
 
 @pr.command("done")
