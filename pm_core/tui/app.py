@@ -206,13 +206,18 @@ class ProjectManagerApp(App):
     ]
 
     def check_action(self, action: str, parameters: tuple) -> bool | None:
-        """Disable single-key shortcuts when command bar is focused."""
+        """Disable single-key shortcuts when command bar is focused or in guide mode."""
         if action in ("start_pr", "done_pr", "copy_prompt", "launch_claude",
                        "edit_plan", "toggle_guide", "launch_notes", "refresh",
                        "rebalance", "quit", "show_help"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus:
                 _log.debug("check_action: blocked %s (command bar focused)", action)
+                return False
+        # Block PR actions when in guide mode (can't see the PR tree)
+        if action in ("start_pr", "done_pr", "copy_prompt", "launch_claude", "edit_plan"):
+            if self._current_guide_step is not None:
+                _log.debug("check_action: blocked %s (in guide mode)", action)
                 return False
         return True
 
