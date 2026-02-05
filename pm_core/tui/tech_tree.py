@@ -159,15 +159,39 @@ class TechTree(Widget):
                 if dep_id in self._node_positions and pr["id"] in self._node_positions:
                     sx, sy = node_pos(dep_id)
                     ex, ey = node_pos(pr["id"])
-                    # Draw horizontal arrow from right of source to left of target
-                    arrow_y = sy + NODE_H // 2
+                    # Arrow from right of source to left of target
+                    src_y = sy + NODE_H // 2  # middle of source
+                    dst_y = ey + NODE_H // 2  # middle of target
                     arrow_start_x = sx + NODE_W
                     arrow_end_x = ex - 1
 
                     if arrow_end_x > arrow_start_x:
-                        for x in range(arrow_start_x, arrow_end_x + 1):
-                            safe_write(arrow_y, x, "─", "dim")
-                        safe_write(arrow_y, arrow_end_x, "▶", "dim")
+                        if src_y == dst_y:
+                            # Simple horizontal arrow
+                            for x in range(arrow_start_x, arrow_end_x + 1):
+                                safe_write(src_y, x, "─", "dim")
+                            safe_write(src_y, arrow_end_x, "▶", "dim")
+                        else:
+                            # L-shaped connector: horizontal from source, then vertical, then horizontal to target
+                            mid_x = arrow_start_x + (arrow_end_x - arrow_start_x) // 2
+                            # Horizontal from source to midpoint
+                            for x in range(arrow_start_x, mid_x + 1):
+                                safe_write(src_y, x, "─", "dim")
+                            # Vertical segment
+                            if dst_y > src_y:
+                                safe_write(src_y, mid_x, "┐", "dim")
+                                for y in range(src_y + 1, dst_y):
+                                    safe_write(y, mid_x, "│", "dim")
+                                safe_write(dst_y, mid_x, "└", "dim")
+                            else:
+                                safe_write(src_y, mid_x, "┘", "dim")
+                                for y in range(dst_y + 1, src_y):
+                                    safe_write(y, mid_x, "│", "dim")
+                                safe_write(dst_y, mid_x, "┌", "dim")
+                            # Horizontal from midpoint to target
+                            for x in range(mid_x + 1, arrow_end_x + 1):
+                                safe_write(dst_y, x, "─", "dim")
+                            safe_write(dst_y, arrow_end_x, "▶", "dim")
 
         # Draw nodes
         for pr_id, (col, row) in self._node_positions.items():
