@@ -111,7 +111,7 @@ class HelpScreen(ModalScreen):
             yield Label("  [bold]d[/]  Mark PR as done", classes="help-row")
             yield Label("  [bold]c[/]  Launch Claude for PR", classes="help-row")
             yield Label("  [bold]p[/]  Copy prompt to clipboard", classes="help-row")
-            yield Label("  [bold]e[/]  Edit PR's plan file", classes="help-row")
+            yield Label("  [bold]e[/]  Edit selected PR", classes="help-row")
             yield Label("Panes & Views", classes="help-section")
             yield Label("  [bold]/[/]  Open command bar", classes="help-row")
             yield Label("  [bold]g[/]  Toggle guide view", classes="help-row")
@@ -194,7 +194,7 @@ class ProjectManagerApp(App):
         Binding("d", "done_pr", "Done PR", show=True),
         Binding("p", "copy_prompt", "Copy Prompt", show=True),
         Binding("c", "launch_claude", "Claude", show=True),
-        Binding("e", "edit_plan", "Edit Plan", show=True),
+        Binding("e", "edit_plan", "Edit PR", show=True),
         Binding("g", "toggle_guide", "Guide", show=True),
         Binding("n", "launch_notes", "Notes", show=True),
         Binding("r", "refresh", "Refresh", show=True),
@@ -737,37 +737,23 @@ class ProjectManagerApp(App):
             self.log_message("No PR selected")
 
     def action_edit_plan(self) -> None:
+        """Edit the selected PR in an interactive editor."""
         _log.info("action: edit_plan")
         if not tmux_mod.in_tmux():
             self.log_message("Not in tmux. Use 'pm session' to start a tmux session.")
             return
-        if not self._root:
-            return
-        # Find plan file for selected PR, or first plan
         tree = self.query_one("#tech-tree", TechTree)
         pr_id = tree.selected_pr_id
-        plan_path = None
-        if pr_id:
-            pr = store.get_pr(self._data, pr_id)
-            if pr and pr.get("plan"):
-                plan_entry = store.get_plan(self._data, pr["plan"])
-                if plan_entry:
-                    plan_path = self._root / plan_entry["file"]
-        if not plan_path:
-            plans = self._data.get("plans") or []
-            if plans:
-                plan_path = self._root / plans[0]["file"]
-        if not plan_path or not plan_path.exists():
-            self.log_message("No plan file found")
+        if not pr_id:
+            self.log_message("No PR selected")
             return
-        editor = find_editor()
         try:
             session_name = subprocess.run(
                 ["tmux", "display-message", "-p", "#{session_name}"],
                 capture_output=True, text=True
             ).stdout.strip()
-            tmux_mod.split_pane(session_name, "h", f"{editor} {plan_path}")
-            self.log_message(f"Opened {plan_path.name} in {editor}")
+            tmux_mod.split_pane(session_name, "h", f"pm pr edit {pr_id}")
+            self.log_message(f"Editing {pr_id}")
         except Exception as e:
             self.log_message(f"Error: {e}")
 
