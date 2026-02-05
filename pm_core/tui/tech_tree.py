@@ -431,29 +431,52 @@ class TechTree(Widget):
         new_index = None
 
         if event.key in ("up", "k"):
-            # Move up in same column
+            # Move up: prefer same column, but allow other columns if none in same
             candidates = [(i, pid) for i, pid in enumerate(self._ordered_ids)
-                          if self._node_positions[pid][0] == cur_col and self._node_positions[pid][1] < cur_row]
+                          if self._node_positions[pid][1] < cur_row]
             if candidates:
-                new_index = max(candidates, key=lambda x: self._node_positions[x[1]][1])[0]
+                # Prioritize same column, then closest column, then closest row
+                new_index = max(candidates, key=lambda x: (
+                    self._node_positions[x[1]][0] == cur_col,  # same column first
+                    -abs(self._node_positions[x[1]][0] - cur_col),  # then closest column
+                    self._node_positions[x[1]][1]  # then highest row (closest to current)
+                ))[0]
         elif event.key in ("down", "j"):
             candidates = [(i, pid) for i, pid in enumerate(self._ordered_ids)
-                          if self._node_positions[pid][0] == cur_col and self._node_positions[pid][1] > cur_row]
+                          if self._node_positions[pid][1] > cur_row]
             if candidates:
-                new_index = min(candidates, key=lambda x: self._node_positions[x[1]][1])[0]
+                # Prioritize same column, then closest column, then closest row
+                new_index = min(candidates, key=lambda x: (
+                    self._node_positions[x[1]][0] != cur_col,  # same column first (False < True)
+                    abs(self._node_positions[x[1]][0] - cur_col),  # then closest column
+                    self._node_positions[x[1]][1]  # then lowest row (closest to current)
+                ))[0]
         elif event.key in ("left", "h"):
+            # Move left: must be in a column to the left, prefer same row
             candidates = [(i, pid) for i, pid in enumerate(self._ordered_ids)
                           if self._node_positions[pid][0] < cur_col]
             if candidates:
-                # Pick closest column, closest row
-                new_index = min(candidates, key=lambda x: (cur_col - self._node_positions[x[1]][0],
-                                                           abs(self._node_positions[x[1]][1] - cur_row)))[0]
+                # Prefer same row, then closest row in closest column
+                same_row = [(i, pid) for i, pid in candidates
+                            if self._node_positions[pid][1] == cur_row]
+                if same_row:
+                    new_index = max(same_row, key=lambda x: self._node_positions[x[1]][0])[0]
+                else:
+                    new_index = min(candidates, key=lambda x: (cur_col - self._node_positions[x[1]][0],
+                                                               abs(self._node_positions[x[1]][1] - cur_row)))[0]
         elif event.key in ("right", "l"):
+            # Move right: must be in a column to the right, prefer same row
             candidates = [(i, pid) for i, pid in enumerate(self._ordered_ids)
                           if self._node_positions[pid][0] > cur_col]
             if candidates:
-                new_index = min(candidates, key=lambda x: (self._node_positions[x[1]][0] - cur_col,
-                                                           abs(self._node_positions[x[1]][1] - cur_row)))[0]
+                # Prefer same row, then closest row in closest column
+                same_row = [(i, pid) for i, pid in candidates
+                            if self._node_positions[pid][1] == cur_row]
+                if same_row:
+                    new_index = min(same_row, key=lambda x: self._node_positions[x[1]][0])[0]
+                else:
+                    new_index = min(candidates, key=lambda x: (self._node_positions[x[1]][0] - cur_col,
+                                                               abs(self._node_positions[x[1]][1] - cur_row)))[0]
         elif event.key == "enter":
             self.post_message(PRActivated(current_id))
             return
