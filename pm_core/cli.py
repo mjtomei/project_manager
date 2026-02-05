@@ -3450,15 +3450,13 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
     pm_session_name = _get_session_name_for_cwd()  # e.g., "pm-omerta_node-7112c169"
     session_tag = pm_session_name.removeprefix("pm-")  # e.g., "omerta_node-7112c169"
 
-    # Workdir is named by task slug for clarity about what the work is
+    # Workdir uses same tag as session
     from pm_core.paths import workdirs_base
-    slug = branch.split('/')[-1]  # "meta/foo" -> "foo"
-    meta_base = workdirs_base()
-    work_path = meta_base / f"meta-{slug}"
+    work_path = workdirs_base() / f"meta-{session_tag}"
 
     if not work_path.exists():
         click.echo(f"Cloning pm from {PM_REPO_URL}...")
-        meta_base.mkdir(parents=True, exist_ok=True)
+        work_path.parent.mkdir(parents=True, exist_ok=True)
         git_ops.clone(PM_REPO_URL, work_path)
 
         # Determine base ref
