@@ -142,27 +142,15 @@ def session_dir(session_tag: str | None = None) -> Path | None:
     return d
 
 
-def _check_flag_file(session_tag: str | None, filename: str) -> bool:
-    """Check if a flag file exists and contains 'true'."""
-    sd = session_dir(session_tag)
-    if not sd:
-        return False
-    flag_file = sd / filename
-    if not flag_file.exists():
-        return False
-    try:
-        content = flag_file.read_text().strip()
-        return content == "true"
-    except (OSError, IOError):
-        return False
-
-
 def debug_enabled(session_tag: str | None = None) -> bool:
     """Check if debug mode is enabled for current session.
 
-    Looks for ~/.pm/sessions/{session-tag}/debug file containing 'true'.
+    Looks for ~/.pm/sessions/{session-tag}/debug file (just needs to exist).
     """
-    return _check_flag_file(session_tag, "debug")
+    sd = session_dir(session_tag)
+    if not sd:
+        return False
+    return (sd / "debug").exists()
 
 
 def set_debug(session_tag: str, enabled: bool = True) -> None:
@@ -171,7 +159,7 @@ def set_debug(session_tag: str, enabled: bool = True) -> None:
     if sd:
         debug_file = sd / "debug"
         if enabled:
-            debug_file.write_text("true\n")
+            debug_file.touch()
         elif debug_file.exists():
             debug_file.unlink()
 
@@ -182,7 +170,16 @@ def skip_permissions_enabled(session_tag: str | None = None) -> bool:
     Looks for ~/.pm/sessions/{session-tag}/dangerously-skip-permissions
     file containing exactly 'true'.
     """
-    return _check_flag_file(session_tag, "dangerously-skip-permissions")
+    sd = session_dir(session_tag)
+    if not sd:
+        return False
+    skip_file = sd / "dangerously-skip-permissions"
+    if not skip_file.exists():
+        return False
+    try:
+        return skip_file.read_text().strip() == "true"
+    except (OSError, IOError):
+        return False
 
 
 def set_skip_permissions(session_tag: str, enabled: bool = True) -> None:

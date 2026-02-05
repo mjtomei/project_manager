@@ -3640,12 +3640,11 @@ The TUI runs in a tmux session. You can interact with it programmatically:
 - `tmux list-panes -t <session> -F "#{{pane_id}} #{{pane_width}}x#{{pane_height}}"` — List panes
 - `cat ~/.pm/pane-registry/<session>.json` — View pane registry (tracks pane roles/order)
 
-**Session configuration** — Per-session config is stored in `~/.pm/sessions/{session_tag}/`:
+**Debug logging** — Enable by creating `~/.pm/sessions/{session_tag}/debug`:
 ```bash
-# Enable debug logging for this session
-echo true > ~/.pm/sessions/{session_tag}/debug
-
-**Logs** — When debug is enabled, logs are written to `~/.pm/pane-registry/`:
+touch ~/.pm/sessions/{session_tag}/debug
+```
+Logs are written to `~/.pm/pane-registry/`:
 - `tui.log` — TUI events and actions
 - `cli.log` — CLI command execution
 - `layout.log` — Pane layout rebalancing
