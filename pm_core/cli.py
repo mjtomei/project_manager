@@ -3445,12 +3445,16 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
             timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
             branch = f"meta/session-{timestamp}"
 
-    # Create workdir per session using branch slug
-    # branch is like "meta/foo" -> branch_slug is "meta-foo" (already has meta- prefix)
+    # Create workdir and session tag using same pattern as pm session: name-hash
+    # branch is like "meta/foo" -> slug is "foo"
+    import hashlib
     from pm_core.paths import workdirs_base
-    branch_slug = branch.replace('/', '-')
+    slug = branch.split('/')[-1]  # "meta/foo" -> "foo"
     meta_base = workdirs_base()
-    work_path = meta_base / branch_slug
+    work_path = meta_base / f"meta-{slug}"
+    # Session tag follows pm session pattern: meta-{slug}-{hash}
+    path_hash = hashlib.md5(str(work_path).encode()).hexdigest()[:8]
+    session_tag = f"meta-{slug}-{path_hash}"
 
     if not work_path.exists():
         click.echo(f"Cloning pm from {PM_REPO_URL}...")
@@ -3514,16 +3518,16 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
 
     # Set active override so the wrapper uses this workdir's pm_core
     from pm_core.paths import set_override_path, skip_permissions_enabled
-    set_override_path(branch_slug, work_path)
-    click.echo(f"Set session override: ~/.pm/sessions/{branch_slug}/override")
+    set_override_path(session_tag, work_path)
+    click.echo(f"Set session override: ~/.pm/sessions/{session_tag}/override")
 
     # Build command with PM_SESSION env var and cleanup on exit
     escaped_prompt = prompt.replace("'", "'\\''")
     skip_flag = " --dangerously-skip-permissions" if skip_permissions_enabled() else ""
     # Set PM_SESSION so child processes know which session they're in
     # When Claude exits, clear the session config
-    clear_cmd = f"rm -rf ~/.pm/sessions/{branch_slug}"
-    cmd = f"PM_SESSION={branch_slug} claude{skip_flag} '{escaped_prompt}' ; {clear_cmd}"
+    clear_cmd = f"rm -rf ~/.pm/sessions/{session_tag}"
+    cmd = f"PM_SESSION={session_tag} claude{skip_flag} '{escaped_prompt}' ; {clear_cmd}"
 
     # Try to launch in tmux
     if tmux_mod.has_tmux():
