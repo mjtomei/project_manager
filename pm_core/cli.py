@@ -2732,7 +2732,7 @@ def _run_guide(step, fresh=False):
 
         if post_hook:
             # Set deps reviewed BEFORE pm guide done, so detection shows progress
-            post_cmd = f"python -c \"from pm_core.guide import set_deps_reviewed; from pathlib import Path; set_deps_reviewed(Path('{root}'))\" ; pm guide done"
+            post_cmd = f"python3 -c \"from pm_core.guide import set_deps_reviewed; from pathlib import Path; set_deps_reviewed(Path('{root}'))\" ; pm guide done"
         else:
             post_cmd = "pm guide done"
 
