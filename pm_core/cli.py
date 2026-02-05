@@ -1940,7 +1940,11 @@ def _session_start():
         has_project = False
 
     # Generate session name with path hash (uses helper to ensure consistency)
-    cwd = str(root) if root else str(Path.cwd())
+    # Use the repo directory (parent of pm/) as the working directory
+    if root and store.is_internal_pm_dir(root):
+        cwd = str(root.parent)
+    else:
+        cwd = str(root) if root else str(Path.cwd())
     session_name = _get_session_name_for_cwd()
     expected_root = root or (Path.cwd() / "pm")
     notes_path = expected_root / notes.NOTES_FILENAME
