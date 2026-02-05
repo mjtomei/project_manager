@@ -85,7 +85,14 @@ class TechTree(Widget):
         self.refresh(layout=True)
 
     def _recompute(self) -> None:
-        """Recompute layout positions with smart row assignment."""
+        """Recompute layout positions with smart row assignment.
+
+        Strategy: Single-dependency edges should be horizontal when possible.
+        We assign rows in two passes:
+        1. First pass: tentatively assign all nodes
+        2. Second pass: expand rows where needed to accommodate multiple
+           single-dep children of the same parent
+        """
         prs = self._prs
         if not prs:
             self._ordered_ids = []
@@ -97,53 +104,91 @@ class TechTree(Widget):
         self._ordered_ids = []
         self._node_positions = {}
 
-        # Assign rows to minimize edge crossings and keep connected nodes aligned
+        # Build reverse map: parent -> list of single-dep children
+        single_dep_children: dict[str, list[str]] = {}
+        for pr in prs:
+            deps = pr.get("depends_on") or []
+            if len(deps) == 1:
+                parent = deps[0]
+                if parent not in single_dep_children:
+                    single_dep_children[parent] = []
+                single_dep_children[parent].append(pr["id"])
+
+        # Assign rows
         row_assignments: dict[str, int] = {}
 
-        for col, layer in enumerate(layers):
-            if col == 0:
-                # First column: just stack them
-                for row, pr_id in enumerate(sorted(layer)):
-                    row_assignments[pr_id] = row
-            else:
-                # For subsequent columns, try to align with dependencies
-                # Calculate preferred row for each node based on its dependencies
-                preferred_rows: list[tuple[str, float]] = []
-                for pr_id in layer:
-                    pr = pr_map.get(pr_id)
-                    deps = (pr.get("depends_on") or []) if pr else []
-                    dep_rows = [row_assignments[d] for d in deps if d in row_assignments]
-                    if dep_rows:
-                        # Prefer the median row of dependencies
-                        preferred = sum(dep_rows) / len(dep_rows)
-                    else:
-                        preferred = 0
-                    preferred_rows.append((pr_id, preferred))
+        # First column: stack them, but leave gaps for nodes that have
+        # multiple single-dep children
+        if layers:
+            current_row = 0
+            for pr_id in sorted(layers[0]):
+                row_assignments[pr_id] = current_row
+                # If this node has multiple single-dep children, they'll need
+                # adjacent rows, so reserve space
+                children = single_dep_children.get(pr_id, [])
+                if len(children) > 1:
+                    current_row += len(children)
+                else:
+                    current_row += 1
 
-                # Sort by preferred row to assign in order
-                preferred_rows.sort(key=lambda x: (x[1], x[0]))
+        # Subsequent columns
+        for col in range(1, len(layers)):
+            layer = layers[col]
 
-                # Assign rows, avoiding collisions
-                used_rows: set[int] = set()
-                for pr_id, pref in preferred_rows:
-                    # Find closest available row to preferred
-                    target = round(pref)
-                    if target not in used_rows:
-                        row_assignments[pr_id] = target
-                        used_rows.add(target)
-                    else:
-                        # Search outward for an available row
-                        for offset in range(1, len(layer) + 10):
-                            if target + offset not in used_rows:
-                                row_assignments[pr_id] = target + offset
-                                used_rows.add(target + offset)
-                                break
-                            if target - offset >= 0 and target - offset not in used_rows:
-                                row_assignments[pr_id] = target - offset
-                                used_rows.add(target - offset)
-                                break
+            # Categorize nodes
+            single_dep = []  # (pr_id, parent_id)
+            multi_dep = []   # (pr_id, avg_row)
+            no_dep = []      # pr_id
 
-        # Normalize rows: shift all down so minimum is 0, but preserve gaps for alignment
+            for pr_id in layer:
+                pr = pr_map.get(pr_id)
+                deps = (pr.get("depends_on") or []) if pr else []
+                dep_rows = [(d, row_assignments[d]) for d in deps if d in row_assignments]
+                if len(dep_rows) == 1:
+                    single_dep.append((pr_id, dep_rows[0][0], dep_rows[0][1]))
+                elif dep_rows:
+                    avg = sum(r for _, r in dep_rows) / len(dep_rows)
+                    multi_dep.append((pr_id, avg))
+                else:
+                    no_dep.append(pr_id)
+
+            used_rows: set[int] = set()
+
+            # Group single-dep nodes by their parent
+            by_parent: dict[str, list[tuple[str, int]]] = {}
+            for pr_id, parent_id, parent_row in single_dep:
+                if parent_id not in by_parent:
+                    by_parent[parent_id] = []
+                by_parent[parent_id].append((pr_id, parent_row))
+
+            # Assign single-dep nodes: first child gets parent's row,
+            # additional children get adjacent rows
+            for parent_id, children in by_parent.items():
+                children.sort(key=lambda x: x[0])  # Sort by pr_id for consistency
+                base_row = children[0][1]  # Parent's row
+                for i, (pr_id, _) in enumerate(children):
+                    target_row = base_row + i
+                    row_assignments[pr_id] = target_row
+                    used_rows.add(target_row)
+
+            # Assign multi-dep nodes
+            multi_dep.sort(key=lambda x: (x[1], x[0]))
+            for pr_id, pref in multi_dep:
+                target = round(pref)
+                while target in used_rows:
+                    target += 1
+                row_assignments[pr_id] = target
+                used_rows.add(target)
+
+            # Assign no-dep nodes
+            for pr_id in sorted(no_dep):
+                target = 0
+                while target in used_rows:
+                    target += 1
+                row_assignments[pr_id] = target
+                used_rows.add(target)
+
+        # Normalize rows: shift all down so minimum is 0, but preserve gaps
         min_row = min(row_assignments.values()) if row_assignments else 0
         if min_row != 0:
             for pr_id in row_assignments:
