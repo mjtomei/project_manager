@@ -143,11 +143,11 @@ class TechTree(Widget):
                                 used_rows.add(target - offset)
                                 break
 
-        # Compact row numbers to eliminate gaps
-        all_rows = sorted(set(row_assignments.values()))
-        row_remap = {old: new for new, old in enumerate(all_rows)}
-        for pr_id in row_assignments:
-            row_assignments[pr_id] = row_remap[row_assignments[pr_id]]
+        # Normalize rows: shift all down so minimum is 0, but preserve gaps for alignment
+        min_row = min(row_assignments.values()) if row_assignments else 0
+        if min_row != 0:
+            for pr_id in row_assignments:
+                row_assignments[pr_id] -= min_row
 
         # Build final positions
         for col, layer in enumerate(layers):
