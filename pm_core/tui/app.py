@@ -64,6 +64,55 @@ class LogLine(Static):
     pass
 
 
+class WelcomeScreen(ModalScreen):
+    """Welcome popup shown when guide completes."""
+
+    BINDINGS = [
+        Binding("escape", "dismiss", "Close"),
+        Binding("enter", "dismiss", "Close"),
+    ]
+
+    CSS = """
+    WelcomeScreen {
+        align: center middle;
+    }
+    #welcome-container {
+        width: 55;
+        height: auto;
+        max-height: 80%;
+        background: $surface;
+        border: solid $success;
+        padding: 1 2;
+    }
+    #welcome-title {
+        text-align: center;
+        text-style: bold;
+        color: $success;
+        margin-bottom: 1;
+    }
+    .welcome-row {
+        height: 1;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="welcome-container"):
+            yield Label("Setup Complete!", id="welcome-title")
+            yield Label("")
+            yield Label("Your PRs are ready. Here's how to get started:", classes="welcome-row")
+            yield Label("")
+            yield Label("  [bold]↑↓←→[/] or [bold]hjkl[/]  Navigate the PR tree", classes="welcome-row")
+            yield Label("  [bold]s[/]  Start working on the selected PR", classes="welcome-row")
+            yield Label("  [bold]c[/]  Launch Claude in a new pane", classes="welcome-row")
+            yield Label("  [bold]e[/]  Edit PR details", classes="welcome-row")
+            yield Label("  [bold]?[/]  Show all keyboard shortcuts", classes="welcome-row")
+            yield Label("")
+            yield Label("[dim]Press Enter or Esc to continue[/]", classes="welcome-row")
+
+    def action_dismiss(self) -> None:
+        self.app.pop_screen()
+
+
 class HelpScreen(ModalScreen):
     """Modal help screen showing available keybindings."""
 
@@ -230,6 +279,7 @@ class ProjectManagerApp(App):
         self._guide_auto_launched = False
         self._guide_dismissed = False
         self._current_guide_step: str | None = None
+        self._welcome_shown = False
         # Frame capture state (always enabled)
         self._frame_rate: int = DEFAULT_FRAME_RATE
         self._frame_buffer_size: int = DEFAULT_FRAME_BUFFER_SIZE
@@ -457,7 +507,7 @@ class ProjectManagerApp(App):
         _log.info("auto-launching guide pane")
         self._launch_pane("pm guide", "guide")
 
-    def _show_normal_view(self) -> None:
+    def _show_normal_view(self, from_guide: bool = False) -> None:
         """Show the normal tech tree view."""
         tree_container = self.query_one("#tree-container")
         guide_container = self.query_one("#guide-progress-container")
@@ -466,6 +516,10 @@ class ProjectManagerApp(App):
         self._current_guide_step = None
         # Capture frame after view change (use call_after_refresh to ensure screen is updated)
         self.call_after_refresh(self._capture_frame, "show_normal_view")
+        # Show welcome popup when guide completes (only once)
+        if from_guide and not self._welcome_shown:
+            self._welcome_shown = True
+            self.call_later(lambda: self.push_screen(WelcomeScreen()))
 
     def _update_display(self) -> None:
         """Refresh all widgets with current data."""
@@ -511,7 +565,7 @@ class ProjectManagerApp(App):
                 # Guide is complete, switch to normal view
                 if self._data:
                     self._update_display()
-                self._show_normal_view()
+                self._show_normal_view(from_guide=True)
                 self.log_message("Guide complete! Showing tech tree.")
             elif state != self._current_guide_step:
                 # Step changed, update the guide view
