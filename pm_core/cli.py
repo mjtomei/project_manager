@@ -1907,8 +1907,19 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool):
     trigger_tui_refresh()
 
 
-@cli.command("session")
-def session_cmd():
+@cli.group(invoke_without_command=True)
+@click.pass_context
+def session(ctx):
+    """Manage tmux sessions for pm.
+
+    Without a subcommand, starts or attaches to the pm session.
+    """
+    if ctx.invoked_subcommand is not None:
+        return
+    _session_start()
+
+
+def _session_start():
     """Start a tmux session with TUI + notes editor.
 
     If no project exists yet, starts pm guide instead of the TUI so
@@ -2033,6 +2044,23 @@ def session_cmd():
              "run-shell", "pm _pane-closed"], check=False)
 
     tmux_mod.attach(session_name)
+
+
+@session.command("kill")
+def session_kill():
+    """Kill the pm tmux session for this project."""
+    if not tmux_mod.has_tmux():
+        click.echo("tmux is not installed.", err=True)
+        raise SystemExit(1)
+
+    session_name = _get_session_name_for_cwd()
+
+    if not tmux_mod.session_exists(session_name):
+        click.echo(f"No session '{session_name}' found.", err=True)
+        raise SystemExit(1)
+
+    tmux_mod.kill_session(session_name)
+    click.echo(f"Killed session '{session_name}'.")
 
 
 @cli.command("prompt")

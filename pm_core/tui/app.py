@@ -121,7 +121,7 @@ class HelpScreen(ModalScreen):
             yield Label("  [bold]r[/]  Refresh / sync with GitHub", classes="help-row")
             yield Label("  [bold]Ctrl+R[/]  Restart TUI", classes="help-row")
             yield Label("  [bold]?[/]  Show this help", classes="help-row")
-            yield Label("  [bold]q[/]  Quit", classes="help-row")
+            yield Label("  [bold]q[/]  Detach from session", classes="help-row")
             yield Label("")
             yield Label("[dim]Press Esc or ? to close[/]", classes="help-row")
 
@@ -890,3 +890,13 @@ class ProjectManagerApp(App):
     def action_show_help(self) -> None:
         _log.debug("action: show_help")
         self.push_screen(HelpScreen())
+
+    def action_quit(self) -> None:
+        """Detach from tmux session instead of killing the TUI."""
+        _log.info("action: quit")
+        if tmux_mod.in_tmux():
+            # Detach from tmux, leaving session running
+            subprocess.run(["tmux", "detach-client"], check=False)
+        else:
+            # Not in tmux, just exit normally
+            self.exit()
