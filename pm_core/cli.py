@@ -3445,16 +3445,16 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
             timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
             branch = f"meta/session-{timestamp}"
 
-    # Create workdir and session tag using same pattern as pm session: name-hash
-    # branch is like "meta/foo" -> slug is "foo"
-    import hashlib
+    # Reuse the pm session's tag - ties meta work to the session you're in
+    # This prevents multiple agents working on the same running session
+    pm_session_name = _get_session_name_for_cwd()  # e.g., "pm-omerta_node-7112c169"
+    session_tag = pm_session_name.removeprefix("pm-")  # e.g., "omerta_node-7112c169"
+
+    # Workdir is named by task slug for clarity about what the work is
     from pm_core.paths import workdirs_base
     slug = branch.split('/')[-1]  # "meta/foo" -> "foo"
     meta_base = workdirs_base()
     work_path = meta_base / f"meta-{slug}"
-    # Session tag follows pm session pattern: meta-{slug}-{hash}
-    path_hash = hashlib.md5(str(work_path).encode()).hexdigest()[:8]
-    session_tag = f"meta-{slug}-{path_hash}"
 
     if not work_path.exists():
         click.echo(f"Cloning pm from {PM_REPO_URL}...")
