@@ -51,9 +51,9 @@ class LocalBackend(Backend):
 
     def pr_instructions(self, branch, title, base_branch, pr_id, gh_pr_url=None):
         return (
-            f"- Work in the current directory (already on branch {branch})\n"
-            f"- When done, commit your changes\n"
-            f"- Then tell the human you're done so they can run: pm pr done {pr_id}"
+            f"- You're on branch `{branch}`\n"
+            f"- Commit as you go\n"
+            f"- When ready for review: `pm pr done {pr_id}`"
         )
 
 
@@ -78,10 +78,9 @@ class VanillaBackend(Backend):
 
     def pr_instructions(self, branch, title, base_branch, pr_id, gh_pr_url=None):
         return (
-            f"- Work in the current directory (already on branch {branch})\n"
-            f"- When done, commit and push your changes:\n"
-            f"    git push -u origin {branch}\n"
-            f"- Then tell the human you're done so they can run: pm pr done {pr_id}"
+            f"- You're on branch `{branch}`\n"
+            f"- Commit and push as you go: `git push -u origin {branch}`\n"
+            f"- When ready for review: `pm pr done {pr_id}`"
         )
 
 
@@ -94,19 +93,16 @@ class GitHubBackend(Backend):
         if gh_pr_url:
             # Draft PR already exists - just push commits
             return (
-                f"- Work in the current directory (already on branch {branch})\n"
-                f"- A draft PR has been created and the branch pushed: {gh_pr_url}\n"
-                f"- When done, commit your changes and push:\n"
-                f"    git push origin {branch}\n"
-                f"- Then tell the human you're done so they can run: pm pr done {pr_id}"
+                f"- You're on branch `{branch}` with a draft PR: {gh_pr_url}\n"
+                f"- Commit and push as you go: `git push origin {branch}`\n"
+                f"- When ready for review: `pm pr done {pr_id}`"
             )
         # Fallback for when draft PR wasn't created (e.g., push failed)
         return (
-            f"- Work in the current directory (already on branch {branch})\n"
-            f"- When done, commit your changes, push the branch, and create a PR:\n"
-            f"    git push -u origin {branch}\n"
-            f"    gh pr create --title \"{title}\" --base {base_branch}\n"
-            f"- Then tell the human you're done so they can run: pm pr done {pr_id}"
+            f"- You're on branch `{branch}`\n"
+            f"- Commit and push as you go: `git push -u origin {branch}`\n"
+            f"- Create a PR when ready: `gh pr create --title \"{title}\" --base {base_branch}`\n"
+            f"- Then mark it done: `pm pr done {pr_id}`"
         )
 
 

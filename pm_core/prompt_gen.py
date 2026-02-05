@@ -1,4 +1,4 @@
-"""Claude prompt generation with guardrails."""
+"""Claude prompt generation for PR work sessions."""
 
 from pm_core import store, notes
 from pm_core.backend import get_backend
@@ -43,26 +43,22 @@ def generate_prompt(data: dict, pr_id: str) -> str:
     except FileNotFoundError:
         pass
 
-    prompt = f"""Your goal: Implement PR {pr_id}: "{title}" — write the code, write tests,
-and get it ready for review.
+    prompt = f"""You're working on PR {pr_id}: "{title}"
 
-This session is managed by `pm` (project manager for Claude Code). You have access
-to the `pm` CLI tool — run `pm help` to see available commands. When you're done,
-run `pm pr done {pr_id}` to mark this PR as ready for review.
+This session is managed by `pm`. Run `pm help` to see available commands.
 
 ## Context
-This PR is part of the plan "{plan_name}" ({plan_id}).
+Part of plan "{plan_name}" ({plan_id}).
 {deps_section}
 
 ## Task
 {description}
 
-## Guardrails
-- Write unit tests for every phase of your work. Do not defer testing.
-- Before referencing any existing code (imports, function calls, class usage), read the actual source to verify it exists and has the expected interface. Do not assume.
-- **Crash recovery**: This session may be resuming after a crash. Before starting work, check `git status` and `git log` to see if previous work exists on this branch. If commits or changes already exist, continue from where the previous session left off rather than starting from scratch.
+## Tips
+- This session may be resuming after a restart. Check `git status` and `git log` to see if previous work exists on this branch — if so, continue from there.
+- Before referencing existing code (imports, function calls, class usage), read the source to verify the interface.
 
-## Instructions
+## Workflow
 {instructions}
 {notes_block}"""
     return prompt.strip()
