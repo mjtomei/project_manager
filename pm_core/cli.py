@@ -2724,10 +2724,15 @@ def _run_guide(step, fresh=False):
         project_hash = hashlib.md5(str(root).encode()).hexdigest()[:8] if root else "unknown"
         loop_guard = f"pm _loop-guard guide-{project_hash}-{state}"
 
-        claude_cmd = f"claude{skip}{session_flag} '{escaped}'"
+        # Don't pass prompt when resuming - Claude continues from previous conversation
+        if "--resume" in session_flag:
+            claude_cmd = f"claude{skip}{session_flag}"
+        else:
+            claude_cmd = f"claude{skip}{session_flag} '{escaped}'"
 
         if post_hook:
-            post_cmd = f"pm guide done ; python -c \"from pm_core.guide import set_deps_reviewed; from pathlib import Path; set_deps_reviewed(Path('{root}'))\""
+            # Set deps reviewed BEFORE pm guide done, so detection shows progress
+            post_cmd = f"python -c \"from pm_core.guide import set_deps_reviewed; from pathlib import Path; set_deps_reviewed(Path('{root}'))\" ; pm guide done"
         else:
             post_cmd = "pm guide done"
 
