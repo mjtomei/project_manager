@@ -85,20 +85,74 @@ class TechTree(Widget):
         self.refresh(layout=True)
 
     def _recompute(self) -> None:
-        """Recompute layout positions."""
+        """Recompute layout positions with smart row assignment."""
         prs = self._prs
         if not prs:
             self._ordered_ids = []
             self._node_positions = {}
             return
 
+        pr_map = {pr["id"]: pr for pr in prs}
         layers = graph_mod.compute_layers(prs)
         self._ordered_ids = []
         self._node_positions = {}
 
+        # Assign rows to minimize edge crossings and keep connected nodes aligned
+        row_assignments: dict[str, int] = {}
+
         for col, layer in enumerate(layers):
-            for row, pr_id in enumerate(sorted(layer)):
-                self._node_positions[pr_id] = (col, row)
+            if col == 0:
+                # First column: just stack them
+                for row, pr_id in enumerate(sorted(layer)):
+                    row_assignments[pr_id] = row
+            else:
+                # For subsequent columns, try to align with dependencies
+                # Calculate preferred row for each node based on its dependencies
+                preferred_rows: list[tuple[str, float]] = []
+                for pr_id in layer:
+                    pr = pr_map.get(pr_id)
+                    deps = (pr.get("depends_on") or []) if pr else []
+                    dep_rows = [row_assignments[d] for d in deps if d in row_assignments]
+                    if dep_rows:
+                        # Prefer the median row of dependencies
+                        preferred = sum(dep_rows) / len(dep_rows)
+                    else:
+                        preferred = 0
+                    preferred_rows.append((pr_id, preferred))
+
+                # Sort by preferred row to assign in order
+                preferred_rows.sort(key=lambda x: (x[1], x[0]))
+
+                # Assign rows, avoiding collisions
+                used_rows: set[int] = set()
+                for pr_id, pref in preferred_rows:
+                    # Find closest available row to preferred
+                    target = round(pref)
+                    if target not in used_rows:
+                        row_assignments[pr_id] = target
+                        used_rows.add(target)
+                    else:
+                        # Search outward for an available row
+                        for offset in range(1, len(layer) + 10):
+                            if target + offset not in used_rows:
+                                row_assignments[pr_id] = target + offset
+                                used_rows.add(target + offset)
+                                break
+                            if target - offset >= 0 and target - offset not in used_rows:
+                                row_assignments[pr_id] = target - offset
+                                used_rows.add(target - offset)
+                                break
+
+        # Compact row numbers to eliminate gaps
+        all_rows = sorted(set(row_assignments.values()))
+        row_remap = {old: new for new, old in enumerate(all_rows)}
+        for pr_id in row_assignments:
+            row_assignments[pr_id] = row_remap[row_assignments[pr_id]]
+
+        # Build final positions
+        for col, layer in enumerate(layers):
+            for pr_id in sorted(layer, key=lambda x: row_assignments.get(x, 0)):
+                self._node_positions[pr_id] = (col, row_assignments[pr_id])
                 self._ordered_ids.append(pr_id)
 
         if self.selected_index >= len(self._ordered_ids):
@@ -153,45 +207,91 @@ class TechTree(Widget):
             y = row * (NODE_H + V_GAP) + 1
             return x, y
 
-        # Draw edges first
+        # Collect all edges and sort by vertical distance (straight edges first)
+        edges = []
         for pr in self._prs:
             for dep_id in pr.get("depends_on") or []:
                 if dep_id in self._node_positions and pr["id"] in self._node_positions:
-                    sx, sy = node_pos(dep_id)
-                    ex, ey = node_pos(pr["id"])
-                    # Arrow from right of source to left of target
-                    src_y = sy + NODE_H // 2  # middle of source
-                    dst_y = ey + NODE_H // 2  # middle of target
-                    arrow_start_x = sx + NODE_W
-                    arrow_end_x = ex - 1
+                    edges.append((dep_id, pr["id"]))
 
-                    if arrow_end_x > arrow_start_x:
-                        if src_y == dst_y:
-                            # Simple horizontal arrow
-                            for x in range(arrow_start_x, arrow_end_x + 1):
-                                safe_write(src_y, x, "─", "dim")
-                            safe_write(src_y, arrow_end_x, "▶", "dim")
-                        else:
-                            # L-shaped connector: horizontal from source, then vertical, then horizontal to target
-                            mid_x = arrow_start_x + (arrow_end_x - arrow_start_x) // 2
-                            # Horizontal from source to midpoint
-                            for x in range(arrow_start_x, mid_x + 1):
-                                safe_write(src_y, x, "─", "dim")
-                            # Vertical segment
-                            if dst_y > src_y:
-                                safe_write(src_y, mid_x, "┐", "dim")
-                                for y in range(src_y + 1, dst_y):
-                                    safe_write(y, mid_x, "│", "dim")
-                                safe_write(dst_y, mid_x, "└", "dim")
-                            else:
-                                safe_write(src_y, mid_x, "┘", "dim")
-                                for y in range(dst_y + 1, src_y):
-                                    safe_write(y, mid_x, "│", "dim")
-                                safe_write(dst_y, mid_x, "┌", "dim")
-                            # Horizontal from midpoint to target
-                            for x in range(mid_x + 1, arrow_end_x + 1):
-                                safe_write(dst_y, x, "─", "dim")
-                            safe_write(dst_y, arrow_end_x, "▶", "dim")
+        # Sort edges: horizontal (same row) first, then by vertical distance
+        def edge_priority(edge):
+            src_col, src_row = self._node_positions[edge[0]]
+            dst_col, dst_row = self._node_positions[edge[1]]
+            return (abs(dst_row - src_row), src_col, src_row)
+
+        edges.sort(key=edge_priority)
+
+        # Track used vertical channel positions to avoid overlap
+        # Key: x position, Value: set of y ranges that are used
+        used_channels: dict[int, list[tuple[int, int]]] = {}
+
+        def channel_free(x: int, y1: int, y2: int) -> bool:
+            if x not in used_channels:
+                return True
+            min_y, max_y = min(y1, y2), max(y1, y2)
+            for (a, b) in used_channels[x]:
+                if not (max_y < a or min_y > b):  # ranges overlap
+                    return False
+            return True
+
+        def mark_channel(x: int, y1: int, y2: int) -> None:
+            if x not in used_channels:
+                used_channels[x] = []
+            used_channels[x].append((min(y1, y2), max(y1, y2)))
+
+        # Draw edges
+        for dep_id, pr_id in edges:
+            sx, sy = node_pos(dep_id)
+            ex, ey = node_pos(pr_id)
+            src_y = sy + NODE_H // 2
+            dst_y = ey + NODE_H // 2
+            arrow_start_x = sx + NODE_W
+            arrow_end_x = ex - 1
+
+            if arrow_end_x > arrow_start_x:
+                if src_y == dst_y:
+                    # Simple horizontal arrow
+                    for x in range(arrow_start_x, arrow_end_x + 1):
+                        safe_write(src_y, x, "─", "dim")
+                    safe_write(src_y, arrow_end_x, "▶", "dim")
+                else:
+                    # Find a free vertical channel in the gap
+                    gap_start = arrow_start_x + 1
+                    gap_end = arrow_end_x - 1
+                    mid_x = gap_start + (gap_end - gap_start) // 2
+
+                    # Try to find an unused channel position
+                    for offset in range(0, (gap_end - gap_start) // 2 + 1):
+                        test_x = mid_x + offset
+                        if gap_start <= test_x <= gap_end and channel_free(test_x, src_y, dst_y):
+                            mid_x = test_x
+                            break
+                        test_x = mid_x - offset
+                        if gap_start <= test_x <= gap_end and channel_free(test_x, src_y, dst_y):
+                            mid_x = test_x
+                            break
+
+                    mark_channel(mid_x, src_y, dst_y)
+
+                    # Horizontal from source to midpoint
+                    for x in range(arrow_start_x, mid_x + 1):
+                        safe_write(src_y, x, "─", "dim")
+                    # Vertical segment
+                    if dst_y > src_y:
+                        safe_write(src_y, mid_x, "┐", "dim")
+                        for y in range(src_y + 1, dst_y):
+                            safe_write(y, mid_x, "│", "dim")
+                        safe_write(dst_y, mid_x, "└", "dim")
+                    else:
+                        safe_write(src_y, mid_x, "┘", "dim")
+                        for y in range(dst_y + 1, src_y):
+                            safe_write(y, mid_x, "│", "dim")
+                        safe_write(dst_y, mid_x, "┌", "dim")
+                    # Horizontal from midpoint to target
+                    for x in range(mid_x + 1, arrow_end_x + 1):
+                        safe_write(dst_y, x, "─", "dim")
+                    safe_write(dst_y, arrow_end_x, "▶", "dim")
 
         # Draw nodes
         for pr_id, (col, row) in self._node_positions.items():
