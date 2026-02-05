@@ -366,7 +366,8 @@ changes with `pm pr edit`:
   pm pr edit pr-001 --depends-on pr-002,pr-003
   pm pr edit pr-004 --depends-on ""
 
-Then run `pm pr graph` to show the final dependency tree."""
+Run `pm pr graph` to show the final dependency tree. Once the user is happy
+with the graph, this step is complete."""
 
     if state == "ready_to_work":
         ready = ctx.get("ready", [])
