@@ -2046,13 +2046,13 @@ def _session_start():
     # Bind prefix-R to rebalance in this session
     import subprocess as _sp
     _sp.run(["tmux", "bind-key", "-T", "prefix", "R",
-             "run-shell", "pm rebalance"], check=False)
+             "run-shell 'pm rebalance'"], check=False)
 
     # Global hook for kill-pane detection. The after-kill-pane hook
     # doesn't know which pane was killed, so _pane-closed reconciles
     # all registries against live tmux panes.
     _sp.run(["tmux", "set-hook", "-g", "after-kill-pane",
-             "run-shell", "pm _pane-closed"], check=False)
+             "run-shell 'pm _pane-closed'"], check=False)
 
     tmux_mod.attach(session_name)
 
