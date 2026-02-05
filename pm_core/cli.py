@@ -3672,19 +3672,26 @@ The `PM_SESSION` env var identifies this session (set automatically when meta la
 
 ## Testing changes
 
-1. Run tests from this workdir:
+**Session override is already active.** The pm wrapper detects this meta session
+and automatically uses this workdir's `pm_core` instead of the installed version.
+Any changes you make here take effect immediately for new `pm` commands.
+
+1. Run tests:
 ```bash
 python3 -m pytest tests/ -x -q
 ```
 
-2. To test changes live, reinstall pm from this workdir:
+2. Test changes live — just run `pm` commands normally. They use this workdir's code.
+
+3. For TUI changes, restart the TUI (`q` to detach, `pm session` to reattach).
+
+The override is stored at `~/.pm/sessions/$PM_SESSION/override` and is automatically
+cleared when this Claude session exits.
+
+**To install permanently** (make changes the default for all sessions):
 ```bash
 ./install.sh --local --force
 ```
-
-This creates a venv at ~/.local/share/pm/venv and symlinks ~/.local/bin/pm to it.
-After reinstalling, changes take effect for new `pm` invocations.
-For TUI changes, restart the TUI (`q` to detach, `pm session` to reattach).
 
 ## Contributing changes upstream
 
