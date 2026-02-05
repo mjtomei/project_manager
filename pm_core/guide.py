@@ -228,7 +228,7 @@ def _upcoming_steps_section(state: str) -> str:
     for s in remaining:
         desc = STEP_DESCRIPTIONS.get(s, s)
         lines.append(f"  - {desc}")
-    return "\n## What comes next (DO NOT do these now)\n" + "\n".join(lines) + "\n\nStay focused on the current step. The steps above will each run in their own session.\n"
+    return "\n## What comes next\n" + "\n".join(lines) + "\n\n(Each step runs in its own session — just focus on the current one.)\n"
 
 
 def build_guide_prompt(state: str, ctx: dict, root: Optional[Path]) -> Optional[str]:

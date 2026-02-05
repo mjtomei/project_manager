@@ -957,7 +957,7 @@ Phase 1 — Gather data (do this before talking to me):
 - Read the codebase structure (ls key directories, read READMEs)
 - If gh is not available, skip PR/issue steps and work from git log and code only.
 
-Phase 2 — Discuss with me (do NOT skip this):
+Phase 2 — Discuss with me:
 - Summarize what you found: major components, existing PRs, open issues
 - Ask which areas I care about tracking vs ignoring
 - Ask whether old merged work should appear in the graph or only future work
@@ -988,8 +988,7 @@ field, verify the file actually exists in the repo (use ls or read). If a
 path is wrong, find the correct path and update the plan file. Report any
 corrections you made.
 
-Once verified, tell the user to run `pm plan load {plan_id}` to create all
-the PRs in the project.
+Once verified, the next step is `pm plan load {plan_id}` to create the PRs.
 {notes_block}"""
 
     claude = find_claude()

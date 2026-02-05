@@ -60,19 +60,18 @@ def _parse_verdict(output: str) -> str:
 def build_fix_prompt(step_name: str, original_context: str, review_findings: str) -> str:
     """Build a prompt for the -fix variant of a command."""
     return f"""\
-Your goal: Fix the issues found by the automated review of the "{step_name}" step.
+Fixing issues from the "{step_name}" review.
 
-This session is managed by `pm` (project manager for Claude Code). You have access
-to the `pm` CLI tool — run `pm help` to see available commands.
+This session is managed by `pm`. Run `pm help` to see available commands.
 
-The original step had this context:
+Original context:
 {original_context}
 
-The review found these issues:
+Issues found:
 {review_findings}
 
-Read the relevant files, fix the issues, and verify your fixes are correct.
-If the fixes involve pm state (PRs, plans), use `pm` commands to apply them."""
+Read the relevant files, fix the issues, and verify. Use `pm` commands for any
+state changes (PRs, plans)."""
 
 
 def _write_review_file(root: Path, step_name: str, status: str, findings: str) -> Path:
