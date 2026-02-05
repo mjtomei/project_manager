@@ -3417,6 +3417,7 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
         pm meta --tag v1.0.0 "Backport a fix"
     """
     import re
+    from datetime import datetime
 
     # Detect current installation for context
     install_info = _detect_pm_install()

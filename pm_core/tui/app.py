@@ -9,8 +9,9 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from pm_core.paths import configure_logger
+from pm_core.paths import configure_logger, pane_registry_dir
 _log = configure_logger("pm.tui", "tui.log")
+_log_dir = pane_registry_dir()
 
 # Frame capture defaults
 DEFAULT_FRAME_RATE = 1  # Record every change
