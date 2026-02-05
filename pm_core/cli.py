@@ -110,6 +110,12 @@ def _pr_id_num(pr_id: str) -> int:
         return 0
 
 
+def _pr_display_id(pr: dict) -> str:
+    """Display ID for a PR: prefer GitHub #N, fall back to local pr-NNN."""
+    gh = pr.get("gh_pr_number")
+    return f"#{gh}" if gh else pr["id"]
+
+
 def save_and_push(data: dict, root: Path, message: str = "pm: update state") -> None:
     """Save state. Use 'pm push' to commit and share changes."""
     store.save(data, root)
@@ -582,7 +588,7 @@ def plan_deps():
         dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
         desc = p.get("description", "")
         desc_str = f" — {desc}" if desc else ""
-        pr_lines.append(f"  {p['id']}: {p.get('title', '???')} [{p.get('status', '?')}]{dep_str}{desc_str}")
+        pr_lines.append(f"  {_pr_display_id(p)}: {p.get('title', '???')} [{p.get('status', '?')}]{dep_str}{desc_str}")
 
     pr_list_str = "\n".join(pr_lines)
 
@@ -1027,8 +1033,7 @@ def pr():
 @click.option("--plan", "plan_id", default=None, help="Associated plan ID")
 @click.option("--depends-on", "depends_on", default=None, help="Comma-separated PR IDs")
 @click.option("--description", "desc", default="", help="PR description")
-@click.option("--no-draft", is_flag=True, default=False, help="Skip creating a draft PR on GitHub")
-def pr_add(title: str, plan_id: str, depends_on: str, desc: str, no_draft: bool):
+def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
     """Add a new PR to the project."""
     root = state_root()
     data = store.load(root)
@@ -1067,68 +1072,13 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str, no_draft: bool)
         "gh_pr_number": None,
     }
 
-    # For GitHub backend: create branch, push, and create draft PR
-    backend_name = data["project"].get("backend", "vanilla")
-    if backend_name == "github" and not no_draft:
-        repo_url = data["project"]["repo"]
-        base_branch = data["project"].get("base_branch", "main")
-
-        # Clone to temp directory
-        import tempfile
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp_path = Path(tmp_dir) / "repo"
-            click.echo(f"Cloning {repo_url}...")
-            git_ops.clone(repo_url, tmp_path, branch=base_branch)
-
-            # Create and checkout the branch
-            click.echo(f"Creating branch {branch}...")
-            git_ops.checkout_branch(tmp_path, branch, create=True)
-
-            # Create empty commit
-            commit_msg = f"Start work on: {title}\n\nPR: {pr_id}"
-            git_ops.run_git("commit", "--allow-empty", "-m", commit_msg, cwd=tmp_path)
-
-            # Push branch
-            click.echo(f"Pushing branch {branch}...")
-            push_result = git_ops.run_git("push", "-u", "origin", branch, cwd=tmp_path, check=False)
-            if push_result.returncode != 0:
-                click.echo(f"Warning: Failed to push branch: {push_result.stderr}", err=True)
-            else:
-                # Create draft PR
-                click.echo("Creating draft PR on GitHub...")
-                from pm_core import gh_ops
-                pr_info = gh_ops.create_draft_pr(str(tmp_path), title, base_branch, desc)
-                if pr_info:
-                    entry["gh_pr"] = pr_info["url"]
-                    entry["gh_pr_number"] = pr_info["number"]
-                    click.echo(f"Draft PR created: {pr_info['url']}")
-
-                    # Use GitHub PR number for local pr_id
-                    gh_number = pr_info["number"]
-                    existing_ids = {p["id"] for p in (data.get("prs") or [])}
-                    gh_pr_id = f"pr-{gh_number:03d}"
-                    if gh_pr_id in existing_ids:
-                        # Conflict: append suffix to make unique
-                        gh_pr_id = f"pr-{gh_number:03d}-gh"
-                        if gh_pr_id in existing_ids:
-                            # Still conflict: use sequential ID as fallback
-                            click.echo(f"Note: Using sequential ID {pr_id} (GitHub #{gh_number} conflicts)")
-                        else:
-                            pr_id = gh_pr_id
-                            entry["id"] = pr_id
-                    else:
-                        pr_id = gh_pr_id
-                        entry["id"] = pr_id
-                else:
-                    click.echo("Warning: Failed to create draft PR.", err=True)
-
     if data.get("prs") is None:
         data["prs"] = []
     data["prs"].append(entry)
     data["project"]["active_pr"] = pr_id
 
     save_and_push(data, root, f"pm: add {pr_id}")
-    click.echo(f"Created {pr_id}: {title} (now active)")
+    click.echo(f"Created {_pr_display_id(entry)}: {title} (now active)")
     click.echo(f"  branch: {branch}")
     if deps:
         click.echo(f"  depends_on: {', '.join(deps)}")
@@ -1340,7 +1290,7 @@ def pr_list():
         machine = p.get("agent_machine")
         machine_str = f" ({machine})" if machine else ""
         active_str = " *" if p["id"] == active_pr else ""
-        click.echo(f"  {icon} {p['id']}: {p.get('title', '???')} [{p.get('status', '?')}]{dep_str}{machine_str}{active_str}")
+        click.echo(f"  {icon} {_pr_display_id(p)}: {p.get('title', '???')} [{p.get('status', '?')}]{dep_str}{machine_str}{active_str}")
 
 
 @pr.command("graph")
@@ -1377,7 +1327,7 @@ def pr_ready():
         click.echo("No PRs are ready to start.")
         return
     for p in ready:
-        click.echo(f"  ⏳ {p['id']}: {p.get('title', '???')}")
+        click.echo(f"  ⏳ {_pr_display_id(p)}: {p.get('title', '???')}")
 
 
 @pr.command("start")
@@ -1400,21 +1350,21 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
             active_entry = store.get_pr(data, active)
             if active_entry and active_entry.get("status") == "pending":
                 pr_id = active
-                click.echo(f"Using active PR {pr_id}: {active_entry.get('title', '???')}")
+                click.echo(f"Using active PR {_pr_display_id(active_entry)}: {active_entry.get('title', '???')}")
 
     if pr_id is None:
         prs = data.get("prs") or []
         ready = graph.ready_prs(prs)
         if len(ready) == 1:
             pr_id = ready[0]["id"]
-            click.echo(f"Auto-selected {pr_id}: {ready[0].get('title', '???')}")
+            click.echo(f"Auto-selected {_pr_display_id(ready[0])}: {ready[0].get('title', '???')}")
         elif len(ready) == 0:
             click.echo("No PRs are ready to start.", err=True)
             raise SystemExit(1)
         else:
             click.echo("Multiple PRs are ready. Specify one:", err=True)
             for p in ready:
-                click.echo(f"  {p['id']}: {p.get('title', '???')}", err=True)
+                click.echo(f"  {_pr_display_id(p)}: {p.get('title', '???')}", err=True)
             raise SystemExit(1)
 
     pr_entry = store.get_pr(data, pr_id)
@@ -1492,6 +1442,32 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
     click.echo(f"Checking out branch {branch}...")
     git_ops.checkout_branch(work_path, branch, create=True)
 
+    # For GitHub backend: push branch and create draft PR if not already set
+    backend_name = data["project"].get("backend", "vanilla")
+    if backend_name == "github" and not pr_entry.get("gh_pr_number"):
+        base_branch = data["project"].get("base_branch", "main")
+        title = pr_entry.get("title", pr_id)
+        desc = pr_entry.get("description", "")
+
+        # Create empty commit so the branch has something to push
+        commit_msg = f"Start work on: {title}\n\nPR: {pr_id}"
+        git_ops.run_git("commit", "--allow-empty", "-m", commit_msg, cwd=work_path)
+
+        click.echo(f"Pushing branch {branch}...")
+        push_result = git_ops.run_git("push", "-u", "origin", branch, cwd=work_path, check=False)
+        if push_result.returncode != 0:
+            click.echo(f"Warning: Failed to push branch: {push_result.stderr}", err=True)
+        else:
+            click.echo("Creating draft PR on GitHub...")
+            from pm_core import gh_ops
+            pr_info = gh_ops.create_draft_pr(str(work_path), title, base_branch, desc)
+            if pr_info:
+                pr_entry["gh_pr"] = pr_info["url"]
+                pr_entry["gh_pr_number"] = pr_info["number"]
+                click.echo(f"Draft PR created: {pr_info['url']}")
+            else:
+                click.echo("Warning: Failed to create draft PR.", err=True)
+
     # Update state
     pr_entry["status"] = "in_progress"
     pr_entry["agent_machine"] = platform.node()
@@ -1500,7 +1476,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
     save_and_push(data, root, f"pm: start {pr_id}")
     trigger_tui_refresh()
 
-    click.echo(f"\nPR {pr_id} is now in_progress on {platform.node()}")
+    click.echo(f"\nPR {_pr_display_id(pr_entry)} is now in_progress on {platform.node()}")
     click.echo(f"Work directory: {work_path}")
 
     prompt = prompt_gen.generate_prompt(data, pr_id)
@@ -1572,7 +1548,7 @@ def pr_done(pr_id: str | None):
             else:
                 click.echo("Multiple in_progress PRs. Specify one:", err=True)
                 for p in in_progress:
-                    click.echo(f"  {p['id']}: {p.get('title', '???')} ({p.get('agent_machine', '')})", err=True)
+                    click.echo(f"  {_pr_display_id(p)}: {p.get('title', '???')} ({p.get('agent_machine', '')})", err=True)
             raise SystemExit(1)
         click.echo(f"Auto-selected {pr_id}")
 
@@ -1609,7 +1585,7 @@ def pr_done(pr_id: str | None):
 
     pr_entry["status"] = "in_review"
     save_and_push(data, root, f"pm: done {pr_id}")
-    click.echo(f"PR {pr_id} marked as in_review.")
+    click.echo(f"PR {_pr_display_id(pr_entry)} marked as in_review.")
     trigger_tui_refresh()
 
 
@@ -1656,7 +1632,7 @@ def pr_sync():
 
         if backend.is_merged(str(check_dir), branch, base_branch):
             pr_entry["status"] = "merged"
-            click.echo(f"  ✅ {pr_entry['id']}: merged")
+            click.echo(f"  ✅ {_pr_display_id(pr_entry)}: merged")
             updated += 1
 
     if updated:
@@ -1670,7 +1646,7 @@ def pr_sync():
     if ready:
         click.echo("\nNewly ready PRs:")
         for p in ready:
-            click.echo(f"  ⏳ {p['id']}: {p.get('title', '???')}")
+            click.echo(f"  ⏳ {_pr_display_id(p)}: {p.get('title', '???')}")
 
 
 @pr.command("sync-github")
@@ -1844,7 +1820,7 @@ def pr_cleanup(pr_id: str | None):
         else:
             click.echo("Multiple merged PRs have workdirs. Specify one:", err=True)
             for p in with_workdir:
-                click.echo(f"  {p['id']}: {p.get('title', '???')}", err=True)
+                click.echo(f"  {_pr_display_id(p)}: {p.get('title', '???')}", err=True)
             raise SystemExit(1)
 
     pr_entry = store.get_pr(data, pr_id)

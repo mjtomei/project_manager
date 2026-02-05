@@ -193,7 +193,8 @@ class TechTree(Widget):
                 bot = "└" + "─" * (NODE_W - 2) + "┘"
                 side = "│"
 
-            id_line = f"{side} {pr_id:<{NODE_W - 4}} {side}"
+            display_id = f"#{pr.get('gh_pr_number')}" if pr.get("gh_pr_number") else pr_id
+            id_line = f"{side} {display_id:<{NODE_W - 4}} {side}"
             title = pr.get("title", "???")
             max_title_len = NODE_W - 4
             if len(title) > max_title_len:
