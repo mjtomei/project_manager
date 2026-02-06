@@ -3599,7 +3599,7 @@ Based on: {base_ref}
 Repo: https://github.com/mjtomei/project_manager
 
 The pm repository has already been cloned to the working directory above.
-You are already on the feature branch. Do NOT clone the repo again.
+You are on the feature branch.
 
 ## Before starting
 
