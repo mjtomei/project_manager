@@ -3598,7 +3598,8 @@ Branch: {branch_name}
 Based on: {base_ref}
 Repo: https://github.com/mjtomei/project_manager
 
-This is a fresh clone from the upstream pm repository.
+The pm repository has already been cloned to the working directory above.
+You are already on the feature branch. Do NOT clone the repo again.
 
 ## Before starting
 
