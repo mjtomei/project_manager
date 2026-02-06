@@ -612,9 +612,14 @@ class ProjectManagerApp(App):
                 if is_manual:
                     self.log_message("Already up to date")
             elif result.error:
-                sync_status = "error"
-                _log.warning("PR sync error: %s", result.error)
-                self.log_message(f"Sync error: {result.error}")
+                # "No workdirs" is not really an error - just nothing to sync yet
+                if "No workdirs" in result.error:
+                    sync_status = "no-op"
+                    _log.debug("PR sync: %s", result.error)
+                else:
+                    sync_status = "error"
+                    _log.warning("PR sync error: %s", result.error)
+                    self.log_message(f"Sync error: {result.error}")
             elif result.updated_count > 0:
                 sync_status = "synced"
                 self.log_message(f"Synced: {result.updated_count} PR(s) merged")
@@ -706,17 +711,31 @@ class ProjectManagerApp(App):
         tree = self.query_one("#tech-tree", TechTree)
         tree.focus()
 
-    def _run_command(self, cmd: str) -> None:
-        """Execute a pm sub-command."""
+    def _run_command(self, cmd: str, working_message: str | None = None) -> None:
+        """Execute a pm sub-command.
+
+        Args:
+            cmd: The command to run (e.g., "pr start pr-001")
+            working_message: Optional message to show while running (enables async mode)
+        """
         parts = shlex.split(cmd)
         if not parts:
             return
 
-        self.log_message(f"> {cmd}")
         _log.info("running command: %s", parts)
 
+        if working_message:
+            # Run async with spinner
+            self.log_message(f"{working_message}...")
+            self.run_worker(self._run_command_async(cmd, parts, working_message))
+        else:
+            # Run sync for quick commands
+            self.log_message(f"> {cmd}")
+            self._run_command_sync(parts)
+
+    def _run_command_sync(self, parts: list[str]) -> None:
+        """Run a command synchronously (for quick operations)."""
         try:
-            # Run as subprocess so it goes through the full CLI
             result = subprocess.run(
                 [sys.executable, "-m", "pm_core"] + parts,
                 cwd=str(self._root) if self._root else None,
@@ -731,6 +750,42 @@ class ProjectManagerApp(App):
             if result.returncode != 0 and result.stderr.strip():
                 self.log_message(f"Error: {result.stderr.strip().split(chr(10))[-1]}")
         except Exception as e:
+            _log.exception("command failed: %s", parts)
+            self.log_message(f"Error: {e}")
+
+        # Reload state
+        self._load_state()
+
+    async def _run_command_async(self, cmd: str, parts: list[str], working_message: str) -> None:
+        """Run a command asynchronously with progress indicator."""
+        import asyncio
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable, "-m", "pm_core", *parts,
+                cwd=str(self._root) if self._root else None,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+            stdout_text = stdout.decode() if stdout else ""
+            stderr_text = stderr.decode() if stderr else ""
+
+            _log.debug("async command exit=%d stdout=%r stderr=%r",
+                       proc.returncode, stdout_text[:200], stderr_text[:200])
+
+            if stdout_text.strip():
+                self.log_message(stdout_text.strip().split("\n")[-1])
+            elif proc.returncode == 0:
+                self.log_message(f"{working_message} done")
+            if proc.returncode != 0 and stderr_text.strip():
+                self.log_message(f"Error: {stderr_text.strip().split(chr(10))[-1]}")
+
+        except asyncio.TimeoutError:
+            _log.exception("command timed out: %s", cmd)
+            self.log_message(f"Error: Command timed out")
+        except Exception as e:
             _log.exception("command failed: %s", cmd)
             self.log_message(f"Error: {e}")
 
@@ -743,7 +798,7 @@ class ProjectManagerApp(App):
         tree = self.query_one("#tech-tree", TechTree)
         pr_id = tree.selected_pr_id
         if pr_id:
-            self._run_command(f"pr start {pr_id}")
+            self._run_command(f"pr start {pr_id}", working_message=f"Starting {pr_id}")
 
     def action_done_pr(self) -> None:
         tree = self.query_one("#tech-tree", TechTree)
