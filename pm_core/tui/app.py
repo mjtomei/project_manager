@@ -762,6 +762,9 @@ class ProjectManagerApp(App):
         import asyncio
         import itertools
 
+        cwd = str(self._root) if self._root else None
+        _log.info("async command starting: %s (cwd=%s)", parts, cwd)
+
         spinner_frames = itertools.cycle(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
         spinner_running = True
 
@@ -777,7 +780,7 @@ class ProjectManagerApp(App):
         try:
             proc = await asyncio.create_subprocess_exec(
                 sys.executable, "-m", "pm_core", *parts,
-                cwd=str(self._root) if self._root else None,
+                cwd=cwd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -814,19 +817,28 @@ class ProjectManagerApp(App):
     def action_start_pr(self) -> None:
         tree = self.query_one("#tech-tree", TechTree)
         pr_id = tree.selected_pr_id
+        _log.info("action: start_pr selected=%s", pr_id)
         if pr_id:
             self._run_command(f"pr start {pr_id}", working_message=f"Starting {pr_id}")
+        else:
+            _log.info("action: start_pr - no PR selected")
+            self.log_message("No PR selected")
 
     def action_done_pr(self) -> None:
         tree = self.query_one("#tech-tree", TechTree)
         pr_id = tree.selected_pr_id
+        _log.info("action: done_pr selected=%s", pr_id)
         if pr_id:
             self._run_command(f"pr done {pr_id}")
+        else:
+            self.log_message("No PR selected")
 
     def action_copy_prompt(self) -> None:
         tree = self.query_one("#tech-tree", TechTree)
         pr_id = tree.selected_pr_id
+        _log.info("action: copy_prompt selected=%s", pr_id)
         if not pr_id:
+            self.log_message("No PR selected")
             return
         try:
             prompt = prompt_gen.generate_prompt(self._data, pr_id)
@@ -951,6 +963,7 @@ class ProjectManagerApp(App):
 
     def action_toggle_guide(self) -> None:
         """Toggle between guide progress view and tech tree view."""
+        _log.info("action: toggle_guide dismissed=%s current_step=%s", self._guide_dismissed, self._current_guide_step)
         if self._guide_dismissed:
             # Restore guide view if we're in a guide setup step
             state, _ = guide.resolve_guide_step(self._root)
@@ -1004,6 +1017,7 @@ class ProjectManagerApp(App):
         self.log_message("Layout rebalanced")
 
     def action_refresh(self) -> None:
+        _log.info("action: refresh")
         self._load_state()
         if self._current_guide_step is not None:
             self.log_message(f"Refreshed - Guide step: {guide.STEP_DESCRIPTIONS.get(self._current_guide_step, self._current_guide_step)}")
