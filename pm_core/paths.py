@@ -193,30 +193,41 @@ def set_skip_permissions(session_tag: str, enabled: bool = True) -> None:
             skip_file.unlink()
 
 
-def configure_logger(name: str, log_file: str) -> logging.Logger:
-    """Configure a logger that only writes to file when debug is enabled.
+def configure_logger(name: str, log_file: str, max_bytes: int = 10_000_000) -> logging.Logger:
+    """Configure a logger that always writes to file with rotation.
 
     Args:
         name: Logger name (e.g., "pm.tui")
         log_file: Filename within pane_registry_dir (e.g., "tui.log")
+        max_bytes: Maximum log file size before rotation (default 10MB, ~100k lines)
 
     Returns:
         Configured logger instance
     """
+    from logging.handlers import RotatingFileHandler
+
     logger = logging.getLogger(name)
 
+    # Avoid adding duplicate handlers
+    if logger.handlers:
+        return logger
+
+    log_path = pane_registry_dir() / log_file
+    handler = RotatingFileHandler(
+        log_path,
+        maxBytes=max_bytes,
+        backupCount=1,  # Keep one backup file
+    )
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S"
+    ))
+    logger.addHandler(handler)
+
+    # Debug level when debug mode enabled, INFO otherwise (still logs commands)
     if debug_enabled():
-        log_path = pane_registry_dir() / log_file
-        handler = logging.FileHandler(log_path)
-        handler.setFormatter(logging.Formatter(
-            "%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S"
-        ))
-        logger.addHandler(handler)
         logger.setLevel(logging.DEBUG)
     else:
-        # No handlers = no output, but set level to avoid "no handler" warnings
-        logger.addHandler(logging.NullHandler())
-        logger.setLevel(logging.WARNING)
+        logger.setLevel(logging.INFO)
 
     return logger
 
