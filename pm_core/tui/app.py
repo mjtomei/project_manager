@@ -410,7 +410,7 @@ class ProjectManagerApp(App):
         yield CommandBar(id="command-bar")
 
     def on_mount(self) -> None:
-        _log.info("TUI mounted")
+        _log.info("TUI mounted (cwd=%s)", Path.cwd())
         # Get session name for frame capture file naming
         if tmux_mod.in_tmux():
             try:
@@ -454,7 +454,10 @@ class ProjectManagerApp(App):
     def _load_state(self) -> None:
         """Load project state from disk."""
         try:
-            self._root = store.find_project_root()
+            # Only search for root on first load; reuse existing root for refreshes
+            if self._root is None:
+                self._root = store.find_project_root()
+                _log.info("found project root: %s", self._root)
             self._data = store.load(self._root)
             _log.debug("loaded state from %s, %d PRs",
                        self._root, len(self._data.get("prs") or []))
