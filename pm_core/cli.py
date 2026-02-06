@@ -3482,7 +3482,7 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
     prompt = _build_meta_prompt(task, work_path, install_info, branch, base_ref, session_tag)
 
     # Check for existing window
-    window_name = f"meta:{branch.split('/')[-1][:15]}"
+    window_name = "meta"
     if tmux_mod.has_tmux():
         pm_session = _get_session_name_for_cwd()
         if tmux_mod.session_exists(pm_session):
