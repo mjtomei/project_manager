@@ -101,14 +101,18 @@ def find_live_pane_by_role(session: str, role: str) -> str | None:
     from pm_core import tmux as tmux_mod
 
     data = load_registry(session)
+    window = data.get("window", "0")
+    _logger.debug("find_live_pane_by_role: session=%s window=%s role=%s", session, window, role)
+
     # Find pane with this role in registry
     for pane in data.get("panes", []):
         if pane.get("role") == role:
             pane_id = pane.get("id")
             if pane_id:
-                # Check if pane is actually alive in tmux
-                live_panes = tmux_mod.get_pane_indices(session)
+                # Check if pane is actually alive in tmux (use window from registry)
+                live_panes = tmux_mod.get_pane_indices(session, window)
                 live_ids = {p[0] for p in live_panes}
+                _logger.debug("find_live_pane_by_role: live_ids=%s, checking %s", live_ids, pane_id)
                 if pane_id in live_ids:
                     _logger.info("find_live_pane_by_role: %s -> %s (alive)", role, pane_id)
                     return pane_id

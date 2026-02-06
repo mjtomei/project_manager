@@ -923,9 +923,11 @@ class ProjectManagerApp(App):
         if not info:
             return
         session, window = info
+        _log.info("_launch_pane: session=%s window=%s role=%s", session, window, role)
 
         # Check if a pane with this role already exists
         existing_pane = pane_layout.find_live_pane_by_role(session, role)
+        _log.info("_launch_pane: find_live_pane_by_role returned %s", existing_pane)
         if existing_pane:
             _log.info("pane with role=%s already exists: %s, focusing", role, existing_pane)
             tmux_mod.select_pane(existing_pane)
