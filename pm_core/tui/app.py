@@ -162,6 +162,7 @@ class HelpScreen(ModalScreen):
             yield Label("  [bold]g[/]  Toggle guide view", classes="help-row")
             yield Label("  [bold]n[/]  Open notes", classes="help-row")
             yield Label("  [bold]m[/]  Meta: work on pm itself", classes="help-row")
+            yield Label("  [bold]l[/]  View TUI log", classes="help-row")
             yield Label("  [bold]b[/]  Rebalance panes", classes="help-row")
             yield Label("Other", classes="help-section")
             yield Label("  [bold]r[/]  Refresh / sync with GitHub", classes="help-row")
@@ -244,6 +245,7 @@ class ProjectManagerApp(App):
         Binding("g", "toggle_guide", "Guide", show=True),
         Binding("n", "launch_notes", "Notes", show=True),
         Binding("m", "launch_meta", "Meta", show=True),
+        Binding("l", "view_log", "Log", show=True),
         Binding("r", "refresh", "Refresh", show=True),
         Binding("b", "rebalance", "Rebalance", show=True),
         Binding("ctrl+r", "restart", "Restart", show=False),
@@ -256,7 +258,7 @@ class ProjectManagerApp(App):
         """Disable single-key shortcuts when command bar is focused or in guide mode."""
         if action in ("start_pr", "done_pr", "copy_prompt", "launch_claude",
                        "edit_plan", "toggle_guide", "launch_notes", "launch_meta",
-                       "refresh", "rebalance", "quit", "show_help"):
+                       "view_log", "refresh", "rebalance", "quit", "show_help"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus:
                 _log.debug("check_action: blocked %s (command bar focused)", action)
@@ -971,6 +973,15 @@ class ProjectManagerApp(App):
         root = self._root or (Path.cwd() / "pm")
         notes_path = root / notes.NOTES_FILENAME
         self._launch_pane(f"pm notes {notes_path}", "notes")
+
+    def action_view_log(self) -> None:
+        """View the TUI log file in a pane."""
+        _log.info("action: view_log")
+        log_path = _log_dir / "tui.log"
+        if not log_path.exists():
+            self.log_message("No log file yet. Enable debug mode first.")
+            return
+        self._launch_pane(f"tail -f {log_path}", "log")
 
     def action_launch_meta(self) -> None:
         """Launch a meta-development session to work on pm itself."""
