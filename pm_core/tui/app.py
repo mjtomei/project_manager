@@ -726,7 +726,6 @@ class ProjectManagerApp(App):
 
         if working_message:
             # Run async with spinner
-            self.log_message(f"{working_message}...")
             self.run_worker(self._run_command_async(cmd, parts, working_message))
         else:
             # Run sync for quick commands
@@ -757,8 +756,21 @@ class ProjectManagerApp(App):
         self._load_state()
 
     async def _run_command_async(self, cmd: str, parts: list[str], working_message: str) -> None:
-        """Run a command asynchronously with progress indicator."""
+        """Run a command asynchronously with animated spinner."""
         import asyncio
+        import itertools
+
+        spinner_frames = itertools.cycle(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
+        spinner_running = True
+
+        def update_spinner() -> None:
+            if spinner_running:
+                frame = next(spinner_frames)
+                self.log_message(f"{frame} {working_message}...")
+                self.set_timer(0.1, update_spinner)
+
+        # Start spinner
+        update_spinner()
 
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -769,6 +781,7 @@ class ProjectManagerApp(App):
             )
 
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+            spinner_running = False
             stdout_text = stdout.decode() if stdout else ""
             stderr_text = stderr.decode() if stderr else ""
 
@@ -778,14 +791,16 @@ class ProjectManagerApp(App):
             if stdout_text.strip():
                 self.log_message(stdout_text.strip().split("\n")[-1])
             elif proc.returncode == 0:
-                self.log_message(f"{working_message} done")
+                self.log_message(f"✓ {working_message} done")
             if proc.returncode != 0 and stderr_text.strip():
                 self.log_message(f"Error: {stderr_text.strip().split(chr(10))[-1]}")
 
         except asyncio.TimeoutError:
+            spinner_running = False
             _log.exception("command timed out: %s", cmd)
             self.log_message(f"Error: Command timed out")
         except Exception as e:
+            spinner_running = False
             _log.exception("command failed: %s", cmd)
             self.log_message(f"Error: {e}")
 
