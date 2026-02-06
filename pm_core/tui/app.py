@@ -162,7 +162,7 @@ class HelpScreen(ModalScreen):
             yield Label("  [bold]g[/]  Toggle guide view", classes="help-row")
             yield Label("  [bold]n[/]  Open notes", classes="help-row")
             yield Label("  [bold]m[/]  Meta: work on pm itself", classes="help-row")
-            yield Label("  [bold]l[/]  View TUI log", classes="help-row")
+            yield Label("  [bold]L[/]  View TUI log", classes="help-row")
             yield Label("  [bold]b[/]  Rebalance panes", classes="help-row")
             yield Label("Other", classes="help-section")
             yield Label("  [bold]r[/]  Refresh / sync with GitHub", classes="help-row")
@@ -245,7 +245,7 @@ class ProjectManagerApp(App):
         Binding("g", "toggle_guide", "Guide", show=True),
         Binding("n", "launch_notes", "Notes", show=True),
         Binding("m", "launch_meta", "Meta", show=True),
-        Binding("l", "view_log", "Log", show=True),
+        Binding("L", "view_log", "Log", show=True),
         Binding("r", "refresh", "Refresh", show=True),
         Binding("b", "rebalance", "Rebalance", show=True),
         Binding("ctrl+r", "restart", "Restart", show=False),
