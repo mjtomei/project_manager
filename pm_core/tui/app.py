@@ -13,6 +13,34 @@ from pm_core.paths import configure_logger, pane_registry_dir
 _log = configure_logger("pm.tui", "tui.log")
 _log_dir = pane_registry_dir()
 
+
+def _run_shell(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
+    """Run a shell command with logging.
+
+    Logs the command before execution and result after.
+    Passes through all kwargs to subprocess.run.
+    """
+    cmd_str = shlex.join(cmd) if isinstance(cmd, list) else cmd
+    _log.info("shell: %s", cmd_str)
+    result = subprocess.run(cmd, **kwargs)
+    if result.returncode != 0:
+        stderr = getattr(result, 'stderr', '')
+        if stderr:
+            _log.debug("shell failed (rc=%d): %s", result.returncode, stderr[:200])
+    return result
+
+
+async def _run_shell_async(cmd: list[str], **kwargs):
+    """Run a shell command asynchronously with logging.
+
+    Returns the process object for awaiting.
+    """
+    import asyncio
+    cmd_str = shlex.join(cmd) if isinstance(cmd, list) else cmd
+    _log.info("shell async: %s", cmd_str)
+    return await asyncio.create_subprocess_exec(*cmd, **kwargs)
+
+
 # Frame capture defaults
 DEFAULT_FRAME_RATE = 1  # Record every change
 DEFAULT_FRAME_BUFFER_SIZE = 100
@@ -416,7 +444,7 @@ class ProjectManagerApp(App):
         # Get session name for frame capture file naming
         if tmux_mod.in_tmux():
             try:
-                result = subprocess.run(
+                result = _run_shell(
                     ["tmux", "display-message", "-p", "#{session_name}"],
                     capture_output=True, text=True, timeout=5
                 )
@@ -742,14 +770,15 @@ class ProjectManagerApp(App):
     def _run_command_sync(self, parts: list[str]) -> None:
         """Run a command synchronously (for quick operations)."""
         try:
-            result = subprocess.run(
-                [sys.executable, "-m", "pm_core"] + parts,
+            cmd = [sys.executable, "-m", "pm_core"] + parts
+            result = _run_shell(
+                cmd,
                 cwd=str(self._root) if self._root else None,
                 capture_output=True,
                 text=True,
                 timeout=30,
             )
-            _log.debug("command exit=%d stdout=%r stderr=%r",
+            _log.debug("pm exit=%d stdout=%r stderr=%r",
                        result.returncode, result.stdout[:200], result.stderr[:200])
             if result.stdout.strip():
                 self.log_message(result.stdout.strip().split("\n")[-1])
@@ -768,7 +797,7 @@ class ProjectManagerApp(App):
         import itertools
 
         cwd = str(self._root) if self._root else None
-        _log.info("async command starting: %s (cwd=%s)", parts, cwd)
+        full_cmd = [sys.executable, "-m", "pm_core"] + list(parts)
 
         spinner_frames = itertools.cycle(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
         spinner_running = True
@@ -783,8 +812,8 @@ class ProjectManagerApp(App):
         update_spinner()
 
         try:
-            proc = await asyncio.create_subprocess_exec(
-                sys.executable, "-m", "pm_core", *parts,
+            proc = await _run_shell_async(
+                full_cmd,
                 cwd=cwd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -795,7 +824,7 @@ class ProjectManagerApp(App):
             stdout_text = stdout.decode() if stdout else ""
             stderr_text = stderr.decode() if stderr else ""
 
-            _log.debug("async command exit=%d stdout=%r stderr=%r",
+            _log.debug("pm async exit=%d stdout=%r stderr=%r",
                        proc.returncode, stdout_text[:200], stderr_text[:200])
 
             if stdout_text.strip():
@@ -880,12 +909,14 @@ class ProjectManagerApp(App):
         if pr_id:
             try:
                 prompt = prompt_gen.generate_prompt(self._data, pr_id)
-                session_name = subprocess.run(
+                session_name = _run_shell(
                     ["tmux", "display-message", "-p", "#{session_name}"],
                     capture_output=True, text=True
                 ).stdout.strip()
                 escaped = prompt.replace("'", "'\\''")
-                tmux_mod.split_pane(session_name, "h", f"claude '{escaped}'")
+                claude_cmd = f"claude '{escaped}'"
+                _log.info("launching claude: %s", claude_cmd[:100] + "..." if len(claude_cmd) > 100 else claude_cmd)
+                tmux_mod.split_pane(session_name, "h", claude_cmd)
                 self.log_message(f"Launched Claude for {pr_id}")
             except Exception as e:
                 self.log_message(f"Error: {e}")
@@ -897,7 +928,7 @@ class ProjectManagerApp(App):
         pane_id = os.environ.get("TMUX_PANE", "")
         if not pane_id:
             return "h"
-        result = subprocess.run(
+        result = _run_shell(
             ["tmux", "display", "-t", pane_id, "-p", "#{pane_width} #{pane_height}"],
             capture_output=True, text=True
         )
@@ -921,12 +952,14 @@ class ProjectManagerApp(App):
             self.log_message("No PR selected")
             return
         try:
-            session_name = subprocess.run(
+            session_name = _run_shell(
                 ["tmux", "display-message", "-p", "#{session_name}"],
                 capture_output=True, text=True
             ).stdout.strip()
             direction = self._get_pane_split_direction()
-            tmux_mod.split_pane(session_name, direction, f"pm pr edit {pr_id}")
+            edit_cmd = f"pm pr edit {pr_id}"
+            _log.info("launching editor: %s", edit_cmd)
+            tmux_mod.split_pane(session_name, direction, edit_cmd)
             self.log_message(f"Editing {pr_id}")
         except Exception as e:
             self.log_message(f"Error: {e}")
@@ -1075,7 +1108,7 @@ class ProjectManagerApp(App):
         _log.info("action: quit")
         if tmux_mod.in_tmux():
             # Detach from tmux, leaving session running
-            subprocess.run(["tmux", "detach-client"], check=False)
+            _run_shell(["tmux", "detach-client"], check=False)
         else:
             # Not in tmux, just exit normally
             self.exit()
