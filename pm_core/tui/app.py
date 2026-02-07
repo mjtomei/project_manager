@@ -153,6 +153,7 @@ class HelpScreen(ModalScreen):
             yield Label("  [bold]Enter[/]  Show PR details", classes="help-row")
             yield Label("PR Actions", classes="help-section")
             yield Label("  [bold]s[/]  Start selected PR", classes="help-row")
+            yield Label("  [bold]S[/]  Start fresh (no resume)", classes="help-row")
             yield Label("  [bold]d[/]  Mark PR as done", classes="help-row")
             yield Label("  [bold]c[/]  Launch Claude for PR", classes="help-row")
             yield Label("  [bold]p[/]  Copy prompt to clipboard", classes="help-row")
@@ -238,6 +239,7 @@ class ProjectManagerApp(App):
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("s", "start_pr", "Start PR", show=True),
+        Binding("S", "start_pr_fresh", "Start Fresh", show=False),
         Binding("d", "done_pr", "Done PR", show=True),
         Binding("p", "copy_prompt", "Copy Prompt", show=True),
         Binding("c", "launch_claude", "Claude", show=True),
@@ -256,9 +258,9 @@ class ProjectManagerApp(App):
 
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """Disable single-key shortcuts when command bar is focused or in guide mode."""
-        if action in ("start_pr", "done_pr", "copy_prompt", "launch_claude",
-                       "edit_plan", "toggle_guide", "launch_notes", "launch_meta",
-                       "view_log", "refresh", "rebalance", "quit", "show_help"):
+        if action in ("start_pr", "start_pr_fresh", "done_pr", "copy_prompt",
+                       "launch_claude", "edit_plan", "toggle_guide", "launch_notes",
+                       "launch_meta", "view_log", "refresh", "rebalance", "quit", "show_help"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus:
                 _log.debug("check_action: blocked %s (command bar focused)", action)
@@ -825,6 +827,16 @@ class ProjectManagerApp(App):
             self._run_command(f"pr start {pr_id}", working_message=f"Starting {pr_id}")
         else:
             _log.info("action: start_pr - no PR selected")
+            self.log_message("No PR selected")
+
+    def action_start_pr_fresh(self) -> None:
+        """Start PR with fresh Claude session (no resume)."""
+        tree = self.query_one("#tech-tree", TechTree)
+        pr_id = tree.selected_pr_id
+        _log.info("action: start_pr_fresh selected=%s", pr_id)
+        if pr_id:
+            self._run_command(f"pr start --new {pr_id}", working_message=f"Starting {pr_id} (fresh)")
+        else:
             self.log_message("No PR selected")
 
     def action_done_pr(self) -> None:
