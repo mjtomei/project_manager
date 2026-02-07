@@ -8,8 +8,8 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from pm_core.paths import configure_logger
-_log = configure_logger("pm.claude_launcher", "claude_launcher.log")
+from pm_core.paths import configure_logger, log_shell_command
+_log = configure_logger("pm.claude_launcher")
 
 SESSION_REGISTRY = ".pm-sessions.json"
 
@@ -150,8 +150,11 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
     _log.info("launch_claude: %s (cwd=%s, session_key=%s, session_id=%s)",
               cmd[:2], cwd, session_key, session_id[:8] + "...")
 
+    log_shell_command(cmd, prefix="claude")
     result = subprocess.run(cmd, cwd=cwd)
     returncode = result.returncode
+    if returncode != 0:
+        log_shell_command(cmd, prefix="claude", returncode=returncode)
 
     # If session failed (possibly invalid/corrupted), try with fresh session
     if returncode != 0 and resume:
@@ -163,8 +166,11 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
             cmd.append("--dangerously-skip-permissions")
         cmd.extend(["--session-id", session_id])
         cmd.append(prompt)
+        log_shell_command(cmd, prefix="claude")
         result = subprocess.run(cmd, cwd=cwd)
         returncode = result.returncode
+        if returncode != 0:
+            log_shell_command(cmd, prefix="claude", returncode=returncode)
 
     return returncode
 
@@ -204,12 +210,15 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
     spinner_thread.start()
 
     try:
+        log_shell_command(cmd, prefix="claude-print")
         result = subprocess.run(
             cmd,
             cwd=cwd,
             capture_output=True,
             text=True,
         )
+        if result.returncode != 0:
+            log_shell_command(cmd, prefix="claude-print", returncode=result.returncode)
     finally:
         done.set()
         spinner_thread.join()
@@ -217,12 +226,46 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
     return result.stdout
 
 
+def build_claude_shell_cmd(
+    prompt: str | None = None,
+    session_id: str | None = None,
+    resume: bool = False,
+    session_tag: str | None = None,
+) -> str:
+    """Build a claude shell command string with proper flags and logging.
+
+    All code that launches claude as a shell string (tmux, execvp, etc.)
+    should use this to ensure --dangerously-skip-permissions is respected
+    and the command is logged.
+
+    Args:
+        prompt: The prompt to pass to claude (omitted when resuming)
+        session_id: Session ID for --session-id or --resume
+        resume: If True and session_id is set, use --resume instead of --session-id
+        session_tag: Override session tag for skip-permissions check
+    """
+    from pm_core.paths import skip_permissions_enabled
+    skip = " --dangerously-skip-permissions" if skip_permissions_enabled(session_tag) else ""
+    cmd = f"claude{skip}"
+
+    if session_id:
+        if resume:
+            cmd += f" --resume {session_id}"
+        else:
+            cmd += f" --session-id {session_id}"
+
+    if prompt and not resume:
+        escaped = prompt.replace("'", "'\\''")
+        cmd += f" '{escaped}'"
+
+    log_shell_command(cmd, prefix="claude")
+    return cmd
+
+
 def launch_claude_in_tmux(pane_target: str, prompt: str, cwd: str | None = None) -> None:
     """Send a claude command to a tmux pane."""
     from pm_core.tmux import send_keys
-    escaped = prompt.replace("'", "'\\''")
-    skip_flag = " --dangerously-skip-permissions" if _skip_permissions() else ""
-    cmd = f"claude{skip_flag} '{escaped}'"
+    cmd = build_claude_shell_cmd(prompt=prompt)
     if cwd:
         cmd = f"cd '{cwd}' && {cmd}"
     send_keys(pane_target, cmd)
@@ -257,12 +300,15 @@ def launch_claude_print_background(prompt: str, cwd: str | None = None, callback
         if _skip_permissions():
             cmd.append("--dangerously-skip-permissions")
         cmd.extend(["-p", prompt])
+        log_shell_command(cmd, prefix="claude-print")
         result = subprocess.run(
             cmd,
             cwd=cwd,
             capture_output=True,
             text=True,
         )
+        if result.returncode != 0:
+            log_shell_command(cmd, prefix="claude-print", returncode=result.returncode)
         if callback:
             callback(result.stdout, result.stderr, result.returncode)
 

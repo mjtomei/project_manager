@@ -10,8 +10,12 @@ Session tags are derived from the git repo (GitHub repo name or directory name +
 
 import hashlib
 import logging
+import shlex
 import subprocess
 from pathlib import Path
+
+# Cache for session tags to avoid repeated subprocess calls
+_session_tag_cache: dict[str, str | None] = {}
 
 
 def pm_home() -> Path:
@@ -24,6 +28,16 @@ def pm_home() -> Path:
 def pane_registry_dir() -> Path:
     """Return the pane registry directory (~/.pm/pane-registry/)."""
     d = pm_home() / "pane-registry"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def debug_dir() -> Path:
+    """Return the debug/logs directory (~/.pm/debug/).
+
+    Contains per-session log files for debugging.
+    """
+    d = pm_home() / "debug"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -105,7 +119,10 @@ def _get_github_repo_name(git_root: Path) -> str | None:
         return None
 
 
-def get_session_tag(start_path: Path | None = None) -> str | None:
+_session_tag_cache: dict[str, str | None] = {}
+
+
+def get_session_tag(start_path: Path | None = None, use_github_name: bool = True) -> str | None:
     """Generate session tag from the current git repository.
 
     Format: {repo_name}-{hash} where:
@@ -114,18 +131,34 @@ def get_session_tag(start_path: Path | None = None) -> str | None:
 
     Works from any subdirectory of the repo.
     Returns None if not in a git repository.
+    Results are cached to avoid repeated subprocess calls.
+
+    Args:
+        start_path: Path to start searching from (default: cwd)
+        use_github_name: If True, try to get GitHub repo name (requires subprocess).
+                        If False, just use directory name (faster, no subprocess).
     """
+    cache_key = str(start_path or Path.cwd())
+    if cache_key in _session_tag_cache:
+        return _session_tag_cache[cache_key]
+
     git_root = _find_git_root(start_path)
     if not git_root:
+        _session_tag_cache[cache_key] = None
         return None
 
-    # Try to get GitHub repo name first, fall back to directory name
-    repo_name = _get_github_repo_name(git_root) or git_root.name
+    # Get repo name - optionally try GitHub, always fall back to directory name
+    if use_github_name:
+        repo_name = _get_github_repo_name(git_root) or git_root.name
+    else:
+        repo_name = git_root.name
 
     # Generate hash from git root path
     path_hash = hashlib.md5(str(git_root).encode()).hexdigest()[:8]
 
-    return f"{repo_name}-{path_hash}"
+    tag = f"{repo_name}-{path_hash}"
+    _session_tag_cache[cache_key] = tag
+    return tag
 
 
 def session_dir(session_tag: str | None = None) -> Path | None:
@@ -193,12 +226,13 @@ def set_skip_permissions(session_tag: str, enabled: bool = True) -> None:
             skip_file.unlink()
 
 
-def configure_logger(name: str, log_file: str, max_bytes: int = 10_000_000) -> logging.Logger:
+def configure_logger(name: str, log_file: str | None = None, max_bytes: int = 10_000_000) -> logging.Logger:
     """Configure a logger that always writes to file with rotation.
 
     Args:
         name: Logger name (e.g., "pm.tui")
-        log_file: Filename within pane_registry_dir (e.g., "tui.log")
+        log_file: Optional filename override. If None, uses session-based log file
+                  in ~/.pm/debug/{session-tag}.log
         max_bytes: Maximum log file size before rotation (default 10MB, ~100k lines)
 
     Returns:
@@ -212,7 +246,8 @@ def configure_logger(name: str, log_file: str, max_bytes: int = 10_000_000) -> l
     if logger.handlers:
         return logger
 
-    log_path = pane_registry_dir() / log_file
+    # Use session-based log file in debug dir
+    log_path = command_log_file()
     handler = RotatingFileHandler(
         log_path,
         maxBytes=max_bytes,
@@ -263,3 +298,70 @@ def clear_session(session_tag: str) -> None:
     if sd.exists():
         import shutil
         shutil.rmtree(sd)
+
+
+def command_log_file(session_tag: str | None = None) -> Path:
+    """Get the path to the command log file for a session.
+
+    All pm commands log their shell executions here.
+    Located at ~/.pm/debug/{session-tag}.log
+
+    If session_tag is None, derives it from the current git repo.
+    Falls back to 'default.log' if not in a git repo.
+    """
+    # Use fast version (no subprocess) to avoid issues during import
+    tag = session_tag or get_session_tag(use_github_name=False) or "default"
+    return debug_dir() / f"{tag}.log"
+
+
+def log_shell_command(cmd: list[str] | str, prefix: str = "shell", returncode: int | None = None) -> None:
+    """Log a shell command to the central command log.
+
+    All pm shell commands (git, gh, etc.) are logged here for debugging.
+    The TUI and CLI commands share the same log file.
+
+    Args:
+        cmd: Command list or string to log
+        prefix: Prefix for the log entry (e.g., "shell", "git", "gh")
+        returncode: If provided, logs as completion with return code
+    """
+    log_file = command_log_file()
+    cmd_str = shlex.join(cmd) if isinstance(cmd, list) else cmd
+
+    try:
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%H:%M:%S")
+
+        if returncode is not None:
+            if returncode == 0:
+                entry = f"{timestamp} INFO  {prefix} done: {cmd_str}\n"
+            else:
+                entry = f"{timestamp} WARN  {prefix} failed (rc={returncode}): {cmd_str}\n"
+        else:
+            entry = f"{timestamp} INFO  {prefix}: {cmd_str}\n"
+
+        with open(log_file, "a") as f:
+            f.write(entry)
+    except (OSError, IOError):
+        pass  # Silently fail if we can't write to log
+
+
+def run_shell_logged(cmd: list[str], prefix: str = "shell", **kwargs) -> subprocess.CompletedProcess:
+    """Run a shell command with logging to command log.
+
+    This is a convenience wrapper that logs the command before execution
+    and the result after.
+
+    Args:
+        cmd: Command list to run
+        prefix: Prefix for log entries
+        **kwargs: Passed to subprocess.run
+
+    Returns:
+        CompletedProcess result
+    """
+    log_shell_command(cmd, prefix)
+    result = subprocess.run(cmd, **kwargs)
+    if result.returncode != 0:
+        log_shell_command(cmd, prefix, result.returncode)
+    return result

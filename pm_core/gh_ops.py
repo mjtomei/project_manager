@@ -6,6 +6,8 @@ import subprocess
 import sys
 from typing import Optional
 
+from pm_core.paths import log_shell_command
+
 
 def _check_gh():
     """Check that gh CLI is installed and authenticated. Exit with guidance if not."""
@@ -34,15 +36,23 @@ def _check_gh():
 
 
 def run_gh(*args: str, cwd: Optional[str] = None, check: bool = True) -> subprocess.CompletedProcess:
-    """Run a gh CLI command."""
+    """Run a gh CLI command.
+
+    Logs to TUI log file if running under TUI.
+    """
     _check_gh()
-    return subprocess.run(
-        ["gh", *args],
+    cmd = ["gh", *args]
+    log_shell_command(cmd, prefix="gh")
+    result = subprocess.run(
+        cmd,
         cwd=cwd,
         capture_output=True,
         text=True,
         check=check,
     )
+    if result.returncode != 0:
+        log_shell_command(cmd, prefix="gh", returncode=result.returncode)
+    return result
 
 
 def create_pr(workdir: str, title: str, base: str, body: str = "") -> Optional[str]:

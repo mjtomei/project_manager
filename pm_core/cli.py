@@ -13,11 +13,11 @@ import click
 from pm_core import store, graph, git_ops, prompt_gen, notes
 from pm_core import pr_sync as pr_sync_mod
 
-# Set up logging (only writes to file when PM_DEBUG=1)
+# Set up logging - writes to ~/.pm/debug/{session-tag}.log
 from pm_core.paths import configure_logger, pane_registry_dir
-_log = configure_logger("pm.cli", "cli.log")
+_log = configure_logger("pm.cli")
 from pm_core.backend import detect_backend, get_backend
-from pm_core.claude_launcher import find_claude, find_editor, launch_claude, launch_claude_print, clear_session
+from pm_core.claude_launcher import find_claude, find_editor, launch_claude, launch_claude_print, clear_session, build_claude_shell_cmd
 from pm_core import tmux as tmux_mod
 from pm_core import pane_layout
 from pm_core.plan_parser import parse_plan_prs
@@ -1394,16 +1394,20 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
         click.echo(f"PR {pr_id} is already merged.", err=True)
         raise SystemExit(1)
 
-    # Fast path: if window already exists, just switch to it
+    # Fast path: if window already exists, switch to it (or kill it if --new)
     if tmux_mod.has_tmux():
         pm_session = _get_session_name_for_cwd()
         if tmux_mod.session_exists(pm_session):
             window_name = _pr_display_id(pr_entry)
             existing = tmux_mod.find_window_by_name(pm_session, window_name)
             if existing:
-                tmux_mod.select_window(pm_session, existing["index"])
-                click.echo(f"Switched to existing window '{window_name}' (session: {pm_session})")
-                return
+                if fresh:
+                    tmux_mod.kill_window(pm_session, existing["index"])
+                    click.echo(f"Killed existing window '{window_name}'")
+                else:
+                    tmux_mod.select_window(pm_session, existing["index"])
+                    click.echo(f"Switched to existing window '{window_name}' (session: {pm_session})")
+                    return
 
     repo_url = data["project"]["repo"]
     base_branch = data["project"].get("base_branch", "main")
@@ -1507,8 +1511,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
         pm_session = _get_session_name_for_cwd()
         if tmux_mod.session_exists(pm_session):
             window_name = _pr_display_id(pr_entry)
-            escaped_prompt = prompt.replace("'", "'\\''")
-            cmd = f"claude '{escaped_prompt}'"
+            cmd = build_claude_shell_cmd(prompt=prompt)
             try:
                 tmux_mod.new_window(pm_session, window_name, cmd, str(work_path))
                 click.echo(f"Launched Claude in tmux window '{window_name}' (session: {pm_session})")
@@ -2632,7 +2635,7 @@ def _refresh_tui_if_running():
 
 
 def _run_guide(step, fresh=False):
-    from pm_core.claude_launcher import find_claude, _skip_permissions, load_session, save_session
+    from pm_core.claude_launcher import find_claude, load_session, save_session
 
     # Detect state
     try:
@@ -2715,29 +2718,22 @@ def _run_guide(step, fresh=False):
 
     if _in_pm_tmux_session():
         import uuid as uuid_mod
-        escaped = prompt.replace("'", "'\\''")
-        skip = " --dangerously-skip-permissions" if _skip_permissions() else ""
 
         # Get or create session ID
         session_id = None
-        session_flag = ""
+        is_resuming = False
         if root and not fresh:
             session_id = load_session(root, session_key)
             if session_id:
-                session_flag = f" --resume {session_id}"
+                is_resuming = True
 
         # If no existing session, generate new UUID and save it
         save_cmd = ""
         if not session_id and root:
             session_id = str(uuid_mod.uuid4())
-            session_flag = f" --session-id {session_id}"
             save_cmd = f"pm _save-session '{session_key}' '{session_id}' '{root}' ; "
 
-        # Don't pass prompt when resuming - Claude continues from previous conversation
-        if "--resume" in session_flag:
-            claude_cmd = f"claude{skip}{session_flag}"
-        else:
-            claude_cmd = f"claude{skip}{session_flag} '{escaped}'"
+        claude_cmd = build_claude_shell_cmd(prompt=prompt, session_id=session_id, resume=is_resuming)
 
         if post_hook:
             # Set deps reviewed BEFORE pm guide done, so detection shows progress
@@ -2750,12 +2746,6 @@ def _run_guide(step, fresh=False):
         clear_cmd = f"pm _clear-session '{session_key}' '{root}'" if root else "true"
         cmd = f"{save_cmd}{claude_cmd} ; claude_rc=$? ; if [ $claude_rc -ne 0 ]; then {clear_cmd}; else {post_cmd}; fi"
 
-        # Log the full command for debugging
-        import logging as _logging
-        _log = _logging.getLogger("pm.guide")
-        _log.info("guide chain: skip_permissions=%s env=%s", _skip_permissions(),
-                   os.environ.get("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS"))
-        _log.info("guide chain cmd: %s", cmd[:100] + "...")
         os.execvp("bash", ["bash", "-c", cmd])
     else:
         launch_claude(prompt, session_key=session_key, pm_root=root, resume=not fresh)
@@ -3502,17 +3492,14 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
         raise SystemExit(1)
 
     # Set active override so the wrapper uses this workdir's pm_core
-    from pm_core.paths import set_override_path, skip_permissions_enabled
+    from pm_core.paths import set_override_path
     set_override_path(session_tag, work_path)
     click.echo(f"Set session override: ~/.pm/sessions/{session_tag}/override")
 
     # Build command with cleanup on exit
-    escaped_prompt = prompt.replace("'", "'\\''")
-    # Check skip-permissions file (must contain 'true')
-    skip_flag = " --dangerously-skip-permissions" if skip_permissions_enabled(session_tag) else ""
-    # When Claude exits, clear the session config
+    claude_cmd = build_claude_shell_cmd(prompt=prompt, session_tag=session_tag)
     clear_cmd = f"rm -rf ~/.pm/sessions/{session_tag}"
-    cmd = f"claude{skip_flag} '{escaped_prompt}' ; {clear_cmd}"
+    cmd = f"{claude_cmd} ; {clear_cmd}"
 
     # Try to launch in tmux
     if tmux_mod.has_tmux():

@@ -10,29 +10,14 @@ import os
 import time
 from pathlib import Path
 
-_logger = logging.getLogger("pm.pane_layout")
-_log_configured = False
+from pm_core.paths import configure_logger
+
+_logger = configure_logger("pm.pane_layout")
 
 
 def _ensure_logging():
-    """Set up file logging on first call (only when PM_DEBUG=1)."""
-    global _log_configured
-    if _log_configured:
-        return
-    _log_configured = True
-
-    from pm_core.paths import debug_enabled
-    if debug_enabled():
-        log_path = registry_dir() / "layout.log"
-        handler = logging.FileHandler(log_path)
-        handler.setFormatter(logging.Formatter(
-            "%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S"
-        ))
-        _logger.addHandler(handler)
-        _logger.setLevel(logging.DEBUG)
-    else:
-        _logger.addHandler(logging.NullHandler())
-        _logger.setLevel(logging.WARNING)
+    """No-op for backward compatibility. Logging is now auto-configured."""
+    pass
 
 
 def registry_dir() -> Path:

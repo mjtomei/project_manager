@@ -73,6 +73,11 @@ def kill_session(name: str) -> None:
     subprocess.run(["tmux", "kill-session", "-t", name], check=False)
 
 
+def kill_window(session: str, window: str) -> None:
+    """Kill a tmux window by index or name."""
+    subprocess.run(["tmux", "kill-window", "-t", f"{session}:{window}"], check=False)
+
+
 def new_window(session: str, name: str, cmd: str, cwd: str) -> None:
     """Create a new tmux window with the given name, running cmd.
 

@@ -6,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from pm_core.paths import log_shell_command
+
 
 def is_git_repo(path: Path) -> bool:
     """Check if path is inside a git repository."""
@@ -19,14 +21,22 @@ def is_git_repo(path: Path) -> bool:
 
 
 def run_git(*args: str, cwd: Optional[str | Path] = None, check: bool = True) -> subprocess.CompletedProcess:
-    """Run a git command and return result."""
-    return subprocess.run(
-        ["git", *args],
+    """Run a git command and return result.
+
+    Logs to TUI log file if running under TUI.
+    """
+    cmd = ["git", *args]
+    log_shell_command(cmd, prefix="git")
+    result = subprocess.run(
+        cmd,
         cwd=cwd,
         capture_output=True,
         text=True,
         check=check,
     )
+    if result.returncode != 0:
+        log_shell_command(cmd, prefix="git", returncode=result.returncode)
+    return result
 
 
 def clone(repo_url: str, dest: Path, branch: Optional[str] = None) -> None:

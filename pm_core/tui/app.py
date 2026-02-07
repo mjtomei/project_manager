@@ -9,9 +9,9 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from pm_core.paths import configure_logger, pane_registry_dir
-_log = configure_logger("pm.tui", "tui.log")
-_log_dir = pane_registry_dir()
+from pm_core.paths import configure_logger, debug_dir, command_log_file
+_log = configure_logger("pm.tui")
+_log_dir = debug_dir()
 
 
 def _run_shell(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -54,7 +54,7 @@ from textual.widgets import Header, Footer, Static, Label
 from textual.screen import ModalScreen
 
 from pm_core import store, graph as graph_mod, git_ops, prompt_gen, notes, guide, pr_sync
-from pm_core.claude_launcher import find_claude, find_editor
+
 from pm_core import tmux as tmux_mod
 from pm_core import pane_layout
 from pm_core.tui.tech_tree import TechTree, PRSelected, PRActivated
@@ -270,7 +270,7 @@ class ProjectManagerApp(App):
         Binding("S", "start_pr_fresh", "Start Fresh", show=False),
         Binding("d", "done_pr", "Done PR", show=True),
         Binding("p", "copy_prompt", "Copy Prompt", show=True),
-        Binding("c", "launch_claude", "Claude", show=True),
+
         Binding("e", "edit_plan", "Edit PR", show=True),
         Binding("g", "toggle_guide", "Guide", show=True),
         Binding("n", "launch_notes", "Notes", show=True),
@@ -287,7 +287,7 @@ class ProjectManagerApp(App):
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """Disable single-key shortcuts when command bar is focused or in guide mode."""
         if action in ("start_pr", "start_pr_fresh", "done_pr", "copy_prompt",
-                       "launch_claude", "edit_plan", "toggle_guide", "launch_notes",
+                       "edit_plan", "toggle_guide", "launch_notes",
                        "launch_meta", "view_log", "refresh", "rebalance", "quit", "show_help"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus:
@@ -894,35 +894,6 @@ class ProjectManagerApp(App):
         except Exception as e:
             self.log_message(f"Clipboard error: {e}")
 
-    def action_launch_claude(self) -> None:
-        _log.info("action: launch_claude")
-        if not tmux_mod.in_tmux():
-            _log.warning("not in tmux")
-            self.log_message("Not in tmux. Use 'pm session' to start a tmux session.")
-            return
-        if not find_claude():
-            _log.warning("claude CLI not found")
-            self.log_message("Claude CLI not found.")
-            return
-        tree = self.query_one("#tech-tree", TechTree)
-        pr_id = tree.selected_pr_id
-        if pr_id:
-            try:
-                prompt = prompt_gen.generate_prompt(self._data, pr_id)
-                session_name = _run_shell(
-                    ["tmux", "display-message", "-p", "#{session_name}"],
-                    capture_output=True, text=True
-                ).stdout.strip()
-                escaped = prompt.replace("'", "'\\''")
-                claude_cmd = f"claude '{escaped}'"
-                _log.info("launching claude: %s", claude_cmd[:100] + "..." if len(claude_cmd) > 100 else claude_cmd)
-                tmux_mod.split_pane(session_name, "h", claude_cmd)
-                self.log_message(f"Launched Claude for {pr_id}")
-            except Exception as e:
-                self.log_message(f"Error: {e}")
-        else:
-            self.log_message("No PR selected")
-
     def _get_pane_split_direction(self) -> str:
         """Return 'v' if pane is taller than wide, else 'h'."""
         pane_id = os.environ.get("TMUX_PANE", "")
@@ -1040,9 +1011,9 @@ class ProjectManagerApp(App):
     def action_view_log(self) -> None:
         """View the TUI log file in a pane."""
         _log.info("action: view_log")
-        log_path = _log_dir / "tui.log"
+        log_path = command_log_file()
         if not log_path.exists():
-            self.log_message("No log file yet. Enable debug mode first.")
+            self.log_message("No log file yet.")
             return
         self._launch_pane(f"tail -f {log_path}", "log")
 
