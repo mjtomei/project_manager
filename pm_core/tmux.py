@@ -277,3 +277,36 @@ def select_window(session: str, window: str) -> bool:
         capture_output=True,
     )
     return result.returncode == 0
+
+
+def zoom_pane(pane_id: str) -> None:
+    """Zoom (maximize) a pane within its window."""
+    subprocess.run(["tmux", "resize-pane", "-t", pane_id, "-Z"], check=False)
+
+
+def is_zoomed(session: str, window: str = "0") -> bool:
+    """Check if the active pane in a window is currently zoomed."""
+    result = subprocess.run(
+        ["tmux", "display", "-t", f"{session}:{window}", "-p",
+         "#{window_zoomed_flag}"],
+        capture_output=True, text=True,
+    )
+    return result.stdout.strip() == "1"
+
+
+def unzoom_pane(session: str, window: str = "0") -> None:
+    """Unzoom the window if it's currently zoomed."""
+    if is_zoomed(session, window):
+        # Toggle zoom off by zooming the active pane again
+        subprocess.run(
+            ["tmux", "resize-pane", "-t", f"{session}:{window}", "-Z"],
+            check=False,
+        )
+
+
+def select_pane_smart(pane_id: str, session: str, window: str) -> None:
+    """Focus a pane, auto-zooming it in mobile mode."""
+    from pm_core import pane_layout
+    select_pane(pane_id)
+    if pane_layout.is_mobile(session, window):
+        zoom_pane(pane_id)

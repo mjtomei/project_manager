@@ -1041,7 +1041,7 @@ class ProjectManagerApp(App):
         _log.info("_launch_pane: find_live_pane_by_role returned %s", existing_pane)
         if existing_pane:
             _log.info("pane with role=%s already exists: %s, focusing", role, existing_pane)
-            tmux_mod.select_pane(existing_pane)
+            tmux_mod.select_pane_smart(existing_pane, session, window)
             self.log_message(f"Focused existing {role} pane")
             return
 
@@ -1053,7 +1053,7 @@ class ProjectManagerApp(App):
             pane_id = tmux_mod.split_pane(session, "h", wrap)
             pane_layout.register_pane(session, window, pane_id, role, cmd)
             pane_layout.rebalance(session, window)
-            tmux_mod.select_pane(pane_id)
+            tmux_mod.select_pane_smart(pane_id, session, window)
             self.log_message(f"Launched {role} pane")
             _log.info("launched pane: role=%s id=%s", role, pane_id)
         except Exception as e:

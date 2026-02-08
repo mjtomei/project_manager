@@ -7,12 +7,15 @@ recursive binary split algorithm. Newer panes get priority for larger areas.
 import json
 import logging
 import os
+import subprocess
 import time
 from pathlib import Path
 
 from pm_core.paths import configure_logger
 
 _logger = configure_logger("pm.pane_layout")
+
+MOBILE_WIDTH_THRESHOLD = 120
 
 
 def _ensure_logging():
@@ -29,6 +32,32 @@ def registry_dir() -> Path:
 def registry_path(session: str) -> Path:
     """Return the registry file path for a session."""
     return registry_dir() / f"{session}.json"
+
+
+def mobile_flag_path(session: str) -> Path:
+    """Return the path to the force-mobile flag file for a session."""
+    return registry_dir() / f"{session}.mobile"
+
+
+def set_force_mobile(session: str, enabled: bool) -> None:
+    """Set or clear the force-mobile flag for a session."""
+    path = mobile_flag_path(session)
+    if enabled:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+        _logger.info("set_force_mobile: enabled for %s", session)
+    else:
+        path.unlink(missing_ok=True)
+        _logger.info("set_force_mobile: disabled for %s", session)
+
+
+def is_mobile(session: str, window: str = "0") -> bool:
+    """Check if mobile mode is active (force flag or narrow terminal)."""
+    if mobile_flag_path(session).exists():
+        return True
+    from pm_core import tmux as tmux_mod
+    width, _ = tmux_mod.get_window_size(session, window)
+    return 0 < width < MOBILE_WIDTH_THRESHOLD
 
 
 def load_registry(session: str) -> dict:
@@ -305,7 +334,20 @@ def rebalance(session: str, window: str) -> bool:
     ok = tmux_mod.apply_layout(session, window, layout_str)
     if not ok:
         _logger.warning("rebalance: apply_layout failed")
-    return ok
+        return False
+
+    # In mobile mode, zoom the active pane after layout
+    if is_mobile(session, window):
+        result = subprocess.run(
+            ["tmux", "display", "-t", f"{session}:{window}", "-p", "#{pane_id}"],
+            capture_output=True, text=True,
+        )
+        active_pane = result.stdout.strip()
+        if active_pane:
+            _logger.info("rebalance: mobile mode, zooming active pane %s", active_pane)
+            tmux_mod.zoom_pane(active_pane)
+
+    return True
 
 
 def check_user_modified(session: str, window: str) -> bool:

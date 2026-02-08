@@ -2201,10 +2201,28 @@ def _session_start():
     pane_layout.rebalance(session_name, window_id)
     _log.info("rebalanced layout, attaching to session")
 
+    # If mobile mode, start zoomed into TUI
+    if pane_layout.is_mobile(session_name, window_id):
+        _log.info("mobile mode detected, zooming TUI pane")
+        tmux_mod.zoom_pane(tui_pane)
+
     # Bind prefix-R to rebalance in this session
     import subprocess as _sp
     _sp.run(["tmux", "bind-key", "-T", "prefix", "R",
              "run-shell 'pm rebalance'"], check=False)
+
+    # Bind pane-switch keys for mobile-aware navigation
+    switch_keys = {
+        "o": "next",
+        "Up": "-U",
+        "Down": "-D",
+        "Left": "-L",
+        "Right": "-R",
+    }
+    for key, direction in switch_keys.items():
+        _sp.run(["tmux", "bind-key", "-T", "prefix", key,
+                 "run-shell", f"pm _pane-switch {session_name} {direction}"],
+                check=False)
 
     # Global hook for kill-pane detection. The after-kill-pane hook
     # doesn't know which pane was killed, so _pane-closed reconciles
@@ -2229,7 +2247,46 @@ def session_kill():
         raise SystemExit(1)
 
     tmux_mod.kill_session(session_name)
+    pane_layout.set_force_mobile(session_name, False)
     click.echo(f"Killed session '{session_name}'.")
+
+
+@session.command("mobile")
+@click.option("--force/--no-force", default=None, help="Force mobile mode on/off")
+def session_mobile(force: bool | None):
+    """Show or toggle mobile mode for the current session.
+
+    Mobile mode auto-zooms the active pane on every pane switch,
+    making the tool usable on narrow terminals (< 120 cols).
+    """
+    session_name = _get_session_name_for_cwd()
+
+    if force is not None:
+        pane_layout.set_force_mobile(session_name, force)
+        state = "enabled" if force else "disabled"
+        click.echo(f"Mobile mode force-{state} for '{session_name}'.")
+        # Trigger rebalance if in tmux
+        if tmux_mod.in_tmux():
+            window = tmux_mod.get_window_id(session_name)
+            data = pane_layout.load_registry(session_name)
+            data["user_modified"] = False
+            pane_layout.save_registry(session_name, data)
+            pane_layout.rebalance(session_name, window)
+    else:
+        # Show status
+        force_flag = pane_layout.mobile_flag_path(session_name).exists()
+        if tmux_mod.session_exists(session_name):
+            window = tmux_mod.get_window_id(session_name)
+            width, _ = tmux_mod.get_window_size(session_name, window)
+            mobile = pane_layout.is_mobile(session_name, window)
+            click.echo(f"Session: {session_name}")
+            click.echo(f"Mobile active: {mobile}")
+            click.echo(f"Force flag: {force_flag}")
+            click.echo(f"Window width: {width} (threshold: {pane_layout.MOBILE_WIDTH_THRESHOLD})")
+        else:
+            click.echo(f"Session: {session_name} (not running)")
+            click.echo(f"Force flag: {force_flag}")
+            click.echo(f"Threshold: {pane_layout.MOBILE_WIDTH_THRESHOLD}")
 
 
 @cli.command("prompt")
@@ -3022,6 +3079,41 @@ def pane_closed_cmd():
 def pane_opened_cmd(session: str, window: str, pane_id: str):
     """Internal: handle tmux after-split-window hook."""
     pane_layout.handle_pane_opened(session, window, pane_id)
+
+
+@cli.command("_pane-switch", hidden=True)
+@click.argument("session")
+@click.argument("direction")
+def pane_switch_cmd(session: str, direction: str):
+    """Internal: switch pane with mobile-aware zoom.
+
+    direction is 'next' or a tmux flag like '-U', '-D', '-L', '-R'.
+    """
+    window = tmux_mod.get_window_id(session)
+
+    # Unzoom first so select-pane can reach other panes
+    tmux_mod.unzoom_pane(session, window)
+
+    if direction == "next":
+        subprocess.run(
+            ["tmux", "select-pane", "-t", f"{session}:{window}", "-t", ":.+"],
+            check=False,
+        )
+    else:
+        subprocess.run(
+            ["tmux", "select-pane", "-t", f"{session}:{window}", direction],
+            check=False,
+        )
+
+    # If mobile, zoom the newly focused pane
+    if pane_layout.is_mobile(session, window):
+        result = subprocess.run(
+            ["tmux", "display", "-t", f"{session}:{window}", "-p", "#{pane_id}"],
+            capture_output=True, text=True,
+        )
+        active = result.stdout.strip()
+        if active:
+            tmux_mod.zoom_pane(active)
 
 
 @cli.command("rebalance")

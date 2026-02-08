@@ -6,7 +6,7 @@ project:
   active_pr: pr-010
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
-  last_pr_sync: '2026-02-08T19:02:00.359210+00:00'
+  last_pr_sync: '2026-02-08T19:38:52.953044+00:00'
 plans:
 - id: plan-001
   name: Import from existing repo
