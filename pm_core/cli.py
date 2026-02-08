@@ -27,6 +27,38 @@ from pm_core import guide as guide_mod
 
 _project_override: Path | None = None
 
+# Shared Click settings: make -h and --help both work everywhere
+CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"])
+
+
+class HelpGroup(click.Group):
+    """Click Group that treats 'help' as an alias for --help everywhere.
+
+    Applied to the top-level group and auto-inherited by all child groups
+    via ``group_class = type`` (Click uses ``type(self)`` as default cls).
+
+    Handles two cases:
+    - ``pm pr help`` — 'help' as the command name on a group
+    - ``pm tui test help`` — 'help' as an arg to a leaf command
+    """
+
+    group_class = type  # auto-propagate HelpGroup to child groups
+
+    def resolve_command(self, ctx, args):
+        if args and args[0] == "help":
+            # If there's a real 'help' command registered, let it run
+            if super().get_command(ctx, "help") is not None:
+                return super().resolve_command(ctx, args)
+            # Otherwise replace 'help' with '--help'
+            args = ["--help"] + args[1:]
+        cmd_name, cmd, remaining = super().resolve_command(ctx, args)
+        # Also handle 'help' as first arg to a leaf command:
+        # e.g. 'pm tui test help' → 'pm tui test --help'
+        if (remaining and remaining[0] == "help"
+                and cmd is not None and not isinstance(cmd, click.MultiCommand)):
+            remaining = ["--help"] + remaining[1:]
+        return cmd_name, cmd, remaining
+
 
 def _normalize_repo_url(url: str) -> str:
     """Normalize git remote URL for comparison.
@@ -190,7 +222,7 @@ def _infer_pr_id(data: dict, status_filter: tuple[str, ...] | None = None) -> st
     return None
 
 
-@click.group(invoke_without_command=True)
+@click.group(invoke_without_command=True, cls=HelpGroup, context_settings=CONTEXT_SETTINGS)
 @click.option("-C", "project_dir", default=None, envvar="PM_PROJECT",
               help="Path to PM repo (or set PM_PROJECT env var)")
 @click.pass_context
