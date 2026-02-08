@@ -105,7 +105,7 @@ a natural escalation ladder. Test pass rate is the objective signal for routing:
 ## PRs
 
 ### PR: Local model runner with Ollama integration
-- **description**: Create a module that manages local LLM inference via Ollama's API. Support sending prompts to a configurable model, collecting responses, and running multiple generations with different temperatures in parallel. Include a simple CLI command (`pm bench models`) that lists available Ollama models and validates connectivity.
+- **description**: Create a module that manages local LLM inference via Ollama's API (see `pm/plans/plan-002.md` for the broader multi-candidate generation strategy). Support sending prompts to a configurable model, collecting responses, and running multiple generations with different temperatures in parallel. Track token counts and wall-clock time per request for downstream cost analysis. Include a simple CLI command (`pm bench models`) that lists available Ollama models and validates connectivity.
 - **tests**: Unit tests for API interaction (mock Ollama responses), integration test that checks Ollama connectivity and lists models
 - **files**: pm_core/bench/runner.py, pm_core/cli.py
 - **depends_on**:
@@ -113,7 +113,7 @@ a natural escalation ladder. Test pass rate is the objective signal for routing:
 ---
 
 ### PR: Aider polyglot exercise loader
-- **description**: Load the Exercism exercises used by aider's polyglot benchmark. Each exercise has a problem description, starter code, and a reference test suite. Parse exercises into a structured format: {language, slug, description, starter_code, reference_tests}. Support filtering by language and exercise name. Download or reference the exercise set from aider's benchmark repo.
+- **description**: Load the Exercism exercises used by aider's polyglot benchmark (https://github.com/Aider-AI/aider — see `benchmark/` directory for exercise structure). Each exercise has a problem description, starter code, and a reference test suite. Parse exercises into a structured format: {language, slug, description, starter_code, reference_tests}. Support filtering by language and exercise name. Clone or download the exercise set from aider's benchmark repo and cache it locally. See `pm/plans/plan-002.md` for how these exercises are used in the multi-candidate benchmark pipeline.
 - **tests**: Test that exercises load correctly, test filtering by language, test that at least 200 exercises are available across the 6 languages (C++, Go, Java, JavaScript, Python, Rust)
 - **files**: pm_core/bench/exercises.py, pm_core/cli.py
 - **depends_on**:
@@ -121,7 +121,7 @@ a natural escalation ladder. Test pass rate is the objective signal for routing:
 ---
 
 ### PR: Test generation from problem descriptions
-- **description**: Given an exercise's problem description and starter code (but NOT the reference tests), generate test cases using a local model. Use the problem description and function signatures to produce tests that verify correctness. Generate tests at multiple temperatures and with prompt variations to increase diversity. Deduplicate and validate generated tests (must parse, must be syntactically valid, must reference the correct function names). Return a merged test suite.
+- **description**: Given an exercise's problem description and starter code (but NOT the reference tests), generate test cases using a local model. The core insight from the plan (`pm/plans/plan-002.md`): verification is easier than generation — a model that scores poorly on single-pass coding can generate useful tests that filter better solutions from multiple candidates. Use the problem description and function signatures to produce tests that verify correctness. Generate tests at multiple temperatures and with prompt variations to increase diversity. Deduplicate and validate generated tests (must parse, must be syntactically valid, must reference the correct function names). Return a merged test suite.
 - **tests**: Test that generated tests are syntactically valid for each supported language, test deduplication logic, test that generated tests cover basic cases from the problem description
 - **files**: pm_core/bench/test_gen.py
 - **depends_on**: Local model runner with Ollama integration, Aider polyglot exercise loader
@@ -129,7 +129,7 @@ a natural escalation ladder. Test pass rate is the objective signal for routing:
 ---
 
 ### PR: Multi-candidate solution generation
-- **description**: Given an exercise's starter code, problem description, and a test suite (either generated or reference), produce N candidate solutions using a local model. Vary temperature (0.0 to 1.0), prompt format (direct, chain-of-thought, example-driven), and optionally model (if multiple Ollama models are available). Each candidate is a complete file that should compile and pass the tests. Return candidates as a list of {code, temperature, prompt_variant, model}.
+- **description**: Given an exercise's starter code, problem description, and a test suite (either generated or reference), produce N candidate solutions using a local model. Vary temperature (0.0 to 1.0) and prompt format (direct, chain-of-thought, example-driven). Multi-model support (querying different Ollama models for the same problem) is a stretch goal — the initial implementation should work well with a single model and temperature/prompt diversity. Each candidate is a complete file that should compile and pass the tests. Return candidates as a list of {code, temperature, prompt_variant, model}. See `pm/plans/plan-002.md` for how candidate diversity feeds into tournament selection.
 - **tests**: Test that N candidates are generated with requested diversity, test that candidates contain syntactically valid code, test deduplication of identical solutions
 - **files**: pm_core/bench/solve.py
 - **depends_on**: Local model runner with Ollama integration, Aider polyglot exercise loader
@@ -137,7 +137,7 @@ a natural escalation ladder. Test pass rate is the objective signal for routing:
 ---
 
 ### PR: Test execution and candidate scoring
-- **description**: Run a test suite against a candidate solution in a sandboxed environment. Support the 6 polyglot languages (C++, Go, Java, JavaScript, Python, Rust) with appropriate build/test commands for each. Return per-test pass/fail results and an overall score. Score candidates as (passing_tests / total_tests). Handle compilation failures, timeouts, and runtime errors gracefully. Use subprocess with timeout to prevent hangs.
+- **description**: Run a test suite against a candidate solution in an isolated environment. Use temporary directories with copies of the exercise scaffold — each candidate gets its own temp directory, solution file is written in, and the language-appropriate test runner is invoked via subprocess with a timeout. Support the 6 polyglot languages (C++, Go, Java, JavaScript, Python, Rust) with appropriate build/test commands for each (e.g., `pytest` for Python, `go test` for Go, `cargo test` for Rust). Return per-test pass/fail results and an overall score. Score candidates as (passing_tests / total_tests). Handle compilation failures, timeouts, and runtime errors gracefully. See `pm/plans/plan-002.md` for how scores drive candidate selection.
 - **tests**: Test scoring logic with mock test results, test timeout handling, test that each language's build/test command is correct, integration test running a simple Python exercise end-to-end
 - **files**: pm_core/bench/executor.py
 - **depends_on**: Aider polyglot exercise loader
@@ -145,7 +145,7 @@ a natural escalation ladder. Test pass rate is the objective signal for routing:
 ---
 
 ### PR: Benchmark orchestrator with tournament selection
-- **description**: Wire together the full pipeline: for each exercise, (1) generate tests from the description, (2) generate N candidate solutions, (3) score each candidate against the generated tests, (4) pick the best candidate, (5) score the best candidate against the reference tests to get the final result. Compare the tournament score against a single-pass baseline (N=1, reference tests only). Report results as a table showing per-exercise and aggregate scores. Add CLI command `pm bench run` with options for model, N candidates, languages, and exercise filter.
+- **description**: Wire together the full pipeline from `pm/plans/plan-002.md`: for each exercise, (1) generate tests from the description, (2) generate N candidate solutions, (3) score each candidate against the generated tests, (4) pick the best candidate, (5) score the best candidate against the reference tests to get the final result. The pipeline embodies the plan's core insight — separating verification (test generation) from generation (solution candidates) lets weaker models punch above their weight through selection pressure. Compare the tournament score against a single-pass baseline (N=1, reference tests only). Collect cost metrics from the runner (total tokens, wall-clock time, tokens per exercise) alongside scores. Report results as a table showing per-exercise and aggregate scores. Add CLI command `pm bench run` with options for model, N candidates, languages, and exercise filter.
 - **tests**: End-to-end test with a small subset of exercises (2-3 per language), test that tournament selection picks the highest-scoring candidate, test that results are reported correctly
 - **files**: pm_core/bench/orchestrator.py, pm_core/cli.py
 - **depends_on**: Test generation from problem descriptions, Multi-candidate solution generation, Test execution and candidate scoring
@@ -153,15 +153,15 @@ a natural escalation ladder. Test pass rate is the objective signal for routing:
 ---
 
 ### PR: Baseline measurement and analysis
-- **description**: Run the benchmark in single-pass mode (N=1, no test generation) to establish the baseline score for each local model. Then run with test generation + tournament (N=8, N=16) and compare. Produce a report showing: baseline vs tournament scores per language, per exercise difficulty tier, and aggregate. Identify which exercises benefit most from multi-candidate generation (large delta) vs which are insensitive (model either always gets it or never does). Save results to a JSON file for tracking over time.
-- **tests**: Test report generation with mock benchmark results, test JSON output format
+- **description**: Run the benchmark in single-pass mode (N=1, no test generation) to establish the baseline score for each local model. Then run with test generation + tournament (N=8, N=16) and compare. Produce a report showing: baseline vs tournament scores per language, per exercise difficulty tier, and aggregate. Include cost analysis — total tokens generated, wall-clock time, and tokens-per-correct-exercise for each configuration, so the accuracy improvement can be weighed against the compute cost (e.g., "N=16 tournament scores 58% vs 40% baseline but costs 20x the tokens"). Identify which exercises benefit most from multi-candidate generation (large delta) vs which are insensitive (model either always gets it or never does). Save results to a JSON file for tracking over time. See `pm/plans/plan-002.md` for how these results inform the heterogeneous compute and escalation strategy.
+- **tests**: Test report generation with mock benchmark results, test JSON output format, test cost metric aggregation
 - **files**: pm_core/bench/analysis.py, pm_core/cli.py
 - **depends_on**: Benchmark orchestrator with tournament selection
 
 ---
 
 ### PR: Generated test quality analysis
-- **description**: Compare generated tests against reference tests to understand test generation quality. Measure: (1) coverage overlap — what fraction of reference test cases are covered by generated tests, (2) false positives — generated tests that pass on wrong solutions, (3) diversity — how many distinct behaviors are tested. This analysis reveals whether test generation is the bottleneck (if generated tests are poor, even good solutions won't be selected correctly) and guides improvements to test generation prompts.
+- **description**: Compare generated tests against reference tests to understand test generation quality. This is critical for validating the plan's core assumption (`pm/plans/plan-002.md`) that verification is easier than generation — if generated tests are poor, tournament selection breaks down regardless of candidate quality. Measure: (1) coverage overlap — what fraction of reference test cases are covered by generated tests, (2) false positives — generated tests that pass on wrong solutions, (3) diversity — how many distinct behaviors are tested. Cross-reference with benchmark results: do exercises where generated tests diverge most from reference tests also show the largest gap between tournament-selected and oracle-selected (best candidate scored against reference tests) scores?
 - **tests**: Test analysis metrics with synthetic test suites, test that false positive detection works
 - **files**: pm_core/bench/test_analysis.py
 - **depends_on**: Benchmark orchestrator with tournament selection

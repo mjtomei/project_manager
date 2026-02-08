@@ -460,7 +460,7 @@ Ask me what this plan should accomplish. I'll describe it at a high level and
 we'll iterate until the plan is clear and complete. Then write the final plan
 to the file above as structured markdown.
 
-The plan needs to be detailed enough that the next step (`pm plan review`) can
+The plan needs to be detailed enough that the next step (`pm plan breakdown`) can
 break it into individual PRs. Include scope, goals, key design decisions, and
 any constraints.
 {notes_block}"""
@@ -496,11 +496,11 @@ def plan_list():
         click.echo(f"  {p['id']}: {p['name']} [{p.get('status', 'draft')}]")
 
 
-@plan.command("review")
+@plan.command("breakdown")
 @click.argument("plan_id", default=None, required=False)
 @click.option("--prs", "initial_prs", default=None, help="Seed the conversation with an initial PR list")
 @click.option("--new", "fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
-def plan_review(plan_id: str | None, initial_prs: str | None, fresh: bool):
+def plan_breakdown(plan_id: str | None, initial_prs: str | None, fresh: bool):
     """Launch Claude to break a plan into PRs (written to plan file).
 
     If PLAN_ID is omitted, auto-selects when there's exactly one plan.
@@ -584,6 +584,129 @@ After writing, the user can run `pm plan load` to create all PRs at once.
 
     claude = find_claude()
     if claude:
+        session_key = f"plan:breakdown:{plan_id}"
+        if fresh:
+            clear_session(root, session_key)
+        click.echo(f"Launching Claude to break down plan {plan_id}...")
+        launch_claude(prompt, session_key=session_key, pm_root=root, resume=not fresh)
+        # Background review
+        check_prompt = review_mod.REVIEW_PROMPTS["plan-breakdown"].format(path=plan_path)
+        click.echo("Reviewing results... (background)")
+        review_mod.review_step("plan breakdown", f"Break plan {plan_id} into PRs", check_prompt, root)
+    else:
+        click.echo()
+        click.echo("Claude CLI not found. Copy-paste this prompt into Claude Code:")
+        click.echo()
+        click.echo(f"---\n{prompt}\n---")
+
+
+@plan.command("review")
+@click.argument("plan_id", default=None, required=False)
+@click.option("--new", "fresh", is_flag=True, default=False, help="Start a fresh session")
+def plan_review(plan_id: str | None, fresh: bool):
+    """Launch Claude to review plan-PR consistency."""
+    root = state_root()
+    data = store.load(root)
+
+    if plan_id is None:
+        plans = data.get("plans") or []
+        if len(plans) == 1:
+            plan_id = plans[0]["id"]
+        elif len(plans) == 0:
+            click.echo("No plans. Create one with: pm plan add <name>", err=True)
+            raise SystemExit(1)
+        else:
+            click.echo("Multiple plans. Specify one:", err=True)
+            for p in plans:
+                click.echo(f"  {p['id']}: {p['name']}", err=True)
+            raise SystemExit(1)
+
+    plan_entry = store.get_plan(data, plan_id)
+    if not plan_entry:
+        plans = data.get("plans") or []
+        click.echo(f"Plan {plan_id} not found.", err=True)
+        if plans:
+            click.echo(f"Available plans: {', '.join(p['id'] for p in plans)}", err=True)
+        raise SystemExit(1)
+
+    plan_path = root / plan_entry["file"]
+    if not plan_path.exists():
+        click.echo(f"Plan file {plan_path} not found.", err=True)
+        raise SystemExit(1)
+
+    # Build PR list for this plan
+    all_prs = data.get("prs") or []
+    plan_prs = [pr for pr in all_prs if pr.get("plan") == plan_id]
+    other_prs = [pr for pr in all_prs if pr.get("plan") != plan_id]
+
+    def _format_pr(pr):
+        deps = pr.get("depends_on") or []
+        dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
+        desc = pr.get("description", "")
+        desc_str = f"\n    description: {desc}" if desc else ""
+        tests = pr.get("tests", "")
+        tests_str = f"\n    tests: {tests}" if tests else ""
+        files = pr.get("files", "")
+        files_str = f"\n    files: {files}" if files else ""
+        status = pr.get("status", "pending")
+        return f"  {pr['id']}: {pr.get('title', '???')} [{status}]{dep_str}{desc_str}{tests_str}{files_str}"
+
+    pr_list = "\n".join(_format_pr(pr) for pr in plan_prs) if plan_prs else "(no PRs linked to this plan)"
+
+    other_prs_context = ""
+    if other_prs:
+        other_prs_context = "\nPRs from other plans (for cross-plan reference):\n" + "\n".join(
+            f"  {pr['id']}: {pr.get('title', '???')} [{pr.get('status', '?')}] (plan: {pr.get('plan', '?')})"
+            for pr in other_prs
+        ) + "\n"
+
+    notes_block = notes.notes_section(root)
+
+    prompt = f"""\
+Your goal: Review the plan and its PRs for consistency, coverage, and
+self-containment. Identify gaps and fix them.
+
+This session is managed by `pm` (project manager for Claude Code). You have
+access to the `pm` CLI tool — run `pm help` to see available commands.
+
+Read the plan file at: {plan_path}
+
+PRs belonging to this plan:
+{pr_list}
+
+{other_prs_context}\
+Check the following:
+
+1. COVERAGE — Does every feature, behavior, or capability described in the
+   plan have at least one PR responsible for it? List any gaps.
+
+2. SELF-CONTAINMENT — Can an agent pick up any single PR and understand what
+   to build without reading the entire plan? Each PR description should include:
+   - What the PR does and why (not just "implement X")
+   - Which files to modify or create
+   - What tests to write
+   - How it relates to its dependencies (what it receives from them)
+   - Reference to the plan file for broader context
+
+3. CONSISTENCY — Do PR descriptions match the plan? Are depends_on
+   references correct? Are file paths plausible? For each file path
+   mentioned in a PR's **files** field, check whether it already exists
+   in the repo (ls or find the file). If it exists, the PR should modify
+   it; if it doesn't, the PR should create it. Flag paths that look wrong
+   (typos, wrong directory, missing extension).
+
+For each issue found, propose a fix. When the user agrees, apply fixes:
+- For PR description/title/deps changes: use `pm pr edit <id> --description "..." --title "..."`
+- For plan content gaps: edit the plan file directly at {plan_path}
+
+After fixing, summarize what was changed.
+
+The following are notes the user has written for context shared across all
+pm sessions:
+{notes_block}"""
+
+    claude = find_claude()
+    if claude:
         session_key = f"plan:review:{plan_id}"
         if fresh:
             clear_session(root, session_key)
@@ -592,7 +715,7 @@ After writing, the user can run `pm plan load` to create all PRs at once.
         # Background review
         check_prompt = review_mod.REVIEW_PROMPTS["plan-review"].format(path=plan_path)
         click.echo("Reviewing results... (background)")
-        review_mod.review_step("plan review", f"Break plan {plan_id} into PRs", check_prompt, root)
+        review_mod.review_step("plan review", f"Review plan {plan_id} consistency", check_prompt, root)
     else:
         click.echo()
         click.echo("Claude CLI not found. Copy-paste this prompt into Claude Code:")
@@ -716,7 +839,7 @@ def plan_load(plan_id: str | None):
     prs = parse_plan_prs(plan_content)
 
     if not prs:
-        click.echo("No PRs found in plan file. Run 'pm plan review' first to add a ## PRs section.", err=True)
+        click.echo("No PRs found in plan file. Run 'pm plan breakdown' first to add a ## PRs section.", err=True)
         raise SystemExit(1)
 
     click.echo(f"Found {len(prs)} PRs in plan file:")
@@ -846,11 +969,11 @@ def plan_add_fix(review_path: str):
     _run_fix_command("plan add", review_path)
 
 
-@plan.command("review-fix")
+@plan.command("breakdown-fix")
 @click.option("--review", "review_path", required=True, help="Path to review file")
-def plan_review_fix(review_path: str):
-    """Fix issues found by plan review review."""
-    _run_fix_command("plan review", review_path)
+def plan_breakdown_fix(review_path: str):
+    """Fix issues found by plan breakdown review."""
+    _run_fix_command("plan breakdown", review_path)
 
 
 @plan.command("deps-fix")
@@ -2235,7 +2358,7 @@ def _getting_started_text() -> str:
   Or start from scratch instead:
      pm init --no-import
      pm plan add "Add authentication"
-     pm plan review
+     pm plan breakdown
 
   5. Review and finalize dependencies:
        pm plan deps
@@ -2280,13 +2403,14 @@ COMMANDS
   pm session                    Start tmux session with TUI + notes editor
   pm plan add <name>            Add a plan and launch Claude to develop it
   pm plan list                  List plans
-  pm plan review [plan-id]      Launch Claude to break plan into PRs
+  pm plan breakdown [plan-id]   Launch Claude to break plan into PRs
+  pm plan review [plan-id]      Launch Claude to review plan-PR consistency
   pm plan deps                  Launch Claude to review/fix PR dependencies
   pm plan load [plan-id]        Create PRs from plan file (non-interactive)
   pm plan import [--name NAME]  Bootstrap PR graph from existing repo (interactive)
   pm plan fixes                 List pending review files with fix commands
   pm plan add-fix --review <f>  Fix issues from plan add review
-  pm plan review-fix --review   Fix issues from plan review review
+  pm plan breakdown-fix --review Fix issues from plan breakdown review
   pm plan deps-fix --review     Fix issues from plan deps review
   pm plan load-fix --review     Fix issues from plan load review
   pm plan import-fix --review   Fix issues from plan import review

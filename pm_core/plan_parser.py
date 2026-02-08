@@ -3,6 +3,24 @@
 import re
 
 
+def extract_plan_intro(text: str) -> str:
+    """Return everything before the first ## heading.
+
+    Skips the first line if it starts with ``# `` (the plan title).
+    """
+    lines = text.split('\n')
+    result = []
+    skipped_title = False
+    for line in lines:
+        if not skipped_title and line.startswith('# '):
+            skipped_title = True
+            continue
+        if line.startswith('## '):
+            break
+        result.append(line)
+    return '\n'.join(result).strip()
+
+
 def parse_plan_prs(text: str) -> list[dict]:
     """Parse structured PR entries from a plan file's ## PRs section.
 

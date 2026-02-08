@@ -61,6 +61,8 @@ from pm_core.tui.tech_tree import TechTree, PRSelected, PRActivated
 from pm_core.tui.detail_panel import DetailPanel
 from pm_core.tui.command_bar import CommandBar, CommandSubmitted
 from pm_core.tui.guide_progress import GuideProgress
+from pm_core.tui.plans_pane import PlansPane, PlanSelected, PlanActivated, PlanAction
+from pm_core.plan_parser import extract_plan_intro
 
 # Guide steps that indicate setup is still in progress
 GUIDE_SETUP_STEPS = {"no_project", "initialized", "has_plan_draft", "has_plan_prs", "needs_deps_review"}
@@ -173,26 +175,44 @@ class HelpScreen(ModalScreen):
     }
     """
 
+    def __init__(self, in_plans: bool = False):
+        super().__init__()
+        self._in_plans = in_plans
+
     def compose(self) -> ComposeResult:
         with Vertical(id="help-container"):
             yield Label("Keyboard Shortcuts", id="help-title")
-            yield Label("Tree Navigation", classes="help-section")
-            yield Label("  [bold]↑↓←→[/] or [bold]hjkl[/]  Move selection", classes="help-row")
-            yield Label("  [bold]Enter[/]  Show PR details", classes="help-row")
-            yield Label("PR Actions", classes="help-section")
-            yield Label("  [bold]s[/]  Start selected PR", classes="help-row")
-            yield Label("  [bold]S[/]  Start fresh (no resume)", classes="help-row")
-            yield Label("  [bold]d[/]  Mark PR as done", classes="help-row")
-            yield Label("  [bold]c[/]  Launch Claude for PR", classes="help-row")
-            yield Label("  [bold]p[/]  Copy prompt to clipboard", classes="help-row")
-            yield Label("  [bold]e[/]  Edit selected PR", classes="help-row")
-            yield Label("  [bold]v[/]  View plan file", classes="help-row")
+            if self._in_plans:
+                yield Label("Plan Navigation", classes="help-section")
+                yield Label("  [bold]↑↓[/] or [bold]jk[/]  Move selection", classes="help-row")
+                yield Label("  [bold]Enter/v[/]  View plan file", classes="help-row")
+                yield Label("Plan Actions", classes="help-section")
+                yield Label("  [bold]a[/]  Add a new plan", classes="help-row")
+                yield Label("  [bold]e[/]  Edit plan file", classes="help-row")
+                yield Label("  [bold]w[/]  Break plan into PRs", classes="help-row")
+                yield Label("  [bold]c[/]  Review plan-PR consistency", classes="help-row")
+                yield Label("  [bold]D[/]  Review PR dependencies", classes="help-row")
+                yield Label("  [bold]l[/]  Load PRs from plan", classes="help-row")
+                yield Label("  [bold]P[/]  Back to tree view", classes="help-row")
+            else:
+                yield Label("Tree Navigation", classes="help-section")
+                yield Label("  [bold]↑↓←→[/] or [bold]hjkl[/]  Move selection", classes="help-row")
+                yield Label("  [bold]Enter[/]  Show PR details", classes="help-row")
+                yield Label("PR Actions", classes="help-section")
+                yield Label("  [bold]s[/]  Start selected PR", classes="help-row")
+                yield Label("  [bold]S[/]  Start fresh (no resume)", classes="help-row")
+                yield Label("  [bold]d[/]  Mark PR as done", classes="help-row")
+                yield Label("  [bold]c[/]  Launch Claude for PR", classes="help-row")
+                yield Label("  [bold]p[/]  Copy prompt to clipboard", classes="help-row")
+                yield Label("  [bold]e[/]  Edit selected PR", classes="help-row")
+                yield Label("  [bold]v[/]  View plan file", classes="help-row")
             yield Label("Panes & Views", classes="help-section")
             yield Label("  [bold]/[/]  Open command bar", classes="help-row")
             yield Label("  [bold]g[/]  Toggle guide view", classes="help-row")
             yield Label("  [bold]n[/]  Open notes", classes="help-row")
             yield Label("  [bold]m[/]  Meta: work on pm itself", classes="help-row")
             yield Label("  [bold]L[/]  View TUI log", classes="help-row")
+            yield Label("  [bold]P[/]  Toggle plans view", classes="help-row")
             yield Label("  [bold]b[/]  Rebalance panes", classes="help-row")
             yield Label("Other", classes="help-section")
             yield Label("  [bold]r[/]  Refresh / sync with GitHub", classes="help-row")
@@ -263,6 +283,17 @@ class ProjectManagerApp(App):
         height: 100%;
         display: none;
     }
+    #plans-container {
+        width: 100%;
+        height: 100%;
+        display: none;
+        overflow: auto auto;
+    }
+    PlansPane {
+        height: auto;
+        width: auto;
+        padding: 1 2;
+    }
     """
 
     BINDINGS = [
@@ -283,6 +314,7 @@ class ProjectManagerApp(App):
         Binding("ctrl+r", "restart", "Restart", show=False),
         Binding("slash", "focus_command", "Command", show=True),
         Binding("escape", "unfocus_command", "Back", show=False),
+        Binding("P", "toggle_plans", "Plans", show=True),
         Binding("question_mark", "show_help", "Help", show=True),
     ]
 
@@ -295,10 +327,13 @@ class ProjectManagerApp(App):
             if cmd_bar.has_focus:
                 _log.debug("check_action: blocked %s (command bar focused)", action)
                 return False
-        # Block PR actions when in guide mode (can't see the PR tree)
+        # Block PR actions when in guide mode or plans view (can't see the PR tree)
         if action in ("start_pr", "done_pr", "copy_prompt", "launch_claude", "edit_plan", "view_plan"):
             if self._current_guide_step is not None:
                 _log.debug("check_action: blocked %s (in guide mode)", action)
+                return False
+            if self._plans_visible:
+                _log.debug("check_action: blocked %s (in plans view)", action)
                 return False
         return True
 
@@ -312,6 +347,7 @@ class ProjectManagerApp(App):
         self._guide_dismissed = False
         self._current_guide_step: str | None = None
         self._welcome_shown = False
+        self._plans_visible = False
         # Frame capture state (always enabled)
         self._frame_rate: int = DEFAULT_FRAME_RATE
         self._frame_buffer_size: int = DEFAULT_FRAME_BUFFER_SIZE
@@ -436,6 +472,8 @@ class ProjectManagerApp(App):
                 yield TechTree(id="tech-tree")
             with Vertical(id="guide-progress-container"):
                 yield GuideProgress(id="guide-progress")
+            with Vertical(id="plans-container"):
+                yield PlansPane(id="plans-pane")
             with Vertical(id="detail-container"):
                 yield DetailPanel(id="detail-panel")
         yield LogLine(id="log-line")
@@ -501,7 +539,9 @@ class ProjectManagerApp(App):
 
         # Detect guide step and decide which view to show
         state, _ = guide.resolve_guide_step(self._root)
-        if state in GUIDE_SETUP_STEPS and not self._guide_dismissed:
+        if self._plans_visible:
+            self._show_plans_view()
+        elif state in GUIDE_SETUP_STEPS and not self._guide_dismissed:
             self._show_guide_view(state)
         else:
             self._show_normal_view()
@@ -509,16 +549,19 @@ class ProjectManagerApp(App):
     def _show_guide_view(self, state: str) -> None:
         """Show the guide progress view during setup steps."""
         self._current_guide_step = state
+        self._plans_visible = False
 
         # Update guide progress widget
         guide_widget = self.query_one("#guide-progress", GuideProgress)
         guide_widget.update_step(state)
 
-        # Show guide progress, hide tech tree
+        # Show guide progress, hide tech tree and plans
         tree_container = self.query_one("#tree-container")
         guide_container = self.query_one("#guide-progress-container")
+        plans_container = self.query_one("#plans-container")
         tree_container.styles.display = "none"
         guide_container.styles.display = "block"
+        plans_container.styles.display = "none"
 
         # Update status bar for guide mode
         status_bar = self.query_one("#status-bar", StatusBar)
@@ -546,9 +589,12 @@ class ProjectManagerApp(App):
         """Show the normal tech tree view."""
         tree_container = self.query_one("#tree-container")
         guide_container = self.query_one("#guide-progress-container")
+        plans_container = self.query_one("#plans-container")
         tree_container.styles.display = "block"
         guide_container.styles.display = "none"
+        plans_container.styles.display = "none"
         self._current_guide_step = None
+        self._plans_visible = False
         # Capture frame after view change (use call_after_refresh to ensure screen is updated)
         self.call_after_refresh(self._capture_frame, "show_normal_view")
         # Show welcome popup when guide completes (only once)
@@ -1106,7 +1152,120 @@ class ProjectManagerApp(App):
 
     def action_show_help(self) -> None:
         _log.debug("action: show_help")
-        self.push_screen(HelpScreen())
+        self.push_screen(HelpScreen(in_plans=self._plans_visible))
+
+    # --- Plans view ---
+
+    def _show_plans_view(self) -> None:
+        """Show the plans list view."""
+        tree_container = self.query_one("#tree-container")
+        guide_container = self.query_one("#guide-progress-container")
+        plans_container = self.query_one("#plans-container")
+        tree_container.styles.display = "none"
+        guide_container.styles.display = "none"
+        plans_container.styles.display = "block"
+        self._plans_visible = True
+        self._current_guide_step = None
+        self._refresh_plans_pane()
+        plans_pane = self.query_one("#plans-pane", PlansPane)
+        plans_pane.focus()
+        # Update status bar
+        plans = self._data.get("plans") or []
+        status_bar = self.query_one("#status-bar", StatusBar)
+        project = self._data.get("project", {})
+        prs = self._data.get("prs") or []
+        status_bar.update(f" [bold]Plans[/bold]    {len(plans)} plan(s)    [dim]P=back to tree[/dim]")
+        self.call_after_refresh(self._capture_frame, "show_plans_view")
+
+    def _refresh_plans_pane(self) -> None:
+        """Refresh the plans pane with current data."""
+        plans = self._data.get("plans") or []
+        prs = self._data.get("prs") or []
+        enriched = []
+        for plan in plans:
+            plan_id = plan.get("id", "")
+            pr_count = sum(1 for pr in prs if pr.get("plan") == plan_id)
+            intro = ""
+            plan_file = plan.get("file", "")
+            if plan_file and self._root:
+                plan_path = self._root / plan_file
+                try:
+                    text = plan_path.read_text()
+                    intro = extract_plan_intro(text)
+                except OSError:
+                    pass
+            enriched.append({
+                "id": plan_id,
+                "name": plan.get("name", ""),
+                "file": plan.get("file", ""),
+                "status": plan.get("status", "draft"),
+                "intro": intro,
+                "pr_count": pr_count,
+            })
+        plans_pane = self.query_one("#plans-pane", PlansPane)
+        plans_pane.update_plans(enriched)
+
+    def action_toggle_plans(self) -> None:
+        """Toggle between plans view and tech tree view."""
+        _log.info("action: toggle_plans visible=%s", self._plans_visible)
+        if self._plans_visible:
+            self._show_normal_view()
+        else:
+            self._show_plans_view()
+
+    def on_plan_selected(self, message: PlanSelected) -> None:
+        _log.debug("plan selected: %s", message.plan_id)
+
+    def on_plan_activated(self, message: PlanActivated) -> None:
+        """Open plan file in a pane."""
+        _log.info("plan activated: %s", message.plan_id)
+        plan = store.get_plan(self._data, message.plan_id)
+        if not plan or not self._root:
+            return
+        plan_path = self._root / plan.get("file", "")
+        if plan_path.exists():
+            self._launch_pane(f"less {plan_path}", "plan")
+
+    def on_plan_action(self, message: PlanAction) -> None:
+        """Handle plan action shortcuts."""
+        _log.info("plan action: %s", message.action)
+        plans_pane = self.query_one("#plans-pane", PlansPane)
+        plan_id = plans_pane.selected_plan_id
+
+        if message.action == "add":
+            cmd_bar = self.query_one("#command-bar", CommandBar)
+            cmd_bar.value = "plan add "
+            cmd_bar.focus()
+        elif message.action == "view":
+            if plan_id:
+                plan = store.get_plan(self._data, plan_id)
+                if plan and self._root:
+                    plan_path = self._root / plan.get("file", "")
+                    if plan_path.exists():
+                        self._launch_pane(f"less {plan_path}", "plan")
+        elif message.action == "edit":
+            if plan_id:
+                plan = store.get_plan(self._data, plan_id)
+                if plan and self._root:
+                    plan_path = self._root / plan.get("file", "")
+                    if plan_path.exists():
+                        editor = self._find_editor()
+                        self._launch_pane(f"{editor} {plan_path}", "plan-edit")
+        elif message.action == "breakdown":
+            if plan_id:
+                self._launch_pane(f"pm plan breakdown {plan_id}", "plan-breakdown")
+        elif message.action == "deps":
+            self._launch_pane("pm plan deps", "plan-deps")
+        elif message.action == "load":
+            if plan_id:
+                self._launch_pane(f"pm plan load {plan_id}", "plan-load")
+        elif message.action == "review":
+            if plan_id:
+                self._launch_pane(f"pm plan review {plan_id}", "plan-review")
+
+    def _find_editor(self) -> str:
+        """Find the user's preferred editor."""
+        return os.environ.get("EDITOR", os.environ.get("VISUAL", "vi"))
 
     def action_quit(self) -> None:
         """Detach from tmux session instead of killing the TUI."""

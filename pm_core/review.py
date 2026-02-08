@@ -17,7 +17,7 @@ REVIEW_PROMPTS = {
         '(not just the template placeholder "<!-- Describe the plan here -->" or similar)? '
         'Output PASS if yes, NEEDS_FIX if no, followed by a brief explanation.'
     ),
-    "plan-review": (
+    "plan-breakdown": (
         'Read the plan file at {path}. Does it have a "## PRs" section with at least one '
         '"### PR:" entry that has description, tests, files fields? '
         'Output PASS if yes, NEEDS_FIX if no, followed by what\'s missing.'
@@ -35,6 +35,13 @@ REVIEW_PROMPTS = {
         'Read the plan file at {path}. Does it have a "## PRs" section with at least one '
         '"### PR:" entry that has description, tests, files fields? '
         'Output PASS if yes, NEEDS_FIX if no, followed by what\'s missing.'
+    ),
+    "plan-review": (
+        'Read the plan file at {path} and run `pm pr list`. For each PR linked to this plan, '
+        'check: (1) does the PR description contain enough context to work independently, '
+        '(2) does the plan mention anything not covered by any PR, '
+        '(3) do the file paths in each PR exist or make sense as new files. '
+        'Output PASS if consistent, NEEDS_FIX if not, with specifics.'
     ),
 }
 

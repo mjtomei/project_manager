@@ -1,0 +1,163 @@
+"""Plans pane widget for the TUI."""
+
+from textual.widget import Widget
+from textual.reactive import reactive
+from textual.message import Message
+from rich.text import Text
+from rich.console import RenderableType
+
+
+class PlanSelected(Message):
+    """Fired when a plan is highlighted."""
+    def __init__(self, plan_id: str) -> None:
+        self.plan_id = plan_id
+        super().__init__()
+
+
+class PlanActivated(Message):
+    """Fired when Enter is pressed on a plan."""
+    def __init__(self, plan_id: str) -> None:
+        self.plan_id = plan_id
+        super().__init__()
+
+
+class PlanAction(Message):
+    """Fired when a plan action shortcut is pressed."""
+    def __init__(self, action: str) -> None:
+        self.action = action
+        super().__init__()
+
+
+class PlansPane(Widget):
+    """Scrollable list of plans with descriptions and action shortcuts."""
+
+    can_focus = True
+
+    selected_index: reactive[int] = reactive(0)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._plans: list[dict] = []
+
+    def update_plans(self, plans: list[dict]) -> None:
+        """Update the plans data and refresh.
+
+        Each dict should have: {id, name, file, status, intro, pr_count}
+        """
+        self._plans = plans
+        # Clamp selected index
+        if self._plans:
+            if self.selected_index >= len(self._plans):
+                self.selected_index = len(self._plans) - 1
+        else:
+            self.selected_index = 0
+        self.refresh()
+
+    @property
+    def selected_plan_id(self) -> str | None:
+        if not self._plans:
+            return None
+        if self.selected_index >= len(self._plans):
+            return None
+        return self._plans[self.selected_index]["id"]
+
+    def render(self) -> RenderableType:
+        output = Text()
+
+        if not self._plans:
+            output.append("No plans yet. Press ", style="dim")
+            output.append("a", style="bold")
+            output.append(" to add one.\n", style="dim")
+        else:
+            for i, plan in enumerate(self._plans):
+                is_selected = (i == self.selected_index)
+                plan_id = plan.get("id", "???")
+                name = plan.get("name", "Untitled")
+                status = plan.get("status", "draft")
+                pr_count = plan.get("pr_count", 0)
+                intro = plan.get("intro", "")
+
+                # Selection arrow
+                if is_selected:
+                    output.append("▶ ", style="bold cyan")
+                else:
+                    output.append("  ")
+
+                # Plan ID and name
+                output.append(f"{plan_id}: ", style="bold" if is_selected else "")
+                output.append(name, style="bold cyan" if is_selected else "")
+                output.append(f"  [{status}]", style="dim")
+                if pr_count:
+                    output.append(f"  {pr_count} PR{'s' if pr_count != 1 else ''}", style="dim")
+                output.append("\n")
+
+                # Show intro text indented
+                if intro:
+                    for line in intro.split("\n"):
+                        line = line.strip()
+                        if line:
+                            output.append(f"    {line}\n", style="dim italic" if not is_selected else "italic")
+                output.append("\n")
+
+        # Footer with shortcuts
+        output.append("\n")
+        output.append("  Enter/v", style="bold")
+        output.append("=view  ", style="dim")
+        output.append("e", style="bold")
+        output.append("=edit  ", style="dim")
+        output.append("a", style="bold")
+        output.append("=add  ", style="dim")
+        output.append("w", style="bold")
+        output.append("=breakdown  ", style="dim")
+        output.append("D", style="bold")
+        output.append("=deps  ", style="dim")
+        output.append("l", style="bold")
+        output.append("=load  ", style="dim")
+        output.append("c", style="bold")
+        output.append("=review  ", style="dim")
+        output.append("P", style="bold")
+        output.append("=back\n", style="dim")
+
+        return output
+
+    def on_key(self, event) -> None:
+        if not self.has_focus:
+            return
+
+        if event.key in ("up", "k"):
+            if self._plans and self.selected_index > 0:
+                self.selected_index -= 1
+                self.refresh()
+                self.post_message(PlanSelected(self.selected_plan_id))
+            event.prevent_default()
+        elif event.key in ("down", "j"):
+            if self._plans and self.selected_index < len(self._plans) - 1:
+                self.selected_index += 1
+                self.refresh()
+                self.post_message(PlanSelected(self.selected_plan_id))
+            event.prevent_default()
+        elif event.key == "enter":
+            if self.selected_plan_id:
+                self.post_message(PlanActivated(self.selected_plan_id))
+            event.prevent_default()
+        elif event.key == "a":
+            self.post_message(PlanAction("add"))
+            event.prevent_default()
+        elif event.key == "w":
+            self.post_message(PlanAction("breakdown"))
+            event.prevent_default()
+        elif event.key == "D":
+            self.post_message(PlanAction("deps"))
+            event.prevent_default()
+        elif event.key == "l":
+            self.post_message(PlanAction("load"))
+            event.prevent_default()
+        elif event.key == "v":
+            self.post_message(PlanAction("view"))
+            event.prevent_default()
+        elif event.key == "e":
+            self.post_message(PlanAction("edit"))
+            event.prevent_default()
+        elif event.key == "c":
+            self.post_message(PlanAction("review"))
+            event.prevent_default()
