@@ -14,7 +14,7 @@ from pm_core import store, graph, git_ops, prompt_gen, notes
 from pm_core import pr_sync as pr_sync_mod
 
 # Set up logging - writes to ~/.pm/debug/{session-tag}.log
-from pm_core.paths import configure_logger, pane_registry_dir
+from pm_core.paths import configure_logger, debug_dir, pane_registry_dir
 _log = configure_logger("pm.cli")
 from pm_core.backend import detect_backend, get_backend
 from pm_core.claude_launcher import find_claude, find_editor, launch_claude, launch_claude_print, clear_session, build_claude_shell_cmd
@@ -2268,6 +2268,8 @@ def session_mobile(force: bool | None):
         # Trigger rebalance if in tmux
         if tmux_mod.in_tmux():
             window = tmux_mod.get_window_id(session_name)
+            # Unzoom before rebalance so layout applies to all panes
+            tmux_mod.unzoom_pane(session_name, window)
             data = pane_layout.load_registry(session_name)
             data["user_modified"] = False
             pane_layout.save_registry(session_name, data)
@@ -3081,7 +3083,8 @@ def pane_opened_cmd(session: str, window: str, pane_id: str):
     pane_layout.handle_pane_opened(session, window, pane_id)
 
 
-@cli.command("_pane-switch", hidden=True)
+@cli.command("_pane-switch", hidden=True,
+             context_settings={"ignore_unknown_options": True})
 @click.argument("session")
 @click.argument("direction")
 def pane_switch_cmd(session: str, direction: str):
@@ -3096,7 +3099,7 @@ def pane_switch_cmd(session: str, direction: str):
 
     if direction == "next":
         subprocess.run(
-            ["tmux", "select-pane", "-t", f"{session}:{window}", "-t", ":.+"],
+            ["tmux", "select-pane", "-t", f"{session}:{window}.+"],
             check=False,
         )
     else:
@@ -3138,6 +3141,8 @@ def rebalance_cmd():
     data["user_modified"] = False
     pane_layout.save_registry(session, data)
 
+    # Unzoom before rebalance so layout applies to all panes
+    tmux_mod.unzoom_pane(session, window)
     pane_layout.rebalance(session, window)
     click.echo("Layout rebalanced.")
 
@@ -3401,6 +3406,9 @@ def tui_clear_history(session: str | None):
 
 
 # --- Frame capture commands ---
+
+_log_dir = debug_dir()
+
 
 def _capture_config_file(session: str) -> Path:
     """Get the capture config file path for a session."""
