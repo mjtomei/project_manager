@@ -186,6 +186,7 @@ class HelpScreen(ModalScreen):
             yield Label("  [bold]c[/]  Launch Claude for PR", classes="help-row")
             yield Label("  [bold]p[/]  Copy prompt to clipboard", classes="help-row")
             yield Label("  [bold]e[/]  Edit selected PR", classes="help-row")
+            yield Label("  [bold]v[/]  View plan file", classes="help-row")
             yield Label("Panes & Views", classes="help-section")
             yield Label("  [bold]/[/]  Open command bar", classes="help-row")
             yield Label("  [bold]g[/]  Toggle guide view", classes="help-row")
@@ -272,6 +273,7 @@ class ProjectManagerApp(App):
         Binding("p", "copy_prompt", "Copy Prompt", show=True),
 
         Binding("e", "edit_plan", "Edit PR", show=True),
+        Binding("v", "view_plan", "View Plan", show=True),
         Binding("g", "toggle_guide", "Guide", show=True),
         Binding("n", "launch_notes", "Notes", show=True),
         Binding("m", "launch_meta", "Meta", show=True),
@@ -287,14 +289,14 @@ class ProjectManagerApp(App):
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """Disable single-key shortcuts when command bar is focused or in guide mode."""
         if action in ("start_pr", "start_pr_fresh", "done_pr", "copy_prompt",
-                       "edit_plan", "toggle_guide", "launch_notes",
+                       "edit_plan", "view_plan", "toggle_guide", "launch_notes",
                        "launch_meta", "view_log", "refresh", "rebalance", "quit", "show_help"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus:
                 _log.debug("check_action: blocked %s (command bar focused)", action)
                 return False
         # Block PR actions when in guide mode (can't see the PR tree)
-        if action in ("start_pr", "done_pr", "copy_prompt", "launch_claude", "edit_plan"):
+        if action in ("start_pr", "done_pr", "copy_prompt", "launch_claude", "edit_plan", "view_plan"):
             if self._current_guide_step is not None:
                 _log.debug("check_action: blocked %s (in guide mode)", action)
                 return False
@@ -723,20 +725,29 @@ class ProjectManagerApp(App):
 
     # --- Message handlers ---
 
-    def on_pr_selected(self, message: PRSelected) -> None:
+    def _get_plan_for_pr(self, pr: dict | None) -> dict | None:
+        """Look up the plan entry for a PR, if any."""
+        if not pr or not pr.get("plan"):
+            return None
+        return store.get_plan(self._data, pr["plan"])
+
+    def on_prselected(self, message: PRSelected) -> None:
         _log.debug("PR selected: %s", message.pr_id)
         pr = store.get_pr(self._data, message.pr_id)
+        plan = self._get_plan_for_pr(pr)
         detail = self.query_one("#detail-panel", DetailPanel)
-        detail.update_pr(pr, self._data.get("prs"))
+        detail.update_pr(pr, self._data.get("prs"), plan=plan, project_root=self._root)
         self.log_message(f"Selected: {message.pr_id}")
         self.call_after_refresh(self._capture_frame, f"pr_selected:{message.pr_id}")
 
-    def on_pr_activated(self, message: PRActivated) -> None:
+    def on_practivated(self, message: PRActivated) -> None:
         pr = store.get_pr(self._data, message.pr_id)
+        plan = self._get_plan_for_pr(pr)
         detail = self.query_one("#detail-panel", DetailPanel)
-        detail.update_pr(pr, self._data.get("prs"))
+        detail.update_pr(pr, self._data.get("prs"), plan=plan, project_root=self._root)
         container = self.query_one("#detail-container")
         container.styles.display = "block"
+        self._detail_visible = True
         self.call_after_refresh(self._capture_frame, f"pr_activated:{message.pr_id}")
 
     def on_command_submitted(self, message: CommandSubmitted) -> None:
@@ -934,6 +945,29 @@ class ProjectManagerApp(App):
             self.log_message(f"Editing {pr_id}")
         except Exception as e:
             self.log_message(f"Error: {e}")
+
+    def action_view_plan(self) -> None:
+        """Open the plan file associated with the selected PR in a pane."""
+        _log.info("action: view_plan")
+        tree = self.query_one("#tech-tree", TechTree)
+        pr_id = tree.selected_pr_id
+        if not pr_id:
+            self.log_message("No PR selected")
+            return
+        pr = store.get_pr(self._data, pr_id)
+        plan = self._get_plan_for_pr(pr)
+        if not plan:
+            self.log_message("No plan associated with this PR")
+            return
+        plan_file = plan.get("file", "")
+        if not plan_file or not self._root:
+            self.log_message("Plan file not found")
+            return
+        plan_path = self._root / plan_file
+        if not plan_path.exists():
+            self.log_message(f"Plan file not found: {plan_path}")
+            return
+        self._launch_pane(f"less {plan_path}", "plan")
 
     def _get_session_and_window(self) -> tuple[str, str] | None:
         """Get tmux session name and window ID. Returns None if not in tmux."""
