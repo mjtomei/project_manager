@@ -962,32 +962,20 @@ def _run_fix_command(step_name: str, review_path_str: str):
         click.echo(f"---\n{prompt}\n---")
 
 
-@plan.command("add-fix")
+@plan.command("fix")
 @click.option("--review", "review_path", required=True, help="Path to review file")
-def plan_add_fix(review_path: str):
-    """Fix issues found by plan add review."""
-    _run_fix_command("plan add", review_path)
+def plan_fix(review_path: str):
+    """Fix issues found by a review.
 
-
-@plan.command("breakdown-fix")
-@click.option("--review", "review_path", required=True, help="Path to review file")
-def plan_breakdown_fix(review_path: str):
-    """Fix issues found by plan breakdown review."""
-    _run_fix_command("plan breakdown", review_path)
-
-
-@plan.command("deps-fix")
-@click.option("--review", "review_path", required=True, help="Path to review file")
-def plan_deps_fix(review_path: str):
-    """Fix issues found by plan deps review."""
-    _run_fix_command("plan deps", review_path)
-
-
-@plan.command("load-fix")
-@click.option("--review", "review_path", required=True, help="Path to review file")
-def plan_load_fix(review_path: str):
-    """Fix issues found by plan load review."""
-    _run_fix_command("plan load", review_path)
+    Reads the step name from the review file, so a single command
+    works for any review (plan add, breakdown, deps, load, import).
+    """
+    parsed = review_mod.parse_review_file(Path(review_path))
+    step_name = parsed.get("step", "")
+    if not step_name:
+        click.echo("Could not determine step from review file.", err=True)
+        raise SystemExit(1)
+    _run_fix_command(step_name, review_path)
 
 
 def _import_github_prs(root: Path, data: dict) -> None:
@@ -1170,11 +1158,6 @@ def plan_import(name: str):
     _run_plan_import(name)
 
 
-@plan.command("import-fix")
-@click.option("--review", "review_path", required=True, help="Path to review file")
-def plan_import_fix(review_path: str):
-    """Fix issues found by plan import review."""
-    _run_fix_command("plan import", review_path)
 
 
 # --- PR commands ---
@@ -2479,11 +2462,7 @@ COMMANDS
   pm plan load [plan-id]        Create PRs from plan file (non-interactive)
   pm plan import [--name NAME]  Bootstrap PR graph from existing repo (interactive)
   pm plan fixes                 List pending review files with fix commands
-  pm plan add-fix --review <f>  Fix issues from plan add review
-  pm plan breakdown-fix --review Fix issues from plan breakdown review
-  pm plan deps-fix --review     Fix issues from plan deps review
-  pm plan load-fix --review     Fix issues from plan load review
-  pm plan import-fix --review   Fix issues from plan import review
+  pm plan fix --review <file>   Fix issues found by any review
 
   pm pr add <title>             Add a PR (becomes active) [--plan, --depends-on]
   pm pr edit <pr-id>            Edit PR title, description, or dependencies

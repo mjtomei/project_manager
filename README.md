@@ -81,6 +81,16 @@ status — even if you think the philosophical arguments in this README
 are overreach — you might still want tooling that treats AI well.
 Because that's the tooling that gets better results.
 
+## Features
+
+- **Interactive TUI** — tmux-based dashboard with PR dependency graph, detail panel, and keybindings for all common operations
+- **Plan-driven workflow** — write plans, break them into PRs with Claude, review consistency, and load PRs in one step
+- **Parallel Claude sessions** — each `pm pr start` opens a tmux window with a Claude session; work on multiple PRs simultaneously
+- **Mobile mode** — auto-zooms the active pane on narrow terminals (< 120 cols) or when force-enabled with `pm session mobile --force`, making the tool usable over SSH from phones and tablets
+- **Automated review loop** — every plan command runs a background review; if issues are found, `pm plan fix --review <file>` launches Claude with the findings
+- **Meta-development** — `pm meta` opens a Claude session targeting the pm codebase itself, so you can fix friction as you encounter it
+- **TUI integration tests** — `pm tui test` launches Claude as a test executor to interact with the live TUI and report results
+
 ## Pluggable backends
 
 The interfaces we use to work with code — pull requests, CI checks, merge
@@ -155,7 +165,8 @@ See [demo.md](demo.md) for a full walkthrough you can run targeting this repo re
 pm init <repo-url>            Create PM repo for a target codebase
 pm plan add <name>            Add a plan
 pm plan list                  List plans
-pm plan review <plan-id>      Generate prompt to decompose plan into PRs
+pm plan breakdown <plan-id>   Launch Claude to break plan into PRs
+pm plan review <plan-id>      Review plan-PR consistency
 pm pr add <title>             Add a PR  [--plan, --depends-on, --description]
 pm pr list                    List PRs with status
 pm pr graph                   Show dependency tree

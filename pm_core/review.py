@@ -89,7 +89,7 @@ def _write_review_file(root: Path, step_name: str, status: str, findings: str) -
     filename = f"{slug}-{ts}.txt"
     path = reviews / filename
 
-    fix_cmd = f"pm plan {step_name.replace('plan ', '')}-fix --review {path}"
+    fix_cmd = f"pm plan fix --review {path}"
 
     content = f"""\
 Step: {step_name}
@@ -150,7 +150,7 @@ def review_step(step_name: str, goal_description: str, check_prompt: str, root: 
                 ).stdout.strip()
                 # Show a summary in a background pane
                 summary = output[:200].replace("'", "'\\''").replace("\n", " ")
-                fix_cmd = f"pm plan {step_name.replace('plan ', '')}-fix --review {review_path}"
+                fix_cmd = f"pm plan fix --review {review_path}"
                 pane_cmd = (
                     f"echo 'pm review: {step_name} — NEEDS_FIX' && "
                     f"echo '{summary}' && "
