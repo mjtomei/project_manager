@@ -2076,16 +2076,23 @@ def _register_tmux_bindings(session_name: str) -> None:
     import subprocess as _sp
     _sp.run(["tmux", "bind-key", "-T", "prefix", "R",
              "run-shell 'pm rebalance'"], check=False)
+    # Conditionally override pane-switch keys: use pm's mobile-aware
+    # switch for pm sessions, fall back to default tmux behavior otherwise.
+    # Keyed on the pane registry file existing for the current session.
+    registry_dir = pane_layout.registry_dir()
     switch_keys = {
-        "o": "next",
-        "Up": "-U",
-        "Down": "-D",
-        "Left": "-L",
-        "Right": "-R",
+        "o": ("next", "select-pane -t :.+"),
+        "Up": ("-U", "select-pane -U"),
+        "Down": ("-D", "select-pane -D"),
+        "Left": ("-L", "select-pane -L"),
+        "Right": ("-R", "select-pane -R"),
     }
-    for key, direction in switch_keys.items():
+    for key, (direction, fallback) in switch_keys.items():
         _sp.run(["tmux", "bind-key", "-T", "prefix", key,
-                 "run-shell", f"pm _pane-switch {session_name} {direction}"],
+                 "if-shell",
+                 f"test -f {registry_dir}/#{{session_name}}.json",
+                 f"run-shell 'pm _pane-switch #{{session_name}} {direction}'",
+                 fallback],
                 check=False)
     _sp.run(["tmux", "set-hook", "-g", "after-kill-pane",
              "run-shell 'pm _pane-closed'"], check=False)
