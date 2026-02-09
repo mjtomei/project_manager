@@ -1252,7 +1252,7 @@ for plan operations (view, edit, add, review, deps, load).
    - `pm tui send w`
    - Wait 2 seconds
    - `tmux list-panes` - should see a breakdown pane (role "plan-breakdown")
-   - Kill the review pane after verifying
+   - Kill the breakdown pane after verifying
 
 6. Plan deps (D):
    - `pm tui send D`
