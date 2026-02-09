@@ -1436,9 +1436,12 @@ Key implementation details:
 2. Verify mobile status:
    - `pm session mobile` - should show "Mobile active: True", "Force flag: True"
 
-3. Check zoom state:
-   - `tmux display -t <session> -p "#{window_zoomed_flag}"` - should be "1" (zoomed)
-   - Only one pane should be fully visible (the active one is zoomed)
+3. Check zoom state on ALL windows:
+   - List all windows: `tmux list-windows -t <session> -F "#{window_index} #{window_name}"`
+   - For EACH window that has multiple panes, verify it is zoomed:
+     `tmux display -t <session>:<window_index> -p "#{window_zoomed_flag}"` - should be "1"
+   - Windows with only one pane can't be zoomed (that's expected)
+   - The active pane in each multi-pane window should be the zoomed one
 
 ### Part 3: Pane Switching in Mobile Mode
 
@@ -1493,11 +1496,11 @@ Key implementation details:
    - `pm session mobile` - Force flag should be False
    - Mobile active depends on actual window width
 
-3. If window is wide (>= 120):
-   - Mobile active should be False
-   - After a rebalance (`pm rebalance`), panes should be unzoomed
-   - `tmux display -t <session> -p "#{window_zoomed_flag}"` → "0"
-   - All panes should be visible side-by-side
+3. Verify ALL windows are unzoomed:
+   - List all windows: `tmux list-windows -t <session> -F "#{window_index} #{window_name}"`
+   - For EACH window, verify it is NOT zoomed:
+     `tmux display -t <session>:<window_index> -p "#{window_zoomed_flag}"` - should be "0"
+   - All panes in multi-pane windows should be visible side-by-side
 
 4. If window is narrow (< 120):
    - Mobile active should still be True (auto-detected)
@@ -1518,8 +1521,8 @@ Key implementation details:
 ## Expected Behavior
 
 - `pm session mobile` shows status without changing anything
-- `pm session mobile --force` enables force-mobile, triggers rebalance, zooms active pane
-- `pm session mobile --no-force` disables force-mobile, triggers rebalance
+- `pm session mobile --force` enables force-mobile, triggers rebalance, zooms active pane on ALL windows
+- `pm session mobile --no-force` disables force-mobile, unzooms ALL windows, triggers rebalance
 - `pm _pane-switch` unzooms → switches pane → re-zooms (in mobile mode)
 - `pm _pane-switch` just switches pane (in desktop mode, no zoom)
 - TUI `_launch_pane` auto-zooms new/existing panes via `select_pane_smart`
@@ -1543,7 +1546,7 @@ pm session mobile output correct: [PASS/FAIL]
 ## Part 2: Force Mobile On
 --force enables flag file: [PASS/FAIL]
 Status shows force-enabled: [PASS/FAIL]
-Active pane is zoomed: [PASS/FAIL]
+All multi-pane windows zoomed: [PASS/FAIL]
 
 ## Part 3: Pane Switching
 _pane-switch next: [PASS/FAIL] - <pane changed? still zoomed?>
@@ -1561,7 +1564,7 @@ Rebalance preserves zoom: [PASS/FAIL]
 ## Part 6: Force Mobile Off
 --no-force removes flag: [PASS/FAIL]
 Status shows force-disabled: [PASS/FAIL]
-Panes unzoomed (if wide terminal): [PASS/FAIL or N/A]
+All windows unzoomed: [PASS/FAIL]
 
 ## Part 7: Cleanup
 Original state restored: [PASS/FAIL]

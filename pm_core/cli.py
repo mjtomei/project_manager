@@ -2268,9 +2268,10 @@ def session_mobile(force: bool | None):
         # Trigger rebalance if in tmux
         if tmux_mod.in_tmux():
             window = tmux_mod.get_window_id(session_name)
+            all_windows = tmux_mod.list_windows(session_name)
             if not force:
-                # Exiting mobile: unzoom all windows, not just current
-                for w in tmux_mod.list_windows(session_name):
+                # Exiting mobile: unzoom all windows
+                for w in all_windows:
                     tmux_mod.unzoom_pane(session_name, w["index"])
             else:
                 # Entering mobile: unzoom current window before rebalance
@@ -2279,6 +2280,11 @@ def session_mobile(force: bool | None):
             data["user_modified"] = False
             pane_layout.save_registry(session_name, data)
             pane_layout.rebalance(session_name, window)
+            if force:
+                # Entering mobile: zoom active pane on every window
+                for w in all_windows:
+                    if not tmux_mod.is_zoomed(session_name, w["index"]):
+                        tmux_mod.zoom_pane(f"{session_name}:{w['index']}")
     else:
         # Show status
         force_flag = pane_layout.mobile_flag_path(session_name).exists()
