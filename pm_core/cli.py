@@ -3147,6 +3147,114 @@ def rebalance_cmd():
     click.echo("Layout rebalanced.")
 
 
+# ---------------------------------------------------------------------------
+# bench group
+# ---------------------------------------------------------------------------
+
+@cli.group()
+def bench():
+    """Run coding benchmarks with tournament selection."""
+    pass
+
+
+@bench.command("models")
+@click.option("--url", default="http://localhost:11434", help="Ollama base URL")
+def bench_models(url):
+    """List available local models via Ollama."""
+    from pm_core.bench.runner import OllamaRunner
+
+    runner = OllamaRunner(base_url=url)
+    if not runner.is_available():
+        click.echo(f"Error: Cannot connect to Ollama at {url}")
+        click.echo("Make sure Ollama is running: ollama serve")
+        raise SystemExit(1)
+
+    models = runner.list_models()
+    if not models:
+        click.echo("No models found. Pull one with: ollama pull <model>")
+        return
+
+    click.echo(f"Available models ({len(models)}):")
+    for m in models:
+        click.echo(f"  {m}")
+
+
+@bench.command("run")
+@click.argument("model")
+@click.option("-n", "--candidates", default=8, type=int,
+              help="Number of candidate solutions per exercise")
+@click.option("-l", "--languages", default=None,
+              help="Comma-separated languages (default: all)")
+@click.option("-e", "--exercises", "exercise_filter", default=None,
+              help="Comma-separated exercise slugs to run")
+@click.option("-o", "--output", "output_path", default=None, type=click.Path(),
+              help="Save JSON results to this path")
+def bench_run(model, candidates, languages, exercise_filter, output_path):
+    """Run benchmark with tournament selection.
+
+    Generates tests, produces N candidate solutions, scores via tournament,
+    and compares against a single-pass baseline.
+    """
+    from pm_core.bench.orchestrator import (
+        format_results_table,
+        run_benchmark,
+        save_results_json,
+    )
+
+    lang_list = [l.strip() for l in languages.split(",")] if languages else None
+    slug_list = [s.strip() for s in exercise_filter.split(",")] if exercise_filter else None
+
+    def _progress(msg):
+        click.echo(f"  {msg}")
+
+    click.echo(f"Starting benchmark: model={model}, N={candidates}")
+    click.echo("")
+
+    try:
+        run = run_benchmark(
+            model,
+            num_candidates=candidates,
+            languages=lang_list,
+            slugs=slug_list,
+            progress_callback=_progress,
+        )
+    except (ConnectionError, ValueError) as exc:
+        click.echo(f"Error: {exc}")
+        raise SystemExit(1)
+
+    click.echo("")
+    click.echo(format_results_table(run))
+
+    if output_path:
+        from pathlib import Path
+        save_results_json(run, Path(output_path))
+        click.echo(f"\nResults saved to {output_path}")
+
+
+@bench.command("exercises")
+@click.option("-l", "--languages", default=None,
+              help="Comma-separated languages (default: all)")
+def bench_exercises(languages):
+    """List available benchmark exercises."""
+    from pm_core.bench.exercises import load_exercises
+
+    lang_list = [l.strip() for l in languages.split(",")] if languages else None
+
+    try:
+        exercises = load_exercises(languages=lang_list)
+    except Exception as exc:
+        click.echo(f"Error loading exercises: {exc}")
+        raise SystemExit(1)
+
+    by_lang: dict[str, int] = {}
+    for ex in exercises:
+        by_lang[ex.language] = by_lang.get(ex.language, 0) + 1
+
+    click.echo(f"Available exercises ({len(exercises)} total):")
+    for lang in sorted(by_lang):
+        click.echo(f"  {lang:<12} {by_lang[lang]} exercises")
+
+
 @cli.group()
 def tui():
     """Control and monitor the TUI from the command line."""
