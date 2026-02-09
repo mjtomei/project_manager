@@ -2067,6 +2067,30 @@ def session(ctx):
     _session_start()
 
 
+def _register_tmux_bindings(session_name: str) -> None:
+    """Register tmux keybindings for mobile-aware pane navigation.
+
+    Called on both new session creation and reattach so bindings
+    survive across sessions (tmux bindings are global).
+    """
+    import subprocess as _sp
+    _sp.run(["tmux", "bind-key", "-T", "prefix", "R",
+             "run-shell 'pm rebalance'"], check=False)
+    switch_keys = {
+        "o": "next",
+        "Up": "-U",
+        "Down": "-D",
+        "Left": "-L",
+        "Right": "-R",
+    }
+    for key, direction in switch_keys.items():
+        _sp.run(["tmux", "bind-key", "-T", "prefix", key,
+                 "run-shell", f"pm _pane-switch {session_name} {direction}"],
+                check=False)
+    _sp.run(["tmux", "set-hook", "-g", "after-kill-pane",
+             "run-shell 'pm _pane-closed'"], check=False)
+
+
 def _session_start():
     """Start a tmux session with TUI + notes editor.
 
@@ -2121,6 +2145,7 @@ def _session_start():
         else:
             _log.info("TUI present, just attaching")
             click.echo(f"Attaching to existing session '{session_name}'...")
+            _register_tmux_bindings(session_name)
             tmux_mod.attach(session_name)
             return
 
@@ -2189,29 +2214,7 @@ def _session_start():
         _log.info("mobile mode detected, zooming TUI pane")
         tmux_mod.zoom_pane(tui_pane)
 
-    # Bind prefix-R to rebalance in this session
-    import subprocess as _sp
-    _sp.run(["tmux", "bind-key", "-T", "prefix", "R",
-             "run-shell 'pm rebalance'"], check=False)
-
-    # Bind pane-switch keys for mobile-aware navigation
-    switch_keys = {
-        "o": "next",
-        "Up": "-U",
-        "Down": "-D",
-        "Left": "-L",
-        "Right": "-R",
-    }
-    for key, direction in switch_keys.items():
-        _sp.run(["tmux", "bind-key", "-T", "prefix", key,
-                 "run-shell", f"pm _pane-switch {session_name} {direction}"],
-                check=False)
-
-    # Global hook for kill-pane detection. The after-kill-pane hook
-    # doesn't know which pane was killed, so _pane-closed reconciles
-    # all registries against live tmux panes.
-    _sp.run(["tmux", "set-hook", "-g", "after-kill-pane",
-             "run-shell 'pm _pane-closed'"], check=False)
+    _register_tmux_bindings(session_name)
 
     tmux_mod.attach(session_name)
 
@@ -2322,6 +2325,13 @@ def prompt(pr_id: str | None):
 @cli.command("_tui", hidden=True)
 def tui_cmd():
     """Launch the interactive TUI (internal command)."""
+    # Re-register tmux bindings on every TUI launch so they survive
+    # TUI restarts without needing to kill/recreate the session.
+    try:
+        session_name = tmux_mod.get_session_name()
+        _register_tmux_bindings(session_name)
+    except Exception:
+        pass  # Not fatal — may not be inside tmux
     from pm_core.tui.app import ProjectManagerApp
     app = ProjectManagerApp()
     app.run()
@@ -3365,8 +3375,7 @@ Navigation:
 Actions:
   g                Launch guide pane
   n                Open notes
-  c                Copy prompt to clipboard
-  l                Launch Claude for selected PR
+  c                Launch Claude for selected PR
   r                Refresh state
 
 Guide Mode:
