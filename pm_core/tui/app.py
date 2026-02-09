@@ -62,6 +62,7 @@ from pm_core.tui.detail_panel import DetailPanel
 from pm_core.tui.command_bar import CommandBar, CommandSubmitted
 from pm_core.tui.guide_progress import GuideProgress
 from pm_core.tui.plans_pane import PlansPane, PlanSelected, PlanActivated, PlanAction
+from pm_core.tui.tests_pane import TestsPane, TestSelected, TestActivated
 from pm_core.plan_parser import extract_plan_intro
 
 # Guide steps that indicate setup is still in progress
@@ -175,14 +176,20 @@ class HelpScreen(ModalScreen):
     }
     """
 
-    def __init__(self, in_plans: bool = False):
+    def __init__(self, in_plans: bool = False, in_tests: bool = False):
         super().__init__()
         self._in_plans = in_plans
+        self._in_tests = in_tests
 
     def compose(self) -> ComposeResult:
         with Vertical(id="help-container"):
             yield Label("Keyboard Shortcuts", id="help-title")
-            if self._in_plans:
+            if self._in_tests:
+                yield Label("Test Navigation", classes="help-section")
+                yield Label("  [bold]↑↓[/] or [bold]jk[/]  Move selection", classes="help-row")
+                yield Label("  [bold]Enter[/]  Run selected test", classes="help-row")
+                yield Label("  [bold]T[/]  Back to tree view", classes="help-row")
+            elif self._in_plans:
                 yield Label("Plan Navigation", classes="help-section")
                 yield Label("  [bold]↑↓[/] or [bold]jk[/]  Move selection", classes="help-row")
                 yield Label("  [bold]Enter/v[/]  View plan file", classes="help-row")
@@ -213,6 +220,7 @@ class HelpScreen(ModalScreen):
             yield Label("  [bold]m[/]  Meta: work on pm itself", classes="help-row")
             yield Label("  [bold]L[/]  View TUI log", classes="help-row")
             yield Label("  [bold]P[/]  Toggle plans view", classes="help-row")
+            yield Label("  [bold]T[/]  Toggle tests view", classes="help-row")
             yield Label("  [bold]b[/]  Rebalance panes", classes="help-row")
             yield Label("Other", classes="help-section")
             yield Label("  [bold]r[/]  Refresh / sync with GitHub", classes="help-row")
@@ -294,6 +302,17 @@ class ProjectManagerApp(App):
         width: auto;
         padding: 1 2;
     }
+    #tests-container {
+        width: 100%;
+        height: 100%;
+        display: none;
+        overflow: auto auto;
+    }
+    TestsPane {
+        height: auto;
+        width: 1fr;
+        padding: 1 2;
+    }
     """
 
     BINDINGS = [
@@ -315,6 +334,7 @@ class ProjectManagerApp(App):
         Binding("slash", "focus_command", "Command", show=True),
         Binding("escape", "unfocus_command", "Back", show=False),
         Binding("P", "toggle_plans", "Plans", show=True),
+        Binding("T", "toggle_tests", "Tests", show=True),
         Binding("question_mark", "show_help", "Help", show=True),
     ]
 
@@ -322,7 +342,8 @@ class ProjectManagerApp(App):
         """Disable single-key shortcuts when command bar is focused or in guide mode."""
         if action in ("start_pr", "start_pr_fresh", "done_pr", "copy_prompt",
                        "edit_plan", "view_plan", "toggle_guide", "launch_notes",
-                       "launch_meta", "view_log", "refresh", "rebalance", "quit", "show_help"):
+                       "launch_meta", "view_log", "refresh", "rebalance", "quit", "show_help",
+                       "toggle_tests"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus:
                 _log.debug("check_action: blocked %s (command bar focused)", action)
@@ -334,6 +355,9 @@ class ProjectManagerApp(App):
                 return False
             if self._plans_visible:
                 _log.debug("check_action: blocked %s (in plans view)", action)
+                return False
+            if self._tests_visible:
+                _log.debug("check_action: blocked %s (in tests view)", action)
                 return False
         return True
 
@@ -348,6 +372,7 @@ class ProjectManagerApp(App):
         self._current_guide_step: str | None = None
         self._welcome_shown = False
         self._plans_visible = False
+        self._tests_visible = False
         # Frame capture state (always enabled)
         self._frame_rate: int = DEFAULT_FRAME_RATE
         self._frame_buffer_size: int = DEFAULT_FRAME_BUFFER_SIZE
@@ -474,6 +499,8 @@ class ProjectManagerApp(App):
                 yield GuideProgress(id="guide-progress")
             with Vertical(id="plans-container"):
                 yield PlansPane(id="plans-pane")
+            with Vertical(id="tests-container"):
+                yield TestsPane(id="tests-pane")
             with Vertical(id="detail-container"):
                 yield DetailPanel(id="detail-panel")
         yield LogLine(id="log-line")
@@ -541,6 +568,8 @@ class ProjectManagerApp(App):
         state, _ = guide.resolve_guide_step(self._root)
         if self._plans_visible:
             self._show_plans_view()
+        elif self._tests_visible:
+            self._show_tests_view()
         elif state in GUIDE_SETUP_STEPS and not self._guide_dismissed:
             self._show_guide_view(state)
         else:
@@ -550,18 +579,21 @@ class ProjectManagerApp(App):
         """Show the guide progress view during setup steps."""
         self._current_guide_step = state
         self._plans_visible = False
+        self._tests_visible = False
 
         # Update guide progress widget
         guide_widget = self.query_one("#guide-progress", GuideProgress)
         guide_widget.update_step(state)
 
-        # Show guide progress, hide tech tree and plans
+        # Show guide progress, hide tech tree, plans, and tests
         tree_container = self.query_one("#tree-container")
         guide_container = self.query_one("#guide-progress-container")
         plans_container = self.query_one("#plans-container")
+        tests_container = self.query_one("#tests-container")
         tree_container.styles.display = "none"
         guide_container.styles.display = "block"
         plans_container.styles.display = "none"
+        tests_container.styles.display = "none"
 
         # Update status bar for guide mode
         status_bar = self.query_one("#status-bar", StatusBar)
@@ -590,11 +622,14 @@ class ProjectManagerApp(App):
         tree_container = self.query_one("#tree-container")
         guide_container = self.query_one("#guide-progress-container")
         plans_container = self.query_one("#plans-container")
+        tests_container = self.query_one("#tests-container")
         tree_container.styles.display = "block"
         guide_container.styles.display = "none"
         plans_container.styles.display = "none"
+        tests_container.styles.display = "none"
         self._current_guide_step = None
         self._plans_visible = False
+        self._tests_visible = False
         # Capture frame after view change (use call_after_refresh to ensure screen is updated)
         self.call_after_refresh(self._capture_frame, "show_normal_view")
         # Show welcome popup when guide completes (only once)
@@ -1152,7 +1187,7 @@ class ProjectManagerApp(App):
 
     def action_show_help(self) -> None:
         _log.debug("action: show_help")
-        self.push_screen(HelpScreen(in_plans=self._plans_visible))
+        self.push_screen(HelpScreen(in_plans=self._plans_visible, in_tests=self._tests_visible))
 
     # --- Plans view ---
 
@@ -1161,10 +1196,13 @@ class ProjectManagerApp(App):
         tree_container = self.query_one("#tree-container")
         guide_container = self.query_one("#guide-progress-container")
         plans_container = self.query_one("#plans-container")
+        tests_container = self.query_one("#tests-container")
         tree_container.styles.display = "none"
         guide_container.styles.display = "none"
         plans_container.styles.display = "block"
+        tests_container.styles.display = "none"
         self._plans_visible = True
+        self._tests_visible = False
         self._current_guide_step = None
         self._refresh_plans_pane()
         plans_pane = self.query_one("#plans-pane", PlansPane)
@@ -1262,6 +1300,89 @@ class ProjectManagerApp(App):
         elif message.action == "review":
             if plan_id:
                 self._launch_pane(f"pm plan review {plan_id}", "plan-review")
+
+    # --- Tests view ---
+
+    def _show_tests_view(self) -> None:
+        """Show the tests list view."""
+        tree_container = self.query_one("#tree-container")
+        guide_container = self.query_one("#guide-progress-container")
+        plans_container = self.query_one("#plans-container")
+        tests_container = self.query_one("#tests-container")
+        tree_container.styles.display = "none"
+        guide_container.styles.display = "none"
+        plans_container.styles.display = "none"
+        tests_container.styles.display = "block"
+        self._tests_visible = True
+        self._plans_visible = False
+        self._current_guide_step = None
+        self._refresh_tests_pane()
+        tests_pane = self.query_one("#tests-pane", TestsPane)
+        tests_pane.focus()
+        # Update status bar
+        from pm_core import tui_tests
+        tests = tui_tests.list_tests()
+        status_bar = self.query_one("#status-bar", StatusBar)
+        status_bar.update(f" [bold]Tests[/bold]    {len(tests)} test(s)    [dim]T=back to tree[/dim]")
+        self.call_after_refresh(self._capture_frame, "show_tests_view")
+
+    def _refresh_tests_pane(self) -> None:
+        """Refresh the tests pane with current data."""
+        from pm_core import tui_tests
+        tests = tui_tests.list_tests()
+        tests_pane = self.query_one("#tests-pane", TestsPane)
+        tests_pane.update_tests(tests)
+
+    def action_toggle_tests(self) -> None:
+        """Toggle between tests view and tech tree view."""
+        _log.info("action: toggle_tests visible=%s", self._tests_visible)
+        if self._tests_visible:
+            self._show_normal_view()
+        else:
+            self._show_tests_view()
+
+    def on_test_selected(self, message: TestSelected) -> None:
+        _log.debug("test selected: %s", message.test_id)
+
+    def on_test_activated(self, message: TestActivated) -> None:
+        """Launch Claude with the selected test prompt."""
+        _log.info("test activated: %s", message.test_id)
+        from pm_core import tui_tests
+        from pm_core.claude_launcher import find_claude
+
+        prompt = tui_tests.get_test_prompt(message.test_id)
+        if not prompt:
+            self.log_message(f"Test not found: {message.test_id}")
+            return
+
+        claude = find_claude()
+        if not claude:
+            self.log_message("Claude CLI not found")
+            return
+
+        # Build session context (same pattern as cli.py tui_test command)
+        sess = self._session_name or "default"
+        pane_id = os.environ.get("TMUX_PANE", "")
+        full_prompt = f"""\
+## Session Context
+
+You are testing against tmux session: {sess}
+The TUI pane ID is: {pane_id}
+
+To interact with this session, use commands like:
+- pm tui view -s {sess}
+- pm tui send <keys> -s {sess}
+- tmux list-panes -t {sess} -F "#{{pane_id}} #{{pane_width}}x#{{pane_height}} #{{pane_current_command}}"
+- cat ~/.pm-pane-registry/{sess}.json
+
+{prompt}
+"""
+
+        cmd = claude
+        if os.environ.get("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS") == "true":
+            cmd += " --dangerously-skip-permissions"
+        cmd += f" {shlex.quote(full_prompt)}"
+        self._launch_pane(cmd, "tui-test")
 
     def _find_editor(self) -> str:
         """Find the user's preferred editor."""
