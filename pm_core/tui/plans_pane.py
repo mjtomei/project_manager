@@ -120,6 +120,17 @@ class PlansPane(Widget):
 
         return output
 
+    # Map keys to PlanAction strings — keep in sync with on_plan_action in app.py
+    _KEY_ACTIONS: dict[str, str] = {
+        "a": "add",
+        "w": "breakdown",
+        "D": "deps",
+        "l": "load",
+        "v": "view",
+        "e": "edit",
+        "c": "review",
+    }
+
     def on_key(self, event) -> None:
         if not self.has_focus:
             return
@@ -129,35 +140,17 @@ class PlansPane(Widget):
                 self.selected_index -= 1
                 self.refresh()
                 self.post_message(PlanSelected(self.selected_plan_id))
-            event.prevent_default()
+            event.stop()
         elif event.key in ("down", "j"):
             if self._plans and self.selected_index < len(self._plans) - 1:
                 self.selected_index += 1
                 self.refresh()
                 self.post_message(PlanSelected(self.selected_plan_id))
-            event.prevent_default()
+            event.stop()
         elif event.key == "enter":
             if self.selected_plan_id:
                 self.post_message(PlanActivated(self.selected_plan_id))
-            event.prevent_default()
-        elif event.key == "a":
-            self.post_message(PlanAction("add"))
-            event.prevent_default()
-        elif event.key == "w":
-            self.post_message(PlanAction("breakdown"))
-            event.prevent_default()
-        elif event.key == "D":
-            self.post_message(PlanAction("deps"))
-            event.prevent_default()
-        elif event.key == "l":
-            self.post_message(PlanAction("load"))
-            event.prevent_default()
-        elif event.key == "v":
-            self.post_message(PlanAction("view"))
-            event.prevent_default()
-        elif event.key == "e":
-            self.post_message(PlanAction("edit"))
-            event.prevent_default()
-        elif event.key == "c":
-            self.post_message(PlanAction("review"))
-            event.prevent_default()
+            event.stop()
+        elif event.key in self._KEY_ACTIONS:
+            self.post_message(PlanAction(self._KEY_ACTIONS[event.key]))
+            event.stop()

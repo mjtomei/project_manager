@@ -1284,10 +1284,14 @@ class ProjectManagerApp(App):
             self._launch_pane(f"less {plan_path}", "plan")
 
     def on_plan_action(self, message: PlanAction) -> None:
-        """Handle plan action shortcuts."""
-        _log.info("plan action: %s", message.action)
+        """Handle plan action shortcuts.
+
+        Key → action mapping is defined in PlansPane._KEY_ACTIONS.
+        """
+        message.stop()
         plans_pane = self.query_one("#plans-pane", PlansPane)
         plan_id = plans_pane.selected_plan_id
+        _log.info("plan action: %s (plan=%s)", message.action, plan_id)
 
         if message.action == "add":
             cmd_bar = self.query_one("#command-bar", CommandBar)
