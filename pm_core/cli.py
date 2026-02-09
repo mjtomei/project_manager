@@ -1566,7 +1566,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
 
     repo_url = data["project"]["repo"]
     base_branch = data["project"].get("base_branch", "main")
-    branch = pr_entry.get("branch", f"pm/{pr_id}")
+    branch = pr_entry.get("branch") or f"pm/{pr_id}"
 
     if workdir:
         work_path = Path(workdir).resolve()
