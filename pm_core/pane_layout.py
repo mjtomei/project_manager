@@ -427,9 +427,42 @@ def handle_pane_exited(session: str, window: str, generation: str,
             _logger.info("handle_pane_exited: no panes were removed from registry")
             return
 
-    # Brief wait for tmux to finish removing the pane, then rebalance.
+    # The EXIT trap runs while the dying pane is still alive in tmux.
+    # If we rebalance now, the layout includes the dying pane; when it
+    # dies moments later tmux recalculates the layout and unzooms.
+    # Fix: unzoom, switch focus away, then defer rebalance via a
+    # detached background process that waits for the pane to die first.
+    from pm_core import tmux as tmux_mod
     reg_window = data.get("window", window)
-    rebalance(session, reg_window)
+    tmux_mod.unzoom_pane(session, reg_window)
+    if pane_id:
+        # Focus the last active pane (the one the user was in before the
+        # dying pane).  Fall back to next pane if there is no last pane.
+        result = subprocess.run(
+            ["tmux", "select-pane", "-t", f"{session}:{reg_window}", "-l"],
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            subprocess.run(
+                ["tmux", "select-pane", "-t", f"{session}:{reg_window}", "-t", ":.+"],
+                check=False,
+            )
+
+    # Defer rebalance so it runs after the dying pane is gone.
+    # start_new_session detaches the process from the dying pane's PTY.
+    import sys
+    _logger.info("handle_pane_exited: deferring rebalance for %s:%s",
+                 session, reg_window)
+    subprocess.Popen(
+        [sys.executable, "-c",
+         "import time; time.sleep(0.3); "
+         "from pm_core.pane_layout import rebalance; "
+         f"rebalance({session!r}, {reg_window!r})"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
 
 
 def handle_any_pane_closed() -> None:

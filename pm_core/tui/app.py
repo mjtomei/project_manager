@@ -1025,26 +1025,12 @@ class ProjectManagerApp(App):
     def action_edit_plan(self) -> None:
         """Edit the selected PR in an interactive editor."""
         _log.info("action: edit_plan")
-        if not tmux_mod.in_tmux():
-            self.log_message("Not in tmux. Use 'pm session' to start a tmux session.")
-            return
         tree = self.query_one("#tech-tree", TechTree)
         pr_id = tree.selected_pr_id
         if not pr_id:
             self.log_message("No PR selected")
             return
-        try:
-            session_name = _run_shell(
-                ["tmux", "display-message", "-p", "#{session_name}"],
-                capture_output=True, text=True
-            ).stdout.strip()
-            direction = self._get_pane_split_direction()
-            edit_cmd = f"pm pr edit {pr_id}"
-            _log.info("launching editor: %s", edit_cmd)
-            tmux_mod.split_pane(session_name, direction, edit_cmd)
-            self.log_message(f"Editing {pr_id}")
-        except Exception as e:
-            self.log_message(f"Error: {e}")
+        self._launch_pane(f"pm pr edit {pr_id}", "pr-edit")
 
     def action_view_plan(self) -> None:
         """Open the plan file associated with the selected PR in a pane."""
