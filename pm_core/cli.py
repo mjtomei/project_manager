@@ -2762,6 +2762,73 @@ def _in_pm_tmux_session() -> bool:
     return session_name.startswith("pm-")
 
 
+# ---------------------------------------------------------------------------
+# bench group
+# ---------------------------------------------------------------------------
+
+@cli.group()
+def bench():
+    """Local LLM benchmarking via OpenAI-compatible APIs."""
+    pass
+
+
+@bench.command("models")
+@click.option("--url", default=None, envvar="PM_BENCH_URL",
+              help="Server URL (default: auto-detect)")
+@click.option("--backend", default=None, envvar="PM_BENCH_BACKEND",
+              type=click.Choice(["llama.cpp", "sglang", "vllm"], case_sensitive=False),
+              help="Force a specific backend")
+def bench_models(url, backend):
+    """Detect backend, list loaded models, and validate connectivity."""
+    from pm_core.bench.runner import Backend, Runner, detect_backend as _detect, _get_server_url
+
+    # Detect or use specified backend
+    if backend:
+        for b in Backend:
+            if b.value == backend:
+                chosen = b
+                break
+    else:
+        chosen = _detect()
+
+    if chosen is None:
+        click.echo("No local inference backend detected.", err=True)
+        click.echo("", err=True)
+        click.echo("Supported backends:", err=True)
+        click.echo("  macOS: llama.cpp server (default http://localhost:8080)", err=True)
+        click.echo("  Linux: sglang (http://localhost:30000), vllm (http://localhost:8000)", err=True)
+        click.echo("", err=True)
+        click.echo("Set PM_BENCH_URL to override, or PM_BENCH_BACKEND to force a backend.", err=True)
+        raise SystemExit(1)
+
+    runner = Runner(backend=chosen, base_url=url or _get_server_url(chosen))
+
+    # Health check
+    healthy = runner.health_check()
+    click.echo(f"Backend:  {runner.backend.value}")
+    click.echo(f"URL:      {runner.base_url}")
+    click.echo(f"Status:   {'connected' if healthy else 'unreachable'}")
+
+    if not healthy:
+        raise SystemExit(1)
+
+    # List models
+    try:
+        models = runner.list_models()
+    except Exception as e:
+        click.echo(f"Failed to list models: {e}", err=True)
+        raise SystemExit(1)
+
+    if not models:
+        click.echo("No models loaded.")
+        return
+
+    click.echo(f"Models:   {len(models)} loaded")
+    for m in models:
+        model_id = m.get("id", "unknown")
+        click.echo(f"  - {model_id}")
+
+
 @cli.group(invoke_without_command=True)
 @click.option("--step", default=None, help="Force a specific workflow step")
 @click.option("--new", "fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
