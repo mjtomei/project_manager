@@ -25,6 +25,13 @@ def pm_home() -> Path:
     return d
 
 
+def bench_cache_dir() -> Path:
+    """Return the benchmark cache directory (~/.cache/pm-bench/exercises/)."""
+    d = Path.home() / ".cache" / "pm-bench" / "exercises"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def pane_registry_dir() -> Path:
     """Return the pane registry directory (~/.pm/pane-registry/)."""
     d = pm_home() / "pane-registry"

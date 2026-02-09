@@ -2531,6 +2531,66 @@ def getting_started_cmd():
 
 
 # ---------------------------------------------------------------------------
+# bench group
+# ---------------------------------------------------------------------------
+
+@cli.group()
+def bench():
+    """Benchmark utilities (exercise loading, test generation)."""
+    pass
+
+
+@bench.command("exercises")
+@click.option("--language", "-l", default=None, help="Filter by language (e.g. python, go, rust)")
+@click.option("--slug", "-s", default=None, help="Filter exercises whose name contains this string")
+@click.option("--sync/--no-sync", default=True, help="Download/update exercises before listing")
+@click.option("--detail", is_flag=True, default=False, help="Show file counts for each exercise")
+def bench_exercises(language, slug, sync, detail):
+    """Download/update the exercise cache and list available exercises."""
+    from pm_core.bench.exercises import sync_exercises, load_exercises, list_languages
+
+    if sync:
+        try:
+            sync_exercises()
+        except subprocess.CalledProcessError as exc:
+            raise click.ClickException(f"Failed to sync exercises: {exc}") from exc
+
+    try:
+        exercises = load_exercises(language=language, slug=slug)
+    except FileNotFoundError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    if not exercises:
+        if language:
+            available = list_languages()
+            click.echo(f"No exercises found for language '{language}'.")
+            if available:
+                click.echo(f"Available languages: {', '.join(available)}")
+        else:
+            click.echo("No exercises found.")
+        return
+
+    # Group by language for display
+    by_lang: dict[str, list] = {}
+    for ex in exercises:
+        by_lang.setdefault(ex.language, []).append(ex)
+
+    total = len(exercises)
+    for lang in sorted(by_lang):
+        exs = by_lang[lang]
+        click.echo(f"\n{lang} ({len(exs)} exercises):")
+        for ex in exs:
+            if detail:
+                sc = len(ex.starter_code)
+                tc = len(ex.reference_tests)
+                click.echo(f"  {ex.slug}  ({sc} starter, {tc} test files)")
+            else:
+                click.echo(f"  {ex.slug}")
+
+    click.echo(f"\n{total} exercises across {len(by_lang)} languages")
+
+
+# ---------------------------------------------------------------------------
 # cluster group
 # ---------------------------------------------------------------------------
 
