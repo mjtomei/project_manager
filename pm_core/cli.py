@@ -2268,8 +2268,13 @@ def session_mobile(force: bool | None):
         # Trigger rebalance if in tmux
         if tmux_mod.in_tmux():
             window = tmux_mod.get_window_id(session_name)
-            # Unzoom before rebalance so layout applies to all panes
-            tmux_mod.unzoom_pane(session_name, window)
+            if not force:
+                # Exiting mobile: unzoom all windows, not just current
+                for w in tmux_mod.list_windows(session_name):
+                    tmux_mod.unzoom_pane(session_name, w["index"])
+            else:
+                # Entering mobile: unzoom current window before rebalance
+                tmux_mod.unzoom_pane(session_name, window)
             data = pane_layout.load_registry(session_name)
             data["user_modified"] = False
             pane_layout.save_registry(session_name, data)
