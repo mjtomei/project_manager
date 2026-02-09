@@ -133,8 +133,5 @@ class DetailPanel(Widget):
                 if section.get("files"):
                     lines.append(f"  Files: {section['files']}")
 
-        lines.append("")
-        lines.append("[dim]s=start  d=done  p=copy prompt  v=plan  q=quit[/dim]")
-
         content = "\n".join(lines)
         return Panel(content, title=f"{display_id}", border_style="blue")

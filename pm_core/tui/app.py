@@ -47,13 +47,13 @@ DEFAULT_FRAME_BUFFER_SIZE = 100
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Container, Horizontal, Vertical
 from textual.reactive import reactive
 from textual.timer import Timer
 from textual.widgets import Header, Footer, Static, Label
 from textual.screen import ModalScreen
 
-from pm_core import store, graph as graph_mod, git_ops, prompt_gen, notes, guide, pr_sync
+from pm_core import store, graph as graph_mod, git_ops, notes, guide, pr_sync
 
 from pm_core import tmux as tmux_mod
 from pm_core import pane_layout
@@ -210,7 +210,6 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]S[/]  Start fresh (no resume)", classes="help-row")
                 yield Label("  [bold]d[/]  Mark PR as done", classes="help-row")
                 yield Label("  [bold]c[/]  Launch Claude for PR", classes="help-row")
-                yield Label("  [bold]p[/]  Copy prompt to clipboard", classes="help-row")
                 yield Label("  [bold]e[/]  Edit selected PR", classes="help-row")
                 yield Label("  [bold]v[/]  View plan file", classes="help-row")
             yield Label("Panes & Views", classes="help-section")
@@ -251,7 +250,11 @@ class ProjectManagerApp(App):
         margin-top: 1;
     }
     #main-area {
+        layout: horizontal;
         height: 1fr;
+    }
+    #main-area.portrait {
+        layout: vertical;
     }
     #tree-container {
         width: 2fr;
@@ -263,6 +266,14 @@ class ProjectManagerApp(App):
         min-width: 35;
         max-width: 50;
         display: none;
+        overflow-y: auto;
+    }
+    #detail-container.portrait {
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+        height: 1fr;
+        max-height: 40%;
     }
     LogLine {
         height: 1;
@@ -320,7 +331,6 @@ class ProjectManagerApp(App):
         Binding("s", "start_pr", "Start PR", show=True),
         Binding("S", "start_pr_fresh", "Start Fresh", show=False),
         Binding("d", "done_pr", "Done PR", show=True),
-        Binding("p", "copy_prompt", "Copy Prompt", show=True),
 
         Binding("e", "edit_plan", "Edit PR", show=True),
         Binding("v", "view_plan", "View Plan", show=True),
@@ -340,7 +350,7 @@ class ProjectManagerApp(App):
 
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """Disable single-key shortcuts when command bar is focused or in guide mode."""
-        if action in ("start_pr", "start_pr_fresh", "done_pr", "copy_prompt",
+        if action in ("start_pr", "start_pr_fresh", "done_pr",
                        "edit_plan", "view_plan", "toggle_guide", "launch_notes",
                        "launch_meta", "view_log", "refresh", "rebalance", "quit", "show_help",
                        "toggle_tests"):
@@ -349,7 +359,7 @@ class ProjectManagerApp(App):
                 _log.debug("check_action: blocked %s (command bar focused)", action)
                 return False
         # Block PR actions when in guide mode or plans view (can't see the PR tree)
-        if action in ("start_pr", "done_pr", "copy_prompt", "launch_claude", "edit_plan", "view_plan"):
+        if action in ("start_pr", "done_pr", "launch_claude", "edit_plan", "view_plan"):
             if self._current_guide_step is not None:
                 _log.debug("check_action: blocked %s (in guide mode)", action)
                 return False
@@ -380,6 +390,7 @@ class ProjectManagerApp(App):
         self._frame_change_count: int = 0
         self._last_frame_content: str | None = None
         self._session_name: str | None = None
+        self._is_portrait: bool = False
 
     # --- Frame capture methods ---
 
@@ -492,7 +503,7 @@ class ProjectManagerApp(App):
 
     def compose(self) -> ComposeResult:
         yield StatusBar(id="status-bar")
-        with Horizontal(id="main-area"):
+        with Container(id="main-area"):
             with Vertical(id="tree-container"):
                 yield TechTree(id="tech-tree")
             with Vertical(id="guide-progress-container"):
@@ -532,6 +543,30 @@ class ProjectManagerApp(App):
 
         # Capture initial frame after state is loaded and rendered
         self.call_after_refresh(self._capture_frame, "mount")
+
+        # Set initial layout orientation
+        self._update_orientation()
+
+    def on_resize(self) -> None:
+        """Update layout orientation when terminal is resized."""
+        self._update_orientation()
+
+    def _update_orientation(self) -> None:
+        """Switch main area between landscape/portrait based on terminal size."""
+        # Textual char cells are ~2:1 aspect ratio, so compare width to height*2
+        is_portrait = self.size.width < self.size.height * 2
+        if is_portrait != self._is_portrait:
+            self._is_portrait = is_portrait
+            main_area = self.query_one("#main-area")
+            detail = self.query_one("#detail-container")
+            if is_portrait:
+                main_area.add_class("portrait")
+                detail.add_class("portrait")
+            else:
+                main_area.remove_class("portrait")
+                detail.remove_class("portrait")
+            _log.debug("orientation: %s (%dx%d)", "portrait" if is_portrait else "landscape",
+                       self.size.width, self.size.height)
 
     def _setup_frame_watchers(self) -> None:
         """Set up watchers on child widgets to capture frames on change."""
@@ -969,22 +1004,6 @@ class ProjectManagerApp(App):
         else:
             self.log_message("No PR selected")
 
-    def action_copy_prompt(self) -> None:
-        tree = self.query_one("#tech-tree", TechTree)
-        pr_id = tree.selected_pr_id
-        _log.info("action: copy_prompt selected=%s", pr_id)
-        if not pr_id:
-            self.log_message("No PR selected")
-            return
-        try:
-            prompt = prompt_gen.generate_prompt(self._data, pr_id)
-            import pyperclip
-            pyperclip.copy(prompt)
-            self.log_message(f"Prompt for {pr_id} copied to clipboard")
-        except ImportError:
-            self.log_message("pyperclip not available — install it for clipboard support")
-        except Exception as e:
-            self.log_message(f"Clipboard error: {e}")
 
     def _get_pane_split_direction(self) -> str:
         """Return 'v' if pane is taller than wide, else 'h'."""

@@ -175,7 +175,6 @@ pm pr start <pr-id>           Clone, branch, print Claude prompt
 pm pr done <pr-id>            Mark PR as in_review
 pm pr sync                    Check for merged PRs
 pm pr cleanup <pr-id>         Remove workdir for merged PR
-pm prompt <pr-id>             Print Claude prompt for a PR
 pm tui                        Launch interactive dashboard
 ```
 
@@ -190,7 +189,6 @@ terminal.
 - `d` — Mark selected PR as done
 - `c` — Launch Claude for selected PR (opens in new pane)
 - `e` — Edit selected PR
-- `p` — Copy PR prompt to clipboard
 - `n` — Open notes editor
 - `g` — Toggle guide mode
 - `r` — Refresh state

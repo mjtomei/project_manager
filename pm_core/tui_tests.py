@@ -580,7 +580,6 @@ The TUI displays PRs in a tech tree format. Users can:
 - Select a PR to see details (Enter)
 - Start working on a PR ('s' key)
 - Mark a PR as done ('d' key)
-- Copy the PR prompt to clipboard ('p' key)
 - Launch Claude with the PR prompt ('c' key)
 - Edit the plan file ('e' key)
 
@@ -673,20 +672,14 @@ This test requires PRs to exist in the project. Check first:
 
 ### Scenario D: PR Actions
 
-1. Copy prompt ('p'):
-   - Select a PR
-   - `pm tui send p`
-   - Check log line - should say "Prompt copied to clipboard" or similar
-   - (Cannot verify clipboard contents, just verify no error)
-
-2. Launch Claude ('c'):
+1. Launch Claude ('c'):
    - Select a PR
    - `pm tui send c`
    - This should open a new pane with Claude
    - Check `tmux list-panes` for new pane
    - Note: This may fail if not in tmux or Claude not installed
 
-3. Edit plan ('e'):
+2. Edit plan ('e'):
    - Select a PR that has an associated plan
    - `pm tui send e`
    - Should open editor in a new pane
@@ -725,7 +718,6 @@ From pm_core/tui/app.py:
 - PRActivated message sent when PR is activated (Enter)
 - action_start_pr() runs `pm pr start <id>`
 - action_done_pr() runs `pm pr done <id>`
-- action_copy_prompt() copies prompt to clipboard
 - action_launch_claude() opens Claude in new pane
 
 ## Reporting
@@ -754,7 +746,6 @@ Guide Mode Dismissed: [Yes/No/N/A]
 - Dependency handling: <observations>
 
 ## Scenario D: Actions
-- Copy prompt ('p'): [PASS/FAIL] - <log message>
 - Launch Claude ('c'): [PASS/FAIL/SKIPPED] - <notes>
 - Edit plan ('e'): [PASS/FAIL/SKIPPED] - <notes>
 
@@ -962,7 +953,6 @@ d=done PR, q=quit) should be tested carefully to avoid changing project state.
      * S - Start fresh (no resume)
      * d - Mark PR as done
      * c - Launch Claude for PR
-     * p - Copy prompt to clipboard
      * e - Edit selected PR
      * v - View plan file
    - Panes & Views section:
@@ -1009,49 +999,45 @@ Test each key that is safe to press (won't change PR state or quit):
    - `tmux list-panes` to verify pane count increased
    - Check pane registry for role "plan"
 
-4. **p** (copy prompt):
-   - `pm tui send p`
-   - `pm tui view` → log line should show "Prompt for <id> copied" or clipboard error
-
-5. **/** (command bar):
+4. **/** (command bar):
    - `pm tui send /`
    - `pm tui view` → command bar should be focused
    - `pm tui send Escape` → should unfocus command bar
 
-6. **g** (toggle guide):
+5. **g** (toggle guide):
    - `pm tui send g`
    - Wait 1 second
    - `pm tui view` → should either show guide view or launch guide pane
    - If guide pane launched, verify via `tmux list-panes`
    - Press 'g' again if needed to return to tech tree
 
-7. **n** (notes):
+6. **n** (notes):
    - `pm tui send n`
    - Wait 1 second
    - `tmux list-panes` → should see a new notes pane
    - Check registry for role "notes"
 
-8. **L** (view log):
+7. **L** (view log):
    - `pm tui send L`
    - Wait 1 second
    - `tmux list-panes` → should see a new log pane
    - Check registry for role "log"
 
-9. **r** (refresh):
+8. **r** (refresh):
    - `pm tui send r`
    - `pm tui view` → log line should show "Refreshing..." or sync result
 
-10. **b** (rebalance):
-    - `pm tui send b`
-    - `pm tui view` → log line should show "Layout rebalanced"
+9. **b** (rebalance):
+   - `pm tui send b`
+   - `pm tui view` → log line should show "Layout rebalanced"
 
-11. **?** (help - test open/close cycle):
+10. **?** (help - test open/close cycle):
     - `pm tui send ?`
     - `pm tui view` → help screen should appear
     - `pm tui send ?` → pressing again should close it
     - `pm tui view` → verify back to normal view
 
-12. **e** (edit PR):
+11. **e** (edit PR):
     - `pm tui send e`
     - Wait 1 second
     - `tmux list-panes` → should see editor pane
@@ -1106,7 +1092,6 @@ Navigation:
 PR Actions:
   Enter (detail panel): [PASS/FAIL] - <what detail panel shows>
   v (view plan): [PASS/FAIL] - <pane created? role correct?>
-  p (copy prompt): [PASS/FAIL] - <log message>
   e (edit PR): [PASS/FAIL] - <pane created?>
 
 Panes & Views:
