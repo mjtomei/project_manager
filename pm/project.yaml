@@ -3,10 +3,10 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-010
+  active_pr: pr-011
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
-  last_pr_sync: '2026-02-08T19:38:52.953044+00:00'
+  last_pr_sync: '2026-02-09T04:37:52.251537+00:00'
 plans:
 - id: plan-001
   name: Import from existing repo
@@ -141,3 +141,35 @@ prs:
   agent_machine: spark-424d
   gh_pr: null
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-010-isolate-workdir-pm-state-from-main-repo-8a71ed5f
+- id: pr-011
+  title: Fix plans pane w key launching wrong action
+  branch: null
+  status: in_progress
+  depends_on: []
+  description: 'In the plans pane, pressing w (breakdown) sometimes launches pm plan
+    review instead of pm plan breakdown. The PlanAction("breakdown") message is posted
+    correctly by plans_pane.py, but the app handler routes it to the wrong command.
+
+
+    Reproduction steps:
+
+    1. Open the TUI and press P to enter plans view
+
+    2. Select a plan (e.g. plan-001)
+
+    3. Press w to trigger breakdown
+
+    4. Check pane registry: the new pane has role "plan-review" running "pm plan review
+    plan-001" instead of role "plan-breakdown" running "pm plan breakdown plan-001"
+
+    5. Also observed: first w press sometimes produces no pane at all (no log entry
+    for "plan action: breakdown"), while a second w press creates the wrong pane type
+
+
+    The mismatch may indicate the on_plan_action handler is receiving a different
+    action string than expected, or there is a code path where the running TUI code
+    diverges from the source on disk.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/32
+  gh_pr_number: 32
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-011-d59a6c15
