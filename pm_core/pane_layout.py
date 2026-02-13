@@ -29,14 +29,19 @@ def registry_dir() -> Path:
     return pane_registry_dir()
 
 
+def base_session_name(session: str) -> str:
+    """Strip grouped-session suffix (~N) to get the base session name."""
+    return session.split("~")[0]
+
+
 def registry_path(session: str) -> Path:
     """Return the registry file path for a session."""
-    return registry_dir() / f"{session}.json"
+    return registry_dir() / f"{base_session_name(session)}.json"
 
 
 def mobile_flag_path(session: str) -> Path:
     """Return the path to the force-mobile flag file for a session."""
-    return registry_dir() / f"{session}.mobile"
+    return registry_dir() / f"{base_session_name(session)}.mobile"
 
 
 def set_force_mobile(session: str, enabled: bool) -> None:
