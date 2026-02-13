@@ -526,7 +526,7 @@ class ProjectManagerApp(App):
                     ["tmux", "display-message", "-p", "#{session_name}"],
                     capture_output=True, text=True, timeout=5
                 )
-                self._session_name = result.stdout.strip()
+                self._session_name = result.stdout.strip().split("~")[0]
             except Exception:
                 pass
         # Load any existing capture config

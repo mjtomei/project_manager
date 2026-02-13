@@ -29,14 +29,19 @@ def registry_dir() -> Path:
     return pane_registry_dir()
 
 
+def base_session_name(session: str) -> str:
+    """Strip grouped-session suffix (~N) to get the base session name."""
+    return session.split("~")[0]
+
+
 def registry_path(session: str) -> Path:
     """Return the registry file path for a session."""
-    return registry_dir() / f"{session}.json"
+    return registry_dir() / f"{base_session_name(session)}.json"
 
 
 def mobile_flag_path(session: str) -> Path:
     """Return the path to the force-mobile flag file for a session."""
-    return registry_dir() / f"{session}.mobile"
+    return registry_dir() / f"{base_session_name(session)}.mobile"
 
 
 def set_force_mobile(session: str, enabled: bool) -> None:
@@ -52,12 +57,21 @@ def set_force_mobile(session: str, enabled: bool) -> None:
 
 
 def is_mobile(session: str, window: str = "0") -> bool:
-    """Check if mobile mode is active (force flag or narrow terminal)."""
+    """Check if mobile mode is active (force flag or narrow terminal).
+
+    Checks all sessions in the group — if any attached client has a
+    narrow terminal, mobile mode applies to the shared window.
+    """
     if mobile_flag_path(session).exists():
         return True
     from pm_core import tmux as tmux_mod
-    width, _ = tmux_mod.get_window_size(session, window)
-    return 0 < width < MOBILE_WIDTH_THRESHOLD
+    base = base_session_name(session)
+    # Check all sessions in the group (base + grouped)
+    for s in [base] + tmux_mod.list_grouped_sessions(base):
+        width, _ = tmux_mod.get_window_size(s, window)
+        if 0 < width < MOBILE_WIDTH_THRESHOLD:
+            return True
+    return False
 
 
 def load_registry(session: str) -> dict:
@@ -274,6 +288,13 @@ def rebalance(session: str, window: str) -> bool:
         return False
 
     width, height = tmux_mod.get_window_size(session, window)
+    # If base session has no clients, try grouped sessions for size
+    if width <= 0 or height <= 0:
+        base = base_session_name(session)
+        for gs in tmux_mod.list_grouped_sessions(base):
+            width, height = tmux_mod.get_window_size(gs, window)
+            if width > 0 and height > 0:
+                break
     _logger.info("rebalance: window %s size=%dx%d, %d panes",
                  window, width, height, len(panes))
     if width <= 0 or height <= 0:

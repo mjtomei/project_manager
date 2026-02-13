@@ -310,3 +310,53 @@ def select_pane_smart(pane_id: str, session: str, window: str) -> None:
     select_pane(pane_id)
     if pane_layout.is_mobile(session, window):
         zoom_pane(pane_id)
+
+
+def create_grouped_session(base: str, name: str) -> None:
+    """Create a grouped session sharing windows with the base session."""
+    subprocess.run(
+        ["tmux", "new-session", "-d", "-t", base, "-s", name],
+        check=True,
+    )
+
+
+def list_grouped_sessions(base: str) -> list[str]:
+    """List grouped sessions matching base~*, sorted by suffix number."""
+    result = subprocess.run(
+        ["tmux", "list-sessions", "-F", "#{session_name}"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return []
+    prefix = base + "~"
+    grouped = []
+    for line in result.stdout.strip().splitlines():
+        if line.startswith(prefix):
+            grouped.append(line)
+    grouped.sort(key=lambda s: int(s.split("~")[1]) if s.split("~")[1].isdigit() else 0)
+    return grouped
+
+
+def find_unattached_grouped_session(base: str) -> str | None:
+    """Find the earliest grouped session with no clients attached."""
+    for name in list_grouped_sessions(base):
+        result = subprocess.run(
+            ["tmux", "display-message", "-t", name, "-p", "#{session_attached}"],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0 and result.stdout.strip() == "0":
+            return name
+    return None
+
+
+def next_grouped_session_name(base: str) -> str:
+    """Return the next grouped session name (base~{max+1})."""
+    existing = list_grouped_sessions(base)
+    if not existing:
+        return f"{base}~1"
+    max_n = 0
+    for name in existing:
+        suffix = name.split("~")[1]
+        if suffix.isdigit():
+            max_n = max(max_n, int(suffix))
+    return f"{base}~{max_n + 1}"

@@ -39,6 +39,12 @@ class PlansPane(Widget):
         super().__init__(**kwargs)
         self._plans: list[dict] = []
 
+    def _truncate(self, text: str, max_width: int) -> str:
+        """Truncate text to max_width, adding ellipsis if needed."""
+        if len(text) <= max_width:
+            return text
+        return text[: max_width - 1] + "\u2026"
+
     def update_plans(self, plans: list[dict]) -> None:
         """Update the plans data and refresh.
 
@@ -64,6 +70,9 @@ class PlansPane(Widget):
     def render(self) -> RenderableType:
         output = Text()
 
+        # Content width: widget width minus CSS padding (2 each side)
+        content_width = (self.size.width - 4) if self.size.width > 8 else 60
+
         if not self._plans:
             output.append("No plans yet. Press ", style="dim")
             output.append("a", style="bold")
@@ -83,19 +92,22 @@ class PlansPane(Widget):
                 else:
                     output.append("  ")
 
-                # Plan ID and name
-                output.append(f"{plan_id}: ", style="bold" if is_selected else "")
-                output.append(name, style="bold cyan" if is_selected else "")
-                output.append(f"  [{status}]", style="dim")
+                # Plan ID and name — truncate to fit one line
+                suffix = f"  [{status}]"
                 if pr_count:
-                    output.append(f"  {pr_count} PR{'s' if pr_count != 1 else ''}", style="dim")
+                    suffix += f"  {pr_count} PR{'s' if pr_count != 1 else ''}"
+                header = f"{plan_id}: {name}"
+                header = self._truncate(header, content_width - 2 - len(suffix))
+                output.append(header, style="bold cyan" if is_selected else "")
+                output.append(suffix, style="dim")
                 output.append("\n")
 
-                # Show intro text indented
+                # Show intro text indented — truncate to prevent wrapping
                 if intro:
                     for line in intro.split("\n"):
                         line = line.strip()
                         if line:
+                            line = self._truncate(line, content_width - 4)
                             output.append(f"    {line}\n", style="dim italic" if not is_selected else "italic")
                 output.append("\n")
 
@@ -120,6 +132,17 @@ class PlansPane(Widget):
 
         return output
 
+    def _scroll_selected_into_view(self) -> None:
+        """Scroll the parent container to keep the selected plan visible."""
+        if not self._plans:
+            return
+        # Estimate Y offset: each plan entry is ~3 lines (header, intro, blank)
+        y = self.selected_index * 3
+        from textual.geometry import Region
+        node_region = Region(0, y, self.size.width or 40, 3)
+        if self.parent:
+            self.parent.scroll_to_region(node_region)
+
     # Map keys to PlanAction strings — keep in sync with on_plan_action in app.py
     _KEY_ACTIONS: dict[str, str] = {
         "a": "add",
@@ -139,12 +162,14 @@ class PlansPane(Widget):
             if self._plans and self.selected_index > 0:
                 self.selected_index -= 1
                 self.refresh()
+                self._scroll_selected_into_view()
                 self.post_message(PlanSelected(self.selected_plan_id))
             event.stop()
         elif event.key in ("down", "j"):
             if self._plans and self.selected_index < len(self._plans) - 1:
                 self.selected_index += 1
                 self.refresh()
+                self._scroll_selected_into_view()
                 self.post_message(PlanSelected(self.selected_plan_id))
             event.stop()
         elif event.key == "enter":

@@ -401,7 +401,7 @@ try:
         # Find pm session and send refresh key
         result = sp.run(["tmux", "list-sessions", "-F", "#{{session_name}}"], capture_output=True, text=True)
         for session in result.stdout.strip().split("\\n"):
-            if session.startswith("pm-"):
+            if session.startswith("pm-") and "~" not in session:
                 sp.run(["tmux", "send-keys", "-t", session, "r"], capture_output=True)
                 break
 except Exception:

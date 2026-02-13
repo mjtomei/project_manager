@@ -2090,7 +2090,7 @@ def _register_tmux_bindings(session_name: str) -> None:
     for key, (direction, fallback) in switch_keys.items():
         _sp.run(["tmux", "bind-key", "-T", "prefix", key,
                  "if-shell",
-                 f"test -f {registry_dir}/#{{session_name}}.json",
+                 f"s='#{{session_name}}'; test -f {registry_dir}/${{s%%~*}}.json",
                  f"run-shell 'pm _pane-switch #{{session_name}} {direction}'",
                  fallback],
                 check=False)
@@ -2150,10 +2150,19 @@ def _session_start():
             tmux_mod.kill_session(session_name)
             # Fall through to normal creation code below
         else:
-            _log.info("TUI present, just attaching")
-            click.echo(f"Attaching to existing session '{session_name}'...")
+            _log.info("TUI present, finding/creating grouped session")
             _register_tmux_bindings(session_name)
-            tmux_mod.attach(session_name)
+            # Reuse an unattached grouped session, or create a new one
+            grouped = tmux_mod.find_unattached_grouped_session(session_name)
+            if grouped:
+                _log.info("reusing unattached grouped session: %s", grouped)
+                click.echo(f"Attaching to session '{grouped}'...")
+            else:
+                grouped = tmux_mod.next_grouped_session_name(session_name)
+                _log.info("creating new grouped session: %s", grouped)
+                tmux_mod.create_grouped_session(session_name, grouped)
+                click.echo(f"Attaching to session '{grouped}'...")
+            tmux_mod.attach(grouped)
             return
 
     _log.info("session does not exist or was killed, creating new session")
@@ -2223,7 +2232,10 @@ def _session_start():
 
     _register_tmux_bindings(session_name)
 
-    tmux_mod.attach(session_name)
+    # Create a grouped session so we never attach directly to the base
+    grouped = f"{session_name}~1"
+    tmux_mod.create_grouped_session(session_name, grouped)
+    tmux_mod.attach(grouped)
 
 
 @session.command("kill")
@@ -2239,6 +2251,9 @@ def session_kill():
         click.echo(f"No session '{session_name}' found.", err=True)
         raise SystemExit(1)
 
+    # Kill grouped sessions first, then the base
+    for g in tmux_mod.list_grouped_sessions(session_name):
+        tmux_mod.kill_session(g)
     tmux_mod.kill_session(session_name)
     pane_layout.set_force_mobile(session_name, False)
     click.echo(f"Killed session '{session_name}'.")
@@ -3167,7 +3182,7 @@ TUI_MAX_FRAMES = 50
 def _tui_history_file(session: str) -> Path:
     """Get the TUI history file for a specific session."""
     TUI_HISTORY_DIR.mkdir(parents=True, exist_ok=True)
-    return TUI_HISTORY_DIR / f"{session}.json"
+    return TUI_HISTORY_DIR / f"{session.split('~')[0]}.json"
 
 
 def _get_session_name_for_cwd() -> str:
@@ -3231,7 +3246,7 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
         return None, None
 
     for sess in result.stdout.strip().splitlines():
-        if sess.startswith("pm-"):
+        if sess.startswith("pm-") and "~" not in sess:
             data = pane_layout.load_registry(sess)
             for pane in data.get("panes", []):
                 if pane.get("role") == "tui":
