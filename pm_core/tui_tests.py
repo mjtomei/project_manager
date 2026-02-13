@@ -1567,6 +1567,97 @@ OVERALL: [PASS/FAIL]
 """
 
 
+COMMAND_DEDUP_TEST = """\
+You are testing the pm TUI command deduplication behavior. Your goal is to verify
+that PR action commands cannot be triggered concurrently, preventing race conditions.
+
+## Background
+
+The TUI allows keyboard shortcuts to trigger PR actions like "pr start" (s key) and
+"pr done" (d key). Previously, pressing the same key rapidly or triggering conflicting
+actions on different PRs could cause race conditions. The fix adds in-flight action
+tracking: while one PR action runs, all other PR actions are blocked with a "Busy: ..."
+message in the log line.
+
+## Available Tools
+
+You have access to these commands:
+- `pm tui view` - See current TUI state
+- `pm tui send <keys>` - Send keystrokes to TUI (s=start, d=done, j/k=navigate)
+- `pm tui frames` - View captured frames
+- `pm tui clear-frames` - Clear captured frames
+- `tmux list-panes -t <session>` - List panes
+
+## Test Procedure
+
+1. Setup:
+   - Run `pm tui clear-frames` to start fresh
+   - Run `pm tui view` to see the TUI and identify PRs
+   - Find a PR that is in "planned" status (can be started)
+   - Note the selected PR
+
+2. Test A - Rapid double-press of start key:
+   - Send 's' key twice rapidly: `pm tui send s s`
+   - Wait 2 seconds, then check the TUI: `pm tui view`
+   - The log line should show "Busy: Starting <pr_id>" for the second press
+   - Only ONE pr start command should be running
+   - Check frames to see the sequence of states
+
+3. Test B - Different action while start is running:
+   - If a pr start is still running (spinner visible), send 'd' key
+   - The log line should show "Busy: Starting <pr_id>"
+   - The done action should be blocked
+
+4. Test C - Command bar PR action while action is running:
+   - If a pr start is still running, open command bar with '/'
+   - Type "pr start pr-002" (or similar) and press Enter
+   - Should show "Busy: ..." message
+
+5. Test D - Action allowed after completion:
+   - Wait for the in-flight action to complete (spinner stops)
+   - Verify the log line shows completion (e.g., "✓ Starting pr-001 done")
+   - Try pressing 'd' on the same PR
+   - It should work (no "Busy" message)
+
+6. Cleanup:
+   - If a PR was started, run `pm tui send d` to mark it done, or wait for it
+   - Verify the TUI is in a clean state
+
+## Expected Behavior
+
+- `_inflight_pr_action` is set when a PR action begins
+- `_guard_pr_action()` blocks and shows "Busy: ..." if `_inflight_pr_action` is set
+- The flag is cleared when the command completes (success or failure)
+- Both keyboard shortcuts and command bar commands are guarded
+- Non-PR commands (r=refresh, g=guide, n=notes) are NOT blocked
+
+## Reporting
+
+```
+COMMAND DEDUP TEST RESULTS
+==========================
+
+Test A - Rapid double-press: [PASS/FAIL]
+  Second press blocked with Busy message: [Yes/No]
+  Only one command executed: [Yes/No]
+
+Test B - Different action during inflight: [PASS/FAIL]
+  Action blocked with Busy message: [Yes/No]
+
+Test C - Command bar guarded: [PASS/FAIL]
+  Command bar PR action blocked: [Yes/No]
+
+Test D - Action allowed after completion: [PASS/FAIL]
+  New action works after previous completes: [Yes/No]
+
+Issues Found:
+<list any bugs or unexpected behavior>
+
+OVERALL: [PASS/FAIL]
+```
+"""
+
+
 ALL_TESTS = {
     "pane-layout": {
         "name": "Pane Layout Refresh",
@@ -1617,6 +1708,11 @@ ALL_TESTS = {
         "name": "Mobile Mode",
         "prompt": MOBILE_MODE_TEST,
         "description": "Test mobile mode auto-zoom, force flag, pane switching, and status command",
+    },
+    "command-dedup": {
+        "name": "Command Deduplication",
+        "prompt": COMMAND_DEDUP_TEST,
+        "description": "Test that PR actions block concurrent/duplicate execution",
     },
 }
 
