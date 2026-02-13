@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-021
+  active_pr: pr-022
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-02-09T21:36:51.525740+00:00'
@@ -340,20 +340,6 @@ prs:
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
-- id: pr-020
-  plan: null
-  title: Fix rebalance layout for grouped sessions with different terminal sizes
-  branch: pm/pr-020-fix-rebalance-layout-for-grouped-sessions-with-dif
-  status: pending
-  depends_on: []
-  description: When multiple terminals are attached via grouped sessions with different
-    aspect ratios (e.g. portrait vs landscape), rebalance computes layout based on
-    the shared window size (minimum of all clients) rather than the calling terminal's
-    size. This means a portrait monitor doesn't get a horizontal split layout. Need
-    to investigate tmux aggressive-resize or alternative approaches.
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
 - id: pr-021
   plan: null
   title: Fix tmux commands to target current grouped session instead of base
@@ -364,6 +350,33 @@ prs:
     automatic window switching) target the base session name instead of the current
     grouped session. Need a helper that detects the current grouped session and targets
     that, falling back to the base session when not inside tmux.
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+- id: pr-022
+  plan: null
+  title: Handle merging pm directory changes across clones
+  branch: pm/pr-022-handle-merging-pm-directory-changes-across-clones
+  status: pending
+  depends_on: []
+  description: When PRs are added in two separate clones/workdirs, the pm/project.yaml
+    can diverge. Need a strategy for merging pm directory changes (e.g. new PRs added
+    concurrently) — could be a git pull/merge of the pm directory, a TUI key to sync,
+    or automatic conflict resolution.
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+- id: pr-023
+  plan: null
+  title: Fix rebalance layout for grouped sessions with different terminal sizes
+  branch: pm/pr-023-fix-rebalance-layout-for-grouped-sessions-with-dif
+  status: pending
+  depends_on: []
+  description: When multiple terminals are attached via grouped sessions with different
+    aspect ratios (e.g. portrait vs landscape), rebalance computes layout based on
+    the shared window size (minimum of all clients) rather than the calling terminal's
+    size. This means a portrait monitor doesn't get a horizontal split layout. Need
+    to investigate tmux aggressive-resize or alternative approaches.
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
