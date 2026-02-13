@@ -2068,12 +2068,20 @@ def session(ctx):
 
 
 def _register_tmux_bindings(session_name: str) -> None:
-    """Register tmux keybindings for mobile-aware pane navigation.
+    """Register tmux keybindings and session options for pm.
 
     Called on both new session creation and reattach so bindings
     survive across sessions (tmux bindings are global).
+    Also sets window-size=latest on all sessions in the group so each
+    client's terminal size is used for layout, not the minimum.
     """
     import subprocess as _sp
+    # Enable per-client window sizing: window follows the most recently
+    # active client rather than shrinking to the smallest.
+    base = session_name.split("~")[0]
+    for s in [base] + tmux_mod.list_grouped_sessions(base):
+        tmux_mod.set_session_option(s, "window-size", "latest")
+
     _sp.run(["tmux", "bind-key", "-T", "prefix", "R",
              "run-shell 'pm rebalance'"], check=False)
     # Conditionally override pane-switch keys: use pm's mobile-aware
@@ -2096,6 +2104,10 @@ def _register_tmux_bindings(session_name: str) -> None:
                 check=False)
     _sp.run(["tmux", "set-hook", "-g", "after-kill-pane",
              "run-shell 'pm _pane-closed'"], check=False)
+    # Auto-rebalance when window resizes (triggered by client switches
+    # with window-size=latest, or terminal resizes).
+    _sp.run(["tmux", "set-hook", "-t", base, "after-resize-window",
+             "run-shell 'pm _window-resized \"#{session_name}\"'"], check=False)
 
 
 def _session_start():
@@ -2161,6 +2173,7 @@ def _session_start():
                 grouped = tmux_mod.next_grouped_session_name(session_name)
                 _log.info("creating new grouped session: %s", grouped)
                 tmux_mod.create_grouped_session(session_name, grouped)
+                tmux_mod.set_session_option(grouped, "window-size", "latest")
                 click.echo(f"Attaching to session '{grouped}'...")
             tmux_mod.attach(grouped)
             return
@@ -2235,6 +2248,7 @@ def _session_start():
     # Create a grouped session so we never attach directly to the base
     grouped = f"{session_name}~1"
     tmux_mod.create_grouped_session(session_name, grouped)
+    tmux_mod.set_session_option(grouped, "window-size", "latest")
     tmux_mod.attach(grouped)
 
 
@@ -3094,6 +3108,24 @@ def pane_exited_cmd(session: str, window: str, generation: str, pane_id: str):
 def pane_closed_cmd():
     """Internal: handle pane close from global tmux hook."""
     pane_layout.handle_any_pane_closed()
+
+
+@cli.command("_window-resized", hidden=True)
+@click.argument("session")
+def window_resized_cmd(session: str):
+    """Internal: auto-rebalance after window resize.
+
+    Called from the after-resize-window tmux hook when window-size=latest
+    causes the window to resize (e.g. a different client becomes active).
+    """
+    base = pane_layout.base_session_name(session)
+    data = pane_layout.load_registry(base)
+    if not data["panes"]:
+        return
+    if data.get("user_modified"):
+        return
+    window = data.get("window", "0")
+    pane_layout.rebalance(base, window)
 
 
 @cli.command("_pane-opened", hidden=True)
