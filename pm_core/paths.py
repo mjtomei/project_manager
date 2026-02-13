@@ -18,6 +18,13 @@ from pathlib import Path
 _session_tag_cache: dict[str, str | None] = {}
 
 
+def bench_cache_dir() -> Path:
+    """Return the benchmark cache directory (~/.cache/pm-bench/)."""
+    d = Path.home() / ".cache" / "pm-bench"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def pm_home() -> Path:
     """Return the pm home directory (~/.pm/)."""
     d = Path.home() / ".pm"
