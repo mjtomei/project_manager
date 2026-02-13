@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -20,7 +21,7 @@ _LANG_CONFIG: dict[str, dict] = {
     "python": {
         "solution_file": lambda slug: f"{slug.replace('-', '_')}.py",
         "test_file": lambda slug: f"{slug.replace('-', '_')}_test.py",
-        "test_cmd": ["python", "-m", "pytest", "-x", "--tb=short", "-q"],
+        "test_cmd": [sys.executable, "-m", "pytest", "-x", "--tb=short", "-q"],
     },
     "go": {
         "solution_file": lambda slug: f"{slug.replace('-', '_')}.go",
