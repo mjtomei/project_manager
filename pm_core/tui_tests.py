@@ -1615,12 +1615,15 @@ Note the IDs assigned (e.g. pr-024, pr-025). Then refresh the TUI:
 - The log line should show "Busy: Starting <pr_id>" for the second press
 - Only ONE pr start command should be running
 - Check `pm tui frames` to see the sequence of states
+- Verify a frame with trigger starting with `log_message:Busy:` was captured
 
 ### 3. Test B - Different action while start is running
 
 - If a pr start is still running (spinner visible), send 'd' key
 - The log line should show "Busy: Starting <pr_id>"
 - The done action should be blocked
+- Note: `pr done` now runs async with a spinner, making the dedup guard critical
+  for preventing conflicts between concurrent start and done operations
 
 ### 4. Test C - Command bar PR action while action is running
 
@@ -1641,7 +1644,17 @@ Note the IDs assigned (e.g. pr-024, pr-025). Then refresh the TUI:
 - Try pressing 'd' on the same PR
 - It should work (no "Busy" message)
 
-### 7. Cleanup - Remove dummy PRs
+### 7. Test F - pr done dedup with start blocked
+
+- Navigate to the first dummy PR
+- Send 'd' key to start `pr done` (runs async with spinner)
+- While the spinner is visible, rapidly press 's' to try starting the same PR
+- The log line should show "Busy: Completing <pr_id>"
+- The start action should be blocked
+- Check `pm tui frames` for a frame with trigger starting with `log_message:Busy:`
+- Wait for pr done to complete, then verify the PR status changed
+
+### 8. Cleanup - Remove dummy PRs
 
 IMPORTANT: Always run this step, even if tests fail.
 
@@ -1684,6 +1697,11 @@ Test D - Non-PR actions not blocked: [PASS/FAIL]
 
 Test E - Action allowed after completion: [PASS/FAIL]
   New action works after previous completes: [Yes/No]
+
+Test F - pr done dedup with start blocked: [PASS/FAIL]
+  pr done runs async with spinner: [Yes/No]
+  Start blocked with Busy message during done: [Yes/No]
+  Busy message captured in frames (log_message:Busy:*): [Yes/No]
 
 Cleanup: [PASS/FAIL]
   Dummy PRs removed: [Yes/No]

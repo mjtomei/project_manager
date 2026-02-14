@@ -792,13 +792,16 @@ class ProjectManagerApp(App):
             _log.exception("Sync error")
             self.log_message(f"Sync error: {e}")
 
-    def log_message(self, msg: str) -> None:
+    def log_message(self, msg: str, capture: bool = True) -> None:
         """Show a message in the log line."""
         try:
             log = self.query_one("#log-line", LogLine)
             log.update(f" {msg}")
         except Exception:
             pass
+        if capture:
+            truncated = msg[:60].replace("\n", " ")
+            self.call_after_refresh(self._capture_frame, f"log_message:{truncated}")
 
     def _clear_log_message(self) -> None:
         """Clear the log line message."""
@@ -888,12 +891,16 @@ class ProjectManagerApp(App):
                 self._inflight_pr_action = action_key
                 break
 
-        # Detect if this should run async (PR start commands are long-running)
+        # Detect if this should run async (PR commands are long-running)
         working_message = None
         if cmd.startswith("pr start"):
             parts = shlex.split(cmd)
             pr_id = parts[-1] if len(parts) >= 3 else "PR"
             working_message = f"Starting {pr_id}"
+        elif cmd.startswith("pr done"):
+            parts = shlex.split(cmd)
+            pr_id = parts[-1] if len(parts) >= 3 else "PR"
+            working_message = f"Completing {pr_id}"
 
         self._run_command(cmd, working_message=working_message, action_key=action_key)
         tree = self.query_one("#tech-tree", TechTree)
@@ -963,7 +970,7 @@ class ProjectManagerApp(App):
         def update_spinner() -> None:
             if spinner_running:
                 frame = next(spinner_frames)
-                self.log_message(f"{frame} {working_message}...")
+                self.log_message(f"{frame} {working_message}...", capture=False)
                 self.set_timer(0.1, update_spinner)
 
         # Start spinner
@@ -1060,7 +1067,7 @@ class ProjectManagerApp(App):
         if not self._guard_pr_action(action_key):
             return
         self._inflight_pr_action = action_key
-        self._run_command(f"pr done {pr_id}", action_key=action_key)
+        self._run_command(f"pr done {pr_id}", working_message=action_key, action_key=action_key)
 
 
     def _get_pane_split_direction(self) -> str:
