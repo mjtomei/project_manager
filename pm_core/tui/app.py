@@ -740,16 +740,6 @@ class ProjectManagerApp(App):
             prs = self._data.get("prs") or []
             status_bar.update_status(project.get("name", "???"), project.get("repo", "???"), "pulling", pr_count=len(prs))
 
-            # Sync pm state from remote (picks up PRs/plans from other clones)
-            from pm_core import pm_sync
-            merged, pm_changed = pm_sync.sync_pm_state(
-                self._root, self._data, force=is_manual,
-            )
-            if pm_changed:
-                store.save(merged, self._root)
-                self._data = merged
-                pm_sync.sync_plan_files(self._root, merged)
-
             # Use shorter interval for manual refresh, longer for background
             min_interval = (
                 pr_sync.MIN_SYNC_INTERVAL_SECONDS if is_manual

@@ -146,16 +146,8 @@ def _pr_display_id(pr: dict) -> str:
 
 
 def save_and_push(data: dict, root: Path, message: str = "pm: update state") -> None:
-    """Sync with remote, merge, then save state."""
-    from pm_core import pm_sync
-    merged, changed = pm_sync.sync_pm_state(root, data)
-    if changed:
-        store.save(merged, root)
-        # Update caller's dict reference so subsequent code sees merged data
-        data.clear()
-        data.update(merged)
-    else:
-        store.save(data, root)
+    """Save state. Use 'pm push' to commit and share changes."""
+    store.save(data, root)
 
 
 def trigger_tui_refresh() -> None:
@@ -414,30 +406,6 @@ def push_cmd():
         elif backend == "local":
             click.echo("Committed locally. Merge the branch to apply changes:")
             click.echo(f"  git merge {result['branch']}")
-
-
-@cli.command("sync")
-@click.option("--force", is_flag=True, help="Force sync regardless of throttle")
-def sync_cmd(force):
-    """Sync pm state from remote base branch.
-
-    Fetches the latest project.yaml from origin/<base_branch> and merges
-    it with local state. Picks up PRs and plans added in other clones.
-    """
-    from pm_core import pm_sync
-
-    root = state_root()
-    data = store.load(root)
-    merged, changed = pm_sync.sync_pm_state(root, data, force=force)
-    if changed:
-        store.save(merged, root)
-        synced_files = pm_sync.sync_plan_files(root, merged)
-        click.echo("State synced and merged.")
-        if synced_files:
-            click.echo(f"  Pulled {synced_files} plan file(s).")
-        trigger_tui_refresh()
-    else:
-        click.echo("Already up to date.")
 
 
 # --- Plan commands ---
