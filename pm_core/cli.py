@@ -861,33 +861,23 @@ def plan_load(plan_id: str | None):
         commands.append(cmd)
         click.echo(f"  - {pr['title']}")
 
-    # Build depends_on edit commands (second pass, referencing predicted PR IDs)
-    # Hash-based IDs are deterministic from title+desc, so we can predict them
-    existing_ids = {p["id"] for p in (data.get("prs") or [])}
-    title_to_predicted_id = {}
-    for pr in prs:
-        predicted_id = store.generate_pr_id(pr["title"], pr.get("description", ""), existing_ids)
-        title_to_predicted_id[pr["title"]] = predicted_id
-        existing_ids.add(predicted_id)  # avoid collisions between new PRs
-
-    dep_commands = []
+    # Collect dependency info (title -> depends_on_title) for Claude to resolve
+    dep_info = []
     for pr in prs:
         if pr["depends_on"]:
-            pr_id = title_to_predicted_id[pr["title"]]
-            dep_title = pr["depends_on"].strip()
-            if dep_title in title_to_predicted_id:
-                dep_id = title_to_predicted_id[dep_title]
-                dep_commands.append(f'pm pr edit {pr_id} --depends-on {dep_id}')
-
-    all_commands = commands + dep_commands
+            dep_info.append((pr["title"], pr["depends_on"].strip()))
 
     click.echo()
     prompt = "Your goal: Create all the PRs from the plan by running these pm commands.\n\n"
     prompt += "This session is managed by `pm` (project manager for Claude Code). "
     prompt += "Run these commands in order using your Bash tool:\n\n"
-    prompt += "\n".join(all_commands)
-    prompt += "\n\nAfter running all commands, run `pm pr list` and `pm pr graph` to "
-    prompt += "show the user what was created."
+    prompt += "\n".join(commands)
+    if dep_info:
+        prompt += "\n\nAfter creating all PRs, run `pm pr list` to see the assigned PR IDs, "
+        prompt += "then set up these dependencies using `pm pr edit <id> --depends-on <id>`:\n"
+        for title, dep_title in dep_info:
+            prompt += f'  - "{title}" depends on "{dep_title}"\n'
+    prompt += "\nFinally, run `pm pr list` and `pm pr graph` to show the user what was created."
 
     claude = find_claude()
     if claude:
