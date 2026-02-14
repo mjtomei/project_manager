@@ -1588,7 +1588,7 @@ You have access to these commands:
 - `pm tui clear-frames` - Clear captured frames
 - `tmux list-panes -t <session>` - List panes
 - `pm pr add <title>` - Create a dummy PR
-- `pm pr close <pr_id>` - Remove a PR (use --keep-github --keep-branch for dummy PRs)
+- `pm pr close <pr_id>` - Remove a PR from project.yaml
 
 ## Test Procedure
 
@@ -1646,8 +1646,8 @@ Note the IDs assigned (e.g. pr-024, pr-025). Then refresh the TUI:
 IMPORTANT: Always run this step, even if tests fail.
 
 ```
-pm pr close <first-dummy-pr-id> --keep-github --keep-branch
-pm pr close <second-dummy-pr-id> --keep-github --keep-branch
+pm pr close <first-dummy-pr-id>
+pm pr close <second-dummy-pr-id>
 ```
 
 Then refresh the TUI: `pm tui send r`
