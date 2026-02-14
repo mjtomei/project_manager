@@ -127,14 +127,16 @@ def load_and_sync() -> tuple[dict, Path]:
     return store.load(root), root
 
 
-def _pr_id_num(pr_id: str) -> int:
-    """Extract numeric part from pr-NNN id for sorting."""
-    # pr-001 → 1, pr-010 → 10
-    parts = pr_id.split("-")
-    try:
-        return int(parts[1])
-    except (IndexError, ValueError):
-        return 0
+def _pr_id_sort_key(pr_id: str) -> tuple[int, str]:
+    """Sort key for PR IDs. Numeric pr-NNN sorts by number, hash IDs sort after."""
+    # pr-001 → (1, ""), pr-a3f2b1c → (0, "a3f2b1c")
+    parts = pr_id.split("-", 1)
+    if len(parts) == 2:
+        try:
+            return (int(parts[1]), "")
+        except ValueError:
+            return (0, parts[1])
+    return (0, pr_id)
 
 
 def _pr_display_id(pr: dict) -> str:
@@ -144,8 +146,16 @@ def _pr_display_id(pr: dict) -> str:
 
 
 def save_and_push(data: dict, root: Path, message: str = "pm: update state") -> None:
-    """Save state. Use 'pm push' to commit and share changes."""
-    store.save(data, root)
+    """Sync with remote, merge, then save state."""
+    from pm_core import pm_sync
+    merged, changed = pm_sync.sync_pm_state(root, data)
+    if changed:
+        store.save(merged, root)
+        # Update caller's dict reference so subsequent code sees merged data
+        data.clear()
+        data.update(merged)
+    else:
+        store.save(data, root)
 
 
 def trigger_tui_refresh() -> None:
@@ -404,6 +414,30 @@ def push_cmd():
         elif backend == "local":
             click.echo("Committed locally. Merge the branch to apply changes:")
             click.echo(f"  git merge {result['branch']}")
+
+
+@cli.command("sync")
+@click.option("--force", is_flag=True, help="Force sync regardless of throttle")
+def sync_cmd(force):
+    """Sync pm state from remote base branch.
+
+    Fetches the latest project.yaml from origin/<base_branch> and merges
+    it with local state. Picks up PRs and plans added in other clones.
+    """
+    from pm_core import pm_sync
+
+    root = state_root()
+    data = store.load(root)
+    merged, changed = pm_sync.sync_pm_state(root, data, force=force)
+    if changed:
+        store.save(merged, root)
+        synced_files = pm_sync.sync_plan_files(root, merged)
+        click.echo("State synced and merged.")
+        if synced_files:
+            click.echo(f"  Pulled {synced_files} plan file(s).")
+        trigger_tui_refresh()
+    else:
+        click.echo("Already up to date.")
 
 
 # --- Plan commands ---
@@ -859,19 +893,14 @@ def plan_load(plan_id: str | None):
         commands.append(cmd)
         click.echo(f"  - {pr['title']}")
 
-    # Build depends_on edit commands (second pass, referencing PR IDs)
-    # We know the current next_pr_id, so we can predict IDs
-    existing_prs = data.get("prs") or []
-    if existing_prs:
-        import re
-        nums = [int(m.group(1)) for p in existing_prs if (m := re.match(r"pr-(\d+)", p["id"]))]
-        next_num = max(nums) + 1 if nums else 1
-    else:
-        next_num = 1
-
+    # Build depends_on edit commands (second pass, referencing predicted PR IDs)
+    # Hash-based IDs are deterministic from title+desc, so we can predict them
+    existing_ids = {p["id"] for p in (data.get("prs") or [])}
     title_to_predicted_id = {}
-    for i, pr in enumerate(prs):
-        title_to_predicted_id[pr["title"]] = f"pr-{next_num + i:03d}"
+    for pr in prs:
+        predicted_id = store.generate_pr_id(pr["title"], pr.get("description", ""), existing_ids)
+        title_to_predicted_id[pr["title"]] = predicted_id
+        existing_ids.add(predicted_id)  # avoid collisions between new PRs
 
     dep_commands = []
     for pr in prs:
@@ -1024,9 +1053,8 @@ def _import_github_prs(root: Path, data: dict) -> None:
             status = "pending"
 
         existing_ids = {p["id"] for p in data["prs"]}
-        pr_id = f"pr-{number:03d}"
-        if pr_id in existing_ids:
-            pr_id = store.next_pr_id(data)
+        desc = gh_pr.get("body", "") or ""
+        pr_id = store.generate_pr_id(title, desc, existing_ids)
 
         entry = {
             "id": pr_id,
@@ -1035,12 +1063,13 @@ def _import_github_prs(root: Path, data: dict) -> None:
             "branch": branch,
             "status": status,
             "depends_on": [],
-            "description": gh_pr.get("body", "") or "",
+            "description": desc,
             "agent_machine": None,
             "gh_pr": gh_pr.get("url", ""),
             "gh_pr_number": number,
         }
         data["prs"].append(entry)
+        existing_ids.add(pr_id)
         imported += 1
         click.echo(f"  + {pr_id}: {title} [{status}] (#{number})")
 
@@ -1184,7 +1213,8 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
         if len(plans) == 1:
             plan_id = plans[0]["id"]
 
-    pr_id = store.next_pr_id(data)
+    existing_ids = {p["id"] for p in (data.get("prs") or [])}
+    pr_id = store.generate_pr_id(title, desc, existing_ids)
     slug = store.slugify(title)
     branch = f"pm/{pr_id}-{slug}"
 
@@ -1413,7 +1443,7 @@ def pr_list():
         return
 
     # Sort newest first (by gh_pr_number descending, then pr id descending)
-    prs = sorted(prs, key=lambda p: (p.get("gh_pr_number") or _pr_id_num(p["id"])), reverse=True)
+    prs = sorted(prs, key=lambda p: (p.get("gh_pr_number") or _pr_id_sort_key(p["id"])[0], _pr_id_sort_key(p["id"])[1]), reverse=True)
 
     active_pr = data.get("project", {}).get("active_pr")
     status_icons = {
@@ -1896,17 +1926,11 @@ def pr_import_github(gh_state: str):
         else:
             status = "pending"
 
-        # Generate a pr_id based on the GH PR number
+        # Generate a hash-based pr_id from title + body
         existing_ids = {p["id"] for p in data["prs"]}
-        pr_id = f"pr-{number:03d}"
-        if pr_id in existing_ids:
-            pr_id = f"pr-{number:03d}-gh"
-        if pr_id in existing_ids:
-            # Fall back to sequential
-            pr_id = store.next_pr_id(data)
-
         url = gh_pr.get("url", "")
         body = gh_pr.get("body", "") or ""
+        pr_id = store.generate_pr_id(title, body, existing_ids)
 
         entry = {
             "id": pr_id,

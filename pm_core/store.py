@@ -1,5 +1,6 @@
 """YAML read/write for project.yaml state management."""
 
+import hashlib
 import os
 import re
 from pathlib import Path
@@ -94,6 +95,30 @@ def next_pr_id(data: dict) -> str:
         if m:
             nums.append(int(m.group(1)))
     return f"pr-{max(nums) + 1:03d}"
+
+
+def generate_pr_id(title: str, desc: str = "", existing_ids: set[str] | None = None) -> str:
+    """Generate a PR ID from a hash of title and description.
+
+    Uses sha256(title + newline + desc) truncated to 7 hex chars,
+    producing IDs like 'pr-a3f2b1c'. If the ID collides with an
+    existing one, extends the hash until unique.
+
+    Backwards compatible: old pr-001 style IDs continue to work
+    everywhere since IDs are just opaque strings.
+    """
+    digest = hashlib.sha256(f"{title}\n{desc}".encode()).hexdigest()
+    min_len = 7
+    for length in range(min_len, len(digest) + 1):
+        pr_id = f"pr-{digest[:length]}"
+        if existing_ids is None or pr_id not in existing_ids:
+            return pr_id
+    # Extremely unlikely: full hash collision. Append counter.
+    for i in range(2, 1000):
+        pr_id = f"pr-{digest[:min_len]}-{i}"
+        if existing_ids is None or pr_id not in existing_ids:
+            return pr_id
+    raise RuntimeError("Could not generate unique PR ID")
 
 
 def get_pr(data: dict, pr_id: str) -> Optional[dict]:
