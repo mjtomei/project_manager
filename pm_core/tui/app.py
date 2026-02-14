@@ -391,6 +391,8 @@ class ProjectManagerApp(App):
         self._last_frame_content: str | None = None
         self._session_name: str | None = None
         self._is_portrait: bool = False
+        # In-flight PR action tracking (prevents concurrent/duplicate PR commands)
+        self._inflight_pr_action: str | None = None
 
     # --- Frame capture methods ---
 
@@ -790,13 +792,16 @@ class ProjectManagerApp(App):
             _log.exception("Sync error")
             self.log_message(f"Sync error: {e}")
 
-    def log_message(self, msg: str) -> None:
+    def log_message(self, msg: str, capture: bool = True) -> None:
         """Show a message in the log line."""
         try:
             log = self.query_one("#log-line", LogLine)
             log.update(f" {msg}")
         except Exception:
             pass
+        if capture:
+            truncated = msg[:60].replace("\n", " ")
+            self.call_after_refresh(self._capture_frame, f"log_message:{truncated}")
 
     def _clear_log_message(self) -> None:
         """Clear the log line message."""
@@ -866,19 +871,49 @@ class ProjectManagerApp(App):
         self._detail_visible = True
         self.call_after_refresh(self._capture_frame, f"pr_activated:{message.pr_id}")
 
+    # PR command prefixes that require in-flight action guarding
+    _PR_ACTION_PREFIXES = ("pr start", "pr done")
+
     def on_command_submitted(self, message: CommandSubmitted) -> None:
         """Handle commands typed in the command bar."""
         _log.info("command submitted: %s", message.command)
-        self._run_command(message.command)
+        cmd = message.command.strip()
+
+        # Guard PR action commands from the command bar too
+        action_key = None
+        for prefix in self._PR_ACTION_PREFIXES:
+            if cmd.startswith(prefix):
+                action_key = cmd
+                if not self._guard_pr_action(action_key):
+                    tree = self.query_one("#tech-tree", TechTree)
+                    tree.focus()
+                    return
+                self._inflight_pr_action = action_key
+                break
+
+        # Detect if this should run async (PR commands are long-running)
+        working_message = None
+        if cmd.startswith("pr start"):
+            parts = shlex.split(cmd)
+            pr_id = parts[-1] if len(parts) >= 3 else "PR"
+            working_message = f"Starting {pr_id}"
+        elif cmd.startswith("pr done"):
+            parts = shlex.split(cmd)
+            pr_id = parts[-1] if len(parts) >= 3 else "PR"
+            working_message = f"Completing {pr_id}"
+
+        self._run_command(cmd, working_message=working_message, action_key=action_key)
         tree = self.query_one("#tech-tree", TechTree)
         tree.focus()
 
-    def _run_command(self, cmd: str, working_message: str | None = None) -> None:
+    def _run_command(self, cmd: str, working_message: str | None = None,
+                     action_key: str | None = None) -> None:
         """Execute a pm sub-command.
 
         Args:
             cmd: The command to run (e.g., "pr start pr-001")
             working_message: Optional message to show while running (enables async mode)
+            action_key: Optional key for in-flight tracking (set before calling this)
         """
         parts = shlex.split(cmd)
         if not parts:
@@ -888,11 +923,13 @@ class ProjectManagerApp(App):
 
         if working_message:
             # Run async with spinner
-            self.run_worker(self._run_command_async(cmd, parts, working_message))
+            self.run_worker(self._run_command_async(cmd, parts, working_message, action_key))
         else:
             # Run sync for quick commands
             self.log_message(f"> {cmd}")
             self._run_command_sync(parts)
+            if action_key:
+                self._inflight_pr_action = None
 
     def _run_command_sync(self, parts: list[str]) -> None:
         """Run a command synchronously (for quick operations)."""
@@ -918,7 +955,8 @@ class ProjectManagerApp(App):
         # Reload state
         self._load_state()
 
-    async def _run_command_async(self, cmd: str, parts: list[str], working_message: str) -> None:
+    async def _run_command_async(self, cmd: str, parts: list[str], working_message: str,
+                                action_key: str | None = None) -> None:
         """Run a command asynchronously with animated spinner."""
         import asyncio
         import itertools
@@ -932,7 +970,7 @@ class ProjectManagerApp(App):
         def update_spinner() -> None:
             if spinner_running:
                 frame = next(spinner_frames)
-                self.log_message(f"{frame} {working_message}...")
+                self.log_message(f"{frame} {working_message}...", capture=False)
                 self.set_timer(0.1, update_spinner)
 
         # Start spinner
@@ -969,40 +1007,67 @@ class ProjectManagerApp(App):
             spinner_running = False
             _log.exception("command failed: %s", cmd)
             self.log_message(f"Error: {e}")
+        finally:
+            if action_key:
+                self._inflight_pr_action = None
 
         # Reload state
         self._load_state()
 
     # --- Key actions ---
 
+    def _guard_pr_action(self, action_desc: str) -> bool:
+        """Check if a PR action is allowed (no conflicting action in-flight).
+
+        Returns True if the action can proceed, False if blocked.
+        Shows a status message when blocked.
+        """
+        if self._inflight_pr_action:
+            _log.info("action blocked: %s (busy: %s)", action_desc, self._inflight_pr_action)
+            self.log_message(f"Busy: {self._inflight_pr_action}")
+            return False
+        return True
+
     def action_start_pr(self) -> None:
         tree = self.query_one("#tech-tree", TechTree)
         pr_id = tree.selected_pr_id
         _log.info("action: start_pr selected=%s", pr_id)
-        if pr_id:
-            self._run_command(f"pr start {pr_id}", working_message=f"Starting {pr_id}")
-        else:
+        if not pr_id:
             _log.info("action: start_pr - no PR selected")
             self.log_message("No PR selected")
+            return
+        action_key = f"Starting {pr_id}"
+        if not self._guard_pr_action(action_key):
+            return
+        self._inflight_pr_action = action_key
+        self._run_command(f"pr start {pr_id}", working_message=action_key, action_key=action_key)
 
     def action_start_pr_fresh(self) -> None:
         """Start PR with fresh Claude session (no resume)."""
         tree = self.query_one("#tech-tree", TechTree)
         pr_id = tree.selected_pr_id
         _log.info("action: start_pr_fresh selected=%s", pr_id)
-        if pr_id:
-            self._run_command(f"pr start --new {pr_id}", working_message=f"Starting {pr_id} (fresh)")
-        else:
+        if not pr_id:
             self.log_message("No PR selected")
+            return
+        action_key = f"Starting {pr_id} (fresh)"
+        if not self._guard_pr_action(action_key):
+            return
+        self._inflight_pr_action = action_key
+        self._run_command(f"pr start --new {pr_id}", working_message=action_key, action_key=action_key)
 
     def action_done_pr(self) -> None:
         tree = self.query_one("#tech-tree", TechTree)
         pr_id = tree.selected_pr_id
         _log.info("action: done_pr selected=%s", pr_id)
-        if pr_id:
-            self._run_command(f"pr done {pr_id}")
-        else:
+        if not pr_id:
             self.log_message("No PR selected")
+            return
+        action_key = f"Completing {pr_id}"
+        if not self._guard_pr_action(action_key):
+            return
+        self._inflight_pr_action = action_key
+        self._run_command(f"pr done {pr_id}", working_message=action_key, action_key=action_key)
 
 
     def _get_pane_split_direction(self) -> str:
@@ -1357,16 +1422,11 @@ class ProjectManagerApp(App):
         """Launch Claude with the selected test prompt."""
         _log.info("test activated: %s", message.test_id)
         from pm_core import tui_tests
-        from pm_core.claude_launcher import find_claude
+        from pm_core.claude_launcher import build_claude_shell_cmd
 
         prompt = tui_tests.get_test_prompt(message.test_id)
         if not prompt:
             self.log_message(f"Test not found: {message.test_id}")
-            return
-
-        claude = find_claude()
-        if not claude:
-            self.log_message("Claude CLI not found")
             return
 
         # Build session context (same pattern as cli.py tui_test command)
@@ -1387,10 +1447,7 @@ To interact with this session, use commands like:
 {prompt}
 """
 
-        cmd = claude
-        if os.environ.get("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS") == "true":
-            cmd += " --dangerously-skip-permissions"
-        cmd += f" {shlex.quote(full_prompt)}"
+        cmd = build_claude_shell_cmd(prompt=full_prompt)
         self._launch_pane(cmd, "tui-test")
 
     def _find_editor(self) -> str:

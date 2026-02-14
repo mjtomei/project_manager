@@ -182,7 +182,8 @@ class Bridge:
             return "ERROR: claude CLI not found"
 
         cmd = [claude, "-p"]
-        if os.environ.get("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS") == "true":
+        from pm_core.paths import skip_permissions_enabled
+        if skip_permissions_enabled():
             cmd.append("--dangerously-skip-permissions")
         if self.session_id:
             cmd.extend(["--resume", self.session_id])
