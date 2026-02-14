@@ -2105,9 +2105,13 @@ def _register_tmux_bindings(session_name: str) -> None:
     _sp.run(["tmux", "set-hook", "-g", "after-kill-pane",
              "run-shell 'pm _pane-closed'"], check=False)
     # Auto-rebalance when window resizes (triggered by client switches
-    # with window-size=latest, or terminal resizes).
-    _sp.run(["tmux", "set-hook", "-t", base, "after-resize-window",
-             "run-shell 'pm _window-resized \"#{session_name}\"'"], check=False)
+    # with window-size=latest, or terminal resizes).  Global hook with
+    # if-shell guard so only pm sessions trigger the Python process.
+    _sp.run(["tmux", "set-hook", "-g", "after-resize-window",
+             "if-shell",
+             f"s='#{{session_name}}'; test -f {registry_dir}/${{s%%~*}}.json",
+             "run-shell 'pm _window-resized \"#{session_name}\"'"],
+            check=False)
 
 
 def _session_start():
@@ -3115,14 +3119,18 @@ def pane_closed_cmd():
 def window_resized_cmd(session: str):
     """Internal: auto-rebalance after window resize.
 
-    Called from the after-resize-window tmux hook when window-size=latest
-    causes the window to resize (e.g. a different client becomes active).
+    Called from the global after-resize-window tmux hook when
+    window-size=latest causes the window to resize (e.g. a different
+    client becomes active, or the terminal is resized).
     """
+    _log.info("window_resized: session=%s", session)
     base = pane_layout.base_session_name(session)
     data = pane_layout.load_registry(base)
     if not data["panes"]:
+        _log.debug("window_resized: no panes, skipping")
         return
     if data.get("user_modified"):
+        _log.debug("window_resized: user_modified, skipping")
         return
     window = data.get("window", "0")
     pane_layout.rebalance(base, window)
