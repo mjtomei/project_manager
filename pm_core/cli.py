@@ -1550,9 +1550,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
             click.echo(f"PR {pr_id} is already in_progress, reusing existing workdir.")
             workdir = existing_workdir  # Set workdir so it gets used below
         else:
-            click.echo(f"PR {pr_id} is already in_progress on {pr_entry.get('agent_machine', '???')}.", err=True)
-            click.echo("No existing workdir found. Use 'pm prompt' to regenerate the prompt.", err=True)
-            raise SystemExit(1)
+            # Workdir was deleted — fall through to create a new one
+            click.echo(f"PR {pr_id} workdir missing, creating a new one.")
 
     if pr_entry.get("status") == "merged":
         click.echo(f"PR {pr_id} is already merged.", err=True)
