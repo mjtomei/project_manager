@@ -339,6 +339,7 @@ class ProjectManagerApp(App):
         Binding("m", "launch_meta", "Meta", show=True),
         Binding("L", "view_log", "Log", show=True),
         Binding("r", "refresh", "Refresh", show=True),
+        Binding("R", "reload", "Reload", show=False),
         Binding("b", "rebalance", "Rebalance", show=True),
         Binding("ctrl+r", "restart", "Restart", show=False),
         Binding("slash", "focus_command", "Command", show=True),
@@ -1166,6 +1167,11 @@ class ProjectManagerApp(App):
                 await self._do_normal_sync(is_manual=True)
             self.run_worker(do_refresh())
             self.log_message("Refreshing...")
+
+    def action_reload(self) -> None:
+        """Reload state from disk without triggering PR sync."""
+        _log.info("action: reload (state only)")
+        self._load_state()
 
     def action_restart(self) -> None:
         """Restart the TUI by exec'ing a fresh pm _tui process."""

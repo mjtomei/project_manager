@@ -10,9 +10,8 @@ def generate_prompt(data: dict, pr_id: str) -> str:
     if not pr:
         raise ValueError(f"PR {pr_id} not found")
 
-    plan = store.get_plan(data, pr.get("plan", ""))
-    plan_name = plan["name"] if plan else "Unknown"
-    plan_id = plan["id"] if plan else "?"
+    plan_ref = pr.get("plan")
+    plan = store.get_plan(data, plan_ref) if plan_ref else None
 
     # Build dependency context
     dep_lines = []
@@ -48,7 +47,7 @@ def generate_prompt(data: dict, pr_id: str) -> str:
 This session is managed by `pm`. Run `pm help` to see available commands.
 
 ## Context
-Part of plan "{plan_name}" ({plan_id}).
+{f'Part of plan "{plan["name"]}" ({plan["id"]}).' if plan else 'Standalone PR (not part of a plan).'}
 {deps_section}
 
 ## Task
