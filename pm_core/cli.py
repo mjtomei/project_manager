@@ -143,6 +143,20 @@ def _pr_display_id(pr: dict) -> str:
     return f"#{gh}" if gh else pr["id"]
 
 
+def _resolve_pr_id(data: dict, identifier: str) -> dict | None:
+    """Resolve a PR by pm ID (pr-NNN) or GitHub PR number (bare integer)."""
+    if identifier.startswith("pr-"):
+        return store.get_pr(data, identifier)
+    try:
+        num = int(identifier)
+    except ValueError:
+        return None
+    for pr in data.get("prs") or []:
+        if pr.get("gh_pr_number") == num:
+            return pr
+    return None
+
+
 def save_and_push(data: dict, root: Path, message: str = "pm: update state") -> None:
     """Save state. Use 'pm push' to commit and share changes."""
     store.save(data, root)
@@ -1393,6 +1407,32 @@ def pr_select(pr_id: str):
     save_and_push(data, root)
     click.echo(f"Active PR: {pr_id} ({pr_entry.get('title', '???')})")
     trigger_tui_refresh()
+
+
+@pr.command("cd")
+@click.argument("identifier")
+def pr_cd(identifier: str):
+    """Open a shell in a PR's workdir.
+
+    IDENTIFIER can be a pm PR ID (e.g. pr-021) or a GitHub PR number (e.g. 42).
+    Type 'exit' to return to your original directory.
+    """
+    root = state_root()
+    data = store.load(root)
+    pr_entry = _resolve_pr_id(data, identifier)
+    if not pr_entry:
+        click.echo(f"PR '{identifier}' not found.", err=True)
+        raise SystemExit(1)
+    workdir = pr_entry.get("workdir")
+    if not workdir or not Path(workdir).is_dir():
+        click.echo(f"Workdir for {pr_entry['id']} does not exist: {workdir}", err=True)
+        raise SystemExit(1)
+    shell = os.environ.get("SHELL", "/bin/sh")
+    click.echo(f"Entering workdir for {pr_entry['id']} ({pr_entry.get('title', '???')})")
+    click.echo(f"  {workdir}")
+    click.echo(f"Type 'exit' to return.")
+    os.chdir(workdir)
+    os.execvp(shell, [shell])
 
 
 @pr.command("list")
