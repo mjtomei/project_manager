@@ -143,6 +143,20 @@ def _pr_display_id(pr: dict) -> str:
     return f"#{gh}" if gh else pr["id"]
 
 
+def _resolve_pr_id(data: dict, identifier: str) -> dict | None:
+    """Resolve a PR by pm ID (pr-NNN) or GitHub PR number (bare integer)."""
+    if identifier.startswith("pr-"):
+        return store.get_pr(data, identifier)
+    try:
+        num = int(identifier)
+    except ValueError:
+        return None
+    for pr in data.get("prs") or []:
+        if pr.get("gh_pr_number") == num:
+            return pr
+    return None
+
+
 def save_and_push(data: dict, root: Path, message: str = "pm: update state") -> None:
     """Save state. Use 'pm push' to commit and share changes."""
     store.save(data, root)
@@ -1395,6 +1409,32 @@ def pr_select(pr_id: str):
     trigger_tui_refresh()
 
 
+@pr.command("cd")
+@click.argument("identifier")
+def pr_cd(identifier: str):
+    """Open a shell in a PR's workdir.
+
+    IDENTIFIER can be a pm PR ID (e.g. pr-021) or a GitHub PR number (e.g. 42).
+    Type 'exit' to return to your original directory.
+    """
+    root = state_root()
+    data = store.load(root)
+    pr_entry = _resolve_pr_id(data, identifier)
+    if not pr_entry:
+        click.echo(f"PR '{identifier}' not found.", err=True)
+        raise SystemExit(1)
+    workdir = pr_entry.get("workdir")
+    if not workdir or not Path(workdir).is_dir():
+        click.echo(f"Workdir for {pr_entry['id']} does not exist: {workdir}", err=True)
+        raise SystemExit(1)
+    shell = os.environ.get("SHELL", "/bin/sh")
+    click.echo(f"Entering workdir for {pr_entry['id']} ({pr_entry.get('title', '???')})")
+    click.echo(f"  {workdir}")
+    click.echo(f"Type 'exit' to return.")
+    os.chdir(workdir)
+    os.execvp(shell, [shell])
+
+
 @pr.command("list")
 def pr_list():
     """List all PRs with status."""
@@ -1534,7 +1574,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
 
     # Fast path: if window already exists, switch to it (or kill it if --new)
     if tmux_mod.has_tmux():
-        pm_session = _get_session_name_for_cwd()
+        pm_session = _get_current_pm_session() or _get_session_name_for_cwd()
         if tmux_mod.session_exists(pm_session):
             window_name = _pr_display_id(pr_entry)
             existing = tmux_mod.find_window_by_name(pm_session, window_name)
@@ -1646,7 +1686,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
 
     # Try to launch in the pm tmux session
     if tmux_mod.has_tmux():
-        pm_session = _get_session_name_for_cwd()
+        pm_session = _get_current_pm_session() or _get_session_name_for_cwd()
         if tmux_mod.session_exists(pm_session):
             window_name = _pr_display_id(pr_entry)
             cmd = build_claude_shell_cmd(prompt=prompt)
@@ -2125,7 +2165,9 @@ def _session_start():
         cwd = str(root.parent)
     else:
         cwd = str(root) if root else str(Path.cwd())
-    session_name = _get_session_name_for_cwd()
+    # Prefer the actual tmux session if we're already inside one (e.g. meta
+    # workdirs whose git-root hash differs from the session they belong to).
+    session_name = _get_current_pm_session() or _get_session_name_for_cwd()
     expected_root = root or (Path.cwd() / "pm")
     notes_path = expected_root / notes.NOTES_FILENAME
 
@@ -2236,6 +2278,19 @@ def _session_start():
     grouped = f"{session_name}~1"
     tmux_mod.create_grouped_session(session_name, grouped)
     tmux_mod.attach(grouped)
+
+
+@session.command("name")
+def session_name_cmd():
+    """Print the computed session name for the current directory."""
+    click.echo(_get_session_name_for_cwd())
+
+
+@cli.command("which")
+def which_cmd():
+    """Print the path to the pm_core package being used."""
+    import pm_core
+    click.echo(pm_core.__path__[0])
 
 
 @session.command("kill")
@@ -3186,10 +3241,16 @@ def _tui_history_file(session: str) -> Path:
 
 
 def _get_session_name_for_cwd() -> str:
-    """Generate the expected session name for the current working directory.
+    """Generate the expected pm session name for the current working directory.
 
-    Uses GitHub repo name (without org/user) if available, otherwise directory name.
-    Hash is based on git root path for consistency across subdirectories.
+    Computes the name from the git root so it's deterministic regardless
+    of which tmux session the caller is in.  Used by ``pm session`` to
+    create/attach sessions and by ``pm pr start`` to find the session.
+
+    When the caller is already inside the target pm session (e.g. TUI
+    subprocesses), the computed name may not match the actual session
+    (workdir clones have a different git-root hash).  Use
+    ``_get_current_pm_session()`` in those cases.
     """
     from pm_core.paths import get_session_tag
     tag = get_session_tag()
@@ -3198,6 +3259,23 @@ def _get_session_name_for_cwd() -> str:
 
     # Fallback if not in a git repo
     return f"pm-{Path.cwd().name}-00000000"
+
+
+def _get_current_pm_session() -> str | None:
+    """Return the base pm session name when running inside one.
+
+    Reads the actual session from $TMUX_PANE and strips any grouped-session
+    ~N suffix.  Returns None if not inside tmux or not in a pm- session.
+    """
+    if not tmux_mod.in_tmux():
+        return None
+    name = tmux_mod.get_session_name()
+    # Strip grouped session suffix
+    if "~" in name:
+        name = name.rsplit("~", 1)[0]
+    if name.startswith("pm-"):
+        return name
+    return None
 
 
 def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
