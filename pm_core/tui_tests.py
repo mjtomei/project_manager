@@ -1587,41 +1587,71 @@ You have access to these commands:
 - `pm tui frames` - View captured frames
 - `pm tui clear-frames` - Clear captured frames
 - `tmux list-panes -t <session>` - List panes
+- `pm pr add <title>` - Create a dummy PR
+- `pm pr close <pr_id>` - Remove a PR (use --keep-github --keep-branch for dummy PRs)
 
 ## Test Procedure
 
-1. Setup:
-   - Run `pm tui clear-frames` to start fresh
-   - Run `pm tui view` to see the TUI and identify PRs
-   - Find a PR that is in "planned" status (can be started)
-   - Note the selected PR
+### 1. Setup - Create dummy PRs
 
-2. Test A - Rapid double-press of start key:
-   - Send 's' key twice rapidly: `pm tui send s s`
-   - Wait 2 seconds, then check the TUI: `pm tui view`
-   - The log line should show "Busy: Starting <pr_id>" for the second press
-   - Only ONE pr start command should be running
-   - Check frames to see the sequence of states
+Create two temporary PRs for testing. These will be cleaned up at the end.
 
-3. Test B - Different action while start is running:
-   - If a pr start is still running (spinner visible), send 'd' key
-   - The log line should show "Busy: Starting <pr_id>"
-   - The done action should be blocked
+```
+pm pr add "Dedup test PR alpha" --description "Temporary PR for dedup testing"
+pm pr add "Dedup test PR beta" --description "Temporary PR for dedup testing"
+```
 
-4. Test C - Command bar PR action while action is running:
-   - If a pr start is still running, open command bar with '/'
-   - Type "pr start pr-002" (or similar) and press Enter
-   - Should show "Busy: ..." message
+Note the IDs assigned (e.g. pr-024, pr-025). Then refresh the TUI:
+- `pm tui send r`
+- Wait 1 second, then `pm tui view` to confirm the dummy PRs appear
+- Navigate to select one of the dummy PRs (use j/k keys)
+- Run `pm tui clear-frames` to start with a clean frame buffer
 
-5. Test D - Action allowed after completion:
-   - Wait for the in-flight action to complete (spinner stops)
-   - Verify the log line shows completion (e.g., "✓ Starting pr-001 done")
-   - Try pressing 'd' on the same PR
-   - It should work (no "Busy" message)
+### 2. Test A - Rapid double-press of start key
 
-6. Cleanup:
-   - If a PR was started, run `pm tui send d` to mark it done, or wait for it
-   - Verify the TUI is in a clean state
+- Navigate to the first dummy PR
+- Send 's' key twice rapidly: `pm tui send s s`
+- Wait 2 seconds, then check the TUI: `pm tui view`
+- The log line should show "Busy: Starting <pr_id>" for the second press
+- Only ONE pr start command should be running
+- Check `pm tui frames` to see the sequence of states
+
+### 3. Test B - Different action while start is running
+
+- If a pr start is still running (spinner visible), send 'd' key
+- The log line should show "Busy: Starting <pr_id>"
+- The done action should be blocked
+
+### 4. Test C - Command bar PR action while action is running
+
+- If a pr start is still running, open command bar with '/'
+- Type "pr start <second-dummy-pr-id>" and press Enter
+- Should show "Busy: ..." message
+- Press Escape to dismiss the command bar
+
+### 5. Test D - Non-PR actions are NOT blocked
+
+- While a pr start is running, send 'r' (refresh)
+- This should NOT be blocked — refresh should work normally
+
+### 6. Test E - Action allowed after completion
+
+- Wait for the in-flight action to complete (spinner stops)
+- Verify the log line shows completion (e.g., "✓ Starting <pr_id> done")
+- Try pressing 'd' on the same PR
+- It should work (no "Busy" message)
+
+### 7. Cleanup - Remove dummy PRs
+
+IMPORTANT: Always run this step, even if tests fail.
+
+```
+pm pr close <first-dummy-pr-id> --keep-github --keep-branch
+pm pr close <second-dummy-pr-id> --keep-github --keep-branch
+```
+
+Then refresh the TUI: `pm tui send r`
+Verify the dummy PRs are gone: `pm tui view`
 
 ## Expected Behavior
 
@@ -1637,6 +1667,8 @@ You have access to these commands:
 COMMAND DEDUP TEST RESULTS
 ==========================
 
+Dummy PRs created: <pr_id_1>, <pr_id_2>
+
 Test A - Rapid double-press: [PASS/FAIL]
   Second press blocked with Busy message: [Yes/No]
   Only one command executed: [Yes/No]
@@ -1647,8 +1679,15 @@ Test B - Different action during inflight: [PASS/FAIL]
 Test C - Command bar guarded: [PASS/FAIL]
   Command bar PR action blocked: [Yes/No]
 
-Test D - Action allowed after completion: [PASS/FAIL]
+Test D - Non-PR actions not blocked: [PASS/FAIL]
+  Refresh worked during inflight action: [Yes/No]
+
+Test E - Action allowed after completion: [PASS/FAIL]
   New action works after previous completes: [Yes/No]
+
+Cleanup: [PASS/FAIL]
+  Dummy PRs removed: [Yes/No]
+  TUI state clean: [Yes/No]
 
 Issues Found:
 <list any bugs or unexpected behavior>
