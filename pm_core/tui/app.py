@@ -897,7 +897,7 @@ class ProjectManagerApp(App):
     def _run_command_sync(self, parts: list[str]) -> None:
         """Run a command synchronously (for quick operations)."""
         try:
-            cmd = [sys.executable, "-m", "pm_core"] + parts
+            cmd = [sys.executable, "-m", "pm_core.wrapper"] + parts
             result = _run_shell(
                 cmd,
                 cwd=str(self._root) if self._root else None,
@@ -924,7 +924,7 @@ class ProjectManagerApp(App):
         import itertools
 
         cwd = str(self._root) if self._root else None
-        full_cmd = [sys.executable, "-m", "pm_core"] + list(parts)
+        full_cmd = [sys.executable, "-m", "pm_core.wrapper"] + list(parts)
 
         spinner_frames = itertools.cycle(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
         spinner_running = True
