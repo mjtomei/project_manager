@@ -163,15 +163,19 @@ def save_and_push(data: dict, root: Path, message: str = "pm: update state") -> 
 
 
 def trigger_tui_refresh() -> None:
-    """Send refresh key to TUI pane in the pm session for the current directory."""
+    """Send reload key to TUI pane in the pm session for the current directory.
+
+    Sends 'R' (reload) which reloads state from disk without triggering
+    an expensive PR sync. Use 'r' (refresh) for full sync with GitHub.
+    """
     try:
         if not tmux_mod.has_tmux():
             return
         # Use _find_tui_pane which correctly matches session by cwd
         tui_pane, session = _find_tui_pane()
         if tui_pane and session:
-            tmux_mod.send_keys_literal(tui_pane, "r")
-            _log.debug("Sent refresh to TUI pane %s in session %s", tui_pane, session)
+            tmux_mod.send_keys_literal(tui_pane, "R")
+            _log.debug("Sent reload to TUI pane %s in session %s", tui_pane, session)
     except Exception as e:
         _log.debug("Could not trigger TUI refresh: %s", e)
 
@@ -1441,12 +1445,6 @@ def pr_list():
     root = state_root()
     data = store.load(root)
 
-    # Sync to detect merged PRs (if interval allows)
-    data, result = pr_sync_mod.sync_prs_quiet(root, data)
-    if result.synced and result.updated_count > 0:
-        click.echo(f"Synced: {result.updated_count} PR(s) merged")
-        store.save(data, root)
-
     prs = data.get("prs") or []
     if not prs:
         click.echo("No PRs.")
@@ -1479,12 +1477,6 @@ def pr_graph():
     root = state_root()
     data = store.load(root)
 
-    # Sync to detect merged PRs (if interval allows)
-    data, result = pr_sync_mod.sync_prs_quiet(root, data)
-    if result.synced and result.updated_count > 0:
-        click.echo(f"Synced: {result.updated_count} PR(s) merged")
-        store.save(data, root)
-
     prs = data.get("prs") or []
     click.echo(graph.render_static_graph(prs))
 
@@ -1494,12 +1486,6 @@ def pr_ready():
     """List PRs ready to start (all deps merged)."""
     root = state_root()
     data = store.load(root)
-
-    # Sync to detect merged PRs (if interval allows)
-    data, result = pr_sync_mod.sync_prs_quiet(root, data)
-    if result.synced and result.updated_count > 0:
-        click.echo(f"Synced: {result.updated_count} PR(s) merged")
-        store.save(data, root)
 
     prs = data.get("prs") or []
     ready = graph.ready_prs(prs)
@@ -1663,8 +1649,9 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
             else:
                 click.echo("Warning: Failed to create draft PR.", err=True)
 
-    # Update state
-    pr_entry["status"] = "in_progress"
+    # Update state — only advance from pending; don't regress in_review/merged
+    if pr_entry.get("status") == "pending":
+        pr_entry["status"] = "in_progress"
     pr_entry["agent_machine"] = platform.node()
     pr_entry["workdir"] = str(work_path)
     data["project"]["active_pr"] = pr_id
@@ -2285,6 +2272,11 @@ def session_name_cmd():
     """Print the computed session name for the current directory."""
     click.echo(_get_session_name_for_cwd())
 
+@session.command("tag")
+def session_tag_cmd():
+    """Print the computed session tag for the current directory."""
+    from pm_core.paths import get_session_tag
+    click.echo(get_session_tag())
 
 @cli.command("which")
 def which_cmd():
@@ -2912,13 +2904,13 @@ def guide_done_cmd():
 
 
 def _refresh_tui_if_running():
-    """Send refresh key to TUI pane if one is running."""
+    """Send reload key to TUI pane if one is running."""
     import subprocess
     try:
         pane_id, _ = _find_tui_pane()
         if pane_id:
             subprocess.run(
-                ["tmux", "send-keys", "-t", pane_id, "r"],
+                ["tmux", "send-keys", "-t", pane_id, "R"],
                 capture_output=True,
                 timeout=2,
             )
