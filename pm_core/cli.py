@@ -3693,8 +3693,9 @@ To interact with this session, use commands like:
         raise SystemExit(1)
 
     import subprocess
+    from pm_core.paths import skip_permissions_enabled
     cmd = [claude]
-    if os.environ.get("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS") == "true":
+    if skip_permissions_enabled():
         cmd.append("--dangerously-skip-permissions")
     cmd.append(full_prompt)
 
