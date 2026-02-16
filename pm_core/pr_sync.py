@@ -54,7 +54,7 @@ def _trigger_tui_refresh() -> None:
             if ":pm" in line or ":python" in line:
                 pane_id = line.split(":")[0]
                 subprocess.run(
-                    ["tmux", "send-keys", "-t", f"{session_name}:{pane_id}", "r"],
+                    ["tmux", "send-keys", "-t", f"{session_name}:{pane_id}", "R"],
                     check=False, timeout=5
                 )
                 _log.debug("Sent refresh to TUI pane %s", pane_id)
@@ -402,7 +402,7 @@ try:
         result = sp.run(["tmux", "list-sessions", "-F", "#{{session_name}}"], capture_output=True, text=True)
         for session in result.stdout.strip().split("\\n"):
             if session.startswith("pm-") and "~" not in session:
-                sp.run(["tmux", "send-keys", "-t", session, "r"], capture_output=True)
+                sp.run(["tmux", "send-keys", "-t", session, "R"], capture_output=True)
                 break
 except Exception:
     pass  # Silently fail

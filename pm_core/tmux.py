@@ -82,14 +82,23 @@ def new_window(session: str, name: str, cmd: str, cwd: str) -> None:
     """Create a new tmux window with the given name, running cmd.
 
     Uses 'session:' format to ensure numeric session names aren't
-    interpreted as window indices.
+    interpreted as window indices.  Uses -d to avoid switching the base
+    session, then switches only the caller's grouped session.
     """
     # Use session: format to explicitly target session, not window index
     target = f"{session}:"
     subprocess.run(
-        ["tmux", "new-window", "-t", target, "-n", name, "-c", cwd, cmd],
+        ["tmux", "new-window", "-d", "-t", target, "-n", name, "-c", cwd, cmd],
         check=True,
     )
+    # Switch only the current grouped session to the new window
+    win = find_window_by_name(session, name)
+    if win:
+        current = current_or_base_session(session)
+        subprocess.run(
+            ["tmux", "select-window", "-t", f"{current}:{win['index']}"],
+            capture_output=True,
+        )
 
 
 def split_pane_background(session: str, direction: str, cmd: str) -> str:
@@ -230,9 +239,14 @@ def get_pane_geometries(session: str, window: str = "0") -> list[tuple[str, int,
 
 
 def get_window_id(session: str) -> str:
-    """Get the active window ID for a session."""
+    """Get the active window ID for a session.
+
+    Automatically targets the current grouped session so the returned
+    window matches what the user actually sees.
+    """
+    target = current_or_base_session(session)
     result = subprocess.run(
-        ["tmux", "display", "-t", session, "-p", "#{window_id}"],
+        ["tmux", "display", "-t", target, "-p", "#{window_id}"],
         capture_output=True, text=True,
     )
     return result.stdout.strip()
@@ -271,9 +285,13 @@ def find_window_by_name(session: str, name: str) -> dict | None:
 
 
 def select_window(session: str, window: str) -> bool:
-    """Select (switch to) a window by index or name. Returns True on success."""
+    """Select (switch to) a window by index or name. Returns True on success.
+
+    Targets the current grouped session so only the caller's terminal switches.
+    """
+    target = current_or_base_session(session)
     result = subprocess.run(
-        ["tmux", "select-window", "-t", f"{session}:{window}"],
+        ["tmux", "select-window", "-t", f"{target}:{window}"],
         capture_output=True,
     )
     return result.returncode == 0
@@ -318,6 +336,30 @@ def set_session_option(session: str, option: str, value: str) -> None:
         ["tmux", "set-option", "-t", session, option, value],
         check=False,
     )
+
+
+def current_or_base_session(base: str) -> str:
+    """Return the best session to target for query operations.
+
+    Priority:
+    1. Current session (from $TMUX_PANE) if it's in the same group
+    2. Any attached grouped session (user is watching it)
+    3. The base session as fallback
+    """
+    if in_tmux():
+        current = get_session_name()
+        if current == base or current.startswith(base + "~"):
+            return current
+    # Current pane is in a different group (or not in tmux).
+    # The base session may have no clients; prefer an attached grouped session.
+    for name in list_grouped_sessions(base):
+        result = subprocess.run(
+            ["tmux", "display-message", "-t", name, "-p", "#{session_attached}"],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0 and result.stdout.strip() != "0":
+            return name
+    return base
 
 
 def create_grouped_session(base: str, name: str) -> None:
