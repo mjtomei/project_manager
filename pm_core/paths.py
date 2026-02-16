@@ -138,7 +138,7 @@ def get_session_tag(start_path: Path | None = None, use_github_name: bool = True
         use_github_name: If True, try to get GitHub repo name (requires subprocess).
                         If False, just use directory name (faster, no subprocess).
     """
-    cache_key = str(start_path or Path.cwd())
+    cache_key = (str(start_path or Path.cwd()), use_github_name)
     if cache_key in _session_tag_cache:
         return _session_tag_cache[cache_key]
 

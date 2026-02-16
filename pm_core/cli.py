@@ -145,21 +145,39 @@ def _pr_display_id(pr: dict) -> str:
     return f"#{gh}" if gh else pr["id"]
 
 
+def _resolve_pr_id(data: dict, identifier: str) -> dict | None:
+    """Resolve a PR by pm ID (pr-NNN) or GitHub PR number (bare integer)."""
+    if identifier.startswith("pr-"):
+        return store.get_pr(data, identifier)
+    try:
+        num = int(identifier)
+    except ValueError:
+        return None
+    for pr in data.get("prs") or []:
+        if pr.get("gh_pr_number") == num:
+            return pr
+    return None
+
+
 def save_and_push(data: dict, root: Path, message: str = "pm: update state") -> None:
     """Save state. Use 'pm push' to commit and share changes."""
     store.save(data, root)
 
 
 def trigger_tui_refresh() -> None:
-    """Send refresh key to TUI pane in the pm session for the current directory."""
+    """Send reload key to TUI pane in the pm session for the current directory.
+
+    Sends 'R' (reload) which reloads state from disk without triggering
+    an expensive PR sync. Use 'r' (refresh) for full sync with GitHub.
+    """
     try:
         if not tmux_mod.has_tmux():
             return
         # Use _find_tui_pane which correctly matches session by cwd
         tui_pane, session = _find_tui_pane()
         if tui_pane and session:
-            tmux_mod.send_keys_literal(tui_pane, "r")
-            _log.debug("Sent refresh to TUI pane %s in session %s", tui_pane, session)
+            tmux_mod.send_keys_literal(tui_pane, "R")
+            _log.debug("Sent reload to TUI pane %s in session %s", tui_pane, session)
     except Exception as e:
         _log.debug("Could not trigger TUI refresh: %s", e)
 
@@ -1394,17 +1412,37 @@ def pr_select(pr_id: str):
     trigger_tui_refresh()
 
 
+@pr.command("cd")
+@click.argument("identifier")
+def pr_cd(identifier: str):
+    """Open a shell in a PR's workdir.
+
+    IDENTIFIER can be a pm PR ID (e.g. pr-021) or a GitHub PR number (e.g. 42).
+    Type 'exit' to return to your original directory.
+    """
+    root = state_root()
+    data = store.load(root)
+    pr_entry = _resolve_pr_id(data, identifier)
+    if not pr_entry:
+        click.echo(f"PR '{identifier}' not found.", err=True)
+        raise SystemExit(1)
+    workdir = pr_entry.get("workdir")
+    if not workdir or not Path(workdir).is_dir():
+        click.echo(f"Workdir for {pr_entry['id']} does not exist: {workdir}", err=True)
+        raise SystemExit(1)
+    shell = os.environ.get("SHELL", "/bin/sh")
+    click.echo(f"Entering workdir for {pr_entry['id']} ({pr_entry.get('title', '???')})")
+    click.echo(f"  {workdir}")
+    click.echo(f"Type 'exit' to return.")
+    os.chdir(workdir)
+    os.execvp(shell, [shell])
+
+
 @pr.command("list")
 def pr_list():
     """List all PRs with status."""
     root = state_root()
     data = store.load(root)
-
-    # Sync to detect merged PRs (if interval allows)
-    data, result = pr_sync_mod.sync_prs_quiet(root, data)
-    if result.synced and result.updated_count > 0:
-        click.echo(f"Synced: {result.updated_count} PR(s) merged")
-        store.save(data, root)
 
     prs = data.get("prs") or []
     if not prs:
@@ -1438,12 +1476,6 @@ def pr_graph():
     root = state_root()
     data = store.load(root)
 
-    # Sync to detect merged PRs (if interval allows)
-    data, result = pr_sync_mod.sync_prs_quiet(root, data)
-    if result.synced and result.updated_count > 0:
-        click.echo(f"Synced: {result.updated_count} PR(s) merged")
-        store.save(data, root)
-
     prs = data.get("prs") or []
     click.echo(graph.render_static_graph(prs))
 
@@ -1453,12 +1485,6 @@ def pr_ready():
     """List PRs ready to start (all deps merged)."""
     root = state_root()
     data = store.load(root)
-
-    # Sync to detect merged PRs (if interval allows)
-    data, result = pr_sync_mod.sync_prs_quiet(root, data)
-    if result.synced and result.updated_count > 0:
-        click.echo(f"Synced: {result.updated_count} PR(s) merged")
-        store.save(data, root)
 
     prs = data.get("prs") or []
     ready = graph.ready_prs(prs)
@@ -1523,9 +1549,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
             click.echo(f"PR {pr_id} is already in_progress, reusing existing workdir.")
             workdir = existing_workdir  # Set workdir so it gets used below
         else:
-            click.echo(f"PR {pr_id} is already in_progress on {pr_entry.get('agent_machine', '???')}.", err=True)
-            click.echo("No existing workdir found. Use 'pm prompt' to regenerate the prompt.", err=True)
-            raise SystemExit(1)
+            # Workdir was deleted — fall through to create a new one
+            click.echo(f"PR {pr_id} workdir missing, creating a new one.")
 
     if pr_entry.get("status") == "merged":
         click.echo(f"PR {pr_id} is already merged.", err=True)
@@ -1533,7 +1558,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
 
     # Fast path: if window already exists, switch to it (or kill it if --new)
     if tmux_mod.has_tmux():
-        pm_session = _get_session_name_for_cwd()
+        pm_session = _get_current_pm_session() or _get_session_name_for_cwd()
         if tmux_mod.session_exists(pm_session):
             window_name = _pr_display_id(pr_entry)
             existing = tmux_mod.find_window_by_name(pm_session, window_name)
@@ -1622,8 +1647,9 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
             else:
                 click.echo("Warning: Failed to create draft PR.", err=True)
 
-    # Update state
-    pr_entry["status"] = "in_progress"
+    # Update state — only advance from pending; don't regress in_review/merged
+    if pr_entry.get("status") == "pending":
+        pr_entry["status"] = "in_progress"
     pr_entry["agent_machine"] = platform.node()
     pr_entry["workdir"] = str(work_path)
     data["project"]["active_pr"] = pr_id
@@ -1645,7 +1671,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
 
     # Try to launch in the pm tmux session
     if tmux_mod.has_tmux():
-        pm_session = _get_session_name_for_cwd()
+        pm_session = _get_current_pm_session() or _get_session_name_for_cwd()
         if tmux_mod.session_exists(pm_session):
             window_name = _pr_display_id(pr_entry)
             cmd = build_claude_shell_cmd(prompt=prompt)
@@ -2118,7 +2144,9 @@ def _session_start():
         cwd = str(root.parent)
     else:
         cwd = str(root) if root else str(Path.cwd())
-    session_name = _get_session_name_for_cwd()
+    # Prefer the actual tmux session if we're already inside one (e.g. meta
+    # workdirs whose git-root hash differs from the session they belong to).
+    session_name = _get_current_pm_session() or _get_session_name_for_cwd()
     expected_root = root or (Path.cwd() / "pm")
     notes_path = expected_root / notes.NOTES_FILENAME
 
@@ -2229,6 +2257,24 @@ def _session_start():
     grouped = f"{session_name}~1"
     tmux_mod.create_grouped_session(session_name, grouped)
     tmux_mod.attach(grouped)
+
+
+@session.command("name")
+def session_name_cmd():
+    """Print the computed session name for the current directory."""
+    click.echo(_get_session_name_for_cwd())
+
+@session.command("tag")
+def session_tag_cmd():
+    """Print the computed session tag for the current directory."""
+    from pm_core.paths import get_session_tag
+    click.echo(get_session_tag())
+
+@cli.command("which")
+def which_cmd():
+    """Print the path to the pm_core package being used."""
+    import pm_core
+    click.echo(pm_core.__path__[0])
 
 
 @session.command("kill")
@@ -2850,13 +2896,13 @@ def guide_done_cmd():
 
 
 def _refresh_tui_if_running():
-    """Send refresh key to TUI pane if one is running."""
+    """Send reload key to TUI pane if one is running."""
     import subprocess
     try:
         pane_id, _ = _find_tui_pane()
         if pane_id:
             subprocess.run(
-                ["tmux", "send-keys", "-t", pane_id, "r"],
+                ["tmux", "send-keys", "-t", pane_id, "R"],
                 capture_output=True,
                 timeout=2,
             )
@@ -3179,10 +3225,16 @@ def _tui_history_file(session: str) -> Path:
 
 
 def _get_session_name_for_cwd() -> str:
-    """Generate the expected session name for the current working directory.
+    """Generate the expected pm session name for the current working directory.
 
-    Uses GitHub repo name (without org/user) if available, otherwise directory name.
-    Hash is based on git root path for consistency across subdirectories.
+    Computes the name from the git root so it's deterministic regardless
+    of which tmux session the caller is in.  Used by ``pm session`` to
+    create/attach sessions and by ``pm pr start`` to find the session.
+
+    When the caller is already inside the target pm session (e.g. TUI
+    subprocesses), the computed name may not match the actual session
+    (workdir clones have a different git-root hash).  Use
+    ``_get_current_pm_session()`` in those cases.
     """
     from pm_core.paths import get_session_tag
     tag = get_session_tag()
@@ -3191,6 +3243,23 @@ def _get_session_name_for_cwd() -> str:
 
     # Fallback if not in a git repo
     return f"pm-{Path.cwd().name}-00000000"
+
+
+def _get_current_pm_session() -> str | None:
+    """Return the base pm session name when running inside one.
+
+    Reads the actual session from $TMUX_PANE and strips any grouped-session
+    ~N suffix.  Returns None if not inside tmux or not in a pm- session.
+    """
+    if not tmux_mod.in_tmux():
+        return None
+    name = tmux_mod.get_session_name()
+    # Strip grouped session suffix
+    if "~" in name:
+        name = name.rsplit("~", 1)[0]
+    if name.startswith("pm-"):
+        return name
+    return None
 
 
 def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
