@@ -380,10 +380,14 @@ def sync_from_github(
     if closed_prs and save_state:
         import subprocess
         import json
+        import os as _os
+        # Capture socket path for shared sessions
+        _socket = _os.environ.get("PM_TMUX_SOCKET", "")
         # Spawn a background process that sleeps then removes the PRs
         script = f'''
 import time
 import json
+import os
 from pathlib import Path
 time.sleep(3)
 try:
@@ -399,11 +403,15 @@ try:
         store.save(data, root)
         # Trigger TUI refresh via tmux
         import subprocess as sp
-        # Find pm session and send refresh key
-        result = sp.run(["tmux", "list-sessions", "-F", "#{{session_name}}"], capture_output=True, text=True)
+        # Use shared socket if set, otherwise default tmux server
+        tmux_cmd = ["tmux"]
+        socket_path = "{_socket}"
+        if socket_path:
+            tmux_cmd.extend(["-S", socket_path])
+        result = sp.run(tmux_cmd + ["list-sessions", "-F", "#{{session_name}}"], capture_output=True, text=True)
         for session in result.stdout.strip().split("\\n"):
             if session.startswith("pm-") and "~" not in session:
-                sp.run(["tmux", "send-keys", "-t", session, "R"], capture_output=True)
+                sp.run(tmux_cmd + ["send-keys", "-t", session, "R"], capture_output=True)
                 break
 except Exception:
     pass  # Silently fail

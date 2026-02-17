@@ -2280,7 +2280,8 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
                 _log.info("creating new grouped session: %s", grouped)
                 tmux_mod.create_grouped_session(session_name, grouped,
                                                 socket_path=socket_path)
-                tmux_mod.set_session_option(grouped, "window-size", "latest")
+                tmux_mod.set_session_option(grouped, "window-size", "latest",
+                                            socket_path=socket_path)
                 click.echo(f"Attaching to session '{grouped}'...")
             tmux_mod.attach(grouped, socket_path=socket_path)
             return
@@ -2384,7 +2385,8 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
     # Create a grouped session so we never attach directly to the base
     grouped = f"{session_name}~1"
     tmux_mod.create_grouped_session(session_name, grouped, socket_path=socket_path)
-    tmux_mod.set_session_option(grouped, "window-size", "latest")
+    tmux_mod.set_session_option(grouped, "window-size", "latest",
+                                socket_path=socket_path)
     tmux_mod.attach(grouped, socket_path=socket_path)
 
 
