@@ -441,7 +441,8 @@ def plan_add(name: str, fresh: bool):
     """Create a new plan and launch Claude to develop it."""
     root = state_root()
     data = store.load(root)
-    plan_id = store.next_plan_id(data)
+    existing_ids = {p["id"] for p in (data.get("plans") or [])}
+    plan_id = store.generate_plan_id(name, existing_ids)
     plan_file = f"plans/{plan_id}.md"
 
     entry = {
@@ -1069,7 +1070,8 @@ def _run_plan_import(name: str):
     """Core logic for plan import — used by both `plan import` and `init`."""
     root = state_root()
     data = store.load(root)
-    plan_id = store.next_plan_id(data)
+    existing_ids = {p["id"] for p in (data.get("plans") or [])}
+    plan_id = store.generate_plan_id(name, existing_ids)
     plan_file = f"plans/{plan_id}.md"
 
     entry = {
@@ -2680,7 +2682,8 @@ def cluster_auto(threshold, max_commits, weights, output_fmt):
         click.echo(clusters_to_json(clusters, chunk_map))
     elif output_fmt == "plan":
         md = clusters_to_plan_markdown(clusters, chunk_map)
-        plan_id = store.next_plan_id(data)
+        existing_ids = {p["id"] for p in (data.get("plans") or [])}
+        plan_id = store.generate_plan_id(f"cluster-explore", existing_ids)
         plan_name = f"cluster-{plan_id}"
         plan_file = f"plans/{plan_name}.md"
         plan_path = root / plan_file

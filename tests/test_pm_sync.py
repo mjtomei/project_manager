@@ -1,6 +1,47 @@
-"""Tests for hash-based PR ID generation."""
+"""Tests for hash-based ID generation (PRs and plans)."""
 
 from pm_core import store
+
+
+class TestGeneratePlanId:
+    """Tests for hash-based plan ID generation."""
+
+    def test_deterministic(self):
+        """Same name always produces the same ID."""
+        id1 = store.generate_plan_id("Import from existing repo")
+        id2 = store.generate_plan_id("Import from existing repo")
+        assert id1 == id2
+
+    def test_starts_with_plan_prefix(self):
+        """Generated IDs start with 'plan-'."""
+        plan_id = store.generate_plan_id("Test plan")
+        assert plan_id.startswith("plan-")
+
+    def test_hash_length(self):
+        """Default hash is 7 hex chars."""
+        plan_id = store.generate_plan_id("Test plan")
+        assert len(plan_id) == 5 + 7  # plan- prefix + 7 hex chars
+
+    def test_different_names_different_ids(self):
+        """Different names produce different IDs."""
+        id1 = store.generate_plan_id("Plan A")
+        id2 = store.generate_plan_id("Plan B")
+        assert id1 != id2
+
+    def test_avoids_existing_ids(self):
+        """Extends hash when collision with existing ID."""
+        plan_id = store.generate_plan_id("Test")
+        extended = store.generate_plan_id("Test", existing_ids={plan_id})
+        assert extended != plan_id
+        assert extended.startswith("plan-")
+        assert len(extended) > len(plan_id)
+
+    def test_backwards_compatible_with_old_ids(self):
+        """Old plan-001 style IDs in existing set don't interfere."""
+        existing = {"plan-001", "plan-002"}
+        plan_id = store.generate_plan_id("New Plan", existing_ids=existing)
+        assert plan_id.startswith("plan-")
+        assert plan_id not in existing
 
 
 class TestGeneratePrId:

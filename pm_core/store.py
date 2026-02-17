@@ -97,6 +97,26 @@ def next_pr_id(data: dict) -> str:
     return f"pr-{max(nums) + 1:03d}"
 
 
+def generate_plan_id(name: str, existing_ids: set[str] | None = None) -> str:
+    """Generate a plan ID from a hash of the plan name.
+
+    Uses sha256(name) truncated to 7 hex chars, producing IDs like
+    'plan-a3f2b1c'. If the ID collides with an existing one, extends
+    the hash until unique.
+    """
+    digest = hashlib.sha256(name.encode()).hexdigest()
+    min_len = 7
+    for length in range(min_len, len(digest) + 1):
+        plan_id = f"plan-{digest[:length]}"
+        if existing_ids is None or plan_id not in existing_ids:
+            return plan_id
+    for i in range(2, 1000):
+        plan_id = f"plan-{digest[:min_len]}-{i}"
+        if existing_ids is None or plan_id not in existing_ids:
+            return plan_id
+    raise RuntimeError("Could not generate unique plan ID")
+
+
 def generate_pr_id(title: str, desc: str = "", existing_ids: set[str] | None = None) -> str:
     """Generate a PR ID from a hash of title and description.
 
