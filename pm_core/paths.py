@@ -294,6 +294,32 @@ def set_override_path(session_tag: str, workdir: Path) -> None:
         (sd / "override").write_text(str(workdir) + "\n")
 
 
+def get_global_setting(name: str) -> bool:
+    """Check if a global pm setting is enabled.
+
+    Settings are stored as files in ~/.pm/settings/.
+    A setting is enabled if its file exists and contains 'true'.
+    """
+    f = pm_home() / "settings" / name
+    if not f.exists():
+        return False
+    try:
+        return f.read_text().strip() == "true"
+    except (OSError, IOError):
+        return False
+
+
+def set_global_setting(name: str, enabled: bool) -> None:
+    """Enable or disable a global pm setting."""
+    d = pm_home() / "settings"
+    d.mkdir(parents=True, exist_ok=True)
+    f = d / name
+    if enabled:
+        f.write_text("true\n")
+    elif f.exists():
+        f.unlink()
+
+
 def clear_session(session_tag: str) -> None:
     """Remove all config files for a session."""
     sd = sessions_dir() / session_tag

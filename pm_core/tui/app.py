@@ -350,7 +350,7 @@ class ProjectManagerApp(App):
         Binding("T", "toggle_tests", "Tests", show=True),
         Binding("question_mark", "show_help", "Help", show=True),
         Binding("c", "launch_claude", "Claude", show=True),
-        Binding("H", "launch_help_claude", "Assist", show=True),
+        Binding("H", "launch_help_claude", "Assist", show=True),  # show toggled in __init__
         Binding("C", "show_connect", "Connect", show=False),
     ]
 
@@ -379,6 +379,15 @@ class ProjectManagerApp(App):
         return True
 
     def __init__(self):
+        # Check global setting before super().__init__ processes bindings
+        from pm_core.paths import get_global_setting
+        if get_global_setting("hide-assist"):
+            self.BINDINGS = [
+                Binding(b.key, b.action, b.description,
+                        show=False if b.action == "launch_help_claude" else b.show,
+                        key_display=b.key_display, priority=b.priority)
+                for b in self.BINDINGS
+            ]
         super().__init__()
         self._data: dict = {}
         self._root: Path | None = None

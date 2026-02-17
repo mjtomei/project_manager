@@ -2386,6 +2386,26 @@ def which_cmd():
     click.echo(pm_core.__path__[0])
 
 
+@cli.command("set")
+@click.argument("setting")
+@click.argument("value", type=click.Choice(["on", "off"]))
+def set_cmd(setting, value):
+    """Toggle a global pm setting.
+
+    Available settings:
+
+      hide-assist   Hide the Assist (H) key from the TUI footer bar
+    """
+    from pm_core.paths import set_global_setting
+    known = {"hide-assist"}
+    if setting not in known:
+        click.echo(f"Unknown setting: {setting}", err=True)
+        click.echo(f"Available: {', '.join(sorted(known))}", err=True)
+        raise SystemExit(1)
+    set_global_setting(setting, value == "on")
+    click.echo(f"{setting} = {value}")
+
+
 @session.command("kill")
 @click.option("--global", "share_global", is_flag=True, default=False,
               help="Target a globally shared session")
