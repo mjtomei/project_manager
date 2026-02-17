@@ -2126,11 +2126,10 @@ def _register_tmux_bindings(session_name: str) -> None:
     _sp.run(["tmux", "set-hook", "-g", "after-kill-pane",
              "run-shell 'pm _pane-closed'"], check=False)
     # Auto-rebalance when window resizes (triggered by client switches
-    # with window-size=latest, or terminal resizes).  Global hook with
-    # if-shell guard so only pm sessions trigger the Python process.
+    # with window-size=latest, or terminal resizes).
+    # Note: no if-shell guard — _window-resized already exits early
+    # when no registry exists, and set-hook requires a single command arg.
     _sp.run(["tmux", "set-hook", "-g", "after-resize-window",
-             "if-shell",
-             f"s='#{{session_name}}'; test -f {registry_dir}/${{s%%~*}}.json",
              "run-shell 'pm _window-resized \"#{session_name}\"'"],
             check=False)
 
