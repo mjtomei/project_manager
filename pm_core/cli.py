@@ -2129,11 +2129,14 @@ def _register_tmux_bindings(session_name: str) -> None:
     # with window-size=latest, or moving terminal to a different monitor).
     # Uses "window-resized" (fires on any window size change) not
     # "after-resize-window" (only fires after the resize-window command).
-    _sp.run(["tmux", "set-hook", "-g", "window-resized",
+    # Note: window-resized is a window hook, so use -gw not -g.
+    _sp.run(["tmux", "set-hook", "-gw", "window-resized",
              "run-shell 'pm _window-resized \"#{session_name}\"'"],
             check=False)
-    # Clean up stale hook from earlier versions that used the wrong name
+    # Clean up stale hooks from earlier versions
     _sp.run(["tmux", "set-hook", "-gu", "after-resize-window"],
+            check=False)
+    _sp.run(["tmux", "set-hook", "-gu", "window-resized"],
             check=False)
 
 

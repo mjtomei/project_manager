@@ -59,24 +59,14 @@ def set_force_mobile(session: str, enabled: bool) -> None:
 def is_mobile(session: str, window: str = "0") -> bool:
     """Check if mobile mode is active (force flag or narrow terminal).
 
-    Tries the passed session first, then the base session, then grouped
-    sessions (~N) to handle cases where the base session isn't in the
-    group or has a different window set.
+    With window-size=latest, the window size reflects the most recently
+    active client, so we only need to check the current window size.
     """
     if mobile_flag_path(session).exists():
         return True
     from pm_core import tmux as tmux_mod
-    # Try the passed session first (may include ~N suffix)
-    width, _ = tmux_mod.get_window_size(session, window)
-    if width <= 0:
-        base = base_session_name(session)
-        if base != session:
-            width, _ = tmux_mod.get_window_size(base, window)
-        if width <= 0:
-            for gs in tmux_mod.list_grouped_sessions(base):
-                width, _ = tmux_mod.get_window_size(gs, window)
-                if width > 0:
-                    break
+    base = base_session_name(session)
+    width, _ = tmux_mod.get_window_size(base, window)
     return 0 < width < MOBILE_WIDTH_THRESHOLD
 
 
