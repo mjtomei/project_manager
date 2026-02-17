@@ -1469,14 +1469,26 @@ operating within this pm session."""
         repo = project.get("repo", "unknown")
         prs = self._data.get("prs") or []
 
+        plans = self._data.get("plans") or []
+
         # Build a summary of current PRs
         pr_lines = []
         for pr in prs:
             status = pr.get("status", "pending")
             title = pr.get("title", "???")
             pr_id = pr.get("id", "???")
-            pr_lines.append(f"  - {pr_id}: {title} ({status})")
+            deps = pr.get("depends_on") or []
+            dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
+            pr_lines.append(f"  - {pr_id}: {title} [{status}]{dep_str}")
         pr_summary = "\n".join(pr_lines) if pr_lines else "  (no PRs yet)"
+
+        # Build a summary of plans
+        plan_lines = []
+        for plan in plans:
+            plan_id = plan.get("id", "???")
+            title = plan.get("title", "???")
+            plan_lines.append(f"  - {plan_id}: {title}")
+        plan_summary = "\n".join(plan_lines) if plan_lines else "  (no plans yet)"
 
         prompt = f"""\
 ## You are a helpful coding assistant for a beginner
@@ -1491,26 +1503,57 @@ Project: {project_name}
 Repository: {repo}
 tmux session: {sess}
 
+Current plans:
+{plan_summary}
+
 Current PRs:
 {pr_summary}
 
-## About pm
+## pm Project Lifecycle
 
-pm is a project manager tool that helps organize coding work into plans \
-and pull requests (PRs). Here's what the user can do:
+pm organizes work in a structured lifecycle:
 
-- **Plans**: High-level descriptions of features to build. Plans get broken \
-down into PRs. Use `pm plan list` to see plans.
-- **PRs**: Individual units of work. Each PR has a status: pending, \
-in_progress, in_review, or merged.
-- **Starting work**: Select a PR in the tree view and press `s` to start \
-working on it. This opens a Claude session focused on that PR.
-- **Finishing work**: Press `d` to mark a PR as done when the work is complete.
+1. **Initialize** (`pm init`): Set up pm for a codebase. This creates a \
+pm/ directory that tracks plans and PRs.
 
-The user is looking at the pm TUI (text interface) which shows a tree of \
-PRs. Help them understand their project's current state and suggest \
-concrete next steps. If there are no PRs yet, help them think about what \
-to build and offer to create a plan or add PRs."""
+2. **Plan** (`pm plan add`): Write a high-level plan describing a feature \
+or goal. Plans are markdown files that describe what to build and why.
+
+3. **Break down** (`pm plan breakdown <plan-id>`): Turn a plan into \
+concrete PRs — small, focused units of work. PRs can depend on each other, \
+forming a dependency tree shown in the TUI.
+
+4. **Work** (select a PR and press `s` in the TUI): Start a PR to open a \
+Claude session focused on that task. Claude works in a dedicated branch \
+and directory.
+
+5. **Review** (press `d` in the TUI or `pm pr done <pr-id>`): Mark a PR \
+as done. This pushes the branch and creates a GitHub pull request for review.
+
+6. **Merge**: After review, PRs get merged. pm detects this automatically \
+and updates the tree.
+
+At any point the user might need to: add new plans, add or reorder PRs, \
+check on in-progress work, or understand what to tackle next.
+
+## Your Task
+
+Before making any recommendations, check the project's current health:
+
+1. Run `pm pr list` to see the current state of all PRs
+2. Run `pm plan list` to see existing plans
+3. Look at the repository with `git log --oneline -10` and `ls` to \
+understand what the codebase contains
+
+Then assess:
+- Are there plans that haven't been broken into PRs yet?
+- Are there PRs that are blocked or stuck?
+- Is the dependency tree healthy (no circular deps, reasonable ordering)?
+- Are there PRs in progress that might need attention?
+- If the project is brand new, help the user think about what to build first.
+
+Based on what you find, give the user clear, simple recommendations for \
+what to do next. Suggest one or two concrete actions, not an overwhelming list."""
 
         cmd = claude
         if os.environ.get("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS") == "true":
