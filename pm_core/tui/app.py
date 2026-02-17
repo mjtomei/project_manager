@@ -847,6 +847,7 @@ class ProjectManagerApp(App):
         tree = self.query_one("#tech-tree", TechTree)
         tree.update_plans(self._data.get("plans") or [])
         tree.update_prs(self._data.get("prs") or [])
+        self._update_filter_status()
 
     async def _background_sync(self) -> None:
         """Pull latest state from git or check guide progress."""

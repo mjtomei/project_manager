@@ -2414,10 +2414,12 @@ def set_cmd(setting, value):
 
     Available settings:
 
-      hide-assist   Hide the Assist (H) key from the TUI footer bar
+      hide-assist   Hide the Assist (h) key from the TUI footer bar
+
+      hide-merged   Hide merged PRs in the TUI by default
     """
     from pm_core.paths import set_global_setting
-    known = {"hide-assist"}
+    known = {"hide-assist", "hide-merged"}
     if setting not in known:
         click.echo(f"Unknown setting: {setting}", err=True)
         click.echo(f"Available: {', '.join(sorted(known))}", err=True)
