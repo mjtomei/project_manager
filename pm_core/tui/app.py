@@ -99,7 +99,7 @@ class StatusBar(Static):
         from rich.markup import escape
         safe_repo = escape(repo)
         pr_info = f"[bold]{pr_count}[/bold] PRs" if pr_count else ""
-        filter_display = f"    [bold yellow]filter: {filter_text}[/bold yellow]" if filter_text else ""
+        filter_display = f"    [dim]filter:[/dim] [italic]{filter_text}[/italic]" if filter_text else ""
         self.update(f" Project: [bold]{project_name}[/bold]    {pr_info}{filter_display}    repo: [cyan]{safe_repo}[/cyan]    {sync_display}")
 
 
