@@ -1711,14 +1711,14 @@ IMPORTANT: Always restore the window to its original size!
 
 ## Expected Behavior
 
-- Landscape (width > height): horizontal split `{left,right}` — panes side-by-side
-- Portrait (height > width): vertical split `[top,bottom]` — panes stacked
-- Square (width == height): horizontal split (w >= h rule)
+- Landscape (physically wider): horizontal split `{left,right}` — panes side-by-side
+- Portrait (physically taller): vertical split `[top,bottom]` — panes stacked
+- The split compares `w >= h * 2` to account for character aspect ratio (~2:1 h:w)
 - Narrow (< 120 cols): mobile mode triggers, active pane zooms
 - `rebalance()` is called automatically after resize via tmux hook
 - Multiple panes: recursive binary split alternates horizontal/vertical
 - Layout computation from `pane_layout.py`:
-  - `_layout_node` chooses `{` for w >= h (horizontal), `[` for h > w (vertical)
+  - `_layout_node` chooses `{` for w >= h*2 (horizontal), `[` otherwise (vertical)
   - 2 panes: single split in appropriate direction
   - 3+ panes: recursive split with alternating axis
 

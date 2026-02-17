@@ -57,9 +57,9 @@ class TestComputeLayout:
         assert "]" in layout
 
     def test_two_panes_square(self):
-        """Square terminal: w >= h so horizontal split."""
+        """Square char grid is physically portrait (chars ~2:1), so vertical split."""
         layout = compute_layout(2, 100, 100)
-        assert "{" in layout
+        assert "[" in layout
 
     def test_three_panes_landscape(self):
         """Three panes in landscape: first split horizontal, children alternate."""
@@ -169,15 +169,25 @@ class TestLayoutSplitDirection:
         # Vertical splits use [ ]
         assert body.startswith("80x120,0,0[")
 
-    def test_equal_dimensions_uses_horizontal(self):
-        """When w == h, horizontal split is chosen (w >= h)."""
+    def test_equal_dimensions_uses_vertical(self):
+        """When w == h in chars, physically portrait (chars ~2:1), so vertical."""
         body = _layout_node([0, 1], 0, 0, 100, 100)
-        assert body.startswith("100x100,0,0{")
+        assert body.startswith("100x100,0,0[")
 
-    def test_slightly_landscape(self):
-        """Even slightly wider than tall should use horizontal."""
-        body = _layout_node([0, 1], 0, 0, 101, 100)
-        assert body.startswith("101x100,0,0{")
+    def test_physically_landscape(self):
+        """Physically landscape (w >= h*2) should use horizontal."""
+        body = _layout_node([0, 1], 0, 0, 200, 50)
+        assert body.startswith("200x50,0,0{")
+
+    def test_boundary_landscape(self):
+        """At exact boundary (w == h*2), horizontal split."""
+        body = _layout_node([0, 1], 0, 0, 200, 100)
+        assert body.startswith("200x100,0,0{")
+
+    def test_just_below_boundary_is_vertical(self):
+        """Just below boundary (w < h*2), vertical split."""
+        body = _layout_node([0, 1], 0, 0, 199, 100)
+        assert body.startswith("199x100,0,0[")
 
     def test_slightly_portrait(self):
         """Even slightly taller than wide should use vertical."""

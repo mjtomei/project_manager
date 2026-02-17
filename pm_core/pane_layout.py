@@ -220,7 +220,10 @@ def _layout_node(panes, x, y, w, h, force_axis=None):
     elif force_axis == 'v':
         split_h = False
     else:
-        split_h = w >= h
+        # Terminal characters are roughly 2× taller than wide, so scale
+        # the comparison to approximate physical aspect ratio.
+        # physical_width ∝ w, physical_height ∝ h × 2
+        split_h = w >= h * 2
 
     # Opposite axis for child groups so they don't keep splitting the same way
     child_axis = 'v' if split_h else 'h'
