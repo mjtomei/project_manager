@@ -47,7 +47,7 @@ DEFAULT_FRAME_BUFFER_SIZE = 100
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Container, Horizontal, Vertical
+from textual.containers import Container, Horizontal, ScrollableContainer, Vertical
 from textual.reactive import reactive
 from textual.timer import Timer
 from textual.widgets import Header, Footer, Static, Label
@@ -69,10 +69,26 @@ from pm_core.plan_parser import extract_plan_intro
 GUIDE_SETUP_STEPS = {"no_project", "initialized", "has_plan_draft", "has_plan_prs", "needs_deps_review"}
 
 
+class TreeScroll(ScrollableContainer, can_focus=False, can_focus_children=True):
+    """Scrollable container for the tech tree."""
+
+    DEFAULT_CSS = """
+    TreeScroll {
+        scrollbar-background: $surface-darken-1;
+        scrollbar-color: $text-muted;
+        scrollbar-color-hover: $text;
+        scrollbar-color-active: $accent;
+        scrollbar-size-vertical: 1;
+    }
+    """
+
+
+
 class StatusBar(Static):
     """Top status bar showing project info and sync state."""
 
-    def update_status(self, project_name: str, repo: str, sync_state: str, pr_count: int = 0) -> None:
+    def update_status(self, project_name: str, repo: str, sync_state: str,
+                       pr_count: int = 0, filter_text: str = "") -> None:
         sync_icons = {
             "synced": "[green]synced[/green]",
             "pulling": "[yellow]pulling...[/yellow]",
@@ -83,7 +99,8 @@ class StatusBar(Static):
         from rich.markup import escape
         safe_repo = escape(repo)
         pr_info = f"[bold]{pr_count}[/bold] PRs" if pr_count else ""
-        self.update(f" Project: [bold]{project_name}[/bold]    {pr_info}    repo: [cyan]{safe_repo}[/cyan]    {sync_display}")
+        filter_display = f"    [dim]filter:[/dim] [italic]{filter_text}[/italic]" if filter_text else ""
+        self.update(f" Project: [bold]{project_name}[/bold]    {pr_info}{filter_display}    repo: [cyan]{safe_repo}[/cyan]    {sync_display}")
 
 
 class LogLine(Static):
@@ -204,6 +221,10 @@ class HelpScreen(ModalScreen):
             else:
                 yield Label("Tree Navigation", classes="help-section")
                 yield Label("  [bold]↑↓←→[/] or [bold]jkl[/]  Move selection", classes="help-row")
+                yield Label("  [bold]J/K[/]  Jump to next/prev plan", classes="help-row")
+                yield Label("  [bold]H[/]  Hide/show plan group", classes="help-row")
+                yield Label("  [bold]X[/]  Toggle merged PRs", classes="help-row")
+                yield Label("  [bold]F[/]  Cycle status filter", classes="help-row")
                 yield Label("  [bold]Enter[/]  Show PR details", classes="help-row")
                 yield Label("PR Actions", classes="help-section")
                 yield Label("  [bold]s[/]  Start selected PR", classes="help-row")
@@ -211,6 +232,7 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]d[/]  Mark PR as done", classes="help-row")
                 yield Label("  [bold]e[/]  Edit selected PR", classes="help-row")
                 yield Label("  [bold]v[/]  View plan file", classes="help-row")
+                yield Label("  [bold]M[/]  Move to plan", classes="help-row")
             yield Label("Panes & Views", classes="help-section")
             yield Label("  [bold]c[/]  Launch Claude session", classes="help-row")
             yield Label("  [bold]h[/]  Ask for help (beginner-friendly)", classes="help-row")
@@ -233,6 +255,121 @@ class HelpScreen(ModalScreen):
 
     def action_dismiss(self) -> None:
         self.app.pop_screen()
+
+
+class PlanPickerScreen(ModalScreen):
+    """Modal for picking a plan to assign to a PR."""
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    CSS = """
+    PlanPickerScreen {
+        align: center middle;
+    }
+    #picker-container {
+        width: 55;
+        height: auto;
+        max-height: 80%;
+        background: $surface;
+        border: solid $primary;
+        padding: 1 2;
+    }
+    #picker-title {
+        text-align: center;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+    .picker-row {
+        height: 1;
+    }
+    #picker-input {
+        display: none;
+        margin-top: 1;
+    }
+    """
+
+    def __init__(self, plans: list[dict], current_plan: str | None, pr_id: str):
+        super().__init__()
+        self._plans = plans
+        self._current_plan = current_plan
+        self._pr_id = pr_id
+        self._selected = 0
+        # Options: each plan + "No plan (standalone)" + "New plan..."
+        self._options: list[tuple[str | None, str]] = []  # (plan_id_or_None, display_label)
+        for p in plans:
+            self._options.append((p["id"], f"{p['id']}: {p.get('name', '')}"))
+        self._options.append(("_standalone", "No plan (standalone)"))
+        self._options.append(("_new", "New plan..."))
+        # Pre-select current plan
+        for i, (pid, _) in enumerate(self._options):
+            if pid == current_plan:
+                self._selected = i
+                break
+        self._input_mode = False
+
+    def compose(self) -> ComposeResult:
+        from textual.widgets import Input
+        with Vertical(id="picker-container"):
+            yield Label(f"Move {self._pr_id} to plan:", id="picker-title")
+            yield Label("", id="picker-options")
+            yield Input(placeholder="Plan name", id="picker-input")
+            yield Label("[dim]↑↓ navigate  Enter select  Esc cancel[/]", classes="picker-row")
+
+    def on_mount(self) -> None:
+        self._refresh_options()
+
+    def _refresh_options(self) -> None:
+        lines = []
+        for i, (pid, label) in enumerate(self._options):
+            is_current = (pid == self._current_plan) or (pid == "_standalone" and self._current_plan is None)
+            marker = "●" if is_current else "○"
+            pointer = "▸ " if i == self._selected else "  "
+            style = "bold" if i == self._selected else ""
+            lines.append(f"{pointer}{marker} {label}")
+        options_label = self.query_one("#picker-options", Label)
+        options_label.update("\n".join(lines))
+
+    def on_key(self, event) -> None:
+        if self._input_mode:
+            return  # Let Input widget handle keys
+        if event.key in ("up", "k"):
+            self._selected = max(0, self._selected - 1)
+            self._refresh_options()
+            event.prevent_default()
+            event.stop()
+        elif event.key in ("down", "j"):
+            self._selected = min(len(self._options) - 1, self._selected + 1)
+            self._refresh_options()
+            event.prevent_default()
+            event.stop()
+        elif event.key == "enter":
+            pid, label = self._options[self._selected]
+            if pid == "_new":
+                self._enter_input_mode()
+            else:
+                self.dismiss(pid)
+            event.prevent_default()
+            event.stop()
+
+    def _enter_input_mode(self) -> None:
+        from textual.widgets import Input
+        self._input_mode = True
+        input_widget = self.query_one("#picker-input", Input)
+        input_widget.styles.display = "block"
+        input_widget.focus()
+
+    def on_input_submitted(self, event) -> None:
+        title = event.value.strip()
+        if title:
+            self.dismiss(("_new", title))
+        else:
+            self._input_mode = False
+            event.input.styles.display = "none"
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
 
 
 class ProjectManagerApp(App):
@@ -348,6 +485,10 @@ class ProjectManagerApp(App):
         Binding("escape", "unfocus_command", "Back", show=False),
         Binding("P", "toggle_plans", "Plans", show=True),
         Binding("T", "toggle_tests", "Tests", show=True),
+        Binding("H", "hide_plan", "Hide Plan", show=False),
+        Binding("M", "move_to_plan", "Move Plan", show=False),
+        Binding("X", "toggle_merged", "Toggle Merged", show=False),
+        Binding("F", "cycle_filter", "Filter", show=False),
         Binding("question_mark", "show_help", "Help", show=True),
         Binding("c", "launch_claude", "Claude", show=True),
         Binding("h", "launch_help_claude", "Assist", show=True),  # show toggled in __init__
@@ -359,14 +500,14 @@ class ProjectManagerApp(App):
         if action in ("start_pr", "start_pr_fresh", "done_pr",
                        "edit_plan", "view_plan", "toggle_guide", "launch_notes",
                        "launch_meta", "launch_claude", "launch_help_claude",
-                       "view_log", "refresh",
-                       "rebalance", "quit", "show_help", "toggle_tests"):
+                       "view_log", "refresh", "rebalance", "quit", "show_help",
+                       "toggle_tests", "hide_plan", "move_to_plan", "toggle_merged", "cycle_filter"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus:
                 _log.debug("check_action: blocked %s (command bar focused)", action)
                 return False
         # Block PR actions when in guide mode or plans view (can't see the PR tree)
-        if action in ("start_pr", "done_pr", "launch_claude", "edit_plan", "view_plan"):
+        if action in ("start_pr", "done_pr", "launch_claude", "edit_plan", "view_plan", "hide_plan", "move_to_plan", "toggle_merged", "cycle_filter"):
             if self._current_guide_step is not None:
                 _log.debug("check_action: blocked %s (in guide mode)", action)
                 return False
@@ -520,7 +661,7 @@ class ProjectManagerApp(App):
     def compose(self) -> ComposeResult:
         yield StatusBar(id="status-bar")
         with Container(id="main-area"):
-            with Vertical(id="tree-container"):
+            with TreeScroll(id="tree-container"):
                 yield TechTree(id="tech-tree")
             with Vertical(id="guide-progress-container"):
                 yield GuideProgress(id="guide-progress")
@@ -704,6 +845,7 @@ class ProjectManagerApp(App):
         )
 
         tree = self.query_one("#tech-tree", TechTree)
+        tree.update_plans(self._data.get("plans") or [])
         tree.update_prs(self._data.get("prs") or [])
 
     async def _background_sync(self) -> None:
@@ -1010,6 +1152,166 @@ class ProjectManagerApp(App):
             self._run_command(f"pr start --new {pr_id}", working_message=f"Starting {pr_id} (fresh)")
         else:
             self.log_message("No PR selected")
+
+    def action_hide_plan(self) -> None:
+        """Toggle hiding the selected PR's plan group.
+
+        If selected on a hidden label: unhide that plan.
+        If selected on a normal PR: hide its plan.
+        If no selection: unhide all.
+        """
+        tree = self.query_one("#tech-tree", TechTree)
+
+        # Check if selected node is a hidden label
+        if tree.selected_is_hidden_label:
+            plan_id = tree.get_selected_plan()
+            if plan_id:
+                tree._hidden_plans.discard(plan_id)
+                tree._recompute()
+                tree.refresh(layout=True)
+                self.log_message(f"Showing: {tree.get_plan_display_name(plan_id)}")
+            return
+
+        plan_id = tree.get_selected_plan()
+        if plan_id is None:
+            # No selection (all hidden) — unhide all
+            tree._hidden_plans.clear()
+            tree._recompute()
+            tree.refresh(layout=True)
+            self.log_message("All plans visible")
+            return
+        if plan_id in tree._hidden_plans:
+            tree._hidden_plans.discard(plan_id)
+            tree._recompute()
+            tree.refresh(layout=True)
+            self.log_message(f"Showing: {tree.get_plan_display_name(plan_id)}")
+        else:
+            tree._hidden_plans.add(plan_id)
+            tree._recompute()
+            tree.refresh(layout=True)
+            self.log_message(f"Hidden: {tree.get_plan_display_name(plan_id)}")
+
+    def action_toggle_merged(self) -> None:
+        """Toggle hiding/showing of merged PRs."""
+        tree = self.query_one("#tech-tree", TechTree)
+        tree._hide_merged = not tree._hide_merged
+        tree._recompute()
+        tree.refresh(layout=True)
+        self._update_filter_status()
+        if tree._hide_merged:
+            self.log_message("Merged PRs hidden")
+        else:
+            self.log_message("Merged PRs shown")
+
+    def action_cycle_filter(self) -> None:
+        """Cycle through status filters: all → pending → in_progress → ..."""
+        from pm_core.tui.tech_tree import STATUS_FILTER_CYCLE, STATUS_ICONS
+        tree = self.query_one("#tech-tree", TechTree)
+        current = tree._status_filter
+        try:
+            idx = STATUS_FILTER_CYCLE.index(current)
+        except ValueError:
+            idx = 0
+        next_idx = (idx + 1) % len(STATUS_FILTER_CYCLE)
+        tree._status_filter = STATUS_FILTER_CYCLE[next_idx]
+        tree._recompute()
+        tree.refresh(layout=True)
+        self._update_filter_status()
+        if tree._status_filter:
+            icon = STATUS_ICONS.get(tree._status_filter, "")
+            self.log_message(f"Filter: {icon} {tree._status_filter}")
+        else:
+            self.log_message("Filter: all")
+
+    def _update_filter_status(self) -> None:
+        """Update the status bar to reflect active filters."""
+        from pm_core.tui.tech_tree import STATUS_ICONS
+        if not self._data:
+            return
+        tree = self.query_one("#tech-tree", TechTree)
+        project = self._data.get("project", {})
+        prs = self._data.get("prs") or []
+        filter_text = ""
+        if tree._status_filter:
+            icon = STATUS_ICONS.get(tree._status_filter, "")
+            filter_text = f"{icon} {tree._status_filter}"
+        elif tree._hide_merged:
+            filter_text = "hide merged"
+        status_bar = self.query_one("#status-bar", StatusBar)
+        status_bar.update_status(
+            project.get("name", "???"),
+            project.get("repo", "???"),
+            "synced",
+            pr_count=len(prs),
+            filter_text=filter_text,
+        )
+
+    def action_move_to_plan(self) -> None:
+        """Open plan picker to move selected PR to a different plan."""
+        tree = self.query_one("#tech-tree", TechTree)
+        pr_id = tree.selected_pr_id
+        if not pr_id:
+            self.log_message("No PR selected")
+            return
+        pr = store.get_pr(self._data, pr_id)
+        if not pr:
+            self.log_message("PR not found")
+            return
+        plans = self._data.get("plans") or []
+        current_plan = pr.get("plan") or None
+        self.push_screen(
+            PlanPickerScreen(plans, current_plan, pr_id),
+            callback=lambda result: self._handle_plan_pick(pr_id, result),
+        )
+
+    def _handle_plan_pick(self, pr_id: str, result) -> None:
+        """Handle the result from PlanPickerScreen."""
+        if result is None:
+            return  # Cancelled
+        pr = store.get_pr(self._data, pr_id)
+        if not pr:
+            return
+
+        if isinstance(result, tuple) and result[0] == "_new":
+            # Create a new plan
+            _, title = result
+            plan_id = store.next_plan_id(self._data)
+            plan_file = f"plans/{plan_id}.md"
+            entry = {"id": plan_id, "name": title, "file": plan_file, "status": "draft"}
+            if self._data.get("plans") is None:
+                self._data["plans"] = []
+            self._data["plans"].append(entry)
+            # Create plan file
+            if self._root:
+                plan_path = self._root / plan_file
+                plan_path.parent.mkdir(parents=True, exist_ok=True)
+                plan_path.write_text(f"# {title}\n\n<!-- Describe the plan here -->\n")
+            pr["plan"] = plan_id
+            store.save(self._data, self._root)
+            self._load_state()
+            self.log_message(f"Moved {pr_id} → {plan_id}: {title} (new)")
+        elif result == "_standalone":
+            # Remove plan assignment
+            old_plan = pr.get("plan")
+            if not old_plan:
+                self.log_message("Already standalone")
+                return
+            pr.pop("plan", None)
+            store.save(self._data, self._root)
+            self._load_state()
+            self.log_message(f"Moved {pr_id} → Standalone")
+        elif isinstance(result, str):
+            # Existing plan selected
+            old_plan = pr.get("plan")
+            if result == old_plan:
+                self.log_message("Already in that plan")
+                return
+            pr["plan"] = result
+            store.save(self._data, self._root)
+            self._load_state()
+            tree = self.query_one("#tech-tree", TechTree)
+            display = tree.get_plan_display_name(result)
+            self.log_message(f"Moved {pr_id} → {display}")
 
     def action_done_pr(self) -> None:
         tree = self.query_one("#tech-tree", TechTree)
@@ -1378,7 +1680,7 @@ class ProjectManagerApp(App):
         """Launch Claude with the selected test prompt."""
         _log.info("test activated: %s", message.test_id)
         from pm_core import tui_tests
-        from pm_core.claude_launcher import find_claude
+        from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
 
         prompt = tui_tests.get_test_prompt(message.test_id)
         if not prompt:
@@ -1408,10 +1710,7 @@ To interact with this session, use commands like:
 {prompt}
 """
 
-        cmd = claude
-        if os.environ.get("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS") == "true":
-            cmd += " --dangerously-skip-permissions"
-        cmd += f" {shlex.quote(full_prompt)}"
+        cmd = build_claude_shell_cmd(prompt=full_prompt)
         self._launch_pane(cmd, "tui-test")
 
     def _find_editor(self) -> str:

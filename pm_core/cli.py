@@ -128,14 +128,16 @@ def load_and_sync() -> tuple[dict, Path]:
     return store.load(root), root
 
 
-def _pr_id_num(pr_id: str) -> int:
-    """Extract numeric part from pr-NNN id for sorting."""
-    # pr-001 → 1, pr-010 → 10
-    parts = pr_id.split("-")
-    try:
-        return int(parts[1])
-    except (IndexError, ValueError):
-        return 0
+def _pr_id_sort_key(pr_id: str) -> tuple[int, str]:
+    """Sort key for PR IDs. Numeric pr-NNN sorts by number, hash IDs sort after."""
+    # pr-001 → (1, ""), pr-a3f2b1c → (0, "a3f2b1c")
+    parts = pr_id.split("-", 1)
+    if len(parts) == 2:
+        try:
+            return (int(parts[1]), "")
+        except ValueError:
+            return (0, parts[1])
+    return (0, pr_id)
 
 
 def _pr_display_id(pr: dict) -> str:
@@ -440,7 +442,8 @@ def plan_add(name: str, fresh: bool):
     """Create a new plan and launch Claude to develop it."""
     root = state_root()
     data = store.load(root)
-    plan_id = store.next_plan_id(data)
+    existing_ids = {p["id"] for p in (data.get("plans") or [])}
+    plan_id = store.generate_plan_id(name, existing_ids)
     plan_file = f"plans/{plan_id}.md"
 
     entry = {
@@ -878,27 +881,23 @@ def plan_load(plan_id: str | None):
         commands.append(cmd)
         click.echo(f"  - {pr['title']}")
 
-    # Build depends_on edit commands (second pass, referencing PR IDs)
-    # We know the current next_pr_id, so we can predict IDs
-    existing_prs = data.get("prs") or []
-    if existing_prs:
-        import re
-        nums = [int(m.group(1)) for p in existing_prs if (m := re.match(r"pr-(\d+)", p["id"]))]
-        next_num = max(nums) + 1 if nums else 1
-    else:
-        next_num = 1
-
-    title_to_predicted_id = {}
-    for i, pr in enumerate(prs):
-        title_to_predicted_id[pr["title"]] = f"pr-{next_num + i:03d}"
+    # Compute the PR IDs that will be assigned when the add commands run.
+    # This is safe because hash-based IDs are deterministic from title+desc,
+    # and we have the exact title+desc that the add commands will use.
+    existing_ids = {p["id"] for p in (data.get("prs") or [])}
+    title_to_id = {}
+    for pr in prs:
+        pr_id = store.generate_pr_id(pr["title"], pr.get("description", ""), existing_ids)
+        title_to_id[pr["title"]] = pr_id
+        existing_ids.add(pr_id)
 
     dep_commands = []
     for pr in prs:
         if pr["depends_on"]:
-            pr_id = title_to_predicted_id[pr["title"]]
+            pr_id = title_to_id[pr["title"]]
             dep_title = pr["depends_on"].strip()
-            if dep_title in title_to_predicted_id:
-                dep_id = title_to_predicted_id[dep_title]
+            if dep_title in title_to_id:
+                dep_id = title_to_id[dep_title]
                 dep_commands.append(f'pm pr edit {pr_id} --depends-on {dep_id}')
 
     all_commands = commands + dep_commands
@@ -1043,9 +1042,8 @@ def _import_github_prs(root: Path, data: dict) -> None:
             status = "pending"
 
         existing_ids = {p["id"] for p in data["prs"]}
-        pr_id = f"pr-{number:03d}"
-        if pr_id in existing_ids:
-            pr_id = store.next_pr_id(data)
+        desc = gh_pr.get("body", "") or ""
+        pr_id = store.generate_pr_id(title, desc, existing_ids)
 
         entry = {
             "id": pr_id,
@@ -1054,12 +1052,13 @@ def _import_github_prs(root: Path, data: dict) -> None:
             "branch": branch,
             "status": status,
             "depends_on": [],
-            "description": gh_pr.get("body", "") or "",
+            "description": desc,
             "agent_machine": None,
             "gh_pr": gh_pr.get("url", ""),
             "gh_pr_number": number,
         }
         data["prs"].append(entry)
+        existing_ids.add(pr_id)
         imported += 1
         click.echo(f"  + {pr_id}: {title} [{status}] (#{number})")
 
@@ -1072,7 +1071,8 @@ def _run_plan_import(name: str):
     """Core logic for plan import — used by both `plan import` and `init`."""
     root = state_root()
     data = store.load(root)
-    plan_id = store.next_plan_id(data)
+    existing_ids = {p["id"] for p in (data.get("plans") or [])}
+    plan_id = store.generate_plan_id(name, existing_ids)
     plan_file = f"plans/{plan_id}.md"
 
     entry = {
@@ -1203,7 +1203,8 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
         if len(plans) == 1:
             plan_id = plans[0]["id"]
 
-    pr_id = store.next_pr_id(data)
+    existing_ids = {p["id"] for p in (data.get("prs") or [])}
+    pr_id = store.generate_pr_id(title, desc, existing_ids)
     slug = store.slugify(title)
     branch = f"pm/{pr_id}-{slug}"
 
@@ -1452,7 +1453,7 @@ def pr_list():
         return
 
     # Sort newest first (by gh_pr_number descending, then pr id descending)
-    prs = sorted(prs, key=lambda p: (p.get("gh_pr_number") or _pr_id_num(p["id"])), reverse=True)
+    prs = sorted(prs, key=lambda p: (p.get("gh_pr_number") or _pr_id_sort_key(p["id"])[0], _pr_id_sort_key(p["id"])[1]), reverse=True)
 
     active_pr = data.get("project", {}).get("active_pr")
     status_icons = {
@@ -1923,17 +1924,11 @@ def pr_import_github(gh_state: str):
         else:
             status = "pending"
 
-        # Generate a pr_id based on the GH PR number
+        # Generate a hash-based pr_id from title + body
         existing_ids = {p["id"] for p in data["prs"]}
-        pr_id = f"pr-{number:03d}"
-        if pr_id in existing_ids:
-            pr_id = f"pr-{number:03d}-gh"
-        if pr_id in existing_ids:
-            # Fall back to sequential
-            pr_id = store.next_pr_id(data)
-
         url = gh_pr.get("url", "")
         body = gh_pr.get("body", "") or ""
+        pr_id = store.generate_pr_id(title, body, existing_ids)
 
         entry = {
             "id": pr_id,
@@ -2128,12 +2123,20 @@ def session(ctx, share_global, share_group, start_dir, print_connect):
 
 
 def _register_tmux_bindings(session_name: str) -> None:
-    """Register tmux keybindings for mobile-aware pane navigation.
+    """Register tmux keybindings and session options for pm.
 
     Called on both new session creation and reattach so bindings
     survive across sessions (tmux bindings are global).
+    Also sets window-size=latest on all sessions in the group so each
+    client's terminal size is used for layout, not the minimum.
     """
     import subprocess as _sp
+    # Enable per-client window sizing: window follows the most recently
+    # active client rather than shrinking to the smallest.
+    base = session_name.split("~")[0]
+    for s in [base] + tmux_mod.list_grouped_sessions(base):
+        tmux_mod.set_session_option(s, "window-size", "latest")
+
     _sp.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", "R",
              "run-shell 'pm rebalance'"), check=False)
     # Conditionally override pane-switch keys: use pm's mobile-aware
@@ -2156,6 +2159,16 @@ def _register_tmux_bindings(session_name: str) -> None:
                 check=False)
     _sp.run(tmux_mod._tmux_cmd("set-hook", "-g", "after-kill-pane",
              "run-shell 'pm _pane-closed'"), check=False)
+    # Auto-rebalance when window resizes (triggered by client switches
+    # with window-size=latest, or moving terminal to a different monitor).
+    # Uses "window-resized" (fires on any window size change) not
+    # "after-resize-window" (only fires after the resize-window command).
+    _sp.run(tmux_mod._tmux_cmd("set-hook", "-g", "window-resized",
+             "run-shell 'pm _window-resized \"#{session_name}\"'"),
+            check=False)
+    # Clean up stale hook from earlier versions that used the wrong name
+    _sp.run(tmux_mod._tmux_cmd("set-hook", "-gu", "after-resize-window"),
+            check=False)
 
 
 def _session_start(share_global: bool = False, share_group: str | None = None,
@@ -2267,6 +2280,7 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
                 _log.info("creating new grouped session: %s", grouped)
                 tmux_mod.create_grouped_session(session_name, grouped,
                                                 socket_path=socket_path)
+                tmux_mod.set_session_option(grouped, "window-size", "latest")
                 click.echo(f"Attaching to session '{grouped}'...")
             tmux_mod.attach(grouped, socket_path=socket_path)
             return
@@ -2309,8 +2323,7 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
             click.echo(f"Warning: Could not set socket permissions: {e}", err=True)
 
     # Forward key environment variables into the tmux session
-    env_keys = ["CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS", "PM_PROJECT", "EDITOR", "PATH"]
-    for env_key in env_keys:
+    for env_key in ("PM_PROJECT", "EDITOR", "PATH"):
         val = os.environ.get(env_key)
         if val:
             tmux_mod.set_environment(session_name, env_key, val,
@@ -2371,6 +2384,7 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
     # Create a grouped session so we never attach directly to the base
     grouped = f"{session_name}~1"
     tmux_mod.create_grouped_session(session_name, grouped, socket_path=socket_path)
+    tmux_mod.set_session_option(grouped, "window-size", "latest")
     tmux_mod.attach(grouped, socket_path=socket_path)
 
 
@@ -2842,7 +2856,8 @@ def cluster_auto(threshold, max_commits, weights, output_fmt):
         click.echo(clusters_to_json(clusters, chunk_map))
     elif output_fmt == "plan":
         md = clusters_to_plan_markdown(clusters, chunk_map)
-        plan_id = store.next_plan_id(data)
+        existing_ids = {p["id"] for p in (data.get("plans") or [])}
+        plan_id = store.generate_plan_id(f"cluster-explore", existing_ids)
         plan_name = f"cluster-{plan_id}"
         plan_file = f"plans/{plan_name}.md"
         plan_path = root / plan_file
@@ -3295,6 +3310,28 @@ def pane_exited_cmd(session: str, window: str, generation: str, pane_id: str):
 def pane_closed_cmd():
     """Internal: handle pane close from global tmux hook."""
     pane_layout.handle_any_pane_closed()
+
+
+@cli.command("_window-resized", hidden=True)
+@click.argument("session")
+def window_resized_cmd(session: str):
+    """Internal: auto-rebalance after window resize.
+
+    Called from the global window-resized tmux hook when
+    the window changes size (e.g. terminal moved to a different
+    monitor, client switches with window-size=latest).
+    """
+    _log.info("window_resized: session=%s", session)
+    base = pane_layout.base_session_name(session)
+    data = pane_layout.load_registry(base)
+    if not data["panes"]:
+        _log.debug("window_resized: no panes, skipping")
+        return
+    if data.get("user_modified"):
+        _log.debug("window_resized: user_modified, skipping")
+        return
+    window = data.get("window", "0")
+    pane_layout.rebalance(base, window)
 
 
 @cli.command("_pane-opened", hidden=True)
@@ -3910,20 +3947,15 @@ To interact with this session, use commands like:
     click.echo(f"Session: {sess}")
     click.echo("-" * 60)
 
-    # Launch Claude with the test prompt
-    claude = find_claude()
-    if not claude:
-        click.echo("Claude CLI not found.", err=True)
-        raise SystemExit(1)
-
-    import subprocess
-    cmd = [claude]
-    if os.environ.get("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS") == "true":
-        cmd.append("--dangerously-skip-permissions")
-    cmd.append(full_prompt)
-
-    result = subprocess.run(cmd)
-    raise SystemExit(result.returncode)
+    # Launch Claude with the test prompt (no session resume for tests)
+    from pm_core.claude_launcher import launch_claude
+    try:
+        root = state_root()
+    except FileNotFoundError:
+        root = Path.home() / ".pm"
+    rc = launch_claude(full_prompt, session_key=f"tui-test:{test_id}",
+                       pm_root=root, resume=False)
+    raise SystemExit(rc)
 
 
 PM_REPO_URL = "https://github.com/mjtomei/project_manager.git"
