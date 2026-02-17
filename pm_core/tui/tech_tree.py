@@ -451,7 +451,7 @@ class TechTree(Widget):
                     abs(self._node_positions[x[1]][0] - cur_col),  # then closest column
                     self._node_positions[x[1]][1]  # then lowest row (closest to current)
                 ))[0]
-        elif event.key in ("left", "h"):
+        elif event.key == "left":
             # Move left: must be in a column to the left, prefer same row
             candidates = [(i, pid) for i, pid in enumerate(self._ordered_ids)
                           if self._node_positions[pid][0] < cur_col]

@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import platform
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -2290,7 +2291,12 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
     # Always create session with TUI in the left pane
     _log.info("creating tmux session: %s cwd=%s socket=%s", session_name, cwd, socket_path)
     click.echo(f"Creating tmux session '{session_name}'...")
-    tmux_mod.create_session(session_name, cwd, "pm _tui", socket_path=socket_path)
+    # For shared sessions, set PM_TMUX_SOCKET in the initial command so the TUI
+    # process inherits it immediately (set-environment only affects new processes)
+    tui_cmd = "pm _tui"
+    if socket_path:
+        tui_cmd = f"PM_TMUX_SOCKET={shlex.quote(socket_path)} pm _tui"
+    tmux_mod.create_session(session_name, cwd, tui_cmd, socket_path=socket_path)
 
     # Set socket permissions for shared sessions
     if is_shared and socket_path:

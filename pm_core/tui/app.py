@@ -128,7 +128,7 @@ class WelcomeScreen(ModalScreen):
             yield Label("")
             yield Label("Your PRs are ready. Here's how to get started:", classes="welcome-row")
             yield Label("")
-            yield Label("  [bold]↑↓←→[/] or [bold]hjkl[/]  Navigate the PR tree", classes="welcome-row")
+            yield Label("  [bold]↑↓←→[/] or [bold]jkl[/]  Navigate the PR tree", classes="welcome-row")
             yield Label("  [bold]s[/]  Start working on the selected PR", classes="welcome-row")
             yield Label("  [bold]c[/]  Launch Claude in a new pane", classes="welcome-row")
             yield Label("  [bold]e[/]  Edit PR details", classes="welcome-row")
@@ -203,7 +203,7 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]P[/]  Back to tree view", classes="help-row")
             else:
                 yield Label("Tree Navigation", classes="help-section")
-                yield Label("  [bold]↑↓←→[/] or [bold]hjkl[/]  Move selection", classes="help-row")
+                yield Label("  [bold]↑↓←→[/] or [bold]jkl[/]  Move selection", classes="help-row")
                 yield Label("  [bold]Enter[/]  Show PR details", classes="help-row")
                 yield Label("PR Actions", classes="help-section")
                 yield Label("  [bold]s[/]  Start selected PR", classes="help-row")
@@ -213,7 +213,7 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]v[/]  View plan file", classes="help-row")
             yield Label("Panes & Views", classes="help-section")
             yield Label("  [bold]c[/]  Launch Claude session", classes="help-row")
-            yield Label("  [bold]H[/]  Ask for help (beginner-friendly)", classes="help-row")
+            yield Label("  [bold]h[/]  Ask for help (beginner-friendly)", classes="help-row")
             yield Label("  [bold]/[/]  Open command bar", classes="help-row")
             yield Label("  [bold]g[/]  Toggle guide view", classes="help-row")
             yield Label("  [bold]n[/]  Open notes", classes="help-row")
@@ -350,7 +350,7 @@ class ProjectManagerApp(App):
         Binding("T", "toggle_tests", "Tests", show=True),
         Binding("question_mark", "show_help", "Help", show=True),
         Binding("c", "launch_claude", "Claude", show=True),
-        Binding("H", "launch_help_claude", "Assist", show=True),  # show toggled in __init__
+        Binding("h", "launch_help_claude", "Assist", show=True),  # show toggled in __init__
         Binding("C", "show_connect", "Connect", show=False),
     ]
 
