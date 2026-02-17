@@ -1413,9 +1413,34 @@ To interact with this session, use commands like:
         if not claude:
             self.log_message("Claude CLI not found")
             return
+
+        sess = self._session_name or "default"
+        pane_id = os.environ.get("TMUX_PANE", "")
+        prompt = f"""\
+## Session Context
+
+You are running inside a pm (project manager) tmux session: {sess}
+The TUI pane ID is: {pane_id}
+
+pm is a CLI tool for managing Claude Code development sessions. You can use \
+it to manage PRs, plans, and the TUI. Run `pm --help` for the full command list.
+
+Common tasks:
+- `pm pr list` — list PRs and their status
+- `pm pr add <title>` — add a new PR
+- `pm pr start <pr-id>` — start working on a PR
+- `pm pr done <pr-id>` — mark a PR as ready for review
+- `pm plan list` — list plans
+- `pm tui view -s {sess}` — capture the current TUI screen
+- `pm tui send <keys> -s {sess}` — send keys to the TUI
+
+The user will tell you what they need. You are a general-purpose assistant \
+operating within this pm session."""
+
         cmd = claude
         if os.environ.get("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS") == "true":
             cmd += " --dangerously-skip-permissions"
+        cmd += f" {shlex.quote(prompt)}"
         self._launch_pane(cmd, "claude")
 
     def action_show_connect(self) -> None:
