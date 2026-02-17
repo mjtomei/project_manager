@@ -485,3 +485,25 @@ class TestSessionStartSetsEnvVar:
         cmd = mock_run.call_args[0][0]
         assert "-S" in cmd
         assert socket in cmd
+
+
+# ---------------------------------------------------------------------------
+# TUI: ConnectScreen modal
+# ---------------------------------------------------------------------------
+
+class TestConnectScreen:
+    """Verify ConnectScreen can be instantiated with a command string."""
+
+    def test_stores_command(self):
+        from pm_core.tui.app import ConnectScreen
+        cmd = "tmux -S /tmp/pm-sessions/pm-test attach"
+        screen = ConnectScreen(cmd)
+        assert screen._command == cmd
+
+    def test_different_commands(self):
+        from pm_core.tui.app import ConnectScreen
+        cmd1 = "tmux -S /tmp/sock1 attach"
+        cmd2 = "tmux -S /tmp/sock2 attach"
+        s1 = ConnectScreen(cmd1)
+        s2 = ConnectScreen(cmd2)
+        assert s1._command != s2._command

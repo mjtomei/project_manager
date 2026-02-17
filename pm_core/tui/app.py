@@ -157,6 +157,73 @@ class WelcomeScreen(ModalScreen):
         self.app.pop_screen()
 
 
+class ConnectScreen(ModalScreen):
+    """Modal popup showing the tmux connect command for shared sessions."""
+
+    BINDINGS = [
+        Binding("escape", "dismiss", "Close"),
+        Binding("q", "dismiss", "Close"),
+        Binding("c", "copy_and_dismiss", "Copy & close"),
+    ]
+
+    CSS = """
+    ConnectScreen {
+        align: center middle;
+    }
+    #connect-container {
+        width: 70;
+        height: auto;
+        background: $surface;
+        border: solid $primary;
+        padding: 1 2;
+    }
+    #connect-title {
+        text-align: center;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+    #connect-command {
+        margin: 1 0;
+        padding: 1 2;
+        background: $surface-darken-1;
+        text-style: bold;
+    }
+    .connect-hint {
+        height: 1;
+        color: $text-muted;
+    }
+    """
+
+    def __init__(self, command: str):
+        super().__init__()
+        self._command = command
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="connect-container"):
+            yield Label("Connect Command", id="connect-title")
+            yield Label(self._command, id="connect-command")
+            yield Label("")
+            yield Label("[dim]Press [bold]c[/bold] to copy to clipboard  |  [bold]Esc[/bold] to close[/]", classes="connect-hint")
+
+    def action_dismiss(self) -> None:
+        self.app.pop_screen()
+
+    def action_copy_and_dismiss(self) -> None:
+        copy_failed = False
+        try:
+            import pyperclip
+            pyperclip.copy(self._command)
+        except Exception:
+            copy_failed = True
+        self.app.pop_screen()
+        if copy_failed:
+            def _show_error() -> None:
+                self.app.log_error(
+                    "Copy failed:", "install xclip (apt install xclip) or xsel"
+                )
+            self.app.set_timer(0.1, _show_error)
+
+
 class HelpScreen(ModalScreen):
     """Modal help screen showing available keybindings."""
 
@@ -956,6 +1023,20 @@ class ProjectManagerApp(App):
             log.update(f" {msg}")
         except Exception:
             pass
+
+    def log_error(self, title: str, detail: str = "", timeout: float = 5) -> None:
+        """Show a red error in the log line that auto-clears.
+
+        Args:
+            title: Short error summary (shown in red bold).
+            detail: Optional extra context (shown in normal style).
+            timeout: Seconds before the message auto-clears.
+        """
+        msg = f"[red bold]{title}[/]"
+        if detail:
+            msg += f" {detail}"
+        self.log_message(msg)
+        self.set_timer(timeout, self._clear_log_message)
 
     def _clear_log_message(self) -> None:
         """Clear the log line message."""
@@ -1872,7 +1953,8 @@ what to do next. Suggest one or two concrete actions, not an overwhelming list."
         """Show the tmux connect command for shared sessions."""
         socket_path = os.environ.get("PM_TMUX_SOCKET")
         if socket_path:
-            self.log_message(f"Connect: tmux -S {socket_path} attach")
+            command = f"tmux -S {socket_path} attach"
+            self.push_screen(ConnectScreen(command))
         else:
             self.log_message("Not a shared session")
             self.set_timer(2, self._clear_log_message)
