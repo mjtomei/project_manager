@@ -1579,13 +1579,13 @@ restores the original size at the end.
 When multiple terminals connect to the same pm session via grouped tmux
 sessions (e.g. a landscape monitor and a portrait monitor), each terminal may
 have different dimensions. With `window-size=latest`, the tmux window follows
-the most recently active client's size. A global `after-resize-window` hook
+the most recently active client's size. A global `window-resized` hook
 triggers `pm _window-resized` which calls `rebalance()`, recomputing the
 layout based on the new dimensions.
 
 Key implementation details:
 - `window-size=latest` is set on all sessions in the group
-- Global `after-resize-window` hook fires `run-shell 'pm _window-resized'`
+- Global `window-resized` hook fires `run-shell 'pm _window-resized'`
 - `rebalance()` uses `w >= h * 2` to account for character aspect ratio (~2:1 h:w)
 - `is_mobile()` triggers for terminals narrower than 120 columns
 - Layout uses a recursive binary split: `{ }` for horizontal, `[ ]` for vertical
@@ -1625,8 +1625,8 @@ Key implementation details:
    - If grouped sessions exist, check one: `tmux show-options -t <base>~1 window-size`
    - Both should show "latest"
 
-2. Check the global after-resize-window hook:
-   - `tmux show-hooks -g` - should include `after-resize-window[0] run-shell "pm _window-resized ..."`
+2. Check the global window-resized hook:
+   - `tmux show-hooks -g` - should include `window-resized[0] run-shell "pm _window-resized ..."`
 
 ### Part 2: Landscape Layout (wide terminal)
 
@@ -1700,11 +1700,17 @@ IMPORTANT: Always restore the window to its original size!
    - `tmux resize-window -t <session> -x <original_width> -y <original_height>`
    - Wait 1-2 seconds for rebalance
 
-2. Alternatively, reset to automatic sizing:
-   - `tmux resize-window -t <session> -A`
-   - This makes the window follow the attached client's size again
+2. Clear the manual window-size override that `tmux resize-window -x -y` sets:
+   - `tmux set-window-option -u -t <session> window-size`
+   - Without this, the window stays in "manual" sizing mode and will NOT
+     auto-resize to follow the attached client, even after `resize-window -A`.
+   - Verify it's cleared: `tmux show-window-options -t <session>` should NOT
+     show `window-size manual`.
 
-3. Verify restoration:
+3. Optionally, also run `tmux resize-window -t <session> -A` to snap the
+   window size back to the largest attached client immediately.
+
+4. Verify restoration:
    - Pane geometries should match the original state (or be close)
    - TUI should be responsive: `pm tui view`
    - Registry should still have user_modified=false
@@ -1757,6 +1763,8 @@ pm tui view works: [PASS/FAIL]
 Refresh works: [PASS/FAIL]
 
 ## Part 7: Restore
+Manual window-size cleared: [PASS/FAIL]
+  `tmux set-window-option -u` removed "window-size manual"
 Original size restored: [PASS/FAIL]
   Method: resize-window -A / explicit dimensions
 Final state matches original: [PASS/FAIL]
