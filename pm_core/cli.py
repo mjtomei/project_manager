@@ -3189,6 +3189,44 @@ def pane_opened_cmd(session: str, window: str, pane_id: str):
     pane_layout.handle_pane_opened(session, window, pane_id)
 
 
+@cli.command("_window-resized", hidden=True)
+@click.argument("session")
+@click.argument("window")
+def window_resized_cmd(session: str, window: str):
+    """Internal: handle tmux window resize — debounce and rebalance."""
+    import time
+
+    _log.info("_window-resized: ENTERED session=%s window=%s pid=%d", session, window, os.getpid())
+
+    base = pane_layout.base_session_name(session)
+    data = pane_layout.load_registry(base)
+    if not data["panes"]:
+        _log.info("_window-resized: no panes in registry for %s, exiting", base)
+        return
+
+    _log.info("_window-resized: %d panes in registry, debouncing...", len(data["panes"]))
+
+    # Debounce: write our PID, sleep, then only proceed if we're still
+    # the latest resize event.  This avoids N rebalances during a drag.
+    debounce_file = pane_layout.registry_dir() / f"{base}.resize"
+    my_id = str(os.getpid())
+    debounce_file.write_text(my_id)
+    time.sleep(0.15)
+    try:
+        current_id = debounce_file.read_text()
+        if current_id != my_id:
+            _log.info("_window-resized: debounce lost (pid %s != %s), exiting", my_id, current_id)
+            return  # A newer resize event superseded us
+    except FileNotFoundError:
+        _log.info("_window-resized: debounce file gone, exiting")
+        return
+
+    _log.info("_window-resized: debounce won, rebalancing %s:%s", session, window)
+    tmux_mod.unzoom_pane(session, window)
+    result = pane_layout.rebalance(session, window)
+    _log.info("_window-resized: rebalance returned %s", result)
+
+
 @cli.command("_pane-switch", hidden=True,
              context_settings={"ignore_unknown_options": True})
 @click.argument("session")
@@ -3860,30 +3898,58 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
             # Check if master exists, otherwise use main
             result = git_ops.run_git("branch", "-r", "--list", "origin/master", cwd=work_path, check=False)
             base_ref = "master" if result.stdout.strip() else "main"
+
+        # Checkout base and create branch
+        if tag:
+            click.echo(f"Checking out tag {tag}...")
+            git_ops.run_git("checkout", tag, cwd=work_path, check=True)
+        else:
+            click.echo(f"Checking out {base_ref}...")
+            git_ops.run_git("checkout", base_ref, cwd=work_path, check=True)
+            click.echo(f"Pulling latest {base_ref}...")
+            git_ops.pull_rebase(work_path)
+
+        click.echo(f"Creating branch {branch} from {base_ref}...")
+        git_ops.checkout_branch(work_path, branch, create=True)
     else:
         click.echo(f"Using existing workdir: {work_path}")
-        # Fetch latest
-        click.echo("Fetching latest from origin...")
-        git_ops.run_git("fetch", "origin", cwd=work_path, check=False)
 
-        if tag:
-            base_ref = tag
+        # Check if workdir has in-progress work (dirty files or on a meta branch)
+        status = git_ops.run_git("status", "--porcelain", cwd=work_path, check=False)
+        current_branch = git_ops.run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=work_path, check=False)
+        current_branch_name = current_branch.stdout.strip()
+        has_dirty_files = bool(status.stdout.strip())
+        on_meta_branch = current_branch_name.startswith("meta/")
+
+        if has_dirty_files or on_meta_branch:
+            # Resume existing session — don't reset the workdir
+            click.echo(f"Resuming in-progress work on branch {current_branch_name}")
+            if has_dirty_files:
+                click.echo("(workdir has uncommitted changes)")
+            branch = current_branch_name
+            base_ref = "master"
         else:
-            result = git_ops.run_git("branch", "-r", "--list", "origin/master", cwd=work_path, check=False)
-            base_ref = "master" if result.stdout.strip() else "main"
+            # Clean workdir — safe to update and create new branch
+            click.echo("Fetching latest from origin...")
+            git_ops.run_git("fetch", "origin", cwd=work_path, check=False)
 
-    # Checkout base and create branch
-    if tag:
-        click.echo(f"Checking out tag {tag}...")
-        git_ops.run_git("checkout", tag, cwd=work_path, check=True)
-    else:
-        click.echo(f"Checking out {base_ref}...")
-        git_ops.run_git("checkout", base_ref, cwd=work_path, check=True)
-        click.echo(f"Pulling latest {base_ref}...")
-        git_ops.pull_rebase(work_path)
+            if tag:
+                base_ref = tag
+            else:
+                result = git_ops.run_git("branch", "-r", "--list", "origin/master", cwd=work_path, check=False)
+                base_ref = "master" if result.stdout.strip() else "main"
 
-    click.echo(f"Creating branch {branch} from {base_ref}...")
-    git_ops.checkout_branch(work_path, branch, create=True)
+            if tag:
+                click.echo(f"Checking out tag {tag}...")
+                git_ops.run_git("checkout", tag, cwd=work_path, check=True)
+            else:
+                click.echo(f"Checking out {base_ref}...")
+                git_ops.run_git("checkout", base_ref, cwd=work_path, check=True)
+                click.echo(f"Pulling latest {base_ref}...")
+                git_ops.pull_rebase(work_path)
+
+            click.echo(f"Creating branch {branch} from {base_ref}...")
+            git_ops.checkout_branch(work_path, branch, create=True)
 
     # Build the prompt
     prompt = _build_meta_prompt(task, work_path, install_info, branch, base_ref, session_tag)
