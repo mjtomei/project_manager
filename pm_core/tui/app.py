@@ -347,15 +347,16 @@ class ProjectManagerApp(App):
         Binding("P", "toggle_plans", "Plans", show=True),
         Binding("T", "toggle_tests", "Tests", show=True),
         Binding("question_mark", "show_help", "Help", show=True),
-        Binding("c", "show_connect", "Connect", show=False),
+        Binding("c", "launch_claude", "Claude", show=True),
+        Binding("C", "show_connect", "Connect", show=False),
     ]
 
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """Disable single-key shortcuts when command bar is focused or in guide mode."""
         if action in ("start_pr", "start_pr_fresh", "done_pr",
                        "edit_plan", "view_plan", "toggle_guide", "launch_notes",
-                       "launch_meta", "view_log", "refresh", "rebalance", "quit", "show_help",
-                       "toggle_tests"):
+                       "launch_meta", "launch_claude", "view_log", "refresh",
+                       "rebalance", "quit", "show_help", "toggle_tests"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus:
                 _log.debug("check_action: blocked %s (command bar focused)", action)
@@ -1403,6 +1404,18 @@ To interact with this session, use commands like:
     def _find_editor(self) -> str:
         """Find the user's preferred editor."""
         return os.environ.get("EDITOR", os.environ.get("VISUAL", "vi"))
+
+    def action_launch_claude(self) -> None:
+        """Launch an interactive Claude session in the project directory."""
+        from pm_core.claude_launcher import find_claude
+        claude = find_claude()
+        if not claude:
+            self.log_message("Claude CLI not found")
+            return
+        cmd = claude
+        if os.environ.get("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS") == "true":
+            cmd += " --dangerously-skip-permissions"
+        self._launch_pane(cmd, "claude")
 
     def action_show_connect(self) -> None:
         """Show the tmux connect command for shared sessions."""
