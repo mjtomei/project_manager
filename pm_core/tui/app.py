@@ -1544,8 +1544,15 @@ Before making any recommendations, check the project's current health:
 2. Run `pm plan list` to see existing plans
 3. Look at the repository with `git log --oneline -10` and `ls` to \
 understand what the codebase contains
+4. Check git health with `git status` and `git stash list` to look for \
+uncommitted changes, merge conflicts, or stashed work that was forgotten
+5. Run `git branch -a` to check for leftover or orphaned branches
+6. If anything looks off, run `git fsck --no-dangling` to verify repo integrity
 
 Then assess:
+- **Git health**: Are there uncommitted changes, unresolved merge conflicts, \
+detached HEAD, stashed changes, or other signs the repo is in a weird state? \
+If so, help the user fix these first before anything else.
 - Are there plans that haven't been broken into PRs yet?
 - Are there PRs that are blocked or stuck?
 - Is the dependency tree healthy (no circular deps, reasonable ordering)?
