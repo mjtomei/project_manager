@@ -62,7 +62,13 @@ def is_mobile(session: str, window: str = "0") -> bool:
     With window-size=latest, the window size reflects the most recently
     active client, so we only need to check the current window size.
     """
+    import traceback
+    caller = traceback.extract_stack(limit=3)[0]
+    caller_loc = f"{caller.filename.split('/')[-1]}:{caller.lineno}:{caller.name}"
+
     if mobile_flag_path(session).exists():
+        _logger.info("is_mobile(%s, %s): True (force flag) [caller: %s]",
+                      session, window, caller_loc)
         return True
     from pm_core import tmux as tmux_mod
     base = base_session_name(session)
