@@ -3335,7 +3335,7 @@ def window_resized_cmd(session: str):
         _log.debug("window_resized: user_modified, skipping")
         return
     window = data.get("window", "0")
-    pane_layout.rebalance(base, window)
+    pane_layout.rebalance(base, window, query_session=session)
 
 
 @cli.command("_pane-opened", hidden=True)
