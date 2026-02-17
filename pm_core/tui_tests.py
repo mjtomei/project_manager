@@ -1585,8 +1585,8 @@ layout based on the new dimensions.
 
 Key implementation details:
 - `window-size=latest` is set on all sessions in the group
-- Global `after-resize-window` hook with `if-shell` guard fires `pm _window-resized`
-- `rebalance()` chooses horizontal split when width >= height, vertical when height > width
+- Global `after-resize-window` hook fires `run-shell 'pm _window-resized'`
+- `rebalance()` uses `w >= h * 2` to account for character aspect ratio (~2:1 h:w)
 - `is_mobile()` triggers for terminals narrower than 120 columns
 - Layout uses a recursive binary split: `{ }` for horizontal, `[ ]` for vertical
 
@@ -1626,7 +1626,7 @@ Key implementation details:
    - Both should show "latest"
 
 2. Check the global after-resize-window hook:
-   - `tmux show-hooks -g` - should include `after-resize-window` with `if-shell ... pm _window-resized`
+   - `tmux show-hooks -g` - should include `after-resize-window[0] run-shell "pm _window-resized ..."`
 
 ### Part 2: Landscape Layout (wide terminal)
 
