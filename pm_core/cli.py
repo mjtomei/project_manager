@@ -2088,8 +2088,10 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool):
               help="Share session with a Unix group")
 @click.option("--dir", "start_dir", type=click.Path(exists=True, file_okay=False),
               default=None, help="Project directory (for joining another user's session)")
+@click.option("--print-connect", is_flag=True, default=False,
+              help="Print the tmux command others can use to connect (no pm required)")
 @click.pass_context
-def session(ctx, share_global, share_group, start_dir):
+def session(ctx, share_global, share_group, start_dir, print_connect):
     """Manage tmux sessions for pm.
 
     Without a subcommand, starts or attaches to the pm session.
@@ -2106,8 +2108,11 @@ def session(ctx, share_global, share_group, start_dir):
     if share_global and share_group:
         click.echo("--global and --group are mutually exclusive", err=True)
         raise SystemExit(1)
+    if print_connect and not (share_global or share_group):
+        click.echo("--print-connect requires --global or --group", err=True)
+        raise SystemExit(1)
     _session_start(share_global=share_global, share_group=share_group,
-                   start_dir=start_dir)
+                   start_dir=start_dir, print_connect=print_connect)
 
 
 def _register_tmux_bindings(session_name: str) -> None:
@@ -2142,7 +2147,7 @@ def _register_tmux_bindings(session_name: str) -> None:
 
 
 def _session_start(share_global: bool = False, share_group: str | None = None,
-                   start_dir: str | None = None):
+                   start_dir: str | None = None, print_connect: bool = False):
     """Start a tmux session with TUI + notes editor.
 
     If no project exists yet, starts pm guide instead of the TUI so
@@ -2153,6 +2158,7 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
         share_group: Make session accessible to this Unix group.
         start_dir: Compute session tag from this directory instead of cwd.
                    Used when joining another user's shared session.
+        print_connect: Print the raw tmux connect command (for users without pm).
     """
     _log.info("session_cmd started")
     if not tmux_mod.has_tmux():
@@ -2180,6 +2186,14 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
             raise SystemExit(1)
         ensure_shared_socket_dir()
         socket_path = str(shared_socket_path(tag))
+
+    def _maybe_print_connect():
+        """Print the raw tmux connect command if --print-connect was given."""
+        if print_connect and socket_path:
+            click.echo()
+            click.echo("Other users can connect with:")
+            click.echo(f"  tmux -S {socket_path} attach")
+            click.echo()
 
     # Check if project exists
     try:
@@ -2251,6 +2265,7 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
                 tmux_mod.create_grouped_session(session_name, grouped,
                                                 socket_path=socket_path)
                 click.echo(f"Attaching to session '{grouped}'...")
+            _maybe_print_connect()
             tmux_mod.attach(grouped, socket_path=socket_path)
             return
 
@@ -2349,6 +2364,7 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
     # Create a grouped session so we never attach directly to the base
     grouped = f"{session_name}~1"
     tmux_mod.create_grouped_session(session_name, grouped, socket_path=socket_path)
+    _maybe_print_connect()
     tmux_mod.attach(grouped, socket_path=socket_path)
 
 
