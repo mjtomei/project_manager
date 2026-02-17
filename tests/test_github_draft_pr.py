@@ -156,8 +156,9 @@ class TestPrAddNoDraftPr:
 
         # PR should be created with gh_pr=None
         data = store.load(tmp_project["pm_dir"])
-        pr = store.get_pr(data, "pr-001")
-        assert pr is not None
+        prs = data.get("prs") or []
+        assert len(prs) == 1
+        pr = prs[0]
         assert pr["gh_pr"] is None
         assert pr["gh_pr_number"] is None
 

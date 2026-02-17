@@ -127,14 +127,16 @@ def load_and_sync() -> tuple[dict, Path]:
     return store.load(root), root
 
 
-def _pr_id_num(pr_id: str) -> int:
-    """Extract numeric part from pr-NNN id for sorting."""
-    # pr-001 → 1, pr-010 → 10
-    parts = pr_id.split("-")
-    try:
-        return int(parts[1])
-    except (IndexError, ValueError):
-        return 0
+def _pr_id_sort_key(pr_id: str) -> tuple[int, str]:
+    """Sort key for PR IDs. Numeric pr-NNN sorts by number, hash IDs sort after."""
+    # pr-001 → (1, ""), pr-a3f2b1c → (0, "a3f2b1c")
+    parts = pr_id.split("-", 1)
+    if len(parts) == 2:
+        try:
+            return (int(parts[1]), "")
+        except ValueError:
+            return (0, parts[1])
+    return (0, pr_id)
 
 
 def _pr_display_id(pr: dict) -> str:
@@ -439,7 +441,8 @@ def plan_add(name: str, fresh: bool):
     """Create a new plan and launch Claude to develop it."""
     root = state_root()
     data = store.load(root)
-    plan_id = store.next_plan_id(data)
+    existing_ids = {p["id"] for p in (data.get("plans") or [])}
+    plan_id = store.generate_plan_id(name, existing_ids)
     plan_file = f"plans/{plan_id}.md"
 
     entry = {
@@ -877,27 +880,23 @@ def plan_load(plan_id: str | None):
         commands.append(cmd)
         click.echo(f"  - {pr['title']}")
 
-    # Build depends_on edit commands (second pass, referencing PR IDs)
-    # We know the current next_pr_id, so we can predict IDs
-    existing_prs = data.get("prs") or []
-    if existing_prs:
-        import re
-        nums = [int(m.group(1)) for p in existing_prs if (m := re.match(r"pr-(\d+)", p["id"]))]
-        next_num = max(nums) + 1 if nums else 1
-    else:
-        next_num = 1
-
-    title_to_predicted_id = {}
-    for i, pr in enumerate(prs):
-        title_to_predicted_id[pr["title"]] = f"pr-{next_num + i:03d}"
+    # Compute the PR IDs that will be assigned when the add commands run.
+    # This is safe because hash-based IDs are deterministic from title+desc,
+    # and we have the exact title+desc that the add commands will use.
+    existing_ids = {p["id"] for p in (data.get("prs") or [])}
+    title_to_id = {}
+    for pr in prs:
+        pr_id = store.generate_pr_id(pr["title"], pr.get("description", ""), existing_ids)
+        title_to_id[pr["title"]] = pr_id
+        existing_ids.add(pr_id)
 
     dep_commands = []
     for pr in prs:
         if pr["depends_on"]:
-            pr_id = title_to_predicted_id[pr["title"]]
+            pr_id = title_to_id[pr["title"]]
             dep_title = pr["depends_on"].strip()
-            if dep_title in title_to_predicted_id:
-                dep_id = title_to_predicted_id[dep_title]
+            if dep_title in title_to_id:
+                dep_id = title_to_id[dep_title]
                 dep_commands.append(f'pm pr edit {pr_id} --depends-on {dep_id}')
 
     all_commands = commands + dep_commands
@@ -1042,9 +1041,8 @@ def _import_github_prs(root: Path, data: dict) -> None:
             status = "pending"
 
         existing_ids = {p["id"] for p in data["prs"]}
-        pr_id = f"pr-{number:03d}"
-        if pr_id in existing_ids:
-            pr_id = store.next_pr_id(data)
+        desc = gh_pr.get("body", "") or ""
+        pr_id = store.generate_pr_id(title, desc, existing_ids)
 
         entry = {
             "id": pr_id,
@@ -1053,12 +1051,13 @@ def _import_github_prs(root: Path, data: dict) -> None:
             "branch": branch,
             "status": status,
             "depends_on": [],
-            "description": gh_pr.get("body", "") or "",
+            "description": desc,
             "agent_machine": None,
             "gh_pr": gh_pr.get("url", ""),
             "gh_pr_number": number,
         }
         data["prs"].append(entry)
+        existing_ids.add(pr_id)
         imported += 1
         click.echo(f"  + {pr_id}: {title} [{status}] (#{number})")
 
@@ -1071,7 +1070,8 @@ def _run_plan_import(name: str):
     """Core logic for plan import — used by both `plan import` and `init`."""
     root = state_root()
     data = store.load(root)
-    plan_id = store.next_plan_id(data)
+    existing_ids = {p["id"] for p in (data.get("plans") or [])}
+    plan_id = store.generate_plan_id(name, existing_ids)
     plan_file = f"plans/{plan_id}.md"
 
     entry = {
@@ -1202,7 +1202,8 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
         if len(plans) == 1:
             plan_id = plans[0]["id"]
 
-    pr_id = store.next_pr_id(data)
+    existing_ids = {p["id"] for p in (data.get("prs") or [])}
+    pr_id = store.generate_pr_id(title, desc, existing_ids)
     slug = store.slugify(title)
     branch = f"pm/{pr_id}-{slug}"
 
@@ -1451,7 +1452,7 @@ def pr_list():
         return
 
     # Sort newest first (by gh_pr_number descending, then pr id descending)
-    prs = sorted(prs, key=lambda p: (p.get("gh_pr_number") or _pr_id_num(p["id"])), reverse=True)
+    prs = sorted(prs, key=lambda p: (p.get("gh_pr_number") or _pr_id_sort_key(p["id"])[0], _pr_id_sort_key(p["id"])[1]), reverse=True)
 
     active_pr = data.get("project", {}).get("active_pr")
     status_icons = {
@@ -1922,17 +1923,11 @@ def pr_import_github(gh_state: str):
         else:
             status = "pending"
 
-        # Generate a pr_id based on the GH PR number
+        # Generate a hash-based pr_id from title + body
         existing_ids = {p["id"] for p in data["prs"]}
-        pr_id = f"pr-{number:03d}"
-        if pr_id in existing_ids:
-            pr_id = f"pr-{number:03d}-gh"
-        if pr_id in existing_ids:
-            # Fall back to sequential
-            pr_id = store.next_pr_id(data)
-
         url = gh_pr.get("url", "")
         body = gh_pr.get("body", "") or ""
+        pr_id = store.generate_pr_id(title, body, existing_ids)
 
         entry = {
             "id": pr_id,
@@ -2687,7 +2682,8 @@ def cluster_auto(threshold, max_commits, weights, output_fmt):
         click.echo(clusters_to_json(clusters, chunk_map))
     elif output_fmt == "plan":
         md = clusters_to_plan_markdown(clusters, chunk_map)
-        plan_id = store.next_plan_id(data)
+        existing_ids = {p["id"] for p in (data.get("plans") or [])}
+        plan_id = store.generate_plan_id(f"cluster-explore", existing_ids)
         plan_name = f"cluster-{plan_id}"
         plan_file = f"plans/{plan_name}.md"
         plan_path = root / plan_file
