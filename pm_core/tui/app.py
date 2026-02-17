@@ -347,6 +347,7 @@ class ProjectManagerApp(App):
         Binding("P", "toggle_plans", "Plans", show=True),
         Binding("T", "toggle_tests", "Tests", show=True),
         Binding("question_mark", "show_help", "Help", show=True),
+        Binding("c", "show_connect", "Connect", show=False),
     ]
 
     def check_action(self, action: str, parameters: tuple) -> bool | None:
@@ -1402,6 +1403,15 @@ To interact with this session, use commands like:
     def _find_editor(self) -> str:
         """Find the user's preferred editor."""
         return os.environ.get("EDITOR", os.environ.get("VISUAL", "vi"))
+
+    def action_show_connect(self) -> None:
+        """Show the tmux connect command for shared sessions."""
+        socket_path = os.environ.get("PM_TMUX_SOCKET")
+        if socket_path:
+            self.log_message(f"Connect: tmux -S {socket_path} attach")
+        else:
+            self.log_message("Not a shared session")
+            self.set_timer(2, self._clear_log_message)
 
     def action_quit(self) -> None:
         """Detach from tmux session instead of killing the TUI."""

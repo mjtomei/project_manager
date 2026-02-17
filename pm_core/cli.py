@@ -2102,17 +2102,28 @@ def session(ctx, share_global, share_group, start_dir, print_connect):
     """
     if ctx.invoked_subcommand is not None:
         return
+    if print_connect:
+        # Check PM_TMUX_SOCKET (set inside shared sessions) or compute from flags
+        sp = os.environ.get("PM_TMUX_SOCKET")
+        if not sp and (share_global or share_group):
+            from pm_core.paths import get_session_tag, shared_socket_path
+            tag = get_session_tag(start_path=Path(start_dir) if start_dir else None)
+            if tag:
+                sp = str(shared_socket_path(tag))
+        if sp:
+            click.echo(f"tmux -S {sp} attach")
+        else:
+            click.echo("Not in a shared session and no --global/--group given.", err=True)
+            raise SystemExit(1)
+        return
     if start_dir and not (share_global or share_group):
         click.echo("--dir requires --global or --group", err=True)
         raise SystemExit(1)
     if share_global and share_group:
         click.echo("--global and --group are mutually exclusive", err=True)
         raise SystemExit(1)
-    if print_connect and not (share_global or share_group):
-        click.echo("--print-connect requires --global or --group", err=True)
-        raise SystemExit(1)
     _session_start(share_global=share_global, share_group=share_group,
-                   start_dir=start_dir, print_connect=print_connect)
+                   start_dir=start_dir)
 
 
 def _register_tmux_bindings(session_name: str) -> None:
@@ -2147,7 +2158,7 @@ def _register_tmux_bindings(session_name: str) -> None:
 
 
 def _session_start(share_global: bool = False, share_group: str | None = None,
-                   start_dir: str | None = None, print_connect: bool = False):
+                   start_dir: str | None = None):
     """Start a tmux session with TUI + notes editor.
 
     If no project exists yet, starts pm guide instead of the TUI so
@@ -2158,7 +2169,6 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
         share_group: Make session accessible to this Unix group.
         start_dir: Compute session tag from this directory instead of cwd.
                    Used when joining another user's shared session.
-        print_connect: Print the raw tmux connect command (for users without pm).
     """
     _log.info("session_cmd started")
     if not tmux_mod.has_tmux():
@@ -2186,14 +2196,6 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
             raise SystemExit(1)
         ensure_shared_socket_dir()
         socket_path = str(shared_socket_path(tag))
-
-    def _maybe_print_connect():
-        """Print the raw tmux connect command if --print-connect was given."""
-        if print_connect and socket_path:
-            click.echo()
-            click.echo("Other users can connect with:")
-            click.echo(f"  tmux -S {socket_path} attach")
-            click.echo()
 
     # Check if project exists
     try:
@@ -2265,7 +2267,6 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
                 tmux_mod.create_grouped_session(session_name, grouped,
                                                 socket_path=socket_path)
                 click.echo(f"Attaching to session '{grouped}'...")
-            _maybe_print_connect()
             tmux_mod.attach(grouped, socket_path=socket_path)
             return
 
@@ -2364,7 +2365,6 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
     # Create a grouped session so we never attach directly to the base
     grouped = f"{session_name}~1"
     tmux_mod.create_grouped_session(session_name, grouped, socket_path=socket_path)
-    _maybe_print_connect()
     tmux_mod.attach(grouped, socket_path=socket_path)
 
 
