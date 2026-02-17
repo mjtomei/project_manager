@@ -2223,7 +2223,7 @@ def _session_start():
 
     # Forward key environment variables into the tmux session
     import subprocess as _sp
-    for env_key in ("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS", "PM_PROJECT", "EDITOR", "PATH"):
+    for env_key in ("PM_PROJECT", "EDITOR", "PATH"):
         val = os.environ.get(env_key)
         if val:
             _sp.run(["tmux", "set-environment", "-t", session_name, env_key, val], check=False)
@@ -3791,20 +3791,15 @@ To interact with this session, use commands like:
     click.echo(f"Session: {sess}")
     click.echo("-" * 60)
 
-    # Launch Claude with the test prompt
-    claude = find_claude()
-    if not claude:
-        click.echo("Claude CLI not found.", err=True)
-        raise SystemExit(1)
-
-    import subprocess
-    cmd = [claude]
-    if os.environ.get("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS") == "true":
-        cmd.append("--dangerously-skip-permissions")
-    cmd.append(full_prompt)
-
-    result = subprocess.run(cmd)
-    raise SystemExit(result.returncode)
+    # Launch Claude with the test prompt (no session resume for tests)
+    from pm_core.claude_launcher import launch_claude
+    try:
+        root = state_root()
+    except FileNotFoundError:
+        root = Path.home() / ".pm"
+    rc = launch_claude(full_prompt, session_key=f"tui-test:{test_id}",
+                       pm_root=root, resume=False)
+    raise SystemExit(rc)
 
 
 PM_REPO_URL = "https://github.com/mjtomei/project_manager.git"
