@@ -440,7 +440,7 @@ class ProjectManagerApp(App):
                 return
 
             result = subprocess.run(
-                ["tmux", "capture-pane", "-t", pane_id, "-p"],
+                tmux_mod._tmux_cmd("capture-pane", "-t", pane_id, "-p"),
                 capture_output=True, text=True, timeout=5
             )
             content = result.stdout
@@ -524,7 +524,7 @@ class ProjectManagerApp(App):
         if tmux_mod.in_tmux():
             try:
                 result = _run_shell(
-                    ["tmux", "display-message", "-p", "#{session_name}"],
+                    tmux_mod._tmux_cmd("display-message", "-p", "#{session_name}"),
                     capture_output=True, text=True, timeout=5
                 )
                 self._session_name = result.stdout.strip().split("~")[0]
@@ -1012,7 +1012,7 @@ class ProjectManagerApp(App):
         if not pane_id:
             return "h"
         result = _run_shell(
-            ["tmux", "display", "-t", pane_id, "-p", "#{pane_width} #{pane_height}"],
+            tmux_mod._tmux_cmd("display", "-t", pane_id, "-p", "#{pane_width} #{pane_height}"),
             capture_output=True, text=True
         )
         parts = result.stdout.strip().split()
@@ -1408,7 +1408,7 @@ To interact with this session, use commands like:
         _log.info("action: quit")
         if tmux_mod.in_tmux():
             # Detach from tmux, leaving session running
-            _run_shell(["tmux", "detach-client"], check=False)
+            _run_shell(tmux_mod._tmux_cmd("detach-client"), check=False)
         else:
             # Not in tmux, just exit normally
             self.exit()

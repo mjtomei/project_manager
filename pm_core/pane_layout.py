@@ -360,7 +360,7 @@ def rebalance(session: str, window: str) -> bool:
     # In mobile mode, zoom the active pane after layout
     if is_mobile(session, window):
         result = subprocess.run(
-            ["tmux", "display", "-t", f"{session}:{window}", "-p", "#{pane_id}"],
+            tmux_mod._tmux_cmd("display", "-t", f"{session}:{window}", "-p", "#{pane_id}"),
             capture_output=True, text=True,
         )
         active_pane = result.stdout.strip()
@@ -460,12 +460,12 @@ def handle_pane_exited(session: str, window: str, generation: str,
         # Focus the last active pane (the one the user was in before the
         # dying pane).  Fall back to next pane if there is no last pane.
         result = subprocess.run(
-            ["tmux", "select-pane", "-t", f"{session}:{reg_window}", "-l"],
+            tmux_mod._tmux_cmd("select-pane", "-t", f"{session}:{reg_window}", "-l"),
             capture_output=True,
         )
         if result.returncode != 0:
             subprocess.run(
-                ["tmux", "select-pane", "-t", f"{session}:{reg_window}", "-t", ":.+"],
+                tmux_mod._tmux_cmd("select-pane", "-t", f"{session}:{reg_window}", "-t", ":.+"),
                 check=False,
             )
 

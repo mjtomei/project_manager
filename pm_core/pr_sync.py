@@ -43,8 +43,9 @@ def _trigger_tui_refresh() -> None:
             return
 
         # Find TUI pane in the session
+        from pm_core.tmux import _tmux_cmd
         result = subprocess.run(
-            ["tmux", "list-panes", "-t", session_name, "-F", "#{pane_id}:#{pane_current_command}"],
+            _tmux_cmd("list-panes", "-t", session_name, "-F", "#{pane_id}:#{pane_current_command}"),
             capture_output=True, text=True, timeout=5
         )
         if result.returncode != 0:
@@ -54,7 +55,7 @@ def _trigger_tui_refresh() -> None:
             if ":pm" in line or ":python" in line:
                 pane_id = line.split(":")[0]
                 subprocess.run(
-                    ["tmux", "send-keys", "-t", f"{session_name}:{pane_id}", "R"],
+                    _tmux_cmd("send-keys", "-t", f"{session_name}:{pane_id}", "R"),
                     check=False, timeout=5
                 )
                 _log.debug("Sent refresh to TUI pane %s", pane_id)

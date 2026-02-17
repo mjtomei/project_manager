@@ -8,8 +8,10 @@ All pm-related directories now live under ~/.pm/:
 Session tags are derived from the git repo (GitHub repo name or directory name + hash).
 """
 
+import grp
 import hashlib
 import logging
+import os
 import shlex
 import subprocess
 from pathlib import Path
@@ -344,6 +346,45 @@ def log_shell_command(cmd: list[str] | str, prefix: str = "shell", returncode: i
             f.write(entry)
     except (OSError, IOError):
         pass  # Silently fail if we can't write to log
+
+
+SHARED_SOCKET_DIR = Path("/tmp/pm-sessions")
+
+
+def shared_socket_path(session_tag: str) -> Path:
+    """Return the deterministic socket path for a shared session.
+
+    Both the creating user and joining users compute the same path
+    from the session tag, so they find each other's tmux server.
+    """
+    return SHARED_SOCKET_DIR / f"pm-{session_tag}"
+
+
+def ensure_shared_socket_dir() -> None:
+    """Create /tmp/pm-sessions/ with sticky world-writable permissions.
+
+    Uses 1777 (sticky + rwx for all) so any user can create sockets
+    but only the owner can delete their own.
+    """
+    SHARED_SOCKET_DIR.mkdir(mode=0o1777, parents=True, exist_ok=True)
+    # Ensure permissions are correct even if directory already existed
+    SHARED_SOCKET_DIR.chmod(0o1777)
+
+
+def set_shared_socket_permissions(socket_path: Path, group_name: str | None = None) -> None:
+    """Set permissions on a tmux socket for multi-user access.
+
+    Args:
+        socket_path: Path to the tmux socket file
+        group_name: Unix group name for group-shared mode.
+                    If None, sets world-accessible permissions (global mode).
+    """
+    if group_name:
+        gid = grp.getgrnam(group_name).gr_gid
+        os.chown(str(socket_path), -1, gid)
+        socket_path.chmod(0o770)
+    else:
+        socket_path.chmod(0o777)
 
 
 def run_shell_logged(cmd: list[str], prefix: str = "shell", **kwargs) -> subprocess.CompletedProcess:
