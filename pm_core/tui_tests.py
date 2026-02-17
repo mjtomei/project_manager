@@ -1656,7 +1656,39 @@ Key implementation details:
 3. This is the core bug this PR fixes — a portrait terminal should get a
    vertical split, not be stuck with the landscape layout.
 
-### Part 4: Mobile Mode Trigger on Narrow Resize
+### Part 4: Client-Driven Resize (simulates moving to a different monitor)
+
+This is the critical test. Parts 2-3 use `tmux resize-window` which is an
+explicit command and fires `after-resize-window`. But when a user moves
+their terminal to a different monitor, the resize comes from the client
+(SIGWINCH), which only fires the `window-resized` hook. We must test this
+path separately using `tmux refresh-client -C WxH`.
+
+1. First, set the window back to a known landscape state:
+   - `tmux resize-window -t <session> -x 200 -y 50`
+   - Wait 1-2 seconds, verify panes are side-by-side
+
+2. Now simulate moving to a portrait monitor via client resize:
+   - `tmux refresh-client -C 80,120`
+   - Wait 1-2 seconds for the `window-resized` hook to fire
+
+3. Verify the layout auto-rebalanced to vertical (stacked):
+   - `tmux list-panes -t <session> -F "#{pane_id} #{pane_width}x#{pane_height} #{pane_left},#{pane_top}"`
+   - Panes should be arranged TOP-BOTTOM (different pane_top values)
+   - If panes are still side-by-side, the hook is NOT firing for client
+     resizes — this is the bug that `window-resized` (not `after-resize-window`)
+     was needed to fix
+
+4. Simulate moving back to landscape monitor:
+   - `tmux refresh-client -C 200,50`
+   - Wait 1-2 seconds
+   - Verify panes switched back to side-by-side
+
+5. Reset client size to auto:
+   - `tmux refresh-client -C ""`  (or omit -C to reset)
+   - This clears the manual client size override
+
+### Part 5: Mobile Mode Trigger on Narrow Resize
 
 1. Resize window to narrow (mobile) width:
    - `tmux resize-window -t <session> -x 80 -y 24`
@@ -1672,7 +1704,7 @@ Key implementation details:
    - `pm session mobile` - should show "Mobile active: False" (200 >= 120)
    - Zoom should be off (if no force flag): `tmux display -t <session> -p "#{window_zoomed_flag}"` → "0"
 
-### Part 5: Manual Rebalance After Resize
+### Part 6: Manual Rebalance After Resize
 
 1. Resize to an unusual aspect ratio:
    - `tmux resize-window -t <session> -x 160 -y 80`
@@ -1685,14 +1717,14 @@ Key implementation details:
    - `pm rebalance`
    - Check panes again — layout should be consistent
 
-### Part 6: TUI Responsiveness After Resize
+### Part 7: TUI Responsiveness After Resize
 
 1. Verify TUI is still responsive:
    - `pm tui view` - should render without errors
    - `pm tui send r` (refresh) - should work
    - `pm tui frames` - check recent frames show no errors
 
-### Part 7: Restore Original Size
+### Part 8: Restore Original Size
 
 IMPORTANT: Always restore the window to its original size!
 
@@ -1739,30 +1771,37 @@ Base session has latest: [PASS/FAIL]
 Grouped session has latest: [PASS/FAIL]
 Global hook exists: [PASS/FAIL]
 
-## Part 2: Landscape Layout (200x50)
+## Part 2: Landscape Layout (200x50) — via resize-window
 Panes are side-by-side: [PASS/FAIL]
   Pane positions: <list pane_left values>
 user_modified still false: [PASS/FAIL]
 
-## Part 3: Portrait Layout (80x120)
+## Part 3: Portrait Layout (80x120) — via resize-window
 Panes are stacked vertically: [PASS/FAIL]
   Pane positions: <list pane_top values>
-THIS IS THE CORE BUG FIX - portrait should NOT use horizontal split
 
-## Part 4: Mobile Mode on Narrow
+## Part 4: Client-Driven Resize — via refresh-client -C (KEY TEST)
+Portrait via refresh-client auto-rebalanced: [PASS/FAIL]
+  Pane positions after refresh-client -C 80,120: <list pane_top values>
+Landscape via refresh-client auto-rebalanced: [PASS/FAIL]
+  Pane positions after refresh-client -C 200,50: <list pane_left values>
+THIS TESTS THE REAL SCENARIO (moving terminal between monitors).
+If this fails but Parts 2-3 pass, the hook name is wrong.
+
+## Part 5: Mobile Mode on Narrow
 Mobile detected at 80 cols: [PASS/FAIL]
 Active pane zoomed: [PASS/FAIL]
 Desktop mode restored at 200 cols: [PASS/FAIL]
 Zoom off after widen: [PASS/FAIL]
 
-## Part 5: Manual Rebalance
+## Part 6: Manual Rebalance
 pm rebalance works after resize: [PASS/FAIL]
 
-## Part 6: TUI Responsiveness
+## Part 7: TUI Responsiveness
 pm tui view works: [PASS/FAIL]
 Refresh works: [PASS/FAIL]
 
-## Part 7: Restore
+## Part 8: Restore
 Manual window-size cleared: [PASS/FAIL]
   `tmux set-window-option -u` removed "window-size manual"
 Original size restored: [PASS/FAIL]
