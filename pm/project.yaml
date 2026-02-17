@@ -3,10 +3,10 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-017
+  active_pr: pr-024
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
-  last_pr_sync: '2026-02-17T19:01:00.659540+00:00'
+  last_pr_sync: '2026-02-17T23:04:09.603896+00:00'
 plans:
 - id: plan-001
   name: Import from existing repo
@@ -360,7 +360,7 @@ prs:
   agent_machine: spark-424d
   gh_pr: https://github.com/mjtomei/project_manager/pull/38
   gh_pr_number: 38
-  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-020-fix-tui-command-deduplication-for-concur-528046b8
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-020-fix-tui-command-deduplication-for-concur-d5a7ac61
 - id: pr-021
   plan: null
   title: Fix tmux commands to target current grouped session instead of base
@@ -376,7 +376,7 @@ prs:
   gh_pr_number: 39
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-021-fix-tmux-commands-to-target-current-grou-5853804d
 - id: pr-022
-  plan: null
+  plan: plan-003
   title: Handle merging pm directory changes across clones
   branch: pm/pr-022-handle-merging-pm-directory-changes-across-clones
   status: merged
@@ -388,7 +388,7 @@ prs:
   agent_machine: spark-424d
   gh_pr: https://github.com/mjtomei/project_manager/pull/40
   gh_pr_number: 40
-  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-022-handle-merging-pm-directory-changes-acro-5853804d
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-022-handle-merging-pm-directory-changes-acro-d5a7ac61
 - id: pr-023
   plan: null
   title: Fix rebalance layout for grouped sessions with different terminal sizes
@@ -403,7 +403,7 @@ prs:
   agent_machine: spark-424d
   gh_pr: https://github.com/mjtomei/project_manager/pull/41
   gh_pr_number: 41
-  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-023-fix-rebalance-layout-for-grouped-session-5853804d
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-023-fix-rebalance-layout-for-grouped-session-866fb290
 - id: pr-024
   plan: plan-003
   title: Add multi-user support to sessions
@@ -411,8 +411,13 @@ prs:
   status: in_review
   depends_on: []
   description: Add support for two users on the same computer accessing the same pm
-    session simultaneously via shared tmux sockets. Controlled by session command
-    flags for group or global accessibility.
+    session simultaneously. This is done by creating a tmux session with a session
+    file that is accessible to a given group or all users on the system optionally.
+    The choice between groups or global accessibility is controlled by a session command
+    flag. The default continues to be accessibility only to the current user. Other
+    users can access the same session by passing the same flags as well as the directory
+    in which the original user started the session. The code uses that directory to
+    correctly identify what the session tag is.
   agent_machine: spark-424d
   gh_pr: https://github.com/mjtomei/project_manager/pull/52
   gh_pr_number: 52

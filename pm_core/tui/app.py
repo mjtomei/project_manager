@@ -1064,8 +1064,9 @@ class ProjectManagerApp(App):
                 text=True,
                 timeout=30,
             )
-            _log.debug("pm exit=%d stdout=%r stderr=%r",
-                       result.returncode, result.stdout[:200], result.stderr[:200])
+            if result.returncode != 0:
+                _log.info("pm exit=%d stderr=%s",
+                          result.returncode, result.stderr.strip()[:200])
             if result.stdout.strip():
                 self.log_message(result.stdout.strip().split("\n")[-1])
             if result.returncode != 0 and result.stderr.strip():
@@ -1460,7 +1461,6 @@ class ProjectManagerApp(App):
         """Launch a meta-development session to work on pm itself."""
         _log.info("action: launch_meta")
         self._run_command("meta")
-        self.log_message("Launched meta session for pm development")
 
     def action_rebalance(self) -> None:
         _log.info("action: rebalance")
