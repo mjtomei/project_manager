@@ -2211,6 +2211,9 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
             raise SystemExit(1)
         ensure_shared_socket_dir()
         socket_path = str(shared_socket_path(tag))
+        # Set env var so _tmux_cmd() in all subsequent calls (split_pane,
+        # get_window_id, rebalance, etc.) routes to the shared server.
+        os.environ["PM_TMUX_SOCKET"] = socket_path
 
     # Check if project exists
     try:

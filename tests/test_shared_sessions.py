@@ -439,3 +439,49 @@ class TestNextGroupedSessionName:
     @patch("pm_core.tmux.list_grouped_sessions", return_value=["base~5", "base~2", "base~8"])
     def test_handles_out_of_order(self, _):
         assert tmux.next_grouped_session_name("base") == "base~9"
+
+
+# ---------------------------------------------------------------------------
+# Regression: _session_start sets PM_TMUX_SOCKET in current process
+# ---------------------------------------------------------------------------
+
+class TestSessionStartSetsEnvVar:
+    """Verify that _session_start sets PM_TMUX_SOCKET in the current process
+    so that split_pane and other calls without explicit socket_path work.
+
+    This is a regression test for the --global crash where split_pane
+    called plain 'tmux' without -S because the env var wasn't set.
+    """
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_split_pane_after_env_set(self, mock_run):
+        """After setting PM_TMUX_SOCKET, split_pane includes -S flag."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="%2\n")
+        socket = "/tmp/pm-sessions/pm-test-abc123"
+        with patch.dict(os.environ, {"PM_TMUX_SOCKET": socket}):
+            tmux.split_pane("pm-test-abc123", "h", "bash")
+        cmd = mock_run.call_args[0][0]
+        assert cmd[1] == "-S"
+        assert cmd[2] == socket
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_get_pane_indices_after_env_set(self, mock_run):
+        """get_pane_indices (used for session health check) also uses socket."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="%0 0\n")
+        socket = "/tmp/pm-sessions/pm-test-abc123"
+        with patch.dict(os.environ, {"PM_TMUX_SOCKET": socket}):
+            tmux.get_pane_indices("pm-test-abc123")
+        cmd = mock_run.call_args[0][0]
+        assert "-S" in cmd
+        assert socket in cmd
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_apply_layout_after_env_set(self, mock_run):
+        """apply_layout (called by rebalance) also uses socket."""
+        mock_run.return_value = MagicMock(returncode=0)
+        socket = "/tmp/pm-sessions/pm-test-abc123"
+        with patch.dict(os.environ, {"PM_TMUX_SOCKET": socket}):
+            tmux.apply_layout("pm-test-abc123", "0", "abcd,200x50,0,0,0")
+        cmd = mock_run.call_args[0][0]
+        assert "-S" in cmd
+        assert socket in cmd
