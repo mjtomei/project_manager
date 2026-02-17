@@ -1604,7 +1604,7 @@ class ProjectManagerApp(App):
         """Launch Claude with the selected test prompt."""
         _log.info("test activated: %s", message.test_id)
         from pm_core import tui_tests
-        from pm_core.claude_launcher import find_claude
+        from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
 
         prompt = tui_tests.get_test_prompt(message.test_id)
         if not prompt:
@@ -1634,10 +1634,7 @@ To interact with this session, use commands like:
 {prompt}
 """
 
-        cmd = claude
-        if os.environ.get("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS") == "true":
-            cmd += " --dangerously-skip-permissions"
-        cmd += f" {shlex.quote(full_prompt)}"
+        cmd = build_claude_shell_cmd(prompt=full_prompt)
         self._launch_pane(cmd, "tui-test")
 
     def _find_editor(self) -> str:

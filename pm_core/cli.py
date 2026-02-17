@@ -2089,12 +2089,20 @@ def session(ctx):
 
 
 def _register_tmux_bindings(session_name: str) -> None:
-    """Register tmux keybindings for mobile-aware pane navigation.
+    """Register tmux keybindings and session options for pm.
 
     Called on both new session creation and reattach so bindings
     survive across sessions (tmux bindings are global).
+    Also sets window-size=latest on all sessions in the group so each
+    client's terminal size is used for layout, not the minimum.
     """
     import subprocess as _sp
+    # Enable per-client window sizing: window follows the most recently
+    # active client rather than shrinking to the smallest.
+    base = session_name.split("~")[0]
+    for s in [base] + tmux_mod.list_grouped_sessions(base):
+        tmux_mod.set_session_option(s, "window-size", "latest")
+
     _sp.run(["tmux", "bind-key", "-T", "prefix", "R",
              "run-shell 'pm rebalance'"], check=False)
     # Conditionally override pane-switch keys: use pm's mobile-aware
@@ -2117,6 +2125,16 @@ def _register_tmux_bindings(session_name: str) -> None:
                 check=False)
     _sp.run(["tmux", "set-hook", "-g", "after-kill-pane",
              "run-shell 'pm _pane-closed'"], check=False)
+    # Auto-rebalance when window resizes (triggered by client switches
+    # with window-size=latest, or moving terminal to a different monitor).
+    # Uses "window-resized" (fires on any window size change) not
+    # "after-resize-window" (only fires after the resize-window command).
+    _sp.run(["tmux", "set-hook", "-g", "window-resized",
+             "run-shell 'pm _window-resized \"#{session_name}\"'"],
+            check=False)
+    # Clean up stale hook from earlier versions that used the wrong name
+    _sp.run(["tmux", "set-hook", "-gu", "after-resize-window"],
+            check=False)
 
 
 def _session_start():
@@ -2184,6 +2202,7 @@ def _session_start():
                 grouped = tmux_mod.next_grouped_session_name(session_name)
                 _log.info("creating new grouped session: %s", grouped)
                 tmux_mod.create_grouped_session(session_name, grouped)
+                tmux_mod.set_session_option(grouped, "window-size", "latest")
                 click.echo(f"Attaching to session '{grouped}'...")
             tmux_mod.attach(grouped)
             return
@@ -2206,7 +2225,7 @@ def _session_start():
 
     # Forward key environment variables into the tmux session
     import subprocess as _sp
-    for env_key in ("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS", "PM_PROJECT", "EDITOR", "PATH"):
+    for env_key in ("PM_PROJECT", "EDITOR", "PATH"):
         val = os.environ.get(env_key)
         if val:
             _sp.run(["tmux", "set-environment", "-t", session_name, env_key, val], check=False)
@@ -2258,6 +2277,7 @@ def _session_start():
     # Create a grouped session so we never attach directly to the base
     grouped = f"{session_name}~1"
     tmux_mod.create_grouped_session(session_name, grouped)
+    tmux_mod.set_session_option(grouped, "window-size", "latest")
     tmux_mod.attach(grouped)
 
 
@@ -3138,6 +3158,28 @@ def pane_closed_cmd():
     pane_layout.handle_any_pane_closed()
 
 
+@cli.command("_window-resized", hidden=True)
+@click.argument("session")
+def window_resized_cmd(session: str):
+    """Internal: auto-rebalance after window resize.
+
+    Called from the global window-resized tmux hook when
+    the window changes size (e.g. terminal moved to a different
+    monitor, client switches with window-size=latest).
+    """
+    _log.info("window_resized: session=%s", session)
+    base = pane_layout.base_session_name(session)
+    data = pane_layout.load_registry(base)
+    if not data["panes"]:
+        _log.debug("window_resized: no panes, skipping")
+        return
+    if data.get("user_modified"):
+        _log.debug("window_resized: user_modified, skipping")
+        return
+    window = data.get("window", "0")
+    pane_layout.rebalance(base, window)
+
+
 @cli.command("_pane-opened", hidden=True)
 @click.argument("session")
 @click.argument("window")
@@ -3751,20 +3793,15 @@ To interact with this session, use commands like:
     click.echo(f"Session: {sess}")
     click.echo("-" * 60)
 
-    # Launch Claude with the test prompt
-    claude = find_claude()
-    if not claude:
-        click.echo("Claude CLI not found.", err=True)
-        raise SystemExit(1)
-
-    import subprocess
-    cmd = [claude]
-    if os.environ.get("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS") == "true":
-        cmd.append("--dangerously-skip-permissions")
-    cmd.append(full_prompt)
-
-    result = subprocess.run(cmd)
-    raise SystemExit(result.returncode)
+    # Launch Claude with the test prompt (no session resume for tests)
+    from pm_core.claude_launcher import launch_claude
+    try:
+        root = state_root()
+    except FileNotFoundError:
+        root = Path.home() / ".pm"
+    rc = launch_claude(full_prompt, session_key=f"tui-test:{test_id}",
+                       pm_root=root, resume=False)
+    raise SystemExit(rc)
 
 
 PM_REPO_URL = "https://github.com/mjtomei/project_manager.git"

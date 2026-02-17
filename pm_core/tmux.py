@@ -330,6 +330,14 @@ def select_pane_smart(pane_id: str, session: str, window: str) -> None:
         zoom_pane(pane_id)
 
 
+def set_session_option(session: str, option: str, value: str) -> None:
+    """Set a tmux session option."""
+    subprocess.run(
+        ["tmux", "set-option", "-t", session, option, value],
+        check=False,
+    )
+
+
 def current_or_base_session(base: str) -> str:
     """Return the best session to target for query operations.
 
@@ -352,7 +360,6 @@ def current_or_base_session(base: str) -> str:
         if result.returncode == 0 and result.stdout.strip() != "0":
             return name
     return base
-
 
 
 def create_grouped_session(base: str, name: str) -> None:
