@@ -16,6 +16,10 @@ plans:
   name: Multi-candidate test-driven code generation
   file: plans/plan-002.md
   status: draft
+- id: plan-003
+  name: Multiuser Support
+  file: plans/plan-003.md
+  status: draft
 prs:
 - id: pr-001
   plan: plan-001
@@ -400,3 +404,16 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/41
   gh_pr_number: 41
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-023-fix-rebalance-layout-for-grouped-session-5853804d
+- id: pr-024
+  plan: plan-003
+  title: Add multi-user support to sessions
+  branch: pm/pr-024-add-multi-user-support-to-sessions
+  status: in_review
+  depends_on: []
+  description: Add support for two users on the same computer accessing the same pm
+    session simultaneously via shared tmux sockets. Controlled by session command
+    flags for group or global accessibility.
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/52
+  gh_pr_number: 52
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-024-add-multi-user-support-to-sessions-44b6754d
