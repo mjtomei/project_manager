@@ -39,6 +39,9 @@ STATUS_BG = {
     "blocked": "on #330000",      # subtle red
 }
 
+# Status filter cycle order (None = show all)
+STATUS_FILTER_CYCLE = [None, "pending", "in_progress", "in_review", "merged", "closed"]
+
 # Node dimensions
 NODE_W = 24
 NODE_H = 5  # 5 lines: top border, id, title, status, bottom border
@@ -80,6 +83,8 @@ class TechTree(Widget):
         self._hidden_label_ids: list[str] = []              # ["_hidden:plan-001", ...] for navigation
         self._plan_group_order: list[str] = []              # ordered plan_ids (visible groups)
         self._jump_plan_scroll: bool = False                  # flag: scroll plan label to top
+        self._hide_merged: bool = False                          # toggle: hide merged PRs
+        self._status_filter: str | None = None                    # filter to show only this status
 
     def on_mount(self) -> None:
         self.prs = self._prs
@@ -146,6 +151,18 @@ class TechTree(Widget):
                 self._ordered_ids = []
                 self._node_positions = {}
                 return
+
+        # Filter by status
+        if self._status_filter:
+            # Status filter overrides hide_merged when filtering for "merged"
+            prs = [p for p in prs if p.get("status") == self._status_filter]
+        elif self._hide_merged:
+            prs = [p for p in prs if p.get("status") != "merged"]
+
+        if not prs:
+            self._ordered_ids = []
+            self._node_positions = {}
+            return
 
         pr_map = {pr["id"]: pr for pr in prs}
         layers = graph_mod.compute_layers(prs)
@@ -343,6 +360,10 @@ class TechTree(Widget):
     def render(self) -> RenderableType:
         if not self._prs:
             return Text("No PRs defined. Use 'pr add' to create PRs.", style="dim")
+
+        if not self._ordered_ids and self._status_filter:
+            icon = STATUS_ICONS.get(self._status_filter, "?")
+            return Text(f"No {self._status_filter} PRs. Press F to cycle filter.", style="dim")
 
         if not self._ordered_ids and self._hidden_plans:
             hidden_count = len(self._hidden_plans)

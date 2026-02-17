@@ -87,7 +87,8 @@ class TreeScroll(ScrollableContainer, can_focus=False, can_focus_children=True):
 class StatusBar(Static):
     """Top status bar showing project info and sync state."""
 
-    def update_status(self, project_name: str, repo: str, sync_state: str, pr_count: int = 0) -> None:
+    def update_status(self, project_name: str, repo: str, sync_state: str,
+                       pr_count: int = 0, filter_text: str = "") -> None:
         sync_icons = {
             "synced": "[green]synced[/green]",
             "pulling": "[yellow]pulling...[/yellow]",
@@ -98,7 +99,8 @@ class StatusBar(Static):
         from rich.markup import escape
         safe_repo = escape(repo)
         pr_info = f"[bold]{pr_count}[/bold] PRs" if pr_count else ""
-        self.update(f" Project: [bold]{project_name}[/bold]    {pr_info}    repo: [cyan]{safe_repo}[/cyan]    {sync_display}")
+        filter_display = f"    [bold yellow]filter: {filter_text}[/bold yellow]" if filter_text else ""
+        self.update(f" Project: [bold]{project_name}[/bold]    {pr_info}{filter_display}    repo: [cyan]{safe_repo}[/cyan]    {sync_display}")
 
 
 class LogLine(Static):
@@ -221,6 +223,8 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]↑↓←→[/] or [bold]hjkl[/]  Move selection", classes="help-row")
                 yield Label("  [bold]J/K[/]  Jump to next/prev plan", classes="help-row")
                 yield Label("  [bold]H[/]  Hide/show plan group", classes="help-row")
+                yield Label("  [bold]X[/]  Toggle merged PRs", classes="help-row")
+                yield Label("  [bold]F[/]  Cycle status filter", classes="help-row")
                 yield Label("  [bold]Enter[/]  Show PR details", classes="help-row")
                 yield Label("PR Actions", classes="help-section")
                 yield Label("  [bold]s[/]  Start selected PR", classes="help-row")
@@ -481,6 +485,8 @@ class ProjectManagerApp(App):
         Binding("T", "toggle_tests", "Tests", show=True),
         Binding("H", "hide_plan", "Hide Plan", show=False),
         Binding("M", "move_to_plan", "Move Plan", show=False),
+        Binding("X", "toggle_merged", "Toggle Merged", show=False),
+        Binding("F", "cycle_filter", "Filter", show=False),
         Binding("question_mark", "show_help", "Help", show=True),
     ]
 
@@ -489,13 +495,13 @@ class ProjectManagerApp(App):
         if action in ("start_pr", "start_pr_fresh", "done_pr",
                        "edit_plan", "view_plan", "toggle_guide", "launch_notes",
                        "launch_meta", "view_log", "refresh", "rebalance", "quit", "show_help",
-                       "toggle_tests", "hide_plan", "move_to_plan"):
+                       "toggle_tests", "hide_plan", "move_to_plan", "toggle_merged", "cycle_filter"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus:
                 _log.debug("check_action: blocked %s (command bar focused)", action)
                 return False
         # Block PR actions when in guide mode or plans view (can't see the PR tree)
-        if action in ("start_pr", "done_pr", "launch_claude", "edit_plan", "view_plan", "hide_plan", "move_to_plan"):
+        if action in ("start_pr", "done_pr", "launch_claude", "edit_plan", "view_plan", "hide_plan", "move_to_plan", "toggle_merged", "cycle_filter"):
             if self._current_guide_step is not None:
                 _log.debug("check_action: blocked %s (in guide mode)", action)
                 return False
@@ -1169,6 +1175,61 @@ class ProjectManagerApp(App):
             tree._recompute()
             tree.refresh(layout=True)
             self.log_message(f"Hidden: {tree.get_plan_display_name(plan_id)}")
+
+    def action_toggle_merged(self) -> None:
+        """Toggle hiding/showing of merged PRs."""
+        tree = self.query_one("#tech-tree", TechTree)
+        tree._hide_merged = not tree._hide_merged
+        tree._recompute()
+        tree.refresh(layout=True)
+        self._update_filter_status()
+        if tree._hide_merged:
+            self.log_message("Merged PRs hidden")
+        else:
+            self.log_message("Merged PRs shown")
+
+    def action_cycle_filter(self) -> None:
+        """Cycle through status filters: all → pending → in_progress → ..."""
+        from pm_core.tui.tech_tree import STATUS_FILTER_CYCLE, STATUS_ICONS
+        tree = self.query_one("#tech-tree", TechTree)
+        current = tree._status_filter
+        try:
+            idx = STATUS_FILTER_CYCLE.index(current)
+        except ValueError:
+            idx = 0
+        next_idx = (idx + 1) % len(STATUS_FILTER_CYCLE)
+        tree._status_filter = STATUS_FILTER_CYCLE[next_idx]
+        tree._recompute()
+        tree.refresh(layout=True)
+        self._update_filter_status()
+        if tree._status_filter:
+            icon = STATUS_ICONS.get(tree._status_filter, "")
+            self.log_message(f"Filter: {icon} {tree._status_filter}")
+        else:
+            self.log_message("Filter: all")
+
+    def _update_filter_status(self) -> None:
+        """Update the status bar to reflect active filters."""
+        from pm_core.tui.tech_tree import STATUS_ICONS
+        if not self._data:
+            return
+        tree = self.query_one("#tech-tree", TechTree)
+        project = self._data.get("project", {})
+        prs = self._data.get("prs") or []
+        filter_text = ""
+        if tree._status_filter:
+            icon = STATUS_ICONS.get(tree._status_filter, "")
+            filter_text = f"{icon} {tree._status_filter}"
+        elif tree._hide_merged:
+            filter_text = "hide merged"
+        status_bar = self.query_one("#status-bar", StatusBar)
+        status_bar.update_status(
+            project.get("name", "???"),
+            project.get("repo", "???"),
+            "synced",
+            pr_count=len(prs),
+            filter_text=filter_text,
+        )
 
     def action_move_to_plan(self) -> None:
         """Open plan picker to move selected PR to a different plan."""
