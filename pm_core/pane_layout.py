@@ -11,6 +11,7 @@ here for backward compatibility.
 import json
 import subprocess
 import time
+from pathlib import Path
 
 from pm_core.paths import configure_logger
 
@@ -38,7 +39,7 @@ def _ensure_logging():
     pass
 
 
-def mobile_flag_path(session: str) -> "Path":
+def mobile_flag_path(session: str) -> Path:
     """Return the path to the force-mobile flag file for a session."""
     return registry_dir() / f"{base_session_name(session)}.mobile"
 

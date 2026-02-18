@@ -6,7 +6,6 @@ containing pane IDs, roles, and ordering information.
 """
 
 import json
-import logging
 from pathlib import Path
 
 from pm_core.paths import configure_logger
