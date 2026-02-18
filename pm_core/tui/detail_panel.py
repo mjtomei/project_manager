@@ -9,7 +9,7 @@ from rich.text import Text
 from rich.panel import Panel
 from rich.console import RenderableType
 
-from pm_core.plan_parser import _extract_field
+from pm_core.plan_parser import extract_field
 from pm_core.tui.tech_tree import STATUS_ICONS
 
 
@@ -33,8 +33,8 @@ def _extract_plan_section(plan_file: Path, pr_title: str) -> dict | None:
         first_line = block.split('\n', 1)[0].strip()
         if first_line == pr_title:
             body = block.split('\n', 1)[1] if '\n' in block else ""
-            tests = _extract_field(body, "tests")
-            files = _extract_field(body, "files")
+            tests = extract_field(body, "tests")
+            files = extract_field(body, "files")
             if tests or files:
                 return {"tests": tests, "files": files}
             return None

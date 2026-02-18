@@ -1,52 +1,52 @@
-"""Tests for deduplicated functions: _extract_field, get_git_root, get_github_repo_name."""
+"""Tests for deduplicated functions: extract_field, get_git_root, get_github_repo_name."""
 
 import subprocess
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
-from pm_core.plan_parser import _extract_field
+from pm_core.plan_parser import extract_field
 from pm_core.git_ops import get_git_root, get_github_repo_name
 
 
 # ---------------------------------------------------------------------------
-# _extract_field tests
+# extract_field tests
 # ---------------------------------------------------------------------------
 
 class TestExtractField:
-    """Tests for _extract_field imported from plan_parser."""
+    """Tests for extract_field imported from plan_parser."""
 
     def test_extracts_description(self):
         body = "- **description**: Implement JWT auth\n- **tests**: Unit tests"
-        assert _extract_field(body, "description") == "Implement JWT auth"
+        assert extract_field(body, "description") == "Implement JWT auth"
 
     def test_extracts_tests(self):
         body = "- **description**: Something\n- **tests**: Run pytest tests/"
-        assert _extract_field(body, "tests") == "Run pytest tests/"
+        assert extract_field(body, "tests") == "Run pytest tests/"
 
     def test_extracts_files(self):
         body = "- **files**: src/auth.py, tests/test_auth.py"
-        assert _extract_field(body, "files") == "src/auth.py, tests/test_auth.py"
+        assert extract_field(body, "files") == "src/auth.py, tests/test_auth.py"
 
     def test_missing_field_returns_empty(self):
         body = "- **description**: Something"
-        assert _extract_field(body, "tests") == ""
+        assert extract_field(body, "tests") == ""
 
     def test_empty_body_returns_empty(self):
-        assert _extract_field("", "description") == ""
+        assert extract_field("", "description") == ""
 
     def test_case_insensitive(self):
         body = "- **Description**: Some value"
-        assert _extract_field(body, "description") == "Some value"
+        assert extract_field(body, "description") == "Some value"
 
     def test_strips_whitespace(self):
         body = "- **tests**:   extra spaces   "
-        assert _extract_field(body, "tests") == "extra spaces"
+        assert extract_field(body, "tests") == "extra spaces"
 
     def test_field_with_leading_whitespace(self):
         body = "  - **description**: indented item"
-        assert _extract_field(body, "description") == "indented item"
+        assert extract_field(body, "description") == "indented item"
 
 
 # ---------------------------------------------------------------------------
@@ -148,12 +148,12 @@ class TestImportSmoke:
     """Verify that modules successfully import the shared versions."""
 
     def test_detail_panel_imports_extract_field(self):
-        """detail_panel.py imports _extract_field from plan_parser."""
+        """detail_panel.py imports extract_field from plan_parser."""
         from pm_core.tui import detail_panel
-        # _extract_field should be used in the module (imported, not defined locally)
-        assert hasattr(detail_panel, '_extract_field')
+        # extract_field should be used in the module (imported, not defined locally)
+        assert hasattr(detail_panel, 'extract_field')
         # Confirm it's the same function from plan_parser
-        assert detail_panel._extract_field is _extract_field
+        assert detail_panel.extract_field is extract_field
 
     def test_paths_uses_git_ops_functions(self):
         """paths.py uses get_git_root and get_github_repo_name from git_ops."""
