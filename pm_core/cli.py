@@ -1628,15 +1628,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
         raise SystemExit(1)
 
     if pr_entry.get("status") == "in_progress":
-        existing_workdir = pr_entry.get("workdir")
-        # If we're already inside this PR's workdir, it's a no-op
-        if existing_workdir:
-            cwd = str(Path.cwd().resolve())
-            wd_resolved = str(Path(existing_workdir).resolve())
-            if cwd.startswith(wd_resolved):
-                click.echo(f"PR {pr_id} is already in_progress in this workdir.")
-                return
         # If already in_progress, reuse existing workdir if available
+        existing_workdir = pr_entry.get("workdir")
         if existing_workdir and Path(existing_workdir).exists():
             click.echo(f"PR {pr_id} is already in_progress, reusing existing workdir.")
             workdir = existing_workdir  # Set workdir so it gets used below
