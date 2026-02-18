@@ -1776,6 +1776,73 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
     launch_claude(prompt, cwd=str(work_path), session_key=session_key, pm_root=root, resume=not fresh)
 
 
+def _launch_review_window(data: dict, pr_entry: dict) -> None:
+    """Launch a tmux review window with Claude review + git diff shell."""
+    if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
+        return
+
+    pm_session = _get_current_pm_session() or _get_session_name_for_cwd()
+    if not tmux_mod.session_exists(pm_session):
+        return
+
+    workdir = pr_entry.get("workdir")
+    if not workdir:
+        return
+
+    pr_id = pr_entry["id"]
+    display_id = _pr_display_id(pr_entry)
+    title = pr_entry.get("title", "")
+    base_branch = data.get("project", {}).get("base_branch", "main")
+
+    # Generate review prompt and build Claude command
+    review_prompt = prompt_gen.generate_review_prompt(data, pr_id)
+    claude_cmd = build_claude_shell_cmd(prompt=review_prompt)
+
+    window_name = f"review-{display_id}"
+
+    # If review window already exists, just switch to it
+    existing = tmux_mod.find_window_by_name(pm_session, window_name)
+    if existing:
+        tmux_mod.select_window(pm_session, existing["index"])
+        click.echo(f"Switched to existing review window '{window_name}'")
+        return
+
+    try:
+        claude_pane = tmux_mod.new_window_get_pane(pm_session, window_name, claude_cmd, workdir)
+        if not claude_pane:
+            return
+
+        # Build shell command that shows PR info then drops to interactive shell
+        shell = os.environ.get("SHELL", "/bin/bash")
+        header = f"Review: {display_id} — {title}"
+        diff_cmd = (
+            f"cd '{workdir}'"
+            f" && echo '=== {header} ==='"
+            f" && echo ''"
+            f" && git status"
+            f" && echo ''"
+            f" && echo '--- Change summary ---'"
+            f" && git diff --stat origin/{base_branch}...HEAD"
+            f" && echo ''"
+            f" && echo '--- Full diff ---'"
+            f" && git diff origin/{base_branch}...HEAD"
+            f" && exec {shell}"
+        )
+        diff_pane = tmux_mod.split_pane_at(claude_pane, "h", diff_cmd, background=True)
+
+        # Find the window ID for pane registration
+        win = tmux_mod.find_window_by_name(pm_session, window_name)
+        if win:
+            window_id = win["id"]
+            pane_layout.register_pane(pm_session, window_id, claude_pane, "claude", claude_cmd)
+            pane_layout.register_pane(pm_session, window_id, diff_pane, "shell", "review-diff")
+            pane_layout.rebalance(pm_session, window_id)
+
+        click.echo(f"Opened review window '{window_name}'")
+    except Exception as e:
+        _log.warning("Failed to launch review window: %s", e)
+
+
 @pr.command("done")
 @click.argument("pr_id", default=None, required=False)
 def pr_done(pr_id: str | None):
@@ -1813,8 +1880,9 @@ def pr_done(pr_id: str | None):
         click.echo(f"PR {pr_id} is already merged.", err=True)
         raise SystemExit(1)
     if pr_entry.get("status") == "in_review":
-        click.echo(f"PR {pr_id} is already in_review.", err=True)
-        raise SystemExit(1)
+        click.echo(f"PR {pr_id} is already in_review.")
+        _launch_review_window(data, pr_entry)
+        return
     if pr_entry.get("status") == "pending":
         click.echo(f"PR {pr_id} is pending — start it first with: pm pr start {pr_id}", err=True)
         raise SystemExit(1)
@@ -1836,6 +1904,7 @@ def pr_done(pr_id: str | None):
     save_and_push(data, root, f"pm: done {pr_id}")
     click.echo(f"PR {_pr_display_id(pr_entry)} marked as in_review.")
     trigger_tui_refresh()
+    _launch_review_window(data, pr_entry)
 
 
 @pr.command("sync")

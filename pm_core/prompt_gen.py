@@ -62,3 +62,33 @@ This session is managed by `pm`. Run `pm help` to see available commands.
 {instructions}
 {notes_block}"""
     return prompt.strip()
+
+
+def generate_review_prompt(data: dict, pr_id: str) -> str:
+    """Generate a Claude Code prompt for reviewing a completed PR."""
+    pr = store.get_pr(data, pr_id)
+    if not pr:
+        raise ValueError(f"PR {pr_id} not found")
+
+    title = pr.get("title", "")
+    description = pr.get("description", "").strip()
+    base_branch = data.get("project", {}).get("base_branch", "main")
+
+    prompt = f"""You are reviewing PR {pr_id}: "{title}"
+
+## Task
+Review the code changes in this PR for quality, correctness, and consistency.
+
+## Description
+{description}
+
+## Steps
+1. Run `git diff origin/{base_branch}...HEAD` to see all changes
+2. **Generic checks** — things any codebase should get right:
+   - Excessive file/function length, duplicated code, dead or unnecessary code, potential bugs, security issues, confusing code that lacks comments, sufficient test coverage
+3. **Project-specific checks** — does the change fit this codebase?
+   - Convention consistency, architectural patterns
+   - Search for similar code elsewhere in the repo — flag opportunities for shared helpers or reuse
+4. Output per-file notes: **filename** — GOOD / FIX
+5. End with an overall verdict: **PASS** or **NEEDS_WORK**"""
+    return prompt.strip()
