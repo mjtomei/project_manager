@@ -1947,7 +1947,7 @@ To interact with this session, use commands like:
 
     def action_launch_claude(self) -> None:
         """Launch an interactive Claude session in the project directory."""
-        from pm_core.claude_launcher import find_claude
+        from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
         claude = find_claude()
         if not claude:
             self.log_message("Claude CLI not found")
@@ -1975,15 +1975,12 @@ Common tasks:
 
 The user will tell you what they need."""
 
-        cmd = claude
-        if os.environ.get("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS") == "true":
-            cmd += " --dangerously-skip-permissions"
-        cmd += f" {shlex.quote(prompt)}"
+        cmd = build_claude_shell_cmd(prompt=prompt)
         self._launch_pane(cmd, "claude")
 
     def action_launch_help_claude(self) -> None:
         """Launch a beginner-friendly Claude assistant for the current project."""
-        from pm_core.claude_launcher import find_claude
+        from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
         claude = find_claude()
         if not claude:
             self.log_message("Claude CLI not found")
@@ -2085,10 +2082,7 @@ If so, help the user fix these first before anything else.
 Based on what you find, give the user clear, simple recommendations for \
 what to do next. Suggest one or two concrete actions, not an overwhelming list."""
 
-        cmd = claude
-        if os.environ.get("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS") == "true":
-            cmd += " --dangerously-skip-permissions"
-        cmd += f" {shlex.quote(prompt)}"
+        cmd = build_claude_shell_cmd(prompt=prompt)
         self._launch_pane(cmd, "assist")
 
     def action_show_connect(self) -> None:
