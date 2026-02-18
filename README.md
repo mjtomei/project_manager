@@ -8,7 +8,7 @@ shaping a codebase together.
 
 - **Interactive TUI** — tmux-based dashboard with PR dependency graph, detail panel, and keybindings for all common operations
 - **Plan-driven workflow** — write plans, break them into PRs with Claude, review consistency, and load PRs in one step
-- **Parallel Claude sessions** — each `pm pr start` opens a tmux window with a Claude session; work on multiple PRs simultaneously
+- **Parallel Claude sessions** — spin up Claude sessions with their own branches and working directories as needed for PRs, experiments, or any task; low friction to start many and switch between them
 - **Shared sessions** — share your tmux session with other users on the same machine via `--global` or `--group`, with per-client viewports
 - **Mobile mode** — auto-zooms the active pane on narrow terminals (< 120 cols) or when force-enabled with `pm session mobile --force`, making the tool usable over SSH from phones and tablets
 - **Meta-development** — `pm meta` opens a Claude session targeting the pm codebase itself, so you can fix friction as you encounter it
