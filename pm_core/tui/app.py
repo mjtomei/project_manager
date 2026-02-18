@@ -65,449 +65,13 @@ from pm_core.tui.plans_pane import PlansPane, PlanSelected, PlanActivated, PlanA
 from pm_core.tui.tests_pane import TestsPane, TestSelected, TestActivated
 from pm_core.plan_parser import extract_plan_intro
 
-# Guide steps that indicate setup is still in progress
-GUIDE_SETUP_STEPS = {"no_project", "initialized", "has_plan_draft", "has_plan_prs", "needs_deps_review"}
-
-
-class TreeScroll(ScrollableContainer, can_focus=False, can_focus_children=True):
-    """Scrollable container for the tech tree."""
-
-    DEFAULT_CSS = """
-    TreeScroll {
-        scrollbar-background: $surface-darken-1;
-        scrollbar-color: $text-muted;
-        scrollbar-color-hover: $text;
-        scrollbar-color-active: $accent;
-        scrollbar-size-vertical: 1;
-    }
-    """
-
-
-
-class StatusBar(Static):
-    """Top status bar showing project info and sync state."""
-
-    def update_status(self, project_name: str, repo: str, sync_state: str,
-                       pr_count: int = 0, filter_text: str = "",
-                       show_assist: bool = False) -> None:
-        sync_icons = {
-            "synced": "[green]synced[/green]",
-            "pulling": "[yellow]pulling...[/yellow]",
-            "no-op": "[dim]up to date[/dim]",
-            "error": "[red]sync error[/red]",
-        }
-        sync_display = sync_icons.get(sync_state, f"[red]{sync_state}[/red]")
-        from rich.markup import escape
-        safe_repo = escape(repo)
-        pr_info = f"[bold]{pr_count}[/bold] PRs" if pr_count else ""
-        filter_display = f"    [dim]filter:[/dim] [italic]{filter_text}[/italic]" if filter_text else ""
-        assist_display = "    [dim]\\[H] Assist[/dim]" if show_assist else ""
-        self.update(f" Project: [bold]{project_name}[/bold]    {pr_info}{filter_display}    repo: [cyan]{safe_repo}[/cyan]    {sync_display}{assist_display}")
-
-
-class LogLine(Static):
-    """Single-line log output above the command bar."""
-    pass
-
-
-class WelcomeScreen(ModalScreen):
-    """Welcome popup shown when guide completes."""
-
-    BINDINGS = [
-        Binding("escape", "dismiss", "Close"),
-        Binding("enter", "dismiss", "Close"),
-    ]
-
-    CSS = """
-    WelcomeScreen {
-        align: center middle;
-    }
-    #welcome-container {
-        width: 55;
-        height: auto;
-        max-height: 80%;
-        background: $surface;
-        border: solid $success;
-        padding: 1 2;
-    }
-    #welcome-title {
-        text-align: center;
-        text-style: bold;
-        color: $success;
-        margin-bottom: 1;
-    }
-    .welcome-row {
-        height: 1;
-    }
-    """
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="welcome-container"):
-            yield Label("Setup Complete!", id="welcome-title")
-            yield Label("")
-            yield Label("Your PRs are ready. Here's how to get started:", classes="welcome-row")
-            yield Label("")
-            yield Label("  [bold]↑↓←→[/] or [bold]jkl[/]  Navigate the PR tree", classes="welcome-row")
-            yield Label("  [bold]s[/]  Start working on the selected PR", classes="welcome-row")
-            yield Label("  [bold]c[/]  Launch Claude in a new pane", classes="welcome-row")
-            yield Label("  [bold]e[/]  Edit PR details", classes="welcome-row")
-            yield Label("  [bold]?[/]  Show all keyboard shortcuts", classes="welcome-row")
-            yield Label("")
-            yield Label("[dim]Press Enter or Esc to continue[/]", classes="welcome-row")
-
-    def action_dismiss(self) -> None:
-        self.app.pop_screen()
-
-
-class ConnectScreen(ModalScreen):
-    """Modal popup showing the tmux connect command for shared sessions."""
-
-    BINDINGS = [
-        Binding("escape", "dismiss", "Close"),
-        Binding("q", "dismiss", "Close"),
-        Binding("c", "copy_and_dismiss", "Copy & close"),
-    ]
-
-    CSS = """
-    ConnectScreen {
-        align: center middle;
-    }
-    #connect-container {
-        width: 70;
-        height: auto;
-        background: $surface;
-        border: solid $primary;
-        padding: 1 2;
-    }
-    #connect-title {
-        text-align: center;
-        text-style: bold;
-        margin-bottom: 1;
-    }
-    #connect-command {
-        margin: 1 0;
-        padding: 1 2;
-        background: $surface-darken-1;
-        text-style: bold;
-    }
-    .connect-hint {
-        height: 1;
-        color: $text-muted;
-    }
-    """
-
-    def __init__(self, command: str):
-        super().__init__()
-        self._command = command
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="connect-container"):
-            yield Label("Connect Command", id="connect-title")
-            yield Label(self._command, id="connect-command")
-            yield Label("")
-            yield Label("[dim]Press [bold]c[/bold] to copy to clipboard  |  [bold]Esc[/bold] to close[/]", classes="connect-hint")
-
-    def action_dismiss(self) -> None:
-        self.app.pop_screen()
-
-    def action_copy_and_dismiss(self) -> None:
-        copy_failed = False
-        try:
-            import pyperclip
-            pyperclip.copy(self._command)
-        except Exception:
-            copy_failed = True
-        self.app.pop_screen()
-        if copy_failed:
-            def _show_error() -> None:
-                self.app.log_error(
-                    "Copy failed:", "install xclip (apt install xclip) or xsel"
-                )
-            self.app.set_timer(0.1, _show_error)
-
-
-class HelpScreen(ModalScreen):
-    """Modal help screen showing available keybindings."""
-
-    BINDINGS = [
-        Binding("escape", "dismiss", "Close"),
-        Binding("question_mark", "dismiss", "Close"),
-        Binding("q", "dismiss", "Close"),
-    ]
-
-    CSS = """
-    HelpScreen {
-        align: center middle;
-    }
-    #help-container {
-        width: 50;
-        height: auto;
-        max-height: 80%;
-        background: $surface;
-        border: solid $primary;
-        padding: 1 2;
-    }
-    #help-title {
-        text-align: center;
-        text-style: bold;
-        margin-bottom: 1;
-    }
-    .help-section {
-        margin-top: 1;
-        text-style: bold;
-        color: $primary;
-    }
-    .help-row {
-        height: 1;
-    }
-    """
-
-    def __init__(self, in_plans: bool = False, in_tests: bool = False):
-        super().__init__()
-        self._in_plans = in_plans
-        self._in_tests = in_tests
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="help-container"):
-            yield Label("Keyboard Shortcuts", id="help-title")
-            if self._in_tests:
-                yield Label("Test Navigation", classes="help-section")
-                yield Label("  [bold]↑↓[/] or [bold]jk[/]  Move selection", classes="help-row")
-                yield Label("  [bold]Enter[/]  Run selected test", classes="help-row")
-                yield Label("  [bold]T[/]  Back to tree view", classes="help-row")
-            elif self._in_plans:
-                yield Label("Plan Navigation", classes="help-section")
-                yield Label("  [bold]↑↓[/] or [bold]jk[/]  Move selection", classes="help-row")
-                yield Label("  [bold]Enter/v[/]  View plan file", classes="help-row")
-                yield Label("Plan Actions", classes="help-section")
-                yield Label("  [bold]a[/]  Add a new plan", classes="help-row")
-                yield Label("  [bold]e[/]  Edit plan file", classes="help-row")
-                yield Label("  [bold]w[/]  Break plan into PRs", classes="help-row")
-                yield Label("  [bold]c[/]  Review plan-PR consistency", classes="help-row")
-                yield Label("  [bold]l[/]  Load PRs from plan", classes="help-row")
-                yield Label("Cross-plan", classes="help-section")
-                yield Label("  [bold]D[/]  Review PR dependencies", classes="help-row")
-            else:
-                yield Label("Tree Navigation", classes="help-section")
-                yield Label("  [bold]↑↓←→[/] or [bold]hjkl[/]  Move selection", classes="help-row")
-                yield Label("  [bold]J/K[/]  Jump to next/prev plan", classes="help-row")
-                yield Label("  [bold]x[/]  Hide/show plan group", classes="help-row")
-                yield Label("  [bold]X[/]  Toggle merged PRs", classes="help-row")
-                yield Label("  [bold]F[/]  Cycle status filter", classes="help-row")
-                yield Label("  [bold]Enter[/]  Show PR details", classes="help-row")
-                yield Label("PR Actions", classes="help-section")
-                yield Label("  [bold]s[/]  Start selected PR", classes="help-row")
-                yield Label("  [bold]S[/]  Start fresh (no resume)", classes="help-row")
-                yield Label("  [bold]d[/]  Mark PR as done", classes="help-row")
-                yield Label("  [bold]e[/]  Edit selected PR", classes="help-row")
-                yield Label("  [bold]v[/]  View plan file", classes="help-row")
-                yield Label("  [bold]M[/]  Move to plan", classes="help-row")
-            yield Label("Panes & Views", classes="help-section")
-            yield Label("  [bold]c[/]  Launch Claude session", classes="help-row")
-            yield Label("  [bold]H[/]  Ask for help (beginner-friendly)", classes="help-row")
-            yield Label("  [bold]/[/]  Open command bar", classes="help-row")
-            yield Label("  [bold]g[/]  Toggle guide view", classes="help-row")
-            yield Label("  [bold]n[/]  Open notes", classes="help-row")
-            yield Label("  [bold]m[/]  Meta: work on pm itself", classes="help-row")
-            yield Label("  [bold]L[/]  View TUI log", classes="help-row")
-            yield Label("  [bold]P[/]  Toggle plans view", classes="help-row")
-            yield Label("  [bold]T[/]  Toggle tests view", classes="help-row")
-            yield Label("  [bold]b[/]  Rebalance panes", classes="help-row")
-            yield Label("Other", classes="help-section")
-            yield Label("  [bold]r[/]  Refresh / sync with GitHub", classes="help-row")
-            yield Label("  [bold]C[/]  Show connect command (shared sessions)", classes="help-row")
-            yield Label("  [bold]Ctrl+R[/]  Restart TUI", classes="help-row")
-            yield Label("  [bold]?[/]  Show this help", classes="help-row")
-            yield Label("  [bold]q[/]  Detach from session", classes="help-row")
-            yield Label("")
-            yield Label("[dim]Press Esc or ? to close[/]", classes="help-row")
-
-    def action_dismiss(self) -> None:
-        self.app.pop_screen()
-
-
-class PlanPickerScreen(ModalScreen):
-    """Modal for picking a plan to assign to a PR."""
-
-    BINDINGS = [
-        Binding("escape", "cancel", "Cancel"),
-    ]
-
-    CSS = """
-    PlanPickerScreen {
-        align: center middle;
-    }
-    #picker-container {
-        width: 55;
-        height: auto;
-        max-height: 80%;
-        background: $surface;
-        border: solid $primary;
-        padding: 1 2;
-    }
-    #picker-title {
-        text-align: center;
-        text-style: bold;
-        margin-bottom: 1;
-    }
-    .picker-row {
-        height: 1;
-    }
-    #picker-input {
-        display: none;
-        margin-top: 1;
-    }
-    """
-
-    def __init__(self, plans: list[dict], current_plan: str | None, pr_id: str):
-        super().__init__()
-        self._plans = plans
-        self._current_plan = current_plan
-        self._pr_id = pr_id
-        self._selected = 0
-        # Options: each plan + "No plan (standalone)" + "New plan..."
-        self._options: list[tuple[str | None, str]] = []  # (plan_id_or_None, display_label)
-        for p in plans:
-            self._options.append((p["id"], f"{p['id']}: {p.get('name', '')}"))
-        self._options.append(("_standalone", "No plan (standalone)"))
-        self._options.append(("_new", "New plan..."))
-        # Pre-select current plan
-        for i, (pid, _) in enumerate(self._options):
-            if pid == current_plan:
-                self._selected = i
-                break
-        self._input_mode = False
-
-    def compose(self) -> ComposeResult:
-        from textual.widgets import Input
-        with Vertical(id="picker-container"):
-            yield Label(f"Move {self._pr_id} to plan:", id="picker-title")
-            yield Label("", id="picker-options")
-            yield Input(placeholder="Plan name", id="picker-input")
-            yield Label("[dim]↑↓ navigate  Enter select  Esc cancel[/]", classes="picker-row")
-
-    def on_mount(self) -> None:
-        self._refresh_options()
-
-    def _refresh_options(self) -> None:
-        lines = []
-        for i, (pid, label) in enumerate(self._options):
-            is_current = (pid == self._current_plan) or (pid == "_standalone" and self._current_plan is None)
-            marker = "●" if is_current else "○"
-            pointer = "▸ " if i == self._selected else "  "
-            style = "bold" if i == self._selected else ""
-            lines.append(f"{pointer}{marker} {label}")
-        options_label = self.query_one("#picker-options", Label)
-        options_label.update("\n".join(lines))
-
-    def on_key(self, event) -> None:
-        if self._input_mode:
-            return  # Let Input widget handle keys
-        if event.key in ("up", "k"):
-            self._selected = max(0, self._selected - 1)
-            self._refresh_options()
-            event.prevent_default()
-            event.stop()
-        elif event.key in ("down", "j"):
-            self._selected = min(len(self._options) - 1, self._selected + 1)
-            self._refresh_options()
-            event.prevent_default()
-            event.stop()
-        elif event.key == "enter":
-            pid, label = self._options[self._selected]
-            if pid == "_new":
-                self._enter_input_mode()
-            else:
-                self.dismiss(pid)
-            event.prevent_default()
-            event.stop()
-
-    def _enter_input_mode(self) -> None:
-        from textual.widgets import Input
-        self._input_mode = True
-        input_widget = self.query_one("#picker-input", Input)
-        input_widget.styles.display = "block"
-        input_widget.focus()
-
-    def on_input_submitted(self, event) -> None:
-        title = event.value.strip()
-        if title:
-            self.dismiss(("_new", title))
-        else:
-            self._input_mode = False
-            event.input.styles.display = "none"
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)
-
-
-class PlanAddScreen(ModalScreen):
-    """Modal for creating a new plan with name and optional description."""
-
-    BINDINGS = [
-        Binding("escape", "cancel", "Cancel"),
-    ]
-
-    CSS = """
-    PlanAddScreen {
-        align: center middle;
-    }
-    #plan-add-container {
-        width: 60;
-        height: auto;
-        background: $surface;
-        border: solid $primary;
-        padding: 1 2;
-    }
-    #plan-add-title {
-        text-align: center;
-        text-style: bold;
-        margin-bottom: 1;
-    }
-    .plan-add-label {
-        margin-top: 1;
-    }
-    #plan-add-container Input {
-        border: none;
-        height: 1;
-        padding: 0 1;
-        background: #333333;
-    }
-    #plan-add-container Input:focus {
-        background: #444444;
-    }
-    """
-
-    def compose(self) -> ComposeResult:
-        from textual.widgets import Input
-        with Vertical(id="plan-add-container"):
-            yield Label("New Plan", id="plan-add-title")
-            yield Label("Name [dim](required)[/]", classes="plan-add-label")
-            yield Input(placeholder="e.g. auth-refactor", id="plan-add-name")
-            yield Label("Description [dim](optional)[/]", classes="plan-add-label")
-            yield Input(placeholder="What should this plan accomplish?", id="plan-add-desc")
-            yield Label("[dim]Tab between fields · Enter to create · Esc to cancel[/]")
-
-    def on_mount(self) -> None:
-        from textual.widgets import Input
-        self.query_one("#plan-add-name", Input).focus()
-
-    def on_input_submitted(self, event) -> None:
-        from textual.widgets import Input
-        name_input = self.query_one("#plan-add-name", Input)
-        desc_input = self.query_one("#plan-add-desc", Input)
-        if event.input is name_input:
-            # Enter on name field: move to description
-            desc_input.focus()
-        elif event.input is desc_input:
-            # Enter on description field: submit
-            name = name_input.value.strip()
-            if name:
-                desc = desc_input.value.strip()
-                self.dismiss((name, desc))
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)
+# Import from new modules
+from pm_core.tui.widgets import TreeScroll, StatusBar, LogLine
+from pm_core.tui.screens import (
+    WelcomeScreen, ConnectScreen, HelpScreen, PlanPickerScreen, PlanAddScreen,
+)
+from pm_core.tui import pane_ops
+from pm_core.tui.pane_ops import GUIDE_SETUP_STEPS
 
 
 class ProjectManagerApp(App):
@@ -939,15 +503,10 @@ class ProjectManagerApp(App):
         if not self._guide_auto_launched and tmux_mod.in_tmux():
             self._guide_auto_launched = True
             # Use call_later to launch after UI is ready
-            self.call_later(self._auto_launch_guide)
+            self.call_later(lambda: pane_ops.auto_launch_guide(self))
 
         # Capture frame after view change (use call_after_refresh to ensure screen is updated)
         self.call_after_refresh(self._capture_frame, f"show_guide_view:{state}")
-
-    def _auto_launch_guide(self) -> None:
-        """Auto-launch the guide pane."""
-        _log.info("auto-launching guide pane")
-        self._launch_pane("pm guide", "guide")
 
     def _show_normal_view(self, from_guide: bool = False) -> None:
         """Show the normal tech tree view."""
@@ -1227,7 +786,7 @@ class ProjectManagerApp(App):
         # Commands that launch interactive Claude sessions need a tmux pane
         parts = shlex.split(cmd)
         if len(parts) >= 3 and parts[0] == "plan" and parts[1] == "add":
-            self._launch_pane(f"pm {cmd}", "plan-add")
+            pane_ops.launch_pane(self, f"pm {cmd}", "plan-add")
             self._load_state()
         else:
             # Detect if this should run async (PR commands are long-running)
@@ -1397,12 +956,7 @@ class ProjectManagerApp(App):
         self._run_command(f"pr start --new {pr_id}", working_message=action_key, action_key=action_key)
 
     def action_hide_plan(self) -> None:
-        """Toggle hiding the selected PR's plan group.
-
-        If selected on a hidden label: unhide that plan.
-        If selected on a normal PR: hide its plan.
-        If no selection: unhide all.
-        """
+        """Toggle hiding the selected PR's plan group."""
         tree = self.query_one("#tech-tree", TechTree)
 
         # Check if selected node is a hidden label
@@ -1447,7 +1001,7 @@ class ProjectManagerApp(App):
             self.log_message("Merged PRs shown")
 
     def action_cycle_filter(self) -> None:
-        """Cycle through status filters: all → pending → in_progress → ..."""
+        """Cycle through status filters: all -> pending -> in_progress -> ..."""
         from pm_core.tui.tech_tree import STATUS_FILTER_CYCLE, STATUS_ICONS
         tree = self.query_one("#tech-tree", TechTree)
         current = tree._status_filter
@@ -1550,155 +1104,53 @@ class ProjectManagerApp(App):
         self._inflight_pr_action = action_key
         self._run_command(f"pr done {pr_id}", working_message=action_key, action_key=action_key)
 
-
-    def _get_pane_split_direction(self) -> str:
-        """Return 'v' if pane is taller than wide, else 'h'."""
-        pane_id = os.environ.get("TMUX_PANE", "")
-        if not pane_id:
-            return "h"
-        result = _run_shell(
-            tmux_mod._tmux_cmd("display", "-t", pane_id, "-p", "#{pane_width} #{pane_height}"),
-            capture_output=True, text=True
-        )
-        parts = result.stdout.strip().split()
-        if len(parts) == 2:
-            width, height = int(parts[0]), int(parts[1])
-            # Use vertical split if pane is taller than wide (accounting for ~2:1 char aspect ratio)
-            if height > width // 2:
-                return "v"
-        return "h"
+    # --- Pane operation delegates (see tui/pane_ops.py) ---
 
     def action_edit_plan(self) -> None:
         """Edit the selected PR in an interactive editor."""
-        _log.info("action: edit_plan")
-        tree = self.query_one("#tech-tree", TechTree)
-        pr_id = tree.selected_pr_id
-        if not pr_id:
-            self.log_message("No PR selected")
-            return
-        self._launch_pane(f"pm pr edit {pr_id}", "pr-edit")
+        pane_ops.edit_plan(self)
 
     def action_view_plan(self) -> None:
         """Open the plan file associated with the selected PR in a pane."""
-        _log.info("action: view_plan")
-        tree = self.query_one("#tech-tree", TechTree)
-        pr_id = tree.selected_pr_id
-        if not pr_id:
-            self.log_message("No PR selected")
-            return
-        pr = store.get_pr(self._data, pr_id)
-        plan = self._get_plan_for_pr(pr)
-        if not plan:
-            self.log_message("No plan associated with this PR")
-            return
-        plan_file = plan.get("file", "")
-        if not plan_file or not self._root:
-            self.log_message("Plan file not found")
-            return
-        plan_path = self._root / plan_file
-        if not plan_path.exists():
-            self.log_message(f"Plan file not found: {plan_path}")
-            return
-        self._launch_pane(f"less {plan_path}", "plan")
-
-    def _get_session_and_window(self) -> tuple[str, str] | None:
-        """Get tmux session name and window ID. Returns None if not in tmux."""
-        if not tmux_mod.in_tmux():
-            self.log_message("Not in tmux. Use 'pm session' to start a tmux session.")
-            return None
-        session = tmux_mod.get_session_name()
-        window = tmux_mod.get_window_id(session)
-        return session, window
-
-    def _launch_pane(self, cmd: str, role: str) -> None:
-        """Launch a wrapped pane, register it, and rebalance.
-
-        If a pane with this role already exists and is alive, focuses it instead
-        of creating a duplicate.
-        """
-        info = self._get_session_and_window()
-        if not info:
-            return
-        session, window = info
-        _log.info("_launch_pane: session=%s window=%s role=%s", session, window, role)
-
-        # Check if a pane with this role already exists
-        existing_pane = pane_layout.find_live_pane_by_role(session, role)
-        _log.info("_launch_pane: find_live_pane_by_role returned %s", existing_pane)
-        if existing_pane:
-            _log.info("pane with role=%s already exists: %s, focusing", role, existing_pane)
-            tmux_mod.select_pane_smart(existing_pane, session, window)
-            self.log_message(f"Focused existing {role} pane")
-            return
-
-        data = pane_layout.load_registry(session)
-        gen = data.get("generation", "0")
-        escaped = cmd.replace("'", "'\\''")
-        wrap = f"bash -c 'trap \"pm _pane-exited {session} {window} {gen} $TMUX_PANE\" EXIT; {escaped}'"
-        try:
-            pane_id = tmux_mod.split_pane(session, "h", wrap)
-            pane_layout.register_pane(session, window, pane_id, role, cmd)
-            pane_layout.rebalance(session, window)
-            tmux_mod.select_pane_smart(pane_id, session, window)
-            self.log_message(f"Launched {role} pane")
-            _log.info("launched pane: role=%s id=%s", role, pane_id)
-        except Exception as e:
-            _log.exception("failed to launch %s pane", role)
-            self.log_message(f"Error: {e}")
+        pane_ops.view_plan(self)
 
     def action_toggle_guide(self) -> None:
         """Toggle between guide progress view and tech tree view."""
-        _log.info("action: toggle_guide dismissed=%s current_step=%s", self._guide_dismissed, self._current_guide_step)
-        if self._guide_dismissed:
-            # Restore guide view if we're in a guide setup step
-            state, _ = guide.resolve_guide_step(self._root)
-            if state in GUIDE_SETUP_STEPS:
-                _log.info("action: toggle_guide - restoring guide view for step %s", state)
-                self._guide_dismissed = False
-                self._show_guide_view(state)
-                self._launch_pane("pm guide", "guide")
-            else:
-                # Not in guide setup steps, just launch the guide pane
-                _log.info("action: toggle_guide - launching guide pane (not in setup steps)")
-                self._launch_pane("pm guide", "guide")
-        elif self._current_guide_step is not None:
-            # Guide view is showing, dismiss it
-            _log.info("action: toggle_guide - dismissing guide from step %s", self._current_guide_step)
-            self._guide_dismissed = True
-            self._show_normal_view()
-            self.log_message("Guide dismissed. Press 'g' to restore.")
+        pane_ops.toggle_guide(self)
 
     def action_launch_notes(self) -> None:
-        _log.info("action: launch_notes")
-        root = self._root or (Path.cwd() / "pm")
-        notes_path = root / notes.NOTES_FILENAME
-        self._launch_pane(f"pm notes {notes_path}", "notes")
+        pane_ops.launch_notes(self)
 
     def action_view_log(self) -> None:
         """View the TUI log file in a pane."""
-        _log.info("action: view_log")
-        log_path = command_log_file()
-        if not log_path.exists():
-            self.log_message("No log file yet.")
-            return
-        self._launch_pane(f"tail -f {log_path}", "log")
+        pane_ops.view_log(self)
 
     def action_launch_meta(self) -> None:
         """Launch a meta-development session to work on pm itself."""
-        _log.info("action: launch_meta")
-        self._run_command("meta")
+        pane_ops.launch_meta(self)
 
     def action_rebalance(self) -> None:
-        _log.info("action: rebalance")
-        info = self._get_session_and_window()
-        if not info:
-            return
-        session, window = info
-        data = pane_layout.load_registry(session)
-        data["user_modified"] = False
-        pane_layout.save_registry(session, data)
-        pane_layout.rebalance(session, window)
-        self.log_message("Layout rebalanced")
+        pane_ops.rebalance(self)
+
+    def action_launch_claude(self) -> None:
+        """Launch an interactive Claude session in the project directory."""
+        pane_ops.launch_claude(self)
+
+    def action_launch_help_claude(self) -> None:
+        """Launch a beginner-friendly Claude assistant for the current project."""
+        pane_ops.launch_help_claude(self)
+
+    def action_show_connect(self) -> None:
+        """Show the tmux connect command for shared sessions."""
+        pane_ops.show_connect(self)
+
+    def action_quit(self) -> None:
+        """Detach from tmux session instead of killing the TUI."""
+        pane_ops.quit_app(self)
+
+    def action_restart(self) -> None:
+        """Restart the TUI by exec'ing a fresh pm _tui process."""
+        pane_ops.restart_app(self)
 
     def action_refresh(self) -> None:
         _log.info("action: refresh")
@@ -1716,17 +1168,6 @@ class ProjectManagerApp(App):
         """Reload state from disk without triggering PR sync."""
         _log.info("action: reload (state only)")
         self._load_state()
-
-    def action_restart(self) -> None:
-        """Restart the TUI by exec'ing a fresh pm _tui process."""
-        _log.info("action: restart")
-        self.exit()
-        import shutil
-        pm = shutil.which("pm")
-        if pm:
-            os.execvp(pm, [pm, "_tui"])
-        else:
-            os.execvp(sys.executable, [sys.executable, "-m", "pm_core.cli", "_tui"])
 
     def action_focus_command(self) -> None:
         _log.debug("action: focus_command")
@@ -1767,8 +1208,6 @@ class ProjectManagerApp(App):
         # Update status bar
         plans = self._data.get("plans") or []
         status_bar = self.query_one("#status-bar", StatusBar)
-        project = self._data.get("project", {})
-        prs = self._data.get("prs") or []
         status_bar.update(f" [bold]Plans[/bold]    {len(plans)} plan(s)    [dim]P=back to tree[/dim]")
         self.call_after_refresh(self._capture_frame, "show_plans_view")
 
@@ -1813,18 +1252,12 @@ class ProjectManagerApp(App):
 
     def on_plan_activated(self, message: PlanActivated) -> None:
         """Open plan file in a pane."""
-        _log.info("plan activated: %s", message.plan_id)
-        plan = store.get_plan(self._data, message.plan_id)
-        if not plan or not self._root:
-            return
-        plan_path = self._root / plan.get("file", "")
-        if plan_path.exists():
-            self._launch_pane(f"less {plan_path}", "plan")
+        pane_ops.launch_plan_activated(self, message.plan_id)
 
     def on_plan_action(self, message: PlanAction) -> None:
         """Handle plan action shortcuts.
 
-        Key → action mapping is defined in PlansPane._KEY_ACTIONS.
+        Key -> action mapping is defined in PlansPane._KEY_ACTIONS.
         """
         message.stop()
         plans_pane = self.query_one("#plans-pane", PlansPane)
@@ -1832,43 +1265,9 @@ class ProjectManagerApp(App):
         _log.info("plan action: %s (plan=%s)", message.action, plan_id)
 
         if message.action == "add":
-            self.push_screen(PlanAddScreen(), callback=self._handle_plan_add)
-        elif message.action == "view":
-            if plan_id:
-                plan = store.get_plan(self._data, plan_id)
-                if plan and self._root:
-                    plan_path = self._root / plan.get("file", "")
-                    if plan_path.exists():
-                        self._launch_pane(f"less {plan_path}", "plan")
-        elif message.action == "edit":
-            if plan_id:
-                plan = store.get_plan(self._data, plan_id)
-                if plan and self._root:
-                    plan_path = self._root / plan.get("file", "")
-                    if plan_path.exists():
-                        editor = self._find_editor()
-                        self._launch_pane(f"{editor} {plan_path}", "plan-edit")
-        elif message.action == "breakdown":
-            if plan_id:
-                self._launch_pane(f"pm plan breakdown {plan_id}", "plan-breakdown")
-        elif message.action == "deps":
-            self._launch_pane("pm plan deps", "plan-deps")
-        elif message.action == "load":
-            if plan_id:
-                self._launch_pane(f"pm plan load {plan_id}", "plan-load")
-        elif message.action == "review":
-            if plan_id:
-                self._launch_pane(f"pm plan review {plan_id}", "plan-review")
-
-    def _handle_plan_add(self, result: tuple[str, str] | None) -> None:
-        """Handle result from PlanAddScreen modal."""
-        if result is None:
-            return
-        name, description = result
-        cmd = f"pm plan add {shlex.quote(name)}"
-        if description:
-            cmd += f" --description {shlex.quote(description)}"
-        self._launch_pane(cmd, "plan-add")
+            self.push_screen(PlanAddScreen(), callback=lambda r: pane_ops.handle_plan_add(self, r))
+        else:
+            pane_ops.handle_plan_action(self, message.action, plan_id)
 
     # --- Tests view ---
 
@@ -1915,198 +1314,4 @@ class ProjectManagerApp(App):
 
     def on_test_activated(self, message: TestActivated) -> None:
         """Launch Claude with the selected test prompt."""
-        _log.info("test activated: %s", message.test_id)
-        from pm_core import tui_tests
-        from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
-
-        prompt = tui_tests.get_test_prompt(message.test_id)
-        if not prompt:
-            self.log_message(f"Test not found: {message.test_id}")
-            return
-
-        # Build session context (same pattern as cli.py tui_test command)
-        sess = self._session_name or "default"
-        pane_id = os.environ.get("TMUX_PANE", "")
-        full_prompt = f"""\
-## Session Context
-
-You are testing against tmux session: {sess}
-The TUI pane ID is: {pane_id}
-
-To interact with this session, use commands like:
-- pm tui view -s {sess}
-- pm tui send <keys> -s {sess}
-- tmux list-panes -t {sess} -F "#{{pane_id}} #{{pane_width}}x#{{pane_height}} #{{pane_current_command}}"
-- cat ~/.pm-pane-registry/{sess}.json
-
-{prompt}
-"""
-
-        cmd = build_claude_shell_cmd(prompt=full_prompt)
-        self._launch_pane(cmd, "tui-test")
-
-    def _find_editor(self) -> str:
-        """Find the user's preferred editor."""
-        return os.environ.get("EDITOR", os.environ.get("VISUAL", "vi"))
-
-    def action_launch_claude(self) -> None:
-        """Launch an interactive Claude session in the project directory."""
-        from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
-        claude = find_claude()
-        if not claude:
-            self.log_message("Claude CLI not found")
-            return
-
-        sess = self._session_name or "default"
-        pane_id = os.environ.get("TMUX_PANE", "")
-        prompt = f"""\
-## Session Context
-
-You are running inside a pm (project manager) tmux session: {sess}
-The TUI pane ID is: {pane_id}
-
-pm is a CLI tool for managing Claude Code development sessions. You can use \
-it to manage PRs, plans, and the TUI. Run `pm --help` for the full command list.
-
-Common tasks:
-- `pm pr list` — list PRs and their status
-- `pm pr add <title>` — add a new PR
-- `pm pr start <pr-id>` — start working on a PR
-- `pm pr done <pr-id>` — mark a PR as ready for review
-- `pm plan list` — list plans
-- `pm tui view -s {sess}` — capture the current TUI screen
-- `pm tui send <keys> -s {sess}` — send keys to the TUI
-
-The user will tell you what they need."""
-
-        cmd = build_claude_shell_cmd(prompt=prompt)
-        self._launch_pane(cmd, "claude")
-
-    def action_launch_help_claude(self) -> None:
-        """Launch a beginner-friendly Claude assistant for the current project."""
-        from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
-        claude = find_claude()
-        if not claude:
-            self.log_message("Claude CLI not found")
-            return
-
-        sess = self._session_name or "default"
-        project = self._data.get("project", {})
-        project_name = project.get("name", "unknown")
-        repo = project.get("repo", "unknown")
-        prs = self._data.get("prs") or []
-
-        plans = self._data.get("plans") or []
-
-        # Build a summary of current PRs with workdir info
-        pr_lines = []
-        for pr in prs:
-            status = pr.get("status", "pending")
-            title = pr.get("title", "???")
-            pr_id = pr.get("id", "???")
-            deps = pr.get("depends_on") or []
-            dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
-            wd = pr.get("workdir", "")
-            wd_str = ""
-            if wd:
-                wd_path = Path(wd)
-                if wd_path.exists():
-                    wd_str = f" workdir: {wd}"
-                else:
-                    wd_str = f" workdir: {wd} (MISSING)"
-            pr_lines.append(f"  - {pr_id}: {title} [{status}]{dep_str}{wd_str}")
-        pr_summary = "\n".join(pr_lines) if pr_lines else "  (no PRs yet)"
-
-        # Build a summary of plans
-        plan_lines = []
-        for plan in plans:
-            plan_id = plan.get("id", "???")
-            title = plan.get("title", "???")
-            plan_lines.append(f"  - {plan_id}: {title}")
-        plan_summary = "\n".join(plan_lines) if plan_lines else "  (no plans yet)"
-
-        prompt = f"""\
-## You are helping someone who may be a novice programmer decide on their \
-next step.
-
-## Project Info
-
-Project: {project_name}
-Repository: {repo}
-tmux session: {sess}
-
-Current plans:
-{plan_summary}
-
-Current PRs:
-{pr_summary}
-
-## pm Project Lifecycle
-
-pm organizes work in a structured lifecycle:
-
-1. **Initialize** (`pm init`): Set up pm for a codebase. This creates a \
-pm/ directory that tracks plans and PRs.
-
-2. **Plan** (`pm plan add`): Write a high-level plan describing a feature \
-or goal. Plans are markdown files that describe what to build and why.
-
-3. **Break down** (`pm plan breakdown <plan-id>`): Turn a plan into \
-concrete PRs — small, focused units of work. PRs can depend on each other, \
-forming a dependency tree shown in the TUI.
-
-4. **Work** (select a PR and press `s` in the TUI): Start a PR to open a \
-Claude session focused on that task. Claude works in a dedicated branch \
-and directory.
-
-5. **Review** (press `d` in the TUI or `pm pr done <pr-id>`): Mark a PR \
-as done. This pushes the branch and creates a GitHub pull request for review.
-
-6. **Merge**: After review, PRs get merged. pm detects this automatically \
-and updates the tree.
-
-At any point the user might need to: add new plans, add or reorder PRs, \
-check on in-progress work, or understand what to tackle next.
-
-## Your Task
-
-Before making any recommendations, check the project's current health:
-
-1. Run `pm pr list --workdirs` to see all PRs with their workdir paths and \
-git status (clean/dirty/missing)
-2. Run `pm plan list` to see existing plans
-
-Then assess:
-- Are there workdirs with uncommitted changes for merged PRs? (work that might be lost)
-- Are there in-progress PRs that could be resumed?
-- Are there PRs in review that might need attention?
-- Are there pending PRs whose dependencies are all met?
-- Are there plans that haven't been broken down yet?
-- Is the dependency tree healthy?
-
-Based on what you find, give the user clear, simple recommendations for \
-what to do next. Suggest one or two concrete actions, not an overwhelming list. \
-Prefer finishing in-progress work over starting new work."""
-
-        cmd = build_claude_shell_cmd(prompt=prompt)
-        self._launch_pane(cmd, "assist")
-
-    def action_show_connect(self) -> None:
-        """Show the tmux connect command for shared sessions."""
-        socket_path = os.environ.get("PM_TMUX_SOCKET")
-        if socket_path:
-            command = f"tmux -S {socket_path} attach"
-            self.push_screen(ConnectScreen(command))
-        else:
-            self.log_message("Not a shared session")
-            self.set_timer(2, self._clear_log_message)
-
-    def action_quit(self) -> None:
-        """Detach from tmux session instead of killing the TUI."""
-        _log.info("action: quit")
-        if tmux_mod.in_tmux():
-            # Detach from tmux, leaving session running
-            _run_shell(tmux_mod._tmux_cmd("detach-client"), check=False)
-        else:
-            # Not in tmux, just exit normally
-            self.exit()
+        pane_ops.launch_test(self, message.test_id)
