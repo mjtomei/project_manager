@@ -1513,7 +1513,8 @@ def pr_cd(identifier: str):
 
 
 @pr.command("list")
-def pr_list():
+@click.option("--workdirs", is_flag=True, default=False, help="Show workdir paths and their git status")
+def pr_list(workdirs: bool):
     """List all PRs with status."""
     root = state_root()
     data = store.load(root)
@@ -1542,6 +1543,16 @@ def pr_list():
         machine_str = f" ({machine})" if machine else ""
         active_str = " *" if p["id"] == active_pr else ""
         click.echo(f"  {icon} {_pr_display_id(p)}: {p.get('title', '???')} [{p.get('status', '?')}]{dep_str}{machine_str}{active_str}")
+        if workdirs:
+            wd = p.get("workdir")
+            if wd and Path(wd).exists():
+                dirty = _workdir_is_dirty(Path(wd))
+                dirty_str = " (dirty)" if dirty else " (clean)"
+                click.echo(f"      workdir: {wd}{dirty_str}")
+            elif wd:
+                click.echo(f"      workdir: {wd} (missing)")
+            else:
+                click.echo(f"      workdir: none")
 
 
 @pr.command("graph")
@@ -2058,14 +2069,34 @@ def _cleanup_pr(pr_entry: dict, data: dict, root: Path, force: bool) -> bool:
 @click.argument("pr_id", default=None, required=False)
 @click.option("--force", is_flag=True, default=False, help="Remove even if workdir has uncommitted changes")
 @click.option("--all", "cleanup_all", is_flag=True, default=False, help="Clean up all PR workdirs")
-def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool):
+@click.option("--prune", is_flag=True, default=False, help="Clear workdir references for paths that no longer exist")
+def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool):
     """Remove work directory for a PR.
 
     Refuses to delete workdirs with uncommitted changes unless --force is given.
     Use --all to clean up all PR workdirs at once.
+    Use --prune to clear stale workdir references from project.yaml.
     """
     root = state_root()
     data = store.load(root)
+
+    if prune:
+        prs = data.get("prs") or []
+        pruned = 0
+        for p in prs:
+            wd = p.get("workdir")
+            if wd and not Path(wd).exists():
+                click.echo(f"  {p['id']}: cleared missing workdir {wd}")
+                p["workdir"] = None
+                pruned += 1
+        if pruned:
+            save_and_push(data, root, f"pm: prune {pruned} missing workdirs")
+            trigger_tui_refresh()
+            click.echo(f"Pruned {pruned} stale workdir reference(s).")
+        else:
+            click.echo("No stale workdir references found.")
+        if not cleanup_all and not pr_id:
+            return
 
     if cleanup_all:
         prs = data.get("prs") or []

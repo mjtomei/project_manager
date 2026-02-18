@@ -1994,7 +1994,7 @@ The user will tell you what they need."""
 
         plans = self._data.get("plans") or []
 
-        # Build a summary of current PRs
+        # Build a summary of current PRs with workdir info
         pr_lines = []
         for pr in prs:
             status = pr.get("status", "pending")
@@ -2002,7 +2002,15 @@ The user will tell you what they need."""
             pr_id = pr.get("id", "???")
             deps = pr.get("depends_on") or []
             dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
-            pr_lines.append(f"  - {pr_id}: {title} [{status}]{dep_str}")
+            wd = pr.get("workdir", "")
+            wd_str = ""
+            if wd:
+                wd_path = Path(wd)
+                if wd_path.exists():
+                    wd_str = f" workdir: {wd}"
+                else:
+                    wd_str = f" workdir: {wd} (MISSING)"
+            pr_lines.append(f"  - {pr_id}: {title} [{status}]{dep_str}{wd_str}")
         pr_summary = "\n".join(pr_lines) if pr_lines else "  (no PRs yet)"
 
         # Build a summary of plans
@@ -2060,27 +2068,21 @@ check on in-progress work, or understand what to tackle next.
 
 Before making any recommendations, check the project's current health:
 
-1. Run `pm pr list` to see the current state of all PRs
+1. Run `pm pr list --workdirs` to see all PRs with their workdir paths and \
+git status (clean/dirty/missing)
 2. Run `pm plan list` to see existing plans
-3. Look at the repository with `git log --oneline -10` and `ls` to \
-understand what the codebase contains
-4. Check git health with `git status` and `git stash list` to look for \
-uncommitted changes, merge conflicts, or stashed work that was forgotten
-5. Run `git branch -a` to check for leftover or orphaned branches
-6. If anything looks off, run `git fsck --no-dangling` to verify repo integrity
 
 Then assess:
-- **Git health**: Are there uncommitted changes, unresolved merge conflicts, \
-detached HEAD, stashed changes, or other signs the repo is in a weird state? \
-If so, help the user fix these first before anything else.
-- Are there plans that haven't been broken into PRs yet?
-- Are there PRs that are blocked or stuck?
-- Is the dependency tree healthy (no circular deps, reasonable ordering)?
-- Are there PRs in progress that might need attention?
-- If the project is brand new, help the user think about what to build first.
+- Are there workdirs with uncommitted changes for merged PRs? (work that might be lost)
+- Are there in-progress PRs that could be resumed?
+- Are there PRs in review that might need attention?
+- Are there pending PRs whose dependencies are all met?
+- Are there plans that haven't been broken down yet?
+- Is the dependency tree healthy?
 
 Based on what you find, give the user clear, simple recommendations for \
-what to do next. Suggest one or two concrete actions, not an overwhelming list."""
+what to do next. Suggest one or two concrete actions, not an overwhelming list. \
+Prefer finishing in-progress work over starting new work."""
 
         cmd = build_claude_shell_cmd(prompt=prompt)
         self._launch_pane(cmd, "assist")
