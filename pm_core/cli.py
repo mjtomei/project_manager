@@ -2317,11 +2317,14 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
         tui_cmd = f"PM_TMUX_SOCKET={shlex.quote(socket_path)} pm _tui"
     tmux_mod.create_session(session_name, cwd, tui_cmd, socket_path=socket_path)
 
-    # Set socket permissions for shared sessions
+    # Set socket permissions and grant tmux server-access for shared sessions
     if is_shared and socket_path:
-        from pm_core.paths import set_shared_socket_permissions
+        from pm_core.paths import set_shared_socket_permissions, get_share_users
         try:
             set_shared_socket_permissions(Path(socket_path), group_name=share_group)
+            users = get_share_users(group_name=share_group)
+            if users:
+                tmux_mod.grant_server_access(users, socket_path=socket_path)
             mode_desc = f"group '{share_group}'" if share_group else "all users"
             click.echo(f"Session shared with {mode_desc}.")
         except (PermissionError, OSError) as e:

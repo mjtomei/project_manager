@@ -507,3 +507,75 @@ class TestConnectScreen:
         s1 = ConnectScreen(cmd1)
         s2 = ConnectScreen(cmd2)
         assert s1._command != s2._command
+
+
+# ---------------------------------------------------------------------------
+# tmux: grant_server_access
+# ---------------------------------------------------------------------------
+
+class TestGrantServerAccess:
+    """Verify grant_server_access calls server-access -a for each user."""
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_grants_each_user(self, mock_run):
+        tmux.grant_server_access(["alice", "bob"], socket_path="/tmp/sock")
+        assert mock_run.call_count == 2
+        cmds = [c[0][0] for c in mock_run.call_args_list]
+        assert cmds[0] == ["tmux", "-S", "/tmp/sock", "server-access", "-a", "alice"]
+        assert cmds[1] == ["tmux", "-S", "/tmp/sock", "server-access", "-a", "bob"]
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_empty_list_no_calls(self, mock_run):
+        tmux.grant_server_access([], socket_path="/tmp/sock")
+        mock_run.assert_not_called()
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_uses_env_socket(self, mock_run):
+        with patch.dict(os.environ, {"PM_TMUX_SOCKET": "/tmp/env-sock"}):
+            tmux.grant_server_access(["alice"])
+        cmd = mock_run.call_args[0][0]
+        assert "-S" in cmd
+        assert "/tmp/env-sock" in cmd
+
+
+# ---------------------------------------------------------------------------
+# paths: get_share_users
+# ---------------------------------------------------------------------------
+
+class TestGetShareUsers:
+    """Verify get_share_users returns the right user list."""
+
+    def test_global_excludes_current_user(self):
+        """Global mode returns regular users excluding the current user."""
+        fake_passwd = [
+            MagicMock(pw_name="root", pw_uid=0),
+            MagicMock(pw_name="daemon", pw_uid=1),
+            MagicMock(pw_name="alice", pw_uid=1000),
+            MagicMock(pw_name="bob", pw_uid=1001),
+            MagicMock(pw_name="matt", pw_uid=1002),
+        ]
+        with patch("pm_core.paths.pwd.getpwall", return_value=fake_passwd):
+            with patch.dict(os.environ, {"USER": "matt"}):
+                users = paths.get_share_users(group_name=None)
+        assert sorted(users) == ["alice", "bob"]
+
+    def test_group_mode_returns_members(self):
+        """Group mode returns group members excluding current user."""
+        mock_grp = MagicMock()
+        mock_grp.gr_mem = ["alice", "bob", "matt"]
+        with patch("pm_core.paths.grp.getgrnam", return_value=mock_grp):
+            with patch.dict(os.environ, {"USER": "matt"}):
+                users = paths.get_share_users(group_name="devteam")
+        assert sorted(users) == ["alice", "bob"]
+
+    def test_global_skips_system_users(self):
+        """System users (UID < 1000) are excluded."""
+        fake_passwd = [
+            MagicMock(pw_name="www-data", pw_uid=33),
+            MagicMock(pw_name="nobody", pw_uid=65534),
+            MagicMock(pw_name="alice", pw_uid=1000),
+        ]
+        with patch("pm_core.paths.pwd.getpwall", return_value=fake_passwd):
+            with patch.dict(os.environ, {"USER": "root"}):
+                users = paths.get_share_users(group_name=None)
+        assert users == ["alice"]

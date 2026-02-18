@@ -39,6 +39,20 @@ def session_exists(name: str, socket_path: str | None = None) -> bool:
     return result.returncode == 0
 
 
+def grant_server_access(users: list[str], socket_path: str | None = None) -> None:
+    """Grant tmux server-access to a list of users.
+
+    tmux 3.3+ enforces an ACL on socket connections.  Even with 0o777
+    file permissions, other UIDs are rejected unless explicitly allowed
+    via ``server-access -a <user>``.
+    """
+    for user in users:
+        subprocess.run(
+            _tmux_cmd("server-access", "-a", user, socket_path=socket_path),
+            capture_output=True,
+        )
+
+
 def create_session(name: str, cwd: str, cmd: str, socket_path: str | None = None) -> None:
     """Create a detached tmux session running cmd."""
     subprocess.run(

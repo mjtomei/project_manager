@@ -10,6 +10,7 @@ Session tags are derived from the git repo (GitHub repo name or directory name +
 
 import grp
 import hashlib
+import pwd
 import logging
 import os
 import shlex
@@ -411,6 +412,25 @@ def set_shared_socket_permissions(socket_path: Path, group_name: str | None = No
         socket_path.chmod(0o770)
     else:
         socket_path.chmod(0o777)
+
+
+def get_share_users(group_name: str | None = None) -> list[str]:
+    """Return usernames that should be granted tmux server-access.
+
+    Args:
+        group_name: If given, return members of that Unix group.
+                    If None (global mode), return all regular users (UID >= 1000).
+    """
+    current_user = os.getenv("USER", "")
+    if group_name:
+        members = grp.getgrnam(group_name).gr_mem
+        return [u for u in members if u != current_user]
+    # Global mode: all regular (non-system) users
+    # UID 65534 is conventionally 'nobody', so cap at 60000
+    return [
+        pw.pw_name for pw in pwd.getpwall()
+        if 1000 <= pw.pw_uid < 60000 and pw.pw_name != current_user
+    ]
 
 
 def run_shell_logged(cmd: list[str], prefix: str = "shell", **kwargs) -> subprocess.CompletedProcess:
