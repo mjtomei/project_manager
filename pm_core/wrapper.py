@@ -9,60 +9,19 @@ pm meta sessions to redirect the installation to their working directory.
 """
 import hashlib
 import os
-import subprocess
 import sys
 from pathlib import Path
 
 
-def _find_git_root() -> Path | None:
-    """Find the git repository root from cwd."""
-    path = Path.cwd().resolve()
-
-    while path != path.parent:
-        if (path / ".git").exists():
-            return path
-        path = path.parent
-
-    if (path / ".git").exists():
-        return path
-    return None
-
-
-def _get_github_repo_name(git_root: Path) -> str | None:
-    """Extract GitHub repo name (without org/user) from git remote."""
-    try:
-        result = subprocess.run(
-            ["git", "remote", "get-url", "origin"],
-            cwd=git_root,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            return None
-
-        url = result.stdout.strip()
-        if "github.com" not in url:
-            return None
-
-        if url.endswith(".git"):
-            url = url[:-4]
-
-        repo_name = url.rstrip("/").split("/")[-1]
-        if ":" in repo_name:
-            repo_name = repo_name.split(":")[-1].split("/")[-1]
-
-        return repo_name if repo_name else None
-    except (subprocess.SubprocessError, OSError):
-        return None
-
-
 def _get_session_tag() -> str | None:
     """Generate session tag from current git repository."""
-    git_root = _find_git_root()
+    from pm_core.git_ops import get_git_root, get_github_repo_name
+
+    git_root = get_git_root()
     if not git_root:
         return None
 
-    repo_name = _get_github_repo_name(git_root) or git_root.name
+    repo_name = get_github_repo_name(git_root) or git_root.name
     path_hash = hashlib.md5(str(git_root).encode()).hexdigest()[:8]
 
     return f"{repo_name}-{path_hash}"

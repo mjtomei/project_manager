@@ -9,6 +9,7 @@ from rich.text import Text
 from rich.panel import Panel
 from rich.console import RenderableType
 
+from pm_core.plan_parser import _extract_field
 from pm_core.tui.tech_tree import STATUS_ICONS
 
 
@@ -38,15 +39,6 @@ def _extract_plan_section(plan_file: Path, pr_title: str) -> dict | None:
                 return {"tests": tests, "files": files}
             return None
     return None
-
-
-def _extract_field(body: str, field: str) -> str:
-    """Extract a **field**: value from markdown body text."""
-    pattern = rf'^\s*-\s*\*\*{re.escape(field)}\*\*:\s*(.*?)$'
-    match = re.search(pattern, body, re.MULTILINE | re.IGNORECASE)
-    if match:
-        return match.group(1).strip()
-    return ""
 
 
 def _pr_display_id(pr: dict) -> str:
