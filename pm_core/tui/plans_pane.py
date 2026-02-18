@@ -111,22 +111,18 @@ class PlansPane(Widget):
                             output.append(f"    {line}\n", style="dim italic" if not is_selected else "italic")
                 output.append("\n")
 
-        # Footer with shortcuts
+        # Footer with shortcuts — standard flow
         output.append("\n")
-        output.append("  Enter/v", style="bold")
-        output.append("=view  ", style="dim")
-        output.append("e", style="bold")
-        output.append("=edit  ", style="dim")
-        output.append("a", style="bold")
+        output.append("  a", style="bold")
         output.append("=add  ", style="dim")
         output.append("w", style="bold")
         output.append("=breakdown  ", style="dim")
-        output.append("D", style="bold")
-        output.append("=deps  ", style="dim")
-        output.append("l", style="bold")
-        output.append("=load  ", style="dim")
         output.append("c", style="bold")
         output.append("=review  ", style="dim")
+        output.append("l", style="bold")
+        output.append("=load  ", style="dim")
+        output.append("e", style="bold")
+        output.append("=edit  ", style="dim")
         output.append("P", style="bold")
         output.append("=back\n", style="dim")
 
