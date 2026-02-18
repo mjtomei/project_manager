@@ -2102,6 +2102,7 @@ def session(ctx, share_global, share_group, start_dir, print_connect):
         # Check PM_TMUX_SOCKET (set inside shared sessions) or compute from flags
         sp = os.environ.get("PM_TMUX_SOCKET")
         if not sp and (share_global or share_group):
+            _set_share_mode_env(share_global, share_group)
             from pm_core.paths import get_session_tag, shared_socket_path
             tag = get_session_tag(start_path=Path(start_dir) if start_dir else None)
             if tag:
@@ -2191,6 +2192,9 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
         raise SystemExit(1)
 
     is_shared = share_global or share_group is not None
+
+    # Set PM_SHARE_MODE so get_session_tag produces distinct hashes per mode
+    _set_share_mode_env(share_global, share_group)
 
     # Validate group exists before doing anything else
     if share_group:
@@ -2313,8 +2317,14 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
     # For shared sessions, set PM_TMUX_SOCKET in the initial command so the TUI
     # process inherits it immediately (set-environment only affects new processes)
     tui_cmd = "pm _tui"
+    tui_env_prefix = ""
     if socket_path:
-        tui_cmd = f"PM_TMUX_SOCKET={shlex.quote(socket_path)} pm _tui"
+        tui_env_prefix += f"PM_TMUX_SOCKET={shlex.quote(socket_path)} "
+    share_mode = os.environ.get("PM_SHARE_MODE")
+    if share_mode:
+        tui_env_prefix += f"PM_SHARE_MODE={shlex.quote(share_mode)} "
+    if tui_env_prefix:
+        tui_cmd = f"{tui_env_prefix}pm _tui"
     tmux_mod.create_session(session_name, cwd, tui_cmd, socket_path=socket_path)
 
     # Set socket permissions and grant tmux server-access for shared sessions
@@ -2341,6 +2351,12 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
     # the session automatically route to the correct tmux server
     if socket_path:
         tmux_mod.set_environment(session_name, "PM_TMUX_SOCKET", socket_path,
+                                 socket_path=socket_path)
+
+    # Propagate PM_SHARE_MODE so subprocesses (rebalance, pane-switch, etc.)
+    # compute the same session tag as the parent
+    if share_mode:
+        tmux_mod.set_environment(session_name, "PM_SHARE_MODE", share_mode,
                                  socket_path=socket_path)
 
     # Get the TUI pane ID and window ID
@@ -2449,6 +2465,9 @@ def session_kill(share_global, share_group, start_dir):
     if not tmux_mod.has_tmux():
         click.echo("tmux is not installed.", err=True)
         raise SystemExit(1)
+
+    # Set PM_SHARE_MODE so get_session_tag produces distinct hashes per mode
+    _set_share_mode_env(share_global, share_group)
 
     is_shared = share_global or share_group is not None
     socket_path: str | None = None
@@ -3448,6 +3467,16 @@ def _tui_history_file(session: str) -> Path:
     """Get the TUI history file for a specific session."""
     TUI_HISTORY_DIR.mkdir(parents=True, exist_ok=True)
     return TUI_HISTORY_DIR / f"{session.split('~')[0]}.json"
+
+
+def _set_share_mode_env(share_global: bool, share_group: str | None) -> None:
+    """Set PM_SHARE_MODE env var from CLI flags so get_session_tag mixes it into the hash."""
+    if share_global:
+        os.environ["PM_SHARE_MODE"] = "global"
+    elif share_group:
+        os.environ["PM_SHARE_MODE"] = f"group:{share_group}"
+    else:
+        os.environ.pop("PM_SHARE_MODE", None)
 
 
 def _get_session_name_for_cwd() -> str:

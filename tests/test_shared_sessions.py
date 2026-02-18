@@ -488,6 +488,103 @@ class TestSessionStartSetsEnvVar:
 
 
 # ---------------------------------------------------------------------------
+# paths: get_session_tag differentiates by PM_SHARE_MODE
+# ---------------------------------------------------------------------------
+
+class TestShareModeTagDifferentiation:
+    """Verify that PM_SHARE_MODE produces distinct session tags."""
+
+    @patch("pm_core.paths._find_git_root", return_value=Path("/home/user/myrepo"))
+    @patch("pm_core.paths._get_github_repo_name", return_value="myrepo")
+    def test_no_share_mode_unchanged(self, _mock_gh, _mock_root):
+        """Without PM_SHARE_MODE, tag is the same as the classic hash."""
+        import hashlib
+        paths._session_tag_cache.clear()
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("PM_SHARE_MODE", None)
+            tag = paths.get_session_tag()
+        expected_hash = hashlib.md5("/home/user/myrepo".encode()).hexdigest()[:8]
+        assert tag == f"myrepo-{expected_hash}"
+
+    @patch("pm_core.paths._find_git_root", return_value=Path("/home/user/myrepo"))
+    @patch("pm_core.paths._get_github_repo_name", return_value="myrepo")
+    def test_global_mode_different_tag(self, _mock_gh, _mock_root):
+        """PM_SHARE_MODE=global produces a different hash than unset."""
+        paths._session_tag_cache.clear()
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("PM_SHARE_MODE", None)
+            tag_plain = paths.get_session_tag()
+
+        paths._session_tag_cache.clear()
+        with patch.dict(os.environ, {"PM_SHARE_MODE": "global"}):
+            tag_global = paths.get_session_tag()
+
+        # Same repo name, different hash
+        assert tag_plain.split("-")[0] == tag_global.split("-")[0] == "myrepo"
+        assert tag_plain != tag_global
+
+    @patch("pm_core.paths._find_git_root", return_value=Path("/home/user/myrepo"))
+    @patch("pm_core.paths._get_github_repo_name", return_value="myrepo")
+    def test_group_mode_different_tag(self, _mock_gh, _mock_root):
+        """PM_SHARE_MODE=group:devteam produces yet another hash."""
+        paths._session_tag_cache.clear()
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("PM_SHARE_MODE", None)
+            tag_plain = paths.get_session_tag()
+
+        paths._session_tag_cache.clear()
+        with patch.dict(os.environ, {"PM_SHARE_MODE": "group:devteam"}):
+            tag_group = paths.get_session_tag()
+
+        assert tag_plain != tag_group
+
+    @patch("pm_core.paths._find_git_root", return_value=Path("/home/user/myrepo"))
+    @patch("pm_core.paths._get_github_repo_name", return_value="myrepo")
+    def test_global_vs_group_different(self, _mock_gh, _mock_root):
+        """Global and group modes produce different tags from each other."""
+        paths._session_tag_cache.clear()
+        with patch.dict(os.environ, {"PM_SHARE_MODE": "global"}):
+            tag_global = paths.get_session_tag()
+
+        paths._session_tag_cache.clear()
+        with patch.dict(os.environ, {"PM_SHARE_MODE": "group:devteam"}):
+            tag_group = paths.get_session_tag()
+
+        assert tag_global != tag_group
+
+    @patch("pm_core.paths._find_git_root", return_value=Path("/home/user/myrepo"))
+    @patch("pm_core.paths._get_github_repo_name", return_value="myrepo")
+    def test_different_groups_different_tags(self, _mock_gh, _mock_root):
+        """Different group names produce different tags."""
+        paths._session_tag_cache.clear()
+        with patch.dict(os.environ, {"PM_SHARE_MODE": "group:team-a"}):
+            tag_a = paths.get_session_tag()
+
+        paths._session_tag_cache.clear()
+        with patch.dict(os.environ, {"PM_SHARE_MODE": "group:team-b"}):
+            tag_b = paths.get_session_tag()
+
+        assert tag_a != tag_b
+
+    @patch("pm_core.paths._find_git_root", return_value=Path("/home/user/myrepo"))
+    @patch("pm_core.paths._get_github_repo_name", return_value="myrepo")
+    def test_socket_paths_differ(self, _mock_gh, _mock_root):
+        """Different share modes lead to different shared socket paths."""
+        paths._session_tag_cache.clear()
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("PM_SHARE_MODE", None)
+            tag_plain = paths.get_session_tag()
+
+        paths._session_tag_cache.clear()
+        with patch.dict(os.environ, {"PM_SHARE_MODE": "global"}):
+            tag_global = paths.get_session_tag()
+
+        sp_plain = paths.shared_socket_path(tag_plain)
+        sp_global = paths.shared_socket_path(tag_global)
+        assert sp_plain != sp_global
+
+
+# ---------------------------------------------------------------------------
 # TUI: ConnectScreen modal
 # ---------------------------------------------------------------------------
 
