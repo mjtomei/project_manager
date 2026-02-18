@@ -1,0 +1,997 @@
+"""PR commands for the pm CLI.
+
+Registers the ``pr`` group and all subcommands on the top-level ``cli`` group.
+"""
+
+import os
+import platform
+import shutil
+import subprocess
+from pathlib import Path
+
+import click
+
+from pm_core import store, graph, git_ops, prompt_gen
+from pm_core import pr_sync as pr_sync_mod
+from pm_core import tmux as tmux_mod
+from pm_core import pane_layout
+from pm_core.backend import get_backend
+from pm_core.claude_launcher import find_claude, build_claude_shell_cmd, clear_session, launch_claude
+
+from pm_core.cli import cli
+from pm_core.cli.helpers import (
+    CONTEXT_SETTINGS,
+    _get_current_pm_session,
+    _get_session_name_for_cwd,
+    _infer_pr_id,
+    _pr_display_id,
+    _pr_id_sort_key,
+    _resolve_pr_id,
+    _resolve_repo_id,
+    _workdirs_dir,
+    save_and_push,
+    state_root,
+    trigger_tui_refresh,
+)
+
+
+# --- PR commands ---
+
+@cli.group()
+def pr():
+    """Manage PRs."""
+    pass
+
+
+@pr.command("add")
+@click.argument("title")
+@click.option("--plan", "plan_id", default=None, help="Associated plan ID")
+@click.option("--depends-on", "depends_on", default=None, help="Comma-separated PR IDs")
+@click.option("--description", "desc", default="", help="PR description")
+def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
+    """Add a new PR to the project."""
+    root = state_root()
+    data = store.load(root)
+
+    # Auto-select plan if there's exactly one
+    if plan_id is None:
+        plans = data.get("plans") or []
+        if len(plans) == 1:
+            plan_id = plans[0]["id"]
+
+    existing_ids = {p["id"] for p in (data.get("prs") or [])}
+    pr_id = store.generate_pr_id(title, desc, existing_ids)
+    slug = store.slugify(title)
+    branch = f"pm/{pr_id}-{slug}"
+
+    deps = []
+    if depends_on:
+        deps = [d.strip() for d in depends_on.split(",")]
+        existing_ids = {p["id"] for p in (data.get("prs") or [])}
+        unknown = [d for d in deps if d not in existing_ids]
+        if unknown:
+            click.echo(f"Unknown PR IDs in --depends-on: {', '.join(unknown)}", err=True)
+            if existing_ids:
+                click.echo(f"Available PRs: {', '.join(sorted(existing_ids))}", err=True)
+            raise SystemExit(1)
+
+    entry = {
+        "id": pr_id,
+        "plan": plan_id,
+        "title": title,
+        "branch": branch,
+        "status": "pending",
+        "depends_on": deps,
+        "description": desc,
+        "agent_machine": None,
+        "gh_pr": None,
+        "gh_pr_number": None,
+    }
+
+    if data.get("prs") is None:
+        data["prs"] = []
+    data["prs"].append(entry)
+    data["project"]["active_pr"] = pr_id
+
+    save_and_push(data, root, f"pm: add {pr_id}")
+    click.echo(f"Created {_pr_display_id(entry)}: {title} (now active)")
+    click.echo(f"  branch: {branch}")
+    if deps:
+        click.echo(f"  depends_on: {', '.join(deps)}")
+    if entry.get("gh_pr"):
+        click.echo(f"  draft PR: {entry['gh_pr']}")
+    trigger_tui_refresh()
+
+
+@pr.command("edit")
+@click.argument("pr_id")
+@click.option("--title", default=None, help="New title")
+@click.option("--depends-on", "depends_on", default=None, help="Comma-separated PR IDs (replaces existing)")
+@click.option("--description", "desc", default=None, help="New description")
+@click.option("--status", default=None, type=click.Choice(["pending", "in_progress", "in_review", "merged", "closed"]),
+              help="New status (pending, in_progress, in_review, merged, closed)")
+def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | None, status: str | None):
+    """Edit an existing PR's title, description, dependencies, or status."""
+    root = state_root()
+    data = store.load(root)
+    pr_entry = store.get_pr(data, pr_id)
+    if not pr_entry:
+        prs = data.get("prs") or []
+        click.echo(f"PR {pr_id} not found.", err=True)
+        if prs:
+            click.echo(f"Available PRs: {', '.join(p['id'] for p in prs)}", err=True)
+        raise SystemExit(1)
+
+    changes = []
+    if title is not None:
+        pr_entry["title"] = title
+        changes.append(f"title={title}")
+    if desc is not None:
+        pr_entry["description"] = desc
+        changes.append("description updated")
+    if status is not None:
+        old_status = pr_entry.get("status", "pending")
+        pr_entry["status"] = status
+        changes.append(f"status: {old_status} → {status}")
+    if depends_on is not None:
+        if depends_on == "":
+            pr_entry["depends_on"] = []
+            changes.append("depends_on cleared")
+        else:
+            deps = [d.strip() for d in depends_on.split(",")]
+            existing_ids = {p["id"] for p in (data.get("prs") or [])}
+            unknown = [d for d in deps if d not in existing_ids]
+            if unknown:
+                click.echo(f"Unknown PR IDs: {', '.join(unknown)}", err=True)
+                raise SystemExit(1)
+            pr_entry["depends_on"] = deps
+            changes.append(f"depends_on={', '.join(deps)}")
+
+    if not changes:
+        # No flags given — open in $EDITOR
+        import tempfile
+        editor = os.environ.get("EDITOR", os.environ.get("VISUAL", "vi"))
+        current_title = pr_entry.get("title", "")
+        current_desc = pr_entry.get("description", "")
+        current_deps = ", ".join(pr_entry.get("depends_on") or [])
+        current_status = pr_entry.get("status", "pending")
+
+        template = (
+            f"# Editing {pr_id}\n"
+            f"# Lines starting with # are ignored.\n"
+            f"# Save and exit to apply changes. Exit without saving to cancel.\n"
+            f"\n"
+            f"title: {current_title}\n"
+            f"status: {current_status}\n"
+            f"depends_on: {current_deps}\n"
+            f"\n"
+            f"# Description (everything below this line):\n"
+            f"{current_desc}\n"
+        )
+
+        with tempfile.NamedTemporaryFile(suffix=".md", mode="w", delete=False) as f:
+            f.write(template)
+            tmp_path = f.name
+
+        try:
+            mtime_before = os.path.getmtime(tmp_path)
+            ret = subprocess.call([editor, tmp_path])
+            if ret != 0:
+                click.echo("Editor exited with error. No changes made.", err=True)
+                raise SystemExit(1)
+            mtime_after = os.path.getmtime(tmp_path)
+            if mtime_before == mtime_after:
+                click.echo("No changes made.")
+                raise SystemExit(0)
+
+            with open(tmp_path) as f:
+                raw = f.read()
+        finally:
+            os.unlink(tmp_path)
+
+        # Parse the edited file
+        desc_lines = []
+        in_desc = False
+        new_title = current_title
+        new_status = current_status
+        new_deps_str = current_deps
+        for line in raw.splitlines():
+            if line.startswith("#"):
+                if "description" in line.lower() and "below" in line.lower():
+                    in_desc = True
+                continue
+            if in_desc:
+                desc_lines.append(line)
+            elif line.startswith("title:"):
+                new_title = line[len("title:"):].strip()
+            elif line.startswith("status:"):
+                new_status = line[len("status:"):].strip()
+            elif line.startswith("depends_on:"):
+                new_deps_str = line[len("depends_on:"):].strip()
+
+        new_desc = "\n".join(desc_lines).strip()
+
+        if new_title != current_title:
+            pr_entry["title"] = new_title
+            changes.append(f"title={new_title}")
+        if new_desc != current_desc.strip():
+            pr_entry["description"] = new_desc
+            changes.append("description updated")
+        if new_status != current_status:
+            valid = {"pending", "in_progress", "in_review", "merged", "closed"}
+            if new_status not in valid:
+                click.echo(f"Invalid status '{new_status}'. Must be one of: {', '.join(sorted(valid))}", err=True)
+                raise SystemExit(1)
+            pr_entry["status"] = new_status
+            changes.append(f"status: {current_status} → {new_status}")
+        if new_deps_str != current_deps:
+            if not new_deps_str:
+                pr_entry["depends_on"] = []
+                changes.append("depends_on cleared")
+            else:
+                deps = [d.strip() for d in new_deps_str.split(",")]
+                existing_ids = {p["id"] for p in (data.get("prs") or [])}
+                unknown = [d for d in deps if d not in existing_ids]
+                if unknown:
+                    click.echo(f"Unknown PR IDs: {', '.join(unknown)}", err=True)
+                    raise SystemExit(1)
+                pr_entry["depends_on"] = deps
+                changes.append(f"depends_on={', '.join(deps)}")
+
+        if not changes:
+            click.echo("No changes made.")
+            raise SystemExit(0)
+
+    save_and_push(data, root, f"pm: edit {pr_id}")
+    click.echo(f"Updated {pr_id}: {', '.join(changes)}")
+    trigger_tui_refresh()
+
+
+@pr.command("select")
+@click.argument("pr_id")
+def pr_select(pr_id: str):
+    """Set the active PR.
+
+    The active PR is used as the default when commands like pm pr start,
+    pm pr done, pm prompt, etc. are run without specifying a PR ID.
+    """
+    root = state_root()
+    data = store.load(root)
+    pr_entry = store.get_pr(data, pr_id)
+    if not pr_entry:
+        prs = data.get("prs") or []
+        click.echo(f"PR {pr_id} not found.", err=True)
+        if prs:
+            click.echo(f"Available PRs: {', '.join(p['id'] for p in prs)}", err=True)
+        raise SystemExit(1)
+
+    data["project"]["active_pr"] = pr_id
+    save_and_push(data, root)
+    click.echo(f"Active PR: {pr_id} ({pr_entry.get('title', '???')})")
+    trigger_tui_refresh()
+
+
+@pr.command("cd")
+@click.argument("identifier")
+def pr_cd(identifier: str):
+    """Open a shell in a PR's workdir.
+
+    IDENTIFIER can be a pm PR ID (e.g. pr-021) or a GitHub PR number (e.g. 42).
+    Type 'exit' to return to your original directory.
+    """
+    root = state_root()
+    data = store.load(root)
+    pr_entry = _resolve_pr_id(data, identifier)
+    if not pr_entry:
+        click.echo(f"PR '{identifier}' not found.", err=True)
+        raise SystemExit(1)
+    workdir = pr_entry.get("workdir")
+    if not workdir or not Path(workdir).is_dir():
+        click.echo(f"Workdir for {pr_entry['id']} does not exist: {workdir}", err=True)
+        raise SystemExit(1)
+    shell = os.environ.get("SHELL", "/bin/sh")
+    click.echo(f"Entering workdir for {pr_entry['id']} ({pr_entry.get('title', '???')})")
+    click.echo(f"  {workdir}")
+    click.echo(f"Type 'exit' to return.")
+    os.chdir(workdir)
+    os.execvp(shell, [shell])
+
+
+@pr.command("list")
+@click.option("--workdirs", is_flag=True, default=False, help="Show workdir paths and their git status")
+def pr_list(workdirs: bool):
+    """List all PRs with status."""
+    root = state_root()
+    data = store.load(root)
+
+    prs = data.get("prs") or []
+    if not prs:
+        click.echo("No PRs.")
+        return
+
+    # Sort newest first (by gh_pr_number descending, then pr id descending)
+    prs = sorted(prs, key=lambda p: (p.get("gh_pr_number") or _pr_id_sort_key(p["id"])[0], _pr_id_sort_key(p["id"])[1]), reverse=True)
+
+    active_pr = data.get("project", {}).get("active_pr")
+    status_icons = {
+        "pending": "⏳",
+        "in_progress": "🔨",
+        "in_review": "👀",
+        "merged": "✅",
+        "blocked": "🚫",
+    }
+    for p in prs:
+        icon = status_icons.get(p.get("status", "pending"), "?")
+        deps = p.get("depends_on") or []
+        dep_str = f" <- [{', '.join(deps)}]" if deps else ""
+        machine = p.get("agent_machine")
+        machine_str = f" ({machine})" if machine else ""
+        active_str = " *" if p["id"] == active_pr else ""
+        click.echo(f"  {icon} {_pr_display_id(p)}: {p.get('title', '???')} [{p.get('status', '?')}]{dep_str}{machine_str}{active_str}")
+        if workdirs:
+            wd = p.get("workdir")
+            if wd and Path(wd).exists():
+                dirty = _workdir_is_dirty(Path(wd))
+                dirty_str = " (dirty)" if dirty else " (clean)"
+                click.echo(f"      workdir: {wd}{dirty_str}")
+            elif wd:
+                click.echo(f"      workdir: {wd} (missing)")
+            else:
+                click.echo(f"      workdir: none")
+
+
+@pr.command("graph")
+def pr_graph():
+    """Show static dependency graph."""
+    root = state_root()
+    data = store.load(root)
+
+    prs = data.get("prs") or []
+    click.echo(graph.render_static_graph(prs))
+
+
+@pr.command("ready")
+def pr_ready():
+    """List PRs ready to start (all deps merged)."""
+    root = state_root()
+    data = store.load(root)
+
+    prs = data.get("prs") or []
+    ready = graph.ready_prs(prs)
+    if not ready:
+        click.echo("No PRs are ready to start.")
+        return
+    for p in ready:
+        click.echo(f"  ⏳ {_pr_display_id(p)}: {p.get('title', '???')}")
+
+
+@pr.command("start")
+@click.argument("pr_id", default=None, required=False)
+@click.option("--workdir", default=None, help="Custom work directory")
+@click.option("--new", "fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
+def pr_start(pr_id: str | None, workdir: str, fresh: bool):
+    """Start working on a PR: clone, branch, print prompt.
+
+    If PR_ID is omitted, uses the active PR if it's pending/ready, or
+    auto-selects the next ready PR (when there's exactly one).
+    """
+    root = state_root()
+    data = store.load(root)
+
+    if pr_id is None:
+        # Try active PR first
+        active = data.get("project", {}).get("active_pr")
+        if active:
+            active_entry = store.get_pr(data, active)
+            if active_entry and active_entry.get("status") == "pending":
+                pr_id = active
+                click.echo(f"Using active PR {_pr_display_id(active_entry)}: {active_entry.get('title', '???')}")
+
+    if pr_id is None:
+        prs = data.get("prs") or []
+        ready = graph.ready_prs(prs)
+        if len(ready) == 1:
+            pr_id = ready[0]["id"]
+            click.echo(f"Auto-selected {_pr_display_id(ready[0])}: {ready[0].get('title', '???')}")
+        elif len(ready) == 0:
+            click.echo("No PRs are ready to start.", err=True)
+            raise SystemExit(1)
+        else:
+            click.echo("Multiple PRs are ready. Specify one:", err=True)
+            for p in ready:
+                click.echo(f"  {_pr_display_id(p)}: {p.get('title', '???')}", err=True)
+            raise SystemExit(1)
+
+    pr_entry = store.get_pr(data, pr_id)
+    if not pr_entry:
+        prs = data.get("prs") or []
+        click.echo(f"PR {pr_id} not found.", err=True)
+        if prs:
+            click.echo(f"Available PRs: {', '.join(p['id'] for p in prs)}", err=True)
+        else:
+            click.echo("No PRs exist. Create one with: pm pr add <title>", err=True)
+        raise SystemExit(1)
+
+    if pr_entry.get("status") == "in_progress":
+        # If already in_progress, reuse existing workdir if available
+        existing_workdir = pr_entry.get("workdir")
+        if existing_workdir and Path(existing_workdir).exists():
+            click.echo(f"PR {pr_id} is already in_progress, reusing existing workdir.")
+            workdir = existing_workdir  # Set workdir so it gets used below
+        else:
+            # Workdir was deleted — fall through to create a new one
+            click.echo(f"PR {pr_id} workdir missing, creating a new one.")
+
+    if pr_entry.get("status") == "merged":
+        click.echo(f"PR {pr_id} is already merged.", err=True)
+        raise SystemExit(1)
+
+    # Fast path: if window already exists, switch to it (or kill it if --new)
+    if tmux_mod.has_tmux():
+        pm_session = _get_current_pm_session() or _get_session_name_for_cwd()
+        if tmux_mod.session_exists(pm_session):
+            window_name = _pr_display_id(pr_entry)
+            existing = tmux_mod.find_window_by_name(pm_session, window_name)
+            if existing:
+                if fresh:
+                    tmux_mod.kill_window(pm_session, existing["index"])
+                    click.echo(f"Killed existing window '{window_name}'")
+                else:
+                    tmux_mod.select_window(pm_session, existing["index"])
+                    click.echo(f"Switched to existing window '{window_name}' (session: {pm_session})")
+                    return
+
+    repo_url = data["project"]["repo"]
+    base_branch = data["project"].get("base_branch", "main")
+    branch = pr_entry.get("branch") or f"pm/{pr_id}"
+
+    if workdir:
+        work_path = Path(workdir).resolve()
+    else:
+        # Check if we already have a workdir for this PR
+        existing_workdir = pr_entry.get("workdir")
+        if existing_workdir and Path(existing_workdir).exists():
+            work_path = Path(existing_workdir)
+        else:
+            # Need to clone first, then figure out the final path
+            # Clone to a temp location under the project dir
+            project_dir = _workdirs_dir(data)
+            project_dir.mkdir(parents=True, exist_ok=True)
+            tmp_path = project_dir / f".tmp-{pr_id}"
+            if tmp_path.exists():
+                shutil.rmtree(tmp_path)
+            click.echo(f"Cloning {repo_url}...")
+            git_ops.clone(repo_url, tmp_path, branch=base_branch)
+
+            # Cache repo_id now that we have a clone
+            _resolve_repo_id(data, tmp_path, root)
+
+            # Get the base commit hash for the branch directory name
+            base_hash = git_ops.run_git(
+                "rev-parse", "--short=8", "HEAD", cwd=tmp_path, check=False
+            ).stdout.strip()
+
+            # Final path: <project_dir>/<branch_slug>-<base_hash>
+            # Re-resolve project_dir since _resolve_repo_id may have updated data
+            branch_slug = store.slugify(branch.replace("/", "-"))
+            dir_name = f"{branch_slug}-{base_hash}" if base_hash else branch_slug
+            final_project_dir = _workdirs_dir(data)
+            final_project_dir.mkdir(parents=True, exist_ok=True)
+            work_path = final_project_dir / dir_name
+
+            if work_path.exists():
+                shutil.rmtree(tmp_path)
+            else:
+                shutil.move(str(tmp_path), str(work_path))
+
+    if work_path.exists() and git_ops.is_git_repo(work_path):
+        click.echo(f"Updating {work_path}...")
+        git_ops.pull_rebase(work_path)
+
+    click.echo(f"Checking out branch {branch}...")
+    git_ops.checkout_branch(work_path, branch, create=True)
+
+    # For GitHub backend: push branch and create draft PR if not already set
+    backend_name = data["project"].get("backend", "vanilla")
+    if backend_name == "github" and not pr_entry.get("gh_pr_number"):
+        base_branch = data["project"].get("base_branch", "main")
+        title = pr_entry.get("title", pr_id)
+        desc = pr_entry.get("description", "")
+
+        # Create empty commit so the branch has something to push
+        commit_msg = f"Start work on: {title}\n\nPR: {pr_id}"
+        git_ops.run_git("commit", "--allow-empty", "-m", commit_msg, cwd=work_path)
+
+        click.echo(f"Pushing branch {branch}...")
+        push_result = git_ops.run_git("push", "-u", "origin", branch, cwd=work_path, check=False)
+        if push_result.returncode != 0:
+            click.echo(f"Warning: Failed to push branch: {push_result.stderr}", err=True)
+        else:
+            click.echo("Creating draft PR on GitHub...")
+            from pm_core import gh_ops
+            pr_info = gh_ops.create_draft_pr(str(work_path), title, base_branch, desc)
+            if pr_info:
+                pr_entry["gh_pr"] = pr_info["url"]
+                pr_entry["gh_pr_number"] = pr_info["number"]
+                click.echo(f"Draft PR created: {pr_info['url']}")
+            else:
+                click.echo("Warning: Failed to create draft PR.", err=True)
+
+    # Update state — only advance from pending; don't regress in_review/merged
+    if pr_entry.get("status") == "pending":
+        pr_entry["status"] = "in_progress"
+    pr_entry["agent_machine"] = platform.node()
+    pr_entry["workdir"] = str(work_path)
+    data["project"]["active_pr"] = pr_id
+    save_and_push(data, root, f"pm: start {pr_id}")
+    trigger_tui_refresh()
+
+    click.echo(f"\nPR {_pr_display_id(pr_entry)} is now in_progress on {platform.node()}")
+    click.echo(f"Work directory: {work_path}")
+
+    prompt = prompt_gen.generate_prompt(data, pr_id)
+
+    claude = find_claude()
+    if not claude:
+        click.echo(f"\n{'='*60}")
+        click.echo("CLAUDE PROMPT:")
+        click.echo(f"{'='*60}\n")
+        click.echo(prompt)
+        return
+
+    # Try to launch in the pm tmux session
+    if tmux_mod.has_tmux():
+        pm_session = _get_current_pm_session() or _get_session_name_for_cwd()
+        if tmux_mod.session_exists(pm_session):
+            window_name = _pr_display_id(pr_entry)
+            cmd = build_claude_shell_cmd(prompt=prompt)
+            try:
+                tmux_mod.new_window(pm_session, window_name, cmd, str(work_path))
+                click.echo(f"Launched Claude in tmux window '{window_name}' (session: {pm_session})")
+                return
+            except Exception as e:
+                click.echo(f"Failed to create tmux window: {e}", err=True)
+                click.echo("Launching Claude in current terminal...")
+
+    # Fall through: launch interactively in current terminal
+    session_key = f"pr:start:{pr_id}"
+    if fresh:
+        clear_session(root, session_key)
+    click.echo("Launching Claude...")
+    launch_claude(prompt, cwd=str(work_path), session_key=session_key, pm_root=root, resume=not fresh)
+
+
+@pr.command("done")
+@click.argument("pr_id", default=None, required=False)
+def pr_done(pr_id: str | None):
+    """Mark a PR as in_review.
+
+    If PR_ID is omitted, infers from cwd (if inside a workdir) or
+    auto-selects when there's exactly one in_progress PR.
+    """
+    root = state_root()
+    data = store.load(root)
+
+    if pr_id is None:
+        pr_id = _infer_pr_id(data, status_filter=("in_progress",))
+        if pr_id is None:
+            prs = data.get("prs") or []
+            in_progress = [p for p in prs if p.get("status") == "in_progress"]
+            if len(in_progress) == 0:
+                click.echo("No in_progress PRs to mark done.", err=True)
+            else:
+                click.echo("Multiple in_progress PRs. Specify one:", err=True)
+                for p in in_progress:
+                    click.echo(f"  {_pr_display_id(p)}: {p.get('title', '???')} ({p.get('agent_machine', '')})", err=True)
+            raise SystemExit(1)
+        click.echo(f"Auto-selected {pr_id}")
+
+    pr_entry = store.get_pr(data, pr_id)
+    if not pr_entry:
+        prs = data.get("prs") or []
+        click.echo(f"PR {pr_id} not found.", err=True)
+        if prs:
+            click.echo(f"Available PRs: {', '.join(p['id'] for p in prs)}", err=True)
+        raise SystemExit(1)
+
+    if pr_entry.get("status") == "merged":
+        click.echo(f"PR {pr_id} is already merged.", err=True)
+        raise SystemExit(1)
+    if pr_entry.get("status") == "in_review":
+        click.echo(f"PR {pr_id} is already in_review.", err=True)
+        raise SystemExit(1)
+    if pr_entry.get("status") == "pending":
+        click.echo(f"PR {pr_id} is pending — start it first with: pm pr start {pr_id}", err=True)
+        raise SystemExit(1)
+
+    # For GitHub backend: upgrade draft PR to ready for review
+    backend_name = data["project"].get("backend", "vanilla")
+    gh_pr_number = pr_entry.get("gh_pr_number")
+    workdir = pr_entry.get("workdir")
+
+    if backend_name == "github" and gh_pr_number and workdir:
+        from pm_core import gh_ops
+        click.echo(f"Marking PR #{gh_pr_number} as ready for review...")
+        if gh_ops.mark_pr_ready(workdir, gh_pr_number):
+            click.echo("Draft PR upgraded to ready for review.")
+        else:
+            click.echo("Warning: Failed to upgrade draft PR. It may already be ready or was closed.", err=True)
+
+    pr_entry["status"] = "in_review"
+    save_and_push(data, root, f"pm: done {pr_id}")
+    click.echo(f"PR {_pr_display_id(pr_entry)} marked as in_review.")
+    trigger_tui_refresh()
+
+
+@pr.command("sync")
+def pr_sync():
+    """Check for merged PRs and unblock dependents.
+
+    Uses the configured backend (vanilla or github) to detect merges.
+    Needs at least one workdir to exist (created by 'pm pr start').
+    """
+    root = state_root()
+    data = store.load(root)
+    base_branch = data["project"].get("base_branch", "main")
+    prs = data.get("prs") or []
+    backend = get_backend(data)
+    updated = 0
+
+    # Find any existing workdir to check merge status from
+    target_workdir = None
+    for p in prs:
+        wd = p.get("workdir")
+        if wd and Path(wd).exists() and git_ops.is_git_repo(wd):
+            target_workdir = wd
+            break
+    if not target_workdir:
+        workdirs_base = _workdirs_dir(data)
+        if workdirs_base.exists():
+            for d in workdirs_base.iterdir():
+                if d.is_dir() and git_ops.is_git_repo(d):
+                    target_workdir = str(d)
+                    break
+
+    if not target_workdir:
+        click.echo("No workdirs found. Run 'pm pr start' on a PR first.", err=True)
+        raise SystemExit(1)
+
+    for pr_entry in prs:
+        if pr_entry.get("status") not in ("in_review", "in_progress"):
+            continue
+        branch = pr_entry.get("branch", "")
+        # Prefer PR's own workdir if it exists
+        wd = pr_entry.get("workdir")
+        check_dir = wd if (wd and Path(wd).exists()) else target_workdir
+
+        if backend.is_merged(str(check_dir), branch, base_branch):
+            pr_entry["status"] = "merged"
+            click.echo(f"  ✅ {_pr_display_id(pr_entry)}: merged")
+            updated += 1
+
+    if updated:
+        save_and_push(data, root, f"pm: sync - {updated} PRs merged")
+        trigger_tui_refresh()
+    else:
+        click.echo("No new merges detected.")
+
+    # Show newly unblocked PRs
+    ready = graph.ready_prs(prs)
+    if ready:
+        click.echo("\nNewly ready PRs:")
+        for p in ready:
+            click.echo(f"  ⏳ {_pr_display_id(p)}: {p.get('title', '???')}")
+
+
+@pr.command("sync-github")
+def pr_sync_github():
+    """Fetch and update PR statuses from GitHub.
+
+    For each PR with a GitHub PR number, fetches the current state
+    from GitHub and updates the local status accordingly:
+    - MERGED → merged
+    - CLOSED → closed (then auto-removed after 3 seconds)
+    - OPEN + draft → in_progress
+    - OPEN + ready → in_review
+    """
+    root = state_root()
+    data = store.load(root)
+
+    backend_name = data["project"].get("backend", "vanilla")
+    if backend_name != "github":
+        click.echo("This command only works with the GitHub backend.", err=True)
+        raise SystemExit(1)
+
+    # Use the shared sync function which handles auto-removal of closed PRs
+    result = pr_sync_mod.sync_from_github(root, data, save_state=True)
+
+    if result.error:
+        click.echo(f"Error: {result.error}", err=True)
+        raise SystemExit(1)
+
+    if result.updated_count > 0:
+        click.echo(f"Updated {result.updated_count} PR(s).")
+        if result.merged_prs:
+            click.echo(f"  Merged: {', '.join(result.merged_prs)}")
+        if result.closed_prs:
+            click.echo(f"  Closed: {', '.join(result.closed_prs)} (will be removed in 3s)")
+        trigger_tui_refresh()
+    else:
+        click.echo("No status changes.")
+
+
+@pr.command("import-github")
+@click.option("--state", "gh_state", default="all", help="GitHub PR state to import: open, closed, merged, all")
+def pr_import_github(gh_state: str):
+    """Import existing GitHub PRs into the project yaml.
+
+    Fetches PRs from GitHub and creates yaml entries for any not already
+    tracked. Matches existing entries by branch name or GH PR number.
+    Skips PRs that are already in the yaml.
+
+    \b
+    Examples:
+      pm pr import-github              # import all PRs
+      pm pr import-github --state open # only open PRs
+    """
+    root = state_root()
+    data = store.load(root)
+
+    backend_name = data["project"].get("backend", "vanilla")
+    if backend_name != "github":
+        click.echo("This command only works with the GitHub backend.", err=True)
+        raise SystemExit(1)
+
+    # Determine repo directory for gh CLI
+    if store.is_internal_pm_dir(root):
+        repo_dir = str(root.parent)
+    else:
+        repo_url = data["project"].get("repo", "")
+        if repo_url and Path(repo_url).is_dir():
+            repo_dir = repo_url
+        else:
+            repo_dir = str(Path.cwd())
+
+    from pm_core import gh_ops
+
+    click.echo("Fetching PRs from GitHub...")
+    gh_prs = gh_ops.list_prs(repo_dir, state=gh_state)
+    if not gh_prs:
+        click.echo("No PRs found on GitHub.")
+        return
+
+    # Build lookup of existing entries by branch and gh_pr_number
+    existing_branches = {p.get("branch") for p in (data.get("prs") or [])}
+    existing_gh_numbers = {p.get("gh_pr_number") for p in (data.get("prs") or []) if p.get("gh_pr_number")}
+
+    if data.get("prs") is None:
+        data["prs"] = []
+
+    imported = 0
+    skipped = 0
+    for gh_pr in gh_prs:
+        branch = gh_pr.get("headRefName", "")
+        number = gh_pr.get("number")
+        title = gh_pr.get("title", "")
+
+        # Skip if already tracked
+        if branch in existing_branches or number in existing_gh_numbers:
+            skipped += 1
+            continue
+
+        # Map GitHub state to local status
+        gh_s = gh_pr.get("state", "OPEN")
+        is_draft = gh_pr.get("isDraft", False)
+        if gh_s == "MERGED":
+            status = "merged"
+        elif gh_s == "CLOSED":
+            status = "closed"
+        elif gh_s == "OPEN":
+            status = "in_progress" if is_draft else "in_review"
+        else:
+            status = "pending"
+
+        # Generate a hash-based pr_id from title + body
+        existing_ids = {p["id"] for p in data["prs"]}
+        url = gh_pr.get("url", "")
+        body = gh_pr.get("body", "") or ""
+        pr_id = store.generate_pr_id(title, body, existing_ids)
+
+        entry = {
+            "id": pr_id,
+            "plan": None,
+            "title": title,
+            "branch": branch,
+            "status": status,
+            "depends_on": [],
+            "description": body,
+            "agent_machine": None,
+            "gh_pr": url,
+            "gh_pr_number": number,
+        }
+        data["prs"].append(entry)
+        existing_ids.add(pr_id)
+        existing_branches.add(branch)
+        existing_gh_numbers.add(number)
+        imported += 1
+        click.echo(f"  + {pr_id}: {title} [{status}] (#{number})")
+
+    if imported:
+        save_and_push(data, root, "pm: import github PRs")
+        click.echo(f"\nImported {imported} PR(s), skipped {skipped} already tracked.")
+        trigger_tui_refresh()
+    else:
+        click.echo(f"No new PRs to import ({skipped} already tracked).")
+
+
+def _workdir_is_dirty(work_path: Path) -> bool:
+    """Check if a workdir has uncommitted changes."""
+    result = git_ops.run_git("status", "--porcelain", cwd=work_path, check=False)
+    return bool(result.stdout.strip())
+
+
+def _cleanup_pr(pr_entry: dict, data: dict, root: Path, force: bool) -> bool:
+    """Clean up a single PR's workdir. Returns True if cleaned."""
+    pr_id = pr_entry["id"]
+    work_path = Path(pr_entry["workdir"]) if pr_entry.get("workdir") else None
+
+    if not work_path or not work_path.exists():
+        click.echo(f"  {pr_id}: no workdir to clean up")
+        return False
+
+    if not force and _workdir_is_dirty(work_path):
+        click.echo(f"  {pr_id}: skipped (uncommitted changes in {work_path})")
+        click.echo(f"    Use --force to remove anyway")
+        return False
+
+    shutil.rmtree(work_path)
+    click.echo(f"  {pr_id}: removed {work_path}")
+    pr_entry["workdir"] = None
+    return True
+
+
+@pr.command("cleanup")
+@click.argument("pr_id", default=None, required=False)
+@click.option("--force", is_flag=True, default=False, help="Remove even if workdir has uncommitted changes")
+@click.option("--all", "cleanup_all", is_flag=True, default=False, help="Clean up all PR workdirs")
+@click.option("--prune", is_flag=True, default=False, help="Clear workdir references for paths that no longer exist")
+def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool):
+    """Remove work directory for a PR.
+
+    Refuses to delete workdirs with uncommitted changes unless --force is given.
+    Use --all to clean up all PR workdirs at once.
+    Use --prune to clear stale workdir references from project.yaml.
+    """
+    root = state_root()
+    data = store.load(root)
+
+    if prune:
+        prs = data.get("prs") or []
+        pruned = 0
+        for p in prs:
+            wd = p.get("workdir")
+            if wd and not Path(wd).exists():
+                click.echo(f"  {p['id']}: cleared missing workdir {wd}")
+                p["workdir"] = None
+                pruned += 1
+        if pruned:
+            save_and_push(data, root, f"pm: prune {pruned} missing workdirs")
+            trigger_tui_refresh()
+            click.echo(f"Pruned {pruned} stale workdir reference(s).")
+        else:
+            click.echo("No stale workdir references found.")
+        if not cleanup_all and not pr_id:
+            return
+
+    if cleanup_all:
+        prs = data.get("prs") or []
+        with_workdir = [p for p in prs if p.get("workdir") and Path(p["workdir"]).exists()]
+        if not with_workdir:
+            click.echo("No PR workdirs to clean up.")
+            return
+        click.echo(f"Cleaning up {len(with_workdir)} workdir(s)...")
+        cleaned = 0
+        for pr_entry in with_workdir:
+            if _cleanup_pr(pr_entry, data, root, force):
+                cleaned += 1
+        if cleaned:
+            save_and_push(data, root, f"pm: cleanup {cleaned} workdirs")
+            trigger_tui_refresh()
+        click.echo(f"Cleaned {cleaned}/{len(with_workdir)} workdirs.")
+        return
+
+    if pr_id is None:
+        prs = data.get("prs") or []
+        with_workdir = [p for p in prs if p.get("status") == "merged" and p.get("workdir")
+                        and Path(p["workdir"]).exists()]
+        if len(with_workdir) == 1:
+            pr_id = with_workdir[0]["id"]
+            click.echo(f"Auto-selected {pr_id}")
+        elif len(with_workdir) == 0:
+            click.echo("No merged PRs with workdirs to clean up.", err=True)
+            raise SystemExit(1)
+        else:
+            click.echo("Multiple merged PRs have workdirs. Specify one:", err=True)
+            for p in with_workdir:
+                click.echo(f"  {_pr_display_id(p)}: {p.get('title', '???')}", err=True)
+            raise SystemExit(1)
+
+    pr_entry = _resolve_pr_id(data, pr_id)
+    if not pr_entry:
+        click.echo(f"PR '{pr_id}' not found.", err=True)
+        raise SystemExit(1)
+
+    if pr_entry.get("status") not in ("merged", "in_review"):
+        click.echo(f"Warning: {pr_id} status is '{pr_entry.get('status')}' (not merged).", err=True)
+        click.echo("Cleaning up anyway.", err=True)
+
+    if _cleanup_pr(pr_entry, data, root, force):
+        save_and_push(data, root, f"pm: cleanup {pr_entry['id']}")
+        trigger_tui_refresh()
+
+
+@pr.command("close")
+@click.argument("pr_id", default=None, required=False)
+@click.option("--keep-github", is_flag=True, help="Don't close the GitHub PR")
+@click.option("--keep-branch", is_flag=True, help="Don't delete the remote branch")
+def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool):
+    """Close and remove a PR from the project.
+
+    Removes the PR entry from project.yaml. By default also closes the
+    GitHub PR and deletes the remote branch if they exist.
+
+    If PR_ID is omitted, uses the active PR.
+    """
+    root = state_root()
+    data = store.load(root)
+
+    if pr_id is None:
+        pr_id = data.get("project", {}).get("active_pr")
+        if not pr_id:
+            click.echo("No active PR. Specify a PR ID.", err=True)
+            raise SystemExit(1)
+        click.echo(f"Using active PR: {pr_id}")
+
+    pr_entry = store.get_pr(data, pr_id)
+    if not pr_entry:
+        prs = data.get("prs") or []
+        click.echo(f"PR {pr_id} not found.", err=True)
+        if prs:
+            click.echo(f"Available PRs: {', '.join(p['id'] for p in prs)}", err=True)
+        raise SystemExit(1)
+
+    # Close GitHub PR if exists
+    gh_pr_number = pr_entry.get("gh_pr_number")
+    if gh_pr_number and not keep_github:
+        click.echo(f"Closing GitHub PR #{gh_pr_number}...")
+        try:
+            delete_flag = [] if keep_branch else ["--delete-branch"]
+            result = subprocess.run(
+                ["gh", "pr", "close", str(gh_pr_number), *delete_flag],
+                capture_output=True, text=True
+            )
+            if result.returncode == 0:
+                click.echo(f"GitHub PR #{gh_pr_number} closed.")
+            else:
+                click.echo(f"Warning: Could not close GitHub PR: {result.stderr.strip()}", err=True)
+        except Exception as e:
+            click.echo(f"Warning: Could not close GitHub PR: {e}", err=True)
+
+    # Remove workdir if exists
+    workdir = pr_entry.get("workdir")
+    if workdir and Path(workdir).exists():
+        shutil.rmtree(workdir)
+        click.echo(f"Removed workdir: {workdir}")
+
+    # Remove PR from list
+    prs = data.get("prs") or []
+    data["prs"] = [p for p in prs if p["id"] != pr_id]
+
+    # Update active_pr if needed
+    if data.get("project", {}).get("active_pr") == pr_id:
+        remaining = data.get("prs") or []
+        data["project"]["active_pr"] = remaining[0]["id"] if remaining else None
+
+    save_and_push(data, root, f"pm: close {pr_id}")
+    click.echo(f"Removed {pr_id}: {pr_entry.get('title', '???')}")
+    trigger_tui_refresh()

@@ -1,9 +1,11 @@
 """Shared helpers for the pm CLI package.
 
 Contains utility classes and functions used across multiple CLI submodules:
-HelpGroup, state management, PR ID resolution, and TUI refresh.
+HelpGroup, state management, PR ID resolution, TUI refresh, and session helpers.
 """
 
+import os
+import subprocess
 from pathlib import Path
 
 import click
@@ -11,6 +13,7 @@ import click
 from pm_core import store, git_ops
 from pm_core.paths import configure_logger
 from pm_core import tmux as tmux_mod
+from pm_core import pane_layout
 
 _log = configure_logger("pm.cli")
 
@@ -170,9 +173,6 @@ def trigger_tui_refresh() -> None:
     try:
         if not tmux_mod.has_tmux():
             return
-        # Late import to avoid circular dependency — _find_tui_pane
-        # lives in cli/__init__.py (will move to cli/tui.py in a later PR)
-        from pm_core.cli import _find_tui_pane
         tui_pane, session = _find_tui_pane()
         if tui_pane and session:
             tmux_mod.send_keys_literal(tui_pane, "R")
@@ -239,3 +239,108 @@ def _infer_pr_id(data: dict, status_filter: tuple[str, ...] | None = None) -> st
             return matches[0]["id"]
 
     return None
+
+
+# ---------------------------------------------------------------------------
+# Session / TUI helpers used by multiple submodules
+# ---------------------------------------------------------------------------
+
+def _set_share_mode_env(share_global: bool, share_group: str | None) -> None:
+    """Set PM_SHARE_MODE env var from CLI flags so get_session_tag mixes it into the hash."""
+    if share_global:
+        os.environ["PM_SHARE_MODE"] = "global"
+    elif share_group:
+        os.environ["PM_SHARE_MODE"] = f"group:{share_group}"
+    else:
+        os.environ.pop("PM_SHARE_MODE", None)
+
+
+def _get_session_name_for_cwd() -> str:
+    """Generate the expected pm session name for the current working directory.
+
+    Computes the name from the git root so it's deterministic regardless
+    of which tmux session the caller is in.  Used by ``pm session`` to
+    create/attach sessions and by ``pm pr start`` to find the session.
+
+    When the caller is already inside the target pm session (e.g. TUI
+    subprocesses), the computed name may not match the actual session
+    (workdir clones have a different git-root hash).  Use
+    ``_get_current_pm_session()`` in those cases.
+    """
+    from pm_core.paths import get_session_tag
+    tag = get_session_tag()
+    if tag:
+        return f"pm-{tag}"
+
+    # Fallback if not in a git repo
+    return f"pm-{Path.cwd().name}-00000000"
+
+
+def _get_current_pm_session() -> str | None:
+    """Return the base pm session name when running inside one.
+
+    Reads the actual session from $TMUX_PANE and strips any grouped-session
+    ~N suffix.  Returns None if not inside tmux or not in a pm- session.
+    """
+    if not tmux_mod.in_tmux():
+        return None
+    name = tmux_mod.get_session_name()
+    # Strip grouped session suffix
+    if "~" in name:
+        name = name.rsplit("~", 1)[0]
+    if name.startswith("pm-"):
+        return name
+    return None
+
+
+def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
+    """Find the TUI pane in a pm session.
+
+    Returns (pane_id, session_name) or (None, None) if not found.
+
+    If session is provided, uses that. Otherwise:
+    - If in a pm- tmux session, uses current session
+    - Otherwise, tries to find session matching current directory
+    - Falls back to searching for any pm- session with a TUI pane
+    """
+    # If session specified, use it
+    if session:
+        data = pane_layout.load_registry(session)
+        for pane in data.get("panes", []):
+            if pane.get("role") == "tui":
+                return pane.get("id"), session
+        return None, None
+
+    # If in a pm session, use current
+    if tmux_mod.in_tmux():
+        current_session = tmux_mod.get_session_name()
+        if current_session.startswith("pm-"):
+            data = pane_layout.load_registry(current_session)
+            for pane in data.get("panes", []):
+                if pane.get("role") == "tui":
+                    return pane.get("id"), current_session
+
+    # Try to find session matching current directory first
+    expected_session = _get_session_name_for_cwd()
+    if tmux_mod.session_exists(expected_session):
+        data = pane_layout.load_registry(expected_session)
+        for pane in data.get("panes", []):
+            if pane.get("role") == "tui":
+                return pane.get("id"), expected_session
+
+    # Fall back to searching for any pm session with a TUI
+    result = subprocess.run(
+        tmux_mod._tmux_cmd("list-sessions", "-F", "#{session_name}"),
+        capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        return None, None
+
+    for sess in result.stdout.strip().splitlines():
+        if sess.startswith("pm-") and "~" not in sess:
+            data = pane_layout.load_registry(sess)
+            for pane in data.get("panes", []):
+                if pane.get("role") == "tui":
+                    return pane.get("id"), sess
+
+    return None, None
