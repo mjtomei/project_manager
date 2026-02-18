@@ -715,9 +715,11 @@ def plan_review(plan_id: str | None, fresh: bool):
 
     notes_block = notes.notes_section(root)
 
-    prompt = f"""\
-Your goal: Review the plan and its PRs for consistency, coverage, and
-self-containment. Identify gaps and fix them.
+    if plan_prs:
+        # Post-load: PRs exist in project.yaml — review with progress awareness
+        prompt = f"""\
+Your goal: Review the plan's progress, iterate on both the plan and its PRs,
+and help the user understand where things stand.
 
 This session is managed by `pm` (project manager for Claude Code). You have
 access to the `pm` CLI tool — run `pm help` to see available commands.
@@ -726,6 +728,46 @@ Read the plan file at: {plan_path}
 
 PRs belonging to this plan:
 {pr_list}
+
+{other_prs_context}\
+First, assess progress:
+- How many PRs are done (merged/in_review) vs remaining (pending/in_progress)?
+- Are there any blockers — PRs whose dependencies aren't met yet?
+- Summarize the current state concisely for the user.
+
+Then check for issues:
+
+1. COVERAGE — Does every feature in the plan have at least one PR? Are there
+   new requirements or scope changes that need additional PRs?
+
+2. CONSISTENCY — Do PR descriptions still match the plan? Are depends_on
+   references correct? For each file path in a PR's **files** field, check
+   whether it exists in the repo. Flag paths that look wrong.
+
+3. ITERATION — Based on what's been completed so far, does the plan need
+   updating? Do remaining PR descriptions need refinement based on what
+   was learned from completed PRs?
+
+For any issues found, you can propose a fix. Fixes can be applied as follows:
+- For PR changes: use `pm pr edit <id> --description "..." --title "..."`
+- For plan updates: edit the plan file directly at {plan_path}
+- To add new PRs: use `pm pr add`
+
+After fixing, summarize what was changed.
+{notes_block}"""
+    else:
+        # Pre-load: no PRs in project.yaml yet — review the plan file's PR section
+        prompt = f"""\
+Your goal: Review the plan and its PRs for consistency, coverage, and
+self-containment before they are loaded. Identify gaps and fix them.
+
+This session is managed by `pm` (project manager for Claude Code). You have
+access to the `pm` CLI tool — run `pm help` to see available commands.
+
+Read the plan file at: {plan_path}
+
+The plan file should contain a "## PRs" section with proposed PRs. No PRs
+have been loaded into the project yet.
 
 {other_prs_context}\
 Check the following:
@@ -748,23 +790,21 @@ Check the following:
    it; if it doesn't, the PR should create it. Flag paths that look wrong
    (typos, wrong directory, missing extension).
 
-For each issue found, propose a fix. When the user agrees, apply fixes:
-- For PR description/title/deps changes: use `pm pr edit <id> --description "..." --title "..."`
-- For plan content gaps: edit the plan file directly at {plan_path}
+For each issue found, propose a fix. When the user agrees, apply fixes
+by editing the plan file directly at {plan_path}.
 
-After fixing, summarize what was changed.
-
-The following are notes the user has written for context shared across all
-pm sessions:
+After fixing, summarize what was changed. Then tell the user to run
+`pm plan load {plan_id}` (key: l in the plans pane) to create the PRs.
 {notes_block}"""
 
     claude = find_claude()
     if claude:
         session_key = f"plan:review:{plan_id}"
-        if fresh:
+        # Post-load reviews always start fresh — state changes between reviews
+        if fresh or plan_prs:
             clear_session(root, session_key)
         click.echo(f"Launching Claude to review plan {plan_id}...")
-        launch_claude(prompt, session_key=session_key, pm_root=root, resume=not fresh)
+        launch_claude(prompt, session_key=session_key, pm_root=root, resume=not fresh and not plan_prs)
         # Background review
         check_prompt = review_mod.REVIEW_PROMPTS["plan-review"].format(path=plan_path)
         click.echo("Reviewing results... (background)")
@@ -4067,6 +4107,20 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
     import re
     from datetime import datetime
 
+    # Handle "pm meta cd" — open shell in meta workdir
+    if task == "cd":
+        work_path = _meta_workdir()
+        if not work_path.is_dir():
+            click.echo(f"Meta workdir does not exist: {work_path}", err=True)
+            click.echo("Run 'pm meta' first to create it.", err=True)
+            raise SystemExit(1)
+        shell = os.environ.get("SHELL", "/bin/sh")
+        click.echo(f"Entering meta workdir")
+        click.echo(f"  {work_path}")
+        click.echo(f"Type 'exit' to return.")
+        os.chdir(work_path)
+        os.execvp(shell, [shell])
+
     # Detect current installation for context
     install_info = _detect_pm_install()
 
@@ -4204,6 +4258,14 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
     result = subprocess.run(f"cd '{work_path}' && {cmd}", shell=True)
     # The clear_cmd in the shell command handles cleanup
     raise SystemExit(result.returncode)
+
+
+def _meta_workdir() -> Path:
+    """Return the meta workdir path for the current pm session."""
+    from pm_core.paths import workdirs_base
+    pm_session_name = _get_session_name_for_cwd()
+    session_tag = pm_session_name.removeprefix("pm-")
+    return workdirs_base() / f"meta-{session_tag}"
 
 
 def _detect_pm_install() -> dict:
