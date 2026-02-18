@@ -57,11 +57,22 @@ def set_force_mobile(session: str, enabled: bool) -> None:
 
 
 def is_mobile(session: str, window: str = "0") -> bool:
-    """Check if mobile mode is active (force flag or narrow terminal)."""
+    """Check if mobile mode is active (force flag or narrow terminal).
+
+    With window-size=latest, the window size reflects the most recently
+    active client, so we only need to check the current window size.
+    """
+    import traceback
+    caller = traceback.extract_stack(limit=3)[0]
+    caller_loc = f"{caller.filename.split('/')[-1]}:{caller.lineno}:{caller.name}"
+
     if mobile_flag_path(session).exists():
+        _logger.info("is_mobile(%s, %s): True (force flag) [caller: %s]",
+                      session, window, caller_loc)
         return True
     from pm_core import tmux as tmux_mod
-    width, _ = tmux_mod.get_window_size(session, window)
+    base = base_session_name(session)
+    width, _ = tmux_mod.get_window_size(base, window)
     return 0 < width < MOBILE_WIDTH_THRESHOLD
 
 
@@ -141,16 +152,18 @@ def find_live_pane_by_role(session: str, role: str) -> str | None:
     return None
 
 
-def _reconcile_registry(session: str, window: str) -> list[str]:
+def _reconcile_registry(session: str, window: str,
+                        query_session: str | None = None) -> list[str]:
     """Remove registry panes that no longer exist in tmux. Returns removed IDs."""
     _ensure_logging()
     from pm_core import tmux as tmux_mod
 
+    qs = query_session or session
     data = load_registry(session)
     # Always use the registry's window, not the caller's — the caller may
     # have a stale window ID from an old session.
     reg_window = data.get("window", window)
-    live_panes = tmux_mod.get_pane_indices(session, reg_window)
+    live_panes = tmux_mod.get_pane_indices(qs, reg_window)
     live_ids = {pid for pid, _ in live_panes}
 
     # If we got zero live panes but the registry has panes, the window
@@ -215,7 +228,10 @@ def _layout_node(panes, x, y, w, h, force_axis=None):
     elif force_axis == 'v':
         split_h = False
     else:
-        split_h = w >= h
+        # Terminal characters are roughly 2× taller than wide, so scale
+        # the comparison to approximate physical aspect ratio.
+        # physical_width ∝ w, physical_height ∝ h × 2
+        split_h = w >= h * 2
 
     # Opposite axis for child groups so they don't keep splitting the same way
     child_axis = 'v' if split_h else 'h'
@@ -257,16 +273,28 @@ def compute_layout(n_panes: int, width: int, height: int) -> str:
     return f"{_checksum(body)},{body}"
 
 
-def rebalance(session: str, window: str) -> bool:
+def rebalance(session: str, window: str, query_session: str | None = None) -> bool:
     """Load registry, compute layout, apply via tmux select-layout.
+
+    Args:
+        session: Base session name for registry lookup.
+        window: Window ID or index.
+        query_session: Session to use for tmux queries (e.g. the grouped
+            session that triggered the resize). Falls back to session if
+            not provided.
 
     Returns True if layout was applied, False otherwise.
     """
     _ensure_logging()
     from pm_core import tmux as tmux_mod
 
+    # Use query_session for tmux operations (window size, pane list, layout).
+    # This handles grouped sessions where the base session may not have
+    # the same window set.
+    qs = query_session or session
+
     # Clean stale entries before computing layout
-    _reconcile_registry(session, window)
+    _reconcile_registry(session, window, query_session=qs)
 
     data = load_registry(session)
     if data.get("user_modified"):
@@ -278,7 +306,16 @@ def rebalance(session: str, window: str) -> bool:
         _logger.info("rebalance: no panes in registry")
         return False
 
-    width, height = tmux_mod.get_window_size(session, window)
+    width, height = tmux_mod.get_window_size(qs, window)
+    # Fallback: if query session returns 0×0 (no clients), try other sessions
+    if width <= 0 or height <= 0:
+        width, height = tmux_mod.get_window_size(session, window)
+    if width <= 0 or height <= 0:
+        base = base_session_name(session)
+        for gs in tmux_mod.list_grouped_sessions(base):
+            width, height = tmux_mod.get_window_size(gs, window)
+            if width > 0 and height > 0:
+                break
     _logger.info("rebalance: window %s size=%dx%d, %d panes",
                  window, width, height, len(panes))
     if width <= 0 or height <= 0:
@@ -286,7 +323,7 @@ def rebalance(session: str, window: str) -> bool:
         return False
 
     # Get live pane IDs from tmux in their current tmux order
-    pane_indices = tmux_mod.get_pane_indices(session, window)
+    pane_indices = tmux_mod.get_pane_indices(qs, window)
     live_ids = {pid for pid, _ in pane_indices}
     tmux_order = [pid for pid, _ in pane_indices]  # current tmux index order
     _logger.debug("rebalance: tmux pane order: %s", tmux_order)
@@ -336,15 +373,18 @@ def rebalance(session: str, window: str) -> bool:
     layout_str = f"{_checksum(body)},{body}"
     _logger.info("rebalance: applying layout: %s", layout_str)
 
-    ok = tmux_mod.apply_layout(session, window, layout_str)
+    ok = tmux_mod.apply_layout(qs, window, layout_str)
     if not ok:
         _logger.warning("rebalance: apply_layout failed")
         return False
 
-    # In mobile mode, zoom the active pane after layout
-    if is_mobile(session, window):
+    # In mobile mode, zoom the active pane after layout.
+    # Use already-computed width instead of re-querying via is_mobile(),
+    # which might hit a different session/window and get a stale size.
+    force_mobile = mobile_flag_path(session).exists()
+    if force_mobile or (0 < width < MOBILE_WIDTH_THRESHOLD):
         result = subprocess.run(
-            ["tmux", "display", "-t", f"{session}:{window}", "-p", "#{pane_id}"],
+            tmux_mod._tmux_cmd("display", "-t", f"{qs}:{window}", "-p", "#{pane_id}"),
             capture_output=True, text=True,
         )
         active_pane = result.stdout.strip()
@@ -444,12 +484,12 @@ def handle_pane_exited(session: str, window: str, generation: str,
         # Focus the last active pane (the one the user was in before the
         # dying pane).  Fall back to next pane if there is no last pane.
         result = subprocess.run(
-            ["tmux", "select-pane", "-t", f"{session}:{reg_window}", "-l"],
+            tmux_mod._tmux_cmd("select-pane", "-t", f"{session}:{reg_window}", "-l"),
             capture_output=True,
         )
         if result.returncode != 0:
             subprocess.run(
-                ["tmux", "select-pane", "-t", f"{session}:{reg_window}", "-t", ":.+"],
+                tmux_mod._tmux_cmd("select-pane", "-t", f"{session}:{reg_window}", "-t", ":.+"),
                 check=False,
             )
 

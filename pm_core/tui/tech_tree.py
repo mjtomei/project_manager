@@ -39,6 +39,9 @@ STATUS_BG = {
     "blocked": "on #330000",      # subtle red
 }
 
+# Status filter cycle order (None = show all)
+STATUS_FILTER_CYCLE = [None, "pending", "in_progress", "in_review", "merged", "closed"]
+
 # Node dimensions
 NODE_W = 24
 NODE_H = 5  # 5 lines: top border, id, title, status, bottom border
@@ -73,6 +76,16 @@ class TechTree(Widget):
         self._prs = prs or []
         self._ordered_ids: list[str] = []
         self._node_positions: dict[str, tuple[int, int]] = {}  # pr_id -> (col, row) in grid
+        self._hidden_plans: set[str] = set()       # plan IDs to hide ("_standalone" for null-plan PRs)
+        self._plan_map: dict[str, dict] = {}       # plan_id -> plan dict (for name lookup)
+        self._plan_label_rows: dict[str, int] = {} # plan_id -> row number for label
+        self._hidden_plan_label_rows: dict[str, int] = {}  # hidden plan_id -> row for collapsed label
+        self._hidden_label_ids: list[str] = []              # ["_hidden:plan-001", ...] for navigation
+        self._plan_group_order: list[str] = []              # ordered plan_ids (visible groups)
+        self._jump_plan_scroll: bool = False                  # flag: scroll plan label to top
+        from pm_core.paths import get_global_setting
+        self._hide_merged: bool = get_global_setting("hide-merged")  # toggle: hide merged PRs
+        self._status_filter: str | None = None                    # filter to show only this status
 
     def on_mount(self) -> None:
         self.prs = self._prs
@@ -84,6 +97,35 @@ class TechTree(Widget):
         self._recompute()
         self.refresh(layout=True)
 
+    def update_plans(self, plans: list[dict]) -> None:
+        """Store plan name mapping for label rendering."""
+        self._plan_map = {p["id"]: p for p in plans if p.get("id")}
+
+    def get_selected_plan(self) -> str | None:
+        """Returns plan ID (or '_standalone') of the currently selected node.
+
+        For hidden labels, extracts the plan_id from the virtual ID.
+        """
+        if not self._ordered_ids:
+            return None
+        sel = self._ordered_ids[self.selected_index]
+        if sel.startswith("_hidden:"):
+            return sel[len("_hidden:"):]
+        pr_map = {pr["id"]: pr for pr in self._prs}
+        pr = pr_map.get(sel)
+        if not pr:
+            return None
+        return pr.get("plan") or "_standalone"
+
+    def get_plan_display_name(self, plan_id: str) -> str:
+        """Returns label text like 'plan-001: Import from existing repo' or 'Standalone'."""
+        if plan_id == "_standalone":
+            return "Standalone"
+        plan = self._plan_map.get(plan_id)
+        if plan and plan.get("name"):
+            return f"{plan_id}: {plan['name']}"
+        return plan_id
+
     def _recompute(self) -> None:
         """Recompute layout positions with smart row assignment.
 
@@ -93,7 +135,31 @@ class TechTree(Widget):
         2. Second pass: expand rows where needed to accommodate multiple
            single-dep children of the same parent
         """
+        self._plan_label_rows = {}
+        self._hidden_plan_label_rows = {}
+        self._hidden_label_ids = []
+        self._plan_group_order = []
         prs = self._prs
+        if not prs:
+            self._ordered_ids = []
+            self._node_positions = {}
+            return
+
+        # Filter out hidden plan PRs
+        if self._hidden_plans:
+            prs = [p for p in prs if (p.get("plan") or "_standalone") not in self._hidden_plans]
+            if not prs:
+                self._ordered_ids = []
+                self._node_positions = {}
+                return
+
+        # Filter by status
+        if self._status_filter:
+            # Status filter overrides hide_merged when filtering for "merged"
+            prs = [p for p in prs if p.get("status") == self._status_filter]
+        elif self._hide_merged:
+            prs = [p for p in prs if p.get("status") != "merged"]
+
         if not prs:
             self._ordered_ids = []
             self._node_positions = {}
@@ -194,11 +260,59 @@ class TechTree(Widget):
             for pr_id in row_assignments:
                 row_assignments[pr_id] -= min_row
 
+        # Group by plan (only if 2+ distinct plan groups)
+        pr_map_local = {pr["id"]: pr for pr in prs}
+        plan_groups: dict[str, list[str]] = {}
+        for pr_id in row_assignments:
+            pr = pr_map_local.get(pr_id)
+            plan_id = (pr.get("plan") or "_standalone") if pr else "_standalone"
+            if plan_id not in plan_groups:
+                plan_groups[plan_id] = []
+            plan_groups[plan_id].append(pr_id)
+
+        if len(plan_groups) >= 2:
+            # Order: named plans sorted by ID, then standalone last
+            group_order = sorted(
+                (k for k in plan_groups if k != "_standalone"),
+            )
+            if "_standalone" in plan_groups:
+                group_order.append("_standalone")
+            self._plan_group_order = list(group_order)
+
+            current_row = 0
+            for plan_id in group_order:
+                group_pr_ids = plan_groups[plan_id]
+                # Reserve a row for the plan label header
+                self._plan_label_rows[plan_id] = current_row
+                current_row += 1  # label takes one row
+
+                # Get the rows used by this group and compact them
+                group_rows = sorted(set(row_assignments[pid] for pid in group_pr_ids))
+                row_remap = {old_row: current_row + i for i, old_row in enumerate(group_rows)}
+                for pid in group_pr_ids:
+                    row_assignments[pid] = row_remap[row_assignments[pid]]
+                current_row += len(group_rows) + 1  # +1 gap between groups
+
         # Build final positions
         for col, layer in enumerate(layers):
             for pr_id in sorted(layer, key=lambda x: row_assignments.get(x, 0)):
                 self._node_positions[pr_id] = (col, row_assignments[pr_id])
                 self._ordered_ids.append(pr_id)
+
+        # Add hidden plan labels as navigable rows below visible content
+        if self._hidden_plans:
+            max_row = max(row_assignments.values()) if row_assignments else -1
+            hidden_row = max_row + 2  # gap after visible content
+            # Count PRs per hidden plan from the unfiltered list
+            all_pr_map = {pr["id"]: pr for pr in self._prs}
+            for plan_id in sorted(self._hidden_plans):
+                pr_count = sum(1 for pr in self._prs if (pr.get("plan") or "_standalone") == plan_id)
+                virtual_id = f"_hidden:{plan_id}"
+                self._hidden_plan_label_rows[plan_id] = hidden_row
+                self._node_positions[virtual_id] = (0, hidden_row)
+                self._ordered_ids.append(virtual_id)
+                self._hidden_label_ids.append(virtual_id)
+                hidden_row += 1
 
         if self.selected_index >= len(self._ordered_ids):
             self.selected_index = max(0, len(self._ordered_ids) - 1)
@@ -207,30 +321,69 @@ class TechTree(Widget):
     def selected_pr_id(self) -> str | None:
         if not self._ordered_ids:
             return None
-        return self._ordered_ids[self.selected_index]
+        sel = self._ordered_ids[self.selected_index]
+        if sel.startswith("_hidden:"):
+            return None
+        return sel
+
+    @property
+    def selected_is_hidden_label(self) -> bool:
+        """True if current selection is a hidden plan label."""
+        if not self._ordered_ids:
+            return False
+        return self._ordered_ids[self.selected_index].startswith("_hidden:")
 
     def get_content_width(self, container, viewport):
         if not self._node_positions:
             return 40
-        max_col = max(c for c, r in self._node_positions.values()) + 1
+        real_positions = {k: v for k, v in self._node_positions.items() if not k.startswith("_hidden:")}
+        if not real_positions:
+            return 40
+        max_col = max(c for c, r in real_positions.values()) + 1
         return max_col * (NODE_W + H_GAP) + 4
 
     def get_content_height(self, container, viewport, width):
         if not self._node_positions:
             return 10
-        max_row = max(r for c, r in self._node_positions.values()) + 1
-        return max_row * (NODE_H + V_GAP) + 2
+        # Only count real node rows for grid height
+        real_ids = [nid for nid in self._node_positions if not nid.startswith("_hidden:")]
+        if not real_ids:
+            # Only hidden labels — 1 line per label + padding
+            return len(self._hidden_label_ids) + 4
+        max_row = max(self._node_positions[nid][1] for nid in real_ids) + 1
+        # Extra padding (NODE_H) so bottom node can scroll clear of status/command bars
+        height = max_row * (NODE_H + V_GAP) + 4 + NODE_H
+        # Add space for hidden labels (1 line each + gap)
+        if self._hidden_label_ids:
+            height += 2 + len(self._hidden_label_ids)
+        return height
 
     def render(self) -> RenderableType:
         if not self._prs:
             return Text("No PRs defined. Use 'pr add' to create PRs.", style="dim")
 
+        if not self._ordered_ids and self._status_filter:
+            icon = STATUS_ICONS.get(self._status_filter, "?")
+            return Text(f"No {self._status_filter} PRs. Press F to cycle filter.", style="dim")
+
+        if not self._ordered_ids and self._hidden_plans:
+            hidden_count = len(self._hidden_plans)
+            return Text(f"All PRs hidden ({hidden_count} plan(s)). Press H to show all.", style="dim")
+
+        # If only hidden labels exist (no visible PR nodes), render just the labels
+        visible_node_ids = [nid for nid in self._node_positions if not nid.startswith("_hidden:")]
+        if not visible_node_ids and self._hidden_label_ids:
+            return self._render_hidden_labels_only()
+
         pr_map = {pr["id"]: pr for pr in self._prs}
         lines: list[Text] = []
 
-        # Compute grid dimensions
-        max_col = max(c for c, r in self._node_positions.values()) + 1
-        max_row = max(r for c, r in self._node_positions.values()) + 1
+        # Compute grid dimensions from real nodes only (not hidden labels)
+        real_positions = {k: v for k, v in self._node_positions.items() if not k.startswith("_hidden:")}
+        if not real_positions:
+            return self._render_hidden_labels_only()
+        max_col = max(c for c, r in real_positions.values()) + 1
+        max_row = max(r for c, r in real_positions.values()) + 1
 
         total_h = max_row * (NODE_H + V_GAP)
         total_w = max_col * (NODE_W + H_GAP)
@@ -338,8 +491,10 @@ class TechTree(Widget):
                         safe_write(dst_y, x, "─", "dim")
                     safe_write(dst_y, arrow_end_x, "▶", "dim")
 
-        # Draw nodes
+        # Draw nodes (skip virtual hidden label IDs)
         for pr_id, (col, row) in self._node_positions.items():
+            if pr_id.startswith("_hidden:"):
+                continue
             pr = pr_map.get(pr_id)
             if not pr:
                 continue
@@ -395,6 +550,17 @@ class TechTree(Widget):
                         style = f"{node_style} {bg_style}".strip()
                     safe_write(y + dy, x + dx, ch, style)
 
+        # Draw plan labels
+        for plan_id, label_row in self._plan_label_rows.items():
+            label_y = label_row * (NODE_H + V_GAP) + 1 + NODE_H // 2
+            label_text = f" ── {self.get_plan_display_name(plan_id)} "
+            grid_w = len(grid[0]) if grid else 0
+            # Pad with ─ to fill width
+            if len(label_text) < grid_w - 2:
+                label_text += "─" * (grid_w - 2 - len(label_text))
+            for dx, ch in enumerate(label_text):
+                safe_write(label_y, dx, ch, "dim cyan")
+
         # Convert grid to Rich Text
         output = Text()
         for row_idx, row in enumerate(grid):
@@ -416,6 +582,31 @@ class TechTree(Widget):
             output.append(line)
             output.append("\n")
 
+        # Append hidden plan labels below the grid
+        if self._hidden_plan_label_rows:
+            output.append("\n")
+            for plan_id in sorted(self._hidden_plan_label_rows):
+                pr_count = sum(1 for pr in self._prs if (pr.get("plan") or "_standalone") == plan_id)
+                label_text = f" ── {self.get_plan_display_name(plan_id)} (hidden, {pr_count} PR{'s' if pr_count != 1 else ''}) ──"
+                virtual_id = f"_hidden:{plan_id}"
+                is_selected = (self._ordered_ids[self.selected_index] == virtual_id if self._ordered_ids else False)
+                style = "bold white" if is_selected else "dim"
+                output.append(label_text, style=style)
+                output.append("\n")
+
+        return output
+
+    def _render_hidden_labels_only(self) -> RenderableType:
+        """Render only hidden plan labels when no visible PR nodes exist."""
+        output = Text()
+        for plan_id, label_row in self._hidden_plan_label_rows.items():
+            pr_count = sum(1 for pr in self._prs if (pr.get("plan") or "_standalone") == plan_id)
+            label_text = f" ── {self.get_plan_display_name(plan_id)} (hidden, {pr_count} PR{'s' if pr_count != 1 else ''}) ──"
+            virtual_id = f"_hidden:{plan_id}"
+            is_selected = (self._ordered_ids[self.selected_index] == virtual_id if self._ordered_ids else False)
+            style = "bold white" if is_selected else "dim"
+            output.append(label_text, style=style)
+            output.append("\n")
         return output
 
     def on_key(self, event) -> None:
@@ -441,6 +632,9 @@ class TechTree(Widget):
                     -abs(self._node_positions[x[1]][0] - cur_col),  # then closest column
                     self._node_positions[x[1]][1]  # then highest row (closest to current)
                 ))[0]
+            else:
+                # Already at top — scroll to reveal plan label header
+                self._scroll_to_edge("top")
         elif event.key in ("down", "j"):
             candidates = [(i, pid) for i, pid in enumerate(self._ordered_ids)
                           if self._node_positions[pid][1] > cur_row]
@@ -451,7 +645,10 @@ class TechTree(Widget):
                     abs(self._node_positions[x[1]][0] - cur_col),  # then closest column
                     self._node_positions[x[1]][1]  # then lowest row (closest to current)
                 ))[0]
-        elif event.key in ("left", "h"):
+            else:
+                # Already at bottom — scroll to reveal bottom content
+                self._scroll_to_edge("bottom")
+        elif event.key == "left":
             # Move left: must be in a column to the left, prefer same row
             candidates = [(i, pid) for i, pid in enumerate(self._ordered_ids)
                           if self._node_positions[pid][0] < cur_col]
@@ -477,16 +674,100 @@ class TechTree(Widget):
                 else:
                     new_index = min(candidates, key=lambda x: (self._node_positions[x[1]][0] - cur_col,
                                                                abs(self._node_positions[x[1]][1] - cur_row)))[0]
+        elif event.key == "J":
+            # Jump to first PR of next plan group
+            new_index = self._jump_plan(1)
+            if new_index is not None:
+                self._jump_plan_scroll = True
+        elif event.key == "K":
+            # Jump to first PR of previous plan group
+            new_index = self._jump_plan(-1)
+            if new_index is not None:
+                self._jump_plan_scroll = True
         elif event.key == "enter":
-            self.post_message(PRActivated(current_id))
+            if not current_id.startswith("_hidden:"):
+                self.post_message(PRActivated(current_id))
             return
 
         if new_index is not None and new_index != self.selected_index:
             self.selected_index = new_index
-            self.post_message(PRSelected(self._ordered_ids[new_index]))
+            new_id = self._ordered_ids[new_index]
+            if not new_id.startswith("_hidden:"):
+                self.post_message(PRSelected(new_id))
             self.refresh()
             # Scroll to keep selected node visible
             self._scroll_selected_into_view()
+
+    def _scroll_to_edge(self, direction: str) -> None:
+        """Scroll to the top or bottom edge of the content.
+
+        For bottom: targets well past the last node so it clears the
+        status/command bars that overlay the bottom of the viewport.
+        """
+        from textual.geometry import Region
+        if direction == "top":
+            region = Region(0, 0, 1, 1)
+        else:
+            # Target the very bottom of content with extra margin
+            real_positions = {k: v for k, v in self._node_positions.items() if not k.startswith("_hidden:")}
+            if real_positions:
+                max_row = max(r for c, r in real_positions.values())
+            else:
+                max_row = 0
+            # Position well past the last node's bottom border
+            y = (max_row + 1) * (NODE_H + V_GAP) + NODE_H
+            if self._hidden_label_ids:
+                y += 2 + len(self._hidden_label_ids)
+            region = Region(0, y, 1, 1)
+        if self.parent:
+            self.parent.scroll_to_region(region)
+        else:
+            self.scroll_to_region(region)
+
+    def _jump_plan(self, direction: int) -> int | None:
+        """Jump to the first PR of the next/previous plan group.
+
+        Args:
+            direction: 1 for next plan, -1 for previous plan
+
+        Returns:
+            New index in _ordered_ids, or None if no jump possible.
+        """
+        if not self._plan_group_order or len(self._plan_group_order) < 2:
+            return None
+
+        # Determine current plan
+        current_id = self._ordered_ids[self.selected_index]
+        if current_id.startswith("_hidden:"):
+            current_plan = current_id[len("_hidden:"):]
+        else:
+            pr_map = {pr["id"]: pr for pr in self._prs}
+            pr = pr_map.get(current_id)
+            current_plan = (pr.get("plan") or "_standalone") if pr else "_standalone"
+
+        # Find current plan's position in group order
+        try:
+            plan_idx = self._plan_group_order.index(current_plan)
+        except ValueError:
+            plan_idx = 0
+
+        # Compute target plan index
+        target_idx = plan_idx + direction
+        if target_idx < 0 or target_idx >= len(self._plan_group_order):
+            return None
+
+        target_plan = self._plan_group_order[target_idx]
+
+        # Find first PR in ordered_ids that belongs to target plan
+        pr_map = {pr["id"]: pr for pr in self._prs}
+        for i, pid in enumerate(self._ordered_ids):
+            if pid.startswith("_hidden:"):
+                continue
+            pr = pr_map.get(pid)
+            if pr and (pr.get("plan") or "_standalone") == target_plan:
+                return i
+
+        return None
 
     def _scroll_selected_into_view(self) -> None:
         """Scroll the parent container to keep the selected node visible."""
@@ -496,16 +777,58 @@ class TechTree(Widget):
         if pr_id not in self._node_positions:
             return
 
-        col, row = self._node_positions[pr_id]
-        # Calculate pixel position of the node
-        x = col * (NODE_W + H_GAP) + 2
-        y = row * (NODE_H + V_GAP) + 1
-
-        # Create a region for the node and scroll it into view
-        # The scrollable container is the parent, so scroll there
         from textual.geometry import Region
-        node_region = Region(x, y, NODE_W, NODE_H)
+
+        # When jumping between plans, scroll the plan label to the top
+        if self._jump_plan_scroll:
+            self._jump_plan_scroll = False
+            self._scroll_plan_label_to_top(pr_id)
+            return
+
+        if pr_id.startswith("_hidden:"):
+            # Hidden labels are appended after the grid as text lines.
+            # Calculate their y position: grid height + gap + label index
+            real_positions = {k: v for k, v in self._node_positions.items() if not k.startswith("_hidden:")}
+            if real_positions:
+                max_row = max(r for c, r in real_positions.values()) + 1
+                grid_h = max_row * (NODE_H + V_GAP) + 4
+            else:
+                grid_h = 0
+            label_index = self._hidden_label_ids.index(pr_id) if pr_id in self._hidden_label_ids else 0
+            y = grid_h + 1 + label_index
+            node_region = Region(0, y, 60, 1)
+        else:
+            col, row = self._node_positions[pr_id]
+            x = col * (NODE_W + H_GAP) + 2
+            y = row * (NODE_H + V_GAP) + 1
+            node_region = Region(x, y, NODE_W, NODE_H)
+
         if self.parent:
             self.parent.scroll_to_region(node_region)
         else:
             self.scroll_to_region(node_region)
+
+    def _scroll_plan_label_to_top(self, pr_id: str) -> None:
+        """Scroll so the plan label header for the given PR is at the top of the viewport."""
+        from textual.geometry import Region
+        # Find the plan for this PR
+        pr_map = {pr["id"]: pr for pr in self._prs}
+        pr = pr_map.get(pr_id)
+        if not pr:
+            return
+        plan_id = pr.get("plan") or "_standalone"
+        label_row = self._plan_label_rows.get(plan_id)
+        if label_row is None:
+            # No plan label (single group) — just scroll to the PR
+            self._jump_plan_scroll = False
+            self._scroll_selected_into_view()
+            return
+
+        # Plan label is drawn at: label_row * (NODE_H + V_GAP) + 1 + NODE_H // 2
+        # Subtract 1 so the dashes above the label text are visible
+        label_y = label_row * (NODE_H + V_GAP) + NODE_H // 2
+        # Use a region as tall as the viewport to force label to top
+        scroller = self.parent if self.parent else self
+        viewport_h = scroller.size.height if hasattr(scroller, 'size') else 40
+        region = Region(0, label_y, 1, viewport_h)
+        scroller.scroll_to_region(region)

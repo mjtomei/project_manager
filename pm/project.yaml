@@ -3,10 +3,10 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-013
+  active_pr: pr-024
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
-  last_pr_sync: '2026-02-09T21:36:51.525740+00:00'
+  last_pr_sync: '2026-02-17T23:04:09.603896+00:00'
 plans:
 - id: plan-001
   name: Import from existing repo
@@ -15,6 +15,10 @@ plans:
 - id: plan-002
   name: Multi-candidate test-driven code generation
   file: plans/plan-002.md
+  status: draft
+- id: plan-003
+  name: Multiuser Support
+  file: plans/plan-003.md
   status: draft
 prs:
 - id: pr-001
@@ -177,7 +181,7 @@ prs:
   plan: plan-002
   title: Local model runner with OpenAI-compatible API
   branch: pm/pr-012-local-model-runner-with-openai-compatible-api
-  status: in_progress
+  status: in_review
   depends_on: []
   description: 'Create a module that manages local LLM inference via the OpenAI-compatible
     API exposed by local serving backends (see `pm/plans/plan-002.md` for the broader
@@ -193,14 +197,14 @@ prs:
     a CLI command (`pm bench models`) that detects the available backend, lists loaded
     models, and validates connectivity.'
   agent_machine: spark-424d
-  gh_pr: null
-  gh_pr_number: null
+  gh_pr: https://github.com/mjtomei/project_manager/pull/33
+  gh_pr_number: 33
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-012-local-model-runner-with-openai-compatibl-837c8c28
 - id: pr-013
   plan: plan-002
   title: Aider polyglot exercise loader
   branch: pm/pr-013-aider-polyglot-exercise-loader
-  status: in_progress
+  status: in_review
   depends_on: []
   description: 'Load the Exercism exercises used by aider''s polyglot benchmark (https://github.com/Aider-AI/aider
     — see `benchmark/` directory for exercise structure). Each exercise has a problem
@@ -211,14 +215,14 @@ prs:
     Include a CLI command (`pm bench exercises`) that downloads/updates the exercise
     cache and lists available exercises with optional `--language` filter.'
   agent_machine: spark-424d
-  gh_pr: null
-  gh_pr_number: null
+  gh_pr: https://github.com/mjtomei/project_manager/pull/34
+  gh_pr_number: 34
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-013-aider-polyglot-exercise-loader-837c8c28
 - id: pr-014
   plan: plan-002
   title: Test generation from problem descriptions
   branch: pm/pr-014-test-generation-from-problem-descriptions
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'Given an exercise''s problem description and starter code (but NOT
     the reference tests), generate test cases using a local model. The core insight
@@ -230,9 +234,10 @@ prs:
     and validate generated tests (must parse, must be syntactically valid, must reference
     the correct function names). Return a merged test suite as a single source file
     string per language''s test convention.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/35
+  gh_pr_number: 35
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-014-test-generation-from-problem-description-837c8c28
 - id: pr-015
   plan: plan-002
   title: Multi-candidate solution generation
@@ -340,3 +345,80 @@ prs:
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
+- id: pr-020
+  plan: null
+  title: Fix TUI command deduplication for concurrent PR actions
+  branch: pm/pr-020-fix-tui-command-deduplication-for-concurrent-pr-ac
+  status: in_review
+  depends_on: []
+  description: 'The TUI allows the same action (e.g. pr start) to be triggered multiple
+    times before the first invocation completes, and allows the same action on multiple
+    PRs simultaneously, causing race conditions and buggy behavior. Add guards to
+    prevent: (1) re-triggering an action while it is still running, (2) running conflicting
+    actions on different PRs concurrently (e.g. two pr starts). Track in-flight actions
+    and either queue or reject duplicates, showing a status message to the user.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/38
+  gh_pr_number: 38
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-020-fix-tui-command-deduplication-for-concur-d5a7ac61
+- id: pr-021
+  plan: null
+  title: Fix tmux commands to target current grouped session instead of base
+  branch: pm/pr-021-fix-tmux-commands-to-target-current-grouped-sessio
+  status: merged
+  depends_on: []
+  description: Commands that switch windows or interact with the tmux session (e.g.
+    automatic window switching) target the base session name instead of the current
+    grouped session. Need a helper that detects the current grouped session and targets
+    that, falling back to the base session when not inside tmux.
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/39
+  gh_pr_number: 39
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-021-fix-tmux-commands-to-target-current-grou-5853804d
+- id: pr-022
+  plan: plan-003
+  title: Handle merging pm directory changes across clones
+  branch: pm/pr-022-handle-merging-pm-directory-changes-across-clones
+  status: merged
+  depends_on: []
+  description: When PRs are added in two separate clones/workdirs, the pm/project.yaml
+    can diverge. Need a strategy for merging pm directory changes (e.g. new PRs added
+    concurrently) — could be a git pull/merge of the pm directory, a TUI key to sync,
+    or automatic conflict resolution.
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/40
+  gh_pr_number: 40
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-022-handle-merging-pm-directory-changes-acro-d5a7ac61
+- id: pr-023
+  plan: null
+  title: Fix rebalance layout for grouped sessions with different terminal sizes
+  branch: pm/pr-023-fix-rebalance-layout-for-grouped-sessions-with-dif
+  status: merged
+  depends_on: []
+  description: When multiple terminals are attached via grouped sessions with different
+    aspect ratios (e.g. portrait vs landscape), rebalance computes layout based on
+    the shared window size (minimum of all clients) rather than the calling terminal's
+    size. This means a portrait monitor doesn't get a horizontal split layout. Need
+    to investigate tmux aggressive-resize or alternative approaches.
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/41
+  gh_pr_number: 41
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-023-fix-rebalance-layout-for-grouped-session-866fb290
+- id: pr-024
+  plan: plan-003
+  title: Add multi-user support to sessions
+  branch: pm/pr-024-add-multi-user-support-to-sessions
+  status: in_review
+  depends_on: []
+  description: Add support for two users on the same computer accessing the same pm
+    session simultaneously. This is done by creating a tmux session with a session
+    file that is accessible to a given group or all users on the system optionally.
+    The choice between groups or global accessibility is controlled by a session command
+    flag. The default continues to be accessibility only to the current user. Other
+    users can access the same session by passing the same flags as well as the directory
+    in which the original user started the session. The code uses that directory to
+    correctly identify what the session tag is.
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/52
+  gh_pr_number: 52
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-024-add-multi-user-support-to-sessions-44b6754d

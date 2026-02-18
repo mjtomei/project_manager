@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import platform
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -127,14 +128,16 @@ def load_and_sync() -> tuple[dict, Path]:
     return store.load(root), root
 
 
-def _pr_id_num(pr_id: str) -> int:
-    """Extract numeric part from pr-NNN id for sorting."""
-    # pr-001 → 1, pr-010 → 10
-    parts = pr_id.split("-")
-    try:
-        return int(parts[1])
-    except (IndexError, ValueError):
-        return 0
+def _pr_id_sort_key(pr_id: str) -> tuple[int, str]:
+    """Sort key for PR IDs. Numeric pr-NNN sorts by number, hash IDs sort after."""
+    # pr-001 → (1, ""), pr-a3f2b1c → (0, "a3f2b1c")
+    parts = pr_id.split("-", 1)
+    if len(parts) == 2:
+        try:
+            return (int(parts[1]), "")
+        except ValueError:
+            return (0, parts[1])
+    return (0, pr_id)
 
 
 def _pr_display_id(pr: dict) -> str:
@@ -143,21 +146,39 @@ def _pr_display_id(pr: dict) -> str:
     return f"#{gh}" if gh else pr["id"]
 
 
+def _resolve_pr_id(data: dict, identifier: str) -> dict | None:
+    """Resolve a PR by pm ID (pr-NNN) or GitHub PR number (bare integer)."""
+    if identifier.startswith("pr-"):
+        return store.get_pr(data, identifier)
+    try:
+        num = int(identifier)
+    except ValueError:
+        return None
+    for pr in data.get("prs") or []:
+        if pr.get("gh_pr_number") == num:
+            return pr
+    return None
+
+
 def save_and_push(data: dict, root: Path, message: str = "pm: update state") -> None:
     """Save state. Use 'pm push' to commit and share changes."""
     store.save(data, root)
 
 
 def trigger_tui_refresh() -> None:
-    """Send refresh key to TUI pane in the pm session for the current directory."""
+    """Send reload key to TUI pane in the pm session for the current directory.
+
+    Sends 'R' (reload) which reloads state from disk without triggering
+    an expensive PR sync. Use 'r' (refresh) for full sync with GitHub.
+    """
     try:
         if not tmux_mod.has_tmux():
             return
         # Use _find_tui_pane which correctly matches session by cwd
         tui_pane, session = _find_tui_pane()
         if tui_pane and session:
-            tmux_mod.send_keys_literal(tui_pane, "r")
-            _log.debug("Sent refresh to TUI pane %s in session %s", tui_pane, session)
+            tmux_mod.send_keys_literal(tui_pane, "R")
+            _log.debug("Sent reload to TUI pane %s in session %s", tui_pane, session)
     except Exception as e:
         _log.debug("Could not trigger TUI refresh: %s", e)
 
@@ -416,12 +437,14 @@ def plan():
 
 @plan.command("add")
 @click.argument("name")
+@click.option("--description", default="", help="Description of what the plan should accomplish")
 @click.option("--new", "fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
-def plan_add(name: str, fresh: bool):
+def plan_add(name: str, description: str, fresh: bool):
     """Create a new plan and launch Claude to develop it."""
     root = state_root()
     data = store.load(root)
-    plan_id = store.next_plan_id(data)
+    existing_ids = {p["id"] for p in (data.get("plans") or [])}
+    plan_id = store.generate_plan_id(name, existing_ids, description=description)
     plan_file = f"plans/{plan_id}.md"
 
     entry = {
@@ -437,7 +460,10 @@ def plan_add(name: str, fresh: bool):
     # Create the plan file
     plan_path = root / plan_file
     plan_path.parent.mkdir(parents=True, exist_ok=True)
-    plan_path.write_text(f"# {name}\n\n<!-- Describe the plan here -->\n")
+    if description:
+        plan_path.write_text(f"# {name}\n\n{description}\n")
+    else:
+        plan_path.write_text(f"# {name}\n\n<!-- Describe the plan here -->\n")
 
     # Ensure notes file exists
     notes.ensure_notes_file(root)
@@ -448,6 +474,22 @@ def plan_add(name: str, fresh: bool):
     trigger_tui_refresh()
 
     notes_block = notes.notes_section(root)
+    desc_block = ""
+    if description:
+        desc_block = f"""
+The user has provided this description of what the plan should accomplish:
+
+> {description}
+
+Use this as a starting point — confirm your understanding, ask clarifying questions
+if needed, then develop the full plan.
+"""
+    else:
+        desc_block = """
+Ask me what this plan should accomplish. I'll describe it at a high level and
+we'll iterate until the plan is clear and complete. Then write the final plan
+to the file above as structured markdown.
+"""
     prompt = f"""\
 Your goal: Help me develop a plan called "{name}" and write it to {plan_path}.
 
@@ -455,14 +497,24 @@ This session is managed by `pm` (project manager for Claude Code). You have acce
 to the `pm` CLI tool — run `pm help` to see available commands.
 
 The plan file is at: {plan_path}
+{desc_block}
+The plan needs to include scope, goals, key design decisions, and any constraints.
 
-Ask me what this plan should accomplish. I'll describe it at a high level and
-we'll iterate until the plan is clear and complete. Then write the final plan
-to the file above as structured markdown.
+Once the plan is solid, break it down into a "## PRs" section with individual PRs
+in this format:
 
-The plan needs to be detailed enough that the next step (`pm plan breakdown`) can
-break it into individual PRs. Include scope, goals, key design decisions, and
-any constraints.
+### PR: <title>
+- **description**: What this PR does
+- **tests**: Expected unit tests
+- **files**: Expected file modifications
+- **depends_on**: <title of dependency PR, or empty>
+
+Separate PR entries with --- lines. Prefer more small PRs over fewer large ones.
+Order them so independent PRs can be worked on in parallel. Only add depends_on
+when there's a real ordering constraint.
+
+After writing the PRs section, tell the user to run `pm plan review {plan_id}`
+(key: c in the plans pane) to check consistency and coverage before loading.
 {notes_block}"""
 
     claude = find_claude()
@@ -551,7 +603,7 @@ def plan_breakdown(plan_id: str | None, initial_prs: str | None, fresh: bool):
 
     prompt = f"""\
 Your goal: Break the plan into a list of PRs that the user is happy with, then
-write them to the plan file so they can be loaded with `pm plan load`.
+write them to the plan file so they can be reviewed with `pm plan review`.
 
 This session is managed by `pm` (project manager for Claude Code). You have access
 to the `pm` CLI tool — run `pm help` to see available commands.
@@ -579,7 +631,8 @@ Guidelines:
 - Only add depends_on when there's a real ordering constraint
 - Write the ## PRs section directly into the plan file at {plan_path}
 
-After writing, the user can run `pm plan load` to create all PRs at once.
+After writing, tell the user to run `pm plan review {plan_id}` (key: c in the
+plans pane) to check consistency and coverage before loading PRs.
 {notes_block}"""
 
     claude = find_claude()
@@ -859,27 +912,23 @@ def plan_load(plan_id: str | None):
         commands.append(cmd)
         click.echo(f"  - {pr['title']}")
 
-    # Build depends_on edit commands (second pass, referencing PR IDs)
-    # We know the current next_pr_id, so we can predict IDs
-    existing_prs = data.get("prs") or []
-    if existing_prs:
-        import re
-        nums = [int(m.group(1)) for p in existing_prs if (m := re.match(r"pr-(\d+)", p["id"]))]
-        next_num = max(nums) + 1 if nums else 1
-    else:
-        next_num = 1
-
-    title_to_predicted_id = {}
-    for i, pr in enumerate(prs):
-        title_to_predicted_id[pr["title"]] = f"pr-{next_num + i:03d}"
+    # Compute the PR IDs that will be assigned when the add commands run.
+    # This is safe because hash-based IDs are deterministic from title+desc,
+    # and we have the exact title+desc that the add commands will use.
+    existing_ids = {p["id"] for p in (data.get("prs") or [])}
+    title_to_id = {}
+    for pr in prs:
+        pr_id = store.generate_pr_id(pr["title"], pr.get("description", ""), existing_ids)
+        title_to_id[pr["title"]] = pr_id
+        existing_ids.add(pr_id)
 
     dep_commands = []
     for pr in prs:
         if pr["depends_on"]:
-            pr_id = title_to_predicted_id[pr["title"]]
+            pr_id = title_to_id[pr["title"]]
             dep_title = pr["depends_on"].strip()
-            if dep_title in title_to_predicted_id:
-                dep_id = title_to_predicted_id[dep_title]
+            if dep_title in title_to_id:
+                dep_id = title_to_id[dep_title]
                 dep_commands.append(f'pm pr edit {pr_id} --depends-on {dep_id}')
 
     all_commands = commands + dep_commands
@@ -1024,9 +1073,8 @@ def _import_github_prs(root: Path, data: dict) -> None:
             status = "pending"
 
         existing_ids = {p["id"] for p in data["prs"]}
-        pr_id = f"pr-{number:03d}"
-        if pr_id in existing_ids:
-            pr_id = store.next_pr_id(data)
+        desc = gh_pr.get("body", "") or ""
+        pr_id = store.generate_pr_id(title, desc, existing_ids)
 
         entry = {
             "id": pr_id,
@@ -1035,12 +1083,13 @@ def _import_github_prs(root: Path, data: dict) -> None:
             "branch": branch,
             "status": status,
             "depends_on": [],
-            "description": gh_pr.get("body", "") or "",
+            "description": desc,
             "agent_machine": None,
             "gh_pr": gh_pr.get("url", ""),
             "gh_pr_number": number,
         }
         data["prs"].append(entry)
+        existing_ids.add(pr_id)
         imported += 1
         click.echo(f"  + {pr_id}: {title} [{status}] (#{number})")
 
@@ -1053,7 +1102,8 @@ def _run_plan_import(name: str):
     """Core logic for plan import — used by both `plan import` and `init`."""
     root = state_root()
     data = store.load(root)
-    plan_id = store.next_plan_id(data)
+    existing_ids = {p["id"] for p in (data.get("plans") or [])}
+    plan_id = store.generate_plan_id(name, existing_ids)
     plan_file = f"plans/{plan_id}.md"
 
     entry = {
@@ -1184,7 +1234,8 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
         if len(plans) == 1:
             plan_id = plans[0]["id"]
 
-    pr_id = store.next_pr_id(data)
+    existing_ids = {p["id"] for p in (data.get("prs") or [])}
+    pr_id = store.generate_pr_id(title, desc, existing_ids)
     slug = store.slugify(title)
     branch = f"pm/{pr_id}-{slug}"
 
@@ -1395,17 +1446,37 @@ def pr_select(pr_id: str):
     trigger_tui_refresh()
 
 
+@pr.command("cd")
+@click.argument("identifier")
+def pr_cd(identifier: str):
+    """Open a shell in a PR's workdir.
+
+    IDENTIFIER can be a pm PR ID (e.g. pr-021) or a GitHub PR number (e.g. 42).
+    Type 'exit' to return to your original directory.
+    """
+    root = state_root()
+    data = store.load(root)
+    pr_entry = _resolve_pr_id(data, identifier)
+    if not pr_entry:
+        click.echo(f"PR '{identifier}' not found.", err=True)
+        raise SystemExit(1)
+    workdir = pr_entry.get("workdir")
+    if not workdir or not Path(workdir).is_dir():
+        click.echo(f"Workdir for {pr_entry['id']} does not exist: {workdir}", err=True)
+        raise SystemExit(1)
+    shell = os.environ.get("SHELL", "/bin/sh")
+    click.echo(f"Entering workdir for {pr_entry['id']} ({pr_entry.get('title', '???')})")
+    click.echo(f"  {workdir}")
+    click.echo(f"Type 'exit' to return.")
+    os.chdir(workdir)
+    os.execvp(shell, [shell])
+
+
 @pr.command("list")
 def pr_list():
     """List all PRs with status."""
     root = state_root()
     data = store.load(root)
-
-    # Sync to detect merged PRs (if interval allows)
-    data, result = pr_sync_mod.sync_prs_quiet(root, data)
-    if result.synced and result.updated_count > 0:
-        click.echo(f"Synced: {result.updated_count} PR(s) merged")
-        store.save(data, root)
 
     prs = data.get("prs") or []
     if not prs:
@@ -1413,7 +1484,7 @@ def pr_list():
         return
 
     # Sort newest first (by gh_pr_number descending, then pr id descending)
-    prs = sorted(prs, key=lambda p: (p.get("gh_pr_number") or _pr_id_num(p["id"])), reverse=True)
+    prs = sorted(prs, key=lambda p: (p.get("gh_pr_number") or _pr_id_sort_key(p["id"])[0], _pr_id_sort_key(p["id"])[1]), reverse=True)
 
     active_pr = data.get("project", {}).get("active_pr")
     status_icons = {
@@ -1439,12 +1510,6 @@ def pr_graph():
     root = state_root()
     data = store.load(root)
 
-    # Sync to detect merged PRs (if interval allows)
-    data, result = pr_sync_mod.sync_prs_quiet(root, data)
-    if result.synced and result.updated_count > 0:
-        click.echo(f"Synced: {result.updated_count} PR(s) merged")
-        store.save(data, root)
-
     prs = data.get("prs") or []
     click.echo(graph.render_static_graph(prs))
 
@@ -1454,12 +1519,6 @@ def pr_ready():
     """List PRs ready to start (all deps merged)."""
     root = state_root()
     data = store.load(root)
-
-    # Sync to detect merged PRs (if interval allows)
-    data, result = pr_sync_mod.sync_prs_quiet(root, data)
-    if result.synced and result.updated_count > 0:
-        click.echo(f"Synced: {result.updated_count} PR(s) merged")
-        store.save(data, root)
 
     prs = data.get("prs") or []
     ready = graph.ready_prs(prs)
@@ -1524,9 +1583,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
             click.echo(f"PR {pr_id} is already in_progress, reusing existing workdir.")
             workdir = existing_workdir  # Set workdir so it gets used below
         else:
-            click.echo(f"PR {pr_id} is already in_progress on {pr_entry.get('agent_machine', '???')}.", err=True)
-            click.echo("No existing workdir found. Use 'pm prompt' to regenerate the prompt.", err=True)
-            raise SystemExit(1)
+            # Workdir was deleted — fall through to create a new one
+            click.echo(f"PR {pr_id} workdir missing, creating a new one.")
 
     if pr_entry.get("status") == "merged":
         click.echo(f"PR {pr_id} is already merged.", err=True)
@@ -1534,7 +1592,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
 
     # Fast path: if window already exists, switch to it (or kill it if --new)
     if tmux_mod.has_tmux():
-        pm_session = _get_session_name_for_cwd()
+        pm_session = _get_current_pm_session() or _get_session_name_for_cwd()
         if tmux_mod.session_exists(pm_session):
             window_name = _pr_display_id(pr_entry)
             existing = tmux_mod.find_window_by_name(pm_session, window_name)
@@ -1623,8 +1681,9 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
             else:
                 click.echo("Warning: Failed to create draft PR.", err=True)
 
-    # Update state
-    pr_entry["status"] = "in_progress"
+    # Update state — only advance from pending; don't regress in_review/merged
+    if pr_entry.get("status") == "pending":
+        pr_entry["status"] = "in_progress"
     pr_entry["agent_machine"] = platform.node()
     pr_entry["workdir"] = str(work_path)
     data["project"]["active_pr"] = pr_id
@@ -1646,7 +1705,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
 
     # Try to launch in the pm tmux session
     if tmux_mod.has_tmux():
-        pm_session = _get_session_name_for_cwd()
+        pm_session = _get_current_pm_session() or _get_session_name_for_cwd()
         if tmux_mod.session_exists(pm_session):
             window_name = _pr_display_id(pr_entry)
             cmd = build_claude_shell_cmd(prompt=prompt)
@@ -1896,17 +1955,11 @@ def pr_import_github(gh_state: str):
         else:
             status = "pending"
 
-        # Generate a pr_id based on the GH PR number
+        # Generate a hash-based pr_id from title + body
         existing_ids = {p["id"] for p in data["prs"]}
-        pr_id = f"pr-{number:03d}"
-        if pr_id in existing_ids:
-            pr_id = f"pr-{number:03d}-gh"
-        if pr_id in existing_ids:
-            # Fall back to sequential
-            pr_id = store.next_pr_id(data)
-
         url = gh_pr.get("url", "")
         body = gh_pr.get("body", "") or ""
+        pr_id = store.generate_pr_id(title, body, existing_ids)
 
         entry = {
             "id": pr_id,
@@ -2056,26 +2109,68 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool):
 
 
 @cli.group(invoke_without_command=True)
+@click.option("--global", "share_global", is_flag=True, default=False,
+              help="Share session with all users on the system")
+@click.option("--group", "share_group", type=str, default=None,
+              help="Share session with a Unix group")
+@click.option("--dir", "start_dir", type=click.Path(exists=True, file_okay=False),
+              default=None, help="Project directory (for joining another user's session)")
+@click.option("--print-connect", is_flag=True, default=False,
+              help="Print the tmux command others can use to connect (no pm required)")
 @click.pass_context
-def session(ctx):
+def session(ctx, share_global, share_group, start_dir, print_connect):
     """Manage tmux sessions for pm.
 
     Without a subcommand, starts or attaches to the pm session.
+
+    Use --global or --group to create a session accessible by other users.
+    Other users join with the same flag plus --dir pointing to the original
+    user's project directory.
     """
     if ctx.invoked_subcommand is not None:
         return
-    _session_start()
+    if print_connect:
+        # Check PM_TMUX_SOCKET (set inside shared sessions) or compute from flags
+        sp = os.environ.get("PM_TMUX_SOCKET")
+        if not sp and (share_global or share_group):
+            _set_share_mode_env(share_global, share_group)
+            from pm_core.paths import get_session_tag, shared_socket_path
+            tag = get_session_tag(start_path=Path(start_dir) if start_dir else None)
+            if tag:
+                sp = str(shared_socket_path(tag))
+        if sp:
+            click.echo(f"tmux -S {sp} attach")
+        else:
+            click.echo("Not in a shared session and no --global/--group given.", err=True)
+            raise SystemExit(1)
+        return
+    if start_dir and not (share_global or share_group):
+        click.echo("--dir requires --global or --group", err=True)
+        raise SystemExit(1)
+    if share_global and share_group:
+        click.echo("--global and --group are mutually exclusive", err=True)
+        raise SystemExit(1)
+    _session_start(share_global=share_global, share_group=share_group,
+                   start_dir=start_dir)
 
 
 def _register_tmux_bindings(session_name: str) -> None:
-    """Register tmux keybindings for mobile-aware pane navigation.
+    """Register tmux keybindings and session options for pm.
 
     Called on both new session creation and reattach so bindings
     survive across sessions (tmux bindings are global).
+    Also sets window-size=latest on all sessions in the group so each
+    client's terminal size is used for layout, not the minimum.
     """
     import subprocess as _sp
-    _sp.run(["tmux", "bind-key", "-T", "prefix", "R",
-             "run-shell 'pm rebalance'"], check=False)
+    # Enable per-client window sizing: window follows the most recently
+    # active client rather than shrinking to the smallest.
+    base = session_name.split("~")[0]
+    for s in [base] + tmux_mod.list_grouped_sessions(base):
+        tmux_mod.set_session_option(s, "window-size", "latest")
+
+    _sp.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", "R",
+             "run-shell 'pm rebalance'"), check=False)
     # Conditionally override pane-switch keys: use pm's mobile-aware
     # switch for pm sessions, fall back to default tmux behavior otherwise.
     # Keyed on the pane registry file existing for the current session.
@@ -2088,26 +2183,72 @@ def _register_tmux_bindings(session_name: str) -> None:
         "Right": ("-R", "select-pane -R"),
     }
     for key, (direction, fallback) in switch_keys.items():
-        _sp.run(["tmux", "bind-key", "-T", "prefix", key,
+        _sp.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", key,
                  "if-shell",
                  f"s='#{{session_name}}'; test -f {registry_dir}/${{s%%~*}}.json",
                  f"run-shell 'pm _pane-switch #{{session_name}} {direction}'",
-                 fallback],
+                 fallback),
                 check=False)
-    _sp.run(["tmux", "set-hook", "-g", "after-kill-pane",
-             "run-shell 'pm _pane-closed'"], check=False)
+    _sp.run(tmux_mod._tmux_cmd("set-hook", "-g", "after-kill-pane",
+             "run-shell 'pm _pane-closed'"), check=False)
+    # Auto-rebalance when window resizes (triggered by client switches
+    # with window-size=latest, or moving terminal to a different monitor).
+    # Uses "window-resized" (fires on any window size change) not
+    # "after-resize-window" (only fires after the resize-window command).
+    # Note: window-resized is a window hook, so use -gw not -g.
+    _sp.run(tmux_mod._tmux_cmd("set-hook", "-gw", "window-resized",
+             "run-shell 'pm _window-resized \"#{session_name}\" \"#{window_id}\"'"),
+            check=False)
+    # Clean up stale hook from earlier versions that used the wrong name
+    _sp.run(tmux_mod._tmux_cmd("set-hook", "-gu", "after-resize-window"),
+            check=False)
 
 
-def _session_start():
+def _session_start(share_global: bool = False, share_group: str | None = None,
+                   start_dir: str | None = None):
     """Start a tmux session with TUI + notes editor.
 
     If no project exists yet, starts pm guide instead of the TUI so
     the guided workflow can initialize the project inside tmux.
+
+    Args:
+        share_global: Make session accessible to all users on the system.
+        share_group: Make session accessible to this Unix group.
+        start_dir: Compute session tag from this directory instead of cwd.
+                   Used when joining another user's shared session.
     """
     _log.info("session_cmd started")
     if not tmux_mod.has_tmux():
         click.echo("tmux is required for 'pm session'. Install it first.", err=True)
         raise SystemExit(1)
+
+    is_shared = share_global or share_group is not None
+
+    # Set PM_SHARE_MODE so get_session_tag produces distinct hashes per mode
+    _set_share_mode_env(share_global, share_group)
+
+    # Validate group exists before doing anything else
+    if share_group:
+        import grp as _grp
+        try:
+            _grp.getgrnam(share_group)
+        except KeyError:
+            click.echo(f"Unix group '{share_group}' does not exist.", err=True)
+            raise SystemExit(1)
+
+    # Compute socket path for shared sessions
+    socket_path: str | None = None
+    if is_shared:
+        from pm_core.paths import get_session_tag, shared_socket_path, ensure_shared_socket_dir
+        tag = get_session_tag(start_path=Path(start_dir) if start_dir else None)
+        if not tag:
+            click.echo("Cannot determine session tag (not in a git repo?).", err=True)
+            raise SystemExit(1)
+        ensure_shared_socket_dir()
+        socket_path = str(shared_socket_path(tag))
+        # Set env var so _tmux_cmd() in all subsequent calls (split_pane,
+        # get_window_id, rebalance, etc.) routes to the shared server.
+        os.environ["PM_TMUX_SOCKET"] = socket_path
 
     # Check if project exists
     try:
@@ -2125,12 +2266,26 @@ def _session_start():
         cwd = str(root.parent)
     else:
         cwd = str(root) if root else str(Path.cwd())
-    session_name = _get_session_name_for_cwd()
+
+    if start_dir:
+        # When joining another user's session, compute session name from their directory
+        from pm_core.paths import get_session_tag
+        tag = get_session_tag(start_path=Path(start_dir))
+        if tag:
+            session_name = f"pm-{tag}"
+        else:
+            click.echo(f"Cannot determine session from directory '{start_dir}'.", err=True)
+            raise SystemExit(1)
+    else:
+        # Prefer the actual tmux session if we're already inside one (e.g. meta
+        # workdirs whose git-root hash differs from the session they belong to).
+        session_name = _get_current_pm_session() or _get_session_name_for_cwd()
+
     expected_root = root or (Path.cwd() / "pm")
     notes_path = expected_root / notes.NOTES_FILENAME
 
-    _log.info("checking if session exists: %s", session_name)
-    if tmux_mod.session_exists(session_name):
+    _log.info("checking if session exists: %s (socket=%s)", session_name, socket_path)
+    if tmux_mod.session_exists(session_name, socket_path=socket_path):
         # Check if the session has the expected panes
         live_panes = tmux_mod.get_pane_indices(session_name)
         registry = pane_layout.load_registry(session_name)
@@ -2147,23 +2302,34 @@ def _session_start():
         if "tui" not in roles_alive:
             _log.info("TUI missing, killing broken session to recreate")
             click.echo(f"Session '{session_name}' is broken. Recreating...")
-            tmux_mod.kill_session(session_name)
+            tmux_mod.kill_session(session_name, socket_path=socket_path)
             # Fall through to normal creation code below
         else:
             _log.info("TUI present, finding/creating grouped session")
             _register_tmux_bindings(session_name)
             # Reuse an unattached grouped session, or create a new one
-            grouped = tmux_mod.find_unattached_grouped_session(session_name)
+            grouped = tmux_mod.find_unattached_grouped_session(
+                session_name, socket_path=socket_path)
             if grouped:
                 _log.info("reusing unattached grouped session: %s", grouped)
                 click.echo(f"Attaching to session '{grouped}'...")
             else:
-                grouped = tmux_mod.next_grouped_session_name(session_name)
+                grouped = tmux_mod.next_grouped_session_name(
+                    session_name, socket_path=socket_path)
                 _log.info("creating new grouped session: %s", grouped)
-                tmux_mod.create_grouped_session(session_name, grouped)
+                tmux_mod.create_grouped_session(session_name, grouped,
+                                                socket_path=socket_path)
+                tmux_mod.set_session_option(grouped, "window-size", "latest",
+                                            socket_path=socket_path)
                 click.echo(f"Attaching to session '{grouped}'...")
-            tmux_mod.attach(grouped)
+            tmux_mod.attach(grouped, socket_path=socket_path)
             return
+
+    # If --dir was specified, the session must already exist (we're joining, not creating)
+    if start_dir:
+        click.echo(f"No shared session '{session_name}' found to join.", err=True)
+        click.echo("The session owner must start it first.", err=True)
+        raise SystemExit(1)
 
     _log.info("session does not exist or was killed, creating new session")
     editor = find_editor()
@@ -2177,20 +2343,58 @@ def _session_start():
     })
 
     # Always create session with TUI in the left pane
-    _log.info("creating tmux session: %s cwd=%s", session_name, cwd)
+    _log.info("creating tmux session: %s cwd=%s socket=%s", session_name, cwd, socket_path)
     click.echo(f"Creating tmux session '{session_name}'...")
-    tmux_mod.create_session(session_name, cwd, "pm _tui")
+    # For shared sessions, set PM_TMUX_SOCKET in the initial command so the TUI
+    # process inherits it immediately (set-environment only affects new processes)
+    tui_cmd = "pm _tui"
+    tui_env_prefix = ""
+    if socket_path:
+        tui_env_prefix += f"PM_TMUX_SOCKET={shlex.quote(socket_path)} "
+    share_mode = os.environ.get("PM_SHARE_MODE")
+    if share_mode:
+        tui_env_prefix += f"PM_SHARE_MODE={shlex.quote(share_mode)} "
+    if tui_env_prefix:
+        tui_cmd = f"{tui_env_prefix}pm _tui"
+    tmux_mod.create_session(session_name, cwd, tui_cmd, socket_path=socket_path)
+
+    # Set socket permissions and grant tmux server-access for shared sessions
+    if is_shared and socket_path:
+        from pm_core.paths import set_shared_socket_permissions, get_share_users
+        try:
+            set_shared_socket_permissions(Path(socket_path), group_name=share_group)
+            users = get_share_users(group_name=share_group)
+            if users:
+                tmux_mod.grant_server_access(users, socket_path=socket_path)
+            mode_desc = f"group '{share_group}'" if share_group else "all users"
+            click.echo(f"Session shared with {mode_desc}.")
+        except (PermissionError, OSError) as e:
+            click.echo(f"Warning: Could not set socket permissions: {e}", err=True)
 
     # Forward key environment variables into the tmux session
-    import subprocess as _sp
-    for env_key in ("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS", "PM_PROJECT", "EDITOR", "PATH"):
+    for env_key in ("PM_PROJECT", "EDITOR", "PATH"):
         val = os.environ.get(env_key)
         if val:
-            _sp.run(["tmux", "set-environment", "-t", session_name, env_key, val], check=False)
+            tmux_mod.set_environment(session_name, env_key, val,
+                                     socket_path=socket_path)
+
+    # For shared sessions, set PM_TMUX_SOCKET so all pm commands inside
+    # the session automatically route to the correct tmux server
+    if socket_path:
+        tmux_mod.set_environment(session_name, "PM_TMUX_SOCKET", socket_path,
+                                 socket_path=socket_path)
+
+    # Propagate PM_SHARE_MODE so subprocesses (rebalance, pane-switch, etc.)
+    # compute the same session tag as the parent
+    if share_mode:
+        tmux_mod.set_environment(session_name, "PM_SHARE_MODE", share_mode,
+                                 socket_path=socket_path)
 
     # Get the TUI pane ID and window ID
+    import subprocess as _sp
     tui_pane = _sp.run(
-        ["tmux", "list-panes", "-t", session_name, "-F", "#{pane_id}"],
+        tmux_mod._tmux_cmd("list-panes", "-t", session_name, "-F", "#{pane_id}",
+                            socket_path=socket_path),
         capture_output=True, text=True,
     ).stdout.strip().splitlines()[0]
     window_id = tmux_mod.get_window_id(session_name)
@@ -2234,28 +2438,100 @@ def _session_start():
 
     # Create a grouped session so we never attach directly to the base
     grouped = f"{session_name}~1"
-    tmux_mod.create_grouped_session(session_name, grouped)
-    tmux_mod.attach(grouped)
+    tmux_mod.create_grouped_session(session_name, grouped, socket_path=socket_path)
+    tmux_mod.set_session_option(grouped, "window-size", "latest",
+                                socket_path=socket_path)
+    tmux_mod.attach(grouped, socket_path=socket_path)
+
+
+@session.command("name")
+def session_name_cmd():
+    """Print the computed session name for the current directory."""
+    click.echo(_get_session_name_for_cwd())
+
+@session.command("tag")
+def session_tag_cmd():
+    """Print the computed session tag for the current directory."""
+    from pm_core.paths import get_session_tag
+    click.echo(get_session_tag())
+
+@cli.command("which")
+def which_cmd():
+    """Print the path to the pm_core package being used."""
+    import pm_core
+    click.echo(pm_core.__path__[0])
+
+
+@cli.command("set")
+@click.argument("setting")
+@click.argument("value", type=click.Choice(["on", "off"]))
+def set_cmd(setting, value):
+    """Toggle a global pm setting.
+
+    Available settings:
+
+      hide-assist   Hide the Assist (h) key from the TUI footer bar
+
+      hide-merged   Hide merged PRs in the TUI by default
+    """
+    from pm_core.paths import set_global_setting
+    known = {"hide-assist", "hide-merged"}
+    if setting not in known:
+        click.echo(f"Unknown setting: {setting}", err=True)
+        click.echo(f"Available: {', '.join(sorted(known))}", err=True)
+        raise SystemExit(1)
+    set_global_setting(setting, value == "on")
+    click.echo(f"{setting} = {value}")
 
 
 @session.command("kill")
-def session_kill():
+@click.option("--global", "share_global", is_flag=True, default=False,
+              help="Target a globally shared session")
+@click.option("--group", "share_group", type=str, default=None,
+              help="Target a group-shared session")
+@click.option("--dir", "start_dir", type=click.Path(exists=True, file_okay=False),
+              default=None, help="Project directory of the shared session")
+def session_kill(share_global, share_group, start_dir):
     """Kill the pm tmux session for this project."""
     if not tmux_mod.has_tmux():
         click.echo("tmux is not installed.", err=True)
         raise SystemExit(1)
 
-    session_name = _get_session_name_for_cwd()
+    # Set PM_SHARE_MODE so get_session_tag produces distinct hashes per mode
+    _set_share_mode_env(share_global, share_group)
 
-    if not tmux_mod.session_exists(session_name):
+    is_shared = share_global or share_group is not None
+    socket_path: str | None = None
+    if is_shared:
+        from pm_core.paths import get_session_tag, shared_socket_path
+        tag = get_session_tag(start_path=Path(start_dir) if start_dir else None)
+        if tag:
+            socket_path = str(shared_socket_path(tag))
+
+    if start_dir:
+        from pm_core.paths import get_session_tag
+        tag = get_session_tag(start_path=Path(start_dir))
+        session_name = f"pm-{tag}" if tag else _get_session_name_for_cwd()
+    else:
+        session_name = _get_session_name_for_cwd()
+
+    if not tmux_mod.session_exists(session_name, socket_path=socket_path):
         click.echo(f"No session '{session_name}' found.", err=True)
         raise SystemExit(1)
 
     # Kill grouped sessions first, then the base
-    for g in tmux_mod.list_grouped_sessions(session_name):
-        tmux_mod.kill_session(g)
-    tmux_mod.kill_session(session_name)
+    for g in tmux_mod.list_grouped_sessions(session_name, socket_path=socket_path):
+        tmux_mod.kill_session(g, socket_path=socket_path)
+    tmux_mod.kill_session(session_name, socket_path=socket_path)
     pane_layout.set_force_mobile(session_name, False)
+
+    # Clean up shared socket file
+    if socket_path:
+        try:
+            Path(socket_path).unlink(missing_ok=True)
+        except OSError:
+            pass
+
     click.echo(f"Killed session '{session_name}'.")
 
 
@@ -2641,7 +2917,8 @@ def cluster_auto(threshold, max_commits, weights, output_fmt):
         click.echo(clusters_to_json(clusters, chunk_map))
     elif output_fmt == "plan":
         md = clusters_to_plan_markdown(clusters, chunk_map)
-        plan_id = store.next_plan_id(data)
+        existing_ids = {p["id"] for p in (data.get("plans") or [])}
+        plan_id = store.generate_plan_id(f"cluster-explore", existing_ids)
         plan_name = f"cluster-{plan_id}"
         plan_file = f"plans/{plan_name}.md"
         plan_path = root / plan_file
@@ -2857,13 +3134,13 @@ def guide_done_cmd():
 
 
 def _refresh_tui_if_running():
-    """Send refresh key to TUI pane if one is running."""
+    """Send reload key to TUI pane if one is running."""
     import subprocess
     try:
         pane_id, _ = _find_tui_pane()
         if pane_id:
             subprocess.run(
-                ["tmux", "send-keys", "-t", pane_id, "r"],
+                tmux_mod._tmux_cmd("send-keys", "-t", pane_id, "R"),
                 capture_output=True,
                 timeout=2,
             )
@@ -3105,6 +3382,44 @@ def pane_opened_cmd(session: str, window: str, pane_id: str):
     pane_layout.handle_pane_opened(session, window, pane_id)
 
 
+@cli.command("_window-resized", hidden=True)
+@click.argument("session")
+@click.argument("window")
+def window_resized_cmd(session: str, window: str):
+    """Internal: handle tmux window resize — debounce and rebalance."""
+    import time
+
+    _log.info("_window-resized: ENTERED session=%s window=%s pid=%d", session, window, os.getpid())
+
+    base = pane_layout.base_session_name(session)
+    data = pane_layout.load_registry(base)
+    if not data["panes"]:
+        _log.info("_window-resized: no panes in registry for %s, exiting", base)
+        return
+
+    _log.info("_window-resized: %d panes in registry, debouncing...", len(data["panes"]))
+
+    # Debounce: write our PID, sleep, then only proceed if we're still
+    # the latest resize event.  This avoids N rebalances during a drag.
+    debounce_file = pane_layout.registry_dir() / f"{base}.resize"
+    my_id = str(os.getpid())
+    debounce_file.write_text(my_id)
+    time.sleep(0.15)
+    try:
+        current_id = debounce_file.read_text()
+        if current_id != my_id:
+            _log.info("_window-resized: debounce lost (pid %s != %s), exiting", my_id, current_id)
+            return  # A newer resize event superseded us
+    except FileNotFoundError:
+        _log.info("_window-resized: debounce file gone, exiting")
+        return
+
+    _log.info("_window-resized: debounce won, rebalancing %s:%s", session, window)
+    tmux_mod.unzoom_pane(session, window)
+    result = pane_layout.rebalance(session, window)
+    _log.info("_window-resized: rebalance returned %s", result)
+
+
 @cli.command("_pane-switch", hidden=True,
              context_settings={"ignore_unknown_options": True})
 @click.argument("session")
@@ -3121,19 +3436,19 @@ def pane_switch_cmd(session: str, direction: str):
 
     if direction == "next":
         subprocess.run(
-            ["tmux", "select-pane", "-t", f"{session}:{window}.+"],
+            tmux_mod._tmux_cmd("select-pane", "-t", f"{session}:{window}.+"),
             check=False,
         )
     else:
         subprocess.run(
-            ["tmux", "select-pane", "-t", f"{session}:{window}", direction],
+            tmux_mod._tmux_cmd("select-pane", "-t", f"{session}:{window}", direction),
             check=False,
         )
 
     # If mobile, zoom the newly focused pane
     if pane_layout.is_mobile(session, window):
         result = subprocess.run(
-            ["tmux", "display", "-t", f"{session}:{window}", "-p", "#{pane_id}"],
+            tmux_mod._tmux_cmd("display", "-t", f"{session}:{window}", "-p", "#{pane_id}"),
             capture_output=True, text=True,
         )
         active = result.stdout.strip()
@@ -3185,11 +3500,27 @@ def _tui_history_file(session: str) -> Path:
     return TUI_HISTORY_DIR / f"{session.split('~')[0]}.json"
 
 
-def _get_session_name_for_cwd() -> str:
-    """Generate the expected session name for the current working directory.
+def _set_share_mode_env(share_global: bool, share_group: str | None) -> None:
+    """Set PM_SHARE_MODE env var from CLI flags so get_session_tag mixes it into the hash."""
+    if share_global:
+        os.environ["PM_SHARE_MODE"] = "global"
+    elif share_group:
+        os.environ["PM_SHARE_MODE"] = f"group:{share_group}"
+    else:
+        os.environ.pop("PM_SHARE_MODE", None)
 
-    Uses GitHub repo name (without org/user) if available, otherwise directory name.
-    Hash is based on git root path for consistency across subdirectories.
+
+def _get_session_name_for_cwd() -> str:
+    """Generate the expected pm session name for the current working directory.
+
+    Computes the name from the git root so it's deterministic regardless
+    of which tmux session the caller is in.  Used by ``pm session`` to
+    create/attach sessions and by ``pm pr start`` to find the session.
+
+    When the caller is already inside the target pm session (e.g. TUI
+    subprocesses), the computed name may not match the actual session
+    (workdir clones have a different git-root hash).  Use
+    ``_get_current_pm_session()`` in those cases.
     """
     from pm_core.paths import get_session_tag
     tag = get_session_tag()
@@ -3198,6 +3529,23 @@ def _get_session_name_for_cwd() -> str:
 
     # Fallback if not in a git repo
     return f"pm-{Path.cwd().name}-00000000"
+
+
+def _get_current_pm_session() -> str | None:
+    """Return the base pm session name when running inside one.
+
+    Reads the actual session from $TMUX_PANE and strips any grouped-session
+    ~N suffix.  Returns None if not inside tmux or not in a pm- session.
+    """
+    if not tmux_mod.in_tmux():
+        return None
+    name = tmux_mod.get_session_name()
+    # Strip grouped session suffix
+    if "~" in name:
+        name = name.rsplit("~", 1)[0]
+    if name.startswith("pm-"):
+        return name
+    return None
 
 
 def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
@@ -3239,7 +3587,7 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
 
     # Fall back to searching for any pm session with a TUI
     result = subprocess.run(
-        ["tmux", "list-sessions", "-F", "#{session_name}"],
+        tmux_mod._tmux_cmd("list-sessions", "-F", "#{session_name}"),
         capture_output=True, text=True
     )
     if result.returncode != 0:
@@ -3259,7 +3607,7 @@ def _capture_tui_frame(pane_id: str) -> str:
     """Capture the current TUI pane content."""
     import subprocess
     result = subprocess.run(
-        ["tmux", "capture-pane", "-t", pane_id, "-p"],
+        tmux_mod._tmux_cmd("capture-pane", "-t", pane_id, "-p"),
         capture_output=True, text=True
     )
     return result.stdout
@@ -3380,7 +3728,7 @@ def tui_send(keys: str, session: str | None):
         click.echo("No TUI pane found. Is there a pm tmux session running?", err=True)
         raise SystemExit(1)
 
-    subprocess.run(["tmux", "send-keys", "-t", pane_id, keys], check=True)
+    subprocess.run(tmux_mod._tmux_cmd("send-keys", "-t", pane_id, keys), check=True)
     click.echo(f"Sent keys '{keys}' to TUI pane {pane_id} (session: {sess})")
 
 
@@ -3686,21 +4034,15 @@ To interact with this session, use commands like:
     click.echo(f"Session: {sess}")
     click.echo("-" * 60)
 
-    # Launch Claude with the test prompt
-    claude = find_claude()
-    if not claude:
-        click.echo("Claude CLI not found.", err=True)
-        raise SystemExit(1)
-
-    import subprocess
-    from pm_core.paths import skip_permissions_enabled
-    cmd = [claude]
-    if skip_permissions_enabled():
-        cmd.append("--dangerously-skip-permissions")
-    cmd.append(full_prompt)
-
-    result = subprocess.run(cmd)
-    raise SystemExit(result.returncode)
+    # Launch Claude with the test prompt (no session resume for tests)
+    from pm_core.claude_launcher import launch_claude
+    try:
+        root = state_root()
+    except FileNotFoundError:
+        root = Path.home() / ".pm"
+    rc = launch_claude(full_prompt, session_key=f"tui-test:{test_id}",
+                       pm_root=root, resume=False)
+    raise SystemExit(rc)
 
 
 PM_REPO_URL = "https://github.com/mjtomei/project_manager.git"
@@ -3759,30 +4101,58 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
             # Check if master exists, otherwise use main
             result = git_ops.run_git("branch", "-r", "--list", "origin/master", cwd=work_path, check=False)
             base_ref = "master" if result.stdout.strip() else "main"
+
+        # Checkout base and create branch
+        if tag:
+            click.echo(f"Checking out tag {tag}...")
+            git_ops.run_git("checkout", tag, cwd=work_path, check=True)
+        else:
+            click.echo(f"Checking out {base_ref}...")
+            git_ops.run_git("checkout", base_ref, cwd=work_path, check=True)
+            click.echo(f"Pulling latest {base_ref}...")
+            git_ops.pull_rebase(work_path)
+
+        click.echo(f"Creating branch {branch} from {base_ref}...")
+        git_ops.checkout_branch(work_path, branch, create=True)
     else:
         click.echo(f"Using existing workdir: {work_path}")
-        # Fetch latest
-        click.echo("Fetching latest from origin...")
-        git_ops.run_git("fetch", "origin", cwd=work_path, check=False)
 
-        if tag:
-            base_ref = tag
+        # Check if workdir has in-progress work (dirty files or on a meta branch)
+        status = git_ops.run_git("status", "--porcelain", cwd=work_path, check=False)
+        current_branch = git_ops.run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=work_path, check=False)
+        current_branch_name = current_branch.stdout.strip()
+        has_dirty_files = bool(status.stdout.strip())
+        on_meta_branch = current_branch_name.startswith("meta/")
+
+        if has_dirty_files or on_meta_branch:
+            # Resume existing session — don't reset the workdir
+            click.echo(f"Resuming in-progress work on branch {current_branch_name}")
+            if has_dirty_files:
+                click.echo("(workdir has uncommitted changes)")
+            branch = current_branch_name
+            base_ref = "master"
         else:
-            result = git_ops.run_git("branch", "-r", "--list", "origin/master", cwd=work_path, check=False)
-            base_ref = "master" if result.stdout.strip() else "main"
+            # Clean workdir — safe to update and create new branch
+            click.echo("Fetching latest from origin...")
+            git_ops.run_git("fetch", "origin", cwd=work_path, check=False)
 
-    # Checkout base and create branch
-    if tag:
-        click.echo(f"Checking out tag {tag}...")
-        git_ops.run_git("checkout", tag, cwd=work_path, check=True)
-    else:
-        click.echo(f"Checking out {base_ref}...")
-        git_ops.run_git("checkout", base_ref, cwd=work_path, check=True)
-        click.echo(f"Pulling latest {base_ref}...")
-        git_ops.pull_rebase(work_path)
+            if tag:
+                base_ref = tag
+            else:
+                result = git_ops.run_git("branch", "-r", "--list", "origin/master", cwd=work_path, check=False)
+                base_ref = "master" if result.stdout.strip() else "main"
 
-    click.echo(f"Creating branch {branch} from {base_ref}...")
-    git_ops.checkout_branch(work_path, branch, create=True)
+            if tag:
+                click.echo(f"Checking out tag {tag}...")
+                git_ops.run_git("checkout", tag, cwd=work_path, check=True)
+            else:
+                click.echo(f"Checking out {base_ref}...")
+                git_ops.run_git("checkout", base_ref, cwd=work_path, check=True)
+                click.echo(f"Pulling latest {base_ref}...")
+                git_ops.pull_rebase(work_path)
+
+            click.echo(f"Creating branch {branch} from {base_ref}...")
+            git_ops.checkout_branch(work_path, branch, create=True)
 
     # Build the prompt
     prompt = _build_meta_prompt(task, work_path, install_info, branch, base_ref, session_tag)
