@@ -960,6 +960,7 @@ class ProjectManagerApp(App):
         self._current_guide_step = None
         self._plans_visible = False
         self._tests_visible = False
+        self.query_one("#tech-tree", TechTree).focus()
         # Capture frame after view change (use call_after_refresh to ensure screen is updated)
         self.call_after_refresh(self._capture_frame, "show_normal_view")
         # Show welcome popup when guide completes (only once)
