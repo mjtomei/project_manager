@@ -56,6 +56,7 @@ This session is managed by `pm`. Run `pm help` to see available commands.
 ## Tips
 - This session may be resuming after a restart. Check `git status` and `git log` to see if previous work exists on this branch — if so, continue from there.
 - Before referencing existing code (imports, function calls, class usage), read the source to verify the interface.
+- Do NOT run `pm pr start` — this session is already started and running for {pr_id}.
 
 ## Workflow
 {instructions}
