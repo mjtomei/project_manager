@@ -2,23 +2,12 @@
 
 from textual.widget import Widget
 from textual.reactive import reactive
-from textual.message import Message
 from rich.text import Text
 from rich.console import RenderableType
 
+from pm_core.tui import item_message
 
-class TestSelected(Message):
-    """Fired when a test is highlighted."""
-    def __init__(self, test_id: str) -> None:
-        self.test_id = test_id
-        super().__init__()
-
-
-class TestActivated(Message):
-    """Fired when Enter is pressed on a test."""
-    def __init__(self, test_id: str) -> None:
-        self.test_id = test_id
-        super().__init__()
+TestSelected, TestActivated = item_message("Test", "test_id")
 
 
 class TestsPane(Widget):
