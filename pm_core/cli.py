@@ -436,13 +436,14 @@ def plan():
 
 @plan.command("add")
 @click.argument("name")
+@click.option("--description", default="", help="Description of what the plan should accomplish")
 @click.option("--new", "fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
-def plan_add(name: str, fresh: bool):
+def plan_add(name: str, description: str, fresh: bool):
     """Create a new plan and launch Claude to develop it."""
     root = state_root()
     data = store.load(root)
     existing_ids = {p["id"] for p in (data.get("plans") or [])}
-    plan_id = store.generate_plan_id(name, existing_ids)
+    plan_id = store.generate_plan_id(name, existing_ids, description=description)
     plan_file = f"plans/{plan_id}.md"
 
     entry = {
@@ -458,7 +459,10 @@ def plan_add(name: str, fresh: bool):
     # Create the plan file
     plan_path = root / plan_file
     plan_path.parent.mkdir(parents=True, exist_ok=True)
-    plan_path.write_text(f"# {name}\n\n<!-- Describe the plan here -->\n")
+    if description:
+        plan_path.write_text(f"# {name}\n\n{description}\n")
+    else:
+        plan_path.write_text(f"# {name}\n\n<!-- Describe the plan here -->\n")
 
     # Ensure notes file exists
     notes.ensure_notes_file(root)
@@ -469,6 +473,22 @@ def plan_add(name: str, fresh: bool):
     trigger_tui_refresh()
 
     notes_block = notes.notes_section(root)
+    desc_block = ""
+    if description:
+        desc_block = f"""
+The user has provided this description of what the plan should accomplish:
+
+> {description}
+
+Use this as a starting point — confirm your understanding, ask clarifying questions
+if needed, then develop the full plan.
+"""
+    else:
+        desc_block = """
+Ask me what this plan should accomplish. I'll describe it at a high level and
+we'll iterate until the plan is clear and complete. Then write the final plan
+to the file above as structured markdown.
+"""
     prompt = f"""\
 Your goal: Help me develop a plan called "{name}" and write it to {plan_path}.
 
@@ -476,11 +496,7 @@ This session is managed by `pm` (project manager for Claude Code). You have acce
 to the `pm` CLI tool — run `pm help` to see available commands.
 
 The plan file is at: {plan_path}
-
-Ask me what this plan should accomplish. I'll describe it at a high level and
-we'll iterate until the plan is clear and complete. Then write the final plan
-to the file above as structured markdown.
-
+{desc_block}
 The plan needs to be detailed enough that the next step (`pm plan breakdown`) can
 break it into individual PRs. Include scope, goals, key design decisions, and
 any constraints.

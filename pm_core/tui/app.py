@@ -370,6 +370,75 @@ class PlanPickerScreen(ModalScreen):
         self.dismiss(None)
 
 
+class PlanAddScreen(ModalScreen):
+    """Modal for creating a new plan with name and optional description."""
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    CSS = """
+    PlanAddScreen {
+        align: center middle;
+    }
+    #plan-add-container {
+        width: 60;
+        height: auto;
+        background: $surface;
+        border: solid $primary;
+        padding: 1 2;
+    }
+    #plan-add-title {
+        text-align: center;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+    .plan-add-label {
+        margin-top: 1;
+    }
+    #plan-add-container Input {
+        border: none;
+        height: 1;
+        padding: 0 1;
+        background: #333333;
+    }
+    #plan-add-container Input:focus {
+        background: #444444;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        from textual.widgets import Input
+        with Vertical(id="plan-add-container"):
+            yield Label("New Plan", id="plan-add-title")
+            yield Label("Name [dim](required)[/]", classes="plan-add-label")
+            yield Input(placeholder="e.g. auth-refactor", id="plan-add-name")
+            yield Label("Description [dim](optional)[/]", classes="plan-add-label")
+            yield Input(placeholder="What should this plan accomplish?", id="plan-add-desc")
+            yield Label("[dim]Tab between fields · Enter to create · Esc to cancel[/]")
+
+    def on_mount(self) -> None:
+        from textual.widgets import Input
+        self.query_one("#plan-add-name", Input).focus()
+
+    def on_input_submitted(self, event) -> None:
+        from textual.widgets import Input
+        name_input = self.query_one("#plan-add-name", Input)
+        desc_input = self.query_one("#plan-add-desc", Input)
+        if event.input is name_input:
+            # Enter on name field: move to description
+            desc_input.focus()
+        elif event.input is desc_input:
+            # Enter on description field: submit
+            name = name_input.value.strip()
+            if name:
+                desc = desc_input.value.strip()
+                self.dismiss((name, desc))
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class ProjectManagerApp(App):
     """Interactive TUI for managing PR dependency graphs."""
 
@@ -1012,9 +1081,17 @@ class ProjectManagerApp(App):
     def on_command_submitted(self, message: CommandSubmitted) -> None:
         """Handle commands typed in the command bar."""
         _log.info("command submitted: %s", message.command)
-        self._run_command(message.command)
-        tree = self.query_one("#tech-tree", TechTree)
-        tree.focus()
+        # Commands that launch interactive Claude sessions need a tmux pane
+        parts = shlex.split(message.command)
+        if len(parts) >= 3 and parts[0] == "plan" and parts[1] == "add":
+            self._launch_pane(f"pm {message.command}", "plan-add")
+            self._load_state()
+        else:
+            self._run_command(message.command)
+        if self._plans_visible:
+            self.query_one("#plans-pane", PlansPane).focus()
+        else:
+            self.query_one("#tech-tree", TechTree).focus()
 
     def _run_command(self, cmd: str, working_message: str | None = None) -> None:
         """Execute a pm sub-command.
@@ -1495,8 +1572,10 @@ class ProjectManagerApp(App):
         cmd_bar = self.query_one("#command-bar", CommandBar)
         if cmd_bar.has_focus:
             cmd_bar.value = ""
-            tree = self.query_one("#tech-tree", TechTree)
-            tree.focus()
+            if self._plans_visible:
+                self.query_one("#plans-pane", PlansPane).focus()
+            else:
+                self.query_one("#tech-tree", TechTree).focus()
 
     def action_show_help(self) -> None:
         _log.debug("action: show_help")
@@ -1588,9 +1667,7 @@ class ProjectManagerApp(App):
         _log.info("plan action: %s (plan=%s)", message.action, plan_id)
 
         if message.action == "add":
-            cmd_bar = self.query_one("#command-bar", CommandBar)
-            cmd_bar.value = "plan add "
-            cmd_bar.focus()
+            self.push_screen(PlanAddScreen(), callback=self._handle_plan_add)
         elif message.action == "view":
             if plan_id:
                 plan = store.get_plan(self._data, plan_id)
@@ -1617,6 +1694,16 @@ class ProjectManagerApp(App):
         elif message.action == "review":
             if plan_id:
                 self._launch_pane(f"pm plan review {plan_id}", "plan-review")
+
+    def _handle_plan_add(self, result: tuple[str, str] | None) -> None:
+        """Handle result from PlanAddScreen modal."""
+        if result is None:
+            return
+        name, description = result
+        cmd = f"pm plan add {shlex.quote(name)}"
+        if description:
+            cmd += f" --description {shlex.quote(description)}"
+        self._launch_pane(cmd, "plan-add")
 
     # --- Tests view ---
 

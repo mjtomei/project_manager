@@ -97,14 +97,14 @@ def next_pr_id(data: dict) -> str:
     return f"pr-{max(nums) + 1:03d}"
 
 
-def generate_plan_id(name: str, existing_ids: set[str] | None = None) -> str:
-    """Generate a plan ID from a hash of the plan name.
+def generate_plan_id(name: str, existing_ids: set[str] | None = None, description: str = "") -> str:
+    """Generate a plan ID from a hash of the plan name and description.
 
-    Uses sha256(name) truncated to 7 hex chars, producing IDs like
+    Uses sha256(name + description) truncated to 7 hex chars, producing IDs like
     'plan-a3f2b1c'. If the ID collides with an existing one, extends
     the hash until unique.
     """
-    digest = hashlib.sha256(name.encode()).hexdigest()
+    digest = hashlib.sha256((name + description).encode()).hexdigest()
     min_len = 7
     for length in range(min_len, len(digest) + 1):
         plan_id = f"plan-{digest[:length]}"
