@@ -83,7 +83,8 @@ class TechTree(Widget):
         self._hidden_label_ids: list[str] = []              # ["_hidden:plan-001", ...] for navigation
         self._plan_group_order: list[str] = []              # ordered plan_ids (visible groups)
         self._jump_plan_scroll: bool = False                  # flag: scroll plan label to top
-        self._hide_merged: bool = False                          # toggle: hide merged PRs
+        from pm_core.paths import get_global_setting
+        self._hide_merged: bool = get_global_setting("hide-merged")  # toggle: hide merged PRs
         self._status_filter: str | None = None                    # filter to show only this status
 
     def on_mount(self) -> None:
@@ -647,7 +648,7 @@ class TechTree(Widget):
             else:
                 # Already at bottom — scroll to reveal bottom content
                 self._scroll_to_edge("bottom")
-        elif event.key in ("left", "h"):
+        elif event.key == "left":
             # Move left: must be in a column to the left, prefer same row
             candidates = [(i, pid) for i, pid in enumerate(self._ordered_ids)
                           if self._node_positions[pid][0] < cur_col]

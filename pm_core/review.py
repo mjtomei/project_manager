@@ -127,7 +127,7 @@ def review_step(step_name: str, goal_description: str, check_prompt: str, root: 
                 try:
                     import subprocess
                     session_name = subprocess.run(
-                        ["tmux", "display-message", "-p", "#{session_name}"],
+                        tmux_mod._tmux_cmd("display-message", "-p", "#{session_name}"),
                         capture_output=True, text=True,
                     ).stdout.strip()
                     tmux_mod.split_pane_background(
@@ -145,7 +145,7 @@ def review_step(step_name: str, goal_description: str, check_prompt: str, root: 
             try:
                 import subprocess
                 session_name = subprocess.run(
-                    ["tmux", "display-message", "-p", "#{session_name}"],
+                    tmux_mod._tmux_cmd("display-message", "-p", "#{session_name}"),
                     capture_output=True, text=True,
                 ).stdout.strip()
                 # Show a summary in a background pane

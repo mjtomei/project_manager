@@ -8,8 +8,11 @@ All pm-related directories now live under ~/.pm/:
 Session tags are derived from the git repo (GitHub repo name or directory name + hash).
 """
 
+import grp
 import hashlib
+import pwd
 import logging
+import os
 import shlex
 import subprocess
 from pathlib import Path
@@ -138,7 +141,8 @@ def get_session_tag(start_path: Path | None = None, use_github_name: bool = True
         use_github_name: If True, try to get GitHub repo name (requires subprocess).
                         If False, just use directory name (faster, no subprocess).
     """
-    cache_key = (str(start_path or Path.cwd()), use_github_name)
+    share_mode = os.environ.get("PM_SHARE_MODE")
+    cache_key = (str(start_path or Path.cwd()), use_github_name, share_mode)
     if cache_key in _session_tag_cache:
         return _session_tag_cache[cache_key]
 
@@ -153,8 +157,12 @@ def get_session_tag(start_path: Path | None = None, use_github_name: bool = True
     else:
         repo_name = git_root.name
 
-    # Generate hash from git root path
-    path_hash = hashlib.md5(str(git_root).encode()).hexdigest()[:8]
+    # Generate hash from git root path, mixing in share mode when set
+    # so --global and --group sessions get distinct tags
+    hash_input = str(git_root)
+    if share_mode:
+        hash_input += "\0" + share_mode
+    path_hash = hashlib.md5(hash_input.encode()).hexdigest()[:8]
 
     tag = f"{repo_name}-{path_hash}"
     _session_tag_cache[cache_key] = tag
@@ -292,6 +300,32 @@ def set_override_path(session_tag: str, workdir: Path) -> None:
         (sd / "override").write_text(str(workdir) + "\n")
 
 
+def get_global_setting(name: str) -> bool:
+    """Check if a global pm setting is enabled.
+
+    Settings are stored as files in ~/.pm/settings/.
+    A setting is enabled if its file exists and contains 'true'.
+    """
+    f = pm_home() / "settings" / name
+    if not f.exists():
+        return False
+    try:
+        return f.read_text().strip() == "true"
+    except (OSError, IOError):
+        return False
+
+
+def set_global_setting(name: str, enabled: bool) -> None:
+    """Enable or disable a global pm setting."""
+    d = pm_home() / "settings"
+    d.mkdir(parents=True, exist_ok=True)
+    f = d / name
+    if enabled:
+        f.write_text("true\n")
+    elif f.exists():
+        f.unlink()
+
+
 def clear_session(session_tag: str) -> None:
     """Remove all config files for a session."""
     sd = sessions_dir() / session_tag
@@ -344,6 +378,72 @@ def log_shell_command(cmd: list[str] | str, prefix: str = "shell", returncode: i
             f.write(entry)
     except (OSError, IOError):
         pass  # Silently fail if we can't write to log
+
+
+SHARED_SOCKET_DIR = Path("/tmp/pm-sessions")
+
+
+def shared_socket_path(session_tag: str) -> Path:
+    """Return the deterministic socket path for a shared session.
+
+    Both the creating user and joining users compute the same path
+    from the session tag, so they find each other's tmux server.
+    """
+    return SHARED_SOCKET_DIR / f"pm-{session_tag}"
+
+
+def ensure_shared_socket_dir() -> None:
+    """Create /tmp/pm-sessions/ with sticky world-writable permissions.
+
+    Uses 1777 (sticky + rwx for all) so any user can create sockets
+    but only the owner can delete their own.
+    """
+    SHARED_SOCKET_DIR.mkdir(mode=0o1777, parents=True, exist_ok=True)
+    # Ensure permissions are correct even if directory already existed
+    SHARED_SOCKET_DIR.chmod(0o1777)
+
+
+def set_shared_socket_permissions(socket_path: Path, group_name: str | None = None) -> None:
+    """Set permissions on a tmux socket for multi-user access.
+
+    Args:
+        socket_path: Path to the tmux socket file
+        group_name: Unix group name for group-shared mode.
+                    If None, sets world-accessible permissions (global mode).
+    """
+    if group_name:
+        # Validate group first (raises KeyError if invalid)
+        gid = grp.getgrnam(group_name).gr_gid
+        try:
+            os.chown(str(socket_path), -1, gid)
+            # chown succeeded — restrict to owner+group
+            socket_path.chmod(0o770)
+        except (PermissionError, OSError):
+            # chown requires root or membership in the target group.
+            # Fall back to world-accessible and rely on tmux server-access
+            # grants (tmux 3.3+) for actual access control.
+            socket_path.chmod(0o777)
+    else:
+        socket_path.chmod(0o777)
+
+
+def get_share_users(group_name: str | None = None) -> list[str]:
+    """Return usernames that should be granted tmux server-access.
+
+    Args:
+        group_name: If given, return members of that Unix group.
+                    If None (global mode), return all regular users (UID >= 1000).
+    """
+    current_user = os.getenv("USER", "")
+    if group_name:
+        members = grp.getgrnam(group_name).gr_mem
+        return [u for u in members if u != current_user]
+    # Global mode: all regular (non-system) users
+    # UID 65534 is conventionally 'nobody', so cap at 60000
+    return [
+        pw.pw_name for pw in pwd.getpwall()
+        if 1000 <= pw.pw_uid < 60000 and pw.pw_name != current_user
+    ]
 
 
 def run_shell_logged(cmd: list[str], prefix: str = "shell", **kwargs) -> subprocess.CompletedProcess:

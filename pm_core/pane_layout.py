@@ -384,7 +384,7 @@ def rebalance(session: str, window: str, query_session: str | None = None) -> bo
     force_mobile = mobile_flag_path(session).exists()
     if force_mobile or (0 < width < MOBILE_WIDTH_THRESHOLD):
         result = subprocess.run(
-            ["tmux", "display", "-t", f"{qs}:{window}", "-p", "#{pane_id}"],
+            tmux_mod._tmux_cmd("display", "-t", f"{qs}:{window}", "-p", "#{pane_id}"),
             capture_output=True, text=True,
         )
         active_pane = result.stdout.strip()
@@ -484,12 +484,12 @@ def handle_pane_exited(session: str, window: str, generation: str,
         # Focus the last active pane (the one the user was in before the
         # dying pane).  Fall back to next pane if there is no last pane.
         result = subprocess.run(
-            ["tmux", "select-pane", "-t", f"{session}:{reg_window}", "-l"],
+            tmux_mod._tmux_cmd("select-pane", "-t", f"{session}:{reg_window}", "-l"),
             capture_output=True,
         )
         if result.returncode != 0:
             subprocess.run(
-                ["tmux", "select-pane", "-t", f"{session}:{reg_window}", "-t", ":.+"],
+                tmux_mod._tmux_cmd("select-pane", "-t", f"{session}:{reg_window}", "-t", ":.+"),
                 check=False,
             )
 
