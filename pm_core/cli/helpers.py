@@ -11,7 +11,6 @@ import click
 from pm_core import store, git_ops
 from pm_core.paths import configure_logger
 from pm_core import tmux as tmux_mod
-from pm_core import pane_layout
 
 _log = configure_logger("pm.cli")
 
