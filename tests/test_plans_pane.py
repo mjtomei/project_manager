@@ -132,13 +132,11 @@ class TestPlansPane:
         pane = PlansPane()
         result = pane.render()
         text = result.plain
-        assert "view" in text
-        assert "edit" in text
         assert "add" in text
         assert "breakdown" in text
-        assert "deps" in text
-        assert "load" in text
         assert "review" in text
+        assert "load" in text
+        assert "edit" in text
         assert "back" in text
 
     def test_key_action_mapping(self):
