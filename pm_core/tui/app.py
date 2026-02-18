@@ -57,6 +57,7 @@ from pm_core import store, graph as graph_mod, git_ops, notes, guide, pr_sync
 
 from pm_core import tmux as tmux_mod
 from pm_core import pane_layout
+from pm_core import pane_registry
 from pm_core.tui.tech_tree import TechTree, PRSelected, PRActivated
 from pm_core.tui.detail_panel import DetailPanel
 from pm_core.tui.command_bar import CommandBar, CommandSubmitted
@@ -1623,7 +1624,7 @@ class ProjectManagerApp(App):
         _log.info("_launch_pane: session=%s window=%s role=%s", session, window, role)
 
         # Check if a pane with this role already exists
-        existing_pane = pane_layout.find_live_pane_by_role(session, role)
+        existing_pane = pane_registry.find_live_pane_by_role(session, role)
         _log.info("_launch_pane: find_live_pane_by_role returned %s", existing_pane)
         if existing_pane:
             _log.info("pane with role=%s already exists: %s, focusing", role, existing_pane)
@@ -1631,13 +1632,13 @@ class ProjectManagerApp(App):
             self.log_message(f"Focused existing {role} pane")
             return
 
-        data = pane_layout.load_registry(session)
+        data = pane_registry.load_registry(session)
         gen = data.get("generation", "0")
         escaped = cmd.replace("'", "'\\''")
         wrap = f"bash -c 'trap \"pm _pane-exited {session} {window} {gen} $TMUX_PANE\" EXIT; {escaped}'"
         try:
             pane_id = tmux_mod.split_pane(session, "h", wrap)
-            pane_layout.register_pane(session, window, pane_id, role, cmd)
+            pane_registry.register_pane(session, window, pane_id, role, cmd)
             pane_layout.rebalance(session, window)
             tmux_mod.select_pane_smart(pane_id, session, window)
             self.log_message(f"Launched {role} pane")
@@ -1694,9 +1695,9 @@ class ProjectManagerApp(App):
         if not info:
             return
         session, window = info
-        data = pane_layout.load_registry(session)
+        data = pane_registry.load_registry(session)
         data["user_modified"] = False
-        pane_layout.save_registry(session, data)
+        pane_registry.save_registry(session, data)
         pane_layout.rebalance(session, window)
         self.log_message("Layout rebalanced")
 
