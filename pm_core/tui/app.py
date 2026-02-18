@@ -960,8 +960,8 @@ class ProjectManagerApp(App):
         self._current_guide_step = None
         self._plans_visible = False
         self._tests_visible = False
-        # Restore status bar to normal view
-        self._update_status_bar()
+        # Restore status bar to normal view (includes filter state)
+        self._update_filter_status()
         self.query_one("#tech-tree", TechTree).focus()
         # Capture frame after view change (use call_after_refresh to ensure screen is updated)
         self.call_after_refresh(self._capture_frame, "show_normal_view")
