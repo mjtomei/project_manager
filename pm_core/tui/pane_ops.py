@@ -6,31 +6,19 @@ access app state and call app methods (log_message, push_screen, etc.).
 
 import os
 import shlex
-import subprocess
 from pathlib import Path
 
 from pm_core.paths import configure_logger, command_log_file
 from pm_core import tmux as tmux_mod
 from pm_core import pane_layout
 from pm_core import store, guide, notes
+from pm_core.tui._shell import _run_shell
 from pm_core.tui.screens import ConnectScreen
 
 _log = configure_logger("pm.tui.pane_ops")
 
 # Guide steps that indicate setup is still in progress
 GUIDE_SETUP_STEPS = {"no_project", "initialized", "has_plan_draft", "has_plan_prs", "needs_deps_review"}
-
-
-def _run_shell(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
-    """Run a shell command with logging."""
-    cmd_str = shlex.join(cmd) if isinstance(cmd, list) else cmd
-    _log.info("shell: %s", cmd_str)
-    result = subprocess.run(cmd, **kwargs)
-    if result.returncode != 0:
-        stderr = getattr(result, 'stderr', '')
-        if stderr:
-            _log.debug("shell failed (rc=%d): %s", result.returncode, stderr[:200])
-    return result
 
 
 # ---------------------------------------------------------------------------

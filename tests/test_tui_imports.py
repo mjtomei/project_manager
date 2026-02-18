@@ -229,3 +229,23 @@ class TestBackwardCompatImports:
         from pm_core.tui.app import StatusBar as SB1
         from pm_core.tui.widgets import StatusBar as SB2
         assert SB1 is SB2
+
+
+# ---------------------------------------------------------------------------
+# Shared shell helpers importable from tui._shell
+# ---------------------------------------------------------------------------
+
+class TestShellImports:
+    def test_run_shell(self):
+        from pm_core.tui._shell import _run_shell
+        assert callable(_run_shell)
+
+    def test_run_shell_async(self):
+        from pm_core.tui._shell import _run_shell_async
+        assert callable(_run_shell_async)
+
+    def test_app_reexports_run_shell(self):
+        """app.py imports _run_shell from _shell (no duplicate definition)."""
+        from pm_core.tui._shell import _run_shell as shell_ver
+        from pm_core.tui.app import _run_shell as app_ver
+        assert shell_ver is app_ver
