@@ -2574,7 +2574,7 @@ def set_cmd(setting, value):
 
     Available settings:
 
-      hide-assist   Hide the Assist (h) key from the TUI footer bar
+      hide-assist   Hide the Assist (H) key from the TUI status and footer bars
 
       hide-merged   Hide merged PRs in the TUI by default
     """

@@ -88,7 +88,8 @@ class StatusBar(Static):
     """Top status bar showing project info and sync state."""
 
     def update_status(self, project_name: str, repo: str, sync_state: str,
-                       pr_count: int = 0, filter_text: str = "") -> None:
+                       pr_count: int = 0, filter_text: str = "",
+                       show_assist: bool = False) -> None:
         sync_icons = {
             "synced": "[green]synced[/green]",
             "pulling": "[yellow]pulling...[/yellow]",
@@ -100,7 +101,8 @@ class StatusBar(Static):
         safe_repo = escape(repo)
         pr_info = f"[bold]{pr_count}[/bold] PRs" if pr_count else ""
         filter_display = f"    [dim]filter:[/dim] [italic]{filter_text}[/italic]" if filter_text else ""
-        self.update(f" Project: [bold]{project_name}[/bold]    {pr_info}{filter_display}    repo: [cyan]{safe_repo}[/cyan]    {sync_display}")
+        assist_display = "    [dim]\\[H] Assist[/dim]" if show_assist else ""
+        self.update(f" Project: [bold]{project_name}[/bold]    {pr_info}{filter_display}    repo: [cyan]{safe_repo}[/cyan]    {sync_display}{assist_display}")
 
 
 class LogLine(Static):
@@ -287,9 +289,9 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]D[/]  Review PR dependencies", classes="help-row")
             else:
                 yield Label("Tree Navigation", classes="help-section")
-                yield Label("  [bold]↑↓←→[/] or [bold]jkl[/]  Move selection", classes="help-row")
+                yield Label("  [bold]↑↓←→[/] or [bold]hjkl[/]  Move selection", classes="help-row")
                 yield Label("  [bold]J/K[/]  Jump to next/prev plan", classes="help-row")
-                yield Label("  [bold]H[/]  Hide/show plan group", classes="help-row")
+                yield Label("  [bold]x[/]  Hide/show plan group", classes="help-row")
                 yield Label("  [bold]X[/]  Toggle merged PRs", classes="help-row")
                 yield Label("  [bold]F[/]  Cycle status filter", classes="help-row")
                 yield Label("  [bold]Enter[/]  Show PR details", classes="help-row")
@@ -302,7 +304,7 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]M[/]  Move to plan", classes="help-row")
             yield Label("Panes & Views", classes="help-section")
             yield Label("  [bold]c[/]  Launch Claude session", classes="help-row")
-            yield Label("  [bold]h[/]  Ask for help (beginner-friendly)", classes="help-row")
+            yield Label("  [bold]H[/]  Ask for help (beginner-friendly)", classes="help-row")
             yield Label("  [bold]/[/]  Open command bar", classes="help-row")
             yield Label("  [bold]g[/]  Toggle guide view", classes="help-row")
             yield Label("  [bold]n[/]  Open notes", classes="help-row")
@@ -621,13 +623,13 @@ class ProjectManagerApp(App):
         Binding("escape", "unfocus_command", "Back", show=False),
         Binding("P", "toggle_plans", "Plans", show=True),
         Binding("T", "toggle_tests", "Tests", show=True),
-        Binding("H", "hide_plan", "Hide Plan", show=False),
+        Binding("x", "hide_plan", "Hide Plan", show=False),
         Binding("M", "move_to_plan", "Move Plan", show=False),
         Binding("X", "toggle_merged", "Toggle Merged", show=False),
         Binding("F", "cycle_filter", "Filter", show=False),
         Binding("question_mark", "show_help", "Help", show=True),
         Binding("c", "launch_claude", "Claude", show=True),
-        Binding("h", "launch_help_claude", "Assist", show=True),  # show toggled in __init__
+        Binding("H", "launch_help_claude", "Assist", show=True),  # show toggled in __init__
         Binding("C", "show_connect", "Connect", show=False),
     ]
 
@@ -973,6 +975,7 @@ class ProjectManagerApp(App):
     def _update_status_bar(self, sync_state: str = "synced") -> None:
         """Update the status bar with current project info and filter state."""
         from pm_core.tui.tech_tree import STATUS_ICONS
+        from pm_core.paths import get_global_setting
         if not self._data:
             return
         project = self._data.get("project", {})
@@ -991,6 +994,7 @@ class ProjectManagerApp(App):
             sync_state,
             pr_count=len(prs),
             filter_text=filter_text,
+            show_assist=not get_global_setting("hide-assist"),
         )
 
     def _update_display(self) -> None:

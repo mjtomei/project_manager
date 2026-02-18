@@ -368,7 +368,7 @@ class TechTree(Widget):
 
         if not self._ordered_ids and self._hidden_plans:
             hidden_count = len(self._hidden_plans)
-            return Text(f"All PRs hidden ({hidden_count} plan(s)). Press H to show all.", style="dim")
+            return Text(f"All PRs hidden ({hidden_count} plan(s)). Press x to show all.", style="dim")
 
         # If only hidden labels exist (no visible PR nodes), render just the labels
         visible_node_ids = [nid for nid in self._node_positions if not nid.startswith("_hidden:")]
@@ -648,7 +648,7 @@ class TechTree(Widget):
             else:
                 # Already at bottom — scroll to reveal bottom content
                 self._scroll_to_edge("bottom")
-        elif event.key == "left":
+        elif event.key in ("left", "h"):
             # Move left: must be in a column to the left, prefer same row
             candidates = [(i, pid) for i, pid in enumerate(self._ordered_ids)
                           if self._node_positions[pid][0] < cur_col]
