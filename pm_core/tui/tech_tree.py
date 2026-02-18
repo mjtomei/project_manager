@@ -675,13 +675,20 @@ class TechTree(Widget):
                     new_index = min(candidates, key=lambda x: (self._node_positions[x[1]][0] - cur_col,
                                                                abs(self._node_positions[x[1]][1] - cur_row)))[0]
         elif event.key == "J":
-            # Jump to first PR of next plan group
+            # Jump to first PR of next plan group, or last PR if on bottom plan
             new_index = self._jump_plan(1)
+            if new_index is None:
+                # Already on bottom plan — jump to last PR
+                new_index = self._jump_plan_bottom()
             if new_index is not None:
                 self._jump_plan_scroll = True
         elif event.key == "K":
-            # Jump to first PR of previous plan group
-            new_index = self._jump_plan(-1)
+            # Jump to top of current plan first, then to previous plan
+            top_index = self._jump_plan_top()
+            if top_index is not None and top_index != self.selected_index:
+                new_index = top_index
+            else:
+                new_index = self._jump_plan(-1)
             if new_index is not None:
                 self._jump_plan_scroll = True
         elif event.key == "enter":
@@ -723,6 +730,66 @@ class TechTree(Widget):
             self.parent.scroll_to_region(region)
         else:
             self.scroll_to_region(region)
+
+    def _jump_plan_top(self) -> int | None:
+        """Return the index of the first PR in the current plan group.
+
+        Returns:
+            Index of the first PR in the current plan, or None if not applicable.
+        """
+        if not self._ordered_ids:
+            return None
+
+        current_id = self._ordered_ids[self.selected_index]
+        if current_id.startswith("_hidden:"):
+            current_plan = current_id[len("_hidden:"):]
+        else:
+            pr_map = {pr["id"]: pr for pr in self._prs}
+            pr = pr_map.get(current_id)
+            current_plan = (pr.get("plan") or "_standalone") if pr else "_standalone"
+
+        # Find first PR in ordered_ids that belongs to current plan
+        pr_map = {pr["id"]: pr for pr in self._prs}
+        for i, pid in enumerate(self._ordered_ids):
+            if pid.startswith("_hidden:"):
+                continue
+            pr = pr_map.get(pid)
+            if pr and (pr.get("plan") or "_standalone") == current_plan:
+                return i
+
+        return None
+
+    def _jump_plan_bottom(self) -> int | None:
+        """Return the index of the last root PR (no dependencies) in the current plan.
+
+        A root PR has no depends_on — it sits in the leftmost column.
+        Returns the last such root in ordering (bottom of the TUI).
+
+        Returns:
+            Index of the last root PR in the current plan, or None.
+        """
+        if not self._ordered_ids:
+            return None
+
+        current_id = self._ordered_ids[self.selected_index]
+        if current_id.startswith("_hidden:"):
+            current_plan = current_id[len("_hidden:"):]
+        else:
+            pr_map = {pr["id"]: pr for pr in self._prs}
+            pr = pr_map.get(current_id)
+            current_plan = (pr.get("plan") or "_standalone") if pr else "_standalone"
+
+        pr_map = {pr["id"]: pr for pr in self._prs}
+        last_root = None
+        for i, pid in enumerate(self._ordered_ids):
+            if pid.startswith("_hidden:"):
+                continue
+            pr = pr_map.get(pid)
+            if pr and (pr.get("plan") or "_standalone") == current_plan:
+                if not pr.get("depends_on"):
+                    last_root = i
+
+        return last_root
 
     def _jump_plan(self, direction: int) -> int | None:
         """Jump to the first PR of the next/previous plan group.
