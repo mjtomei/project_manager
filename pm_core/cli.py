@@ -2028,16 +2028,61 @@ def pr_import_github(gh_state: str):
         click.echo(f"No new PRs to import ({skipped} already tracked).")
 
 
+def _workdir_is_dirty(work_path: Path) -> bool:
+    """Check if a workdir has uncommitted changes."""
+    result = git_ops.run_git("status", "--porcelain", cwd=work_path, check=False)
+    return bool(result.stdout.strip())
+
+
+def _cleanup_pr(pr_entry: dict, data: dict, root: Path, force: bool) -> bool:
+    """Clean up a single PR's workdir. Returns True if cleaned."""
+    pr_id = pr_entry["id"]
+    work_path = Path(pr_entry["workdir"]) if pr_entry.get("workdir") else None
+
+    if not work_path or not work_path.exists():
+        click.echo(f"  {pr_id}: no workdir to clean up")
+        return False
+
+    if not force and _workdir_is_dirty(work_path):
+        click.echo(f"  {pr_id}: skipped (uncommitted changes in {work_path})")
+        click.echo(f"    Use --force to remove anyway")
+        return False
+
+    shutil.rmtree(work_path)
+    click.echo(f"  {pr_id}: removed {work_path}")
+    pr_entry["workdir"] = None
+    return True
+
+
 @pr.command("cleanup")
 @click.argument("pr_id", default=None, required=False)
-def pr_cleanup(pr_id: str | None):
-    """Remove work directory for a merged PR.
+@click.option("--force", is_flag=True, default=False, help="Remove even if workdir has uncommitted changes")
+@click.option("--all", "cleanup_all", is_flag=True, default=False, help="Clean up all PR workdirs")
+def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool):
+    """Remove work directory for a PR.
 
-    If PR_ID is omitted, auto-selects when there's exactly one merged PR
-    with a workdir.
+    Refuses to delete workdirs with uncommitted changes unless --force is given.
+    Use --all to clean up all PR workdirs at once.
     """
     root = state_root()
     data = store.load(root)
+
+    if cleanup_all:
+        prs = data.get("prs") or []
+        with_workdir = [p for p in prs if p.get("workdir") and Path(p["workdir"]).exists()]
+        if not with_workdir:
+            click.echo("No PR workdirs to clean up.")
+            return
+        click.echo(f"Cleaning up {len(with_workdir)} workdir(s)...")
+        cleaned = 0
+        for pr_entry in with_workdir:
+            if _cleanup_pr(pr_entry, data, root, force):
+                cleaned += 1
+        if cleaned:
+            save_and_push(data, root, f"pm: cleanup {cleaned} workdirs")
+            trigger_tui_refresh()
+        click.echo(f"Cleaned {cleaned}/{len(with_workdir)} workdirs.")
+        return
 
     if pr_id is None:
         prs = data.get("prs") or []
@@ -2055,30 +2100,18 @@ def pr_cleanup(pr_id: str | None):
                 click.echo(f"  {_pr_display_id(p)}: {p.get('title', '???')}", err=True)
             raise SystemExit(1)
 
-    pr_entry = store.get_pr(data, pr_id)
+    pr_entry = _resolve_pr_id(data, pr_id)
     if not pr_entry:
-        prs = data.get("prs") or []
-        click.echo(f"PR {pr_id} not found.", err=True)
-        if prs:
-            click.echo(f"Available PRs: {', '.join(p['id'] for p in prs)}", err=True)
+        click.echo(f"PR '{pr_id}' not found.", err=True)
         raise SystemExit(1)
 
     if pr_entry.get("status") not in ("merged", "in_review"):
         click.echo(f"Warning: {pr_id} status is '{pr_entry.get('status')}' (not merged).", err=True)
         click.echo("Cleaning up anyway.", err=True)
 
-    work_path = None
-    if pr_entry.get("workdir"):
-        work_path = Path(pr_entry["workdir"])
-
-    if work_path and work_path.exists():
-        shutil.rmtree(work_path)
-        click.echo(f"Removed {work_path}")
-        pr_entry["workdir"] = None
-        save_and_push(data, root, f"pm: cleanup {pr_id}")
+    if _cleanup_pr(pr_entry, data, root, force):
+        save_and_push(data, root, f"pm: cleanup {pr_entry['id']}")
         trigger_tui_refresh()
-    else:
-        click.echo(f"No work directory found for {pr_id}.")
 
 
 @pr.command("close")
