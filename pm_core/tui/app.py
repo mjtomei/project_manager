@@ -688,6 +688,7 @@ class ProjectManagerApp(App):
         self._is_portrait: bool = False
         # In-flight PR action tracking (prevents concurrent/duplicate PR commands)
         self._inflight_pr_action: str | None = None
+        self._log_sticky_until: float = 0.0  # monotonic time until which log line is protected
 
     # --- Frame capture methods ---
 
@@ -1109,8 +1110,21 @@ class ProjectManagerApp(App):
             _log.exception("Sync error")
             self.log_message(f"Sync error: {e}")
 
-    def log_message(self, msg: str, capture: bool = True) -> None:
-        """Show a message in the log line."""
+    def log_message(self, msg: str, capture: bool = True, sticky: float = 0) -> None:
+        """Show a message in the log line.
+
+        Args:
+            msg: Message to display.
+            capture: Whether to capture a frame after showing.
+            sticky: Minimum seconds to keep the message visible (prevents
+                    other non-sticky messages from overwriting it).
+        """
+        import time as _time
+        now = _time.monotonic()
+        if sticky > 0:
+            self._log_sticky_until = now + sticky
+        elif now < self._log_sticky_until:
+            return  # a sticky message is still showing
         try:
             log = self.query_one("#log-line", LogLine)
             log.update(f" {msg}")
@@ -1131,11 +1145,12 @@ class ProjectManagerApp(App):
         msg = f"[red bold]{title}[/]"
         if detail:
             msg += f" {detail}"
-        self.log_message(msg)
+        self.log_message(msg, sticky=timeout)
         self.set_timer(timeout, self._clear_log_message)
 
     def _clear_log_message(self) -> None:
         """Clear the log line message."""
+        self._log_sticky_until = 0.0
         try:
             log = self.query_one("#log-line", LogLine)
             log.update("")
@@ -1364,7 +1379,8 @@ class ProjectManagerApp(App):
         """
         if self._inflight_pr_action:
             _log.info("action blocked: %s (busy: %s)", action_desc, self._inflight_pr_action)
-            self.log_message(f"Busy: {self._inflight_pr_action}")
+            self.log_message(f"Busy: {self._inflight_pr_action}", sticky=1.0)
+            self.set_timer(1.0, self._clear_log_message)
             return False
         return True
 
