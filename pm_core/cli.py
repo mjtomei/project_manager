@@ -497,9 +497,23 @@ to the `pm` CLI tool — run `pm help` to see available commands.
 
 The plan file is at: {plan_path}
 {desc_block}
-The plan needs to be detailed enough that the next step (`pm plan breakdown`) can
-break it into individual PRs. Include scope, goals, key design decisions, and
-any constraints.
+The plan needs to include scope, goals, key design decisions, and any constraints.
+
+Once the plan is solid, break it down into a "## PRs" section with individual PRs
+in this format:
+
+### PR: <title>
+- **description**: What this PR does
+- **tests**: Expected unit tests
+- **files**: Expected file modifications
+- **depends_on**: <title of dependency PR, or empty>
+
+Separate PR entries with --- lines. Prefer more small PRs over fewer large ones.
+Order them so independent PRs can be worked on in parallel. Only add depends_on
+when there's a real ordering constraint.
+
+After writing the PRs section, tell the user to run `pm plan review {plan_id}`
+(key: c in the plans pane) to check consistency and coverage before loading.
 {notes_block}"""
 
     claude = find_claude()
@@ -588,7 +602,7 @@ def plan_breakdown(plan_id: str | None, initial_prs: str | None, fresh: bool):
 
     prompt = f"""\
 Your goal: Break the plan into a list of PRs that the user is happy with, then
-write them to the plan file so they can be loaded with `pm plan load`.
+write them to the plan file so they can be reviewed with `pm plan review`.
 
 This session is managed by `pm` (project manager for Claude Code). You have access
 to the `pm` CLI tool — run `pm help` to see available commands.
@@ -616,7 +630,8 @@ Guidelines:
 - Only add depends_on when there's a real ordering constraint
 - Write the ## PRs section directly into the plan file at {plan_path}
 
-After writing, the user can run `pm plan load` to create all PRs at once.
+After writing, tell the user to run `pm plan review {plan_id}` (key: c in the
+plans pane) to check consistency and coverage before loading PRs.
 {notes_block}"""
 
     claude = find_claude()

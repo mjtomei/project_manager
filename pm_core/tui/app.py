@@ -215,9 +215,9 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]e[/]  Edit plan file", classes="help-row")
                 yield Label("  [bold]w[/]  Break plan into PRs", classes="help-row")
                 yield Label("  [bold]c[/]  Review plan-PR consistency", classes="help-row")
-                yield Label("  [bold]D[/]  Review PR dependencies", classes="help-row")
                 yield Label("  [bold]l[/]  Load PRs from plan", classes="help-row")
-                yield Label("  [bold]P[/]  Back to tree view", classes="help-row")
+                yield Label("Cross-plan", classes="help-section")
+                yield Label("  [bold]D[/]  Review PR dependencies", classes="help-row")
             else:
                 yield Label("Tree Navigation", classes="help-section")
                 yield Label("  [bold]↑↓←→[/] or [bold]hjkl[/]  Move selection", classes="help-row")
