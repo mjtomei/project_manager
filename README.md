@@ -6,13 +6,12 @@ shaping a codebase together.
 
 ## Features
 
-- **Interactive TUI** — tmux-based dashboard with PR dependency graph, detail panel, and keybindings for all common operations
-- **Plan-driven workflow** — write plans, break them into PRs with Claude, review consistency, and load PRs in one step
+- **Interactive TUI** — tmux-based dashboard with quality of life improvements in tmux hooks
+- **Plan-driven workflow** — write and manage plans and associated PRs with Claude in a standardized flow
 - **Parallel Claude sessions** — spin up Claude sessions with their own branches and working directories as needed for PRs, experiments, or any task
-- **Shared sessions** — share your tmux session with other users on the same machine via `--global` or `--group`, with per-client viewports
-- **Mobile mode** — auto-zooms the active pane on narrow terminals (< 120 cols) or when force-enabled with `pm session mobile --force`, making the tool usable over SSH from phones and tablets
-- **Meta-development** — `pm meta` opens a Claude session targeting the pm codebase itself, so you can fix friction as you encounter it
-- **TUI integration tests** — `pm tui test` launches Claude as a test executor to interact with the live TUI and report results
+- **Shared sessions** — share your tmux session with other users on the same machine via `--global` or `--group`
+- **Smart mobile mode** — auto-zooms the active pane on narrow terminals, usable over SSH from phones and tablets
+- **Meta-development** — open a Claude session targeting the pm codebase itself, to fix pain points as you encounter them
 
 ## Install
 
