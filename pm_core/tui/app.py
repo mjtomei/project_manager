@@ -960,6 +960,8 @@ class ProjectManagerApp(App):
         self._current_guide_step = None
         self._plans_visible = False
         self._tests_visible = False
+        # Restore status bar to normal view
+        self._update_status_bar()
         self.query_one("#tech-tree", TechTree).focus()
         # Capture frame after view change (use call_after_refresh to ensure screen is updated)
         self.call_after_refresh(self._capture_frame, "show_normal_view")
@@ -968,20 +970,26 @@ class ProjectManagerApp(App):
             self._welcome_shown = True
             self.call_later(lambda: self.push_screen(WelcomeScreen()))
 
-    def _update_display(self) -> None:
-        """Refresh all widgets with current data."""
+    def _update_status_bar(self, sync_state: str = "synced") -> None:
+        """Update the status bar with current project info."""
         if not self._data:
             return
-
         project = self._data.get("project", {})
         prs = self._data.get("prs") or []
         status_bar = self.query_one("#status-bar", StatusBar)
         status_bar.update_status(
             project.get("name", "???"),
             project.get("repo", "???"),
-            "synced",
+            sync_state,
             pr_count=len(prs),
         )
+
+    def _update_display(self) -> None:
+        """Refresh all widgets with current data."""
+        if not self._data:
+            return
+
+        self._update_status_bar()
 
         tree = self.query_one("#tech-tree", TechTree)
         tree.update_plans(self._data.get("plans") or [])
