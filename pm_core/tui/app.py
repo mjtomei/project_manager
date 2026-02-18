@@ -1914,8 +1914,7 @@ Common tasks:
 - `pm tui view -s {sess}` — capture the current TUI screen
 - `pm tui send <keys> -s {sess}` — send keys to the TUI
 
-The user will tell you what they need. You are a general-purpose assistant \
-operating within this pm session."""
+The user will tell you what they need."""
 
         cmd = claude
         if os.environ.get("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS") == "true":
@@ -1959,11 +1958,8 @@ operating within this pm session."""
         plan_summary = "\n".join(plan_lines) if plan_lines else "  (no plans yet)"
 
         prompt = f"""\
-## You are a helpful coding assistant for a beginner
-
-The user is new to coding and needs help figuring out what to do next. \
-Be patient, explain things simply, and avoid jargon. When you suggest \
-commands, explain what they do before running them.
+## You are helping someone who may be a novice programmer decide on their \
+next step.
 
 ## Project Info
 
