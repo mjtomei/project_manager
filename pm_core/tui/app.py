@@ -960,8 +960,8 @@ class ProjectManagerApp(App):
         self._current_guide_step = None
         self._plans_visible = False
         self._tests_visible = False
-        # Restore status bar to normal view (includes filter state)
-        self._update_filter_status()
+        # Restore status bar to normal view
+        self._update_status_bar()
         self.query_one("#tech-tree", TechTree).focus()
         # Capture frame after view change (use call_after_refresh to ensure screen is updated)
         self.call_after_refresh(self._capture_frame, "show_normal_view")
@@ -971,17 +971,26 @@ class ProjectManagerApp(App):
             self.call_later(lambda: self.push_screen(WelcomeScreen()))
 
     def _update_status_bar(self, sync_state: str = "synced") -> None:
-        """Update the status bar with current project info."""
+        """Update the status bar with current project info and filter state."""
+        from pm_core.tui.tech_tree import STATUS_ICONS
         if not self._data:
             return
         project = self._data.get("project", {})
         prs = self._data.get("prs") or []
+        tree = self.query_one("#tech-tree", TechTree)
+        filter_text = ""
+        if tree._status_filter:
+            icon = STATUS_ICONS.get(tree._status_filter, "")
+            filter_text = f"{icon} {tree._status_filter}"
+        elif tree._hide_merged:
+            filter_text = "hide merged"
         status_bar = self.query_one("#status-bar", StatusBar)
         status_bar.update_status(
             project.get("name", "???"),
             project.get("repo", "???"),
             sync_state,
             pr_count=len(prs),
+            filter_text=filter_text,
         )
 
     def _update_display(self) -> None:
@@ -1455,26 +1464,7 @@ class ProjectManagerApp(App):
 
     def _update_filter_status(self) -> None:
         """Update the status bar to reflect active filters."""
-        from pm_core.tui.tech_tree import STATUS_ICONS
-        if not self._data:
-            return
-        tree = self.query_one("#tech-tree", TechTree)
-        project = self._data.get("project", {})
-        prs = self._data.get("prs") or []
-        filter_text = ""
-        if tree._status_filter:
-            icon = STATUS_ICONS.get(tree._status_filter, "")
-            filter_text = f"{icon} {tree._status_filter}"
-        elif tree._hide_merged:
-            filter_text = "hide merged"
-        status_bar = self.query_one("#status-bar", StatusBar)
-        status_bar.update_status(
-            project.get("name", "???"),
-            project.get("repo", "???"),
-            "synced",
-            pr_count=len(prs),
-            filter_text=filter_text,
-        )
+        self._update_status_bar()
 
     def action_move_to_plan(self) -> None:
         """Open plan picker to move selected PR to a different plan."""
