@@ -1,7 +1,5 @@
 """Tests for tree layout algorithm and TUI message factory."""
 
-import pytest
-
 from pm_core.tui import item_message
 from pm_core.tui.tree_layout import compute_tree_layout, TreeLayout
 
