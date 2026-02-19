@@ -17,11 +17,11 @@ X. Enter key triggers edit (not detail panel)
    - Check the Claude prompt in the new window
    - Expected: workflow section says "press d in the TUI or run pm pr done ... from the base pm directory (not from this workdir)"
 
-4. Plans pane width
+X. Plans pane width
    - Press 'P' to open the plans view
    - Expected: plans fill the full width of the terminal, not a narrow sliver
 
-5. Command bar placeholder
+X. Command bar placeholder
    - Look at the bottom command bar when it is NOT focused
    - Expected: shows "press / to type a command"
    - Press '/' to focus the command bar
@@ -29,10 +29,12 @@ X. Enter key triggers edit (not detail panel)
    - Press Esc to unfocus
    - Expected: placeholder reverts to "press / to type a command"
 
-6. Plan view pane persists after less
-   - Press 'v' on a PR that has a plan file (or go to Plans view and press Enter)
-   - In the pane, quit less (press 'q')
-   - Expected: pane stays open as an interactive shell instead of closing
+6. Review window diff pane persists after quitting pager
+   - Press 'd' on an in_progress PR to mark it done and open the review window
+   - In the diff pane (right side), press 'q' to quit the less pager
+   - Expected: pane stays open as an interactive shell cd'd into the PR workdir
+   - Verify you can run git commands, edit files, etc. in that shell
+   (Also: plan view panes now persist after less — press 'v' and quit less)
 
 7. ? in help menu opens discussion pane
    - Press '?' to open the help screen

@@ -579,21 +579,26 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False) -> No
         if not claude_pane:
             return
 
-        # Build shell command that shows PR info then drops to interactive shell
+        # Build shell command that shows PR info via a pager then drops
+        # to an interactive shell in the workdir.  We use git --no-pager
+        # and pipe through less ourselves so that quitting the pager
+        # doesn't kill the pane (git's built-in pager can cause SIGPIPE
+        # exit codes that break && chains).
         shell = os.environ.get("SHELL", "/bin/bash")
         header = f"Review: {display_id} — {title}"
         diff_cmd = (
             f"cd '{workdir}'"
-            f" && echo '=== {header} ==='"
+            f" && {{ echo '=== {header} ==='"
             f" && echo ''"
             f" && git status"
             f" && echo ''"
             f" && echo '--- Change summary ---'"
-            f" && git diff --stat origin/{base_branch}...HEAD"
+            f" && git --no-pager diff --stat origin/{base_branch}...HEAD"
             f" && echo ''"
             f" && echo '--- Full diff ---'"
-            f" && git diff origin/{base_branch}...HEAD"
-            f" && exec {shell}"
+            f" && git --no-pager diff origin/{base_branch}...HEAD"
+            f"; }} | less -R"
+            f"; exec {shell}"
         )
         diff_pane = tmux_mod.split_pane_at(claude_pane, "h", diff_cmd, background=True)
 
