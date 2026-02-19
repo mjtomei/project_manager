@@ -213,7 +213,7 @@ def view_plan(app) -> None:
     if not plan_path.exists():
         app.log_message(f"Plan file not found: {plan_path}")
         return
-    launch_pane(app, f"less {shlex.quote(str(plan_path))}; $SHELL", "plan", fresh=fresh)
+    launch_pane(app, f"less {plan_path}", "plan", fresh=fresh)
 
 
 # ---------------------------------------------------------------------------
@@ -517,7 +517,7 @@ def handle_plan_action(app, action: str, plan_id: str | None) -> None:
             if plan and app._root:
                 plan_path = app._root / plan.get("file", "")
                 if plan_path.exists():
-                    launch_pane(app, f"less {shlex.quote(str(plan_path))}; $SHELL", "plan")
+                    launch_pane(app, f"less {plan_path}", "plan")
     elif action == "edit":
         if plan_id:
             plan = store.get_plan(app._data, plan_id)
@@ -558,7 +558,7 @@ def launch_plan_activated(app, plan_id: str) -> None:
         return
     plan_path = app._root / plan.get("file", "")
     if plan_path.exists():
-        launch_pane(app, f"less {shlex.quote(str(plan_path))}; $SHELL", "plan")
+        launch_pane(app, f"less {plan_path}", "plan")
 
 
 # ---------------------------------------------------------------------------
