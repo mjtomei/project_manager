@@ -15,7 +15,9 @@ from pm_core.claude_launcher import find_claude, launch_claude, launch_claude_pr
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
+    _auto_select_plan,
     _pr_display_id,
+    _require_plan,
     save_and_push,
     state_root,
     trigger_tui_refresh,
@@ -155,26 +157,8 @@ def plan_breakdown(plan_id: str | None, initial_prs: str | None, fresh: bool):
     root = state_root()
     data = store.load(root)
 
-    if plan_id is None:
-        plans = data.get("plans") or []
-        if len(plans) == 1:
-            plan_id = plans[0]["id"]
-        elif len(plans) == 0:
-            click.echo("No plans. Create one with: pm plan add <name>", err=True)
-            raise SystemExit(1)
-        else:
-            click.echo("Multiple plans. Specify one:", err=True)
-            for p in plans:
-                click.echo(f"  {p['id']}: {p['name']}", err=True)
-            raise SystemExit(1)
-
-    plan_entry = store.get_plan(data, plan_id)
-    if not plan_entry:
-        plans = data.get("plans") or []
-        click.echo(f"Plan {plan_id} not found.", err=True)
-        if plans:
-            click.echo(f"Available plans: {', '.join(p['id'] for p in plans)}", err=True)
-        raise SystemExit(1)
+    plan_id = _auto_select_plan(data, plan_id)
+    plan_entry = _require_plan(data, plan_id)
 
     plan_path = root / plan_entry["file"]
     if not plan_path.exists():
@@ -256,26 +240,8 @@ def plan_review(plan_id: str | None, fresh: bool):
     root = state_root()
     data = store.load(root)
 
-    if plan_id is None:
-        plans = data.get("plans") or []
-        if len(plans) == 1:
-            plan_id = plans[0]["id"]
-        elif len(plans) == 0:
-            click.echo("No plans. Create one with: pm plan add <name>", err=True)
-            raise SystemExit(1)
-        else:
-            click.echo("Multiple plans. Specify one:", err=True)
-            for p in plans:
-                click.echo(f"  {p['id']}: {p['name']}", err=True)
-            raise SystemExit(1)
-
-    plan_entry = store.get_plan(data, plan_id)
-    if not plan_entry:
-        plans = data.get("plans") or []
-        click.echo(f"Plan {plan_id} not found.", err=True)
-        if plans:
-            click.echo(f"Available plans: {', '.join(p['id'] for p in plans)}", err=True)
-        raise SystemExit(1)
+    plan_id = _auto_select_plan(data, plan_id)
+    plan_entry = _require_plan(data, plan_id)
 
     plan_path = root / plan_entry["file"]
     if not plan_path.exists():
@@ -509,23 +475,8 @@ def plan_load(plan_id: str | None):
     root = state_root()
     data = store.load(root)
 
-    if plan_id is None:
-        plans = data.get("plans") or []
-        if len(plans) == 1:
-            plan_id = plans[0]["id"]
-        elif len(plans) == 0:
-            click.echo("No plans. Create one with: pm plan add <name>", err=True)
-            raise SystemExit(1)
-        else:
-            click.echo("Multiple plans. Specify one:", err=True)
-            for p in plans:
-                click.echo(f"  {p['id']}: {p['name']}", err=True)
-            raise SystemExit(1)
-
-    plan_entry = store.get_plan(data, plan_id)
-    if not plan_entry:
-        click.echo(f"Plan {plan_id} not found.", err=True)
-        raise SystemExit(1)
+    plan_id = _auto_select_plan(data, plan_id)
+    plan_entry = _require_plan(data, plan_id)
 
     plan_path = root / plan_entry["file"]
     if not plan_path.exists():

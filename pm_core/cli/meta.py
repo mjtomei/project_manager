@@ -16,7 +16,6 @@ from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
     _get_session_name_for_cwd,
-    state_root,
 )
 
 

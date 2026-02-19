@@ -160,6 +160,46 @@ def _resolve_pr_id(data: dict, identifier: str) -> dict | None:
     return None
 
 
+def _require_pr(data: dict, pr_id: str) -> dict:
+    """Get a PR by ID or exit with an error listing available PRs."""
+    pr_entry = store.get_pr(data, pr_id)
+    if pr_entry:
+        return pr_entry
+    prs = data.get("prs") or []
+    click.echo(f"PR {pr_id} not found.", err=True)
+    if prs:
+        click.echo(f"Available PRs: {', '.join(p['id'] for p in prs)}", err=True)
+    raise SystemExit(1)
+
+
+def _require_plan(data: dict, plan_id: str) -> dict:
+    """Get a plan by ID or exit with an error listing available plans."""
+    plan_entry = store.get_plan(data, plan_id)
+    if plan_entry:
+        return plan_entry
+    plans = data.get("plans") or []
+    click.echo(f"Plan {plan_id} not found.", err=True)
+    if plans:
+        click.echo(f"Available plans: {', '.join(p['id'] for p in plans)}", err=True)
+    raise SystemExit(1)
+
+
+def _auto_select_plan(data: dict, plan_id: str | None) -> str:
+    """Auto-select a plan ID when not specified, or exit with an error."""
+    if plan_id is not None:
+        return plan_id
+    plans = data.get("plans") or []
+    if len(plans) == 1:
+        return plans[0]["id"]
+    if len(plans) == 0:
+        click.echo("No plans. Create one with: pm plan add <name>", err=True)
+        raise SystemExit(1)
+    click.echo("Multiple plans. Specify one:", err=True)
+    for p in plans:
+        click.echo(f"  {p['id']}: {p['name']}", err=True)
+    raise SystemExit(1)
+
+
 def save_and_push(data: dict, root: Path, message: str = "pm: update state") -> None:
     """Save state. Use 'pm push' to commit and share changes."""
     store.save(data, root)

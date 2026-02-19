@@ -21,28 +21,14 @@ import click
 from pm_core import store, git_ops, prompt_gen
 from pm_core.backend import detect_backend
 
-# Re-export shared helpers so that the rest of this module (and future
-# submodules) can use them without qualifying with ``helpers.``.
-from pm_core.cli.helpers import (  # noqa: F401 — re-exported
+# Import helpers used directly in this module.  Submodules import from
+# ``pm_core.cli.helpers`` directly rather than via re-export.
+from pm_core.cli.helpers import (
     CONTEXT_SETTINGS,
     HelpGroup,
-    _find_tui_pane,
-    _get_current_pm_session,
-    _get_session_name_for_cwd,
     _infer_pr_id,
-    _normalize_repo_url,
-    _pr_display_id,
-    _pr_id_sort_key,
-    _resolve_pr_id,
-    _resolve_repo_id,
-    _set_share_mode_env,
-    _verify_pm_repo_matches_cwd,
-    _workdirs_dir,
-    load_and_sync,
-    save_and_push,
     set_project_override,
     state_root,
-    trigger_tui_refresh,
 )
 
 

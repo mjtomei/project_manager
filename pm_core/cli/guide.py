@@ -20,7 +20,6 @@ from pm_core.cli import cli
 from pm_core.cli.helpers import (
     _find_tui_pane,
     state_root,
-    trigger_tui_refresh,
 )
 
 

@@ -18,15 +18,18 @@ from pm_core import pane_layout
 from pm_core import pane_registry
 from pm_core.backend import get_backend
 from pm_core.claude_launcher import find_claude, build_claude_shell_cmd, clear_session, launch_claude
+from pm_core.paths import configure_logger
+
+_log = configure_logger("pm.cli")
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
-    CONTEXT_SETTINGS,
     _get_current_pm_session,
     _get_session_name_for_cwd,
     _infer_pr_id,
     _pr_display_id,
     _pr_id_sort_key,
+    _require_pr,
     _resolve_pr_id,
     _resolve_repo_id,
     _workdirs_dir,
@@ -115,13 +118,7 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
     """Edit an existing PR's title, description, dependencies, or status."""
     root = state_root()
     data = store.load(root)
-    pr_entry = store.get_pr(data, pr_id)
-    if not pr_entry:
-        prs = data.get("prs") or []
-        click.echo(f"PR {pr_id} not found.", err=True)
-        if prs:
-            click.echo(f"Available PRs: {', '.join(p['id'] for p in prs)}", err=True)
-        raise SystemExit(1)
+    pr_entry = _require_pr(data, pr_id)
 
     changes = []
     if title is not None:
@@ -258,13 +255,7 @@ def pr_select(pr_id: str):
     """
     root = state_root()
     data = store.load(root)
-    pr_entry = store.get_pr(data, pr_id)
-    if not pr_entry:
-        prs = data.get("prs") or []
-        click.echo(f"PR {pr_id} not found.", err=True)
-        if prs:
-            click.echo(f"Available PRs: {', '.join(p['id'] for p in prs)}", err=True)
-        raise SystemExit(1)
+    pr_entry = _require_pr(data, pr_id)
 
     data["project"]["active_pr"] = pr_id
     save_and_push(data, root)
@@ -403,15 +394,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
                 click.echo(f"  {_pr_display_id(p)}: {p.get('title', '???')}", err=True)
             raise SystemExit(1)
 
-    pr_entry = store.get_pr(data, pr_id)
-    if not pr_entry:
-        prs = data.get("prs") or []
-        click.echo(f"PR {pr_id} not found.", err=True)
-        if prs:
-            click.echo(f"Available PRs: {', '.join(p['id'] for p in prs)}", err=True)
-        else:
-            click.echo("No PRs exist. Create one with: pm pr add <title>", err=True)
-        raise SystemExit(1)
+    pr_entry = _require_pr(data, pr_id)
 
     if pr_entry.get("status") == "in_progress":
         # If already in_progress, reuse existing workdir if available
@@ -635,8 +618,6 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False) -> No
 
         click.echo(f"Opened review window '{window_name}'")
     except Exception as e:
-        from pm_core.paths import configure_logger
-        _log = configure_logger("pm.cli")
         _log.warning("Failed to launch review window: %s", e)
 
 
@@ -666,13 +647,7 @@ def pr_done(pr_id: str | None, fresh: bool):
             raise SystemExit(1)
         click.echo(f"Auto-selected {pr_id}")
 
-    pr_entry = store.get_pr(data, pr_id)
-    if not pr_entry:
-        prs = data.get("prs") or []
-        click.echo(f"PR {pr_id} not found.", err=True)
-        if prs:
-            click.echo(f"Available PRs: {', '.join(p['id'] for p in prs)}", err=True)
-        raise SystemExit(1)
+    pr_entry = _require_pr(data, pr_id)
 
     if pr_entry.get("status") == "merged":
         click.echo(f"PR {pr_id} is already merged.", err=True)
@@ -1034,13 +1009,7 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool):
             raise SystemExit(1)
         click.echo(f"Using active PR: {pr_id}")
 
-    pr_entry = store.get_pr(data, pr_id)
-    if not pr_entry:
-        prs = data.get("prs") or []
-        click.echo(f"PR {pr_id} not found.", err=True)
-        if prs:
-            click.echo(f"Available PRs: {', '.join(p['id'] for p in prs)}", err=True)
-        raise SystemExit(1)
+    pr_entry = _require_pr(data, pr_id)
 
     # Close GitHub PR if exists
     gh_pr_number = pr_entry.get("gh_pr_number")
