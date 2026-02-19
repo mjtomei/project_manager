@@ -10,7 +10,7 @@ from pathlib import Path
 
 from pm_core.paths import configure_logger, command_log_file
 from pm_core import tmux as tmux_mod
-from pm_core import pane_layout
+from pm_core import pane_layout, pane_registry
 from pm_core import store, guide, notes
 from pm_core.tui._shell import _run_shell
 from pm_core.tui.screens import ConnectScreen
@@ -43,7 +43,7 @@ def heal_registry(session: str | None) -> None:
         if not window:
             return
 
-        data = pane_layout.load_registry(session)
+        data = pane_registry.load_registry(session)
         changed = False
 
         # Heal every window: remove dead panes, drop empty windows
@@ -76,7 +76,7 @@ def heal_registry(session: str | None) -> None:
         live_panes = tmux_mod.get_pane_indices(session, window)
         live_ids = {pid for pid, _ in live_panes}
         if tui_pane_id in live_ids:
-            wdata = pane_layout._get_window_data(data, window)
+            wdata = pane_registry._get_window_data(data, window)
             if not any(p["id"] == tui_pane_id for p in wdata["panes"]):
                 wdata["panes"].insert(0, {
                     "id": tui_pane_id,
@@ -89,7 +89,7 @@ def heal_registry(session: str | None) -> None:
                 changed = True
 
         if changed:
-            pane_layout.save_registry(session, data)
+            pane_registry.save_registry(session, data)
             _log.info("heal_registry: saved corrected registry")
         else:
             _log.info("heal_registry: registry OK")
@@ -124,25 +124,25 @@ def launch_pane(app, cmd: str, role: str, fresh: bool = False) -> None:
     _log.info("launch_pane: session=%s window=%s role=%s fresh=%s", session, window, role, fresh)
 
     # Check if a pane with this role already exists
-    existing_pane = pane_layout.find_live_pane_by_role(session, role, window=window)
+    existing_pane = pane_registry.find_live_pane_by_role(session, role, window=window)
     _log.info("launch_pane: find_live_pane_by_role returned %s", existing_pane)
     if existing_pane:
         if fresh:
             _log.info("pane with role=%s exists: %s, killing (fresh)", role, existing_pane)
-            pane_layout.kill_and_unregister(session, existing_pane)
+            pane_registry.kill_and_unregister(session, existing_pane)
         else:
             _log.info("pane with role=%s already exists: %s, focusing", role, existing_pane)
             tmux_mod.select_pane_smart(existing_pane, session, window)
             app.log_message(f"Focused existing {role} pane")
             return
 
-    data = pane_layout.load_registry(session)
+    data = pane_registry.load_registry(session)
     gen = data.get("generation", "0")
     escaped = cmd.replace("'", "'\\''")
     wrap = f"bash -c 'trap \"pm _pane-exited {session} {window} {gen} $TMUX_PANE\" EXIT; {escaped}'"
     try:
         pane_id = tmux_mod.split_pane(session, "h", wrap)
-        pane_layout.register_pane(session, window, pane_id, role, cmd)
+        pane_registry.register_pane(session, window, pane_id, role, cmd)
         pane_layout.rebalance(session, window)
         tmux_mod.select_pane_smart(pane_id, session, window)
         app.log_message(f"Launched {role} pane")
@@ -159,10 +159,10 @@ def rebalance(app) -> None:
     if not info:
         return
     session, window = info
-    data = pane_layout.load_registry(session)
-    wdata = pane_layout._get_window_data(data, window)
+    data = pane_registry.load_registry(session)
+    wdata = pane_registry._get_window_data(data, window)
     wdata["user_modified"] = False
-    pane_layout.save_registry(session, data)
+    pane_registry.save_registry(session, data)
     pane_layout.rebalance(session, window)
     app.log_message("Layout rebalanced")
 

@@ -209,7 +209,7 @@ def mock_registry(tmp_path):
     """Patch registry_path to use a temp directory."""
     def _reg_path(session):
         return tmp_path / f"{session}.json"
-    with patch("pm_core.pane_layout.registry_path", side_effect=_reg_path):
+    with patch("pm_core.pane_registry.registry_path", side_effect=_reg_path):
         yield tmp_path
 
 
