@@ -1,5 +1,6 @@
 """Tests for pm_core.claude_launcher — claude CLI launching and session management."""
 
+import json
 import os
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -14,8 +15,11 @@ from pm_core.claude_launcher import (
     _registry_path,
     _skip_permissions,
     _parse_session_id,
+    launch_claude,
+    launch_claude_print,
     launch_claude_print_background,
     launch_claude_in_tmux,
+    launch_bridge_in_tmux,
 )
 
 
@@ -242,3 +246,233 @@ class TestLaunchClaudeInTmux:
         launch_claude_in_tmux("%1", "hello", cwd="/tmp/proj")
         cmd = mock_sk.call_args[0][1]
         assert cmd.startswith("cd '/tmp/proj' && ")
+
+
+# ---------------------------------------------------------------------------
+# Session edge cases — corrupt files
+# ---------------------------------------------------------------------------
+
+class TestSessionCorruptFile:
+    def test_save_over_corrupt_json(self, tmp_path):
+        """save_session should handle corrupt JSON gracefully (lines 47-48)."""
+        path = tmp_path / ".pm-sessions.json"
+        path.write_text("{invalid json!!!")
+        save_session(tmp_path, "key", "session-1")
+        assert load_session(tmp_path, "key") == "session-1"
+
+    def test_load_non_dict_json(self, tmp_path):
+        """load_session returns None for non-dict JSON."""
+        path = tmp_path / ".pm-sessions.json"
+        path.write_text('"just a string"')
+        assert load_session(tmp_path, "key") is None
+
+    def test_load_missing_session_id(self, tmp_path):
+        """load_session returns None when entry lacks session_id."""
+        path = tmp_path / ".pm-sessions.json"
+        path.write_text(json.dumps({"key": {"other": "stuff"}}))
+        assert load_session(tmp_path, "key") is None
+
+    def test_clear_corrupt_json(self, tmp_path):
+        """clear_session should handle corrupt JSON gracefully."""
+        path = tmp_path / ".pm-sessions.json"
+        path.write_text("{bad json")
+        # Should not raise
+        clear_session(tmp_path, "key")
+
+
+# ---------------------------------------------------------------------------
+# launch_claude
+# ---------------------------------------------------------------------------
+
+class TestLaunchClaude:
+    @patch("pm_core.claude_launcher.find_claude", return_value=None)
+    def test_raises_when_no_claude(self, mock_fc, tmp_path):
+        import pytest
+        with pytest.raises(FileNotFoundError, match="claude CLI not found"):
+            launch_claude("hello", "key", tmp_path)
+
+    @patch("pm_core.claude_launcher.log_shell_command")
+    @patch("pm_core.claude_launcher.subprocess.run")
+    @patch("pm_core.claude_launcher._skip_permissions", return_value=False)
+    @patch("pm_core.claude_launcher.find_claude", return_value="/usr/bin/claude")
+    def test_new_session(self, mock_fc, mock_sp, mock_run, mock_log, tmp_path):
+        mock_run.return_value = MagicMock(returncode=0)
+        rc = launch_claude("hello", "key1", tmp_path, resume=True)
+        assert rc == 0
+        # Session should be saved
+        assert load_session(tmp_path, "key1") is not None
+        cmd = mock_run.call_args[0][0]
+        assert "--session-id" in cmd
+
+    @patch("pm_core.claude_launcher.log_shell_command")
+    @patch("pm_core.claude_launcher.subprocess.run")
+    @patch("pm_core.claude_launcher._skip_permissions", return_value=False)
+    @patch("pm_core.claude_launcher.find_claude", return_value="/usr/bin/claude")
+    def test_resume_existing_session(self, mock_fc, mock_sp, mock_run, mock_log, tmp_path):
+        save_session(tmp_path, "key1", "existing-session-id")
+        mock_run.return_value = MagicMock(returncode=0)
+        rc = launch_claude("hello", "key1", tmp_path, resume=True)
+        assert rc == 0
+        cmd = mock_run.call_args[0][0]
+        assert "--resume" in cmd
+        assert "existing-session-id" in cmd
+
+    @patch("pm_core.claude_launcher.log_shell_command")
+    @patch("pm_core.claude_launcher.subprocess.run")
+    @patch("pm_core.claude_launcher._skip_permissions", return_value=False)
+    @patch("pm_core.claude_launcher.find_claude", return_value="/usr/bin/claude")
+    def test_retry_on_failure(self, mock_fc, mock_sp, mock_run, mock_log, tmp_path):
+        """When first run fails with resume, retries with fresh session."""
+        save_session(tmp_path, "key1", "old-session")
+        mock_run.side_effect = [
+            MagicMock(returncode=1),  # First attempt fails
+            MagicMock(returncode=0),  # Retry succeeds
+        ]
+        rc = launch_claude("hello", "key1", tmp_path, resume=True)
+        assert rc == 0
+        assert mock_run.call_count == 2
+        # Second call should use --session-id (not --resume)
+        retry_cmd = mock_run.call_args_list[1][0][0]
+        assert "--session-id" in retry_cmd
+
+    @patch("pm_core.claude_launcher.log_shell_command")
+    @patch("pm_core.claude_launcher.subprocess.run")
+    @patch("pm_core.claude_launcher._skip_permissions", return_value=True)
+    @patch("pm_core.claude_launcher.find_claude", return_value="/usr/bin/claude")
+    def test_skip_permissions_flag(self, mock_fc, mock_sp, mock_run, mock_log, tmp_path):
+        mock_run.return_value = MagicMock(returncode=0)
+        launch_claude("hello", "key1", tmp_path, resume=False)
+        cmd = mock_run.call_args[0][0]
+        assert "--dangerously-skip-permissions" in cmd
+
+    @patch("pm_core.claude_launcher.log_shell_command")
+    @patch("pm_core.claude_launcher.subprocess.run")
+    @patch("pm_core.claude_launcher._skip_permissions", return_value=False)
+    @patch("pm_core.claude_launcher.find_claude", return_value="/usr/bin/claude")
+    def test_no_resume(self, mock_fc, mock_sp, mock_run, mock_log, tmp_path):
+        """resume=False skips retry logic on failure."""
+        mock_run.return_value = MagicMock(returncode=1)
+        rc = launch_claude("hello", "key1", tmp_path, resume=False)
+        assert rc == 1
+        # Should only run once (no retry)
+        assert mock_run.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# launch_claude_print
+# ---------------------------------------------------------------------------
+
+class TestLaunchClaudePrint:
+    @patch("pm_core.claude_launcher.find_claude", return_value=None)
+    def test_raises_when_no_claude(self, mock_fc):
+        import pytest
+        with pytest.raises(FileNotFoundError, match="claude CLI not found"):
+            launch_claude_print("hello")
+
+    @patch("pm_core.claude_launcher.log_shell_command")
+    @patch("pm_core.claude_launcher.subprocess.run")
+    @patch("pm_core.claude_launcher._skip_permissions", return_value=False)
+    @patch("pm_core.claude_launcher.find_claude", return_value="/usr/bin/claude")
+    def test_returns_stdout(self, mock_fc, mock_sp, mock_run, mock_log):
+        mock_run.return_value = MagicMock(returncode=0, stdout="result text")
+        result = launch_claude_print("hello")
+        assert result == "result text"
+
+    @patch("pm_core.claude_launcher.log_shell_command")
+    @patch("pm_core.claude_launcher.subprocess.run")
+    @patch("pm_core.claude_launcher._skip_permissions", return_value=True)
+    @patch("pm_core.claude_launcher.find_claude", return_value="/usr/bin/claude")
+    def test_skip_permissions(self, mock_fc, mock_sp, mock_run, mock_log):
+        mock_run.return_value = MagicMock(returncode=0, stdout="ok")
+        launch_claude_print("hello")
+        cmd = mock_run.call_args[0][0]
+        assert "--dangerously-skip-permissions" in cmd
+
+    @patch("pm_core.claude_launcher.log_shell_command")
+    @patch("pm_core.claude_launcher.subprocess.run")
+    @patch("pm_core.claude_launcher._skip_permissions", return_value=False)
+    @patch("pm_core.claude_launcher.find_claude", return_value="/usr/bin/claude")
+    def test_nonzero_returncode_logged(self, mock_fc, mock_sp, mock_run, mock_log):
+        mock_run.return_value = MagicMock(returncode=1, stdout="")
+        launch_claude_print("hello")
+        # log_shell_command called twice: once for the command, once for the failure
+        assert mock_log.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# launch_bridge_in_tmux
+# ---------------------------------------------------------------------------
+
+class TestLaunchBridgeInTmux:
+    @patch("pm_core.tmux.split_pane_background")
+    def test_returns_socket_path(self, mock_split):
+        result = launch_bridge_in_tmux(None, "/tmp/proj", "main-session")
+        assert result.startswith("/tmp/pm-bridge-")
+        assert result.endswith(".sock")
+        mock_split.assert_called_once()
+
+    @patch("pm_core.tmux.split_pane_background")
+    def test_includes_prompt(self, mock_split):
+        launch_bridge_in_tmux("my prompt", "/tmp/proj", "sess")
+        cmd = mock_split.call_args[0][2]
+        assert "--prompt" in cmd
+        assert "my prompt" in cmd
+
+    @patch("pm_core.tmux.split_pane_background")
+    def test_escapes_quotes_in_prompt(self, mock_split):
+        launch_bridge_in_tmux("it's a test", "/tmp/proj", "sess")
+        cmd = mock_split.call_args[0][2]
+        assert "it'\\''s a test" in cmd
+
+    @patch("pm_core.tmux.split_pane_background")
+    def test_no_prompt(self, mock_split):
+        launch_bridge_in_tmux(None, "/tmp/proj", "sess")
+        cmd = mock_split.call_args[0][2]
+        assert "--prompt" not in cmd
+
+
+# ---------------------------------------------------------------------------
+# launch_claude_print_background — additional coverage
+# ---------------------------------------------------------------------------
+
+class TestLaunchClaudePrintBackgroundExtra:
+    @patch("pm_core.claude_launcher._skip_permissions", return_value=True)
+    @patch("pm_core.claude_launcher.log_shell_command")
+    @patch("pm_core.claude_launcher.subprocess.run")
+    @patch("pm_core.claude_launcher.find_claude", return_value="/usr/bin/claude")
+    def test_skip_permissions_flag(self, mock_fc, mock_run, mock_log, mock_sp):
+        """Line 301: _skip_permissions adds --dangerously-skip-permissions."""
+        import threading
+        mock_run.return_value = MagicMock(stdout="out", stderr="", returncode=0)
+        event = threading.Event()
+        results = {}
+
+        def cb(stdout, stderr, rc):
+            results["cmd"] = mock_run.call_args[0][0]
+            results["rc"] = rc
+            event.set()
+
+        launch_claude_print_background("test", callback=cb)
+        event.wait(timeout=2)
+        assert "--dangerously-skip-permissions" in results["cmd"]
+
+    @patch("pm_core.claude_launcher._skip_permissions", return_value=False)
+    @patch("pm_core.claude_launcher.log_shell_command")
+    @patch("pm_core.claude_launcher.subprocess.run")
+    @patch("pm_core.claude_launcher.find_claude", return_value="/usr/bin/claude")
+    def test_nonzero_returncode(self, mock_fc, mock_run, mock_log, mock_sp):
+        """Line 311: non-zero returncode is logged."""
+        import threading
+        mock_run.return_value = MagicMock(stdout="", stderr="err", returncode=1)
+        event = threading.Event()
+        results = {}
+
+        def cb(stdout, stderr, rc):
+            results["rc"] = rc
+            event.set()
+
+        launch_claude_print_background("test", callback=cb)
+        event.wait(timeout=2)
+        assert results["rc"] == 1
+        # log_shell_command called twice (once for cmd, once for failure)
+        assert mock_log.call_count == 2
