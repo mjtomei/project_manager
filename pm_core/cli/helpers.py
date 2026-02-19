@@ -222,6 +222,32 @@ def trigger_tui_refresh() -> None:
         _log.debug("Could not trigger TUI refresh: %s", e)
 
 
+def _resolve_repo_dir(root: Path, data: dict) -> Path:
+    """Determine the target repo directory from pm state.
+
+    Used when a command needs to run tools (like ``gh``) against the
+    target repo.  Returns the parent of an internal pm/ dir, otherwise
+    falls back to the repo URL (if it's a local path) or cwd.
+    """
+    if store.is_internal_pm_dir(root):
+        return root.parent
+    repo_url = data.get("project", {}).get("repo", "")
+    if repo_url and Path(repo_url).is_dir():
+        return Path(repo_url)
+    return Path.cwd()
+
+
+def _gh_state_to_status(state: str, is_draft: bool) -> str:
+    """Map a GitHub PR state string to a local pm status."""
+    if state == "MERGED":
+        return "merged"
+    if state == "CLOSED":
+        return "closed"
+    if state == "OPEN":
+        return "in_progress" if is_draft else "in_review"
+    return "pending"
+
+
 def _workdirs_dir(data: dict) -> Path:
     """Return the workdirs base path for this project.
 

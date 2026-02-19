@@ -16,8 +16,10 @@ from pm_core.claude_launcher import find_claude, launch_claude, launch_claude_pr
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
     _auto_select_plan,
+    _gh_state_to_status,
     _pr_display_id,
     _require_plan,
+    _resolve_repo_dir,
     save_and_push,
     state_root,
     trigger_tui_refresh,
@@ -626,15 +628,7 @@ def _import_github_prs(root: Path, data: dict) -> None:
     """Import existing GitHub PRs into yaml during init."""
     from pm_core import gh_ops
 
-    # Determine repo directory for gh CLI
-    if store.is_internal_pm_dir(root):
-        repo_dir = str(root.parent)
-    else:
-        repo_url = data["project"].get("repo", "")
-        if repo_url and Path(repo_url).is_dir():
-            repo_dir = repo_url
-        else:
-            repo_dir = str(Path.cwd())
+    repo_dir = str(_resolve_repo_dir(root, data))
 
     click.echo("Checking for existing GitHub PRs...")
     try:
@@ -655,17 +649,7 @@ def _import_github_prs(root: Path, data: dict) -> None:
         branch = gh_pr.get("headRefName", "")
         number = gh_pr.get("number")
         title = gh_pr.get("title", "")
-        is_draft = gh_pr.get("isDraft", False)
-        gh_s = gh_pr.get("state", "OPEN")
-
-        if gh_s == "MERGED":
-            status = "merged"
-        elif gh_s == "CLOSED":
-            status = "closed"
-        elif gh_s == "OPEN":
-            status = "in_progress" if is_draft else "in_review"
-        else:
-            status = "pending"
+        status = _gh_state_to_status(gh_pr.get("state", "OPEN"), gh_pr.get("isDraft", False))
 
         existing_ids = {p["id"] for p in data["prs"]}
         desc = gh_pr.get("body", "") or ""

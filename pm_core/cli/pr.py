@@ -26,11 +26,13 @@ from pm_core.cli import cli
 from pm_core.cli.helpers import (
     _get_current_pm_session,
     _get_session_name_for_cwd,
+    _gh_state_to_status,
     _infer_pr_id,
     _pr_display_id,
     _pr_id_sort_key,
     _require_pr,
     _resolve_pr_id,
+    _resolve_repo_dir,
     _resolve_repo_id,
     _workdirs_dir,
     save_and_push,
@@ -799,17 +801,9 @@ def pr_import_github(gh_state: str):
         click.echo("This command only works with the GitHub backend.", err=True)
         raise SystemExit(1)
 
-    # Determine repo directory for gh CLI
-    if store.is_internal_pm_dir(root):
-        repo_dir = str(root.parent)
-    else:
-        repo_url = data["project"].get("repo", "")
-        if repo_url and Path(repo_url).is_dir():
-            repo_dir = repo_url
-        else:
-            repo_dir = str(Path.cwd())
-
     from pm_core import gh_ops
+
+    repo_dir = str(_resolve_repo_dir(root, data))
 
     click.echo("Fetching PRs from GitHub...")
     gh_prs = gh_ops.list_prs(repo_dir, state=gh_state)
@@ -836,17 +830,7 @@ def pr_import_github(gh_state: str):
             skipped += 1
             continue
 
-        # Map GitHub state to local status
-        gh_s = gh_pr.get("state", "OPEN")
-        is_draft = gh_pr.get("isDraft", False)
-        if gh_s == "MERGED":
-            status = "merged"
-        elif gh_s == "CLOSED":
-            status = "closed"
-        elif gh_s == "OPEN":
-            status = "in_progress" if is_draft else "in_review"
-        else:
-            status = "pending"
+        status = _gh_state_to_status(gh_pr.get("state", "OPEN"), gh_pr.get("isDraft", False))
 
         # Generate a hash-based pr_id from title + body
         existing_ids = {p["id"] for p in data["prs"]}

@@ -14,10 +14,66 @@ from pm_core.claude_launcher import find_claude, launch_claude, clear_session
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
+    _resolve_repo_dir,
     save_and_push,
     state_root,
     trigger_tui_refresh,
 )
+
+
+def _run_clustering(
+    repo_root: Path,
+    weights: dict[str, float],
+    threshold: float = 0.15,
+    max_commits: int = 500,
+    verbose: bool = True,
+) -> tuple[list, list, dict]:
+    """Extract chunks, partition, cluster, and return (clusters, chunks, chunk_map).
+
+    When *verbose* is True, prints per-partition progress lines.
+    """
+    from pm_core.cluster import extract_chunks, compute_edges, agglomerative_cluster, pre_partition
+    from pm_core.cluster.cluster_graph import Cluster
+
+    click.echo(f"Extracting chunks from {repo_root} ...")
+    chunks = extract_chunks(repo_root)
+    click.echo(f"  {len(chunks)} chunks extracted")
+
+    click.echo("Pre-partitioning ...")
+    partitions = pre_partition(chunks)
+    click.echo(f"  {len(partitions)} partitions: {', '.join(partitions.keys())}")
+
+    clusters = []
+    cluster_id = 0
+    for part_name, part_chunks in partitions.items():
+        file_count = sum(1 for c in part_chunks if c.kind in ("function", "class", "file"))
+        if file_count <= 3:
+            cluster_id += 1
+            clusters.append(Cluster(
+                id=str(cluster_id),
+                chunk_ids={c.id for c in part_chunks if c.kind in ("function", "class", "file")},
+                name=part_name,
+            ))
+            if verbose:
+                click.echo(f"  [{part_name}] {file_count} chunks → 1 cluster (small partition)")
+            continue
+
+        if verbose:
+            click.echo(f"  [{part_name}] computing edges for {len(part_chunks)} chunks ...")
+        part_edges = compute_edges(part_chunks, weights=weights, repo_root=repo_root, max_commits=max_commits)
+        part_clusters = agglomerative_cluster(part_chunks, part_edges, threshold=threshold)
+        for c in part_clusters:
+            cluster_id += 1
+            c.id = str(cluster_id)
+            c.name = f"{part_name}: {c.name}" if c.name else part_name
+        clusters.extend(part_clusters)
+        if verbose:
+            click.echo(f"  [{part_name}] {len(part_edges)} edges → {len(part_clusters)} clusters")
+
+    click.echo(f"  {len(clusters)} clusters found")
+
+    chunk_map = {c.id: c for c in chunks}
+    return clusters, chunks, chunk_map
 
 
 @cli.group()
@@ -35,23 +91,11 @@ def cluster():
               help="Output format")
 def cluster_auto(threshold, max_commits, weights, output_fmt):
     """Discover feature clusters automatically."""
-    from pm_core.cluster import extract_chunks, compute_edges, agglomerative_cluster, pre_partition
     from pm_core.cluster import clusters_to_plan_markdown, clusters_to_json, clusters_to_text
-    from pm_core.cluster.cluster_graph import Cluster
 
     root = state_root()
     data = store.load(root)
-    project = data.get("project", {})
-
-    # Determine repo root
-    if store.is_internal_pm_dir(root):
-        repo_root = root.parent
-    else:
-        repo_url = project.get("repo", "")
-        if repo_url and Path(repo_url).is_dir():
-            repo_root = Path(repo_url)
-        else:
-            repo_root = Path.cwd()
+    repo_root = _resolve_repo_dir(root, data)
 
     # Parse weights
     w = {"structural": 0.2, "semantic": 0.3, "cochange": 0.2, "callgraph": 0.3}
@@ -60,43 +104,9 @@ def cluster_auto(threshold, max_commits, weights, output_fmt):
             k, v = pair.split("=")
             w[k.strip()] = float(v.strip())
 
-    click.echo(f"Extracting chunks from {repo_root} ...")
-    chunks = extract_chunks(repo_root)
-    click.echo(f"  {len(chunks)} chunks extracted")
-
-    click.echo("Pre-partitioning ...")
-    partitions = pre_partition(chunks)
-    click.echo(f"  {len(partitions)} partitions: {', '.join(partitions.keys())}")
-
-    clusters = []
-    cluster_id = 0
-    for part_name, part_chunks in partitions.items():
-        file_count = sum(1 for c in part_chunks if c.kind in ("function", "class", "file"))
-        if file_count <= 3:
-            # Small partition — single cluster, no need for metric computation
-            cluster_id += 1
-            clusters.append(Cluster(
-                id=str(cluster_id),
-                chunk_ids={c.id for c in part_chunks if c.kind in ("function", "class", "file")},
-                name=part_name,
-            ))
-            click.echo(f"  [{part_name}] {file_count} chunks → 1 cluster (small partition)")
-            continue
-
-        click.echo(f"  [{part_name}] computing edges for {len(part_chunks)} chunks ...")
-        part_edges = compute_edges(part_chunks, weights=w, repo_root=repo_root, max_commits=max_commits)
-        part_clusters = agglomerative_cluster(part_chunks, part_edges, threshold=threshold)
-        # Re-number cluster IDs to be globally unique
-        for c in part_clusters:
-            cluster_id += 1
-            c.id = str(cluster_id)
-            c.name = f"{part_name}: {c.name}" if c.name else part_name
-        clusters.extend(part_clusters)
-        click.echo(f"  [{part_name}] {len(part_edges)} edges → {len(part_clusters)} clusters")
-
-    click.echo(f"  {len(clusters)} clusters found")
-
-    chunk_map = {c.id: c for c in chunks}
+    clusters, chunks, chunk_map = _run_clustering(
+        repo_root, weights=w, threshold=threshold, max_commits=max_commits,
+    )
 
     if output_fmt == "text":
         click.echo("")
@@ -130,52 +140,17 @@ def cluster_auto(threshold, max_commits, weights, output_fmt):
 def cluster_explore(bridged, fresh):
     """Interactively explore code clusters with Claude."""
     import tempfile
-    from pm_core.cluster import extract_chunks, compute_edges, agglomerative_cluster, pre_partition
     from pm_core.cluster import clusters_to_text
-    from pm_core.cluster.cluster_graph import Cluster
 
     root = state_root()
     data = store.load(root)
-
-    if store.is_internal_pm_dir(root):
-        repo_root = root.parent
-    else:
-        repo_url = data.get("project", {}).get("repo", "")
-        if repo_url and Path(repo_url).is_dir():
-            repo_root = Path(repo_url)
-        else:
-            repo_root = Path.cwd()
-
-    click.echo("Extracting chunks ...")
-    chunks = extract_chunks(repo_root)
-    click.echo(f"  {len(chunks)} chunks")
-
-    click.echo("Pre-partitioning ...")
-    partitions = pre_partition(chunks)
-    click.echo(f"  {len(partitions)} partitions: {', '.join(partitions.keys())}")
+    repo_root = _resolve_repo_dir(root, data)
 
     w = {"structural": 0.25, "semantic": 0.25, "cochange": 0.25, "callgraph": 0.25}
-    clusters = []
-    cluster_id = 0
-    for part_name, part_chunks in partitions.items():
-        file_count = sum(1 for c in part_chunks if c.kind in ("function", "class", "file"))
-        if file_count <= 3:
-            cluster_id += 1
-            clusters.append(Cluster(
-                id=str(cluster_id),
-                chunk_ids={c.id for c in part_chunks if c.kind in ("function", "class", "file")},
-                name=part_name,
-            ))
-            continue
-        part_edges = compute_edges(part_chunks, weights=w, repo_root=repo_root)
-        part_clusters = agglomerative_cluster(part_chunks, part_edges, threshold=0.15)
-        for c in part_clusters:
-            cluster_id += 1
-            c.id = str(cluster_id)
-            c.name = f"{part_name}: {c.name}" if c.name else part_name
-        clusters.extend(part_clusters)
+    clusters, chunks, chunk_map = _run_clustering(
+        repo_root, weights=w, verbose=False,
+    )
 
-    chunk_map = {c.id: c for c in chunks}
     summary = clusters_to_text(clusters, chunk_map)
 
     # Write summary to temp file for Claude context
@@ -183,7 +158,6 @@ def cluster_explore(bridged, fresh):
         f.write(summary)
         f.write("\n\n--- Cluster Data ---\n")
         f.write(f"Total chunks: {len(chunks)}\n")
-        f.write(f"Partitions: {len(partitions)} ({', '.join(partitions.keys())})\n")
         f.write(f"Clusters: {len(clusters)}\n")
         f.write(f"Threshold: 0.15\n")
         f.write(f"Weights: {w}\n")
