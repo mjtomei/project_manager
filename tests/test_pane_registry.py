@@ -7,7 +7,6 @@ from unittest.mock import patch
 import pytest
 
 from pm_core.pane_registry import (
-    base_session_name,
     load_registry,
     save_registry,
     register_pane,
