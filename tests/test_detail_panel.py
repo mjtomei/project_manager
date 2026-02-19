@@ -223,6 +223,18 @@ class TestDetailPanelRender:
         assert "plan-abc" in text
         assert "My Plan" in text
 
+    def test_render_with_plan_no_name(self):
+        panel = self._make_panel(
+            pr_data={
+                "id": "pr-x", "title": "T", "status": "pending",
+                "branch": "b", "plan": "plan-abc",
+            },
+            plan={"file": "plan.md"},
+        )
+        result = self._render(panel)
+        text = str(result.renderable)
+        assert "plan-abc" in text
+
     def test_render_with_machine(self):
         panel = self._make_panel(pr_data={
             "id": "pr-x", "title": "T", "status": "pending",

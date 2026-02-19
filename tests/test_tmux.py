@@ -9,11 +9,14 @@ from pm_core.tmux import (
     session_exists,
     create_session,
     new_window,
+    new_window_get_pane,
     split_pane,
     split_pane_background,
     split_pane_at,
     send_keys_literal,
     kill_window,
+    apply_layout,
+    get_pane_indices,
     get_pane_geometries,
     get_window_id,
     get_window_size,
@@ -21,10 +24,13 @@ from pm_core.tmux import (
     list_windows,
     find_window_by_name,
     select_window,
+    select_pane_smart,
     is_zoomed,
     unzoom_pane,
     get_session_name,
     current_or_base_session,
+    list_grouped_sessions,
+    find_unattached_grouped_session,
 )
 
 
@@ -386,3 +392,128 @@ class TestCurrentOrBaseSession:
             MagicMock(returncode=0, stdout="1\n"),  # proj~2 attached
         ]
         assert current_or_base_session("proj") == "proj~2"
+
+
+# ---------------------------------------------------------------------------
+# new_window_get_pane
+# ---------------------------------------------------------------------------
+
+class TestNewWindowGetPane:
+    @patch("pm_core.tmux.get_pane_indices", return_value=[("%5", 0)])
+    @patch("pm_core.tmux.current_or_base_session", return_value="sess")
+    @patch("pm_core.tmux.find_window_by_name", return_value={"id": "@1", "index": "1", "name": "review"})
+    @patch("pm_core.tmux.subprocess.run")
+    def test_returns_pane_id(self, mock_run, mock_fwbn, mock_cobs, mock_gpi):
+        mock_run.return_value = MagicMock(returncode=0)
+        result = new_window_get_pane("sess", "review", "bash", "/tmp")
+        assert result == "%5"
+
+    @patch("pm_core.tmux.find_window_by_name", return_value=None)
+    @patch("pm_core.tmux.subprocess.run")
+    def test_returns_none_when_window_not_found(self, mock_run, mock_fwbn):
+        mock_run.return_value = MagicMock(returncode=0)
+        result = new_window_get_pane("sess", "review", "bash", "/tmp")
+        assert result is None
+
+    @patch("pm_core.tmux.get_pane_indices", return_value=[])
+    @patch("pm_core.tmux.current_or_base_session", return_value="sess")
+    @patch("pm_core.tmux.find_window_by_name", return_value={"id": "@1", "index": "1", "name": "review"})
+    @patch("pm_core.tmux.subprocess.run")
+    def test_returns_none_when_no_panes(self, mock_run, mock_fwbn, mock_cobs, mock_gpi):
+        mock_run.return_value = MagicMock(returncode=0)
+        result = new_window_get_pane("sess", "review", "bash", "/tmp")
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# apply_layout
+# ---------------------------------------------------------------------------
+
+class TestApplyLayout:
+    @patch("pm_core.tmux.subprocess.run")
+    def test_failure_logs_warning(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=1, stderr="layout error")
+        result = apply_layout("sess", "0", "bad-layout")
+        assert result is False
+
+
+# ---------------------------------------------------------------------------
+# get_pane_indices
+# ---------------------------------------------------------------------------
+
+class TestGetPaneIndices:
+    @patch("pm_core.tmux.subprocess.run")
+    def test_error_returns_empty(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=1, stdout="")
+        assert get_pane_indices("sess") == []
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_parses_output(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="%0 0\n%1 1\n")
+        result = get_pane_indices("sess")
+        assert result == [("%0", 0), ("%1", 1)]
+
+
+# ---------------------------------------------------------------------------
+# select_pane_smart
+# ---------------------------------------------------------------------------
+
+class TestSelectPaneSmart:
+    @patch("pm_core.tmux.zoom_pane")
+    @patch("pm_core.tmux.select_pane")
+    @patch("pm_core.pane_layout.is_mobile", return_value=True)
+    def test_zooms_in_mobile(self, mock_mobile, mock_select, mock_zoom):
+        select_pane_smart("%1", "sess", "0")
+        mock_select.assert_called_once_with("%1")
+        mock_zoom.assert_called_once_with("%1")
+
+    @patch("pm_core.tmux.zoom_pane")
+    @patch("pm_core.tmux.select_pane")
+    @patch("pm_core.pane_layout.is_mobile", return_value=False)
+    def test_no_zoom_in_desktop(self, mock_mobile, mock_select, mock_zoom):
+        select_pane_smart("%1", "sess", "0")
+        mock_select.assert_called_once_with("%1")
+        mock_zoom.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# list_grouped_sessions / find_unattached_grouped_session
+# ---------------------------------------------------------------------------
+
+class TestListGroupedSessions:
+    @patch("pm_core.tmux.subprocess.run")
+    def test_error_returns_empty(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=1, stdout="")
+        assert list_grouped_sessions("proj") == []
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_filters_and_sorts(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="proj\nproj~2\nproj~1\nother~1\n"
+        )
+        result = list_grouped_sessions("proj")
+        assert result == ["proj~1", "proj~2"]
+
+
+class TestFindUnattachedGroupedSession:
+    @patch("pm_core.tmux.list_grouped_sessions", return_value=[])
+    def test_no_grouped_returns_none(self, mock_lg):
+        assert find_unattached_grouped_session("proj") is None
+
+    @patch("pm_core.tmux.subprocess.run")
+    @patch("pm_core.tmux.list_grouped_sessions", return_value=["proj~1", "proj~2"])
+    def test_all_attached_returns_none(self, mock_lg, mock_run):
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="1\n"),  # proj~1 attached
+            MagicMock(returncode=0, stdout="1\n"),  # proj~2 attached
+        ]
+        assert find_unattached_grouped_session("proj") is None
+
+    @patch("pm_core.tmux.subprocess.run")
+    @patch("pm_core.tmux.list_grouped_sessions", return_value=["proj~1", "proj~2"])
+    def test_finds_first_unattached(self, mock_lg, mock_run):
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="1\n"),  # proj~1 attached
+            MagicMock(returncode=0, stdout="0\n"),  # proj~2 unattached
+        ]
+        assert find_unattached_grouped_session("proj") == "proj~2"
