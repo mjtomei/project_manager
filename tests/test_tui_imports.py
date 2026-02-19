@@ -164,6 +164,11 @@ class TestPaneOpsImports:
         from pm_core.tui.pane_ops import auto_launch_guide
         assert callable(auto_launch_guide)
 
+    def test_heal_registry(self):
+        from pm_core.tui.pane_ops import heal_registry
+        sig = inspect.signature(heal_registry)
+        assert "session" in sig.parameters
+
     def test_guide_setup_steps_constant(self):
         from pm_core.tui.pane_ops import GUIDE_SETUP_STEPS
         assert isinstance(GUIDE_SETUP_STEPS, set)
