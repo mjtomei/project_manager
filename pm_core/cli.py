@@ -1834,11 +1834,19 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False) -> No
         )
         diff_pane = tmux_mod.split_pane_at(claude_pane, "h", diff_cmd, background=True)
 
-        # Don't register review panes in the main session's pane registry.
-        # The registry is single-window; registering here would overwrite
-        # the main TUI window's registry, causing reconciliation to remove
-        # all main-window pane entries.  The review window doesn't need
-        # managed layout — it's a simple two-pane split.
+        # Register review panes under the review window (multi-window safe).
+        # Derive window ID from the pane we just created rather than
+        # searching by name, which is more robust.
+        import subprocess as _sp_rev
+        wid_result = _sp_rev.run(
+            tmux_mod._tmux_cmd("display", "-t", claude_pane, "-p", "#{window_id}"),
+            capture_output=True, text=True,
+        )
+        review_win_id = wid_result.stdout.strip()
+        if review_win_id:
+            pane_layout.register_pane(pm_session, review_win_id, claude_pane, "review-claude", claude_cmd)
+            if diff_pane:
+                pane_layout.register_pane(pm_session, review_win_id, diff_pane, "review-diff", "diff-shell")
 
         click.echo(f"Opened review window '{window_name}'")
     except Exception as e:
@@ -2367,6 +2375,9 @@ def _register_tmux_bindings(session_name: str) -> None:
                 check=False)
     _sp.run(tmux_mod._tmux_cmd("set-hook", "-g", "after-kill-pane",
              "run-shell 'pm _pane-closed'"), check=False)
+    _sp.run(tmux_mod._tmux_cmd("set-hook", "-gw", "after-split-window",
+             "run-shell 'pm _pane-opened \"#{session_name}\" \"#{window_id}\" \"#{pane_id}\"'"),
+            check=False)
     # Auto-rebalance when window resizes (triggered by client switches
     # with window-size=latest, or moving terminal to a different monitor).
     # Uses "window-resized" (fires on any window size change) not
@@ -2465,11 +2476,11 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
         # Check if the session has the expected panes
         live_panes = tmux_mod.get_pane_indices(session_name)
         registry = pane_layout.load_registry(session_name)
-        registered_panes = registry.get("panes", [])
+        all_registered = [p for _, p in pane_layout._iter_all_panes(registry)]
 
         # Find which registered panes are still alive
         live_pane_ids = {p[0] for p in live_panes}
-        roles_alive = {p["role"] for p in registered_panes if p["id"] in live_pane_ids}
+        roles_alive = {p["role"] for p in all_registered if p["id"] in live_pane_ids}
 
         _log.info("session exists: %s", session_name)
         _log.info("roles_alive: %s", roles_alive)
@@ -2514,8 +2525,8 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
     import time as _time
     generation = str(int(_time.time()))
     pane_layout.save_registry(session_name, {
-        "session": session_name, "window": "0", "panes": [],
-        "user_modified": False, "generation": generation,
+        "session": session_name, "windows": {},
+        "generation": generation,
     })
 
     # Always create session with TUI in the left pane
@@ -2737,7 +2748,8 @@ def session_mobile(force: bool | None):
                 # Entering mobile: unzoom current window before rebalance
                 tmux_mod.unzoom_pane(session_name, window)
             data = pane_layout.load_registry(session_name)
-            data["user_modified"] = False
+            for wdata in data.get("windows", {}).values():
+                wdata["user_modified"] = False
             pane_layout.save_registry(session_name, data)
             pane_layout.rebalance(session_name, window)
             if force:
@@ -3569,11 +3581,12 @@ def window_resized_cmd(session: str, window: str):
 
     base = pane_layout.base_session_name(session)
     data = pane_layout.load_registry(base)
-    if not data["panes"]:
-        _log.info("_window-resized: no panes in registry for %s, exiting", base)
+    wdata = pane_layout._get_window_data(data, window)
+    if not wdata["panes"]:
+        _log.info("_window-resized: no panes in registry for %s window %s, exiting", base, window)
         return
 
-    _log.info("_window-resized: %d panes in registry, debouncing...", len(data["panes"]))
+    _log.info("_window-resized: %d panes in window %s, debouncing...", len(wdata["panes"]), window)
 
     # Debounce: write our PID, sleep, then only proceed if we're still
     # the latest resize event.  This avoids N rebalances during a drag.
@@ -3647,11 +3660,12 @@ def rebalance_cmd():
     window = tmux_mod.get_window_id(session)
 
     data = pane_layout.load_registry(session)
-    if not data["panes"]:
+    wdata = pane_layout._get_window_data(data, window)
+    if not wdata["panes"]:
         click.echo("No panes registered for this session.", err=True)
         raise SystemExit(1)
 
-    data["user_modified"] = False
+    wdata["user_modified"] = False
     pane_layout.save_registry(session, data)
 
     # Unzoom before rebalance so layout applies to all panes
@@ -3739,7 +3753,7 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     # If session specified, use it
     if session:
         data = pane_layout.load_registry(session)
-        for pane in data.get("panes", []):
+        for _, pane in pane_layout._iter_all_panes(data):
             if pane.get("role") == "tui":
                 return pane.get("id"), session
         return None, None
@@ -3749,7 +3763,7 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
         current_session = tmux_mod.get_session_name()
         if current_session.startswith("pm-"):
             data = pane_layout.load_registry(current_session)
-            for pane in data.get("panes", []):
+            for _, pane in pane_layout._iter_all_panes(data):
                 if pane.get("role") == "tui":
                     return pane.get("id"), current_session
 
@@ -3757,7 +3771,7 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     expected_session = _get_session_name_for_cwd()
     if tmux_mod.session_exists(expected_session):
         data = pane_layout.load_registry(expected_session)
-        for pane in data.get("panes", []):
+        for _, pane in pane_layout._iter_all_panes(data):
             if pane.get("role") == "tui":
                 return pane.get("id"), expected_session
 
@@ -3772,9 +3786,26 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     for sess in result.stdout.strip().splitlines():
         if sess.startswith("pm-") and "~" not in sess:
             data = pane_layout.load_registry(sess)
-            for pane in data.get("panes", []):
+            for _, pane in pane_layout._iter_all_panes(data):
                 if pane.get("role") == "tui":
                     return pane.get("id"), sess
+
+    # Last resort: search tmux directly for a pane running 'pm _tui'.
+    # This handles cases where the TUI pane was removed from the registry
+    # (e.g. during heal testing) but is still alive in tmux.
+    result = subprocess.run(
+        tmux_mod._tmux_cmd("list-panes", "-a",
+                           "-F", "#{pane_id} #{session_name} #{pane_current_command} #{pane_start_command}"),
+        capture_output=True, text=True
+    )
+    if result.returncode == 0:
+        for line in result.stdout.strip().splitlines():
+            parts = line.split(None, 3)
+            if len(parts) >= 3 and parts[1].startswith("pm-"):
+                # Check if command contains 'pm _tui' or 'pm-tui'
+                cmd_text = " ".join(parts[2:])
+                if "_tui" in cmd_text:
+                    return parts[0], parts[1]
 
     return None, None
 

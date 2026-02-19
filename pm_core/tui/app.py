@@ -876,8 +876,8 @@ class ProjectManagerApp(App):
     def _heal_registry(self) -> None:
         """Fix pane registry discrepancies on TUI startup.
 
-        Ensures the registry points to the correct window, removes panes
-        that are no longer alive, and re-registers the TUI pane if missing.
+        Heals all windows: removes dead panes, cleans empty window entries,
+        and ensures the TUI pane is registered in the current window.
         """
         session = self._session_name
         if not session or not tmux_mod.in_tmux():
@@ -895,35 +895,46 @@ class ProjectManagerApp(App):
             data = pane_layout.load_registry(session)
             changed = False
 
-            # Fix window pointer if it drifted (e.g. review-window registration)
-            if data.get("window") != window:
-                _log.info("heal_registry: fixing window %s -> %s",
-                          data.get("window"), window)
-                data["window"] = window
-                changed = True
+            # Heal every window: remove dead panes, drop empty windows
+            for win_id in list(data.get("windows", {})):
+                wdata = data["windows"][win_id]
+                live_panes = tmux_mod.get_pane_indices(session, win_id)
+                live_ids = {pid for pid, _ in live_panes}
 
-            # Remove panes not alive in this window
+                # If no live panes returned for this window, it's gone
+                if not live_ids:
+                    if wdata["panes"]:
+                        _log.info("heal_registry: window %s has no live panes, removing", win_id)
+                        del data["windows"][win_id]
+                        changed = True
+                    continue
+
+                before = len(wdata["panes"])
+                wdata["panes"] = [p for p in wdata["panes"] if p["id"] in live_ids]
+                removed = before - len(wdata["panes"])
+                if removed:
+                    _log.info("heal_registry: removed %d dead pane(s) from window %s", removed, win_id)
+                    changed = True
+
+                # Drop empty window entry
+                if not wdata["panes"]:
+                    del data["windows"][win_id]
+                    changed = True
+
+            # Ensure TUI pane is registered in the current window
             live_panes = tmux_mod.get_pane_indices(session, window)
             live_ids = {pid for pid, _ in live_panes}
-
-            before = len(data["panes"])
-            data["panes"] = [p for p in data["panes"] if p["id"] in live_ids]
-            removed = before - len(data["panes"])
-            if removed:
-                _log.info("heal_registry: removed %d dead pane(s)", removed)
-                changed = True
-
-            # Ensure TUI pane is registered
             if tui_pane_id in live_ids:
-                if not any(p["id"] == tui_pane_id for p in data["panes"]):
-                    data["panes"].insert(0, {
+                wdata = pane_layout._get_window_data(data, window)
+                if not any(p["id"] == tui_pane_id for p in wdata["panes"]):
+                    wdata["panes"].insert(0, {
                         "id": tui_pane_id,
                         "role": "tui",
                         "order": 0,
                         "cmd": "tui",
                     })
-                    _log.info("heal_registry: re-registered TUI pane %s",
-                              tui_pane_id)
+                    _log.info("heal_registry: re-registered TUI pane %s in window %s",
+                              tui_pane_id, window)
                     changed = True
 
             if changed:
@@ -1720,7 +1731,7 @@ class ProjectManagerApp(App):
         _log.info("_launch_pane: session=%s window=%s role=%s fresh=%s", session, window, role, fresh)
 
         # Check if a pane with this role already exists
-        existing_pane = pane_layout.find_live_pane_by_role(session, role)
+        existing_pane = pane_layout.find_live_pane_by_role(session, role, window=window)
         _log.info("_launch_pane: find_live_pane_by_role returned %s", existing_pane)
         if existing_pane:
             if fresh:
@@ -1799,7 +1810,8 @@ class ProjectManagerApp(App):
             return
         session, window = info
         data = pane_layout.load_registry(session)
-        data["user_modified"] = False
+        wdata = pane_layout._get_window_data(data, window)
+        wdata["user_modified"] = False
         pane_layout.save_registry(session, data)
         pane_layout.rebalance(session, window)
         self.log_message("Layout rebalanced")
