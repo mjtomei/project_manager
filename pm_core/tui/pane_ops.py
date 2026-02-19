@@ -35,26 +35,30 @@ def get_session_and_window(app) -> tuple[str, str] | None:
     return session, window
 
 
-def launch_pane(app, cmd: str, role: str) -> None:
+def launch_pane(app, cmd: str, role: str, fresh: bool = False) -> None:
     """Launch a wrapped pane, register it, and rebalance.
 
     If a pane with this role already exists and is alive, focuses it instead
-    of creating a duplicate.
+    of creating a duplicate. When fresh=True, kills the existing pane first.
     """
     info = get_session_and_window(app)
     if not info:
         return
     session, window = info
-    _log.info("launch_pane: session=%s window=%s role=%s", session, window, role)
+    _log.info("launch_pane: session=%s window=%s role=%s fresh=%s", session, window, role, fresh)
 
     # Check if a pane with this role already exists
-    existing_pane = pane_layout.find_live_pane_by_role(session, role)
+    existing_pane = pane_layout.find_live_pane_by_role(session, role, window=window)
     _log.info("launch_pane: find_live_pane_by_role returned %s", existing_pane)
     if existing_pane:
-        _log.info("pane with role=%s already exists: %s, focusing", role, existing_pane)
-        tmux_mod.select_pane_smart(existing_pane, session, window)
-        app.log_message(f"Focused existing {role} pane")
-        return
+        if fresh:
+            _log.info("pane with role=%s exists: %s, killing (fresh)", role, existing_pane)
+            pane_layout.kill_and_unregister(session, existing_pane)
+        else:
+            _log.info("pane with role=%s already exists: %s, focusing", role, existing_pane)
+            tmux_mod.select_pane_smart(existing_pane, session, window)
+            app.log_message(f"Focused existing {role} pane")
+            return
 
     data = pane_layout.load_registry(session)
     gen = data.get("generation", "0")
@@ -80,7 +84,8 @@ def rebalance(app) -> None:
         return
     session, window = info
     data = pane_layout.load_registry(session)
-    data["user_modified"] = False
+    wdata = pane_layout._get_window_data(data, window)
+    wdata["user_modified"] = False
     pane_layout.save_registry(session, data)
     pane_layout.rebalance(session, window)
     app.log_message("Layout rebalanced")
@@ -98,19 +103,21 @@ def find_editor() -> str:
 def edit_plan(app) -> None:
     """Edit the selected PR in an interactive editor."""
     from pm_core.tui.tech_tree import TechTree
-    _log.info("edit_plan")
+    fresh = app._consume_z()
+    _log.info("edit_plan fresh=%s", fresh)
     tree = app.query_one("#tech-tree", TechTree)
     pr_id = tree.selected_pr_id
     if not pr_id:
         app.log_message("No PR selected")
         return
-    launch_pane(app, f"pm pr edit {pr_id}", "pr-edit")
+    launch_pane(app, f"pm pr edit {pr_id}", "pr-edit", fresh=fresh)
 
 
 def view_plan(app) -> None:
     """Open the plan file associated with the selected PR in a pane."""
     from pm_core.tui.tech_tree import TechTree
-    _log.info("view_plan")
+    fresh = app._consume_z()
+    _log.info("view_plan fresh=%s", fresh)
     tree = app.query_one("#tech-tree", TechTree)
     pr_id = tree.selected_pr_id
     if not pr_id:
@@ -129,7 +136,7 @@ def view_plan(app) -> None:
     if not plan_path.exists():
         app.log_message(f"Plan file not found: {plan_path}")
         return
-    launch_pane(app, f"less {plan_path}", "plan")
+    launch_pane(app, f"less {plan_path}", "plan", fresh=fresh)
 
 
 # ---------------------------------------------------------------------------
@@ -138,24 +145,27 @@ def view_plan(app) -> None:
 
 def launch_notes(app) -> None:
     """Launch the notes editor in a pane."""
-    _log.info("launch_notes")
+    fresh = app._consume_z()
+    _log.info("launch_notes fresh=%s", fresh)
     root = app._root or (Path.cwd() / "pm")
     notes_path = root / notes.NOTES_FILENAME
-    launch_pane(app, f"pm notes {notes_path}", "notes")
+    launch_pane(app, f"pm notes {notes_path}", "notes", fresh=fresh)
 
 
 def view_log(app) -> None:
     """View the TUI log file in a pane."""
-    _log.info("view_log")
+    fresh = app._consume_z()
+    _log.info("view_log fresh=%s", fresh)
     log_path = command_log_file()
     if not log_path.exists():
         app.log_message("No log file yet.")
         return
-    launch_pane(app, f"tail -f {log_path}", "log")
+    launch_pane(app, f"tail -f {log_path}", "log", fresh=fresh)
 
 
 def launch_meta(app) -> None:
     """Launch a meta-development session to work on pm itself."""
+    app._consume_z()  # consume but meta doesn't support --fresh
     _log.info("launch_meta")
     app._run_command("meta")
 
@@ -192,6 +202,7 @@ def toggle_guide(app) -> None:
 
 def launch_claude(app) -> None:
     """Launch an interactive Claude session in the project directory."""
+    fresh = app._consume_z()
     from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
     claude = find_claude()
     if not claude:
@@ -221,11 +232,12 @@ Common tasks:
 The user will tell you what they need."""
 
     cmd = build_claude_shell_cmd(prompt=prompt)
-    launch_pane(app, cmd, "claude")
+    launch_pane(app, cmd, "claude", fresh=fresh)
 
 
 def launch_help_claude(app) -> None:
     """Launch a beginner-friendly Claude assistant for the current project."""
+    fresh = app._consume_z()
     from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
     claude = find_claude()
     if not claude:
@@ -331,7 +343,7 @@ what to do next. Suggest one or two concrete actions, not an overwhelming list. 
 Prefer finishing in-progress work over starting new work."""
 
     cmd = build_claude_shell_cmd(prompt=prompt)
-    launch_pane(app, cmd, "assist")
+    launch_pane(app, cmd, "assist", fresh=fresh)
 
 
 def launch_test(app, test_id: str) -> None:

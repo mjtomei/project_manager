@@ -144,7 +144,6 @@ class ProjectManagerApp(App):
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("s", "start_pr", "Start PR", show=True),
-        Binding("S", "start_pr_fresh", "Start Fresh", show=False),
         Binding("d", "done_pr", "Done PR", show=True),
 
         Binding("e", "edit_plan", "Edit PR", show=True),
@@ -171,9 +170,27 @@ class ProjectManagerApp(App):
         Binding("C", "show_connect", "Connect", show=False),
     ]
 
+    def on_key(self, event) -> None:
+        """Handle z modifier prefix key."""
+        cmd_bar = self.query_one("#command-bar", CommandBar)
+        if cmd_bar.has_focus:
+            return
+        if event.key == "z":
+            self._z_pending = not self._z_pending
+            if self._z_pending:
+                self.log_message("[bold]z …[/]")
+            else:
+                self._clear_log_message()
+            event.prevent_default()
+            event.stop()
+        elif event.key == "escape" and self._z_pending:
+            self._z_pending = False
+            self._clear_log_message()
+            # Don't prevent — let escape also do its normal thing
+
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """Disable single-key shortcuts when command bar is focused or in guide mode."""
-        if action in ("start_pr", "start_pr_fresh", "done_pr",
+        if action in ("start_pr", "done_pr",
                        "edit_plan", "view_plan", "toggle_guide", "launch_notes",
                        "launch_meta", "launch_claude", "launch_help_claude",
                        "view_log", "refresh", "rebalance", "quit", "show_help",
@@ -226,6 +243,16 @@ class ProjectManagerApp(App):
         self._is_portrait: bool = False
         # In-flight PR action tracking (prevents concurrent/duplicate PR commands)
         self._inflight_pr_action: str | None = None
+        self._log_sticky_until: float = 0.0  # monotonic time until which log line is protected
+        # z modifier key state (vim-style prefix)
+        self._z_pending: bool = False
+
+    def _consume_z(self) -> bool:
+        """Atomically read and clear the z modifier flag."""
+        if self._z_pending:
+            self._z_pending = False
+            return True
+        return False
 
     # --- Frame capture methods ---
 
@@ -366,6 +393,8 @@ class ProjectManagerApp(App):
                 pass
         # Load any existing capture config
         self._load_capture_config()
+        # Heal pane registry before anything uses it
+        self._heal_registry()
         # Set up watchers on child widgets for frame capture
         self._setup_frame_watchers()
 
@@ -381,6 +410,78 @@ class ProjectManagerApp(App):
 
         # Set initial layout orientation
         self._update_orientation()
+
+    def _heal_registry(self) -> None:
+        """Fix pane registry discrepancies on TUI startup.
+
+        Heals all windows: removes dead panes, cleans empty window entries,
+        and ensures the TUI pane is registered in the current window.
+        """
+        session = self._session_name
+        if not session or not tmux_mod.in_tmux():
+            return
+
+        tui_pane_id = os.environ.get("TMUX_PANE")
+        if not tui_pane_id:
+            return
+
+        try:
+            window = tmux_mod.get_window_id(session)
+            if not window:
+                return
+
+            data = pane_layout.load_registry(session)
+            changed = False
+
+            # Heal every window: remove dead panes, drop empty windows
+            for win_id in list(data.get("windows", {})):
+                wdata = data["windows"][win_id]
+                live_panes = tmux_mod.get_pane_indices(session, win_id)
+                live_ids = {pid for pid, _ in live_panes}
+
+                # If no live panes returned for this window, it's gone
+                if not live_ids:
+                    if wdata["panes"]:
+                        _log.info("heal_registry: window %s has no live panes, removing", win_id)
+                        del data["windows"][win_id]
+                        changed = True
+                    continue
+
+                before = len(wdata["panes"])
+                wdata["panes"] = [p for p in wdata["panes"] if p["id"] in live_ids]
+                removed = before - len(wdata["panes"])
+                if removed:
+                    _log.info("heal_registry: removed %d dead pane(s) from window %s", removed, win_id)
+                    changed = True
+
+                # Drop empty window entry
+                if not wdata["panes"]:
+                    del data["windows"][win_id]
+                    changed = True
+
+            # Ensure TUI pane is registered in the current window
+            live_panes = tmux_mod.get_pane_indices(session, window)
+            live_ids = {pid for pid, _ in live_panes}
+            if tui_pane_id in live_ids:
+                wdata = pane_layout._get_window_data(data, window)
+                if not any(p["id"] == tui_pane_id for p in wdata["panes"]):
+                    wdata["panes"].insert(0, {
+                        "id": tui_pane_id,
+                        "role": "tui",
+                        "order": 0,
+                        "cmd": "tui",
+                    })
+                    _log.info("heal_registry: re-registered TUI pane %s in window %s",
+                              tui_pane_id, window)
+                    changed = True
+
+            if changed:
+                pane_layout.save_registry(session, data)
+                _log.info("heal_registry: saved corrected registry")
+            else:
+                _log.info("heal_registry: registry OK")
+        except Exception:
+            _log.exception("heal_registry failed")
 
     def on_resize(self) -> None:
         """Update layout orientation when terminal is resized."""
@@ -642,8 +743,21 @@ class ProjectManagerApp(App):
             _log.exception("Sync error")
             self.log_message(f"Sync error: {e}")
 
-    def log_message(self, msg: str, capture: bool = True) -> None:
-        """Show a message in the log line."""
+    def log_message(self, msg: str, capture: bool = True, sticky: float = 0) -> None:
+        """Show a message in the log line.
+
+        Args:
+            msg: Message to display.
+            capture: Whether to capture a frame after showing.
+            sticky: Minimum seconds to keep the message visible (prevents
+                    other non-sticky messages from overwriting it).
+        """
+        import time as _time
+        now = _time.monotonic()
+        if sticky > 0:
+            self._log_sticky_until = now + sticky
+        elif now < self._log_sticky_until:
+            return  # a sticky message is still showing
         try:
             log = self.query_one("#log-line", LogLine)
             log.update(f" {msg}")
@@ -664,11 +778,12 @@ class ProjectManagerApp(App):
         msg = f"[red bold]{title}[/]"
         if detail:
             msg += f" {detail}"
-        self.log_message(msg)
+        self.log_message(msg, sticky=timeout)
         self.set_timer(timeout, self._clear_log_message)
 
     def _clear_log_message(self) -> None:
         """Clear the log line message."""
+        self._log_sticky_until = 0.0
         try:
             log = self.query_one("#log-line", LogLine)
             log.update("")
@@ -897,37 +1012,26 @@ class ProjectManagerApp(App):
         """
         if self._inflight_pr_action:
             _log.info("action blocked: %s (busy: %s)", action_desc, self._inflight_pr_action)
-            self.log_message(f"Busy: {self._inflight_pr_action}")
+            self.log_message(f"Busy: {self._inflight_pr_action}", sticky=1.0)
+            self.set_timer(1.0, self._clear_log_message)
             return False
         return True
 
     def action_start_pr(self) -> None:
+        fresh = self._consume_z()
         tree = self.query_one("#tech-tree", TechTree)
         pr_id = tree.selected_pr_id
-        _log.info("action: start_pr selected=%s", pr_id)
+        _log.info("action: start_pr selected=%s fresh=%s", pr_id, fresh)
         if not pr_id:
             _log.info("action: start_pr - no PR selected")
             self.log_message("No PR selected")
             return
-        action_key = f"Starting {pr_id}"
+        action_key = f"Starting {pr_id}" + (" (fresh)" if fresh else "")
         if not self._guard_pr_action(action_key):
             return
         self._inflight_pr_action = action_key
-        self._run_command(f"pr start {pr_id}", working_message=action_key, action_key=action_key)
-
-    def action_start_pr_fresh(self) -> None:
-        """Start PR with fresh Claude session (no resume)."""
-        tree = self.query_one("#tech-tree", TechTree)
-        pr_id = tree.selected_pr_id
-        _log.info("action: start_pr_fresh selected=%s", pr_id)
-        if not pr_id:
-            self.log_message("No PR selected")
-            return
-        action_key = f"Starting {pr_id} (fresh)"
-        if not self._guard_pr_action(action_key):
-            return
-        self._inflight_pr_action = action_key
-        self._run_command(f"pr start --new {pr_id}", working_message=action_key, action_key=action_key)
+        cmd = f"pr start --fresh {pr_id}" if fresh else f"pr start {pr_id}"
+        self._run_command(cmd, working_message=action_key, action_key=action_key)
 
     def action_hide_plan(self) -> None:
         """Toggle hiding the selected PR's plan group."""
@@ -1066,17 +1170,19 @@ class ProjectManagerApp(App):
             self.log_message(f"Moved {pr_id} → {display}")
 
     def action_done_pr(self) -> None:
+        fresh = self._consume_z()
         tree = self.query_one("#tech-tree", TechTree)
         pr_id = tree.selected_pr_id
-        _log.info("action: done_pr selected=%s", pr_id)
+        _log.info("action: done_pr selected=%s fresh=%s", pr_id, fresh)
         if not pr_id:
             self.log_message("No PR selected")
             return
-        action_key = f"Completing {pr_id}"
+        action_key = f"Completing {pr_id}" + (" (fresh)" if fresh else "")
         if not self._guard_pr_action(action_key):
             return
         self._inflight_pr_action = action_key
-        self._run_command(f"pr done {pr_id}", working_message=action_key, action_key=action_key)
+        cmd = f"pr done --fresh {pr_id}" if fresh else f"pr done {pr_id}"
+        self._run_command(cmd, working_message=action_key, action_key=action_key)
 
     # --- Pane operation delegates (see tui/pane_ops.py) ---
 

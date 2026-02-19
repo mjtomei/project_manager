@@ -80,7 +80,7 @@ class TestPaneOpsImports:
         from pm_core.tui.pane_ops import launch_pane
         sig = inspect.signature(launch_pane)
         params = list(sig.parameters.keys())
-        assert params == ["app", "cmd", "role"]
+        assert params == ["app", "cmd", "role", "fresh"]
 
     def test_rebalance(self):
         from pm_core.tui.pane_ops import rebalance
