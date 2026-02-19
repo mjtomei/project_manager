@@ -6,8 +6,8 @@ Claude-based TUI test coverage. The cluster/ subpackage is out of scope.
 
 ## Scope
 
-- **Split large files**: cli.py (4,427 lines), tui/app.py (2,114 lines),
-  tech_tree.py (834 lines), pane_layout.py (552 lines)
+- **Split large files**: cli.py (4,603 lines), tui/app.py (2,230 lines),
+  tech_tree.py (901 lines), pane_layout.py (614 lines)
 - **Deduplicate code**: `_extract_field()`, `_find_git_root()`, GitHub repo name
   extraction, TUI Message classes
 - **Expand unit tests**: Target modules with <50% coverage (graph.py 19%,
@@ -30,16 +30,16 @@ Claude-based TUI test coverage. The cluster/ subpackage is out of scope.
 
 ### cli.py split strategy
 
-Convert `pm_core/cli.py` (4,427 lines) into a `pm_core/cli/` subpackage. Split
+Convert `pm_core/cli.py` (4,603 lines) into a `pm_core/cli/` subpackage. Split
 by Click command group into separate modules, each registering its commands on
 the main `cli` group. Shared helpers go into `cli/helpers.py`.
 
 | New file | Contents | ~Lines |
 |----------|----------|--------|
 | `cli/__init__.py` | `cli` group, `main`, `init`, `push`, `set`, `_check`, `help`, `getting-started`, `which`, `prompt`, plus imports of all submodules to trigger registration. Re-exports `cli` and `main` for backward compatibility (`from pm_core.cli import cli`). | ~530 |
-| `cli/pr.py` | `pr` group: add, edit, select, cd, list, graph, ready, start, done, sync, sync-github, import-github, cleanup, close | ~900 |
-| `cli/plan.py` | `plan` group: add, list, breakdown, review, deps, load, fixes, fix, import, `_run_plan_import`, `_import_github_prs` | ~750 |
-| `cli/session.py` | `session` group, `_register_tmux_bindings`, `_session_start`, internal pane/window commands (`_pane-exited`, `_pane-closed`, `_pane-opened`, `_pane-switch`, `_window-resized`, `rebalance`), session registry commands (`_save-session`, `_clear-session`) | ~550 |
+| `cli/pr.py` | `pr` group: add, edit, select, cd, list, graph, ready, start, done, sync, sync-github, import-github, cleanup, close. Includes `_launch_review_window` helper added for code review pane during `pr done`. | ~940 |
+| `cli/plan.py` | `plan` group: add, list, breakdown, review, deps, load, fixes, fix, import, `_run_plan_import`, `_import_github_prs` | ~775 |
+| `cli/session.py` | `session` group, `_register_tmux_bindings`, `_session_start`, internal pane/window commands (`_pane-exited`, `_pane-closed`, `_pane-opened`, `_pane-switch`, `_window-resized`, `rebalance`), session registry commands (`_save-session`, `_clear-session`). Pane-exited now passes pane_id and window to multi-window registry. | ~560 |
 | `cli/tui.py` | `tui` group: view, history, send, keys, clear-history, capture, frames, clear-frames, test, plus frame/history helpers, internal `_tui` launcher | ~570 |
 | `cli/guide.py` | `guide` group, `_run_guide`, `notes` command | ~300 |
 | `cli/meta.py` | `meta` command, `_detect_pm_install`, `_build_meta_prompt`, `_meta_workdir` | ~335 |
@@ -54,15 +54,17 @@ work because `__init__.py` defines and exports both names.
 
 ### tui/app.py split strategy
 
-Extract modal screens and helper classes into separate files. app.py is now
-2,114 lines (grown from 1,713 due to new shared-session and assist features):
+Extract modal screens, helper classes, and pane management into separate files.
+app.py is now 2,230 lines (grown from 1,713 due to shared-session, assist,
+multi-window registry healing, z-modifier fresh restart, and sticky logging):
 
 | New file | Contents | ~Lines |
 |----------|----------|--------|
-| `tui/app.py` (trimmed) | `ProjectManagerApp` core class | ~900 |
+| `tui/app.py` (trimmed) | `ProjectManagerApp` core class, z-modifier key handling (`_consume_z`), sticky log messages | ~950 |
 | `tui/screens.py` | `WelcomeScreen`, `ConnectScreen`, `HelpScreen`, `PlanPickerScreen`, `PlanAddScreen` | ~500 |
 | `tui/widgets.py` | `TreeScroll`, `StatusBar`, `LogLine` | ~100 |
-| `tui/pane_ops.py` | Pane launch/management methods extracted as functions that `ProjectManagerApp` delegates to | ~500 |
+| `tui/pane_ops.py` | Pane launch/kill/rebalance/zoom (with `fresh` param for pane recreation), `_heal_registry` for multi-window registry repair | ~560 |
+| `tui/_shell.py` | Shell command helpers (`_run_shell`, `_run_shell_async`) extracted from app.py top-level | ~60 |
 
 ### tech_tree.py split strategy
 
@@ -70,18 +72,19 @@ Extract the layout algorithm and rendering logic:
 
 | New file | Contents | ~Lines |
 |----------|----------|--------|
-| `tui/tech_tree.py` (trimmed) | `TechTree` widget, message classes, keyboard handling | ~500 |
+| `tui/tech_tree.py` (trimmed) | `TechTree` widget, message classes, keyboard handling | ~570 |
 | `tui/tree_layout.py` | Tree layout algorithm (node positioning, column assignment, edge routing) | ~330 |
 
 ### pane_layout.py split strategy
 
-This file is 552 lines — just over the threshold. Extract the registry I/O into
-its own module:
+This file is now 614 lines after the multi-window pane registry refactor
+(registry format changed from flat `panes` list to per-window `windows` dict).
+Extract the registry I/O into its own module:
 
 | New file | Contents | ~Lines |
 |----------|----------|--------|
-| `pane_layout.py` (trimmed) | Layout algorithm, rebalance logic, mobile detection | ~350 |
-| `pane_registry.py` | Registry file I/O: register_pane, unregister_pane, load/save registry JSON, find_live_pane_by_role | ~210 |
+| `pane_layout.py` (trimmed) | Layout algorithm (`_layout_node`, `compute_layout`, `_checksum`), `rebalance`, mobile detection, lifecycle handlers (`handle_pane_exited`, `handle_any_pane_closed`, `handle_pane_opened`, `check_user_modified`) | ~340 |
+| `pane_registry.py` | Registry CRUD: `registry_dir`, `registry_path`, `load_registry` (with old→new format migration), `save_registry`, `register_pane`, `unregister_pane`, `kill_and_unregister`, `find_live_pane_by_role` (with optional window scoping), `_get_window_data`, `_iter_all_panes`, `_reconcile_registry` (per-window dead pane cleanup) | ~280 |
 
 ### Code deduplication
 
@@ -153,7 +156,7 @@ Available Tools, Test Procedure, Expected Behavior, and Reporting sections:
 ## PRs
 
 ### PR: Convert cli.py to cli/ package and extract shared helpers
-- **description**: Convert the monolithic pm_core/cli.py (4,427 lines) into a pm_core/cli/ subpackage. Create cli/__init__.py with the `cli` Click group, `main` entry point, and the core commands (init, push, set, help, getting-started, which, prompt) — these stay in __init__.py. Move HelpGroup, load_and_sync, save_and_push, trigger_tui_refresh, _pr_id_sort_key, _pr_display_id, _resolve_pr_id, _infer_pr_id, _workdirs_dir, _resolve_repo_id, and state_root into cli/helpers.py. The __init__.py re-exports `cli` and `main` at module level so that `from pm_core.cli import cli` and `from pm_core.cli import main` continue to work (used by tests, __main__.py, and wrapper.py). This is the foundation for the next PR which splits all command groups into submodules. See `pm/plans/plan-e4fa5cb.md` for the overall split strategy and target line counts.
+- **description**: Convert the monolithic pm_core/cli.py (4,603 lines) into a pm_core/cli/ subpackage. Create cli/__init__.py with the `cli` Click group, `main` entry point, and the core commands (init, push, set, help, getting-started, which, prompt) — these stay in __init__.py. Move HelpGroup, load_and_sync, save_and_push, trigger_tui_refresh, _pr_id_sort_key, _pr_display_id, _resolve_pr_id, _infer_pr_id, _workdirs_dir, _resolve_repo_id, and state_root into cli/helpers.py. The __init__.py re-exports `cli` and `main` at module level so that `from pm_core.cli import cli` and `from pm_core.cli import main` continue to work (used by tests, __main__.py, and wrapper.py). This is the foundation for the next PR which splits all command groups into submodules. See `pm/plans/plan-e4fa5cb.md` for the overall split strategy and target line counts.
 - **tests**: Run `pytest tests/` — all existing tests pass. Verify `from pm_core.cli import cli` and `from pm_core.cli import main` still work. Add unit tests for _resolve_pr_id (valid/invalid IDs, prefix matching) and _infer_pr_id (active PR, branch-based inference) in tests/test_pr_utils.py or a new test file.
 - **files**: pm_core/cli.py (delete), pm_core/cli/__init__.py (create — cli group, main, core commands, plus all remaining command groups temporarily until the next PR splits them out), pm_core/cli/helpers.py (create — ~250 lines of shared utilities)
 - **depends_on**:
@@ -161,7 +164,7 @@ Available Tools, Test Procedure, Expected Behavior, and Reporting sections:
 ---
 
 ### PR: Split all CLI command groups into cli/ submodules
-- **description**: Complete the cli/ package split by moving all remaining command groups out of cli/__init__.py into dedicated submodules. Each submodule imports `cli` from `pm_core.cli` and registers its commands; the __init__.py imports all submodules at the bottom to trigger registration. Submodules to create: (1) cli/pr.py (~900 lines) — `pr` group: add, edit, select, cd, list, graph, ready, start, done, sync, sync-github, import-github, cleanup, close. (2) cli/plan.py (~750 lines) — `plan` group: add, list, breakdown, review, deps, load, fixes, fix, import, plus _run_plan_import and _import_github_prs. (3) cli/session.py (~550 lines) — `session` group, _register_tmux_bindings, _session_start, internal pane/window commands (_pane-exited, _pane-closed, _pane-opened, _window-resized, _pane-switch, rebalance), and session registry commands (_save-session, _clear-session). (4) cli/tui.py (~570 lines) — `tui` group: view, history, send, keys, clear-history, capture, frames, clear-frames, test, plus frame/history helpers and internal _tui launcher. (5) cli/guide.py (~300 lines) — guide group, _run_guide, notes command. (6) cli/meta.py (~335 lines) — meta command, _detect_pm_install, _build_meta_prompt, _meta_workdir. (7) cli/cluster.py (~220 lines) — cluster group: auto, explore. All submodules import shared helpers from `pm_core.cli.helpers`. After this PR, cli/__init__.py is trimmed to ~520 lines (init, push, set, help, getting-started, which, prompt, plus submodule imports). See `pm/plans/plan-e4fa5cb.md` for the full cli/ split strategy table.
+- **description**: Complete the cli/ package split by moving all remaining command groups out of cli/__init__.py into dedicated submodules. Each submodule imports `cli` from `pm_core.cli` and registers its commands; the __init__.py imports all submodules at the bottom to trigger registration. Submodules to create: (1) cli/pr.py (~940 lines) — `pr` group: add, edit, select, cd, list, graph, ready, start, done, sync, sync-github, import-github, cleanup, close, plus `_launch_review_window` helper for code review pane. (2) cli/plan.py (~775 lines) — `plan` group: add, list, breakdown, review, deps, load, fixes, fix, import, plus _run_plan_import and _import_github_prs. (3) cli/session.py (~560 lines) — `session` group, `_register_tmux_bindings`, `_session_start`, internal pane/window commands (`_pane-exited`, `_pane-closed`, `_pane-opened`, `_window-resized`, `_pane-switch`, `rebalance`), session registry commands (`_save-session`, `_clear-session`). Note: pane-exited now passes pane_id and window for multi-window registry support. (4) cli/tui.py (~570 lines) — `tui` group: view, history, send, keys, clear-history, capture, frames, clear-frames, test, plus frame/history helpers and internal _tui launcher. (5) cli/guide.py (~300 lines) — guide group, _run_guide, notes command. (6) cli/meta.py (~335 lines) — meta command, _detect_pm_install, _build_meta_prompt, _meta_workdir. (7) cli/cluster.py (~220 lines) — cluster group: auto, explore. All submodules import shared helpers from `pm_core.cli.helpers`. After this PR, cli/__init__.py is trimmed to ~530 lines (init, push, set, help, getting-started, which, prompt, plus submodule imports). See `pm/plans/plan-e4fa5cb.md` for the full cli/ split strategy table.
 - **tests**: Run `pytest tests/` — all existing tests pass unchanged. Key test files exercising moved code: test_pr_utils.py, test_pr_sync.py, test_bugs.py, test_plan_parser.py, test_store_validation.py, test_session_registry.py, test_pane_layout.py.
 - **files**: pm_core/cli/__init__.py (modify — remove all command groups, add submodule imports at bottom), pm_core/cli/pr.py (create), pm_core/cli/plan.py (create), pm_core/cli/session.py (create), pm_core/cli/tui.py (create), pm_core/cli/guide.py (create), pm_core/cli/meta.py (create), pm_core/cli/cluster.py (create)
 - **depends_on**: Convert cli.py to cli/ package and extract shared helpers
@@ -169,15 +172,15 @@ Available Tools, Test Procedure, Expected Behavior, and Reporting sections:
 ---
 
 ### PR: Split app.py into screens, widgets, and pane_ops
-- **description**: Reduce tui/app.py from 2,114 lines to ~900 by extracting three categories of code into new modules: (1) tui/screens.py (~500 lines) — move WelcomeScreen, ConnectScreen, HelpScreen, PlanPickerScreen, PlanAddScreen. (2) tui/widgets.py (~100 lines) — move TreeScroll, StatusBar, LogLine. (3) tui/pane_ops.py (~500 lines) — extract pane launch (_launch_pane), kill, rebalance, and zoom logic from ProjectManagerApp into standalone functions. The app delegates to pane_ops functions, passing the app instance or necessary state as parameters. After this PR, app.py contains only ProjectManagerApp core lifecycle and event handling. See `pm/plans/plan-e4fa5cb.md` for the tui/app.py split strategy.
-- **tests**: Run `pytest tests/` — all existing tests pass unchanged (including tests/test_shared_sessions.py which tests ConnectScreen, and tests/test_plans_pane.py which imports ProjectManagerApp). Add import smoke tests in tests/test_tui_imports.py verifying: all screen classes importable from tui.screens, all widget classes from tui.widgets, pane_ops functions have expected signatures, and `from pm_core.tui.app import ProjectManagerApp` still works.
-- **files**: pm_core/tui/app.py (modify — remove screen/widget/pane classes and methods, add imports), pm_core/tui/screens.py (create — ~500 lines), pm_core/tui/widgets.py (create — ~100 lines), pm_core/tui/pane_ops.py (create — ~500 lines), tests/test_tui_imports.py (create)
+- **description**: Reduce tui/app.py from 2,230 lines to ~950 by extracting four categories of code into new modules: (1) tui/screens.py (~500 lines) — move WelcomeScreen, ConnectScreen, HelpScreen, PlanPickerScreen, PlanAddScreen. (2) tui/widgets.py (~100 lines) — move TreeScroll, StatusBar, LogLine. (3) tui/pane_ops.py (~560 lines) — extract pane launch (`_launch_pane` with `fresh` param for pane recreation), kill, rebalance, zoom logic, and `_heal_registry` (multi-window registry repair) from ProjectManagerApp into standalone functions. (4) tui/_shell.py (~60 lines) — extract `_run_shell` and `_run_shell_async` helpers. The app delegates to pane_ops functions, passing the app instance or necessary state as parameters. After this PR, app.py contains ProjectManagerApp core lifecycle, event handling, z-modifier key handling (`_consume_z`), and sticky log messages. See `pm/plans/plan-e4fa5cb.md` for the tui/app.py split strategy.
+- **tests**: Run `pytest tests/` — all existing tests pass unchanged (including tests/test_shared_sessions.py which tests ConnectScreen, and tests/test_plans_pane.py which imports ProjectManagerApp). Add import smoke tests in tests/test_tui_imports.py verifying: all screen classes importable from tui.screens, all widget classes from tui.widgets, pane_ops functions have expected signatures, _shell helpers importable, and `from pm_core.tui.app import ProjectManagerApp` still works.
+- **files**: pm_core/tui/app.py (modify — remove screen/widget/pane classes and methods, add imports), pm_core/tui/screens.py (create — ~500 lines), pm_core/tui/widgets.py (create — ~100 lines), pm_core/tui/pane_ops.py (create — ~560 lines), pm_core/tui/_shell.py (create — ~60 lines), tests/test_tui_imports.py (create)
 - **depends_on**:
 
 ---
 
 ### PR: Extract tree layout and abstract TUI message factory
-- **description**: Two related changes to tui/ code, combined because both modify tech_tree.py: (1) Move the tree layout algorithm (node positioning, column assignment, edge routing) from tech_tree.py into a new tui/tree_layout.py (~330 lines). TechTree widget calls layout functions and retains rendering + keyboard handling. Reduces tech_tree.py from 834 to ~500 lines. (2) Create a generic message factory function `item_message(name, field)` in tui/__init__.py that generates Selected/Activated message class pairs with a single ID field. Replace the boilerplate PlanSelected/PlanActivated in plans_pane.py, TestSelected/TestActivated in tests_pane.py, and PRSelected/PRActivated in tech_tree.py with factory-generated classes. See `pm/plans/plan-e4fa5cb.md` for the tech_tree.py split strategy and message factory design.
+- **description**: Two related changes to tui/ code, combined because both modify tech_tree.py: (1) Move the tree layout algorithm (node positioning, column assignment, edge routing) from tech_tree.py into a new tui/tree_layout.py (~330 lines). TechTree widget calls layout functions and retains rendering + keyboard handling. Reduces tech_tree.py from 901 to ~570 lines. (2) Create a generic message factory function `item_message(name, field)` in tui/__init__.py that generates Selected/Activated message class pairs with a single ID field. Replace the boilerplate PlanSelected/PlanActivated in plans_pane.py, TestSelected/TestActivated in tests_pane.py, and PRSelected/PRActivated in tech_tree.py with factory-generated classes. See `pm/plans/plan-e4fa5cb.md` for the tech_tree.py split strategy and message factory design.
 - **tests**: Run `pytest tests/` — existing tests (test_tech_tree_status.py) pass. Add unit tests for layout algorithm in tests/test_tree_layout.py (node positions for linear chains, fan-out graphs, diamond dependencies; edge routing avoids overlaps). Add unit tests for the message factory (correct class names, handler_name property, field accessibility).
 - **files**: pm_core/tui/tech_tree.py (modify — remove layout code and message boilerplate), pm_core/tui/tree_layout.py (create — ~330 lines), pm_core/tui/__init__.py (modify — add item_message factory), pm_core/tui/plans_pane.py (modify — replace message classes), pm_core/tui/tests_pane.py (modify — replace message classes), tests/test_tree_layout.py (create)
 - **depends_on**:
@@ -185,9 +188,9 @@ Available Tools, Test Procedure, Expected Behavior, and Reporting sections:
 ---
 
 ### PR: Extract pane registry I/O from pane_layout.py
-- **description**: Move registry file I/O functions (register_pane, unregister_pane, load_registry, save_registry, find_live_pane_by_role) from pane_layout.py into a new pane_registry.py. pane_layout.py keeps the layout algorithm and rebalance logic (~350 lines). Update all callers across the codebase (cli/__init__.py or cli/session.py, tui/app.py or tui/pane_ops.py — whichever exists at the time) to import from pane_registry instead. See `pm/plans/plan-e4fa5cb.md` for the pane_layout.py split strategy.
-- **tests**: Run `pytest tests/` — existing tests (test_pane_layout.py, test_session_registry.py) pass. Note: test_pane_layout.py tests layout functions which stay, but the registry functions being moved have zero unit tests. Add tests for: register_pane creates/updates registry JSON, unregister_pane removes entries, find_live_pane_by_role returns correct pane or None, load_registry/save_registry round-trip, load_registry handles missing file. Add to test_session_registry.py or create tests/test_pane_registry.py.
-- **files**: pm_core/pane_layout.py (modify — remove registry functions), pm_core/pane_registry.py (create — ~210 lines)
+- **description**: Move registry CRUD and lookup functions from pane_layout.py (now 614 lines after multi-window registry refactor) into a new pane_registry.py. Functions to move: `registry_dir`, `registry_path`, `load_registry` (includes old→new format migration), `save_registry`, `register_pane` (per-window), `unregister_pane` (searches all windows), `kill_and_unregister`, `find_live_pane_by_role` (with optional `window` scoping), `_get_window_data`, `_iter_all_panes`, `_reconcile_registry` (per-window dead pane cleanup). pane_layout.py keeps the layout algorithm (`_layout_node`, `compute_layout`, `_checksum`), `rebalance`, mobile detection, and lifecycle event handlers (`handle_pane_exited`, `handle_any_pane_closed`, `handle_pane_opened`, `check_user_modified`) which orchestrate both registry and layout operations. The lifecycle handlers import from pane_registry. Update all callers across the codebase (cli/__init__.py or cli/session.py, tui/app.py or tui/pane_ops.py — whichever exists at the time) to import from pane_registry instead. See `pm/plans/plan-e4fa5cb.md` for the pane_layout.py split strategy.
+- **tests**: Run `pytest tests/` — existing tests (test_pane_layout.py, test_session_registry.py) pass. Note: test_pane_layout.py now has substantial registry tests from the multi-window refactor. Verify those still pass with the new import paths. Add tests for: register_pane creates per-window registry entries, unregister_pane removes entries across windows, find_live_pane_by_role with and without window scoping, load_registry old-format migration, load_registry handles missing file, _get_window_data creates entries on demand, _iter_all_panes yields from all windows, kill_and_unregister combines kill+cleanup. Add to test_session_registry.py or create tests/test_pane_registry.py.
+- **files**: pm_core/pane_layout.py (modify — remove registry functions, ~340 lines remaining), pm_core/pane_registry.py (create — ~280 lines)
 - **depends_on**:
 
 ---
@@ -209,8 +212,8 @@ Available Tools, Test Procedure, Expected Behavior, and Reporting sections:
 ---
 
 ### PR: Add Claude-based TUI tests for detail panel, filters, sync, meta, and log viewer
-- **description**: Add five new Claude-based TUI test prompts to tui_tests.py following the existing format (Background, Available Tools, Test Procedure, Expected Behavior, Reporting sections): (1) Detail Panel Content Test — verify the detail panel shows correct PR info (title, status, branch, deps, plan context) and updates when navigating between PRs, (2) Status Filter & Merged Toggle Test — test F key cycles through status filters (all → pending → in_progress → done) and X key toggles merged PR visibility, verify tech tree updates accordingly, (3) Sync Refresh Test — test r key triggers sync, verify log line updates and PR statuses change if PRs were merged upstream, (4) Meta Session Launch Test — test m key launches a meta pane, verify pane registry and correct role, (5) TUI Log Viewer Test — test L key opens log pane, verify content and pane lifecycle. Register all five in the ALL_TESTS dict at the bottom of the file. See `pm/plans/plan-e4fa5cb.md` for test descriptions.
-- **tests**: Verify with `pm tui test --list` that all 5 new tests appear. Run individual tests with `pm tui test <test-name>`.
+- **description**: Add five new Claude-based TUI test prompts to tui_tests.py (which currently has 13 tests including the recently added multi-window-registry and window-resize tests) following the existing format (Background, Available Tools, Test Procedure, Expected Behavior, Reporting sections): (1) Detail Panel Content Test — verify the detail panel shows correct PR info (title, status, branch, deps, plan context) and updates when navigating between PRs, (2) Status Filter & Merged Toggle Test — test F key cycles through status filters (all → pending → in_progress → done) and X key toggles merged PR visibility, verify tech tree updates accordingly, (3) Sync Refresh Test — test r key triggers sync, verify log line updates and PR statuses change if PRs were merged upstream, (4) Meta Session Launch Test — test m key launches a meta pane, verify pane registry and correct role, (5) TUI Log Viewer Test — test L key opens log pane, verify content and pane lifecycle. Register all five in the ALL_TESTS dict at the bottom of the file, bringing the total to 18 tests. The multi-window registry format is now the standard — new test fixtures should use the `{"windows": {...}}` format, not the old flat `{"panes": [...]}` format. See `pm/plans/plan-e4fa5cb.md` for test descriptions.
+- **tests**: Verify with `pm tui test --list` that all 5 new tests appear (total should be 18). Run individual tests with `pm tui test <test-name>`.
 - **files**: pm_core/tui_tests.py (modify — add 5 test prompt strings and register in ALL_TESTS)
 - **depends_on**:
 
