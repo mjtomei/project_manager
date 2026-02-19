@@ -5,7 +5,6 @@ Registers the ``tui`` group and all subcommands, plus the internal
 """
 
 import json
-import os
 from pathlib import Path
 
 import click

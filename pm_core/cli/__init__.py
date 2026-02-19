@@ -14,16 +14,12 @@ Command groups are split into submodules:
 - cli.cluster  — Codebase analysis and clustering
 """
 
-import os
-import shutil
 from pathlib import Path
 
 import click
 
 from pm_core import store, git_ops, prompt_gen
 from pm_core.backend import detect_backend
-from pm_core.claude_launcher import find_claude
-from pm_core import tmux as tmux_mod
 
 # Re-export shared helpers so that the rest of this module (and future
 # submodules) can use them without qualifying with ``helpers.``.

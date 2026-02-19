@@ -8,7 +8,7 @@ from pathlib import Path
 
 import click
 
-from pm_core import store, git_ops
+from pm_core import store
 from pm_core import tmux as tmux_mod
 from pm_core.claude_launcher import find_claude, launch_claude, clear_session
 
