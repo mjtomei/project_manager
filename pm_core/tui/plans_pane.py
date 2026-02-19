@@ -6,19 +6,9 @@ from textual.message import Message
 from rich.text import Text
 from rich.console import RenderableType
 
+from pm_core.tui import item_message
 
-class PlanSelected(Message):
-    """Fired when a plan is highlighted."""
-    def __init__(self, plan_id: str) -> None:
-        self.plan_id = plan_id
-        super().__init__()
-
-
-class PlanActivated(Message):
-    """Fired when Enter is pressed on a plan."""
-    def __init__(self, plan_id: str) -> None:
-        self.plan_id = plan_id
-        super().__init__()
+PlanSelected, PlanActivated = item_message("Plan", "plan_id")
 
 
 class PlanAction(Message):
