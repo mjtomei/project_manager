@@ -212,7 +212,7 @@ def view_plan(app) -> None:
     if not plan_path.exists():
         app.log_message(f"Plan file not found: {plan_path}")
         return
-    launch_pane(app, f"less {plan_path}", "plan", fresh=fresh)
+    launch_pane(app, f"less {shlex.quote(str(plan_path))}; $SHELL", "plan", fresh=fresh)
 
 
 # ---------------------------------------------------------------------------
@@ -422,6 +422,56 @@ Prefer finishing in-progress work over starting new work."""
     launch_pane(app, cmd, "assist", fresh=fresh)
 
 
+def launch_discuss(app) -> None:
+    """Launch a Claude pane to discuss the pm tool and answer questions about it."""
+    from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
+    claude = find_claude()
+    if not claude:
+        app.log_message("Claude CLI not found")
+        return
+
+    prompt = """\
+## You are helping someone learn about pm (project manager).
+
+pm is a CLI tool and TUI for managing Claude Code development sessions. \
+It organizes work into plans (high-level goals) and PRs (concrete units of work) \
+with dependency tracking.
+
+The user has questions about how pm works, its keyboard shortcuts, \
+or what to do next. Answer clearly and concisely.
+
+Key concepts:
+- **Plans**: High-level goals described in markdown files
+- **PRs**: Concrete work items, organized in a dependency tree
+- **TUI**: The interactive terminal UI showing the PR graph
+- **Sessions**: tmux sessions with panes for Claude, editors, and more
+
+Common keyboard shortcuts in the TUI:
+- Arrow keys / hjkl: Navigate the PR tree
+- s: Start working on a PR (launches Claude in a new window)
+- d: Mark PR as done (sends for review)
+- e: Edit PR details
+- c: Launch Claude session
+- P: Toggle plans view
+- ?: Show help
+- /: Open command bar
+- b: Rebalance panes
+- q: Detach from session
+
+Common commands:
+- pm pr list: List all PRs
+- pm pr start <id>: Start a PR
+- pm pr done <id>: Mark PR as done
+- pm plan list: List plans
+- pm plan add <name>: Add a new plan
+- pm plan breakdown <id>: Break plan into PRs
+
+Ask the user what they'd like to know about."""
+
+    cmd = build_claude_shell_cmd(prompt=prompt)
+    launch_pane(app, cmd, "discuss")
+
+
 def launch_test(app, test_id: str) -> None:
     """Launch Claude with a TUI test prompt."""
     from pm_core import tui_tests
@@ -466,7 +516,7 @@ def handle_plan_action(app, action: str, plan_id: str | None) -> None:
             if plan and app._root:
                 plan_path = app._root / plan.get("file", "")
                 if plan_path.exists():
-                    launch_pane(app, f"less {plan_path}", "plan")
+                    launch_pane(app, f"less {shlex.quote(str(plan_path))}; $SHELL", "plan")
     elif action == "edit":
         if plan_id:
             plan = store.get_plan(app._data, plan_id)
@@ -507,7 +557,7 @@ def launch_plan_activated(app, plan_id: str) -> None:
         return
     plan_path = app._root / plan.get("file", "")
     if plan_path.exists():
-        launch_pane(app, f"less {plan_path}", "plan")
+        launch_pane(app, f"less {shlex.quote(str(plan_path))}; $SHELL", "plan")
 
 
 # ---------------------------------------------------------------------------

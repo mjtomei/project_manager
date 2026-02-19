@@ -18,14 +18,19 @@ class CommandSubmitted(Message):
 class CommandBar(Input):
     """Command input bar at the bottom of the TUI."""
 
+    UNFOCUSED_PLACEHOLDER = "press / to type a command"
+    FOCUSED_PLACEHOLDER = "Type command (e.g. pr start pr-001)..."
+
     def __init__(self, **kwargs):
-        super().__init__(placeholder="Type command (e.g. pr start pr-001)...", **kwargs)
+        super().__init__(placeholder=self.UNFOCUSED_PLACEHOLDER, **kwargs)
 
     def on_focus(self) -> None:
         _log.debug("CommandBar: got focus, has_focus=%s", self.has_focus)
+        self.placeholder = self.FOCUSED_PLACEHOLDER
 
     def on_blur(self) -> None:
         _log.debug("CommandBar: lost focus")
+        self.placeholder = self.UNFOCUSED_PLACEHOLDER
 
     def on_key(self, event) -> None:
         _log.debug("CommandBar on_key: key=%r char=%r value=%r",

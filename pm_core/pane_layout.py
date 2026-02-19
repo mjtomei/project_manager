@@ -64,18 +64,24 @@ def is_mobile(session: str, window: str = "0") -> bool:
 
     With window-size=latest, the window size reflects the most recently
     active client, so we only need to check the current window size.
+    Uses the same session-fallback logic as rebalance() to handle
+    grouped sessions where the base session may have no clients.
     """
-    import traceback
-    caller = traceback.extract_stack(limit=3)[0]
-    caller_loc = f"{caller.filename.split('/')[-1]}:{caller.lineno}:{caller.name}"
-
     if mobile_flag_path(session).exists():
-        _logger.info("is_mobile(%s, %s): True (force flag) [caller: %s]",
-                      session, window, caller_loc)
+        _logger.info("is_mobile(%s, %s): True (force flag)", session, window)
         return True
     from pm_core import tmux as tmux_mod
-    base = base_session_name(session)
-    width, _ = tmux_mod.get_window_size(base, window)
+    # Try current/best session first, then base, then grouped sessions
+    qs = tmux_mod.current_or_base_session(base_session_name(session))
+    width, _ = tmux_mod.get_window_size(qs, window)
+    if width <= 0:
+        width, _ = tmux_mod.get_window_size(session, window)
+    if width <= 0:
+        base = base_session_name(session)
+        for gs in tmux_mod.list_grouped_sessions(base):
+            width, _ = tmux_mod.get_window_size(gs, window)
+            if width > 0:
+                break
     return 0 < width < MOBILE_WIDTH_THRESHOLD
 
 

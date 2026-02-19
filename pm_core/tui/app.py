@@ -112,7 +112,7 @@ class ProjectManagerApp(App):
     }
     PlansPane {
         height: auto;
-        width: auto;
+        width: 1fr;
         padding: 1 2;
     }
     #tests-container {

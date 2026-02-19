@@ -507,7 +507,10 @@ class TechTree(Widget):
                 self._jump_plan_scroll = True
         elif event.key == "enter":
             if not current_id.startswith("_hidden:"):
-                self.post_message(PRActivated(current_id))
+                self.post_message(PRSelected(current_id))
+                # Trigger edit action (same as 'e' key)
+                from pm_core.tui import pane_ops
+                pane_ops.edit_plan(self.app)
             return
 
         if new_index is not None and new_index != self.selected_index:

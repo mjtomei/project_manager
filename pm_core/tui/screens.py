@@ -128,7 +128,7 @@ class HelpScreen(ModalScreen):
 
     BINDINGS = [
         Binding("escape", "dismiss", "Close"),
-        Binding("question_mark", "dismiss", "Close"),
+        Binding("question_mark", "discuss", "Discuss"),
         Binding("q", "dismiss", "Close"),
     ]
 
@@ -217,10 +217,16 @@ class HelpScreen(ModalScreen):
             yield Label("  [bold]?[/]  Show this help", classes="help-row")
             yield Label("  [bold]q[/]  Detach from session", classes="help-row")
             yield Label("")
-            yield Label("[dim]Press Esc or ? to close[/]", classes="help-row")
+            yield Label("[dim]Press Esc to close  |  ? to discuss pm with Claude[/]", classes="help-row")
 
     def action_dismiss(self) -> None:
         self.app.pop_screen()
+
+    def action_discuss(self) -> None:
+        """Open a Claude pane to discuss the pm tool, then dismiss help."""
+        self.app.pop_screen()
+        from pm_core.tui import pane_ops
+        pane_ops.launch_discuss(self.app)
 
 
 class PlanPickerScreen(ModalScreen):
