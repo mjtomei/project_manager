@@ -44,13 +44,20 @@ def get_github_repo_name(git_root: Path) -> str | None:
             return None
 
         url = result.stdout.strip()
+        # Handle various GitHub URL formats:
+        # https://github.com/user/repo.git
+        # git@github.com:user/repo.git
+        # https://github.com/user/repo
         if "github.com" not in url:
             return None
 
+        # Extract repo name from URL
         if url.endswith(".git"):
             url = url[:-4]
 
+        # Get the last path component (repo name)
         repo_name = url.rstrip("/").split("/")[-1]
+        # Also handle git@github.com:user/repo format
         if ":" in repo_name:
             repo_name = repo_name.split(":")[-1].split("/")[-1]
 
