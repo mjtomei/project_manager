@@ -376,52 +376,9 @@ def sync_from_github(
     if save_state and updated:
         store.save(data, root)
 
-    # Schedule removal of closed PRs after 3 seconds using a background process
-    if closed_prs and save_state:
-        import subprocess
-        import json
-        import os as _os
-        # Capture socket path for shared sessions
-        _socket = _os.environ.get("PM_TMUX_SOCKET", "")
-        # Spawn a background process that sleeps then removes the PRs
-        script = f'''
-import time
-import json
-import os
-from pathlib import Path
-time.sleep(3)
-try:
-    import sys
-    sys.path.insert(0, "{Path(__file__).parent.parent}")
-    from pm_core import store
-    root = Path("{root}")
-    data = store.load(root)
-    closed_ids = {json.dumps(closed_prs)}
-    original_count = len(data.get("prs", []))
-    data["prs"] = [p for p in data.get("prs", []) if p["id"] not in closed_ids]
-    if len(data["prs"]) < original_count:
-        store.save(data, root)
-        # Trigger TUI refresh via tmux
-        import subprocess as sp
-        # Use shared socket if set, otherwise default tmux server
-        tmux_cmd = ["tmux"]
-        socket_path = "{_socket}"
-        if socket_path:
-            tmux_cmd.extend(["-S", socket_path])
-        result = sp.run(tmux_cmd + ["list-sessions", "-F", "#{{session_name}}"], capture_output=True, text=True)
-        for session in result.stdout.strip().split("\\n"):
-            if session.startswith("pm-") and "~" not in session:
-                sp.run(tmux_cmd + ["send-keys", "-t", session, "R"], capture_output=True)
-                break
-except Exception:
-    pass  # Silently fail
-'''
-        subprocess.Popen(
-            ["python3", "-c", script],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,  # Detach from parent
-        )
+    # Closed PRs keep status "closed" in the yaml but are not auto-removed.
+    # This avoids losing PRs that were auto-closed by GitHub (e.g. when a
+    # base branch is deleted) but may be reopened or retargeted.
 
     return SyncResult(
         synced=True,

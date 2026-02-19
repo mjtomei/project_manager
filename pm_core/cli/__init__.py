@@ -1801,7 +1801,7 @@ def pr_sync_github():
     For each PR with a GitHub PR number, fetches the current state
     from GitHub and updates the local status accordingly:
     - MERGED → merged
-    - CLOSED → closed (then auto-removed after 3 seconds)
+    - CLOSED → closed
     - OPEN + draft → in_progress
     - OPEN + ready → in_review
     """
@@ -1813,7 +1813,7 @@ def pr_sync_github():
         click.echo("This command only works with the GitHub backend.", err=True)
         raise SystemExit(1)
 
-    # Use the shared sync function which handles auto-removal of closed PRs
+    # Use the shared sync function
     result = pr_sync_mod.sync_from_github(root, data, save_state=True)
 
     if result.error:
@@ -1825,7 +1825,7 @@ def pr_sync_github():
         if result.merged_prs:
             click.echo(f"  Merged: {', '.join(result.merged_prs)}")
         if result.closed_prs:
-            click.echo(f"  Closed: {', '.join(result.closed_prs)} (will be removed in 3s)")
+            click.echo(f"  Closed: {', '.join(result.closed_prs)}")
         trigger_tui_refresh()
     else:
         click.echo("No status changes.")
