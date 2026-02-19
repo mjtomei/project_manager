@@ -21,10 +21,13 @@ from pm_core.pane_registry import (  # noqa: F401
     base_session_name,
     registry_dir,
     registry_path,
+    _get_window_data,
+    _iter_all_panes,
     load_registry,
     save_registry,
     register_pane,
     unregister_pane,
+    kill_and_unregister,
     find_live_pane_by_role,
     _reconcile_registry,
 )
@@ -181,11 +184,12 @@ def rebalance(session: str, window: str, query_session: str | None = None) -> bo
     _reconcile_registry(session, window, query_session=qs)
 
     data = load_registry(session)
-    if data.get("user_modified"):
-        _logger.info("rebalance: skipping, user_modified=True")
+    wdata = _get_window_data(data, window)
+    if wdata.get("user_modified"):
+        _logger.info("rebalance: skipping, user_modified=True for window %s", window)
         return False
 
-    panes = sorted(data["panes"], key=lambda p: p["order"])
+    panes = sorted(wdata["panes"], key=lambda p: p["order"])
     if len(panes) < 1:
         _logger.info("rebalance: no panes in registry")
         return False
@@ -283,15 +287,16 @@ def check_user_modified(session: str, window: str) -> bool:
     """Check if the user has manually modified the layout.
 
     Compares actual pane geometry against expected layout. If different,
-    sets user_modified flag in registry.
+    sets user_modified flag in the per-window registry entry.
     """
     from pm_core import tmux as tmux_mod
 
     data = load_registry(session)
-    if data.get("user_modified"):
+    wdata = _get_window_data(data, window)
+    if wdata.get("user_modified"):
         return True
 
-    panes = sorted(data["panes"], key=lambda p: p["order"])
+    panes = sorted(wdata["panes"], key=lambda p: p["order"])
     if len(panes) < 2:
         return False
 
@@ -305,7 +310,7 @@ def check_user_modified(session: str, window: str) -> bool:
 
     registered_live = [p for p in panes if p["id"] in id_to_index]
     if len(registered_live) != len(current):
-        data["user_modified"] = True
+        wdata["user_modified"] = True
         save_registry(session, data)
         return True
 
@@ -334,18 +339,20 @@ def handle_pane_exited(session: str, window: str, generation: str,
                      generation, reg_gen)
         return
 
-    if data.get("user_modified"):
-        _logger.info("handle_pane_exited: user_modified, skipping")
+    wdata = _get_window_data(data, window)
+    if wdata.get("user_modified"):
+        _logger.info("handle_pane_exited: user_modified for window %s, skipping", window)
         if pane_id:
             unregister_pane(session, pane_id)
         return
 
     # Directly unregister the pane that exited
     if pane_id:
-        before = len(data["panes"])
+        before_count = sum(len(w["panes"]) for w in data["windows"].values())
         unregister_pane(session, pane_id)
         data = load_registry(session)
-        if len(data["panes"]) == before:
+        after_count = sum(len(w["panes"]) for w in data.get("windows", {}).values())
+        if after_count == before_count:
             _logger.info("handle_pane_exited: pane %s was not in registry", pane_id)
             return
     else:
@@ -362,18 +369,17 @@ def handle_pane_exited(session: str, window: str, generation: str,
     # Fix: unzoom, switch focus away, then defer rebalance via a
     # detached background process that waits for the pane to die first.
     from pm_core import tmux as tmux_mod
-    reg_window = data.get("window", window)
-    tmux_mod.unzoom_pane(session, reg_window)
+    tmux_mod.unzoom_pane(session, window)
     if pane_id:
         # Focus the last active pane (the one the user was in before the
         # dying pane).  Fall back to next pane if there is no last pane.
         result = subprocess.run(
-            tmux_mod._tmux_cmd("select-pane", "-t", f"{session}:{reg_window}", "-l"),
+            tmux_mod._tmux_cmd("select-pane", "-t", f"{session}:{window}", "-l"),
             capture_output=True,
         )
         if result.returncode != 0:
             subprocess.run(
-                tmux_mod._tmux_cmd("select-pane", "-t", f"{session}:{reg_window}", "-t", ":.+"),
+                tmux_mod._tmux_cmd("select-pane", "-t", f"{session}:{window}", "-t", ":.+"),
                 check=False,
             )
 
@@ -381,12 +387,12 @@ def handle_pane_exited(session: str, window: str, generation: str,
     # start_new_session detaches the process from the dying pane's PTY.
     import sys
     _logger.info("handle_pane_exited: deferring rebalance for %s:%s",
-                 session, reg_window)
+                 session, window)
     subprocess.Popen(
         [sys.executable, "-c",
          "import time; time.sleep(0.3); "
          "from pm_core.pane_layout import rebalance; "
-         f"rebalance({session!r}, {reg_window!r})"],
+         f"rebalance({session!r}, {window!r})"],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -409,28 +415,30 @@ def handle_any_pane_closed() -> None:
         except (json.JSONDecodeError, KeyError):
             continue
         session = data.get("session", "")
-        window = data.get("window", "0")
         if not session:
             continue
-        if data.get("user_modified"):
-            continue
 
-        removed = _reconcile_registry(session, window)
-        if removed:
-            _logger.info("handle_any_pane_closed: session=%s removed=%s, rebalancing",
-                         session, removed)
-            rebalance(session, window)
+        for window_id, wdata in list(data.get("windows", {}).items()):
+            if wdata.get("user_modified"):
+                continue
+            removed = _reconcile_registry(session, window_id)
+            if removed:
+                _logger.info("handle_any_pane_closed: session=%s window=%s removed=%s, rebalancing",
+                             session, window_id, removed)
+                rebalance(session, window_id)
 
 
 def handle_pane_opened(session: str, window: str, pane_id: str) -> None:
-    """Handle pane-opened event: if not in registry, mark user_modified."""
+    """Handle pane-opened event: if not in registry, mark per-window user_modified."""
     _ensure_logging()
     _logger.info("handle_pane_opened called: session=%s window=%s pane_id=%s",
                  session, window, pane_id)
 
     data = load_registry(session)
-    known_ids = {p["id"] for p in data["panes"]}
+    wdata = _get_window_data(data, window)
+    known_ids = {p["id"] for p in wdata["panes"]}
     if pane_id not in known_ids:
-        _logger.info("handle_pane_opened: unknown pane %s, setting user_modified", pane_id)
-        data["user_modified"] = True
+        _logger.info("handle_pane_opened: unknown pane %s in window %s, setting user_modified",
+                     pane_id, window)
+        wdata["user_modified"] = True
         save_registry(session, data)

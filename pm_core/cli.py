@@ -439,7 +439,7 @@ def plan():
 @plan.command("add")
 @click.argument("name")
 @click.option("--description", default="", help="Description of what the plan should accomplish")
-@click.option("--new", "fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
+@click.option("--fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
 def plan_add(name: str, description: str, fresh: bool):
     """Create a new plan and launch Claude to develop it."""
     root = state_root()
@@ -552,7 +552,7 @@ def plan_list():
 @plan.command("breakdown")
 @click.argument("plan_id", default=None, required=False)
 @click.option("--prs", "initial_prs", default=None, help="Seed the conversation with an initial PR list")
-@click.option("--new", "fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
+@click.option("--fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
 def plan_breakdown(plan_id: str | None, initial_prs: str | None, fresh: bool):
     """Launch Claude to break a plan into PRs (written to plan file).
 
@@ -656,7 +656,7 @@ plans pane) to check consistency and coverage before loading PRs.
 
 @plan.command("review")
 @click.argument("plan_id", default=None, required=False)
-@click.option("--new", "fresh", is_flag=True, default=False, help="Start a fresh session")
+@click.option("--fresh", is_flag=True, default=False, help="Start a fresh session")
 def plan_review(plan_id: str | None, fresh: bool):
     """Launch Claude to review plan-PR consistency."""
     root = state_root()
@@ -703,7 +703,13 @@ def plan_review(plan_id: str | None, fresh: bool):
         files = pr.get("files", "")
         files_str = f"\n    files: {files}" if files else ""
         status = pr.get("status", "pending")
-        return f"  {pr['id']}: {pr.get('title', '???')} [{status}]{dep_str}{desc_str}{tests_str}{files_str}"
+        gh_num = pr.get("gh_pr_number")
+        gh_str = f"\n    github: PR #{gh_num}" if gh_num else ""
+        branch = pr.get("branch")
+        branch_str = f"\n    branch: {branch}" if branch else ""
+        workdir = pr.get("workdir")
+        workdir_str = f"\n    workdir: {workdir}" if workdir else ""
+        return f"  {pr['id']}: {pr.get('title', '???')} [{status}]{dep_str}{gh_str}{branch_str}{workdir_str}{desc_str}{tests_str}{files_str}"
 
     pr_list = "\n".join(_format_pr(pr) for pr in plan_prs) if plan_prs else "(no PRs linked to this plan)"
 
@@ -733,6 +739,8 @@ PRs belonging to this plan:
 {other_prs_context}\
 First, assess progress:
 - How many PRs are done (merged/in_review) vs remaining (pending/in_progress)?
+- Check the github PR, branch, or workdir listed in each PR's yaml to verify
+  actual implementation state.
 - Are there any blockers — PRs whose dependencies aren't met yet?
 - Summarize the current state concisely for the user.
 
@@ -742,8 +750,9 @@ Then check for issues:
    new requirements or scope changes that need additional PRs?
 
 2. CONSISTENCY — Do PR descriptions still match the plan? Are depends_on
-   references correct? For each file path in a PR's **files** field, check
-   whether it exists in the repo. Flag paths that look wrong.
+   references correct? Verify actual changed files against each PR's
+   description using the github PR, branch, or workdir in the yaml.
+   The current working tree may not reflect PR branch changes.
 
 3. ITERATION — Based on what's been completed so far, does the plan need
    updating? Do remaining PR descriptions need refinement based on what
@@ -1584,7 +1593,7 @@ def pr_ready():
 @pr.command("start")
 @click.argument("pr_id", default=None, required=False)
 @click.option("--workdir", default=None, help="Custom work directory")
-@click.option("--new", "fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
+@click.option("--fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
 def pr_start(pr_id: str | None, workdir: str, fresh: bool):
     """Start working on a PR: clone, branch, print prompt.
 
@@ -1642,7 +1651,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
         click.echo(f"PR {pr_id} is already merged.", err=True)
         raise SystemExit(1)
 
-    # Fast path: if window already exists, switch to it (or kill it if --new)
+    # Fast path: if window already exists, switch to it (or kill it if --fresh)
     if tmux_mod.has_tmux():
         pm_session = _get_current_pm_session() or _get_session_name_for_cwd()
         if tmux_mod.session_exists(pm_session):
@@ -1650,10 +1659,10 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
             existing = tmux_mod.find_window_by_name(pm_session, window_name)
             if existing:
                 if fresh:
-                    tmux_mod.kill_window(pm_session, existing["index"])
+                    tmux_mod.kill_window(pm_session, existing["id"])
                     click.echo(f"Killed existing window '{window_name}'")
                 else:
-                    tmux_mod.select_window(pm_session, existing["index"])
+                    tmux_mod.select_window(pm_session, existing["id"])
                     click.echo(f"Switched to existing window '{window_name}' (session: {pm_session})")
                     return
 
@@ -1777,9 +1786,87 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
     launch_claude(prompt, cwd=str(work_path), session_key=session_key, pm_root=root, resume=not fresh)
 
 
+def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False) -> None:
+    """Launch a tmux review window with Claude review + git diff shell."""
+    if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
+        return
+
+    pm_session = _get_current_pm_session() or _get_session_name_for_cwd()
+    if not tmux_mod.session_exists(pm_session):
+        return
+
+    workdir = pr_entry.get("workdir")
+    if not workdir:
+        return
+
+    pr_id = pr_entry["id"]
+    display_id = _pr_display_id(pr_entry)
+    title = pr_entry.get("title", "")
+    base_branch = data.get("project", {}).get("base_branch", "main")
+
+    # Generate review prompt and build Claude command
+    review_prompt = prompt_gen.generate_review_prompt(data, pr_id)
+    claude_cmd = build_claude_shell_cmd(prompt=review_prompt)
+
+    window_name = f"review-{display_id}"
+
+    # If review window already exists, kill it if fresh, otherwise switch to it
+    existing = tmux_mod.find_window_by_name(pm_session, window_name)
+    if existing:
+        if fresh:
+            tmux_mod.kill_window(pm_session, existing["id"])
+            click.echo(f"Killed existing review window '{window_name}'")
+        else:
+            tmux_mod.select_window(pm_session, existing["id"])
+            click.echo(f"Switched to existing review window '{window_name}'")
+            return
+
+    try:
+        claude_pane = tmux_mod.new_window_get_pane(pm_session, window_name, claude_cmd, workdir)
+        if not claude_pane:
+            return
+
+        # Build shell command that shows PR info then drops to interactive shell
+        shell = os.environ.get("SHELL", "/bin/bash")
+        header = f"Review: {display_id} — {title}"
+        diff_cmd = (
+            f"cd '{workdir}'"
+            f" && echo '=== {header} ==='"
+            f" && echo ''"
+            f" && git status"
+            f" && echo ''"
+            f" && echo '--- Change summary ---'"
+            f" && git diff --stat origin/{base_branch}...HEAD"
+            f" && echo ''"
+            f" && echo '--- Full diff ---'"
+            f" && git diff origin/{base_branch}...HEAD"
+            f" && exec {shell}"
+        )
+        diff_pane = tmux_mod.split_pane_at(claude_pane, "h", diff_cmd, background=True)
+
+        # Register review panes under the review window (multi-window safe).
+        # Derive window ID from the pane we just created rather than
+        # searching by name, which is more robust.
+        import subprocess as _sp_rev
+        wid_result = _sp_rev.run(
+            tmux_mod._tmux_cmd("display", "-t", claude_pane, "-p", "#{window_id}"),
+            capture_output=True, text=True,
+        )
+        review_win_id = wid_result.stdout.strip()
+        if review_win_id:
+            pane_layout.register_pane(pm_session, review_win_id, claude_pane, "review-claude", claude_cmd)
+            if diff_pane:
+                pane_layout.register_pane(pm_session, review_win_id, diff_pane, "review-diff", "diff-shell")
+
+        click.echo(f"Opened review window '{window_name}'")
+    except Exception as e:
+        _log.warning("Failed to launch review window: %s", e)
+
+
 @pr.command("done")
 @click.argument("pr_id", default=None, required=False)
-def pr_done(pr_id: str | None):
+@click.option("--fresh", is_flag=True, default=False, help="Kill existing review window and create a new one")
+def pr_done(pr_id: str | None, fresh: bool):
     """Mark a PR as in_review.
 
     If PR_ID is omitted, infers from cwd (if inside a workdir) or
@@ -1814,8 +1901,9 @@ def pr_done(pr_id: str | None):
         click.echo(f"PR {pr_id} is already merged.", err=True)
         raise SystemExit(1)
     if pr_entry.get("status") == "in_review":
-        click.echo(f"PR {pr_id} is already in_review.", err=True)
-        raise SystemExit(1)
+        click.echo(f"PR {pr_id} is already in_review.")
+        _launch_review_window(data, pr_entry, fresh=fresh)
+        return
     if pr_entry.get("status") == "pending":
         click.echo(f"PR {pr_id} is pending — start it first with: pm pr start {pr_id}", err=True)
         raise SystemExit(1)
@@ -1837,6 +1925,7 @@ def pr_done(pr_id: str | None):
     save_and_push(data, root, f"pm: done {pr_id}")
     click.echo(f"PR {_pr_display_id(pr_entry)} marked as in_review.")
     trigger_tui_refresh()
+    _launch_review_window(data, pr_entry, fresh=fresh)
 
 
 @pr.command("sync")
@@ -2296,6 +2385,9 @@ def _register_tmux_bindings(session_name: str) -> None:
                 check=False)
     _sp.run(tmux_mod._tmux_cmd("set-hook", "-g", "after-kill-pane",
              "run-shell 'pm _pane-closed'"), check=False)
+    _sp.run(tmux_mod._tmux_cmd("set-hook", "-gw", "after-split-window",
+             "run-shell 'pm _pane-opened \"#{session_name}\" \"#{window_id}\" \"#{pane_id}\"'"),
+            check=False)
     # Auto-rebalance when window resizes (triggered by client switches
     # with window-size=latest, or moving terminal to a different monitor).
     # Uses "window-resized" (fires on any window size change) not
@@ -2394,11 +2486,11 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
         # Check if the session has the expected panes
         live_panes = tmux_mod.get_pane_indices(session_name)
         registry = pane_registry.load_registry(session_name)
-        registered_panes = registry.get("panes", [])
+        all_registered = [p for _, p in pane_registry._iter_all_panes(registry)]
 
         # Find which registered panes are still alive
         live_pane_ids = {p[0] for p in live_panes}
-        roles_alive = {p["role"] for p in registered_panes if p["id"] in live_pane_ids}
+        roles_alive = {p["role"] for p in all_registered if p["id"] in live_pane_ids}
 
         _log.info("session exists: %s", session_name)
         _log.info("roles_alive: %s", roles_alive)
@@ -2443,8 +2535,8 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
     import time as _time
     generation = str(int(_time.time()))
     pane_registry.save_registry(session_name, {
-        "session": session_name, "window": "0", "panes": [],
-        "user_modified": False, "generation": generation,
+        "session": session_name, "windows": {},
+        "generation": generation,
     })
 
     # Always create session with TUI in the left pane
@@ -2666,7 +2758,8 @@ def session_mobile(force: bool | None):
                 # Entering mobile: unzoom current window before rebalance
                 tmux_mod.unzoom_pane(session_name, window)
             data = pane_registry.load_registry(session_name)
-            data["user_modified"] = False
+            for wdata in data.get("windows", {}).values():
+                wdata["user_modified"] = False
             pane_registry.save_registry(session_name, data)
             pane_layout.rebalance(session_name, window)
             if force:
@@ -3043,7 +3136,7 @@ def cluster_auto(threshold, max_commits, weights, output_fmt):
 @cluster.command("explore")
 @click.option("--bridged", is_flag=True, default=False,
               help="Launch in a bridge pane (for agent orchestration)")
-@click.option("--new", "fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
+@click.option("--fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
 def cluster_explore(bridged, fresh):
     """Interactively explore code clusters with Claude."""
     import tempfile
@@ -3168,7 +3261,7 @@ def _in_pm_tmux_session() -> bool:
 
 @cli.group(invoke_without_command=True)
 @click.option("--step", default=None, help="Force a specific workflow step")
-@click.option("--new", "fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
+@click.option("--fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
 @click.pass_context
 def guide(ctx, step, fresh):
     """Guided workflow — walks through init -> plan -> PRs -> start."""
@@ -3498,11 +3591,12 @@ def window_resized_cmd(session: str, window: str):
 
     base = pane_registry.base_session_name(session)
     data = pane_registry.load_registry(base)
-    if not data["panes"]:
-        _log.info("_window-resized: no panes in registry for %s, exiting", base)
+    wdata = pane_registry._get_window_data(data, window)
+    if not wdata["panes"]:
+        _log.info("_window-resized: no panes in registry for %s window %s, exiting", base, window)
         return
 
-    _log.info("_window-resized: %d panes in registry, debouncing...", len(data["panes"]))
+    _log.info("_window-resized: %d panes in window %s, debouncing...", len(wdata["panes"]), window)
 
     # Debounce: write our PID, sleep, then only proceed if we're still
     # the latest resize event.  This avoids N rebalances during a drag.
@@ -3576,11 +3670,12 @@ def rebalance_cmd():
     window = tmux_mod.get_window_id(session)
 
     data = pane_registry.load_registry(session)
-    if not data["panes"]:
+    wdata = pane_registry._get_window_data(data, window)
+    if not wdata["panes"]:
         click.echo("No panes registered for this session.", err=True)
         raise SystemExit(1)
 
-    data["user_modified"] = False
+    wdata["user_modified"] = False
     pane_registry.save_registry(session, data)
 
     # Unzoom before rebalance so layout applies to all panes
@@ -3668,7 +3763,7 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     # If session specified, use it
     if session:
         data = pane_registry.load_registry(session)
-        for pane in data.get("panes", []):
+        for _, pane in pane_registry._iter_all_panes(data):
             if pane.get("role") == "tui":
                 return pane.get("id"), session
         return None, None
@@ -3678,7 +3773,7 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
         current_session = tmux_mod.get_session_name()
         if current_session.startswith("pm-"):
             data = pane_registry.load_registry(current_session)
-            for pane in data.get("panes", []):
+            for _, pane in pane_registry._iter_all_panes(data):
                 if pane.get("role") == "tui":
                     return pane.get("id"), current_session
 
@@ -3686,7 +3781,7 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     expected_session = _get_session_name_for_cwd()
     if tmux_mod.session_exists(expected_session):
         data = pane_registry.load_registry(expected_session)
-        for pane in data.get("panes", []):
+        for _, pane in pane_registry._iter_all_panes(data):
             if pane.get("role") == "tui":
                 return pane.get("id"), expected_session
 
@@ -3701,9 +3796,26 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     for sess in result.stdout.strip().splitlines():
         if sess.startswith("pm-") and "~" not in sess:
             data = pane_registry.load_registry(sess)
-            for pane in data.get("panes", []):
+            for _, pane in pane_registry._iter_all_panes(data):
                 if pane.get("role") == "tui":
                     return pane.get("id"), sess
+
+    # Last resort: search tmux directly for a pane running 'pm _tui'.
+    # This handles cases where the TUI pane was removed from the registry
+    # (e.g. during heal testing) but is still alive in tmux.
+    result = subprocess.run(
+        tmux_mod._tmux_cmd("list-panes", "-a",
+                           "-F", "#{pane_id} #{session_name} #{pane_current_command} #{pane_start_command}"),
+        capture_output=True, text=True
+    )
+    if result.returncode == 0:
+        for line in result.stdout.strip().splitlines():
+            parts = line.split(None, 3)
+            if len(parts) >= 3 and parts[1].startswith("pm-"):
+                # Check if command contains 'pm _tui' or 'pm-tui'
+                cmd_text = " ".join(parts[2:])
+                if "_tui" in cmd_text:
+                    return parts[0], parts[1]
 
     return None, None
 
