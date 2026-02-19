@@ -126,7 +126,7 @@ def cluster_auto(threshold, max_commits, weights, output_fmt):
 @cluster.command("explore")
 @click.option("--bridged", is_flag=True, default=False,
               help="Launch in a bridge pane (for agent orchestration)")
-@click.option("--new", "fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
+@click.option("--fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
 def cluster_explore(bridged, fresh):
     """Interactively explore code clusters with Claude."""
     import tempfile

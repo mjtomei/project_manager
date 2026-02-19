@@ -140,6 +140,33 @@ def new_window(session: str, name: str, cmd: str, cwd: str) -> None:
         )
 
 
+def new_window_get_pane(session: str, name: str, cmd: str, cwd: str) -> str | None:
+    """Create a new tmux window and return its initial pane ID.
+
+    Like new_window but returns the pane ID so callers can split on it.
+    Returns None if the window couldn't be found after creation.
+    """
+    target = f"{session}:"
+    subprocess.run(
+        _tmux_cmd("new-window", "-d", "-t", target, "-n", name, "-c", cwd, cmd),
+        check=True,
+    )
+    # Switch the current grouped session to the new window
+    win = find_window_by_name(session, name)
+    if not win:
+        return None
+    current = current_or_base_session(session)
+    subprocess.run(
+        _tmux_cmd("select-window", "-t", f"{current}:{win['index']}"),
+        capture_output=True,
+    )
+    # Discover the pane ID
+    panes = get_pane_indices(session, win["index"])
+    if panes:
+        return panes[0][0]
+    return None
+
+
 def split_pane_background(session: str, direction: str, cmd: str) -> str:
     """Split a pane without switching focus. Returns new pane ID.
 

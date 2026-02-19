@@ -65,6 +65,9 @@ def _register_tmux_bindings(session_name: str) -> None:
                 check=False)
     _sp.run(tmux_mod._tmux_cmd("set-hook", "-g", "after-kill-pane",
              "run-shell 'pm _pane-closed'"), check=False)
+    _sp.run(tmux_mod._tmux_cmd("set-hook", "-gw", "after-split-window",
+             "run-shell 'pm _pane-opened \"#{session_name}\" \"#{window_id}\" \"#{pane_id}\"'"),
+            check=False)
     # Auto-rebalance when window resizes (triggered by client switches
     # with window-size=latest, or moving terminal to a different monitor).
     # Uses "window-resized" (fires on any window size change) not
@@ -163,11 +166,11 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
         # Check if the session has the expected panes
         live_panes = tmux_mod.get_pane_indices(session_name)
         registry = pane_layout.load_registry(session_name)
-        registered_panes = registry.get("panes", [])
+        all_registered = [p for _, p in pane_layout._iter_all_panes(registry)]
 
         # Find which registered panes are still alive
         live_pane_ids = {p[0] for p in live_panes}
-        roles_alive = {p["role"] for p in registered_panes if p["id"] in live_pane_ids}
+        roles_alive = {p["role"] for p in all_registered if p["id"] in live_pane_ids}
 
         _log.info("session exists: %s", session_name)
         _log.info("roles_alive: %s", roles_alive)
@@ -212,8 +215,8 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
     import time as _time
     generation = str(int(_time.time()))
     pane_layout.save_registry(session_name, {
-        "session": session_name, "window": "0", "panes": [],
-        "user_modified": False, "generation": generation,
+        "session": session_name, "windows": {},
+        "generation": generation,
     })
 
     # Always create session with TUI in the left pane
@@ -453,7 +456,8 @@ def session_mobile(force: bool | None):
                 # Entering mobile: unzoom current window before rebalance
                 tmux_mod.unzoom_pane(session_name, window)
             data = pane_layout.load_registry(session_name)
-            data["user_modified"] = False
+            for wdata in data.get("windows", {}).values():
+                wdata["user_modified"] = False
             pane_layout.save_registry(session_name, data)
             pane_layout.rebalance(session_name, window)
             if force:
@@ -516,11 +520,12 @@ def window_resized_cmd(session: str, window: str):
 
     base = pane_layout.base_session_name(session)
     data = pane_layout.load_registry(base)
-    if not data["panes"]:
-        _log.info("_window-resized: no panes in registry for %s, exiting", base)
+    wdata = pane_layout._get_window_data(data, window)
+    if not wdata["panes"]:
+        _log.info("_window-resized: no panes in registry for %s window %s, exiting", base, window)
         return
 
-    _log.info("_window-resized: %d panes in registry, debouncing...", len(data["panes"]))
+    _log.info("_window-resized: %d panes in window %s, debouncing...", len(wdata["panes"]), window)
 
     # Debounce: write our PID, sleep, then only proceed if we're still
     # the latest resize event.  This avoids N rebalances during a drag.
@@ -594,11 +599,12 @@ def rebalance_cmd():
     window = tmux_mod.get_window_id(session)
 
     data = pane_layout.load_registry(session)
-    if not data["panes"]:
+    wdata = pane_layout._get_window_data(data, window)
+    if not wdata["panes"]:
         click.echo("No panes registered for this session.", err=True)
         raise SystemExit(1)
 
-    data["user_modified"] = False
+    wdata["user_modified"] = False
     pane_layout.save_registry(session, data)
 
     # Unzoom before rebalance so layout applies to all panes

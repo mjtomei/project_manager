@@ -306,7 +306,7 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     # If session specified, use it
     if session:
         data = pane_layout.load_registry(session)
-        for pane in data.get("panes", []):
+        for _, pane in pane_layout._iter_all_panes(data):
             if pane.get("role") == "tui":
                 return pane.get("id"), session
         return None, None
@@ -316,7 +316,7 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
         current_session = tmux_mod.get_session_name()
         if current_session.startswith("pm-"):
             data = pane_layout.load_registry(current_session)
-            for pane in data.get("panes", []):
+            for _, pane in pane_layout._iter_all_panes(data):
                 if pane.get("role") == "tui":
                     return pane.get("id"), current_session
 
@@ -324,7 +324,7 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     expected_session = _get_session_name_for_cwd()
     if tmux_mod.session_exists(expected_session):
         data = pane_layout.load_registry(expected_session)
-        for pane in data.get("panes", []):
+        for _, pane in pane_layout._iter_all_panes(data):
             if pane.get("role") == "tui":
                 return pane.get("id"), expected_session
 
@@ -339,8 +339,25 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     for sess in result.stdout.strip().splitlines():
         if sess.startswith("pm-") and "~" not in sess:
             data = pane_layout.load_registry(sess)
-            for pane in data.get("panes", []):
+            for _, pane in pane_layout._iter_all_panes(data):
                 if pane.get("role") == "tui":
                     return pane.get("id"), sess
+
+    # Last resort: search tmux directly for a pane running 'pm _tui'.
+    # This handles cases where the TUI pane was removed from the registry
+    # (e.g. during heal testing) but is still alive in tmux.
+    result = subprocess.run(
+        tmux_mod._tmux_cmd("list-panes", "-a",
+                           "-F", "#{pane_id} #{session_name} #{pane_current_command} #{pane_start_command}"),
+        capture_output=True, text=True
+    )
+    if result.returncode == 0:
+        for line in result.stdout.strip().splitlines():
+            parts = line.split(None, 3)
+            if len(parts) >= 3 and parts[1].startswith("pm-"):
+                # Check if command contains 'pm _tui' or 'pm-tui'
+                cmd_text = " ".join(parts[2:])
+                if "_tui" in cmd_text:
+                    return parts[0], parts[1]
 
     return None, None

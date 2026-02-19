@@ -34,7 +34,7 @@ def _in_pm_tmux_session() -> bool:
 
 @cli.group(invoke_without_command=True)
 @click.option("--step", default=None, help="Force a specific workflow step")
-@click.option("--new", "fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
+@click.option("--fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
 @click.pass_context
 def guide(ctx, step, fresh):
     """Guided workflow — walks through init -> plan -> PRs -> start."""
