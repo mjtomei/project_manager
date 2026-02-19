@@ -8,7 +8,8 @@ import tempfile
 import pytest
 from click.testing import CliRunner
 
-from pm_core import cli, store, git_ops
+from pm_core import store, git_ops
+from pm_core.cli import pr as pr_mod
 
 
 @pytest.fixture
@@ -146,8 +147,8 @@ class TestPrAddNoDraftPr:
         """pr_add should NOT create a draft PR (moved to pr_start)."""
         runner = CliRunner()
 
-        with mock.patch.object(cli, "state_root", return_value=tmp_project["pm_dir"]):
-            result = runner.invoke(cli.pr, ["add", "Test PR", "--description", "Test description"])
+        with mock.patch.object(pr_mod, "state_root", return_value=tmp_project["pm_dir"]):
+            result = runner.invoke(pr_mod.pr, ["add", "Test PR", "--description", "Test description"])
 
         assert result.exit_code == 0
 
@@ -166,8 +167,8 @@ class TestPrAddNoDraftPr:
         """pr_add should not accept --no-draft flag."""
         runner = CliRunner()
 
-        with mock.patch.object(cli, "state_root", return_value=tmp_project["pm_dir"]):
-            result = runner.invoke(cli.pr, ["add", "Test PR", "--no-draft"])
+        with mock.patch.object(pr_mod, "state_root", return_value=tmp_project["pm_dir"]):
+            result = runner.invoke(pr_mod.pr, ["add", "Test PR", "--no-draft"])
 
         # Should fail because --no-draft is no longer a valid option
         assert result.exit_code != 0
@@ -181,10 +182,10 @@ class TestPrStartCreatesDraftPr:
         """pr_start should create a draft PR for GitHub backend."""
         runner = CliRunner()
 
-        with mock.patch.object(cli, "state_root", return_value=tmp_project_with_pending_pr["pm_dir"]):
-            with mock.patch.object(cli, "find_claude", return_value=None):
-                with mock.patch.object(cli, "_workdirs_dir", return_value=tmp_project_with_pending_pr["workdir"].parent):
-                    with mock.patch.object(cli.tmux_mod, "has_tmux", return_value=False):
+        with mock.patch.object(pr_mod, "state_root", return_value=tmp_project_with_pending_pr["pm_dir"]):
+            with mock.patch.object(pr_mod, "find_claude", return_value=None):
+                with mock.patch.object(pr_mod, "_workdirs_dir", return_value=tmp_project_with_pending_pr["workdir"].parent):
+                    with mock.patch.object(pr_mod.tmux_mod, "has_tmux", return_value=False):
                         with mock.patch.multiple(
                             git_ops,
                             clone=mock.DEFAULT,
@@ -195,7 +196,7 @@ class TestPrStartCreatesDraftPr:
                         ):
                             with mock.patch("shutil.rmtree"):
                                 with mock.patch("shutil.move"):
-                                    result = runner.invoke(cli.pr, [
+                                    result = runner.invoke(pr_mod.pr, [
                                         "start", "pr-001",
                                         "--workdir", str(tmp_project_with_pending_pr["workdir"]),
                                     ])
@@ -218,10 +219,10 @@ class TestPrStartCreatesDraftPr:
         """pr_start should not create draft PR if gh_pr_number already exists."""
         runner = CliRunner()
 
-        with mock.patch.object(cli, "state_root", return_value=tmp_project_with_pr["pm_dir"]):
-            with mock.patch.object(cli, "find_claude", return_value=None):
-                with mock.patch.object(cli, "_workdirs_dir", return_value=tmp_project_with_pr["workdir"].parent):
-                    with mock.patch.object(cli.tmux_mod, "has_tmux", return_value=False):
+        with mock.patch.object(pr_mod, "state_root", return_value=tmp_project_with_pr["pm_dir"]):
+            with mock.patch.object(pr_mod, "find_claude", return_value=None):
+                with mock.patch.object(pr_mod, "_workdirs_dir", return_value=tmp_project_with_pr["workdir"].parent):
+                    with mock.patch.object(pr_mod.tmux_mod, "has_tmux", return_value=False):
                         with mock.patch.multiple(
                             git_ops,
                             clone=mock.DEFAULT,
@@ -232,7 +233,7 @@ class TestPrStartCreatesDraftPr:
                         ):
                             with mock.patch("shutil.rmtree"):
                                 with mock.patch("shutil.move"):
-                                    result = runner.invoke(cli.pr, [
+                                    result = runner.invoke(pr_mod.pr, [
                                         "start", "pr-001",
                                         "--workdir", str(tmp_project_with_pr["workdir"]),
                                     ])
@@ -252,10 +253,10 @@ class TestPrStartCreatesDraftPr:
                 return mock.Mock(returncode=1, stdout="", stderr="push failed")
             return mock.Mock(returncode=0, stdout="abc12345\n", stderr="")
 
-        with mock.patch.object(cli, "state_root", return_value=tmp_project_with_pending_pr["pm_dir"]):
-            with mock.patch.object(cli, "find_claude", return_value=None):
-                with mock.patch.object(cli, "_workdirs_dir", return_value=tmp_project_with_pending_pr["workdir"].parent):
-                    with mock.patch.object(cli.tmux_mod, "has_tmux", return_value=False):
+        with mock.patch.object(pr_mod, "state_root", return_value=tmp_project_with_pending_pr["pm_dir"]):
+            with mock.patch.object(pr_mod, "find_claude", return_value=None):
+                with mock.patch.object(pr_mod, "_workdirs_dir", return_value=tmp_project_with_pending_pr["workdir"].parent):
+                    with mock.patch.object(pr_mod.tmux_mod, "has_tmux", return_value=False):
                         with mock.patch.multiple(
                             git_ops,
                             clone=mock.DEFAULT,
@@ -266,7 +267,7 @@ class TestPrStartCreatesDraftPr:
                         ):
                             with mock.patch("shutil.rmtree"):
                                 with mock.patch("shutil.move"):
-                                    result = runner.invoke(cli.pr, [
+                                    result = runner.invoke(pr_mod.pr, [
                                         "start", "pr-001",
                                         "--workdir", str(tmp_project_with_pending_pr["workdir"]),
                                     ])
@@ -293,10 +294,10 @@ class TestPrStartCreatesDraftPr:
 
         runner = CliRunner()
 
-        with mock.patch.object(cli, "state_root", return_value=tmp_project_with_pending_pr["pm_dir"]):
-            with mock.patch.object(cli, "find_claude", return_value=None):
-                with mock.patch.object(cli, "_workdirs_dir", return_value=tmp_project_with_pending_pr["workdir"].parent):
-                    with mock.patch.object(cli.tmux_mod, "has_tmux", return_value=False):
+        with mock.patch.object(pr_mod, "state_root", return_value=tmp_project_with_pending_pr["pm_dir"]):
+            with mock.patch.object(pr_mod, "find_claude", return_value=None):
+                with mock.patch.object(pr_mod, "_workdirs_dir", return_value=tmp_project_with_pending_pr["workdir"].parent):
+                    with mock.patch.object(pr_mod.tmux_mod, "has_tmux", return_value=False):
                         with mock.patch.multiple(
                             git_ops,
                             clone=mock.DEFAULT,
@@ -307,7 +308,7 @@ class TestPrStartCreatesDraftPr:
                         ):
                             with mock.patch("shutil.rmtree"):
                                 with mock.patch("shutil.move"):
-                                    result = runner.invoke(cli.pr, [
+                                    result = runner.invoke(pr_mod.pr, [
                                         "start", "pr-001",
                                         "--workdir", str(tmp_project_with_pending_pr["workdir"]),
                                     ])
@@ -318,7 +319,7 @@ class TestPrStartCreatesDraftPr:
         mock_gh_ops["create_draft_pr"].assert_not_called()
 
 
-@mock.patch.object(cli, "_launch_review_window")
+@mock.patch.object(pr_mod, "_launch_review_window")
 class TestPrDoneUpgradesDraftPr:
     """Tests for draft PR upgrade during pr_done."""
 
@@ -333,8 +334,8 @@ class TestPrDoneUpgradesDraftPr:
 
         runner = CliRunner()
 
-        with mock.patch.object(cli, "state_root", return_value=tmp_project_with_pr["pm_dir"]):
-            result = runner.invoke(cli.pr, ["done", "pr-001"])
+        with mock.patch.object(pr_mod, "state_root", return_value=tmp_project_with_pr["pm_dir"]):
+            result = runner.invoke(pr_mod.pr, ["done", "pr-001"])
 
         assert result.exit_code == 0
 
@@ -361,8 +362,8 @@ class TestPrDoneUpgradesDraftPr:
 
         runner = CliRunner()
 
-        with mock.patch.object(cli, "state_root", return_value=tmp_project_with_pr["pm_dir"]):
-            result = runner.invoke(cli.pr, ["done", "pr-001"])
+        with mock.patch.object(pr_mod, "state_root", return_value=tmp_project_with_pr["pm_dir"]):
+            result = runner.invoke(pr_mod.pr, ["done", "pr-001"])
 
         assert result.exit_code == 0
 
@@ -381,8 +382,8 @@ class TestPrDoneUpgradesDraftPr:
 
         runner = CliRunner()
 
-        with mock.patch.object(cli, "state_root", return_value=tmp_project_with_pr["pm_dir"]):
-            result = runner.invoke(cli.pr, ["done", "pr-001"])
+        with mock.patch.object(pr_mod, "state_root", return_value=tmp_project_with_pr["pm_dir"]):
+            result = runner.invoke(pr_mod.pr, ["done", "pr-001"])
 
         assert result.exit_code == 0
         assert "Warning" in result.output
@@ -403,8 +404,8 @@ class TestPrDoneUpgradesDraftPr:
 
         runner = CliRunner()
 
-        with mock.patch.object(cli, "state_root", return_value=tmp_project_with_pr["pm_dir"]):
-            result = runner.invoke(cli.pr, ["done", "pr-001"])
+        with mock.patch.object(pr_mod, "state_root", return_value=tmp_project_with_pr["pm_dir"]):
+            result = runner.invoke(pr_mod.pr, ["done", "pr-001"])
 
         assert result.exit_code == 0
         mock_gh_ops["mark_pr_ready"].assert_not_called()
@@ -451,14 +452,14 @@ class TestPrDisplayId:
     def test_with_gh_pr_number(self):
         """Should return #N when gh_pr_number is set."""
         pr = {"id": "pr-001", "gh_pr_number": 42}
-        assert cli._pr_display_id(pr) == "#42"
+        assert pr_mod._pr_display_id(pr) == "#42"
 
     def test_without_gh_pr_number(self):
         """Should return pr-NNN when gh_pr_number is not set."""
         pr = {"id": "pr-001", "gh_pr_number": None}
-        assert cli._pr_display_id(pr) == "pr-001"
+        assert pr_mod._pr_display_id(pr) == "pr-001"
 
     def test_without_gh_pr_number_key(self):
         """Should return pr-NNN when gh_pr_number key is missing."""
         pr = {"id": "pr-003"}
-        assert cli._pr_display_id(pr) == "pr-003"
+        assert pr_mod._pr_display_id(pr) == "pr-003"
