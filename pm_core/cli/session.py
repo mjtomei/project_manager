@@ -15,18 +15,16 @@ from pm_core import store, notes
 from pm_core import tmux as tmux_mod
 from pm_core import pane_layout
 from pm_core import pane_registry
-from pm_core.paths import configure_logger
 from pm_core.claude_launcher import find_editor
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
     _get_current_pm_session,
     _get_session_name_for_cwd,
+    _log,
     _set_share_mode_env,
     state_root,
 )
-
-_log = configure_logger("pm.cli")
 
 
 def _register_tmux_bindings(session_name: str) -> None:

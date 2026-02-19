@@ -18,9 +18,6 @@ from pm_core import pane_layout
 from pm_core import pane_registry
 from pm_core.backend import get_backend
 from pm_core.claude_launcher import find_claude, build_claude_shell_cmd, clear_session, launch_claude
-from pm_core.paths import configure_logger
-
-_log = configure_logger("pm.cli")
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
@@ -28,6 +25,7 @@ from pm_core.cli.helpers import (
     _get_session_name_for_cwd,
     _gh_state_to_status,
     _infer_pr_id,
+    _log,
     _make_pr_entry,
     _pr_display_id,
     _pr_id_sort_key,
