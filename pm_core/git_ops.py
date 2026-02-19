@@ -9,6 +9,63 @@ from typing import Optional
 from pm_core.paths import log_shell_command
 
 
+def get_git_root(start_path: Path | None = None) -> Path | None:
+    """Find the git repository root from the given path or cwd.
+
+    Walks up the directory tree looking for .git directory.
+    """
+    path = start_path or Path.cwd()
+    path = path.resolve()
+
+    while path != path.parent:
+        if (path / ".git").exists():
+            return path
+        path = path.parent
+
+    # Check root directory too
+    if (path / ".git").exists():
+        return path
+    return None
+
+
+def get_github_repo_name(git_root: Path) -> str | None:
+    """Extract GitHub repo name (without org/user) from git remote.
+
+    Returns None if not a GitHub repo or can't determine name.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=git_root,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return None
+
+        url = result.stdout.strip()
+        # Handle various GitHub URL formats:
+        # https://github.com/user/repo.git
+        # git@github.com:user/repo.git
+        # https://github.com/user/repo
+        if "github.com" not in url:
+            return None
+
+        # Extract repo name from URL
+        if url.endswith(".git"):
+            url = url[:-4]
+
+        # Get the last path component (repo name)
+        repo_name = url.rstrip("/").split("/")[-1]
+        # Also handle git@github.com:user/repo format
+        if ":" in repo_name:
+            repo_name = repo_name.split(":")[-1].split("/")[-1]
+
+        return repo_name if repo_name else None
+    except (subprocess.SubprocessError, OSError):
+        return None
+
+
 def is_git_repo(path: Path) -> bool:
     """Check if path is inside a git repository."""
     result = subprocess.run(

@@ -65,66 +65,6 @@ def sessions_dir() -> Path:
     return d
 
 
-def _find_git_root(start_path: Path | None = None) -> Path | None:
-    """Find the git repository root from the given path or cwd.
-
-    Walks up the directory tree looking for .git directory.
-    """
-    path = start_path or Path.cwd()
-    path = path.resolve()
-
-    while path != path.parent:
-        if (path / ".git").exists():
-            return path
-        path = path.parent
-
-    # Check root directory too
-    if (path / ".git").exists():
-        return path
-    return None
-
-
-def _get_github_repo_name(git_root: Path) -> str | None:
-    """Extract GitHub repo name (without org/user) from git remote.
-
-    Returns None if not a GitHub repo or can't determine name.
-    """
-    try:
-        result = subprocess.run(
-            ["git", "remote", "get-url", "origin"],
-            cwd=git_root,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            return None
-
-        url = result.stdout.strip()
-        # Handle various GitHub URL formats:
-        # https://github.com/user/repo.git
-        # git@github.com:user/repo.git
-        # https://github.com/user/repo
-        if "github.com" not in url:
-            return None
-
-        # Extract repo name from URL
-        if url.endswith(".git"):
-            url = url[:-4]
-
-        # Get the last path component (repo name)
-        repo_name = url.rstrip("/").split("/")[-1]
-        # Also handle git@github.com:user/repo format
-        if ":" in repo_name:
-            repo_name = repo_name.split(":")[-1].split("/")[-1]
-
-        return repo_name if repo_name else None
-    except (subprocess.SubprocessError, OSError):
-        return None
-
-
-_session_tag_cache: dict[str, str | None] = {}
-
-
 def get_session_tag(start_path: Path | None = None, use_github_name: bool = True) -> str | None:
     """Generate session tag from the current git repository.
 
@@ -141,19 +81,21 @@ def get_session_tag(start_path: Path | None = None, use_github_name: bool = True
         use_github_name: If True, try to get GitHub repo name (requires subprocess).
                         If False, just use directory name (faster, no subprocess).
     """
+    from pm_core.git_ops import get_git_root, get_github_repo_name
+
     share_mode = os.environ.get("PM_SHARE_MODE")
     cache_key = (str(start_path or Path.cwd()), use_github_name, share_mode)
     if cache_key in _session_tag_cache:
         return _session_tag_cache[cache_key]
 
-    git_root = _find_git_root(start_path)
+    git_root = get_git_root(start_path)
     if not git_root:
         _session_tag_cache[cache_key] = None
         return None
 
     # Get repo name - optionally try GitHub, always fall back to directory name
     if use_github_name:
-        repo_name = _get_github_repo_name(git_root) or git_root.name
+        repo_name = get_github_repo_name(git_root) or git_root.name
     else:
         repo_name = git_root.name
 

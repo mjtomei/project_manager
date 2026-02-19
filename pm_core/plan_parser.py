@@ -66,17 +66,17 @@ def parse_plan_prs(text: str) -> list[dict]:
 
         entry = {
             "title": title,
-            "description": _extract_field(body, "description"),
-            "tests": _extract_field(body, "tests"),
-            "files": _extract_field(body, "files"),
-            "depends_on": _extract_field(body, "depends_on"),
+            "description": extract_field(body, "description"),
+            "tests": extract_field(body, "tests"),
+            "files": extract_field(body, "files"),
+            "depends_on": extract_field(body, "depends_on"),
         }
         results.append(entry)
 
     return results
 
 
-def _extract_field(body: str, field: str) -> str:
+def extract_field(body: str, field: str) -> str:
     """Extract a **field**: value from the body text."""
     pattern = rf'^\s*-\s*\*\*{re.escape(field)}\*\*:\s*(.*?)$'
     match = re.search(pattern, body, re.MULTILINE | re.IGNORECASE)
