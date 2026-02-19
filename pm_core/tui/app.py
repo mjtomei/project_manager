@@ -9,7 +9,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from pm_core.paths import configure_logger, debug_dir, command_log_file
+from pm_core.paths import configure_logger, debug_dir
 from pm_core.tui._shell import _run_shell, _run_shell_async
 
 _log = configure_logger("pm.tui")
@@ -27,7 +27,7 @@ from textual.reactive import reactive
 from textual.timer import Timer
 from textual.widgets import Label
 
-from pm_core import store, graph as graph_mod, git_ops, notes, guide, pr_sync
+from pm_core import store, graph as graph_mod, guide, pr_sync
 
 from pm_core import tmux as tmux_mod
 from pm_core import pane_layout
