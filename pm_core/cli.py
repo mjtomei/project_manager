@@ -702,7 +702,13 @@ def plan_review(plan_id: str | None, fresh: bool):
         files = pr.get("files", "")
         files_str = f"\n    files: {files}" if files else ""
         status = pr.get("status", "pending")
-        return f"  {pr['id']}: {pr.get('title', '???')} [{status}]{dep_str}{desc_str}{tests_str}{files_str}"
+        gh_num = pr.get("gh_pr_number")
+        gh_str = f"\n    github: PR #{gh_num}" if gh_num else ""
+        branch = pr.get("branch")
+        branch_str = f"\n    branch: {branch}" if branch else ""
+        workdir = pr.get("workdir")
+        workdir_str = f"\n    workdir: {workdir}" if workdir else ""
+        return f"  {pr['id']}: {pr.get('title', '???')} [{status}]{dep_str}{gh_str}{branch_str}{workdir_str}{desc_str}{tests_str}{files_str}"
 
     pr_list = "\n".join(_format_pr(pr) for pr in plan_prs) if plan_prs else "(no PRs linked to this plan)"
 
@@ -732,6 +738,8 @@ PRs belonging to this plan:
 {other_prs_context}\
 First, assess progress:
 - How many PRs are done (merged/in_review) vs remaining (pending/in_progress)?
+- Check the github PR, branch, or workdir listed in each PR's yaml to verify
+  actual implementation state.
 - Are there any blockers — PRs whose dependencies aren't met yet?
 - Summarize the current state concisely for the user.
 
@@ -741,8 +749,9 @@ Then check for issues:
    new requirements or scope changes that need additional PRs?
 
 2. CONSISTENCY — Do PR descriptions still match the plan? Are depends_on
-   references correct? For each file path in a PR's **files** field, check
-   whether it exists in the repo. Flag paths that look wrong.
+   references correct? Verify actual changed files against each PR's
+   description using the github PR, branch, or workdir in the yaml.
+   The current working tree may not reflect PR branch changes.
 
 3. ITERATION — Based on what's been completed so far, does the plan need
    updating? Do remaining PR descriptions need refinement based on what
