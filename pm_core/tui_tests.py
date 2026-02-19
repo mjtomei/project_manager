@@ -2557,6 +2557,7 @@ project manager tool itself from within the project manager TUI.
 - `cat ~/.pm/pane-registry/<session>.json` - View pane registry
 - `tmux display-message -p "#{session_name}"` - Get session name
 - `tmux capture-pane -t <pane_id> -p` - Capture content of a specific pane
+- `tmux kill-pane -t <pane_id>` - Kill a specific pane
 
 ## Test Procedure
 
@@ -2710,6 +2711,7 @@ session — every pm CLI command logs its execution and result here.
 - `cat ~/.pm/pane-registry/<session>.json` - View pane registry
 - `tmux display-message -p "#{session_name}"` - Get session name
 - `tmux capture-pane -t <pane_id> -p` - Capture content of a specific pane
+- `tmux kill-pane -t <pane_id>` - Kill a specific pane
 
 ## Test Procedure
 
