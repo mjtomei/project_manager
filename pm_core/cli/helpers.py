@@ -140,11 +140,18 @@ def _pr_display_id(pr: dict) -> str:
 
 
 def _resolve_pr_id(data: dict, identifier: str) -> dict | None:
-    """Resolve a PR by pm ID (pr-NNN) or GitHub PR number (bare integer)."""
-    if identifier.startswith("pr-"):
-        return store.get_pr(data, identifier)
+    """Resolve a PR by pm ID (pr-NNN), GitHub PR number (#N or bare integer).
+
+    Accepts: 'pr-001', '42', '#42'.
+    """
+    # Exact pm ID match first
+    pr = store.get_pr(data, identifier)
+    if pr:
+        return pr
+    # Strip leading '#' for GitHub-style references
+    cleaned = identifier.lstrip("#")
     try:
-        num = int(identifier)
+        num = int(cleaned)
     except ValueError:
         return None
     for pr in data.get("prs") or []:
@@ -154,14 +161,20 @@ def _resolve_pr_id(data: dict, identifier: str) -> dict | None:
 
 
 def _require_pr(data: dict, pr_id: str) -> dict:
-    """Get a PR by ID or exit with an error listing available PRs."""
-    pr_entry = store.get_pr(data, pr_id)
+    """Get a PR by pm ID or GitHub PR number, or exit with an error.
+
+    Accepts: 'pr-001', '42', '#42'.
+    """
+    pr_entry = _resolve_pr_id(data, pr_id)
     if pr_entry:
         return pr_entry
     prs = data.get("prs") or []
-    click.echo(f"PR {pr_id} not found.", err=True)
+    click.echo(f"PR '{pr_id}' not found.", err=True)
     if prs:
-        click.echo(f"Available PRs: {', '.join(p['id'] for p in prs)}", err=True)
+        ids = []
+        for p in prs:
+            ids.append(_pr_display_id(p))
+        click.echo(f"Available PRs: {', '.join(ids)}", err=True)
     raise SystemExit(1)
 
 

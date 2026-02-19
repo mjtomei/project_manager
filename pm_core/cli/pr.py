@@ -110,6 +110,7 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
     root = state_root()
     data = store.load(root)
     pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
 
     changes = []
     if title is not None:
@@ -247,6 +248,7 @@ def pr_select(pr_id: str):
     root = state_root()
     data = store.load(root)
     pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
 
     data["project"]["active_pr"] = pr_id
     save_and_push(data, root)
@@ -386,6 +388,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
             raise SystemExit(1)
 
     pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
 
     if pr_entry.get("status") == "in_progress":
         # If already in_progress, reuse existing workdir if available
@@ -639,6 +642,7 @@ def pr_done(pr_id: str | None, fresh: bool):
         click.echo(f"Auto-selected {pr_id}")
 
     pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
 
     if pr_entry.get("status") == "merged":
         click.echo(f"PR {pr_id} is already merged.", err=True)
@@ -974,6 +978,7 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool):
         click.echo(f"Using active PR: {pr_id}")
 
     pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
 
     # Close GitHub PR if exists
     gh_pr_number = pr_entry.get("gh_pr_number")
