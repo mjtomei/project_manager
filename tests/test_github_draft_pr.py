@@ -318,10 +318,11 @@ class TestPrStartCreatesDraftPr:
         mock_gh_ops["create_draft_pr"].assert_not_called()
 
 
+@mock.patch.object(cli, "_launch_review_window")
 class TestPrDoneUpgradesDraftPr:
     """Tests for draft PR upgrade during pr_done."""
 
-    def test_upgrades_draft_to_ready_for_github_backend(self, tmp_project_with_pr, mock_gh_ops):
+    def test_upgrades_draft_to_ready_for_github_backend(self, _mock_review, tmp_project_with_pr, mock_gh_ops):
         """pr_done should upgrade draft PR to ready for review."""
         # Set up PR as in_progress
         data = store.load(tmp_project_with_pr["pm_dir"])
@@ -347,7 +348,7 @@ class TestPrDoneUpgradesDraftPr:
         pr = store.get_pr(data, "pr-001")
         assert pr["status"] == "in_review"
 
-    def test_skips_upgrade_if_no_gh_pr(self, tmp_project_with_pr, mock_gh_ops):
+    def test_skips_upgrade_if_no_gh_pr(self, _mock_review, tmp_project_with_pr, mock_gh_ops):
         """pr_done should skip upgrade if no gh_pr is set."""
         # Remove gh_pr
         data = store.load(tmp_project_with_pr["pm_dir"])
@@ -368,7 +369,7 @@ class TestPrDoneUpgradesDraftPr:
         # Should NOT have called mark_pr_ready
         mock_gh_ops["mark_pr_ready"].assert_not_called()
 
-    def test_handles_upgrade_failure_gracefully(self, tmp_project_with_pr, mock_gh_ops):
+    def test_handles_upgrade_failure_gracefully(self, _mock_review, tmp_project_with_pr, mock_gh_ops):
         """pr_done should continue if upgrade fails."""
         mock_gh_ops["mark_pr_ready"].return_value = False
 
@@ -391,7 +392,7 @@ class TestPrDoneUpgradesDraftPr:
         pr = store.get_pr(data, "pr-001")
         assert pr["status"] == "in_review"
 
-    def test_no_upgrade_for_vanilla_backend(self, tmp_project_with_pr, mock_gh_ops):
+    def test_no_upgrade_for_vanilla_backend(self, _mock_review, tmp_project_with_pr, mock_gh_ops):
         """pr_done should not upgrade for vanilla backend."""
         data = store.load(tmp_project_with_pr["pm_dir"])
         data["project"]["backend"] = "vanilla"
