@@ -30,6 +30,7 @@ def compute_tree_layout(
     hidden_plans: set[str] | None = None,
     status_filter: str | None = None,
     hide_merged: bool = False,
+    hide_closed: bool = True,
 ) -> TreeLayout:
     """Compute the full tree layout for a set of PRs.
 
@@ -38,6 +39,7 @@ def compute_tree_layout(
         hidden_plans: Plan IDs whose PRs should be collapsed.
         status_filter: If set, show only PRs with this status.
         hide_merged: If True (and no status_filter), hide merged PRs.
+        hide_closed: If True (and no status_filter), hide closed PRs.
 
     Returns:
         A :class:`TreeLayout` with positions and navigation order.
@@ -58,8 +60,11 @@ def compute_tree_layout(
     # Filter by status
     if status_filter:
         prs = [p for p in prs if p.get("status") == status_filter]
-    elif hide_merged:
-        prs = [p for p in prs if p.get("status") != "merged"]
+    else:
+        if hide_merged:
+            prs = [p for p in prs if p.get("status") != "merged"]
+        if hide_closed:
+            prs = [p for p in prs if p.get("status") != "closed"]
 
     if not prs:
         return layout

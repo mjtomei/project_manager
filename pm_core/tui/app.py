@@ -428,8 +428,14 @@ class ProjectManagerApp(App):
         if tree._status_filter:
             icon = STATUS_ICONS.get(tree._status_filter, "")
             filter_text = f"{icon} {tree._status_filter}"
-        elif tree._hide_merged:
-            filter_text = "hide merged"
+        else:
+            hidden = []
+            if tree._hide_merged:
+                hidden.append("merged")
+            if tree._hide_closed:
+                hidden.append("closed")
+            if hidden:
+                filter_text = "hide " + "+".join(hidden)
         status_bar = self.query_one("#status-bar", StatusBar)
         status_bar.update_status(
             project.get("name", "???"),
