@@ -1,7 +1,6 @@
 """Textual TUI App for Project Manager."""
 
 import json
-import logging
 import os
 import shlex
 import subprocess
@@ -27,10 +26,9 @@ from textual.reactive import reactive
 from textual.timer import Timer
 from textual.widgets import Label
 
-from pm_core import store, graph as graph_mod, guide, pr_sync
+from pm_core import store, guide, pr_sync
 
 from pm_core import tmux as tmux_mod
-from pm_core import pane_layout
 from pm_core.tui.tech_tree import TechTree, PRSelected, PRActivated
 from pm_core.tui.detail_panel import DetailPanel
 from pm_core.tui.command_bar import CommandBar, CommandSubmitted
