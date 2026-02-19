@@ -8,7 +8,6 @@ from pm_core.tui.detail_panel import (
     _pr_display_id,
     DetailPanel,
 )
-from pm_core.plan_parser import extract_field
 
 
 # ---------------------------------------------------------------------------
@@ -102,22 +101,6 @@ class TestPrDisplayId:
     def test_gh_pr_number_zero(self):
         """0 is falsy, so falls back to id."""
         assert _pr_display_id({"id": "pr-x", "gh_pr_number": 0}) == "pr-x"
-
-
-# ---------------------------------------------------------------------------
-# extract_field (imported from plan_parser, used by detail_panel)
-# ---------------------------------------------------------------------------
-
-class TestExtractFieldIntegration:
-    def test_basic_extraction(self):
-        body = "- **description**: Some description text"
-        assert extract_field(body, "description") == "Some description text"
-
-    def test_missing_field(self):
-        assert extract_field("no match here", "tests") == ""
-
-    def test_empty_body(self):
-        assert extract_field("", "files") == ""
 
 
 # ---------------------------------------------------------------------------

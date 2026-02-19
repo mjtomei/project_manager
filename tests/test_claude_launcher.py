@@ -1,6 +1,9 @@
-"""Tests for pm_core.claude_launcher — claude CLI launching and session management."""
+"""Tests for pm_core.claude_launcher — claude CLI launching helpers.
 
-import json
+Note: load_session, save_session, clear_session, _parse_session_id are
+      tested in test_session_registry.py.
+"""
+
 import os
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -11,10 +14,6 @@ from pm_core.claude_launcher import (
     build_claude_shell_cmd,
     load_session,
     save_session,
-    clear_session,
-    _registry_path,
-    _skip_permissions,
-    _parse_session_id,
     launch_claude,
     launch_claude_print,
     launch_claude_print_background,
@@ -130,61 +129,6 @@ class TestBuildClaudeShellCmd:
 
 
 # ---------------------------------------------------------------------------
-# Session round-trip (load / save / clear)
-# ---------------------------------------------------------------------------
-
-class TestSessionRoundTrip:
-    def test_save_load_clear(self, tmp_path):
-        save_session(tmp_path, "key1", "session-abc")
-        assert load_session(tmp_path, "key1") == "session-abc"
-        clear_session(tmp_path, "key1")
-        assert load_session(tmp_path, "key1") is None
-
-    def test_multiple_keys(self, tmp_path):
-        save_session(tmp_path, "a", "s1")
-        save_session(tmp_path, "b", "s2")
-        assert load_session(tmp_path, "a") == "s1"
-        assert load_session(tmp_path, "b") == "s2"
-
-    def test_overwrite(self, tmp_path):
-        save_session(tmp_path, "k", "old")
-        save_session(tmp_path, "k", "new")
-        assert load_session(tmp_path, "k") == "new"
-
-    def test_load_missing_file(self, tmp_path):
-        assert load_session(tmp_path, "x") is None
-
-    def test_clear_missing_key(self, tmp_path):
-        save_session(tmp_path, "a", "s1")
-        clear_session(tmp_path, "nonexistent")
-        assert load_session(tmp_path, "a") == "s1"
-
-
-# ---------------------------------------------------------------------------
-# _registry_path
-# ---------------------------------------------------------------------------
-
-class TestRegistryPath:
-    def test_returns_path(self, tmp_path):
-        result = _registry_path(tmp_path)
-        assert result == tmp_path / ".pm-sessions.json"
-
-
-# ---------------------------------------------------------------------------
-# _skip_permissions
-# ---------------------------------------------------------------------------
-
-class TestSkipPermissions:
-    @patch("pm_core.paths.skip_permissions_enabled", return_value=True)
-    def test_enabled(self, mock_sp):
-        assert _skip_permissions() is True
-
-    @patch("pm_core.paths.skip_permissions_enabled", return_value=False)
-    def test_disabled(self, mock_sp):
-        assert _skip_permissions() is False
-
-
-# ---------------------------------------------------------------------------
 # launch_claude_print_background
 # ---------------------------------------------------------------------------
 
@@ -246,38 +190,6 @@ class TestLaunchClaudeInTmux:
         launch_claude_in_tmux("%1", "hello", cwd="/tmp/proj")
         cmd = mock_sk.call_args[0][1]
         assert cmd.startswith("cd '/tmp/proj' && ")
-
-
-# ---------------------------------------------------------------------------
-# Session edge cases — corrupt files
-# ---------------------------------------------------------------------------
-
-class TestSessionCorruptFile:
-    def test_save_over_corrupt_json(self, tmp_path):
-        """save_session should handle corrupt JSON gracefully (lines 47-48)."""
-        path = tmp_path / ".pm-sessions.json"
-        path.write_text("{invalid json!!!")
-        save_session(tmp_path, "key", "session-1")
-        assert load_session(tmp_path, "key") == "session-1"
-
-    def test_load_non_dict_json(self, tmp_path):
-        """load_session returns None for non-dict JSON."""
-        path = tmp_path / ".pm-sessions.json"
-        path.write_text('"just a string"')
-        assert load_session(tmp_path, "key") is None
-
-    def test_load_missing_session_id(self, tmp_path):
-        """load_session returns None when entry lacks session_id."""
-        path = tmp_path / ".pm-sessions.json"
-        path.write_text(json.dumps({"key": {"other": "stuff"}}))
-        assert load_session(tmp_path, "key") is None
-
-    def test_clear_corrupt_json(self, tmp_path):
-        """clear_session should handle corrupt JSON gracefully."""
-        path = tmp_path / ".pm-sessions.json"
-        path.write_text("{bad json")
-        # Should not raise
-        clear_session(tmp_path, "key")
 
 
 # ---------------------------------------------------------------------------

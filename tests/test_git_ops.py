@@ -1,13 +1,14 @@
-"""Tests for pm_core.git_ops — git operations (run_git, get_git_root, etc.)."""
+"""Tests for pm_core.git_ops — git operations (run_git, clone, checkout, etc.).
 
-import subprocess
+Note: get_git_root, get_github_repo_name are tested in test_dedup.py.
+      select_remote, list_remotes are tested in test_git_remote_detection.py.
+"""
+
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 from pm_core.git_ops import (
     run_git,
-    get_git_root,
-    get_github_repo_name,
     is_git_repo,
     clone,
     checkout_branch,
@@ -15,8 +16,6 @@ from pm_core.git_ops import (
     commit_and_push,
     sync_state,
     auto_commit_state,
-    select_remote,
-    list_remotes,
     push_pm_branch,
     _checkout_and_restore_pm,
 )
@@ -60,71 +59,6 @@ class TestRunGit:
         run_git("commit", "-m", "message")
         cmd = mock_run.call_args[0][0]
         assert cmd == ["git", "commit", "-m", "message"]
-
-
-# ---------------------------------------------------------------------------
-# get_git_root
-# ---------------------------------------------------------------------------
-
-class TestGetGitRoot:
-    def test_finds_root_in_current_dir(self, tmp_path):
-        (tmp_path / ".git").mkdir()
-        assert get_git_root(tmp_path) == tmp_path
-
-    def test_finds_root_in_parent(self, tmp_path):
-        (tmp_path / ".git").mkdir()
-        child = tmp_path / "sub" / "deep"
-        child.mkdir(parents=True)
-        assert get_git_root(child) == tmp_path
-
-    def test_returns_none_when_no_git(self, tmp_path):
-        child = tmp_path / "sub"
-        child.mkdir()
-        assert get_git_root(child) is None
-
-
-# ---------------------------------------------------------------------------
-# get_github_repo_name
-# ---------------------------------------------------------------------------
-
-class TestGetGithubRepoName:
-    @patch("pm_core.git_ops.subprocess.run")
-    def test_https_url(self, mock_run):
-        mock_run.return_value = MagicMock(
-            returncode=0, stdout="https://github.com/user/myrepo.git\n"
-        )
-        assert get_github_repo_name(Path("/tmp")) == "myrepo"
-
-    @patch("pm_core.git_ops.subprocess.run")
-    def test_ssh_url(self, mock_run):
-        mock_run.return_value = MagicMock(
-            returncode=0, stdout="git@github.com:user/myrepo.git\n"
-        )
-        assert get_github_repo_name(Path("/tmp")) == "myrepo"
-
-    @patch("pm_core.git_ops.subprocess.run")
-    def test_non_github_returns_none(self, mock_run):
-        mock_run.return_value = MagicMock(
-            returncode=0, stdout="https://gitlab.com/user/repo.git\n"
-        )
-        assert get_github_repo_name(Path("/tmp")) is None
-
-    @patch("pm_core.git_ops.subprocess.run")
-    def test_no_remote_returns_none(self, mock_run):
-        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="error")
-        assert get_github_repo_name(Path("/tmp")) is None
-
-    @patch("pm_core.git_ops.subprocess.run")
-    def test_url_without_git_suffix(self, mock_run):
-        mock_run.return_value = MagicMock(
-            returncode=0, stdout="https://github.com/user/myrepo\n"
-        )
-        assert get_github_repo_name(Path("/tmp")) == "myrepo"
-
-    @patch("pm_core.git_ops.subprocess.run")
-    def test_subprocess_error(self, mock_run):
-        mock_run.side_effect = subprocess.SubprocessError("fail")
-        assert get_github_repo_name(Path("/tmp")) is None
 
 
 # ---------------------------------------------------------------------------
@@ -245,121 +179,6 @@ class TestNoOps:
 
     def test_auto_commit_state(self, tmp_path):
         assert auto_commit_state(tmp_path) is None
-
-
-# ---------------------------------------------------------------------------
-# select_remote
-# ---------------------------------------------------------------------------
-
-class TestSelectRemote:
-    def test_no_remotes(self):
-        result = select_remote({})
-        assert result == {"selected": None}
-
-    def test_single_remote(self):
-        result = select_remote({"origin": "git@github.com:org/repo.git"})
-        assert result["selected"] == ("origin", "git@github.com:org/repo.git")
-
-    def test_origin_preferred_no_backend(self):
-        remotes = {
-            "origin": "git@github.com:org/repo.git",
-            "upstream": "git@github.com:other/repo.git",
-        }
-        result = select_remote(remotes)
-        assert result["selected"][0] == "origin"
-
-    def test_origin_preferred_with_matching_github_backend(self):
-        remotes = {
-            "origin": "https://github.com/org/repo.git",
-            "upstream": "https://github.com/other/repo.git",
-        }
-        result = select_remote(remotes, preferred_backend="github")
-        assert result["selected"][0] == "origin"
-
-    def test_origin_skipped_when_backend_mismatch(self):
-        remotes = {
-            "origin": "/local/path/repo",
-            "github": "https://github.com/org/repo.git",
-        }
-        result = select_remote(remotes, preferred_backend="github")
-        assert result["selected"] == ("github", "https://github.com/org/repo.git")
-
-    def test_local_backend_matches_anything(self):
-        """Line 319: 'local' or None matches anything."""
-        remotes = {
-            "origin": "https://github.com/org/repo.git",
-            "other": "/local/path",
-        }
-        result = select_remote(remotes, preferred_backend="local")
-        assert result["selected"][0] == "origin"
-
-    def test_ambiguous_multiple_github(self):
-        remotes = {
-            "fork1": "https://github.com/user1/repo.git",
-            "fork2": "https://github.com/user2/repo.git",
-        }
-        result = select_remote(remotes, preferred_backend="github")
-        assert "ambiguous" in result
-        assert len(result["ambiguous"]) == 2
-
-    def test_ambiguous_no_origin_no_backend(self):
-        remotes = {
-            "upstream": "git@github.com:org/repo.git",
-            "fork": "git@github.com:user/repo.git",
-        }
-        # No origin → ambiguous without preferred_backend
-        # Actually origin isn't there, but preferred_backend is None
-        # so matches_backend matches anything → origin check fails → preferred_backend is None → skip → ambiguous
-        result = select_remote(remotes)
-        assert "ambiguous" in result
-
-    def test_vanilla_backend_matches_remote_urls(self):
-        remotes = {
-            "local": "/home/user/repos/proj",
-            "remote": "https://gitlab.com/org/repo.git",
-        }
-        result = select_remote(remotes, preferred_backend="vanilla")
-        assert result["selected"] == ("remote", "https://gitlab.com/org/repo.git")
-
-    def test_vanilla_backend_matches_ssh(self):
-        remotes = {
-            "local": "/home/user/repos/proj",
-            "remote": "git@gitlab.com:org/repo.git",
-        }
-        result = select_remote(remotes, preferred_backend="vanilla")
-        assert result["selected"] == ("remote", "git@gitlab.com:org/repo.git")
-
-
-# ---------------------------------------------------------------------------
-# list_remotes
-# ---------------------------------------------------------------------------
-
-class TestListRemotes:
-    @patch("pm_core.git_ops.is_git_repo", return_value=False)
-    def test_not_git_repo(self, mock_igr):
-        assert list_remotes(Path("/tmp")) == {}
-
-    @patch("pm_core.git_ops.run_git")
-    @patch("pm_core.git_ops.is_git_repo", return_value=True)
-    def test_parses_fetch_remotes(self, mock_igr, mock_rg):
-        mock_rg.return_value = MagicMock(
-            returncode=0,
-            stdout="origin\tgit@github.com:org/repo.git (fetch)\norigin\tgit@github.com:org/repo.git (push)\n"
-        )
-        result = list_remotes(Path("/tmp"))
-        assert result == {"origin": "git@github.com:org/repo.git"}
-
-    @patch("pm_core.git_ops.run_git")
-    @patch("pm_core.git_ops.is_git_repo", return_value=True)
-    def test_no_remotes(self, mock_igr, mock_rg):
-        mock_rg.return_value = MagicMock(returncode=0, stdout="")
-        assert list_remotes(Path("/tmp")) == {}
-
-    @patch("pm_core.git_ops.run_git")
-    @patch("pm_core.git_ops.is_git_repo", return_value=True)
-    def test_error(self, mock_igr, mock_rg):
-        mock_rg.return_value = MagicMock(returncode=1, stdout="")
-        assert list_remotes(Path("/tmp")) == {}
 
 
 # ---------------------------------------------------------------------------
