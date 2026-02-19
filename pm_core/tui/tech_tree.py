@@ -2,13 +2,11 @@
 
 from textual.widget import Widget
 from textual.reactive import reactive
-from textual.message import Message
-from textual.geometry import Size
 from rich.text import Text
-from rich.style import Style
 from rich.console import RenderableType
 
-from pm_core import graph as graph_mod
+from pm_core.tui import item_message
+from pm_core.tui.tree_layout import compute_tree_layout
 
 
 STATUS_ICONS = {
@@ -49,18 +47,7 @@ H_GAP = 6
 V_GAP = 2
 
 
-class PRSelected(Message):
-    """Fired when a PR node is selected."""
-    def __init__(self, pr_id: str) -> None:
-        self.pr_id = pr_id
-        super().__init__()
-
-
-class PRActivated(Message):
-    """Fired when Enter is pressed on a PR node."""
-    def __init__(self, pr_id: str) -> None:
-        self.pr_id = pr_id
-        super().__init__()
+PRSelected, PRActivated = item_message("PR", "pr_id")
 
 
 class TechTree(Widget):
@@ -127,192 +114,19 @@ class TechTree(Widget):
         return plan_id
 
     def _recompute(self) -> None:
-        """Recompute layout positions with smart row assignment.
-
-        Strategy: Single-dependency edges should be horizontal when possible.
-        We assign rows in two passes:
-        1. First pass: tentatively assign all nodes
-        2. Second pass: expand rows where needed to accommodate multiple
-           single-dep children of the same parent
-        """
-        self._plan_label_rows = {}
-        self._hidden_plan_label_rows = {}
-        self._hidden_label_ids = []
-        self._plan_group_order = []
-        prs = self._prs
-        if not prs:
-            self._ordered_ids = []
-            self._node_positions = {}
-            return
-
-        # Filter out hidden plan PRs
-        if self._hidden_plans:
-            prs = [p for p in prs if (p.get("plan") or "_standalone") not in self._hidden_plans]
-            if not prs:
-                self._ordered_ids = []
-                self._node_positions = {}
-                return
-
-        # Filter by status
-        if self._status_filter:
-            # Status filter overrides hide_merged when filtering for "merged"
-            prs = [p for p in prs if p.get("status") == self._status_filter]
-        elif self._hide_merged:
-            prs = [p for p in prs if p.get("status") != "merged"]
-
-        if not prs:
-            self._ordered_ids = []
-            self._node_positions = {}
-            return
-
-        pr_map = {pr["id"]: pr for pr in prs}
-        layers = graph_mod.compute_layers(prs)
-        self._ordered_ids = []
-        self._node_positions = {}
-
-        # Build reverse map: parent -> list of single-dep children
-        single_dep_children: dict[str, list[str]] = {}
-        for pr in prs:
-            deps = pr.get("depends_on") or []
-            if len(deps) == 1:
-                parent = deps[0]
-                if parent not in single_dep_children:
-                    single_dep_children[parent] = []
-                single_dep_children[parent].append(pr["id"])
-
-        # Assign rows
-        row_assignments: dict[str, int] = {}
-
-        # First column: stack them, but leave gaps for nodes that have
-        # multiple single-dep children
-        if layers:
-            current_row = 0
-            for pr_id in sorted(layers[0]):
-                row_assignments[pr_id] = current_row
-                # If this node has multiple single-dep children, they'll need
-                # adjacent rows, so reserve space
-                children = single_dep_children.get(pr_id, [])
-                if len(children) > 1:
-                    current_row += len(children)
-                else:
-                    current_row += 1
-
-        # Subsequent columns
-        for col in range(1, len(layers)):
-            layer = layers[col]
-
-            # Categorize nodes
-            single_dep = []  # (pr_id, parent_id)
-            multi_dep = []   # (pr_id, avg_row)
-            no_dep = []      # pr_id
-
-            for pr_id in layer:
-                pr = pr_map.get(pr_id)
-                deps = (pr.get("depends_on") or []) if pr else []
-                dep_rows = [(d, row_assignments[d]) for d in deps if d in row_assignments]
-                if len(dep_rows) == 1:
-                    single_dep.append((pr_id, dep_rows[0][0], dep_rows[0][1]))
-                elif dep_rows:
-                    avg = sum(r for _, r in dep_rows) / len(dep_rows)
-                    multi_dep.append((pr_id, avg))
-                else:
-                    no_dep.append(pr_id)
-
-            used_rows: set[int] = set()
-
-            # Group single-dep nodes by their parent
-            by_parent: dict[str, list[tuple[str, int]]] = {}
-            for pr_id, parent_id, parent_row in single_dep:
-                if parent_id not in by_parent:
-                    by_parent[parent_id] = []
-                by_parent[parent_id].append((pr_id, parent_row))
-
-            # Assign single-dep nodes: first child gets parent's row,
-            # additional children get adjacent rows
-            for parent_id, children in by_parent.items():
-                children.sort(key=lambda x: x[0])  # Sort by pr_id for consistency
-                base_row = children[0][1]  # Parent's row
-                for i, (pr_id, _) in enumerate(children):
-                    target_row = base_row + i
-                    row_assignments[pr_id] = target_row
-                    used_rows.add(target_row)
-
-            # Assign multi-dep nodes
-            multi_dep.sort(key=lambda x: (x[1], x[0]))
-            for pr_id, pref in multi_dep:
-                target = round(pref)
-                while target in used_rows:
-                    target += 1
-                row_assignments[pr_id] = target
-                used_rows.add(target)
-
-            # Assign no-dep nodes
-            for pr_id in sorted(no_dep):
-                target = 0
-                while target in used_rows:
-                    target += 1
-                row_assignments[pr_id] = target
-                used_rows.add(target)
-
-        # Normalize rows: shift all down so minimum is 0, but preserve gaps
-        min_row = min(row_assignments.values()) if row_assignments else 0
-        if min_row != 0:
-            for pr_id in row_assignments:
-                row_assignments[pr_id] -= min_row
-
-        # Group by plan (only if 2+ distinct plan groups)
-        pr_map_local = {pr["id"]: pr for pr in prs}
-        plan_groups: dict[str, list[str]] = {}
-        for pr_id in row_assignments:
-            pr = pr_map_local.get(pr_id)
-            plan_id = (pr.get("plan") or "_standalone") if pr else "_standalone"
-            if plan_id not in plan_groups:
-                plan_groups[plan_id] = []
-            plan_groups[plan_id].append(pr_id)
-
-        if len(plan_groups) >= 2:
-            # Order: named plans sorted by ID, then standalone last
-            group_order = sorted(
-                (k for k in plan_groups if k != "_standalone"),
-            )
-            if "_standalone" in plan_groups:
-                group_order.append("_standalone")
-            self._plan_group_order = list(group_order)
-
-            current_row = 0
-            for plan_id in group_order:
-                group_pr_ids = plan_groups[plan_id]
-                # Reserve a row for the plan label header
-                self._plan_label_rows[plan_id] = current_row
-                current_row += 1  # label takes one row
-
-                # Get the rows used by this group and compact them
-                group_rows = sorted(set(row_assignments[pid] for pid in group_pr_ids))
-                row_remap = {old_row: current_row + i for i, old_row in enumerate(group_rows)}
-                for pid in group_pr_ids:
-                    row_assignments[pid] = row_remap[row_assignments[pid]]
-                current_row += len(group_rows) + 1  # +1 gap between groups
-
-        # Build final positions
-        for col, layer in enumerate(layers):
-            for pr_id in sorted(layer, key=lambda x: row_assignments.get(x, 0)):
-                self._node_positions[pr_id] = (col, row_assignments[pr_id])
-                self._ordered_ids.append(pr_id)
-
-        # Add hidden plan labels as navigable rows below visible content
-        if self._hidden_plans:
-            max_row = max(row_assignments.values()) if row_assignments else -1
-            hidden_row = max_row + 2  # gap after visible content
-            # Count PRs per hidden plan from the unfiltered list
-            all_pr_map = {pr["id"]: pr for pr in self._prs}
-            for plan_id in sorted(self._hidden_plans):
-                pr_count = sum(1 for pr in self._prs if (pr.get("plan") or "_standalone") == plan_id)
-                virtual_id = f"_hidden:{plan_id}"
-                self._hidden_plan_label_rows[plan_id] = hidden_row
-                self._node_positions[virtual_id] = (0, hidden_row)
-                self._ordered_ids.append(virtual_id)
-                self._hidden_label_ids.append(virtual_id)
-                hidden_row += 1
+        """Recompute layout positions using the tree_layout module."""
+        result = compute_tree_layout(
+            self._prs,
+            hidden_plans=self._hidden_plans,
+            status_filter=self._status_filter,
+            hide_merged=self._hide_merged,
+        )
+        self._ordered_ids = result.ordered_ids
+        self._node_positions = result.node_positions
+        self._plan_label_rows = result.plan_label_rows
+        self._hidden_plan_label_rows = result.hidden_plan_label_rows
+        self._hidden_label_ids = result.hidden_label_ids
+        self._plan_group_order = result.plan_group_order
 
         if self.selected_index >= len(self._ordered_ids):
             self.selected_index = max(0, len(self._ordered_ids) - 1)
