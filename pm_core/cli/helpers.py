@@ -200,6 +200,33 @@ def _auto_select_plan(data: dict, plan_id: str | None) -> str:
     raise SystemExit(1)
 
 
+def _make_pr_entry(
+    pr_id: str,
+    title: str,
+    branch: str,
+    *,
+    plan: str | None = None,
+    status: str = "pending",
+    depends_on: list[str] | None = None,
+    description: str = "",
+    gh_pr: str | None = None,
+    gh_pr_number: int | None = None,
+) -> dict:
+    """Create a standard PR entry dict with all required keys."""
+    return {
+        "id": pr_id,
+        "plan": plan,
+        "title": title,
+        "branch": branch,
+        "status": status,
+        "depends_on": depends_on or [],
+        "description": description,
+        "agent_machine": None,
+        "gh_pr": gh_pr,
+        "gh_pr_number": gh_pr_number,
+    }
+
+
 def save_and_push(data: dict, root: Path, message: str = "pm: update state") -> None:
     """Save state. Use 'pm push' to commit and share changes."""
     store.save(data, root)
@@ -270,8 +297,9 @@ def _resolve_repo_id(data: dict, workdir: Path, root: Path) -> None:
     if data.get("project", {}).get("repo_id"):
         return
     result = git_ops.run_git("rev-list", "--max-parents=0", "HEAD", cwd=workdir, check=False)
-    if result.returncode == 0 and result.stdout.strip():
-        data["project"]["repo_id"] = result.stdout.strip().splitlines()[0]
+    lines = result.stdout.strip().splitlines() if result.returncode == 0 else []
+    if lines:
+        data["project"]["repo_id"] = lines[0]
         save_and_push(data, root, "pm: cache repo_id")
 
 

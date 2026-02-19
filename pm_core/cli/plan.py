@@ -17,6 +17,7 @@ from pm_core.cli import cli
 from pm_core.cli.helpers import (
     _auto_select_plan,
     _gh_state_to_status,
+    _make_pr_entry,
     _pr_display_id,
     _require_plan,
     _resolve_repo_dir,
@@ -655,18 +656,9 @@ def _import_github_prs(root: Path, data: dict) -> None:
         desc = gh_pr.get("body", "") or ""
         pr_id = store.generate_pr_id(title, desc, existing_ids)
 
-        entry = {
-            "id": pr_id,
-            "plan": None,
-            "title": title,
-            "branch": branch,
-            "status": status,
-            "depends_on": [],
-            "description": desc,
-            "agent_machine": None,
-            "gh_pr": gh_pr.get("url", ""),
-            "gh_pr_number": number,
-        }
+        entry = _make_pr_entry(pr_id, title, branch, status=status,
+                               description=desc, gh_pr=gh_pr.get("url", ""),
+                               gh_pr_number=number)
         data["prs"].append(entry)
         existing_ids.add(pr_id)
         imported += 1

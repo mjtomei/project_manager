@@ -268,11 +268,15 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
                                  socket_path=socket_path)
 
     # Get the TUI pane ID and window ID
-    tui_pane = subprocess.run(
+    _pane_lines = subprocess.run(
         tmux_mod._tmux_cmd("list-panes", "-t", session_name, "-F", "#{pane_id}",
                             socket_path=socket_path),
         capture_output=True, text=True,
-    ).stdout.strip().splitlines()[0]
+    ).stdout.strip().splitlines()
+    if not _pane_lines:
+        click.echo("Failed to detect TUI pane after session creation.", err=True)
+        raise SystemExit(1)
+    tui_pane = _pane_lines[0]
     window_id = tmux_mod.get_window_id(session_name)
     _log.info("created tui_pane=%s window_id=%s", tui_pane, window_id)
 

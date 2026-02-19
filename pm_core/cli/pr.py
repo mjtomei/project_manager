@@ -28,6 +28,7 @@ from pm_core.cli.helpers import (
     _get_session_name_for_cwd,
     _gh_state_to_status,
     _infer_pr_id,
+    _make_pr_entry,
     _pr_display_id,
     _pr_id_sort_key,
     _require_pr,
@@ -81,18 +82,8 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
                 click.echo(f"Available PRs: {', '.join(sorted(existing_ids))}", err=True)
             raise SystemExit(1)
 
-    entry = {
-        "id": pr_id,
-        "plan": plan_id,
-        "title": title,
-        "branch": branch,
-        "status": "pending",
-        "depends_on": deps,
-        "description": desc,
-        "agent_machine": None,
-        "gh_pr": None,
-        "gh_pr_number": None,
-    }
+    entry = _make_pr_entry(pr_id, title, branch, plan=plan_id,
+                           depends_on=deps, description=desc)
 
     if data.get("prs") is None:
         data["prs"] = []
@@ -838,18 +829,9 @@ def pr_import_github(gh_state: str):
         body = gh_pr.get("body", "") or ""
         pr_id = store.generate_pr_id(title, body, existing_ids)
 
-        entry = {
-            "id": pr_id,
-            "plan": None,
-            "title": title,
-            "branch": branch,
-            "status": status,
-            "depends_on": [],
-            "description": body,
-            "agent_machine": None,
-            "gh_pr": url,
-            "gh_pr_number": number,
-        }
+        entry = _make_pr_entry(pr_id, title, branch, status=status,
+                               description=body, gh_pr=url,
+                               gh_pr_number=number)
         data["prs"].append(entry)
         existing_ids.add(pr_id)
         existing_branches.add(branch)
