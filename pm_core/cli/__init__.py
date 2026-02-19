@@ -2,7 +2,7 @@
 
 This package was converted from a single cli.py module. The ``cli`` Click
 group, ``main`` entry point, and core commands live here.  Shared helpers
-(HelpGroup, state_root, load_and_sync, etc.) are in ``cli.helpers``.
+(HelpGroup, state_root, etc.) are in ``cli.helpers``.
 
 Command groups are split into submodules:
 - cli.pr       — PR management commands

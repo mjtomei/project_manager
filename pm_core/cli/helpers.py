@@ -121,13 +121,6 @@ def state_root() -> Path:
     return store.find_project_root()
 
 
-def load_and_sync() -> tuple[dict, Path]:
-    """Load state, optionally syncing from git first."""
-    root = state_root()
-    git_ops.sync_state(root)
-    return store.load(root), root
-
-
 def _pr_id_sort_key(pr_id: str) -> tuple[int, str]:
     """Sort key for PR IDs. Numeric pr-NNN sorts by number, hash IDs sort after."""
     # pr-001 → (1, ""), pr-a3f2b1c → (0, "a3f2b1c")
