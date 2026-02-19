@@ -14,6 +14,7 @@ from pm_core import store, git_ops
 from pm_core.paths import configure_logger
 from pm_core import tmux as tmux_mod
 from pm_core import pane_layout
+from pm_core import pane_registry
 
 _log = configure_logger("pm.cli")
 
@@ -305,8 +306,8 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     """
     # If session specified, use it
     if session:
-        data = pane_layout.load_registry(session)
-        for _, pane in pane_layout._iter_all_panes(data):
+        data = pane_registry.load_registry(session)
+        for _, pane in pane_registry._iter_all_panes(data):
             if pane.get("role") == "tui":
                 return pane.get("id"), session
         return None, None
@@ -315,16 +316,16 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     if tmux_mod.in_tmux():
         current_session = tmux_mod.get_session_name()
         if current_session.startswith("pm-"):
-            data = pane_layout.load_registry(current_session)
-            for _, pane in pane_layout._iter_all_panes(data):
+            data = pane_registry.load_registry(current_session)
+            for _, pane in pane_registry._iter_all_panes(data):
                 if pane.get("role") == "tui":
                     return pane.get("id"), current_session
 
     # Try to find session matching current directory first
     expected_session = _get_session_name_for_cwd()
     if tmux_mod.session_exists(expected_session):
-        data = pane_layout.load_registry(expected_session)
-        for _, pane in pane_layout._iter_all_panes(data):
+        data = pane_registry.load_registry(expected_session)
+        for _, pane in pane_registry._iter_all_panes(data):
             if pane.get("role") == "tui":
                 return pane.get("id"), expected_session
 
@@ -338,8 +339,8 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
 
     for sess in result.stdout.strip().splitlines():
         if sess.startswith("pm-") and "~" not in sess:
-            data = pane_layout.load_registry(sess)
-            for _, pane in pane_layout._iter_all_panes(data):
+            data = pane_registry.load_registry(sess)
+            for _, pane in pane_registry._iter_all_panes(data):
                 if pane.get("role") == "tui":
                     return pane.get("id"), sess
 

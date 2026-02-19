@@ -15,6 +15,7 @@ from pm_core import store, graph, git_ops, prompt_gen
 from pm_core import pr_sync as pr_sync_mod
 from pm_core import tmux as tmux_mod
 from pm_core import pane_layout
+from pm_core import pane_registry
 from pm_core.backend import get_backend
 from pm_core.claude_launcher import find_claude, build_claude_shell_cmd, clear_session, launch_claude
 
@@ -628,9 +629,9 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False) -> No
         )
         review_win_id = wid_result.stdout.strip()
         if review_win_id:
-            pane_layout.register_pane(pm_session, review_win_id, claude_pane, "review-claude", claude_cmd)
+            pane_registry.register_pane(pm_session, review_win_id, claude_pane, "review-claude", claude_cmd)
             if diff_pane:
-                pane_layout.register_pane(pm_session, review_win_id, diff_pane, "review-diff", "diff-shell")
+                pane_registry.register_pane(pm_session, review_win_id, diff_pane, "review-diff", "diff-shell")
 
         click.echo(f"Opened review window '{window_name}'")
     except Exception as e:
@@ -771,7 +772,7 @@ def pr_sync_github():
     For each PR with a GitHub PR number, fetches the current state
     from GitHub and updates the local status accordingly:
     - MERGED → merged
-    - CLOSED → closed (then auto-removed after 3 seconds)
+    - CLOSED → closed
     - OPEN + draft → in_progress
     - OPEN + ready → in_review
     """
@@ -783,7 +784,7 @@ def pr_sync_github():
         click.echo("This command only works with the GitHub backend.", err=True)
         raise SystemExit(1)
 
-    # Use the shared sync function which handles auto-removal of closed PRs
+    # Use the shared sync function
     result = pr_sync_mod.sync_from_github(root, data, save_state=True)
 
     if result.error:
@@ -795,7 +796,7 @@ def pr_sync_github():
         if result.merged_prs:
             click.echo(f"  Merged: {', '.join(result.merged_prs)}")
         if result.closed_prs:
-            click.echo(f"  Closed: {', '.join(result.closed_prs)} (will be removed in 3s)")
+            click.echo(f"  Closed: {', '.join(result.closed_prs)}")
         trigger_tui_refresh()
     else:
         click.echo("No status changes.")
