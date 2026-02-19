@@ -160,21 +160,21 @@ class TestPlansPane:
         assert pane._KEY_ACTIONS["c"] == "review"
 
     def test_handler_routes_match_key_actions(self):
-        """Verify on_plan_action routes each action to the matching pm command.
+        """Verify handle_plan_action routes each action to the matching pm command.
 
         This catches swapped conditions like:
-            elif message.action == "breakdown":
-                self._launch_pane("pm plan review ...", "plan-review")  # WRONG
+            elif action == "breakdown":
+                launch_pane(app, "pm plan review ...", "plan-review")  # WRONG
         """
-        from pm_core.tui.app import ProjectManagerApp
-        src = inspect.getsource(ProjectManagerApp.on_plan_action)
+        from pm_core.tui.pane_ops import handle_plan_action
+        src = inspect.getsource(handle_plan_action)
         # For each pane-launching action, verify the action check and the
         # command string use the SAME action word.
         for action in ("breakdown", "review", "load"):
-            # Find: message.action == "<action>" ... pm plan <action>
-            pattern = rf'message\.action\s*==\s*"{action}".*?_launch_pane\(.*?pm plan {action}'
+            # Find: action == "<action>" ... pm plan <action>
+            pattern = rf'action\s*==\s*"{action}".*?launch_pane\(.*?pm plan {action}'
             assert re.search(pattern, src, re.DOTALL), (
-                f"action '{action}' does not route to 'pm plan {action}' in on_plan_action"
+                f"action '{action}' does not route to 'pm plan {action}' in handle_plan_action"
             )
 
     def test_render_singular_pr(self):

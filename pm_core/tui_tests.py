@@ -2297,6 +2297,916 @@ OVERALL: [PASS/FAIL]
 """
 
 
+DETAIL_PANEL_CONTENT_TEST = """\
+You are testing the detail panel in the pm TUI. Your goal is to verify that
+the detail panel shows correct PR information and updates when navigating
+between PRs.
+
+## Background
+
+The TUI displays a tech tree of PRs on the left and an optional detail panel
+on the right. When a PR is activated (Enter key), the detail panel appears
+showing comprehensive information about the selected PR. When navigating
+between PRs (Up/Down), the detail panel updates to show the newly selected
+PR's info.
+
+The detail panel (from pm_core/tui/detail_panel.py) displays:
+- PR display ID (prefers GitHub PR number like #42 over local pr-NNN)
+- PR title
+- Status with icon (○ pending, ● in_progress, ◎ in_review, ✓ merged, ✗ closed/blocked)
+- Git branch name (if set)
+- Plan ID and name (if assigned to a plan)
+- GitHub PR link (if available)
+- Dependencies with their status icons and titles
+- Description text
+- Plan context: extracted "tests" and "files" sections from the plan markdown
+
+## Available Tools
+
+- `pm tui view` - See current TUI state
+- `pm tui send <keys>` - Send keystrokes to TUI (Enter=activate, Up/Down=navigate)
+- `pm tui frames` - View captured frames
+- `pm tui frames --all` - View all captured frames with triggers
+- `pm tui clear-frames` - Clear frame buffer
+- `pm pr list` - List all PRs with status
+
+## Test Procedure
+
+### Setup
+
+1. Run `pm tui clear-frames` to start with empty frame buffer
+2. Run `pm pr list` to see available PRs — note their IDs, titles, and statuses
+3. Run `pm tui view` to verify TUI is running and showing the tech tree
+4. If in guide mode, press 'x' to dismiss and show the tech tree
+
+### Part 1: Activate Detail Panel
+
+1. Navigate to the first PR:
+   - `pm tui send Up` several times to reach the top
+   - `pm tui view` - note which PR is selected
+
+2. Open the detail panel:
+   - `pm tui send Enter`
+   - Wait 1 second
+   - `pm tui view` - the detail panel should appear on the right side
+
+3. Verify detail panel contents. Check that these fields are visible:
+   - PR ID (e.g., "#42" or "pr-001")
+   - PR title
+   - Status with appropriate icon
+   - Branch name (if the PR has one)
+   - Plan name (if the PR belongs to a plan)
+   - Dependencies (if any exist)
+   - Description (if set)
+
+4. Cross-reference with `pm pr list` output:
+   - The status shown in the detail panel should match `pm pr list`
+   - The title should match
+
+### Part 2: Detail Panel Updates on Navigation
+
+1. With the detail panel open, navigate to the next PR:
+   - `pm tui send Down`
+   - Wait 1 second
+   - `pm tui view`
+
+2. Verify the detail panel updated:
+   - The PR ID should have changed to the newly selected PR
+   - The title should match the new PR
+   - Status icon should reflect the new PR's status
+
+3. Navigate back up:
+   - `pm tui send Up`
+   - Wait 1 second
+   - `pm tui view`
+   - Detail panel should show the original PR's info again
+
+4. Navigate through several PRs:
+   - Move Down 3-4 times, checking the detail panel updates each time
+   - Verify that each navigation updates the detail panel content
+
+### Part 3: Plan Context Display
+
+1. Find a PR that belongs to a plan:
+   - Navigate through PRs looking for one that shows a "Plan:" field
+   - If found, verify the plan name is displayed
+
+2. Check for plan-extracted sections:
+   - If the PR's plan markdown has a "tests" or "files" section for this PR,
+     the detail panel should show those sections under "From plan:"
+   - Note whether these sections appear (they depend on plan content)
+
+### Part 4: Dependency Display
+
+1. Find a PR with dependencies:
+   - Navigate through PRs looking for one with "Dependencies:" or "Deps:" section
+   - If found, verify each dependency shows:
+     * Status icon (○, ●, ✓, etc.)
+     * PR title or ID
+   - Dependencies should be listed with their current status
+
+### Part 5: Frame Analysis
+
+1. Run `pm tui frames --all` to see all captured state changes
+2. Look for frames triggered by:
+   - "log_message:Selected: ..." - when PRs are selected during navigation
+   - Navigation-related state changes
+3. Verify frames show consistent detail panel state
+
+## Expected Behavior
+
+From pm_core/tui/detail_panel.py:
+- `update_pr()` is called on both PRSelected and PRActivated messages
+- PRActivated (Enter) makes the detail container visible (display: block)
+- PRSelected (navigation) updates the content if already visible
+- `_pr_display_id()` prefers `#<gh_pr_number>` over local `pr-NNN` ID
+- `_extract_plan_section()` extracts tests/files from plan markdown for the PR
+- STATUS_ICONS: pending=○, in_progress=●, in_review=◎, merged=✓, closed=✗, blocked=✗
+
+## Reporting
+
+```
+DETAIL PANEL CONTENT TEST RESULTS
+==================================
+
+## Part 1: Activate Detail Panel
+Detail panel opens on Enter: [PASS/FAIL]
+Fields visible:
+  PR ID: [PASS/FAIL] - <ID shown>
+  Title: [PASS/FAIL] - <title shown>
+  Status + icon: [PASS/FAIL] - <status shown>
+  Branch: [PASS/FAIL/N/A] - <branch shown or N/A>
+  Plan: [PASS/FAIL/N/A] - <plan shown or N/A>
+  Dependencies: [PASS/FAIL/N/A] - <deps shown or N/A>
+  Description: [PASS/FAIL/N/A] - <description shown or N/A>
+
+## Part 2: Navigation Updates
+Detail panel updates on Down: [PASS/FAIL]
+  New PR ID shown: <ID>
+Detail panel updates on Up: [PASS/FAIL]
+  Original PR ID restored: <ID>
+Multi-step navigation: [PASS/FAIL]
+  All navigations updated panel: [Yes/No]
+
+## Part 3: Plan Context
+PR with plan found: [Yes/No]
+Plan name displayed: [PASS/FAIL/N/A]
+Plan tests/files sections: [PASS/FAIL/N/A]
+
+## Part 4: Dependencies
+PR with dependencies found: [Yes/No]
+Dependencies listed with icons: [PASS/FAIL/N/A]
+Dependency statuses correct: [PASS/FAIL/N/A]
+
+## Part 5: Frame Analysis
+Total frames captured: <N>
+Selection triggers seen: [Yes/No]
+Detail panel updates in frames: [Yes/No]
+
+## Issues Found
+<list any bugs, missing fields, or unexpected behavior>
+
+OVERALL: [PASS/FAIL]
+```
+"""
+
+
+STATUS_FILTER_MERGED_TOGGLE_TEST = """\
+You are testing the status filter and merged toggle features in the pm TUI.
+Your goal is to verify that the F key cycles through status filters and the
+X key toggles merged PR visibility.
+
+## Background
+
+The TUI tech tree can be filtered by PR status:
+- F key cycles through: all → pending → in_progress → in_review → merged → closed → all
+- X key toggles hiding/showing merged PRs
+- When a filter is active, only PRs matching that status are shown in the tree
+- The status bar displays the current filter
+- The log line shows a message on each filter change
+
+Status icons used: ○ pending, ● in_progress, ◎ in_review, ✓ merged, ✗ closed
+
+## Available Tools
+
+- `pm tui view` - See current TUI state
+- `pm tui send <keys>` - Send keystrokes to TUI (F=cycle filter, X=toggle merged)
+- `pm tui frames` - View captured frames
+- `pm tui frames --all` - View all captured frames with triggers
+- `pm tui clear-frames` - Clear frame buffer
+- `pm pr list` - List all PRs with status
+
+## Test Procedure
+
+### Setup
+
+1. Run `pm tui clear-frames` to start with empty frame buffer
+2. Run `pm pr list` to inventory all PRs and their statuses
+   - Count how many PRs exist in each status (pending, in_progress, in_review, merged, closed)
+   - This is your reference for verifying filter results
+3. Run `pm tui view` to verify TUI is running and showing the tech tree
+4. If in guide mode, press 'x' to dismiss
+
+### Part 1: Status Filter Cycling (F key)
+
+1. Start state — no filter (all PRs shown):
+   - `pm tui view` - count the total number of PR nodes visible
+   - This should match the total from `pm pr list`
+
+2. First press — filter to "pending":
+   - `pm tui send F`
+   - Wait 1 second
+   - `pm tui view`
+   - Log line should show "Filter: ○ pending"
+   - Count visible PR nodes — should match your pending count from setup
+   - If no pending PRs exist, the tree should be empty or show a message
+
+3. Second press — filter to "in_progress":
+   - `pm tui send F`
+   - Wait 1 second
+   - `pm tui view`
+   - Log line should show "Filter: ● in_progress"
+   - Count visible PR nodes — should match in_progress count
+
+4. Third press — filter to "in_review":
+   - `pm tui send F`
+   - Wait 1 second
+   - `pm tui view`
+   - Log line should show "Filter: ◎ in_review"
+   - Count visible PR nodes — should match in_review count
+
+5. Fourth press — filter to "merged":
+   - `pm tui send F`
+   - Wait 1 second
+   - `pm tui view`
+   - Log line should show "Filter: ✓ merged"
+   - Count visible PR nodes — should match merged count
+
+6. Fifth press — filter to "closed":
+   - `pm tui send F`
+   - Wait 1 second
+   - `pm tui view`
+   - Log line should show "Filter: ✗ closed"
+   - Count visible PR nodes — should match closed count
+
+7. Sixth press — back to "all":
+   - `pm tui send F`
+   - Wait 1 second
+   - `pm tui view`
+   - Log line should show "Filter: all"
+   - All PRs should be visible again
+
+### Part 2: Merged Toggle (X key)
+
+1. Reset to show all (press F until "Filter: all" appears, or it already is)
+
+2. First toggle — hide merged:
+   - `pm tui send X`
+   - Wait 1 second
+   - `pm tui view`
+   - Log line should show "Merged PRs hidden"
+   - Count visible PR nodes — should be total minus merged count
+   - No PR with status "merged" should be visible
+
+3. Verify hidden PRs:
+   - If you had any merged PRs in setup, they should be gone from the tree
+   - Non-merged PRs should all still be visible
+
+4. Second toggle — show merged:
+   - `pm tui send X`
+   - Wait 1 second
+   - `pm tui view`
+   - Log line should show "Merged PRs shown"
+   - All PRs should be visible again
+
+### Part 3: Filter and Merged Toggle Interaction
+
+1. Hide merged PRs:
+   - `pm tui send X` (should show "Merged PRs hidden")
+
+2. Apply a status filter:
+   - `pm tui send F` to filter to "pending"
+   - `pm tui view`
+   - Only pending PRs should show (merged toggle doesn't matter since
+     we're filtering to pending specifically)
+
+3. Cycle back to "all":
+   - Press F until "Filter: all" appears
+   - `pm tui view`
+   - With no status filter but merged hidden, all non-merged PRs should show
+
+4. Show merged again:
+   - `pm tui send X` (should show "Merged PRs shown")
+   - All PRs should be visible
+
+### Part 4: Status Bar Filter Indicator
+
+1. Apply a filter:
+   - `pm tui send F`
+   - `pm tui view`
+   - Check the status bar (bottom of TUI) for a filter indicator
+   - It should show something like "filter: ○ pending"
+
+2. Reset filter:
+   - Press F until back to "all"
+   - Status bar filter indicator should disappear or show "all"
+
+### Part 5: Frame Analysis
+
+1. Run `pm tui frames --all` to see captured state changes
+2. Look for frames triggered by:
+   - "log_message:Filter: ..." — each F press should generate one
+   - "log_message:Merged PRs hidden/shown" — each X press should generate one
+3. Count the filter-related frames — should match the number of F/X presses
+
+## Expected Behavior
+
+From pm_core/tui/app.py action_cycle_filter():
+- STATUS_FILTER_CYCLE = [None, "pending", "in_progress", "in_review", "merged", "closed"]
+- Cycles through the list, wrapping around to None (all)
+- Calls tree._recompute() and tree.refresh(layout=True) after each change
+- Logs "Filter: {icon} {status}" or "Filter: all"
+
+From pm_core/tui/app.py action_toggle_merged():
+- Toggles tree._hide_merged boolean
+- Calls tree._recompute() and tree.refresh(layout=True)
+- Logs "Merged PRs hidden" or "Merged PRs shown"
+
+From pm_core/tui/tech_tree.py _recompute():
+- If _status_filter is set: filters PRs to only that status
+- Elif _hide_merged is True: filters out PRs with status "merged"
+- Note: status filter takes priority over merged toggle
+
+## Reporting
+
+```
+STATUS FILTER & MERGED TOGGLE TEST RESULTS
+============================================
+
+PR inventory from pm pr list:
+  Total: <N>
+  pending: <N>
+  in_progress: <N>
+  in_review: <N>
+  merged: <N>
+  closed: <N>
+
+## Part 1: Status Filter Cycling
+Initial (all): [PASS/FAIL] - <visible count> PRs shown
+Filter pending: [PASS/FAIL] - <visible count> PRs (expected <N>)
+  Log message: <message seen>
+Filter in_progress: [PASS/FAIL] - <visible count> PRs (expected <N>)
+  Log message: <message seen>
+Filter in_review: [PASS/FAIL] - <visible count> PRs (expected <N>)
+  Log message: <message seen>
+Filter merged: [PASS/FAIL] - <visible count> PRs (expected <N>)
+  Log message: <message seen>
+Filter closed: [PASS/FAIL] - <visible count> PRs (expected <N>)
+  Log message: <message seen>
+Back to all: [PASS/FAIL] - <visible count> PRs (expected <total>)
+  Log message: <message seen>
+
+## Part 2: Merged Toggle
+Hide merged: [PASS/FAIL] - <visible count> PRs (expected <total - merged>)
+  Log message: <message seen>
+  Merged PRs gone: [Yes/No]
+Show merged: [PASS/FAIL] - <visible count> PRs (expected <total>)
+  Log message: <message seen>
+
+## Part 3: Filter + Merged Interaction
+Status filter overrides merged toggle: [PASS/FAIL]
+All filter with merged hidden shows non-merged: [PASS/FAIL]
+
+## Part 4: Status Bar Indicator
+Filter shown in status bar: [PASS/FAIL]
+Filter cleared when reset: [PASS/FAIL]
+
+## Part 5: Frame Analysis
+Total frames captured: <N>
+Filter frames: <N> (expected ~8 for F presses + 2 for X presses)
+
+## Issues Found
+<list any bugs, incorrect counts, or unexpected behavior>
+
+OVERALL: [PASS/FAIL]
+```
+"""
+
+
+SYNC_REFRESH_TEST = """\
+You are testing the sync/refresh functionality in the pm TUI. Your goal is
+to verify that pressing 'r' triggers a sync operation, the log line updates
+with sync results, and the tech tree reflects any status changes.
+
+## Background
+
+The TUI's 'r' key triggers a manual refresh that:
+1. Immediately shows "Refreshing..." in the log line
+2. Runs pr_sync.sync_prs() asynchronously to check for merged PRs on GitHub
+3. Updates the log line with the result:
+   - "Refreshed" if sync completed with no changes
+   - "Synced: N PR(s) merged" if PRs were detected as merged
+   - "Already up to date" if sync was skipped (too recent)
+   - "Sync error: ..." if something went wrong
+4. Reloads the project data and updates the tech tree display
+5. The status bar shows "pulling" during sync, then "synced"/"no-op"/"error"
+
+Sync has a minimum interval to avoid hammering GitHub — if you press 'r'
+twice quickly, the second press may show "Already up to date".
+
+## Available Tools
+
+- `pm tui view` - See current TUI state
+- `pm tui send <keys>` - Send keystrokes to TUI (r=refresh)
+- `pm tui frames` - View captured frames
+- `pm tui frames --all` - View all captured frames with triggers
+- `pm tui clear-frames` - Clear frame buffer
+- `pm pr list` - List all PRs with status (to verify before/after)
+
+## Test Procedure
+
+### Setup
+
+1. Run `pm tui clear-frames` to start with empty frame buffer
+2. Run `pm pr list` to record current PR statuses — SAVE this as baseline
+3. Run `pm tui view` to verify TUI is running
+4. If in guide mode, press 'x' to dismiss
+
+### Part 1: Basic Refresh
+
+1. Trigger refresh:
+   - `pm tui send r`
+   - Immediately check: `pm tui view`
+   - Log line should show "Refreshing..." (may be brief)
+
+2. Wait for sync to complete:
+   - Wait 3 seconds
+   - `pm tui view`
+   - Log line should show one of:
+     * "Refreshed" — sync completed, no merged PRs found
+     * "Synced: N PR(s) merged" — PRs were detected as merged
+     * "Already up to date" — sync skipped (too recent)
+     * "Sync error: ..." — something went wrong
+
+3. Check the status bar:
+   - Look at the status bar (bottom of TUI)
+   - It should show a sync state: "synced", "no-op", or "error"
+
+### Part 2: Status Bar Transition
+
+1. Clear frames: `pm tui clear-frames`
+2. Trigger refresh: `pm tui send r`
+3. Quickly capture state: `pm tui view` (within 1 second)
+   - Status bar may show "pulling" state during sync
+4. Wait 3 seconds
+5. `pm tui view` — status bar should show post-sync state
+6. Check `pm tui frames --all`:
+   - Look for frames showing the "Refreshing..." message
+   - Look for frames showing the final result message
+   - The status bar should transition through states
+
+### Part 3: Rapid Double Refresh
+
+1. Wait at least 10 seconds (to clear the minimum sync interval)
+2. First refresh: `pm tui send r`
+3. Wait 3 seconds for it to complete
+4. Immediately second refresh: `pm tui send r`
+5. Wait 2 seconds
+6. `pm tui view`
+   - Second refresh should either complete normally or show "Already up to date"
+   - This tests the minimum interval throttling
+
+### Part 4: PR Status Verification
+
+1. Run `pm pr list` again after the refresh
+2. Compare with the baseline from setup:
+   - Are there any status changes? (e.g., PRs that went from in_progress to merged)
+   - If changes occurred, verify the tech tree in `pm tui view` reflects them
+3. If no changes occurred, that's also valid — note that sync found no updates
+
+### Part 5: Refresh During Guide Mode
+
+1. If the TUI has a guide step active:
+   - Press 'r' to refresh
+   - Log line should show "Refreshed - Guide step: <description>"
+   - This is a different code path than the normal sync
+2. If not in guide mode, skip this part (N/A)
+
+### Part 6: Log Message Auto-Clear
+
+1. After a manual refresh completes:
+   - Note the log message shown
+   - Wait 2 seconds
+   - `pm tui view`
+   - The log message should have auto-cleared (set_timer(1.0, _clear_log_message))
+   - Log line should be empty or show a different message
+
+## Expected Behavior
+
+From pm_core/tui/app.py action_refresh():
+- Calls _load_state() to reload from disk
+- If in guide mode: logs "Refreshed - Guide step: ..." and returns
+- If in normal mode: runs _do_normal_sync(is_manual=True) async, logs "Refreshing..."
+
+From pm_core/tui/app.py _do_normal_sync():
+- Calls pr_sync.sync_prs() with min_interval for manual refresh
+- Updates status bar through: "pulling" → "synced"/"no-op"/"error"
+- Log messages: "Refreshed", "Synced: N PR(s) merged", "Already up to date", "Sync error: ..."
+- Auto-clears log message after 1 second for manual refresh
+
+## Reporting
+
+```
+SYNC REFRESH TEST RESULTS
+===========================
+
+## Part 1: Basic Refresh
+"Refreshing..." shown: [PASS/FAIL]
+Final result message: [PASS/FAIL] - <message seen>
+Status bar updated: [PASS/FAIL] - <state shown>
+
+## Part 2: Status Bar Transition
+"pulling" state observed: [PASS/FAIL/Not captured]
+Post-sync state: [PASS/FAIL] - <state shown>
+Frames captured during sync: <N>
+
+## Part 3: Rapid Double Refresh
+Second refresh handled: [PASS/FAIL]
+  Result: <"Already up to date" or completed normally>
+
+## Part 4: PR Status Verification
+Baseline PR count: <N>
+Post-sync PR count: <N>
+Status changes detected: [Yes/No]
+  Changes: <list any status changes>
+Tech tree matches pr list: [PASS/FAIL]
+
+## Part 5: Guide Mode Refresh
+Guide mode active: [Yes/No]
+Guide refresh message: [PASS/FAIL/N/A]
+
+## Part 6: Log Auto-Clear
+Log message auto-cleared: [PASS/FAIL]
+
+## Issues Found
+<list any bugs, timing issues, or unexpected behavior>
+
+OVERALL: [PASS/FAIL]
+```
+"""
+
+
+META_SESSION_LAUNCH_TEST = """\
+You are testing the meta session launch feature in the pm TUI. Your goal is
+to verify that pressing 'm' launches a meta-development session for working
+on the pm tool itself.
+
+## Background
+
+The 'm' key triggers action_launch_meta() which runs `pm meta` as a synchronous
+command via _run_command("meta"). The meta command:
+1. Detects the pm installation (finds the pm source code directory)
+2. Builds a meta prompt describing the pm tool's architecture
+3. Creates or finds a workdir for meta development
+4. Launches Claude in a new pane with the meta prompt and appropriate context
+
+The meta session is designed for self-referential development — working on the
+project manager tool itself from within the project manager TUI.
+
+## Available Tools
+
+- `pm tui view` - See current TUI state
+- `pm tui send <keys>` - Send keystrokes to TUI (m=meta)
+- `pm tui frames` - View captured frames
+- `pm tui frames --all` - View all captured frames
+- `pm tui clear-frames` - Clear frame buffer
+- `tmux list-panes -t <session> -F "#{pane_id} #{pane_current_command}"` - List panes
+- `cat ~/.pm/pane-registry/<base>.json` - View pane registry (multi-window format)
+- `python3 -c "import json; d=json.load(open('<path>')); print(json.dumps(d, indent=2))"` - Pretty-print registry
+- `tmux display-message -p "#{session_name}"` - Get session name
+- `tmux capture-pane -t <pane_id> -p` - Capture content of a specific pane
+- `tmux kill-pane -t <pane_id>` - Kill a specific pane
+
+## Test Procedure
+
+### Setup
+
+1. Run `pm tui clear-frames` to start with empty frame buffer
+2. Get session name: `tmux display-message -p "#{session_name}"`
+3. Get base session name (strip ~N suffix if present)
+4. Record initial state:
+   - `tmux list-panes -t <session> -F "#{pane_id} #{pane_current_command}"` — count panes
+   - `cat ~/.pm/pane-registry/<base>.json` — note the "windows" dict and registered panes/roles
+5. Run `pm tui view` to verify TUI is running
+
+### Part 1: Launch Meta Session
+
+1. Send meta key:
+   - `pm tui send m`
+   - Wait 2 seconds (meta needs time to detect pm install and set up)
+
+2. Check log line:
+   - `pm tui view`
+   - The log line should show "> meta" (the command being run)
+   - After completion, it may show output from the meta command
+
+3. Check for new pane:
+   - `tmux list-panes -t <session> -F "#{pane_id} #{pane_current_command}"`
+   - Compare with initial count — should have one more pane
+   - The new pane should be running Claude or a shell with Claude
+
+4. Check pane registry (multi-window format):
+   - `cat ~/.pm/pane-registry/<base>.json`
+   - Registry uses `{"windows": {"@ID": {"panes": [...]}}}` format
+   - Look in the current window's panes for a pane with role "meta" or related
+   - Note: The meta command uses _run_command which is synchronous,
+     so the pane may be registered differently than _launch_pane panes
+
+### Part 2: Verify Meta Pane Content
+
+1. Identify the new pane ID from the pane list comparison
+2. Capture its content:
+   - `tmux capture-pane -t <pane_id> -p`
+   - Look for Claude startup indicators or meta prompt content
+   - The pane should show signs of a Claude session starting
+
+3. Check that the meta session has appropriate context:
+   - The prompt should reference the pm tool
+   - There may be file paths to pm source code visible
+
+### Part 3: TUI Responsiveness After Meta Launch
+
+1. Verify TUI is still responsive:
+   - `pm tui view` — should render without errors
+   - Try navigating: `pm tui send Down` then `pm tui send Up`
+   - TUI should still respond to keypresses
+
+### Part 4: Duplicate Meta Launch
+
+1. With meta pane already running, press 'm' again:
+   - `pm tui send m`
+   - Wait 2 seconds
+   - `tmux list-panes -t <session> -F "#{pane_id} #{pane_current_command}"`
+   - Check if a second meta pane was created or if the existing one was focused
+   - Note the behavior (this tests deduplication for meta sessions)
+
+### Part 5: Cleanup
+
+1. If a meta pane was created, you can leave it running — the user may want it
+2. Alternatively, to clean up:
+   - Find the meta pane ID from the registry or pane list
+   - `tmux kill-pane -t <pane_id>`
+   - Wait 1 second
+   - Verify the TUI is still running: `pm tui view`
+   - Check registry was updated: `cat ~/.pm/pane-registry/<base>.json`
+
+## Expected Behavior
+
+From pm_core/tui/app.py action_launch_meta():
+- Calls _run_command("meta") which runs `pm meta` synchronously
+- The meta command finds the pm installation, builds a prompt, and launches Claude
+- A new pane is created in the tmux session
+- The TUI shows "> meta" in the log line while running
+
+From pm_core/cli.py meta command:
+- _detect_pm_install() finds the pm source code
+- _build_meta_prompt() creates a comprehensive prompt about pm architecture
+- _meta_workdir() creates/finds a working directory
+- Launches Claude with --session-id for resumable sessions
+
+## Reporting
+
+```
+META SESSION LAUNCH TEST RESULTS
+==================================
+
+## Part 1: Launch Meta Session
+'m' key triggered meta: [PASS/FAIL]
+Log line showed "> meta": [PASS/FAIL]
+New pane created: [PASS/FAIL]
+  Initial pane count: <N>
+  After meta count: <N>
+Pane registry updated: [PASS/FAIL]
+  Role: <role found or "not registered">
+
+## Part 2: Meta Pane Content
+Claude session starting: [PASS/FAIL/Unclear]
+Meta context visible: [PASS/FAIL/Unclear]
+  Content observed: <brief description>
+
+## Part 3: TUI Responsiveness
+TUI responds after meta launch: [PASS/FAIL]
+Navigation still works: [PASS/FAIL]
+
+## Part 4: Duplicate Launch
+Behavior on second 'm': <description>
+Duplicate pane created: [Yes/No]
+
+## Part 5: Cleanup
+Meta pane state: <running/killed/left running>
+TUI responsive after cleanup: [PASS/FAIL]
+
+## Issues Found
+<list any bugs, errors, or unexpected behavior>
+
+OVERALL: [PASS/FAIL]
+```
+"""
+
+
+TUI_LOG_VIEWER_TEST = """\
+You are testing the TUI log viewer feature in the pm TUI. Your goal is to
+verify that pressing 'L' opens a log pane, the log shows recent TUI activity,
+and the pane lifecycle works correctly (launch, focus, kill, relaunch).
+
+## Background
+
+The 'L' key triggers action_view_log() which:
+1. Gets the command log file path from command_log_file() (located at
+   ~/.pm/debug/{session-tag}.log)
+2. If the file doesn't exist, shows "No log file yet." in the log line
+3. If it exists, launches a pane running `tail -f <log_path>` with role "log"
+
+The log file contains timestamped entries from all pm commands executed in this
+session — every pm CLI command logs its execution and result here.
+
+## Available Tools
+
+- `pm tui view` - See current TUI state
+- `pm tui send <keys>` - Send keystrokes to TUI (L=view log)
+- `pm tui frames` - View captured frames
+- `pm tui frames --all` - View all captured frames
+- `pm tui clear-frames` - Clear frame buffer
+- `tmux list-panes -t <session> -F "#{pane_id} #{pane_current_command}"` - List panes
+- `cat ~/.pm/pane-registry/<base>.json` - View pane registry (multi-window format)
+- `python3 -c "import json; d=json.load(open('<path>')); print(json.dumps(d, indent=2))"` - Pretty-print registry
+- `tmux display-message -p "#{session_name}"` - Get session name
+- `tmux capture-pane -t <pane_id> -p` - Capture content of a specific pane
+- `tmux kill-pane -t <pane_id>` - Kill a specific pane
+
+## Test Procedure
+
+### Setup
+
+1. Run `pm tui clear-frames` to start with empty frame buffer
+2. Get session name: `tmux display-message -p "#{session_name}"`
+3. Get base session name (strip ~N suffix if present)
+4. Record initial state:
+   - `tmux list-panes -t <session> -F "#{pane_id} #{pane_current_command}"` — count panes
+   - `cat ~/.pm/pane-registry/<base>.json` — note the "windows" dict and registered panes/roles
+   - Check if a log pane already exists (role "log") in any window's panes
+5. Run `pm tui view` to verify TUI is running
+
+### Part 1: Launch Log Pane
+
+1. Open the log viewer:
+   - `pm tui send L`
+   - Wait 2 seconds
+
+2. Verify pane was created:
+   - `tmux list-panes -t <session> -F "#{pane_id} #{pane_current_command}"`
+   - Should have one more pane than before
+   - The new pane should be running `tail` (visible in pane_current_command)
+
+3. Check pane registry (multi-window format):
+   - `cat ~/.pm/pane-registry/<base>.json`
+   - Registry uses `{"windows": {"@ID": {"panes": [...]}}}` format
+   - Should have a pane with role "log" in the current window's panes
+
+4. Check TUI log line:
+   - `pm tui view`
+   - Should show "Launched log pane" or "Focused existing log pane"
+
+### Part 2: Log Pane Content
+
+1. Find the log pane ID from the pane list or registry
+2. Capture its content:
+   - `tmux capture-pane -t <pane_id> -p`
+3. Verify the content:
+   - Should show timestamped log entries (format: "HH:MM:SS LEVEL message")
+   - Should contain entries from recent pm commands
+   - Look for entries related to your test actions (tui view, tui send, etc.)
+   - The log should be continuously updating (tail -f)
+
+### Part 3: Log Updates in Real-Time
+
+1. Trigger some TUI activity while the log pane is open:
+   - `pm tui send r` (refresh — this triggers a sync command)
+   - Wait 2 seconds
+2. Capture the log pane content again:
+   - `tmux capture-pane -t <pane_id> -p`
+   - New entries should have appeared for the refresh/sync operation
+3. This verifies that `tail -f` is working and the log updates in real-time
+
+### Part 4: Focus Existing Log Pane (Dedup)
+
+1. With the log pane already running, press 'L' again:
+   - `pm tui send L`
+   - Wait 1 second
+2. Check pane count:
+   - `tmux list-panes -t <session> -F "#{pane_id}"`
+   - Should be SAME as before (no new pane created)
+3. Check registry:
+   - `cat ~/.pm/pane-registry/<base>.json`
+   - Should still have exactly ONE pane with role "log" across all windows
+4. Check log line:
+   - `pm tui view`
+   - Should show "Focused existing log pane"
+
+### Part 5: Kill and Relaunch
+
+1. Find the log pane ID from the registry
+2. Kill the log pane:
+   - `tmux kill-pane -t <pane_id>`
+   - Wait 2 seconds (allow pane-exited handler to run)
+
+3. Verify cleanup:
+   - `cat ~/.pm/pane-registry/<base>.json`
+   - The log pane should be unregistered (role "log" gone from all windows)
+
+4. Relaunch:
+   - `pm tui send L`
+   - Wait 2 seconds
+
+5. Verify relaunch:
+   - `tmux list-panes -t <session> -F "#{pane_id} #{pane_current_command}"`
+   - A new log pane should exist
+   - `cat ~/.pm/pane-registry/<base>.json` — role "log" should be back in current window
+   - The pane ID should be different from the killed one
+
+### Part 6: Cleanup
+
+1. Kill the log pane if you created one:
+   - Find pane ID from registry
+   - `tmux kill-pane -t <pane_id>`
+   - Wait 1 second
+2. Verify TUI is still responsive:
+   - `pm tui view`
+3. Verify final pane count matches initial count
+
+## Expected Behavior
+
+From pm_core/tui/app.py action_view_log():
+- Gets log path from command_log_file() (pm_core.paths)
+- If file doesn't exist: logs "No log file yet."
+- If exists: calls _launch_pane(f"tail -f {log_path}", "log")
+
+From _launch_pane():
+- Checks for existing pane with role "log" via find_live_pane_by_role()
+- If found: focuses it, logs "Focused existing log pane"
+- If not found: creates new pane, registers with role "log"
+
+Log file location: ~/.pm/debug/{session-tag}.log
+Log format: "HH:MM:SS LEVEL message" (e.g., "14:23:01 INFO pm exit=0 ...")
+
+## Reporting
+
+```
+TUI LOG VIEWER TEST RESULTS
+=============================
+
+## Part 1: Launch Log Pane
+'L' key creates pane: [PASS/FAIL]
+  Initial pane count: <N>
+  After launch count: <N>
+Pane running tail: [PASS/FAIL]
+Registry has role "log": [PASS/FAIL]
+Log line message: <message seen>
+
+## Part 2: Log Content
+Log entries visible: [PASS/FAIL]
+Timestamp format correct: [PASS/FAIL]
+Recent activity present: [PASS/FAIL]
+  Sample entry: <one log line>
+
+## Part 3: Real-Time Updates
+New entries after refresh: [PASS/FAIL]
+tail -f working: [PASS/FAIL]
+
+## Part 4: Focus Dedup
+Second 'L' reuses pane: [PASS/FAIL]
+  Pane count unchanged: [Yes/No]
+  "Focused existing" message: [Yes/No]
+
+## Part 5: Kill and Relaunch
+Kill removes from registry: [PASS/FAIL]
+Relaunch creates new pane: [PASS/FAIL]
+  New pane ID different: [Yes/No]
+  Registry updated: [Yes/No]
+
+## Part 6: Cleanup
+Panes cleaned up: [PASS/FAIL]
+TUI responsive: [PASS/FAIL]
+Final pane count matches initial: [PASS/FAIL]
+
+## Issues Found
+<list any bugs, missing log entries, or unexpected behavior>
+
+OVERALL: [PASS/FAIL]
+```
+"""
+
+
 ALL_TESTS = {
     "pane-layout": {
         "name": "Pane Layout Refresh",
@@ -2362,6 +3272,31 @@ ALL_TESTS = {
         "name": "Multi-Window Registry",
         "prompt": MULTI_WINDOW_REGISTRY_TEST,
         "description": "Test multi-window pane registry, review window isolation, and heal on restart",
+    },
+    "detail-panel": {
+        "name": "Detail Panel Content",
+        "prompt": DETAIL_PANEL_CONTENT_TEST,
+        "description": "Verify detail panel shows correct PR info and updates on navigation",
+    },
+    "status-filter": {
+        "name": "Status Filter & Merged Toggle",
+        "prompt": STATUS_FILTER_MERGED_TOGGLE_TEST,
+        "description": "Test F key status filter cycling and X key merged PR toggle",
+    },
+    "sync-refresh": {
+        "name": "Sync Refresh",
+        "prompt": SYNC_REFRESH_TEST,
+        "description": "Test r key sync, log line updates, and PR status changes",
+    },
+    "meta-launch": {
+        "name": "Meta Session Launch",
+        "prompt": META_SESSION_LAUNCH_TEST,
+        "description": "Test m key launches meta pane with correct role and context",
+    },
+    "log-viewer": {
+        "name": "TUI Log Viewer",
+        "prompt": TUI_LOG_VIEWER_TEST,
+        "description": "Test L key opens log pane, verify content and pane lifecycle",
     },
 }
 
