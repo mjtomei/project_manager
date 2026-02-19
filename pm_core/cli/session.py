@@ -36,14 +36,13 @@ def _register_tmux_bindings(session_name: str) -> None:
     Also sets window-size=latest on all sessions in the group so each
     client's terminal size is used for layout, not the minimum.
     """
-    import subprocess as _sp
     # Enable per-client window sizing: window follows the most recently
     # active client rather than shrinking to the smallest.
     base = session_name.split("~")[0]
     for s in [base] + tmux_mod.list_grouped_sessions(base):
         tmux_mod.set_session_option(s, "window-size", "latest")
 
-    _sp.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", "R",
+    subprocess.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", "R",
              "run-shell 'pm rebalance'"), check=False)
     # Conditionally override pane-switch keys: use pm's mobile-aware
     # switch for pm sessions, fall back to default tmux behavior otherwise.
@@ -57,15 +56,15 @@ def _register_tmux_bindings(session_name: str) -> None:
         "Right": ("-R", "select-pane -R"),
     }
     for key, (direction, fallback) in switch_keys.items():
-        _sp.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", key,
+        subprocess.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", key,
                  "if-shell",
                  f"s='#{{session_name}}'; test -f {registry_dir}/${{s%%~*}}.json",
                  f"run-shell 'pm _pane-switch #{{session_name}} {direction}'",
                  fallback),
                 check=False)
-    _sp.run(tmux_mod._tmux_cmd("set-hook", "-g", "after-kill-pane",
+    subprocess.run(tmux_mod._tmux_cmd("set-hook", "-g", "after-kill-pane",
              "run-shell 'pm _pane-closed'"), check=False)
-    _sp.run(tmux_mod._tmux_cmd("set-hook", "-gw", "after-split-window",
+    subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gw", "after-split-window",
              "run-shell 'pm _pane-opened \"#{session_name}\" \"#{window_id}\" \"#{pane_id}\"'"),
             check=False)
     # Auto-rebalance when window resizes (triggered by client switches
@@ -73,11 +72,11 @@ def _register_tmux_bindings(session_name: str) -> None:
     # Uses "window-resized" (fires on any window size change) not
     # "after-resize-window" (only fires after the resize-window command).
     # Note: window-resized is a window hook, so use -gw not -g.
-    _sp.run(tmux_mod._tmux_cmd("set-hook", "-gw", "window-resized",
+    subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gw", "window-resized",
              "run-shell 'pm _window-resized \"#{session_name}\" \"#{window_id}\"'"),
             check=False)
     # Clean up stale hook from earlier versions that used the wrong name
-    _sp.run(tmux_mod._tmux_cmd("set-hook", "-gu", "after-resize-window"),
+    subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gu", "after-resize-window"),
             check=False)
 
 
@@ -268,8 +267,7 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
                                  socket_path=socket_path)
 
     # Get the TUI pane ID and window ID
-    import subprocess as _sp
-    tui_pane = _sp.run(
+    tui_pane = subprocess.run(
         tmux_mod._tmux_cmd("list-panes", "-t", session_name, "-F", "#{pane_id}",
                             socket_path=socket_path),
         capture_output=True, text=True,

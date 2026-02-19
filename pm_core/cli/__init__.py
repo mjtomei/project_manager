@@ -16,7 +16,6 @@ Command groups are split into submodules:
 
 import os
 import shutil
-import subprocess
 from pathlib import Path
 
 import click

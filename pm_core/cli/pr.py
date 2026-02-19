@@ -622,8 +622,7 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False) -> No
         # Register review panes under the review window (multi-window safe).
         # Derive window ID from the pane we just created rather than
         # searching by name, which is more robust.
-        import subprocess as _sp_rev
-        wid_result = _sp_rev.run(
+        wid_result = subprocess.run(
             tmux_mod._tmux_cmd("display", "-t", claude_pane, "-p", "#{window_id}"),
             capture_output=True, text=True,
         )

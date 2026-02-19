@@ -284,7 +284,7 @@ installation instead of reimplementing.
 
 ## Key files
 
-- pm_core/cli.py — Main CLI commands (Click-based)
+- pm_core/cli/ — CLI package (commands split into submodules: pr, plan, session, tui, guide, meta, cluster)
 - pm_core/tui/app.py — Interactive TUI (Textual-based)
 - pm_core/tui/tech_tree.py — PR dependency graph widget
 - pm_core/tmux.py — Tmux session/window/pane management
