@@ -644,7 +644,6 @@ def pr_done(pr_id: str | None, fresh: bool):
         click.echo(f"PR {pr_id} is already merged.", err=True)
         raise SystemExit(1)
     if pr_entry.get("status") == "in_review":
-        click.echo(f"PR {pr_id} is already in_review.")
         _launch_review_window(data, pr_entry, fresh=fresh)
         return
     if pr_entry.get("status") == "pending":
