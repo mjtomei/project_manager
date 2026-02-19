@@ -8,7 +8,6 @@ from pm_core.tmux import (
     in_tmux,
     session_exists,
     create_session,
-    new_window,
     new_window_get_pane,
     split_pane,
     split_pane_background,
