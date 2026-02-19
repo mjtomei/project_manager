@@ -432,7 +432,7 @@ def launch_test(app, test_id: str) -> None:
         app.log_message(f"Test not found: {test_id}")
         return
 
-    # Build session context (same pattern as cli.py tui_test command)
+    # Build session context (same pattern as cli tui-test command)
     sess = app._session_name or "default"
     pane_id = os.environ.get("TMUX_PANE", "")
     full_prompt = f"""\

@@ -523,8 +523,8 @@ Test that Escape cancels command input:
 
 ## Expected Behavior
 
-From pm_core/tui/app.py _launch_pane():
-- Calls pane_layout.find_live_pane_by_role() to check for existing pane
+From pm_core/tui/pane_ops.py launch_pane():
+- Calls pane_registry.find_live_pane_by_role() to check for existing pane
 - If found, calls tmux_mod.select_pane() to focus it
 - Only creates new pane if no existing live pane found
 - Logs "Focused existing {role} pane" when reusing
@@ -2223,14 +2223,14 @@ From pm_core/pane_layout.py:
 - `_get_window_data()` creates a new window entry if absent
 - `_iter_all_panes()` yields panes from all windows
 
-From pm_core/tui/app.py _heal_registry():
+From pm_core/tui/pane_ops.py _heal_registry():
 - Iterates all windows in data["windows"]
 - For each window, queries tmux for live panes
 - Removes dead panes and empty windows
 - Ensures TUI pane registered in current window
 - Saves only if changes made
 
-From pm_core/cli.py:
+From pm_core/cli/:
 - `_launch_review_window()` registers panes under the review window's ID
 - Session init creates `{"session":..., "windows":{}, "generation":...}`
 - `_find_tui_pane()` searches across all windows
@@ -2968,7 +2968,7 @@ From pm_core/tui/app.py action_launch_meta():
 - A new pane is created in the tmux session
 - The TUI shows "> meta" in the log line while running
 
-From pm_core/cli.py meta command:
+From pm_core/cli/ meta command:
 - _detect_pm_install() finds the pm source code
 - _build_meta_prompt() creates a comprehensive prompt about pm architecture
 - _meta_workdir() creates/finds a working directory

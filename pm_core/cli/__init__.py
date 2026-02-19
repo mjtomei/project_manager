@@ -4334,12 +4334,14 @@ installation instead of reimplementing.
 
 ## Key files
 
-- pm_core/cli.py — Main CLI commands (Click-based)
-- pm_core/tui/app.py — Interactive TUI (Textual-based)
-- pm_core/tui/tech_tree.py — PR dependency graph widget
+- pm_core/cli/ — CLI package (Click-based): __init__.py has core commands, helpers.py has shared utilities
+- pm_core/tui/app.py — TUI app core (Textual-based), with screens.py, widgets.py, pane_ops.py for extracted code
+- pm_core/tui/tech_tree.py — PR dependency graph widget, with tree_layout.py for layout algorithm
 - pm_core/tmux.py — Tmux session/window/pane management
-- pm_core/pane_layout.py — Pane registry and auto-rebalancing
+- pm_core/pane_registry.py — Pane registry I/O (multi-window format)
+- pm_core/pane_layout.py — Layout algorithm and rebalancing
 - pm_core/store.py — YAML state management (project.yaml)
+- pm_core/git_ops.py — Git operations, get_git_root, get_github_repo_name
 - pm_core/guide.py — Guided workflow state machine
 - pm_core/prompt_gen.py — Claude prompt generation
 - pm_core/paths.py — Centralized path management (~/.pm/)

@@ -57,7 +57,7 @@ def find_local_pm_core():
     # Check cwd and up to 3 parent directories
     for _ in range(4):
         candidate = os.path.join(cwd, "pm_core")
-        if os.path.isdir(candidate) and os.path.isfile(os.path.join(candidate, "cli.py")):
+        if os.path.isdir(candidate) and os.path.isdir(os.path.join(candidate, "cli")):
             return cwd
         parent = os.path.dirname(cwd)
         if parent == cwd:
