@@ -438,7 +438,7 @@ def plan():
 @plan.command("add")
 @click.argument("name")
 @click.option("--description", default="", help="Description of what the plan should accomplish")
-@click.option("--new", "fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
+@click.option("--fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
 def plan_add(name: str, description: str, fresh: bool):
     """Create a new plan and launch Claude to develop it."""
     root = state_root()
@@ -551,7 +551,7 @@ def plan_list():
 @plan.command("breakdown")
 @click.argument("plan_id", default=None, required=False)
 @click.option("--prs", "initial_prs", default=None, help="Seed the conversation with an initial PR list")
-@click.option("--new", "fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
+@click.option("--fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
 def plan_breakdown(plan_id: str | None, initial_prs: str | None, fresh: bool):
     """Launch Claude to break a plan into PRs (written to plan file).
 
@@ -655,7 +655,7 @@ plans pane) to check consistency and coverage before loading PRs.
 
 @plan.command("review")
 @click.argument("plan_id", default=None, required=False)
-@click.option("--new", "fresh", is_flag=True, default=False, help="Start a fresh session")
+@click.option("--fresh", is_flag=True, default=False, help="Start a fresh session")
 def plan_review(plan_id: str | None, fresh: bool):
     """Launch Claude to review plan-PR consistency."""
     root = state_root()
@@ -1583,7 +1583,7 @@ def pr_ready():
 @pr.command("start")
 @click.argument("pr_id", default=None, required=False)
 @click.option("--workdir", default=None, help="Custom work directory")
-@click.option("--new", "fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
+@click.option("--fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
 def pr_start(pr_id: str | None, workdir: str, fresh: bool):
     """Start working on a PR: clone, branch, print prompt.
 
@@ -1641,7 +1641,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
         click.echo(f"PR {pr_id} is already merged.", err=True)
         raise SystemExit(1)
 
-    # Fast path: if window already exists, switch to it (or kill it if --new)
+    # Fast path: if window already exists, switch to it (or kill it if --fresh)
     if tmux_mod.has_tmux():
         pm_session = _get_current_pm_session() or _get_session_name_for_cwd()
         if tmux_mod.session_exists(pm_session):
@@ -1649,10 +1649,10 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
             existing = tmux_mod.find_window_by_name(pm_session, window_name)
             if existing:
                 if fresh:
-                    tmux_mod.kill_window(pm_session, existing["index"])
+                    tmux_mod.kill_window(pm_session, existing["id"])
                     click.echo(f"Killed existing window '{window_name}'")
                 else:
-                    tmux_mod.select_window(pm_session, existing["index"])
+                    tmux_mod.select_window(pm_session, existing["id"])
                     click.echo(f"Switched to existing window '{window_name}' (session: {pm_session})")
                     return
 
@@ -1776,7 +1776,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
     launch_claude(prompt, cwd=str(work_path), session_key=session_key, pm_root=root, resume=not fresh)
 
 
-def _launch_review_window(data: dict, pr_entry: dict) -> None:
+def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False) -> None:
     """Launch a tmux review window with Claude review + git diff shell."""
     if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
         return
@@ -1800,12 +1800,16 @@ def _launch_review_window(data: dict, pr_entry: dict) -> None:
 
     window_name = f"review-{display_id}"
 
-    # If review window already exists, just switch to it
+    # If review window already exists, kill it if fresh, otherwise switch to it
     existing = tmux_mod.find_window_by_name(pm_session, window_name)
     if existing:
-        tmux_mod.select_window(pm_session, existing["index"])
-        click.echo(f"Switched to existing review window '{window_name}'")
-        return
+        if fresh:
+            tmux_mod.kill_window(pm_session, existing["id"])
+            click.echo(f"Killed existing review window '{window_name}'")
+        else:
+            tmux_mod.select_window(pm_session, existing["id"])
+            click.echo(f"Switched to existing review window '{window_name}'")
+            return
 
     try:
         claude_pane = tmux_mod.new_window_get_pane(pm_session, window_name, claude_cmd, workdir)
@@ -1830,13 +1834,11 @@ def _launch_review_window(data: dict, pr_entry: dict) -> None:
         )
         diff_pane = tmux_mod.split_pane_at(claude_pane, "h", diff_cmd, background=True)
 
-        # Find the window ID for pane registration
-        win = tmux_mod.find_window_by_name(pm_session, window_name)
-        if win:
-            window_id = win["id"]
-            pane_layout.register_pane(pm_session, window_id, claude_pane, "claude", claude_cmd)
-            pane_layout.register_pane(pm_session, window_id, diff_pane, "shell", "review-diff")
-            pane_layout.rebalance(pm_session, window_id)
+        # Don't register review panes in the main session's pane registry.
+        # The registry is single-window; registering here would overwrite
+        # the main TUI window's registry, causing reconciliation to remove
+        # all main-window pane entries.  The review window doesn't need
+        # managed layout — it's a simple two-pane split.
 
         click.echo(f"Opened review window '{window_name}'")
     except Exception as e:
@@ -1845,7 +1847,8 @@ def _launch_review_window(data: dict, pr_entry: dict) -> None:
 
 @pr.command("done")
 @click.argument("pr_id", default=None, required=False)
-def pr_done(pr_id: str | None):
+@click.option("--fresh", is_flag=True, default=False, help="Kill existing review window and create a new one")
+def pr_done(pr_id: str | None, fresh: bool):
     """Mark a PR as in_review.
 
     If PR_ID is omitted, infers from cwd (if inside a workdir) or
@@ -1881,7 +1884,7 @@ def pr_done(pr_id: str | None):
         raise SystemExit(1)
     if pr_entry.get("status") == "in_review":
         click.echo(f"PR {pr_id} is already in_review.")
-        _launch_review_window(data, pr_entry)
+        _launch_review_window(data, pr_entry, fresh=fresh)
         return
     if pr_entry.get("status") == "pending":
         click.echo(f"PR {pr_id} is pending — start it first with: pm pr start {pr_id}", err=True)
@@ -1904,7 +1907,7 @@ def pr_done(pr_id: str | None):
     save_and_push(data, root, f"pm: done {pr_id}")
     click.echo(f"PR {_pr_display_id(pr_entry)} marked as in_review.")
     trigger_tui_refresh()
-    _launch_review_window(data, pr_entry)
+    _launch_review_window(data, pr_entry, fresh=fresh)
 
 
 @pr.command("sync")
@@ -3111,7 +3114,7 @@ def cluster_auto(threshold, max_commits, weights, output_fmt):
 @cluster.command("explore")
 @click.option("--bridged", is_flag=True, default=False,
               help="Launch in a bridge pane (for agent orchestration)")
-@click.option("--new", "fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
+@click.option("--fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
 def cluster_explore(bridged, fresh):
     """Interactively explore code clusters with Claude."""
     import tempfile
@@ -3236,7 +3239,7 @@ def _in_pm_tmux_session() -> bool:
 
 @cli.group(invoke_without_command=True)
 @click.option("--step", default=None, help="Force a specific workflow step")
-@click.option("--new", "fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
+@click.option("--fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
 @click.pass_context
 def guide(ctx, step, fresh):
     """Guided workflow — walks through init -> plan -> PRs -> start."""

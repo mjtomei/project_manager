@@ -110,7 +110,7 @@ cluster explore.
 The pm cluster explore command uses Claude's session management. When you:
 1. Start cluster explore, a UUID is generated and saved to .pm-sessions.json
 2. Exit and restart cluster explore, it should resume with --resume <session_id>
-3. Using --new flag should start a fresh session
+3. Using --fresh flag should start a fresh session
 
 This test uses cluster explore instead of guide because:
 - Guide advances through steps, making resume testing unreliable
@@ -135,7 +135,7 @@ This test uses cluster explore instead of guide because:
 
 2. Test session creation:
    - Create a new tmux pane for testing
-   - Run `pm cluster explore --new` to start a fresh session
+   - Run `pm cluster explore --fresh` to start a fresh session
    - Wait for Claude to start (about 10 seconds)
    - Check .pm-sessions.json - should have new cluster:explore entry
    - Note the session_id
@@ -145,7 +145,7 @@ This test uses cluster explore instead of guide because:
 3. Test session resume:
    - Kill the pane with `tmux kill-pane -t <pane_id>`
    - Create a new pane
-   - Run `pm cluster explore` (WITHOUT --new flag)
+   - Run `pm cluster explore` (WITHOUT --fresh flag)
    - Check if --resume flag is being used: `ps aux | grep "claude.*resume"`
    - The process should show: `claude --resume <session_id>`
    - Wait for Claude to start
@@ -908,7 +908,7 @@ screen with '?', verify its contents, then systematically test each key.
 The TUI has a help modal (HelpScreen) that opens when the user presses '?'.
 It lists all available keybindings grouped by category:
 - Tree Navigation: arrow keys, hjkl, Enter
-- PR Actions: s, S, d, c, p, e, v
+- PR Actions: s, d, c, p, e, v
 - Panes & Views: /, g, n, m, L, b
 - Other: r, Ctrl+R, ?, q
 
@@ -950,7 +950,7 @@ d=done PR, q=quit) should be tested carefully to avoid changing project state.
      * Enter - Show PR details
    - PR Actions section:
      * s - Start selected PR
-     * S - Start fresh (no resume)
+     * z - Modifier: kill existing before next command
      * d - Mark PR as done
      * c - Launch Claude for PR
      * e - Edit selected PR
@@ -1046,7 +1046,7 @@ Test each key that is safe to press (won't change PR state or quit):
 ### Part 3: Destructive Keys (observe only)
 
 Do NOT press these, just verify they exist in help:
-- **s** / **S** - Would start a PR (changes project state)
+- **s** - Would start a PR (changes project state)
 - **d** - Would mark PR as done (changes project state)
 - **c** - Would launch Claude (resource-intensive)
 - **m** - Would launch meta session
@@ -1108,7 +1108,7 @@ Other:
 ## Part 3: Destructive Keys
 All documented in help: [PASS/FAIL]
   s (start PR): [PRESENT/MISSING]
-  S (start fresh): [PRESENT/MISSING]
+  z (kill existing modifier): [PRESENT/MISSING]
   d (done PR): [PRESENT/MISSING]
   c (claude): [PRESENT/MISSING]
   m (meta): [PRESENT/MISSING]

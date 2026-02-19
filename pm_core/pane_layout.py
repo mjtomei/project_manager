@@ -121,6 +121,13 @@ def unregister_pane(session: str, pane_id: str) -> None:
                  pane_id, before != after, before, after)
 
 
+def kill_and_unregister(session: str, pane_id: str) -> None:
+    """Kill a tmux pane and remove it from the registry."""
+    from pm_core import tmux as tmux_mod
+    subprocess.run(tmux_mod._tmux_cmd("kill-pane", "-t", pane_id), check=False)
+    unregister_pane(session, pane_id)
+
+
 def find_live_pane_by_role(session: str, role: str) -> str | None:
     """Find a live pane with the given role, or None if not found.
 
