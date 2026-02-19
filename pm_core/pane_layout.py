@@ -76,15 +76,44 @@ def is_mobile(session: str, window: str = "0") -> bool:
     return 0 < width < MOBILE_WIDTH_THRESHOLD
 
 
+def _get_window_data(data: dict, window: str) -> dict:
+    """Return the window entry for *window*, creating it if absent."""
+    windows = data.setdefault("windows", {})
+    if window not in windows:
+        windows[window] = {"panes": [], "user_modified": False}
+    return windows[window]
+
+
+def _iter_all_panes(data: dict):
+    """Yield ``(window_id, pane_dict)`` across every window in the registry."""
+    for window_id, wdata in data.get("windows", {}).items():
+        for pane in wdata.get("panes", []):
+            yield window_id, pane
+
+
 def load_registry(session: str) -> dict:
-    """Load the pane registry for a session."""
+    """Load the pane registry for a session.
+
+    Automatically migrates the old single-window format to the new
+    multi-window format on read.
+    """
     path = registry_path(session)
     if path.exists():
         try:
-            return json.loads(path.read_text())
+            data = json.loads(path.read_text())
         except (json.JSONDecodeError, ValueError):
-            pass
-    return {"session": session, "window": "0", "panes": [], "user_modified": False}
+            data = None
+        if data is not None:
+            # Migrate old flat format → multi-window
+            if "panes" in data and "windows" not in data:
+                window = data.pop("window", "0")
+                panes = data.pop("panes", [])
+                user_modified = data.pop("user_modified", False)
+                data["windows"] = {
+                    window: {"panes": panes, "user_modified": user_modified},
+                }
+            return data
+    return {"session": session, "windows": {}, "generation": ""}
 
 
 def save_registry(session: str, data: dict) -> None:
@@ -96,98 +125,126 @@ def register_pane(session: str, window: str, pane_id: str, role: str, cmd: str) 
     """Register a new pane in the registry."""
     _ensure_logging()
     data = load_registry(session)
-    data["window"] = window
-    order = max((p["order"] for p in data["panes"]), default=-1) + 1
-    data["panes"].append({
+    wdata = _get_window_data(data, window)
+    order = max((p["order"] for p in wdata["panes"]), default=-1) + 1
+    wdata["panes"].append({
         "id": pane_id,
         "role": role,
         "order": order,
         "cmd": cmd,
     })
     save_registry(session, data)
-    _logger.info("register_pane: %s role=%s order=%d (total=%d)",
-                 pane_id, role, order, len(data["panes"]))
+    _logger.info("register_pane: %s role=%s window=%s order=%d (total=%d)",
+                 pane_id, role, window, order, len(wdata["panes"]))
 
 
 def unregister_pane(session: str, pane_id: str) -> None:
-    """Remove a pane from the registry."""
+    """Remove a pane from the registry (searches all windows)."""
     _ensure_logging()
     data = load_registry(session)
-    before = len(data["panes"])
-    data["panes"] = [p for p in data["panes"] if p["id"] != pane_id]
-    after = len(data["panes"])
+    found = False
+    for window_id, wdata in data.get("windows", {}).items():
+        before = len(wdata["panes"])
+        wdata["panes"] = [p for p in wdata["panes"] if p["id"] != pane_id]
+        if len(wdata["panes"]) < before:
+            found = True
+            _logger.info("unregister_pane: %s removed from window %s", pane_id, window_id)
     save_registry(session, data)
-    _logger.info("unregister_pane: %s removed=%s (before=%d after=%d)",
-                 pane_id, before != after, before, after)
+    if not found:
+        _logger.info("unregister_pane: %s not found in any window", pane_id)
 
 
-def find_live_pane_by_role(session: str, role: str) -> str | None:
+def kill_and_unregister(session: str, pane_id: str) -> None:
+    """Kill a tmux pane and remove it from the registry."""
+    from pm_core import tmux as tmux_mod
+    subprocess.run(tmux_mod._tmux_cmd("kill-pane", "-t", pane_id), check=False)
+    unregister_pane(session, pane_id)
+
+
+def find_live_pane_by_role(session: str, role: str,
+                           window: str | None = None) -> str | None:
     """Find a live pane with the given role, or None if not found.
 
     Checks both the registry and tmux to ensure the pane actually exists.
+    When *window* is given, only that window is searched; otherwise all
+    windows are searched.
     Returns the pane ID if found and alive, None otherwise.
     """
     _ensure_logging()
     from pm_core import tmux as tmux_mod
 
     data = load_registry(session)
-    window = data.get("window", "0")
-    _logger.debug("find_live_pane_by_role: session=%s window=%s role=%s", session, window, role)
 
-    # Find pane with this role in registry
-    for pane in data.get("panes", []):
-        if pane.get("role") == role:
-            pane_id = pane.get("id")
-            if pane_id:
-                # Check if pane is actually alive in tmux (use window from registry)
-                live_panes = tmux_mod.get_pane_indices(session, window)
-                live_ids = {p[0] for p in live_panes}
-                _logger.debug("find_live_pane_by_role: live_ids=%s, checking %s", live_ids, pane_id)
-                if pane_id in live_ids:
-                    _logger.info("find_live_pane_by_role: %s -> %s (alive)", role, pane_id)
-                    return pane_id
-                else:
-                    _logger.info("find_live_pane_by_role: %s -> %s (dead)", role, pane_id)
+    if window:
+        windows_to_search = {window: _get_window_data(data, window)}
+    else:
+        windows_to_search = data.get("windows", {})
+
+    _logger.debug("find_live_pane_by_role: session=%s windows=%s role=%s",
+                  session, list(windows_to_search), role)
+
+    for win_id, wdata in windows_to_search.items():
+        for pane in wdata.get("panes", []):
+            if pane.get("role") == role:
+                pane_id = pane.get("id")
+                if pane_id:
+                    live_panes = tmux_mod.get_pane_indices(session, win_id)
+                    live_ids = {p[0] for p in live_panes}
+                    _logger.debug("find_live_pane_by_role: window=%s live_ids=%s, checking %s",
+                                  win_id, live_ids, pane_id)
+                    if pane_id in live_ids:
+                        _logger.info("find_live_pane_by_role: %s -> %s (alive in %s)",
+                                     role, pane_id, win_id)
+                        return pane_id
+                    else:
+                        _logger.info("find_live_pane_by_role: %s -> %s (dead in %s)",
+                                     role, pane_id, win_id)
     _logger.info("find_live_pane_by_role: %s -> None", role)
     return None
 
 
 def _reconcile_registry(session: str, window: str,
                         query_session: str | None = None) -> list[str]:
-    """Remove registry panes that no longer exist in tmux. Returns removed IDs."""
+    """Remove registry panes that no longer exist in tmux. Returns removed IDs.
+
+    Only reconciles the specified *window*.  If the window becomes empty
+    its entry is removed from the registry.
+    """
     _ensure_logging()
     from pm_core import tmux as tmux_mod
 
     qs = query_session or session
     data = load_registry(session)
-    # Always use the registry's window, not the caller's — the caller may
-    # have a stale window ID from an old session.
-    reg_window = data.get("window", window)
-    live_panes = tmux_mod.get_pane_indices(qs, reg_window)
+    wdata = _get_window_data(data, window)
+    live_panes = tmux_mod.get_pane_indices(qs, window)
     live_ids = {pid for pid, _ in live_panes}
 
-    # If we got zero live panes but the registry has panes, the window
-    # probably doesn't exist (session was killed). Don't wipe the registry.
-    if not live_ids and data["panes"]:
+    # If we got zero live panes but the window has panes, the window
+    # probably doesn't exist (session was killed). Don't wipe.
+    if not live_ids and wdata["panes"]:
         _logger.info("reconcile: no live panes found for %s:%s, skipping "
-                     "(window may not exist)", session, reg_window)
+                     "(window may not exist)", session, window)
         return []
 
     removed = []
     surviving = []
-    for p in data["panes"]:
+    for p in wdata["panes"]:
         if p["id"] in live_ids:
             surviving.append(p)
         else:
             removed.append(p["id"])
 
     if removed:
-        data["panes"] = surviving
+        wdata["panes"] = surviving
+        # Remove empty window entry
+        if not surviving:
+            data["windows"].pop(window, None)
         save_registry(session, data)
-        _logger.info("reconcile: removed dead panes %s, %d remaining",
-                     removed, len(surviving))
+        _logger.info("reconcile: removed dead panes %s from window %s, %d remaining",
+                     removed, window, len(surviving))
     else:
-        _logger.debug("reconcile: all %d registry panes still alive", len(data["panes"]))
+        _logger.debug("reconcile: all %d registry panes still alive in window %s",
+                     len(wdata["panes"]), window)
 
     return removed
 
@@ -297,11 +354,12 @@ def rebalance(session: str, window: str, query_session: str | None = None) -> bo
     _reconcile_registry(session, window, query_session=qs)
 
     data = load_registry(session)
-    if data.get("user_modified"):
-        _logger.info("rebalance: skipping, user_modified=True")
+    wdata = _get_window_data(data, window)
+    if wdata.get("user_modified"):
+        _logger.info("rebalance: skipping, user_modified=True for window %s", window)
         return False
 
-    panes = sorted(data["panes"], key=lambda p: p["order"])
+    panes = sorted(wdata["panes"], key=lambda p: p["order"])
     if len(panes) < 1:
         _logger.info("rebalance: no panes in registry")
         return False
@@ -399,15 +457,16 @@ def check_user_modified(session: str, window: str) -> bool:
     """Check if the user has manually modified the layout.
 
     Compares actual pane geometry against expected layout. If different,
-    sets user_modified flag in registry.
+    sets user_modified flag in the per-window registry entry.
     """
     from pm_core import tmux as tmux_mod
 
     data = load_registry(session)
-    if data.get("user_modified"):
+    wdata = _get_window_data(data, window)
+    if wdata.get("user_modified"):
         return True
 
-    panes = sorted(data["panes"], key=lambda p: p["order"])
+    panes = sorted(wdata["panes"], key=lambda p: p["order"])
     if len(panes) < 2:
         return False
 
@@ -421,7 +480,7 @@ def check_user_modified(session: str, window: str) -> bool:
 
     registered_live = [p for p in panes if p["id"] in id_to_index]
     if len(registered_live) != len(current):
-        data["user_modified"] = True
+        wdata["user_modified"] = True
         save_registry(session, data)
         return True
 
@@ -450,18 +509,20 @@ def handle_pane_exited(session: str, window: str, generation: str,
                      generation, reg_gen)
         return
 
-    if data.get("user_modified"):
-        _logger.info("handle_pane_exited: user_modified, skipping")
+    wdata = _get_window_data(data, window)
+    if wdata.get("user_modified"):
+        _logger.info("handle_pane_exited: user_modified for window %s, skipping", window)
         if pane_id:
             unregister_pane(session, pane_id)
         return
 
     # Directly unregister the pane that exited
     if pane_id:
-        before = len(data["panes"])
+        before_count = sum(len(w["panes"]) for w in data["windows"].values())
         unregister_pane(session, pane_id)
         data = load_registry(session)
-        if len(data["panes"]) == before:
+        after_count = sum(len(w["panes"]) for w in data.get("windows", {}).values())
+        if after_count == before_count:
             _logger.info("handle_pane_exited: pane %s was not in registry", pane_id)
             return
     else:
@@ -478,18 +539,17 @@ def handle_pane_exited(session: str, window: str, generation: str,
     # Fix: unzoom, switch focus away, then defer rebalance via a
     # detached background process that waits for the pane to die first.
     from pm_core import tmux as tmux_mod
-    reg_window = data.get("window", window)
-    tmux_mod.unzoom_pane(session, reg_window)
+    tmux_mod.unzoom_pane(session, window)
     if pane_id:
         # Focus the last active pane (the one the user was in before the
         # dying pane).  Fall back to next pane if there is no last pane.
         result = subprocess.run(
-            tmux_mod._tmux_cmd("select-pane", "-t", f"{session}:{reg_window}", "-l"),
+            tmux_mod._tmux_cmd("select-pane", "-t", f"{session}:{window}", "-l"),
             capture_output=True,
         )
         if result.returncode != 0:
             subprocess.run(
-                tmux_mod._tmux_cmd("select-pane", "-t", f"{session}:{reg_window}", "-t", ":.+"),
+                tmux_mod._tmux_cmd("select-pane", "-t", f"{session}:{window}", "-t", ":.+"),
                 check=False,
             )
 
@@ -497,12 +557,12 @@ def handle_pane_exited(session: str, window: str, generation: str,
     # start_new_session detaches the process from the dying pane's PTY.
     import sys
     _logger.info("handle_pane_exited: deferring rebalance for %s:%s",
-                 session, reg_window)
+                 session, window)
     subprocess.Popen(
         [sys.executable, "-c",
          "import time; time.sleep(0.3); "
          "from pm_core.pane_layout import rebalance; "
-         f"rebalance({session!r}, {reg_window!r})"],
+         f"rebalance({session!r}, {window!r})"],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -525,28 +585,30 @@ def handle_any_pane_closed() -> None:
         except (json.JSONDecodeError, KeyError):
             continue
         session = data.get("session", "")
-        window = data.get("window", "0")
         if not session:
             continue
-        if data.get("user_modified"):
-            continue
 
-        removed = _reconcile_registry(session, window)
-        if removed:
-            _logger.info("handle_any_pane_closed: session=%s removed=%s, rebalancing",
-                         session, removed)
-            rebalance(session, window)
+        for window_id, wdata in list(data.get("windows", {}).items()):
+            if wdata.get("user_modified"):
+                continue
+            removed = _reconcile_registry(session, window_id)
+            if removed:
+                _logger.info("handle_any_pane_closed: session=%s window=%s removed=%s, rebalancing",
+                             session, window_id, removed)
+                rebalance(session, window_id)
 
 
 def handle_pane_opened(session: str, window: str, pane_id: str) -> None:
-    """Handle pane-opened event: if not in registry, mark user_modified."""
+    """Handle pane-opened event: if not in registry, mark per-window user_modified."""
     _ensure_logging()
     _logger.info("handle_pane_opened called: session=%s window=%s pane_id=%s",
                  session, window, pane_id)
 
     data = load_registry(session)
-    known_ids = {p["id"] for p in data["panes"]}
+    wdata = _get_window_data(data, window)
+    known_ids = {p["id"] for p in wdata["panes"]}
     if pane_id not in known_ids:
-        _logger.info("handle_pane_opened: unknown pane %s, setting user_modified", pane_id)
-        data["user_modified"] = True
+        _logger.info("handle_pane_opened: unknown pane %s in window %s, setting user_modified",
+                     pane_id, window)
+        wdata["user_modified"] = True
         save_registry(session, data)
