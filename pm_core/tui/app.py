@@ -893,7 +893,7 @@ class ProjectManagerApp(App):
             if not window:
                 return
 
-            data = pane_layout.load_registry(session)
+            data = pane_registry.load_registry(session)
             changed = False
 
             # Heal every window: remove dead panes, drop empty windows
@@ -926,7 +926,7 @@ class ProjectManagerApp(App):
             live_panes = tmux_mod.get_pane_indices(session, window)
             live_ids = {pid for pid, _ in live_panes}
             if tui_pane_id in live_ids:
-                wdata = pane_layout._get_window_data(data, window)
+                wdata = pane_registry._get_window_data(data, window)
                 if not any(p["id"] == tui_pane_id for p in wdata["panes"]):
                     wdata["panes"].insert(0, {
                         "id": tui_pane_id,
@@ -939,7 +939,7 @@ class ProjectManagerApp(App):
                     changed = True
 
             if changed:
-                pane_layout.save_registry(session, data)
+                pane_registry.save_registry(session, data)
                 _log.info("heal_registry: saved corrected registry")
             else:
                 _log.info("heal_registry: registry OK")

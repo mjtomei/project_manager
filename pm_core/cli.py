@@ -1854,9 +1854,9 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False) -> No
         )
         review_win_id = wid_result.stdout.strip()
         if review_win_id:
-            pane_layout.register_pane(pm_session, review_win_id, claude_pane, "review-claude", claude_cmd)
+            pane_registry.register_pane(pm_session, review_win_id, claude_pane, "review-claude", claude_cmd)
             if diff_pane:
-                pane_layout.register_pane(pm_session, review_win_id, diff_pane, "review-diff", "diff-shell")
+                pane_registry.register_pane(pm_session, review_win_id, diff_pane, "review-diff", "diff-shell")
 
         click.echo(f"Opened review window '{window_name}'")
     except Exception as e:
