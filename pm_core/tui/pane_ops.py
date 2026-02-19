@@ -141,7 +141,8 @@ def launch_pane(app, cmd: str, role: str, fresh: bool = False) -> None:
     escaped = cmd.replace("'", "'\\''")
     wrap = f"bash -c 'trap \"pm _pane-exited {session} {window} {gen} $TMUX_PANE\" EXIT; {escaped}'"
     try:
-        pane_id = tmux_mod.split_pane(session, "h", wrap)
+        direction = pane_layout.preferred_split_direction(session, window)
+        pane_id = tmux_mod.split_pane(session, direction, wrap)
         pane_registry.register_pane(session, window, pane_id, role, cmd)
         pane_layout.rebalance(session, window)
         tmux_mod.select_pane_smart(pane_id, session, window)

@@ -37,6 +37,24 @@ _logger = configure_logger("pm.pane_layout")
 MOBILE_WIDTH_THRESHOLD = 120
 
 
+def preferred_split_direction(session: str, window: str) -> str:
+    """Return 'h' (left|right) or 'v' (top/bottom) based on window aspect ratio.
+
+    Terminal characters are roughly 2x taller than wide, so a 100-col x 50-row
+    window is roughly square in pixels.  We split horizontally when the window
+    is physically wider than tall, vertically otherwise.
+    """
+    from pm_core import tmux as tmux_mod
+    qs = tmux_mod.current_or_base_session(base_session_name(session))
+    w, h = tmux_mod.get_window_size(qs, window)
+    if w <= 0 or h <= 0:
+        w, h = tmux_mod.get_window_size(session, window)
+    if w <= 0 or h <= 0:
+        return "h"  # fallback
+    # Same heuristic as _layout_node: physical_width ∝ w, physical_height ∝ h*2
+    return "h" if w >= h * 2 else "v"
+
+
 def _ensure_logging():
     """No-op for backward compatibility. Logging is now auto-configured."""
     pass
