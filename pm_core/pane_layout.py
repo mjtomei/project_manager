@@ -445,13 +445,36 @@ def handle_pane_exited(session: str, window: str, generation: str,
 
 
 def _respawn_tui(session: str, window: str) -> None:
-    """Respawn the TUI pane in *window* after it was killed."""
+    """Respawn the TUI pane in *window* after it was killed.
+
+    If the window still exists (other panes remain), splits a new pane
+    into it.  If the window is gone (TUI was the last pane), creates a
+    new window so the session stays alive.
+    """
     from pm_core import tmux as tmux_mod
 
     _logger.info("_respawn_tui: respawning TUI in %s:%s", session, window)
     try:
-        target = f"{session}:{window}"
-        pane_id = tmux_mod.split_pane(target, "h", "pm _tui")
+        # Check if the window still exists
+        live_panes = tmux_mod.get_pane_indices(session, window)
+        if live_panes:
+            # Window exists — split into it
+            target = f"{session}:{window}"
+            pane_id = tmux_mod.split_pane(target, "h", "pm _tui")
+        else:
+            # Window is gone (TUI was the last pane) — create a new one
+            _logger.info("_respawn_tui: window %s gone, creating new window", window)
+            result = subprocess.run(
+                tmux_mod._tmux_cmd("new-window", "-t", f"{session}:",
+                                   "-P", "-F", "#{pane_id} #{window_id}",
+                                   "pm _tui"),
+                capture_output=True, text=True, check=True,
+            )
+            parts = result.stdout.strip().split()
+            pane_id = parts[0]
+            # Update window to the newly created one
+            window = parts[1] if len(parts) > 1 else window
+
         # Register with lowest order so TUI sorts first (leftmost)
         data = load_registry(session)
         wdata = _get_window_data(data, window)
@@ -467,7 +490,8 @@ def _respawn_tui(session: str, window: str) -> None:
         # set it before panes are registered).  Caller rebalances.
         wdata["user_modified"] = False
         save_registry(session, data)
-        _logger.info("_respawn_tui: created pane %s order=%d", pane_id, min_order)
+        _logger.info("_respawn_tui: created pane %s in window %s order=%d",
+                     pane_id, window, min_order)
     except Exception:
         _logger.exception("_respawn_tui: failed to respawn TUI")
 
