@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-c11d04f
+  active_pr: pr-9c1af2e
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-02-20T02:43:08.956779+00:00'
@@ -755,13 +755,50 @@ prs:
   plan: plan-003
   title: Add notes field to PRs for post-start addendums
   branch: pm/pr-c11d04f-add-notes-field-to-prs-for-post-start-addendums
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'Add a notes list field to PR entries in project.yaml for recording
     addendums after work has begun. Each note identified by a hash-based ID (note-<hash>,
     like PRs and plans) to avoid sync conflicts. Add pm pr note CLI command to append/list/delete
     notes by hash ID. Notes appear in: pr edit output, TUI detail panel, generate_prompt,
     and generate_review_prompt.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/70
+  gh_pr_number: 70
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-c11d04f-add-notes-field-to-prs-for-post-star-d4068f70
+- id: pr-9c1af2e
+  plan: null
+  title: Fix assorted bugs from bugs.txt
+  branch: pm/pr-9c1af2e-fix-assorted-bugs-from-bugs-txt
+  status: pending
+  depends_on: []
+  description: 'Fix the following bugs:
+
+
+    1. Session tag command doesn''t respect --group/--global flags
+
+    2. Help screen and other panes are not scrollable, cut off on small windows
+
+    3. Guide ''pm guide done'' regresses to create-a-plan instead of completing; guide
+    may advance from init too early
+
+    4. Step after first Claude session in guide doesn''t auto-start when init session
+    finishes
+
+    5. Rebalance hides panes in shared sessions with differently-sized clients
+
+    6. Empty ''import from existing repo'' plan created on init — guide plan not officially
+    added, guide session unaware of plan mechanics
+
+    7. Claude H session (and others) don''t know to use TUI input commands instead
+    of running shell commands manually; consider making manual execution work too
+
+    8. Start command (and probably others) broken with bare git backend — should be
+    covered by new init TUI tests
+
+
+    Add TUI tests that run through init with an existing repo, a notes-only repo,
+    and an empty repo, fully isolated and cleaned up after.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
