@@ -107,6 +107,13 @@ class DetailPanel(Widget):
                     lines.append(f"  ? {dep_id}")
             lines.append("")
 
+        pr_notes = pr.get("notes") or []
+        if pr_notes:
+            lines.append("[bold]Notes:[/bold]")
+            for n in pr_notes:
+                lines.append(f"  - {n['text']}")
+            lines.append("")
+
         if description:
             lines.append("[bold]Description:[/bold]")
             lines.append(description)
