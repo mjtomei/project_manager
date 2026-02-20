@@ -314,12 +314,11 @@ def format_results_table(run: BenchmarkRun) -> str:
     lines.append("-" * 80)
     scored = [r for r in run.results if r.error is None]
     if scored:
-        agg_tourn = sum(r.tournament_score for r in scored) / len(scored)
-        agg_base = sum(r.baseline_score for r in scored) / len(scored)
-        agg_delta = agg_tourn - agg_base
+        agg_delta = run.tournament_aggregate - run.baseline_aggregate
         lines.append(
             f"{'AGGREGATE':<12} {f'{len(scored)} exercises':<30} "
-            f"{agg_tourn:>9.0%} {agg_base:>10.0%} {agg_delta:>+7.0%}"
+            f"{run.tournament_aggregate:>9.0%} {run.baseline_aggregate:>10.0%} "
+            f"{agg_delta:>+7.0%}"
         )
     if run.num_errors > 0:
         lines.append(f"  ({run.num_errors} exercises had errors)")

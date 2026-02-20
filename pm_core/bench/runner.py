@@ -406,12 +406,3 @@ class Runner:
             self.metrics.record(r)
         return results
 
-    def aggregate_stats(self, results: list[GenerationResult]) -> RequestStats:
-        """Aggregate stats across multiple generation results."""
-        total = RequestStats()
-        for r in results:
-            total.prompt_tokens += r.stats.prompt_tokens
-            total.completion_tokens += r.stats.completion_tokens
-            total.total_tokens += r.stats.total_tokens
-            total.wall_clock_seconds += r.stats.wall_clock_seconds
-        return total

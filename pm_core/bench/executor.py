@@ -130,6 +130,10 @@ def execute_tests(
                 # overwrite the first reference test file from the exercise scaffold.
                 first_test = next(iter(exercise.reference_tests))
                 (work_dir / first_test).write_text(test_code)
+            else:
+                return ScoreResult(
+                    error="Cannot determine test file path for custom test code"
+                )
 
         # Run tests
         try:

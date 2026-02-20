@@ -314,18 +314,6 @@ class TestRunner:
             with pytest.raises(RuntimeError, match="No local inference backend"):
                 Runner.create()
 
-    def test_aggregate_stats(self):
-        runner = Runner(backend=Backend.LLAMA_CPP, base_url="http://localhost:8080")
-        results = [
-            GenerationResult(stats=RequestStats(10, 5, 15, 1.0)),
-            GenerationResult(stats=RequestStats(10, 8, 18, 2.0)),
-            GenerationResult(stats=RequestStats(10, 3, 13, 0.5)),
-        ]
-        total = runner.aggregate_stats(results)
-        assert total.prompt_tokens == 30
-        assert total.completion_tokens == 16
-        assert total.total_tokens == 46
-        assert total.wall_clock_seconds == 3.5
 
 
 # ---------------------------------------------------------------------------

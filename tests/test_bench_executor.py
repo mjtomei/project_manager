@@ -1,5 +1,9 @@
 """Tests for bench executor — test output parsing and scoring."""
 
+import json
+import sys
+from pathlib import Path
+
 import pytest
 
 from pm_core.bench.executor import (
@@ -7,7 +11,9 @@ from pm_core.bench.executor import (
     _count_tests_from_output,
     _parse_counts,
     _parse_test_output,
+    execute_tests,
 )
+from pm_core.bench.exercises import Exercise
 
 
 # ---------------------------------------------------------------------------
@@ -179,3 +185,104 @@ class TestScoreResult:
         assert r.raw_output == ""
         assert r.error is None
         assert r.timed_out is False
+
+
+# ---------------------------------------------------------------------------
+# execute_tests — integration tests with real subprocess
+# ---------------------------------------------------------------------------
+
+def _make_python_exercise(tmp_path, slug="hello-world", *, starter="", test_code="",
+                          config=None):
+    """Create a minimal Python exercise directory and return an Exercise."""
+    ex_dir = tmp_path / "exercise"
+    ex_dir.mkdir(parents=True, exist_ok=True)
+
+    starter_file = f"{slug.replace('-', '_')}.py"
+    test_file = f"{slug.replace('-', '_')}_test.py"
+
+    (ex_dir / starter_file).write_text(starter)
+    (ex_dir / test_file).write_text(test_code)
+
+    return Exercise(
+        language="python",
+        slug=slug,
+        description="test exercise",
+        starter_code={starter_file: starter},
+        reference_tests={test_file: test_code},
+        path=ex_dir,
+    )
+
+
+class TestExecuteTests:
+    def test_passing_solution(self, tmp_path):
+        ex = _make_python_exercise(
+            tmp_path,
+            starter="def hello():\n    pass\n",
+            test_code=(
+                "from hello_world import hello\n"
+                "def test_hello():\n"
+                "    assert hello() == 'Hello, World!'\n"
+            ),
+        )
+        result = execute_tests(ex, "def hello():\n    return 'Hello, World!'\n")
+        assert result.score == 1.0
+        assert result.error is None
+
+    def test_failing_solution(self, tmp_path):
+        ex = _make_python_exercise(
+            tmp_path,
+            starter="def hello():\n    pass\n",
+            test_code=(
+                "from hello_world import hello\n"
+                "def test_hello():\n"
+                "    assert hello() == 'Hello, World!'\n"
+            ),
+        )
+        result = execute_tests(ex, "def hello():\n    return 'wrong'\n")
+        assert result.score == 0.0
+
+    def test_custom_test_code_override(self, tmp_path):
+        ex = _make_python_exercise(
+            tmp_path,
+            starter="def hello():\n    pass\n",
+            test_code="def test_ref():\n    assert False\n",
+        )
+        # Reference test would fail, but custom test passes
+        custom_test = (
+            "from hello_world import hello\n"
+            "def test_custom():\n"
+            "    assert hello() == 42\n"
+        )
+        result = execute_tests(
+            ex, "def hello():\n    return 42\n", custom_test,
+        )
+        assert result.score == 1.0
+
+    def test_custom_test_code_errors_when_no_test_file(self, tmp_path):
+        # Go's test_file config returns None, so custom test code needs
+        # reference_tests to know where to write. With empty reference_tests,
+        # the custom test code would be silently dropped — should error instead.
+        ex = Exercise(
+            language="go",
+            slug="orphan",
+            description="test",
+            starter_code={},
+            reference_tests={},  # empty — no test file to override
+            path=tmp_path,
+        )
+        result = execute_tests(ex, "package orphan", "package orphan_test")
+        assert result.error is not None
+        assert "Cannot determine test file" in result.error
+
+    def test_unsupported_language(self, tmp_path):
+        ex = Exercise(
+            language="fortran",
+            slug="hello",
+            description="test",
+            starter_code={},
+            reference_tests={},
+            path=tmp_path,
+        )
+        result = execute_tests(ex, "PROGRAM HELLO\nEND PROGRAM")
+        assert result.error is not None
+        assert "Unsupported language" in result.error
