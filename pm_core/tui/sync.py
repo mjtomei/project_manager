@@ -72,12 +72,15 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
             else pr_sync.MIN_BACKGROUND_SYNC_INTERVAL_SECONDS
         )
 
-        # Perform PR sync to detect merged PRs
-        result = pr_sync.sync_prs(
-            app._root,
-            app._data,
-            min_interval_seconds=min_interval,
-        )
+        # Run blocking sync in a thread so it doesn't freeze the UI
+        import asyncio
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None, lambda: pr_sync.sync_prs(
+                app._root,
+                app._data,
+                min_interval_seconds=min_interval,
+            ))
 
         # Reload data after sync
         app._data = store.load(app._root)
@@ -132,7 +135,11 @@ async def startup_github_sync(app) -> None:
 
     try:
         app.log_message("Syncing with GitHub...")
-        result = pr_sync.sync_from_github(app._root, app._data, save_state=True)
+        # Run blocking HTTP call in a thread so it doesn't freeze the UI
+        import asyncio
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None, lambda: pr_sync.sync_from_github(app._root, app._data, save_state=True))
 
         if result.synced and result.updated_count > 0:
             # Reload data after sync
