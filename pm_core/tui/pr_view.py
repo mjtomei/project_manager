@@ -51,6 +51,11 @@ def handle_pr_selected(app, pr_id: str) -> None:
     app.log_message(f"Selected: {pr_id}")
     app.call_after_refresh(app._capture_frame, f"pr_selected:{pr_id}")
 
+    # Persist selection so TUI restarts on this PR
+    if app._data.get("project", {}).get("active_pr") != pr_id:
+        app._data["project"]["active_pr"] = pr_id
+        store.save(app._data, app._root)
+
 
 # ---------------------------------------------------------------------------
 # PR workflow actions
