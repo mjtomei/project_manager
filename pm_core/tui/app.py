@@ -285,23 +285,32 @@ class ProjectManagerApp(App):
                 pass
         # Load any existing capture config
         frame_capture.load_capture_config(self)
-        # Heal pane registry before anything uses it
-        pane_ops.heal_registry(self._session_name)
         # Set up watchers on child widgets for frame capture
         frame_capture.setup_frame_watchers(self)
 
+        # Load state and render immediately so the TUI shows content fast.
+        # Defer heavier operations (heal_registry, tmux bindings, GitHub
+        # sync) to after the first frame.
         self._load_state()
+        self._update_orientation()
+        self.call_after_refresh(self._deferred_startup)
+
+    def _deferred_startup(self) -> None:
+        """Run heavier startup tasks after the first frame is rendered."""
+        pane_ops.heal_registry(self._session_name)
+        # Re-register tmux bindings so they survive TUI restarts
+        try:
+            if self._session_name:
+                from pm_core.cli.session import _register_tmux_bindings
+                _register_tmux_bindings(self._session_name)
+        except Exception:
+            pass
         # Background sync interval: 5 minutes for automatic PR sync
         self._sync_timer = self.set_interval(300, self._background_sync)
-
         # Do a full GitHub sync on startup (non-blocking)
         self.run_worker(sync_mod.startup_github_sync(self))
-
-        # Capture initial frame after state is loaded and rendered
-        self.call_after_refresh(self._capture_frame, "mount")
-
-        # Set initial layout orientation
-        self._update_orientation()
+        # Capture initial frame
+        self._capture_frame("mount")
 
     def on_resize(self) -> None:
         """Update layout orientation when terminal is resized."""

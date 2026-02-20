@@ -530,40 +530,30 @@ def _process_registry_pane_closed(data: dict) -> None:
 def handle_any_pane_closed() -> None:
     """Handle a pane-close event when we don't know which pane died.
 
-    Called from global tmux hooks (after-kill-pane). Reconciles all
-    registries and rebalances any that changed.  If the killed pane
-    was the TUI, automatically respawns it.
-
-    Processes the current session's registry first so the TUI respawns
-    immediately rather than waiting for stale registries to reconcile.
+    Called from global tmux hooks (after-kill-pane). Only processes the
+    current session's registry — the killed pane must belong to the
+    session where the hook fired.  If the killed pane was the TUI,
+    automatically respawns it.
     """
     _ensure_logging()
     _logger.info("handle_any_pane_closed called")
 
-    # Process current session first for fast TUI respawn
     from pm_core import tmux as tmux_mod
-    current_reg = None
-    other_paths = []
-    if tmux_mod.in_tmux():
-        current_session = tmux_mod.get_session_name()
-        current_reg = registry_path(current_session)
+    if not tmux_mod.in_tmux():
+        _logger.info("handle_any_pane_closed: not in tmux, skipping")
+        return
 
-    for path in registry_dir().glob("*.json"):
-        if current_reg and path == current_reg:
-            try:
-                data = json.loads(path.read_text())
-            except (json.JSONDecodeError, KeyError):
-                continue
-            _process_registry_pane_closed(data)
-        else:
-            other_paths.append(path)
+    current_session = tmux_mod.get_session_name()
+    reg_path = registry_path(current_session)
+    if not reg_path.exists():
+        _logger.info("handle_any_pane_closed: no registry for %s", current_session)
+        return
 
-    for path in other_paths:
-        try:
-            data = json.loads(path.read_text())
-        except (json.JSONDecodeError, KeyError):
-            continue
-        _process_registry_pane_closed(data)
+    try:
+        data = json.loads(reg_path.read_text())
+    except (json.JSONDecodeError, KeyError):
+        return
+    _process_registry_pane_closed(data)
 
 
 def handle_pane_opened(session: str, window: str, pane_id: str) -> None:
