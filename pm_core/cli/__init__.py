@@ -127,8 +127,10 @@ def init(repo_url: str | None, name: str, base_branch: str, directory: str,
     if base_branch is None:
         if git_ops.is_git_repo(cwd):
             result = git_ops.run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=cwd, check=False)
-            if result.returncode == 0 and result.stdout.strip():
-                base_branch = result.stdout.strip()
+            branch_name = result.stdout.strip() if result.returncode == 0 else ""
+            # "HEAD" means detached/bare repo — not a valid branch name
+            if branch_name and branch_name != "HEAD":
+                base_branch = branch_name
         if base_branch is None:
             base_branch = "main"
 

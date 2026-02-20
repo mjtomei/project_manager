@@ -84,15 +84,30 @@ class TestIsGitRepo:
 class TestClone:
     @patch("pm_core.git_ops.run_git")
     def test_basic_clone(self, mock_rg):
+        mock_rg.return_value = MagicMock(returncode=0)
         clone("https://github.com/org/repo.git", Path("/tmp/dest"))
-        mock_rg.assert_called_once_with("clone", "https://github.com/org/repo.git", "/tmp/dest")
+        mock_rg.assert_called_once_with("clone", "https://github.com/org/repo.git", "/tmp/dest", check=False)
 
     @patch("pm_core.git_ops.run_git")
     def test_clone_with_branch(self, mock_rg):
+        mock_rg.return_value = MagicMock(returncode=0)
         clone("url", Path("/tmp/dest"), branch="main")
-        args = mock_rg.call_args[0]
+        args = mock_rg.call_args_list[0][0]
         assert "--branch" in args
         assert "main" in args
+
+    @patch("pm_core.git_ops.run_git")
+    def test_clone_with_branch_fallback(self, mock_rg):
+        """When clone with --branch fails, retries without it."""
+        mock_rg.side_effect = [
+            MagicMock(returncode=128),  # clone with --branch fails
+            MagicMock(returncode=0),    # clone without --branch succeeds
+        ]
+        clone("url", Path("/tmp/dest"), branch="main")
+        assert mock_rg.call_count == 2
+        # Second call should not have --branch
+        second_args = mock_rg.call_args_list[1][0]
+        assert "--branch" not in second_args
 
 
 # ---------------------------------------------------------------------------
@@ -107,22 +122,37 @@ class TestCheckoutBranch:
 
     @patch("pm_core.git_ops.run_git")
     def test_create_branch_new(self, mock_rg):
-        """When branch doesn't exist on remote, creates with -b."""
-        mock_rg.return_value = MagicMock(stdout="")
+        """When branch doesn't exist locally or on remote, creates with -b."""
+        mock_rg.return_value = MagicMock(stdout="", returncode=1)
         checkout_branch(Path("/tmp"), "feature", create=True)
-        # First call: ls-remote; second: checkout -b
+        # First call: rev-parse (local check), second: ls-remote, third: checkout -b
         calls = mock_rg.call_args_list
-        assert calls[0][0][0] == "ls-remote"
-        assert calls[1][0] == ("checkout", "-b", "feature")
+        assert calls[0][0][:2] == ("rev-parse", "--verify")
+        assert calls[1][0][0] == "ls-remote"
+        assert calls[2][0] == ("checkout", "-b", "feature")
+
+    @patch("pm_core.git_ops.run_git")
+    def test_create_branch_exists_local(self, mock_rg):
+        """When branch exists locally, checks it out directly."""
+        mock_rg.return_value = MagicMock(stdout="abc123", returncode=0)
+        checkout_branch(Path("/tmp"), "feature", create=True)
+        calls = mock_rg.call_args_list
+        assert calls[0][0][:2] == ("rev-parse", "--verify")
+        assert calls[1][0] == ("checkout", "feature")
 
     @patch("pm_core.git_ops.run_git")
     def test_create_branch_exists_remote(self, mock_rg):
         """When branch exists on remote, fetches then checks out."""
-        mock_rg.return_value = MagicMock(stdout="abc123\trefs/heads/feature")
+        def side_effect(*args, **kwargs):
+            if args[0] == "rev-parse":
+                return MagicMock(returncode=1, stdout="")
+            return MagicMock(stdout="abc123\trefs/heads/feature", returncode=0)
+        mock_rg.side_effect = side_effect
         checkout_branch(Path("/tmp"), "feature", create=True)
         calls = mock_rg.call_args_list
-        assert calls[1][0] == ("fetch", "origin", "feature")
-        assert calls[2][0] == ("checkout", "feature")
+        assert calls[1][0][0] == "ls-remote"
+        assert calls[2][0] == ("fetch", "origin", "feature")
+        assert calls[3][0] == ("checkout", "feature")
 
 
 # ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@
 
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical
+from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Label
 from textual.screen import ModalScreen
 
@@ -39,7 +39,7 @@ class WelcomeScreen(ModalScreen):
     """
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="welcome-container"):
+        with VerticalScroll(id="welcome-container"):
             yield Label("Setup Complete!", id="welcome-title")
             yield Label("")
             yield Label("Your PRs are ready. Here's how to get started:", classes="welcome-row")
@@ -165,7 +165,7 @@ class HelpScreen(ModalScreen):
         self._in_tests = in_tests
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="help-container"):
+        with VerticalScroll(id="help-container"):
             yield Label("Keyboard Shortcuts", id="help-title")
             if self._in_tests:
                 yield Label("Test Navigation", classes="help-section")
@@ -283,7 +283,7 @@ class PlanPickerScreen(ModalScreen):
 
     def compose(self) -> ComposeResult:
         from textual.widgets import Input
-        with Vertical(id="picker-container"):
+        with VerticalScroll(id="picker-container"):
             yield Label(f"Move {self._pr_id} to plan:", id="picker-title")
             yield Label("", id="picker-options")
             yield Input(placeholder="Plan name", id="picker-input")

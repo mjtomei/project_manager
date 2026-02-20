@@ -97,23 +97,43 @@ def run_git(*args: str, cwd: Optional[str | Path] = None, check: bool = True) ->
 
 
 def clone(repo_url: str, dest: Path, branch: Optional[str] = None) -> None:
-    """Clone a repo to dest."""
+    """Clone a repo to dest.
+
+    Falls back to cloning without --branch if the branch doesn't exist
+    (e.g. empty repos or repos where the default branch differs).
+    """
     args = ["clone", repo_url, str(dest)]
     if branch:
         args.extend(["--branch", branch])
-    run_git(*args)
+    result = run_git(*args, check=False)
+    if result.returncode != 0 and branch:
+        # Retry without --branch (handles empty repos, wrong default branch)
+        run_git("clone", repo_url, str(dest))
 
 
 def checkout_branch(workdir: Path, branch: str, create: bool = False) -> None:
-    """Checkout or create a branch."""
+    """Checkout or create a branch.
+
+    Handles repos with no remote (local backend) and empty repos
+    gracefully by falling back to local branch operations.
+    """
     if create:
-        # Check if branch exists on remote first
+        # Check if branch exists locally first
+        local_check = run_git("rev-parse", "--verify", branch, cwd=workdir, check=False)
+        if local_check.returncode == 0:
+            run_git("checkout", branch, cwd=workdir)
+            return
+        # Check if branch exists on remote (may fail if no remote)
         result = run_git("ls-remote", "--heads", "origin", branch, cwd=workdir, check=False)
-        if result.stdout.strip():
+        if result.returncode == 0 and result.stdout.strip():
             run_git("fetch", "origin", branch, cwd=workdir)
             run_git("checkout", branch, cwd=workdir)
         else:
-            run_git("checkout", "-b", branch, cwd=workdir)
+            # Create new local branch; use --orphan for empty repos
+            create_result = run_git("checkout", "-b", branch, cwd=workdir, check=False)
+            if create_result.returncode != 0:
+                # May fail if HEAD is invalid (empty repo) — try orphan branch
+                run_git("checkout", "--orphan", branch, cwd=workdir, check=False)
     else:
         run_git("checkout", branch, cwd=workdir)
 

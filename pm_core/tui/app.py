@@ -214,7 +214,7 @@ class ProjectManagerApp(App):
         self._root: Path | None = None
         self._sync_timer: Timer | None = None
         self._detail_visible = False
-        self._guide_auto_launched = False
+        self._guide_auto_launched_step: str | None = None
         self._guide_dismissed = False
         self._current_guide_step: str | None = None
         self._welcome_shown = False
@@ -397,9 +397,9 @@ class ProjectManagerApp(App):
 
         self.log_message(f"Guide step {step_num}/{total}: {guide.STEP_DESCRIPTIONS.get(state, state)}")
 
-        # Auto-launch guide pane if in tmux and not already launched
-        if not self._guide_auto_launched and tmux_mod.in_tmux():
-            self._guide_auto_launched = True
+        # Auto-launch guide pane if in tmux and not already launched for this step
+        if self._guide_auto_launched_step != state and tmux_mod.in_tmux():
+            self._guide_auto_launched_step = state
             # Use call_later to launch after UI is ready
             self.call_later(lambda: pane_ops.auto_launch_guide(self))
 

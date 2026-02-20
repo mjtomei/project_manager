@@ -99,6 +99,24 @@ def guide_done_cmd():
     desc = guide_mod.STEP_DESCRIPTIONS.get(state, state)
     click.echo(f"Step completed: {desc}")
 
+    # Auto-advance past steps whose artifacts already exist.
+    # For example, if init created a plan (via import), skip "Create a plan"
+    # and "Break plan into PRs" if those artifacts are already there.
+    completed_idx = guide_mod.STEP_ORDER.index(state) if state in guide_mod.STEP_ORDER else -1
+    while completed_idx + 1 < len(guide_mod.STEP_ORDER):
+        next_step = guide_mod.STEP_ORDER[completed_idx + 1]
+        next_detected, _ = guide_mod.detect_state(root)
+        next_detected_idx = guide_mod.STEP_ORDER.index(next_detected) if next_detected in guide_mod.STEP_ORDER else -1
+        if next_detected_idx > completed_idx + 1:
+            # Artifacts for the next step already exist, auto-complete it
+            guide_mod.mark_step_started(root, next_step)
+            guide_mod.mark_step_completed(root, next_step)
+            next_desc = guide_mod.STEP_DESCRIPTIONS.get(next_step, next_step)
+            click.echo(f"Step auto-completed: {next_desc} (artifacts already exist)")
+            completed_idx += 1
+        else:
+            break
+
     # Trigger TUI refresh so it picks up the step change immediately
     trigger_tui_refresh()
 

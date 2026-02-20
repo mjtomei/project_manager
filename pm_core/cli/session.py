@@ -374,8 +374,13 @@ def session_name_cmd():
     click.echo(_get_session_name_for_cwd())
 
 @session.command("tag")
-def session_tag_cmd():
+@click.option("--global", "share_global", is_flag=True, default=False,
+              help="Compute tag for a globally shared session")
+@click.option("--group", "share_group", type=str, default=None,
+              help="Compute tag for a group-shared session")
+def session_tag_cmd(share_global, share_group):
     """Print the computed session tag for the current directory."""
+    _set_share_mode_env(share_global, share_group)
     from pm_core.paths import get_session_tag
     click.echo(get_session_tag())
 

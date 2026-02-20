@@ -135,9 +135,17 @@ def resolve_guide_step(root: Optional[Path]) -> tuple[str, dict]:
 
     completed_idx = STEP_ORDER.index(completed)
 
-    # If detection jumped ahead of what was completed, stay on next step
+    # If detection jumped ahead of what was completed, advance to the
+    # next uncompleted step.  But if a step was started (and not completed),
+    # stay on that step — the user is still working on it.
     next_step_idx = completed_idx + 1
     if detected_idx > next_step_idx and next_step_idx < len(STEP_ORDER):
+        # If a step has been started but not completed, stay on it
+        if started is not None and started in STEP_ORDER:
+            started_idx = STEP_ORDER.index(started)
+            if started_idx > completed_idx:
+                _, fresh_ctx = detect_state(root)
+                return started, fresh_ctx
         corrected = STEP_ORDER[next_step_idx]
         # Re-derive context for the corrected state by re-detecting
         _, fresh_ctx = detect_state(root)
@@ -279,8 +287,9 @@ def _step_instructions(state: str, ctx: dict, root: Optional[Path]) -> Optional[
 
     if state == "no_project":
         return """\
-Run `pm init` to initialize the project. This will auto-detect the repo from
-the current directory.
+Run `pm init --no-import` to initialize the project. This will auto-detect the
+repo from the current directory. (Use --no-import because the guided workflow
+handles plan creation in a later step.)
 
 After init completes, explore the codebase yourself — read the README, look at
 the directory structure, check recent git history. Build your own understanding

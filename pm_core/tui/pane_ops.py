@@ -306,14 +306,22 @@ The TUI pane ID is: {pane_id}
 pm is a CLI tool for managing Claude Code development sessions. You can use \
 it to manage PRs, plans, and the TUI. Run `pm --help` for the full command list.
 
-Common tasks:
+## Interacting with the TUI
+
+Use these commands to interact with the TUI from this pane — do NOT try to \
+run tmux commands directly or manually type into other panes:
+- `pm tui view -s {sess}` — capture and view the current TUI screen
+- `pm tui send <keys> -s {sess}` — send keystrokes to the TUI (e.g. `pm tui send j` to move down)
+
+## Common pm commands
+
+These run directly in your terminal (not through the TUI):
 - `pm pr list` — list PRs and their status
 - `pm pr add <title>` — add a new PR
 - `pm pr start <pr-id>` — start working on a PR
 - `pm pr done <pr-id>` — mark a PR as ready for review
 - `pm plan list` — list plans
-- `pm tui view -s {sess}` — capture the current TUI screen
-- `pm tui send <keys> -s {sess}` — send keys to the TUI
+- `pm pr graph` — show the PR dependency tree
 
 The user will tell you what they need."""
 
@@ -365,15 +373,24 @@ def launch_help_claude(app) -> None:
         plan_lines.append(f"  - {plan_id}: {title}")
     plan_summary = "\n".join(plan_lines) if plan_lines else "  (no plans yet)"
 
+    pane_id = os.environ.get("TMUX_PANE", "")
     prompt = f"""\
 ## You are helping someone who may be a novice programmer decide on their \
 next step.
 
-## Project Info
+## Session Context
 
 Project: {project_name}
 Repository: {repo}
 tmux session: {sess}
+TUI pane ID: {pane_id}
+
+## Interacting with the TUI
+
+Use these commands to interact with the TUI from this pane — do NOT try to \
+run tmux commands directly or manually type into other panes:
+- `pm tui view -s {sess}` — capture and view the current TUI screen
+- `pm tui send <keys> -s {sess}` — send keystrokes to the TUI
 
 Current plans:
 {plan_summary}
