@@ -444,12 +444,15 @@ def handle_pane_exited(session: str, window: str, generation: str,
     )
 
 
-def _respawn_tui(session: str, window: str) -> None:
+def _respawn_tui(session: str, window: str) -> str:
     """Respawn the TUI pane in *window* after it was killed.
 
     If the window still exists (other panes remain), splits a new pane
     into it.  If the window is gone (TUI was the last pane), creates a
     new window so the session stays alive.
+
+    Returns the window ID the TUI was actually created in (may differ
+    from *window* when a new window had to be created).
     """
     from pm_core import tmux as tmux_mod
 
@@ -487,6 +490,7 @@ def _respawn_tui(session: str, window: str) -> None:
                      pane_id, window, min_order)
     except Exception:
         _logger.exception("_respawn_tui: failed to respawn TUI")
+    return window
 
 
 def _process_registry_pane_closed(data: dict) -> None:
@@ -506,10 +510,12 @@ def _process_registry_pane_closed(data: dict) -> None:
             # Always respawn TUI regardless of user_modified
             if tui_ids & set(removed):
                 _logger.info("handle_any_pane_closed: TUI pane was killed, respawning")
-                _respawn_tui(session, window_id)
+                actual_window = _respawn_tui(session, window_id)
                 # _respawn_tui resets user_modified; always rebalance
                 # after respawn so the new TUI pane is sized correctly.
-                rebalance(session, window_id)
+                # Use the actual window ID (may differ if a new window
+                # was created because the TUI was the last pane).
+                rebalance(session, actual_window)
             elif not wdata.get("user_modified"):
                 rebalance(session, window_id)
 

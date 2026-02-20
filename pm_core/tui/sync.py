@@ -9,6 +9,7 @@ read/write project.yaml, the thread operates on a deep copy of the data
 and never saves to disk — the main thread reloads and applies results.
 """
 
+import asyncio
 import copy
 
 from pm_core.paths import configure_logger
@@ -82,7 +83,6 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
         # Run blocking sync in a thread so it doesn't freeze the UI.
         # Use a deep copy so the thread doesn't mutate app._data, and
         # save_state=False to avoid overwriting concurrent user changes.
-        import asyncio
         data_copy = copy.deepcopy(app._data)
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
@@ -154,7 +154,6 @@ async def startup_github_sync(app) -> None:
         app.log_message("Syncing with GitHub...")
         # Run blocking HTTP call in a thread so it doesn't freeze the UI.
         # Deep copy + save_state=False to avoid racing with user actions.
-        import asyncio
         data_copy = copy.deepcopy(app._data)
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(

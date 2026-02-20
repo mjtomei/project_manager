@@ -519,8 +519,7 @@ class TechTree(Widget):
             if not current_id.startswith("_hidden:"):
                 self.post_message(PRSelected(current_id))
                 # Trigger edit action (same as 'e' key)
-                from pm_core.tui import pane_ops
-                pane_ops.edit_plan(self.app)
+                self.app.action_edit_plan()
             return
 
         if new_index is not None and new_index != self.selected_index:
