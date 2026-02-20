@@ -619,6 +619,15 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False) -> No
             if diff_pane:
                 pane_registry.register_pane(pm_session, review_win_id, diff_pane, "review-diff", "diff-shell")
 
+        # Reset user_modified (after-split-window hook sets it before
+        # panes are registered) and rebalance with mobile zoom.
+        if review_win_id:
+            reg = pane_registry.load_registry(pm_session)
+            wdata = pane_registry._get_window_data(reg, review_win_id)
+            wdata["user_modified"] = False
+            pane_registry.save_registry(pm_session, reg)
+            pane_layout.rebalance(pm_session, review_win_id)
+
         click.echo(f"Opened review window '{window_name}'")
     except Exception as e:
         _log.warning("Failed to launch review window: %s", e)
