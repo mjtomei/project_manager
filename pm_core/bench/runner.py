@@ -199,47 +199,19 @@ def generate_multiple(
 ) -> list[GenerationResult]:
     """Generate multiple completions in parallel with different temperatures.
 
-    Runs all requests concurrently using asyncio.
+    Thin wrapper over :func:`batch_complete` — broadcasts the same messages
+    across the given temperatures.
 
     Note: Calls asyncio.run() internally — cannot be used from within an
     existing event loop (e.g. a Textual TUI). Use from synchronous code only.
     """
-    return asyncio.run(_generate_multiple_async(
+    return batch_complete(
         base_url,
         model=model,
-        messages=messages,
-        temperatures=temperatures,
+        requests=[(messages, t) for t in temperatures],
         max_tokens=max_tokens,
         timeout=timeout,
-    ))
-
-
-async def _generate_multiple_async(
-    base_url: str,
-    *,
-    model: str,
-    messages: list[dict[str, str]],
-    temperatures: list[float],
-    max_tokens: int,
-    timeout: float,
-) -> list[GenerationResult]:
-    """Async implementation of parallel generation."""
-    loop = asyncio.get_running_loop()
-    tasks = [
-        loop.run_in_executor(
-            None,
-            lambda t=temp: chat_completion(
-                base_url,
-                model=model,
-                messages=messages,
-                temperature=t,
-                max_tokens=max_tokens,
-                timeout=timeout,
-            ),
-        )
-        for temp in temperatures
-    ]
-    return list(await asyncio.gather(*tasks))
+    )
 
 
 def batch_complete(

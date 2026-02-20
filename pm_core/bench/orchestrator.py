@@ -235,10 +235,15 @@ def run_benchmark(
         )
 
     # Load exercises
-    exercises = load_exercises(
-        language=languages[0] if languages and len(languages) == 1 else None,
-        slug=slugs[0] if slugs and len(slugs) == 1 else None,
-    )
+    try:
+        exercises = load_exercises(
+            language=languages[0] if languages and len(languages) == 1 else None,
+            slug=slugs[0] if slugs and len(slugs) == 1 else None,
+        )
+    except FileNotFoundError:
+        raise FileNotFoundError(
+            "Exercise cache not found. Run `pm bench exercises` first to download."
+        ) from None
 
     # Apply multi-language/slug filters if needed
     if languages and len(languages) > 1:

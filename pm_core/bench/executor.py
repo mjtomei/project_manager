@@ -94,6 +94,12 @@ def execute_tests(
 ) -> ScoreResult:
     """Run tests against a candidate solution in an isolated temp directory.
 
+    .. warning::
+        Candidate code runs **unsandboxed** via ``subprocess.run`` — no
+        cgroup, seccomp, or network isolation.  This is acceptable for a
+        local-only benchmark tool running locally-generated code, but should
+        not be exposed to untrusted inputs without adding a sandbox layer.
+
     Args:
         exercise: The exercise (provides language, slug, and path).
         candidate_code: The candidate's source code.

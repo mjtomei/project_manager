@@ -11,6 +11,7 @@ from pm_core.bench.orchestrator import (
     BenchmarkRun,
     ExerciseResult,
     format_results_table,
+    run_benchmark,
     run_exercise_tournament,
     save_results_json,
 )
@@ -232,3 +233,15 @@ class TestRunExerciseTournament:
 
         assert any("generating tests" in m for m in messages)
         assert any("scoring" in m for m in messages)
+
+
+class TestRunBenchmark:
+    def test_missing_exercise_cache_gives_friendly_error(self):
+        runner = mock.MagicMock(spec=Runner)
+        runner.list_models.return_value = [{"id": "m"}]
+
+        with mock.patch("pm_core.bench.orchestrator.Runner.create", return_value=runner), \
+             mock.patch("pm_core.bench.orchestrator.load_exercises",
+                        side_effect=FileNotFoundError("Exercise cache not found")):
+            with pytest.raises(FileNotFoundError, match="pm bench exercises"):
+                run_benchmark("m")

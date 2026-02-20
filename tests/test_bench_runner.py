@@ -314,6 +314,46 @@ class TestRunner:
             with pytest.raises(RuntimeError, match="No local inference backend"):
                 Runner.create()
 
+    def test_complete_records_metrics(self):
+        body = _chat_response("hi", prompt_tokens=10, completion_tokens=5)
+        runner = Runner(backend=Backend.LLAMA_CPP, base_url="http://localhost:8080")
+        with mock.patch("urllib.request.urlopen", return_value=_mock_urlopen(body)):
+            result = runner.complete(
+                model="m", messages=[{"role": "user", "content": "hi"}],
+            )
+        assert result.content == "hi"
+        assert runner.metrics.total_tokens == 15
+        assert runner.metrics.num_requests == 1
+
+    def test_generate_records_metrics(self):
+        body = _chat_response("out", prompt_tokens=8, completion_tokens=4)
+        runner = Runner(backend=Backend.LLAMA_CPP, base_url="http://localhost:8080")
+        with mock.patch("urllib.request.urlopen", return_value=_mock_urlopen(body)):
+            results = runner.generate(
+                model="m",
+                messages=[{"role": "user", "content": "hi"}],
+                temperatures=[0.3, 0.7],
+            )
+        assert len(results) == 2
+        assert runner.metrics.total_tokens == 24  # 12 * 2
+        assert runner.metrics.num_requests == 2
+
+    def test_complete_batch_records_metrics(self):
+        body = _chat_response("out", prompt_tokens=6, completion_tokens=3)
+        runner = Runner(backend=Backend.LLAMA_CPP, base_url="http://localhost:8080")
+        with mock.patch("urllib.request.urlopen", return_value=_mock_urlopen(body)):
+            results = runner.complete_batch(
+                model="m",
+                requests=[
+                    ([{"role": "user", "content": "Q1"}], 0.3),
+                    ([{"role": "user", "content": "Q2"}], 0.7),
+                    ([{"role": "user", "content": "Q3"}], 1.0),
+                ],
+            )
+        assert len(results) == 3
+        assert runner.metrics.total_tokens == 27  # 9 * 3
+        assert runner.metrics.num_requests == 3
+
 
 
 # ---------------------------------------------------------------------------
