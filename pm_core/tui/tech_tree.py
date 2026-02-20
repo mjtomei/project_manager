@@ -92,6 +92,7 @@ class TechTree(Widget):
             if idx != self.selected_index:
                 self.selected_index = idx
                 self.refresh()
+                self._scroll_selected_into_view()
 
     def update_plans(self, plans: list[dict]) -> None:
         """Store plan name mapping for label rendering."""
