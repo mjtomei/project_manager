@@ -178,12 +178,19 @@ def _reconcile_registry(session: str, window: str,
     live_panes = tmux_mod.get_pane_indices(qs, window)
     live_ids = {pid for pid, _ in live_panes}
 
-    # If we got zero live panes but the window has panes, the window
-    # probably doesn't exist (session was killed). Don't wipe.
+    # If we got zero live panes but the registry has panes, the window
+    # may have been destroyed.  Only skip if the entire session is gone
+    # (stale registry from a killed session).  If the session is still
+    # alive the window was destroyed (last pane killed) and we should
+    # report the panes as removed so callers can respawn the TUI.
     if not live_ids and wdata["panes"]:
-        _logger.info("reconcile: no live panes found for %s:%s, skipping "
-                     "(window may not exist)", session, window)
-        return []
+        if not tmux_mod.session_exists(qs):
+            _logger.info("reconcile: no live panes for %s:%s and session gone, skipping",
+                         session, window)
+            return []
+        _logger.info("reconcile: window %s gone but session %s alive, "
+                     "reporting %d pane(s) as removed", window, session,
+                     len(wdata["panes"]))
 
     removed = []
     surviving = []
