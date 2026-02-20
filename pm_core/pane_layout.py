@@ -424,11 +424,38 @@ def handle_pane_exited(session: str, window: str, generation: str,
     )
 
 
+def _respawn_tui(session: str, window: str) -> None:
+    """Respawn the TUI pane in *window* after it was killed."""
+    from pm_core import tmux as tmux_mod
+
+    _logger.info("_respawn_tui: respawning TUI in %s:%s", session, window)
+    try:
+        target = f"{session}:{window}"
+        pane_id = tmux_mod.split_pane(target, "h", "pm _tui")
+        # Register with lowest order so TUI sorts first (leftmost)
+        data = load_registry(session)
+        wdata = _get_window_data(data, window)
+        min_order = min((p["order"] for p in wdata["panes"]), default=1) - 1
+        wdata["panes"].insert(0, {
+            "id": pane_id,
+            "role": "tui",
+            "order": min_order,
+            "cmd": "pm _tui",
+        })
+        # Reset user_modified (after-split-window hook may have set it)
+        wdata["user_modified"] = False
+        save_registry(session, data)
+        _logger.info("_respawn_tui: created pane %s order=%d", pane_id, min_order)
+    except Exception:
+        _logger.exception("_respawn_tui: failed to respawn TUI")
+
+
 def handle_any_pane_closed() -> None:
     """Handle a pane-close event when we don't know which pane died.
 
     Called from global tmux hooks (after-kill-pane). Reconciles all
-    registries and rebalances any that changed.
+    registries and rebalances any that changed.  If the killed pane
+    was the TUI, automatically respawns it.
     """
     _ensure_logging()
     _logger.info("handle_any_pane_closed called")
@@ -445,10 +472,17 @@ def handle_any_pane_closed() -> None:
         for window_id, wdata in list(data.get("windows", {}).items()):
             if wdata.get("user_modified"):
                 continue
+            # Snapshot TUI pane IDs before reconciliation removes them
+            tui_ids = {p["id"] for p in wdata.get("panes", [])
+                       if p.get("role") == "tui"}
             removed = _reconcile_registry(session, window_id)
             if removed:
                 _logger.info("handle_any_pane_closed: session=%s window=%s removed=%s, rebalancing",
                              session, window_id, removed)
+                # If the TUI pane was killed and other panes survive, respawn it
+                if tui_ids & set(removed):
+                    _logger.info("handle_any_pane_closed: TUI pane was killed, respawning")
+                    _respawn_tui(session, window_id)
                 rebalance(session, window_id)
 
 
