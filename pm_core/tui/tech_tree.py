@@ -695,7 +695,9 @@ class TechTree(Widget):
             col, row = self._node_positions[pr_id]
             x = col * (NODE_W + H_GAP) + 2
             y = row * (NODE_H + V_GAP) + 1
-            node_region = Region(x, y, NODE_W, NODE_H)
+            # Extra height so the node doesn't end up flush against the
+            # bottom edge where it gets obscured by the command bar.
+            node_region = Region(x, y, NODE_W, NODE_H + V_GAP + 1)
 
         if self.parent:
             self.parent.scroll_to_region(node_region)
