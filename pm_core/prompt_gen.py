@@ -46,8 +46,12 @@ def generate_prompt(data: dict, pr_id: str) -> str:
     pr_notes = pr.get("notes") or []
     pr_notes_block = ""
     if pr_notes:
-        lines = "\n".join(f"- {n['text']}" for n in pr_notes)
-        pr_notes_block = f"\n## PR Notes\n{lines}\n"
+        note_lines = []
+        for n in pr_notes:
+            ts = n.get("created_at", "")
+            ts_str = f" ({ts})" if ts else ""
+            note_lines.append(f"- {n['text']}{ts_str}")
+        pr_notes_block = f"\n## PR Notes\n" + "\n".join(note_lines) + "\n"
 
     prompt = f"""You're working on PR {pr_id}: "{title}"
 
@@ -117,8 +121,12 @@ This PR is part of plan "{plan['name']}" ({plan['id']}). Other PRs in this plan:
     pr_notes = pr.get("notes") or []
     pr_notes_block = ""
     if pr_notes:
-        lines_n = "\n".join(f"- {n['text']}" for n in pr_notes)
-        pr_notes_block = f"\n## PR Notes\n{lines_n}\n"
+        note_lines = []
+        for n in pr_notes:
+            ts = n.get("created_at", "")
+            ts_str = f" ({ts})" if ts else ""
+            note_lines.append(f"- {n['text']}{ts_str}")
+        pr_notes_block = f"\n## PR Notes\n" + "\n".join(note_lines) + "\n"
 
     prompt = f"""You are reviewing PR {pr_id}: "{title}"
 

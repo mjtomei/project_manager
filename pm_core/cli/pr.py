@@ -7,6 +7,7 @@ import os
 import platform
 import shutil
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 import click
@@ -150,7 +151,9 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
         notes_lines = ""
         if current_notes:
             for n in current_notes:
-                notes_lines += f"- {n['text']}\n"
+                ts = n.get("created_at", "")
+                ts_suffix = f"  # {ts}" if ts else ""
+                notes_lines += f"- {n['text']}{ts_suffix}\n"
         else:
             notes_lines = "# (no notes)\n"
 
@@ -269,9 +272,10 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
                     new_notes.append(reused)
                     existing_note_ids.add(reused["id"])
                 else:
-                    # New or edited note — generate new ID
+                    # New or edited note — generate new ID and timestamp
                     note_id = store.generate_note_id(pr_id, text, existing_note_ids)
-                    new_notes.append({"id": note_id, "text": text})
+                    created_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                    new_notes.append({"id": note_id, "text": text, "created_at": created_at})
                     existing_note_ids.add(note_id)
             pr_entry["notes"] = new_notes
             changes.append("notes updated")
@@ -1062,8 +1066,9 @@ def pr_note_add(pr_id: str, text: str):
     notes = pr_entry.get("notes") or []
     existing_ids = {n["id"] for n in notes}
     note_id = store.generate_note_id(pr_id, text, existing_ids)
+    created_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    notes.append({"id": note_id, "text": text})
+    notes.append({"id": note_id, "text": text, "created_at": created_at})
     pr_entry["notes"] = notes
 
     save_and_push(data, root, f"pm: note on {pr_id}")
@@ -1084,7 +1089,9 @@ def pr_note_list(pr_id: str):
         click.echo(f"No notes on {_pr_display_id(pr_entry)}.")
         return
     for n in notes:
-        click.echo(f"  {n['id']}: {n['text']}")
+        ts = n.get("created_at", "")
+        ts_str = f" ({ts})" if ts else ""
+        click.echo(f"  {n['id']}{ts_str}: {n['text']}")
 
 
 @pr_note.command("delete")

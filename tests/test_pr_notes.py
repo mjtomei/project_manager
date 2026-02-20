@@ -1,5 +1,6 @@
 """Tests for PR notes feature — hash-based note IDs, CLI commands, prompt gen, detail panel."""
 
+import re
 from unittest.mock import patch
 
 from click.testing import CliRunner
@@ -89,6 +90,18 @@ class TestPrNoteAdd:
         assert pr["notes"][0]["text"] == "Fix the bug first"
         assert pr["notes"][0]["id"].startswith("note-")
 
+    def test_add_note_has_timestamp(self, tmp_path):
+        root = _make_state(tmp_path)
+        runner = CliRunner()
+        result = runner.invoke(cli, ["-C", str(root), "pr", "note", "add", "pr-001", "Timestamped note"])
+        assert result.exit_code == 0
+        data = store.load(root)
+        pr = store.get_pr(data, "pr-001")
+        note = pr["notes"][0]
+        assert "created_at" in note
+        # ISO 8601 UTC format: YYYY-MM-DDTHH:MM:SSZ
+        assert re.match(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", note["created_at"])
+
     def test_add_multiple_notes(self, tmp_path):
         root = _make_state(tmp_path)
         runner = CliRunner()
@@ -99,6 +112,9 @@ class TestPrNoteAdd:
         assert len(pr["notes"]) == 2
         assert pr["notes"][0]["text"] == "Note one"
         assert pr["notes"][1]["text"] == "Note two"
+        # Both have timestamps
+        assert pr["notes"][0]["created_at"]
+        assert pr["notes"][1]["created_at"]
 
     def test_add_note_unknown_pr(self, tmp_path):
         root = _make_state(tmp_path)
@@ -117,8 +133,8 @@ class TestPrNoteList:
 
     def test_list_with_notes(self, tmp_path):
         notes = [
-            {"id": "note-abc1234", "text": "First note"},
-            {"id": "note-def5678", "text": "Second note"},
+            {"id": "note-abc1234", "text": "First note", "created_at": "2026-01-15T10:30:00Z"},
+            {"id": "note-def5678", "text": "Second note", "created_at": "2026-01-16T14:00:00Z"},
         ]
         root = _make_state(tmp_path, notes=notes)
         runner = CliRunner()
@@ -128,12 +144,32 @@ class TestPrNoteList:
         assert "Second note" in result.output
         assert "note-abc1234" in result.output
 
+    def test_list_shows_timestamps(self, tmp_path):
+        notes = [
+            {"id": "note-abc1234", "text": "A note", "created_at": "2026-01-15T10:30:00Z"},
+        ]
+        root = _make_state(tmp_path, notes=notes)
+        runner = CliRunner()
+        result = runner.invoke(cli, ["-C", str(root), "pr", "note", "list", "pr-001"])
+        assert "2026-01-15T10:30:00Z" in result.output
+
+    def test_list_without_timestamps(self, tmp_path):
+        """Notes created before timestamps were added still display fine."""
+        notes = [
+            {"id": "note-abc1234", "text": "Legacy note"},
+        ]
+        root = _make_state(tmp_path, notes=notes)
+        runner = CliRunner()
+        result = runner.invoke(cli, ["-C", str(root), "pr", "note", "list", "pr-001"])
+        assert result.exit_code == 0
+        assert "Legacy note" in result.output
+
 
 class TestPrNoteDelete:
     def test_delete_note(self, tmp_path):
         notes = [
-            {"id": "note-abc1234", "text": "First note"},
-            {"id": "note-def5678", "text": "Second note"},
+            {"id": "note-abc1234", "text": "First note", "created_at": "2026-01-15T10:30:00Z"},
+            {"id": "note-def5678", "text": "Second note", "created_at": "2026-01-16T14:00:00Z"},
         ]
         root = _make_state(tmp_path, notes=notes)
         runner = CliRunner()
@@ -186,11 +222,12 @@ class TestPrEditNotes:
 
     def test_editor_template_shows_notes(self, tmp_path):
         """When PR has notes, they appear as bulleted list."""
-        notes = [{"id": "note-abc", "text": "Important context"}]
+        notes = [{"id": "note-abc", "text": "Important context", "created_at": "2026-01-15T10:30:00Z"}]
         root = _make_state(tmp_path, notes=notes)
         data = store.load(root)
         pr = store.get_pr(data, "pr-001")
         assert pr["notes"][0]["text"] == "Important context"
+        assert pr["notes"][0]["created_at"] == "2026-01-15T10:30:00Z"
 
 
 # ---------------------------------------------------------------------------
@@ -230,13 +267,32 @@ class TestPromptGenNotes:
     @patch("pm_core.prompt_gen.store.find_project_root")
     def test_with_notes(self, mock_root, mock_notes):
         data = self._data(notes=[
-            {"id": "note-abc", "text": "Use the new API"},
-            {"id": "note-def", "text": "Don't touch auth module"},
+            {"id": "note-abc", "text": "Use the new API", "created_at": "2026-01-15T10:30:00Z"},
+            {"id": "note-def", "text": "Don't touch auth module", "created_at": "2026-01-16T14:00:00Z"},
         ])
         prompt = generate_prompt(data, "pr-001")
         assert "## PR Notes" in prompt
         assert "Use the new API" in prompt
         assert "Don't touch auth module" in prompt
+
+    @patch("pm_core.prompt_gen.notes.notes_section", return_value="")
+    @patch("pm_core.prompt_gen.store.find_project_root")
+    def test_prompt_includes_timestamps(self, mock_root, mock_notes):
+        data = self._data(notes=[
+            {"id": "note-abc", "text": "A note", "created_at": "2026-01-15T10:30:00Z"},
+        ])
+        prompt = generate_prompt(data, "pr-001")
+        assert "2026-01-15T10:30:00Z" in prompt
+
+    @patch("pm_core.prompt_gen.notes.notes_section", return_value="")
+    @patch("pm_core.prompt_gen.store.find_project_root")
+    def test_prompt_handles_missing_timestamp(self, mock_root, mock_notes):
+        """Legacy notes without timestamps still render."""
+        data = self._data(notes=[
+            {"id": "note-abc", "text": "Legacy note"},
+        ])
+        prompt = generate_prompt(data, "pr-001")
+        assert "Legacy note" in prompt
 
     def test_review_no_notes(self):
         data = self._data()
@@ -244,10 +300,21 @@ class TestPromptGenNotes:
         assert "PR Notes" not in prompt
 
     def test_review_with_notes(self):
-        data = self._data(notes=[{"id": "note-abc", "text": "Check edge cases"}])
+        data = self._data(notes=[
+            {"id": "note-abc", "text": "Check edge cases", "created_at": "2026-01-15T10:30:00Z"},
+        ])
         prompt = generate_review_prompt(data, "pr-001")
         assert "## PR Notes" in prompt
         assert "Check edge cases" in prompt
+        assert "2026-01-15T10:30:00Z" in prompt
+
+    def test_review_handles_missing_timestamp(self):
+        """Legacy notes without timestamps still render in review prompt."""
+        data = self._data(notes=[
+            {"id": "note-abc", "text": "Legacy note"},
+        ])
+        prompt = generate_review_prompt(data, "pr-001")
+        assert "Legacy note" in prompt
 
 
 # ---------------------------------------------------------------------------
@@ -280,8 +347,8 @@ class TestDetailPanelNotes:
         panel = self._make_panel(pr_data={
             "id": "pr-x", "title": "T", "status": "pending", "branch": "b",
             "notes": [
-                {"id": "note-abc", "text": "Remember to update docs"},
-                {"id": "note-def", "text": "API changed since plan"},
+                {"id": "note-abc", "text": "Remember to update docs", "created_at": "2026-01-15T10:30:00Z"},
+                {"id": "note-def", "text": "API changed since plan", "created_at": "2026-01-16T14:00:00Z"},
             ],
         })
         result = self._render(panel)
@@ -289,6 +356,29 @@ class TestDetailPanelNotes:
         assert "Notes:" in text
         assert "Remember to update docs" in text
         assert "API changed since plan" in text
+
+    def test_with_timestamps(self):
+        panel = self._make_panel(pr_data={
+            "id": "pr-x", "title": "T", "status": "pending", "branch": "b",
+            "notes": [
+                {"id": "note-abc", "text": "A note", "created_at": "2026-01-15T10:30:00Z"},
+            ],
+        })
+        result = self._render(panel)
+        text = str(result.renderable)
+        assert "2026-01-15T10:30:00Z" in text
+
+    def test_without_timestamps(self):
+        """Legacy notes without timestamps still render."""
+        panel = self._make_panel(pr_data={
+            "id": "pr-x", "title": "T", "status": "pending", "branch": "b",
+            "notes": [
+                {"id": "note-abc", "text": "Legacy note"},
+            ],
+        })
+        result = self._render(panel)
+        text = str(result.renderable)
+        assert "Legacy note" in text
 
     def test_empty_notes_list(self):
         panel = self._make_panel(pr_data={
