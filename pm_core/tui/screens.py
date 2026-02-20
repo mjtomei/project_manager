@@ -210,14 +210,14 @@ class HelpScreen(ModalScreen):
             yield Label("  [bold]T[/]  Toggle tests view", classes="help-row")
             yield Label("  [bold]b[/]  Rebalance panes", classes="help-row")
             yield Label("Other", classes="help-section")
-            yield Label("  [bold]z[/]  Modifier: kill existing before next command", classes="help-row")
+            yield Label("  [bold]z[/]  Modifier: kill existing before next", classes="help-row")
             yield Label("  [bold]r[/]  Refresh / sync with GitHub", classes="help-row")
             yield Label("  [bold]C[/]  Show connect command (shared sessions)", classes="help-row")
             yield Label("  [bold]Ctrl+R[/]  Restart TUI", classes="help-row")
             yield Label("  [bold]?[/]  Show this help", classes="help-row")
             yield Label("  [bold]q[/]  Detach from session", classes="help-row")
             yield Label("")
-            yield Label("[dim]Press Esc to close  |  ? to discuss pm with Claude[/]", classes="help-row")
+            yield Label("[dim]Press Esc to close  |  ? to discuss pm[/]", classes="help-row")
 
     def action_dismiss(self) -> None:
         self.app.pop_screen()
