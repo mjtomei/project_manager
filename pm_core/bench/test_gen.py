@@ -8,6 +8,7 @@ filter better solutions from multiple candidates.
 
 from __future__ import annotations
 
+from pm_core.bench._utils import extract_code
 from pm_core.bench.exercises import Exercise
 from pm_core.bench.runner import GenerationResult, Runner
 
@@ -69,33 +70,14 @@ def generate_tests(
         {"role": "user", "content": prompt},
     ]
 
-    results: list[GenerationResult] = []
+    results = runner.generate(model=model, messages=messages, temperatures=temps)
+
     best_code = ""
     best_length = 0
-
-    for temp in temps:
-        result = runner.complete(
-            model=model, messages=messages, temperature=temp
-        )
-        results.append(result)
-
-        code = _extract_code(result.content)
+    for result in results:
+        code = extract_code(result.content)
         if len(code.strip()) > best_length:
             best_code = code
             best_length = len(code.strip())
 
     return best_code, results
-
-
-def _extract_code(text: str) -> str:
-    """Extract code from a model response, stripping markdown fences if present."""
-    lines = text.strip().split("\n")
-
-    if lines and lines[0].startswith("```"):
-        lines = lines[1:]
-        for i in range(len(lines) - 1, -1, -1):
-            if lines[i].strip() == "```":
-                lines = lines[:i]
-                break
-
-    return "\n".join(lines)

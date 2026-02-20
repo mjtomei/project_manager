@@ -20,20 +20,16 @@ def bench():
 @click.option("--url", default=None, help="Override server URL (default: auto-detect)")
 def bench_models(url):
     """List models available on the local inference backend."""
-    from pm_core.bench.runner import Runner, _get_server_url, _probe_health
+    from pm_core.bench.runner import Runner
 
-    if url:
-        if not _probe_health(url):
-            click.echo(f"Cannot reach server at {url}")
-            raise SystemExit(1)
-        from pm_core.bench.runner import list_models
-        models = list_models(url)
-        click.echo(f"Server: {url}")
-    else:
-        runner = Runner.create()
-        models = runner.list_models()
+    runner = Runner.create(base_url=url) if url else Runner.create()
+    if not runner.health_check():
+        click.echo(f"Cannot reach server at {runner.base_url}")
+        raise SystemExit(1)
+    models = runner.list_models()
+    if not url:
         click.echo(f"Backend: {runner.backend.value}")
-        click.echo(f"Server:  {runner.base_url}")
+    click.echo(f"Server:  {runner.base_url}")
 
     click.echo(f"Models:  {len(models)}")
     for m in models:
@@ -100,8 +96,5 @@ def bench_run(model, candidates, languages, exercise_filter, output_path):
 
     if output_path:
         out = Path(output_path)
-    else:
-        out = Path(f"bench-{model}-n{candidates}.json")
-
-    save_results_json(run, out)
-    click.echo(f"\nResults saved to {out}")
+        save_results_json(run, out)
+        click.echo(f"\nResults saved to {out}")

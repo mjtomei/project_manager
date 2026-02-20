@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from pm_core.bench._utils import extract_code
 from pm_core.bench.exercises import Exercise
 from pm_core.bench.runner import GenerationResult, Runner
 
@@ -76,20 +77,22 @@ def generate_candidates(
             temperatures = [round(i * step, 2) for i in range(num_candidates)]
 
     variants = list(PROMPT_VARIANTS.keys())
-    candidates: list[Candidate] = []
 
+    # Build all requests up front so they can run in parallel
+    request_specs: list[tuple[str, float]] = []  # (variant, temperature)
+    requests: list[tuple[list[dict[str, str]], float]] = []
     for i in range(num_candidates):
         temp = temperatures[i % len(temperatures)]
         variant = variants[i % len(variants)]
         prompt = _build_prompt(exercise, variant, tests=tests)
+        request_specs.append((variant, temp))
+        requests.append(([{"role": "user", "content": prompt}], temp))
 
-        result = runner.complete(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=temp,
-        )
-        code = _extract_code(result.content)
+    gen_results = runner.complete_batch(model=model, requests=requests)
 
+    candidates: list[Candidate] = []
+    for (variant, temp), result in zip(request_specs, gen_results):
+        code = extract_code(result.content)
         candidates.append(Candidate(
             code=code,
             temperature=temp,
@@ -99,15 +102,3 @@ def generate_candidates(
         ))
 
     return candidates
-
-
-def _extract_code(text: str) -> str:
-    """Extract code from model response, stripping markdown fences if present."""
-    lines = text.strip().split("\n")
-    if lines and lines[0].startswith("```"):
-        lines = lines[1:]
-        for i in range(len(lines) - 1, -1, -1):
-            if lines[i].strip() == "```":
-                lines = lines[:i]
-                break
-    return "\n".join(lines)

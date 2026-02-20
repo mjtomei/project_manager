@@ -221,7 +221,7 @@ async def _generate_multiple_async(
     timeout: float,
 ) -> list[GenerationResult]:
     """Async implementation of parallel generation."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     tasks = [
         loop.run_in_executor(
             None,
@@ -235,6 +235,54 @@ async def _generate_multiple_async(
             ),
         )
         for temp in temperatures
+    ]
+    return list(await asyncio.gather(*tasks))
+
+
+def batch_complete(
+    base_url: str,
+    *,
+    model: str,
+    requests: list[tuple[list[dict[str, str]], float]],
+    max_tokens: int = 4096,
+    timeout: float = 120.0,
+) -> list[GenerationResult]:
+    """Run multiple completions in parallel with different messages and temperatures.
+
+    Each request is a (messages, temperature) tuple.
+    """
+    return asyncio.run(_batch_complete_async(
+        base_url,
+        model=model,
+        requests=requests,
+        max_tokens=max_tokens,
+        timeout=timeout,
+    ))
+
+
+async def _batch_complete_async(
+    base_url: str,
+    *,
+    model: str,
+    requests: list[tuple[list[dict[str, str]], float]],
+    max_tokens: int,
+    timeout: float,
+) -> list[GenerationResult]:
+    """Async implementation of batch completion."""
+    loop = asyncio.get_running_loop()
+    tasks = [
+        loop.run_in_executor(
+            None,
+            lambda msgs=msgs, t=temp: chat_completion(
+                base_url,
+                model=model,
+                messages=msgs,
+                temperature=t,
+                max_tokens=max_tokens,
+                timeout=timeout,
+            ),
+        )
+        for msgs, temp in requests
     ]
     return list(await asyncio.gather(*tasks))
 
@@ -255,8 +303,21 @@ class Runner:
     metrics: CostMetrics = field(default_factory=CostMetrics)
 
     @classmethod
-    def create(cls, backend: Backend | None = None) -> "Runner":
-        """Create a runner, auto-detecting backend if not specified."""
+    def create(
+        cls,
+        backend: Backend | None = None,
+        *,
+        base_url: str | None = None,
+    ) -> "Runner":
+        """Create a runner, auto-detecting backend if not specified.
+
+        Args:
+            backend: Explicit backend choice. Auto-detected if None.
+            base_url: Explicit server URL. Overrides backend default if given.
+        """
+        if base_url is not None:
+            b = backend or detect_backend() or Backend.LLAMA_CPP
+            return cls(backend=b, base_url=base_url.rstrip("/"))
         if backend is None:
             backend = detect_backend()
             if backend is None:
@@ -265,8 +326,8 @@ class Runner:
                     "Ensure llama.cpp server (macOS) or sglang/vllm (Linux) "
                     "is running, or set PM_BENCH_URL."
                 )
-        base_url = _get_server_url(backend)
-        return cls(backend=backend, base_url=base_url)
+        url = _get_server_url(backend)
+        return cls(backend=backend, base_url=url)
 
     def health_check(self) -> bool:
         """Check if the backend server is healthy."""
@@ -312,6 +373,26 @@ class Runner:
             model=model,
             messages=messages,
             temperatures=temperatures,
+            max_tokens=max_tokens,
+            timeout=timeout,
+        )
+        for r in results:
+            self.metrics.record(r)
+        return results
+
+    def complete_batch(
+        self,
+        *,
+        model: str,
+        requests: list[tuple[list[dict[str, str]], float]],
+        max_tokens: int = 4096,
+        timeout: float = 120.0,
+    ) -> list[GenerationResult]:
+        """Run multiple completions in parallel with different messages/temperatures."""
+        results = batch_complete(
+            self.base_url,
+            model=model,
+            requests=requests,
             max_tokens=max_tokens,
             timeout=timeout,
         )

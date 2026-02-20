@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -36,6 +37,9 @@ class ExerciseResult:
 
     # Baseline: single-pass, N=1, scored against reference tests
     baseline_score: float = 0.0
+
+    # Generated test code (stored for downstream analysis, e.g. pr-019)
+    generated_test_code: str = ""
 
     # Cost
     tokens_used: int = 0
@@ -84,6 +88,7 @@ class BenchmarkRun:
 
     def to_dict(self) -> dict:
         return {
+            "schema_version": 1,
             "model": self.model,
             "num_candidates": self.num_candidates,
             "languages": self.languages,
@@ -102,6 +107,7 @@ class BenchmarkRun:
                     "tournament_best_gen_score": r.tournament_best_gen_score,
                     "baseline_score": r.baseline_score,
                     "num_candidates": r.num_candidates,
+                    "generated_test_code": r.generated_test_code,
                     "tokens_used": r.tokens_used,
                     "wall_clock_seconds": r.wall_clock_seconds,
                     "error": r.error,
@@ -117,7 +123,7 @@ def run_exercise_tournament(
     model: str,
     num_candidates: int,
     *,
-    progress_callback: callable | None = None,
+    progress_callback: Callable[[str], None] | None = None,
 ) -> ExerciseResult:
     """Run the full tournament pipeline on a single exercise.
 
@@ -146,6 +152,7 @@ def run_exercise_tournament(
         gen_test_code, _test_results = generate_tests(
             exercise, runner, model, num_variants=3
         )
+        result.generated_test_code = gen_test_code
 
         # Step 2: Generate N candidate solutions
         if progress_callback:
@@ -202,7 +209,7 @@ def run_benchmark(
     *,
     languages: list[str] | None = None,
     slugs: list[str] | None = None,
-    progress_callback: callable | None = None,
+    progress_callback: Callable[[str], None] | None = None,
 ) -> BenchmarkRun:
     """Run the full benchmark across all matching exercises.
 

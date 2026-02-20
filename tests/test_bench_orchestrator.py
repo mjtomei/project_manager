@@ -42,14 +42,17 @@ class TestBenchmarkRun:
         run.results = [
             ExerciseResult(language="python", slug="hello",
                            tournament_score=0.8, baseline_score=0.4,
+                           generated_test_code="def test_hello(): pass",
                            tokens_used=500, wall_clock_seconds=5.0),
         ]
         d = run.to_dict()
+        assert d["schema_version"] == 1
         assert d["model"] == "test"
         assert d["num_candidates"] == 4
         assert d["total_tokens"] == 1000
         assert len(d["results"]) == 1
         assert d["results"][0]["slug"] == "hello"
+        assert d["results"][0]["generated_test_code"] == "def test_hello(): pass"
 
 
 class TestFormatResultsTable:

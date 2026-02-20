@@ -14,6 +14,7 @@ from pm_core.bench.runner import (
     Runner,
     _get_server_url,
     _probe_health,
+    batch_complete,
     chat_completion,
     detect_backend,
     generate_multiple,
@@ -245,6 +246,49 @@ class TestGenerateMultiple:
             )
         assert len(results) == 1
         assert results[0].content == "Solo"
+
+
+# ---------------------------------------------------------------------------
+# Batch complete
+# ---------------------------------------------------------------------------
+
+class TestBatchComplete:
+    def test_batch_with_different_messages(self):
+        responses = [
+            _chat_response("Answer 1", prompt_tokens=10, completion_tokens=5),
+            _chat_response("Answer 2", prompt_tokens=12, completion_tokens=6),
+        ]
+        call_count = 0
+
+        def fake_urlopen(req, timeout=None):
+            nonlocal call_count
+            idx = call_count % len(responses)
+            call_count += 1
+            return _mock_urlopen(responses[idx])
+
+        with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            results = batch_complete(
+                "http://localhost:8080",
+                model="test-model",
+                requests=[
+                    ([{"role": "user", "content": "Q1"}], 0.3),
+                    ([{"role": "user", "content": "Q2"}], 0.7),
+                ],
+            )
+
+        assert len(results) == 2
+        assert all(isinstance(r, GenerationResult) for r in results)
+
+    def test_single_request(self):
+        body = _chat_response("Only one")
+        with mock.patch("urllib.request.urlopen", return_value=_mock_urlopen(body)):
+            results = batch_complete(
+                "http://localhost:8080",
+                model="m",
+                requests=[([{"role": "user", "content": "Hi"}], 0.5)],
+            )
+        assert len(results) == 1
+        assert results[0].content == "Only one"
 
 
 # ---------------------------------------------------------------------------
