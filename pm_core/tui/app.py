@@ -15,7 +15,7 @@ from textual.timer import Timer
 from pm_core import store, guide
 
 from pm_core import tmux as tmux_mod
-from pm_core.tui.tech_tree import TechTree, PRSelected, PRActivated
+from pm_core.tui.tech_tree import TechTree, PRSelected
 from pm_core.tui.detail_panel import DetailPanel
 from pm_core.tui.command_bar import CommandBar, CommandSubmitted
 from pm_core.tui.guide_progress import GuideProgress
@@ -517,9 +517,6 @@ class ProjectManagerApp(App):
 
     def on_prselected(self, message: PRSelected) -> None:
         pr_view.handle_pr_selected(self, message.pr_id)
-
-    def on_practivated(self, message: PRActivated) -> None:
-        pr_view.handle_pr_activated(self, message.pr_id)
 
     def on_command_submitted(self, message: CommandSubmitted) -> None:
         pr_view.handle_command_submitted(self, message.command)

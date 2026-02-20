@@ -52,20 +52,6 @@ def handle_pr_selected(app, pr_id: str) -> None:
     app.call_after_refresh(app._capture_frame, f"pr_selected:{pr_id}")
 
 
-def handle_pr_activated(app, pr_id: str) -> None:
-    """Handle PR activation (enter key) in the tech tree."""
-    from pm_core.tui.detail_panel import DetailPanel
-
-    pr = store.get_pr(app._data, pr_id)
-    plan = app._get_plan_for_pr(pr)
-    detail = app.query_one("#detail-panel", DetailPanel)
-    detail.update_pr(pr, app._data.get("prs"), plan=plan, project_root=app._root)
-    container = app.query_one("#detail-container")
-    container.styles.display = "block"
-    app._detail_visible = True
-    app.call_after_refresh(app._capture_frame, f"pr_activated:{pr_id}")
-
-
 # ---------------------------------------------------------------------------
 # PR workflow actions
 # ---------------------------------------------------------------------------

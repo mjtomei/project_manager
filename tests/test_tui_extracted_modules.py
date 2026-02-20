@@ -121,12 +121,6 @@ class TestPrViewImports:
         params = list(sig.parameters.keys())
         assert params == ["app", "pr_id"]
 
-    def test_handle_pr_activated(self):
-        from pm_core.tui.pr_view import handle_pr_activated
-        sig = inspect.signature(handle_pr_activated)
-        params = list(sig.parameters.keys())
-        assert params == ["app", "pr_id"]
-
     def test_start_pr(self):
         from pm_core.tui.pr_view import start_pr
         sig = inspect.signature(start_pr)
