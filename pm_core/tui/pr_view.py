@@ -282,8 +282,26 @@ def handle_command_submitted(app, cmd: str) -> None:
             app._inflight_pr_action = action_key
             break
 
-    # Commands that launch interactive Claude sessions need a tmux pane
+    # Handle review loop commands
     parts = shlex.split(cmd)
+    if cmd == "review-loop" or cmd == "review loop":
+        from pm_core.tui import review_loop_ui
+        review_loop_ui.toggle_review_loop(app)
+        if app._plans_visible:
+            app.query_one("#plans-pane", PlansPane).focus()
+        else:
+            app.query_one("#tech-tree", TechTree).focus()
+        return
+    if cmd in ("review-loop stop", "review loop stop"):
+        from pm_core.tui import review_loop_ui
+        review_loop_ui.stop_review_loop(app)
+        if app._plans_visible:
+            app.query_one("#plans-pane", PlansPane).focus()
+        else:
+            app.query_one("#tech-tree", TechTree).focus()
+        return
+
+    # Commands that launch interactive Claude sessions need a tmux pane
     if len(parts) >= 3 and parts[0] == "plan" and parts[1] == "add":
         pane_ops.launch_pane(app, f"pm {cmd}", "plan-add")
         app._load_state()

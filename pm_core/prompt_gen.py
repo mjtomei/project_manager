@@ -114,6 +114,8 @@ Review the code changes in this PR for quality, correctness, and architectural f
    - Run `pm pr list` to see all PRs and plans for the repo. If any other plans or standalone PRs touch related areas, consider whether this PR's approach conflicts with or complicates them.
    - Consider likely future changes beyond the current PR list — does this PR paint the codebase into a corner or leave good extension points?
 5. Output per-file notes: **filename** — GOOD / FIX / RETHINK
-6. End with an overall verdict: **PASS** or **NEEDS_WORK**
-   - If NEEDS_WORK, separate code-quality fixes from architectural concerns"""
+6. End with an overall verdict on its own line — one of:
+   - **PASS** — No changes needed. The code is ready to merge as-is.
+   - **PASS_WITH_SUGGESTIONS** — Only non-blocking suggestions remain (style nits, minor refactors, optional improvements). The PR could merge now, but would benefit from small tweaks. List suggestions clearly.
+   - **NEEDS_WORK** — Blocking issues found (bugs, missing error handling, architectural problems, test gaps). Separate code-quality fixes from architectural concerns."""
     return prompt.strip()

@@ -33,6 +33,7 @@ from pm_core.tui import frame_capture
 from pm_core.tui.frame_capture import DEFAULT_FRAME_RATE, DEFAULT_FRAME_BUFFER_SIZE
 from pm_core.tui import sync as sync_mod
 from pm_core.tui import pr_view
+from pm_core.tui import review_loop_ui
 
 
 class ProjectManagerApp(App):
@@ -233,6 +234,9 @@ class ProjectManagerApp(App):
         self._log_sticky_until: float = 0.0  # monotonic time until which log line is protected
         # z modifier key state (vim-style prefix)
         self._z_pending: bool = False
+        # Review loop state
+        self._review_loop_state = None  # ReviewLoopState or None
+        self._review_loop_timer: Timer | None = None
 
     def _consume_z(self) -> bool:
         """Atomically read and clear the z modifier flag."""
@@ -452,6 +456,18 @@ class ProjectManagerApp(App):
                 hidden.append("closed")
             if hidden:
                 filter_text = "hide " + "+".join(hidden)
+        # Build review loop indicator
+        review_loop_text = ""
+        if self._review_loop_state:
+            from pm_core.tui.review_loop_ui import VERDICT_ICONS
+            state = self._review_loop_state
+            if state.running:
+                verdict = VERDICT_ICONS.get(state.latest_verdict, "")
+                review_loop_text = f"[bold cyan]⟳ review loop[/] {state.pr_id} iter {state.iteration} {verdict}"
+            elif state.latest_verdict:
+                verdict = VERDICT_ICONS.get(state.latest_verdict, state.latest_verdict)
+                review_loop_text = f"[dim]review loop done:[/] {verdict}"
+
         status_bar = self.query_one("#status-bar", StatusBar)
         status_bar.update_status(
             project.get("name", "???"),
@@ -460,6 +476,7 @@ class ProjectManagerApp(App):
             pr_count=len(prs),
             filter_text=filter_text,
             show_assist=not get_global_setting("hide-assist"),
+            review_loop=review_loop_text,
         )
 
     def _update_display(self) -> None:
@@ -543,7 +560,11 @@ class ProjectManagerApp(App):
         pr_view.start_pr(self)
 
     def action_done_pr(self) -> None:
-        pr_view.done_pr(self)
+        # z d = start/stop review loop; plain d = one-shot done
+        if self._consume_z():
+            review_loop_ui.toggle_review_loop(self)
+        else:
+            pr_view.done_pr(self)
 
     def action_hide_plan(self) -> None:
         pr_view.hide_plan(self)
