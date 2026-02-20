@@ -207,6 +207,7 @@ def configure_logger(name: str, log_file: str | None = None, max_bytes: int = 10
         "%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S"
     ))
     logger.addHandler(handler)
+    logger.propagate = False
 
     # Debug level when debug mode enabled, INFO otherwise (still logs commands)
     if debug_enabled():

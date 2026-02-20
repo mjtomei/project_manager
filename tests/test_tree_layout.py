@@ -208,6 +208,36 @@ class TestFiltering:
         layout = compute_tree_layout(prs, status_filter="pending")
         assert layout.ordered_ids == []
 
+    def test_hide_closed_by_default(self):
+        """Closed PRs are hidden by default (hide_closed=True)."""
+        prs = [
+            _pr("pr-a", status="pending"),
+            _pr("pr-b", status="closed"),
+        ]
+        layout = compute_tree_layout(prs)
+        assert "pr-a" in layout.ordered_ids
+        assert "pr-b" not in layout.ordered_ids
+
+    def test_status_filter_closed_overrides_hide_closed(self):
+        """Filtering for 'closed' shows closed PRs even with hide_closed=True."""
+        prs = [
+            _pr("pr-a", status="pending"),
+            _pr("pr-b", status="closed"),
+        ]
+        layout = compute_tree_layout(prs, status_filter="closed")
+        assert "pr-b" in layout.ordered_ids
+        assert "pr-a" not in layout.ordered_ids
+
+    def test_hide_closed_false_shows_closed(self):
+        """Setting hide_closed=False shows closed PRs in the unfiltered view."""
+        prs = [
+            _pr("pr-a", status="pending"),
+            _pr("pr-b", status="closed"),
+        ]
+        layout = compute_tree_layout(prs, hide_closed=False)
+        assert "pr-a" in layout.ordered_ids
+        assert "pr-b" in layout.ordered_ids
+
 
 class TestPlanGrouping:
     def test_single_plan_no_labels(self):

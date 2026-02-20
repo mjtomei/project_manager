@@ -72,6 +72,7 @@ class TechTree(Widget):
         self._jump_plan_scroll: bool = False                  # flag: scroll plan label to top
         from pm_core.paths import get_global_setting
         self._hide_merged: bool = get_global_setting("hide-merged")  # toggle: hide merged PRs
+        self._hide_closed: bool = True                            # toggle: hide closed PRs
         self._status_filter: str | None = None                    # filter to show only this status
 
     def on_mount(self) -> None:
@@ -120,6 +121,7 @@ class TechTree(Widget):
             hidden_plans=self._hidden_plans,
             status_filter=self._status_filter,
             hide_merged=self._hide_merged,
+            hide_closed=self._hide_closed,
         )
         self._ordered_ids = result.ordered_ids
         self._node_positions = result.node_positions

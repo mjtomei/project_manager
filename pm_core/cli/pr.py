@@ -542,14 +542,17 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
 def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False) -> None:
     """Launch a tmux review window with Claude review + git diff shell."""
     if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
+        click.echo("Review window requires tmux.")
         return
 
     pm_session = _get_current_pm_session() or _get_session_name_for_cwd()
     if not tmux_mod.session_exists(pm_session):
+        click.echo(f"Review window: tmux session '{pm_session}' not found.")
         return
 
     workdir = pr_entry.get("workdir")
     if not workdir:
+        click.echo(f"Review window: no workdir for {pr_entry['id']}. Start the PR first.")
         return
 
     pr_id = pr_entry["id"]
@@ -577,6 +580,7 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False) -> No
     try:
         claude_pane = tmux_mod.new_window_get_pane(pm_session, window_name, claude_cmd, workdir)
         if not claude_pane:
+            click.echo(f"Review window: failed to create tmux window '{window_name}'.")
             return
 
         # Build shell command that shows PR info via a pager then drops
@@ -618,6 +622,7 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False) -> No
         click.echo(f"Opened review window '{window_name}'")
     except Exception as e:
         _log.warning("Failed to launch review window: %s", e)
+        click.echo(f"Review window error: {e}")
 
 
 @pr.command("done")
