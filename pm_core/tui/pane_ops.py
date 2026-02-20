@@ -446,7 +446,7 @@ It organizes work into plans (high-level goals) and PRs (concrete units of work)
 with dependency tracking.
 
 The user has questions about how pm works, its keyboard shortcuts, \
-or what to do next. Answer clearly and concisely.
+or what to do next. 
 
 Key concepts:
 - **Plans**: High-level goals described in markdown files
