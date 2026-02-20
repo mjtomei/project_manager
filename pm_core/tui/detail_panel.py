@@ -111,7 +111,9 @@ class DetailPanel(Widget):
         if pr_notes:
             lines.append("[bold]Notes:[/bold]")
             for n in pr_notes:
-                lines.append(f"  - {n['text']}")
+                ts = n.get("created_at", "")
+                ts_str = f" [dim]({ts})[/dim]" if ts else ""
+                lines.append(f"  - {n['text']}{ts_str}")
             lines.append("")
 
         if description:
