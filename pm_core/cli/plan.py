@@ -126,7 +126,7 @@ when there's a real ordering constraint.
 
 After writing the PRs section, tell the user to run `pm plan review {plan_id}`
 (key: c in the plans pane) to check consistency and coverage before loading.
-{tui_section(_get_pm_session()) if _get_pm_session() else ""}{notes_block}"""
+{tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
 
     claude = find_claude()
     if claude:
@@ -226,7 +226,7 @@ Guidelines:
 
 After writing, tell the user to run `pm plan review {plan_id}` (key: c in the
 plans pane) to check consistency and coverage before loading PRs.
-{tui_section(_get_pm_session()) if _get_pm_session() else ""}{notes_block}"""
+{tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
 
     claude = find_claude()
     if claude:
@@ -338,7 +338,7 @@ For any issues found, you can propose a fix. Fixes can be applied as follows:
 - To add new PRs: use `pm pr add`
 
 After fixing, summarize what was changed.
-{tui_section(_get_pm_session()) if _get_pm_session() else ""}{notes_block}"""
+{tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
     else:
         # Pre-load: no PRs in project.yaml yet — review the plan file's PR section
         prompt = f"""\
@@ -379,7 +379,7 @@ by editing the plan file directly at {plan_path}.
 
 After fixing, summarize what was changed. Then tell the user to run
 `pm plan load {plan_id}` (key: l in the plans pane) to create the PRs.
-{tui_section(_get_pm_session()) if _get_pm_session() else ""}{notes_block}"""
+{tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
 
     claude = find_claude()
     if claude:
@@ -461,7 +461,7 @@ If a PR should have NO dependencies, use:
 
 After applying changes, run `pm pr graph` to show the user the final
 dependency tree.
-{tui_section(_get_pm_session()) if _get_pm_session() else ""}{notes_block}"""
+{tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
 
     claude = find_claude()
     if claude:
@@ -765,7 +765,7 @@ path is wrong, find the correct path and update the plan file. Report any
 corrections you made.
 
 Once verified, the next step is `pm plan load {plan_id}` to create the PRs.
-{tui_section(_get_pm_session()) if _get_pm_session() else ""}{notes_block}"""
+{tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
 
     claude = find_claude()
     if claude:

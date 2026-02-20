@@ -107,6 +107,10 @@ def clone(repo_url: str, dest: Path, branch: Optional[str] = None) -> None:
         args.extend(["--branch", branch])
     result = run_git(*args, check=False)
     if result.returncode != 0 and branch:
+        # Clean up partial clone directory before retrying
+        import shutil
+        if dest.exists():
+            shutil.rmtree(dest)
         # Retry without --branch (handles empty repos, wrong default branch)
         run_git("clone", repo_url, str(dest))
 

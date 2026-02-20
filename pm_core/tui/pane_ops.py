@@ -12,6 +12,7 @@ from pm_core.paths import configure_logger, command_log_file
 from pm_core import tmux as tmux_mod
 from pm_core import pane_layout, pane_registry
 from pm_core import store, guide, notes
+from pm_core.prompt_gen import tui_section
 from pm_core.tui._shell import _run_shell
 from pm_core.tui.screens import ConnectScreen
 
@@ -306,13 +307,7 @@ The TUI pane ID is: {pane_id}
 pm is a CLI tool for managing Claude Code development sessions. You can use \
 it to manage PRs, plans, and the TUI. Run `pm --help` for the full command list.
 
-## Interacting with the TUI
-
-Use these commands to interact with the TUI from this pane — do NOT try to \
-run tmux commands directly or manually type into other panes:
-- `pm tui view -s {sess}` — capture and view the current TUI screen
-- `pm tui send <keys> -s {sess}` — send keystrokes to the TUI (e.g. `pm tui send j` to move down)
-
+{tui_section(sess)}
 ## Common pm commands
 
 These run directly in your terminal (not through the TUI):
@@ -385,13 +380,7 @@ Repository: {repo}
 tmux session: {sess}
 TUI pane ID: {pane_id}
 
-## Interacting with the TUI
-
-Use these commands to interact with the TUI from this pane — do NOT try to \
-run tmux commands directly or manually type into other panes:
-- `pm tui view -s {sess}` — capture and view the current TUI screen
-- `pm tui send <keys> -s {sess}` — send keystrokes to the TUI
-
+{tui_section(sess)}
 Current plans:
 {plan_summary}
 
