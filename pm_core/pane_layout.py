@@ -474,6 +474,12 @@ def _respawn_tui(session: str, window: str) -> None:
             pane_id = parts[0]
             # Update window to the newly created one
             window = parts[1] if len(parts) > 1 else window
+            # Switch the client to the new window so the user sees it
+            qs = tmux_mod.current_or_base_session(base_session_name(session))
+            subprocess.run(
+                tmux_mod._tmux_cmd("select-window", "-t", f"{qs}:{window}"),
+                capture_output=True,
+            )
 
         # Register with lowest order so TUI sorts first (leftmost)
         data = load_registry(session)
@@ -496,42 +502,68 @@ def _respawn_tui(session: str, window: str) -> None:
         _logger.exception("_respawn_tui: failed to respawn TUI")
 
 
+def _process_registry_pane_closed(data: dict) -> None:
+    """Reconcile one registry file after a pane-close event."""
+    session = data.get("session", "")
+    if not session:
+        return
+
+    for window_id, wdata in list(data.get("windows", {}).items()):
+        # Snapshot TUI pane IDs before reconciliation removes them
+        tui_ids = {p["id"] for p in wdata.get("panes", [])
+                   if p.get("role") == "tui"}
+        removed = _reconcile_registry(session, window_id)
+        if removed:
+            _logger.info("handle_any_pane_closed: session=%s window=%s removed=%s",
+                         session, window_id, removed)
+            # Always respawn TUI regardless of user_modified
+            if tui_ids & set(removed):
+                _logger.info("handle_any_pane_closed: TUI pane was killed, respawning")
+                _respawn_tui(session, window_id)
+                # _respawn_tui resets user_modified; always rebalance
+                # after respawn so the new TUI pane is sized correctly.
+                rebalance(session, window_id)
+            elif not wdata.get("user_modified"):
+                rebalance(session, window_id)
+
+
 def handle_any_pane_closed() -> None:
     """Handle a pane-close event when we don't know which pane died.
 
     Called from global tmux hooks (after-kill-pane). Reconciles all
     registries and rebalances any that changed.  If the killed pane
     was the TUI, automatically respawns it.
+
+    Processes the current session's registry first so the TUI respawns
+    immediately rather than waiting for stale registries to reconcile.
     """
     _ensure_logging()
     _logger.info("handle_any_pane_closed called")
 
+    # Process current session first for fast TUI respawn
+    from pm_core import tmux as tmux_mod
+    current_reg = None
+    other_paths = []
+    if tmux_mod.in_tmux():
+        current_session = tmux_mod.get_session_name()
+        current_reg = registry_path(current_session)
+
     for path in registry_dir().glob("*.json"):
+        if current_reg and path == current_reg:
+            try:
+                data = json.loads(path.read_text())
+            except (json.JSONDecodeError, KeyError):
+                continue
+            _process_registry_pane_closed(data)
+        else:
+            other_paths.append(path)
+
+    for path in other_paths:
         try:
             data = json.loads(path.read_text())
         except (json.JSONDecodeError, KeyError):
             continue
-        session = data.get("session", "")
-        if not session:
-            continue
-
-        for window_id, wdata in list(data.get("windows", {}).items()):
-            # Snapshot TUI pane IDs before reconciliation removes them
-            tui_ids = {p["id"] for p in wdata.get("panes", [])
-                       if p.get("role") == "tui"}
-            removed = _reconcile_registry(session, window_id)
-            if removed:
-                _logger.info("handle_any_pane_closed: session=%s window=%s removed=%s",
-                             session, window_id, removed)
-                # Always respawn TUI regardless of user_modified
-                if tui_ids & set(removed):
-                    _logger.info("handle_any_pane_closed: TUI pane was killed, respawning")
-                    _respawn_tui(session, window_id)
-                    # _respawn_tui resets user_modified; always rebalance
-                    # after respawn so the new TUI pane is sized correctly.
-                    rebalance(session, window_id)
-                elif not wdata.get("user_modified"):
-                    rebalance(session, window_id)
+        _process_registry_pane_closed(data)
 
 
 def handle_pane_opened(session: str, window: str, pane_id: str) -> None:
