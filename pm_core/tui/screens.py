@@ -191,7 +191,7 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]x[/]  Hide/show plan group", classes="help-row")
                 yield Label("  [bold]X[/]  Toggle merged PRs", classes="help-row")
                 yield Label("  [bold]F[/]  Cycle status filter", classes="help-row")
-                yield Label("  [bold]Enter[/]  Show PR details", classes="help-row")
+                yield Label("  [bold]Enter[/]  Edit selected PR", classes="help-row")
                 yield Label("PR Actions", classes="help-section")
                 yield Label("  [bold]s[/]  Start selected PR", classes="help-row")
                 yield Label("  [bold]d[/]  Mark PR as done", classes="help-row")

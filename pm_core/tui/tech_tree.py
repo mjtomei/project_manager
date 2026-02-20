@@ -47,7 +47,7 @@ H_GAP = 6
 V_GAP = 2
 
 
-PRSelected, PRActivated = item_message("PR", "pr_id")
+PRSelected, _PRActivated = item_message("PR", "pr_id")
 
 
 class TechTree(Widget):

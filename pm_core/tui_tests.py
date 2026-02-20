@@ -714,8 +714,8 @@ If no PRs exist in the project:
 
 From pm_core/tui/app.py:
 - TechTree widget handles PR display and navigation
-- PRSelected message sent when PR is highlighted
-- PRActivated message sent when PR is activated (Enter)
+- PRSelected message sent when PR is highlighted or activated (Enter)
+- Enter triggers edit (same as 'e' key)
 - action_start_pr() runs `pm pr start <id>`
 - action_done_pr() runs `pm pr done <id>`
 - action_launch_claude() opens Claude in new pane
@@ -2416,9 +2416,9 @@ The detail panel (from pm_core/tui/detail_panel.py) displays:
 ## Expected Behavior
 
 From pm_core/tui/detail_panel.py:
-- `update_pr()` is called on both PRSelected and PRActivated messages
-- PRActivated (Enter) makes the detail container visible (display: block)
-- PRSelected (navigation) updates the content if already visible
+- `update_pr()` is called on PRSelected messages (navigation and Enter)
+- Enter triggers edit (same as 'e' key) and posts PRSelected
+- PRSelected (navigation) updates the detail panel content
 - `_pr_display_id()` prefers `#<gh_pr_number>` over local `pr-NNN` ID
 - `_extract_plan_section()` extracts tests/files from plan markdown for the PR
 - STATUS_ICONS: pending=○, in_progress=●, in_review=◎, merged=✓, closed=✗, blocked=✗

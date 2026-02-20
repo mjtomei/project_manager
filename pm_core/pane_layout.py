@@ -37,6 +37,52 @@ _logger = configure_logger("pm.pane_layout")
 MOBILE_WIDTH_THRESHOLD = 120
 
 
+def get_reliable_window_size(
+    session: str, window: str, query_session: str | None = None,
+) -> tuple[int, int]:
+    """Return (width, height) for *window*, trying multiple sessions.
+
+    Grouped tmux sessions share windows but only the session with an
+    attached client reports a non-zero size.  This helper walks the
+    fallback chain so every caller gets consistent behaviour:
+
+    1. *query_session* (if given) — e.g. the session that triggered a
+       resize hook.
+    2. ``current_or_base_session(base)`` — the current pane's session
+       or an attached grouped session.
+    3. *session* itself.
+    4. Every grouped session (``base~1``, ``base~2``, …).
+    """
+    from pm_core import tmux as tmux_mod
+
+    base = base_session_name(session)
+
+    # Build an ordered list of sessions to try, deduplicating.
+    candidates: list[str] = []
+    if query_session:
+        candidates.append(query_session)
+    best = tmux_mod.current_or_base_session(base)
+    if best not in candidates:
+        candidates.append(best)
+    if session not in candidates:
+        candidates.append(session)
+
+    for s in candidates:
+        w, h = tmux_mod.get_window_size(s, window)
+        if w > 0 and h > 0:
+            return w, h
+
+    # Last resort: walk all grouped sessions
+    for gs in tmux_mod.list_grouped_sessions(base):
+        if gs in candidates:
+            continue
+        w, h = tmux_mod.get_window_size(gs, window)
+        if w > 0 and h > 0:
+            return w, h
+
+    return 0, 0
+
+
 def preferred_split_direction(session: str, window: str) -> str:
     """Return 'h' (left|right) or 'v' (top/bottom) based on window aspect ratio.
 
@@ -44,11 +90,7 @@ def preferred_split_direction(session: str, window: str) -> str:
     window is roughly square in pixels.  We split horizontally when the window
     is physically wider than tall, vertically otherwise.
     """
-    from pm_core import tmux as tmux_mod
-    qs = tmux_mod.current_or_base_session(base_session_name(session))
-    w, h = tmux_mod.get_window_size(qs, window)
-    if w <= 0 or h <= 0:
-        w, h = tmux_mod.get_window_size(session, window)
+    w, h = get_reliable_window_size(session, window)
     if w <= 0 or h <= 0:
         return "h"  # fallback
     # Same heuristic as _layout_node: physical_width ∝ w, physical_height ∝ h*2
@@ -82,24 +124,11 @@ def is_mobile(session: str, window: str = "0") -> bool:
 
     With window-size=latest, the window size reflects the most recently
     active client, so we only need to check the current window size.
-    Uses the same session-fallback logic as rebalance() to handle
-    grouped sessions where the base session may have no clients.
     """
     if mobile_flag_path(session).exists():
         _logger.info("is_mobile(%s, %s): True (force flag)", session, window)
         return True
-    from pm_core import tmux as tmux_mod
-    # Try current/best session first, then base, then grouped sessions
-    qs = tmux_mod.current_or_base_session(base_session_name(session))
-    width, _ = tmux_mod.get_window_size(qs, window)
-    if width <= 0:
-        width, _ = tmux_mod.get_window_size(session, window)
-    if width <= 0:
-        base = base_session_name(session)
-        for gs in tmux_mod.list_grouped_sessions(base):
-            width, _ = tmux_mod.get_window_size(gs, window)
-            if width > 0:
-                break
+    width, _ = get_reliable_window_size(session, window)
     return 0 < width < MOBILE_WIDTH_THRESHOLD
 
 
@@ -218,16 +247,7 @@ def rebalance(session: str, window: str, query_session: str | None = None) -> bo
         _logger.info("rebalance: no panes in registry")
         return False
 
-    width, height = tmux_mod.get_window_size(qs, window)
-    # Fallback: if query session returns 0×0 (no clients), try other sessions
-    if width <= 0 or height <= 0:
-        width, height = tmux_mod.get_window_size(session, window)
-    if width <= 0 or height <= 0:
-        base = base_session_name(session)
-        for gs in tmux_mod.list_grouped_sessions(base):
-            width, height = tmux_mod.get_window_size(gs, window)
-            if width > 0 and height > 0:
-                break
+    width, height = get_reliable_window_size(session, window, query_session=qs)
     _logger.info("rebalance: window %s size=%dx%d, %d panes",
                  window, width, height, len(panes))
     if width <= 0 or height <= 0:
@@ -483,7 +503,10 @@ def handle_any_pane_closed() -> None:
                 if tui_ids & set(removed):
                     _logger.info("handle_any_pane_closed: TUI pane was killed, respawning")
                     _respawn_tui(session, window_id)
-                if not wdata.get("user_modified"):
+                    # _respawn_tui resets user_modified; always rebalance
+                    # after respawn so the new TUI pane is sized correctly.
+                    rebalance(session, window_id)
+                elif not wdata.get("user_modified"):
                     rebalance(session, window_id)
 
 
