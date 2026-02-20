@@ -12,7 +12,7 @@ from pm_core.pane_layout import (
     is_mobile,
     _layout_node,
     _checksum,
-    _get_window_data,
+    get_window_data,
     _iter_all_panes,
     load_registry,
     save_registry,
@@ -374,9 +374,9 @@ class TestMultiWindowRegistry:
         assert data["windows"]["@38"]["user_modified"] is False
 
     def test_get_window_data_creates_if_absent(self, mock_registry):
-        """_get_window_data creates a new entry for unknown windows."""
+        """get_window_data creates a new entry for unknown windows."""
         data = {"session": "pm-test", "windows": {}, "generation": "1"}
-        wdata = _get_window_data(data, "@99")
+        wdata = get_window_data(data, "@99")
         assert wdata == {"panes": [], "user_modified": False}
         assert "@99" in data["windows"]
 

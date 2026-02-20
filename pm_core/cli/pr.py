@@ -626,7 +626,7 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False) -> No
         # before panes are registered) and then rebalance.
         if review_win_id:
             reg = pane_registry.load_registry(pm_session)
-            wdata = pane_registry._get_window_data(reg, review_win_id)
+            wdata = pane_registry.get_window_data(reg, review_win_id)
             wdata["user_modified"] = False
             pane_registry.save_registry(pm_session, reg)
             pane_layout.rebalance(pm_session, review_win_id)

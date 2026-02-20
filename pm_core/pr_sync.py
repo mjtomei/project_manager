@@ -82,6 +82,7 @@ class SyncResult:
         ready_prs: Optional[list[dict]] = None,
         error: Optional[str] = None,
         skipped_reason: Optional[str] = None,
+        status_updates: Optional[dict[str, str]] = None,
     ):
         self.synced = synced
         self.updated_count = updated_count
@@ -90,6 +91,7 @@ class SyncResult:
         self.ready_prs = ready_prs or []
         self.error = error
         self.skipped_reason = skipped_reason
+        self.status_updates = status_updates or {}
 
     @property
     def was_skipped(self) -> bool:
@@ -322,6 +324,7 @@ def sync_from_github(
     updated = 0
     merged_prs = []
     closed_prs = []
+    status_updates: dict[str, str] = {}
 
     for pr_entry in prs:
         gh_pr_number = pr_entry.get("gh_pr_number")
@@ -359,6 +362,7 @@ def sync_from_github(
             if new_status != old_status:
                 pr_entry["status"] = new_status
                 updated += 1
+                status_updates[pr_id] = new_status
                 _log.info("PR %s: %s → %s (from GitHub)", pr_id, old_status, new_status)
                 if new_status == "merged":
                     merged_prs.append(pr_id)
@@ -385,4 +389,5 @@ def sync_from_github(
         updated_count=updated,
         merged_prs=merged_prs,
         closed_prs=closed_prs,
+        status_updates=status_updates,
     )

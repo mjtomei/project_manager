@@ -161,15 +161,13 @@ async def startup_github_sync(app) -> None:
             None, lambda: pr_sync.sync_from_github(app._root, data_copy, save_state=False))
 
         if result.synced and result.updated_count > 0:
-            # Reload from disk and apply status changes on the main thread
+            # Reload from disk and apply ALL status changes on the main thread
             app._data = store.load(app._root)
             changed = False
             for pr in app._data.get("prs") or []:
-                if pr["id"] in (result.merged_prs or []):
-                    pr["status"] = "merged"
-                    changed = True
-                elif pr["id"] in (result.closed_prs or []):
-                    pr["status"] = "closed"
+                new_status = result.status_updates.get(pr["id"])
+                if new_status and pr.get("status") != new_status:
+                    pr["status"] = new_status
                     changed = True
             if changed:
                 store.save(app._data, app._root)

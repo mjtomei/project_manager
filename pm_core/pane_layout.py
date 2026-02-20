@@ -21,7 +21,7 @@ from pm_core.pane_registry import (  # noqa: F401
     base_session_name,
     registry_dir,
     registry_path,
-    _get_window_data,
+    get_window_data,
     _iter_all_panes,
     load_registry,
     save_registry,
@@ -237,7 +237,7 @@ def rebalance(session: str, window: str, query_session: str | None = None) -> bo
     _reconcile_registry(session, window, query_session=qs)
 
     data = load_registry(session)
-    wdata = _get_window_data(data, window)
+    wdata = get_window_data(data, window)
     if wdata.get("user_modified"):
         _logger.info("rebalance: skipping, user_modified=True for window %s", window)
         return False
@@ -336,7 +336,7 @@ def check_user_modified(session: str, window: str) -> bool:
     from pm_core import tmux as tmux_mod
 
     data = load_registry(session)
-    wdata = _get_window_data(data, window)
+    wdata = get_window_data(data, window)
     if wdata.get("user_modified"):
         return True
 
@@ -383,7 +383,7 @@ def handle_pane_exited(session: str, window: str, generation: str,
                      generation, reg_gen)
         return
 
-    wdata = _get_window_data(data, window)
+    wdata = get_window_data(data, window)
     if wdata.get("user_modified"):
         _logger.info("handle_pane_exited: user_modified for window %s, skipping", window)
         if pane_id:
@@ -464,26 +464,13 @@ def _respawn_tui(session: str, window: str) -> None:
         else:
             # Window is gone (TUI was the last pane) — create a new one
             _logger.info("_respawn_tui: window %s gone, creating new window", window)
-            result = subprocess.run(
-                tmux_mod._tmux_cmd("new-window", "-t", f"{session}:",
-                                   "-P", "-F", "#{pane_id} #{window_id}",
-                                   "pm _tui"),
-                capture_output=True, text=True, check=True,
-            )
-            parts = result.stdout.strip().split()
-            pane_id = parts[0]
-            # Update window to the newly created one
-            window = parts[1] if len(parts) > 1 else window
+            pane_id, window = tmux_mod.create_window(session, "pm _tui")
             # Switch the client to the new window so the user sees it
-            qs = tmux_mod.current_or_base_session(base_session_name(session))
-            subprocess.run(
-                tmux_mod._tmux_cmd("select-window", "-t", f"{qs}:{window}"),
-                capture_output=True,
-            )
+            tmux_mod.select_window(session, window)
 
         # Register with lowest order so TUI sorts first (leftmost)
         data = load_registry(session)
-        wdata = _get_window_data(data, window)
+        wdata = get_window_data(data, window)
         min_order = min((p["order"] for p in wdata["panes"]), default=1) - 1
         wdata["panes"].insert(0, {
             "id": pane_id,
@@ -563,7 +550,7 @@ def handle_pane_opened(session: str, window: str, pane_id: str) -> None:
                  session, window, pane_id)
 
     data = load_registry(session)
-    wdata = _get_window_data(data, window)
+    wdata = get_window_data(data, window)
     known_ids = {p["id"] for p in wdata["panes"]}
     if pane_id not in known_ids:
         _logger.info("handle_pane_opened: unknown pane %s in window %s, setting user_modified",

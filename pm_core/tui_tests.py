@@ -2220,7 +2220,7 @@ From pm_core/pane_layout.py:
 - `register_pane()` stores panes under `data["windows"][window]`
 - `unregister_pane()` searches all windows for the pane ID
 - `_reconcile_registry()` only reconciles the specified window; removes empty windows
-- `_get_window_data()` creates a new window entry if absent
+- `get_window_data()` creates a new window entry if absent
 - `_iter_all_panes()` yields panes from all windows
 
 From pm_core/tui/pane_ops.py _heal_registry():

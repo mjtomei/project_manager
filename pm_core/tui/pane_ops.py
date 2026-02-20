@@ -76,7 +76,7 @@ def heal_registry(session: str | None) -> None:
         live_panes = tmux_mod.get_pane_indices(session, window)
         live_ids = {pid for pid, _ in live_panes}
         if tui_pane_id in live_ids:
-            wdata = pane_registry._get_window_data(data, window)
+            wdata = pane_registry.get_window_data(data, window)
             if not any(p["id"] == tui_pane_id for p in wdata["panes"]):
                 wdata["panes"].insert(0, {
                     "id": tui_pane_id,
@@ -150,7 +150,7 @@ def launch_pane(app, cmd: str, role: str, fresh: bool = False) -> None:
         # NOTE: this register → reset → rebalance pattern is also used in
         # cli/pr.py (review window) and pane_layout._respawn_tui().
         data = pane_registry.load_registry(session)
-        wdata = pane_registry._get_window_data(data, window)
+        wdata = pane_registry.get_window_data(data, window)
         wdata["user_modified"] = False
         pane_registry.save_registry(session, data)
         pane_layout.rebalance(session, window)
@@ -170,7 +170,7 @@ def rebalance(app) -> None:
         return
     session, window = info
     data = pane_registry.load_registry(session)
-    wdata = pane_registry._get_window_data(data, window)
+    wdata = pane_registry.get_window_data(data, window)
     wdata["user_modified"] = False
     pane_registry.save_registry(session, data)
     pane_layout.rebalance(session, window)

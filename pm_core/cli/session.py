@@ -521,7 +521,7 @@ def window_resized_cmd(session: str, window: str):
 
     base = pane_registry.base_session_name(session)
     data = pane_registry.load_registry(base)
-    wdata = pane_registry._get_window_data(data, window)
+    wdata = pane_registry.get_window_data(data, window)
     if not wdata["panes"]:
         _log.info("_window-resized: no panes in registry for %s window %s, exiting", base, window)
         return
@@ -600,7 +600,7 @@ def rebalance_cmd():
     window = tmux_mod.get_window_id(session)
 
     data = pane_registry.load_registry(session)
-    wdata = pane_registry._get_window_data(data, window)
+    wdata = pane_registry.get_window_data(data, window)
     if not wdata["panes"]:
         click.echo("No panes registered for this session.", err=True)
         raise SystemExit(1)
