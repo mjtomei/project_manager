@@ -3,10 +3,10 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-3563708
+  active_pr: pr-017
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
-  last_pr_sync: '2026-02-19T19:18:47.235103+00:00'
+  last_pr_sync: '2026-02-20T00:12:09.912483+00:00'
 plans:
 - id: plan-001
   name: Import from existing repo
@@ -185,7 +185,7 @@ prs:
   plan: plan-002
   title: Local model runner with OpenAI-compatible API
   branch: pm/pr-012-local-model-runner-with-openai-compatible-api
-  status: in_review
+  status: closed
   depends_on: []
   description: 'Create a module that manages local LLM inference via the OpenAI-compatible
     API exposed by local serving backends (see `pm/plans/plan-002.md` for the broader
@@ -208,7 +208,7 @@ prs:
   plan: plan-002
   title: Aider polyglot exercise loader
   branch: pm/pr-013-aider-polyglot-exercise-loader
-  status: in_review
+  status: closed
   depends_on: []
   description: 'Load the Exercism exercises used by aider''s polyglot benchmark (https://github.com/Aider-AI/aider
     — see `benchmark/` directory for exercise structure). Each exercise has a problem
@@ -226,7 +226,7 @@ prs:
   plan: plan-002
   title: Test generation from problem descriptions
   branch: pm/pr-014-test-generation-from-problem-descriptions
-  status: in_progress
+  status: closed
   depends_on: []
   description: 'Given an exercise''s problem description and starter code (but NOT
     the reference tests), generate test cases using a local model. The core insight
@@ -246,7 +246,7 @@ prs:
   plan: plan-002
   title: Multi-candidate solution generation
   branch: pm/pr-015-multi-candidate-solution-generation
-  status: in_progress
+  status: closed
   depends_on: []
   description: Given an exercise's starter code, problem description, and a test suite
     (either generated or reference), produce N candidate solutions using a local model.
@@ -264,7 +264,7 @@ prs:
   plan: plan-002
   title: Test execution and candidate scoring
   branch: pm/pr-016-test-execution-and-candidate-scoring
-  status: pending
+  status: closed
   depends_on:
   - pr-013
   description: 'Run a test suite against a candidate solution in an isolated environment.
@@ -281,26 +281,21 @@ prs:
   gh_pr_number: null
 - id: pr-017
   plan: plan-002
-  title: Benchmark orchestrator with tournament selection
-  branch: pm/pr-017-benchmark-orchestrator-with-tournament-selection
-  status: in_progress
+  title: 'Benchmark: multi-candidate code generation with tournament selection'
+  branch: pm/pr-017-benchmark-orchestrator-with-tournament-selection-v2
+  status: in_review
   depends_on: []
-  description: 'Wire together the full pipeline from `pm/plans/plan-002.md`: for each
-    exercise, (1) generate tests from the description, (2) generate N candidate solutions,
-    (3) score each candidate against the generated tests, (4) pick the best candidate,
-    (5) score the best candidate against the reference tests to get the final result.
-    The pipeline embodies the plan''s core insight — separating verification (test
-    generation) from generation (solution candidates) lets weaker models punch above
-    their weight through selection pressure. Compare the tournament score against
-    a single-pass baseline (N=1, reference tests only). Collect cost metrics from
-    the runner (total tokens, wall-clock time, tokens per exercise) alongside scores.
-    Report results as a terminal table showing per-exercise and aggregate scores,
-    and save raw results to a JSON file. Add CLI command `pm bench run` with options
-    for model, N candidates, languages, and exercise filter.'
+  description: 'Collapsed implementation of the full benchmark pipeline from plan-002.
+    Includes: OpenAI-compatible multi-backend runner (llama.cpp/sglang/vllm), Exercism
+    exercise loader from aider''s polyglot-benchmark, test generation from problem
+    descriptions, multi-candidate solution generation, test execution with 6-language
+    support, and tournament orchestrator with baseline comparison, cost metrics, and
+    JSON export. CLI commands: pm bench models, pm bench exercises, pm bench run.
+    Supersedes pr-012 through pr-016.'
   agent_machine: spark-424d
-  gh_pr: https://github.com/mjtomei/project_manager/pull/37
-  gh_pr_number: 37
-  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-017-benchmark-orchestrator-with-tournament-s-ca6da32e
+  gh_pr: https://github.com/mjtomei/project_manager/pull/69
+  gh_pr_number: 69
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-017-benchmark-orchestrator-with-tournament-s-012e3bc5
 - id: pr-018
   plan: plan-002
   title: Baseline measurement and analysis

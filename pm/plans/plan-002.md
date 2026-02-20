@@ -107,7 +107,7 @@ a natural escalation ladder. Test pass rate is the objective signal for routing:
 ### PR: Local model runner with OpenAI-compatible API
 - **description**: Create a module that manages local LLM inference via the OpenAI-compatible API exposed by local serving backends (see `pm/plans/plan-002.md` for the broader multi-candidate generation strategy). Support three backends with automatic platform detection: llama.cpp server on macOS, sglang and vllm on Linux. All three expose the same OpenAI-compatible chat/completions endpoint, so the core runner uses a single HTTP client with backend-specific server management (health checks, model listing). Server URL is configured via `PM_BENCH_URL` environment variable with a sensible default per backend (e.g. `http://localhost:8080` for llama.cpp, `http://localhost:30000` for sglang). Support sending prompts to a configurable model, collecting responses, and running multiple generations with different temperatures in parallel. Track token counts and wall-clock time per request for downstream cost analysis. Include a CLI command (`pm bench models`) that detects the available backend, lists loaded models, and validates connectivity.
 - **tests**: Unit tests for API interaction (mock OpenAI-compatible responses), test platform detection logic, test that all three backends use the same request/response format. Integration test (requires running backend, marked slow/CI-optional) that checks connectivity and lists models
-- **files**: pm_core/bench/runner.py, pm_core/cli.py
+- **files**: pm_core/bench/runner.py, pm_core/cli/bench.py
 - **depends_on**:
 
 ---
@@ -115,7 +115,7 @@ a natural escalation ladder. Test pass rate is the objective signal for routing:
 ### PR: Aider polyglot exercise loader
 - **description**: Load the Exercism exercises used by aider's polyglot benchmark (https://github.com/Aider-AI/aider — see `benchmark/` directory for exercise structure). Each exercise has a problem description, starter code, and a reference test suite. Parse exercises into a structured format: {language, slug, description, starter_code, reference_tests}. Support filtering by language and exercise name. Clone or download the exercise set from aider's benchmark repo and cache it locally under `~/.cache/pm-bench/exercises/`. Include a CLI command (`pm bench exercises`) that downloads/updates the exercise cache and lists available exercises with optional `--language` filter.
 - **tests**: Unit tests for exercise parsing with fixture data (a few sample exercises checked into the test directory). Integration test (marked slow, requires network) that clones the repo and verifies at least 200 exercises are available across the 6 languages (C++, Go, Java, JavaScript, Python, Rust). Test filtering by language and exercise name
-- **files**: pm_core/bench/exercises.py, pm_core/cli.py
+- **files**: pm_core/bench/exercises.py, pm_core/cli/bench.py
 - **depends_on**:
 
 ---
@@ -147,7 +147,7 @@ a natural escalation ladder. Test pass rate is the objective signal for routing:
 ### PR: Benchmark orchestrator with tournament selection
 - **description**: Wire together the full pipeline from `pm/plans/plan-002.md`: for each exercise, (1) generate tests from the description, (2) generate N candidate solutions, (3) score each candidate against the generated tests, (4) pick the best candidate, (5) score the best candidate against the reference tests to get the final result. The pipeline embodies the plan's core insight — separating verification (test generation) from generation (solution candidates) lets weaker models punch above their weight through selection pressure. Compare the tournament score against a single-pass baseline (N=1, reference tests only). Collect cost metrics from the runner (total tokens, wall-clock time, tokens per exercise) alongside scores. Report results as a terminal table showing per-exercise and aggregate scores, and save raw results to a JSON file. Add CLI command `pm bench run` with options for model, N candidates, languages, and exercise filter.
 - **tests**: Unit test that tournament selection picks the highest-scoring candidate from mock scores. Integration test (marked slow, requires running backend) that runs the full pipeline on 1-2 Python exercises end-to-end: exercises loaded from cache, tests generated via runner, candidates generated via runner, candidates scored via executor, best selected, and final score computed against reference tests. Verify the JSON output contains all expected fields
-- **files**: pm_core/bench/orchestrator.py, pm_core/cli.py
+- **files**: pm_core/bench/orchestrator.py, pm_core/cli/bench.py
 - **depends_on**: Test generation from problem descriptions, Multi-candidate solution generation, Test execution and candidate scoring
 
 ---
@@ -155,7 +155,7 @@ a natural escalation ladder. Test pass rate is the objective signal for routing:
 ### PR: Baseline measurement and analysis
 - **description**: Add a CLI command `pm bench analyze` that reads benchmark result JSON files produced by the orchestrator and generates comparison reports. Run the benchmark via `pm bench run` in single-pass mode (N=1, no test generation) to establish the baseline, then with tournament (N=8, N=16) and compare. Produce a report showing: baseline vs tournament scores per language, per exercise difficulty tier (easy/medium/hard, based on baseline pass rate — easy: >66% of models solve it, hard: <33%), and aggregate. Include cost analysis — total tokens generated, wall-clock time, and tokens-per-correct-exercise for each configuration, so the accuracy improvement can be weighed against the compute cost (e.g., "N=16 tournament scores 58% vs 40% baseline but costs 20x the tokens"). Identify which exercises benefit most from multi-candidate generation (large delta) vs which are insensitive (model either always gets it or never does). Save analysis results to a JSON file for tracking over time.
 - **tests**: Unit tests for report generation and difficulty tier classification with mock benchmark result JSON. Test cost metric aggregation logic. Integration test (marked slow) that reads real orchestrator output JSON (from a previous `pm bench run`) and produces a valid analysis report
-- **files**: pm_core/bench/analysis.py, pm_core/cli.py
+- **files**: pm_core/bench/analysis.py, pm_core/cli/bench.py
 - **depends_on**: Benchmark orchestrator with tournament selection
 
 ---
@@ -163,5 +163,5 @@ a natural escalation ladder. Test pass rate is the objective signal for routing:
 ### PR: Generated test quality analysis
 - **description**: Add a CLI command `pm bench test-quality` that analyzes how well generated tests compare to reference tests. This is critical for validating the plan's core assumption (`pm/plans/plan-002.md`) that verification is easier than generation — if generated tests are poor, tournament selection breaks down regardless of candidate quality. Reads benchmark result JSON from the orchestrator, which includes both generated and reference test outcomes per candidate. Measure: (1) coverage overlap — run each candidate against both generated and reference tests and compute rank correlation (do generated tests rank candidates in the same order as reference tests?), (2) false positives — identify generated tests that pass on candidates that fail all reference tests (using the failed candidates already present in benchmark results), (3) diversity — count distinct pass/fail signatures across generated tests (more signatures = more behavioral coverage). Cross-reference with benchmark results: do exercises where generated tests diverge most from reference tests also show the largest gap between tournament-selected and oracle-selected (best candidate scored against reference tests) scores?
 - **tests**: Unit tests for rank correlation, false positive detection, and diversity metrics using synthetic candidate score data. Integration test (marked slow) that reads real orchestrator output JSON and produces a valid test quality report
-- **files**: pm_core/bench/test_analysis.py, pm_core/cli.py
+- **files**: pm_core/bench/test_analysis.py, pm_core/cli/bench.py
 - **depends_on**: Benchmark orchestrator with tournament selection
