@@ -3,10 +3,10 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-017
+  active_pr: pr-f38005f
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
-  last_pr_sync: '2026-02-20T00:12:09.912483+00:00'
+  last_pr_sync: '2026-02-20T02:40:13.492546+00:00'
 plans:
 - id: plan-001
   name: Import from existing repo
@@ -719,3 +719,35 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/66
   gh_pr_number: 66
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-3563708-extract-pr-view-sync-and-frame-captu-9b46a99c
+- id: pr-b89ae16
+  title: Miscellaneous TUI fixes and UX improvements
+  branch: pm/pr-b89ae16-miscellaneous-tui-fixes-and-ux-improvements
+  status: in_review
+  depends_on: []
+  description: 'A collection of small TUI fixes and UX improvements: remove Enter
+    pane (superseded by e key), fix rebalance for non-default tmux windows, fix pr
+    start prompt, fix plans pane width, fix command prompt message, fix review window
+    second pane, add ? help pane option.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/67
+  gh_pr_number: 67
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-b89ae16-miscellaneous-tui-fixes-and-ux-impro-c89a8140
+- id: pr-f38005f
+  plan: plan-003
+  title: Add file locking to project.yaml read-modify-write operations
+  branch: pm/pr-f38005f-add-file-locking-to-project-yaml-read-modify-write
+  status: pending
+  depends_on:
+  - pr-022
+  description: 'Add advisory file locking to store.py so that concurrent processes
+    (TUI background sync, CLI commands, multiple users) cannot corrupt project.yaml
+    with lost-update races. Introduce a locked_update(root, fn) helper that acquires
+    an fcntl.flock exclusive lock, loads fresh state, applies mutations, saves, and
+    releases. All read-modify-write call sites must migrate to locked_update. Critical
+    constraint: lock must never be held across network calls — operations interleaving
+    GitHub API calls must be restructured to do the external call first, then acquire
+    the lock, load fresh state, merge results, and save. Lock timeout of 2 seconds
+    with clear error message.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null

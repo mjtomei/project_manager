@@ -237,10 +237,10 @@ class TestComputeLayers:
         assert result[2] == ["d"]
 
     def test_unknown_dep_returns_zero(self):
-        """Deps referencing non-existent PRs are treated as layer 0."""
+        """Deps referencing non-existent (filtered) PRs are ignored."""
         prs = [{"id": "a", "depends_on": ["missing"]}]
         result = compute_layers(prs)
-        assert result == [[], ["a"]]
+        assert result == [["a"]]
 
     def test_independent_all_layer_zero(self):
         prs = [{"id": "a"}, {"id": "b"}, {"id": "c"}]
