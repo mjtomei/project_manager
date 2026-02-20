@@ -597,11 +597,21 @@ def quit_app(app) -> None:
 
 
 def restart_app(app) -> None:
-    """Restart the TUI by exec'ing a fresh pm _tui process."""
+    """Restart the TUI by exec'ing a fresh pm _tui process.
+
+    Uses os.execvp directly (no app.exit()) so the process is replaced
+    in-place and the tmux pane stays alive — otherwise the last pane in
+    a window would die before the new process starts.
+    """
     import sys
     import shutil
     _log.info("restart_app")
-    app.exit()
+    # Restore terminal state (raw mode, alt screen, etc.) before
+    # replacing the process so the new TUI starts clean.
+    try:
+        app._driver.stop_application_mode()
+    except Exception:
+        pass  # new Textual app will reinitialize the terminal
     pm = shutil.which("pm")
     if pm:
         os.execvp(pm, [pm, "_tui"])
