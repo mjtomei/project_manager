@@ -142,13 +142,17 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
             click.echo(f"Creating branch {branch} from {base_ref}...")
             git_ops.checkout_branch(work_path, branch, create=True)
 
+    # Determine pm session name for TUI targeting
+    pm_session = None
+    if tmux_mod.has_tmux():
+        pm_session = _get_session_name_for_cwd()
+
     # Build the prompt
-    prompt = _build_meta_prompt(task, work_path, install_info, branch, base_ref, session_tag)
+    prompt = _build_meta_prompt(task, work_path, install_info, branch, base_ref, session_tag, session_name=pm_session)
 
     # Check for existing window
     window_name = "meta"
-    if tmux_mod.has_tmux():
-        pm_session = _get_session_name_for_cwd()
+    if pm_session:
         if tmux_mod.session_exists(pm_session):
             existing = tmux_mod.find_window_by_name(pm_session, window_name)
             if existing:
@@ -236,7 +240,7 @@ def _detect_pm_install() -> dict:
     return info
 
 
-def _build_meta_prompt(task: str, work_path: Path, install_info: dict, branch_name: str, base_ref: str, session_tag: str) -> str:
+def _build_meta_prompt(task: str, work_path: Path, install_info: dict, branch_name: str, base_ref: str, session_tag: str, session_name: str | None = None) -> str:
     """Build prompt for meta-development session."""
     task_section = f"""
 ## Task
@@ -297,16 +301,17 @@ installation instead of reimplementing.
 
 ## Debugging the TUI
 
-The TUI runs in a tmux session. You can interact with it programmatically:
+The TUI runs in a tmux session. You can interact with it programmatically.
+{f"Target the base session with `-s {session_name}`:" if session_name else "Use these commands:"}
 
 **Frame buffer** — The TUI captures frames on every UI change:
-- `pm tui view` — Capture and display current TUI state
+- `pm tui view{f" -s {session_name}" if session_name else ""}` — Capture and display current TUI state
 - `pm tui frames` — View last 5 captured frames
 - `pm tui frames --all` — View all captured frames with triggers
 - `pm tui clear-frames` — Clear the frame buffer
 
 **Sending keystrokes**:
-- `pm tui send <keys>` — Send keystrokes to the TUI (e.g., `pm tui send g` for guide)
+- `pm tui send <keys>{f" -s {session_name}" if session_name else ""}` — Send keystrokes to the TUI (e.g., `pm tui send g` for guide)
 
 **Tmux inspection**:
 - `tmux list-panes -t <session> -F "#{{pane_id}} #{{pane_width}}x#{{pane_height}}"` — List panes

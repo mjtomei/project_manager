@@ -172,8 +172,16 @@ def _run_guide(step, fresh=False):
             click.echo("\nNext: run 'pm guide' to continue.")
         return
 
+    # Determine session name for TUI targeting
+    pm_session = None
+    if _in_pm_tmux_session():
+        session_name = tmux_mod.get_session_name()
+        if "~" in session_name:
+            session_name = session_name.rsplit("~", 1)[0]
+        pm_session = session_name
+
     # Interactive steps
-    prompt = guide_mod.build_guide_prompt(state, ctx, root)
+    prompt = guide_mod.build_guide_prompt(state, ctx, root, session_name=pm_session)
     if prompt is None:
         click.echo(f"Unknown state: {state}")
         return

@@ -507,7 +507,12 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
     click.echo(f"\nPR {_pr_display_id(pr_entry)} is now in_progress on {platform.node()}")
     click.echo(f"Work directory: {work_path}")
 
-    prompt = prompt_gen.generate_prompt(data, pr_id)
+    # Determine tmux session name for TUI targeting in prompt
+    pm_session = None
+    if tmux_mod.has_tmux():
+        pm_session = _get_current_pm_session() or _get_session_name_for_cwd()
+
+    prompt = prompt_gen.generate_prompt(data, pr_id, session_name=pm_session)
 
     claude = find_claude()
     if not claude:
@@ -518,8 +523,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
         return
 
     # Try to launch in the pm tmux session
-    if tmux_mod.has_tmux():
-        pm_session = _get_current_pm_session() or _get_session_name_for_cwd()
+    if pm_session:
         if tmux_mod.session_exists(pm_session):
             window_name = _pr_display_id(pr_entry)
             cmd = build_claude_shell_cmd(prompt=prompt)
@@ -561,7 +565,7 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False) -> No
     base_branch = data.get("project", {}).get("base_branch", "main")
 
     # Generate review prompt and build Claude command
-    review_prompt = prompt_gen.generate_review_prompt(data, pr_id)
+    review_prompt = prompt_gen.generate_review_prompt(data, pr_id, session_name=pm_session)
     claude_cmd = build_claude_shell_cmd(prompt=review_prompt)
 
     window_name = f"review-{display_id}"

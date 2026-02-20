@@ -9,13 +9,17 @@ from pathlib import Path
 import click
 
 from pm_core import store, notes
+from pm_core import tmux as tmux_mod
 from pm_core.plan_parser import parse_plan_prs
 from pm_core import review as review_mod
 from pm_core.claude_launcher import find_claude, launch_claude, launch_claude_print, clear_session
+from pm_core.prompt_gen import tui_section
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
     _auto_select_plan,
+    _get_current_pm_session,
+    _get_session_name_for_cwd,
     _gh_state_to_status,
     _make_pr_entry,
     _pr_display_id,
@@ -25,6 +29,13 @@ from pm_core.cli.helpers import (
     state_root,
     trigger_tui_refresh,
 )
+
+
+def _get_pm_session() -> str | None:
+    """Get the pm tmux session name if running inside one."""
+    if not tmux_mod.has_tmux():
+        return None
+    return _get_current_pm_session() or _get_session_name_for_cwd()
 
 
 # --- Plan commands ---
@@ -115,7 +126,7 @@ when there's a real ordering constraint.
 
 After writing the PRs section, tell the user to run `pm plan review {plan_id}`
 (key: c in the plans pane) to check consistency and coverage before loading.
-{notes_block}"""
+{tui_section(_get_pm_session()) if _get_pm_session() else ""}{notes_block}"""
 
     claude = find_claude()
     if claude:
@@ -215,7 +226,7 @@ Guidelines:
 
 After writing, tell the user to run `pm plan review {plan_id}` (key: c in the
 plans pane) to check consistency and coverage before loading PRs.
-{notes_block}"""
+{tui_section(_get_pm_session()) if _get_pm_session() else ""}{notes_block}"""
 
     claude = find_claude()
     if claude:
@@ -327,7 +338,7 @@ For any issues found, you can propose a fix. Fixes can be applied as follows:
 - To add new PRs: use `pm pr add`
 
 After fixing, summarize what was changed.
-{notes_block}"""
+{tui_section(_get_pm_session()) if _get_pm_session() else ""}{notes_block}"""
     else:
         # Pre-load: no PRs in project.yaml yet — review the plan file's PR section
         prompt = f"""\
@@ -368,7 +379,7 @@ by editing the plan file directly at {plan_path}.
 
 After fixing, summarize what was changed. Then tell the user to run
 `pm plan load {plan_id}` (key: l in the plans pane) to create the PRs.
-{notes_block}"""
+{tui_section(_get_pm_session()) if _get_pm_session() else ""}{notes_block}"""
 
     claude = find_claude()
     if claude:
@@ -450,7 +461,7 @@ If a PR should have NO dependencies, use:
 
 After applying changes, run `pm pr graph` to show the user the final
 dependency tree.
-{notes_block}"""
+{tui_section(_get_pm_session()) if _get_pm_session() else ""}{notes_block}"""
 
     claude = find_claude()
     if claude:
@@ -596,6 +607,10 @@ def _run_fix_command(step_name: str, review_path_str: str):
     notes_block = notes.notes_section(root)
     if notes_block:
         prompt += f"\n{notes_block}"
+
+    pm_session = _get_pm_session()
+    if pm_session:
+        prompt += tui_section(pm_session)
 
     claude = find_claude()
     if claude:
@@ -750,7 +765,7 @@ path is wrong, find the correct path and update the plan file. Report any
 corrections you made.
 
 Once verified, the next step is `pm plan load {plan_id}` to create the PRs.
-{notes_block}"""
+{tui_section(_get_pm_session()) if _get_pm_session() else ""}{notes_block}"""
 
     claude = find_claude()
     if claude:

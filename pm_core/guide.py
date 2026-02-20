@@ -239,7 +239,8 @@ def _upcoming_steps_section(state: str) -> str:
     return "\n## What comes next\n" + "\n".join(lines) + "\n\n(Each step runs in its own session — just focus on the current one.)\n"
 
 
-def build_guide_prompt(state: str, ctx: dict, root: Optional[Path]) -> Optional[str]:
+def build_guide_prompt(state: str, ctx: dict, root: Optional[Path],
+                       session_name: str | None = None) -> Optional[str]:
     """Build combined manager + step prompt for the given state.
 
     Returns None for non-interactive steps or terminal states.
@@ -266,6 +267,11 @@ def build_guide_prompt(state: str, ctx: dict, root: Optional[Path]) -> Optional[
 
     upcoming_block = _upcoming_steps_section(state)
 
+    tui_block = ""
+    if session_name:
+        from pm_core.prompt_gen import tui_section
+        tui_block = tui_section(session_name)
+
     return f"""\
 You are managing the guided workflow for `pm` (Project Manager for Claude Code).
 You have access to the `pm` CLI — run `pm help` to see all commands.
@@ -274,7 +280,7 @@ Current state: {state_desc}
 Step {n} of {total} in the setup workflow.
 
 {step_instructions}
-{notes_block}{guide_notes_block}{upcoming_block}
+{tui_block}{notes_block}{guide_notes_block}{upcoming_block}
 IMPORTANT — When this step is complete and the user is satisfied:
 - Confirm what was accomplished
 - Run `pm guide done` to record completion

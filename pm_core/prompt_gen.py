@@ -4,8 +4,31 @@ from pm_core import store, notes
 from pm_core.backend import get_backend
 
 
-def generate_prompt(data: dict, pr_id: str) -> str:
-    """Generate a Claude Code prompt for working on a PR."""
+def tui_section(session_name: str) -> str:
+    """Build a TUI interaction section for prompts running in a tmux session.
+
+    Used by prompt_gen internally and by other modules (guide, plan, meta)
+    that construct prompts for Claude sessions running alongside the TUI.
+    """
+    return f"""
+## Interacting with the TUI
+
+Use these commands to interact with the pm TUI from this pane — do NOT try to \
+run tmux commands directly or manually type into other panes:
+- `pm tui view -s {session_name}` — capture and view the current TUI screen
+- `pm tui send <keys> -s {session_name}` — send keystrokes to the TUI (e.g. `pm tui send j` to move down)
+"""
+
+
+def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> str:
+    """Generate a Claude Code prompt for working on a PR.
+
+    Args:
+        data: Project data dict (from project.yaml).
+        pr_id: The PR to generate a prompt for.
+        session_name: If provided, include TUI interaction instructions
+            targeting this tmux session.
+    """
     pr = store.get_pr(data, pr_id)
     if not pr:
         raise ValueError(f"PR {pr_id} not found")
@@ -42,6 +65,8 @@ def generate_prompt(data: dict, pr_id: str) -> str:
     except FileNotFoundError:
         pass
 
+    tui_block = tui_section(session_name) if session_name else ""
+
     prompt = f"""You're working on PR {pr_id}: "{title}"
 
 This session is managed by `pm`. Run `pm help` to see available commands.
@@ -60,11 +85,11 @@ This session is managed by `pm`. Run `pm help` to see available commands.
 
 ## Workflow
 {instructions}
-{notes_block}"""
+{tui_block}{notes_block}"""
     return prompt.strip()
 
 
-def generate_review_prompt(data: dict, pr_id: str) -> str:
+def generate_review_prompt(data: dict, pr_id: str, session_name: str | None = None) -> str:
     """Generate a Claude Code prompt for reviewing a completed PR."""
     pr = store.get_pr(data, pr_id)
     if not pr:
@@ -93,6 +118,8 @@ This PR is part of plan "{plan['name']}" ({plan['id']}). Other PRs in this plan:
 {chr(10).join(lines)}
 """
 
+    tui_block = tui_section(session_name) if session_name else ""
+
     prompt = f"""You are reviewing PR {pr_id}: "{title}"
 
 ## Task
@@ -100,7 +127,7 @@ Review the code changes in this PR for quality, correctness, and architectural f
 
 ## Description
 {description}
-{plan_context}
+{plan_context}{tui_block}
 ## Steps
 1. Run `git diff origin/{base_branch}...HEAD` to see all changes
 2. **Generic checks** — things any codebase should get right:
