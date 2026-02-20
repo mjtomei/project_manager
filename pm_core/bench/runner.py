@@ -200,6 +200,9 @@ def generate_multiple(
     """Generate multiple completions in parallel with different temperatures.
 
     Runs all requests concurrently using asyncio.
+
+    Note: Calls asyncio.run() internally — cannot be used from within an
+    existing event loop (e.g. a Textual TUI). Use from synchronous code only.
     """
     return asyncio.run(_generate_multiple_async(
         base_url,
@@ -250,6 +253,9 @@ def batch_complete(
     """Run multiple completions in parallel with different messages and temperatures.
 
     Each request is a (messages, temperature) tuple.
+
+    Note: Calls asyncio.run() internally — cannot be used from within an
+    existing event loop (e.g. a Textual TUI). Use from synchronous code only.
     """
     return asyncio.run(_batch_complete_async(
         base_url,

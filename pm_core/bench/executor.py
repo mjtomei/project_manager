@@ -125,6 +125,11 @@ def execute_tests(
             test_file = config["test_file"](exercise.slug)
             if test_file is not None:
                 (work_dir / test_file).write_text(test_code)
+            elif exercise.reference_tests:
+                # For languages where test_file is not configured (Go, Rust, Java),
+                # overwrite the first reference test file from the exercise scaffold.
+                first_test = next(iter(exercise.reference_tests))
+                (work_dir / first_test).write_text(test_code)
 
         # Run tests
         try:
@@ -136,7 +141,7 @@ def execute_tests(
                 timeout=timeout,
             )
             output = proc.stdout + proc.stderr
-            return _parse_test_output(output, proc.returncode, lang)
+            return _parse_test_output(output, proc.returncode)
         except subprocess.TimeoutExpired:
             return ScoreResult(
                 raw_output="Test execution timed out",
@@ -149,18 +154,18 @@ def execute_tests(
             return ScoreResult(error=f"Execution error: {exc}")
 
 
-def _parse_test_output(output: str, returncode: int, language: str) -> ScoreResult:
+def _parse_test_output(output: str, returncode: int) -> ScoreResult:
     """Parse test runner output to extract pass/fail counts."""
     result = ScoreResult(raw_output=output)
 
     if returncode == 0:
-        total = _count_tests_from_output(output, language)
+        total = _count_tests_from_output(output)
         result.passed = total
         result.total = total
         result.score = 1.0
         return result
 
-    passed, total = _parse_counts(output, language)
+    passed, total = _parse_counts(output)
     result.passed = passed
     result.total = max(total, 1)
     result.score = passed / result.total if result.total > 0 else 0.0
@@ -171,7 +176,7 @@ def _parse_test_output(output: str, returncode: int, language: str) -> ScoreResu
     return result
 
 
-def _count_tests_from_output(output: str, language: str) -> int:
+def _count_tests_from_output(output: str) -> int:
     """Try to count total tests from passing output."""
     # pytest: "5 passed"
     m = re.search(r"(\d+) passed", output)
@@ -196,7 +201,7 @@ def _count_tests_from_output(output: str, language: str) -> int:
     return 1
 
 
-def _parse_counts(output: str, language: str) -> tuple[int, int]:
+def _parse_counts(output: str) -> tuple[int, int]:
     """Parse passed/total counts from test runner output."""
     # pytest: "2 passed, 3 failed"
     passed = 0

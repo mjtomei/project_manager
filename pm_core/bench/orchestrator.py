@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -163,15 +164,18 @@ def run_exercise_tournament(
             tests=gen_test_code,
         )
 
-        # Step 3: Score each candidate against generated tests
+        # Step 3: Score each candidate against generated tests (parallel)
         if progress_callback:
             progress_callback("scoring candidates")
-        scored: list[tuple[Candidate, ScoreResult]] = []
-        for cand in candidates:
-            test_result = execute_tests(
-                exercise, cand.code, gen_test_code
-            )
-            scored.append((cand, test_result))
+        with ThreadPoolExecutor() as pool:
+            futures = [
+                pool.submit(execute_tests, exercise, cand.code, gen_test_code)
+                for cand in candidates
+            ]
+            scored: list[tuple[Candidate, ScoreResult]] = [
+                (cand, f.result())
+                for cand, f in zip(candidates, futures)
+            ]
 
         # Step 4: Pick the best candidate
         best_candidate, best_gen_result = max(scored, key=lambda x: x[1].score)
@@ -194,7 +198,7 @@ def run_exercise_tournament(
 
     except ConnectionError as exc:
         result.error = f"Backend connection error: {exc}"
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError) as exc:
         result.error = str(exc)
 
     result.wall_clock_seconds = time.monotonic() - start
@@ -253,6 +257,7 @@ def run_benchmark(
         languages=langs_used,
     )
 
+    bench_start = time.monotonic()
     for i, exercise in enumerate(exercises):
         def _progress(msg: str, _ex=exercise, _i=i):
             if progress_callback:
@@ -268,7 +273,7 @@ def run_benchmark(
         run.results.append(ex_result)
 
     run.total_tokens = runner.metrics.total_tokens
-    run.total_wall_clock_seconds = runner.metrics.total_wall_clock_seconds
+    run.total_wall_clock_seconds = time.monotonic() - bench_start
 
     return run
 
