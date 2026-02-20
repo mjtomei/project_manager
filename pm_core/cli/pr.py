@@ -232,6 +232,7 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
             click.echo("No changes made.")
             raise SystemExit(0)
 
+    data["project"]["active_pr"] = pr_id
     save_and_push(data, root, f"pm: edit {pr_id}")
     click.echo(f"Updated {pr_id}: {', '.join(changes)}")
     trigger_tui_refresh()
@@ -274,6 +275,9 @@ def pr_cd(identifier: str):
     if not workdir or not Path(workdir).is_dir():
         click.echo(f"Workdir for {pr_entry['id']} does not exist: {workdir}", err=True)
         raise SystemExit(1)
+    data["project"]["active_pr"] = pr_entry["id"]
+    store.save(data, root)
+
     shell = os.environ.get("SHELL", "/bin/sh")
     click.echo(f"Entering workdir for {pr_entry['id']} ({pr_entry.get('title', '???')})")
     click.echo(f"  {workdir}")
@@ -691,6 +695,7 @@ def pr_done(pr_id: str | None, fresh: bool):
             click.echo("Warning: Failed to upgrade draft PR. It may already be ready or was closed.", err=True)
 
     pr_entry["status"] = "in_review"
+    data["project"]["active_pr"] = pr_id
     save_and_push(data, root, f"pm: done {pr_id}")
     click.echo(f"PR {_pr_display_id(pr_entry)} marked as in_review.")
     trigger_tui_refresh()
