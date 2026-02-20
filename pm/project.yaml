@@ -758,10 +758,10 @@ prs:
   status: pending
   depends_on: []
   description: 'Add a notes list field to PR entries in project.yaml for recording
-    addendums after work has begun. Each note is a timestamped string. Add pm pr note
-    CLI command to append/list/delete notes. Notes appear in: pr edit output, TUI
-    detail panel, generate_prompt, and generate_review_prompt. Append-only by default
-    with optional delete by index.'
+    addendums after work has begun. Each note identified by a hash-based ID (note-<hash>,
+    like PRs and plans) to avoid sync conflicts. Add pm pr note CLI command to append/list/delete
+    notes by hash ID. Notes appear in: pr edit output, TUI detail panel, generate_prompt,
+    and generate_review_prompt.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
