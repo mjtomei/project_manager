@@ -27,6 +27,8 @@ from pm_core.cli.helpers import (
     CONTEXT_SETTINGS,
     HelpGroup,
     _infer_pr_id,
+    _pr_display_id,
+    _resolve_pr_id,
     set_project_override,
     state_root,
 )
@@ -271,15 +273,15 @@ def prompt(pr_id: str | None):
                 click.echo(f"Available PRs: {', '.join(p['id'] for p in prs)}", err=True)
             raise SystemExit(1)
 
-    pr_entry = store.get_pr(data, pr_id)
+    pr_entry = _resolve_pr_id(data, pr_id)
     if not pr_entry:
         prs = data.get("prs") or []
-        click.echo(f"PR {pr_id} not found.", err=True)
+        click.echo(f"PR '{pr_id}' not found.", err=True)
         if prs:
-            click.echo(f"Available PRs: {', '.join(p['id'] for p in prs)}", err=True)
+            click.echo(f"Available PRs: {', '.join(_pr_display_id(p) for p in prs)}", err=True)
         raise SystemExit(1)
 
-    click.echo(prompt_gen.generate_prompt(data, pr_id))
+    click.echo(prompt_gen.generate_prompt(data, pr_entry["id"]))
 
 
 @cli.command("_check", hidden=True)

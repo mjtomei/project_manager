@@ -15,7 +15,7 @@ from textual.timer import Timer
 from pm_core import store, guide
 
 from pm_core import tmux as tmux_mod
-from pm_core.tui.tech_tree import TechTree, PRSelected, PRActivated
+from pm_core.tui.tech_tree import TechTree, PRSelected
 from pm_core.tui.detail_panel import DetailPanel
 from pm_core.tui.command_bar import CommandBar, CommandSubmitted
 from pm_core.tui.guide_progress import GuideProgress
@@ -112,7 +112,7 @@ class ProjectManagerApp(App):
     }
     PlansPane {
         height: auto;
-        width: auto;
+        width: 1fr;
         padding: 1 2;
     }
     #tests-container {
@@ -285,23 +285,39 @@ class ProjectManagerApp(App):
                 pass
         # Load any existing capture config
         frame_capture.load_capture_config(self)
-        # Heal pane registry before anything uses it
-        pane_ops.heal_registry(self._session_name)
         # Set up watchers on child widgets for frame capture
         frame_capture.setup_frame_watchers(self)
 
+        # Load state and render immediately so the TUI shows content fast.
+        # Defer heavier operations (heal_registry, tmux bindings, GitHub
+        # sync) to after the first frame.
         self._load_state()
+        self._update_orientation()
         # Background sync interval: 5 minutes for automatic PR sync
         self._sync_timer = self.set_interval(300, self._background_sync)
+        # Run heavier startup tasks (heal_registry, tmux bindings) in a
+        # background thread so they don't block input processing.
+        self.run_worker(self._deferred_startup(), exclusive=False)
 
-        # Do a full GitHub sync on startup (non-blocking)
+    async def _deferred_startup(self) -> None:
+        """Run heavier startup tasks in a background worker."""
+        import asyncio
+        # Run blocking subprocess work off the event loop
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self._deferred_startup_sync)
+        # These must run on the main thread (touch Textual state)
         self.run_worker(sync_mod.startup_github_sync(self))
+        self._capture_frame("mount")
 
-        # Capture initial frame after state is loaded and rendered
-        self.call_after_refresh(self._capture_frame, "mount")
-
-        # Set initial layout orientation
-        self._update_orientation()
+    def _deferred_startup_sync(self) -> None:
+        """Blocking startup tasks run in a thread."""
+        pane_ops.heal_registry(self._session_name)
+        try:
+            if self._session_name:
+                from pm_core.cli.session import _register_tmux_bindings
+                _register_tmux_bindings(self._session_name)
+        except Exception:
+            pass
 
     def on_resize(self) -> None:
         """Update layout orientation when terminal is resized."""
@@ -456,6 +472,9 @@ class ProjectManagerApp(App):
         tree = self.query_one("#tech-tree", TechTree)
         tree.update_plans(self._data.get("plans") or [])
         tree.update_prs(self._data.get("prs") or [])
+        active_pr = self._data.get("project", {}).get("active_pr")
+        if active_pr:
+            tree.select_pr(active_pr)
         self._update_filter_status()
 
     def _update_filter_status(self) -> None:
@@ -514,9 +533,6 @@ class ProjectManagerApp(App):
 
     def on_prselected(self, message: PRSelected) -> None:
         pr_view.handle_pr_selected(self, message.pr_id)
-
-    def on_practivated(self, message: PRActivated) -> None:
-        pr_view.handle_pr_activated(self, message.pr_id)
 
     def on_command_submitted(self, message: CommandSubmitted) -> None:
         pr_view.handle_command_submitted(self, message.command)

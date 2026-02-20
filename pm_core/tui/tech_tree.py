@@ -47,7 +47,7 @@ H_GAP = 6
 V_GAP = 2
 
 
-PRSelected, PRActivated = item_message("PR", "pr_id")
+PRSelected, _PRActivated = item_message("PR", "pr_id")
 
 
 class TechTree(Widget):
@@ -84,6 +84,14 @@ class TechTree(Widget):
         self.prs = prs
         self._recompute()
         self.refresh(layout=True)
+
+    def select_pr(self, pr_id: str) -> None:
+        """Move the cursor to the given PR if it exists in the tree."""
+        if pr_id and pr_id in self._ordered_ids:
+            idx = self._ordered_ids.index(pr_id)
+            if idx != self.selected_index:
+                self.selected_index = idx
+                self.refresh()
 
     def update_plans(self, plans: list[dict]) -> None:
         """Store plan name mapping for label rendering."""
@@ -509,7 +517,9 @@ class TechTree(Widget):
                 self._jump_plan_scroll = True
         elif event.key == "enter":
             if not current_id.startswith("_hidden:"):
-                self.post_message(PRActivated(current_id))
+                self.post_message(PRSelected(current_id))
+                # Trigger edit action (same as 'e' key)
+                self.app.action_edit_plan()
             return
 
         if new_index is not None and new_index != self.selected_index:

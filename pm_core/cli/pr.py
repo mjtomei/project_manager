@@ -110,6 +110,7 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
     root = state_root()
     data = store.load(root)
     pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
 
     changes = []
     if title is not None:
@@ -247,6 +248,7 @@ def pr_select(pr_id: str):
     root = state_root()
     data = store.load(root)
     pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
 
     data["project"]["active_pr"] = pr_id
     save_and_push(data, root)
@@ -386,6 +388,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
             raise SystemExit(1)
 
     pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
 
     if pr_entry.get("status") == "in_progress":
         # If already in_progress, reuse existing workdir if available
@@ -580,21 +583,26 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False) -> No
             click.echo(f"Review window: failed to create tmux window '{window_name}'.")
             return
 
-        # Build shell command that shows PR info then drops to interactive shell
+        # Build shell command that shows PR info via a pager then drops
+        # to an interactive shell in the workdir.  We use git --no-pager
+        # and pipe through less ourselves so that quitting the pager
+        # doesn't kill the pane (git's built-in pager can cause SIGPIPE
+        # exit codes that break && chains).
         shell = os.environ.get("SHELL", "/bin/bash")
         header = f"Review: {display_id} — {title}"
         diff_cmd = (
             f"cd '{workdir}'"
-            f" && echo '=== {header} ==='"
+            f" && {{ echo '=== {header} ==='"
             f" && echo ''"
             f" && git status"
             f" && echo ''"
             f" && echo '--- Change summary ---'"
-            f" && git diff --stat origin/{base_branch}...HEAD"
+            f" && git --no-pager diff --stat origin/{base_branch}...HEAD"
             f" && echo ''"
             f" && echo '--- Full diff ---'"
-            f" && git diff origin/{base_branch}...HEAD"
-            f" && exec {shell}"
+            f" && git --no-pager diff origin/{base_branch}...HEAD"
+            f"; }} | less -R"
+            f"; exec {shell}"
         )
         diff_pane = tmux_mod.split_pane_at(claude_pane, "h", diff_cmd, background=True)
 
@@ -610,6 +618,18 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False) -> No
             pane_registry.register_pane(pm_session, review_win_id, claude_pane, "review-claude", claude_cmd)
             if diff_pane:
                 pane_registry.register_pane(pm_session, review_win_id, diff_pane, "review-diff", "diff-shell")
+
+        # Reset user_modified and rebalance.  This mirrors the same
+        # pattern used in pane_ops.launch_pane() and
+        # pane_layout._respawn_tui() — any code path that creates panes
+        # must reset user_modified (the after-split-window hook sets it
+        # before panes are registered) and then rebalance.
+        if review_win_id:
+            reg = pane_registry.load_registry(pm_session)
+            wdata = pane_registry.get_window_data(reg, review_win_id)
+            wdata["user_modified"] = False
+            pane_registry.save_registry(pm_session, reg)
+            pane_layout.rebalance(pm_session, review_win_id)
 
         click.echo(f"Opened review window '{window_name}'")
     except Exception as e:
@@ -644,6 +664,7 @@ def pr_done(pr_id: str | None, fresh: bool):
         click.echo(f"Auto-selected {pr_id}")
 
     pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
 
     if pr_entry.get("status") == "merged":
         click.echo(f"PR {pr_id} is already merged.", err=True)
@@ -979,6 +1000,7 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool):
         click.echo(f"Using active PR: {pr_id}")
 
     pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
 
     # Close GitHub PR if exists
     gh_pr_number = pr_entry.get("gh_pr_number")

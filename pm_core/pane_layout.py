@@ -21,7 +21,7 @@ from pm_core.pane_registry import (  # noqa: F401
     base_session_name,
     registry_dir,
     registry_path,
-    _get_window_data,
+    get_window_data,
     _iter_all_panes,
     load_registry,
     save_registry,
@@ -35,6 +35,66 @@ from pm_core.pane_registry import (  # noqa: F401
 _logger = configure_logger("pm.pane_layout")
 
 MOBILE_WIDTH_THRESHOLD = 120
+
+
+def get_reliable_window_size(
+    session: str, window: str, query_session: str | None = None,
+) -> tuple[int, int]:
+    """Return (width, height) for *window*, trying multiple sessions.
+
+    Grouped tmux sessions share windows but only the session with an
+    attached client reports a non-zero size.  This helper walks the
+    fallback chain so every caller gets consistent behaviour:
+
+    1. *query_session* (if given) — e.g. the session that triggered a
+       resize hook.
+    2. ``current_or_base_session(base)`` — the current pane's session
+       or an attached grouped session.
+    3. *session* itself.
+    4. Every grouped session (``base~1``, ``base~2``, …).
+    """
+    from pm_core import tmux as tmux_mod
+
+    base = base_session_name(session)
+
+    # Build an ordered list of sessions to try, deduplicating.
+    candidates: list[str] = []
+    if query_session:
+        candidates.append(query_session)
+    best = tmux_mod.current_or_base_session(base)
+    if best not in candidates:
+        candidates.append(best)
+    if session not in candidates:
+        candidates.append(session)
+
+    for s in candidates:
+        w, h = tmux_mod.get_window_size(s, window)
+        if w > 0 and h > 0:
+            return w, h
+
+    # Last resort: walk all grouped sessions
+    for gs in tmux_mod.list_grouped_sessions(base):
+        if gs in candidates:
+            continue
+        w, h = tmux_mod.get_window_size(gs, window)
+        if w > 0 and h > 0:
+            return w, h
+
+    return 0, 0
+
+
+def preferred_split_direction(session: str, window: str) -> str:
+    """Return 'h' (left|right) or 'v' (top/bottom) based on window aspect ratio.
+
+    Terminal characters are roughly 2x taller than wide, so a 100-col x 50-row
+    window is roughly square in pixels.  We split horizontally when the window
+    is physically wider than tall, vertically otherwise.
+    """
+    w, h = get_reliable_window_size(session, window)
+    if w <= 0 or h <= 0:
+        return "h"  # fallback
+    # Same heuristic as _layout_node: physical_width ∝ w, physical_height ∝ h*2
+    return "h" if w >= h * 2 else "v"
 
 
 def _ensure_logging():
@@ -65,17 +125,10 @@ def is_mobile(session: str, window: str = "0") -> bool:
     With window-size=latest, the window size reflects the most recently
     active client, so we only need to check the current window size.
     """
-    import traceback
-    caller = traceback.extract_stack(limit=3)[0]
-    caller_loc = f"{caller.filename.split('/')[-1]}:{caller.lineno}:{caller.name}"
-
     if mobile_flag_path(session).exists():
-        _logger.info("is_mobile(%s, %s): True (force flag) [caller: %s]",
-                      session, window, caller_loc)
+        _logger.info("is_mobile(%s, %s): True (force flag)", session, window)
         return True
-    from pm_core import tmux as tmux_mod
-    base = base_session_name(session)
-    width, _ = tmux_mod.get_window_size(base, window)
+    width, _ = get_reliable_window_size(session, window)
     return 0 < width < MOBILE_WIDTH_THRESHOLD
 
 
@@ -184,7 +237,7 @@ def rebalance(session: str, window: str, query_session: str | None = None) -> bo
     _reconcile_registry(session, window, query_session=qs)
 
     data = load_registry(session)
-    wdata = _get_window_data(data, window)
+    wdata = get_window_data(data, window)
     if wdata.get("user_modified"):
         _logger.info("rebalance: skipping, user_modified=True for window %s", window)
         return False
@@ -194,16 +247,7 @@ def rebalance(session: str, window: str, query_session: str | None = None) -> bo
         _logger.info("rebalance: no panes in registry")
         return False
 
-    width, height = tmux_mod.get_window_size(qs, window)
-    # Fallback: if query session returns 0×0 (no clients), try other sessions
-    if width <= 0 or height <= 0:
-        width, height = tmux_mod.get_window_size(session, window)
-    if width <= 0 or height <= 0:
-        base = base_session_name(session)
-        for gs in tmux_mod.list_grouped_sessions(base):
-            width, height = tmux_mod.get_window_size(gs, window)
-            if width > 0 and height > 0:
-                break
+    width, height = get_reliable_window_size(session, window, query_session=qs)
     _logger.info("rebalance: window %s size=%dx%d, %d panes",
                  window, width, height, len(panes))
     if width <= 0 or height <= 0:
@@ -292,7 +336,7 @@ def check_user_modified(session: str, window: str) -> bool:
     from pm_core import tmux as tmux_mod
 
     data = load_registry(session)
-    wdata = _get_window_data(data, window)
+    wdata = get_window_data(data, window)
     if wdata.get("user_modified"):
         return True
 
@@ -339,7 +383,7 @@ def handle_pane_exited(session: str, window: str, generation: str,
                      generation, reg_gen)
         return
 
-    wdata = _get_window_data(data, window)
+    wdata = get_window_data(data, window)
     if wdata.get("user_modified"):
         _logger.info("handle_pane_exited: user_modified for window %s, skipping", window)
         if pane_id:
@@ -400,32 +444,109 @@ def handle_pane_exited(session: str, window: str, generation: str,
     )
 
 
+def _respawn_tui(session: str, window: str) -> str:
+    """Respawn the TUI pane in *window* after it was killed.
+
+    If the window still exists (other panes remain), splits a new pane
+    into it.  If the window is gone (TUI was the last pane), creates a
+    new window so the session stays alive.
+
+    Returns the window ID the TUI was actually created in (may differ
+    from *window* when a new window had to be created).
+    """
+    from pm_core import tmux as tmux_mod
+
+    _logger.info("_respawn_tui: respawning TUI in %s:%s", session, window)
+    try:
+        # Check if the window still exists
+        live_panes = tmux_mod.get_pane_indices(session, window)
+        if live_panes:
+            # Window exists — split into it
+            target = f"{session}:{window}"
+            pane_id = tmux_mod.split_pane(target, "h", "pm _tui")
+        else:
+            # Window is gone (TUI was the last pane) — create a new one
+            _logger.info("_respawn_tui: window %s gone, creating new window", window)
+            pane_id, window = tmux_mod.create_window(session, "pm _tui")
+            # Switch the client to the new window so the user sees it
+            tmux_mod.select_window(session, window)
+
+        # Register with lowest order so TUI sorts first (leftmost)
+        data = load_registry(session)
+        wdata = get_window_data(data, window)
+        min_order = min((p["order"] for p in wdata["panes"]), default=1) - 1
+        wdata["panes"].insert(0, {
+            "id": pane_id,
+            "role": "tui",
+            "order": min_order,
+            "cmd": "pm _tui",
+        })
+        # Reset user_modified — same pattern as pane_ops.launch_pane()
+        # and cli/pr.py review window (after-split-window hook may have
+        # set it before panes are registered).  Caller rebalances.
+        wdata["user_modified"] = False
+        save_registry(session, data)
+        _logger.info("_respawn_tui: created pane %s in window %s order=%d",
+                     pane_id, window, min_order)
+    except Exception:
+        _logger.exception("_respawn_tui: failed to respawn TUI")
+    return window
+
+
+def _process_registry_pane_closed(data: dict) -> None:
+    """Reconcile one registry file after a pane-close event."""
+    session = data.get("session", "")
+    if not session:
+        return
+
+    for window_id, wdata in list(data.get("windows", {}).items()):
+        # Snapshot TUI pane IDs before reconciliation removes them
+        tui_ids = {p["id"] for p in wdata.get("panes", [])
+                   if p.get("role") == "tui"}
+        removed = _reconcile_registry(session, window_id)
+        if removed:
+            _logger.info("handle_any_pane_closed: session=%s window=%s removed=%s",
+                         session, window_id, removed)
+            # Always respawn TUI regardless of user_modified
+            if tui_ids & set(removed):
+                _logger.info("handle_any_pane_closed: TUI pane was killed, respawning")
+                actual_window = _respawn_tui(session, window_id)
+                # _respawn_tui resets user_modified; always rebalance
+                # after respawn so the new TUI pane is sized correctly.
+                # Use the actual window ID (may differ if a new window
+                # was created because the TUI was the last pane).
+                rebalance(session, actual_window)
+            elif not wdata.get("user_modified"):
+                rebalance(session, window_id)
+
+
 def handle_any_pane_closed() -> None:
     """Handle a pane-close event when we don't know which pane died.
 
-    Called from global tmux hooks (after-kill-pane). Reconciles all
-    registries and rebalances any that changed.
+    Called from global tmux hooks (after-kill-pane). Only processes the
+    current session's registry — the killed pane must belong to the
+    session where the hook fired.  If the killed pane was the TUI,
+    automatically respawns it.
     """
     _ensure_logging()
     _logger.info("handle_any_pane_closed called")
 
-    for path in registry_dir().glob("*.json"):
-        try:
-            data = json.loads(path.read_text())
-        except (json.JSONDecodeError, KeyError):
-            continue
-        session = data.get("session", "")
-        if not session:
-            continue
+    from pm_core import tmux as tmux_mod
+    if not tmux_mod.in_tmux():
+        _logger.info("handle_any_pane_closed: not in tmux, skipping")
+        return
 
-        for window_id, wdata in list(data.get("windows", {}).items()):
-            if wdata.get("user_modified"):
-                continue
-            removed = _reconcile_registry(session, window_id)
-            if removed:
-                _logger.info("handle_any_pane_closed: session=%s window=%s removed=%s, rebalancing",
-                             session, window_id, removed)
-                rebalance(session, window_id)
+    current_session = tmux_mod.get_session_name()
+    reg_path = registry_path(current_session)
+    if not reg_path.exists():
+        _logger.info("handle_any_pane_closed: no registry for %s", current_session)
+        return
+
+    try:
+        data = json.loads(reg_path.read_text())
+    except (json.JSONDecodeError, KeyError):
+        return
+    _process_registry_pane_closed(data)
 
 
 def handle_pane_opened(session: str, window: str, pane_id: str) -> None:
@@ -435,7 +556,7 @@ def handle_pane_opened(session: str, window: str, pane_id: str) -> None:
                  session, window, pane_id)
 
     data = load_registry(session)
-    wdata = _get_window_data(data, window)
+    wdata = get_window_data(data, window)
     known_ids = {p["id"] for p in wdata["panes"]}
     if pane_id not in known_ids:
         _logger.info("handle_pane_opened: unknown pane %s in window %s, setting user_modified",

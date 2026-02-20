@@ -167,6 +167,20 @@ def new_window_get_pane(session: str, name: str, cmd: str, cwd: str) -> str | No
     return None
 
 
+def create_window(session: str, cmd: str) -> tuple[str, str]:
+    """Create a new window in *session* running *cmd*.
+
+    Returns ``(pane_id, window_id)`` of the newly created window.
+    """
+    result = subprocess.run(
+        _tmux_cmd("new-window", "-t", f"{session}:",
+                  "-P", "-F", "#{pane_id} #{window_id}", cmd),
+        capture_output=True, text=True, check=True,
+    )
+    parts = result.stdout.strip().split()
+    return parts[0], parts[1]
+
+
 def split_pane_background(session: str, direction: str, cmd: str) -> str:
     """Split a pane without switching focus. Returns new pane ID.
 

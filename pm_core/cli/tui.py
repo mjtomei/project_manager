@@ -22,14 +22,6 @@ from pm_core.cli.helpers import (
 @cli.command("_tui", hidden=True)
 def tui_cmd():
     """Launch the interactive TUI (internal command)."""
-    # Re-register tmux bindings on every TUI launch so they survive
-    # TUI restarts without needing to kill/recreate the session.
-    try:
-        session_name = tmux_mod.get_session_name()
-        from pm_core.cli.session import _register_tmux_bindings
-        _register_tmux_bindings(session_name)
-    except Exception:
-        pass  # Not fatal — may not be inside tmux
     from pm_core.tui.app import ProjectManagerApp
     app = ProjectManagerApp()
     app.run()

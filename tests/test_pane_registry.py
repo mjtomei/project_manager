@@ -7,7 +7,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from pm_core.pane_registry import (
-    _get_window_data,
+    get_window_data,
     _iter_all_panes,
     load_registry,
     save_registry,
@@ -151,19 +151,19 @@ class TestLoadSaveRoundTrip:
 class TestGetWindowData:
     def test_creates_entry_on_demand(self):
         data = {"windows": {}}
-        wdata = _get_window_data(data, "0")
+        wdata = get_window_data(data, "0")
         assert wdata == {"panes": [], "user_modified": False}
         assert "0" in data["windows"]
 
     def test_returns_existing_entry(self):
         data = {"windows": {"0": {"panes": [{"id": "%1"}], "user_modified": True}}}
-        wdata = _get_window_data(data, "0")
+        wdata = get_window_data(data, "0")
         assert wdata["user_modified"] is True
         assert len(wdata["panes"]) == 1
 
     def test_creates_windows_dict_if_missing(self):
         data = {}
-        wdata = _get_window_data(data, "1")
+        wdata = get_window_data(data, "1")
         assert "windows" in data
         assert "1" in data["windows"]
         assert wdata["panes"] == []

@@ -35,7 +35,7 @@ def registry_path(session: str) -> Path:
     return registry_dir() / f"{base_session_name(session)}.json"
 
 
-def _get_window_data(data: dict, window: str) -> dict:
+def get_window_data(data: dict, window: str) -> dict:
     """Return the window entry for *window*, creating it if absent."""
     windows = data.setdefault("windows", {})
     if window not in windows:
@@ -84,7 +84,7 @@ def register_pane(session: str, window: str, pane_id: str, role: str, cmd: str) 
     """Register a new pane in the registry."""
     _ensure_logging()
     data = load_registry(session)
-    wdata = _get_window_data(data, window)
+    wdata = get_window_data(data, window)
     order = max((p["order"] for p in wdata["panes"]), default=-1) + 1
     wdata["panes"].append({
         "id": pane_id,
@@ -135,7 +135,7 @@ def find_live_pane_by_role(session: str, role: str,
     data = load_registry(session)
 
     if window:
-        windows_to_search = {window: _get_window_data(data, window)}
+        windows_to_search = {window: get_window_data(data, window)}
     else:
         windows_to_search = data.get("windows", {})
 
@@ -174,16 +174,23 @@ def _reconcile_registry(session: str, window: str,
 
     qs = query_session or session
     data = load_registry(session)
-    wdata = _get_window_data(data, window)
+    wdata = get_window_data(data, window)
     live_panes = tmux_mod.get_pane_indices(qs, window)
     live_ids = {pid for pid, _ in live_panes}
 
-    # If we got zero live panes but the window has panes, the window
-    # probably doesn't exist (session was killed). Don't wipe.
+    # If we got zero live panes but the registry has panes, the window
+    # may have been destroyed.  Only skip if the entire session is gone
+    # (stale registry from a killed session).  If the session is still
+    # alive the window was destroyed (last pane killed) and we should
+    # report the panes as removed so callers can respawn the TUI.
     if not live_ids and wdata["panes"]:
-        _logger.info("reconcile: no live panes found for %s:%s, skipping "
-                     "(window may not exist)", session, window)
-        return []
+        if not tmux_mod.session_exists(qs):
+            _logger.info("reconcile: no live panes for %s:%s and session gone, skipping",
+                         session, window)
+            return []
+        _logger.info("reconcile: window %s gone but session %s alive, "
+                     "reporting %d pane(s) as removed", window, session,
+                     len(wdata["panes"]))
 
     removed = []
     surviving = []

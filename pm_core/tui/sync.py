@@ -2,7 +2,15 @@
 
 All functions take the app instance as the first parameter so they can
 access app state and call app methods (log_message, _update_display, etc.).
+
+Sync functions that call blocking I/O (GitHub API, git) run in a thread
+via run_in_executor.  To avoid race conditions with user actions that also
+read/write project.yaml, the thread operates on a deep copy of the data
+and never saves to disk — the main thread reloads and applies results.
 """
+
+import asyncio
+import copy
 
 from pm_core.paths import configure_logger
 from pm_core import store, guide, pr_sync
@@ -72,15 +80,27 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
             else pr_sync.MIN_BACKGROUND_SYNC_INTERVAL_SECONDS
         )
 
-        # Perform PR sync to detect merged PRs
-        result = pr_sync.sync_prs(
-            app._root,
-            app._data,
-            min_interval_seconds=min_interval,
-        )
+        # Run blocking sync in a thread so it doesn't freeze the UI.
+        # Use a deep copy so the thread doesn't mutate app._data, and
+        # save_state=False to avoid overwriting concurrent user changes.
+        data_copy = copy.deepcopy(app._data)
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None, lambda: pr_sync.sync_prs(
+                app._root,
+                data_copy,
+                min_interval_seconds=min_interval,
+                save_state=False,
+            ))
 
-        # Reload data after sync
+        # Reload from disk (picks up any concurrent user changes) and
+        # apply sync results (merged PRs) on the main thread.
         app._data = store.load(app._root)
+        if result.merged_prs:
+            for pr in app._data.get("prs") or []:
+                if pr["id"] in result.merged_prs:
+                    pr["status"] = "merged"
+            store.save(app._data, app._root)
         app._update_display()
 
         prs = app._data.get("prs") or []
@@ -132,11 +152,24 @@ async def startup_github_sync(app) -> None:
 
     try:
         app.log_message("Syncing with GitHub...")
-        result = pr_sync.sync_from_github(app._root, app._data, save_state=True)
+        # Run blocking HTTP call in a thread so it doesn't freeze the UI.
+        # Deep copy + save_state=False to avoid racing with user actions.
+        data_copy = copy.deepcopy(app._data)
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None, lambda: pr_sync.sync_from_github(app._root, data_copy, save_state=False))
 
         if result.synced and result.updated_count > 0:
-            # Reload data after sync
+            # Reload from disk and apply ALL status changes on the main thread
             app._data = store.load(app._root)
+            changed = False
+            for pr in app._data.get("prs") or []:
+                new_status = result.status_updates.get(pr["id"])
+                if new_status and pr.get("status") != new_status:
+                    pr["status"] = new_status
+                    changed = True
+            if changed:
+                store.save(app._data, app._root)
             app._update_display()
             app.log_message(f"GitHub sync: {result.updated_count} PR(s) updated")
         elif result.error:
