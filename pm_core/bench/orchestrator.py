@@ -42,8 +42,10 @@ class ExerciseResult:
     # Generated test code (stored for downstream analysis, e.g. pr-019)
     generated_test_code: str = ""
 
-    # Cost
-    tokens_used: int = 0
+    # Cost — separated so pr-018 can analyze tournament overhead independently
+    tournament_tokens: int = 0
+    baseline_tokens: int = 0
+    tokens_used: int = 0  # total (tournament + baseline)
     wall_clock_seconds: float = 0.0
 
     error: str | None = None
@@ -109,6 +111,8 @@ class BenchmarkRun:
                     "baseline_score": r.baseline_score,
                     "num_candidates": r.num_candidates,
                     "generated_test_code": r.generated_test_code,
+                    "tournament_tokens": r.tournament_tokens,
+                    "baseline_tokens": r.baseline_tokens,
                     "tokens_used": r.tokens_used,
                     "wall_clock_seconds": r.wall_clock_seconds,
                     "error": r.error,
@@ -187,14 +191,18 @@ def run_exercise_tournament(
         ref_result = execute_tests(exercise, best_candidate.code)
         result.tournament_score = ref_result.score
 
+        result.tournament_tokens = runner.metrics.total_tokens - tokens_before
+
         # Baseline: single pass, scored against reference tests
         if progress_callback:
             progress_callback("running baseline")
+        baseline_tokens_before = runner.metrics.total_tokens
         baseline_candidates = generate_candidates(
             exercise, runner, model, num_candidates=1
         )
         baseline_result = execute_tests(exercise, baseline_candidates[0].code)
         result.baseline_score = baseline_result.score
+        result.baseline_tokens = runner.metrics.total_tokens - baseline_tokens_before
 
     except ConnectionError as exc:
         result.error = f"Backend connection error: {exc}"
@@ -234,22 +242,22 @@ def run_benchmark(
             f"Model '{model}' not found. Available: {', '.join(model_ids)}"
         )
 
-    # Load exercises
+    # Load exercises — always load all, then filter uniformly
     try:
-        exercises = load_exercises(
-            language=languages[0] if languages and len(languages) == 1 else None,
-            slug=slugs[0] if slugs and len(slugs) == 1 else None,
-        )
+        exercises = load_exercises()
     except FileNotFoundError:
         raise FileNotFoundError(
             "Exercise cache not found. Run `pm bench exercises` first to download."
         ) from None
 
-    # Apply multi-language/slug filters if needed
-    if languages and len(languages) > 1:
-        exercises = [e for e in exercises if e.language in languages]
-    if slugs and len(slugs) > 1:
-        exercises = [e for e in exercises if e.slug in slugs]
+    if languages:
+        lang_set = set(languages)
+        exercises = [e for e in exercises if e.language in lang_set]
+    if slugs:
+        exercises = [
+            e for e in exercises
+            if any(s.lower() in e.slug.lower() for s in slugs)
+        ]
 
     if not exercises:
         raise ValueError("No exercises found matching the given filters.")

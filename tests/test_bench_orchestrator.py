@@ -50,6 +50,7 @@ class TestBenchmarkRun:
             ExerciseResult(language="python", slug="hello",
                            tournament_score=0.8, baseline_score=0.4,
                            generated_test_code="def test_hello(): pass",
+                           tournament_tokens=400, baseline_tokens=100,
                            tokens_used=500, wall_clock_seconds=5.0),
         ]
         d = run.to_dict()
@@ -60,6 +61,8 @@ class TestBenchmarkRun:
         assert len(d["results"]) == 1
         assert d["results"][0]["slug"] == "hello"
         assert d["results"][0]["generated_test_code"] == "def test_hello(): pass"
+        assert d["results"][0]["tournament_tokens"] == 400
+        assert d["results"][0]["baseline_tokens"] == 100
 
 
 class TestFormatResultsTable:
@@ -236,6 +239,38 @@ class TestRunExerciseTournament:
 
 
 class TestRunBenchmark:
+    def test_slug_filter_uses_substring_match(self):
+        """Verify slugs filter uses substring matching consistently."""
+        runner = mock.MagicMock(spec=Runner)
+        runner.list_models.return_value = [{"id": "m"}]
+        runner.metrics = CostMetrics()
+
+        hello_ex = Exercise(
+            language="python", slug="hello-world",
+            description="desc", starter_code={}, reference_tests={},
+            path=Path("/tmp/fake"),
+        )
+        leap_ex = Exercise(
+            language="go", slug="leap",
+            description="desc", starter_code={}, reference_tests={},
+            path=Path("/tmp/fake"),
+        )
+
+        with mock.patch("pm_core.bench.orchestrator.Runner.create", return_value=runner), \
+             mock.patch("pm_core.bench.orchestrator.load_exercises",
+                        return_value=[hello_ex, leap_ex]), \
+             mock.patch("pm_core.bench.orchestrator.run_exercise_tournament") as mock_run:
+            mock_run.return_value = ExerciseResult(language="python", slug="hello-world")
+
+            # "hello" should substring-match "hello-world"
+            run = run_benchmark("m", slugs=["hello"])
+            assert len(run.results) == 1
+
+            # Multiple slugs should also substring-match
+            mock_run.return_value = ExerciseResult(language="python", slug="hello-world")
+            run = run_benchmark("m", slugs=["hello", "lea"])
+            assert len(run.results) == 2
+
     def test_missing_exercise_cache_gives_friendly_error(self):
         runner = mock.MagicMock(spec=Runner)
         runner.list_models.return_value = [{"id": "m"}]
