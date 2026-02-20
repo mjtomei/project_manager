@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-f38005f
+  active_pr: pr-c11d04f
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-02-20T02:43:08.956779+00:00'
@@ -722,7 +722,7 @@ prs:
 - id: pr-b89ae16
   title: Miscellaneous TUI fixes and UX improvements
   branch: pm/pr-b89ae16-miscellaneous-tui-fixes-and-ux-improvements
-  status: in_review
+  status: merged
   depends_on: []
   description: 'A collection of small TUI fixes and UX improvements: remove Enter
     pane (superseded by e key), fix rebalance for non-default tmux windows, fix pr
@@ -748,6 +748,20 @@ prs:
     GitHub API calls must be restructured to do the external call first, then acquire
     the lock, load fresh state, merge results, and save. Lock timeout of 2 seconds
     with clear error message.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+- id: pr-c11d04f
+  plan: plan-003
+  title: Add notes field to PRs for post-start addendums
+  branch: pm/pr-c11d04f-add-notes-field-to-prs-for-post-start-addendums
+  status: pending
+  depends_on: []
+  description: 'Add a notes list field to PR entries in project.yaml for recording
+    addendums after work has begun. Each note is a timestamped string. Add pm pr note
+    CLI command to append/list/delete notes. Notes appear in: pr edit output, TUI
+    detail panel, generate_prompt, and generate_review_prompt. Append-only by default
+    with optional delete by index.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null

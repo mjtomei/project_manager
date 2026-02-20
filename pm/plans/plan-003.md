@@ -9,3 +9,11 @@ Support multiple users and processes safely accessing the same pm project state.
 - **tests**: Unit tests for `locked_update` — verify mutual exclusion (two threads, second blocks until first releases), verify timeout raises an error, verify the callback receives loaded data and save is called with the return value. Test that a concurrent writer during a slow callback gets correct final state (no lost updates). Integration test that runs two `pm pr edit` commands concurrently on different PRs and verifies both edits persist.
 - **files**: pm_core/store.py, pm_core/cli/pr.py, pm_core/cli/plan.py, pm_core/cli/helpers.py, pm_core/tui/pr_view.py, pm_core/pr_sync.py, pm_core/tui/sync.py, pm_core/guide.py
 - **depends_on**: Handle merging pm directory changes across clones
+
+---
+
+### PR: Add notes field to PRs for post-start addendums
+- **description**: Add a `notes` list field to PR entries in `project.yaml` for recording addendums after work has begun. Each note is a timestamped string (e.g. `{text: "...", added: "2026-02-20T..."}`). Add `pm pr note <pr-id> <text>` CLI command to append a note to a PR, and `pm pr note <pr-id> --list` to view existing notes. Notes must appear in: (1) `pm pr edit` interactive output alongside the description so the user sees the full picture, (2) the detail panel in the TUI (`detail_panel.py`) below the description, (3) `prompt_gen.generate_prompt` as a "## Notes" section after the task description so Claude has the latest context, and (4) `prompt_gen.generate_review_prompt` so reviewers see addendums too. The `pm pr list` output should indicate when a PR has notes (e.g. a note count or icon). Notes are append-only by default — editing or deleting individual notes can be done via `pm pr note <pr-id> --delete <index>`.
+- **tests**: Unit tests for note append, list, and delete operations on in-memory PR data. Test that `generate_prompt` and `generate_review_prompt` include notes when present and omit the section when empty. Test detail panel rendering with and without notes. Test `pm pr note` CLI command end-to-end with a temp project.yaml.
+- **files**: pm_core/cli/pr.py, pm_core/prompt_gen.py, pm_core/tui/detail_panel.py, pm_core/cli/helpers.py
+- **depends_on**:
