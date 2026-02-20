@@ -3,10 +3,10 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-3563708
+  active_pr: pr-017
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
-  last_pr_sync: '2026-02-19T23:48:36.288796+00:00'
+  last_pr_sync: '2026-02-20T00:12:09.912483+00:00'
 plans:
 - id: plan-001
   name: Import from existing repo
@@ -295,7 +295,7 @@ prs:
   agent_machine: spark-424d
   gh_pr: https://github.com/mjtomei/project_manager/pull/69
   gh_pr_number: 69
-  workdir: null
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-017-benchmark-orchestrator-with-tournament-s-012e3bc5
 - id: pr-018
   plan: plan-002
   title: Baseline measurement and analysis
