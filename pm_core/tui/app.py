@@ -456,6 +456,9 @@ class ProjectManagerApp(App):
         tree = self.query_one("#tech-tree", TechTree)
         tree.update_plans(self._data.get("plans") or [])
         tree.update_prs(self._data.get("prs") or [])
+        active_pr = self._data.get("project", {}).get("active_pr")
+        if active_pr:
+            tree.select_pr(active_pr)
         self._update_filter_status()
 
     def _update_filter_status(self) -> None:

@@ -85,6 +85,14 @@ class TechTree(Widget):
         self._recompute()
         self.refresh(layout=True)
 
+    def select_pr(self, pr_id: str) -> None:
+        """Move the cursor to the given PR if it exists in the tree."""
+        if pr_id and pr_id in self._ordered_ids:
+            idx = self._ordered_ids.index(pr_id)
+            if idx != self.selected_index:
+                self.selected_index = idx
+                self.refresh()
+
     def update_plans(self, plans: list[dict]) -> None:
         """Store plan name mapping for label rendering."""
         self._plan_map = {p["id"]: p for p in plans if p.get("id")}
