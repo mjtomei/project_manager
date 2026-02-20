@@ -78,12 +78,13 @@ def compute_layers(prs: list[dict]) -> list[list[str]]:
             return layers_map[pr_id]
         pr = pr_map.get(pr_id)
         if not pr:
-            return 0
+            return -1
         deps = pr.get("depends_on") or []
-        if not deps:
+        visible_dep_layers = [get_layer(d) for d in deps if d in pr_map]
+        if not visible_dep_layers:
             layers_map[pr_id] = 0
             return 0
-        layer = max(get_layer(d) for d in deps) + 1
+        layer = max(visible_dep_layers) + 1
         layers_map[pr_id] = layer
         return layer
 

@@ -1,3 +1,11 @@
 # Multiuser Support
 
-<!-- Describe the plan here -->
+Support multiple users and processes safely accessing the same pm project state.
+
+## PRs
+
+### PR: Add file locking to project.yaml read-modify-write operations
+- **description**: Add advisory file locking to `store.py` so that concurrent processes (TUI background sync, CLI commands, multiple users) cannot corrupt `project.yaml` with lost-update races. Introduce a `locked_update(root, fn)` context-manager or helper in `store.py` that acquires an `fcntl.flock` exclusive lock on a `project.yaml.lock` lockfile, calls `load()`, passes the data to `fn` which mutates and returns it, then calls `save()`, and finally releases the lock. All existing read-modify-write call sites (CLI commands in `cli/pr.py`, `cli/plan.py`, `cli/helpers.py`, TUI handlers in `tui/pr_view.py`, sync operations in `pr_sync.py` and `tui/sync.py`, guide steps in `guide.py`) must be migrated to use `locked_update` instead of bare `load()`/`save()` pairs. **Critical design constraint**: the lock must only be held during the actual file I/O and in-memory mutation — never across network calls. Operations that interleave GitHub API calls (e.g. `pr start` creating a draft PR, `pr done` calling `gh pr ready`, `sync_from_github` querying PR status) must be restructured to: (1) do the external call first without holding the lock, (2) acquire the lock, (3) load fresh state, (4) merge the external result into the fresh state, (5) save and release. This prevents a slow or hung GitHub call from blocking all other pm operations. The lock timeout should be short (e.g. 2 seconds) with a clear error message if acquisition fails, so users are never silently stuck. Read-only operations (`load()` without a subsequent `save()`) do not need locking.
+- **tests**: Unit tests for `locked_update` — verify mutual exclusion (two threads, second blocks until first releases), verify timeout raises an error, verify the callback receives loaded data and save is called with the return value. Test that a concurrent writer during a slow callback gets correct final state (no lost updates). Integration test that runs two `pm pr edit` commands concurrently on different PRs and verifies both edits persist.
+- **files**: pm_core/store.py, pm_core/cli/pr.py, pm_core/cli/plan.py, pm_core/cli/helpers.py, pm_core/tui/pr_view.py, pm_core/pr_sync.py, pm_core/tui/sync.py, pm_core/guide.py
+- **depends_on**: Handle merging pm directory changes across clones
