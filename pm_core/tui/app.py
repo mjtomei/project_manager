@@ -293,24 +293,31 @@ class ProjectManagerApp(App):
         # sync) to after the first frame.
         self._load_state()
         self._update_orientation()
-        self.call_after_refresh(self._deferred_startup)
+        # Background sync interval: 5 minutes for automatic PR sync
+        self._sync_timer = self.set_interval(300, self._background_sync)
+        # Run heavier startup tasks (heal_registry, tmux bindings) in a
+        # background thread so they don't block input processing.
+        self.run_worker(self._deferred_startup(), exclusive=False)
 
-    def _deferred_startup(self) -> None:
-        """Run heavier startup tasks after the first frame is rendered."""
+    async def _deferred_startup(self) -> None:
+        """Run heavier startup tasks in a background worker."""
+        import asyncio
+        # Run blocking subprocess work off the event loop
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self._deferred_startup_sync)
+        # These must run on the main thread (touch Textual state)
+        self.run_worker(sync_mod.startup_github_sync(self))
+        self._capture_frame("mount")
+
+    def _deferred_startup_sync(self) -> None:
+        """Blocking startup tasks run in a thread."""
         pane_ops.heal_registry(self._session_name)
-        # Re-register tmux bindings so they survive TUI restarts
         try:
             if self._session_name:
                 from pm_core.cli.session import _register_tmux_bindings
                 _register_tmux_bindings(self._session_name)
         except Exception:
             pass
-        # Background sync interval: 5 minutes for automatic PR sync
-        self._sync_timer = self.set_interval(300, self._background_sync)
-        # Do a full GitHub sync on startup (non-blocking)
-        self.run_worker(sync_mod.startup_github_sync(self))
-        # Capture initial frame
-        self._capture_frame("mount")
 
     def on_resize(self) -> None:
         """Update layout orientation when terminal is resized."""
