@@ -619,8 +619,11 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False) -> No
             if diff_pane:
                 pane_registry.register_pane(pm_session, review_win_id, diff_pane, "review-diff", "diff-shell")
 
-        # Reset user_modified (after-split-window hook sets it before
-        # panes are registered) and rebalance with mobile zoom.
+        # Reset user_modified and rebalance.  This mirrors the same
+        # pattern used in pane_ops.launch_pane() and
+        # pane_layout._respawn_tui() — any code path that creates panes
+        # must reset user_modified (the after-split-window hook sets it
+        # before panes are registered) and then rebalance.
         if review_win_id:
             reg = pane_registry.load_registry(pm_session)
             wdata = pane_registry._get_window_data(reg, review_win_id)

@@ -442,7 +442,9 @@ def _respawn_tui(session: str, window: str) -> None:
             "order": min_order,
             "cmd": "pm _tui",
         })
-        # Reset user_modified (after-split-window hook may have set it)
+        # Reset user_modified — same pattern as pane_ops.launch_pane()
+        # and cli/pr.py review window (after-split-window hook may have
+        # set it before panes are registered).  Caller rebalances.
         wdata["user_modified"] = False
         save_registry(session, data)
         _logger.info("_respawn_tui: created pane %s order=%d", pane_id, min_order)

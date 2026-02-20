@@ -147,6 +147,8 @@ def launch_pane(app, cmd: str, role: str, fresh: bool = False) -> None:
         # The after-split-window hook fires handle_pane_opened which sets
         # user_modified=True (because the pane wasn't registered yet when the
         # hook ran).  Reset it so rebalance doesn't skip.
+        # NOTE: this register → reset → rebalance pattern is also used in
+        # cli/pr.py (review window) and pane_layout._respawn_tui().
         data = pane_registry.load_registry(session)
         wdata = pane_registry._get_window_data(data, window)
         wdata["user_modified"] = False
