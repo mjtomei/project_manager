@@ -470,20 +470,19 @@ def handle_any_pane_closed() -> None:
             continue
 
         for window_id, wdata in list(data.get("windows", {}).items()):
-            if wdata.get("user_modified"):
-                continue
             # Snapshot TUI pane IDs before reconciliation removes them
             tui_ids = {p["id"] for p in wdata.get("panes", [])
                        if p.get("role") == "tui"}
             removed = _reconcile_registry(session, window_id)
             if removed:
-                _logger.info("handle_any_pane_closed: session=%s window=%s removed=%s, rebalancing",
+                _logger.info("handle_any_pane_closed: session=%s window=%s removed=%s",
                              session, window_id, removed)
-                # If the TUI pane was killed and other panes survive, respawn it
+                # Always respawn TUI regardless of user_modified
                 if tui_ids & set(removed):
                     _logger.info("handle_any_pane_closed: TUI pane was killed, respawning")
                     _respawn_tui(session, window_id)
-                rebalance(session, window_id)
+                if not wdata.get("user_modified"):
+                    rebalance(session, window_id)
 
 
 def handle_pane_opened(session: str, window: str, pane_id: str) -> None:
