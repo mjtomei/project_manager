@@ -811,11 +811,14 @@ prs:
   depends_on: []
   description: 'Add a mode where pm stays in a review loop until Claude reports a
     pass. The loop repeatedly runs the review prompt and watches for the done/pass
-    message, similar to wiggum loops. Options: stop when only non-blocking fixes remain,
-    or continue until no proposed fixes. The TUI should have: a way to manually disable/stop
-    the loop, an indicator that the loop is running, and the latest review verdict.
-    Build on the existing ''z d'' and review window functionality so the user can
-    interrupt at any time. Use a custom prompt that watches for the done message.'
+    message, similar to wiggum loops. Add a new review verdict PASS_WITH_SUGGESTIONS
+    for when there are only non-blocking changes remaining — distinct from PASS (no
+    changes needed) and NEEDS_WORK (blocking issues). Options: stop the loop on PASS_WITH_SUGGESTIONS
+    (default) or continue until full PASS with no proposed fixes. The TUI should have:
+    a way to manually disable/stop the loop, an indicator that the loop is running,
+    and the latest review verdict. Build on the existing ''z d'' and review window
+    functionality so the user can interrupt at any time. Use a custom prompt that
+    watches for the done message.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
