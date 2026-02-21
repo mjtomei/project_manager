@@ -126,8 +126,7 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
             if tag:
                 base_ref = tag
             else:
-                result = git_ops.run_git("branch", "-r", "--list", "origin/master", cwd=work_path, check=False)
-                base_ref = "master" if result.stdout.strip() else "master"
+                base_ref = "master"
 
             if tag:
                 click.echo(f"Checking out tag {tag}...")

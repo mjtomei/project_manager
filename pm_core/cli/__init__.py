@@ -311,7 +311,8 @@ def _detect_git_repo() -> dict | None:
         return None
 
     branch_result = git_ops.run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=cwd, check=False)
-    branch = branch_result.stdout.strip() if branch_result.returncode == 0 else "master"
+    branch_name = branch_result.stdout.strip() if branch_result.returncode == 0 else ""
+    branch = branch_name if branch_name and branch_name != "HEAD" else "master"
 
     remotes = git_ops.list_remotes(cwd)
     if not remotes:
