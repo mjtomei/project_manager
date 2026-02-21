@@ -341,6 +341,9 @@ def session(ctx, share_global, share_group, start_dir, print_connect):
     Other users join with the same flag plus --dir pointing to the original
     user's project directory.
     """
+    # Always propagate share mode to env so subcommands (tag, kill, etc.)
+    # see the same --global/--group context as the group command.
+    _set_share_mode_env(share_global, share_group)
     if ctx.invoked_subcommand is not None:
         return
     if print_connect:
@@ -380,7 +383,10 @@ def session_name_cmd():
               help="Compute tag for a group-shared session")
 def session_tag_cmd(share_global, share_group):
     """Print the computed session tag for the current directory."""
-    _set_share_mode_env(share_global, share_group)
+    # Only override env if the subcommand itself specified flags;
+    # otherwise inherit from the parent group (pm session --global tag).
+    if share_global or share_group:
+        _set_share_mode_env(share_global, share_group)
     from pm_core.paths import get_session_tag
     click.echo(get_session_tag())
 
@@ -398,10 +404,12 @@ def session_kill(share_global, share_group, start_dir):
         click.echo("tmux is not installed.", err=True)
         raise SystemExit(1)
 
-    # Set PM_SHARE_MODE so get_session_tag produces distinct hashes per mode
-    _set_share_mode_env(share_global, share_group)
+    # Only override env if kill subcommand specified flags;
+    # otherwise inherit from parent group (pm session --global kill).
+    if share_global or share_group:
+        _set_share_mode_env(share_global, share_group)
 
-    is_shared = share_global or share_group is not None
+    is_shared = share_global or share_group is not None or os.environ.get("PM_SHARE_MODE")
     socket_path: str | None = None
     if is_shared:
         from pm_core.paths import get_session_tag, shared_socket_path
