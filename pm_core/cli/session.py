@@ -4,6 +4,7 @@ Registers the ``session`` group and all subcommands, plus internal
 pane/window management commands and session registry commands.
 """
 
+import functools
 import os
 import shlex
 import subprocess
@@ -25,6 +26,27 @@ from pm_core.cli.helpers import (
     _set_share_mode_env,
     state_root,
 )
+
+
+def _share_mode_options(f):
+    """Add --global/--group options that set PM_SHARE_MODE when specified.
+
+    Used on both the session group and subcommands (tag, kill) so the
+    flags work in either position: ``pm session --global tag`` or
+    ``pm session tag --global``.  Only overrides the env var if the
+    decorated command's own flags are set, so parent-group values
+    propagate through to subcommands that don't specify them.
+    """
+    @click.option("--global", "share_global", is_flag=True, default=False,
+                  help="Target a globally shared session")
+    @click.option("--group", "share_group", type=str, default=None,
+                  help="Target a group-shared session")
+    @functools.wraps(f)
+    def wrapper(*args, share_global=False, share_group=None, **kwargs):
+        if share_global or share_group:
+            _set_share_mode_env(share_global, share_group)
+        return f(*args, **kwargs)
+    return wrapper
 
 
 def _register_tmux_bindings(session_name: str) -> None:
@@ -341,8 +363,8 @@ def session(ctx, share_global, share_group, start_dir, print_connect):
     Other users join with the same flag plus --dir pointing to the original
     user's project directory.
     """
-    # Always propagate share mode to env so subcommands (tag, kill, etc.)
-    # see the same --global/--group context as the group command.
+    # Always propagate share mode to env so subcommands (tag, kill, name,
+    # mobile, etc.) inherit the same --global/--group context.
     _set_share_mode_env(share_global, share_group)
     if ctx.invoked_subcommand is not None:
         return
@@ -350,7 +372,6 @@ def session(ctx, share_global, share_group, start_dir, print_connect):
         # Check PM_TMUX_SOCKET (set inside shared sessions) or compute from flags
         sp = os.environ.get("PM_TMUX_SOCKET")
         if not sp and (share_global or share_group):
-            _set_share_mode_env(share_global, share_group)
             from pm_core.paths import get_session_tag, shared_socket_path
             tag = get_session_tag(start_path=Path(start_dir) if start_dir else None)
             if tag:
@@ -377,39 +398,24 @@ def session_name_cmd():
     click.echo(_get_session_name_for_cwd())
 
 @session.command("tag")
-@click.option("--global", "share_global", is_flag=True, default=False,
-              help="Compute tag for a globally shared session")
-@click.option("--group", "share_group", type=str, default=None,
-              help="Compute tag for a group-shared session")
-def session_tag_cmd(share_global, share_group):
+@_share_mode_options
+def session_tag_cmd():
     """Print the computed session tag for the current directory."""
-    # Only override env if the subcommand itself specified flags;
-    # otherwise inherit from the parent group (pm session --global tag).
-    if share_global or share_group:
-        _set_share_mode_env(share_global, share_group)
     from pm_core.paths import get_session_tag
     click.echo(get_session_tag())
 
 
 @session.command("kill")
-@click.option("--global", "share_global", is_flag=True, default=False,
-              help="Target a globally shared session")
-@click.option("--group", "share_group", type=str, default=None,
-              help="Target a group-shared session")
+@_share_mode_options
 @click.option("--dir", "start_dir", type=click.Path(exists=True, file_okay=False),
               default=None, help="Project directory of the shared session")
-def session_kill(share_global, share_group, start_dir):
+def session_kill(start_dir):
     """Kill the pm tmux session for this project."""
     if not tmux_mod.has_tmux():
         click.echo("tmux is not installed.", err=True)
         raise SystemExit(1)
 
-    # Only override env if kill subcommand specified flags;
-    # otherwise inherit from parent group (pm session --global kill).
-    if share_global or share_group:
-        _set_share_mode_env(share_global, share_group)
-
-    is_shared = share_global or share_group is not None or os.environ.get("PM_SHARE_MODE")
+    is_shared = bool(os.environ.get("PM_SHARE_MODE"))
     socket_path: str | None = None
     if is_shared:
         from pm_core.paths import get_session_tag, shared_socket_path
