@@ -3207,6 +3207,168 @@ OVERALL: [PASS/FAIL]
 """
 
 
+INIT_SCENARIOS_TEST = """\
+You are testing the pm init flow across different project types. Your goal is to
+create isolated temporary repos, run `pm init` in each, verify the results, and
+then clean everything up completely.
+
+## Background
+
+`pm init` initializes a project management directory (pm/) for a target codebase.
+It auto-detects the git remote to determine the backend (github, vanilla, local)
+and sets up project.yaml, .gitignore entries, and the guide state.
+
+The TUI guide starts at the `no_project` step and advances to `initialized` after
+init completes. The guide shows a progress widget with step markers.
+
+## Available Tools
+
+You have access to these commands:
+- `pm tui view` - See current TUI state
+- `pm tui send <keys>` - Send keystrokes to TUI
+- `pm tui frames` - View recently captured frames
+- `pm tui clear-frames` - Clear captured frames
+- Standard shell commands (git, cat, ls, etc.)
+
+## Test Procedure
+
+IMPORTANT: All test repos must be created in /tmp and fully cleaned up at the end.
+Record every temp directory you create so you can delete them in cleanup.
+
+### Scenario A: Existing repo with GitHub remote
+
+1. Create temp dir and init a git repo:
+   ```
+   REPO_A=$(mktemp -d /tmp/pm-test-init-a-XXXXXX)
+   cd "$REPO_A"
+   git init
+   git commit --allow-empty -m "initial"
+   git remote add origin https://github.com/test-org/test-repo.git
+   ```
+
+2. Run init:
+   ```
+   pm init --no-import --dir "$REPO_A/pm"
+   ```
+
+3. Verify:
+   - `$REPO_A/pm/project.yaml` exists
+   - project.yaml has `backend: github`
+   - project.yaml has `repo:` matching the remote URL or owner/repo format
+   - project.yaml has a valid `base_branch` (main or master)
+   - `$REPO_A/pm/plans/` directory exists
+   - `$REPO_A/.gitignore` has pm-related entries (like `.guide-state`, `notes.txt`)
+
+### Scenario B: Local repo (no remote)
+
+1. Create temp dir and init a git repo with no remote:
+   ```
+   REPO_B=$(mktemp -d /tmp/pm-test-init-b-XXXXXX)
+   cd "$REPO_B"
+   git init
+   git commit --allow-empty -m "initial"
+   ```
+
+2. Run init:
+   ```
+   pm init --no-import --dir "$REPO_B/pm"
+   ```
+
+3. Verify:
+   - `$REPO_B/pm/project.yaml` exists
+   - project.yaml has `backend: local`
+   - project.yaml has `repo:` set to the absolute path of the repo
+   - `$REPO_B/pm/plans/` directory exists
+
+### Scenario C: Empty repo (no commits)
+
+1. Create temp dir and init a bare git repo (no commits):
+   ```
+   REPO_C=$(mktemp -d /tmp/pm-test-init-c-XXXXXX)
+   cd "$REPO_C"
+   git init
+   ```
+
+2. Run init:
+   ```
+   pm init --no-import --dir "$REPO_C/pm"
+   ```
+
+3. Verify:
+   - `$REPO_C/pm/project.yaml` exists
+   - project.yaml has `backend: local` (no remote, no commits)
+   - project.yaml has `base_branch` set to "main" (default for empty repos)
+   - `$REPO_C/pm/plans/` directory exists
+
+### Scenario D: Guide state detection
+
+After running init for Scenario A (or reusing the directory):
+
+1. Check guide state detection:
+   ```
+   cd "$REPO_A"
+   python3 -c "
+   from pm_core.guide import detect_state, resolve_guide_step
+   from pathlib import Path
+   root = Path('$REPO_A/pm')
+   print('detect_state:', detect_state(root))
+   print('resolve:', resolve_guide_step(root))
+   "
+   ```
+
+2. Verify:
+   - `detect_state()` returns `"initialized"` (project exists but no plans yet)
+   - `resolve_guide_step()` returns state `"initialized"` (or `"no_project"` if
+     guide hasn't been started yet — either is acceptable, note which one)
+
+### Scenario E: TUI guide display (optional — skip if TUI session not available)
+
+If the current TUI session is accessible:
+
+1. Note the current TUI state with `pm tui view`
+2. This is informational only — verify the guide progress widget is visible
+   if the session is still in guide setup steps
+3. Do NOT modify the current session's state
+
+## Cleanup
+
+CRITICAL: You MUST clean up all temporary directories, regardless of test outcome:
+
+```
+rm -rf "$REPO_A" "$REPO_B" "$REPO_C"
+```
+
+Verify cleanup:
+```
+ls /tmp/pm-test-init-* 2>/dev/null && echo "CLEANUP FAILED" || echo "Cleanup OK"
+```
+
+## Reporting
+
+After running your tests, report your findings:
+
+```
+TEST RESULTS
+============
+Scenario A (GitHub remote): [PASS/FAIL] - <brief description>
+Scenario B (Local repo):    [PASS/FAIL] - <brief description>
+Scenario C (Empty repo):    [PASS/FAIL] - <brief description>
+Scenario D (Guide state):   [PASS/FAIL] - <brief description>
+Scenario E (TUI guide):     [PASS/FAIL/SKIPPED] - <brief description>
+
+Details:
+<any issues found, unexpected behavior, or notable observations>
+
+Cleanup: [PASS/FAIL]
+<confirm all temp directories removed>
+
+OVERALL: [PASS/FAIL]
+```
+
+Use PASS if behavior matches expected, FAIL if there are bugs or unexpected behavior.
+"""
+
+
 ALL_TESTS = {
     "pane-layout": {
         "name": "Pane Layout Refresh",
@@ -3297,6 +3459,11 @@ ALL_TESTS = {
         "name": "TUI Log Viewer",
         "prompt": TUI_LOG_VIEWER_TEST,
         "description": "Test L key opens log pane, verify content and pane lifecycle",
+    },
+    "init-scenarios": {
+        "name": "Init Scenarios",
+        "prompt": INIT_SCENARIOS_TEST,
+        "description": "Test pm init across repo types (GitHub, local, empty) with full isolation",
     },
 }
 
