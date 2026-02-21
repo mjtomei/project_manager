@@ -278,9 +278,11 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
                 else:
                     # New or edited note — generate new ID and timestamp
                     note_id = store.generate_note_id(pr_id, text, existing_note_ids)
-                    created_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-                    new_notes.append({"id": note_id, "text": text, "created_at": created_at})
+                    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                    new_notes.append({"id": note_id, "text": text, "created_at": now, "last_edited": now})
                     existing_note_ids.add(note_id)
+            # Sort by last_edited so most recently touched notes appear last
+            new_notes.sort(key=lambda n: n.get("last_edited") or n.get("created_at", ""))
             pr_entry["notes"] = new_notes
             changes.append("notes updated")
 
@@ -1072,7 +1074,7 @@ def pr_note_add(pr_id: str, text: str):
     note_id = store.generate_note_id(pr_id, text, existing_ids)
     created_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    notes.append({"id": note_id, "text": text, "created_at": created_at})
+    notes.append({"id": note_id, "text": text, "created_at": created_at, "last_edited": created_at})
     pr_entry["notes"] = notes
 
     save_and_push(data, root, f"pm: note on {pr_id}")
