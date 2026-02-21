@@ -3242,6 +3242,8 @@ Record every temp directory you create so you can delete them in cleanup.
    REPO_A=$(mktemp -d /tmp/pm-test-init-a-XXXXXX)
    cd "$REPO_A"
    git init
+   git config user.email "test@test.com"
+   git config user.name "Test"
    git commit --allow-empty -m "initial"
    git remote add origin https://github.com/test-org/test-repo.git
    ```
@@ -3251,7 +3253,7 @@ Record every temp directory you create so you can delete them in cleanup.
    pm init --no-import --dir "$REPO_A/pm"
    ```
 
-3. Verify:
+3. Verify init results:
    - `$REPO_A/pm/project.yaml` exists
    - project.yaml has `backend: github`
    - project.yaml has `repo:` matching the remote URL or owner/repo format
@@ -3259,13 +3261,27 @@ Record every temp directory you create so you can delete them in cleanup.
    - `$REPO_A/pm/plans/` directory exists
    - `$REPO_A/.gitignore` has pm-related entries (like `.guide-state`, `notes.txt`)
 
-### Scenario B: Local repo (no remote)
+4. Verify commands work after init:
+   ```
+   cd "$REPO_A"
+   pm pr add --title "Test PR" --description "Test" --dir "$REPO_A/pm"
+   pm pr list --dir "$REPO_A/pm"
+   ```
+   - `pm pr add` should succeed (exit code 0)
+   - `pm pr list` should show the test PR
+
+### Scenario B: Notes-only repo (no remote)
+
+This represents a "notes-only" use case — a local repo with no remote, used
+purely for local project tracking.
 
 1. Create temp dir and init a git repo with no remote:
    ```
    REPO_B=$(mktemp -d /tmp/pm-test-init-b-XXXXXX)
    cd "$REPO_B"
    git init
+   git config user.email "test@test.com"
+   git config user.name "Test"
    git commit --allow-empty -m "initial"
    ```
 
@@ -3274,11 +3290,19 @@ Record every temp directory you create so you can delete them in cleanup.
    pm init --no-import --dir "$REPO_B/pm"
    ```
 
-3. Verify:
+3. Verify init results:
    - `$REPO_B/pm/project.yaml` exists
    - project.yaml has `backend: local`
    - project.yaml has `repo:` set to the absolute path of the repo
    - `$REPO_B/pm/plans/` directory exists
+
+4. Verify commands work after init:
+   ```
+   cd "$REPO_B"
+   pm pr add --title "Notes PR" --description "Test" --dir "$REPO_B/pm"
+   pm pr list --dir "$REPO_B/pm"
+   ```
+   - Both commands should succeed with a local backend
 
 ### Scenario C: Empty repo (no commits)
 
@@ -3287,6 +3311,8 @@ Record every temp directory you create so you can delete them in cleanup.
    REPO_C=$(mktemp -d /tmp/pm-test-init-c-XXXXXX)
    cd "$REPO_C"
    git init
+   git config user.email "test@test.com"
+   git config user.name "Test"
    ```
 
 2. Run init:
@@ -3294,32 +3320,45 @@ Record every temp directory you create so you can delete them in cleanup.
    pm init --no-import --dir "$REPO_C/pm"
    ```
 
-3. Verify:
+3. Verify init results:
    - `$REPO_C/pm/project.yaml` exists
    - project.yaml has `backend: local` (no remote, no commits)
    - project.yaml has `base_branch` set to "main" (default for empty repos)
    - `$REPO_C/pm/plans/` directory exists
 
+4. Verify commands work after init (this catches bug #8 — commands broken
+   with bare/empty git backends):
+   ```
+   cd "$REPO_C"
+   pm pr add --title "Empty repo PR" --description "Test" --dir "$REPO_C/pm"
+   pm pr list --dir "$REPO_C/pm"
+   ```
+   - Both commands should succeed even with no commits in the repo
+   - If any command fails, note the error — this is a known bug area
+
 ### Scenario D: Guide state detection
 
-After running init for Scenario A (or reusing the directory):
+After running init for each scenario above, verify guide state detection works:
 
-1. Check guide state detection:
+1. Check guide state for each repo:
    ```
-   cd "$REPO_A"
    python3 -c "
    from pm_core.guide import detect_state, resolve_guide_step
    from pathlib import Path
-   root = Path('$REPO_A/pm')
-   print('detect_state:', detect_state(root))
-   print('resolve:', resolve_guide_step(root))
+   for label, path in [('A-github', '$REPO_A/pm'), ('B-local', '$REPO_B/pm'), ('C-empty', '$REPO_C/pm')]:
+       root = Path(path)
+       if root.exists():
+           print(f'{label}: detect={detect_state(root)}, resolve={resolve_guide_step(root)}')
+       else:
+           print(f'{label}: pm dir not found')
    "
    ```
 
 2. Verify:
-   - `detect_state()` returns `"initialized"` (project exists but no plans yet)
-   - `resolve_guide_step()` returns state `"initialized"` (or `"no_project"` if
-     guide hasn't been started yet — either is acceptable, note which one)
+   - All three should return `"initialized"` from `detect_state()` (project
+     exists but no plans yet)
+   - `resolve_guide_step()` should return `"initialized"` or `"no_project"`
+     depending on whether guide tracking has been started — note which
 
 ### Scenario E: TUI guide display (optional — skip if TUI session not available)
 
@@ -3350,11 +3389,20 @@ After running your tests, report your findings:
 ```
 TEST RESULTS
 ============
-Scenario A (GitHub remote): [PASS/FAIL] - <brief description>
-Scenario B (Local repo):    [PASS/FAIL] - <brief description>
-Scenario C (Empty repo):    [PASS/FAIL] - <brief description>
-Scenario D (Guide state):   [PASS/FAIL] - <brief description>
-Scenario E (TUI guide):     [PASS/FAIL/SKIPPED] - <brief description>
+Scenario A (GitHub remote):
+  Init:     [PASS/FAIL] - project.yaml correct, backend=github
+  Commands: [PASS/FAIL] - pm pr add/list work after init
+
+Scenario B (Notes-only / local):
+  Init:     [PASS/FAIL] - project.yaml correct, backend=local
+  Commands: [PASS/FAIL] - pm pr add/list work after init
+
+Scenario C (Empty repo / no commits):
+  Init:     [PASS/FAIL] - project.yaml correct, backend=local, base_branch=main
+  Commands: [PASS/FAIL] - pm pr add/list work after init (bug #8 area)
+
+Scenario D (Guide state):   [PASS/FAIL] - detect_state/resolve correct for all repos
+Scenario E (TUI guide):     [PASS/FAIL/SKIPPED] - TUI guide display check
 
 Details:
 <any issues found, unexpected behavior, or notable observations>
