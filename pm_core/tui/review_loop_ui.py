@@ -200,8 +200,8 @@ def _poll_loop_state(app) -> None:
 
     # Refresh detail panel to show updated iteration counts / verdicts
     _refresh_detail_panel(app)
-    # Refresh status bar to show/hide loop count
-    app._update_status_bar()
+    # Refresh tech tree to update ⟳N markers on PR nodes
+    _refresh_tech_tree(app)
 
     # Announce completed loops
     for state in newly_done:
@@ -234,5 +234,15 @@ def _refresh_detail_panel(app) -> None:
         from pm_core.tui.detail_panel import DetailPanel
         detail = app.query_one("#detail-panel", DetailPanel)
         detail.refresh()
+    except Exception:
+        pass
+
+
+def _refresh_tech_tree(app) -> None:
+    """Refresh the tech tree so ⟳N markers update on PR nodes."""
+    try:
+        from pm_core.tui.tech_tree import TechTree
+        tree = app.query_one("#tech-tree", TechTree)
+        tree.refresh()
     except Exception:
         pass

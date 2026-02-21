@@ -462,12 +462,6 @@ class ProjectManagerApp(App):
                 hidden.append("closed")
             if hidden:
                 filter_text = "hide " + "+".join(hidden)
-        # Build review loop summary for status bar
-        active_loops = [s for s in self._review_loops.values() if s.running]
-        review_loop_text = ""
-        if active_loops:
-            review_loop_text = f"[bold cyan]⟳ {len(active_loops)} review loop{'s' if len(active_loops) > 1 else ''}[/]"
-
         status_bar = self.query_one("#status-bar", StatusBar)
         status_bar.update_status(
             project.get("name", "???"),
@@ -476,7 +470,6 @@ class ProjectManagerApp(App):
             pr_count=len(prs),
             filter_text=filter_text,
             show_assist=not get_global_setting("hide-assist"),
-            review_loop=review_loop_text,
         )
 
     def _update_display(self) -> None:

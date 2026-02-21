@@ -23,8 +23,7 @@ class StatusBar(Static):
 
     def update_status(self, project_name: str, repo: str, sync_state: str,
                        pr_count: int = 0, filter_text: str = "",
-                       show_assist: bool = False,
-                       review_loop: str = "") -> None:
+                       show_assist: bool = False) -> None:
         sync_icons = {
             "synced": "[green]synced[/green]",
             "pulling": "[yellow]pulling...[/yellow]",
@@ -37,8 +36,7 @@ class StatusBar(Static):
         pr_info = f"[bold]{pr_count}[/bold] PRs" if pr_count else ""
         filter_display = f"    [dim]filter:[/dim] [italic]{filter_text}[/italic]" if filter_text else ""
         assist_display = "    [dim]\\[H] Assist[/dim]" if show_assist else ""
-        loop_display = f"    {review_loop}" if review_loop else ""
-        self.update(f" Project: [bold]{project_name}[/bold]    {pr_info}{filter_display}{loop_display}    repo: [cyan]{safe_repo}[/cyan]    {sync_display}{assist_display}")
+        self.update(f" Project: [bold]{project_name}[/bold]    {pr_info}{filter_display}    repo: [cyan]{safe_repo}[/cyan]    {sync_display}{assist_display}")
 
 
 class LogLine(Static):

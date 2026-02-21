@@ -158,6 +158,21 @@ class TechTree(Widget):
             return False
         return self._ordered_ids[self.selected_index].startswith("_hidden:")
 
+    def _get_loop_marker(self, pr_id: str) -> str:
+        """Return a marker string if a review loop is active for this PR."""
+        try:
+            loops = self.app._review_loops
+            state = loops.get(pr_id)
+            if not state:
+                return ""
+            if state.running:
+                return f"⟳{state.iteration}"
+            if state.latest_verdict:
+                return ""  # done loops don't need a marker in the tree
+        except Exception:
+            pass
+        return ""
+
     def get_content_width(self, container, viewport):
         if not self._node_positions:
             return 40
@@ -350,6 +365,10 @@ class TechTree(Widget):
                 title = title[:max_title_len - 1] + "…"  # Unicode ellipsis
             title_line = f"{side} {title:<{NODE_W - 4}} {side}"
             status_text = f"{icon} {status}"
+            # Show review loop marker if a loop is active for this PR
+            loop_marker = self._get_loop_marker(pr_id)
+            if loop_marker:
+                status_text += f" {loop_marker}"
             machine = pr.get("agent_machine")
             if machine:
                 avail = NODE_W - 4 - len(status_text) - 1
