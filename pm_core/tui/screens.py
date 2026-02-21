@@ -132,6 +132,8 @@ class HelpScreen(ModalScreen):
         Binding("q", "dismiss", "Close"),
         Binding("j", "scroll_down", "Scroll down", show=False),
         Binding("k", "scroll_up", "Scroll up", show=False),
+        Binding("J", "page_down", "Page down", show=False),
+        Binding("K", "page_up", "Page up", show=False),
         Binding("down", "scroll_down", "Scroll down", show=False),
         Binding("up", "scroll_up", "Scroll up", show=False),
     ]
@@ -221,13 +223,19 @@ class HelpScreen(ModalScreen):
             yield Label("  [bold]?[/]  Show this help", classes="help-row")
             yield Label("  [bold]q[/]  Detach from session", classes="help-row")
             yield Label("")
-            yield Label("[dim]Press Esc to close  |  ? to discuss pm[/]", classes="help-row")
+            yield Label("[dim]Press Esc/q to close  |  ? to discuss pm[/]", classes="help-row")
 
     def action_scroll_down(self) -> None:
         self.query_one("#help-container", VerticalScroll).scroll_down()
 
     def action_scroll_up(self) -> None:
         self.query_one("#help-container", VerticalScroll).scroll_up()
+
+    def action_page_down(self) -> None:
+        self.query_one("#help-container", VerticalScroll).scroll_page_down()
+
+    def action_page_up(self) -> None:
+        self.query_one("#help-container", VerticalScroll).scroll_page_up()
 
     def action_dismiss(self) -> None:
         self.app.pop_screen()

@@ -13,8 +13,8 @@ def tui_section(session_name: str) -> str:
     return f"""
 ## Interacting with the TUI
 
-Use these commands to interact with the pm TUI from this pane — do NOT try to \
-run tmux commands directly or manually type into other panes:
+The base pm tmux session is `{session_name}`. Use `-s {session_name}` with pm tui \
+commands so they target the correct session even from workdir clones:
 - `pm tui view -s {session_name}` — capture and view the current TUI screen
 - `pm tui send <keys> -s {session_name}` — send keystrokes to the TUI (e.g. `pm tui send j` to move down)
 """
