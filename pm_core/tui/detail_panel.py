@@ -149,6 +149,23 @@ class DetailPanel(Widget):
                     f"{loop_state.iteration} iter: {verdict}"
                 )
 
+        # Show all active review loops (across all PRs)
+        active_loops = self._get_all_active_loops()
+        if active_loops:
+            lines.append("")
+            lines.append(f"[bold]Active Review Loops ({len(active_loops)}):[/bold]")
+            pr_map = {p["id"]: p for p in (self._all_prs if hasattr(self, "_all_prs") else [])}
+            for loop in active_loops:
+                lpr = pr_map.get(loop.pr_id)
+                loop_display_id = _pr_display_id(lpr) if lpr else loop.pr_id
+                mode = "S" if not loop.stop_on_suggestions else "N"
+                verdict = loop.latest_verdict or "…"
+                stop_mark = " [yellow]⏹[/]" if loop.stop_requested else ""
+                lines.append(
+                    f"  [cyan]⟳[/] {loop_display_id} [{mode}] "
+                    f"iter {loop.iteration}: {verdict}{stop_mark}"
+                )
+
         content = "\n".join(lines)
         return Panel(content, title=f"{display_id}", border_style="blue")
 
@@ -158,3 +175,10 @@ class DetailPanel(Widget):
             return self.app._review_loops.get(pr_id)
         except Exception:
             return None
+
+    def _get_all_active_loops(self) -> list:
+        """Return all running review loop states."""
+        try:
+            return [s for s in self.app._review_loops.values() if s.running]
+        except Exception:
+            return []
