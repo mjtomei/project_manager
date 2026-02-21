@@ -536,18 +536,14 @@ To interact with this session, use commands like:
     cmd = build_claude_shell_cmd(prompt=full_prompt)
     # Wrap command with cleanup if the test has a cleanup function
     if cleanup_fn and init_context:
-        # Embed values directly via repr() (Python string literals use
-        # single quotes) inside a double-quoted shell string, avoiding
-        # the nested-single-quote problem that shlex.quote would cause.
         _sess = repr(init_context.get("session_name") or "")
         _cwd = repr(init_context.get("cwd") or "")
-        cleanup_script = (
-            'python3 -c "'
+        py_code = (
             'from pm_core import tmux as t; import shutil; '
             f't.kill_session({_sess}) if {_sess} else None; '
             f'shutil.rmtree({_cwd}, ignore_errors=True) if {_cwd} else None'
-            '"'
         )
+        cleanup_script = f"python3 -c {shlex.quote(py_code)}"
         cmd = f"{cmd} ; {cleanup_script}"
     launch_pane(app, cmd, "tui-test")
 
