@@ -178,8 +178,7 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
     clear_cmd = f"rm -rf ~/.pm/sessions/{session_tag}"
     cmd = f"{claude_cmd} ; {clear_cmd}"
 
-    # Try to launch in tmux
-    pm_session = _get_pm_session()
+    # Try to launch in tmux (reuse pm_session from above)
     if pm_session:
         if tmux_mod.session_exists(pm_session):
             try:
