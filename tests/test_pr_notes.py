@@ -100,8 +100,13 @@ class TestPrNoteAdd:
         pr = store.get_pr(data, "pr-001")
         note = pr["notes"][0]
         assert "created_at" in note
+        assert "last_edited" in note
         # ISO 8601 UTC format: YYYY-MM-DDTHH:MM:SSZ
-        assert re.match(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", note["created_at"])
+        ts_re = r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z"
+        assert re.match(ts_re, note["created_at"])
+        assert re.match(ts_re, note["last_edited"])
+        # On creation, both timestamps are the same
+        assert note["created_at"] == note["last_edited"]
 
     def test_add_multiple_notes(self, tmp_path):
         root = _make_state(tmp_path)
@@ -115,7 +120,9 @@ class TestPrNoteAdd:
         assert pr["notes"][1]["text"] == "Note two"
         # Both have timestamps
         assert pr["notes"][0]["created_at"]
+        assert pr["notes"][0]["last_edited"]
         assert pr["notes"][1]["created_at"]
+        assert pr["notes"][1]["last_edited"]
 
     def test_add_note_unknown_pr(self, tmp_path):
         root = _make_state(tmp_path)
@@ -271,6 +278,88 @@ class TestPrEditNotes:
         assert pr["notes"][0]["text"] == "First note"
         assert pr["notes"][1]["id"] == "note-def"
         assert pr["notes"][1]["text"] == "Second note"
+
+    def test_editor_new_note_gets_both_timestamps(self, tmp_path):
+        """A note added via the editor should have created_at and last_edited."""
+        root = _make_state(tmp_path)
+        runner = CliRunner()
+
+        def fake_editor(args):
+            # args is [editor_path, tmp_file] — inject a new note
+            tmp_file = args[1]
+            with open(tmp_file) as f:
+                content = f.read()
+            content = content.replace("# (no notes)\n", "- Brand new note\n")
+            with open(tmp_file, "w") as f:
+                f.write(content)
+            return 0
+
+        with patch("subprocess.call", side_effect=fake_editor):
+            original_call = os.path.getmtime
+
+            def patched_getmtime(path):
+                result = original_call(path)
+                patched_getmtime.call_count = getattr(patched_getmtime, 'call_count', 0) + 1
+                if patched_getmtime.call_count == 1:
+                    return result - 1
+                return result
+
+            with patch("os.path.getmtime", side_effect=patched_getmtime):
+                result = runner.invoke(cli, ["-C", str(root), "pr", "edit", "pr-001"])
+
+        assert result.exit_code == 0
+        data = store.load(root)
+        pr = store.get_pr(data, "pr-001")
+        assert len(pr["notes"]) == 1
+        note = pr["notes"][0]
+        assert note["text"] == "Brand new note"
+        assert "created_at" in note
+        assert "last_edited" in note
+        assert note["created_at"] == note["last_edited"]
+
+    def test_editor_sorts_notes_by_last_edited(self, tmp_path):
+        """After editor save, notes should be sorted by last_edited."""
+        notes = [
+            {"id": "note-old", "text": "Old note", "created_at": "2026-01-10T00:00:00Z", "last_edited": "2026-01-20T00:00:00Z"},
+            {"id": "note-new", "text": "New note", "created_at": "2026-01-15T00:00:00Z", "last_edited": "2026-01-12T00:00:00Z"},
+        ]
+        root = _make_state(tmp_path, notes=notes)
+        runner = CliRunner()
+
+        def fake_editor(args):
+            # Add a third note to trigger the reconciliation path
+            tmp_file = args[1]
+            with open(tmp_file) as f:
+                content = f.read()
+            content = content.replace(
+                "# Description (everything below this line):",
+                "- Third note\n\n# Description (everything below this line):"
+            )
+            with open(tmp_file, "w") as f:
+                f.write(content)
+            return 0
+
+        with patch("subprocess.call", side_effect=fake_editor):
+            original_call = os.path.getmtime
+
+            def patched_getmtime(path):
+                result = original_call(path)
+                patched_getmtime.call_count = getattr(patched_getmtime, 'call_count', 0) + 1
+                if patched_getmtime.call_count == 1:
+                    return result - 1
+                return result
+
+            with patch("os.path.getmtime", side_effect=patched_getmtime):
+                result = runner.invoke(cli, ["-C", str(root), "pr", "edit", "pr-001"])
+
+        assert result.exit_code == 0
+        data = store.load(root)
+        pr = store.get_pr(data, "pr-001")
+        assert len(pr["notes"]) == 3
+        # Sorted by last_edited: note-new (Jan 12) < note-old (Jan 20) < Third note (now)
+        assert pr["notes"][0]["id"] == "note-new"
+        assert pr["notes"][1]["id"] == "note-old"
+        assert pr["notes"][2]["text"] == "Third note"
 
 
 # ---------------------------------------------------------------------------
