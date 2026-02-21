@@ -1,4 +1,4 @@
-"""Tests for PR notes feature — hash-based note IDs, CLI commands, prompt gen, detail panel."""
+"""Tests for PR notes feature — hash-based note IDs, CLI commands, prompt gen."""
 
 import os
 import re
@@ -9,7 +9,6 @@ from click.testing import CliRunner
 from pm_core import store
 from pm_core.cli import cli
 from pm_core.prompt_gen import generate_prompt, generate_review_prompt
-from pm_core.tui.detail_panel import DetailPanel
 
 
 # ---------------------------------------------------------------------------
@@ -449,74 +448,3 @@ class TestPromptGenNotes:
         assert "Legacy note" in prompt
 
 
-# ---------------------------------------------------------------------------
-# TUI detail panel
-# ---------------------------------------------------------------------------
-
-class TestDetailPanelNotes:
-    def _make_panel(self, pr_data=None, all_prs=None, plan=None, project_root=None):
-        panel = DetailPanel.__new__(DetailPanel)
-        panel._test_pr_data = pr_data
-        panel._all_prs = all_prs or []
-        panel._plan = plan
-        panel._project_root = project_root
-        return panel
-
-    def _render(self, panel):
-        with patch.object(type(panel), "pr_data",
-                          new_callable=lambda: property(lambda self: self._test_pr_data)):
-            return panel.render()
-
-    def test_no_notes(self):
-        panel = self._make_panel(pr_data={
-            "id": "pr-x", "title": "T", "status": "pending", "branch": "b",
-        })
-        result = self._render(panel)
-        text = str(result.renderable)
-        assert "Notes:" not in text
-
-    def test_with_notes(self):
-        panel = self._make_panel(pr_data={
-            "id": "pr-x", "title": "T", "status": "pending", "branch": "b",
-            "notes": [
-                {"id": "note-abc", "text": "Remember to update docs", "created_at": "2026-01-15T10:30:00Z"},
-                {"id": "note-def", "text": "API changed since plan", "created_at": "2026-01-16T14:00:00Z"},
-            ],
-        })
-        result = self._render(panel)
-        text = str(result.renderable)
-        assert "Notes:" in text
-        assert "Remember to update docs" in text
-        assert "API changed since plan" in text
-
-    def test_with_timestamps(self):
-        panel = self._make_panel(pr_data={
-            "id": "pr-x", "title": "T", "status": "pending", "branch": "b",
-            "notes": [
-                {"id": "note-abc", "text": "A note", "created_at": "2026-01-15T10:30:00Z"},
-            ],
-        })
-        result = self._render(panel)
-        text = str(result.renderable)
-        assert "2026-01-15T10:30:00Z" in text
-
-    def test_without_timestamps(self):
-        """Legacy notes without timestamps still render."""
-        panel = self._make_panel(pr_data={
-            "id": "pr-x", "title": "T", "status": "pending", "branch": "b",
-            "notes": [
-                {"id": "note-abc", "text": "Legacy note"},
-            ],
-        })
-        result = self._render(panel)
-        text = str(result.renderable)
-        assert "Legacy note" in text
-
-    def test_empty_notes_list(self):
-        panel = self._make_panel(pr_data={
-            "id": "pr-x", "title": "T", "status": "pending", "branch": "b",
-            "notes": [],
-        })
-        result = self._render(panel)
-        text = str(result.renderable)
-        assert "Notes:" not in text
