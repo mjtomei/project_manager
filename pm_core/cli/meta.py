@@ -87,9 +87,7 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
         if tag:
             base_ref = tag
         else:
-            # Check if master exists, otherwise use main
-            result = git_ops.run_git("branch", "-r", "--list", "origin/master", cwd=work_path, check=False)
-            base_ref = "master" if result.stdout.strip() else "main"
+            base_ref = "master"
 
         # Checkout base and create branch
         if tag:
@@ -129,7 +127,7 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
                 base_ref = tag
             else:
                 result = git_ops.run_git("branch", "-r", "--list", "origin/master", cwd=work_path, check=False)
-                base_ref = "master" if result.stdout.strip() else "main"
+                base_ref = "master" if result.stdout.strip() else "master"
 
             if tag:
                 click.echo(f"Checking out tag {tag}...")

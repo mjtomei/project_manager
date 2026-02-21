@@ -421,7 +421,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
                     return
 
     repo_url = data["project"]["repo"]
-    base_branch = data["project"].get("base_branch", "main")
+    base_branch = data["project"].get("base_branch", "master")
     branch = pr_entry.get("branch") or f"pm/{pr_id}"
 
     if workdir:
@@ -473,7 +473,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
     # For GitHub backend: push branch and create draft PR if not already set
     backend_name = data["project"].get("backend", "vanilla")
     if backend_name == "github" and not pr_entry.get("gh_pr_number"):
-        base_branch = data["project"].get("base_branch", "main")
+        base_branch = data["project"].get("base_branch", "master")
         title = pr_entry.get("title", pr_id)
         desc = pr_entry.get("description", "")
 
@@ -558,7 +558,7 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False) -> No
     pr_id = pr_entry["id"]
     display_id = _pr_display_id(pr_entry)
     title = pr_entry.get("title", "")
-    base_branch = data.get("project", {}).get("base_branch", "main")
+    base_branch = data.get("project", {}).get("base_branch", "master")
 
     # Generate review prompt and build Claude command
     review_prompt = prompt_gen.generate_review_prompt(data, pr_id, session_name=pm_session)
@@ -706,7 +706,7 @@ def pr_sync():
     """
     root = state_root()
     data = store.load(root)
-    base_branch = data["project"].get("base_branch", "main")
+    base_branch = data["project"].get("base_branch", "master")
     prs = data.get("prs") or []
     backend = get_backend(data)
     updated = 0

@@ -164,7 +164,7 @@ def slugify(text: str) -> str:
     return s.strip("-")[:50]
 
 
-def init_project(root: Path, name: str, repo: str, base_branch: str = "main",
+def init_project(root: Path, name: str, repo: str, base_branch: str = "master",
                   backend: str = "vanilla") -> dict:
     """Create initial project.yaml in a new PM repo.
 

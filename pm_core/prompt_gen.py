@@ -51,7 +51,7 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
     branch = pr.get("branch", f"pm/{pr_id}")
     title = pr.get("title", "")
     description = pr.get("description", "").strip()
-    base_branch = data.get("project", {}).get("base_branch", "main")
+    base_branch = data.get("project", {}).get("base_branch", "master")
 
     backend = get_backend(data)
     gh_pr_url = pr.get("gh_pr")  # URL of draft PR if created
@@ -97,7 +97,7 @@ def generate_review_prompt(data: dict, pr_id: str, session_name: str | None = No
 
     title = pr.get("title", "")
     description = pr.get("description", "").strip()
-    base_branch = data.get("project", {}).get("base_branch", "main")
+    base_branch = data.get("project", {}).get("base_branch", "master")
 
     # Build plan and sibling PR context for architectural review
     plan_ref = pr.get("plan")
