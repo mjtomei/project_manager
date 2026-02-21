@@ -644,7 +644,12 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
             return
 
     try:
-        claude_pane = tmux_mod.new_window_get_pane(pm_session, window_name, claude_cmd, workdir)
+        # In review loop mode, don't switch focus to the new window — the loop
+        # runs in the background and shouldn't steal focus from the user.
+        claude_pane = tmux_mod.new_window_get_pane(
+            pm_session, window_name, claude_cmd, workdir,
+            switch=not review_loop,
+        )
         if not claude_pane:
             click.echo(f"Review window: failed to create tmux window '{window_name}'.")
             return
