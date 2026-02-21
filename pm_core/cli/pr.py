@@ -21,8 +21,7 @@ from pm_core.claude_launcher import find_claude, build_claude_shell_cmd, clear_s
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
-    _get_current_pm_session,
-    _get_session_name_for_cwd,
+    _get_pm_session,
     _gh_state_to_status,
     _infer_pr_id,
     _log,
@@ -404,9 +403,11 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
         click.echo(f"PR {pr_id} is already merged.", err=True)
         raise SystemExit(1)
 
+    # Determine tmux session name (used for fast-path check and later launch)
+    pm_session = _get_pm_session()
+
     # Fast path: if window already exists, switch to it (or kill it if --fresh)
-    if tmux_mod.has_tmux():
-        pm_session = _get_current_pm_session() or _get_session_name_for_cwd()
+    if pm_session:
         if tmux_mod.session_exists(pm_session):
             window_name = _pr_display_id(pr_entry)
             existing = tmux_mod.find_window_by_name(pm_session, window_name)
@@ -507,11 +508,6 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
     click.echo(f"\nPR {_pr_display_id(pr_entry)} is now in_progress on {platform.node()}")
     click.echo(f"Work directory: {work_path}")
 
-    # Determine tmux session name for TUI targeting in prompt
-    pm_session = None
-    if tmux_mod.has_tmux():
-        pm_session = _get_current_pm_session() or _get_session_name_for_cwd()
-
     prompt = prompt_gen.generate_prompt(data, pr_id, session_name=pm_session)
 
     claude = find_claude()
@@ -549,8 +545,8 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False) -> No
         click.echo("Review window requires tmux.")
         return
 
-    pm_session = _get_current_pm_session() or _get_session_name_for_cwd()
-    if not tmux_mod.session_exists(pm_session):
+    pm_session = _get_pm_session()
+    if not pm_session or not tmux_mod.session_exists(pm_session):
         click.echo(f"Review window: tmux session '{pm_session}' not found.")
         return
 

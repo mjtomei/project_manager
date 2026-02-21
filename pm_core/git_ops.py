@@ -106,7 +106,10 @@ def clone(repo_url: str, dest: Path, branch: Optional[str] = None) -> None:
     if branch:
         args.extend(["--branch", branch])
     result = run_git(*args, check=False)
-    if result.returncode != 0 and branch:
+    if result.returncode != 0:
+        if not branch:
+            # No fallback available — propagate the error
+            run_git(*args)
         # Clean up partial clone directory before retrying
         import shutil
         if dest.exists():

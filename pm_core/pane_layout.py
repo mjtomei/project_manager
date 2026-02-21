@@ -76,6 +76,9 @@ def get_reliable_window_size(
 
     # If there are multiple grouped sessions (multi-client), find the
     # maximum size so we don't squish panes for smaller clients.
+    # Note: w and h are maximised independently, so the result may not
+    # match any single client.  This is intentional — panes are never
+    # hidden, though a smaller client may need to scroll.
     if grouped:
         max_w, max_h = 0, 0
         all_sessions = list(dict.fromkeys(candidates + [base] + grouped))

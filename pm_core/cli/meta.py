@@ -15,6 +15,7 @@ from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
+    _get_pm_session,
     _get_session_name_for_cwd,
 )
 
@@ -143,9 +144,7 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
             git_ops.checkout_branch(work_path, branch, create=True)
 
     # Determine pm session name for TUI targeting
-    pm_session = None
-    if tmux_mod.has_tmux():
-        pm_session = _get_session_name_for_cwd()
+    pm_session = _get_pm_session()
 
     # Build the prompt
     prompt = _build_meta_prompt(task, work_path, install_info, branch, base_ref, session_tag, session_name=pm_session)
@@ -180,8 +179,8 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
     cmd = f"{claude_cmd} ; {clear_cmd}"
 
     # Try to launch in tmux
-    if tmux_mod.has_tmux():
-        pm_session = _get_session_name_for_cwd()
+    pm_session = _get_pm_session()
+    if pm_session:
         if tmux_mod.session_exists(pm_session):
             try:
                 tmux_mod.new_window(pm_session, window_name, cmd, str(work_path))

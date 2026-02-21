@@ -9,7 +9,6 @@ from pathlib import Path
 import click
 
 from pm_core import store, notes
-from pm_core import tmux as tmux_mod
 from pm_core.plan_parser import parse_plan_prs
 from pm_core import review as review_mod
 from pm_core.claude_launcher import find_claude, launch_claude, launch_claude_print, clear_session
@@ -18,8 +17,7 @@ from pm_core.prompt_gen import tui_section
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
     _auto_select_plan,
-    _get_current_pm_session,
-    _get_session_name_for_cwd,
+    _get_pm_session,
     _gh_state_to_status,
     _make_pr_entry,
     _pr_display_id,
@@ -29,13 +27,6 @@ from pm_core.cli.helpers import (
     state_root,
     trigger_tui_refresh,
 )
-
-
-def _get_pm_session() -> str | None:
-    """Get the pm tmux session name if running inside one."""
-    if not tmux_mod.has_tmux():
-        return None
-    return _get_current_pm_session() or _get_session_name_for_cwd()
 
 
 # --- Plan commands ---

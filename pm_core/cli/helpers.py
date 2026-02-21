@@ -394,6 +394,13 @@ def _get_current_pm_session() -> str | None:
     return None
 
 
+def _get_pm_session() -> str | None:
+    """Get the pm tmux session name if running inside one."""
+    if not tmux_mod.has_tmux():
+        return None
+    return _get_current_pm_session() or _get_session_name_for_cwd()
+
+
 def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     """Find the TUI pane in a pm session.
 

@@ -15,8 +15,7 @@ from pm_core.prompt_gen import tui_section
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
-    _get_current_pm_session,
-    _get_session_name_for_cwd,
+    _get_pm_session,
     _resolve_repo_dir,
     save_and_push,
     state_root,
@@ -183,9 +182,7 @@ def cluster_explore(bridged, fresh):
     )
 
     # Add TUI interaction section if in a pm session
-    pm_session = None
-    if tmux_mod.has_tmux():
-        pm_session = _get_current_pm_session() or _get_session_name_for_cwd()
+    pm_session = _get_pm_session()
     if pm_session:
         prompt += tui_section(pm_session)
 
