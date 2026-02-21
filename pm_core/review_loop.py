@@ -14,6 +14,7 @@ PASS_WITH_SUGGESTIONS; set `stop_on_suggestions=False` to keep going
 until full PASS.
 """
 
+import re
 import secrets
 import subprocess
 import sys
@@ -34,6 +35,15 @@ VERDICT_NEEDS_WORK = "NEEDS_WORK"
 VERDICT_KILLED = "KILLED"
 
 ALL_VERDICTS = (VERDICT_PASS, VERDICT_PASS_WITH_SUGGESTIONS, VERDICT_NEEDS_WORK)
+
+# Regex patterns for verdict detection.  Use lookahead/lookbehind instead of
+# \b to avoid matching substrings like "PASSWORD" or "PASS" inside "[PASS/FAIL]".
+# Check PASS_WITH_SUGGESTIONS before PASS since PASS is a prefix.
+_VERDICT_PATTERNS = [
+    (re.compile(r'(?<!\w)PASS_WITH_SUGGESTIONS(?!\w)'), VERDICT_PASS_WITH_SUGGESTIONS),
+    (re.compile(r'(?<!\w)NEEDS_WORK(?!\w)'), VERDICT_NEEDS_WORK),
+    (re.compile(r'(?<!\w)PASS(?!_WITH_SUGGESTIONS|/|\w)'), VERDICT_PASS),
+]
 
 # How often to check pane content for a verdict (seconds)
 _POLL_INTERVAL = 5
@@ -72,6 +82,14 @@ class ReviewLoopState:
     _ui_notified_done: bool = False
 
 
+def _match_verdict(line: str) -> str | None:
+    """Match a verdict keyword in a line using word-boundary regex."""
+    for pattern, verdict in _VERDICT_PATTERNS:
+        if pattern.search(line):
+            return verdict
+    return None
+
+
 def parse_review_verdict(output: str) -> str:
     """Extract a review verdict from Claude output.
 
@@ -82,13 +100,9 @@ def parse_review_verdict(output: str) -> str:
     # Scan from the end — the verdict is typically at the bottom
     for line in reversed(lines):
         stripped = line.strip().strip("*").strip()
-        if "PASS_WITH_SUGGESTIONS" in stripped:
-            return VERDICT_PASS_WITH_SUGGESTIONS
-        if "NEEDS_WORK" in stripped:
-            return VERDICT_NEEDS_WORK
-        # Check for standalone PASS (not part of PASS_WITH_SUGGESTIONS)
-        if "PASS" in stripped and "PASS_WITH_SUGGESTIONS" not in stripped:
-            return VERDICT_PASS
+        verdict = _match_verdict(stripped)
+        if verdict:
+            return verdict
     # If no clear verdict, assume needs work if there's output
     return VERDICT_NEEDS_WORK if output.strip() else VERDICT_PASS
 
@@ -253,13 +267,7 @@ def _extract_verdict_from_content(content: str, prompt_text: str = "") -> str | 
 
     for line in reversed(tail):
         stripped = line.strip().strip("*").strip()
-        verdict = None
-        if "PASS_WITH_SUGGESTIONS" in stripped:
-            verdict = VERDICT_PASS_WITH_SUGGESTIONS
-        elif "NEEDS_WORK" in stripped:
-            verdict = VERDICT_NEEDS_WORK
-        elif "PASS" in stripped and "PASS_WITH_SUGGESTIONS" not in stripped:
-            verdict = VERDICT_PASS
+        verdict = _match_verdict(stripped)
 
         if verdict:
             if prompt_verdict_lines and _is_prompt_line(stripped, prompt_verdict_lines):

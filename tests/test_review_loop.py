@@ -65,6 +65,21 @@ class TestParseReviewVerdict:
     def test_verdict_with_bold_markers(self):
         assert parse_review_verdict("Overall: **NEEDS_WORK**") == VERDICT_NEEDS_WORK
 
+    def test_pass_fail_not_matched(self):
+        """[PASS/FAIL] in diff output should not match as PASS verdict."""
+        output = "2469 -OVERALL: [PASS/FAIL]\nsome other line"
+        assert parse_review_verdict(output) == VERDICT_NEEDS_WORK
+
+    def test_pass_in_brackets_not_matched(self):
+        """PASS inside brackets like [PASS] should still match (word boundary)."""
+        output = "Verdict: [PASS]"
+        assert parse_review_verdict(output) == VERDICT_PASS
+
+    def test_password_not_matched(self):
+        """Words containing PASS like PASSWORD should not match."""
+        output = "Check PASSWORD config\nNo verdict here"
+        assert parse_review_verdict(output) == VERDICT_NEEDS_WORK
+
 
 # --- prompt verdict filtering tests ---
 
