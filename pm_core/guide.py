@@ -173,22 +173,24 @@ def detect_state(root: Optional[Path]) -> tuple[str, dict]:
     plans = data.get("plans") or []
     prs = data.get("prs") or []
 
-    # Has project but no plans
-    if not plans:
+    # Has project but no plans and no PRs
+    if not plans and not prs:
         return "initialized", {"data": data, "root": root}
 
-    # Check if any plan has a ## PRs section
+    # Check if any plan has a ## PRs section (only when plans exist)
     has_pr_section = False
-    plan_entry = plans[0]  # Use first plan
-    plan_path = root / plan_entry["file"]
-    if plan_path.exists():
-        content = plan_path.read_text()
-        parsed = parse_plan_prs(content)
-        if parsed:
-            has_pr_section = True
+    plan_entry = None
+    if plans:
+        plan_entry = plans[0]  # Use first plan
+        plan_path = root / plan_entry["file"]
+        if plan_path.exists():
+            content = plan_path.read_text()
+            parsed = parse_plan_prs(content)
+            if parsed:
+                has_pr_section = True
 
-    # Has plan but no ## PRs section
-    if not has_pr_section and not prs:
+    # Has plan but no ## PRs section and no PRs loaded yet
+    if plans and not has_pr_section and not prs:
         return "has_plan_draft", {"data": data, "root": root, "plan": plan_entry}
 
     # Has ## PRs in plan file but no PRs loaded into project.yaml

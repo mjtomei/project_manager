@@ -3208,9 +3208,19 @@ OVERALL: [PASS/FAIL]
 
 
 INIT_GITHUB_TEST = """\
-You are testing the full `pm session` → `pm init` flow for a repo with a GitHub
-remote.  A bare git repo has been created for you at `{test_cwd}` with an origin
-remote pointing to `pallets/flask`.  No pm init has been run yet.
+You are testing the full `pm session` → `pm init` → guide completion flow for a
+repo with a GitHub remote.  A bare git repo has been created for you at
+`{test_cwd}` with an origin remote pointing to `pallets/flask`.  No pm init has
+been run yet.
+
+The final acceptance criterion is: **the guide is fully completed and the TUI
+shows the normal PR tree view with all PRs visible** — not just that init works.
+
+**IMPORTANT — Automate everything.**  Run every command yourself.  The guide
+will launch interactive Claude sessions — you do NOT need to interact with
+those.  Instead, drive the guide forward by running `pm guide done` from the
+command line after each step's artifacts exist.  The goal is a fully automated
+end-to-end test with no human interaction.
 
 ## Test Procedure
 
@@ -3242,21 +3252,7 @@ cd {test_cwd} && pm init --no-import --dir {test_cwd}/pm
 
 This should detect the GitHub remote and set `backend: github`.
 
-### 4. Refresh TUI and verify guide advances
-
-```bash
-pm tui send r -s {test_session}
-```
-
-Wait a moment, then:
-
-```bash
-pm tui view -s {test_session}
-```
-
-The guide should advance past the `no_project` step to `initialized` or later.
-
-### 5. Verify project.yaml
+### 4. Verify project.yaml
 
 ```bash
 cat {test_cwd}/pm/project.yaml
@@ -3268,18 +3264,15 @@ Check:
 - `base_branch` is set (main or master)
 - File exists and is valid YAML
 
-### 6. Verify directory structure
+### 5. Verify directory structure
 
 ```bash
 ls {test_cwd}/pm/plans/
-cat {test_cwd}/.gitignore
 ```
 
-Check:
-- `{test_cwd}/pm/plans/` directory exists
-- `.gitignore` contains pm-related entries
+Check: `{test_cwd}/pm/plans/` directory exists.
 
-### 7. Verify pm commands work post-init
+### 6. Add test PRs and verify commands work
 
 ```bash
 cd {test_cwd}/pm && pm pr add --title "Test PR" --description "Testing github init"
@@ -3289,17 +3282,59 @@ cd {test_cwd}/pm && pm pr list
 - `pm pr add` should exit 0
 - `pm pr list` should show the test PR
 
-### 8. Verify guide state
+### 7. Walk through the guide to completion
+
+Now mark guide step 1 as done and walk through remaining steps:
+
+```bash
+cd {test_cwd}/pm && pm guide done
+```
+
+This should mark step 1 (no_project) as completed.  Since PRs already exist,
+the guide should auto-advance past intermediate steps (create plan, break into
+PRs, load PRs).  Check the output for "Step auto-completed" messages.
+
+After `pm guide done`, check which step the guide is on:
 
 ```bash
 python3 -c "
-from pm_core.guide import detect_state
+from pm_core.guide import resolve_guide_step
 from pathlib import Path
-print('state:', detect_state(Path('{test_cwd}/pm')))
+state, ctx = resolve_guide_step(Path('{test_cwd}/pm'))
+print('guide step:', state)
 "
 ```
 
-- Should return `initialized` or later
+If the guide is at `needs_deps_review`, complete it:
+
+```bash
+cd {test_cwd}/pm && pm guide done
+```
+
+If the guide is at `ready_to_work`, that's the final interactive step.
+Complete it:
+
+```bash
+cd {test_cwd}/pm && pm guide done
+```
+
+Repeat `pm guide done` until the guide reports all steps complete or
+`resolve_guide_step` returns `ready_to_work`/`all_done`/`all_in_progress`.
+
+### 8. Refresh TUI and verify final state
+
+```bash
+pm tui send r -s {test_session}
+```
+
+Wait a moment, then:
+
+```bash
+pm tui view -s {test_session}
+```
+
+The TUI should now show the normal PR tree view (not the guide view).
+The test PR should be visible in the tree.
 
 ## Reporting
 
@@ -3309,12 +3344,12 @@ TEST RESULTS
 Session start: [PASS/FAIL] - pm session created TUI + notes
 Guide view:    [PASS/FAIL] - TUI shows no_project guide state
 pm init:       [PASS/FAIL] - init completes, backend=github
-Guide advance: [PASS/FAIL] - TUI advances past no_project after refresh
 project.yaml:  [PASS/FAIL] - backend=github, repo correct, base_branch set
-Directory:     [PASS/FAIL] - plans/ exists, .gitignore correct
+Directory:     [PASS/FAIL] - plans/ exists
 pm pr add:     [PASS/FAIL] - exit code and output
 pm pr list:    [PASS/FAIL] - shows test PR
-Guide state:   [PASS/FAIL] - detect_state result
+Guide walk:    [PASS/FAIL] - guide done advances through steps, auto-skips where possible
+Final TUI:     [PASS/FAIL] - TUI shows normal tree view with PRs visible
 
 OVERALL: [PASS/FAIL]
 ```
@@ -3322,9 +3357,19 @@ OVERALL: [PASS/FAIL]
 
 
 INIT_LOCAL_TEST = """\
-You are testing the full `pm session` → `pm init` flow for a local repo with no
-remote (notes-only use case).  A bare git repo with one commit but no remote has
-been created for you at `{test_cwd}`.  No pm init has been run yet.
+You are testing the full `pm session` → `pm init` → guide completion flow for a
+local repo with no remote (notes-only use case).  A bare git repo with one
+commit but no remote has been created for you at `{test_cwd}`.  No pm init has
+been run yet.
+
+The final acceptance criterion is: **the guide is fully completed and the TUI
+shows the normal PR tree view** — not just that init works.
+
+**IMPORTANT — Automate everything.**  Run every command yourself.  The guide
+will launch interactive Claude sessions — you do NOT need to interact with
+those.  Instead, drive the guide forward by running `pm guide done` from the
+command line after each step's artifacts exist.  The goal is a fully automated
+end-to-end test with no human interaction.
 
 ## Test Procedure
 
@@ -3353,16 +3398,7 @@ cd {test_cwd} && pm init --no-import --dir {test_cwd}/pm
 
 Should detect no remote and set `backend: local`.
 
-### 4. Refresh TUI and verify guide advances
-
-```bash
-pm tui send r -s {test_session}
-```
-
-Wait a moment, then `pm tui view -s {test_session}`.  Guide should advance
-past `no_project`.
-
-### 5. Verify project.yaml
+### 4. Verify project.yaml
 
 ```bash
 cat {test_cwd}/pm/project.yaml
@@ -3373,15 +3409,7 @@ Check:
 - `repo:` is set to the absolute path of the repo
 - `base_branch` is set (main or master)
 
-### 6. Verify directory structure
-
-```bash
-ls {test_cwd}/pm/plans/
-```
-
-- `plans/` directory exists
-
-### 7. Verify pm commands work post-init
+### 5. Add test PRs and verify commands work
 
 ```bash
 cd {test_cwd}/pm && pm pr add --title "Notes PR" --description "Testing local init"
@@ -3390,15 +3418,38 @@ cd {test_cwd}/pm && pm pr list
 
 - Both commands should succeed with a local backend
 
-### 8. Verify guide state
+### 6. Walk through the guide to completion
+
+Mark guide step 1 as done:
+
+```bash
+cd {test_cwd}/pm && pm guide done
+```
+
+Since PRs already exist, the guide should auto-advance past intermediate steps.
+Check the output for "Step auto-completed" messages.
+
+Continue marking steps done until the guide reaches `ready_to_work` or later:
 
 ```bash
 python3 -c "
-from pm_core.guide import detect_state
+from pm_core.guide import resolve_guide_step
 from pathlib import Path
-print('state:', detect_state(Path('{test_cwd}/pm')))
+state, ctx = resolve_guide_step(Path('{test_cwd}/pm'))
+print('guide step:', state)
 "
 ```
+
+For each remaining interactive step, run `cd {test_cwd}/pm && pm guide done`.
+
+### 7. Refresh TUI and verify final state
+
+```bash
+pm tui send r -s {test_session}
+```
+
+Wait a moment, then `pm tui view -s {test_session}`.  The TUI should show the
+normal PR tree view (not the guide view).
 
 ## Reporting
 
@@ -3408,12 +3459,10 @@ TEST RESULTS
 Session start: [PASS/FAIL] - pm session created TUI + notes
 Guide view:    [PASS/FAIL] - TUI shows no_project guide state
 pm init:       [PASS/FAIL] - init completes, backend=local
-Guide advance: [PASS/FAIL] - TUI advances past no_project after refresh
 project.yaml:  [PASS/FAIL] - backend=local, repo path correct
-Directory:     [PASS/FAIL] - plans/ exists
 pm pr add:     [PASS/FAIL] - succeeds with local backend
-pm pr list:    [PASS/FAIL] - shows PR
-Guide state:   [PASS/FAIL]
+Guide walk:    [PASS/FAIL] - guide done advances through steps, auto-skips where possible
+Final TUI:     [PASS/FAIL] - TUI shows normal tree view with PRs visible
 
 OVERALL: [PASS/FAIL]
 ```
@@ -3421,10 +3470,19 @@ OVERALL: [PASS/FAIL]
 
 
 INIT_EMPTY_TEST = """\
-You are testing the full `pm session` → `pm init` flow for an empty repo (git
-init, no commits).  This is a known bug area — commands may fail with bare/empty
-git backends.  A bare git repo with no commits and no remote has been created for
-you at `{test_cwd}`.  No pm init has been run yet.
+You are testing the full `pm session` → `pm init` → guide completion flow for an
+empty repo (git init, no commits).  This is a known bug area — commands may fail
+with bare/empty git backends.  A bare git repo with no commits and no remote has
+been created for you at `{test_cwd}`.  No pm init has been run yet.
+
+The final acceptance criterion is: **the guide is fully completed and the TUI
+shows the normal PR tree view** — not just that init works.
+
+**IMPORTANT — Automate everything.**  Run every command yourself.  The guide
+will launch interactive Claude sessions — you do NOT need to interact with
+those.  Instead, drive the guide forward by running `pm guide done` from the
+command line after each step's artifacts exist.  The goal is a fully automated
+end-to-end test with no human interaction.
 
 ## Test Procedure
 
@@ -3450,15 +3508,7 @@ Should show guide progress widget in `no_project` state.
 cd {test_cwd} && pm init --no-import --dir {test_cwd}/pm
 ```
 
-### 4. Refresh TUI and verify guide advances
-
-```bash
-pm tui send r -s {test_session}
-```
-
-Wait a moment, then `pm tui view -s {test_session}`.
-
-### 5. Verify project.yaml
+### 4. Verify project.yaml
 
 ```bash
 cat {test_cwd}/pm/project.yaml
@@ -3468,13 +3518,7 @@ Check:
 - `backend: local` (no remote, no commits)
 - `base_branch` is `master` (default for empty repos)
 
-### 6. Verify directory structure
-
-```bash
-ls {test_cwd}/pm/plans/
-```
-
-### 7. Verify pm commands work post-init (bug #8 area)
+### 5. Verify pm commands work post-init (bug #8 area)
 
 ```bash
 cd {test_cwd}/pm && pm pr add --title "Empty repo PR" --description "Testing empty init"
@@ -3484,15 +3528,38 @@ cd {test_cwd}/pm && pm pr list
 - Both should succeed even with no commits
 - If any command fails, note the error — this is a known bug area
 
-### 8. Verify guide state
+### 6. Walk through the guide to completion
+
+Mark guide step 1 as done:
+
+```bash
+cd {test_cwd}/pm && pm guide done
+```
+
+Since PRs already exist, the guide should auto-advance past intermediate steps.
+Check the output for "Step auto-completed" messages.
+
+Continue marking steps done until the guide reaches `ready_to_work` or later:
 
 ```bash
 python3 -c "
-from pm_core.guide import detect_state
+from pm_core.guide import resolve_guide_step
 from pathlib import Path
-print('state:', detect_state(Path('{test_cwd}/pm')))
+state, ctx = resolve_guide_step(Path('{test_cwd}/pm'))
+print('guide step:', state)
 "
 ```
+
+For each remaining interactive step, run `cd {test_cwd}/pm && pm guide done`.
+
+### 7. Refresh TUI and verify final state
+
+```bash
+pm tui send r -s {test_session}
+```
+
+Wait a moment, then `pm tui view -s {test_session}`.  The TUI should show the
+normal PR tree view (not the guide view).
 
 ## Reporting
 
@@ -3502,12 +3569,11 @@ TEST RESULTS
 Session start: [PASS/FAIL] - pm session created TUI + notes
 Guide view:    [PASS/FAIL] - TUI shows no_project guide state
 pm init:       [PASS/FAIL] - init completes, backend=local
-Guide advance: [PASS/FAIL] - TUI advances past no_project after refresh
 project.yaml:  [PASS/FAIL] - backend=local, base_branch=master
-Directory:     [PASS/FAIL] - plans/ exists
 pm pr add:     [PASS/FAIL] - succeeds with empty repo (bug #8)
 pm pr list:    [PASS/FAIL] - succeeds with empty repo
-Guide state:   [PASS/FAIL]
+Guide walk:    [PASS/FAIL] - guide done advances through steps, auto-skips where possible
+Final TUI:     [PASS/FAIL] - TUI shows normal tree view with PRs visible
 
 OVERALL: [PASS/FAIL]
 ```

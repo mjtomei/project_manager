@@ -138,6 +138,30 @@ class TestDetectState:
         state, ctx = detect_state(pm_root_with_plan_prs)
         assert state == "has_plan_prs"
 
+    def test_needs_deps_review_when_prs_exist_without_plans(self, tmp_pm_root):
+        """PRs imported during init (no plans) should skip to deps review."""
+        (tmp_pm_root / "project.yaml").write_text(
+            "project:\n  name: test\n  repo: /tmp/test\n  base_branch: master\n"
+            "plans: []\n"
+            "prs:\n"
+            "  - id: pr-001\n    title: First PR\n    status: pending\n"
+            "  - id: pr-002\n    title: Second PR\n    status: pending\n"
+        )
+        state, ctx = detect_state(tmp_pm_root)
+        assert state == "needs_deps_review"
+
+    def test_ready_to_work_when_prs_without_plans_deps_reviewed(self, tmp_pm_root):
+        """PRs with deps already reviewed should reach ready_to_work."""
+        (tmp_pm_root / "project.yaml").write_text(
+            "project:\n  name: test\n  repo: /tmp/test\n  base_branch: master\n"
+            "  guide_deps_reviewed: true\n"
+            "plans: []\n"
+            "prs:\n"
+            "  - id: pr-001\n    title: First PR\n    status: pending\n"
+        )
+        state, ctx = detect_state(tmp_pm_root)
+        assert state == "ready_to_work"
+
 
 class TestResolveGuideStep:
     def test_returns_detected_when_root_is_none(self):
