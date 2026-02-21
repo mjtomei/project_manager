@@ -166,6 +166,8 @@ class TechTree(Widget):
             if not state:
                 return ""
             if state.running:
+                if state.stop_requested:
+                    return f"⏹{state.iteration}"
                 return f"⟳{state.iteration}"
             if state.latest_verdict:
                 return ""  # done loops don't need a marker in the tree

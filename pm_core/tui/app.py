@@ -16,7 +16,6 @@ from pm_core import store, guide
 
 from pm_core import tmux as tmux_mod
 from pm_core.tui.tech_tree import TechTree, PRSelected
-from pm_core.tui.detail_panel import DetailPanel
 from pm_core.tui.command_bar import CommandBar, CommandSubmitted
 from pm_core.tui.guide_progress import GuideProgress
 from pm_core.tui.plans_pane import PlansPane, PlanSelected, PlanActivated, PlanAction
@@ -63,20 +62,6 @@ class ProjectManagerApp(App):
         width: 2fr;
         height: 100%;
         overflow: auto auto;
-    }
-    #detail-container {
-        width: 1fr;
-        min-width: 35;
-        max-width: 50;
-        display: none;
-        overflow-y: auto;
-    }
-    #detail-container.portrait {
-        width: 100%;
-        min-width: 0;
-        max-width: 100%;
-        height: 1fr;
-        max-height: 40%;
     }
     LogLine {
         height: 1;
@@ -216,7 +201,6 @@ class ProjectManagerApp(App):
         self._data: dict = {}
         self._root: Path | None = None
         self._sync_timer: Timer | None = None
-        self._detail_visible = False
         self._guide_auto_launched = False
         self._guide_dismissed = False
         self._current_guide_step: str | None = None
@@ -276,8 +260,6 @@ class ProjectManagerApp(App):
                 yield PlansPane(id="plans-pane")
             with Vertical(id="tests-container"):
                 yield TestsPane(id="tests-pane")
-            with Vertical(id="detail-container"):
-                yield DetailPanel(id="detail-panel")
         yield LogLine(id="log-line")
         yield CommandBar(id="command-bar")
 
@@ -340,13 +322,10 @@ class ProjectManagerApp(App):
         if is_portrait != self._is_portrait:
             self._is_portrait = is_portrait
             main_area = self.query_one("#main-area")
-            detail = self.query_one("#detail-container")
             if is_portrait:
                 main_area.add_class("portrait")
-                detail.add_class("portrait")
             else:
                 main_area.remove_class("portrait")
-                detail.remove_class("portrait")
             _log.debug("orientation: %s (%dx%d)", "portrait" if is_portrait else "landscape",
                        self.size.width, self.size.height)
 

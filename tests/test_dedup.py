@@ -147,14 +147,6 @@ class TestGetGithubRepoName:
 class TestImportSmoke:
     """Verify that modules successfully import the shared versions."""
 
-    def test_detail_panel_imports_extract_field(self):
-        """detail_panel.py imports extract_field from plan_parser."""
-        from pm_core.tui import detail_panel
-        # extract_field should be used in the module (imported, not defined locally)
-        assert hasattr(detail_panel, 'extract_field')
-        # Confirm it's the same function from plan_parser
-        assert detail_panel.extract_field is extract_field
-
     def test_paths_uses_git_ops_functions(self):
         """paths.py uses get_git_root and get_github_repo_name from git_ops."""
         # Verify the old private names are no longer defined in paths

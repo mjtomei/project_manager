@@ -205,7 +205,6 @@ def _poll_loop_state(app) -> None:
             app._review_loop_timer = None
 
 
-
 def _refresh_tech_tree(app) -> None:
     """Refresh the tech tree so ⟳N markers update on PR nodes."""
     try:

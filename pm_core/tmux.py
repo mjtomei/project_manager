@@ -497,6 +497,31 @@ def next_grouped_session_name(base: str, socket_path: str | None = None) -> str:
     return f"{base}~{max_n + 1}"
 
 
+def capture_pane(pane_id: str, full_scrollback: bool = False) -> str:
+    """Capture the contents of a tmux pane.
+
+    Returns the pane text, or empty string if the pane doesn't exist.
+    """
+    args = ["capture-pane", "-p", "-t", pane_id]
+    if full_scrollback:
+        args.extend(["-S", "-"])
+    result = subprocess.run(_tmux_cmd(*args), capture_output=True, text=True)
+    return result.stdout if result.returncode == 0 else ""
+
+
+def pane_exists(pane_id: str) -> bool:
+    """Check if a tmux pane still exists.
+
+    Uses ``list-panes`` which reliably returns non-zero for invalid
+    targets (``display -p`` returns 0 with empty output instead).
+    """
+    result = subprocess.run(
+        _tmux_cmd("list-panes", "-t", pane_id),
+        capture_output=True, text=True,
+    )
+    return result.returncode == 0
+
+
 def set_environment(session: str, key: str, value: str, socket_path: str | None = None) -> None:
     """Set an environment variable in a tmux session."""
     subprocess.run(

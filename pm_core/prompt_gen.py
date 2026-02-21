@@ -64,8 +64,21 @@ This session is managed by `pm`. Run `pm help` to see available commands.
     return prompt.strip()
 
 
-def generate_review_prompt(data: dict, pr_id: str) -> str:
-    """Generate a Claude Code prompt for reviewing a completed PR."""
+def generate_review_prompt(data: dict, pr_id: str, review_loop: bool = False,
+                           review_iteration: int = 0,
+                           review_loop_id: str = "") -> str:
+    """Generate a Claude Code prompt for reviewing a completed PR.
+
+    Args:
+        data: Project data dict.
+        pr_id: The PR identifier.
+        review_loop: When True, append fix/commit/push instructions for
+            the automated review loop (``zz d`` / ``zzz d``).
+        review_iteration: Current iteration number (1-based) for commit
+            message tagging.  Only used when ``review_loop`` is True.
+        review_loop_id: Short unique loop identifier for commit message
+            tagging.  Only used when ``review_loop`` is True.
+    """
     pr = store.get_pr(data, pr_id)
     if not pr:
         raise ValueError(f"PR {pr_id} not found")
@@ -118,7 +131,44 @@ Review the code changes in this PR for quality, correctness, and architectural f
    - **PASS** — No changes needed. The code is ready to merge as-is.
    - **PASS_WITH_SUGGESTIONS** — Only non-blocking suggestions remain (style nits, minor refactors, optional improvements). The PR could merge now, but would benefit from small tweaks. List suggestions clearly.
    - **NEEDS_WORK** — Blocking issues found (bugs, missing error handling, architectural problems, test gaps). Separate code-quality fixes from architectural concerns."""
-    return prompt.strip()
+
+    base = prompt.strip()
+    if review_loop:
+        base += _review_loop_addendum(pr.get("branch", ""), review_iteration,
+                                      review_loop_id)
+    return base
+
+
+def _review_loop_addendum(branch: str, iteration: int = 0,
+                          loop_id: str = "") -> str:
+    """Return the review loop addendum text for fix/commit/push instructions."""
+    id_label = f" [{loop_id}]" if loop_id else ""
+    iteration_label = f" (iteration {iteration}){id_label}" if iteration else id_label
+    id_part = f" {loop_id}" if loop_id else ""
+    iter_part = f" i{iteration}" if iteration else ""
+    commit_prefix = f"review-loop{id_part}{iter_part}: "
+    return f"""
+
+## Review Loop Mode{iteration_label}
+
+This review is running in an automated loop.  After completing your review:
+
+1. If you find issues (**NEEDS_WORK**):
+   - Implement ALL the fixes you identified
+   - Run any relevant tests to verify your fixes
+   - Stage and commit your changes — prefix the message with `{commit_prefix}` (e.g. `{commit_prefix}fix null check, add tests`)
+   - Push to the remote: `git push origin {branch}`
+   - Then output your verdict: **NEEDS_WORK** with a summary of what you fixed and what may still need attention on the next iteration
+
+2. If only non-blocking suggestions remain (**PASS_WITH_SUGGESTIONS**):
+   - Implement the suggestions
+   - If you made changes, commit (same `{commit_prefix}` prefix) and push
+   - Output: **PASS_WITH_SUGGESTIONS** with a list of any remaining optional improvements you chose not to implement
+
+3. If the code is ready to merge as-is (**PASS**):
+   - Output: **PASS**
+
+IMPORTANT: Always end your response with the verdict keyword on its own line — one of **PASS**, **PASS_WITH_SUGGESTIONS**, or **NEEDS_WORK**."""
 
 
 def generate_review_loop_prompt(data: dict, pr_id: str) -> str:
@@ -128,30 +178,4 @@ def generate_review_loop_prompt(data: dict, pr_id: str) -> str:
     commit, and push before reporting the verdict.  This is used by the
     review loop (``zz d`` / ``zzz d``) where Claude iterates until PASS.
     """
-    base = generate_review_prompt(data, pr_id)
-    pr = store.get_pr(data, pr_id)
-    branch = pr.get("branch", "") if pr else ""
-
-    addendum = f"""
-
-## Review Loop Mode
-
-This review is running in an automated loop.  After completing your review:
-
-1. If you find issues (**NEEDS_WORK**):
-   - Implement ALL the fixes you identified
-   - Run any relevant tests to verify your fixes
-   - Stage and commit your changes with a descriptive message
-   - Push to the remote: `git push origin {branch}`
-   - Then output your verdict: **NEEDS_WORK** with a summary of what you fixed and what may still need attention on the next iteration
-
-2. If only non-blocking suggestions remain (**PASS_WITH_SUGGESTIONS**):
-   - Implement the suggestions if they are straightforward
-   - Commit and push if you made changes
-   - Output: **PASS_WITH_SUGGESTIONS** with a list of any remaining optional improvements you chose not to implement
-
-3. If the code is ready to merge as-is (**PASS**):
-   - Output: **PASS**
-
-IMPORTANT: Always end your response with the verdict keyword on its own line — one of **PASS**, **PASS_WITH_SUGGESTIONS**, or **NEEDS_WORK**."""
-    return base + addendum
+    return generate_review_prompt(data, pr_id, review_loop=True)

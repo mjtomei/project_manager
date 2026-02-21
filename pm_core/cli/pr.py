@@ -539,7 +539,9 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
     launch_claude(prompt, cwd=str(work_path), session_key=session_key, pm_root=root, resume=not fresh)
 
 
-def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False) -> None:
+def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
+                          review_loop: bool = False, review_iteration: int = 0,
+                          review_loop_id: str = "") -> None:
     """Launch a tmux review window with Claude review + git diff shell."""
     if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
         click.echo("Review window requires tmux.")
@@ -555,13 +557,19 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False) -> No
         click.echo(f"Review window: no workdir for {pr_entry['id']}. Start the PR first.")
         return
 
+    # Review loop always forces a fresh window
+    if review_loop:
+        fresh = True
+
     pr_id = pr_entry["id"]
     display_id = _pr_display_id(pr_entry)
     title = pr_entry.get("title", "")
     base_branch = data.get("project", {}).get("base_branch", "main")
 
     # Generate review prompt and build Claude command
-    review_prompt = prompt_gen.generate_review_prompt(data, pr_id)
+    review_prompt = prompt_gen.generate_review_prompt(data, pr_id, review_loop=review_loop,
+                                                      review_iteration=review_iteration,
+                                                      review_loop_id=review_loop_id)
     claude_cmd = build_claude_shell_cmd(prompt=review_prompt)
 
     window_name = f"review-{display_id}"
@@ -640,7 +648,10 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False) -> No
 @pr.command("done")
 @click.argument("pr_id", default=None, required=False)
 @click.option("--fresh", is_flag=True, default=False, help="Kill existing review window and create a new one")
-def pr_done(pr_id: str | None, fresh: bool):
+@click.option("--review-loop", is_flag=True, default=False, help="Use review loop prompt (fix/commit/push)")
+@click.option("--review-iteration", default=0, type=int, help="Review loop iteration number (for commit messages)")
+@click.option("--review-loop-id", default="", help="Unique review loop identifier (for commit messages)")
+def pr_done(pr_id: str | None, fresh: bool, review_loop: bool, review_iteration: int, review_loop_id: str):
     """Mark a PR as in_review.
 
     If PR_ID is omitted, infers from cwd (if inside a workdir) or
@@ -671,7 +682,9 @@ def pr_done(pr_id: str | None, fresh: bool):
         raise SystemExit(1)
     if pr_entry.get("status") == "in_review":
         click.echo(f"PR {pr_id} is already in_review.")
-        _launch_review_window(data, pr_entry, fresh=fresh)
+        _launch_review_window(data, pr_entry, fresh=fresh, review_loop=review_loop,
+                              review_iteration=review_iteration,
+                              review_loop_id=review_loop_id)
         return
     if pr_entry.get("status") == "pending":
         click.echo(f"PR {pr_id} is pending — start it first with: pm pr start {pr_id}", err=True)
@@ -694,7 +707,9 @@ def pr_done(pr_id: str | None, fresh: bool):
     save_and_push(data, root, f"pm: done {pr_id}")
     click.echo(f"PR {_pr_display_id(pr_entry)} marked as in_review.")
     trigger_tui_refresh()
-    _launch_review_window(data, pr_entry, fresh=fresh)
+    _launch_review_window(data, pr_entry, fresh=fresh, review_loop=review_loop,
+                          review_iteration=review_iteration,
+                          review_loop_id=review_loop_id)
 
 
 @pr.command("sync")
