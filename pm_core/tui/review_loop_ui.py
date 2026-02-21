@@ -14,7 +14,7 @@ Keybindings:
 """
 
 from pm_core.paths import configure_logger
-from pm_core import store, prompt_gen
+from pm_core import store
 from pm_core.review_loop import (
     ReviewLoopState,
     start_review_loop_background,
@@ -25,24 +25,15 @@ from pm_core.review_loop import (
 
 _log = configure_logger("pm.tui.review_loop_ui")
 
-# Icons for review verdicts (used in detail panel and log line)
+# Icons for review verdicts (used in log line)
 VERDICT_ICONS = {
     VERDICT_PASS: "[green bold]✓ PASS[/]",
     VERDICT_PASS_WITH_SUGGESTIONS: "[yellow bold]~ PASS_WITH_SUGGESTIONS[/]",
     VERDICT_NEEDS_WORK: "[red bold]✗ NEEDS_WORK[/]",
+    "KILLED": "[red bold]☠ KILLED[/]",
     "TIMEOUT": "[red bold]⏱ TIMEOUT[/]",
     "ERROR": "[red bold]! ERROR[/]",
     "": "[dim]—[/]",
-}
-
-# Compact icons for detail panel (no Rich markup)
-VERDICT_ICONS_PLAIN = {
-    VERDICT_PASS: "✓ PASS",
-    VERDICT_PASS_WITH_SUGGESTIONS: "~ PASS_WITH_SUGGESTIONS",
-    VERDICT_NEEDS_WORK: "✗ NEEDS_WORK",
-    "TIMEOUT": "⏱ TIMEOUT",
-    "ERROR": "! ERROR",
-    "": "—",
 }
 
 
@@ -112,8 +103,8 @@ def _start_loop(app, pr_id: str, pr: dict | None, stop_on_suggestions: bool) -> 
         app.log_message(f"No workdir for {pr_id}. Start the PR first.")
         return
 
-    # Generate the review-loop prompt (with fix/commit/push addendum)
-    review_prompt = prompt_gen.generate_review_loop_prompt(app._data, pr_id)
+    # Get pm_root for launching the review window
+    pm_root = str(store.find_project_root())
 
     # Create state
     mode = "strict" if not stop_on_suggestions else "normal"
@@ -123,21 +114,18 @@ def _start_loop(app, pr_id: str, pr: dict | None, stop_on_suggestions: bool) -> 
     _log.info("review_loop_ui: starting %s loop for %s", mode, pr_id)
     mode_label = "strict (PASS only)" if not stop_on_suggestions else "normal"
     app.log_message(
-        f"[bold]Review loop started[/] for {pr_id} [{mode_label}] — z d to stop",
+        f"[bold]Review loop started[/] for {pr_id} [{mode_label}] loop={state.loop_id} — z d to stop",
         sticky=3,
     )
 
     # Ensure the poll timer is running
     _ensure_poll_timer(app)
 
-    # Refresh the detail panel to show loop state
-    _refresh_detail_panel(app)
-
     # Start the background loop
     start_review_loop_background(
-        prompt=review_prompt,
-        cwd=workdir,
         state=state,
+        pm_root=pm_root,
+        pr_data=pr,
         on_iteration=lambda s: _on_iteration_from_thread(app, s),
         on_complete=lambda s: _on_complete_from_thread(app, s),
     )
@@ -194,12 +182,10 @@ def _poll_loop_state(app) -> None:
     for pr_id, state in list(app._review_loops.items()):
         if state.running:
             any_running = True
-        elif not getattr(state, "_ui_notified_done", False):
+        elif not state._ui_notified_done:
             state._ui_notified_done = True
             newly_done.append(state)
 
-    # Refresh detail panel to show updated iteration counts / verdicts
-    _refresh_detail_panel(app)
     # Refresh tech tree to update ⟳N markers on PR nodes
     _refresh_tech_tree(app)
 
@@ -218,24 +204,6 @@ def _poll_loop_state(app) -> None:
             app._review_loop_timer.stop()
             app._review_loop_timer = None
 
-
-# ---------------------------------------------------------------------------
-# Detail panel integration
-# ---------------------------------------------------------------------------
-
-def get_loop_state_for_pr(app, pr_id: str) -> ReviewLoopState | None:
-    """Return the loop state for a PR, if any."""
-    return app._review_loops.get(pr_id)
-
-
-def _refresh_detail_panel(app) -> None:
-    """Refresh the detail panel so it picks up updated loop state."""
-    try:
-        from pm_core.tui.detail_panel import DetailPanel
-        detail = app.query_one("#detail-panel", DetailPanel)
-        detail.refresh()
-    except Exception:
-        pass
 
 
 def _refresh_tech_tree(app) -> None:
