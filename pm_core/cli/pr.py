@@ -5,6 +5,7 @@ Registers the ``pr`` group and all subcommands on the top-level ``cli`` group.
 
 import os
 import platform
+import re
 import shutil
 import subprocess
 from datetime import datetime, timezone
@@ -217,7 +218,10 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
             elif in_notes:
                 stripped = line.strip()
                 if stripped.startswith("- "):
-                    note_lines.append(stripped[2:])
+                    text = stripped[2:]
+                    # Strip trailing timestamp comment added by template
+                    text = re.sub(r'\s+#\s+\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$', '', text)
+                    note_lines.append(text)
                 # skip blank lines and non-bulleted lines in notes section
             elif line.startswith("title:"):
                 new_title = line[len("title:"):].strip()

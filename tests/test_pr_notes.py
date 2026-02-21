@@ -1,13 +1,15 @@
 """Tests for PR notes feature — hash-based note IDs, CLI commands, prompt gen, detail panel."""
 
+import os
 import re
+import tempfile
 from unittest.mock import patch
 
 from click.testing import CliRunner
 
 from pm_core import store
 from pm_core.cli import cli
-from pm_core.prompt_gen import generate_prompt, generate_review_prompt
+from pm_core.prompt_gen import generate_prompt, generate_review_prompt, _format_pr_notes
 from pm_core.tui.detail_panel import DetailPanel
 
 
@@ -228,6 +230,48 @@ class TestPrEditNotes:
         pr = store.get_pr(data, "pr-001")
         assert pr["notes"][0]["text"] == "Important context"
         assert pr["notes"][0]["created_at"] == "2026-01-15T10:30:00Z"
+
+    def test_editor_roundtrip_preserves_notes(self, tmp_path):
+        """Saving the editor template without changes must not alter notes.
+
+        Regression test: timestamps rendered as '# ...' comments in the
+        template were being parsed back as part of the note text, causing
+        every note to get a new hash ID on each save.
+        """
+        notes = [
+            {"id": "note-abc", "text": "First note", "created_at": "2026-01-15T10:30:00Z"},
+            {"id": "note-def", "text": "Second note", "created_at": "2026-01-16T14:00:00Z"},
+        ]
+        root = _make_state(tmp_path, notes=notes)
+        runner = CliRunner()
+
+        # Simulate editor that saves the template unchanged
+        def fake_editor(args):
+            # args is [editor_path, tmp_file] — just leave file as-is
+            return 0
+
+        with patch("subprocess.call", side_effect=fake_editor):
+            # Touch the file to update mtime (so the "no changes" check is bypassed)
+            original_call = os.path.getmtime
+
+            def patched_getmtime(path):
+                result = original_call(path)
+                patched_getmtime.call_count = getattr(patched_getmtime, 'call_count', 0) + 1
+                if patched_getmtime.call_count == 1:
+                    return result - 1  # first call returns older mtime
+                return result
+
+            with patch("os.path.getmtime", side_effect=patched_getmtime):
+                result = runner.invoke(cli, ["-C", str(root), "pr", "edit", "pr-001"])
+
+        # Notes should be unchanged — either "No changes" or notes not in changes list
+        data = store.load(root)
+        pr = store.get_pr(data, "pr-001")
+        assert len(pr["notes"]) == 2
+        assert pr["notes"][0]["id"] == "note-abc"
+        assert pr["notes"][0]["text"] == "First note"
+        assert pr["notes"][1]["id"] == "note-def"
+        assert pr["notes"][1]["text"] == "Second note"
 
 
 # ---------------------------------------------------------------------------
