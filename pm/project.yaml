@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-9177f5e
+  active_pr: pr-70cf9e7
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-02-20T02:43:08.956779+00:00'
@@ -840,3 +840,23 @@ prs:
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
+- id: pr-70cf9e7
+  plan: null
+  title: Fix review loop docs and window focus issues
+  branch: pm/pr-70cf9e7-fix-review-loop-docs-and-window-focus-issues
+  status: pending
+  depends_on: []
+  description: 'Fix the following bugs:
+
+
+    1. Meta prompt should know about the override functionality and that it is automatically
+    set; all prompts should know about their initialization
+
+    2. Review loop iterations should not change window focus of any sessions — loop
+    should run without stealing focus from the user''s active tmux window/pane
+
+    3. Make sure review loop is documented in the help pane and features list in README'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  notes: []
