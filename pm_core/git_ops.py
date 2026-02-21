@@ -140,7 +140,7 @@ def checkout_branch(workdir: Path, branch: str, create: bool = False) -> None:
             create_result = run_git("checkout", "-b", branch, cwd=workdir, check=False)
             if create_result.returncode != 0:
                 # May fail if HEAD is invalid (empty repo) — try orphan branch
-                run_git("checkout", "--orphan", branch, cwd=workdir, check=False)
+                run_git("checkout", "--orphan", branch, cwd=workdir)
     else:
         run_git("checkout", branch, cwd=workdir)
 
