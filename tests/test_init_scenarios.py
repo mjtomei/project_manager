@@ -241,7 +241,7 @@ class TestInitEmptyRepo:
 
         assert "backend: local" in result.output
 
-    def test_base_branch_defaults_to_main(self, tmp_path, runner, monkeypatch):
+    def test_base_branch_defaults_to_master(self, tmp_path, runner, monkeypatch):
         repo = _make_repo(tmp_path, commit=False)
         monkeypatch.chdir(repo)
 
@@ -249,8 +249,8 @@ class TestInitEmptyRepo:
 
         data = yaml.safe_load((repo / "pm" / "project.yaml").read_text())
         # Empty repo: rev-parse returns "HEAD" which is not a valid branch,
-        # so init falls back to "main"
-        assert data["project"]["base_branch"] == "main"
+        # so init falls back to "master"
+        assert data["project"]["base_branch"] == "master"
 
     def test_project_yaml_contents(self, tmp_path, runner, monkeypatch):
         repo = _make_repo(tmp_path, commit=False)

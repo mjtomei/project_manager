@@ -3392,7 +3392,7 @@ cat {test_cwd}/pm/project.yaml
 
 Check:
 - `backend: local` (no remote, no commits)
-- `base_branch` is `main` (default for empty repos)
+- `base_branch` is `master` (default for empty repos)
 
 ### 2. Verify directory structure
 
@@ -3431,7 +3431,7 @@ print('state:', detect_state(Path('{test_cwd}/pm')))
 ```
 TEST RESULTS
 ============
-project.yaml:  [PASS/FAIL] - backend=local, base_branch=main
+project.yaml:  [PASS/FAIL] - backend=local, base_branch=master
 Directory:     [PASS/FAIL] - plans/ exists
 pm pr add:     [PASS/FAIL] - succeeds with empty repo (bug #8)
 pm pr list:    [PASS/FAIL] - succeeds with empty repo

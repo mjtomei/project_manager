@@ -132,7 +132,7 @@ def init(repo_url: str | None, name: str, base_branch: str, directory: str,
             if branch_name and branch_name != "HEAD":
                 base_branch = branch_name
         if base_branch is None:
-            base_branch = "main"
+            base_branch = "master"
 
     if directory is None:
         directory = "pm"
