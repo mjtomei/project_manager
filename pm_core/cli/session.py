@@ -363,9 +363,12 @@ def session(ctx, share_global, share_group, start_dir, print_connect):
     Other users join with the same flag plus --dir pointing to the original
     user's project directory.
     """
-    # Always propagate share mode to env so subcommands (tag, kill, name,
-    # mobile, etc.) inherit the same --global/--group context.
-    _set_share_mode_env(share_global, share_group)
+    # Propagate --global/--group to env when explicitly set so
+    # subcommands (tag, kill, etc.) inherit the flags.  When neither
+    # flag is given, leave the env var untouched — it may already be
+    # inherited from the tmux session environment inside shared sessions.
+    if share_global or share_group:
+        _set_share_mode_env(share_global, share_group)
     if ctx.invoked_subcommand is not None:
         return
     if print_connect:
