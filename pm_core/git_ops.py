@@ -1,6 +1,7 @@
 """Git clone, branch, push, pull operations."""
 
 import os
+import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -111,7 +112,6 @@ def clone(repo_url: str, dest: Path, branch: Optional[str] = None) -> None:
             # No fallback available — propagate the error
             run_git(*args)
         # Clean up partial clone directory before retrying
-        import shutil
         if dest.exists():
             shutil.rmtree(dest)
         # Retry without --branch (handles empty repos, wrong default branch)

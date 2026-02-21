@@ -18,6 +18,7 @@ from pm_core.claude_launcher import (
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
+    _get_pm_session,
     state_root,
     trigger_tui_refresh,
 )
@@ -175,12 +176,7 @@ def _run_guide(step, fresh=False):
         return
 
     # Determine session name for TUI targeting
-    pm_session = None
-    if _in_pm_tmux_session():
-        session_name = tmux_mod.get_session_name()
-        if "~" in session_name:
-            session_name = session_name.rsplit("~", 1)[0]
-        pm_session = session_name
+    pm_session = _get_pm_session()
 
     # Interactive steps
     prompt = guide_mod.build_guide_prompt(state, ctx, root, session_name=pm_session)
