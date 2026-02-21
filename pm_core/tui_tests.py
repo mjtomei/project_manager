@@ -3230,7 +3230,7 @@ cat {test_cwd}/pm/project.yaml
 
 Check:
 - `backend: github`
-- `repo:` matches `test-org/test-repo` or similar
+- `repo:` matches `pallets/flask` or the full GitHub URL
 - `base_branch` is `main` or `master`
 - File exists and is valid YAML
 
@@ -3522,7 +3522,7 @@ def _cleanup_test_session(context):
 def _init_github_repo():
     """Set up a temp repo with a GitHub remote, run pm init, start TUI."""
     tmpdir = tempfile.mkdtemp(prefix="pm-test-init-github-")
-    _setup_git_repo(tmpdir, remote="https://github.com/test-org/test-repo.git",
+    _setup_git_repo(tmpdir, remote="https://github.com/pallets/flask.git",
                     commit=True)
     _run_pm_init(tmpdir)
     session_name, pane_id = _start_test_session(tmpdir)
