@@ -755,7 +755,7 @@ prs:
   plan: plan-003
   title: Add notes field to PRs for post-start addendums
   branch: pm/pr-c11d04f-add-notes-field-to-prs-for-post-start-addendums
-  status: in_progress
+  status: in_review
   depends_on: []
   description: 'Add a notes list field to PR entries in project.yaml for recording
     addendums after work has begun. Each note identified by a hash-based ID (note-<hash>,
@@ -807,7 +807,7 @@ prs:
   plan: null
   title: Add review loop mode for iterative PR review until pass
   branch: pm/pr-9cf7150-add-review-loop-mode-for-iterative-pr-review-until
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'Add a mode where pm stays in a review loop until Claude reports a
     pass. The loop repeatedly runs the review prompt and watches for the done/pass
@@ -819,6 +819,7 @@ prs:
     and the latest review verdict. Build on the existing ''z d'' and review window
     functionality so the user can interrupt at any time. Use a custom prompt that
     watches for the done message.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/72
+  gh_pr_number: 72
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9cf7150-add-review-loop-mode-for-iterative-p-3a8584d0
