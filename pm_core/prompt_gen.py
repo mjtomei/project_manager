@@ -4,6 +4,19 @@ from pm_core import store, notes
 from pm_core.backend import get_backend
 
 
+def _format_pr_notes(pr: dict) -> str:
+    """Format PR notes as a markdown section, or empty string if none."""
+    pr_notes = pr.get("notes") or []
+    if not pr_notes:
+        return ""
+    note_lines = []
+    for n in pr_notes:
+        ts = n.get("created_at", "")
+        ts_str = f" ({ts})" if ts else ""
+        note_lines.append(f"- {n['text']}{ts_str}")
+    return f"\n## PR Notes\n" + "\n".join(note_lines) + "\n"
+
+
 def generate_prompt(data: dict, pr_id: str) -> str:
     """Generate a Claude Code prompt for working on a PR."""
     pr = store.get_pr(data, pr_id)
@@ -43,15 +56,7 @@ def generate_prompt(data: dict, pr_id: str) -> str:
         pass
 
     # Include PR notes (addendums added after work began)
-    pr_notes = pr.get("notes") or []
-    pr_notes_block = ""
-    if pr_notes:
-        note_lines = []
-        for n in pr_notes:
-            ts = n.get("created_at", "")
-            ts_str = f" ({ts})" if ts else ""
-            note_lines.append(f"- {n['text']}{ts_str}")
-        pr_notes_block = f"\n## PR Notes\n" + "\n".join(note_lines) + "\n"
+    pr_notes_block = _format_pr_notes(pr)
 
     prompt = f"""You're working on PR {pr_id}: "{title}"
 
@@ -105,15 +110,7 @@ This PR is part of plan "{plan['name']}" ({plan['id']}). Other PRs in this plan:
 """
 
     # Include PR notes (addendums)
-    pr_notes = pr.get("notes") or []
-    pr_notes_block = ""
-    if pr_notes:
-        note_lines = []
-        for n in pr_notes:
-            ts = n.get("created_at", "")
-            ts_str = f" ({ts})" if ts else ""
-            note_lines.append(f"- {n['text']}{ts_str}")
-        pr_notes_block = f"\n## PR Notes\n" + "\n".join(note_lines) + "\n"
+    pr_notes_block = _format_pr_notes(pr)
 
     prompt = f"""You are reviewing PR {pr_id}: "{title}"
 
