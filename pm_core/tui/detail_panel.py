@@ -125,5 +125,36 @@ class DetailPanel(Widget):
                 if section.get("files"):
                     lines.append(f"  Files: {section['files']}")
 
+        # Show review loop state if one exists for this PR
+        pr_id = pr.get("id", "")
+        loop_state = self._get_loop_state(pr_id)
+        if loop_state:
+            lines.append("")
+            mode = "strict" if not loop_state.stop_on_suggestions else "normal"
+            if loop_state.running:
+                if loop_state.iteration == 0:
+                    lines.append(f"[bold cyan]⟳ Review loop[/] [{mode}] starting...")
+                else:
+                    verdict = loop_state.latest_verdict or "—"
+                    lines.append(
+                        f"[bold cyan]⟳ Review loop[/] [{mode}] "
+                        f"iter {loop_state.iteration}: {verdict}"
+                    )
+                if loop_state.stop_requested:
+                    lines.append("  [yellow]stopping after this iteration[/]")
+            else:
+                verdict = loop_state.latest_verdict or "—"
+                lines.append(
+                    f"[dim]Review loop done[/] [{mode}] "
+                    f"{loop_state.iteration} iter: {verdict}"
+                )
+
         content = "\n".join(lines)
         return Panel(content, title=f"{display_id}", border_style="blue")
+
+    def _get_loop_state(self, pr_id: str):
+        """Look up review loop state from the app."""
+        try:
+            return self.app._review_loops.get(pr_id)
+        except Exception:
+            return None

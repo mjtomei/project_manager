@@ -1,4 +1,4 @@
-"""Tests for pm_core.review_loop."""
+"""Tests for pm_core.review_loop and pm_core.prompt_gen review loop prompt."""
 
 import threading
 from unittest.mock import patch, MagicMock
@@ -91,6 +91,10 @@ class TestReviewLoopState:
         assert state.latest_verdict == ""
         assert state.history == []
         assert state.stop_on_suggestions is True
+
+    def test_strict_mode(self):
+        state = ReviewLoopState(pr_id="pr-001", stop_on_suggestions=False)
+        assert state.stop_on_suggestions is False
 
 
 # --- run_review_loop_sync tests ---
@@ -204,3 +208,78 @@ class TestStartReviewLoopBackground:
         assert state.latest_verdict == VERDICT_PASS
         assert state.running is False
         complete_callback.assert_called_once_with(state)
+
+
+# --- generate_review_loop_prompt tests ---
+
+class TestGenerateReviewLoopPrompt:
+    def _make_data(self):
+        return {
+            "project": {"name": "test", "repo": "test/repo", "base_branch": "main"},
+            "prs": [
+                {
+                    "id": "pr-001",
+                    "title": "Add feature",
+                    "description": "Implement the feature",
+                    "branch": "pm/pr-001-add-feature",
+                    "status": "in_progress",
+                },
+            ],
+        }
+
+    def test_includes_review_loop_mode_section(self):
+        from pm_core.prompt_gen import generate_review_loop_prompt
+        data = self._make_data()
+        prompt = generate_review_loop_prompt(data, "pr-001")
+        assert "## Review Loop Mode" in prompt
+
+    def test_includes_fix_commit_push_instructions(self):
+        from pm_core.prompt_gen import generate_review_loop_prompt
+        data = self._make_data()
+        prompt = generate_review_loop_prompt(data, "pr-001")
+        assert "Implement ALL the fixes" in prompt
+        assert "git push" in prompt
+        assert "commit" in prompt.lower()
+
+    def test_includes_branch_in_push_command(self):
+        from pm_core.prompt_gen import generate_review_loop_prompt
+        data = self._make_data()
+        prompt = generate_review_loop_prompt(data, "pr-001")
+        assert "pm/pr-001-add-feature" in prompt
+
+    def test_includes_all_three_verdicts(self):
+        from pm_core.prompt_gen import generate_review_loop_prompt
+        data = self._make_data()
+        prompt = generate_review_loop_prompt(data, "pr-001")
+        assert "PASS" in prompt
+        assert "PASS_WITH_SUGGESTIONS" in prompt
+        assert "NEEDS_WORK" in prompt
+
+    def test_includes_base_review_content(self):
+        from pm_core.prompt_gen import generate_review_loop_prompt
+        data = self._make_data()
+        prompt = generate_review_loop_prompt(data, "pr-001")
+        # Should contain the base review prompt content
+        assert "reviewing pr pr-001" in prompt.lower()
+        assert "git diff" in prompt
+
+
+# --- Multiple concurrent loops (state isolation) ---
+
+class TestMultipleLoops:
+    @patch("pm_core.review_loop._run_claude_review")
+    def test_independent_states(self, mock_review):
+        """Two loops for different PRs track state independently."""
+        mock_review.return_value = "**PASS**"
+        state_a = ReviewLoopState(pr_id="pr-001")
+        state_b = ReviewLoopState(pr_id="pr-002", stop_on_suggestions=False)
+
+        run_review_loop_sync("prompt-a", "/tmp/a", state_a)
+        run_review_loop_sync("prompt-b", "/tmp/b", state_b)
+
+        assert state_a.pr_id == "pr-001"
+        assert state_b.pr_id == "pr-002"
+        assert state_a.iteration == 1
+        assert state_b.iteration == 1
+        assert state_a.stop_on_suggestions is True
+        assert state_b.stop_on_suggestions is False

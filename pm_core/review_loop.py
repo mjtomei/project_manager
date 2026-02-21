@@ -13,8 +13,6 @@ PASS_WITH_SUGGESTIONS; set `stop_on_suggestions=False` to keep going
 until full PASS.
 """
 
-import asyncio
-import logging
 import subprocess
 import threading
 from dataclasses import dataclass, field

@@ -1,7 +1,16 @@
 """Review loop UI integration for the TUI.
 
-Manages starting/stopping the review loop and updating the TUI display
-with loop status and verdicts.
+Manages starting/stopping review loops and updating the TUI display.
+Multiple PRs can have loops running simultaneously.
+
+Keybindings:
+  z d     — If a loop is running for the selected PR, make this iteration
+             the last one.  Otherwise, perform a fresh ``pr done`` (original
+             behaviour).
+  zz d    — Start a review loop (stops on PASS or PASS_WITH_SUGGESTIONS).
+             If a loop is already running, make this iteration the last one.
+  zzz d   — Start a strict review loop (stops only on full PASS).
+             If a loop is already running, make this iteration the last one.
 """
 
 from pm_core.paths import configure_logger
@@ -16,7 +25,7 @@ from pm_core.review_loop import (
 
 _log = configure_logger("pm.tui.review_loop_ui")
 
-# Icons for review verdicts
+# Icons for review verdicts (used in detail panel and log line)
 VERDICT_ICONS = {
     VERDICT_PASS: "[green bold]✓ PASS[/]",
     VERDICT_PASS_WITH_SUGGESTIONS: "[yellow bold]~ PASS_WITH_SUGGESTIONS[/]",
@@ -24,6 +33,16 @@ VERDICT_ICONS = {
     "TIMEOUT": "[red bold]⏱ TIMEOUT[/]",
     "ERROR": "[red bold]! ERROR[/]",
     "": "[dim]—[/]",
+}
+
+# Compact icons for detail panel (no Rich markup)
+VERDICT_ICONS_PLAIN = {
+    VERDICT_PASS: "✓ PASS",
+    VERDICT_PASS_WITH_SUGGESTIONS: "~ PASS_WITH_SUGGESTIONS",
+    VERDICT_NEEDS_WORK: "✗ NEEDS_WORK",
+    "TIMEOUT": "⏱ TIMEOUT",
+    "ERROR": "! ERROR",
+    "": "—",
 }
 
 
@@ -39,25 +58,51 @@ def _get_selected_pr(app) -> tuple[str | None, dict | None]:
     return pr_id, pr
 
 
-def toggle_review_loop(app) -> None:
-    """Start or stop the review loop for the selected PR.
+# ---------------------------------------------------------------------------
+# z d  — fresh done or stop loop
+# ---------------------------------------------------------------------------
 
-    If a loop is already running, stops it. Otherwise starts a new one.
-    """
-    if app._review_loop_state and app._review_loop_state.running:
-        stop_review_loop(app)
-        return
-
-    start_review_loop(app)
-
-
-def start_review_loop(app) -> None:
-    """Start a review loop for the selected PR."""
+def stop_loop_or_fresh_done(app) -> None:
+    """Handle ``z d``: stop a running loop, or do a fresh done."""
     pr_id, pr = _get_selected_pr(app)
     if not pr_id:
         app.log_message("No PR selected")
         return
 
+    loop = app._review_loops.get(pr_id)
+    if loop and loop.running:
+        _stop_loop(app, pr_id)
+    else:
+        # Original z d behaviour: fresh done
+        from pm_core.tui import pr_view
+        pr_view.done_pr(app, fresh=True)
+
+
+# ---------------------------------------------------------------------------
+# zz d / zzz d  — start or stop loop
+# ---------------------------------------------------------------------------
+
+def start_or_stop_loop(app, stop_on_suggestions: bool) -> None:
+    """Handle ``zz d`` / ``zzz d``: start loop or stop if one is running."""
+    pr_id, pr = _get_selected_pr(app)
+    if not pr_id:
+        app.log_message("No PR selected")
+        return
+
+    loop = app._review_loops.get(pr_id)
+    if loop and loop.running:
+        _stop_loop(app, pr_id)
+        return
+
+    _start_loop(app, pr_id, pr, stop_on_suggestions)
+
+
+# ---------------------------------------------------------------------------
+# Core start / stop
+# ---------------------------------------------------------------------------
+
+def _start_loop(app, pr_id: str, pr: dict | None, stop_on_suggestions: bool) -> None:
+    """Start a review loop for the given PR."""
     if not pr:
         app.log_message(f"PR {pr_id} not found")
         return
@@ -67,28 +112,26 @@ def start_review_loop(app) -> None:
         app.log_message(f"No workdir for {pr_id}. Start the PR first.")
         return
 
-    # Stop existing loop if running
-    if app._review_loop_state and app._review_loop_state.running:
-        app._review_loop_state.stop_requested = True
-        _log.info("review_loop_ui: stopping existing loop before starting new one")
-
-    # Generate review prompt
-    review_prompt = prompt_gen.generate_review_prompt(app._data, pr_id)
+    # Generate the review-loop prompt (with fix/commit/push addendum)
+    review_prompt = prompt_gen.generate_review_loop_prompt(app._data, pr_id)
 
     # Create state
-    state = ReviewLoopState(pr_id=pr_id)
-    app._review_loop_state = state
+    mode = "strict" if not stop_on_suggestions else "normal"
+    state = ReviewLoopState(pr_id=pr_id, stop_on_suggestions=stop_on_suggestions)
+    app._review_loops[pr_id] = state
 
-    _log.info("review_loop_ui: starting loop for %s", pr_id)
-    app.log_message(f"[bold]Review loop started[/] for {pr_id} — z d to stop", sticky=3)
+    _log.info("review_loop_ui: starting %s loop for %s", mode, pr_id)
+    mode_label = "strict (PASS only)" if not stop_on_suggestions else "normal"
+    app.log_message(
+        f"[bold]Review loop started[/] for {pr_id} [{mode_label}] — z d to stop",
+        sticky=3,
+    )
 
-    # Update the status bar to show loop indicator
-    _update_loop_display(app)
+    # Ensure the poll timer is running
+    _ensure_poll_timer(app)
 
-    # Start a periodic timer to poll loop state and update TUI
-    if app._review_loop_timer:
-        app._review_loop_timer.stop()
-    app._review_loop_timer = app.set_interval(1.0, lambda: _poll_loop_state(app))
+    # Refresh the detail panel to show loop state
+    _refresh_detail_panel(app)
 
     # Start the background loop
     start_review_loop_background(
@@ -100,27 +143,29 @@ def start_review_loop(app) -> None:
     )
 
 
-def stop_review_loop(app) -> None:
-    """Stop the running review loop."""
-    if not app._review_loop_state:
-        app.log_message("No review loop running")
+def _stop_loop(app, pr_id: str) -> None:
+    """Request graceful stop of a running loop."""
+    loop = app._review_loops.get(pr_id)
+    if not loop or not loop.running:
+        app.log_message(f"No review loop running for {pr_id}")
         return
 
-    if not app._review_loop_state.running:
-        app.log_message("Review loop already stopped")
-        return
+    _log.info("review_loop_ui: stopping loop for %s", pr_id)
+    loop.stop_requested = True
+    app.log_message(f"[bold]Review loop stopping[/] for {pr_id} (finishing current iteration)...")
 
-    _log.info("review_loop_ui: stopping loop for %s", app._review_loop_state.pr_id)
-    app._review_loop_state.stop_requested = True
-    app.log_message("[bold]Review loop stopping...[/]")
 
+def stop_loop_for_pr(app, pr_id: str) -> None:
+    """Public API: stop a loop for a specific PR (used by command bar)."""
+    _stop_loop(app, pr_id)
+
+
+# ---------------------------------------------------------------------------
+# Background thread callbacks
+# ---------------------------------------------------------------------------
 
 def _on_iteration_from_thread(app, state: ReviewLoopState) -> None:
-    """Called from the background thread after each iteration.
-
-    We can't touch Textual widgets from a thread, so we just log.
-    The periodic timer (_poll_loop_state) handles UI updates.
-    """
+    """Called from the background thread after each iteration."""
     _log.info("review_loop_ui: iteration %d verdict=%s for %s",
               state.iteration, state.latest_verdict, state.pr_id)
 
@@ -131,46 +176,63 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
               state.pr_id, state.latest_verdict, state.iteration)
 
 
+# ---------------------------------------------------------------------------
+# Periodic poll timer (shared across all loops)
+# ---------------------------------------------------------------------------
+
+def _ensure_poll_timer(app) -> None:
+    """Start the poll timer if not already running."""
+    if not app._review_loop_timer:
+        app._review_loop_timer = app.set_interval(1.0, lambda: _poll_loop_state(app))
+
+
 def _poll_loop_state(app) -> None:
     """Periodic timer callback to update TUI from loop state."""
-    state = app._review_loop_state
-    if not state:
-        if app._review_loop_timer:
-            app._review_loop_timer.stop()
-            app._review_loop_timer = None
-        return
+    any_running = False
+    newly_done = []
 
-    _update_loop_display(app)
+    for pr_id, state in list(app._review_loops.items()):
+        if state.running:
+            any_running = True
+        elif not getattr(state, "_ui_notified_done", False):
+            state._ui_notified_done = True
+            newly_done.append(state)
 
-    # If loop has finished, clean up the timer
-    if not state.running:
-        if app._review_loop_timer:
-            app._review_loop_timer.stop()
-            app._review_loop_timer = None
+    # Refresh detail panel to show updated iteration counts / verdicts
+    _refresh_detail_panel(app)
+    # Refresh status bar to show/hide loop count
+    app._update_status_bar()
 
+    # Announce completed loops
+    for state in newly_done:
         verdict_icon = VERDICT_ICONS.get(state.latest_verdict, state.latest_verdict)
         app.log_message(
-            f"Review loop done: {verdict_icon} "
+            f"Review loop done for {state.pr_id}: {verdict_icon} "
             f"({state.iteration} iteration{'s' if state.iteration != 1 else ''})",
             sticky=10,
         )
 
+    # Stop the timer if no loops are running
+    if not any_running:
+        if app._review_loop_timer:
+            app._review_loop_timer.stop()
+            app._review_loop_timer = None
 
-def _update_loop_display(app) -> None:
-    """Update the status bar / log line to reflect review loop state."""
-    state = app._review_loop_state
-    if not state:
-        return
 
-    verdict_icon = VERDICT_ICONS.get(state.latest_verdict, state.latest_verdict)
+# ---------------------------------------------------------------------------
+# Detail panel integration
+# ---------------------------------------------------------------------------
 
-    if state.running:
-        if state.iteration == 0:
-            msg = f"[bold cyan]⟳ Review loop[/] {state.pr_id} — starting..."
-        else:
-            msg = (
-                f"[bold cyan]⟳ Review loop[/] {state.pr_id} "
-                f"— iter {state.iteration} {verdict_icon}"
-            )
-        app.log_message(msg, capture=False)
-    # When not running, _poll_loop_state handles the final message
+def get_loop_state_for_pr(app, pr_id: str) -> ReviewLoopState | None:
+    """Return the loop state for a PR, if any."""
+    return app._review_loops.get(pr_id)
+
+
+def _refresh_detail_panel(app) -> None:
+    """Refresh the detail panel so it picks up updated loop state."""
+    try:
+        from pm_core.tui.detail_panel import DetailPanel
+        detail = app.query_one("#detail-panel", DetailPanel)
+        detail.refresh()
+    except Exception:
+        pass

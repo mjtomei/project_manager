@@ -119,3 +119,39 @@ Review the code changes in this PR for quality, correctness, and architectural f
    - **PASS_WITH_SUGGESTIONS** — Only non-blocking suggestions remain (style nits, minor refactors, optional improvements). The PR could merge now, but would benefit from small tweaks. List suggestions clearly.
    - **NEEDS_WORK** — Blocking issues found (bugs, missing error handling, architectural problems, test gaps). Separate code-quality fixes from architectural concerns."""
     return prompt.strip()
+
+
+def generate_review_loop_prompt(data: dict, pr_id: str) -> str:
+    """Generate a review prompt for the automated review loop.
+
+    Wraps the normal review prompt with instructions to implement fixes,
+    commit, and push before reporting the verdict.  This is used by the
+    review loop (``zz d`` / ``zzz d``) where Claude iterates until PASS.
+    """
+    base = generate_review_prompt(data, pr_id)
+    pr = store.get_pr(data, pr_id)
+    branch = pr.get("branch", "") if pr else ""
+
+    addendum = f"""
+
+## Review Loop Mode
+
+This review is running in an automated loop.  After completing your review:
+
+1. If you find issues (**NEEDS_WORK**):
+   - Implement ALL the fixes you identified
+   - Run any relevant tests to verify your fixes
+   - Stage and commit your changes with a descriptive message
+   - Push to the remote: `git push origin {branch}`
+   - Then output your verdict: **NEEDS_WORK** with a summary of what you fixed and what may still need attention on the next iteration
+
+2. If only non-blocking suggestions remain (**PASS_WITH_SUGGESTIONS**):
+   - Implement the suggestions if they are straightforward
+   - Commit and push if you made changes
+   - Output: **PASS_WITH_SUGGESTIONS** with a list of any remaining optional improvements you chose not to implement
+
+3. If the code is ready to merge as-is (**PASS**):
+   - Output: **PASS**
+
+IMPORTANT: Always end your response with the verdict keyword on its own line — one of **PASS**, **PASS_WITH_SUGGESTIONS**, or **NEEDS_WORK**."""
+    return base + addendum

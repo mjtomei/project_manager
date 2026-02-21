@@ -159,20 +159,22 @@ class ProjectManagerApp(App):
     ]
 
     def on_key(self, event) -> None:
-        """Handle z modifier prefix key."""
+        """Handle z modifier prefix key (supports z, zz, zzz)."""
         cmd_bar = self.query_one("#command-bar", CommandBar)
         if cmd_bar.has_focus:
             return
         if event.key == "z":
-            self._z_pending = not self._z_pending
-            if self._z_pending:
-                self.log_message("[bold]z …[/]")
-            else:
+            if self._z_count >= 3:
+                # zzz → cancel (toggle off)
+                self._z_count = 0
                 self._clear_log_message()
+            else:
+                self._z_count += 1
+                self.log_message(f"[bold]{'z' * self._z_count} …[/]")
             event.prevent_default()
             event.stop()
-        elif event.key == "escape" and self._z_pending:
-            self._z_pending = False
+        elif event.key == "escape" and self._z_count > 0:
+            self._z_count = 0
             self._clear_log_message()
             # Don't prevent — let escape also do its normal thing
 
@@ -232,18 +234,22 @@ class ProjectManagerApp(App):
         # In-flight PR action tracking (prevents concurrent/duplicate PR commands)
         self._inflight_pr_action: str | None = None
         self._log_sticky_until: float = 0.0  # monotonic time until which log line is protected
-        # z modifier key state (vim-style prefix)
-        self._z_pending: bool = False
-        # Review loop state
-        self._review_loop_state = None  # ReviewLoopState or None
+        # z modifier key state (vim-style prefix, supports z/zz/zzz)
+        self._z_count: int = 0
+        # Review loop state: dict of pr_id -> ReviewLoopState (supports multiple)
+        self._review_loops: dict = {}
         self._review_loop_timer: Timer | None = None
 
-    def _consume_z(self) -> bool:
-        """Atomically read and clear the z modifier flag."""
-        if self._z_pending:
-            self._z_pending = False
-            return True
-        return False
+    def _consume_z(self) -> int:
+        """Atomically read and clear the z modifier count.
+
+        Returns 0 (no z), 1 (z), 2 (zz), or 3 (zzz).
+        Non-zero is truthy, so ``if app._consume_z():`` still works
+        for callers that only care about "was z pressed".
+        """
+        count = self._z_count
+        self._z_count = 0
+        return count
 
     # --- Frame capture forwarder (called from ~15 sites) ---
 
@@ -456,17 +462,11 @@ class ProjectManagerApp(App):
                 hidden.append("closed")
             if hidden:
                 filter_text = "hide " + "+".join(hidden)
-        # Build review loop indicator
+        # Build review loop summary for status bar
+        active_loops = [s for s in self._review_loops.values() if s.running]
         review_loop_text = ""
-        if self._review_loop_state:
-            from pm_core.tui.review_loop_ui import VERDICT_ICONS
-            state = self._review_loop_state
-            if state.running:
-                verdict = VERDICT_ICONS.get(state.latest_verdict, "")
-                review_loop_text = f"[bold cyan]⟳ review loop[/] {state.pr_id} iter {state.iteration} {verdict}"
-            elif state.latest_verdict:
-                verdict = VERDICT_ICONS.get(state.latest_verdict, state.latest_verdict)
-                review_loop_text = f"[dim]review loop done:[/] {verdict}"
+        if active_loops:
+            review_loop_text = f"[bold cyan]⟳ {len(active_loops)} review loop{'s' if len(active_loops) > 1 else ''}[/]"
 
         status_bar = self.query_one("#status-bar", StatusBar)
         status_bar.update_status(
@@ -560,11 +560,21 @@ class ProjectManagerApp(App):
         pr_view.start_pr(self)
 
     def action_done_pr(self) -> None:
-        # z d = start/stop review loop; plain d = one-shot done
-        if self._consume_z():
-            review_loop_ui.toggle_review_loop(self)
-        else:
+        z = self._consume_z()
+        if z == 0:
+            # plain d = one-shot done + review window
             pr_view.done_pr(self)
+        elif z == 1:
+            # z d = fresh done (original behaviour), OR stop loop if running
+            review_loop_ui.stop_loop_or_fresh_done(self)
+        elif z == 2:
+            # zz d = start review loop (stops on PASS or PASS_WITH_SUGGESTIONS),
+            #        or stop loop if running
+            review_loop_ui.start_or_stop_loop(self, stop_on_suggestions=True)
+        else:
+            # zzz d = start strict review loop (stops only on PASS),
+            #         or stop loop if running
+            review_loop_ui.start_or_stop_loop(self, stop_on_suggestions=False)
 
     def action_hide_plan(self) -> None:
         pr_view.hide_plan(self)

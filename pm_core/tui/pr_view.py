@@ -81,11 +81,10 @@ def start_pr(app) -> None:
     run_command(app, cmd, working_message=action_key, action_key=action_key)
 
 
-def done_pr(app) -> None:
+def done_pr(app, fresh: bool = False) -> None:
     """Mark the selected PR as done."""
     from pm_core.tui.tech_tree import TechTree
 
-    fresh = app._consume_z()
     tree = app.query_one("#tech-tree", TechTree)
     pr_id = tree.selected_pr_id
     _log.info("action: done_pr selected=%s fresh=%s", pr_id, fresh)
@@ -284,9 +283,17 @@ def handle_command_submitted(app, cmd: str) -> None:
 
     # Handle review loop commands
     parts = shlex.split(cmd)
-    if cmd == "review-loop" or cmd == "review loop":
+    if cmd in ("review-loop", "review loop"):
         from pm_core.tui import review_loop_ui
-        review_loop_ui.toggle_review_loop(app)
+        review_loop_ui.start_or_stop_loop(app, stop_on_suggestions=True)
+        if app._plans_visible:
+            app.query_one("#plans-pane", PlansPane).focus()
+        else:
+            app.query_one("#tech-tree", TechTree).focus()
+        return
+    if cmd in ("review-loop strict", "review loop strict"):
+        from pm_core.tui import review_loop_ui
+        review_loop_ui.start_or_stop_loop(app, stop_on_suggestions=False)
         if app._plans_visible:
             app.query_one("#plans-pane", PlansPane).focus()
         else:
@@ -294,7 +301,11 @@ def handle_command_submitted(app, cmd: str) -> None:
         return
     if cmd in ("review-loop stop", "review loop stop"):
         from pm_core.tui import review_loop_ui
-        review_loop_ui.stop_review_loop(app)
+        pr_id, _ = review_loop_ui._get_selected_pr(app)
+        if pr_id:
+            review_loop_ui.stop_loop_for_pr(app, pr_id)
+        else:
+            app.log_message("No PR selected")
         if app._plans_visible:
             app.query_one("#plans-pane", PlansPane).focus()
         else:
