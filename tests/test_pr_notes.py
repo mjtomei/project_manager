@@ -2,14 +2,13 @@
 
 import os
 import re
-import tempfile
 from unittest.mock import patch
 
 from click.testing import CliRunner
 
 from pm_core import store
 from pm_core.cli import cli
-from pm_core.prompt_gen import generate_prompt, generate_review_prompt, _format_pr_notes
+from pm_core.prompt_gen import generate_prompt, generate_review_prompt
 from pm_core.tui.detail_panel import DetailPanel
 
 
