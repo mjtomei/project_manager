@@ -3797,14 +3797,6 @@ ALL_TESTS = {
 }
 
 
-def get_test_prompt(test_id: str) -> str | None:
-    """Get the prompt for a specific test."""
-    test = ALL_TESTS.get(test_id)
-    if test:
-        return test["prompt"]
-    return None
-
-
 def list_tests() -> list[dict]:
     """List all available tests."""
     return [
