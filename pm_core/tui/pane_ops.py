@@ -493,30 +493,61 @@ def launch_test(app, test_id: str) -> None:
     from pm_core import tui_tests
     from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
 
-    prompt = tui_tests.get_test_prompt(test_id)
-    if not prompt:
+    test_info = tui_tests.ALL_TESTS.get(test_id)
+    if not test_info:
         app.log_message(f"Test not found: {test_id}")
         return
 
+    prompt = test_info["prompt"]
+    init_fn = test_info.get("init")
+    cleanup_fn = test_info.get("cleanup")
+    init_context = None
+
+    if init_fn:
+        # Test provides its own setup (e.g. creating a git repo).
+        # Mirrors the logic in cli/tui.py tui_test command.
+        app.log_message(f"Running init for test: {test_info['name']}...")
+        init_context = init_fn()
+        sess = init_context["session_name"]
+        pane_id = init_context.get("pane_id") or ""
+        # Format placeholders into prompt
+        prompt_ctx = init_context.get("prompt_context", {})
+        prompt = prompt.format(**prompt_ctx)
+    else:
+        sess = app._session_name or "default"
+        pane_id = os.environ.get("TMUX_PANE", "")
+
     # Build session context (same pattern as cli tui-test command)
-    sess = app._session_name or "default"
-    pane_id = os.environ.get("TMUX_PANE", "")
+    pane_line = f"\nThe TUI pane ID is: {pane_id}" if pane_id else ""
     full_prompt = f"""\
 ## Session Context
 
-You are testing against tmux session: {sess}
-The TUI pane ID is: {pane_id}
+You are testing against tmux session: {sess}{pane_line}
 
 To interact with this session, use commands like:
 - pm tui view -s {sess}
 - pm tui send <keys> -s {sess}
 - tmux list-panes -t {sess} -F "#{{pane_id}} #{{pane_width}}x#{{pane_height}} #{{pane_current_command}}"
-- cat ~/.pm-pane-registry/{sess}.json
+- cat ~/.pm/pane-registry/{sess}.json
 
 {prompt}
 """
 
     cmd = build_claude_shell_cmd(prompt=full_prompt)
+    # Wrap command with cleanup if the test has a cleanup function
+    if cleanup_fn and init_context:
+        import json as _json
+        import shlex
+        # Serialize init_context to pass to cleanup via a post-command
+        ctx_json = _json.dumps({"session_name": init_context.get("session_name"),
+                                "cwd": init_context.get("cwd")})
+        cleanup_script = (
+            f"python3 -c 'import json, shutil; from pm_core import tmux as t; "
+            f"ctx = json.loads({shlex.quote(ctx_json)}); "
+            f"t.kill_session(ctx[\"session_name\"]) if ctx.get(\"session_name\") else None; "
+            f"shutil.rmtree(ctx[\"cwd\"], ignore_errors=True) if ctx.get(\"cwd\") else None'"
+        )
+        cmd = f"{cmd} ; {cleanup_script}"
     launch_pane(app, cmd, "tui-test")
 
 

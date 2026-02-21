@@ -3282,8 +3282,8 @@ Check:
 ### 7. Verify pm commands work post-init
 
 ```bash
-pm pr add --title "Test PR" --description "Testing github init" --dir {test_cwd}/pm
-pm pr list --dir {test_cwd}/pm
+cd {test_cwd}/pm && pm pr add --title "Test PR" --description "Testing github init"
+cd {test_cwd}/pm && pm pr list
 ```
 
 - `pm pr add` should exit 0
@@ -3384,8 +3384,8 @@ ls {test_cwd}/pm/plans/
 ### 7. Verify pm commands work post-init
 
 ```bash
-pm pr add --title "Notes PR" --description "Testing local init" --dir {test_cwd}/pm
-pm pr list --dir {test_cwd}/pm
+cd {test_cwd}/pm && pm pr add --title "Notes PR" --description "Testing local init"
+cd {test_cwd}/pm && pm pr list
 ```
 
 - Both commands should succeed with a local backend
@@ -3477,8 +3477,8 @@ ls {test_cwd}/pm/plans/
 ### 7. Verify pm commands work post-init (bug #8 area)
 
 ```bash
-pm pr add --title "Empty repo PR" --description "Testing empty init" --dir {test_cwd}/pm
-pm pr list --dir {test_cwd}/pm
+cd {test_cwd}/pm && pm pr add --title "Empty repo PR" --description "Testing empty init"
+cd {test_cwd}/pm && pm pr list
 ```
 
 - Both should succeed even with no commits
