@@ -4,6 +4,19 @@ from pm_core import store, notes
 from pm_core.backend import get_backend
 
 
+def _format_pr_notes(pr: dict) -> str:
+    """Format PR notes as a markdown section, or empty string if none."""
+    pr_notes = pr.get("notes") or []
+    if not pr_notes:
+        return ""
+    note_lines = []
+    for n in pr_notes:
+        ts = n.get("created_at", "")
+        ts_str = f" ({ts})" if ts else ""
+        note_lines.append(f"- {n['text']}{ts_str}")
+    return f"\n## PR Notes\n" + "\n".join(note_lines) + "\n"
+
+
 def generate_prompt(data: dict, pr_id: str) -> str:
     """Generate a Claude Code prompt for working on a PR."""
     pr = store.get_pr(data, pr_id)
@@ -34,13 +47,16 @@ def generate_prompt(data: dict, pr_id: str) -> str:
     gh_pr_url = pr.get("gh_pr")  # URL of draft PR if created
     instructions = backend.pr_instructions(branch, title, base_branch, pr_id, gh_pr_url)
 
-    # Include notes if available
+    # Include session notes if available
     notes_block = ""
     try:
         root = store.find_project_root()
         notes_block = notes.notes_section(root)
     except FileNotFoundError:
         pass
+
+    # Include PR notes (addendums added after work began)
+    pr_notes_block = _format_pr_notes(pr)
 
     prompt = f"""You're working on PR {pr_id}: "{title}"
 
@@ -52,7 +68,7 @@ This session is managed by `pm`. Run `pm help` to see available commands.
 
 ## Task
 {description}
-
+{pr_notes_block}
 ## Tips
 - This session may be resuming after a restart. Check `git status` and `git log` to see if previous work exists on this branch — if so, continue from there.
 - Before referencing existing code (imports, function calls, class usage), read the source to verify the interface.
@@ -106,6 +122,9 @@ This PR is part of plan "{plan['name']}" ({plan['id']}). Other PRs in this plan:
 {chr(10).join(lines)}
 """
 
+    # Include PR notes (addendums)
+    pr_notes_block = _format_pr_notes(pr)
+
     prompt = f"""You are reviewing PR {pr_id}: "{title}"
 
 ## Task
@@ -113,7 +132,7 @@ Review the code changes in this PR for quality, correctness, and architectural f
 
 ## Description
 {description}
-{plan_context}
+{pr_notes_block}{plan_context}
 ## Steps
 1. Run `git diff origin/{base_branch}...HEAD` to see all changes
 2. **Generic checks** — things any codebase should get right:
