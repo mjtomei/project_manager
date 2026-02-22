@@ -91,16 +91,27 @@ class TestsPane(Widget):
 
         return output
 
+    def _entry_lines(self, test: dict) -> int:
+        """Return the number of rendered lines for a test entry."""
+        return 3 if test.get("description") else 2  # header + optional desc + blank
+
     def _scroll_selected_into_view(self) -> None:
         """Scroll the parent container to keep the selected test visible."""
-        if not self._tests:
+        if not self._tests or not self.parent:
             return
-        # Each test entry is exactly 3 lines: header, description, blank
-        y = self.selected_index * 3
-        from textual.geometry import Region
-        node_region = Region(0, y, self.size.width or 40, 3)
-        if self.parent:
-            self.parent.scroll_to_region(node_region)
+        container = self.parent
+        y_top = sum(self._entry_lines(t) for t in self._tests[: self.selected_index])
+        h = self._entry_lines(self._tests[self.selected_index])
+        viewport_h = container.size.height
+        scroll_y = round(container.scroll_y)
+        y_bottom = y_top + h
+        if y_bottom > scroll_y + viewport_h:
+            new_y = min(y_top, y_bottom - viewport_h)
+        elif y_top < scroll_y:
+            new_y = y_top
+        else:
+            return
+        container.scroll_to(y=new_y, animate=False, force=True)
 
     def on_key(self, event) -> None:
         if not self.has_focus:

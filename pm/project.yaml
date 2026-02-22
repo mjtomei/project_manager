@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-e29dda7
+  active_pr: pr-017
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-02-20T02:43:08.956779+00:00'
@@ -24,6 +24,10 @@ plans:
   name: refactor for code quality
   file: plans/plan-e4fa5cb.md
   status: done
+- id: plan-c493724
+  name: project metrics and optimization
+  file: plans/plan-c493724.md
+  status: draft
 prs:
 - id: pr-001
   plan: plan-001
@@ -898,3 +902,16 @@ prs:
       to see if upstream already fixed.'
     created_at: '2026-02-22T01:11:33Z'
     last_edited: '2026-02-22T01:11:33Z'
+- id: pr-4bd4eac
+  plan: null
+  title: 'Fix assorted bugs: pm status, review loop pane checks, help text, help pane
+    keybindings'
+  branch: pm/pr-4bd4eac-fix-assorted-bugs-pm-status-review-loop-pane-check
+  status: in_review
+  depends_on: []
+  description: ''
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/75
+  gh_pr_number: 75
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-4bd4eac-fix-assorted-bugs-pm-status-review-l-c61824fc

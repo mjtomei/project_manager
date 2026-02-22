@@ -195,13 +195,31 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
         _log.info("session exists: %s", session_name)
         _log.info("roles_alive: %s", roles_alive)
 
-        # If TUI is missing, kill the broken session and let normal init recreate it
+        # If TUI is missing, respawn it rather than killing the session
         if "tui" not in roles_alive:
-            _log.info("TUI missing, killing broken session to recreate")
-            click.echo(f"Session '{session_name}' is broken. Recreating...")
-            tmux_mod.kill_session(session_name, socket_path=socket_path)
-            # Fall through to normal creation code below
-        else:
+            _log.info("TUI missing, respawning in existing session")
+            click.echo("TUI pane missing — respawning...")
+            # Find the window where TUI was registered (or fall back to first window)
+            tui_window = None
+            for wid, wdata in registry.get("windows", {}).items():
+                for p in wdata.get("panes", []):
+                    if p.get("role") == "tui":
+                        tui_window = wid
+                        break
+                if tui_window:
+                    break
+            if not tui_window:
+                tui_window = tmux_mod.get_window_id(session_name)
+            if tui_window:
+                pane_registry._respawn_tui(session_name, tui_window)
+                pane_registry.rebalance(session_name, tui_window)
+            else:
+                _log.warning("TUI respawn failed — no windows found in session")
+                click.echo("Could not respawn TUI (no windows). "
+                           "Kill the session manually and re-run pm session.",
+                           err=True)
+
+        if tmux_mod.session_exists(session_name, socket_path=socket_path):
             _log.info("TUI present, finding/creating grouped session")
             _register_tmux_bindings(session_name)
             # Reuse an unattached grouped session, or create a new one
