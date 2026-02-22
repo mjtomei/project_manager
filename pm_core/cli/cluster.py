@@ -11,9 +11,11 @@ import click
 from pm_core import store
 from pm_core import tmux as tmux_mod
 from pm_core.claude_launcher import find_claude, launch_claude, clear_session
+from pm_core.prompt_gen import tui_section
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
+    _get_pm_session,
     _resolve_repo_dir,
     save_and_push,
     state_root,
@@ -176,8 +178,13 @@ def cluster_explore(bridged, fresh):
         f"- Splitting or merging specific clusters\n\n"
         f"Re-run `pm cluster auto` with different parameters to iterate. When the user "
         f"is happy, run `pm cluster auto --output plan` to create the plan, then "
-        f"`pm plan load` to create the PRs."
+        f"`pm plan load` to create the PRs.\n"
     )
+
+    # Add TUI interaction section if in a pm session
+    pm_session = _get_pm_session()
+    if pm_session:
+        prompt += tui_section(pm_session)
 
     claude = find_claude()
     if not claude:

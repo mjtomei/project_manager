@@ -404,17 +404,35 @@ def tui_test(test_id: str | None, list_tests_flag: bool, session: str | None,
         click.echo("Run 'pm tui test --list' to see available tests.")
         raise SystemExit(1)
 
-    prompt = tui_tests.get_test_prompt(test_id)
-    if not prompt:
+    test_info = tui_tests.ALL_TESTS.get(test_id)
+    if not test_info:
         click.echo(f"Unknown test: {test_id}", err=True)
         click.echo("Run 'pm tui test --list' to see available tests.")
         raise SystemExit(1)
 
-    # Verify we have a TUI session
-    pane_id, sess = _find_tui_pane(session)
-    if not sess:
-        click.echo("No pm tmux session found. Start one with 'pm session'.", err=True)
-        raise SystemExit(1)
+    prompt = test_info["prompt"]
+    init_fn = test_info.get("init")
+    cleanup_fn = test_info.get("cleanup")
+    init_context = None
+    cwd = None
+
+    if init_fn:
+        # Test provides its own setup (e.g. creating a git repo).
+        # Claude will start the session itself during the test.
+        click.echo(f"Running init for test: {test_info['name']}...")
+        init_context = init_fn()
+        sess = init_context["session_name"]
+        pane_id = init_context.get("pane_id")
+        cwd = init_context["cwd"]
+        # Format placeholders into prompt
+        prompt_ctx = init_context.get("prompt_context", {})
+        prompt = prompt.format(**prompt_ctx)
+    else:
+        # Existing flow — find a running TUI session
+        pane_id, sess = _find_tui_pane(session)
+        if not sess:
+            click.echo("No pm tmux session found. Start one with 'pm session'.", err=True)
+            raise SystemExit(1)
 
     # Build bug-handling addendum
     bug_addendum = ""
@@ -451,25 +469,25 @@ After completing all test scenarios, if you found ANY bugs or unexpected behavio
 """
 
     # Add session context to the prompt
+    pane_line = f"\nThe TUI pane ID is: {pane_id}" if pane_id else ""
     full_prompt = f"""\
 ## Session Context
 
-You are testing against tmux session: {sess}
-The TUI pane ID is: {pane_id}
+You are testing against tmux session: {sess}{pane_line}
 
 To interact with this session, use commands like:
 - pm tui view -s {sess}
 - pm tui send <keys> -s {sess}
 - tmux list-panes -t {sess} -F "#{{pane_id}} #{{pane_width}}x#{{pane_height}} #{{pane_current_command}}"
-- cat ~/.pm-pane-registry/{sess}.json
+- cat ~/.pm/pane-registry/{sess}.json
 
 {prompt}
 {bug_addendum}
 """
 
-    test_info = tui_tests.ALL_TESTS[test_id]
     click.echo(f"Running test: {test_info['name']}")
     click.echo(f"Session: {sess}")
+    click.echo(f"Claude cwd: {cwd}")
     click.echo("-" * 60)
 
     # Launch Claude with the test prompt (no session resume for tests)
@@ -478,6 +496,12 @@ To interact with this session, use commands like:
         root = state_root()
     except FileNotFoundError:
         root = Path.home() / ".pm"
-    rc = launch_claude(full_prompt, session_key=f"tui-test:{test_id}",
-                       pm_root=root, resume=False)
+    rc = 1
+    try:
+        rc = launch_claude(full_prompt, session_key=f"tui-test:{test_id}",
+                           pm_root=root, cwd=cwd, resume=False)
+    finally:
+        if cleanup_fn and init_context:
+            click.echo("Cleaning up test session...")
+            cleanup_fn(init_context)
     raise SystemExit(rc)

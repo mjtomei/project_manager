@@ -253,7 +253,7 @@ From pm_core/tui/guide_progress.py:
 
 From pm_core/tui/app.py:
 - GuideProgress widget is in #guide-progress-container
-- Shown when state is in GUIDE_SETUP_STEPS and not dismissed
+- Shown when no PRs exist (setup state)
 - Frame capture triggers on guide step changes via watcher
 
 ## Reporting
@@ -1296,7 +1296,7 @@ for plan operations (view, edit, add, review, deps, load).
 - a pre-fills the command bar with "plan add "
 - w launches pm plan breakdown in a pane
 - D launches pm plan deps in a pane
-- l launches pm plan load in a pane
+- l runs pm plan load as an inline command (no pane)
 - Refresh (r) stays in plans view
 - PR actions are blocked while in plans view
 
@@ -3033,6 +3033,318 @@ OVERALL: [PASS/FAIL]
 """
 
 
+INIT_GITHUB_TEST = """\
+You are pretending to be a brand-new user who has never used `pm` before.
+A flask repo has been cloned for you at `{test_cwd}` with an origin remote
+pointing to `mjtomei/flask`.  You want to get organized and manage some
+upcoming work on this project but you don't know how the tool works yet.
+
+## Starting the session
+
+```bash
+cd {test_cwd} && pm session &
+```
+
+Wait 5-10 seconds, then get the session name:
+
+```bash
+cd {test_cwd} && pm session name
+```
+
+The session has a TUI pane and an auto-launched guide Claude session.  Use
+`pm tui view -s $SESSION` and `pm tui send` to interact with the TUI.  Use
+`tmux list-panes`, `tmux capture-pane`, and `tmux send-keys` to find and
+interact with Claude session panes.
+
+## Your role
+
+**Act as a new user.  Read the guide's output and follow its instructions.**
+Respond naturally — tell it you want to get organized, answer its questions,
+do what it says.  When it tells you to interact with the TUI, do so and tell
+it what you see.  When its instructions cause new Claude sessions to launch
+in tmux panes, find those panes and interact with them too.  Do NOT run pm
+commands directly.  Do NOT ask for specific pm concepts (like PRs or plans)
+unless the guide introduces them first.
+
+## Pass criteria
+
+Verify each of the following.  If any check fails, report FAIL for that item.
+
+```
+TEST RESULTS
+============
+Guide launch:    [PASS/FAIL] - TUI shows "Project Setup" checklist with "Guide running"
+Guide quality:   [PASS/FAIL] - guide gave clear instructions you could follow as a new user
+Self-sufficient: [PASS/FAIL] - completed everything through guide and session interaction
+                               only, without reading pm source code, docs, or READMEs
+Guide-driven:    [PASS/FAIL] - guide directed you to use the TUI plans pane (P key, plan
+                               actions) rather than running plan commands itself
+Plans pane:      [PASS/FAIL] - plans pane showed plans when guide directed you to use it
+Tech tree:       [PASS/FAIL] - TUI eventually shows navigable PR tree (not checklist)
+
+OVERALL: [PASS/FAIL]
+```
+"""
+
+
+INIT_LOCAL_TEST = """\
+You are pretending to be a brand-new user who has never used `pm` before.
+A local git repo with one commit but no remote has been created for you at
+`{test_cwd}`.  You want to get organized and manage some upcoming work on
+this project but you don't know how the tool works yet.
+
+## Starting the session
+
+```bash
+cd {test_cwd} && pm session &
+```
+
+Wait 5-10 seconds, then get the session name:
+
+```bash
+cd {test_cwd} && pm session name
+```
+
+The session has a TUI pane and an auto-launched guide Claude session.  Use
+`pm tui view -s $SESSION` and `pm tui send` to interact with the TUI.  Use
+`tmux list-panes`, `tmux capture-pane`, and `tmux send-keys` to find and
+interact with Claude session panes.
+
+## Your role
+
+**Act as a new user.  Read the guide's output and follow its instructions.**
+Respond naturally — tell it you want to get organized, answer its questions,
+do what it says.  When it tells you to interact with the TUI, do so and tell
+it what you see.  When its instructions cause new Claude sessions to launch
+in tmux panes, find those panes and interact with them too.  Do NOT run pm
+commands directly.  Do NOT ask for specific pm concepts (like PRs or plans)
+unless the guide introduces them first.
+
+## Pass criteria
+
+Verify each of the following.  If any check fails, report FAIL for that item.
+
+```
+TEST RESULTS
+============
+Guide launch:    [PASS/FAIL] - TUI shows "Project Setup" checklist with "Guide running"
+Guide quality:   [PASS/FAIL] - guide gave clear instructions you could follow as a new user
+Self-sufficient: [PASS/FAIL] - completed everything through guide and session interaction
+                               only, without reading pm source code, docs, or READMEs
+Guide-driven:    [PASS/FAIL] - guide directed you to use the TUI plans pane (P key, plan
+                               actions) rather than running plan commands itself
+Plans pane:      [PASS/FAIL] - plans pane showed plans when guide directed you to use it
+Tech tree:       [PASS/FAIL] - TUI eventually shows navigable PR tree (not checklist)
+
+OVERALL: [PASS/FAIL]
+```
+"""
+
+
+INIT_EMPTY_TEST = """\
+You are pretending to be a brand-new user who has never used `pm` before.
+An empty git repo (no commits, no remote) has been created for you at
+`{test_cwd}`.  You want to get organized and manage some upcoming work on
+this project but you don't know how the tool works yet.  This is a known
+bug area — empty repos have no commits and no remote.
+
+## Starting the session
+
+```bash
+cd {test_cwd} && pm session &
+```
+
+Wait 5-10 seconds, then get the session name:
+
+```bash
+cd {test_cwd} && pm session name
+```
+
+The session has a TUI pane and an auto-launched guide Claude session.  Use
+`pm tui view -s $SESSION` and `pm tui send` to interact with the TUI.  Use
+`tmux list-panes`, `tmux capture-pane`, and `tmux send-keys` to find and
+interact with Claude session panes.
+
+## Your role
+
+**Act as a new user.  Read the guide's output and follow its instructions.**
+Respond naturally — tell it you want to get organized, answer its questions,
+do what it says.  When it tells you to interact with the TUI, do so and tell
+it what you see.  When its instructions cause new Claude sessions to launch
+in tmux panes, find those panes and interact with them too.  Do NOT run pm
+commands directly.  Do NOT ask for specific pm concepts (like PRs or plans)
+unless the guide introduces them first.
+
+## Pass criteria
+
+Verify each of the following.  If any check fails, report FAIL for that item.
+
+```
+TEST RESULTS
+============
+Guide launch:    [PASS/FAIL] - TUI shows "Project Setup" checklist with "Guide running"
+Guide quality:   [PASS/FAIL] - guide gave clear instructions you could follow as a new user
+Self-sufficient: [PASS/FAIL] - completed everything through guide and session interaction
+                               only, without reading pm source code, docs, or READMEs
+Guide-driven:    [PASS/FAIL] - guide directed you to use the TUI plans pane (P key, plan
+                               actions) rather than running plan commands itself
+Init:            [PASS/FAIL] - project initialized with backend=local (empty repo)
+Plans pane:      [PASS/FAIL] - plans pane showed plans when guide directed you to use it
+Tech tree:       [PASS/FAIL] - TUI eventually shows navigable PR tree (not checklist)
+
+OVERALL: [PASS/FAIL]
+```
+"""
+
+
+# ---------------------------------------------------------------------------
+# Init test helpers — set up temp repos for Claude to drive pm session + init
+# ---------------------------------------------------------------------------
+
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+
+
+def _setup_git_repo(path, remote=None, commit=True):
+    """Initialise a git repo at *path* with optional commit and remote."""
+    subprocess.run(["git", "init", path], check=True,
+                   capture_output=True)
+    subprocess.run(["git", "-C", path, "config", "user.email", "test@test.com"],
+                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", path, "config", "user.name", "Test"],
+                   check=True, capture_output=True)
+    if commit:
+        subprocess.run(
+            ["git", "-C", path, "commit", "--allow-empty", "-m", "initial"],
+            check=True, capture_output=True,
+        )
+    if remote:
+        subprocess.run(
+            ["git", "-C", path, "remote", "add", "origin", remote],
+            check=True, capture_output=True,
+        )
+
+
+def _get_session_name(repo_path):
+    """Compute the pm session name for a repo directory using the real logic."""
+    from pm_core.paths import get_session_tag
+    tag = get_session_tag(start_path=Path(repo_path))
+    return f"pm-{tag}" if tag else None
+
+
+def _set_test_override(repo_path):
+    """Set pm_core override so `pm session` in the temp repo uses dev pm_core.
+
+    Without this, `pm session` would load the globally installed pm_core
+    instead of the development version being tested.
+    """
+    from pm_core.paths import get_session_tag, set_override_path
+    tag = get_session_tag(start_path=Path(repo_path))
+    if tag:
+        # Point to the repo root containing this dev pm_core
+        dev_root = Path(__file__).resolve().parent.parent
+        set_override_path(tag, dev_root)
+    return tag
+
+
+def _cleanup_one_test_dir(dirpath):
+    """Kill tmux session, remove override, and delete a single test dir."""
+    from pm_core import tmux as tmux_mod
+    from pm_core.paths import get_session_tag, session_dir
+
+    p = Path(dirpath)
+    if not p.is_dir():
+        return
+
+    tag = get_session_tag(start_path=p)
+    if tag:
+        session_name = f"pm-{tag}"
+        tmux_mod.kill_session(session_name)
+        sd = session_dir(tag)
+        if sd:
+            override_file = sd / "override"
+            if override_file.exists():
+                override_file.unlink()
+
+    shutil.rmtree(dirpath, ignore_errors=True)
+
+
+def _cleanup_stale_tests(prefix):
+    """Remove leftover temp dirs from previous test runs with the given prefix."""
+    tmp_root = Path(tempfile.gettempdir())
+    for entry in tmp_root.iterdir():
+        if entry.is_dir() and entry.name.startswith(prefix):
+            _cleanup_one_test_dir(str(entry))
+
+
+def _cleanup_test_session(context):
+    """Kill the tmux test session, remove override, and clean up temp dir."""
+    cwd = context.get("cwd")
+    if cwd:
+        _cleanup_one_test_dir(cwd)
+
+
+def _init_github_repo():
+    """Clone a GitHub repo into a temp dir for Claude to init."""
+    _cleanup_stale_tests("pm-test-init-github-")
+    tmpdir = tempfile.mkdtemp(prefix="pm-test-init-github-")
+    # Clone the actual repo so Claude has real content to work with
+    subprocess.run(
+        ["git", "clone", "--depth", "1",
+         "https://github.com/mjtomei/flask.git", tmpdir],
+        check=True, capture_output=True,
+    )
+    session_name = _get_session_name(tmpdir)
+    session_tag = _set_test_override(tmpdir)
+    return {
+        "cwd": tmpdir,
+        "session_name": session_name,
+        "session_tag": session_tag,
+        "pane_id": None,
+        "prompt_context": {
+            "test_cwd": tmpdir,
+        },
+    }
+
+
+def _init_local_repo():
+    """Set up a temp repo with no remote for Claude to init."""
+    _cleanup_stale_tests("pm-test-init-local-")
+    tmpdir = tempfile.mkdtemp(prefix="pm-test-init-local-")
+    _setup_git_repo(tmpdir, commit=True)
+    session_name = _get_session_name(tmpdir)
+    session_tag = _set_test_override(tmpdir)
+    return {
+        "cwd": tmpdir,
+        "session_name": session_name,
+        "session_tag": session_tag,
+        "pane_id": None,
+        "prompt_context": {
+            "test_cwd": tmpdir,
+        },
+    }
+
+
+def _init_empty_repo():
+    """Set up a temp repo with no commits for Claude to init."""
+    _cleanup_stale_tests("pm-test-init-empty-")
+    tmpdir = tempfile.mkdtemp(prefix="pm-test-init-empty-")
+    _setup_git_repo(tmpdir, commit=False)
+    session_name = _get_session_name(tmpdir)
+    session_tag = _set_test_override(tmpdir)
+    return {
+        "cwd": tmpdir,
+        "session_name": session_name,
+        "session_tag": session_tag,
+        "pane_id": None,
+        "prompt_context": {
+            "test_cwd": tmpdir,
+        },
+    }
+
+
 ALL_TESTS = {
     "pane-layout": {
         "name": "Pane Layout Refresh",
@@ -3119,15 +3431,28 @@ ALL_TESTS = {
         "prompt": TUI_LOG_VIEWER_TEST,
         "description": "Test L key opens log pane, verify content and pane lifecycle",
     },
+    "init-github": {
+        "name": "Init: GitHub Repo",
+        "prompt": INIT_GITHUB_TEST,
+        "description": "Test pm init with a GitHub remote — verifies backend, commands, TUI",
+        "init": _init_github_repo,
+        "cleanup": _cleanup_test_session,
+    },
+    "init-local": {
+        "name": "Init: Local Repo",
+        "prompt": INIT_LOCAL_TEST,
+        "description": "Test pm init with a local repo (no remote) — verifies backend, commands, TUI",
+        "init": _init_local_repo,
+        "cleanup": _cleanup_test_session,
+    },
+    "init-empty": {
+        "name": "Init: Empty Repo",
+        "prompt": INIT_EMPTY_TEST,
+        "description": "Test pm init with an empty repo (no commits) — verifies backend, commands, TUI",
+        "init": _init_empty_repo,
+        "cleanup": _cleanup_test_session,
+    },
 }
-
-
-def get_test_prompt(test_id: str) -> str | None:
-    """Get the prompt for a specific test."""
-    test = ALL_TESTS.get(test_id)
-    if test:
-        return test["prompt"]
-    return None
 
 
 def list_tests() -> list[dict]:

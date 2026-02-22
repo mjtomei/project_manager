@@ -168,14 +168,19 @@ class TestPlansPane:
         """
         from pm_core.tui.pane_ops import handle_plan_action
         src = inspect.getsource(handle_plan_action)
-        # For each pane-launching action, verify the action check and the
+        # For pane-launching actions, verify the action check and the
         # command string use the SAME action word.
-        for action in ("breakdown", "review", "load"):
+        for action in ("breakdown", "review"):
             # Find: action == "<action>" ... pm plan <action>
             pattern = rf'action\s*==\s*"{action}".*?launch_pane\(.*?pm plan {action}'
             assert re.search(pattern, src, re.DOTALL), (
                 f"action '{action}' does not route to 'pm plan {action}' in handle_plan_action"
             )
+        # load runs inline (no pane) via _run_command
+        pattern = r'action\s*==\s*"load".*?_run_command\(.*?plan load'
+        assert re.search(pattern, src, re.DOTALL), (
+            "action 'load' does not route to 'plan load' via _run_command in handle_plan_action"
+        )
 
     def test_render_singular_pr(self):
         pane = PlansPane()

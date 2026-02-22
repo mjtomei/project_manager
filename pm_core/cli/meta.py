@@ -15,6 +15,7 @@ from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
+    _get_pm_session,
     _get_session_name_for_cwd,
 )
 
@@ -86,9 +87,7 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
         if tag:
             base_ref = tag
         else:
-            # Check if master exists, otherwise use main
-            result = git_ops.run_git("branch", "-r", "--list", "origin/master", cwd=work_path, check=False)
-            base_ref = "master" if result.stdout.strip() else "main"
+            base_ref = "master"
 
         # Checkout base and create branch
         if tag:
@@ -127,8 +126,7 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
             if tag:
                 base_ref = tag
             else:
-                result = git_ops.run_git("branch", "-r", "--list", "origin/master", cwd=work_path, check=False)
-                base_ref = "master" if result.stdout.strip() else "main"
+                base_ref = "master"
 
             if tag:
                 click.echo(f"Checking out tag {tag}...")
@@ -142,13 +140,15 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
             click.echo(f"Creating branch {branch} from {base_ref}...")
             git_ops.checkout_branch(work_path, branch, create=True)
 
+    # Determine pm session name for TUI targeting
+    pm_session = _get_pm_session()
+
     # Build the prompt
-    prompt = _build_meta_prompt(task, work_path, install_info, branch, base_ref, session_tag)
+    prompt = _build_meta_prompt(task, work_path, install_info, branch, base_ref, session_tag, session_name=pm_session)
 
     # Check for existing window
     window_name = "meta"
-    if tmux_mod.has_tmux():
-        pm_session = _get_session_name_for_cwd()
+    if pm_session:
         if tmux_mod.session_exists(pm_session):
             existing = tmux_mod.find_window_by_name(pm_session, window_name)
             if existing:
@@ -175,9 +175,8 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
     clear_cmd = f"rm -rf ~/.pm/sessions/{session_tag}"
     cmd = f"{claude_cmd} ; {clear_cmd}"
 
-    # Try to launch in tmux
-    if tmux_mod.has_tmux():
-        pm_session = _get_session_name_for_cwd()
+    # Try to launch in tmux (reuse pm_session from above)
+    if pm_session:
         if tmux_mod.session_exists(pm_session):
             try:
                 tmux_mod.new_window(pm_session, window_name, cmd, str(work_path))
@@ -236,7 +235,7 @@ def _detect_pm_install() -> dict:
     return info
 
 
-def _build_meta_prompt(task: str, work_path: Path, install_info: dict, branch_name: str, base_ref: str, session_tag: str) -> str:
+def _build_meta_prompt(task: str, work_path: Path, install_info: dict, branch_name: str, base_ref: str, session_tag: str, session_name: str | None = None) -> str:
     """Build prompt for meta-development session."""
     task_section = f"""
 ## Task
@@ -297,16 +296,17 @@ installation instead of reimplementing.
 
 ## Debugging the TUI
 
-The TUI runs in a tmux session. You can interact with it programmatically:
+The TUI runs in a tmux session. You can interact with it programmatically.
+{f"Target the base session with `-s {session_name}`:" if session_name else "Use these commands:"}
 
 **Frame buffer** — The TUI captures frames on every UI change:
-- `pm tui view` — Capture and display current TUI state
+- `pm tui view{f" -s {session_name}" if session_name else ""}` — Capture and display current TUI state
 - `pm tui frames` — View last 5 captured frames
 - `pm tui frames --all` — View all captured frames with triggers
 - `pm tui clear-frames` — Clear the frame buffer
 
 **Sending keystrokes**:
-- `pm tui send <keys>` — Send keystrokes to the TUI (e.g., `pm tui send g` for guide)
+- `pm tui send <keys>{f" -s {session_name}" if session_name else ""}` — Send keystrokes to the TUI (e.g., `pm tui send g` for guide)
 
 **Tmux inspection**:
 - `tmux list-panes -t <session> -F "#{{pane_id}} #{{pane_width}}x#{{pane_height}}"` — List panes
@@ -322,11 +322,41 @@ Logs are written to `~/.pm/pane-registry/`:
 - `layout.log` — Pane layout rebalancing
 - `claude_launcher.log` — Claude session launches
 
-## Testing changes
+## Session override (how this session works)
 
-**Session override is already active.** The pm wrapper detects this meta session
-and automatically uses this workdir's `pm_core` instead of the installed version.
-Any changes you make here take effect immediately for new `pm` commands.
+**An override is already active for this session.** When `pm meta` launched,
+it called `set_override_path("{session_tag}", "{work_path}")`, which wrote
+this workdir's path to `~/.pm/sessions/{session_tag}/override`.
+
+The pm wrapper (`pm_core/wrapper.py`) checks for this override on every
+invocation.  Its priority order is:
+1. **Session override** — reads `~/.pm/sessions/{{tag}}/override`, prepends
+   that path to `sys.path`, and reloads `pm_core` from there
+2. **Local pm_core** — if the cwd (or a parent) contains `pm_core/`, uses it
+3. **Installed pm_core** — falls back to the pip-installed version
+
+This means any changes you make to files in this workdir take effect
+immediately for all `pm` commands run within this session's tmux environment.
+The override file is automatically deleted when this Claude session exits.
+
+## Prompt generation system
+
+All Claude sessions launched by pm receive generated prompts from
+`pm_core/prompt_gen.py`:
+
+- **`generate_prompt(data, pr_id)`** — Work session prompt (used by `pm pr start`).
+  Includes PR context, dependencies, task description, workflow instructions.
+- **`generate_review_prompt(data, pr_id, ...)`** — Review session prompt (used by
+  `pm pr done`).  Includes review checklist, plan context, and verdict instructions.
+  When `review_loop=True`, appends fix/commit/push instructions for automated
+  review iterations.
+- **`_build_meta_prompt()`** — This prompt (used by `pm meta`).  Provides
+  architecture info, override explanation, and testing instructions.
+
+Prompts are passed to Claude via `pm_core/claude_launcher.py`, which handles
+session resumption, `--session-id` management, and prompt file creation.
+
+## Testing changes
 
 1. Run tests:
 ```bash
@@ -336,9 +366,6 @@ python3 -m pytest tests/ -x -q
 2. Test changes live — just run `pm` commands normally. They use this workdir's code.
 
 3. For TUI changes, restart the TUI (`q` to detach, `pm session` to reattach).
-
-The override is stored at `~/.pm/sessions/{session_tag}/override` and is automatically
-cleared when this Claude session exits.
 
 **To install permanently** (make changes the default for all sessions):
 ```bash

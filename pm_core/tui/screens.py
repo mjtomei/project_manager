@@ -2,58 +2,9 @@
 
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical
+from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Label
 from textual.screen import ModalScreen
-
-
-class WelcomeScreen(ModalScreen):
-    """Welcome popup shown when guide completes."""
-
-    BINDINGS = [
-        Binding("escape", "dismiss", "Close"),
-        Binding("enter", "dismiss", "Close"),
-    ]
-
-    CSS = """
-    WelcomeScreen {
-        align: center middle;
-    }
-    #welcome-container {
-        width: 55;
-        height: auto;
-        max-height: 80%;
-        background: $surface;
-        border: solid $success;
-        padding: 1 2;
-    }
-    #welcome-title {
-        text-align: center;
-        text-style: bold;
-        color: $success;
-        margin-bottom: 1;
-    }
-    .welcome-row {
-        height: 1;
-    }
-    """
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="welcome-container"):
-            yield Label("Setup Complete!", id="welcome-title")
-            yield Label("")
-            yield Label("Your PRs are ready. Here's how to get started:", classes="welcome-row")
-            yield Label("")
-            yield Label("  [bold]↑↓←→[/] or [bold]jkl[/]  Navigate the PR tree", classes="welcome-row")
-            yield Label("  [bold]s[/]  Start working on the selected PR", classes="welcome-row")
-            yield Label("  [bold]c[/]  Launch Claude in a new pane", classes="welcome-row")
-            yield Label("  [bold]e[/]  Edit PR details", classes="welcome-row")
-            yield Label("  [bold]?[/]  Show all keyboard shortcuts", classes="welcome-row")
-            yield Label("")
-            yield Label("[dim]Press Enter or Esc to continue[/]", classes="welcome-row")
-
-    def action_dismiss(self) -> None:
-        self.app.pop_screen()
 
 
 class ConnectScreen(ModalScreen):
@@ -128,8 +79,13 @@ class HelpScreen(ModalScreen):
 
     BINDINGS = [
         Binding("escape", "dismiss", "Close"),
-        Binding("question_mark", "discuss", "Discuss"),
         Binding("q", "dismiss", "Close"),
+        Binding("j", "scroll_down", "Scroll down", show=False),
+        Binding("k", "scroll_up", "Scroll up", show=False),
+        Binding("J", "page_down", "Page down", show=False),
+        Binding("K", "page_up", "Page up", show=False),
+        Binding("down", "scroll_down", "Scroll down", show=False),
+        Binding("up", "scroll_up", "Scroll up", show=False),
     ]
 
     CSS = """
@@ -165,7 +121,7 @@ class HelpScreen(ModalScreen):
         self._in_tests = in_tests
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="help-container"):
+        with VerticalScroll(id="help-container"):
             yield Label("Keyboard Shortcuts", id="help-title")
             if self._in_tests:
                 yield Label("Test Navigation", classes="help-section")
@@ -200,9 +156,8 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]M[/]  Move to plan", classes="help-row")
             yield Label("Panes & Views", classes="help-section")
             yield Label("  [bold]c[/]  Launch Claude session", classes="help-row")
-            yield Label("  [bold]H[/]  Ask for help (beginner-friendly)", classes="help-row")
+            yield Label("  [bold]H[/]  Launch guide (setup or assist)", classes="help-row")
             yield Label("  [bold]/[/]  Open command bar", classes="help-row")
-            yield Label("  [bold]g[/]  Toggle guide view", classes="help-row")
             yield Label("  [bold]n[/]  Open notes", classes="help-row")
             yield Label("  [bold]m[/]  Meta: work on pm itself", classes="help-row")
             yield Label("  [bold]L[/]  View TUI log", classes="help-row")
@@ -221,16 +176,22 @@ class HelpScreen(ModalScreen):
             yield Label("  [bold]?[/]  Show this help", classes="help-row")
             yield Label("  [bold]q[/]  Detach from session", classes="help-row")
             yield Label("")
-            yield Label("[dim]Press Esc to close  |  ? to discuss pm[/]", classes="help-row")
+            yield Label("[dim]Press Esc/q to close[/]", classes="help-row")
+
+    def action_scroll_down(self) -> None:
+        self.query_one("#help-container", VerticalScroll).scroll_down()
+
+    def action_scroll_up(self) -> None:
+        self.query_one("#help-container", VerticalScroll).scroll_up()
+
+    def action_page_down(self) -> None:
+        self.query_one("#help-container", VerticalScroll).scroll_page_down()
+
+    def action_page_up(self) -> None:
+        self.query_one("#help-container", VerticalScroll).scroll_page_up()
 
     def action_dismiss(self) -> None:
         self.app.pop_screen()
-
-    def action_discuss(self) -> None:
-        """Open a Claude pane to discuss the pm tool, then dismiss help."""
-        self.app.pop_screen()
-        from pm_core.tui import pane_ops
-        pane_ops.launch_discuss(self.app)
 
 
 class PlanPickerScreen(ModalScreen):
@@ -287,7 +248,7 @@ class PlanPickerScreen(ModalScreen):
 
     def compose(self) -> ComposeResult:
         from textual.widgets import Input
-        with Vertical(id="picker-container"):
+        with VerticalScroll(id="picker-container"):
             yield Label(f"Move {self._pr_id} to plan:", id="picker-title")
             yield Label("", id="picker-options")
             yield Input(placeholder="Plan name", id="picker-input")

@@ -1,24 +1,34 @@
-"""Widget showing guide workflow progress with step indicators."""
+"""Widget showing guide workflow progress as a setup checklist."""
 
 from textual.widget import Widget
 from textual.reactive import reactive
 from rich.text import Text
 from rich.console import RenderableType
 
-from pm_core.guide import STEP_ORDER, STEP_DESCRIPTIONS
+from pm_core.guide import STEP_ORDER
 
 
-# Steps that are interactive (user-facing)
-INTERACTIVE_STEPS = [s for s in STEP_ORDER if s not in ("all_in_progress", "all_done")]
+# Steps that are interactive (user-facing in the guide)
+INTERACTIVE_STEPS = [s for s in STEP_ORDER if s not in ("ready_to_work", "all_in_progress", "all_done")]
 
-# Unicode markers for step states
-MARKER_COMPLETED = "\u2713"  # checkmark
-MARKER_CURRENT = "\u25b6"    # right-pointing triangle
-MARKER_FUTURE = "\u25cb"     # empty circle
+# Unicode markers for checklist states
+MARKER_DONE = "\u2713"     # checkmark
+MARKER_CURRENT = "\u25b6"  # right-pointing triangle
+MARKER_TODO = "\u25cb"     # empty circle
+
+# Map guide steps to what the user actually needs to create.
+# Each entry: (label, done_after_steps)
+#   label: what to show in the checklist
+#   done_after_steps: the step that, once reached, means this item exists
+_CHECKLIST = [
+    ("Project file", {"initialized", "has_plan_draft", "has_plan_prs"}),
+    ("Plan file", {"has_plan_draft", "has_plan_prs"}),
+    ("PRs loaded", {"has_plan_prs"}),
+]
 
 
 class GuideProgress(Widget):
-    """Displays guide workflow steps with progress indication."""
+    """Displays a setup checklist showing what's been created and what's next."""
 
     current_step: reactive[str] = reactive("no_project")
 
@@ -34,8 +44,7 @@ class GuideProgress(Widget):
     def render(self) -> RenderableType:
         output = Text()
 
-        # Header
-        output.append("Guide Workflow\n", style="bold underline")
+        output.append("Project Setup\n", style="bold underline")
         output.append("\n")
 
         try:
@@ -43,40 +52,37 @@ class GuideProgress(Widget):
         except ValueError:
             current_idx = 0
 
-        for i, step in enumerate(INTERACTIVE_STEPS):
-            step_idx = STEP_ORDER.index(step)
-            step_num = i + 1
-            description = STEP_DESCRIPTIONS.get(step, step)
+        # Build the set of steps that are "done" (before current)
+        done_steps = set(STEP_ORDER[:current_idx])
 
-            # Determine step state and styling
-            if step_idx < current_idx:
-                # Completed step
-                marker = MARKER_COMPLETED
+        found_current = False
+        for label, done_after in _CHECKLIST:
+            # Item is done if any of its done_after steps are in done_steps
+            is_done = bool(done_after & done_steps)
+
+            if is_done:
+                marker = MARKER_DONE
                 marker_style = "bold green"
                 text_style = "green"
-            elif step_idx == current_idx:
-                # Current step
+            elif not found_current:
+                # First not-done item is the current one
+                found_current = True
                 marker = MARKER_CURRENT
                 marker_style = "bold cyan"
                 text_style = "bold cyan"
             else:
-                # Future step
-                marker = MARKER_FUTURE
+                marker = MARKER_TODO
                 marker_style = "dim"
                 text_style = "dim"
 
-            # Build line
             output.append("  ")
             output.append(marker, style=marker_style)
-            output.append(f" {step_num}. {description}\n", style=text_style)
+            output.append(f" {label}\n", style=text_style)
 
         output.append("\n")
-
-        # Show hint based on step
-        output.append("Guide running in adjacent pane\n", style="italic yellow")
-        output.append("\n")
+        output.append("Guide running in adjacent pane\n", style="dim")
         output.append("Press ", style="dim")
-        output.append("g", style="bold")
-        output.append(" to dismiss guide view\n", style="dim")
+        output.append("H", style="bold")
+        output.append(" to restart\n", style="dim")
 
         return output

@@ -43,8 +43,12 @@ def get_reliable_window_size(
     """Return (width, height) for *window*, trying multiple sessions.
 
     Grouped tmux sessions share windows but only the session with an
-    attached client reports a non-zero size.  This helper walks the
-    fallback chain so every caller gets consistent behaviour:
+    attached client reports a non-zero size.  For shared sessions with
+    multiple clients, returns the *maximum* size across all attached
+    sessions so that rebalance doesn't squish panes when a smaller
+    client becomes active.
+
+    Fallback chain for finding a non-zero size:
 
     1. *query_session* (if given) — e.g. the session that triggered a
        resize hook.
@@ -67,13 +71,34 @@ def get_reliable_window_size(
     if session not in candidates:
         candidates.append(session)
 
+    # Collect all grouped sessions for potential multi-client check
+    grouped = tmux_mod.list_grouped_sessions(base)
+
+    # If there are multiple grouped sessions (multi-client), find the
+    # maximum size so we don't squish panes for smaller clients.
+    # Note: w and h are maximised independently, so the result may not
+    # match any single client.  This is intentional — panes are never
+    # hidden, though a smaller client may need to scroll.
+    if grouped:
+        max_w, max_h = 0, 0
+        all_sessions = list(dict.fromkeys(candidates + [base] + grouped))
+        for s in all_sessions:
+            w, h = tmux_mod.get_window_size(s, window)
+            if w > max_w:
+                max_w = w
+            if h > max_h:
+                max_h = h
+        if max_w > 0 and max_h > 0:
+            return max_w, max_h
+
+    # Single client: return first non-zero size
     for s in candidates:
         w, h = tmux_mod.get_window_size(s, window)
         if w > 0 and h > 0:
             return w, h
 
     # Last resort: walk all grouped sessions
-    for gs in tmux_mod.list_grouped_sessions(base):
+    for gs in grouped:
         if gs in candidates:
             continue
         w, h = tmux_mod.get_window_size(gs, window)
