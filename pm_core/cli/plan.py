@@ -537,8 +537,15 @@ def plan_load(plan_id: str | None):
     if data.get("prs") is None:
         data["prs"] = []
 
+    loaded_ids = {p["id"] for p in data["prs"]}
+    created = 0
     for pr in prs:
         pr_id = title_to_id[pr["title"]]
+
+        if pr_id in loaded_ids:
+            click.echo(f"  Skipped {pr_id}: {pr['title']} (already exists)")
+            continue
+
         slug = store.slugify(pr["title"])
         branch = f"pm/{pr_id}-{slug}"
         desc = _build_pr_description(pr)
@@ -556,11 +563,14 @@ def plan_load(plan_id: str | None):
                                plan=plan_id, depends_on=deps,
                                description=desc)
         data["prs"].append(entry)
+        loaded_ids.add(pr_id)
+        created += 1
         click.echo(f"  Created {pr_id}: {pr['title']}")
 
-    save_and_push(data, root, f"pm: load plan {plan_id}")
-    trigger_tui_refresh()
-    click.echo(f"\nLoaded {len(prs)} PRs from plan {plan_id}.")
+    if created:
+        save_and_push(data, root, f"pm: load plan {plan_id}")
+        trigger_tui_refresh()
+    click.echo(f"\nLoaded {created} PRs from plan {plan_id}.")
 
 
 @plan.command("fixes")

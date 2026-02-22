@@ -1296,7 +1296,7 @@ for plan operations (view, edit, add, review, deps, load).
 - a pre-fills the command bar with "plan add "
 - w launches pm plan breakdown in a pane
 - D launches pm plan deps in a pane
-- l launches pm plan load in a pane
+- l runs pm plan load as an inline command (no pane)
 - Refresh (r) stays in plans view
 - PR actions are blocked while in plans view
 

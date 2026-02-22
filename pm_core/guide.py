@@ -238,7 +238,8 @@ session finishes, the user can close that pane before moving on.
 ### Loading PRs
 
 Tell the user to press `l` in the plans view to load PRs from the plan file
-into the project.
+into the project. This runs instantly (no Claude session) — the TUI status bar
+shows progress and the tech tree updates when done.
 
 ### TUI plans view reference
 
@@ -346,8 +347,8 @@ units of work with dependencies forming a tree shown in the TUI.
 Claude session to check plan-PR consistency and coverage before loading.
 
 5. **Load** (TUI: `l` in plans view / CLI: `pm plan load`): Load PRs from \
-the plan file into the project. In the TUI, press `P` to leave plans view \
-and see the tech tree.
+the plan file into the project. Runs instantly — no Claude session needed. \
+In the TUI, press `P` to leave plans view and see the tech tree.
 
 6. **Work** (TUI: `s` on a PR / CLI: `pm pr start`): Start a PR to open \
 a Claude session focused on that task. Claude works in a dedicated branch \

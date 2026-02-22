@@ -392,7 +392,8 @@ def handle_plan_action(app, action: str, plan_id: str | None) -> None:
         launch_pane(app, "pm plan deps", "plan-deps")
     elif action == "load":
         if plan_id:
-            launch_pane(app, f"pm plan load {plan_id}", "plan-load")
+            app._run_command(f"plan load {plan_id}",
+                             working_message="Loading PRs from plan")
     elif action == "review":
         if plan_id:
             launch_pane(app, f"pm plan review {plan_id}", "plan-review")
