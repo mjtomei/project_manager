@@ -755,7 +755,7 @@ prs:
   plan: plan-003
   title: Add notes field to PRs for post-start addendums
   branch: pm/pr-c11d04f-add-notes-field-to-prs-for-post-start-addendums
-  status: closed
+  status: merged
   depends_on: []
   description: 'Add a notes list field to PR entries in project.yaml for recording
     addendums after work has begun. Each note identified by a hash-based ID (note-<hash>,
@@ -763,8 +763,8 @@ prs:
     notes by hash ID. Notes appear in: pr edit output, TUI detail panel, generate_prompt,
     and generate_review_prompt.'
   agent_machine: spark-424d
-  gh_pr: https://github.com/mjtomei/project_manager/pull/70
-  gh_pr_number: 70
+  gh_pr: https://github.com/mjtomei/project_manager/pull/74
+  gh_pr_number: 74
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-c11d04f-add-notes-field-to-prs-for-post-star-d4068f70
 - id: pr-9c1af2e
   plan: null
