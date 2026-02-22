@@ -300,6 +300,8 @@ The user will tell you what they need."""
 
 def launch_discuss(app) -> None:
     """Launch a Claude pane to discuss the pm tool and answer questions about it."""
+    fresh = app._consume_z()
+    _log.info("launch_discuss fresh=%s", fresh)
     from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
     claude = find_claude()
     if not claude:
@@ -344,7 +346,7 @@ Common commands:
 Ask the user what they'd like to know about."""
 
     cmd = build_claude_shell_cmd(prompt=prompt)
-    launch_pane(app, cmd, "discuss")
+    launch_pane(app, cmd, "discuss", fresh=fresh)
 
 
 def launch_test(app, test_id: str) -> None:
