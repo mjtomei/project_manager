@@ -652,11 +652,12 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
             click.echo(f"Switched to existing review window '{window_name}'")
             return
 
-    # In review loop mode, only switch focus if at least one session was
-    # watching the review window (so they stay on it).  The per-session
-    # switching happens below after the window is created.  For non-loop
-    # mode, always switch the current session.
-    switch = bool(sessions_on_review) if review_loop else True
+    # In review loop mode, always create the window in the background —
+    # the explicit per-session switching below handles moving exactly the
+    # sessions that were watching the old window.  Letting new_window_get_pane
+    # switch would move current_or_base_session even if it wasn't on the
+    # review window.  For non-loop mode, always switch the current session.
+    switch = not review_loop
 
     try:
         claude_pane = tmux_mod.new_window_get_pane(
