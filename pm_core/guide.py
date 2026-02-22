@@ -238,7 +238,7 @@ session finishes, the user can close that pane before moving on.
 ### Loading PRs
 
 Tell the user to press `l` in the plans view to load PRs from the plan file
-into the project. This runs quickly and does not launch a Claude session.
+into the project.
 
 ### TUI plans view reference
 
