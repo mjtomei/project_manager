@@ -3036,7 +3036,7 @@ OVERALL: [PASS/FAIL]
 INIT_GITHUB_TEST = """\
 You are testing the full `pm session` → `pm init` → guide completion flow for a
 repo with a GitHub remote.  A bare git repo has been created for you at
-`{test_cwd}` with an origin remote pointing to `pallets/flask`.  No pm init has
+`{test_cwd}` with an origin remote pointing to `mjtomei/flask`.  No pm init has
 been run yet.
 
 The final acceptance criterion is: **the guide is fully completed and the TUI
@@ -3086,7 +3086,7 @@ cat {test_cwd}/pm/project.yaml
 
 Check:
 - `backend: github`
-- `repo:` matches `pallets/flask` or the full GitHub URL
+- `repo:` matches `mjtomei/flask` or the full GitHub URL
 - `base_branch` is set (main or master)
 - File exists and is valid YAML
 
@@ -3462,7 +3462,7 @@ def _cleanup_test_session(context):
 def _init_github_repo():
     """Set up a temp repo with a GitHub remote for Claude to init."""
     tmpdir = tempfile.mkdtemp(prefix="pm-test-init-github-")
-    _setup_git_repo(tmpdir, remote="https://github.com/pallets/flask.git",
+    _setup_git_repo(tmpdir, remote="https://github.com/mjtomei/flask.git",
                     commit=True)
     session_name = _compute_session_name(tmpdir, github_repo_name="flask")
     return {
