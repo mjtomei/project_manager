@@ -94,8 +94,14 @@ def start_or_stop_loop(app, stop_on_suggestions: bool) -> None:
 
 def _start_loop(app, pr_id: str, pr: dict | None, stop_on_suggestions: bool) -> None:
     """Start a review loop for the given PR."""
+    from pm_core import tmux as tmux_mod
+
     if not pr:
         app.log_message(f"PR {pr_id} not found")
+        return
+
+    if not tmux_mod.in_tmux():
+        app.log_message("Review loop requires tmux. Use 'pm session' to start.")
         return
 
     workdir = pr.get("workdir")

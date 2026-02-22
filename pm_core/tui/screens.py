@@ -131,9 +131,10 @@ class HelpScreen(ModalScreen):
             elif self._in_plans:
                 yield Label("Plan Navigation", classes="help-section")
                 yield Label("  [bold]↑↓[/] or [bold]jk[/]  Move selection", classes="help-row")
-                yield Label("  [bold]Enter/v[/]  View plan file", classes="help-row")
+                yield Label("  [bold]Enter[/]  View plan file", classes="help-row")
                 yield Label("Plan Actions", classes="help-section")
                 yield Label("  [bold]a[/]  Add a new plan", classes="help-row")
+                yield Label("  [bold]v[/]  View plan file in pane", classes="help-row")
                 yield Label("  [bold]e[/]  Edit plan file", classes="help-row")
                 yield Label("  [bold]w[/]  Break plan into PRs", classes="help-row")
                 yield Label("  [bold]c[/]  Review plan-PR consistency", classes="help-row")
@@ -155,7 +156,8 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]v[/]  View plan file", classes="help-row")
                 yield Label("  [bold]M[/]  Move to plan", classes="help-row")
             yield Label("Panes & Views", classes="help-section")
-            yield Label("  [bold]c[/]  Launch Claude session", classes="help-row")
+            if not self._in_plans:
+                yield Label("  [bold]c[/]  Launch Claude session", classes="help-row")
             yield Label("  [bold]H[/]  Launch guide (setup or assist)", classes="help-row")
             yield Label("  [bold]/[/]  Open command bar", classes="help-row")
             yield Label("  [bold]n[/]  Open notes", classes="help-row")

@@ -252,6 +252,50 @@ def set_cmd(setting, value):
     click.echo(f"{setting} = {value}")
 
 
+@cli.command("status")
+def status_cmd():
+    """Show project status: active PR, counts by status."""
+    root = state_root()
+    data = store.load(root)
+    project = data.get("project", {})
+    prs = data.get("prs") or []
+    plans = data.get("plans") or []
+
+    click.echo(f"Project: {project.get('name', '???')}")
+    click.echo(f"  repo: {project.get('repo', '???')}")
+    click.echo(f"  base branch: {project.get('base_branch', 'master')}")
+    click.echo(f"  backend: {project.get('backend', 'vanilla')}")
+    click.echo()
+
+    active_pr = project.get("active_pr")
+    if active_pr:
+        pr = store.get_pr(data, active_pr)
+        if pr:
+            click.echo(f"Active PR: {_pr_display_id(pr)} — {pr.get('title', '???')} [{pr.get('status', '?')}]")
+        else:
+            click.echo(f"Active PR: {active_pr} (not found)")
+    else:
+        click.echo("Active PR: none")
+
+    # Count by status
+    counts: dict[str, int] = {}
+    for p in prs:
+        s = p.get("status", "pending")
+        counts[s] = counts.get(s, 0) + 1
+
+    click.echo(f"\nPRs: {len(prs)} total")
+    status_icons = {
+        "pending": "⏳", "in_progress": "🔨", "in_review": "👀",
+        "merged": "✅", "closed": "🚫",
+    }
+    for s in ("pending", "in_progress", "in_review", "merged", "closed"):
+        if s in counts:
+            click.echo(f"  {status_icons.get(s, '?')} {s}: {counts[s]}")
+
+    if plans:
+        click.echo(f"\nPlans: {len(plans)}")
+
+
 @cli.command("prompt")
 @click.argument("pr_id", default=None, required=False)
 def prompt(pr_id: str | None):
@@ -399,6 +443,7 @@ sessions, and provides an interactive terminal dashboard.
 
 COMMANDS
   pm init [target-repo-url]     Create pm/ directory (auto-detects repo from cwd)
+  pm status                     Show project status: active PR, counts by status
   pm push                       Commit pm/ changes to a branch and create PR
   pm session                    Start tmux session with TUI + notes editor
   pm plan add <name>            Add a plan and launch Claude to develop it
@@ -414,18 +459,26 @@ COMMANDS
   pm pr add <title>             Add a PR (becomes active) [--plan, --depends-on]
   pm pr edit <pr-id>            Edit PR title, description, or dependencies
   pm pr select <pr-id>          Set the active PR
+  pm pr cd <pr-id>              Open a shell in a PR's workdir
   pm pr list                    List PRs with status (* = active)
   pm pr graph                   Show dependency tree
   pm pr ready                   Show PRs ready to start
   pm pr start [pr-id]           Clone, branch, launch Claude (tmux window or blocking)
-  pm pr done [pr-id]            Mark PR as in_review
+  pm pr done [pr-id]            Mark PR as in_review, open review window
   pm pr sync                    Check for merged PRs
+  pm pr sync-github             Fetch and update PR statuses from GitHub
+  pm pr import-github           Import existing GitHub PRs into project yaml
+  pm pr close [pr-id]           Close and remove a PR (also closes GitHub PR)
   pm pr cleanup [pr-id]         Remove workdir for merged PR
+  pm pr note add <pr-id> <text> Add a note to a PR
+  pm pr note list <pr-id>       List notes on a PR
+  pm pr note delete <pr-id> <id>  Delete a note from a PR
 
   pm cluster auto               Discover feature clusters automatically
   pm cluster explore            Interactively explore code clusters with Claude
 
   pm guide                      Guided workflow (init → plan → PRs → start)
+  pm notes                      Open session notes in editor
   pm prompt [pr-id]             Print Claude prompt for a PR
   pm tui                        Launch interactive dashboard
   pm meta [task]                Work on pm itself (meta-development session)

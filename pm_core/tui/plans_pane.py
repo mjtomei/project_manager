@@ -105,6 +105,8 @@ class PlansPane(Widget):
         output.append("\n")
         output.append("  a", style="bold")
         output.append("=add  ", style="dim")
+        output.append("v", style="bold")
+        output.append("=view  ", style="dim")
         output.append("w", style="bold")
         output.append("=breakdown  ", style="dim")
         output.append("c", style="bold")
@@ -113,6 +115,8 @@ class PlansPane(Widget):
         output.append("=load  ", style="dim")
         output.append("e", style="bold")
         output.append("=edit  ", style="dim")
+        output.append("D", style="bold")
+        output.append("=deps  ", style="dim")
         output.append("P", style="bold")
         output.append("=back\n", style="dim")
 
