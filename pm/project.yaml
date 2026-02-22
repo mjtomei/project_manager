@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-70cf9e7
+  active_pr: pr-e29dda7
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-02-20T02:43:08.956779+00:00'
@@ -755,7 +755,7 @@ prs:
   plan: plan-003
   title: Add notes field to PRs for post-start addendums
   branch: pm/pr-c11d04f-add-notes-field-to-prs-for-post-start-addendums
-  status: in_review
+  status: closed
   depends_on: []
   description: 'Add a notes list field to PR entries in project.yaml for recording
     addendums after work has begun. Each note identified by a hash-based ID (note-<hash>,
@@ -844,7 +844,7 @@ prs:
   plan: null
   title: Fix review loop docs and window focus issues
   branch: pm/pr-70cf9e7-fix-review-loop-docs-and-window-focus-issues
-  status: in_progress
+  status: merged
   depends_on: []
   description: 'Fix the following bugs:
 
@@ -861,3 +861,40 @@ prs:
   gh_pr_number: 73
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-70cf9e7-fix-review-loop-docs-and-window-focu-2ed009c1
+- id: pr-e29dda7
+  plan: null
+  title: Investigate and fix tmux server crash on session kill
+  branch: pm/pr-e29dda7-investigate-and-fix-tmux-server-crash-on-session-k
+  status: pending
+  depends_on: []
+  description: ''
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  notes:
+  - id: note-b86dd23
+    text: 'Research: tmux 3.4 on Linux. Known bugs: (1) segfault when suspended client
+      killed — signal handler writes to closed tty (2) status bar #() command substitution
+      crash during detach (issue #1030) (3) server exits when all panes gone across
+      all sessions (issue #3083) — grouped sessions may trigger this. Instrumentation
+      needed: wrap kill-session/kill-pane with pre-checks, log tmux server PID, monitor
+      for unexpected death, consider keep-alive sentinel session. Key files: tmux.py:104
+      kill_session(), pane_registry.py:119 kill-pane, cli/session.py:64 after-kill-pane
+      hook, pane_layout.py:526 handler.'
+    created_at: '2026-02-22T01:08:31Z'
+    last_edited: '2026-02-22T01:08:31Z'
+  - id: note-0524965
+    text: 'REFINED: The crash is a full server segfault, not a graceful exit. All
+      sessions die including attached ones with active windows. Key suspect: rapid
+      sequential kill-session calls in session.py:419-421 (kills grouped sessions
+      in a loop then base). Global hooks (after-kill-pane at session.py:64, window-resized
+      at session.py:74) fire run-shell commands during the kill cascade — these reference
+      sessions/panes that are being destroyed, potentially triggering null pointer
+      derefs in the tmux server (similar to issue #2827 pattern). The tmux server
+      is single-threaded so a segfault in any hook handler kills everything. Instrumentation:
+      (1) add sleep between kill-session calls to test if rapid-fire is the trigger
+      (2) temporarily disable global hooks before killing sessions (3) enable core
+      dumps and capture the segfault backtrace (4) test with tmux built from master
+      to see if upstream already fixed.'
+    created_at: '2026-02-22T01:11:33Z'
+    last_edited: '2026-02-22T01:11:33Z'
