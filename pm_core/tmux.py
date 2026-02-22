@@ -117,12 +117,16 @@ def kill_window(session: str, window: str) -> None:
     )
 
 
-def new_window(session: str, name: str, cmd: str, cwd: str) -> None:
+def new_window(session: str, name: str, cmd: str, cwd: str,
+               switch: bool = True) -> None:
     """Create a new tmux window with the given name, running cmd.
 
     Uses 'session:' format to ensure numeric session names aren't
     interpreted as window indices.  Uses -d to avoid switching the base
     session, then switches only the caller's grouped session.
+
+    Set *switch* to False to create the window without changing the
+    active window (useful for background operations like the review loop).
     """
     # Use session: format to explicitly target session, not window index
     target = f"{session}:"
@@ -130,36 +134,42 @@ def new_window(session: str, name: str, cmd: str, cwd: str) -> None:
         _tmux_cmd("new-window", "-d", "-t", target, "-n", name, "-c", cwd, cmd),
         check=True,
     )
-    # Switch only the current grouped session to the new window
-    win = find_window_by_name(session, name)
-    if win:
-        current = current_or_base_session(session)
-        subprocess.run(
-            _tmux_cmd("select-window", "-t", f"{current}:{win['index']}"),
-            capture_output=True,
-        )
+    if switch:
+        # Switch only the current grouped session to the new window
+        win = find_window_by_name(session, name)
+        if win:
+            current = current_or_base_session(session)
+            subprocess.run(
+                _tmux_cmd("select-window", "-t", f"{current}:{win['index']}"),
+                capture_output=True,
+            )
 
 
-def new_window_get_pane(session: str, name: str, cmd: str, cwd: str) -> str | None:
+def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
+                        switch: bool = True) -> str | None:
     """Create a new tmux window and return its initial pane ID.
 
     Like new_window but returns the pane ID so callers can split on it.
     Returns None if the window couldn't be found after creation.
+
+    Set *switch* to False to create the window without changing the
+    active window (useful for background operations like the review loop).
     """
     target = f"{session}:"
     subprocess.run(
         _tmux_cmd("new-window", "-d", "-t", target, "-n", name, "-c", cwd, cmd),
         check=True,
     )
-    # Switch the current grouped session to the new window
     win = find_window_by_name(session, name)
     if not win:
         return None
-    current = current_or_base_session(session)
-    subprocess.run(
-        _tmux_cmd("select-window", "-t", f"{current}:{win['index']}"),
-        capture_output=True,
-    )
+    if switch:
+        # Switch the current grouped session to the new window
+        current = current_or_base_session(session)
+        subprocess.run(
+            _tmux_cmd("select-window", "-t", f"{current}:{win['index']}"),
+            capture_output=True,
+        )
     # Discover the pane ID
     panes = get_pane_indices(session, win["index"])
     if panes:

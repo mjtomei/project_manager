@@ -634,8 +634,14 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
 
     # If review window already exists, kill it if fresh, otherwise switch to it
     existing = tmux_mod.find_window_by_name(pm_session, window_name)
+    # Remember whether the user was already watching the review window —
+    # if so, we should switch to the replacement even in review-loop mode.
+    was_on_review = False
     if existing:
         if fresh:
+            if review_loop:
+                active_wid = tmux_mod.get_window_id(pm_session)
+                was_on_review = (active_wid == existing["id"])
             tmux_mod.kill_window(pm_session, existing["id"])
             click.echo(f"Killed existing review window '{window_name}'")
         else:
@@ -643,8 +649,15 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
             click.echo(f"Switched to existing review window '{window_name}'")
             return
 
+    # In review loop mode, only switch focus if the user was already on the
+    # review window (so they stay on it).  Otherwise don't steal focus.
+    switch = was_on_review if review_loop else True
+
     try:
-        claude_pane = tmux_mod.new_window_get_pane(pm_session, window_name, claude_cmd, workdir)
+        claude_pane = tmux_mod.new_window_get_pane(
+            pm_session, window_name, claude_cmd, workdir,
+            switch=switch,
+        )
         if not claude_pane:
             click.echo(f"Review window: failed to create tmux window '{window_name}'.")
             return
