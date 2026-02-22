@@ -118,16 +118,29 @@ class PlansPane(Widget):
 
         return output
 
+    def _entry_lines(self, plan: dict) -> int:
+        """Return the number of rendered lines for a plan entry."""
+        intro = plan.get("intro", "")
+        intro_lines = sum(1 for line in intro.split("\n") if line.strip()) if intro else 0
+        return 1 + intro_lines + 1  # header + intro lines + blank
+
     def _scroll_selected_into_view(self) -> None:
         """Scroll the parent container to keep the selected plan visible."""
-        if not self._plans:
+        if not self._plans or not self.parent:
             return
-        # Estimate Y offset: each plan entry is ~3 lines (header, intro, blank)
-        y = self.selected_index * 3
-        from textual.geometry import Region
-        node_region = Region(0, y, self.size.width or 40, 3)
-        if self.parent:
-            self.parent.scroll_to_region(node_region)
+        container = self.parent
+        y_top = sum(self._entry_lines(p) for p in self._plans[: self.selected_index])
+        h = self._entry_lines(self._plans[self.selected_index])
+        viewport_h = container.size.height
+        scroll_y = round(container.scroll_y)
+        y_bottom = y_top + h
+        if y_bottom > scroll_y + viewport_h:
+            new_y = min(y_top, y_bottom - viewport_h)
+        elif y_top < scroll_y:
+            new_y = y_top
+        else:
+            return  # already visible
+        container.scroll_to(y=new_y, animate=False, force=True)
 
     # Map keys to PlanAction strings — keep in sync with on_plan_action in app.py
     _KEY_ACTIONS: dict[str, str] = {
