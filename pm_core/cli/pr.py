@@ -5,8 +5,10 @@ Registers the ``pr`` group and all subcommands on the top-level ``cli`` group.
 
 import os
 import platform
+import re
 import shutil
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 import click
@@ -145,6 +147,16 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
         current_deps = ", ".join(pr_entry.get("depends_on") or [])
         current_status = pr_entry.get("status", "pending")
 
+        current_notes = pr_entry.get("notes") or []
+        notes_lines = ""
+        if current_notes:
+            for n in current_notes:
+                ts = n.get("created_at", "")
+                ts_suffix = f"  # {ts}" if ts else ""
+                notes_lines += f"- {n['text']}{ts_suffix}\n"
+        else:
+            notes_lines = "# (no notes)\n"
+
         template = (
             f"# Editing {pr_id}\n"
             f"# Lines starting with # are ignored.\n"
@@ -153,6 +165,9 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
             f"title: {current_title}\n"
             f"status: {current_status}\n"
             f"depends_on: {current_deps}\n"
+            f"\n"
+            f"# Notes (bulleted list, one per line starting with '- '):\n"
+            f"{notes_lines}"
             f"\n"
             f"# Description (everything below this line):\n"
             f"{current_desc}\n"
@@ -178,9 +193,14 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
         finally:
             os.unlink(tmp_path)
 
-        # Parse the edited file
+        # Parse the edited file — three sections:
+        # 1. metadata fields (title:, status:, depends_on:)
+        # 2. notes (between # Notes and # Description comments)
+        # 3. description (after # Description comment)
         desc_lines = []
+        note_lines = []
         in_desc = False
+        in_notes = False
         new_title = current_title
         new_status = current_status
         new_deps_str = current_deps
@@ -188,9 +208,20 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
             if line.startswith("#"):
                 if "description" in line.lower() and "below" in line.lower():
                     in_desc = True
+                    in_notes = False
+                elif "notes" in line.lower():
+                    in_notes = True
                 continue
             if in_desc:
                 desc_lines.append(line)
+            elif in_notes:
+                stripped = line.strip()
+                if stripped.startswith("- "):
+                    text = stripped[2:]
+                    # Strip trailing timestamp comment added by template
+                    text = re.sub(r'\s+#\s+\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$', '', text)
+                    note_lines.append(text)
+                # skip blank lines and non-bulleted lines in notes section
             elif line.startswith("title:"):
                 new_title = line[len("title:"):].strip()
             elif line.startswith("status:"):
@@ -226,6 +257,33 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
                     raise SystemExit(1)
                 pr_entry["depends_on"] = deps
                 changes.append(f"depends_on={', '.join(deps)}")
+
+        # Reconcile notes: compare old text list with new text list
+        # Edits are treated as delete + add (new hash ID)
+        old_texts = [n["text"] for n in current_notes]
+        if note_lines != old_texts:
+            # Build new notes list: keep existing IDs for unchanged, generate new for added
+            old_by_text = {}
+            for n in current_notes:
+                old_by_text.setdefault(n["text"], []).append(n)
+            new_notes = []
+            existing_note_ids = set()
+            for text in note_lines:
+                if text in old_by_text and old_by_text[text]:
+                    # Reuse existing note entry
+                    reused = old_by_text[text].pop(0)
+                    new_notes.append(reused)
+                    existing_note_ids.add(reused["id"])
+                else:
+                    # New or edited note — generate new ID and timestamp
+                    note_id = store.generate_note_id(pr_id, text, existing_note_ids)
+                    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                    new_notes.append({"id": note_id, "text": text, "created_at": now, "last_edited": now})
+                    existing_note_ids.add(note_id)
+            # Sort by last_edited so most recently touched notes appear last
+            new_notes.sort(key=lambda n: n.get("last_edited") or n.get("created_at", ""))
+            pr_entry["notes"] = new_notes
+            changes.append("notes updated")
 
         if not changes:
             click.echo("No changes made.")
@@ -539,7 +597,9 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
     launch_claude(prompt, cwd=str(work_path), session_key=session_key, pm_root=root, resume=not fresh)
 
 
-def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False) -> None:
+def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
+                          review_loop: bool = False, review_iteration: int = 0,
+                          review_loop_id: str = "") -> None:
     """Launch a tmux review window with Claude review + git diff shell."""
     if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
         click.echo("Review window requires tmux.")
@@ -555,13 +615,20 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False) -> No
         click.echo(f"Review window: no workdir for {pr_entry['id']}. Start the PR first.")
         return
 
+    # Review loop always forces a fresh window
+    if review_loop:
+        fresh = True
+
     pr_id = pr_entry["id"]
     display_id = _pr_display_id(pr_entry)
     title = pr_entry.get("title", "")
     base_branch = data.get("project", {}).get("base_branch", "master")
 
     # Generate review prompt and build Claude command
-    review_prompt = prompt_gen.generate_review_prompt(data, pr_id, session_name=pm_session)
+    review_prompt = prompt_gen.generate_review_prompt(data, pr_id, session_name=pm_session,
+                                                      review_loop=review_loop,
+                                                      review_iteration=review_iteration,
+                                                      review_loop_id=review_loop_id)
     claude_cmd = build_claude_shell_cmd(prompt=review_prompt)
 
     window_name = f"review-{display_id}"
@@ -640,7 +707,10 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False) -> No
 @pr.command("done")
 @click.argument("pr_id", default=None, required=False)
 @click.option("--fresh", is_flag=True, default=False, help="Kill existing review window and create a new one")
-def pr_done(pr_id: str | None, fresh: bool):
+@click.option("--review-loop", is_flag=True, default=False, help="Use review loop prompt (fix/commit/push)")
+@click.option("--review-iteration", default=0, type=int, help="Review loop iteration number (for commit messages)")
+@click.option("--review-loop-id", default="", help="Unique review loop identifier (for commit messages)")
+def pr_done(pr_id: str | None, fresh: bool, review_loop: bool, review_iteration: int, review_loop_id: str):
     """Mark a PR as in_review.
 
     If PR_ID is omitted, infers from cwd (if inside a workdir) or
@@ -671,7 +741,9 @@ def pr_done(pr_id: str | None, fresh: bool):
         raise SystemExit(1)
     if pr_entry.get("status") == "in_review":
         click.echo(f"PR {pr_id} is already in_review.")
-        _launch_review_window(data, pr_entry, fresh=fresh)
+        _launch_review_window(data, pr_entry, fresh=fresh, review_loop=review_loop,
+                              review_iteration=review_iteration,
+                              review_loop_id=review_loop_id)
         return
     if pr_entry.get("status") == "pending":
         click.echo(f"PR {pr_id} is pending — start it first with: pm pr start {pr_id}", err=True)
@@ -694,7 +766,9 @@ def pr_done(pr_id: str | None, fresh: bool):
     save_and_push(data, root, f"pm: done {pr_id}")
     click.echo(f"PR {_pr_display_id(pr_entry)} marked as in_review.")
     trigger_tui_refresh()
-    _launch_review_window(data, pr_entry, fresh=fresh)
+    _launch_review_window(data, pr_entry, fresh=fresh, review_loop=review_loop,
+                          review_iteration=review_iteration,
+                          review_loop_id=review_loop_id)
 
 
 @pr.command("sync")
@@ -975,6 +1049,83 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool):
     if _cleanup_pr(pr_entry, data, root, force):
         save_and_push(data, root, f"pm: cleanup {pr_entry['id']}")
         trigger_tui_refresh()
+
+
+@pr.group("note")
+def pr_note():
+    """Manage notes on a PR."""
+    pass
+
+
+@pr_note.command("add")
+@click.argument("pr_id")
+@click.argument("text")
+def pr_note_add(pr_id: str, text: str):
+    """Add a note to a PR.
+
+    TEXT is the note content. Use quotes for multi-word notes.
+    """
+    root = state_root()
+    data = store.load(root)
+    pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
+
+    notes = pr_entry.get("notes") or []
+    existing_ids = {n["id"] for n in notes}
+    note_id = store.generate_note_id(pr_id, text, existing_ids)
+    created_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    notes.append({"id": note_id, "text": text, "created_at": created_at, "last_edited": created_at})
+    pr_entry["notes"] = notes
+
+    save_and_push(data, root, f"pm: note on {pr_id}")
+    click.echo(f"Added note {note_id} to {_pr_display_id(pr_entry)}")
+    trigger_tui_refresh()
+
+
+@pr_note.command("list")
+@click.argument("pr_id")
+def pr_note_list(pr_id: str):
+    """List notes on a PR."""
+    root = state_root()
+    data = store.load(root)
+    pr_entry = _require_pr(data, pr_id)
+
+    notes = pr_entry.get("notes") or []
+    if not notes:
+        click.echo(f"No notes on {_pr_display_id(pr_entry)}.")
+        return
+    for n in notes:
+        ts = n.get("created_at", "")
+        ts_str = f" ({ts})" if ts else ""
+        click.echo(f"  {n['id']}{ts_str}: {n['text']}")
+
+
+@pr_note.command("delete")
+@click.argument("pr_id")
+@click.argument("note_id")
+def pr_note_delete(pr_id: str, note_id: str):
+    """Delete a note from a PR by its note ID."""
+    root = state_root()
+    data = store.load(root)
+    pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
+
+    notes = pr_entry.get("notes") or []
+    original_len = len(notes)
+    pr_entry["notes"] = [n for n in notes if n["id"] != note_id]
+
+    if len(pr_entry["notes"]) == original_len:
+        click.echo(f"Note '{note_id}' not found on {_pr_display_id(pr_entry)}.", err=True)
+        if notes:
+            click.echo("Available notes:", err=True)
+            for n in notes:
+                click.echo(f"  {n['id']}: {n['text']}", err=True)
+        raise SystemExit(1)
+
+    save_and_push(data, root, f"pm: delete note on {pr_id}")
+    click.echo(f"Deleted note {note_id} from {_pr_display_id(pr_entry)}")
+    trigger_tui_refresh()
 
 
 @pr.command("close")

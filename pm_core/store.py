@@ -141,6 +141,26 @@ def generate_pr_id(title: str, desc: str = "", existing_ids: set[str] | None = N
     raise RuntimeError("Could not generate unique PR ID")
 
 
+def generate_note_id(pr_id: str, text: str, existing_ids: set[str] | None = None) -> str:
+    """Generate a note ID from a hash of the PR ID and note text.
+
+    Uses sha256(pr_id + newline + text) truncated to 7 hex chars,
+    producing IDs like 'note-a3f2b1c'. If the ID collides with an
+    existing one, extends the hash until unique.
+    """
+    digest = hashlib.sha256(f"{pr_id}\n{text}".encode()).hexdigest()
+    min_len = 7
+    for length in range(min_len, len(digest) + 1):
+        note_id = f"note-{digest[:length]}"
+        if existing_ids is None or note_id not in existing_ids:
+            return note_id
+    for i in range(2, 1000):
+        note_id = f"note-{digest[:min_len]}-{i}"
+        if existing_ids is None or note_id not in existing_ids:
+            return note_id
+    raise RuntimeError("Could not generate unique note ID")
+
+
 def get_pr(data: dict, pr_id: str) -> Optional[dict]:
     """Get a PR entry by id."""
     for pr in data.get("prs") or []:

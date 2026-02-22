@@ -20,6 +20,19 @@ commands so they target the correct session even from workdir clones:
 """
 
 
+def _format_pr_notes(pr: dict) -> str:
+    """Format PR notes as a markdown section, or empty string if none."""
+    pr_notes = pr.get("notes") or []
+    if not pr_notes:
+        return ""
+    note_lines = []
+    for n in pr_notes:
+        ts = n.get("created_at", "")
+        ts_str = f" ({ts})" if ts else ""
+        note_lines.append(f"- {n['text']}{ts_str}")
+    return f"\n## PR Notes\n" + "\n".join(note_lines) + "\n"
+
+
 def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> str:
     """Generate a Claude Code prompt for working on a PR.
 
@@ -57,7 +70,7 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
     gh_pr_url = pr.get("gh_pr")  # URL of draft PR if created
     instructions = backend.pr_instructions(branch, title, base_branch, pr_id, gh_pr_url)
 
-    # Include notes if available
+    # Include session notes if available
     notes_block = ""
     try:
         root = store.find_project_root()
@@ -66,6 +79,9 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
         pass
 
     tui_block = tui_section(session_name) if session_name else ""
+
+    # Include PR notes (addendums added after work began)
+    pr_notes_block = _format_pr_notes(pr)
 
     prompt = f"""You're working on PR {pr_id}: "{title}"
 
@@ -77,7 +93,7 @@ This session is managed by `pm`. Run `pm help` to see available commands.
 
 ## Task
 {description}
-
+{pr_notes_block}
 ## Tips
 - This session may be resuming after a restart. Check `git status` and `git log` to see if previous work exists on this branch — if so, continue from there.
 - Before referencing existing code (imports, function calls, class usage), read the source to verify the interface.
@@ -89,8 +105,23 @@ This session is managed by `pm`. Run `pm help` to see available commands.
     return prompt.strip()
 
 
-def generate_review_prompt(data: dict, pr_id: str, session_name: str | None = None) -> str:
-    """Generate a Claude Code prompt for reviewing a completed PR."""
+def generate_review_prompt(data: dict, pr_id: str, session_name: str | None = None,
+                           review_loop: bool = False,
+                           review_iteration: int = 0,
+                           review_loop_id: str = "") -> str:
+    """Generate a Claude Code prompt for reviewing a completed PR.
+
+    Args:
+        data: Project data dict.
+        pr_id: The PR identifier.
+        session_name: If provided, include TUI interaction instructions.
+        review_loop: When True, append fix/commit/push instructions for
+            the automated review loop (``zz d`` / ``zzz d``).
+        review_iteration: Current iteration number (1-based) for commit
+            message tagging.  Only used when ``review_loop`` is True.
+        review_loop_id: Short unique loop identifier for commit message
+            tagging.  Only used when ``review_loop`` is True.
+    """
     pr = store.get_pr(data, pr_id)
     if not pr:
         raise ValueError(f"PR {pr_id} not found")
@@ -120,6 +151,9 @@ This PR is part of plan "{plan['name']}" ({plan['id']}). Other PRs in this plan:
 
     tui_block = tui_section(session_name) if session_name else ""
 
+    # Include PR notes (addendums)
+    pr_notes_block = _format_pr_notes(pr)
+
     prompt = f"""You are reviewing PR {pr_id}: "{title}"
 
 ## Task
@@ -127,7 +161,7 @@ Review the code changes in this PR for quality, correctness, and architectural f
 
 ## Description
 {description}
-{plan_context}{tui_block}
+{pr_notes_block}{plan_context}{tui_block}
 ## Steps
 1. Run `git diff origin/{base_branch}...HEAD` to see all changes
 2. **Generic checks** — things any codebase should get right:
@@ -141,6 +175,55 @@ Review the code changes in this PR for quality, correctness, and architectural f
    - Run `pm pr list` to see all PRs and plans for the repo. If any other plans or standalone PRs touch related areas, consider whether this PR's approach conflicts with or complicates them.
    - Consider likely future changes beyond the current PR list — does this PR paint the codebase into a corner or leave good extension points?
 5. Output per-file notes: **filename** — GOOD / FIX / RETHINK
-6. End with an overall verdict: **PASS** or **NEEDS_WORK**
-   - If NEEDS_WORK, separate code-quality fixes from architectural concerns"""
-    return prompt.strip()
+6. End with an overall verdict on its own line — one of:
+   - **PASS** — No changes needed. The code is ready to merge as-is.
+   - **PASS_WITH_SUGGESTIONS** — Only non-blocking suggestions remain (style nits, minor refactors, optional improvements). The PR could merge now, but would benefit from small tweaks. List suggestions clearly.
+   - **NEEDS_WORK** — Blocking issues found (bugs, missing error handling, architectural problems, test gaps). Separate code-quality fixes from architectural concerns."""
+
+    base = prompt.strip()
+    if review_loop:
+        base += _review_loop_addendum(pr.get("branch", ""), review_iteration,
+                                      review_loop_id)
+    return base
+
+
+def _review_loop_addendum(branch: str, iteration: int = 0,
+                          loop_id: str = "") -> str:
+    """Return the review loop addendum text for fix/commit/push instructions."""
+    id_label = f" [{loop_id}]" if loop_id else ""
+    iteration_label = f" (iteration {iteration}){id_label}" if iteration else id_label
+    id_part = f" {loop_id}" if loop_id else ""
+    iter_part = f" i{iteration}" if iteration else ""
+    commit_prefix = f"review-loop{id_part}{iter_part}: "
+    return f"""
+
+## Review Loop Mode{iteration_label}
+
+This review is running in an automated loop.  After completing your review:
+
+1. If you find issues (**NEEDS_WORK**):
+   - Implement ALL the fixes you identified
+   - Run any relevant tests to verify your fixes
+   - Stage and commit your changes — prefix the message with `{commit_prefix}` (e.g. `{commit_prefix}fix null check, add tests`)
+   - Push to the remote: `git push origin {branch}`
+   - Then output your verdict: **NEEDS_WORK** with a summary of what you fixed and what may still need attention on the next iteration
+
+2. If only non-blocking suggestions remain (**PASS_WITH_SUGGESTIONS**):
+   - Implement the suggestions
+   - If you made changes, commit (same `{commit_prefix}` prefix) and push
+   - Output: **PASS_WITH_SUGGESTIONS** with a list of any remaining optional improvements you chose not to implement
+
+3. If the code is ready to merge as-is (**PASS**):
+   - Output: **PASS**
+
+IMPORTANT: Always end your response with the verdict keyword on its own line — one of **PASS**, **PASS_WITH_SUGGESTIONS**, or **NEEDS_WORK**."""
+
+
+def generate_review_loop_prompt(data: dict, pr_id: str) -> str:
+    """Generate a review prompt for the automated review loop.
+
+    Wraps the normal review prompt with instructions to implement fixes,
+    commit, and push before reporting the verdict.  This is used by the
+    review loop (``zz d`` / ``zzz d``) where Claude iterates until PASS.
+    """
+    return generate_review_prompt(data, pr_id, review_loop=True)

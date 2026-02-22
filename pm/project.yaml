@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-9c1af2e
+  active_pr: pr-70cf9e7
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-02-20T02:43:08.956779+00:00'
@@ -755,7 +755,7 @@ prs:
   plan: plan-003
   title: Add notes field to PRs for post-start addendums
   branch: pm/pr-c11d04f-add-notes-field-to-prs-for-post-start-addendums
-  status: in_progress
+  status: in_review
   depends_on: []
   description: 'Add a notes list field to PR entries in project.yaml for recording
     addendums after work has begun. Each note identified by a hash-based ID (note-<hash>,
@@ -770,7 +770,7 @@ prs:
   plan: null
   title: Fix assorted bugs from bugs.txt
   branch: pm/pr-9c1af2e-fix-assorted-bugs-from-bugs-txt
-  status: pending
+  status: in_review
   depends_on: []
   description: 'Fix the following bugs:
 
@@ -799,6 +799,65 @@ prs:
 
     Add TUI tests that run through init with an existing repo, a notes-only repo,
     and an empty repo, fully isolated and cleaned up after.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/71
+  gh_pr_number: 71
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9c1af2e-fix-assorted-bugs-from-bugs-txt-c9d34c54
+- id: pr-9cf7150
+  plan: null
+  title: Add review loop mode for iterative PR review until pass
+  branch: pm/pr-9cf7150-add-review-loop-mode-for-iterative-pr-review-until
+  status: merged
+  depends_on: []
+  description: 'Add a mode where pm stays in a review loop until Claude reports a
+    pass. The loop repeatedly runs the review prompt and watches for the done/pass
+    message, similar to wiggum loops. Add a new review verdict PASS_WITH_SUGGESTIONS
+    for when there are only non-blocking changes remaining — distinct from PASS (no
+    changes needed) and NEEDS_WORK (blocking issues). Options: stop the loop on PASS_WITH_SUGGESTIONS
+    (default) or continue until full PASS with no proposed fixes. The TUI should have:
+    a way to manually disable/stop the loop, an indicator that the loop is running,
+    and the latest review verdict. Build on the existing ''z d'' and review window
+    functionality so the user can interrupt at any time. Use a custom prompt that
+    watches for the done message.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/72
+  gh_pr_number: 72
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9cf7150-add-review-loop-mode-for-iterative-p-3a8584d0
+- id: pr-9177f5e
+  plan: plan-003
+  title: Add TUI external control request protocol
+  branch: pm/pr-9177f5e-add-tui-external-control-request-protocol
+  status: pending
+  depends_on:
+  - pr-024
+  description: 'Add a formal mechanism for external processes to request and release
+    control of the TUI. pm tui send must first acquire control via pm tui request-control,
+    which shows a 3-second popup the current user can deny. On grant: TUI border/background
+    changes to warning color, status bar shows ''EXTERNAL CONTROL (user@host)'', local
+    keypresses blocked or trigger reclaim. Release via pm tui release-control or auto-expiry
+    after 60s. pm tui send refuses without active grant (--force flag for backward
+    compat).'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
+- id: pr-70cf9e7
+  plan: null
+  title: Fix review loop docs and window focus issues
+  branch: pm/pr-70cf9e7-fix-review-loop-docs-and-window-focus-issues
+  status: in_progress
+  depends_on: []
+  description: 'Fix the following bugs:
+
+
+    1. Meta prompt should know about the override functionality and that it is automatically
+    set; all prompts should know about their initialization
+
+    2. Review loop iterations should not change window focus of any sessions — loop
+    should run without stealing focus from the user''s active tmux window/pane
+
+    3. Make sure review loop is documented in the help pane and features list in README'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/73
+  gh_pr_number: 73
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-70cf9e7-fix-review-loop-docs-and-window-focu-2ed009c1

@@ -16,7 +16,6 @@ from pm_core import store, guide
 
 from pm_core import tmux as tmux_mod
 from pm_core.tui.tech_tree import TechTree, PRSelected
-from pm_core.tui.detail_panel import DetailPanel
 from pm_core.tui.command_bar import CommandBar, CommandSubmitted
 from pm_core.tui.guide_progress import GuideProgress
 from pm_core.tui.plans_pane import PlansPane, PlanSelected, PlanActivated, PlanAction
@@ -33,6 +32,7 @@ from pm_core.tui import frame_capture
 from pm_core.tui.frame_capture import DEFAULT_FRAME_RATE, DEFAULT_FRAME_BUFFER_SIZE
 from pm_core.tui import sync as sync_mod
 from pm_core.tui import pr_view
+from pm_core.tui import review_loop_ui
 
 
 class ProjectManagerApp(App):
@@ -62,20 +62,6 @@ class ProjectManagerApp(App):
         width: 2fr;
         height: 100%;
         overflow: auto auto;
-    }
-    #detail-container {
-        width: 1fr;
-        min-width: 35;
-        max-width: 50;
-        display: none;
-        overflow-y: auto;
-    }
-    #detail-container.portrait {
-        width: 100%;
-        min-width: 0;
-        max-width: 100%;
-        height: 1fr;
-        max-height: 40%;
     }
     LogLine {
         height: 1;
@@ -158,20 +144,22 @@ class ProjectManagerApp(App):
     ]
 
     def on_key(self, event) -> None:
-        """Handle z modifier prefix key."""
+        """Handle z modifier prefix key (supports z, zz, zzz)."""
         cmd_bar = self.query_one("#command-bar", CommandBar)
         if cmd_bar.has_focus:
             return
         if event.key == "z":
-            self._z_pending = not self._z_pending
-            if self._z_pending:
-                self.log_message("[bold]z …[/]")
-            else:
+            if self._z_count >= 3:
+                # zzz → cancel (toggle off)
+                self._z_count = 0
                 self._clear_log_message()
+            else:
+                self._z_count += 1
+                self.log_message(f"[bold]{'z' * self._z_count} …[/]")
             event.prevent_default()
             event.stop()
-        elif event.key == "escape" and self._z_pending:
-            self._z_pending = False
+        elif event.key == "escape" and self._z_count > 0:
+            self._z_count = 0
             self._clear_log_message()
             # Don't prevent — let escape also do its normal thing
 
@@ -231,15 +219,22 @@ class ProjectManagerApp(App):
         # In-flight PR action tracking (prevents concurrent/duplicate PR commands)
         self._inflight_pr_action: str | None = None
         self._log_sticky_until: float = 0.0  # monotonic time until which log line is protected
-        # z modifier key state (vim-style prefix)
-        self._z_pending: bool = False
+        # z modifier key state (vim-style prefix, supports z/zz/zzz)
+        self._z_count: int = 0
+        # Review loop state: dict of pr_id -> ReviewLoopState (supports multiple)
+        self._review_loops: dict = {}
+        self._review_loop_timer: Timer | None = None
 
-    def _consume_z(self) -> bool:
-        """Atomically read and clear the z modifier flag."""
-        if self._z_pending:
-            self._z_pending = False
-            return True
-        return False
+    def _consume_z(self) -> int:
+        """Atomically read and clear the z modifier count.
+
+        Returns 0 (no z), 1 (z), 2 (zz), or 3 (zzz).
+        Non-zero is truthy, so ``if app._consume_z():`` still works
+        for callers that only care about "was z pressed".
+        """
+        count = self._z_count
+        self._z_count = 0
+        return count
 
     # --- Frame capture forwarder (called from ~15 sites) ---
 
@@ -266,8 +261,6 @@ class ProjectManagerApp(App):
                 yield PlansPane(id="plans-pane")
             with Vertical(id="tests-container"):
                 yield TestsPane(id="tests-pane")
-            with Vertical(id="detail-container"):
-                yield DetailPanel(id="detail-panel")
         yield LogLine(id="log-line")
         yield CommandBar(id="command-bar")
 
@@ -330,13 +323,10 @@ class ProjectManagerApp(App):
         if is_portrait != self._is_portrait:
             self._is_portrait = is_portrait
             main_area = self.query_one("#main-area")
-            detail = self.query_one("#detail-container")
             if is_portrait:
                 main_area.add_class("portrait")
-                detail.add_class("portrait")
             else:
                 main_area.remove_class("portrait")
-                detail.remove_class("portrait")
             _log.debug("orientation: %s (%dx%d)", "portrait" if is_portrait else "landscape",
                        self.size.width, self.size.height)
 
@@ -543,7 +533,21 @@ class ProjectManagerApp(App):
         pr_view.start_pr(self)
 
     def action_done_pr(self) -> None:
-        pr_view.done_pr(self)
+        z = self._consume_z()
+        if z == 0:
+            # plain d = one-shot done + review window
+            pr_view.done_pr(self)
+        elif z == 1:
+            # z d = fresh done (original behaviour), OR stop loop if running
+            review_loop_ui.stop_loop_or_fresh_done(self)
+        elif z == 2:
+            # zz d = start review loop (stops on PASS or PASS_WITH_SUGGESTIONS),
+            #        or stop loop if running
+            review_loop_ui.start_or_stop_loop(self, stop_on_suggestions=True)
+        else:
+            # zzz d = start strict review loop (stops only on PASS),
+            #         or stop loop if running
+            review_loop_ui.start_or_stop_loop(self, stop_on_suggestions=False)
 
     def action_hide_plan(self) -> None:
         pr_view.hide_plan(self)

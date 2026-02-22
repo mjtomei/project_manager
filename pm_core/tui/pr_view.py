@@ -41,13 +41,7 @@ def guard_pr_action(app, action_desc: str) -> bool:
 
 def handle_pr_selected(app, pr_id: str) -> None:
     """Handle PR selection in the tech tree."""
-    from pm_core.tui.detail_panel import DetailPanel
-
     _log.debug("PR selected: %s", pr_id)
-    pr = store.get_pr(app._data, pr_id)
-    plan = app._get_plan_for_pr(pr)
-    detail = app.query_one("#detail-panel", DetailPanel)
-    detail.update_pr(pr, app._data.get("prs"), plan=plan, project_root=app._root)
     app.log_message(f"Selected: {pr_id}")
     app.call_after_refresh(app._capture_frame, f"pr_selected:{pr_id}")
 
@@ -81,11 +75,10 @@ def start_pr(app) -> None:
     run_command(app, cmd, working_message=action_key, action_key=action_key)
 
 
-def done_pr(app) -> None:
+def done_pr(app, fresh: bool = False) -> None:
     """Mark the selected PR as done."""
     from pm_core.tui.tech_tree import TechTree
 
-    fresh = app._consume_z()
     tree = app.query_one("#tech-tree", TechTree)
     pr_id = tree.selected_pr_id
     _log.info("action: done_pr selected=%s fresh=%s", pr_id, fresh)
@@ -282,8 +275,38 @@ def handle_command_submitted(app, cmd: str) -> None:
             app._inflight_pr_action = action_key
             break
 
-    # Commands that launch interactive Claude sessions need a tmux pane
+    # Handle review loop commands
     parts = shlex.split(cmd)
+    if cmd in ("review-loop", "review loop"):
+        from pm_core.tui import review_loop_ui
+        review_loop_ui.start_or_stop_loop(app, stop_on_suggestions=True)
+        if app._plans_visible:
+            app.query_one("#plans-pane", PlansPane).focus()
+        else:
+            app.query_one("#tech-tree", TechTree).focus()
+        return
+    if cmd in ("review-loop strict", "review loop strict"):
+        from pm_core.tui import review_loop_ui
+        review_loop_ui.start_or_stop_loop(app, stop_on_suggestions=False)
+        if app._plans_visible:
+            app.query_one("#plans-pane", PlansPane).focus()
+        else:
+            app.query_one("#tech-tree", TechTree).focus()
+        return
+    if cmd in ("review-loop stop", "review loop stop"):
+        from pm_core.tui import review_loop_ui
+        pr_id, _ = review_loop_ui._get_selected_pr(app)
+        if pr_id:
+            review_loop_ui.stop_loop_for_pr(app, pr_id)
+        else:
+            app.log_message("No PR selected")
+        if app._plans_visible:
+            app.query_one("#plans-pane", PlansPane).focus()
+        else:
+            app.query_one("#tech-tree", TechTree).focus()
+        return
+
+    # Commands that launch interactive Claude sessions need a tmux pane
     if len(parts) >= 3 and parts[0] == "plan" and parts[1] == "add":
         pane_ops.launch_pane(app, f"pm {cmd}", "plan-add")
         app._load_state()

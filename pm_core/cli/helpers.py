@@ -230,6 +230,7 @@ def _make_pr_entry(
         "agent_machine": None,
         "gh_pr": gh_pr,
         "gh_pr_number": gh_pr_number,
+        "notes": [],
     }
 
 
