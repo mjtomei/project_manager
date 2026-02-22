@@ -635,14 +635,16 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
 
     # If review window already exists, kill it if fresh, otherwise switch to it
     existing = tmux_mod.find_window_by_name(pm_session, window_name)
-    # Remember whether the user was already watching the review window —
-    # if so, we should switch to the replacement even in review-loop mode.
-    was_on_review = False
+    # Remember which grouped sessions were watching the review window —
+    # after we kill and recreate it, those sessions should follow to the
+    # new window.  Check ALL sessions in the group, not just the current one.
+    sessions_on_review: list[str] = []
     if existing:
         if fresh:
             if review_loop:
-                active_wid = tmux_mod.get_window_id(pm_session)
-                was_on_review = (active_wid == existing["id"])
+                sessions_on_review = tmux_mod.sessions_on_window(
+                    pm_session, existing["id"],
+                )
             tmux_mod.kill_window(pm_session, existing["id"])
             click.echo(f"Killed existing review window '{window_name}'")
         else:
@@ -650,9 +652,12 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
             click.echo(f"Switched to existing review window '{window_name}'")
             return
 
-    # In review loop mode, only switch focus if the user was already on the
-    # review window (so they stay on it).  Otherwise don't steal focus.
-    switch = was_on_review if review_loop else True
+    # In review loop mode, always create the window in the background —
+    # the explicit per-session switching below handles moving exactly the
+    # sessions that were watching the old window.  Letting new_window_get_pane
+    # switch would move current_or_base_session even if it wasn't on the
+    # review window.  For non-loop mode, always switch the current session.
+    switch = not review_loop
 
     try:
         claude_pane = tmux_mod.new_window_get_pane(
@@ -699,16 +704,69 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
             if diff_pane:
                 pane_registry.register_pane(pm_session, review_win_id, diff_pane, "review-diff", "diff-shell")
 
-        # Reset user_modified and rebalance.  This mirrors the same
-        # pattern used in pane_ops.launch_pane() and
-        # pane_layout._respawn_tui() — any code path that creates panes
-        # must reset user_modified (the after-split-window hook sets it
-        # before panes are registered) and then rebalance.
+        # Reset user_modified so the registry is clean before rebalance.
+        # This mirrors the same pattern used in pane_ops.launch_pane()
+        # and pane_layout._respawn_tui() — any code path that creates
+        # panes must reset user_modified (the after-split-window hook
+        # sets it before panes are registered) and then rebalance.
         if review_win_id:
             reg = pane_registry.load_registry(pm_session)
             wdata = pane_registry.get_window_data(reg, review_win_id)
             wdata["user_modified"] = False
             pane_registry.save_registry(pm_session, reg)
+
+        # Switch ALL grouped sessions that were watching the old review
+        # window to the new one.  new_window_get_pane only switches one
+        # session (via current_or_base_session), so we need to explicitly
+        # switch any others that were also on the review window.
+        #
+        # select-window alone does NOT update tmux's "latest client"
+        # tracking (used by window-size=latest to determine window
+        # dimensions).  switch-client to the same session is a visible
+        # no-op but makes that client the "latest", causing tmux to
+        # immediately recalculate the window size for the correct
+        # display.
+        if sessions_on_review:
+            new_win = tmux_mod.find_window_by_name(pm_session, window_name)
+            if new_win:
+                # Map session names → client TTYs for switch-client.
+                client_map: dict[str, str] = {}
+                r = subprocess.run(
+                    tmux_mod._tmux_cmd(
+                        "list-clients", "-F",
+                        "#{session_name} #{client_tty}",
+                    ),
+                    capture_output=True, text=True,
+                )
+                if r.returncode == 0:
+                    for line in r.stdout.strip().splitlines():
+                        parts = line.split(None, 1)
+                        if len(parts) == 2:
+                            client_map[parts[0]] = parts[1]
+
+                for sess_name in sessions_on_review:
+                    subprocess.run(
+                        tmux_mod._tmux_cmd(
+                            "select-window", "-t",
+                            f"{sess_name}:{new_win['index']}",
+                        ),
+                        capture_output=True,
+                    )
+                    # Make this session's client the "latest" so tmux
+                    # recalculates window size for its display.
+                    client_tty = client_map.get(sess_name)
+                    if client_tty:
+                        subprocess.run(
+                            tmux_mod._tmux_cmd(
+                                "switch-client", "-t", sess_name,
+                                "-c", client_tty,
+                            ),
+                            capture_output=True,
+                        )
+
+        # Rebalance AFTER session switches so get_reliable_window_size()
+        # sees the correct dimensions.
+        if review_win_id:
             pane_layout.rebalance(pm_session, review_win_id)
 
         click.echo(f"Opened review window '{window_name}'")

@@ -297,9 +297,13 @@ def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
     Raises RuntimeError for setup failures (no tmux session, window
     failed to launch).
     """
+    from pm_core import tmux as tmux_mod
+
     session = _get_pm_session()
     if not session:
         raise RuntimeError("Not in a pm tmux session")
+    if not tmux_mod.session_exists(session):
+        raise RuntimeError(f"tmux session '{session}' no longer exists")
 
     window_name = _compute_review_window_name(pr_data)
 

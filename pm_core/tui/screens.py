@@ -79,6 +79,8 @@ class HelpScreen(ModalScreen):
 
     BINDINGS = [
         Binding("escape", "dismiss", "Close"),
+        Binding("question_mark", "dismiss", "Close"),
+        Binding("h", "discuss", "Discuss"),
         Binding("q", "dismiss", "Close"),
         Binding("j", "scroll_down", "Scroll down", show=False),
         Binding("k", "scroll_up", "Scroll up", show=False),
@@ -131,9 +133,10 @@ class HelpScreen(ModalScreen):
             elif self._in_plans:
                 yield Label("Plan Navigation", classes="help-section")
                 yield Label("  [bold]↑↓[/] or [bold]jk[/]  Move selection", classes="help-row")
-                yield Label("  [bold]Enter/v[/]  View plan file", classes="help-row")
+                yield Label("  [bold]Enter[/]  View plan file", classes="help-row")
                 yield Label("Plan Actions", classes="help-section")
                 yield Label("  [bold]a[/]  Add a new plan", classes="help-row")
+                yield Label("  [bold]v[/]  View plan file in pane", classes="help-row")
                 yield Label("  [bold]e[/]  Edit plan file", classes="help-row")
                 yield Label("  [bold]w[/]  Break plan into PRs", classes="help-row")
                 yield Label("  [bold]c[/]  Review plan-PR consistency", classes="help-row")
@@ -155,7 +158,8 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]v[/]  View plan file", classes="help-row")
                 yield Label("  [bold]M[/]  Move to plan", classes="help-row")
             yield Label("Panes & Views", classes="help-section")
-            yield Label("  [bold]c[/]  Launch Claude session", classes="help-row")
+            if not self._in_plans:
+                yield Label("  [bold]c[/]  Launch Claude session", classes="help-row")
             yield Label("  [bold]H[/]  Launch guide (setup or assist)", classes="help-row")
             yield Label("  [bold]/[/]  Open command bar", classes="help-row")
             yield Label("  [bold]n[/]  Open notes", classes="help-row")
@@ -164,19 +168,19 @@ class HelpScreen(ModalScreen):
             yield Label("  [bold]P[/]  Toggle plans view", classes="help-row")
             yield Label("  [bold]T[/]  Toggle tests view", classes="help-row")
             yield Label("  [bold]b[/]  Rebalance panes", classes="help-row")
-            yield Label("Review Loop", classes="help-section")
-            yield Label("  [bold]zz d[/]  Start loop (stops on PASS/suggestions)", classes="help-row")
-            yield Label("  [bold]zzz d[/]  Start strict loop (PASS only)", classes="help-row")
-            yield Label("  [bold]z d[/]  Stop loop / fresh done", classes="help-row")
             yield Label("Other", classes="help-section")
             yield Label("  [bold]z[/]  Modifier: kill existing before next", classes="help-row")
             yield Label("  [bold]r[/]  Refresh / sync with GitHub", classes="help-row")
-            yield Label("  [bold]C[/]  Show connect command (shared sessions)", classes="help-row")
+            yield Label("  [bold]C[/]  Show shared connect command", classes="help-row")
             yield Label("  [bold]Ctrl+R[/]  Restart TUI", classes="help-row")
             yield Label("  [bold]?[/]  Show this help", classes="help-row")
             yield Label("  [bold]q[/]  Detach from session", classes="help-row")
+            yield Label("Review Loop", classes="help-section")
+            yield Label("  [bold]zz d[/]   Start loop", classes="help-row")
+            yield Label("  [bold]zzz d[/]  Start strict loop", classes="help-row")
+            yield Label("  [bold]z d[/]    Stop loop / fresh done", classes="help-row")
             yield Label("")
-            yield Label("[dim]Press Esc/q to close[/]", classes="help-row")
+            yield Label("[dim]Press Esc/?/q to close  |  h to discuss pm[/]", classes="help-row")
 
     def action_scroll_down(self) -> None:
         self.query_one("#help-container", VerticalScroll).scroll_down()
@@ -192,6 +196,12 @@ class HelpScreen(ModalScreen):
 
     def action_dismiss(self) -> None:
         self.app.pop_screen()
+
+    def action_discuss(self) -> None:
+        """Open a Claude pane to discuss the pm tool, then dismiss help."""
+        self.app.pop_screen()
+        from pm_core.tui import pane_ops
+        pane_ops.launch_discuss(self.app)
 
 
 class PlanPickerScreen(ModalScreen):
