@@ -24,10 +24,9 @@ from pm_core.plan_parser import extract_plan_intro
 
 from pm_core.tui.widgets import TreeScroll, StatusBar, LogLine
 from pm_core.tui.screens import (
-    WelcomeScreen, ConnectScreen, HelpScreen, PlanPickerScreen, PlanAddScreen,
+    ConnectScreen, HelpScreen, PlanPickerScreen, PlanAddScreen,
 )
 from pm_core.tui import pane_ops
-from pm_core.tui.pane_ops import GUIDE_SETUP_STEPS
 from pm_core.tui import frame_capture
 from pm_core.tui.frame_capture import DEFAULT_FRAME_RATE, DEFAULT_FRAME_BUFFER_SIZE
 from pm_core.tui import sync as sync_mod
@@ -121,7 +120,6 @@ class ProjectManagerApp(App):
 
         Binding("e", "edit_plan", "Edit PR", show=True),
         Binding("v", "view_plan", "View Plan", show=True),
-        Binding("g", "toggle_guide", "Guide", show=True),
         Binding("n", "launch_notes", "Notes", show=True),
         Binding("m", "launch_meta", "Meta", show=True),
         Binding("L", "view_log", "Log", show=True),
@@ -139,7 +137,7 @@ class ProjectManagerApp(App):
         Binding("F", "cycle_filter", "Filter", show=False),
         Binding("question_mark", "show_help", "Help", show=True),
         Binding("c", "launch_claude", "Claude", show=True),
-        Binding("H", "launch_help_claude", "Assist", show=True),  # show toggled in __init__
+        Binding("H", "launch_guide", "Guide", show=True),
         Binding("C", "show_connect", "Connect", show=False),
     ]
 
@@ -166,8 +164,8 @@ class ProjectManagerApp(App):
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """Disable single-key shortcuts when command bar is focused or in guide mode."""
         if action in ("start_pr", "done_pr",
-                       "edit_plan", "view_plan", "toggle_guide", "launch_notes",
-                       "launch_meta", "launch_claude", "launch_help_claude",
+                       "edit_plan", "view_plan", "launch_notes",
+                       "launch_meta", "launch_claude", "launch_guide",
                        "view_log", "refresh", "rebalance", "quit", "show_help",
                        "toggle_tests", "hide_plan", "move_to_plan", "toggle_merged", "cycle_filter"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
@@ -176,8 +174,9 @@ class ProjectManagerApp(App):
                 return False
         # Block PR actions when in guide mode or plans view (can't see the PR tree)
         if action in ("start_pr", "done_pr", "launch_claude", "edit_plan", "view_plan", "hide_plan", "move_to_plan", "toggle_merged", "cycle_filter"):
-            if self._current_guide_step is not None:
-                _log.debug("check_action: blocked %s (in guide mode)", action)
+            prs = self._data.get("prs") or []
+            if not prs and self._current_guide_step is not None:
+                _log.debug("check_action: blocked %s (in guide mode, no PRs)", action)
                 return False
             if self._plans_visible:
                 _log.debug("check_action: blocked %s (in plans view)", action)
@@ -188,24 +187,12 @@ class ProjectManagerApp(App):
         return True
 
     def __init__(self):
-        # Check global setting before super().__init__ processes bindings
-        from pm_core.paths import get_global_setting
-        if get_global_setting("hide-assist"):
-            self.BINDINGS = [
-                Binding(b.key, b.action, b.description,
-                        show=False if b.action == "launch_help_claude" else b.show,
-                        key_display=b.key_display, priority=b.priority)
-                for b in self.BINDINGS
-            ]
         super().__init__()
         self._data: dict = {}
         self._root: Path | None = None
         self._sync_timer: Timer | None = None
         self._detail_visible = False
-        self._guide_auto_launched_step: str | None = None
-        self._guide_dismissed = False
         self._current_guide_step: str | None = None
-        self._welcome_shown = False
         self._plans_visible = False
         self._tests_visible = False
         # Frame capture state (always enabled)
@@ -348,13 +335,14 @@ class ProjectManagerApp(App):
             self._root = None
             self._data = {}
 
-        # Detect guide step and decide which view to show
-        state, _ = guide.resolve_guide_step(self._root)
+        # Decide which view to show based on whether PRs exist
+        prs = self._data.get("prs") or []
         if self._plans_visible:
             self._show_plans_view()
         elif self._tests_visible:
             self._show_tests_view()
-        elif state in GUIDE_SETUP_STEPS and not self._guide_dismissed:
+        elif not prs:
+            state, _ = guide.detect_state(self._root)
             self._show_guide_view(state)
         else:
             self._show_normal_view()
@@ -381,22 +369,15 @@ class ProjectManagerApp(App):
 
         # Update status bar for guide mode
         status_bar = self.query_one("#status-bar", StatusBar)
-        step_num = guide.step_number(state)
-        total = len(GUIDE_SETUP_STEPS) + 1  # +1 for ready_to_work as the "done" state
-        status_bar.update(f" [bold]pm Guide[/bold]    Step {step_num}/{total}: [cyan]{guide.STEP_DESCRIPTIONS.get(state, state)}[/cyan]    [dim]Press g to dismiss[/dim]")
+        desc = guide.STEP_DESCRIPTIONS.get(state, state)
+        status_bar.update(f" [bold]pm Guide[/bold]    [cyan]{desc}[/cyan]    [dim]Press H to launch guide[/dim]")
 
-        self.log_message(f"Guide step {step_num}/{total}: {guide.STEP_DESCRIPTIONS.get(state, state)}")
-
-        # Auto-launch guide pane if in tmux and not already launched for this step
-        if self._guide_auto_launched_step != state and tmux_mod.in_tmux():
-            self._guide_auto_launched_step = state
-            # Use call_later to launch after UI is ready
-            self.call_later(lambda: pane_ops.auto_launch_guide(self))
+        self.log_message(f"Guide: {desc}")
 
         # Capture frame after view change (use call_after_refresh to ensure screen is updated)
         self.call_after_refresh(self._capture_frame, f"show_guide_view:{state}")
 
-    def _show_normal_view(self, from_guide: bool = False) -> None:
+    def _show_normal_view(self) -> None:
         """Show the normal tech tree view."""
         tree_container = self.query_one("#tree-container")
         guide_container = self.query_one("#guide-progress-container")
@@ -414,10 +395,6 @@ class ProjectManagerApp(App):
         self.query_one("#tech-tree", TechTree).focus()
         # Capture frame after view change (use call_after_refresh to ensure screen is updated)
         self.call_after_refresh(self._capture_frame, "show_normal_view")
-        # Show welcome popup when guide completes (only once)
-        if from_guide and not self._welcome_shown:
-            self._welcome_shown = True
-            self.call_later(lambda: self.push_screen(WelcomeScreen()))
 
     # --- Log/status utilities ---
 
@@ -569,9 +546,6 @@ class ProjectManagerApp(App):
     def action_view_plan(self) -> None:
         pane_ops.view_plan(self)
 
-    def action_toggle_guide(self) -> None:
-        pane_ops.toggle_guide(self)
-
     def action_launch_notes(self) -> None:
         pane_ops.launch_notes(self)
 
@@ -587,8 +561,8 @@ class ProjectManagerApp(App):
     def action_launch_claude(self) -> None:
         pane_ops.launch_claude(self)
 
-    def action_launch_help_claude(self) -> None:
-        pane_ops.launch_help_claude(self)
+    def action_launch_guide(self) -> None:
+        pane_ops.launch_guide(self)
 
     def action_show_connect(self) -> None:
         pane_ops.show_connect(self)
@@ -690,7 +664,13 @@ class ProjectManagerApp(App):
         """Toggle between plans view and tech tree view."""
         _log.info("action: toggle_plans visible=%s", self._plans_visible)
         if self._plans_visible:
-            self._show_normal_view()
+            # When toggling off during setup, restore guide view
+            prs = self._data.get("prs") or []
+            if not prs:
+                state, _ = guide.detect_state(self._root)
+                self._show_guide_view(state)
+            else:
+                self._show_normal_view()
         else:
             self._show_plans_view()
 

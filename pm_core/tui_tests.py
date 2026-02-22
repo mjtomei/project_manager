@@ -253,7 +253,7 @@ From pm_core/tui/guide_progress.py:
 
 From pm_core/tui/app.py:
 - GuideProgress widget is in #guide-progress-container
-- Shown when state is in GUIDE_SETUP_STEPS and not dismissed
+- Shown when no PRs exist (setup state)
 - Frame capture triggers on guide step changes via watcher
 
 ## Reporting
@@ -3039,14 +3039,21 @@ repo with a GitHub remote.  A bare git repo has been created for you at
 `{test_cwd}` with an origin remote pointing to `mjtomei/flask`.  No pm init has
 been run yet.
 
-The final acceptance criterion is: **the guide is fully completed and the TUI
-shows the normal PR tree view with all PRs visible** — not just that init works.
+The final acceptance criterion is: **PRs are loaded and the TUI shows the
+normal PR tree view with all PRs visible** — not just that init works.
 
-**IMPORTANT — Automate everything.**  Run every command yourself.  The guide
-will launch interactive Claude sessions — you do NOT need to interact with
-those.  Instead, drive the guide forward by running `pm guide done` from the
-command line after each step's artifacts exist.  The goal is a fully automated
-end-to-end test with no human interaction.
+**IMPORTANT — Automate everything.**  Run every command yourself.  Do NOT
+launch interactive Claude sessions.  Instead, run the pm CLI commands directly
+to drive the setup forward.  The goal is a fully automated end-to-end test
+with no human interaction.
+
+## How the guide works
+
+The guide (`pm guide` or `H` key in TUI) is a single launcher:
+- If no PRs exist → launches a setup Claude session (walks through init, plan, PRs)
+- If PRs exist → launches an assist Claude session (health check + recommendations)
+- The TUI shows a checklist widget when no PRs exist, and the normal tech tree once PRs are loaded
+- There is no `pm guide done` command — the guide detects state from artifacts
 
 ## Test Procedure
 
@@ -3069,15 +3076,26 @@ cd {test_cwd} && pm session name
 Save this value — you will need it for all `pm tui` commands below.  We'll
 call it `$SESSION` in subsequent steps.
 
-### 3. Verify TUI shows guide view
+### 3. Verify TUI shows guide checklist
 
 ```bash
 pm tui view -s $SESSION
 ```
 
-The TUI should be running and showing the guide progress widget in the
-`no_project` state (step 1: "Initialize the project").  The guide pane may
-have auto-launched and failed — that's expected.
+Carefully verify that the TUI output matches the NEW guide checklist format.
+You MUST see ALL of the following strings in the output — if any are missing,
+report FAIL for "Guide view":
+
+1. **"Project Setup"** — the checklist header
+2. **"Project file"** — first checklist item
+3. **"Plan file"** — second checklist item
+4. **"PRs loaded"** — third checklist item
+5. **"Press H"** and **"setup guide"** — the key hint
+
+You MUST NOT see any of the following — if any appear, report FAIL:
+
+- **"Press g to dismiss"** — this is the OLD guide UI
+- **"Guide running in adjacent pane"** — this is the OLD guide UI
 
 ### 4. Run pm init
 
@@ -3110,51 +3128,27 @@ Check: `{test_cwd}/pm/plans/` directory exists.
 ### 7. Add test PRs and verify commands work
 
 ```bash
-cd {test_cwd}/pm && pm pr add --title "Test PR" --description "Testing github init"
+cd {test_cwd}/pm && pm pr add "Test PR" --description "Testing github init"
 cd {test_cwd}/pm && pm pr list
 ```
 
 - `pm pr add` should exit 0
 - `pm pr list` should show the test PR
 
-### 8. Walk through the guide to completion
+### 8. Verify guide detects PRs
 
-Now mark guide step 1 as done and walk through remaining steps:
-
-```bash
-cd {test_cwd}/pm && pm guide done
-```
-
-This should mark step 1 (no_project) as completed.  Since PRs already exist,
-the guide should auto-advance past intermediate steps (create plan, break into
-PRs, load PRs).  Check the output for "Step auto-completed" messages.
-
-After `pm guide done`, check which step the guide is on:
+Check the guide state after adding PRs:
 
 ```bash
 python3 -c "
-from pm_core.guide import resolve_guide_step
+from pm_core.guide import detect_state
 from pathlib import Path
-state, ctx = resolve_guide_step(Path('{test_cwd}/pm'))
-print('guide step:', state)
+state, ctx = detect_state(Path('{test_cwd}/pm'))
+print('guide state:', state)
 "
 ```
 
-If the guide is at `needs_deps_review`, complete it:
-
-```bash
-cd {test_cwd}/pm && pm guide done
-```
-
-If the guide is at `ready_to_work`, that's the final interactive step.
-Complete it:
-
-```bash
-cd {test_cwd}/pm && pm guide done
-```
-
-Repeat `pm guide done` until the guide reports all steps complete or
-`resolve_guide_step` returns `ready_to_work`/`all_done`/`all_in_progress`.
+Since PRs exist, the state should be `ready_to_work` (not a setup state).
 
 ### 9. Refresh TUI and verify final state
 
@@ -3168,7 +3162,7 @@ Wait a moment, then:
 pm tui view -s $SESSION
 ```
 
-The TUI should now show the normal PR tree view (not the guide view).
+The TUI should now show the normal PR tree view (not the guide checklist).
 The test PR should be visible in the tree.
 
 ## Reporting
@@ -3178,13 +3172,13 @@ TEST RESULTS
 ============
 Session name:  [PASS/FAIL] - pm session name returned a valid name
 Session start: [PASS/FAIL] - pm session created TUI + notes
-Guide view:    [PASS/FAIL] - TUI shows no_project guide state
+Guide view:    [PASS/FAIL] - TUI shows "Project Setup" header, "Project file"/"Plan file"/"PRs loaded" items, "Press H" hint; does NOT show "Press g to dismiss" or "Guide running"
 pm init:       [PASS/FAIL] - init completes, backend=github
 project.yaml:  [PASS/FAIL] - backend=github, repo correct, base_branch set
 Directory:     [PASS/FAIL] - plans/ exists
 pm pr add:     [PASS/FAIL] - exit code and output
 pm pr list:    [PASS/FAIL] - shows test PR
-Guide walk:    [PASS/FAIL] - guide done advances through steps, auto-skips where possible
+Guide state:   [PASS/FAIL] - detect_state returns ready_to_work after PRs added
 Final TUI:     [PASS/FAIL] - TUI shows normal tree view with PRs visible
 
 OVERALL: [PASS/FAIL]
@@ -3198,14 +3192,21 @@ local repo with no remote (notes-only use case).  A bare git repo with one
 commit but no remote has been created for you at `{test_cwd}`.  No pm init has
 been run yet.
 
-The final acceptance criterion is: **the guide is fully completed and the TUI
-shows the normal PR tree view** — not just that init works.
+The final acceptance criterion is: **PRs are loaded and the TUI shows the
+normal PR tree view** — not just that init works.
 
-**IMPORTANT — Automate everything.**  Run every command yourself.  The guide
-will launch interactive Claude sessions — you do NOT need to interact with
-those.  Instead, drive the guide forward by running `pm guide done` from the
-command line after each step's artifacts exist.  The goal is a fully automated
-end-to-end test with no human interaction.
+**IMPORTANT — Automate everything.**  Run every command yourself.  Do NOT
+launch interactive Claude sessions.  Instead, run the pm CLI commands directly
+to drive the setup forward.  The goal is a fully automated end-to-end test
+with no human interaction.
+
+## How the guide works
+
+The guide (`pm guide` or `H` key in TUI) is a single launcher:
+- If no PRs exist → launches a setup Claude session (walks through init, plan, PRs)
+- If PRs exist → launches an assist Claude session (health check + recommendations)
+- The TUI shows a checklist widget when no PRs exist, and the normal tech tree once PRs are loaded
+- There is no `pm guide done` command — the guide detects state from artifacts
 
 ## Test Procedure
 
@@ -3227,13 +3228,26 @@ cd {test_cwd} && pm session name
 Save this value — you will need it for all `pm tui` commands below.  We'll
 call it `$SESSION` in subsequent steps.
 
-### 3. Verify TUI shows guide view
+### 3. Verify TUI shows guide checklist
 
 ```bash
 pm tui view -s $SESSION
 ```
 
-Should show guide progress widget in `no_project` state.
+Carefully verify that the TUI output matches the NEW guide checklist format.
+You MUST see ALL of the following strings in the output — if any are missing,
+report FAIL for "Guide view":
+
+1. **"Project Setup"** — the checklist header
+2. **"Project file"** — first checklist item
+3. **"Plan file"** — second checklist item
+4. **"PRs loaded"** — third checklist item
+5. **"Press H"** and **"setup guide"** — the key hint
+
+You MUST NOT see any of the following — if any appear, report FAIL:
+
+- **"Press g to dismiss"** — this is the OLD guide UI
+- **"Guide running in adjacent pane"** — this is the OLD guide UI
 
 ### 4. Run pm init
 
@@ -3257,35 +3271,26 @@ Check:
 ### 6. Add test PRs and verify commands work
 
 ```bash
-cd {test_cwd}/pm && pm pr add --title "Notes PR" --description "Testing local init"
+cd {test_cwd}/pm && pm pr add "Notes PR" --description "Testing local init"
 cd {test_cwd}/pm && pm pr list
 ```
 
 - Both commands should succeed with a local backend
 
-### 7. Walk through the guide to completion
+### 7. Verify guide detects PRs
 
-Mark guide step 1 as done:
-
-```bash
-cd {test_cwd}/pm && pm guide done
-```
-
-Since PRs already exist, the guide should auto-advance past intermediate steps.
-Check the output for "Step auto-completed" messages.
-
-Continue marking steps done until the guide reaches `ready_to_work` or later:
+Check the guide state after adding PRs:
 
 ```bash
 python3 -c "
-from pm_core.guide import resolve_guide_step
+from pm_core.guide import detect_state
 from pathlib import Path
-state, ctx = resolve_guide_step(Path('{test_cwd}/pm'))
-print('guide step:', state)
+state, ctx = detect_state(Path('{test_cwd}/pm'))
+print('guide state:', state)
 "
 ```
 
-For each remaining interactive step, run `cd {test_cwd}/pm && pm guide done`.
+Since PRs exist, the state should be `ready_to_work` (not a setup state).
 
 ### 8. Refresh TUI and verify final state
 
@@ -3294,7 +3299,7 @@ pm tui send r -s $SESSION
 ```
 
 Wait a moment, then `pm tui view -s $SESSION`.  The TUI should show the
-normal PR tree view (not the guide view).
+normal PR tree view (not the guide checklist).
 
 ## Reporting
 
@@ -3303,11 +3308,11 @@ TEST RESULTS
 ============
 Session name:  [PASS/FAIL] - pm session name returned a valid name
 Session start: [PASS/FAIL] - pm session created TUI + notes
-Guide view:    [PASS/FAIL] - TUI shows no_project guide state
+Guide view:    [PASS/FAIL] - TUI shows "Project Setup" header, "Project file"/"Plan file"/"PRs loaded" items, "Press H" hint; does NOT show "Press g to dismiss" or "Guide running"
 pm init:       [PASS/FAIL] - init completes, backend=local
 project.yaml:  [PASS/FAIL] - backend=local, repo path correct
 pm pr add:     [PASS/FAIL] - succeeds with local backend
-Guide walk:    [PASS/FAIL] - guide done advances through steps, auto-skips where possible
+Guide state:   [PASS/FAIL] - detect_state returns ready_to_work after PRs added
 Final TUI:     [PASS/FAIL] - TUI shows normal tree view with PRs visible
 
 OVERALL: [PASS/FAIL]
@@ -3321,14 +3326,21 @@ empty repo (git init, no commits).  This is a known bug area — commands may fa
 with bare/empty git backends.  A bare git repo with no commits and no remote has
 been created for you at `{test_cwd}`.  No pm init has been run yet.
 
-The final acceptance criterion is: **the guide is fully completed and the TUI
-shows the normal PR tree view** — not just that init works.
+The final acceptance criterion is: **PRs are loaded and the TUI shows the
+normal PR tree view** — not just that init works.
 
-**IMPORTANT — Automate everything.**  Run every command yourself.  The guide
-will launch interactive Claude sessions — you do NOT need to interact with
-those.  Instead, drive the guide forward by running `pm guide done` from the
-command line after each step's artifacts exist.  The goal is a fully automated
-end-to-end test with no human interaction.
+**IMPORTANT — Automate everything.**  Run every command yourself.  Do NOT
+launch interactive Claude sessions.  Instead, run the pm CLI commands directly
+to drive the setup forward.  The goal is a fully automated end-to-end test
+with no human interaction.
+
+## How the guide works
+
+The guide (`pm guide` or `H` key in TUI) is a single launcher:
+- If no PRs exist → launches a setup Claude session (walks through init, plan, PRs)
+- If PRs exist → launches an assist Claude session (health check + recommendations)
+- The TUI shows a checklist widget when no PRs exist, and the normal tech tree once PRs are loaded
+- There is no `pm guide done` command — the guide detects state from artifacts
 
 ## Test Procedure
 
@@ -3349,13 +3361,26 @@ cd {test_cwd} && pm session name
 Save this value — you will need it for all `pm tui` commands below.  We'll
 call it `$SESSION` in subsequent steps.
 
-### 3. Verify TUI shows guide view
+### 3. Verify TUI shows guide checklist
 
 ```bash
 pm tui view -s $SESSION
 ```
 
-Should show guide progress widget in `no_project` state.
+Carefully verify that the TUI output matches the NEW guide checklist format.
+You MUST see ALL of the following strings in the output — if any are missing,
+report FAIL for "Guide view":
+
+1. **"Project Setup"** — the checklist header
+2. **"Project file"** — first checklist item
+3. **"Plan file"** — second checklist item
+4. **"PRs loaded"** — third checklist item
+5. **"Press H"** and **"setup guide"** — the key hint
+
+You MUST NOT see any of the following — if any appear, report FAIL:
+
+- **"Press g to dismiss"** — this is the OLD guide UI
+- **"Guide running in adjacent pane"** — this is the OLD guide UI
 
 ### 4. Run pm init
 
@@ -3376,36 +3401,27 @@ Check:
 ### 6. Verify pm commands work post-init (bug #8 area)
 
 ```bash
-cd {test_cwd}/pm && pm pr add --title "Empty repo PR" --description "Testing empty init"
+cd {test_cwd}/pm && pm pr add "Empty repo PR" --description "Testing empty init"
 cd {test_cwd}/pm && pm pr list
 ```
 
 - Both should succeed even with no commits
 - If any command fails, note the error — this is a known bug area
 
-### 7. Walk through the guide to completion
+### 7. Verify guide detects PRs
 
-Mark guide step 1 as done:
-
-```bash
-cd {test_cwd}/pm && pm guide done
-```
-
-Since PRs already exist, the guide should auto-advance past intermediate steps.
-Check the output for "Step auto-completed" messages.
-
-Continue marking steps done until the guide reaches `ready_to_work` or later:
+Check the guide state after adding PRs:
 
 ```bash
 python3 -c "
-from pm_core.guide import resolve_guide_step
+from pm_core.guide import detect_state
 from pathlib import Path
-state, ctx = resolve_guide_step(Path('{test_cwd}/pm'))
-print('guide step:', state)
+state, ctx = detect_state(Path('{test_cwd}/pm'))
+print('guide state:', state)
 "
 ```
 
-For each remaining interactive step, run `cd {test_cwd}/pm && pm guide done`.
+Since PRs exist, the state should be `ready_to_work` (not a setup state).
 
 ### 8. Refresh TUI and verify final state
 
@@ -3414,7 +3430,7 @@ pm tui send r -s $SESSION
 ```
 
 Wait a moment, then `pm tui view -s $SESSION`.  The TUI should show the
-normal PR tree view (not the guide view).
+normal PR tree view (not the guide checklist).
 
 ## Reporting
 
@@ -3423,12 +3439,12 @@ TEST RESULTS
 ============
 Session name:  [PASS/FAIL] - pm session name returned a valid name
 Session start: [PASS/FAIL] - pm session created TUI + notes
-Guide view:    [PASS/FAIL] - TUI shows no_project guide state
+Guide view:    [PASS/FAIL] - TUI shows "Project Setup" header, "Project file"/"Plan file"/"PRs loaded" items, "Press H" hint; does NOT show "Press g to dismiss" or "Guide running"
 pm init:       [PASS/FAIL] - init completes, backend=local
 project.yaml:  [PASS/FAIL] - backend=local, base_branch=master
 pm pr add:     [PASS/FAIL] - succeeds with empty repo (bug #8)
 pm pr list:    [PASS/FAIL] - succeeds with empty repo
-Guide walk:    [PASS/FAIL] - guide done advances through steps, auto-skips where possible
+Guide state:   [PASS/FAIL] - detect_state returns ready_to_work after PRs added
 Final TUI:     [PASS/FAIL] - TUI shows normal tree view with PRs visible
 
 OVERALL: [PASS/FAIL]
@@ -3473,28 +3489,74 @@ def _get_session_name(repo_path):
     return f"pm-{tag}" if tag else None
 
 
-def _cleanup_test_session(context):
-    """Kill the tmux test session and remove the temp directory."""
+def _set_test_override(repo_path):
+    """Set pm_core override so `pm session` in the temp repo uses dev pm_core.
+
+    Without this, `pm session` would load the globally installed pm_core
+    instead of the development version being tested.
+    """
+    from pm_core.paths import get_session_tag, set_override_path
+    tag = get_session_tag(start_path=Path(repo_path))
+    if tag:
+        # Point to the repo root containing this dev pm_core
+        dev_root = Path(__file__).resolve().parent.parent
+        set_override_path(tag, dev_root)
+    return tag
+
+
+def _cleanup_one_test_dir(dirpath):
+    """Kill tmux session, remove override, and delete a single test dir."""
     from pm_core import tmux as tmux_mod
+    from pm_core.paths import get_session_tag, session_dir
 
-    session_name = context.get("session_name")
-    cwd = context.get("cwd")
+    p = Path(dirpath)
+    if not p.is_dir():
+        return
 
-    if session_name:
+    tag = get_session_tag(start_path=p)
+    if tag:
+        session_name = f"pm-{tag}"
         tmux_mod.kill_session(session_name)
+        sd = session_dir(tag)
+        if sd:
+            override_file = sd / "override"
+            if override_file.exists():
+                override_file.unlink()
+
+    shutil.rmtree(dirpath, ignore_errors=True)
+
+
+def _cleanup_stale_tests(prefix):
+    """Remove leftover temp dirs from previous test runs with the given prefix."""
+    tmp_root = Path(tempfile.gettempdir())
+    for entry in tmp_root.iterdir():
+        if entry.is_dir() and entry.name.startswith(prefix):
+            _cleanup_one_test_dir(str(entry))
+
+
+def _cleanup_test_session(context):
+    """Kill the tmux test session, remove override, and clean up temp dir."""
+    cwd = context.get("cwd")
     if cwd:
-        shutil.rmtree(cwd, ignore_errors=True)
+        _cleanup_one_test_dir(cwd)
 
 
 def _init_github_repo():
-    """Set up a temp repo with a GitHub remote for Claude to init."""
+    """Clone a GitHub repo into a temp dir for Claude to init."""
+    _cleanup_stale_tests("pm-test-init-github-")
     tmpdir = tempfile.mkdtemp(prefix="pm-test-init-github-")
-    _setup_git_repo(tmpdir, remote="https://github.com/mjtomei/flask.git",
-                    commit=True)
+    # Clone the actual repo so Claude has real content to work with
+    subprocess.run(
+        ["git", "clone", "--depth", "1",
+         "https://github.com/mjtomei/flask.git", tmpdir],
+        check=True, capture_output=True,
+    )
     session_name = _get_session_name(tmpdir)
+    session_tag = _set_test_override(tmpdir)
     return {
         "cwd": tmpdir,
         "session_name": session_name,
+        "session_tag": session_tag,
         "pane_id": None,
         "prompt_context": {
             "test_cwd": tmpdir,
@@ -3504,12 +3566,15 @@ def _init_github_repo():
 
 def _init_local_repo():
     """Set up a temp repo with no remote for Claude to init."""
+    _cleanup_stale_tests("pm-test-init-local-")
     tmpdir = tempfile.mkdtemp(prefix="pm-test-init-local-")
     _setup_git_repo(tmpdir, commit=True)
     session_name = _get_session_name(tmpdir)
+    session_tag = _set_test_override(tmpdir)
     return {
         "cwd": tmpdir,
         "session_name": session_name,
+        "session_tag": session_tag,
         "pane_id": None,
         "prompt_context": {
             "test_cwd": tmpdir,
@@ -3519,12 +3584,15 @@ def _init_local_repo():
 
 def _init_empty_repo():
     """Set up a temp repo with no commits for Claude to init."""
+    _cleanup_stale_tests("pm-test-init-empty-")
     tmpdir = tempfile.mkdtemp(prefix="pm-test-init-empty-")
     _setup_git_repo(tmpdir, commit=False)
     session_name = _get_session_name(tmpdir)
+    session_tag = _set_test_override(tmpdir)
     return {
         "cwd": tmpdir,
         "session_name": session_name,
+        "session_tag": session_tag,
         "pane_id": None,
         "prompt_context": {
             "test_cwd": tmpdir,

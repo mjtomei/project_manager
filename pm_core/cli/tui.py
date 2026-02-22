@@ -487,6 +487,7 @@ To interact with this session, use commands like:
 
     click.echo(f"Running test: {test_info['name']}")
     click.echo(f"Session: {sess}")
+    click.echo(f"Claude cwd: {cwd}")
     click.echo("-" * 60)
 
     # Launch Claude with the test prompt (no session resume for tests)

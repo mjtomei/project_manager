@@ -18,9 +18,6 @@ from pm_core.tui.screens import ConnectScreen
 
 _log = configure_logger("pm.tui.pane_ops")
 
-# Guide steps that indicate setup is still in progress
-GUIDE_SETUP_STEPS = {"no_project", "initialized", "has_plan_draft", "has_plan_prs", "needs_deps_review"}
-
 
 # ---------------------------------------------------------------------------
 # Registry healing
@@ -257,34 +254,11 @@ def launch_meta(app) -> None:
     app._run_command("meta")
 
 
-def auto_launch_guide(app) -> None:
-    """Auto-launch the guide pane."""
-    _log.info("auto-launching guide pane")
-    launch_pane(app, "pm guide", "guide")
-
-
-def toggle_guide(app) -> None:
-    """Toggle between guide progress view and tech tree view."""
-    _log.info("toggle_guide dismissed=%s current_step=%s",
-              app._guide_dismissed, app._current_guide_step)
-    if app._guide_dismissed:
-        # Restore guide view if we're in a guide setup step
-        state, _ = guide.resolve_guide_step(app._root)
-        if state in GUIDE_SETUP_STEPS:
-            _log.info("toggle_guide - restoring guide view for step %s", state)
-            app._guide_dismissed = False
-            app._show_guide_view(state)
-            launch_pane(app, "pm guide", "guide")
-        else:
-            # Not in guide setup steps, just launch the guide pane
-            _log.info("toggle_guide - launching guide pane (not in setup steps)")
-            launch_pane(app, "pm guide", "guide")
-    elif app._current_guide_step is not None:
-        # Guide view is showing, dismiss it
-        _log.info("toggle_guide - dismissing guide from step %s", app._current_guide_step)
-        app._guide_dismissed = True
-        app._show_normal_view()
-        app.log_message("Guide dismissed. Press 'g' to restore.")
+def launch_guide(app) -> None:
+    """Launch the guide (setup or assist depending on project state)."""
+    fresh = app._consume_z()
+    _log.info("launch_guide fresh=%s", fresh)
+    launch_pane(app, "pm guide", "guide", fresh=fresh)
 
 
 def launch_claude(app) -> None:
@@ -322,170 +296,6 @@ The user will tell you what they need."""
 
     cmd = build_claude_shell_cmd(prompt=prompt)
     launch_pane(app, cmd, "claude", fresh=fresh)
-
-
-def launch_help_claude(app) -> None:
-    """Launch a beginner-friendly Claude assistant for the current project."""
-    fresh = app._consume_z()
-    from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
-    claude = find_claude()
-    if not claude:
-        app.log_message("Claude CLI not found")
-        return
-
-    sess = app._session_name or "default"
-    project = app._data.get("project", {})
-    project_name = project.get("name", "unknown")
-    repo = project.get("repo", "unknown")
-    prs = app._data.get("prs") or []
-
-    plans = app._data.get("plans") or []
-
-    # Build a summary of current PRs with workdir info
-    pr_lines = []
-    for pr in prs:
-        status = pr.get("status", "pending")
-        title = pr.get("title", "???")
-        pr_id = pr.get("id", "???")
-        deps = pr.get("depends_on") or []
-        dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
-        wd = pr.get("workdir", "")
-        wd_str = ""
-        if wd:
-            wd_path = Path(wd)
-            if wd_path.exists():
-                wd_str = f" workdir: {wd}"
-            else:
-                wd_str = f" workdir: {wd} (MISSING)"
-        pr_lines.append(f"  - {pr_id}: {title} [{status}]{dep_str}{wd_str}")
-    pr_summary = "\n".join(pr_lines) if pr_lines else "  (no PRs yet)"
-
-    # Build a summary of plans
-    plan_lines = []
-    for plan in plans:
-        plan_id = plan.get("id", "???")
-        title = plan.get("title", "???")
-        plan_lines.append(f"  - {plan_id}: {title}")
-    plan_summary = "\n".join(plan_lines) if plan_lines else "  (no plans yet)"
-
-    pane_id = os.environ.get("TMUX_PANE", "")
-    prompt = f"""\
-## You are helping someone who may be a novice programmer decide on their \
-next step.
-
-## Session Context
-
-Project: {project_name}
-Repository: {repo}
-tmux session: {sess}
-TUI pane ID: {pane_id}
-
-{tui_section(sess)}
-Current plans:
-{plan_summary}
-
-Current PRs:
-{pr_summary}
-
-## pm Project Lifecycle
-
-pm organizes work in a structured lifecycle:
-
-1. **Initialize** (`pm init`): Set up pm for a codebase. This creates a \
-pm/ directory that tracks plans and PRs.
-
-2. **Plan** (`pm plan add`): Write a high-level plan describing a feature \
-or goal. Plans are markdown files that describe what to build and why.
-
-3. **Break down** (`pm plan breakdown <plan-id>`): Turn a plan into \
-concrete PRs — small, focused units of work. PRs can depend on each other, \
-forming a dependency tree shown in the TUI.
-
-4. **Work** (select a PR and press `s` in the TUI): Start a PR to open a \
-Claude session focused on that task. Claude works in a dedicated branch \
-and directory.
-
-5. **Review** (press `d` in the TUI or `pm pr done <pr-id>`): Mark a PR \
-as done. This pushes the branch and creates a GitHub pull request for review.
-
-6. **Merge**: After review, PRs get merged. pm detects this automatically \
-and updates the tree.
-
-At any point the user might need to: add new plans, add or reorder PRs, \
-check on in-progress work, or understand what to tackle next.
-
-## Your Task
-
-Before making any recommendations, check the project's current health:
-
-1. Run `pm pr list --workdirs` to see all PRs with their workdir paths and \
-git status (clean/dirty/missing)
-2. Run `pm plan list` to see existing plans
-
-Then assess:
-- Are there workdirs with uncommitted changes for merged PRs? (work that might be lost)
-- Are there in-progress PRs that could be resumed?
-- Are there PRs in review that might need attention?
-- Are there pending PRs whose dependencies are all met?
-- Are there plans that haven't been broken down yet?
-- Is the dependency tree healthy?
-
-Based on what you find, give the user clear, simple recommendations for \
-what to do next. Suggest one or two concrete actions, not an overwhelming list. \
-Prefer finishing in-progress work over starting new work."""
-
-    cmd = build_claude_shell_cmd(prompt=prompt)
-    launch_pane(app, cmd, "assist", fresh=fresh)
-
-
-def launch_discuss(app) -> None:
-    """Launch a Claude pane to discuss the pm tool and answer questions about it."""
-    from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
-    claude = find_claude()
-    if not claude:
-        app.log_message("Claude CLI not found")
-        return
-
-    prompt = """\
-## You are helping someone learn about pm (project manager).
-
-pm is a CLI tool and TUI for managing Claude Code development sessions. \
-It organizes work into plans (high-level goals) and PRs (concrete units of work) \
-with dependency tracking.
-
-The user has questions about how pm works, its keyboard shortcuts, \
-or what to do next. 
-
-Key concepts:
-- **Plans**: High-level goals described in markdown files
-- **PRs**: Concrete work items, organized in a dependency tree
-- **TUI**: The interactive terminal UI showing the PR graph
-- **Sessions**: tmux sessions with panes for Claude, editors, and more
-
-Common keyboard shortcuts in the TUI:
-- Arrow keys / hjkl: Navigate the PR tree
-- s: Start working on a PR (launches Claude in a new window)
-- d: Mark PR as done (sends for review)
-- e: Edit PR details
-- c: Launch Claude session
-- P: Toggle plans view
-- ?: Show help
-- /: Open command bar
-- b: Rebalance panes
-- q: Detach from session
-
-Common commands:
-- pm pr list: List all PRs
-- pm pr start <id>: Start a PR
-- pm pr done <id>: Mark PR as done
-- pm plan list: List plans
-- pm plan add <name>: Add a new plan
-- pm plan breakdown <id>: Break plan into PRs
-
-Ask the user what they'd like to know about."""
-
-    cmd = build_claude_shell_cmd(prompt=prompt)
-    launch_pane(app, cmd, "discuss")
 
 
 def launch_test(app, test_id: str) -> None:
@@ -534,14 +344,20 @@ To interact with this session, use commands like:
 """
 
     cmd = build_claude_shell_cmd(prompt=full_prompt)
+    # Start Claude in the test directory if one was created.
+    # Unset TMUX/TMUX_PANE so that `pm session` inside the test creates
+    # a fresh session for the test repo instead of detecting and reattaching
+    # to the parent dev session.
+    test_cwd = init_context.get("cwd") if init_context else None
+    if test_cwd:
+        quoted_cwd = shlex.quote(test_cwd)
+        cmd = f"unset TMUX TMUX_PANE && cd {quoted_cwd} && {cmd}"
     # Wrap command with cleanup if the test has a cleanup function
     if cleanup_fn and init_context:
-        _sess = repr(init_context.get("session_name") or "")
         _cwd = repr(init_context.get("cwd") or "")
         py_code = (
-            'from pm_core import tmux as t; import shutil; '
-            f't.kill_session({_sess}) if {_sess} else None; '
-            f'shutil.rmtree({_cwd}, ignore_errors=True) if {_cwd} else None'
+            'from pm_core.tui_tests import _cleanup_one_test_dir; '
+            f'_cleanup_one_test_dir({_cwd})'
         )
         cleanup_script = f"python3 -c {shlex.quote(py_code)}"
         cmd = f"{cmd} ; {cleanup_script}"
