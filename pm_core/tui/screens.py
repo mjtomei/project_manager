@@ -75,11 +75,17 @@ class ConnectScreen(ModalScreen):
 
 
 class HelpScreen(ModalScreen):
-    """Modal help screen showing available keybindings."""
+    """Modal help screen with two pages: keybindings and command reference.
+
+    Press ``?`` to open (keybindings page).  Press ``h``/``H`` inside
+    the help screen to toggle to the CLI command reference.
+    """
 
     BINDINGS = [
         Binding("escape", "dismiss", "Close"),
         Binding("q", "dismiss", "Close"),
+        Binding("h", "toggle_commands", "Commands", show=False),
+        Binding("H", "toggle_commands", "Commands", show=False),
         Binding("j", "scroll_down", "Scroll down", show=False),
         Binding("k", "scroll_up", "Scroll up", show=False),
         Binding("J", "page_down", "Page down", show=False),
@@ -100,7 +106,16 @@ class HelpScreen(ModalScreen):
         border: solid $primary;
         padding: 1 2;
     }
-    #help-title {
+    #commands-container {
+        width: 70;
+        height: auto;
+        max-height: 80%;
+        background: $surface;
+        border: solid $primary;
+        padding: 1 2;
+        display: none;
+    }
+    #help-title, #commands-title {
         text-align: center;
         text-style: bold;
         margin-bottom: 1;
@@ -119,8 +134,10 @@ class HelpScreen(ModalScreen):
         super().__init__()
         self._in_plans = in_plans
         self._in_tests = in_tests
+        self._showing_commands = False
 
     def compose(self) -> ComposeResult:
+        # Page 1: Keybindings
         with VerticalScroll(id="help-container"):
             yield Label("Keyboard Shortcuts", id="help-title")
             if self._in_tests:
@@ -166,10 +183,6 @@ class HelpScreen(ModalScreen):
             yield Label("  [bold]P[/]  Toggle plans view", classes="help-row")
             yield Label("  [bold]T[/]  Toggle tests view", classes="help-row")
             yield Label("  [bold]b[/]  Rebalance panes", classes="help-row")
-            yield Label("Review Loop", classes="help-section")
-            yield Label("  [bold]zz d[/]  Start loop (stops on PASS/suggestions)", classes="help-row")
-            yield Label("  [bold]zzz d[/]  Start strict loop (PASS only)", classes="help-row")
-            yield Label("  [bold]z d[/]  Stop loop / fresh done", classes="help-row")
             yield Label("Other", classes="help-section")
             yield Label("  [bold]z[/]  Modifier: kill existing before next", classes="help-row")
             yield Label("  [bold]r[/]  Refresh / sync with GitHub", classes="help-row")
@@ -177,20 +190,48 @@ class HelpScreen(ModalScreen):
             yield Label("  [bold]Ctrl+R[/]  Restart TUI", classes="help-row")
             yield Label("  [bold]?[/]  Show this help", classes="help-row")
             yield Label("  [bold]q[/]  Detach from session", classes="help-row")
+            yield Label("Review Loop", classes="help-section")
+            yield Label("  [bold]zz d[/]  Start loop (stops on PASS/suggestions)", classes="help-row")
+            yield Label("  [bold]zzz d[/]  Start strict loop (PASS only)", classes="help-row")
+            yield Label("  [bold]z d[/]  Stop loop / fresh done", classes="help-row")
             yield Label("")
-            yield Label("[dim]Press Esc/q to close[/]", classes="help-row")
+            yield Label("[dim]Press [bold]h[/bold] for command reference  |  Esc/q to close[/]", classes="help-row")
+        # Page 2: Command reference (hidden by default)
+        with VerticalScroll(id="commands-container"):
+            yield Label("Command Reference", id="commands-title")
+            from pm_core.cli import HELP_TEXT
+            for line in HELP_TEXT.splitlines():
+                yield Label(line or " ", classes="help-row")
+            yield Label("")
+            yield Label("[dim]Press [bold]h[/bold] for keybindings  |  Esc/q to close[/]", classes="help-row")
+
+    def action_toggle_commands(self) -> None:
+        """Toggle between keybindings page and command reference page."""
+        help_c = self.query_one("#help-container")
+        cmds_c = self.query_one("#commands-container")
+        self._showing_commands = not self._showing_commands
+        if self._showing_commands:
+            help_c.styles.display = "none"
+            cmds_c.styles.display = "block"
+        else:
+            help_c.styles.display = "block"
+            cmds_c.styles.display = "none"
 
     def action_scroll_down(self) -> None:
-        self.query_one("#help-container", VerticalScroll).scroll_down()
+        self._active_scroll().scroll_down()
 
     def action_scroll_up(self) -> None:
-        self.query_one("#help-container", VerticalScroll).scroll_up()
+        self._active_scroll().scroll_up()
 
     def action_page_down(self) -> None:
-        self.query_one("#help-container", VerticalScroll).scroll_page_down()
+        self._active_scroll().scroll_page_down()
 
     def action_page_up(self) -> None:
-        self.query_one("#help-container", VerticalScroll).scroll_page_up()
+        self._active_scroll().scroll_page_up()
+
+    def _active_scroll(self) -> VerticalScroll:
+        cid = "#commands-container" if self._showing_commands else "#help-container"
+        return self.query_one(cid, VerticalScroll)
 
     def action_dismiss(self) -> None:
         self.app.pop_screen()
