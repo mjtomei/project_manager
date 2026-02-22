@@ -88,11 +88,12 @@ class TestGuideProgress:
         assert MARKER_TODO in result.plain
 
     def test_render_shows_h_key_hint(self):
-        """render() should show H key hint for launching guide."""
+        """render() should show H key hint for restarting guide."""
         widget = GuideProgress(current_step="no_project")
         result = widget.render()
         assert "H" in result.plain
-        assert "setup guide" in result.plain
+        assert "restart" in result.plain
+        assert "Guide running" in result.plain
 
     def test_render_no_dismiss_hint(self):
         """render() should not show a dismiss hint."""

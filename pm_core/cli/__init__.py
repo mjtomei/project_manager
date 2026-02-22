@@ -359,41 +359,28 @@ def _getting_started_text() -> str:
             lines += "  The vanilla backend will be auto-selected (pure git, no gh CLI required).\n\n"
 
     lines += """\
-  1. Initialize and import (from your target repo):
-       pm init
-     Sets up pm/ and launches Claude to analyze the repo, discuss with you,
-     and write a PR graph to a plan file.
+  1. Start a session (recommended):
+       pm session
+     Starts a tmux session with TUI + notes editor.  A guide Claude session
+     auto-launches to walk you through setup.
 
-  2. Load PRs from the plan file into pm:
-       pm plan load
-     Parses the ## PRs section and creates the PRs non-interactively.
+  Or use individual CLI commands:
+     pm init                     Initialize pm/ directory
+     pm plan add "name"          Add a plan (launches Claude)
+     pm plan breakdown           Break plan into PRs (launches Claude)
+     pm plan review              Review plan consistency (launches Claude)
+     pm plan load                Load PRs from plan file
 
-  Or start from scratch instead:
-     pm init --no-import
-     pm plan add "Add authentication"
-     pm plan breakdown
+  In the TUI, press P to open the plans view.  Plan action keys:
+     a=add  w=breakdown  c=review  l=load  e=edit  v=view
 
-  5. Review and finalize dependencies:
-       pm plan deps
-     Launches Claude to check for missing or wrong dependencies.
+  Working with PRs:
+     pm pr start                 Clone, branch, launch Claude session
+     pm pr done                  Mark PR as done, push branch
+     pm pr sync                  Check for merges, unblock dependents
+     pm push                     Commit and share pm/ changes
 
-  6. See what's ready to work on:
-       pm pr ready
-
-  7. Start a PR (clones, branches, launches Claude in tmux window or terminal):
-       pm pr start
-
-  8. When Claude is done, mark it:
-       pm pr done
-
-  9. Commit and share pm/ changes:
-       pm push
-
-  10. Check for merges and unblock dependents:
-       pm pr sync
-
-  Tip: 'pm session' starts a tmux session with TUI + notes editor.
-  Arguments in [brackets] are optional — pm infers them when possible."""
+  Tip: Arguments in [brackets] are optional — pm infers them when possible."""
 
     if repo_info and repo_info["name"]:
         lines += f"""

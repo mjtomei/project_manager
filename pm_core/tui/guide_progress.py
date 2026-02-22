@@ -80,8 +80,9 @@ class GuideProgress(Widget):
             output.append(f" {label}\n", style=text_style)
 
         output.append("\n")
+        output.append("Guide running in adjacent pane\n", style="dim")
         output.append("Press ", style="dim")
         output.append("H", style="bold")
-        output.append(" to start the setup guide\n", style="dim")
+        output.append(" to restart\n", style="dim")
 
         return output

@@ -193,6 +193,7 @@ class ProjectManagerApp(App):
         self._sync_timer: Timer | None = None
         self._detail_visible = False
         self._current_guide_step: str | None = None
+        self._guide_auto_launched = False
         self._plans_visible = False
         self._tests_visible = False
         # Frame capture state (always enabled)
@@ -370,9 +371,15 @@ class ProjectManagerApp(App):
         # Update status bar for guide mode
         status_bar = self.query_one("#status-bar", StatusBar)
         desc = guide.STEP_DESCRIPTIONS.get(state, state)
-        status_bar.update(f" [bold]pm Guide[/bold]    [cyan]{desc}[/cyan]    [dim]Press H to launch guide[/dim]")
+        status_bar.update(f" [bold]pm Guide[/bold]    [cyan]{desc}[/cyan]    [dim]Guide running — Press H to restart[/dim]")
 
         self.log_message(f"Guide: {desc}")
+
+        # Auto-launch guide pane on first startup when setup is incomplete.
+        # launch_pane deduplicates if the pane is already running.
+        if not self._guide_auto_launched and guide.is_setup_state(state):
+            self._guide_auto_launched = True
+            pane_ops.launch_guide(self)
 
         # Capture frame after view change (use call_after_refresh to ensure screen is updated)
         self.call_after_refresh(self._capture_frame, f"show_guide_view:{state}")

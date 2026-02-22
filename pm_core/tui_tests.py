@@ -3034,152 +3034,53 @@ OVERALL: [PASS/FAIL]
 
 
 INIT_GITHUB_TEST = """\
-You are testing the full `pm session` → `pm init` → guide completion flow for a
-repo with a GitHub remote.  A bare git repo has been created for you at
-`{test_cwd}` with an origin remote pointing to `mjtomei/flask`.  No pm init has
-been run yet.
+You are pretending to be a brand-new user who has never used `pm` before.
+A flask repo has been cloned for you at `{test_cwd}` with an origin remote
+pointing to `mjtomei/flask`.  You want to get organized and manage some
+upcoming work on this project but you don't know how the tool works yet.
 
-The final acceptance criterion is: **PRs are loaded and the TUI shows the
-normal PR tree view with all PRs visible** — not just that init works.
-
-**IMPORTANT — Automate everything.**  Run every command yourself.  Do NOT
-launch interactive Claude sessions.  Instead, run the pm CLI commands directly
-to drive the setup forward.  The goal is a fully automated end-to-end test
-with no human interaction.
-
-## How the guide works
-
-The guide (`pm guide` or `H` key in TUI) is a single launcher:
-- If no PRs exist → launches a setup Claude session (walks through init, plan, PRs)
-- If PRs exist → launches an assist Claude session (health check + recommendations)
-- The TUI shows a checklist widget when no PRs exist, and the normal tech tree once PRs are loaded
-- There is no `pm guide done` command — the guide detects state from artifacts
-
-## Test Procedure
-
-### 1. Start pm session
+## Starting the session
 
 ```bash
 cd {test_cwd} && pm session &
 ```
 
-This starts the tmux session in the background.  The `tmux attach` at the end
-will fail (no terminal), but the base session with TUI + notes is created.
-Wait a few seconds for the TUI to boot.
-
-### 2. Discover the session name
+Wait 5-10 seconds, then get the session name:
 
 ```bash
 cd {test_cwd} && pm session name
 ```
 
-Save this value — you will need it for all `pm tui` commands below.  We'll
-call it `$SESSION` in subsequent steps.
+The session has a TUI pane and an auto-launched guide Claude session.  Use
+`pm tui view -s $SESSION` and `pm tui send` to interact with the TUI.  Use
+`tmux list-panes`, `tmux capture-pane`, and `tmux send-keys` to find and
+interact with Claude session panes.
 
-### 3. Verify TUI shows guide checklist
+## Your role
 
-```bash
-pm tui view -s $SESSION
-```
+**Act as a new user.  Read the guide's output and follow its instructions.**
+Respond naturally — tell it you want to get organized, answer its questions,
+do what it says.  When it tells you to interact with the TUI, do so and tell
+it what you see.  When its instructions cause new Claude sessions to launch
+in tmux panes, find those panes and interact with them too.  Do NOT run pm
+commands directly.  Do NOT ask for specific pm concepts (like PRs or plans)
+unless the guide introduces them first.
 
-Carefully verify that the TUI output matches the NEW guide checklist format.
-You MUST see ALL of the following strings in the output — if any are missing,
-report FAIL for "Guide view":
+## Pass criteria
 
-1. **"Project Setup"** — the checklist header
-2. **"Project file"** — first checklist item
-3. **"Plan file"** — second checklist item
-4. **"PRs loaded"** — third checklist item
-5. **"Press H"** and **"setup guide"** — the key hint
-
-You MUST NOT see any of the following — if any appear, report FAIL:
-
-- **"Press g to dismiss"** — this is the OLD guide UI
-- **"Guide running in adjacent pane"** — this is the OLD guide UI
-
-### 4. Run pm init
-
-```bash
-cd {test_cwd} && pm init --no-import --dir {test_cwd}/pm
-```
-
-This should detect the GitHub remote and set `backend: github`.
-
-### 5. Verify project.yaml
-
-```bash
-cat {test_cwd}/pm/project.yaml
-```
-
-Check:
-- `backend: github`
-- `repo:` matches `mjtomei/flask` or the full GitHub URL
-- `base_branch` is set (main or master)
-- File exists and is valid YAML
-
-### 6. Verify directory structure
-
-```bash
-ls {test_cwd}/pm/plans/
-```
-
-Check: `{test_cwd}/pm/plans/` directory exists.
-
-### 7. Add test PRs and verify commands work
-
-```bash
-cd {test_cwd}/pm && pm pr add "Test PR" --description "Testing github init"
-cd {test_cwd}/pm && pm pr list
-```
-
-- `pm pr add` should exit 0
-- `pm pr list` should show the test PR
-
-### 8. Verify guide detects PRs
-
-Check the guide state after adding PRs:
-
-```bash
-python3 -c "
-from pm_core.guide import detect_state
-from pathlib import Path
-state, ctx = detect_state(Path('{test_cwd}/pm'))
-print('guide state:', state)
-"
-```
-
-Since PRs exist, the state should be `ready_to_work` (not a setup state).
-
-### 9. Refresh TUI and verify final state
-
-```bash
-pm tui send r -s $SESSION
-```
-
-Wait a moment, then:
-
-```bash
-pm tui view -s $SESSION
-```
-
-The TUI should now show the normal PR tree view (not the guide checklist).
-The test PR should be visible in the tree.
-
-## Reporting
+Verify each of the following.  If any check fails, report FAIL for that item.
 
 ```
 TEST RESULTS
 ============
-Session name:  [PASS/FAIL] - pm session name returned a valid name
-Session start: [PASS/FAIL] - pm session created TUI + notes
-Guide view:    [PASS/FAIL] - TUI shows "Project Setup" header, "Project file"/"Plan file"/"PRs loaded" items, "Press H" hint; does NOT show "Press g to dismiss" or "Guide running"
-pm init:       [PASS/FAIL] - init completes, backend=github
-project.yaml:  [PASS/FAIL] - backend=github, repo correct, base_branch set
-Directory:     [PASS/FAIL] - plans/ exists
-pm pr add:     [PASS/FAIL] - exit code and output
-pm pr list:    [PASS/FAIL] - shows test PR
-Guide state:   [PASS/FAIL] - detect_state returns ready_to_work after PRs added
-Final TUI:     [PASS/FAIL] - TUI shows normal tree view with PRs visible
+Guide launch:    [PASS/FAIL] - TUI shows "Project Setup" checklist with "Guide running"
+Guide quality:   [PASS/FAIL] - guide gave clear instructions you could follow as a new user
+Self-sufficient: [PASS/FAIL] - completed everything through guide and session interaction
+                               only, without reading pm source code, docs, or READMEs
+Guide-driven:    [PASS/FAIL] - guide directed you to use the TUI plans pane (P key, plan
+                               actions) rather than running plan commands itself
+Plans pane:      [PASS/FAIL] - plans pane showed plans when guide directed you to use it
+Tech tree:       [PASS/FAIL] - TUI eventually shows navigable PR tree (not checklist)
 
 OVERALL: [PASS/FAIL]
 ```
@@ -3187,133 +3088,53 @@ OVERALL: [PASS/FAIL]
 
 
 INIT_LOCAL_TEST = """\
-You are testing the full `pm session` → `pm init` → guide completion flow for a
-local repo with no remote (notes-only use case).  A bare git repo with one
-commit but no remote has been created for you at `{test_cwd}`.  No pm init has
-been run yet.
+You are pretending to be a brand-new user who has never used `pm` before.
+A local git repo with one commit but no remote has been created for you at
+`{test_cwd}`.  You want to get organized and manage some upcoming work on
+this project but you don't know how the tool works yet.
 
-The final acceptance criterion is: **PRs are loaded and the TUI shows the
-normal PR tree view** — not just that init works.
-
-**IMPORTANT — Automate everything.**  Run every command yourself.  Do NOT
-launch interactive Claude sessions.  Instead, run the pm CLI commands directly
-to drive the setup forward.  The goal is a fully automated end-to-end test
-with no human interaction.
-
-## How the guide works
-
-The guide (`pm guide` or `H` key in TUI) is a single launcher:
-- If no PRs exist → launches a setup Claude session (walks through init, plan, PRs)
-- If PRs exist → launches an assist Claude session (health check + recommendations)
-- The TUI shows a checklist widget when no PRs exist, and the normal tech tree once PRs are loaded
-- There is no `pm guide done` command — the guide detects state from artifacts
-
-## Test Procedure
-
-### 1. Start pm session
+## Starting the session
 
 ```bash
 cd {test_cwd} && pm session &
 ```
 
-Wait a few seconds for the TUI to boot.  The `tmux attach` at the end will fail
-(no terminal) but the base session with TUI + notes is created.
-
-### 2. Discover the session name
+Wait 5-10 seconds, then get the session name:
 
 ```bash
 cd {test_cwd} && pm session name
 ```
 
-Save this value — you will need it for all `pm tui` commands below.  We'll
-call it `$SESSION` in subsequent steps.
+The session has a TUI pane and an auto-launched guide Claude session.  Use
+`pm tui view -s $SESSION` and `pm tui send` to interact with the TUI.  Use
+`tmux list-panes`, `tmux capture-pane`, and `tmux send-keys` to find and
+interact with Claude session panes.
 
-### 3. Verify TUI shows guide checklist
+## Your role
 
-```bash
-pm tui view -s $SESSION
-```
+**Act as a new user.  Read the guide's output and follow its instructions.**
+Respond naturally — tell it you want to get organized, answer its questions,
+do what it says.  When it tells you to interact with the TUI, do so and tell
+it what you see.  When its instructions cause new Claude sessions to launch
+in tmux panes, find those panes and interact with them too.  Do NOT run pm
+commands directly.  Do NOT ask for specific pm concepts (like PRs or plans)
+unless the guide introduces them first.
 
-Carefully verify that the TUI output matches the NEW guide checklist format.
-You MUST see ALL of the following strings in the output — if any are missing,
-report FAIL for "Guide view":
+## Pass criteria
 
-1. **"Project Setup"** — the checklist header
-2. **"Project file"** — first checklist item
-3. **"Plan file"** — second checklist item
-4. **"PRs loaded"** — third checklist item
-5. **"Press H"** and **"setup guide"** — the key hint
-
-You MUST NOT see any of the following — if any appear, report FAIL:
-
-- **"Press g to dismiss"** — this is the OLD guide UI
-- **"Guide running in adjacent pane"** — this is the OLD guide UI
-
-### 4. Run pm init
-
-```bash
-cd {test_cwd} && pm init --no-import --dir {test_cwd}/pm
-```
-
-Should detect no remote and set `backend: local`.
-
-### 5. Verify project.yaml
-
-```bash
-cat {test_cwd}/pm/project.yaml
-```
-
-Check:
-- `backend: local`
-- `repo:` is set to the absolute path of the repo
-- `base_branch` is set (main or master)
-
-### 6. Add test PRs and verify commands work
-
-```bash
-cd {test_cwd}/pm && pm pr add "Notes PR" --description "Testing local init"
-cd {test_cwd}/pm && pm pr list
-```
-
-- Both commands should succeed with a local backend
-
-### 7. Verify guide detects PRs
-
-Check the guide state after adding PRs:
-
-```bash
-python3 -c "
-from pm_core.guide import detect_state
-from pathlib import Path
-state, ctx = detect_state(Path('{test_cwd}/pm'))
-print('guide state:', state)
-"
-```
-
-Since PRs exist, the state should be `ready_to_work` (not a setup state).
-
-### 8. Refresh TUI and verify final state
-
-```bash
-pm tui send r -s $SESSION
-```
-
-Wait a moment, then `pm tui view -s $SESSION`.  The TUI should show the
-normal PR tree view (not the guide checklist).
-
-## Reporting
+Verify each of the following.  If any check fails, report FAIL for that item.
 
 ```
 TEST RESULTS
 ============
-Session name:  [PASS/FAIL] - pm session name returned a valid name
-Session start: [PASS/FAIL] - pm session created TUI + notes
-Guide view:    [PASS/FAIL] - TUI shows "Project Setup" header, "Project file"/"Plan file"/"PRs loaded" items, "Press H" hint; does NOT show "Press g to dismiss" or "Guide running"
-pm init:       [PASS/FAIL] - init completes, backend=local
-project.yaml:  [PASS/FAIL] - backend=local, repo path correct
-pm pr add:     [PASS/FAIL] - succeeds with local backend
-Guide state:   [PASS/FAIL] - detect_state returns ready_to_work after PRs added
-Final TUI:     [PASS/FAIL] - TUI shows normal tree view with PRs visible
+Guide launch:    [PASS/FAIL] - TUI shows "Project Setup" checklist with "Guide running"
+Guide quality:   [PASS/FAIL] - guide gave clear instructions you could follow as a new user
+Self-sufficient: [PASS/FAIL] - completed everything through guide and session interaction
+                               only, without reading pm source code, docs, or READMEs
+Guide-driven:    [PASS/FAIL] - guide directed you to use the TUI plans pane (P key, plan
+                               actions) rather than running plan commands itself
+Plans pane:      [PASS/FAIL] - plans pane showed plans when guide directed you to use it
+Tech tree:       [PASS/FAIL] - TUI eventually shows navigable PR tree (not checklist)
 
 OVERALL: [PASS/FAIL]
 ```
@@ -3321,131 +3142,55 @@ OVERALL: [PASS/FAIL]
 
 
 INIT_EMPTY_TEST = """\
-You are testing the full `pm session` → `pm init` → guide completion flow for an
-empty repo (git init, no commits).  This is a known bug area — commands may fail
-with bare/empty git backends.  A bare git repo with no commits and no remote has
-been created for you at `{test_cwd}`.  No pm init has been run yet.
+You are pretending to be a brand-new user who has never used `pm` before.
+An empty git repo (no commits, no remote) has been created for you at
+`{test_cwd}`.  You want to get organized and manage some upcoming work on
+this project but you don't know how the tool works yet.  This is a known
+bug area — empty repos have no commits and no remote.
 
-The final acceptance criterion is: **PRs are loaded and the TUI shows the
-normal PR tree view** — not just that init works.
-
-**IMPORTANT — Automate everything.**  Run every command yourself.  Do NOT
-launch interactive Claude sessions.  Instead, run the pm CLI commands directly
-to drive the setup forward.  The goal is a fully automated end-to-end test
-with no human interaction.
-
-## How the guide works
-
-The guide (`pm guide` or `H` key in TUI) is a single launcher:
-- If no PRs exist → launches a setup Claude session (walks through init, plan, PRs)
-- If PRs exist → launches an assist Claude session (health check + recommendations)
-- The TUI shows a checklist widget when no PRs exist, and the normal tech tree once PRs are loaded
-- There is no `pm guide done` command — the guide detects state from artifacts
-
-## Test Procedure
-
-### 1. Start pm session
+## Starting the session
 
 ```bash
 cd {test_cwd} && pm session &
 ```
 
-Wait a few seconds for the TUI to boot.
-
-### 2. Discover the session name
+Wait 5-10 seconds, then get the session name:
 
 ```bash
 cd {test_cwd} && pm session name
 ```
 
-Save this value — you will need it for all `pm tui` commands below.  We'll
-call it `$SESSION` in subsequent steps.
+The session has a TUI pane and an auto-launched guide Claude session.  Use
+`pm tui view -s $SESSION` and `pm tui send` to interact with the TUI.  Use
+`tmux list-panes`, `tmux capture-pane`, and `tmux send-keys` to find and
+interact with Claude session panes.
 
-### 3. Verify TUI shows guide checklist
+## Your role
 
-```bash
-pm tui view -s $SESSION
-```
+**Act as a new user.  Read the guide's output and follow its instructions.**
+Respond naturally — tell it you want to get organized, answer its questions,
+do what it says.  When it tells you to interact with the TUI, do so and tell
+it what you see.  When its instructions cause new Claude sessions to launch
+in tmux panes, find those panes and interact with them too.  Do NOT run pm
+commands directly.  Do NOT ask for specific pm concepts (like PRs or plans)
+unless the guide introduces them first.
 
-Carefully verify that the TUI output matches the NEW guide checklist format.
-You MUST see ALL of the following strings in the output — if any are missing,
-report FAIL for "Guide view":
+## Pass criteria
 
-1. **"Project Setup"** — the checklist header
-2. **"Project file"** — first checklist item
-3. **"Plan file"** — second checklist item
-4. **"PRs loaded"** — third checklist item
-5. **"Press H"** and **"setup guide"** — the key hint
-
-You MUST NOT see any of the following — if any appear, report FAIL:
-
-- **"Press g to dismiss"** — this is the OLD guide UI
-- **"Guide running in adjacent pane"** — this is the OLD guide UI
-
-### 4. Run pm init
-
-```bash
-cd {test_cwd} && pm init --no-import --dir {test_cwd}/pm
-```
-
-### 5. Verify project.yaml
-
-```bash
-cat {test_cwd}/pm/project.yaml
-```
-
-Check:
-- `backend: local` (no remote, no commits)
-- `base_branch` is `master` (default for empty repos)
-
-### 6. Verify pm commands work post-init (bug #8 area)
-
-```bash
-cd {test_cwd}/pm && pm pr add "Empty repo PR" --description "Testing empty init"
-cd {test_cwd}/pm && pm pr list
-```
-
-- Both should succeed even with no commits
-- If any command fails, note the error — this is a known bug area
-
-### 7. Verify guide detects PRs
-
-Check the guide state after adding PRs:
-
-```bash
-python3 -c "
-from pm_core.guide import detect_state
-from pathlib import Path
-state, ctx = detect_state(Path('{test_cwd}/pm'))
-print('guide state:', state)
-"
-```
-
-Since PRs exist, the state should be `ready_to_work` (not a setup state).
-
-### 8. Refresh TUI and verify final state
-
-```bash
-pm tui send r -s $SESSION
-```
-
-Wait a moment, then `pm tui view -s $SESSION`.  The TUI should show the
-normal PR tree view (not the guide checklist).
-
-## Reporting
+Verify each of the following.  If any check fails, report FAIL for that item.
 
 ```
 TEST RESULTS
 ============
-Session name:  [PASS/FAIL] - pm session name returned a valid name
-Session start: [PASS/FAIL] - pm session created TUI + notes
-Guide view:    [PASS/FAIL] - TUI shows "Project Setup" header, "Project file"/"Plan file"/"PRs loaded" items, "Press H" hint; does NOT show "Press g to dismiss" or "Guide running"
-pm init:       [PASS/FAIL] - init completes, backend=local
-project.yaml:  [PASS/FAIL] - backend=local, base_branch=master
-pm pr add:     [PASS/FAIL] - succeeds with empty repo (bug #8)
-pm pr list:    [PASS/FAIL] - succeeds with empty repo
-Guide state:   [PASS/FAIL] - detect_state returns ready_to_work after PRs added
-Final TUI:     [PASS/FAIL] - TUI shows normal tree view with PRs visible
+Guide launch:    [PASS/FAIL] - TUI shows "Project Setup" checklist with "Guide running"
+Guide quality:   [PASS/FAIL] - guide gave clear instructions you could follow as a new user
+Self-sufficient: [PASS/FAIL] - completed everything through guide and session interaction
+                               only, without reading pm source code, docs, or READMEs
+Guide-driven:    [PASS/FAIL] - guide directed you to use the TUI plans pane (P key, plan
+                               actions) rather than running plan commands itself
+Init:            [PASS/FAIL] - project initialized with backend=local (empty repo)
+Plans pane:      [PASS/FAIL] - plans pane showed plans when guide directed you to use it
+Tech tree:       [PASS/FAIL] - TUI eventually shows navigable PR tree (not checklist)
 
 OVERALL: [PASS/FAIL]
 ```

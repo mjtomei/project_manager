@@ -199,11 +199,16 @@ Root: {root_str}
 Walk the user through setting up their project. The status section above shows
 what's already done and what comes next. Focus on the **next** item.
 
+**IMPORTANT:** You are guiding the user, not doing everything yourself. After
+init, direct the user to interact with the TUI to create plans and load PRs.
+Do NOT run `pm plan add`, `pm plan breakdown`, or `pm plan load` yourself —
+instead tell the user which keys to press in the TUI and what to expect.
+
 ### Initializing the project
 
 If no project file exists yet, run `pm init --no-import` to initialize. This
 auto-detects the repo from the current directory. Use --no-import because we'll
-create a plan manually.
+create a plan through the TUI.
 
 After init, explore the codebase — read the README, look at directory structure,
 check recent git history. Share what you find with the user and ask about their
@@ -211,49 +216,45 @@ goals for upcoming work.
 
 ### Creating a plan
 
-Run `pm plan add "main"` to create a plan file. Based on what you know about
-the codebase and the user's goals, draft a plan and write it to the plan file.
-Walk the user through it and refine based on their feedback.
+Tell the user to press `P` in the TUI to open the plans view, then press `a`
+to add a new plan. A dialog will ask for a name and description — help them
+choose good values based on what you learned about the codebase and their goals.
+The `a` action launches a Claude session in a new pane. Once it finishes, the
+user can close that pane before moving on.
 
-The plan should be registered via the store module — `pm plan add` handles this.
+### Breaking the plan into PRs
 
-### Breaking plan into PRs
+Tell the user to press `w` in the plans view to break the plan into PRs. This
+launches a Claude session that explores the codebase, writes the plan content,
+and adds a `## PRs` section with individual PR entries. Once the breakdown
+session finishes, the user can close that pane before moving on.
 
-Read the plan file and break it into PRs. Write a `## PRs` section to the plan
-file with this format:
+### Reviewing the plan
 
-```
-### PR: <title>
-- **description**: What this PR does
-- **tests**: Expected unit tests
-- **files**: Expected file modifications
-- **depends_on**: <title of dependency PR, or empty>
-```
-
-Separate PR entries with `---` lines.
-
-Guidelines:
-- Prefer more small PRs over fewer large ones
-- Order them so independent PRs can be worked on in parallel
-- Only add depends_on when there's a real ordering constraint
+Tell the user to press `c` in the plans view to review the plan. This launches
+a Claude session that checks the plan and PRs for consistency. Once the review
+session finishes, the user can close that pane before moving on.
 
 ### Loading PRs
 
-Run `pm plan load` to load the PRs from the plan file into the project.
+Tell the user to press `l` in the plans view to load PRs from the plan file
+into the project. This runs quickly and does not launch a Claude session.
 
-## Reference
+### TUI plans view reference
 
-In the TUI: press `P` to toggle the plans view. Plan actions:
-- `a` — add a new plan
-- `w` — break plan into PRs
-- `l` — load PRs from plan
+In the TUI, `P` toggles the plans view. The setup flow is `a` → `w` → `c` → `l`:
+- `a` — add a new plan (prompts for name and description)
+- `w` — break plan into PRs (launches a Claude session)
+- `c` — review plan (launches a Claude session)
+- `l` — load PRs from plan into the project
 - `e` — edit plan file
 - `v` — view plan file
 
 ## Next Step
 
-Once PRs are loaded, go back to the main TUI panel and press `s` on a PR to
-start working on it.
+Once PRs are loaded, tell the user to press `P` to leave the plans view.
+The TUI will show the PR tech tree. They can press `s` on a PR to start
+working on it.
 {notes_block}"""
 
 
@@ -328,26 +329,35 @@ Current PRs:
 
 ## pm Project Lifecycle
 
-pm organizes work in a structured lifecycle:
+pm organizes work in a structured lifecycle. Actions can be done through the \
+TUI (key shortcuts) or CLI commands:
 
-1. **Initialize** (`pm init`): Set up pm for a codebase. This creates a \
-pm/ directory that tracks plans and PRs.
+1. **Initialize** (`pm init` / guide auto-runs it): Set up pm for a \
+codebase. Creates a pm/ directory that tracks plans and PRs.
 
-2. **Plan** (`pm plan add`): Write a high-level plan describing a feature \
-or goal. Plans are markdown files that describe what to build and why.
+2. **Plan** (TUI: `P` then `a` / CLI: `pm plan add`): Write a high-level \
+plan describing a feature or goal. Plans are markdown files.
 
-3. **Break down** (`pm plan breakdown <plan-id>`): Turn a plan into \
-concrete PRs — small, focused units of work. PRs can depend on each other, \
-forming a dependency tree shown in the TUI.
+3. **Break down** (TUI: `w` in plans view / CLI: `pm plan breakdown`): \
+Launch a Claude session to turn a plan into concrete PRs — small, focused \
+units of work with dependencies forming a tree shown in the TUI.
 
-4. **Work** (select a PR and press `s` in the TUI): Start a PR to open a \
-Claude session focused on that task. Claude works in a dedicated branch \
+4. **Review** (TUI: `c` in plans view / CLI: `pm plan review`): Launch a \
+Claude session to check plan-PR consistency and coverage before loading.
+
+5. **Load** (TUI: `l` in plans view / CLI: `pm plan load`): Load PRs from \
+the plan file into the project. In the TUI, press `P` to leave plans view \
+and see the tech tree.
+
+6. **Work** (TUI: `s` on a PR / CLI: `pm pr start`): Start a PR to open \
+a Claude session focused on that task. Claude works in a dedicated branch \
 and directory.
 
-5. **Review** (press `d` in the TUI or `pm pr done <pr-id>`): Mark a PR \
-as done. This pushes the branch and creates a GitHub pull request for review.
+7. **Done** (TUI: `d` on a PR / CLI: `pm pr done`): Mark a PR as done. \
+This pushes the branch, creates a GitHub pull request, and opens a new \
+tmux window with a Claude review session that checks the code.
 
-6. **Merge**: After review, PRs get merged. pm detects this automatically \
+8. **Merge**: After review, PRs get merged. pm detects this automatically \
 and updates the tree.
 
 At any point the user might need to: add new plans, add or reorder PRs, \
