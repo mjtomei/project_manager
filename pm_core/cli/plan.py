@@ -526,23 +526,29 @@ def plan_load(plan_id: str | None):
 
     click.echo(f"Found {len(prs)} PRs in plan file:")
 
-    # Pre-compute IDs for all PRs (needed to resolve depends_on by title)
-    existing_ids = {p["id"] for p in (data.get("prs") or [])}
-    title_to_id = {}
-    for pr in prs:
-        pr_id = store.generate_pr_id(pr["title"], pr.get("description", ""), existing_ids)
-        title_to_id[pr["title"]] = pr_id
-        existing_ids.add(pr_id)
-
     if data.get("prs") is None:
         data["prs"] = []
 
-    loaded_ids = {p["id"] for p in data["prs"]}
+    # Build lookup of already-loaded PRs by title to avoid duplicates
+    existing_titles = {p.get("title", ""): p["id"] for p in data["prs"]}
+
+    # Pre-compute IDs for new PRs (needed to resolve depends_on by title)
+    existing_ids = {p["id"] for p in data["prs"]}
+    title_to_id = {}
+    for pr in prs:
+        if pr["title"] in existing_titles:
+            # Reuse the existing ID so depends_on resolution works
+            title_to_id[pr["title"]] = existing_titles[pr["title"]]
+        else:
+            pr_id = store.generate_pr_id(pr["title"], pr.get("description", ""), existing_ids)
+            title_to_id[pr["title"]] = pr_id
+            existing_ids.add(pr_id)
+
     created = 0
     for pr in prs:
         pr_id = title_to_id[pr["title"]]
 
-        if pr_id in loaded_ids:
+        if pr["title"] in existing_titles:
             click.echo(f"  Skipped {pr_id}: {pr['title']} (already exists)")
             continue
 
@@ -563,7 +569,7 @@ def plan_load(plan_id: str | None):
                                plan=plan_id, depends_on=deps,
                                description=desc)
         data["prs"].append(entry)
-        loaded_ids.add(pr_id)
+        existing_titles[pr["title"]] = pr_id
         created += 1
         click.echo(f"  Created {pr_id}: {pr['title']}")
 
