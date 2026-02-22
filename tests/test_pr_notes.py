@@ -68,7 +68,7 @@ def _make_state(tmp_path, notes=None):
     if notes is not None:
         pr["notes"] = notes
     data = {
-        "project": {"name": "test", "repo": "/tmp/fake", "base_branch": "main"},
+        "project": {"name": "test", "repo": "/tmp/fake", "base_branch": "master"},
         "plans": [],
         "prs": [pr],
     }
@@ -382,7 +382,7 @@ class TestPromptGenNotes:
         if notes is not None:
             pr["notes"] = notes
         return {
-            "project": {"name": "test", "repo": "/tmp/fake", "base_branch": "main", "backend": "local"},
+            "project": {"name": "test", "repo": "/tmp/fake", "base_branch": "master", "backend": "local"},
             "plans": [],
             "prs": [pr],
         }

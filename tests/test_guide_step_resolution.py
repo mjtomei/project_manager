@@ -22,7 +22,7 @@ def tmp_pm_root(tmp_path):
     """Create a minimal PM root with project.yaml."""
     root = tmp_path / "pm"
     root.mkdir()
-    (root / "project.yaml").write_text("project:\n  name: test\n  repo: /tmp/test\n  base_branch: main\n")
+    (root / "project.yaml").write_text("project:\n  name: test\n  repo: /tmp/test\n  base_branch: master\n")
     return root
 
 
@@ -35,7 +35,7 @@ def pm_root_with_plan(tmp_pm_root):
 
     # Update project.yaml to include plan
     (tmp_pm_root / "project.yaml").write_text(
-        "project:\n  name: test\n  repo: /tmp/test\n  base_branch: main\n"
+        "project:\n  name: test\n  repo: /tmp/test\n  base_branch: master\n"
         "plans:\n  - id: plan-001\n    name: Test Plan\n    file: plans/plan-001.md\n    status: draft\n"
     )
     return tmp_pm_root
@@ -51,7 +51,7 @@ def pm_root_with_plan_prs(tmp_pm_root):
     )
 
     (tmp_pm_root / "project.yaml").write_text(
-        "project:\n  name: test\n  repo: /tmp/test\n  base_branch: main\n"
+        "project:\n  name: test\n  repo: /tmp/test\n  base_branch: master\n"
         "plans:\n  - id: plan-001\n    name: Test Plan\n    file: plans/plan-001.md\n    status: draft\n"
     )
     return tmp_pm_root
@@ -231,7 +231,7 @@ class TestResolveGuideStep:
         """
         # Set up project.yaml with PRs loaded (which would trigger needs_deps_review)
         (tmp_pm_root / "project.yaml").write_text(
-            "project:\n  name: test\n  repo: /tmp/test\n  base_branch: main\n"
+            "project:\n  name: test\n  repo: /tmp/test\n  base_branch: master\n"
             "plans:\n  - id: plan-001\n    name: Test\n    file: plans/plan-001.md\n    status: draft\n"
             "prs:\n  - id: pr-001\n    title: First PR\n    status: pending\n"
         )

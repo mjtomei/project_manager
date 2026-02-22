@@ -102,7 +102,7 @@ class TestGuideStepResolutionBugs:
         root = tmp_path / "pm"
         root.mkdir()
         (root / "project.yaml").write_text(
-            "project:\n  name: test\n  repo: /tmp/test\n  base_branch: main\n"
+            "project:\n  name: test\n  repo: /tmp/test\n  base_branch: master\n"
         )
         return root
 

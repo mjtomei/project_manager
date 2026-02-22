@@ -87,7 +87,7 @@ def _get_real_prompt() -> str:
     """Generate the actual review prompt from prompt_gen, so tests adapt to prompt changes."""
     from pm_core.prompt_gen import generate_review_prompt
     data = {
-        "project": {"name": "test", "repo": "test/repo", "base_branch": "main"},
+        "project": {"name": "test", "repo": "test/repo", "base_branch": "master"},
         "prs": [{
             "id": "pr-001",
             "title": "Add feature",
@@ -496,7 +496,7 @@ class TestStartReviewLoopBackground:
 class TestGenerateReviewPrompt:
     def _make_data(self):
         return {
-            "project": {"name": "test", "repo": "test/repo", "base_branch": "main"},
+            "project": {"name": "test", "repo": "test/repo", "base_branch": "master"},
             "prs": [
                 {
                     "id": "pr-001",

@@ -3060,17 +3060,26 @@ This starts the tmux session in the background.  The `tmux attach` at the end
 will fail (no terminal), but the base session with TUI + notes is created.
 Wait a few seconds for the TUI to boot.
 
-### 2. Verify TUI shows guide view
+### 2. Discover the session name
 
 ```bash
-pm tui view -s {test_session}
+cd {test_cwd} && pm session name
+```
+
+Save this value — you will need it for all `pm tui` commands below.  We'll
+call it `$SESSION` in subsequent steps.
+
+### 3. Verify TUI shows guide view
+
+```bash
+pm tui view -s $SESSION
 ```
 
 The TUI should be running and showing the guide progress widget in the
 `no_project` state (step 1: "Initialize the project").  The guide pane may
 have auto-launched and failed — that's expected.
 
-### 3. Run pm init
+### 4. Run pm init
 
 ```bash
 cd {test_cwd} && pm init --no-import --dir {test_cwd}/pm
@@ -3078,7 +3087,7 @@ cd {test_cwd} && pm init --no-import --dir {test_cwd}/pm
 
 This should detect the GitHub remote and set `backend: github`.
 
-### 4. Verify project.yaml
+### 5. Verify project.yaml
 
 ```bash
 cat {test_cwd}/pm/project.yaml
@@ -3090,7 +3099,7 @@ Check:
 - `base_branch` is set (main or master)
 - File exists and is valid YAML
 
-### 5. Verify directory structure
+### 6. Verify directory structure
 
 ```bash
 ls {test_cwd}/pm/plans/
@@ -3098,7 +3107,7 @@ ls {test_cwd}/pm/plans/
 
 Check: `{test_cwd}/pm/plans/` directory exists.
 
-### 6. Add test PRs and verify commands work
+### 7. Add test PRs and verify commands work
 
 ```bash
 cd {test_cwd}/pm && pm pr add --title "Test PR" --description "Testing github init"
@@ -3108,7 +3117,7 @@ cd {test_cwd}/pm && pm pr list
 - `pm pr add` should exit 0
 - `pm pr list` should show the test PR
 
-### 7. Walk through the guide to completion
+### 8. Walk through the guide to completion
 
 Now mark guide step 1 as done and walk through remaining steps:
 
@@ -3147,16 +3156,16 @@ cd {test_cwd}/pm && pm guide done
 Repeat `pm guide done` until the guide reports all steps complete or
 `resolve_guide_step` returns `ready_to_work`/`all_done`/`all_in_progress`.
 
-### 8. Refresh TUI and verify final state
+### 9. Refresh TUI and verify final state
 
 ```bash
-pm tui send r -s {test_session}
+pm tui send r -s $SESSION
 ```
 
 Wait a moment, then:
 
 ```bash
-pm tui view -s {test_session}
+pm tui view -s $SESSION
 ```
 
 The TUI should now show the normal PR tree view (not the guide view).
@@ -3167,6 +3176,7 @@ The test PR should be visible in the tree.
 ```
 TEST RESULTS
 ============
+Session name:  [PASS/FAIL] - pm session name returned a valid name
 Session start: [PASS/FAIL] - pm session created TUI + notes
 Guide view:    [PASS/FAIL] - TUI shows no_project guide state
 pm init:       [PASS/FAIL] - init completes, backend=github
@@ -3208,15 +3218,24 @@ cd {test_cwd} && pm session &
 Wait a few seconds for the TUI to boot.  The `tmux attach` at the end will fail
 (no terminal) but the base session with TUI + notes is created.
 
-### 2. Verify TUI shows guide view
+### 2. Discover the session name
 
 ```bash
-pm tui view -s {test_session}
+cd {test_cwd} && pm session name
+```
+
+Save this value — you will need it for all `pm tui` commands below.  We'll
+call it `$SESSION` in subsequent steps.
+
+### 3. Verify TUI shows guide view
+
+```bash
+pm tui view -s $SESSION
 ```
 
 Should show guide progress widget in `no_project` state.
 
-### 3. Run pm init
+### 4. Run pm init
 
 ```bash
 cd {test_cwd} && pm init --no-import --dir {test_cwd}/pm
@@ -3224,7 +3243,7 @@ cd {test_cwd} && pm init --no-import --dir {test_cwd}/pm
 
 Should detect no remote and set `backend: local`.
 
-### 4. Verify project.yaml
+### 5. Verify project.yaml
 
 ```bash
 cat {test_cwd}/pm/project.yaml
@@ -3235,7 +3254,7 @@ Check:
 - `repo:` is set to the absolute path of the repo
 - `base_branch` is set (main or master)
 
-### 5. Add test PRs and verify commands work
+### 6. Add test PRs and verify commands work
 
 ```bash
 cd {test_cwd}/pm && pm pr add --title "Notes PR" --description "Testing local init"
@@ -3244,7 +3263,7 @@ cd {test_cwd}/pm && pm pr list
 
 - Both commands should succeed with a local backend
 
-### 6. Walk through the guide to completion
+### 7. Walk through the guide to completion
 
 Mark guide step 1 as done:
 
@@ -3268,13 +3287,13 @@ print('guide step:', state)
 
 For each remaining interactive step, run `cd {test_cwd}/pm && pm guide done`.
 
-### 7. Refresh TUI and verify final state
+### 8. Refresh TUI and verify final state
 
 ```bash
-pm tui send r -s {test_session}
+pm tui send r -s $SESSION
 ```
 
-Wait a moment, then `pm tui view -s {test_session}`.  The TUI should show the
+Wait a moment, then `pm tui view -s $SESSION`.  The TUI should show the
 normal PR tree view (not the guide view).
 
 ## Reporting
@@ -3282,6 +3301,7 @@ normal PR tree view (not the guide view).
 ```
 TEST RESULTS
 ============
+Session name:  [PASS/FAIL] - pm session name returned a valid name
 Session start: [PASS/FAIL] - pm session created TUI + notes
 Guide view:    [PASS/FAIL] - TUI shows no_project guide state
 pm init:       [PASS/FAIL] - init completes, backend=local
@@ -3320,21 +3340,30 @@ cd {test_cwd} && pm session &
 
 Wait a few seconds for the TUI to boot.
 
-### 2. Verify TUI shows guide view
+### 2. Discover the session name
 
 ```bash
-pm tui view -s {test_session}
+cd {test_cwd} && pm session name
+```
+
+Save this value — you will need it for all `pm tui` commands below.  We'll
+call it `$SESSION` in subsequent steps.
+
+### 3. Verify TUI shows guide view
+
+```bash
+pm tui view -s $SESSION
 ```
 
 Should show guide progress widget in `no_project` state.
 
-### 3. Run pm init
+### 4. Run pm init
 
 ```bash
 cd {test_cwd} && pm init --no-import --dir {test_cwd}/pm
 ```
 
-### 4. Verify project.yaml
+### 5. Verify project.yaml
 
 ```bash
 cat {test_cwd}/pm/project.yaml
@@ -3344,7 +3373,7 @@ Check:
 - `backend: local` (no remote, no commits)
 - `base_branch` is `master` (default for empty repos)
 
-### 5. Verify pm commands work post-init (bug #8 area)
+### 6. Verify pm commands work post-init (bug #8 area)
 
 ```bash
 cd {test_cwd}/pm && pm pr add --title "Empty repo PR" --description "Testing empty init"
@@ -3354,7 +3383,7 @@ cd {test_cwd}/pm && pm pr list
 - Both should succeed even with no commits
 - If any command fails, note the error — this is a known bug area
 
-### 6. Walk through the guide to completion
+### 7. Walk through the guide to completion
 
 Mark guide step 1 as done:
 
@@ -3378,13 +3407,13 @@ print('guide step:', state)
 
 For each remaining interactive step, run `cd {test_cwd}/pm && pm guide done`.
 
-### 7. Refresh TUI and verify final state
+### 8. Refresh TUI and verify final state
 
 ```bash
-pm tui send r -s {test_session}
+pm tui send r -s $SESSION
 ```
 
-Wait a moment, then `pm tui view -s {test_session}`.  The TUI should show the
+Wait a moment, then `pm tui view -s $SESSION`.  The TUI should show the
 normal PR tree view (not the guide view).
 
 ## Reporting
@@ -3392,6 +3421,7 @@ normal PR tree view (not the guide view).
 ```
 TEST RESULTS
 ============
+Session name:  [PASS/FAIL] - pm session name returned a valid name
 Session start: [PASS/FAIL] - pm session created TUI + notes
 Guide view:    [PASS/FAIL] - TUI shows no_project guide state
 pm init:       [PASS/FAIL] - init completes, backend=local
@@ -3410,10 +3440,10 @@ OVERALL: [PASS/FAIL]
 # Init test helpers — set up temp repos for Claude to drive pm session + init
 # ---------------------------------------------------------------------------
 
-import hashlib
 import shutil
 import subprocess
 import tempfile
+from pathlib import Path
 
 
 def _setup_git_repo(path, remote=None, commit=True):
@@ -3436,14 +3466,11 @@ def _setup_git_repo(path, remote=None, commit=True):
         )
 
 
-def _compute_session_name(repo_path, github_repo_name=None):
-    """Pre-compute the pm session name for a repo directory.
-
-    Mirrors the logic in pm_core/paths.py get_session_tag().
-    """
-    repo_name = github_repo_name or repo_path.rstrip("/").rsplit("/", 1)[-1]
-    path_hash = hashlib.md5(str(repo_path).encode()).hexdigest()[:8]
-    return f"pm-{repo_name}-{path_hash}"
+def _get_session_name(repo_path):
+    """Compute the pm session name for a repo directory using the real logic."""
+    from pm_core.paths import get_session_tag
+    tag = get_session_tag(start_path=Path(repo_path))
+    return f"pm-{tag}" if tag else None
 
 
 def _cleanup_test_session(context):
@@ -3464,14 +3491,13 @@ def _init_github_repo():
     tmpdir = tempfile.mkdtemp(prefix="pm-test-init-github-")
     _setup_git_repo(tmpdir, remote="https://github.com/mjtomei/flask.git",
                     commit=True)
-    session_name = _compute_session_name(tmpdir, github_repo_name="flask")
+    session_name = _get_session_name(tmpdir)
     return {
         "cwd": tmpdir,
         "session_name": session_name,
         "pane_id": None,
         "prompt_context": {
             "test_cwd": tmpdir,
-            "test_session": session_name,
         },
     }
 
@@ -3480,14 +3506,13 @@ def _init_local_repo():
     """Set up a temp repo with no remote for Claude to init."""
     tmpdir = tempfile.mkdtemp(prefix="pm-test-init-local-")
     _setup_git_repo(tmpdir, commit=True)
-    session_name = _compute_session_name(tmpdir)
+    session_name = _get_session_name(tmpdir)
     return {
         "cwd": tmpdir,
         "session_name": session_name,
         "pane_id": None,
         "prompt_context": {
             "test_cwd": tmpdir,
-            "test_session": session_name,
         },
     }
 
@@ -3496,14 +3521,13 @@ def _init_empty_repo():
     """Set up a temp repo with no commits for Claude to init."""
     tmpdir = tempfile.mkdtemp(prefix="pm-test-init-empty-")
     _setup_git_repo(tmpdir, commit=False)
-    session_name = _compute_session_name(tmpdir)
+    session_name = _get_session_name(tmpdir)
     return {
         "cwd": tmpdir,
         "session_name": session_name,
         "pane_id": None,
         "prompt_context": {
             "test_cwd": tmpdir,
-            "test_session": session_name,
         },
     }
 

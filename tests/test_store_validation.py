@@ -23,7 +23,7 @@ class TestValidatePRStatuses:
             "project:\n"
             "  name: test\n"
             "  repo: /tmp/repo\n"
-            "  base_branch: main\n"
+            "  base_branch: master\n"
             "prs:\n"
             "  - id: pr-001\n"
             "    status: pending\n"
@@ -52,7 +52,7 @@ class TestValidatePRStatuses:
             "project:\n"
             "  name: test\n"
             "  repo: /tmp/repo\n"
-            "  base_branch: main\n"
+            "  base_branch: master\n"
             "prs:\n"
             "  - id: pr-001\n"
             "    status: invalid_status\n"
@@ -73,7 +73,7 @@ class TestValidatePRStatuses:
             "project:\n"
             "  name: test\n"
             "  repo: /tmp/repo\n"
-            "  base_branch: main\n"
+            "  base_branch: master\n"
             "prs:\n"
             "  - id: pr-001\n"
             "    title: No status PR\n"
@@ -91,7 +91,7 @@ class TestValidatePRStatuses:
             "project:\n"
             "  name: test\n"
             "  repo: /tmp/repo\n"
-            "  base_branch: main\n"
+            "  base_branch: master\n"
             "prs:\n"
             "  - id: pr-001\n"
             "    status: invalid_status\n"
@@ -108,7 +108,7 @@ class TestValidatePRStatuses:
             "project:\n"
             "  name: test\n"
             "  repo: /tmp/repo\n"
-            "  base_branch: main\n"
+            "  base_branch: master\n"
             "prs: []\n"
         )
 
@@ -122,7 +122,7 @@ class TestValidatePRStatuses:
             "project:\n"
             "  name: test\n"
             "  repo: /tmp/repo\n"
-            "  base_branch: main\n"
+            "  base_branch: master\n"
             "prs: null\n"
         )
 
