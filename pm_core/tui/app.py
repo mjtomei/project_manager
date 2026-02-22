@@ -191,7 +191,6 @@ class ProjectManagerApp(App):
         self._data: dict = {}
         self._root: Path | None = None
         self._sync_timer: Timer | None = None
-        self._detail_visible = False
         self._current_guide_step: str | None = None
         self._guide_auto_launched = False
         self._plans_visible = False

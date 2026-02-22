@@ -112,23 +112,6 @@ def run_non_interactive_step(state: str, ctx: dict, root: Path) -> bool:
     return False
 
 
-def _status_line(label: str, state: str, done_after: set[str], current_idx: int, step_order: list[str]) -> str:
-    """Build a single status checklist line for the setup prompt."""
-    done_steps = set(step_order[:current_idx])
-    is_done = bool(done_after & done_steps)
-    if is_done:
-        return f"- {label}: done"
-    # Check if this is the current item
-    for s in step_order:
-        idx = step_order.index(s)
-        if idx >= current_idx and s in done_after:
-            # This item's trigger step is at or after current — it's next or pending
-            break
-    if not is_done and any(step_order.index(s) == current_idx for s in done_after if s in step_order):
-        return f"- {label}: next"
-    return f"- {label}: pending"
-
-
 def build_setup_prompt(state: str, ctx: dict, root: Optional[Path],
                        session_name: str | None = None) -> str:
     """Build the setup prompt for guiding a user through project initialization.
@@ -179,8 +162,6 @@ def build_setup_prompt(state: str, ctx: dict, root: Optional[Path],
     if session_name:
         from pm_core.prompt_gen import tui_section
         tui_block = tui_section(session_name)
-
-    pane_id = os.environ.get("TMUX_PANE", "")
 
     return f"""\
 You are guiding a user through setting up their project with `pm` (Project Manager for Claude Code).
