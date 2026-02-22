@@ -14,7 +14,6 @@ import copy
 
 from pm_core.paths import configure_logger
 from pm_core import store, guide, pr_sync
-from pm_core.tui.pane_ops import GUIDE_SETUP_STEPS
 
 _log = configure_logger("pm.tui.sync")
 
@@ -26,11 +25,6 @@ async def background_sync(app) -> None:
     # Reload capture config in case it was updated via CLI
     load_capture_config(app)
 
-    # If guide was dismissed, do normal sync
-    if app._guide_dismissed:
-        await do_normal_sync(app)
-        return
-
     # Check current guide state
     try:
         app._root = store.find_project_root()
@@ -39,19 +33,19 @@ async def background_sync(app) -> None:
         app._root = None
         app._data = {}
 
-    state, _ = guide.resolve_guide_step(app._root)
-
     # If we're in guide mode, check for state changes
     if app._current_guide_step is not None:
-        if state not in GUIDE_SETUP_STEPS:
-            # Guide is complete, switch to normal view
+        prs = app._data.get("prs") or []
+        if prs:
+            # PRs exist now — guide complete, switch to normal view
             if app._data:
                 app._update_display()
-            app._show_normal_view(from_guide=True)
+            app._show_normal_view()
             app.log_message("Guide complete! Showing tech tree.")
-        elif state != app._current_guide_step:
-            # Step changed, update the guide view
-            app._show_guide_view(state)
+        else:
+            state, _ = guide.detect_state(app._root)
+            if state != app._current_guide_step:
+                app._show_guide_view(state)
         return
 
     # Not in guide mode - do normal sync

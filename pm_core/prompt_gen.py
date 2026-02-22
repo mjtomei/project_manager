@@ -4,6 +4,22 @@ from pm_core import store, notes
 from pm_core.backend import get_backend
 
 
+def tui_section(session_name: str) -> str:
+    """Build a TUI interaction section for prompts running in a tmux session.
+
+    Used by prompt_gen internally and by other modules (guide, plan, meta)
+    that construct prompts for Claude sessions running alongside the TUI.
+    """
+    return f"""
+## Interacting with the TUI
+
+The base pm tmux session is `{session_name}`. Use `-s {session_name}` with pm tui \
+commands so they target the correct session even from workdir clones:
+- `pm tui view -s {session_name}` — capture and view the current TUI screen
+- `pm tui send <keys> -s {session_name}` — send keystrokes to the TUI (e.g. `pm tui send j` to move down)
+"""
+
+
 def _format_pr_notes(pr: dict) -> str:
     """Format PR notes as a markdown section, or empty string if none."""
     pr_notes = pr.get("notes") or []
@@ -17,8 +33,15 @@ def _format_pr_notes(pr: dict) -> str:
     return f"\n## PR Notes\n" + "\n".join(note_lines) + "\n"
 
 
-def generate_prompt(data: dict, pr_id: str) -> str:
-    """Generate a Claude Code prompt for working on a PR."""
+def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> str:
+    """Generate a Claude Code prompt for working on a PR.
+
+    Args:
+        data: Project data dict (from project.yaml).
+        pr_id: The PR to generate a prompt for.
+        session_name: If provided, include TUI interaction instructions
+            targeting this tmux session.
+    """
     pr = store.get_pr(data, pr_id)
     if not pr:
         raise ValueError(f"PR {pr_id} not found")
@@ -41,7 +64,7 @@ def generate_prompt(data: dict, pr_id: str) -> str:
     branch = pr.get("branch", f"pm/{pr_id}")
     title = pr.get("title", "")
     description = pr.get("description", "").strip()
-    base_branch = data.get("project", {}).get("base_branch", "main")
+    base_branch = data.get("project", {}).get("base_branch", "master")
 
     backend = get_backend(data)
     gh_pr_url = pr.get("gh_pr")  # URL of draft PR if created
@@ -54,6 +77,8 @@ def generate_prompt(data: dict, pr_id: str) -> str:
         notes_block = notes.notes_section(root)
     except FileNotFoundError:
         pass
+
+    tui_block = tui_section(session_name) if session_name else ""
 
     # Include PR notes (addendums added after work began)
     pr_notes_block = _format_pr_notes(pr)
@@ -76,11 +101,12 @@ This session is managed by `pm`. Run `pm help` to see available commands.
 
 ## Workflow
 {instructions}
-{notes_block}"""
+{tui_block}{notes_block}"""
     return prompt.strip()
 
 
-def generate_review_prompt(data: dict, pr_id: str, review_loop: bool = False,
+def generate_review_prompt(data: dict, pr_id: str, session_name: str | None = None,
+                           review_loop: bool = False,
                            review_iteration: int = 0,
                            review_loop_id: str = "") -> str:
     """Generate a Claude Code prompt for reviewing a completed PR.
@@ -88,6 +114,7 @@ def generate_review_prompt(data: dict, pr_id: str, review_loop: bool = False,
     Args:
         data: Project data dict.
         pr_id: The PR identifier.
+        session_name: If provided, include TUI interaction instructions.
         review_loop: When True, append fix/commit/push instructions for
             the automated review loop (``zz d`` / ``zzz d``).
         review_iteration: Current iteration number (1-based) for commit
@@ -101,7 +128,7 @@ def generate_review_prompt(data: dict, pr_id: str, review_loop: bool = False,
 
     title = pr.get("title", "")
     description = pr.get("description", "").strip()
-    base_branch = data.get("project", {}).get("base_branch", "main")
+    base_branch = data.get("project", {}).get("base_branch", "master")
 
     # Build plan and sibling PR context for architectural review
     plan_ref = pr.get("plan")
@@ -122,6 +149,8 @@ This PR is part of plan "{plan['name']}" ({plan['id']}). Other PRs in this plan:
 {chr(10).join(lines)}
 """
 
+    tui_block = tui_section(session_name) if session_name else ""
+
     # Include PR notes (addendums)
     pr_notes_block = _format_pr_notes(pr)
 
@@ -132,7 +161,7 @@ Review the code changes in this PR for quality, correctness, and architectural f
 
 ## Description
 {description}
-{pr_notes_block}{plan_context}
+{pr_notes_block}{plan_context}{tui_block}
 ## Steps
 1. Run `git diff origin/{base_branch}...HEAD` to see all changes
 2. **Generic checks** — things any codebase should get right:

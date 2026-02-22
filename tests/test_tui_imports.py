@@ -13,10 +13,6 @@ import inspect
 # ---------------------------------------------------------------------------
 
 class TestScreenImports:
-    def test_welcome_screen(self):
-        from pm_core.tui.screens import WelcomeScreen
-        assert WelcomeScreen is not None
-
     def test_connect_screen(self):
         from pm_core.tui.screens import ConnectScreen
         assert ConnectScreen is not None
@@ -36,10 +32,10 @@ class TestScreenImports:
     def test_all_screens_are_modal(self):
         from textual.screen import ModalScreen
         from pm_core.tui.screens import (
-            WelcomeScreen, ConnectScreen, HelpScreen,
+            ConnectScreen, HelpScreen,
             PlanPickerScreen, PlanAddScreen,
         )
-        for cls in (WelcomeScreen, ConnectScreen, HelpScreen,
+        for cls in (ConnectScreen, HelpScreen,
                     PlanPickerScreen, PlanAddScreen):
             assert issubclass(cls, ModalScreen), f"{cls.__name__} is not a ModalScreen"
 
@@ -101,9 +97,9 @@ class TestPaneOpsImports:
         sig = inspect.signature(launch_claude)
         assert "app" in sig.parameters
 
-    def test_launch_help_claude(self):
-        from pm_core.tui.pane_ops import launch_help_claude
-        sig = inspect.signature(launch_help_claude)
+    def test_launch_guide(self):
+        from pm_core.tui.pane_ops import launch_guide
+        sig = inspect.signature(launch_guide)
         assert "app" in sig.parameters
 
     def test_edit_plan(self):
@@ -156,23 +152,15 @@ class TestPaneOpsImports:
         from pm_core.tui.pane_ops import show_connect
         assert callable(show_connect)
 
-    def test_toggle_guide(self):
-        from pm_core.tui.pane_ops import toggle_guide
-        assert callable(toggle_guide)
-
-    def test_auto_launch_guide(self):
-        from pm_core.tui.pane_ops import auto_launch_guide
-        assert callable(auto_launch_guide)
-
     def test_heal_registry(self):
         from pm_core.tui.pane_ops import heal_registry
         sig = inspect.signature(heal_registry)
         assert "session" in sig.parameters
 
-    def test_guide_setup_steps_constant(self):
-        from pm_core.tui.pane_ops import GUIDE_SETUP_STEPS
-        assert isinstance(GUIDE_SETUP_STEPS, set)
-        assert "no_project" in GUIDE_SETUP_STEPS
+    def test_guide_setup_states(self):
+        from pm_core.guide import is_setup_state
+        assert is_setup_state("no_project")
+        assert not is_setup_state("ready_to_work")
 
 
 # ---------------------------------------------------------------------------
@@ -189,11 +177,6 @@ class TestBackwardCompatImports:
         """ConnectScreen is re-exported from tui.app for backward compatibility."""
         from pm_core.tui.app import ConnectScreen
         assert ConnectScreen is not None
-
-    def test_welcome_screen_from_app(self):
-        """WelcomeScreen is re-exported from tui.app."""
-        from pm_core.tui.app import WelcomeScreen
-        assert WelcomeScreen is not None
 
     def test_help_screen_from_app(self):
         """HelpScreen is re-exported from tui.app."""

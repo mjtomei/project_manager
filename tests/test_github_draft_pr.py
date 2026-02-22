@@ -23,7 +23,7 @@ def tmp_project(tmp_path):
         "project": {
             "name": "test-project",
             "repo": "https://github.com/owner/repo.git",
-            "base_branch": "main",
+            "base_branch": "master",
             "backend": "github",
         },
         "prs": [],
@@ -53,7 +53,7 @@ def tmp_project_with_pr(tmp_path):
         "project": {
             "name": "test-project",
             "repo": "https://github.com/owner/repo.git",
-            "base_branch": "main",
+            "base_branch": "master",
             "backend": "github",
         },
         "prs": [
@@ -92,7 +92,7 @@ def tmp_project_with_pending_pr(tmp_path):
         "project": {
             "name": "test-project",
             "repo": "https://github.com/owner/repo.git",
-            "base_branch": "main",
+            "base_branch": "master",
             "backend": "github",
         },
         "prs": [
@@ -207,7 +207,7 @@ class TestPrStartCreatesDraftPr:
         mock_gh_ops["create_draft_pr"].assert_called_once()
         call_args = mock_gh_ops["create_draft_pr"].call_args
         assert call_args[0][1] == "Test PR"  # title
-        assert call_args[0][2] == "main"  # base branch
+        assert call_args[0][2] == "master"  # base branch
 
         # Check that gh_pr was stored in project.yaml
         data = store.load(tmp_project_with_pending_pr["pm_dir"])
@@ -422,7 +422,7 @@ class TestBackendPrInstructions:
         instructions = backend.pr_instructions(
             branch="pm/pr-001",
             title="Test PR",
-            base_branch="main",
+            base_branch="master",
             pr_id="pr-001",
             gh_pr_url="https://github.com/owner/repo/pull/42",
         )
@@ -438,7 +438,7 @@ class TestBackendPrInstructions:
         instructions = backend.pr_instructions(
             branch="pm/pr-001",
             title="Test PR",
-            base_branch="main",
+            base_branch="master",
             pr_id="pr-001",
             gh_pr_url=None,
         )

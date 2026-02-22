@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-70cf9e7
+  active_pr: pr-9c1af2e
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-02-20T02:43:08.956779+00:00'
@@ -844,7 +844,7 @@ prs:
   plan: null
   title: Fix review loop docs and window focus issues
   branch: pm/pr-70cf9e7-fix-review-loop-docs-and-window-focus-issues
-  status: in_progress
+  status: merged
   depends_on: []
   description: 'Fix the following bugs:
 

@@ -127,10 +127,12 @@ def init(repo_url: str | None, name: str, base_branch: str, directory: str,
     if base_branch is None:
         if git_ops.is_git_repo(cwd):
             result = git_ops.run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=cwd, check=False)
-            if result.returncode == 0 and result.stdout.strip():
-                base_branch = result.stdout.strip()
+            branch_name = result.stdout.strip() if result.returncode == 0 else ""
+            # "HEAD" means detached/bare repo — not a valid branch name
+            if branch_name and branch_name != "HEAD":
+                base_branch = branch_name
         if base_branch is None:
-            base_branch = "main"
+            base_branch = "master"
 
     if directory is None:
         directory = "pm"
@@ -309,7 +311,8 @@ def _detect_git_repo() -> dict | None:
         return None
 
     branch_result = git_ops.run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=cwd, check=False)
-    branch = branch_result.stdout.strip() if branch_result.returncode == 0 else "main"
+    branch_name = branch_result.stdout.strip() if branch_result.returncode == 0 else ""
+    branch = branch_name if branch_name and branch_name != "HEAD" else "master"
 
     remotes = git_ops.list_remotes(cwd)
     if not remotes:
@@ -356,41 +359,28 @@ def _getting_started_text() -> str:
             lines += "  The vanilla backend will be auto-selected (pure git, no gh CLI required).\n\n"
 
     lines += """\
-  1. Initialize and import (from your target repo):
-       pm init
-     Sets up pm/ and launches Claude to analyze the repo, discuss with you,
-     and write a PR graph to a plan file.
+  1. Start a session (recommended):
+       pm session
+     Starts a tmux session with TUI + notes editor.  A guide Claude session
+     auto-launches to walk you through setup.
 
-  2. Load PRs from the plan file into pm:
-       pm plan load
-     Parses the ## PRs section and creates the PRs non-interactively.
+  Or use individual CLI commands:
+     pm init                     Initialize pm/ directory
+     pm plan add "name"          Add a plan (launches Claude)
+     pm plan breakdown           Break plan into PRs (launches Claude)
+     pm plan review              Review plan consistency (launches Claude)
+     pm plan load                Load PRs from plan file
 
-  Or start from scratch instead:
-     pm init --no-import
-     pm plan add "Add authentication"
-     pm plan breakdown
+  In the TUI, press P to open the plans view.  Plan action keys:
+     a=add  w=breakdown  c=review  l=load  e=edit  v=view
 
-  5. Review and finalize dependencies:
-       pm plan deps
-     Launches Claude to check for missing or wrong dependencies.
+  Working with PRs:
+     pm pr start                 Clone, branch, launch Claude session
+     pm pr done                  Mark PR as done, push branch
+     pm pr sync                  Check for merges, unblock dependents
+     pm push                     Commit and share pm/ changes
 
-  6. See what's ready to work on:
-       pm pr ready
-
-  7. Start a PR (clones, branches, launches Claude in tmux window or terminal):
-       pm pr start
-
-  8. When Claude is done, mark it:
-       pm pr done
-
-  9. Commit and share pm/ changes:
-       pm push
-
-  10. Check for merges and unblock dependents:
-       pm pr sync
-
-  Tip: 'pm session' starts a tmux session with TUI + notes editor.
-  Arguments in [brackets] are optional — pm infers them when possible."""
+  Tip: Arguments in [brackets] are optional — pm infers them when possible."""
 
     if repo_info and repo_info["name"]:
         lines += f"""

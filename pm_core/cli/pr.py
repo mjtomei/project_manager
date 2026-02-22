@@ -23,8 +23,7 @@ from pm_core.claude_launcher import find_claude, build_claude_shell_cmd, clear_s
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
-    _get_current_pm_session,
-    _get_session_name_for_cwd,
+    _get_pm_session,
     _gh_state_to_status,
     _infer_pr_id,
     _log,
@@ -462,9 +461,11 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
         click.echo(f"PR {pr_id} is already merged.", err=True)
         raise SystemExit(1)
 
+    # Determine tmux session name (used for fast-path check and later launch)
+    pm_session = _get_pm_session()
+
     # Fast path: if window already exists, switch to it (or kill it if --fresh)
-    if tmux_mod.has_tmux():
-        pm_session = _get_current_pm_session() or _get_session_name_for_cwd()
+    if pm_session:
         if tmux_mod.session_exists(pm_session):
             window_name = _pr_display_id(pr_entry)
             existing = tmux_mod.find_window_by_name(pm_session, window_name)
@@ -478,7 +479,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
                     return
 
     repo_url = data["project"]["repo"]
-    base_branch = data["project"].get("base_branch", "main")
+    base_branch = data["project"].get("base_branch", "master")
     branch = pr_entry.get("branch") or f"pm/{pr_id}"
 
     if workdir:
@@ -530,7 +531,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
     # For GitHub backend: push branch and create draft PR if not already set
     backend_name = data["project"].get("backend", "vanilla")
     if backend_name == "github" and not pr_entry.get("gh_pr_number"):
-        base_branch = data["project"].get("base_branch", "main")
+        base_branch = data["project"].get("base_branch", "master")
         title = pr_entry.get("title", pr_id)
         desc = pr_entry.get("description", "")
 
@@ -565,7 +566,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
     click.echo(f"\nPR {_pr_display_id(pr_entry)} is now in_progress on {platform.node()}")
     click.echo(f"Work directory: {work_path}")
 
-    prompt = prompt_gen.generate_prompt(data, pr_id)
+    prompt = prompt_gen.generate_prompt(data, pr_id, session_name=pm_session)
 
     claude = find_claude()
     if not claude:
@@ -576,8 +577,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
         return
 
     # Try to launch in the pm tmux session
-    if tmux_mod.has_tmux():
-        pm_session = _get_current_pm_session() or _get_session_name_for_cwd()
+    if pm_session:
         if tmux_mod.session_exists(pm_session):
             window_name = _pr_display_id(pr_entry)
             cmd = build_claude_shell_cmd(prompt=prompt)
@@ -605,8 +605,8 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         click.echo("Review window requires tmux.")
         return
 
-    pm_session = _get_current_pm_session() or _get_session_name_for_cwd()
-    if not tmux_mod.session_exists(pm_session):
+    pm_session = _get_pm_session()
+    if not pm_session or not tmux_mod.session_exists(pm_session):
         click.echo(f"Review window: tmux session '{pm_session}' not found.")
         return
 
@@ -622,10 +622,11 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     pr_id = pr_entry["id"]
     display_id = _pr_display_id(pr_entry)
     title = pr_entry.get("title", "")
-    base_branch = data.get("project", {}).get("base_branch", "main")
+    base_branch = data.get("project", {}).get("base_branch", "master")
 
     # Generate review prompt and build Claude command
-    review_prompt = prompt_gen.generate_review_prompt(data, pr_id, review_loop=review_loop,
+    review_prompt = prompt_gen.generate_review_prompt(data, pr_id, session_name=pm_session,
+                                                      review_loop=review_loop,
                                                       review_iteration=review_iteration,
                                                       review_loop_id=review_loop_id)
     claude_cmd = build_claude_shell_cmd(prompt=review_prompt)
@@ -792,7 +793,7 @@ def pr_sync():
     """
     root = state_root()
     data = store.load(root)
-    base_branch = data["project"].get("base_branch", "main")
+    base_branch = data["project"].get("base_branch", "master")
     prs = data.get("prs") or []
     backend = get_backend(data)
     updated = 0

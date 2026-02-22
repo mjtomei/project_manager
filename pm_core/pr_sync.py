@@ -217,7 +217,7 @@ def sync_prs(
         )
 
     prs = data.get("prs") or []
-    base_branch = data.get("project", {}).get("base_branch", "main")
+    base_branch = data.get("project", {}).get("base_branch", "master")
     backend = get_backend(data)
 
     updated = 0
