@@ -635,14 +635,16 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
 
     # If review window already exists, kill it if fresh, otherwise switch to it
     existing = tmux_mod.find_window_by_name(pm_session, window_name)
-    # Remember whether the user was already watching the review window —
-    # if so, we should switch to the replacement even in review-loop mode.
-    was_on_review = False
+    # Remember which grouped sessions were watching the review window —
+    # after we kill and recreate it, those sessions should follow to the
+    # new window.  Check ALL sessions in the group, not just the current one.
+    sessions_on_review: list[str] = []
     if existing:
         if fresh:
             if review_loop:
-                active_wid = tmux_mod.get_window_id(pm_session)
-                was_on_review = (active_wid == existing["id"])
+                sessions_on_review = tmux_mod.sessions_on_window(
+                    pm_session, existing["id"],
+                )
             tmux_mod.kill_window(pm_session, existing["id"])
             click.echo(f"Killed existing review window '{window_name}'")
         else:
@@ -650,9 +652,11 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
             click.echo(f"Switched to existing review window '{window_name}'")
             return
 
-    # In review loop mode, only switch focus if the user was already on the
-    # review window (so they stay on it).  Otherwise don't steal focus.
-    switch = was_on_review if review_loop else True
+    # In review loop mode, only switch focus if at least one session was
+    # watching the review window (so they stay on it).  The per-session
+    # switching happens below after the window is created.  For non-loop
+    # mode, always switch the current session.
+    switch = bool(sessions_on_review) if review_loop else True
 
     try:
         claude_pane = tmux_mod.new_window_get_pane(
@@ -710,6 +714,22 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
             wdata["user_modified"] = False
             pane_registry.save_registry(pm_session, reg)
             pane_layout.rebalance(pm_session, review_win_id)
+
+        # Switch ALL grouped sessions that were watching the old review
+        # window to the new one.  new_window_get_pane only switches one
+        # session (via current_or_base_session), so we need to explicitly
+        # switch any others that were also on the review window.
+        if sessions_on_review:
+            new_win = tmux_mod.find_window_by_name(pm_session, window_name)
+            if new_win:
+                for sess_name in sessions_on_review:
+                    subprocess.run(
+                        tmux_mod._tmux_cmd(
+                            "select-window", "-t",
+                            f"{sess_name}:{new_win['index']}",
+                        ),
+                        capture_output=True,
+                    )
 
         click.echo(f"Opened review window '{window_name}'")
     except Exception as e:

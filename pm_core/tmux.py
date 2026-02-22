@@ -532,6 +532,24 @@ def pane_exists(pane_id: str) -> bool:
     return result.returncode == 0
 
 
+def sessions_on_window(base: str, window_id: str) -> list[str]:
+    """Return all sessions in the group (base + grouped) whose active window matches *window_id*.
+
+    Used by the review loop to determine which sessions need to be
+    switched to the replacement window after the old one is killed.
+    """
+    candidates = [base] + list_grouped_sessions(base)
+    result = []
+    for name in candidates:
+        r = subprocess.run(
+            _tmux_cmd("display", "-t", name, "-p", "#{window_id}"),
+            capture_output=True, text=True,
+        )
+        if r.returncode == 0 and r.stdout.strip() == window_id:
+            result.append(name)
+    return result
+
+
 def set_environment(session: str, key: str, value: str, socket_path: str | None = None) -> None:
     """Set an environment variable in a tmux session."""
     subprocess.run(
