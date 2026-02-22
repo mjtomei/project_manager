@@ -11,7 +11,7 @@ import click
 from pm_core import store, notes
 from pm_core.plan_parser import parse_plan_prs
 from pm_core import review as review_mod
-from pm_core.claude_launcher import find_claude, launch_claude, launch_claude_print, clear_session
+from pm_core.claude_launcher import find_claude, launch_claude, clear_session
 from pm_core.prompt_gen import tui_section
 
 from pm_core.cli import cli
@@ -365,6 +365,21 @@ Check the following:
    it; if it doesn't, the PR should create it. Flag paths that look wrong
    (typos, wrong directory, missing extension).
 
+4. FORMAT — Each PR entry must be parseable by the automated loader.
+   Required format:
+
+   ### PR: <title>
+   - **description**: What this PR does
+   - **tests**: Expected unit tests
+   - **files**: Expected file modifications
+   - **depends_on**: <exact title of dependency PR, or empty>
+
+   Entries separated by --- lines. Check:
+   - Every PR has a ### PR: heading with a title
+   - Every PR has a **description** field (not empty)
+   - **depends_on** values match exact titles of other PRs in the list
+   - No duplicate PR titles
+
 For each issue found, propose a fix. When the user agrees, apply fixes
 by editing the plan file directly at {plan_path}.
 
@@ -469,13 +484,27 @@ dependency tree.
         click.echo(f"---\n{prompt}\n---")
 
 
+def _build_pr_description(pr: dict) -> str:
+    """Build full PR description from parsed plan fields.
+
+    Appends tests and files fields to the description so the agent
+    working on the PR has all the context from the plan.
+    """
+    parts = [pr.get("description", "")]
+    if pr.get("tests"):
+        parts.append(f"\nTests: {pr['tests']}")
+    if pr.get("files"):
+        parts.append(f"\nFiles: {pr['files']}")
+    return "\n".join(parts).strip()
+
+
 @plan.command("load")
 @click.argument("plan_id", default=None, required=False)
 def plan_load(plan_id: str | None):
-    """Parse PRs from plan file and create them via Claude (non-interactive).
+    """Parse PRs from plan file and create them directly.
 
-    Reads the ## PRs section from the plan file, generates pm pr add commands,
-    and launches Claude in print mode to execute them.
+    Reads the ## PRs section from the plan file and creates PR entries
+    in project.yaml without launching Claude.
     """
     root = state_root()
     data = store.load(root)
@@ -497,24 +526,7 @@ def plan_load(plan_id: str | None):
 
     click.echo(f"Found {len(prs)} PRs in plan file:")
 
-    # Build title -> index map for resolving depends_on references
-    title_order = {pr["title"]: i for i, pr in enumerate(prs)}
-
-    # Generate pm pr add commands
-    commands = []
-    for pr in prs:
-        cmd = f'pm pr add "{pr["title"]}" --plan {plan_id}'
-        if pr["description"]:
-            desc_escaped = pr["description"].replace('"', '\\"')
-            cmd += f' --description "{desc_escaped}"'
-        # depends_on references titles; we'll resolve after all are created
-        # For now, skip depends_on in the add commands and do a second pass
-        commands.append(cmd)
-        click.echo(f"  - {pr['title']}")
-
-    # Compute the PR IDs that will be assigned when the add commands run.
-    # This is safe because hash-based IDs are deterministic from title+desc,
-    # and we have the exact title+desc that the add commands will use.
+    # Pre-compute IDs for all PRs (needed to resolve depends_on by title)
     existing_ids = {p["id"] for p in (data.get("prs") or [])}
     title_to_id = {}
     for pr in prs:
@@ -522,40 +534,33 @@ def plan_load(plan_id: str | None):
         title_to_id[pr["title"]] = pr_id
         existing_ids.add(pr_id)
 
-    dep_commands = []
+    if data.get("prs") is None:
+        data["prs"] = []
+
     for pr in prs:
+        pr_id = title_to_id[pr["title"]]
+        slug = store.slugify(pr["title"])
+        branch = f"pm/{pr_id}-{slug}"
+        desc = _build_pr_description(pr)
+
+        # Resolve depends_on title -> ID
+        deps = []
         if pr["depends_on"]:
-            pr_id = title_to_id[pr["title"]]
             dep_title = pr["depends_on"].strip()
             if dep_title in title_to_id:
-                dep_id = title_to_id[dep_title]
-                dep_commands.append(f'pm pr edit {pr_id} --depends-on {dep_id}')
+                deps = [title_to_id[dep_title]]
+            else:
+                click.echo(f"  Warning: unknown dependency '{dep_title}' for '{pr['title']}'", err=True)
 
-    all_commands = commands + dep_commands
+        entry = _make_pr_entry(pr_id, pr["title"], branch,
+                               plan=plan_id, depends_on=deps,
+                               description=desc)
+        data["prs"].append(entry)
+        click.echo(f"  Created {pr_id}: {pr['title']}")
 
-    click.echo()
-    prompt = "Your goal: Create all the PRs from the plan by running these pm commands.\n\n"
-    prompt += "This session is managed by `pm` (project manager for Claude Code). "
-    prompt += "Run these commands in order using your Bash tool:\n\n"
-    prompt += "\n".join(all_commands)
-    prompt += "\n\nAfter running all commands, run `pm pr list` and `pm pr graph` to "
-    prompt += "show the user what was created."
-
-    claude = find_claude()
-    if claude:
-        click.echo("Launching Claude to create PRs...")
-        output = launch_claude_print(prompt, cwd=str(root), message="Creating PRs from plan")
-        click.echo(output)
-        # Background review
-        check_prompt = review_mod.REVIEW_PROMPTS["plan-load"].format(path=plan_path)
-        click.echo("Reviewing results... (background)")
-        review_mod.review_step("plan load", f"Create PRs from plan {plan_id}", check_prompt, root)
-    else:
-        click.echo()
-        click.echo("Claude CLI not found. Run these commands manually:")
-        click.echo()
-        for cmd in all_commands:
-            click.echo(f"  {cmd}")
+    save_and_push(data, root, f"pm: load plan {plan_id}")
+    trigger_tui_refresh()
+    click.echo(f"\nLoaded {len(prs)} PRs from plan {plan_id}.")
 
 
 @plan.command("fixes")
