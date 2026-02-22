@@ -844,7 +844,7 @@ prs:
   plan: null
   title: Fix review loop docs and window focus issues
   branch: pm/pr-70cf9e7-fix-review-loop-docs-and-window-focus-issues
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'Fix the following bugs:
 
@@ -856,7 +856,8 @@ prs:
     should run without stealing focus from the user''s active tmux window/pane
 
     3. Make sure review loop is documented in the help pane and features list in README'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/73
+  gh_pr_number: 73
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-70cf9e7-fix-review-loop-docs-and-window-focu-2ed009c1
