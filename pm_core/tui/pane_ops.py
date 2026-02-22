@@ -298,6 +298,55 @@ The user will tell you what they need."""
     launch_pane(app, cmd, "claude", fresh=fresh)
 
 
+def launch_discuss(app) -> None:
+    """Launch a Claude pane to discuss the pm tool and answer questions about it."""
+    from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
+    claude = find_claude()
+    if not claude:
+        app.log_message("Claude CLI not found")
+        return
+
+    prompt = """\
+## You are helping someone learn about pm (project manager).
+
+pm is a CLI tool and TUI for managing Claude Code development sessions. \
+It organizes work into plans (high-level goals) and PRs (concrete units of work) \
+with dependency tracking.
+
+The user has questions about how pm works, its keyboard shortcuts, \
+or what to do next.
+
+Key concepts:
+- **Plans**: High-level goals described in markdown files
+- **PRs**: Concrete work items, organized in a dependency tree
+- **TUI**: The interactive terminal UI showing the PR graph
+- **Sessions**: tmux sessions with panes for Claude, editors, and more
+
+Common keyboard shortcuts in the TUI:
+- Arrow keys / hjkl: Navigate the PR tree
+- s: Start working on a PR (launches Claude in a new window)
+- d: Mark PR as done (sends for review)
+- e: Edit PR details
+- c: Launch Claude session
+- P: Toggle plans view
+- ?: Show help
+- /: Open command bar
+- b: Rebalance panes
+- q: Detach from session
+
+Common commands:
+- pm pr list: List all PRs
+- pm pr start <id>: Start a PR
+- pm pr done <id>: Mark PR as done
+- pm plan list: List plans
+- pm plan add <name>: Add a new plan
+
+Ask the user what they'd like to know about."""
+
+    cmd = build_claude_shell_cmd(prompt=prompt)
+    launch_pane(app, cmd, "discuss")
+
+
 def launch_test(app, test_id: str) -> None:
     """Launch Claude with a TUI test prompt."""
     from pm_core import tui_tests

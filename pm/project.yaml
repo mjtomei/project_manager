@@ -770,7 +770,7 @@ prs:
   plan: null
   title: Fix assorted bugs from bugs.txt
   branch: pm/pr-9c1af2e-fix-assorted-bugs-from-bugs-txt
-  status: in_review
+  status: merged
   depends_on: []
   description: 'Fix the following bugs:
 

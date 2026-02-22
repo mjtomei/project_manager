@@ -30,6 +30,7 @@ from pm_core.tmux import (
     current_or_base_session,
     list_grouped_sessions,
     find_unattached_grouped_session,
+    sessions_on_window,
 )
 
 
@@ -531,3 +532,27 @@ class TestFindUnattachedGroupedSession:
             MagicMock(returncode=0, stdout="0\n"),  # proj~2 unattached
         ]
         assert find_unattached_grouped_session("proj") == "proj~2"
+
+
+class TestSessionsOnWindow:
+    @patch("pm_core.tmux.subprocess.run")
+    @patch("pm_core.tmux.list_grouped_sessions", return_value=[])
+    def test_no_match(self, mock_lg, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="@2\n")
+        assert sessions_on_window("proj", "@1") == []
+
+    @patch("pm_core.tmux.subprocess.run")
+    @patch("pm_core.tmux.list_grouped_sessions", return_value=["proj~1", "proj~2"])
+    def test_returns_matching_sessions(self, mock_lg, mock_run):
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="@5\n"),   # base on @5
+            MagicMock(returncode=0, stdout="@5\n"),   # proj~1 on @5
+            MagicMock(returncode=0, stdout="@3\n"),   # proj~2 on @3
+        ]
+        assert sessions_on_window("proj", "@5") == ["proj", "proj~1"]
+
+    @patch("pm_core.tmux.subprocess.run")
+    @patch("pm_core.tmux.list_grouped_sessions", return_value=[])
+    def test_display_error_skipped(self, mock_lg, mock_run):
+        mock_run.return_value = MagicMock(returncode=1, stdout="")
+        assert sessions_on_window("proj", "@1") == []
