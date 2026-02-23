@@ -292,8 +292,34 @@ class TechTree(Widget):
             offsets = _spread_offsets(len(dst_ids))
             exit_offsets[src_id] = {dst: offsets[i] for i, dst in enumerate(dst_ids)}
         for dst_id, src_ids in incoming.items():
-            offsets = _spread_offsets(len(src_ids))
-            entry_offsets[dst_id] = {src: offsets[i] for i, src in enumerate(src_ids)}
+            # For same-row edges, match the entry offset to the exit offset
+            # so the line is perfectly straight.  Spread the remaining
+            # (non-same-row) sources across the leftover interior slots.
+            same_row: dict[str, int] = {}   # src -> matched offset
+            other_srcs: list[str] = []
+            dst_row = self._node_positions[dst_id][1]
+            for src in src_ids:
+                src_row = self._node_positions[src][1]
+                if src_row == dst_row and dst_id in exit_offsets.get(src, {}):
+                    same_row[src] = exit_offsets[src][dst_id]
+                else:
+                    other_srcs.append(src)
+            if not other_srcs:
+                # All sources are same-row; just use matched offsets
+                entry_offsets[dst_id] = dict(same_row)
+            else:
+                # Spread non-same-row sources across slots not taken by
+                # same-row edges
+                taken = set(same_row.values())
+                all_offsets = _spread_offsets(len(src_ids))
+                free_offsets = [o for o in all_offsets if o not in taken]
+                # If not enough free slots, fall back to full spread
+                if len(free_offsets) < len(other_srcs):
+                    free_offsets = _spread_offsets(len(other_srcs))
+                mapping = dict(same_row)
+                for i, src in enumerate(other_srcs):
+                    mapping[src] = free_offsets[i]
+                entry_offsets[dst_id] = mapping
 
         # Track used vertical channel positions to avoid overlap
         # Key: x position, Value: set of y ranges that are used
