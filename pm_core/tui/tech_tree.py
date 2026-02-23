@@ -262,6 +262,39 @@ class TechTree(Widget):
 
         edges.sort(key=edge_priority)
 
+        # Pre-compute exit/entry y-offsets for each edge so that multiple
+        # connections on the same node fan out across its interior height
+        # instead of all sharing the center line.
+        # Interior rows within a node: 1, 2, 3 (NODE_H=5: border,id,title,status,border)
+        outgoing: dict[str, list[str]] = {}   # src_id -> [dst_ids] sorted by dst row
+        incoming: dict[str, list[str]] = {}   # dst_id -> [src_ids] sorted by src row
+        for dep_id, pr_id in edges:
+            outgoing.setdefault(dep_id, []).append(pr_id)
+            incoming.setdefault(pr_id, []).append(dep_id)
+        # Sort each list by the connected node's row position
+        for src_id, dst_ids in outgoing.items():
+            dst_ids.sort(key=lambda d: self._node_positions[d][1])
+        for dst_id, src_ids in incoming.items():
+            src_ids.sort(key=lambda s: self._node_positions[s][1])
+
+        def _spread_offsets(n: int) -> list[int]:
+            """Distribute n connection points across interior rows 1..3."""
+            if n == 1:
+                return [NODE_H // 2]  # center (row 2)
+            if n == 2:
+                return [1, NODE_H - 2]  # top and bottom interior
+            # n >= 3: spread evenly across rows 1..3
+            return [1 + round(i * (NODE_H - 3) / (n - 1)) for i in range(n)]
+
+        exit_offsets: dict[str, dict[str, int]] = {}   # src -> {dst -> y_offset}
+        entry_offsets: dict[str, dict[str, int]] = {}   # dst -> {src -> y_offset}
+        for src_id, dst_ids in outgoing.items():
+            offsets = _spread_offsets(len(dst_ids))
+            exit_offsets[src_id] = {dst: offsets[i] for i, dst in enumerate(dst_ids)}
+        for dst_id, src_ids in incoming.items():
+            offsets = _spread_offsets(len(src_ids))
+            entry_offsets[dst_id] = {src: offsets[i] for i, src in enumerate(src_ids)}
+
         # Track used vertical channel positions to avoid overlap
         # Key: x position, Value: set of y ranges that are used
         used_channels: dict[int, list[tuple[int, int]]] = {}
@@ -284,8 +317,10 @@ class TechTree(Widget):
         for dep_id, pr_id in edges:
             sx, sy = node_pos(dep_id)
             ex, ey = node_pos(pr_id)
-            src_y = sy + NODE_H // 2
-            dst_y = ey + NODE_H // 2
+            src_dy = exit_offsets.get(dep_id, {}).get(pr_id, NODE_H // 2)
+            dst_dy = entry_offsets.get(pr_id, {}).get(dep_id, NODE_H // 2)
+            src_y = sy + src_dy
+            dst_y = ey + dst_dy
             arrow_start_x = sx + NODE_W
             arrow_end_x = ex - 1
 
