@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 from pm_core import store, graph, notes
+from pm_core.paths import get_global_setting, has_global_setting
 from pm_core.plan_parser import parse_plan_prs
 
 
@@ -123,6 +124,35 @@ def run_non_interactive_step(state: str, ctx: dict, root: Path) -> bool:
     return False
 
 
+def _beginner_mode_guide_section() -> str:
+    """Return the beginner mode section for the guide prompt.
+
+    - Not yet configured: ask the user and offer to enable it.
+    - Already enabled: explain what it does and confirm they want to keep it.
+    - Explicitly disabled: omit entirely.
+    """
+    if not has_global_setting("beginner-mode"):
+        # Never configured — offer to enable
+        return (
+            "After init, ask the user: \"Are you new to programming or this kind of workflow?\n"
+            "I can enable beginner mode which adds extra guidance to every session.\"\n"
+            "If they say yes (or seem unsure), run `pm setting beginner-mode on` and confirm\n"
+            "it's enabled. Beginner mode adds step-by-step explanations and next-step\n"
+            "recommendations to all Claude sessions. If they say no, run\n"
+            "`pm setting beginner-mode off` so this question isn't asked again.\n\n"
+        )
+    if get_global_setting("beginner-mode"):
+        # Currently enabled — confirm with user
+        return (
+            "Beginner mode is currently enabled. This adds step-by-step explanations\n"
+            "and next-step recommendations to all Claude sessions. Let the user know\n"
+            "it's on and ask if they'd like to keep it. If they want to disable it,\n"
+            "run `pm setting beginner-mode off`.\n\n"
+        )
+    # Explicitly disabled — say nothing
+    return ""
+
+
 def build_setup_prompt(state: str, ctx: dict, root: Optional[Path],
                        session_name: str | None = None) -> str:
     """Build the setup prompt for guiding a user through project initialization.
@@ -223,12 +253,7 @@ If no project file exists yet, run `pm init --no-import` to initialize. This
 auto-detects the repo from the current directory. Use --no-import because we'll
 create a plan through the TUI.
 
-After init, ask the user: "Are you new to programming or this kind of workflow?
-I can enable beginner mode which adds extra guidance to every session."
-If they say yes (or seem unsure), run `pm setting beginner-mode on` and confirm
-it's enabled. Beginner mode adds step-by-step explanations and next-step
-recommendations to all Claude sessions. If they say no, skip it.
-
+{_beginner_mode_guide_section()}
 After init, explore the codebase — read the README, look at directory structure,
 check recent git history. Share what you find with the user and ask about their
 goals for upcoming work.

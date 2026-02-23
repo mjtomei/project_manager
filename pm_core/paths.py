@@ -258,6 +258,15 @@ def get_global_setting(name: str) -> bool:
         return False
 
 
+def has_global_setting(name: str) -> bool:
+    """Check if a global pm setting has been explicitly configured (on or off).
+
+    Returns True if the setting file exists (regardless of value).
+    Returns False if the setting has never been set.
+    """
+    return (pm_home() / "settings" / name).exists()
+
+
 def set_global_setting(name: str, enabled: bool) -> None:
     """Enable or disable a global pm setting."""
     d = pm_home() / "settings"
@@ -265,8 +274,8 @@ def set_global_setting(name: str, enabled: bool) -> None:
     f = d / name
     if enabled:
         f.write_text("true\n")
-    elif f.exists():
-        f.unlink()
+    else:
+        f.write_text("false\n")
 
 
 def clear_session(session_tag: str) -> None:
