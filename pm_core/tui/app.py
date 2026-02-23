@@ -452,6 +452,10 @@ class ProjectManagerApp(App):
             tree.select_pr(active_pr)
         self._update_filter_status()
 
+        # Start animation timer if there are active PRs
+        from pm_core.tui.review_loop_ui import ensure_animation_timer
+        ensure_animation_timer(self)
+
     def _update_filter_status(self) -> None:
         """Update the status bar to reflect active filters."""
         self._update_status_bar()

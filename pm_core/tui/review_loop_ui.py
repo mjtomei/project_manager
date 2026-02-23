@@ -180,6 +180,20 @@ def _ensure_poll_timer(app) -> None:
         app._review_loop_timer = app.set_interval(1.0, lambda: _poll_loop_state(app))
 
 
+def ensure_animation_timer(app) -> None:
+    """Start the poll timer if there are active PRs that need animation.
+
+    Called after PR status changes (start, done, sync) to ensure
+    the spinner animation runs for in_progress/in_review PRs.
+    """
+    has_active = any(
+        pr.get("status") in ("in_progress", "in_review") and pr.get("workdir")
+        for pr in (app._data.get("prs") or [])
+    )
+    if has_active or any(s.running for s in app._review_loops.values()):
+        _ensure_poll_timer(app)
+
+
 def _poll_loop_state(app) -> None:
     """Periodic timer callback to update TUI from loop state."""
     any_running = False
@@ -204,18 +218,23 @@ def _poll_loop_state(app) -> None:
             sticky=10,
         )
 
-    # Stop the timer if no loops are running
-    if not any_running:
+    # Stop the timer if no loops are running AND no active PRs need animation
+    has_active_prs = any(
+        pr.get("status") in ("in_progress", "in_review") and pr.get("workdir")
+        for pr in (app._data.get("prs") or [])
+    )
+    if not any_running and not has_active_prs:
         if app._review_loop_timer:
             app._review_loop_timer.stop()
             app._review_loop_timer = None
 
 
 def _refresh_tech_tree(app) -> None:
-    """Refresh the tech tree so ⟳N markers update on PR nodes."""
+    """Refresh the tech tree so ⟳N markers and spinners update on PR nodes."""
     try:
         from pm_core.tui.tech_tree import TechTree
         tree = app.query_one("#tech-tree", TechTree)
+        tree.advance_animation()
         tree.refresh()
     except Exception:
         pass

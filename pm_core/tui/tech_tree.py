@@ -18,6 +18,26 @@ STATUS_ICONS = {
     "blocked": "✗",
 }
 
+VERDICT_MARKERS = {
+    "PASS": "✓",
+    "PASS_WITH_SUGGESTIONS": "~",
+    "NEEDS_WORK": "✗",
+    "KILLED": "☠",
+    "TIMEOUT": "⏱",
+    "ERROR": "!",
+}
+
+VERDICT_STYLES = {
+    "PASS": "bold green",
+    "PASS_WITH_SUGGESTIONS": "bold yellow",
+    "NEEDS_WORK": "bold red",
+    "KILLED": "bold red",
+    "TIMEOUT": "bold red",
+    "ERROR": "bold red",
+}
+
+SPINNER_FRAMES = "◐◓◑◒"
+
 STATUS_STYLES = {
     "pending": "white",
     "in_progress": "bold yellow",
@@ -74,6 +94,7 @@ class TechTree(Widget):
         self._hide_merged: bool = get_global_setting("hide-merged")  # toggle: hide merged PRs
         self._hide_closed: bool = True                            # toggle: hide closed PRs
         self._status_filter: str | None = None                    # filter to show only this status
+        self._anim_frame: int = 0                                  # animation frame counter
 
     def on_mount(self) -> None:
         self.prs = self._prs
@@ -158,22 +179,33 @@ class TechTree(Widget):
             return False
         return self._ordered_ids[self.selected_index].startswith("_hidden:")
 
-    def _get_loop_marker(self, pr_id: str) -> str:
-        """Return a marker string if a review loop is active for this PR."""
+    def advance_animation(self) -> None:
+        """Advance the animation frame counter (called by poll timer)."""
+        self._anim_frame = (self._anim_frame + 1) % len(SPINNER_FRAMES)
+
+    def _get_loop_marker(self, pr_id: str) -> tuple[str, str]:
+        """Return (marker_text, marker_style) for review loop state.
+
+        Returns a tuple of (text, style) for the marker. Empty strings if no loop.
+        """
         try:
             loops = self.app._review_loops
             state = loops.get(pr_id)
             if not state:
-                return ""
+                return ("", "")
             if state.running:
+                spinner = SPINNER_FRAMES[self._anim_frame % len(SPINNER_FRAMES)]
                 if state.stop_requested:
-                    return f"⏹{state.iteration}"
-                return f"⟳{state.iteration}"
+                    return (f"⏹{state.iteration}{spinner}", "bold red")
+                return (f"⟳{state.iteration}{spinner}", "bold cyan")
             if state.latest_verdict:
-                return ""  # done loops don't need a marker in the tree
+                v = state.latest_verdict
+                marker = VERDICT_MARKERS.get(v, v[:4])
+                style = VERDICT_STYLES.get(v, "")
+                return (f"⟳{state.iteration}{marker}", style)
         except Exception:
             pass
-        return ""
+        return ("", "")
 
     def get_content_width(self, container, viewport):
         if not self._node_positions:
@@ -425,10 +457,15 @@ class TechTree(Widget):
                 title = title[:max_title_len - 1] + "…"  # Unicode ellipsis
             title_line = f"{side} {title:<{NODE_W - 4}} {side}"
             status_text = f"{icon} {status}"
-            # Show review loop marker if a loop is active for this PR
-            loop_marker = self._get_loop_marker(pr_id)
+            # Show review loop marker or verdict if a loop exists for this PR
+            loop_marker, _loop_style = self._get_loop_marker(pr_id)
             if loop_marker:
                 status_text += f" {loop_marker}"
+            else:
+                # Show activity spinner for in_progress/in_review PRs
+                if status in ("in_progress", "in_review") and pr.get("workdir"):
+                    spinner = SPINNER_FRAMES[self._anim_frame % len(SPINNER_FRAMES)]
+                    status_text += f" {spinner}"
             machine = pr.get("agent_machine")
             if machine:
                 avail = NODE_W - 4 - len(status_text) - 1
