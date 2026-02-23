@@ -12,7 +12,7 @@ from pathlib import Path
 
 import click
 
-from pm_core import store, notes
+from pm_core import store, notes, guide
 from pm_core import tmux as tmux_mod
 from pm_core import pane_layout
 from pm_core import pane_registry
@@ -327,17 +327,16 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
         return (f"bash -c 'trap \"pm _pane-exited {session_name} {window_id} {generation} $TMUX_PANE\" EXIT; "
                 f"{escaped}'")
 
-    # Only auto-start the notes pane when the project already exists.
-    # For new projects the guide will auto-launch, and having both the
-    # guide and notes panes open overwhelms the initial layout.
-    if has_project:
-        _log.info("has_project=True, creating notes pane")
+    # Only auto-start the notes pane when the guide will NOT auto-launch.
+    # Having both the guide and notes panes open overwhelms the initial layout.
+    if not guide.needs_guide(root):
+        _log.info("guide will not auto-launch, creating notes pane")
         notes.ensure_notes_file(root)
         notes_pane = tmux_mod.split_pane(session_name, "h", _wrap(f"pm notes {notes_path}"))
         pane_registry.register_pane(session_name, window_id, notes_pane, "notes", "pm notes")
         _log.info("created notes_pane=%s", notes_pane)
     else:
-        _log.info("has_project=False, skipping notes pane (guide will auto-launch)")
+        _log.info("guide will auto-launch, skipping notes pane")
 
     # Apply initial balanced layout
     pane_layout.rebalance(session_name, window_id)

@@ -493,7 +493,6 @@ def _resolve_plan_input(app, name: str) -> str:
 
     Returns the resolved path if found, otherwise the original name.
     """
-    from pathlib import Path
     # Check if it looks like a path (contains / or ends with common extensions)
     if "/" in name or name.endswith((".md", ".txt", ".yaml", ".yml")):
         # Try exact match first

@@ -1133,12 +1133,12 @@ OVERALL: [PASS/FAIL]
 
 PLANS_PANE_TEST = """\
 You are testing the Plans Pane feature in the pm TUI. Your goal is to verify
-that pressing Shift+P toggles a plans view, that navigation works, and that
+that pressing p toggles a plans view, that navigation works, and that
 plan action shortcuts function correctly.
 
 ## Background
 
-The TUI has a plans view (toggled with Shift+P) that replaces the tech tree
+The TUI has a plans view (toggled with p) that replaces the tech tree
 with a scrollable list of plans. Each plan shows its ID, name, status, PR count,
 and intro text from the plan markdown file. The plans pane has its own keybindings
 for plan operations (view, edit, add, review, deps, load).
@@ -1167,7 +1167,7 @@ for plan operations (view, edit, add, review, deps, load).
 ### Part 1: Toggle Plans View
 
 1. Enter plans view:
-   - `pm tui send P` (Shift+P)
+   - `pm tui send p`
    - Wait 1 second
    - `pm tui view` - should show plans list instead of tech tree
    - Verify you can see:
@@ -1179,7 +1179,7 @@ for plan operations (view, edit, add, review, deps, load).
      * Shortcut hints at the bottom (view, edit, add, review, deps, load, back)
 
 2. Return to tree view:
-   - `pm tui send P` (Shift+P again)
+   - `pm tui send p`
    - Wait 1 second
    - `pm tui view` - should show tech tree again with PRs
    - Verify plans view is gone
@@ -1187,7 +1187,7 @@ for plan operations (view, edit, add, review, deps, load).
 ### Part 2: Navigation
 
 1. Enter plans view again:
-   - `pm tui send P`
+   - `pm tui send p`
    - Wait 1 second
 
 2. Navigate between plans:
@@ -1271,24 +1271,24 @@ for plan operations (view, edit, add, review, deps, load).
 ### Part 6: Help Screen
 
 1. Return to tree view first:
-   - `pm tui send P` (if in plans view)
+   - `pm tui send p` (if in plans view)
 
 2. Open help screen:
    - `pm tui send ?`
    - `pm tui view` - verify help screen shows
-   - Verify "P" is listed under "Panes & Views" as "Toggle plans view"
+   - Verify "p" is listed under "Panes & Views" as "Toggle plans view"
    - `pm tui send Escape` to close help
 
 ### Part 7: Cleanup
 
 1. Kill any panes created during testing
-2. Return to tree view with P if in plans view
+2. Return to tree view with p if in plans view
 3. Verify TUI is responsive: `pm tui view`
 4. Final pane count should match initial count
 
 ## Expected Behavior
 
-- Shift+P toggles between plans view and tree view
+- p toggles between plans view and tree view
 - Plans view shows all plans with names, status, PR counts, and intro text
 - Navigation keys (Up/Down, j/k) move selection between plans
 - Enter and v open the plan file in a pane
@@ -2333,14 +2333,14 @@ Status icons used: ○ pending, ● in_progress, ◎ in_review, ✓ merged, ✗ 
 3. Run `pm tui view` to verify TUI is running and showing the tech tree
 4. If in guide mode, press 'x' to dismiss
 
-### Part 1: Status Filter Cycling (F key)
+### Part 1: Status Filter Cycling (f key)
 
 1. Start state — no filter (all PRs shown):
    - `pm tui view` - count the total number of PR nodes visible
    - This should match the total from `pm pr list`
 
 2. First press — filter to "pending":
-   - `pm tui send F`
+   - `pm tui send f`
    - Wait 1 second
    - `pm tui view`
    - Log line should show "Filter: ○ pending"
@@ -2348,35 +2348,35 @@ Status icons used: ○ pending, ● in_progress, ◎ in_review, ✓ merged, ✗ 
    - If no pending PRs exist, the tree should be empty or show a message
 
 3. Second press — filter to "in_progress":
-   - `pm tui send F`
+   - `pm tui send f`
    - Wait 1 second
    - `pm tui view`
    - Log line should show "Filter: ● in_progress"
    - Count visible PR nodes — should match in_progress count
 
 4. Third press — filter to "in_review":
-   - `pm tui send F`
+   - `pm tui send f`
    - Wait 1 second
    - `pm tui view`
    - Log line should show "Filter: ◎ in_review"
    - Count visible PR nodes — should match in_review count
 
 5. Fourth press — filter to "merged":
-   - `pm tui send F`
+   - `pm tui send f`
    - Wait 1 second
    - `pm tui view`
    - Log line should show "Filter: ✓ merged"
    - Count visible PR nodes — should match merged count
 
 6. Fifth press — filter to "closed":
-   - `pm tui send F`
+   - `pm tui send f`
    - Wait 1 second
    - `pm tui view`
    - Log line should show "Filter: ✗ closed"
    - Count visible PR nodes — should match closed count
 
 7. Sixth press — back to "all":
-   - `pm tui send F`
+   - `pm tui send f`
    - Wait 1 second
    - `pm tui view`
    - Log line should show "Filter: all"
@@ -2384,7 +2384,7 @@ Status icons used: ○ pending, ● in_progress, ◎ in_review, ✓ merged, ✗ 
 
 ### Part 2: Merged Toggle (X key)
 
-1. Reset to show all (press F until "Filter: all" appears, or it already is)
+1. Reset to show all (press f until "Filter: all" appears, or it already is)
 
 2. First toggle — hide merged:
    - `pm tui send X`
@@ -2411,13 +2411,13 @@ Status icons used: ○ pending, ● in_progress, ◎ in_review, ✓ merged, ✗ 
    - `pm tui send X` (should show "Merged PRs hidden")
 
 2. Apply a status filter:
-   - `pm tui send F` to filter to "pending"
+   - `pm tui send f` to filter to "pending"
    - `pm tui view`
    - Only pending PRs should show (merged toggle doesn't matter since
      we're filtering to pending specifically)
 
 3. Cycle back to "all":
-   - Press F until "Filter: all" appears
+   - Press f until "Filter: all" appears
    - `pm tui view`
    - With no status filter but merged hidden, all non-merged PRs should show
 
@@ -2428,7 +2428,7 @@ Status icons used: ○ pending, ● in_progress, ◎ in_review, ✓ merged, ✗ 
 ### Part 4: Status Bar Filter Indicator
 
 1. Apply a filter:
-   - `pm tui send F`
+   - `pm tui send f`
    - `pm tui view`
    - Check the status bar (bottom of TUI) for a filter indicator
    - It should show something like "filter: ○ pending"

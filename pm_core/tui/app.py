@@ -376,7 +376,7 @@ class ProjectManagerApp(App):
 
         # Auto-launch guide pane on first startup when setup is incomplete.
         # launch_pane deduplicates if the pane is already running.
-        if not self._guide_auto_launched and guide.is_setup_state(state):
+        if not self._guide_auto_launched and guide.needs_guide(self._root):
             self._guide_auto_launched = True
             pane_ops.launch_guide(self)
 
