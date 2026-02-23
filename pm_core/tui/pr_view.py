@@ -58,6 +58,7 @@ def handle_pr_selected(app, pr_id: str) -> None:
 def start_pr(app) -> None:
     """Start working on the selected PR."""
     from pm_core.tui.tech_tree import TechTree
+    from pm_core.paths import get_global_setting
 
     fresh = app._consume_z()
     tree = app.query_one("#tech-tree", TechTree)
@@ -67,6 +68,20 @@ def start_pr(app) -> None:
         _log.info("action: start_pr - no PR selected")
         app.log_message("No PR selected")
         return
+
+    # In beginner mode, block starting PRs with unmerged dependencies
+    if get_global_setting("beginner-mode"):
+        pr = store.get_pr(app._data, pr_id)
+        if pr and pr.get("depends_on"):
+            unmerged = []
+            for dep_id in pr["depends_on"]:
+                dep = store.get_pr(app._data, dep_id)
+                if dep and dep.get("status") != "merged":
+                    unmerged.append(f"{dep_id} ({dep.get('status', 'pending')})")
+            if unmerged:
+                app.log_error("Blocked", f"{pr_id} has unmerged deps: {', '.join(unmerged)}")
+                return
+
     action_key = f"Starting {pr_id}" + (" (fresh)" if fresh else "")
     if not guard_pr_action(app, action_key):
         return
