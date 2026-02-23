@@ -86,7 +86,7 @@ class TestsPane(Widget):
         output.append("\n")
         output.append("  Enter", style="bold")
         output.append("=run  ", style="dim")
-        output.append("T", style="bold")
+        output.append("t", style="bold")
         output.append("=back\n", style="dim")
 
         return output

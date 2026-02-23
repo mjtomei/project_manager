@@ -583,6 +583,9 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
             cmd = build_claude_shell_cmd(prompt=prompt)
             try:
                 tmux_mod.new_window(pm_session, window_name, cmd, str(work_path))
+                win = tmux_mod.find_window_by_name(pm_session, window_name)
+                if win:
+                    tmux_mod.set_shared_window_size(pm_session, win["id"])
                 click.echo(f"Launched Claude in tmux window '{window_name}' (session: {pm_session})")
                 return
             except Exception as e:
@@ -700,6 +703,7 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         )
         review_win_id = wid_result.stdout.strip()
         if review_win_id:
+            tmux_mod.set_shared_window_size(pm_session, review_win_id)
             pane_registry.register_pane(pm_session, review_win_id, claude_pane, "review-claude", claude_cmd)
             if diff_pane:
                 pane_registry.register_pane(pm_session, review_win_id, diff_pane, "review-diff", "diff-shell")
@@ -720,12 +724,10 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         # session (via current_or_base_session), so we need to explicitly
         # switch any others that were also on the review window.
         #
-        # select-window alone does NOT update tmux's "latest client"
-        # tracking (used by window-size=latest to determine window
-        # dimensions).  switch-client to the same session is a visible
-        # no-op but makes that client the "latest", causing tmux to
-        # immediately recalculate the window size for the correct
-        # display.
+        # select-window alone does NOT update tmux's client tracking.
+        # switch-client to the same session is a visible no-op but
+        # triggers tmux to recalculate the window size for the
+        # correct display.
         if sessions_on_review:
             new_win = tmux_mod.find_window_by_name(pm_session, window_name)
             if new_win:

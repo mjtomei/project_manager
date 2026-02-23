@@ -180,6 +180,9 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
         if tmux_mod.session_exists(pm_session):
             try:
                 tmux_mod.new_window(pm_session, window_name, cmd, str(work_path))
+                win = tmux_mod.find_window_by_name(pm_session, window_name)
+                if win:
+                    tmux_mod.set_shared_window_size(pm_session, win["id"])
                 click.echo(f"Launched meta session in window '{window_name}'")
                 return
             except Exception as e:
