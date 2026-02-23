@@ -357,19 +357,16 @@ class TechTree(Widget):
                         safe_write(src_y, x, "─", "dim")
                     safe_write(src_y, arrow_end_x, "▶", "dim")
                 else:
-                    # Find a free vertical channel in the gap
+                    # Find a free vertical channel in the gap.
+                    # Search from the destination side inward so that
+                    # nearer edges use outer channels and peel off
+                    # without crossing farther edges' verticals.
                     gap_start = arrow_start_x + 1
                     gap_end = arrow_end_x - 1
-                    mid_x = gap_start + (gap_end - gap_start) // 2
+                    mid_x = gap_end
 
-                    # Try to find an unused channel position
-                    for offset in range(0, (gap_end - gap_start) // 2 + 1):
-                        test_x = mid_x + offset
-                        if gap_start <= test_x <= gap_end and channel_free(test_x, src_y, dst_y):
-                            mid_x = test_x
-                            break
-                        test_x = mid_x - offset
-                        if gap_start <= test_x <= gap_end and channel_free(test_x, src_y, dst_y):
+                    for test_x in range(gap_end, gap_start - 1, -1):
+                        if channel_free(test_x, src_y, dst_y):
                             mid_x = test_x
                             break
 
