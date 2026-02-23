@@ -41,11 +41,6 @@ from pm_core.cli.helpers import (
 )
 
 
-def _set_shared_window_size(session: str, window: str) -> None:
-    """Convenience wrapper — delegates to tmux_mod.set_shared_window_size."""
-    tmux_mod.set_shared_window_size(session, window)
-
-
 # --- PR commands ---
 
 @cli.group()
@@ -590,7 +585,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
                 tmux_mod.new_window(pm_session, window_name, cmd, str(work_path))
                 win = tmux_mod.find_window_by_name(pm_session, window_name)
                 if win:
-                    _set_shared_window_size(pm_session, win["id"])
+                    tmux_mod.set_shared_window_size(pm_session, win["id"])
                 click.echo(f"Launched Claude in tmux window '{window_name}' (session: {pm_session})")
                 return
             except Exception as e:
@@ -708,7 +703,7 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         )
         review_win_id = wid_result.stdout.strip()
         if review_win_id:
-            _set_shared_window_size(pm_session, review_win_id)
+            tmux_mod.set_shared_window_size(pm_session, review_win_id)
             pane_registry.register_pane(pm_session, review_win_id, claude_pane, "review-claude", claude_cmd)
             if diff_pane:
                 pane_registry.register_pane(pm_session, review_win_id, diff_pane, "review-diff", "diff-shell")
