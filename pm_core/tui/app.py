@@ -129,12 +129,12 @@ class ProjectManagerApp(App):
         Binding("ctrl+r", "restart", "Restart", show=False),
         Binding("slash", "focus_command", "Command", show=True),
         Binding("escape", "unfocus_command", "Back", show=False),
-        Binding("P", "toggle_plans", "Plans", show=True),
-        Binding("T", "toggle_tests", "Tests", show=True),
+        Binding("p", "toggle_plans", "Plans", show=True),
+        Binding("t", "toggle_tests", "Tests", show=True),
         Binding("x", "hide_plan", "Hide Plan", show=False),
         Binding("M", "move_to_plan", "Move Plan", show=False),
         Binding("X", "toggle_merged", "Toggle Merged", show=False),
-        Binding("F", "cycle_filter", "Filter", show=False),
+        Binding("f", "cycle_filter", "Filter", show=False),
         Binding("question_mark", "show_help", "Help", show=True),
         Binding("c", "launch_claude", "Claude", show=True),
         Binding("H", "launch_guide", "Guide", show=True),
@@ -167,7 +167,7 @@ class ProjectManagerApp(App):
                        "edit_plan", "view_plan", "launch_notes",
                        "launch_meta", "launch_claude", "launch_guide",
                        "view_log", "refresh", "rebalance", "quit", "show_help",
-                       "toggle_tests", "hide_plan", "move_to_plan", "toggle_merged", "cycle_filter"):
+                       "toggle_plans", "toggle_tests", "hide_plan", "move_to_plan", "toggle_merged", "cycle_filter"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus:
                 _log.debug("check_action: blocked %s (command bar focused)", action)
@@ -635,7 +635,7 @@ class ProjectManagerApp(App):
         # Update status bar
         plans = self._data.get("plans") or []
         status_bar = self.query_one("#status-bar", StatusBar)
-        status_bar.update(f" [bold]Plans[/bold]    {len(plans)} plan(s)    [dim]P=back to tree[/dim]")
+        status_bar.update(f" [bold]Plans[/bold]    {len(plans)} plan(s)    [dim]p=back to tree[/dim]")
         self.call_after_refresh(self._capture_frame, "show_plans_view")
 
     def _refresh_plans_pane(self) -> None:
@@ -721,7 +721,7 @@ class ProjectManagerApp(App):
         from pm_core import tui_tests
         tests = tui_tests.list_tests()
         status_bar = self.query_one("#status-bar", StatusBar)
-        status_bar.update(f" [bold]Tests[/bold]    {len(tests)} test(s)    [dim]T=back to tree[/dim]")
+        status_bar.update(f" [bold]Tests[/bold]    {len(tests)} test(s)    [dim]t=back to tree[/dim]")
         self.call_after_refresh(self._capture_frame, "show_tests_view")
 
     def _refresh_tests_pane(self) -> None:

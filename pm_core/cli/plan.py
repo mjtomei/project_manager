@@ -117,6 +117,7 @@ when there's a real ordering constraint.
 
 After writing the PRs section, tell the user to run `pm plan review {plan_id}`
 (key: c in the plans pane) to check consistency and coverage before loading.
+Let them know it is safe to close this pane — the review will run in a new session.
 {tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
 
     claude = find_claude()
@@ -217,6 +218,7 @@ Guidelines:
 
 After writing, tell the user to run `pm plan review {plan_id}` (key: c in the
 plans pane) to check consistency and coverage before loading PRs.
+Let them know it is safe to close this pane — the review will run in a new session.
 {tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
 
     claude = find_claude()
@@ -385,6 +387,7 @@ by editing the plan file directly at {plan_path}.
 
 After fixing, summarize what was changed. Then tell the user to run
 `pm plan load {plan_id}` (key: l in the plans pane) to create the PRs.
+Let them know it is safe to close this pane — loading runs instantly without a session.
 {tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
 
     claude = find_claude()

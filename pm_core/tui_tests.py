@@ -1255,12 +1255,12 @@ for plan operations (view, edit, add, review, deps, load).
 
 ### Part 5: View Switching
 
-1. From plans view, press P to return to tree:
-   - `pm tui send P`
+1. From plans view, press p to return to tree:
+   - `pm tui send p`
    - `pm tui view` - verify tree is shown
 
-2. Press P to return to plans:
-   - `pm tui send P`
+2. Press p to return to plans:
+   - `pm tui send p`
    - `pm tui view` - verify plans shown again
 
 3. From plans view, verify that PR action keys (s, d, p) are blocked:

@@ -327,21 +327,17 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
         return (f"bash -c 'trap \"pm _pane-exited {session_name} {window_id} {generation} $TMUX_PANE\" EXIT; "
                 f"{escaped}'")
 
-    _log.info("has_project=%s, creating notes pane", has_project)
+    # Only auto-start the notes pane when the project already exists.
+    # For new projects the guide will auto-launch, and having both the
+    # guide and notes panes open overwhelms the initial layout.
     if has_project:
-        # Existing project: TUI (left) | notes editor (right)
+        _log.info("has_project=True, creating notes pane")
         notes.ensure_notes_file(root)
         notes_pane = tmux_mod.split_pane(session_name, "h", _wrap(f"pm notes {notes_path}"))
         pane_registry.register_pane(session_name, window_id, notes_pane, "notes", "pm notes")
+        _log.info("created notes_pane=%s", notes_pane)
     else:
-        # Setup: TUI (left) | notes (right)
-        # The TUI will auto-launch the guide pane when it detects setup state
-        notes_path.parent.mkdir(parents=True, exist_ok=True)
-        if not notes_path.exists():
-            notes_path.write_text(notes.NOTES_WELCOME)
-        notes_pane = tmux_mod.split_pane(session_name, "h", _wrap(f"pm notes {notes_path}"))
-        pane_registry.register_pane(session_name, window_id, notes_pane, "notes", "pm notes")
-    _log.info("created notes_pane=%s", notes_pane)
+        _log.info("has_project=False, skipping notes pane (guide will auto-launch)")
 
     # Apply initial balanced layout
     pane_layout.rebalance(session_name, window_id)

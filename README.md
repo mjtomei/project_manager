@@ -4,9 +4,22 @@ A shared workspace where human and machine participants collaborate as
 equals — planning work, picking up tasks, communicating context, and
 shaping a codebase together.
 
+## For everyone
+
+pm is built for people at every level of programming experience. AI
+assistants can do many things that normally require an expert programmer
+— reading and understanding codebases, writing and debugging code,
+managing git branches, and creating pull requests — but they can also
+explain individual pieces and concepts in plain language. The goal is to
+let people who have never programmed (or programmed very little) build
+quality software and learn anything about programming or computers, while
+accelerating development for experienced programmers and handling the
+boring, repetitive parts so they can focus on what matters.
+
 ## Features
 
 - **Interactive TUI** — tmux-based dashboard with quality of life improvements in tmux hooks
+- **Guided setup** — step-by-step guide for new users to initialize projects, create plans, and start working
 - **Plan-driven workflow** — write and manage plans and associated PRs with Claude in a standardized flow
 - **Parallel Claude sessions** — spin up Claude sessions with their own branches and working directories as needed for PRs, experiments, or any task
 - **Shared sessions** — share your tmux session with other users on the same machine via `--global` or `--group`

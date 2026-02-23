@@ -282,15 +282,25 @@ pm is a CLI tool for managing Claude Code development sessions. You can use \
 it to manage PRs, plans, and the TUI. Run `pm --help` for the full command list.
 
 {tui_section(sess)}
-## Common pm commands
+## Read-only pm commands
 
-These run directly in your terminal (not through the TUI):
+These are safe to run directly — they only read state:
 - `pm pr list` — list PRs and their status
-- `pm pr add <title>` — add a new PR
-- `pm pr start <pr-id>` — start working on a PR
-- `pm pr done <pr-id>` — mark a PR as ready for review
 - `pm plan list` — list plans
 - `pm pr graph` — show the PR dependency tree
+
+## Important: Use the TUI for actions that launch sessions
+
+Do NOT run commands that launch new Claude sessions yourself (e.g. `pm pr start`, \
+`pm pr done`, `pm plan add`, `pm plan breakdown`, `pm plan review`). These must be \
+triggered through the TUI so that panes are managed correctly. Instead, tell the \
+user which key to press in the TUI:
+- `s` on a PR — start working on it
+- `d` on a PR — mark it as done and start review
+- `p` — toggle plans view, then `a`/`w`/`c`/`l` for plan actions
+
+For plan management, recommend the user switch to the plans pane (`p` key) where \
+they can use dedicated shortcuts rather than typing commands.
 
 The user will tell you what they need."""
 
@@ -330,7 +340,7 @@ Common keyboard shortcuts in the TUI:
 - d: Mark PR as done (sends for review)
 - e: Edit PR details
 - c: Launch Claude session
-- P: Toggle plans view
+- p: Toggle plans view
 - ?: Show help
 - /: Open command bar
 - b: Rebalance panes
@@ -342,6 +352,16 @@ Common commands:
 - pm pr done <id>: Mark PR as done
 - pm plan list: List plans
 - pm plan add <name>: Add a new plan
+
+Common problems:
+- **Uppercase vs lowercase keys**: Some shortcuts require the Shift modifier. \
+For example, `H` (Shift+h) launches the guide, while `h` navigates left. \
+If a shortcut doesn't work, check whether it needs Shift. The help screen (?) \
+shows which keys are uppercase.
+- **Keys not working**: If key presses seem ignored, the command bar may be \
+focused. Press Escape to return focus to the tree/plans view.
+- **Pane layout looks wrong**: Press `b` to rebalance the pane layout.
+- **Session seems stuck**: Press `Ctrl+R` to restart the TUI.
 
 Ask the user what they'd like to know about."""
 
@@ -451,14 +471,47 @@ def handle_plan_action(app, action: str, plan_id: str | None) -> None:
 
 
 def handle_plan_add(app, result: tuple[str, str] | None) -> None:
-    """Handle result from PlanAddScreen modal."""
+    """Handle result from PlanAddScreen modal.
+
+    The user may enter a plan title or a file path. If the input looks
+    like a path (contains / or . and resembles an existing file), pass
+    it through. Otherwise treat it as a title.
+    """
     if result is None:
         return
     name, description = result
-    cmd = f"pm plan add {shlex.quote(name)}"
+    # Fuzzy match: if input looks like a file path, try to resolve it
+    resolved_name = _resolve_plan_input(app, name)
+    cmd = f"pm plan add {shlex.quote(resolved_name)}"
     if description:
         cmd += f" --description {shlex.quote(description)}"
     launch_pane(app, cmd, "plan-add")
+
+
+def _resolve_plan_input(app, name: str) -> str:
+    """If name looks like a file path, try to fuzzy-match it.
+
+    Returns the resolved path if found, otherwise the original name.
+    """
+    from pathlib import Path
+    # Check if it looks like a path (contains / or ends with common extensions)
+    if "/" in name or name.endswith((".md", ".txt", ".yaml", ".yml")):
+        # Try exact match first
+        root = app._root or Path.cwd()
+        candidate = root / name
+        if candidate.exists():
+            return name
+        # Try fuzzy search: look in plans/ directory and project root
+        search_dirs = [root / "plans", root]
+        basename = Path(name).name
+        stem = Path(name).stem
+        for search_dir in search_dirs:
+            if not search_dir.is_dir():
+                continue
+            for p in search_dir.iterdir():
+                if p.is_file() and (p.name == basename or p.stem == stem):
+                    return str(p.relative_to(root))
+    return name
 
 
 def launch_plan_activated(app, plan_id: str) -> None:

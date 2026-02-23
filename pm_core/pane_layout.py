@@ -44,9 +44,9 @@ def get_reliable_window_size(
 
     Grouped tmux sessions share windows but only the session with an
     attached client reports a non-zero size.  For shared sessions with
-    multiple clients, returns the *maximum* size across all attached
-    sessions so that rebalance doesn't squish panes when a smaller
-    client becomes active.
+    multiple clients, returns the *minimum* non-zero size across all
+    attached sessions so that panes fit on the smallest monitor and
+    everyone can see the full layout without scrolling.
 
     Fallback chain for finding a non-zero size:
 
@@ -75,21 +75,18 @@ def get_reliable_window_size(
     grouped = tmux_mod.list_grouped_sessions(base)
 
     # If there are multiple grouped sessions (multi-client), find the
-    # maximum size so we don't squish panes for smaller clients.
-    # Note: w and h are maximised independently, so the result may not
-    # match any single client.  This is intentional — panes are never
-    # hidden, though a smaller client may need to scroll.
+    # minimum non-zero size so panes fit on the smallest connected
+    # monitor.  This ensures all clients can see the full layout.
     if grouped:
-        max_w, max_h = 0, 0
+        min_w, min_h = 0, 0
         all_sessions = list(dict.fromkeys(candidates + [base] + grouped))
         for s in all_sessions:
             w, h = tmux_mod.get_window_size(s, window)
-            if w > max_w:
-                max_w = w
-            if h > max_h:
-                max_h = h
-        if max_w > 0 and max_h > 0:
-            return max_w, max_h
+            if w > 0 and h > 0:
+                min_w = w if min_w == 0 else min(min_w, w)
+                min_h = h if min_h == 0 else min(min_h, h)
+        if min_w > 0 and min_h > 0:
+            return min_w, min_h
 
     # Single client: return first non-zero size
     for s in candidates:
