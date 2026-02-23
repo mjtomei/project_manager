@@ -957,6 +957,19 @@ def pr_merge(pr_id: str | None):
     click.echo(f"PR {_pr_display_id(pr_entry)} marked as merged.")
     trigger_tui_refresh()
 
+    # Kill tmux windows for the merged PR (they're inaccessible from the TUI)
+    try:
+        from pm_core.cli.helpers import _find_tui_pane
+        _, session = _find_tui_pane()
+        if session:
+            display_id = _pr_display_id(pr_entry)
+            for win_name in (display_id, f"review-{display_id}"):
+                win = tmux_mod.find_window_by_name(session, win_name)
+                if win:
+                    tmux_mod.kill_window(session, win["id"])
+    except Exception:
+        pass
+
     # Show newly unblocked PRs
     prs = data.get("prs") or []
     ready = graph.ready_prs(prs)

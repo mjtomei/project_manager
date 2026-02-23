@@ -129,7 +129,9 @@ async def check_and_start(app) -> None:
 
     if target_reached:
         # Disable auto-start after reaching target
-        app._data.setdefault("project", {})["auto_start"] = False
+        project = app._data.setdefault("project", {})
+        project["auto_start"] = False
+        project.pop("auto_start_target", None)
         store.save(app._data, app._root)
         app.log_message("Auto-start: disabled (target reached)")
 
