@@ -61,8 +61,12 @@ class VanillaBackend(Backend):
     """Vanilla git with a remote. Fetches from origin for merge detection."""
 
     def is_merged(self, workdir, branch, base_branch):
-        git_ops.run_git("fetch", "origin", cwd=workdir, check=False)
-        for ref in (branch, f"origin/{branch}"):
+        # Try to fetch from origin; if no remote exists, fall back to local check
+        fetch = git_ops.run_git("fetch", "origin", cwd=workdir, check=False)
+        refs = [branch]
+        if fetch.returncode == 0:
+            refs.append(f"origin/{branch}")
+        for ref in refs:
             exists = git_ops.run_git(
                 "rev-parse", "--verify", ref, cwd=workdir, check=False,
             )

@@ -159,6 +159,13 @@ This PR is part of plan "{plan['name']}" ({plan['id']}). Other PRs in this plan:
     # Include PR notes (addendums)
     pr_notes_block = _format_pr_notes(pr)
 
+    # Backend-appropriate diff command
+    backend_name = data.get("project", {}).get("backend", "vanilla")
+    if backend_name == "local":
+        diff_cmd = f"git diff $(git merge-base {base_branch} HEAD)...HEAD"
+    else:
+        diff_cmd = f"git diff origin/{base_branch}...HEAD"
+
     prompt = f"""You are reviewing PR {pr_id}: "{title}"
 
 ## Task
@@ -168,7 +175,7 @@ Review the code changes in this PR for quality, correctness, and architectural f
 {description}
 {pr_notes_block}{plan_context}{tui_block}
 ## Steps
-1. Run `git diff origin/{base_branch}...HEAD` to see all changes
+1. Run `{diff_cmd}` to see all changes
 2. **Generic checks** — things any codebase should get right:
    - Excessive file/function length, duplicated code, dead or unnecessary code, potential bugs, security issues, confusing code that lacks comments, sufficient test coverage
 3. **Project-specific checks** — does the change fit this codebase?

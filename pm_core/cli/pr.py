@@ -678,6 +678,14 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         # exit codes that break && chains).
         shell = os.environ.get("SHELL", "/bin/bash")
         header = f"Review: {display_id} — {title}"
+        # Use backend-appropriate diff base:
+        #   local:   merge-base between base_branch and HEAD (no remote)
+        #   vanilla/github: origin/{base_branch}...HEAD
+        backend_name = data.get("project", {}).get("backend", "vanilla")
+        if backend_name == "local":
+            diff_ref = f"$(git merge-base {base_branch} HEAD)"
+        else:
+            diff_ref = f"origin/{base_branch}"
         diff_cmd = (
             f"cd '{workdir}'"
             f" && {{ echo '=== {header} ==='"
@@ -685,10 +693,10 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
             f" && git status"
             f" && echo ''"
             f" && echo '--- Change summary ---'"
-            f" && git --no-pager diff --stat origin/{base_branch}...HEAD"
+            f" && git --no-pager diff --stat {diff_ref}...HEAD"
             f" && echo ''"
             f" && echo '--- Full diff ---'"
-            f" && git --no-pager diff origin/{base_branch}...HEAD"
+            f" && git --no-pager diff {diff_ref}...HEAD"
             f"; }} | less -R"
             f"; exec {shell}"
         )
