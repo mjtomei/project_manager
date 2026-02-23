@@ -12,7 +12,7 @@ from pathlib import Path
 
 import click
 
-from pm_core import store, notes
+from pm_core import store, notes, guide
 from pm_core import tmux as tmux_mod
 from pm_core import pane_layout
 from pm_core import pane_registry
@@ -54,14 +54,14 @@ def _register_tmux_bindings(session_name: str) -> None:
 
     Called on both new session creation and reattach so bindings
     survive across sessions (tmux bindings are global).
-    Also sets window-size=latest on all sessions in the group so each
-    client's terminal size is used for layout, not the minimum.
+    Also sets window-size=smallest on all sessions in the group so the
+    window fits the smallest connected client (everyone sees the full layout).
     """
-    # Enable per-client window sizing: window follows the most recently
-    # active client rather than shrinking to the smallest.
+    # Window follows the smallest client so all connected users see the
+    # full layout without scrolling or clipping.
     base = session_name.split("~")[0]
     for s in [base] + tmux_mod.list_grouped_sessions(base):
-        tmux_mod.set_session_option(s, "window-size", "latest")
+        tmux_mod.set_session_option(s, "window-size", "smallest")
 
     subprocess.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", "R",
              "run-shell 'pm rebalance'"), check=False)
@@ -88,8 +88,8 @@ def _register_tmux_bindings(session_name: str) -> None:
     subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gw", "after-split-window",
              "run-shell 'pm _pane-opened \"#{session_name}\" \"#{window_id}\" \"#{pane_id}\"'"),
             check=False)
-    # Auto-rebalance when window resizes (triggered by client switches
-    # with window-size=latest, or moving terminal to a different monitor).
+    # Auto-rebalance when window resizes (triggered by clients connecting/
+    # disconnecting with window-size=smallest, or moving terminal to a different monitor).
     # Uses "window-resized" (fires on any window size change) not
     # "after-resize-window" (only fires after the resize-window command).
     # Note: window-resized is a window hook, so use -gw not -g.
@@ -234,7 +234,7 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
                 _log.info("creating new grouped session: %s", grouped)
                 tmux_mod.create_grouped_session(session_name, grouped,
                                                 socket_path=socket_path)
-                tmux_mod.set_session_option(grouped, "window-size", "latest",
+                tmux_mod.set_session_option(grouped, "window-size", "smallest",
                                             socket_path=socket_path)
                 click.echo(f"Attaching to session '{grouped}'...")
             tmux_mod.attach(grouped, socket_path=socket_path)
@@ -327,21 +327,16 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
         return (f"bash -c 'trap \"pm _pane-exited {session_name} {window_id} {generation} $TMUX_PANE\" EXIT; "
                 f"{escaped}'")
 
-    _log.info("has_project=%s, creating notes pane", has_project)
-    if has_project:
-        # Existing project: TUI (left) | notes editor (right)
+    # Only auto-start the notes pane when the guide will NOT auto-launch.
+    # Having both the guide and notes panes open overwhelms the initial layout.
+    if not guide.needs_guide(root):
+        _log.info("guide will not auto-launch, creating notes pane")
         notes.ensure_notes_file(root)
         notes_pane = tmux_mod.split_pane(session_name, "h", _wrap(f"pm notes {notes_path}"))
         pane_registry.register_pane(session_name, window_id, notes_pane, "notes", "pm notes")
+        _log.info("created notes_pane=%s", notes_pane)
     else:
-        # Setup: TUI (left) | notes (right)
-        # The TUI will auto-launch the guide pane when it detects setup state
-        notes_path.parent.mkdir(parents=True, exist_ok=True)
-        if not notes_path.exists():
-            notes_path.write_text(notes.NOTES_WELCOME)
-        notes_pane = tmux_mod.split_pane(session_name, "h", _wrap(f"pm notes {notes_path}"))
-        pane_registry.register_pane(session_name, window_id, notes_pane, "notes", "pm notes")
-    _log.info("created notes_pane=%s", notes_pane)
+        _log.info("guide will auto-launch, skipping notes pane")
 
     # Apply initial balanced layout
     pane_layout.rebalance(session_name, window_id)
@@ -357,7 +352,7 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
     # Create a grouped session so we never attach directly to the base
     grouped = f"{session_name}~1"
     tmux_mod.create_grouped_session(session_name, grouped, socket_path=socket_path)
-    tmux_mod.set_session_option(grouped, "window-size", "latest",
+    tmux_mod.set_session_option(grouped, "window-size", "smallest",
                                 socket_path=socket_path)
     tmux_mod.attach(grouped, socket_path=socket_path)
 

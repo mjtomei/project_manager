@@ -415,7 +415,7 @@ def _getting_started_text() -> str:
      pm plan review              Review plan consistency (launches Claude)
      pm plan load                Load PRs from plan file
 
-  In the TUI, press P to open the plans view.  Plan action keys:
+  In the TUI, press p to open the plans view.  Plan action keys:
      a=add  w=breakdown  c=review  l=load  e=edit  v=view
 
   Working with PRs:

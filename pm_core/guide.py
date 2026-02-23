@@ -38,6 +38,17 @@ def is_setup_state(state: str) -> bool:
     return state in SETUP_STATES
 
 
+def needs_guide(root: Optional[Path]) -> bool:
+    """Return True if the guide should auto-launch (project is in setup).
+
+    Used by session startup to decide whether to start the notes pane
+    (skip it when the guide will auto-launch) and by the TUI to trigger
+    the guide pane on first load.
+    """
+    state, _ = detect_state(root)
+    return is_setup_state(state)
+
+
 def detect_state(root: Optional[Path]) -> tuple[str, dict]:
     """Read project state and return (state_name, context).
 
@@ -167,6 +178,27 @@ def build_setup_prompt(state: str, ctx: dict, root: Optional[Path],
 You are guiding a user through setting up their project with `pm` (Project Manager for Claude Code).
 You have access to the `pm` CLI — run `pm help` to see all commands.
 
+## About you and pm
+
+Start by briefly introducing yourself to the user. Tell them a bit about what
+you are and what you can do in relation to this tool — for example, that you
+can do many things only an expert programmer can normally do on a computer
+(reading codebases, writing and debugging code, managing git branches and pull
+requests), but that you can also explain individual concepts in plain language,
+teach programming step by step, and help people build things they couldn't
+build alone.
+
+`pm` is a project manager built specifically for working with machine
+intelligences like you. Its goal is to let people who have never programmed — or have
+programmed very little — build quality software and learn anything about
+programming or computers along the way. For experienced developers, pm
+accelerates development and handles the boring, repetitive parts so they can
+focus on what matters.
+
+The user may be a complete beginner or an expert. Either way, be encouraging
+and clear. If they seem unsure, explain what's happening and why. If they're
+experienced, keep it concise.
+
 ## Current Status
 {status_section}
 
@@ -197,35 +229,43 @@ goals for upcoming work.
 
 ### Creating a plan
 
-Tell the user to press `P` in the TUI to open the plans view, then press `a`
-to add a new plan. A dialog will ask for a name and description — help them
-choose good values based on what you learned about the codebase and their goals.
-The `a` action launches a Claude session in a new pane. Once it finishes, the
-user can close that pane before moving on.
+If you and the user have already discussed their goals and you have a good
+understanding of what the plan should cover, write a short summary to a file
+(e.g. `plans/notes.md`) before telling them to add the plan. Include what
+you learned about the codebase, the user's goals, and any decisions made.
+The user can then pass that file path to the add dialog so the plan session
+picks up where this conversation left off.
+
+Tell the user to press `p` in the TUI to open the plans view, then press `a`
+to add a new plan. A dialog will ask for a title or file path — if you wrote
+a notes file, tell them to enter that path; otherwise help them choose a good
+title based on what you learned about the codebase and their goals. The `a`
+action launches a session in a new pane. Once the plan session finishes,
+walk the user through the remaining steps below.
 
 ### Breaking the plan into PRs
 
 Tell the user to press `w` in the plans view to break the plan into PRs. This
-launches a Claude session that explores the codebase, writes the plan content,
-and adds a `## PRs` section with individual PR entries. Once the breakdown
-session finishes, the user can close that pane before moving on.
+launches a session that explores the codebase, writes the plan content,
+and adds a `## PRs` section with individual PR entries. Wait for it to finish,
+then continue to the next step.
 
 ### Reviewing the plan
 
 Tell the user to press `c` in the plans view to review the plan. This launches
-a Claude session that checks the plan and PRs for consistency. Once the review
-session finishes, the user can close that pane before moving on.
+a session that checks the plan and PRs for consistency. Wait for it to finish,
+then continue to the next step.
 
 ### Loading PRs
 
 Tell the user to press `l` in the plans view to load PRs from the plan file
-into the project. This runs instantly (no Claude session) — the TUI status bar
+into the project. This runs instantly (no session needed) — the TUI status bar
 shows progress and the tech tree updates when done.
 
 ### TUI plans view reference
 
-In the TUI, `P` toggles the plans view. The setup flow is `a` → `w` → `c` → `l`:
-- `a` — add a new plan (prompts for name and description)
+In the TUI, `p` toggles the plans view. The setup flow is `a` → `w` → `c` → `l`:
+- `a` — add a new plan (prompts for a title or file path)
 - `w` — break plan into PRs (launches a Claude session)
 - `c` — review plan (launches a Claude session)
 - `l` — load PRs from plan into the project
@@ -234,9 +274,13 @@ In the TUI, `P` toggles the plans view. The setup flow is `a` → `w` → `c` �
 
 ## Next Step
 
-Once PRs are loaded, tell the user to press `P` to leave the plans view.
-The TUI will show the PR tech tree. They can press `s` on a PR to start
-working on it.
+Once PRs are loaded, tell the user to press `p` to leave the plans view.
+The TUI will show the PR tech tree. Help them choose a good first PR to
+work on, then tell them to press `s` on it to start. This launches a session
+in a new pane focused on that PR.
+
+Once the first PR session is running, **it is safe to close this guide pane**.
+Tell the user.
 {notes_block}"""
 
 
@@ -295,6 +339,13 @@ def build_assist_prompt(data: dict, root: Optional[Path],
 ## You are helping someone who may be a novice programmer decide on their \
 next step.
 
+Start by briefly introducing yourself — tell the user a bit about what you are \
+and what you can do. For example, you can do many things only an expert \
+programmer can normally do on a computer, but you can also explain individual \
+concepts and guide complete beginners. The goal of pm is to let anyone — \
+regardless of experience — build quality code, learn about programming or \
+computers, and avoid boring repetitive work.
+
 ## Session Context
 
 Project: {project_name}
@@ -317,7 +368,7 @@ TUI (key shortcuts) or CLI commands:
 1. **Initialize** (`pm init` / guide auto-runs it): Set up pm for a \
 codebase. Creates a pm/ directory that tracks plans and PRs.
 
-2. **Plan** (TUI: `P` then `a` / CLI: `pm plan add`): Write a high-level \
+2. **Plan** (TUI: `p` then `a` / CLI: `pm plan add`): Write a high-level \
 plan describing a feature or goal. Plans are markdown files.
 
 3. **Break down** (TUI: `w` in plans view / CLI: `pm plan breakdown`): \
@@ -329,7 +380,7 @@ Claude session to check plan-PR consistency and coverage before loading.
 
 5. **Load** (TUI: `l` in plans view / CLI: `pm plan load`): Load PRs from \
 the plan file into the project. Runs instantly — no Claude session needed. \
-In the TUI, press `P` to leave plans view and see the tech tree.
+In the TUI, press `p` to leave plans view and see the tech tree.
 
 6. **Work** (TUI: `s` on a PR / CLI: `pm pr start`): Start a PR to open \
 a Claude session focused on that task. Claude works in a dedicated branch \

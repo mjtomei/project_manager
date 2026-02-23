@@ -17,6 +17,11 @@ The base pm tmux session is `{session_name}`. Use `-s {session_name}` with pm tu
 commands so they target the correct session even from workdir clones:
 - `pm tui view -s {session_name}` — capture and view the current TUI screen
 - `pm tui send <keys> -s {session_name}` — send keystrokes to the TUI (e.g. `pm tui send j` to move down)
+
+**Do not** run commands that spawn new Claude sessions yourself (e.g. `pm pr start`, \
+`pm pr done`, `pm plan add`, `pm plan breakdown`, `pm plan review`). These must be \
+triggered through the TUI so panes are managed correctly. Use `pm tui send` to press \
+the appropriate key in the TUI instead.
 """
 
 

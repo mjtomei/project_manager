@@ -429,6 +429,26 @@ def set_session_option(session: str, option: str, value: str, socket_path: str |
     )
 
 
+def set_shared_window_size(session: str, window: str) -> None:
+    """For shared sessions, set per-window window-size to smallest.
+
+    New tmux windows inherit ``window-size=latest`` by default, which
+    overrides the session-level ``smallest`` setting.  This helper
+    explicitly sets ``window-size=smallest`` on the window so that it
+    fits the smallest connected client in multi-user sessions.
+
+    No-op when ``PM_SHARE_MODE`` is not set (i.e. non-shared sessions).
+    """
+    if os.environ.get("PM_SHARE_MODE"):
+        subprocess.run(
+            _tmux_cmd(
+                "set-window-option", "-t", f"{session}:{window}",
+                "window-size", "smallest",
+            ),
+            capture_output=True,
+        )
+
+
 def current_or_base_session(base: str) -> str:
     """Return the best session to target for query operations.
 

@@ -129,7 +129,7 @@ class HelpScreen(ModalScreen):
                 yield Label("Test Navigation", classes="help-section")
                 yield Label("  [bold]↑↓[/] or [bold]jk[/]  Move selection", classes="help-row")
                 yield Label("  [bold]Enter[/]  Run selected test", classes="help-row")
-                yield Label("  [bold]T[/]  Back to tree view", classes="help-row")
+                yield Label("  [bold]t[/]  Back to tree view", classes="help-row")
             elif self._in_plans:
                 yield Label("Plan Navigation", classes="help-section")
                 yield Label("  [bold]↑↓[/] or [bold]jk[/]  Move selection", classes="help-row")
@@ -149,12 +149,11 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]J/K[/]  Jump to next/prev plan", classes="help-row")
                 yield Label("  [bold]x[/]  Hide/show plan group", classes="help-row")
                 yield Label("  [bold]X[/]  Toggle merged PRs", classes="help-row")
-                yield Label("  [bold]F[/]  Cycle status filter", classes="help-row")
-                yield Label("  [bold]Enter[/]  Edit selected PR", classes="help-row")
+                yield Label("  [bold]f[/]  Cycle status filter", classes="help-row")
                 yield Label("PR Actions", classes="help-section")
                 yield Label("  [bold]s[/]  Start selected PR", classes="help-row")
                 yield Label("  [bold]d[/]  Mark PR as done", classes="help-row")
-                yield Label("  [bold]e[/]  Edit selected PR", classes="help-row")
+                yield Label("  [bold]e[/] / [bold]Enter[/]  Edit selected PR", classes="help-row")
                 yield Label("  [bold]v[/]  View plan file", classes="help-row")
                 yield Label("  [bold]M[/]  Move to plan", classes="help-row")
             yield Label("Panes & Views", classes="help-section")
@@ -165,8 +164,8 @@ class HelpScreen(ModalScreen):
             yield Label("  [bold]n[/]  Open notes", classes="help-row")
             yield Label("  [bold]m[/]  Meta: work on pm itself", classes="help-row")
             yield Label("  [bold]L[/]  View TUI log", classes="help-row")
-            yield Label("  [bold]P[/]  Toggle plans view", classes="help-row")
-            yield Label("  [bold]T[/]  Toggle tests view", classes="help-row")
+            yield Label("  [bold]p[/]  Toggle plans view", classes="help-row")
+            yield Label("  [bold]t[/]  Toggle tests view", classes="help-row")
             yield Label("  [bold]b[/]  Rebalance panes", classes="help-row")
             yield Label("Other", classes="help-section")
             yield Label("  [bold]z[/]  Modifier: kill existing before next", classes="help-row")
@@ -320,7 +319,7 @@ class PlanPickerScreen(ModalScreen):
 
 
 class PlanAddScreen(ModalScreen):
-    """Modal for creating a new plan with name and optional description."""
+    """Modal for creating a new plan — accepts a title or file path."""
 
     BINDINGS = [
         Binding("escape", "cancel", "Cancel"),
@@ -360,11 +359,9 @@ class PlanAddScreen(ModalScreen):
         from textual.widgets import Input
         with Vertical(id="plan-add-container"):
             yield Label("New Plan", id="plan-add-title")
-            yield Label("Name [dim](required)[/]", classes="plan-add-label")
-            yield Input(placeholder="e.g. auth-refactor", id="plan-add-name")
-            yield Label("Description [dim](optional)[/]", classes="plan-add-label")
-            yield Input(placeholder="What should this plan accomplish?", id="plan-add-desc")
-            yield Label("[dim]Tab between fields · Enter to create · Esc to cancel[/]")
+            yield Label("Title or file path [dim](required)[/]", classes="plan-add-label")
+            yield Input(placeholder="e.g. auth-refactor or plans/auth.md", id="plan-add-name")
+            yield Label("[dim]Enter to create · Esc to cancel[/]")
 
     def on_mount(self) -> None:
         from textual.widgets import Input
@@ -373,16 +370,9 @@ class PlanAddScreen(ModalScreen):
     def on_input_submitted(self, event) -> None:
         from textual.widgets import Input
         name_input = self.query_one("#plan-add-name", Input)
-        desc_input = self.query_one("#plan-add-desc", Input)
-        if event.input is name_input:
-            # Enter on name field: move to description
-            desc_input.focus()
-        elif event.input is desc_input:
-            # Enter on description field: submit
-            name = name_input.value.strip()
-            if name:
-                desc = desc_input.value.strip()
-                self.dismiss((name, desc))
+        name = name_input.value.strip()
+        if name:
+            self.dismiss((name, ""))
 
     def action_cancel(self) -> None:
         self.dismiss(None)

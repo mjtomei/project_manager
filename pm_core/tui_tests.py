@@ -1133,12 +1133,12 @@ OVERALL: [PASS/FAIL]
 
 PLANS_PANE_TEST = """\
 You are testing the Plans Pane feature in the pm TUI. Your goal is to verify
-that pressing Shift+P toggles a plans view, that navigation works, and that
+that pressing p toggles a plans view, that navigation works, and that
 plan action shortcuts function correctly.
 
 ## Background
 
-The TUI has a plans view (toggled with Shift+P) that replaces the tech tree
+The TUI has a plans view (toggled with p) that replaces the tech tree
 with a scrollable list of plans. Each plan shows its ID, name, status, PR count,
 and intro text from the plan markdown file. The plans pane has its own keybindings
 for plan operations (view, edit, add, review, deps, load).
@@ -1167,7 +1167,7 @@ for plan operations (view, edit, add, review, deps, load).
 ### Part 1: Toggle Plans View
 
 1. Enter plans view:
-   - `pm tui send P` (Shift+P)
+   - `pm tui send p`
    - Wait 1 second
    - `pm tui view` - should show plans list instead of tech tree
    - Verify you can see:
@@ -1179,7 +1179,7 @@ for plan operations (view, edit, add, review, deps, load).
      * Shortcut hints at the bottom (view, edit, add, review, deps, load, back)
 
 2. Return to tree view:
-   - `pm tui send P` (Shift+P again)
+   - `pm tui send p`
    - Wait 1 second
    - `pm tui view` - should show tech tree again with PRs
    - Verify plans view is gone
@@ -1187,7 +1187,7 @@ for plan operations (view, edit, add, review, deps, load).
 ### Part 2: Navigation
 
 1. Enter plans view again:
-   - `pm tui send P`
+   - `pm tui send p`
    - Wait 1 second
 
 2. Navigate between plans:
@@ -1255,12 +1255,12 @@ for plan operations (view, edit, add, review, deps, load).
 
 ### Part 5: View Switching
 
-1. From plans view, press P to return to tree:
-   - `pm tui send P`
+1. From plans view, press p to return to tree:
+   - `pm tui send p`
    - `pm tui view` - verify tree is shown
 
-2. Press P to return to plans:
-   - `pm tui send P`
+2. Press p to return to plans:
+   - `pm tui send p`
    - `pm tui view` - verify plans shown again
 
 3. From plans view, verify that PR action keys (s, d, p) are blocked:
@@ -1271,24 +1271,24 @@ for plan operations (view, edit, add, review, deps, load).
 ### Part 6: Help Screen
 
 1. Return to tree view first:
-   - `pm tui send P` (if in plans view)
+   - `pm tui send p` (if in plans view)
 
 2. Open help screen:
    - `pm tui send ?`
    - `pm tui view` - verify help screen shows
-   - Verify "P" is listed under "Panes & Views" as "Toggle plans view"
+   - Verify "p" is listed under "Panes & Views" as "Toggle plans view"
    - `pm tui send Escape` to close help
 
 ### Part 7: Cleanup
 
 1. Kill any panes created during testing
-2. Return to tree view with P if in plans view
+2. Return to tree view with p if in plans view
 3. Verify TUI is responsive: `pm tui view`
 4. Final pane count should match initial count
 
 ## Expected Behavior
 
-- Shift+P toggles between plans view and tree view
+- p toggles between plans view and tree view
 - Plans view shows all plans with names, status, PR counts, and intro text
 - Navigation keys (Up/Down, j/k) move selection between plans
 - Enter and v open the plan file in a pane
@@ -1717,7 +1717,7 @@ OVERALL: [PASS/FAIL]
 
 WINDOW_RESIZE_REBALANCE_TEST = """\
 You are testing that pane layout automatically rebalances when the terminal
-window is resized — the core behavior of the window-size=latest grouped-session
+window is resized — the core behavior of the window-size=smallest grouped-session
 fix (PR-023). The test manually resizes the tmux window to simulate portrait
 and landscape aspect ratios, verifies the layout changes accordingly, and
 restores the original size at the end.
@@ -1726,13 +1726,13 @@ restores the original size at the end.
 
 When multiple terminals connect to the same pm session via grouped tmux
 sessions (e.g. a landscape monitor and a portrait monitor), each terminal may
-have different dimensions. With `window-size=latest`, the tmux window follows
-the most recently active client's size. A global `window-resized` hook
+have different dimensions. With `window-size=smallest`, the tmux window follows
+the smallest connected client's size. A global `window-resized` hook
 triggers `pm _window-resized` which calls `rebalance()`, recomputing the
 layout based on the new dimensions.
 
 Key implementation details:
-- `window-size=latest` is set on all sessions in the group
+- `window-size=smallest` is set on all sessions in the group
 - Global `window-resized` hook fires `run-shell 'pm _window-resized'`
 - `rebalance()` uses `w >= h * 2` to account for character aspect ratio (~2:1 h:w)
 - `is_mobile()` triggers for terminals narrower than 120 columns
@@ -1766,12 +1766,12 @@ Key implementation details:
 5. The session should have at least 2 panes for this test to be meaningful.
    If it doesn't, press 'n' to open notes pane.
 
-### Part 1: Verify window-size=latest
+### Part 1: Verify window-size=smallest
 
 1. Check the window-size setting:
-   - `tmux show-options -t <base> window-size` - should show "latest"
+   - `tmux show-options -t <base> window-size` - should show "smallest"
    - If grouped sessions exist, check one: `tmux show-options -t <base>~1 window-size`
-   - Both should show "latest"
+   - Both should show "smallest"
 
 2. Check the global window-resized hook:
    - `tmux show-hooks -g` - should include `window-resized[0] run-shell "pm _window-resized ..."`
@@ -1914,9 +1914,9 @@ IMPORTANT: Always restore the window to its original size!
 WINDOW RESIZE REBALANCE TEST RESULTS
 =====================================
 
-## Part 1: window-size=latest
-Base session has latest: [PASS/FAIL]
-Grouped session has latest: [PASS/FAIL]
+## Part 1: window-size=smallest
+Base session has smallest: [PASS/FAIL]
+Grouped session has smallest: [PASS/FAIL]
 Global hook exists: [PASS/FAIL]
 
 ## Part 2: Landscape Layout (200x50) — via resize-window
@@ -2333,14 +2333,14 @@ Status icons used: ○ pending, ● in_progress, ◎ in_review, ✓ merged, ✗ 
 3. Run `pm tui view` to verify TUI is running and showing the tech tree
 4. If in guide mode, press 'x' to dismiss
 
-### Part 1: Status Filter Cycling (F key)
+### Part 1: Status Filter Cycling (f key)
 
 1. Start state — no filter (all PRs shown):
    - `pm tui view` - count the total number of PR nodes visible
    - This should match the total from `pm pr list`
 
 2. First press — filter to "pending":
-   - `pm tui send F`
+   - `pm tui send f`
    - Wait 1 second
    - `pm tui view`
    - Log line should show "Filter: ○ pending"
@@ -2348,35 +2348,35 @@ Status icons used: ○ pending, ● in_progress, ◎ in_review, ✓ merged, ✗ 
    - If no pending PRs exist, the tree should be empty or show a message
 
 3. Second press — filter to "in_progress":
-   - `pm tui send F`
+   - `pm tui send f`
    - Wait 1 second
    - `pm tui view`
    - Log line should show "Filter: ● in_progress"
    - Count visible PR nodes — should match in_progress count
 
 4. Third press — filter to "in_review":
-   - `pm tui send F`
+   - `pm tui send f`
    - Wait 1 second
    - `pm tui view`
    - Log line should show "Filter: ◎ in_review"
    - Count visible PR nodes — should match in_review count
 
 5. Fourth press — filter to "merged":
-   - `pm tui send F`
+   - `pm tui send f`
    - Wait 1 second
    - `pm tui view`
    - Log line should show "Filter: ✓ merged"
    - Count visible PR nodes — should match merged count
 
 6. Fifth press — filter to "closed":
-   - `pm tui send F`
+   - `pm tui send f`
    - Wait 1 second
    - `pm tui view`
    - Log line should show "Filter: ✗ closed"
    - Count visible PR nodes — should match closed count
 
 7. Sixth press — back to "all":
-   - `pm tui send F`
+   - `pm tui send f`
    - Wait 1 second
    - `pm tui view`
    - Log line should show "Filter: all"
@@ -2384,7 +2384,7 @@ Status icons used: ○ pending, ● in_progress, ◎ in_review, ✓ merged, ✗ 
 
 ### Part 2: Merged Toggle (X key)
 
-1. Reset to show all (press F until "Filter: all" appears, or it already is)
+1. Reset to show all (press f until "Filter: all" appears, or it already is)
 
 2. First toggle — hide merged:
    - `pm tui send X`
@@ -2411,13 +2411,13 @@ Status icons used: ○ pending, ● in_progress, ◎ in_review, ✓ merged, ✗ 
    - `pm tui send X` (should show "Merged PRs hidden")
 
 2. Apply a status filter:
-   - `pm tui send F` to filter to "pending"
+   - `pm tui send f` to filter to "pending"
    - `pm tui view`
    - Only pending PRs should show (merged toggle doesn't matter since
      we're filtering to pending specifically)
 
 3. Cycle back to "all":
-   - Press F until "Filter: all" appears
+   - Press f until "Filter: all" appears
    - `pm tui view`
    - With no status filter but merged hidden, all non-merged PRs should show
 
@@ -2428,7 +2428,7 @@ Status icons used: ○ pending, ● in_progress, ◎ in_review, ✓ merged, ✗ 
 ### Part 4: Status Bar Filter Indicator
 
 1. Apply a filter:
-   - `pm tui send F`
+   - `pm tui send f`
    - `pm tui view`
    - Check the status bar (bottom of TUI) for a filter indicator
    - It should show something like "filter: ○ pending"

@@ -44,9 +44,9 @@ def get_reliable_window_size(
 
     Grouped tmux sessions share windows but only the session with an
     attached client reports a non-zero size.  For shared sessions with
-    multiple clients, returns the *maximum* size across all attached
-    sessions so that rebalance doesn't squish panes when a smaller
-    client becomes active.
+    multiple clients, returns the *minimum* non-zero size across all
+    attached sessions so that panes fit on the smallest monitor and
+    everyone can see the full layout without scrolling.
 
     Fallback chain for finding a non-zero size:
 
@@ -75,21 +75,18 @@ def get_reliable_window_size(
     grouped = tmux_mod.list_grouped_sessions(base)
 
     # If there are multiple grouped sessions (multi-client), find the
-    # maximum size so we don't squish panes for smaller clients.
-    # Note: w and h are maximised independently, so the result may not
-    # match any single client.  This is intentional — panes are never
-    # hidden, though a smaller client may need to scroll.
+    # minimum non-zero size so panes fit on the smallest connected
+    # monitor.  This ensures all clients can see the full layout.
     if grouped:
-        max_w, max_h = 0, 0
+        min_w, min_h = 0, 0
         all_sessions = list(dict.fromkeys(candidates + [base] + grouped))
         for s in all_sessions:
             w, h = tmux_mod.get_window_size(s, window)
-            if w > max_w:
-                max_w = w
-            if h > max_h:
-                max_h = h
-        if max_w > 0 and max_h > 0:
-            return max_w, max_h
+            if w > 0 and h > 0:
+                min_w = w if min_w == 0 else min(min_w, w)
+                min_h = h if min_h == 0 else min(min_h, h)
+        if min_w > 0 and min_h > 0:
+            return min_w, min_h
 
     # Single client: return first non-zero size
     for s in candidates:
@@ -147,8 +144,8 @@ def set_force_mobile(session: str, enabled: bool) -> None:
 def is_mobile(session: str, window: str = "0") -> bool:
     """Check if mobile mode is active (force flag or narrow terminal).
 
-    With window-size=latest, the window size reflects the most recently
-    active client, so we only need to check the current window size.
+    With window-size=smallest, the window size reflects the smallest
+    connected client, so we only need to check the current window size.
     """
     if mobile_flag_path(session).exists():
         _logger.info("is_mobile(%s, %s): True (force flag)", session, window)
@@ -493,6 +490,7 @@ def _respawn_tui(session: str, window: str) -> str:
             # Window is gone (TUI was the last pane) — create a new one
             _logger.info("_respawn_tui: window %s gone, creating new window", window)
             pane_id, window = tmux_mod.create_window(session, "pm _tui")
+            tmux_mod.set_shared_window_size(session, window)
             # Switch the client to the new window so the user sees it
             tmux_mod.select_window(session, window)
 
