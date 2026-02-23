@@ -923,61 +923,33 @@ def pr_merge(pr_id: str | None):
             click.echo("No GitHub PR URL found. Merge manually on GitHub, then run 'pm pr sync'.")
         return
 
-    # For local/vanilla: find a workdir to merge from
+    # For local/vanilla: merge in the PR's workdir (branch always exists there)
     workdir = pr_entry.get("workdir")
     if not workdir or not Path(workdir).exists():
-        # Try to find any workdir
-        workdir = None
-        for p in (data.get("prs") or []):
-            wd = p.get("workdir")
-            if wd and Path(wd).exists() and git_ops.is_git_repo(wd):
-                workdir = wd
-                break
-    if not workdir:
-        click.echo("No workdir found. Start a PR first.", err=True)
+        click.echo(f"PR {pr_id} workdir not found. Cannot merge without the branch.", err=True)
         raise SystemExit(1)
 
-    # Resolve the repo root (for local backend, merge happens in the original repo)
-    repo_url = data["project"].get("repo", "")
+    click.echo(f"Merging {branch} into {base_branch}...")
+    result = git_ops.run_git("checkout", base_branch, cwd=workdir, check=False)
+    if result.returncode != 0:
+        click.echo(f"Failed to checkout {base_branch}: {result.stderr.strip()}", err=True)
+        raise SystemExit(1)
+    result = git_ops.run_git("merge", "--no-ff", branch, "-m",
+                             f"Merge {branch}: {pr_entry.get('title', pr_id)}",
+                             cwd=workdir, check=False)
+    if result.returncode != 0:
+        click.echo(f"Merge failed: {result.stderr.strip()}", err=True)
+        click.echo("Resolve conflicts manually, then run 'pm pr sync'.", err=True)
+        raise SystemExit(1)
 
-    if backend_name == "local":
-        # For local backend, merge in the original repo
-        repo_dir = repo_url if Path(repo_url).exists() else str(Path(workdir))
-        click.echo(f"Merging {branch} into {base_branch} in {repo_dir}...")
-        # Checkout base branch and merge
-        result = git_ops.run_git("checkout", base_branch, cwd=repo_dir, check=False)
-        if result.returncode != 0:
-            click.echo(f"Failed to checkout {base_branch}: {result.stderr.strip()}", err=True)
-            raise SystemExit(1)
-        result = git_ops.run_git("merge", "--no-ff", branch, "-m",
-                                 f"Merge {branch}: {pr_entry.get('title', pr_id)}",
-                                 cwd=repo_dir, check=False)
-        if result.returncode != 0:
-            click.echo(f"Merge failed: {result.stderr.strip()}", err=True)
-            click.echo("Resolve conflicts manually, then run 'pm pr sync'.", err=True)
-            raise SystemExit(1)
-        click.echo(f"Merged {branch} into {base_branch}.")
+    # Push the merged base_branch back to origin (works for both bare and
+    # non-bare repos).  For local backend, origin is the original repo path.
+    push_result = git_ops.run_git("push", "origin", base_branch, cwd=workdir, check=False)
+    if push_result.returncode != 0:
+        click.echo(f"Warning: Push failed: {push_result.stderr.strip()}", err=True)
+        click.echo("The merge is in the workdir. Push or pull manually when ready.")
     else:
-        # Vanilla: merge in workdir and push
-        click.echo(f"Merging {branch} into {base_branch}...")
-        result = git_ops.run_git("checkout", base_branch, cwd=workdir, check=False)
-        if result.returncode != 0:
-            click.echo(f"Failed to checkout {base_branch}: {result.stderr.strip()}", err=True)
-            raise SystemExit(1)
-        result = git_ops.run_git("merge", "--no-ff", branch, "-m",
-                                 f"Merge {branch}: {pr_entry.get('title', pr_id)}",
-                                 cwd=workdir, check=False)
-        if result.returncode != 0:
-            click.echo(f"Merge failed: {result.stderr.strip()}", err=True)
-            click.echo("Resolve conflicts manually, then run 'pm pr sync'.", err=True)
-            raise SystemExit(1)
-        # Push the merge
-        push_result = git_ops.run_git("push", "origin", base_branch, cwd=workdir, check=False)
-        if push_result.returncode != 0:
-            click.echo(f"Warning: Push failed: {push_result.stderr.strip()}", err=True)
-            click.echo("The merge is local. Push manually when ready.")
-        else:
-            click.echo(f"Pushed merged {base_branch} to origin.")
+        click.echo(f"Pushed merged {base_branch} to origin.")
 
     # Update status
     pr_entry["status"] = "merged"
