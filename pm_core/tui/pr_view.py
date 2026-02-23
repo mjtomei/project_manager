@@ -14,7 +14,7 @@ from pm_core.tui._shell import _run_shell, _run_shell_async
 _log = configure_logger("pm.tui.pr_view")
 
 # PR command prefixes that require in-flight action guarding
-PR_ACTION_PREFIXES = ("pr start", "pr done", "pr review", "pr merge")
+PR_ACTION_PREFIXES = ("pr start", "pr review", "pr merge")
 
 
 # ---------------------------------------------------------------------------
@@ -91,30 +91,12 @@ def start_pr(app) -> None:
 
 
 def done_pr(app, fresh: bool = False) -> None:
-    """Mark the selected PR as done."""
+    """Mark the selected PR as in_review and open a review window."""
     from pm_core.tui.tech_tree import TechTree
 
     tree = app.query_one("#tech-tree", TechTree)
     pr_id = tree.selected_pr_id
     _log.info("action: done_pr selected=%s fresh=%s", pr_id, fresh)
-    if not pr_id:
-        app.log_message("No PR selected")
-        return
-    action_key = f"Completing {pr_id}" + (" (fresh)" if fresh else "")
-    if not guard_pr_action(app, action_key):
-        return
-    app._inflight_pr_action = action_key
-    cmd = f"pr done --fresh {pr_id}" if fresh else f"pr done {pr_id}"
-    run_command(app, cmd, working_message=action_key, action_key=action_key)
-
-
-def review_pr(app, fresh: bool = False) -> None:
-    """Launch review window for the selected PR without changing status."""
-    from pm_core.tui.tech_tree import TechTree
-
-    tree = app.query_one("#tech-tree", TechTree)
-    pr_id = tree.selected_pr_id
-    _log.info("action: review_pr selected=%s fresh=%s", pr_id, fresh)
     if not pr_id:
         app.log_message("No PR selected")
         return
@@ -362,7 +344,7 @@ def handle_command_submitted(app, cmd: str) -> None:
     # Handle auto-start commands
     if cmd in ("autostart", "auto-start", "auto start"):
         from pm_core.tui.auto_start import toggle
-        toggle(app)
+        app.run_worker(toggle(app))
         app.query_one("#tech-tree", TechTree).focus()
         return
     if cmd.startswith("autostart target ") or cmd.startswith("auto-start target ") or cmd.startswith("auto start target "):
@@ -388,9 +370,9 @@ def handle_command_submitted(app, cmd: str) -> None:
         if cmd.startswith("pr start"):
             pr_id = parts[-1] if len(parts) >= 3 else "PR"
             working_message = f"Starting {pr_id}"
-        elif cmd.startswith("pr done"):
+        elif cmd.startswith("pr review"):
             pr_id = parts[-1] if len(parts) >= 3 else "PR"
-            working_message = f"Completing {pr_id}"
+            working_message = f"Reviewing {pr_id}"
 
         run_command(app, cmd, working_message=working_message, action_key=action_key)
     if app._plans_visible:

@@ -417,7 +417,8 @@ In the TUI, press `p` to leave plans view and see the tech tree.
 a Claude session focused on that task. Claude works in a dedicated branch \
 and directory.
 
-7. **Done** (TUI: `d` on a PR / CLI: `pm pr done`): Mark a PR as done. \
+7. **Review** (TUI: `d` on a PR / CLI: `pm pr review`): Mark a PR as ready \
+for review. \
 This pushes the branch, creates a GitHub pull request, and opens a new \
 tmux window with a Claude review session that checks the code.
 

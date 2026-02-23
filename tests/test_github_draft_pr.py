@@ -1,4 +1,4 @@
-"""Tests for GitHub draft PR workflow in pr_start and pr_done."""
+"""Tests for GitHub draft PR workflow in pr_start and pr_review."""
 
 import json
 from pathlib import Path
@@ -321,10 +321,10 @@ class TestPrStartCreatesDraftPr:
 
 @mock.patch.object(pr_mod, "_launch_review_window")
 class TestPrDoneUpgradesDraftPr:
-    """Tests for draft PR upgrade during pr_done."""
+    """Tests for draft PR upgrade during pr_review."""
 
     def test_upgrades_draft_to_ready_for_github_backend(self, _mock_review, tmp_project_with_pr, mock_gh_ops):
-        """pr_done should upgrade draft PR to ready for review."""
+        """pr_review should upgrade draft PR to ready for review."""
         # Set up PR as in_progress
         data = store.load(tmp_project_with_pr["pm_dir"])
         pr = store.get_pr(data, "pr-001")
@@ -335,7 +335,7 @@ class TestPrDoneUpgradesDraftPr:
         runner = CliRunner()
 
         with mock.patch.object(pr_mod, "state_root", return_value=tmp_project_with_pr["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["done", "pr-001"])
+            result = runner.invoke(pr_mod.pr, ["review", "pr-001"])
 
         assert result.exit_code == 0
 
@@ -350,7 +350,7 @@ class TestPrDoneUpgradesDraftPr:
         assert pr["status"] == "in_review"
 
     def test_skips_upgrade_if_no_gh_pr(self, _mock_review, tmp_project_with_pr, mock_gh_ops):
-        """pr_done should skip upgrade if no gh_pr is set."""
+        """pr_review should skip upgrade if no gh_pr is set."""
         # Remove gh_pr
         data = store.load(tmp_project_with_pr["pm_dir"])
         pr = store.get_pr(data, "pr-001")
@@ -363,7 +363,7 @@ class TestPrDoneUpgradesDraftPr:
         runner = CliRunner()
 
         with mock.patch.object(pr_mod, "state_root", return_value=tmp_project_with_pr["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["done", "pr-001"])
+            result = runner.invoke(pr_mod.pr, ["review", "pr-001"])
 
         assert result.exit_code == 0
 
@@ -371,7 +371,7 @@ class TestPrDoneUpgradesDraftPr:
         mock_gh_ops["mark_pr_ready"].assert_not_called()
 
     def test_handles_upgrade_failure_gracefully(self, _mock_review, tmp_project_with_pr, mock_gh_ops):
-        """pr_done should continue if upgrade fails."""
+        """pr_review should continue if upgrade fails."""
         mock_gh_ops["mark_pr_ready"].return_value = False
 
         data = store.load(tmp_project_with_pr["pm_dir"])
@@ -383,7 +383,7 @@ class TestPrDoneUpgradesDraftPr:
         runner = CliRunner()
 
         with mock.patch.object(pr_mod, "state_root", return_value=tmp_project_with_pr["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["done", "pr-001"])
+            result = runner.invoke(pr_mod.pr, ["review", "pr-001"])
 
         assert result.exit_code == 0
         assert "Warning" in result.output
@@ -394,7 +394,7 @@ class TestPrDoneUpgradesDraftPr:
         assert pr["status"] == "in_review"
 
     def test_no_upgrade_for_vanilla_backend(self, _mock_review, tmp_project_with_pr, mock_gh_ops):
-        """pr_done should not upgrade for vanilla backend."""
+        """pr_review should not upgrade for vanilla backend."""
         data = store.load(tmp_project_with_pr["pm_dir"])
         data["project"]["backend"] = "vanilla"
         pr = store.get_pr(data, "pr-001")
@@ -405,7 +405,7 @@ class TestPrDoneUpgradesDraftPr:
         runner = CliRunner()
 
         with mock.patch.object(pr_mod, "state_root", return_value=tmp_project_with_pr["pm_dir"]):
-            result = runner.invoke(pr_mod.pr, ["done", "pr-001"])
+            result = runner.invoke(pr_mod.pr, ["review", "pr-001"])
 
         assert result.exit_code == 0
         mock_gh_ops["mark_pr_ready"].assert_not_called()

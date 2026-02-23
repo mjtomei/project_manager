@@ -433,7 +433,7 @@ def _getting_started_text() -> str:
 
   Working with PRs:
      pm pr start                 Clone, branch, launch Claude session
-     pm pr done                  Mark PR as done, push branch
+     pm pr review                Mark PR as in_review, open review window
      pm pr sync                  Check for merges, unblock dependents
      pm push                     Commit and share pm/ changes
 
@@ -477,7 +477,7 @@ COMMANDS
   pm pr graph                   Show dependency tree
   pm pr ready                   Show PRs ready to start
   pm pr start [pr-id]           Clone, branch, launch Claude (tmux window or blocking)
-  pm pr done [pr-id]            Mark PR as in_review, open review window
+  pm pr review [pr-id]          Mark PR as in_review, open review window
   pm pr sync                    Check for merged PRs
   pm pr sync-github             Fetch and update PR statuses from GitHub
   pm pr import-github           Import existing GitHub PRs into project yaml

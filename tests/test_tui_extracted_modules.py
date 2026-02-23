@@ -107,7 +107,7 @@ class TestPrViewImports:
         from pm_core.tui.pr_view import PR_ACTION_PREFIXES
         assert isinstance(PR_ACTION_PREFIXES, tuple)
         assert "pr start" in PR_ACTION_PREFIXES
-        assert "pr done" in PR_ACTION_PREFIXES
+        assert "pr review" in PR_ACTION_PREFIXES
 
     def test_guard_pr_action(self):
         from pm_core.tui.pr_view import guard_pr_action

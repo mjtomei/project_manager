@@ -349,7 +349,7 @@ Common keyboard shortcuts in the TUI:
 Common commands:
 - pm pr list: List all PRs
 - pm pr start <id>: Start a PR
-- pm pr done <id>: Mark PR as done
+- pm pr review <id>: Mark PR as done
 - pm plan list: List plans
 - pm plan add <name>: Add a new plan
 

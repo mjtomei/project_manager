@@ -106,7 +106,7 @@ This session is managed by `pm`. Run `pm help` to see available commands.
 ## Tips
 - This session may be resuming after a restart. Check `git status` and `git log` to see if previous work exists on this branch — if so, continue from there.
 - Before referencing existing code (imports, function calls, class usage), read the source to verify the interface.
-- This workdir is a clone managed by pm. The base pm state (project.yaml, PR status) lives in a separate directory and is not automatically synced with this clone. Commands like `pm pr start` and `pm pr done` should be run from the base directory, not here — your session for {pr_id} is already running.
+- This workdir is a clone managed by pm. The base pm state (project.yaml, PR status) lives in a separate directory and is not automatically synced with this clone. Commands like `pm pr start` and `pm pr review` should be run from the base directory, not here — your session for {pr_id} is already running.
 
 ## Workflow
 {instructions}

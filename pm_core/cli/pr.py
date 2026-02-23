@@ -300,7 +300,7 @@ def pr_select(pr_id: str):
     """Set the active PR.
 
     The active PR is used as the default when commands like pm pr start,
-    pm pr done, pm prompt, etc. are run without specifying a PR ID.
+    pm pr review, pm prompt, etc. are run without specifying a PR ID.
     """
     root = state_root()
     data = store.load(root)
@@ -785,14 +785,14 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         click.echo(f"Review window error: {e}")
 
 
-@pr.command("done")
+@pr.command("review")
 @click.argument("pr_id", default=None, required=False)
 @click.option("--fresh", is_flag=True, default=False, help="Kill existing review window and create a new one")
 @click.option("--review-loop", is_flag=True, default=False, help="Use review loop prompt (fix/commit/push)")
 @click.option("--review-iteration", default=0, type=int, help="Review loop iteration number (for commit messages)")
 @click.option("--review-loop-id", default="", help="Unique review loop identifier (for commit messages)")
-def pr_done(pr_id: str | None, fresh: bool, review_loop: bool, review_iteration: int, review_loop_id: str):
-    """Mark a PR as in_review.
+def pr_review(pr_id: str | None, fresh: bool, review_loop: bool, review_iteration: int, review_loop_id: str):
+    """Mark a PR as in_review and launch a review window.
 
     If PR_ID is omitted, infers from cwd (if inside a workdir) or
     auto-selects when there's exactly one in_progress PR.
@@ -806,7 +806,7 @@ def pr_done(pr_id: str | None, fresh: bool, review_loop: bool, review_iteration:
             prs = data.get("prs") or []
             in_progress = [p for p in prs if p.get("status") == "in_progress"]
             if len(in_progress) == 0:
-                click.echo("No in_progress PRs to mark done.", err=True)
+                click.echo("No in_progress PRs to review.", err=True)
             else:
                 click.echo("Multiple in_progress PRs. Specify one:", err=True)
                 for p in in_progress:
@@ -844,41 +844,12 @@ def pr_done(pr_id: str | None, fresh: bool, review_loop: bool, review_iteration:
             click.echo("Warning: Failed to upgrade draft PR. It may already be ready or was closed.", err=True)
 
     pr_entry["status"] = "in_review"
-    save_and_push(data, root, f"pm: done {pr_id}")
+    save_and_push(data, root, f"pm: review {pr_id}")
     click.echo(f"PR {_pr_display_id(pr_entry)} marked as in_review.")
     trigger_tui_refresh()
     _launch_review_window(data, pr_entry, fresh=fresh, review_loop=review_loop,
                           review_iteration=review_iteration,
                           review_loop_id=review_loop_id)
-
-
-@pr.command("review")
-@click.argument("pr_id", default=None, required=False)
-@click.option("--fresh", is_flag=True, default=False, help="Kill existing review window and create a new one")
-def pr_review(pr_id: str | None, fresh: bool):
-    """Launch a review window for a PR without changing its status.
-
-    Useful for re-reviewing a PR that's already in_review or in_progress.
-    If PR_ID is omitted, infers from cwd or auto-selects.
-    """
-    root = state_root()
-    data = store.load(root)
-
-    if pr_id is None:
-        pr_id = _infer_pr_id(data, status_filter=("in_review", "in_progress"))
-        if pr_id is None:
-            click.echo("No in_progress or in_review PR to review.", err=True)
-            raise SystemExit(1)
-        click.echo(f"Auto-selected {pr_id}")
-
-    pr_entry = _require_pr(data, pr_id)
-    pr_id = pr_entry["id"]
-
-    if not pr_entry.get("workdir"):
-        click.echo(f"PR {pr_id} has no workdir. Start it first with: pm pr start {pr_id}", err=True)
-        raise SystemExit(1)
-
-    _launch_review_window(data, pr_entry, fresh=fresh)
 
 
 def _finalize_merge(data: dict, root, pr_entry: dict, pr_id: str) -> None:

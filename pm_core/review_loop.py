@@ -1,6 +1,6 @@
 """Review loop: repeatedly run Claude review until PASS.
 
-The loop launches a visible tmux review window (via ``pm pr done
+The loop launches a visible tmux review window (via ``pm pr review
 --fresh --review-loop``) and polls the Claude pane with
 ``tmux capture-pane`` to detect the verdict.
 
@@ -116,9 +116,9 @@ def _compute_review_window_name(pr_data: dict) -> str:
 
 def _launch_review_window(pr_id: str, pm_root: str, iteration: int = 0,
                           loop_id: str = "") -> None:
-    """Launch a review window via ``pm pr done --fresh --review-loop``."""
+    """Launch a review window via ``pm pr review --fresh --review-loop``."""
     cmd = [sys.executable, "-m", "pm_core.wrapper",
-           "pr", "done", "--fresh", "--review-loop",
+           "pr", "review", "--fresh", "--review-loop",
            "--review-iteration", str(iteration)]
     if loop_id:
         cmd.extend(["--review-loop-id", loop_id])
@@ -363,7 +363,7 @@ def run_review_loop_sync(
 
     Args:
         state: Mutable state object — the caller can read it to track progress.
-        pm_root: Path to the pm project root (for running ``pm pr done``).
+        pm_root: Path to the pm project root (for running ``pm pr review``).
         pr_data: The PR dict from project data.
         on_iteration: Optional callback fired after each iteration completes.
         max_iterations: Safety cap on number of iterations.

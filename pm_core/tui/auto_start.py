@@ -1,14 +1,16 @@
 """Auto-start mode: automatically start ready PRs and optionally review loops.
 
 When enabled, after each sync cycle detects merged PRs, the auto-start
-logic checks for newly ready PRs (pending, all deps merged) and kicks
-them off without changing TUI focus.
+logic checks for newly ready PRs (pending, all deps merged) that are in
+the transitive dependency tree of the target PR, and kicks them off
+without changing TUI focus.
 
 Settings stored in project.yaml under ``project``:
   auto_start: true/false
-  auto_start_target: <pr_id>   # optional — stop after this PR is started
+  auto_start_target: <pr_id>   # the PR we're working towards
 
-Toggle via TUI key ``A`` or command bar: ``autostart``.
+Toggle via TUI key ``A`` (sets selected PR as target) or command bar:
+``autostart``.
 """
 
 import sys
@@ -30,43 +32,55 @@ def get_target(app) -> str | None:
     return app._data.get("project", {}).get("auto_start_target")
 
 
-def toggle(app, selected_pr_id: str | None = None) -> None:
-    """Toggle auto-start mode or set target PR.
+def _transitive_deps(prs: list[dict], target_id: str) -> set[str]:
+    """Return the set of all PR IDs that ``target_id`` transitively depends on."""
+    pr_map = {pr["id"]: pr for pr in prs}
+    deps = set()
+    stack = [target_id]
+    while stack:
+        pr_id = stack.pop()
+        pr = pr_map.get(pr_id)
+        if not pr:
+            continue
+        for dep_id in pr.get("depends_on") or []:
+            if dep_id not in deps:
+                deps.add(dep_id)
+                stack.append(dep_id)
+    return deps
 
-    - If auto-start is OFF: turn it ON (optionally set selected PR as target)
-    - If auto-start is ON and a PR is selected: set/clear that PR as target
-    - If auto-start is ON and no PR selected: turn it OFF
+
+async def toggle(app, selected_pr_id: str | None = None) -> None:
+    """Toggle auto-start mode.
+
+    - If auto-start is OFF: turn it ON with the selected PR as target,
+      then immediately start any ready PRs in the target's dep tree.
+    - If auto-start is ON: turn it OFF.
     """
     project = app._data.setdefault("project", {})
     current = project.get("auto_start", False)
 
     if not current:
-        # Turn ON, optionally set target to selected PR
+        # Turn ON — always set target to selected PR
         project["auto_start"] = True
         if selected_pr_id:
             project["auto_start_target"] = selected_pr_id
-            app.log_message(f"Auto-start: ON (target: {selected_pr_id})")
+            app.log_message(f"Auto-start: ON → {selected_pr_id}")
         else:
-            app.log_message("Auto-start: ON")
-    elif selected_pr_id:
-        # Already ON — toggle target on selected PR
-        current_target = project.get("auto_start_target")
-        if current_target == selected_pr_id:
-            project.pop("auto_start_target", None)
-            app.log_message(f"Auto-start target cleared (was {selected_pr_id})")
-        else:
-            project["auto_start_target"] = selected_pr_id
-            app.log_message(f"Auto-start target: {selected_pr_id}")
+            app.log_message("Auto-start: ON (no target — all ready PRs)")
+        store.save(app._data, app._root)
+        _log.info("auto_start: enabled=%s target=%s",
+                  project.get("auto_start"), project.get("auto_start_target"))
+        app._update_display()
+        # Immediately start any ready PRs
+        await check_and_start(app)
     else:
-        # Already ON, no PR selected — turn OFF
+        # Turn OFF
         project["auto_start"] = False
         project.pop("auto_start_target", None)
         app.log_message("Auto-start: OFF")
-
-    store.save(app._data, app._root)
-    _log.info("auto_start: enabled=%s target=%s",
-              project.get("auto_start"), project.get("auto_start_target"))
-    app._update_display()
+        store.save(app._data, app._root)
+        _log.info("auto_start: disabled")
+        app._update_display()
 
 
 def set_target(app, pr_id: str | None) -> None:
@@ -82,10 +96,11 @@ def set_target(app, pr_id: str | None) -> None:
 
 
 async def check_and_start(app) -> None:
-    """Check for ready PRs and auto-start them.
+    """Check for ready PRs and auto-start those needed for the target.
 
-    Called after sync detects merged PRs. Starts ready PRs one at a
-    time via ``pm pr start`` without changing TUI focus.
+    Called after sync detects merged PRs. When a target is set, only
+    starts ready PRs that are transitive dependencies of the target (or
+    the target itself). Without a target, starts all ready PRs.
     """
     if not is_enabled(app):
         return
@@ -100,8 +115,19 @@ async def check_and_start(app) -> None:
     target = get_target(app)
     target_reached = False
 
+    # Compute which PRs are relevant for the target
+    if target:
+        allowed = _transitive_deps(prs, target)
+        allowed.add(target)  # the target itself is also eligible
+    else:
+        allowed = None  # no target = start everything
+
     for pr in ready:
         pr_id = pr["id"]
+
+        # Skip PRs outside the target's dependency tree
+        if allowed is not None and pr_id not in allowed:
+            continue
 
         # Skip if already has a workdir (was previously started)
         if pr.get("workdir"):
@@ -136,23 +162,35 @@ async def check_and_start(app) -> None:
         app.log_message("Auto-start: disabled (target reached)")
 
     # Also auto-start review loops for in_review PRs without active loops
-    _auto_start_review_loops(app)
+    _auto_start_review_loops(app, target, prs)
 
 
-def _auto_start_review_loops(app) -> None:
+def _auto_start_review_loops(app, target: str | None = None,
+                              prs: list[dict] | None = None) -> None:
     """Start review loops for in_review PRs that don't have one running.
 
-    Only activates when auto-start mode is enabled. Starts normal review
-    loops (stop on PASS or PASS_WITH_SUGGESTIONS).
+    Only activates when auto-start mode is enabled. When a target is set,
+    only starts loops for PRs in the target's dependency tree.
     """
     if not is_enabled(app):
         return
 
-    prs = app._data.get("prs") or []
+    if prs is None:
+        prs = app._data.get("prs") or []
+
+    # Scope to target's dependency tree if set
+    if target:
+        allowed = _transitive_deps(prs, target)
+        allowed.add(target)
+    else:
+        allowed = None
+
     for pr in prs:
         if pr.get("status") != "in_review":
             continue
         pr_id = pr["id"]
+        if allowed is not None and pr_id not in allowed:
+            continue
         # Skip if a review loop is already running or completed for this PR
         loop = app._review_loops.get(pr_id)
         if loop:
@@ -164,7 +202,7 @@ def _auto_start_review_loops(app) -> None:
         _log.info("auto_start: starting review loop for %s", pr_id)
         app.log_message(f"Auto-start: review loop for {pr_id}")
         from pm_core.tui.review_loop_ui import _start_loop
-        _start_loop(app, pr_id, pr, stop_on_suggestions=True)
+        _start_loop(app, pr_id, pr, stop_on_suggestions=False)
 
 
 async def _start_pr_quiet(app, pr_id: str) -> None:

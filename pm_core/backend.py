@@ -53,7 +53,7 @@ class LocalBackend(Backend):
         return (
             f"- You're on branch `{branch}`\n"
             f"- Commit as you go\n"
-            f"- When ready for review: press `d` in the TUI or run `pm pr done {pr_id}` from the base pm directory (not from this workdir)"
+            f"- When ready for review: press `d` in the TUI or run `pm pr review {pr_id}` from the base pm directory (not from this workdir)"
         )
 
 
@@ -84,7 +84,7 @@ class VanillaBackend(Backend):
         return (
             f"- You're on branch `{branch}`\n"
             f"- Commit and push as you go: `git push origin {branch}`\n"
-            f"- When ready for review: press `d` in the TUI or run `pm pr done {pr_id}` from the base pm directory (not from this workdir)"
+            f"- When ready for review: press `d` in the TUI or run `pm pr review {pr_id}` from the base pm directory (not from this workdir)"
         )
 
 
@@ -99,14 +99,14 @@ class GitHubBackend(Backend):
             return (
                 f"- You're on branch `{branch}` with a draft PR: {gh_pr_url}\n"
                 f"- Commit and push as you go: `git push origin {branch}`\n"
-                f"- When ready for review: press `d` in the TUI or run `pm pr done {pr_id}` from the base pm directory (not from this workdir)"
+                f"- When ready for review: press `d` in the TUI or run `pm pr review {pr_id}` from the base pm directory (not from this workdir)"
             )
         # Fallback for when draft PR wasn't created (e.g., push failed)
         return (
             f"- You're on branch `{branch}`\n"
             f"- Commit and push as you go: `git push -u origin {branch}`\n"
             f"- Create a PR when ready: `gh pr create --title \"{title}\" --base {base_branch}`\n"
-            f"- Then mark it done: press `d` in the TUI or run `pm pr done {pr_id}` from the base pm directory (not from this workdir)"
+            f"- Then mark it done: press `d` in the TUI or run `pm pr review {pr_id}` from the base pm directory (not from this workdir)"
         )
 
 

@@ -3,10 +3,10 @@
 Manages starting/stopping review loops and updating the TUI display.
 Multiple PRs can have loops running simultaneously.
 
-Keybindings:
+Keybindings (mapped to the ``d`` key — "Review" — in the TUI):
+  d       — Mark PR as in_review and open review window.
   z d     — If a loop is running for the selected PR, make this iteration
-             the last one.  Otherwise, perform a fresh ``pr done`` (original
-             behaviour).
+             the last one.  Otherwise, perform a fresh ``pr review``.
   zz d    — Start a review loop (stops on PASS or PASS_WITH_SUGGESTIONS).
              If a loop is already running, make this iteration the last one.
   zzz d   — Start a strict review loop (stops only on full PASS).
