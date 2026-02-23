@@ -100,6 +100,11 @@ class TechTree(Widget):
         self.prs = self._prs
         self._recompute()
 
+    def apply_project_settings(self, project: dict) -> None:
+        """Apply per-project display settings (overrides globals if present)."""
+        if "hide_merged" in project:
+            self._hide_merged = bool(project["hide_merged"])
+
     def update_prs(self, prs: list[dict]) -> None:
         self._prs = prs
         self.prs = prs

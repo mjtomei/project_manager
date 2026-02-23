@@ -448,6 +448,7 @@ class ProjectManagerApp(App):
         self._update_status_bar()
 
         tree = self.query_one("#tech-tree", TechTree)
+        tree.apply_project_settings(self._data.get("project", {}))
         tree.update_plans(self._data.get("plans") or [])
         tree.update_prs(self._data.get("prs") or [])
         active_pr = self._data.get("project", {}).get("active_pr")

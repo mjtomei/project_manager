@@ -184,14 +184,14 @@ def hide_plan(app) -> None:
 
 
 def toggle_merged(app) -> None:
-    """Toggle hiding/showing of merged PRs and persist the setting."""
+    """Toggle hiding/showing of merged PRs and persist to project settings."""
     from pm_core.tui.tech_tree import TechTree
-    from pm_core.paths import set_global_setting
 
     tree = app.query_one("#tech-tree", TechTree)
     tree._hide_merged = not tree._hide_merged
-    # Persist so it survives TUI restarts
-    set_global_setting("hide-merged", tree._hide_merged)
+    # Persist to project.yaml (per-project, overrides global)
+    app._data.setdefault("project", {})["hide_merged"] = tree._hide_merged
+    store.save(app._data, app._root)
     tree._recompute()
     tree.refresh(layout=True)
     app._update_filter_status()
