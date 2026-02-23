@@ -109,7 +109,7 @@ in this format:
 - **description**: What this PR does
 - **tests**: Expected unit tests
 - **files**: Expected file modifications
-- **depends_on**: <title of dependency PR, or empty>
+- **depends_on**: <comma-separated titles of dependency PRs, or empty>
 
 Separate PR entries with --- lines. Prefer more small PRs over fewer large ones.
 Order them so independent PRs can be worked on in parallel. Only add depends_on
@@ -205,7 +205,7 @@ Once agreed, write a "## PRs" section to the plan file with this format:
 - **description**: What this PR does
 - **tests**: Expected unit tests
 - **files**: Expected file modifications
-- **depends_on**: <title of dependency PR, or empty>
+- **depends_on**: <comma-separated titles of dependency PRs, or empty>
 
 Separate PR entries with --- lines.
 {existing_context}{initial_context}
@@ -372,7 +372,7 @@ Check the following:
    - **description**: What this PR does
    - **tests**: Expected unit tests
    - **files**: Expected file modifications
-   - **depends_on**: <exact title of dependency PR, or empty>
+   - **depends_on**: <comma-separated exact titles of dependency PRs, or empty>
 
    Entries separated by --- lines. Check:
    - Every PR has a ### PR: heading with a title
@@ -556,14 +556,17 @@ def plan_load(plan_id: str | None):
         branch = f"pm/{pr_id}-{slug}"
         desc = _build_pr_description(pr)
 
-        # Resolve depends_on title -> ID
+        # Resolve depends_on title(s) -> IDs (comma-separated)
         deps = []
         if pr["depends_on"]:
-            dep_title = pr["depends_on"].strip()
-            if dep_title in title_to_id:
-                deps = [title_to_id[dep_title]]
-            else:
-                click.echo(f"  Warning: unknown dependency '{dep_title}' for '{pr['title']}'", err=True)
+            for dep_title in pr["depends_on"].split(","):
+                dep_title = dep_title.strip()
+                if not dep_title:
+                    continue
+                if dep_title in title_to_id:
+                    deps.append(title_to_id[dep_title])
+                else:
+                    click.echo(f"  Warning: unknown dependency '{dep_title}' for '{pr['title']}'", err=True)
 
         entry = _make_pr_entry(pr_id, pr["title"], branch,
                                plan=plan_id, depends_on=deps,
@@ -762,7 +765,7 @@ Write a ## PRs section to {plan_path} with entries in this format:
 - **description**: What this PR does
 - **tests**: Expected tests
 - **files**: Key files involved
-- **depends_on**: <title of dependency PR, or empty>
+- **depends_on**: <comma-separated titles of dependency PRs, or empty>
 - **status**: merged | open | proposed
 
 Use "merged" for done work, "open" for existing open PRs, "proposed" for
