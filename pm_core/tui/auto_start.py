@@ -8,7 +8,7 @@ Settings stored in project.yaml under ``project``:
   auto_start: true/false
   auto_start_target: <pr_id>   # optional — stop after this PR is started
 
-Toggle via TUI key ``A`` or CLI ``pm set auto-start on/off``.
+Toggle via TUI key ``A`` or command bar: ``autostart``.
 """
 
 import sys
