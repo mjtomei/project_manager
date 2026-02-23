@@ -42,20 +42,8 @@ from pm_core.cli.helpers import (
 
 
 def _set_shared_window_size(session: str, window: str) -> None:
-    """For shared sessions, set per-window window-size to smallest.
-
-    Belt-and-suspenders: the session default is already smallest, but
-    explicitly setting it per-window ensures new windows always fit the
-    smallest connected client regardless of tmux inheritance quirks.
-    """
-    if os.environ.get("PM_SHARE_MODE"):
-        subprocess.run(
-            tmux_mod._tmux_cmd(
-                "set-window-option", "-t", f"{session}:{window}",
-                "window-size", "smallest",
-            ),
-            capture_output=True,
-        )
+    """Convenience wrapper — delegates to tmux_mod.set_shared_window_size."""
+    tmux_mod.set_shared_window_size(session, window)
 
 
 # --- PR commands ---

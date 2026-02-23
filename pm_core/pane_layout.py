@@ -490,6 +490,7 @@ def _respawn_tui(session: str, window: str) -> str:
             # Window is gone (TUI was the last pane) — create a new one
             _logger.info("_respawn_tui: window %s gone, creating new window", window)
             pane_id, window = tmux_mod.create_window(session, "pm _tui")
+            tmux_mod.set_shared_window_size(session, window)
             # Switch the client to the new window so the user sees it
             tmux_mod.select_window(session, window)
 
