@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-c773945
+  active_pr: pr-001
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-02-20T02:43:08.956779+00:00'
@@ -24,6 +24,10 @@ plans:
   name: refactor for code quality
   file: plans/plan-e4fa5cb.md
   status: done
+- id: plan-tl-test
+  name: 'Test layout: complex dependency graph'
+  file: plans/plan-tl-test.md
+  status: draft
 - id: plan-c493724
   name: project metrics and optimization
   file: plans/plan-c493724.md
@@ -930,11 +934,148 @@ prs:
   gh_pr: null
   gh_pr_number: null
   notes: []
+- id: pr-tl01
+  plan: plan-tl-test
+  title: Core data model and schema definitions
+  branch: null
+  status: pending
+  depends_on: []
+  description: 'Test layout: root node A. Foundation data models.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+- id: pr-tl02
+  plan: plan-tl-test
+  title: API client library and HTTP transport
+  branch: null
+  status: pending
+  depends_on: []
+  description: 'Test layout: root node B. HTTP client foundation.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+- id: pr-tl03
+  plan: plan-tl-test
+  title: Authentication and authorization service
+  branch: null
+  status: pending
+  depends_on:
+  - pr-tl01
+  description: 'Test layout: layer 1. Depends on core data model.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+- id: pr-tl04
+  plan: plan-tl-test
+  title: Database access layer and migrations
+  branch: null
+  status: pending
+  depends_on:
+  - pr-tl01
+  description: 'Test layout: layer 1. Depends on core data model.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+- id: pr-tl05
+  plan: plan-tl-test
+  title: External API integration service
+  branch: null
+  status: pending
+  depends_on:
+  - pr-tl02
+  - pr-tl03
+  description: 'Test layout: layer 2. Cross-tree dep: API client + auth.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+- id: pr-tl06
+  plan: plan-tl-test
+  title: Distributed caching layer
+  branch: null
+  status: pending
+  depends_on:
+  - pr-tl02
+  - pr-tl04
+  description: 'Test layout: layer 2. Cross-tree dep: API client + database.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+- id: pr-tl07
+  plan: plan-tl-test
+  title: Search indexer and query engine
+  branch: null
+  status: pending
+  depends_on:
+  - pr-tl04
+  description: 'Test layout: layer 2. Single dep on database layer.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+- id: pr-tl08
+  plan: plan-tl-test
+  title: User management service
+  branch: null
+  status: pending
+  depends_on:
+  - pr-tl03
+  - pr-tl05
+  description: 'Test layout: layer 3. Diamond vertex: auth + external API.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+- id: pr-tl09
+  plan: plan-tl-test
+  title: Content management service
+  branch: null
+  status: pending
+  depends_on:
+  - pr-tl05
+  - pr-tl06
+  - pr-tl07
+  description: 'Test layout: layer 3. Triple fan-in: external API + cache + search.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+- id: pr-tl10
+  plan: plan-tl-test
+  title: Notification and alerting system
+  branch: null
+  status: pending
+  depends_on:
+  - pr-tl06
+  description: 'Test layout: layer 3. Single dep, separate subtree.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+- id: pr-tl11
+  plan: plan-tl-test
+  title: API gateway and rate limiting
+  branch: null
+  status: pending
+  depends_on:
+  - pr-tl08
+  - pr-tl09
+  description: 'Test layout: layer 4. Fan-in from user + content services.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+- id: pr-tl12
+  plan: plan-tl-test
+  title: End-to-end integration test suite
+  branch: null
+  status: pending
+  depends_on:
+  - pr-tl10
+  - pr-tl11
+  description: 'Test layout: layer 5. Final convergence node.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
 - id: pr-c773945
   plan: null
   title: Fix TUI UX issues for new users and shared sessions
   branch: pm/pr-c773945-fix-tui-ux-issues-for-new-users-and-shared-session
-  status: in_review
+  status: merged
   depends_on: []
   description: 'Fix the following UX issues:
 
