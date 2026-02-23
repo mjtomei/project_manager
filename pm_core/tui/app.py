@@ -592,7 +592,8 @@ class ProjectManagerApp(App):
 
     def action_toggle_auto_start(self) -> None:
         from pm_core.tui.auto_start import toggle
-        toggle(self)
+        tree = self.query_one("#tech-tree", TechTree)
+        toggle(self, selected_pr_id=tree.selected_pr_id)
 
     def action_quit(self) -> None:
         pane_ops.quit_app(self)
