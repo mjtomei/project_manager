@@ -44,9 +44,9 @@ from pm_core.cli.helpers import (
 def _set_shared_window_size(session: str, window: str) -> None:
     """For shared sessions, set per-window window-size to smallest.
 
-    In shared (group/global) sessions, new windows inherit window-size=latest
-    which sizes the window to the active client. Override to smallest so all
-    connected clients can see the full layout.
+    Belt-and-suspenders: the session default is already smallest, but
+    explicitly setting it per-window ensures new windows always fit the
+    smallest connected client regardless of tmux inheritance quirks.
     """
     if os.environ.get("PM_SHARE_MODE"):
         subprocess.run(

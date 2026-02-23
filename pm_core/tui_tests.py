@@ -1717,7 +1717,7 @@ OVERALL: [PASS/FAIL]
 
 WINDOW_RESIZE_REBALANCE_TEST = """\
 You are testing that pane layout automatically rebalances when the terminal
-window is resized — the core behavior of the window-size=latest grouped-session
+window is resized — the core behavior of the window-size=smallest grouped-session
 fix (PR-023). The test manually resizes the tmux window to simulate portrait
 and landscape aspect ratios, verifies the layout changes accordingly, and
 restores the original size at the end.
@@ -1726,13 +1726,13 @@ restores the original size at the end.
 
 When multiple terminals connect to the same pm session via grouped tmux
 sessions (e.g. a landscape monitor and a portrait monitor), each terminal may
-have different dimensions. With `window-size=latest`, the tmux window follows
-the most recently active client's size. A global `window-resized` hook
+have different dimensions. With `window-size=smallest`, the tmux window follows
+the smallest connected client's size. A global `window-resized` hook
 triggers `pm _window-resized` which calls `rebalance()`, recomputing the
 layout based on the new dimensions.
 
 Key implementation details:
-- `window-size=latest` is set on all sessions in the group
+- `window-size=smallest` is set on all sessions in the group
 - Global `window-resized` hook fires `run-shell 'pm _window-resized'`
 - `rebalance()` uses `w >= h * 2` to account for character aspect ratio (~2:1 h:w)
 - `is_mobile()` triggers for terminals narrower than 120 columns
@@ -1766,12 +1766,12 @@ Key implementation details:
 5. The session should have at least 2 panes for this test to be meaningful.
    If it doesn't, press 'n' to open notes pane.
 
-### Part 1: Verify window-size=latest
+### Part 1: Verify window-size=smallest
 
 1. Check the window-size setting:
-   - `tmux show-options -t <base> window-size` - should show "latest"
+   - `tmux show-options -t <base> window-size` - should show "smallest"
    - If grouped sessions exist, check one: `tmux show-options -t <base>~1 window-size`
-   - Both should show "latest"
+   - Both should show "smallest"
 
 2. Check the global window-resized hook:
    - `tmux show-hooks -g` - should include `window-resized[0] run-shell "pm _window-resized ..."`
@@ -1914,9 +1914,9 @@ IMPORTANT: Always restore the window to its original size!
 WINDOW RESIZE REBALANCE TEST RESULTS
 =====================================
 
-## Part 1: window-size=latest
-Base session has latest: [PASS/FAIL]
-Grouped session has latest: [PASS/FAIL]
+## Part 1: window-size=smallest
+Base session has smallest: [PASS/FAIL]
+Grouped session has smallest: [PASS/FAIL]
 Global hook exists: [PASS/FAIL]
 
 ## Part 2: Landscape Layout (200x50) — via resize-window
