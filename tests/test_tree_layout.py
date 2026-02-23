@@ -483,3 +483,72 @@ class TestCrossingMinimization:
         assert layout.node_positions["pr-b"][1] == layout.node_positions["pr-d"][1]
         assert layout.node_positions["pr-c"][1] == layout.node_positions["pr-e"][1]
         assert count_crossings(layout.node_positions, prs) == 0
+
+    def test_shared_parents_siblings_adjacent(self):
+        """Two siblings sharing both parents should be adjacent, not split.
+
+        This tests the "best-of-sweeps" fix: forward sweeps correctly group
+        siblings but backward sweeps can undo this when all siblings share
+        the same children.  Without tracking the best ordering, the final
+        backward sweep leaves a worse ordering.
+
+            R1   R2            R1   R2
+           / \\  /            / \\   |
+          A   B  C           A   B  C
+          |   |              |   |  |
+          D   |   E          D   |  E
+           \\ | /              \\  | /
+             F                  F
+
+        A and B depend on R1; C depends on R2.
+        D depends on A; E depends on B+C; F depends on D+E.
+        Without fix: E placed between D and C, creating crossings.
+        """
+        prs = [
+            _pr("pr-r1"),
+            _pr("pr-r2"),
+            _pr("pr-a", depends_on=["pr-r1"]),
+            _pr("pr-b", depends_on=["pr-r1"]),
+            _pr("pr-c", depends_on=["pr-r2"]),
+            _pr("pr-d", depends_on=["pr-a"]),
+            _pr("pr-e", depends_on=["pr-b", "pr-c"]),
+            _pr("pr-f", depends_on=["pr-d", "pr-e"]),
+        ]
+        layout = compute_tree_layout(prs)
+        assert count_crossings(layout.node_positions, prs) == 0
+
+    def test_sweep_oscillation_keeps_best(self):
+        """Regression test: backward sweep must not undo forward improvements.
+
+        Graph modeled on the food project: two parents each connect to
+        two children (K2,2 subgraph), plus a third chain alongside.
+        The K2,2 creates 1 unavoidable crossing, but the ordering should
+        keep sibling children adjacent to avoid additional crossings.
+
+            R1     R2
+           / \\    /
+          P1  P2  P3
+         / \\  |   |
+        C1  C2 C3 (C1+C2 share P1+P2 as parents)
+              \\ | /
+               M1
+        """
+        prs = [
+            _pr("pr-r1"),
+            _pr("pr-r2"),
+            _pr("pr-p1", depends_on=["pr-r1"]),
+            _pr("pr-p2", depends_on=["pr-r1"]),
+            _pr("pr-p3", depends_on=["pr-r1", "pr-r2"]),
+            _pr("pr-c1", depends_on=["pr-p1", "pr-p2"]),
+            _pr("pr-c2", depends_on=["pr-p1", "pr-p2"]),
+            _pr("pr-c3", depends_on=["pr-p3"]),
+            _pr("pr-m1", depends_on=["pr-c2", "pr-c3"]),
+        ]
+        layout = compute_tree_layout(prs)
+        crossings = count_crossings(layout.node_positions, prs)
+        # K2,2 has 1 unavoidable crossing; must not have extra
+        assert crossings <= 1
+        # c1 and c2 must be adjacent (both share parents p1+p2)
+        row_c1 = layout.node_positions["pr-c1"][1]
+        row_c2 = layout.node_positions["pr-c2"][1]
+        assert abs(row_c1 - row_c2) == 1

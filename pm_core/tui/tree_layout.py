@@ -146,6 +146,10 @@ def _minimize_crossings(
     Uses the barycenter heuristic with alternating forward/backward sweeps.
     Each forward sweep orders nodes by the average position of their parents;
     each backward sweep orders by the average position of their children.
+
+    After each sweep, the crossing count is evaluated and the best ordering
+    seen so far is retained.  This prevents oscillation where a backward
+    sweep undoes a good forward ordering (or vice versa).
     """
     layer_orders = [sorted(layer) for layer in layers]
     if len(layer_orders) <= 1:
@@ -156,6 +160,10 @@ def _minimize_crossings(
     for layer in layer_orders:
         for i, node in enumerate(layer):
             pos[node] = float(i)
+
+    # Track the best ordering seen across all sweeps
+    best_crossings = _count_layer_crossings(layer_orders, parents_of)
+    best_orders: list[list[str]] = [list(layer) for layer in layer_orders]
 
     for sweep in range(num_sweeps):
         if sweep % 2 == 0:
@@ -170,6 +178,17 @@ def _minimize_crossings(
                 _reorder_by_barycenter(layer_orders[col], pos, children_of)
                 for i, node in enumerate(layer_orders[col]):
                     pos[node] = float(i)
+
+        crossings = _count_layer_crossings(layer_orders, parents_of)
+        if crossings < best_crossings:
+            best_crossings = crossings
+            best_orders = [list(layer) for layer in layer_orders]
+            if crossings == 0:
+                break  # can't do better
+
+    # Restore the best ordering and rebuild positions
+    if best_crossings < _count_layer_crossings(layer_orders, parents_of):
+        layer_orders = best_orders
 
     return layer_orders
 
@@ -188,6 +207,38 @@ def _reorder_by_barycenter(
         return (bary, node)  # tie-break by ID for determinism
 
     layer.sort(key=key)
+
+
+def _count_layer_crossings(
+    layer_orders: list[list[str]],
+    parents_of: dict[str, list[str]],
+) -> int:
+    """Count edge crossings implied by the current layer orderings.
+
+    Two edges (u→v) and (u'→v') between adjacent layers cross when the
+    ordinal positions of their endpoints are inverted.
+    """
+    # Build ordinal position lookup
+    ordinal: dict[str, int] = {}
+    for layer in layer_orders:
+        for i, node in enumerate(layer):
+            ordinal[node] = i
+
+    crossings = 0
+    for col in range(1, len(layer_orders)):
+        # Collect edges into this layer as (parent_ordinal, child_ordinal)
+        edges: list[tuple[int, int]] = []
+        for node in layer_orders[col]:
+            for parent in parents_of.get(node, []):
+                if parent in ordinal:
+                    edges.append((ordinal[parent], ordinal[node]))
+        # Count inversions
+        for i in range(len(edges)):
+            for j in range(i + 1, len(edges)):
+                if (edges[i][0] - edges[j][0]) * (edges[i][1] - edges[j][1]) < 0:
+                    crossings += 1
+
+    return crossings
 
 
 # ---------------------------------------------------------------------------
