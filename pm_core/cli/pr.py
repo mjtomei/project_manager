@@ -881,13 +881,43 @@ def pr_review(pr_id: str | None, fresh: bool):
     _launch_review_window(data, pr_entry, fresh=fresh)
 
 
+def _finalize_merge(data: dict, root, pr_entry: dict, pr_id: str) -> None:
+    """Mark PR as merged, kill tmux windows, and show newly ready PRs."""
+    pr_entry["status"] = "merged"
+    save_and_push(data, root, f"pm: merge {pr_id}")
+    click.echo(f"PR {_pr_display_id(pr_entry)} marked as merged.")
+    trigger_tui_refresh()
+
+    # Kill tmux windows for the merged PR (they're inaccessible from the TUI)
+    try:
+        from pm_core.cli.helpers import _find_tui_pane
+        _, session = _find_tui_pane()
+        if session:
+            display_id = _pr_display_id(pr_entry)
+            for win_name in (display_id, f"review-{display_id}"):
+                win = tmux_mod.find_window_by_name(session, win_name)
+                if win:
+                    tmux_mod.kill_window(session, win["id"])
+    except Exception:
+        pass
+
+    # Show newly unblocked PRs
+    prs = data.get("prs") or []
+    ready = graph.ready_prs(prs)
+    if ready:
+        click.echo("\nNewly ready PRs:")
+        for p in ready:
+            click.echo(f"  ⏳ {_pr_display_id(p)}: {p.get('title', '???')}")
+
+
 @pr.command("merge")
 @click.argument("pr_id", default=None, required=False)
 def pr_merge(pr_id: str | None):
     """Merge a PR's branch into the base branch.
 
     For local/vanilla backends, performs a local git merge.
-    For GitHub backend, directs the user to merge via GitHub.
+    For GitHub backend, merges via gh CLI if available, otherwise
+    directs the user to merge on GitHub manually.
     If PR_ID is omitted, infers from cwd or auto-selects.
     """
     root = state_root()
@@ -915,6 +945,22 @@ def pr_merge(pr_id: str | None):
     branch = pr_entry.get("branch", "")
 
     if backend_name == "github":
+        gh_pr_number = pr_entry.get("gh_pr_number")
+        workdir = pr_entry.get("workdir")
+        if gh_pr_number and workdir and Path(workdir).exists() and shutil.which("gh"):
+            click.echo(f"Merging GitHub PR #{gh_pr_number} via gh CLI...")
+            merge_result = subprocess.run(
+                ["gh", "pr", "merge", str(gh_pr_number), "--merge"],
+                cwd=workdir, capture_output=True, text=True,
+            )
+            if merge_result.returncode == 0:
+                click.echo(f"GitHub PR #{gh_pr_number} merged.")
+                _finalize_merge(data, root, pr_entry, pr_id)
+                return
+            else:
+                click.echo(f"gh pr merge failed: {merge_result.stderr.strip()}", err=True)
+                click.echo("Falling back to manual instructions.", err=True)
+        # Fallback: direct user to merge manually
         gh_pr = pr_entry.get("gh_pr")
         if gh_pr:
             click.echo(f"GitHub PR: {gh_pr}")
@@ -951,32 +997,7 @@ def pr_merge(pr_id: str | None):
     else:
         click.echo(f"Pushed merged {base_branch} to origin.")
 
-    # Update status
-    pr_entry["status"] = "merged"
-    save_and_push(data, root, f"pm: merge {pr_id}")
-    click.echo(f"PR {_pr_display_id(pr_entry)} marked as merged.")
-    trigger_tui_refresh()
-
-    # Kill tmux windows for the merged PR (they're inaccessible from the TUI)
-    try:
-        from pm_core.cli.helpers import _find_tui_pane
-        _, session = _find_tui_pane()
-        if session:
-            display_id = _pr_display_id(pr_entry)
-            for win_name in (display_id, f"review-{display_id}"):
-                win = tmux_mod.find_window_by_name(session, win_name)
-                if win:
-                    tmux_mod.kill_window(session, win["id"])
-    except Exception:
-        pass
-
-    # Show newly unblocked PRs
-    prs = data.get("prs") or []
-    ready = graph.ready_prs(prs)
-    if ready:
-        click.echo("\nNewly ready PRs:")
-        for p in ready:
-            click.echo(f"  ⏳ {_pr_display_id(p)}: {p.get('title', '???')}")
+    _finalize_merge(data, root, pr_entry, pr_id)
 
 
 @pr.command("sync")
