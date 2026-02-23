@@ -259,16 +259,10 @@ def set_cmd(setting, value):
 @cli.command("setting")
 @click.argument("setting")
 @click.argument("value", type=click.Choice(["on", "off"]))
-def setting_cmd(setting, value):
+@click.pass_context
+def setting_cmd(ctx, setting, value):
     """Alias for 'pm set'. Toggle a global pm setting."""
-    from pm_core.paths import set_global_setting
-    known = {"hide-assist", "hide-merged", "beginner-mode", "auto-cleanup"}
-    if setting not in known:
-        click.echo(f"Unknown setting: {setting}", err=True)
-        click.echo(f"Available: {', '.join(sorted(known))}", err=True)
-        raise SystemExit(1)
-    set_global_setting(setting, value == "on")
-    click.echo(f"{setting} = {value}")
+    ctx.invoke(set_cmd, setting=setting, value=value)
 
 
 @cli.command("status")

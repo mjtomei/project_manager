@@ -166,7 +166,7 @@ This PR is part of plan "{plan['name']}" ({plan['id']}). Other PRs in this plan:
     # Backend-appropriate diff command
     backend_name = data.get("project", {}).get("backend", "vanilla")
     if backend_name == "local":
-        diff_cmd = f"git diff $(git merge-base {base_branch} HEAD)...HEAD"
+        diff_cmd = f"git diff {base_branch}...HEAD"
     else:
         diff_cmd = f"git diff origin/{base_branch}...HEAD"
 

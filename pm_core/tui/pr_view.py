@@ -14,7 +14,7 @@ from pm_core.tui._shell import _run_shell, _run_shell_async
 _log = configure_logger("pm.tui.pr_view")
 
 # PR command prefixes that require in-flight action guarding
-PR_ACTION_PREFIXES = ("pr start", "pr done")
+PR_ACTION_PREFIXES = ("pr start", "pr done", "pr review", "pr merge")
 
 
 # ---------------------------------------------------------------------------

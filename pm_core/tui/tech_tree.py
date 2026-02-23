@@ -463,13 +463,17 @@ class TechTree(Widget):
             title_line = f"{side} {title:<{NODE_W - 4}} {side}"
             status_text = f"{icon} {status}"
             # Show review loop marker or verdict if a loop exists for this PR
-            loop_marker, _loop_style = self._get_loop_marker(pr_id)
+            loop_marker, loop_style = self._get_loop_marker(pr_id)
+            marker_offset = -1  # char offset within status_line where marker starts
             if loop_marker:
+                marker_offset = 2 + len(status_text) + 1  # side + space + base text + space
                 status_text += f" {loop_marker}"
             else:
                 # Show activity spinner for in_progress/in_review PRs
                 if status in ("in_progress", "in_review") and pr.get("workdir"):
                     spinner = SPINNER_FRAMES[self._anim_frame % len(SPINNER_FRAMES)]
+                    marker_offset = 2 + len(status_text) + 1
+                    loop_style = "bold cyan"
                     status_text += f" {spinner}"
             machine = pr.get("agent_machine")
             if machine:
@@ -495,6 +499,14 @@ class TechTree(Widget):
                         # Interior of unselected box: node style + background
                         style = f"{node_style} {bg_style}".strip()
                     safe_write(y + dy, x + dx, ch, style)
+
+            # Apply colored style to loop marker / spinner characters
+            if marker_offset >= 0 and loop_style:
+                status_dy = 3  # status_line is 4th row (index 3) in box_lines
+                marker_len = len(loop_marker) if loop_marker else 1
+                for dx in range(marker_offset, marker_offset + marker_len):
+                    if 0 <= (y + status_dy) < len(style_grid) and 0 <= (x + dx) < len(style_grid[0]):
+                        style_grid[y + status_dy][x + dx] = f"{loop_style} {bg_style}".strip()
 
         # Draw plan labels
         for plan_id, label_row in self._plan_label_rows.items():

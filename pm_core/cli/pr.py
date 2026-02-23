@@ -683,7 +683,7 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         #   vanilla/github: origin/{base_branch}...HEAD
         backend_name = data.get("project", {}).get("backend", "vanilla")
         if backend_name == "local":
-            diff_ref = f"$(git merge-base {base_branch} HEAD)"
+            diff_ref = base_branch
         else:
             diff_ref = f"origin/{base_branch}"
         diff_cmd = (
