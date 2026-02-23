@@ -1,5 +1,6 @@
 """Tests for tree layout algorithm and TUI message factory."""
 
+from pm_core.graph import count_crossings
 from pm_core.tui import item_message
 from pm_core.tui.tree_layout import compute_tree_layout, TreeLayout
 
@@ -296,3 +297,189 @@ class TestNoOverlap:
         layout = compute_tree_layout(prs)
         positions = list(layout.node_positions.values())
         assert len(positions) == len(set(positions))
+
+
+# ---------------------------------------------------------------------------
+# Crossing count utility tests
+# ---------------------------------------------------------------------------
+
+
+class TestCountCrossings:
+    def test_no_edges(self):
+        prs = [_pr("pr-a"), _pr("pr-b")]
+        positions = {"pr-a": (0, 0), "pr-b": (0, 1)}
+        assert count_crossings(positions, prs) == 0
+
+    def test_parallel_edges_no_crossing(self):
+        """A(row 0)→C(row 0), B(row 1)→D(row 1): parallel, no crossing."""
+        prs = [
+            _pr("pr-a"),
+            _pr("pr-b"),
+            _pr("pr-c", depends_on=["pr-a"]),
+            _pr("pr-d", depends_on=["pr-b"]),
+        ]
+        positions = {"pr-a": (0, 0), "pr-b": (0, 1), "pr-c": (1, 0), "pr-d": (1, 1)}
+        assert count_crossings(positions, prs) == 0
+
+    def test_crossed_edges(self):
+        """A(row 0)→D(row 1), B(row 1)→C(row 0): X-crossing."""
+        prs = [
+            _pr("pr-a"),
+            _pr("pr-b"),
+            _pr("pr-c", depends_on=["pr-b"]),
+            _pr("pr-d", depends_on=["pr-a"]),
+        ]
+        positions = {"pr-a": (0, 0), "pr-b": (0, 1), "pr-c": (1, 0), "pr-d": (1, 1)}
+        assert count_crossings(positions, prs) == 1
+
+    def test_linear_chain_no_crossing(self):
+        prs = [
+            _pr("pr-a"),
+            _pr("pr-b", depends_on=["pr-a"]),
+            _pr("pr-c", depends_on=["pr-b"]),
+        ]
+        layout = compute_tree_layout(prs)
+        assert count_crossings(layout.node_positions, prs) == 0
+
+
+# ---------------------------------------------------------------------------
+# Crossing minimization tests
+# ---------------------------------------------------------------------------
+
+
+class TestCrossingMinimization:
+    """Tests that the Sugiyama barycenter algorithm avoids crossings."""
+
+    def test_interleaved_chains_no_crossing(self):
+        """Two chains A→C and B→D should not cross.
+
+        A naive alphabetical ordering could put C before D when their
+        parent positions suggest otherwise.
+        """
+        prs = [
+            _pr("pr-a"),
+            _pr("pr-b"),
+            _pr("pr-c", depends_on=["pr-a"]),
+            _pr("pr-d", depends_on=["pr-b"]),
+        ]
+        layout = compute_tree_layout(prs)
+        assert count_crossings(layout.node_positions, prs) == 0
+        # Horizontal edges: each child should share its parent's row
+        assert layout.node_positions["pr-c"][1] == layout.node_positions["pr-a"][1]
+        assert layout.node_positions["pr-d"][1] == layout.node_positions["pr-b"][1]
+
+    def test_reverse_dep_order_no_crossing(self):
+        """A(row 0)→D, B(row 1)→C — barycenter should order C before D.
+
+        Without crossing minimization, alphabetical order puts C, D which
+        could still work, but reversed parent order requires reordering.
+        """
+        prs = [
+            _pr("pr-a"),
+            _pr("pr-b"),
+            _pr("pr-c", depends_on=["pr-b"]),
+            _pr("pr-d", depends_on=["pr-a"]),
+        ]
+        layout = compute_tree_layout(prs)
+        assert count_crossings(layout.node_positions, prs) == 0
+
+    def test_fan_in_no_crossing(self):
+        """Multiple roots merging into one node should not cross."""
+        prs = [
+            _pr("pr-a"),
+            _pr("pr-b"),
+            _pr("pr-c"),
+            _pr("pr-d", depends_on=["pr-a", "pr-b", "pr-c"]),
+        ]
+        layout = compute_tree_layout(prs)
+        assert count_crossings(layout.node_positions, prs) == 0
+
+    def test_three_chains_no_crossing(self):
+        """Three independent chains should all be horizontal."""
+        prs = [
+            _pr("pr-a"),
+            _pr("pr-b"),
+            _pr("pr-c"),
+            _pr("pr-d", depends_on=["pr-a"]),
+            _pr("pr-e", depends_on=["pr-b"]),
+            _pr("pr-f", depends_on=["pr-c"]),
+        ]
+        layout = compute_tree_layout(prs)
+        assert count_crossings(layout.node_positions, prs) == 0
+        # Each child on same row as parent
+        for parent, child in [("pr-a", "pr-d"), ("pr-b", "pr-e"), ("pr-c", "pr-f")]:
+            assert layout.node_positions[parent][1] == layout.node_positions[child][1]
+
+    def test_w_graph_minimizes_crossings(self):
+        """W-shaped graph: two roots each feeding into two shared children.
+
+            A   B
+           / \\ / \\
+          C   D   E
+
+        This is a case where naive ordering can produce crossings.
+        """
+        prs = [
+            _pr("pr-a"),
+            _pr("pr-b"),
+            _pr("pr-c", depends_on=["pr-a"]),
+            _pr("pr-d", depends_on=["pr-a", "pr-b"]),
+            _pr("pr-e", depends_on=["pr-b"]),
+        ]
+        layout = compute_tree_layout(prs)
+        crossings = count_crossings(layout.node_positions, prs)
+        assert crossings == 0
+        # D should be between C and E vertically
+        row_c = layout.node_positions["pr-c"][1]
+        row_d = layout.node_positions["pr-d"][1]
+        row_e = layout.node_positions["pr-e"][1]
+        assert min(row_c, row_e) <= row_d <= max(row_c, row_e)
+
+    def test_diamond_zero_crossings(self):
+        """Standard diamond A→B,C and B,C→D should have 0 crossings."""
+        prs = [
+            _pr("pr-a"),
+            _pr("pr-b", depends_on=["pr-a"]),
+            _pr("pr-c", depends_on=["pr-a"]),
+            _pr("pr-d", depends_on=["pr-b", "pr-c"]),
+        ]
+        layout = compute_tree_layout(prs)
+        assert count_crossings(layout.node_positions, prs) == 0
+
+    def test_backward_sweep_improves_root_order(self):
+        """Backward sweep should reorder layer 0 based on child positions.
+
+        Layer 0: [A, B, C]  (C connects to layer-1 node near A's children)
+        The backward sweep should notice this and reorder accordingly.
+        """
+        prs = [
+            _pr("pr-a"),
+            _pr("pr-b"),
+            _pr("pr-c"),
+            _pr("pr-d", depends_on=["pr-a"]),
+            _pr("pr-e", depends_on=["pr-c"]),
+            _pr("pr-f", depends_on=["pr-d", "pr-e"]),
+        ]
+        layout = compute_tree_layout(prs)
+        # No crossing is the goal
+        assert count_crossings(layout.node_positions, prs) == 0
+
+    def test_horizontal_edges_maximized(self):
+        """In a simple tree, single-dependency edges should be horizontal."""
+        #    A
+        #   / \
+        #  B   C
+        #  |   |
+        #  D   E
+        prs = [
+            _pr("pr-a"),
+            _pr("pr-b", depends_on=["pr-a"]),
+            _pr("pr-c", depends_on=["pr-a"]),
+            _pr("pr-d", depends_on=["pr-b"]),
+            _pr("pr-e", depends_on=["pr-c"]),
+        ]
+        layout = compute_tree_layout(prs)
+        # B→D and C→E should be horizontal
+        assert layout.node_positions["pr-b"][1] == layout.node_positions["pr-d"][1]
+        assert layout.node_positions["pr-c"][1] == layout.node_positions["pr-e"][1]
+        assert count_crossings(layout.node_positions, prs) == 0

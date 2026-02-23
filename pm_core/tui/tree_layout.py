@@ -1,8 +1,14 @@
 """Tree layout algorithm for the PR dependency graph.
 
-Computes node positions (column, row), plan group ordering, and hidden
-label placement.  The TechTree widget calls :func:`compute_tree_layout`
-and uses the resulting :class:`TreeLayout` for rendering and navigation.
+Uses Sugiyama-style layered graph drawing to compute node positions with
+minimal edge crossings and maximal horizontal (straight) edges:
+
+1. **Layer assignment** (dependency depth) — via ``graph.compute_layers``
+2. **Crossing minimization** — barycenter heuristic with alternating sweeps
+3. **Coordinate assignment** — greedy row placement maximizing straight edges
+
+The TechTree widget calls :func:`compute_tree_layout` and uses the resulting
+:class:`TreeLayout` for rendering and navigation.
 """
 
 from __future__ import annotations
@@ -72,7 +78,21 @@ def compute_tree_layout(
     pr_map = {pr["id"]: pr for pr in prs}
     layers = graph_mod.compute_layers(prs)
 
-    row_assignments = _assign_rows(prs, pr_map, layers)
+    # Build adjacency for layout (only visible nodes)
+    pr_ids = set(pr_map.keys())
+    parents_of: dict[str, list[str]] = {}
+    children_of: dict[str, list[str]] = {}
+    for pr in prs:
+        node = pr["id"]
+        parents_of[node] = [d for d in (pr.get("depends_on") or []) if d in pr_ids]
+        children_of.setdefault(node, [])
+        for d in parents_of[node]:
+            children_of.setdefault(d, [])
+            children_of[d].append(node)
+
+    # Sugiyama phases
+    layer_orders = _minimize_crossings(layers, parents_of, children_of)
+    row_assignments = _assign_coordinates(layer_orders, parents_of, children_of)
 
     # Normalize rows so minimum is 0
     if row_assignments:
@@ -89,8 +109,8 @@ def compute_tree_layout(
     layout.plan_group_order = plan_group_order
 
     # Build final ordered_ids and node_positions from layers
-    for col, layer in enumerate(layers):
-        for pr_id in sorted(layer, key=lambda x: row_assignments.get(x, 0)):
+    for col, layer_order in enumerate(layer_orders):
+        for pr_id in sorted(layer_order, key=lambda x: row_assignments.get(x, 0)):
             layout.node_positions[pr_id] = (col, row_assignments[pr_id])
             layout.ordered_ids.append(pr_id)
 
@@ -109,106 +129,137 @@ def compute_tree_layout(
     return layout
 
 
-def _assign_rows(
-    prs: list[dict],
-    pr_map: dict[str, dict],
+# ---------------------------------------------------------------------------
+# Sugiyama Phase 2: Crossing Minimization
+# ---------------------------------------------------------------------------
+
+
+def _minimize_crossings(
     layers: list[list[str]],
-) -> dict[str, int]:
-    """Assign a row to each PR node.
+    parents_of: dict[str, list[str]],
+    children_of: dict[str, list[str]],
+    *,
+    num_sweeps: int = 4,
+) -> list[list[str]]:
+    """Reorder nodes within layers to minimize edge crossings.
 
-    Strategy: single-dependency edges should be horizontal when possible.
-    Nodes with a single parent share the parent's row (first child) or get
-    adjacent rows (subsequent children).
+    Uses the barycenter heuristic with alternating forward/backward sweeps.
+    Each forward sweep orders nodes by the average position of their parents;
+    each backward sweep orders by the average position of their children.
     """
-    # Build reverse map: parent -> list of single-dep children
-    single_dep_children: dict[str, list[str]] = {}
-    for pr in prs:
-        deps = pr.get("depends_on") or []
-        if len(deps) == 1:
-            parent = deps[0]
-            if parent not in single_dep_children:
-                single_dep_children[parent] = []
-            single_dep_children[parent].append(pr["id"])
+    layer_orders = [sorted(layer) for layer in layers]
+    if len(layer_orders) <= 1:
+        return layer_orders
 
+    # Position lookup: node → ordinal position in its layer
+    pos: dict[str, float] = {}
+    for layer in layer_orders:
+        for i, node in enumerate(layer):
+            pos[node] = float(i)
+
+    for sweep in range(num_sweeps):
+        if sweep % 2 == 0:
+            # Forward pass: order each layer by parent positions
+            for col in range(1, len(layer_orders)):
+                _reorder_by_barycenter(layer_orders[col], pos, parents_of)
+                for i, node in enumerate(layer_orders[col]):
+                    pos[node] = float(i)
+        else:
+            # Backward pass: order each layer by child positions
+            for col in range(len(layer_orders) - 2, -1, -1):
+                _reorder_by_barycenter(layer_orders[col], pos, children_of)
+                for i, node in enumerate(layer_orders[col]):
+                    pos[node] = float(i)
+
+    return layer_orders
+
+
+def _reorder_by_barycenter(
+    layer: list[str],
+    pos: dict[str, float],
+    neighbors_of: dict[str, list[str]],
+) -> None:
+    """Sort *layer* in place by average position of connected neighbors."""
+
+    def key(node: str) -> tuple[float, str]:
+        neighbors = neighbors_of.get(node, [])
+        nbr_pos = [pos[n] for n in neighbors if n in pos]
+        bary = sum(nbr_pos) / len(nbr_pos) if nbr_pos else pos.get(node, 0.0)
+        return (bary, node)  # tie-break by ID for determinism
+
+    layer.sort(key=key)
+
+
+# ---------------------------------------------------------------------------
+# Sugiyama Phase 3: Coordinate Assignment
+# ---------------------------------------------------------------------------
+
+
+def _assign_coordinates(
+    layer_orders: list[list[str]],
+    parents_of: dict[str, list[str]],
+    children_of: dict[str, list[str]],
+) -> dict[str, int]:
+    """Assign row coordinates to maximize horizontal (straight) edges.
+
+    Single-dependency nodes try to share their parent's row.  Multi-dependency
+    nodes target the mean of their parents' rows.  Within-layer ordering from
+    crossing minimization is preserved to maintain the crossing reduction.
+    """
     row_assignments: dict[str, int] = {}
+    if not layer_orders:
+        return row_assignments
 
-    # First column: stack, leaving gaps for multi-child parents
-    if layers:
-        current_row = 0
-        for pr_id in sorted(layers[0]):
-            row_assignments[pr_id] = current_row
-            children = single_dep_children.get(pr_id, [])
-            if len(children) > 1:
-                current_row += len(children)
+    # Layer 0: stack roots, leaving gaps for parents with multiple
+    # single-dependency children (so those children can fan out adjacently).
+    current_row = 0
+    for node in layer_orders[0]:
+        row_assignments[node] = current_row
+        single_children = sum(
+            1
+            for c in children_of.get(node, [])
+            if len(parents_of.get(c, [])) == 1
+        )
+        current_row += max(1, single_children)
+
+    # Subsequent layers
+    for col in range(1, len(layer_orders)):
+        order = layer_orders[col]
+        used_rows: set[int] = set()
+        prev_row: int | None = None
+
+        for node in order:
+            parent_rows = sorted(
+                row_assignments[p]
+                for p in parents_of.get(node, [])
+                if p in row_assignments
+            )
+
+            if len(parent_rows) == 1:
+                ideal = parent_rows[0]
+            elif parent_rows:
+                ideal = round(sum(parent_rows) / len(parent_rows))
             else:
-                current_row += 1
+                ideal = (prev_row + 1) if prev_row is not None else 0
 
-    # Subsequent columns
-    for col in range(1, len(layers)):
-        layer = layers[col]
-        _assign_layer_rows(layer, pr_map, row_assignments, single_dep_children)
+            # Maintain within-layer ordering (preserves crossing minimization)
+            if prev_row is not None:
+                ideal = max(ideal, prev_row + 1)
+
+            # Avoid collisions within this layer
+            while ideal in used_rows:
+                ideal += 1
+
+            row_assignments[node] = ideal
+            used_rows.add(ideal)
+            prev_row = ideal
 
     return row_assignments
 
 
-def _assign_layer_rows(
-    layer: list[str],
-    pr_map: dict[str, dict],
-    row_assignments: dict[str, int],
-    single_dep_children: dict[str, list[str]],
-) -> None:
-    """Assign rows for all nodes in a single layer (modifies *row_assignments*)."""
-    # Categorize nodes
-    single_dep: list[tuple[str, str, int]] = []  # (pr_id, parent_id, parent_row)
-    multi_dep: list[tuple[str, float]] = []       # (pr_id, avg_row)
-    no_dep: list[str] = []
-
-    for pr_id in layer:
-        pr = pr_map.get(pr_id)
-        deps = (pr.get("depends_on") or []) if pr else []
-        dep_rows = [(d, row_assignments[d]) for d in deps if d in row_assignments]
-        if len(dep_rows) == 1:
-            single_dep.append((pr_id, dep_rows[0][0], dep_rows[0][1]))
-        elif dep_rows:
-            avg = sum(r for _, r in dep_rows) / len(dep_rows)
-            multi_dep.append((pr_id, avg))
-        else:
-            no_dep.append(pr_id)
-
-    used_rows: set[int] = set()
-
-    # Group single-dep nodes by parent
-    by_parent: dict[str, list[tuple[str, int]]] = {}
-    for pr_id, parent_id, parent_row in single_dep:
-        if parent_id not in by_parent:
-            by_parent[parent_id] = []
-        by_parent[parent_id].append((pr_id, parent_row))
-
-    # Assign single-dep: first child gets parent's row, extras get adjacent
-    for parent_id, children in by_parent.items():
-        children.sort(key=lambda x: x[0])
-        base_row = children[0][1]
-        for i, (pr_id, _) in enumerate(children):
-            target_row = base_row + i
-            row_assignments[pr_id] = target_row
-            used_rows.add(target_row)
-
-    # Assign multi-dep nodes
-    multi_dep.sort(key=lambda x: (x[1], x[0]))
-    for pr_id, pref in multi_dep:
-        target = round(pref)
-        while target in used_rows:
-            target += 1
-        row_assignments[pr_id] = target
-        used_rows.add(target)
-
-    # Assign no-dep nodes
-    for pr_id in sorted(no_dep):
-        target = 0
-        while target in used_rows:
-            target += 1
-        row_assignments[pr_id] = target
-        used_rows.add(target)
+# ---------------------------------------------------------------------------
+# Plan Grouping (unchanged from original)
+# ---------------------------------------------------------------------------
 
 
 def _apply_plan_grouping(

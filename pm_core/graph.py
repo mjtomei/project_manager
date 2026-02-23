@@ -98,6 +98,40 @@ def compute_layers(prs: list[dict]) -> list[list[str]]:
     return layers
 
 
+def count_crossings(
+    node_positions: dict[str, tuple[int, int]],
+    prs: list[dict],
+) -> int:
+    """Count edge crossings in a layout.
+
+    Two edges (u→v) and (u'→v') cross when they connect the same pair of
+    adjacent layers and the row orderings of their endpoints are inverted:
+    one goes up while the other goes down.
+    """
+    pr_ids = set(p["id"] for p in prs)
+    edges = []
+    for pr in prs:
+        for dep in pr.get("depends_on") or []:
+            if dep in pr_ids and dep in node_positions and pr["id"] in node_positions:
+                edges.append((dep, pr["id"]))
+
+    crossings = 0
+    for i in range(len(edges)):
+        u1, v1 = edges[i]
+        col_u1, row_u1 = node_positions[u1]
+        col_v1, row_v1 = node_positions[v1]
+        for j in range(i + 1, len(edges)):
+            u2, v2 = edges[j]
+            col_u2, row_u2 = node_positions[u2]
+            col_v2, row_v2 = node_positions[v2]
+            # Only count crossings between edges connecting the same layers
+            if col_u1 == col_u2 and col_v1 == col_v2:
+                if (row_u1 - row_u2) * (row_v1 - row_v2) < 0:
+                    crossings += 1
+
+    return crossings
+
+
 def render_static_graph(prs: list[dict]) -> str:
     """Render a simple text-based graph for terminal output."""
     if not prs:
