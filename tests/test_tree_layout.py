@@ -520,18 +520,18 @@ class TestCrossingMinimization:
     def test_sweep_oscillation_keeps_best(self):
         """Regression test: backward sweep must not undo forward improvements.
 
-        Graph modeled on the food project: two parents each connect to
-        two children (K2,2 subgraph), plus a third chain alongside.
-        The K2,2 creates 1 unavoidable crossing, but the ordering should
-        keep sibling children adjacent to avoid additional crossings.
+        K2,2 siblings (aa, cc) sharing parents (p1, p2) with a third
+        node (bb) on a different chain but whose ID sorts between them.
+        The backward sweep gives all three the same child barycenter and
+        re-sorts alphabetically, splitting the siblings apart.
 
             R1     R2
            / \\    /
           P1  P2  P3
          / \\  |   |
-        C1  C2 C3 (C1+C2 share P1+P2 as parents)
-              \\ | /
-               M1
+        aa  cc bb  (aa+cc share P1+P2; bb depends on P3)
+          \\  | /
+            M1
         """
         prs = [
             _pr("pr-r1"),
@@ -539,16 +539,164 @@ class TestCrossingMinimization:
             _pr("pr-p1", depends_on=["pr-r1"]),
             _pr("pr-p2", depends_on=["pr-r1"]),
             _pr("pr-p3", depends_on=["pr-r1", "pr-r2"]),
-            _pr("pr-c1", depends_on=["pr-p1", "pr-p2"]),
-            _pr("pr-c2", depends_on=["pr-p1", "pr-p2"]),
-            _pr("pr-c3", depends_on=["pr-p3"]),
-            _pr("pr-m1", depends_on=["pr-c2", "pr-c3"]),
+            _pr("pr-aa", depends_on=["pr-p1", "pr-p2"]),
+            _pr("pr-cc", depends_on=["pr-p1", "pr-p2"]),
+            _pr("pr-bb", depends_on=["pr-p3"]),
+            _pr("pr-m1", depends_on=["pr-aa", "pr-cc", "pr-bb"]),
         ]
         layout = compute_tree_layout(prs)
         crossings = count_crossings(layout.node_positions, prs)
         # K2,2 has 1 unavoidable crossing; must not have extra
         assert crossings <= 1
-        # c1 and c2 must be adjacent (both share parents p1+p2)
-        row_c1 = layout.node_positions["pr-c1"][1]
-        row_c2 = layout.node_positions["pr-c2"][1]
-        assert abs(row_c1 - row_c2) == 1
+        # aa and cc must be adjacent (both share parents p1+p2)
+        row_aa = layout.node_positions["pr-aa"][1]
+        row_cc = layout.node_positions["pr-cc"][1]
+        assert abs(row_aa - row_cc) == 1
+
+
+# ---------------------------------------------------------------------------
+# Brute-force optimality tests
+# ---------------------------------------------------------------------------
+
+
+def _brute_force_min_crossings(prs):
+    """Compute the minimum possible crossings by trying all layer permutations.
+
+    For each layer, try every permutation of nodes.  For each combination
+    of permutations across layers, count the crossings and return the
+    minimum.  This is O(product(n_i!) for each layer i) — only feasible
+    for small graphs.
+    """
+    from itertools import permutations, product
+    from pm_core.graph import compute_layers
+
+    layers = compute_layers(prs)
+    pr_ids = set(p["id"] for p in prs)
+    parents_of = {}
+    for pr in prs:
+        parents_of[pr["id"]] = [d for d in (pr.get("depends_on") or []) if d in pr_ids]
+
+    # Generate all possible orderings per layer
+    layer_perms = [list(permutations(layer)) for layer in layers]
+
+    best = float("inf")
+    for combo in product(*layer_perms):
+        # Build ordinal positions
+        ordinal = {}
+        for layer in combo:
+            for i, node in enumerate(layer):
+                ordinal[node] = i
+
+        # Count crossings between adjacent layers
+        crossings = 0
+        for col in range(1, len(combo)):
+            edges = []
+            for node in combo[col]:
+                for parent in parents_of.get(node, []):
+                    if parent in ordinal:
+                        edges.append((ordinal[parent], ordinal[node]))
+            for i in range(len(edges)):
+                for j in range(i + 1, len(edges)):
+                    if (edges[i][0] - edges[j][0]) * (edges[i][1] - edges[j][1]) < 0:
+                        crossings += 1
+            if crossings >= best:
+                break  # prune
+        best = min(best, crossings)
+
+    return best
+
+
+class TestBruteForceOptimality:
+    """Verify the heuristic matches brute-force optimal on small graphs."""
+
+    def test_linear_chain(self):
+        prs = [_pr("pr-a"), _pr("pr-b", depends_on=["pr-a"]), _pr("pr-c", depends_on=["pr-b"])]
+        layout = compute_tree_layout(prs)
+        assert count_crossings(layout.node_positions, prs) == _brute_force_min_crossings(prs)
+
+    def test_diamond(self):
+        prs = [
+            _pr("pr-a"),
+            _pr("pr-b", depends_on=["pr-a"]),
+            _pr("pr-c", depends_on=["pr-a"]),
+            _pr("pr-d", depends_on=["pr-b", "pr-c"]),
+        ]
+        layout = compute_tree_layout(prs)
+        assert count_crossings(layout.node_positions, prs) == _brute_force_min_crossings(prs)
+
+    def test_w_graph(self):
+        prs = [
+            _pr("pr-a"), _pr("pr-b"),
+            _pr("pr-c", depends_on=["pr-a"]),
+            _pr("pr-d", depends_on=["pr-a", "pr-b"]),
+            _pr("pr-e", depends_on=["pr-b"]),
+        ]
+        layout = compute_tree_layout(prs)
+        assert count_crossings(layout.node_positions, prs) == _brute_force_min_crossings(prs)
+
+    def test_two_chains(self):
+        prs = [
+            _pr("pr-a"), _pr("pr-b"),
+            _pr("pr-c", depends_on=["pr-a"]),
+            _pr("pr-d", depends_on=["pr-b"]),
+        ]
+        layout = compute_tree_layout(prs)
+        assert count_crossings(layout.node_positions, prs) == _brute_force_min_crossings(prs)
+
+    def test_reverse_dep_order(self):
+        """A(row 0)→D, B(row 1)→C — requires reordering to avoid crossing."""
+        prs = [
+            _pr("pr-a"), _pr("pr-b"),
+            _pr("pr-c", depends_on=["pr-b"]),
+            _pr("pr-d", depends_on=["pr-a"]),
+        ]
+        layout = compute_tree_layout(prs)
+        assert count_crossings(layout.node_positions, prs) == _brute_force_min_crossings(prs)
+
+    def test_fan_in(self):
+        prs = [
+            _pr("pr-a"), _pr("pr-b"), _pr("pr-c"),
+            _pr("pr-d", depends_on=["pr-a", "pr-b", "pr-c"]),
+        ]
+        layout = compute_tree_layout(prs)
+        assert count_crossings(layout.node_positions, prs) == _brute_force_min_crossings(prs)
+
+    def test_k22_with_third_chain(self):
+        """The food project pattern — K2,2 plus a separate chain.
+
+        Brute force confirms the minimum is 1 (K2,2 unavoidable).
+        """
+        prs = [
+            _pr("pr-r1"), _pr("pr-r2"),
+            _pr("pr-p1", depends_on=["pr-r1"]),
+            _pr("pr-p2", depends_on=["pr-r1"]),
+            _pr("pr-p3", depends_on=["pr-r1", "pr-r2"]),
+            _pr("pr-aa", depends_on=["pr-p1", "pr-p2"]),
+            _pr("pr-cc", depends_on=["pr-p1", "pr-p2"]),
+            _pr("pr-bb", depends_on=["pr-p3"]),
+            _pr("pr-m1", depends_on=["pr-aa", "pr-cc", "pr-bb"]),
+        ]
+        layout = compute_tree_layout(prs)
+        heuristic = count_crossings(layout.node_positions, prs)
+        optimal = _brute_force_min_crossings(prs)
+        assert heuristic == optimal, f"heuristic={heuristic} > optimal={optimal}"
+
+    def test_complex_test_graph(self):
+        """12-node graph from plan-tl-test with 6 layers."""
+        prs = [
+            _pr("pr-tl01"), _pr("pr-tl02"),
+            _pr("pr-tl03", depends_on=["pr-tl01"]),
+            _pr("pr-tl04", depends_on=["pr-tl01"]),
+            _pr("pr-tl05", depends_on=["pr-tl02", "pr-tl03"]),
+            _pr("pr-tl06", depends_on=["pr-tl02", "pr-tl04"]),
+            _pr("pr-tl07", depends_on=["pr-tl04"]),
+            _pr("pr-tl08", depends_on=["pr-tl03", "pr-tl05"]),
+            _pr("pr-tl09", depends_on=["pr-tl05", "pr-tl06", "pr-tl07"]),
+            _pr("pr-tl10", depends_on=["pr-tl06"]),
+            _pr("pr-tl11", depends_on=["pr-tl08", "pr-tl09"]),
+            _pr("pr-tl12", depends_on=["pr-tl10", "pr-tl11"]),
+        ]
+        layout = compute_tree_layout(prs)
+        heuristic = count_crossings(layout.node_positions, prs)
+        optimal = _brute_force_min_crossings(prs)
+        assert heuristic == optimal, f"heuristic={heuristic} > optimal={optimal}"
