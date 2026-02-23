@@ -144,8 +144,8 @@ def set_force_mobile(session: str, enabled: bool) -> None:
 def is_mobile(session: str, window: str = "0") -> bool:
     """Check if mobile mode is active (force flag or narrow terminal).
 
-    With window-size=latest, the window size reflects the most recently
-    active client, so we only need to check the current window size.
+    With window-size=smallest, the window size reflects the smallest
+    connected client, so we only need to check the current window size.
     """
     if mobile_flag_path(session).exists():
         _logger.info("is_mobile(%s, %s): True (force flag)", session, window)

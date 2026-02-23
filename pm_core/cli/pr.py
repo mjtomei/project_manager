@@ -720,12 +720,10 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         # session (via current_or_base_session), so we need to explicitly
         # switch any others that were also on the review window.
         #
-        # select-window alone does NOT update tmux's "latest client"
-        # tracking (used by window-size=latest to determine window
-        # dimensions).  switch-client to the same session is a visible
-        # no-op but makes that client the "latest", causing tmux to
-        # immediately recalculate the window size for the correct
-        # display.
+        # select-window alone does NOT update tmux's client tracking.
+        # switch-client to the same session is a visible no-op but
+        # triggers tmux to recalculate the window size for the
+        # correct display.
         if sessions_on_review:
             new_win = tmux_mod.find_window_by_name(pm_session, window_name)
             if new_win:

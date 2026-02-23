@@ -54,14 +54,14 @@ def _register_tmux_bindings(session_name: str) -> None:
 
     Called on both new session creation and reattach so bindings
     survive across sessions (tmux bindings are global).
-    Also sets window-size=latest on all sessions in the group so each
-    client's terminal size is used for layout, not the minimum.
+    Also sets window-size=smallest on all sessions in the group so the
+    window fits the smallest connected client (everyone sees the full layout).
     """
-    # Enable per-client window sizing: window follows the most recently
-    # active client rather than shrinking to the smallest.
+    # Window follows the smallest client so all connected users see the
+    # full layout without scrolling or clipping.
     base = session_name.split("~")[0]
     for s in [base] + tmux_mod.list_grouped_sessions(base):
-        tmux_mod.set_session_option(s, "window-size", "latest")
+        tmux_mod.set_session_option(s, "window-size", "smallest")
 
     subprocess.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", "R",
              "run-shell 'pm rebalance'"), check=False)
@@ -88,8 +88,8 @@ def _register_tmux_bindings(session_name: str) -> None:
     subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gw", "after-split-window",
              "run-shell 'pm _pane-opened \"#{session_name}\" \"#{window_id}\" \"#{pane_id}\"'"),
             check=False)
-    # Auto-rebalance when window resizes (triggered by client switches
-    # with window-size=latest, or moving terminal to a different monitor).
+    # Auto-rebalance when window resizes (triggered by clients connecting/
+    # disconnecting with window-size=smallest, or moving terminal to a different monitor).
     # Uses "window-resized" (fires on any window size change) not
     # "after-resize-window" (only fires after the resize-window command).
     # Note: window-resized is a window hook, so use -gw not -g.
@@ -234,7 +234,7 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
                 _log.info("creating new grouped session: %s", grouped)
                 tmux_mod.create_grouped_session(session_name, grouped,
                                                 socket_path=socket_path)
-                tmux_mod.set_session_option(grouped, "window-size", "latest",
+                tmux_mod.set_session_option(grouped, "window-size", "smallest",
                                             socket_path=socket_path)
                 click.echo(f"Attaching to session '{grouped}'...")
             tmux_mod.attach(grouped, socket_path=socket_path)
@@ -352,7 +352,7 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
     # Create a grouped session so we never attach directly to the base
     grouped = f"{session_name}~1"
     tmux_mod.create_grouped_session(session_name, grouped, socket_path=socket_path)
-    tmux_mod.set_session_option(grouped, "window-size", "latest",
+    tmux_mod.set_session_option(grouped, "window-size", "smallest",
                                 socket_path=socket_path)
     tmux_mod.attach(grouped, socket_path=socket_path)
 
