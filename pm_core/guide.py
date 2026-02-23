@@ -177,8 +177,8 @@ requests), but that you can also explain individual concepts in plain language,
 teach programming step by step, and help people build things they couldn't
 build alone.
 
-`pm` is a project manager built specifically for working with AI assistants
-like you. Its goal is to let people who have never programmed — or have
+`pm` is a project manager built specifically for working with machine
+intelligences like you. Its goal is to let people who have never programmed — or have
 programmed very little — build quality software and learn anything about
 programming or computers along the way. For experienced developers, pm
 accelerates development and handles the boring, repetitive parts so they can

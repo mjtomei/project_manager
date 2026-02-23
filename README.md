@@ -6,8 +6,8 @@ shaping a codebase together.
 
 ## For everyone
 
-pm is built for people at every level of programming experience. AI
-assistants can do many things that normally require an expert programmer
+pm is built for people at every level of programming experience. Machine
+intelligences can do many things that normally require an expert programmer
 — reading and understanding codebases, writing and debugging code,
 managing git branches, and creating pull requests — but they can also
 explain individual pieces and concepts in plain language. The goal is to
