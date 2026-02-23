@@ -18,6 +18,35 @@ from pm_core import store, guide, pr_sync
 _log = configure_logger("pm.tui.sync")
 
 
+def _kill_merged_pr_windows(app, merged_pr_ids: set[str]) -> None:
+    """Kill tmux windows for merged PRs since they're no longer accessible from the TUI."""
+    from pm_core import tmux as tmux_mod
+    from pm_core.cli.helpers import _pr_display_id
+
+    if not app._session_name or not merged_pr_ids:
+        return
+    session = app._session_name
+    if not tmux_mod.session_exists(session):
+        return
+
+    for pr_id in merged_pr_ids:
+        pr = store.get_pr(app._data, pr_id)
+        if not pr:
+            continue
+        display_id = _pr_display_id(pr)
+        # Kill work window (named by display_id, e.g. "#77" or "pr-001")
+        work_win = tmux_mod.find_window_by_name(session, display_id)
+        if work_win:
+            tmux_mod.kill_window(session, work_win["id"])
+            _log.info("Killed work window '%s' for merged %s", display_id, pr_id)
+        # Kill review window (named "review-{display_id}")
+        review_name = f"review-{display_id}"
+        review_win = tmux_mod.find_window_by_name(session, review_name)
+        if review_win:
+            tmux_mod.kill_window(session, review_win["id"])
+            _log.info("Killed review window '%s' for merged %s", review_name, pr_id)
+
+
 async def background_sync(app) -> None:
     """Pull latest state from git or check guide progress."""
     from pm_core.tui.frame_capture import load_capture_config
@@ -95,6 +124,7 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
                 if pr["id"] in result.merged_prs:
                     pr["status"] = "merged"
             store.save(app._data, app._root)
+            _kill_merged_pr_windows(app, result.merged_prs)
         app._update_display()
 
         prs = app._data.get("prs") or []
@@ -157,13 +187,18 @@ async def startup_github_sync(app) -> None:
             # Reload from disk and apply ALL status changes on the main thread
             app._data = store.load(app._root)
             changed = False
+            newly_merged = set()
             for pr in app._data.get("prs") or []:
                 new_status = result.status_updates.get(pr["id"])
                 if new_status and pr.get("status") != new_status:
+                    if new_status == "merged":
+                        newly_merged.add(pr["id"])
                     pr["status"] = new_status
                     changed = True
             if changed:
                 store.save(app._data, app._root)
+            if newly_merged:
+                _kill_merged_pr_windows(app, newly_merged)
             app._update_display()
             app.log_message(f"GitHub sync: {result.updated_count} PR(s) updated")
         elif result.error:
