@@ -229,37 +229,43 @@ goals for upcoming work.
 
 ### Creating a plan
 
+If you and the user have already discussed their goals and you have a good
+understanding of what the plan should cover, write a short summary to a file
+(e.g. `plans/notes.md`) before telling them to add the plan. Include what
+you learned about the codebase, the user's goals, and any decisions made.
+The user can then pass that file path to the add dialog so the plan session
+picks up where this conversation left off.
+
 Tell the user to press `p` in the TUI to open the plans view, then press `a`
-to add a new plan. A dialog will ask for a title — help them choose a good
+to add a new plan. A dialog will ask for a title or file path — if you wrote
+a notes file, tell them to enter that path; otherwise help them choose a good
 title based on what you learned about the codebase and their goals. The `a`
-action launches a Claude session in a new pane. **It is safe to close this
-guide pane now** — the new plan session will guide the rest. Tell the user this.
+action launches a session in a new pane. Once the plan session finishes,
+walk the user through the remaining steps below.
 
 ### Breaking the plan into PRs
 
 Tell the user to press `w` in the plans view to break the plan into PRs. This
-launches a Claude session that explores the codebase, writes the plan content,
-and adds a `## PRs` section with individual PR entries. **It is safe to close
-this guide pane now** — the new breakdown session will guide the rest. Tell the
-user this.
+launches a session that explores the codebase, writes the plan content,
+and adds a `## PRs` section with individual PR entries. Wait for it to finish,
+then continue to the next step.
 
 ### Reviewing the plan
 
 Tell the user to press `c` in the plans view to review the plan. This launches
-a Claude session that checks the plan and PRs for consistency. **It is safe to
-close this guide pane now** — the new review session will guide the rest. Tell
-the user this.
+a session that checks the plan and PRs for consistency. Wait for it to finish,
+then continue to the next step.
 
 ### Loading PRs
 
 Tell the user to press `l` in the plans view to load PRs from the plan file
-into the project. This runs instantly (no Claude session) — the TUI status bar
+into the project. This runs instantly (no session needed) — the TUI status bar
 shows progress and the tech tree updates when done.
 
 ### TUI plans view reference
 
 In the TUI, `p` toggles the plans view. The setup flow is `a` → `w` → `c` → `l`:
-- `a` — add a new plan (prompts for name and description)
+- `a` — add a new plan (prompts for a title or file path)
 - `w` — break plan into PRs (launches a Claude session)
 - `c` — review plan (launches a Claude session)
 - `l` — load PRs from plan into the project
@@ -269,8 +275,12 @@ In the TUI, `p` toggles the plans view. The setup flow is `a` → `w` → `c` �
 ## Next Step
 
 Once PRs are loaded, tell the user to press `p` to leave the plans view.
-The TUI will show the PR tech tree. They can press `s` on a PR to start
-working on it.
+The TUI will show the PR tech tree. Help them choose a good first PR to
+work on, then tell them to press `s` on it to start. This launches a session
+in a new pane focused on that PR.
+
+Once the first PR session is running, **it is safe to close this guide pane**.
+Tell the user.
 {notes_block}"""
 
 

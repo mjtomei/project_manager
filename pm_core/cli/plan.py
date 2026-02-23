@@ -39,14 +39,20 @@ def plan():
 
 @plan.command("add")
 @click.argument("name")
-@click.option("--description", default="", help="Description of what the plan should accomplish")
+@click.option("--description", default="", help="(Deprecated) Description — ignored, kept for backward compat")
 @click.option("--fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
 def plan_add(name: str, description: str, fresh: bool):
-    """Create a new plan and launch Claude to develop it."""
+    """Create a new plan and launch Claude to develop it.
+
+    NAME can be a short title (e.g. "auth-refactor") or a path to an
+    existing file that describes the plan (e.g. "plans/auth.md" or
+    "DESIGN.md").  The Claude session handles file resolution.
+    """
     root = state_root()
     data = store.load(root)
+
     existing_ids = {p["id"] for p in (data.get("plans") or [])}
-    plan_id = store.generate_plan_id(name, existing_ids, description=description)
+    plan_id = store.generate_plan_id(name, existing_ids)
     plan_file = f"plans/{plan_id}.md"
 
     entry = {
@@ -62,10 +68,7 @@ def plan_add(name: str, description: str, fresh: bool):
     # Create the plan file
     plan_path = root / plan_file
     plan_path.parent.mkdir(parents=True, exist_ok=True)
-    if description:
-        plan_path.write_text(f"# {name}\n\n{description}\n")
-    else:
-        plan_path.write_text(f"# {name}\n\n<!-- Describe the plan here -->\n")
+    plan_path.write_text(f"# {name}\n\n<!-- Describe the plan here -->\n")
 
     # Ensure notes file exists
     notes.ensure_notes_file(root)
@@ -76,22 +79,6 @@ def plan_add(name: str, description: str, fresh: bool):
     trigger_tui_refresh()
 
     notes_block = notes.notes_section(root)
-    desc_block = ""
-    if description:
-        desc_block = f"""
-The user has provided this description of what the plan should accomplish:
-
-> {description}
-
-Use this as a starting point — confirm your understanding, ask clarifying questions
-if needed, then develop the full plan.
-"""
-    else:
-        desc_block = """
-Ask me what this plan should accomplish. I'll describe it at a high level and
-we'll iterate until the plan is clear and complete. Then write the final plan
-to the file above as structured markdown.
-"""
     prompt = f"""\
 Your goal: Help me develop a plan called "{name}" and write it to {plan_path}.
 
@@ -99,7 +86,20 @@ This session is managed by `pm` (project manager for Claude Code). You have acce
 to the `pm` CLI tool — run `pm help` to see available commands.
 
 The plan file is at: {plan_path}
-{desc_block}
+
+The user gave "{name}" as the plan name. This might be:
+- A short title describing the plan (e.g. "auth-refactor", "add dark mode")
+- A file path pointing to an existing document with plan context (e.g.
+  "plans/auth.md", "DESIGN.md", "notes/idea.txt")
+
+If it looks like a file path, try to find and read the file — check relative to
+the project root and common directories. If you find it, use its contents as
+context for developing the plan. If not found, just treat it as a title.
+
+If the name is just a title, ask the user what the plan should accomplish.
+They'll describe it at a high level and you'll iterate until the plan is clear
+and complete. Then write the final plan to the file above as structured markdown.
+
 The plan needs to include scope, goals, key design decisions, and any constraints.
 
 Once the plan is solid, break it down into a "## PRs" section with individual PRs

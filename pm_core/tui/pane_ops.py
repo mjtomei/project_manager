@@ -473,44 +473,14 @@ def handle_plan_action(app, action: str, plan_id: str | None) -> None:
 def handle_plan_add(app, result: tuple[str, str] | None) -> None:
     """Handle result from PlanAddScreen modal.
 
-    The user may enter a plan title or a file path. If the input looks
-    like a path (contains / or . and resembles an existing file), pass
-    it through. Otherwise treat it as a title.
+    The user enters a plan title or file path. The raw value is passed
+    to ``pm plan add`` — the Claude session handles file resolution.
     """
     if result is None:
         return
-    name, description = result
-    # Fuzzy match: if input looks like a file path, try to resolve it
-    resolved_name = _resolve_plan_input(app, name)
-    cmd = f"pm plan add {shlex.quote(resolved_name)}"
-    if description:
-        cmd += f" --description {shlex.quote(description)}"
+    name, _description = result  # description is always empty now
+    cmd = f"pm plan add {shlex.quote(name)}"
     launch_pane(app, cmd, "plan-add")
-
-
-def _resolve_plan_input(app, name: str) -> str:
-    """If name looks like a file path, try to fuzzy-match it.
-
-    Returns the resolved path if found, otherwise the original name.
-    """
-    # Check if it looks like a path (contains / or ends with common extensions)
-    if "/" in name or name.endswith((".md", ".txt", ".yaml", ".yml")):
-        # Try exact match first
-        root = app._root or Path.cwd()
-        candidate = root / name
-        if candidate.exists():
-            return name
-        # Try fuzzy search: look in plans/ directory and project root
-        search_dirs = [root / "plans", root]
-        basename = Path(name).name
-        stem = Path(name).stem
-        for search_dir in search_dirs:
-            if not search_dir.is_dir():
-                continue
-            for p in search_dir.iterdir():
-                if p.is_file() and (p.name == basename or p.stem == stem):
-                    return str(p.relative_to(root))
-    return name
 
 
 def launch_plan_activated(app, plan_id: str) -> None:
