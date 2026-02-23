@@ -2,6 +2,7 @@
 
 from pm_core import store, notes
 from pm_core.backend import get_backend
+from pm_core.paths import get_global_setting
 
 
 def tui_section(session_name: str) -> str:
@@ -88,6 +89,9 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
     # Include PR notes (addendums added after work began)
     pr_notes_block = _format_pr_notes(pr)
 
+    beginner_block = _beginner_addendum()
+    cleanup_block = _auto_cleanup_addendum()
+
     prompt = f"""You're working on PR {pr_id}: "{title}"
 
 This session is managed by `pm`. Run `pm help` to see available commands.
@@ -106,7 +110,7 @@ This session is managed by `pm`. Run `pm help` to see available commands.
 
 ## Workflow
 {instructions}
-{tui_block}{notes_block}"""
+{tui_block}{notes_block}{beginner_block}{cleanup_block}"""
     return prompt.strip()
 
 
@@ -193,6 +197,7 @@ Review the code changes in this PR for quality, correctness, and architectural f
    - **NEEDS_WORK** — Blocking issues found (bugs, missing error handling, architectural problems, test gaps). Separate code-quality fixes from architectural concerns."""
 
     base = prompt.strip()
+    base += _beginner_addendum()
     if review_loop:
         base += _review_loop_addendum(pr.get("branch", ""), review_iteration,
                                       review_loop_id)
@@ -229,6 +234,39 @@ This review is running in an automated loop.  After completing your review:
    - Output: **PASS**
 
 IMPORTANT: Always end your response with the verdict keyword on its own line — one of **PASS**, **PASS_WITH_SUGGESTIONS**, or **NEEDS_WORK**."""
+
+
+def _beginner_addendum() -> str:
+    """Return beginner mode addendum if enabled, or empty string."""
+    if not get_global_setting("beginner-mode"):
+        return ""
+    return """
+
+## Beginner Guidance
+
+The user has beginner mode enabled. Please:
+- Explain what you're doing and why at each step
+- After completing work, always recommend clear next steps
+- Suggest which TUI key to press or CLI command to run next
+- If something goes wrong, explain what happened in simple terms
+- Avoid jargon without explanation
+- When committing, explain what a commit is and why we push
+"""
+
+
+def _auto_cleanup_addendum() -> str:
+    """Return auto-cleanup addendum if enabled, or empty string."""
+    if not get_global_setting("auto-cleanup"):
+        return ""
+    return """
+
+## Pane Cleanup
+
+Auto-cleanup is enabled. After finishing your main work:
+- Check for old or dead tmux panes that are no longer needed
+- Suggest running `pm tui send q` to close finished sessions
+- Mention that the user can press `b` in the TUI to rebalance panes
+"""
 
 
 def generate_review_loop_prompt(data: dict, pr_id: str) -> str:

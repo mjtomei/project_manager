@@ -223,6 +223,11 @@ If no project file exists yet, run `pm init --no-import` to initialize. This
 auto-detects the repo from the current directory. Use --no-import because we'll
 create a plan through the TUI.
 
+After init, ask the user about their experience level. If they are new to
+programming or to this kind of workflow, enable beginner mode by running:
+`pm setting beginner-mode on`
+This adds helpful guidance and next-step recommendations to all Claude sessions.
+
 After init, explore the codebase — read the README, look at directory structure,
 check recent git history. Share what you find with the user and ask about their
 goals for upcoming work.
