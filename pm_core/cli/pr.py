@@ -852,6 +852,148 @@ def pr_done(pr_id: str | None, fresh: bool, review_loop: bool, review_iteration:
                           review_loop_id=review_loop_id)
 
 
+@pr.command("review")
+@click.argument("pr_id", default=None, required=False)
+@click.option("--fresh", is_flag=True, default=False, help="Kill existing review window and create a new one")
+def pr_review(pr_id: str | None, fresh: bool):
+    """Launch a review window for a PR without changing its status.
+
+    Useful for re-reviewing a PR that's already in_review or in_progress.
+    If PR_ID is omitted, infers from cwd or auto-selects.
+    """
+    root = state_root()
+    data = store.load(root)
+
+    if pr_id is None:
+        pr_id = _infer_pr_id(data, status_filter=("in_review", "in_progress"))
+        if pr_id is None:
+            click.echo("No in_progress or in_review PR to review.", err=True)
+            raise SystemExit(1)
+        click.echo(f"Auto-selected {pr_id}")
+
+    pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
+
+    if not pr_entry.get("workdir"):
+        click.echo(f"PR {pr_id} has no workdir. Start it first with: pm pr start {pr_id}", err=True)
+        raise SystemExit(1)
+
+    _launch_review_window(data, pr_entry, fresh=fresh)
+
+
+@pr.command("merge")
+@click.argument("pr_id", default=None, required=False)
+def pr_merge(pr_id: str | None):
+    """Merge a PR's branch into the base branch.
+
+    For local/vanilla backends, performs a local git merge.
+    For GitHub backend, directs the user to merge via GitHub.
+    If PR_ID is omitted, infers from cwd or auto-selects.
+    """
+    root = state_root()
+    data = store.load(root)
+
+    if pr_id is None:
+        pr_id = _infer_pr_id(data, status_filter=("in_review",))
+        if pr_id is None:
+            click.echo("No in_review PR to merge.", err=True)
+            raise SystemExit(1)
+        click.echo(f"Auto-selected {pr_id}")
+
+    pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
+
+    if pr_entry.get("status") == "merged":
+        click.echo(f"PR {pr_id} is already merged.", err=True)
+        raise SystemExit(1)
+    if pr_entry.get("status") == "pending":
+        click.echo(f"PR {pr_id} is pending — start and review it first.", err=True)
+        raise SystemExit(1)
+
+    backend_name = data["project"].get("backend", "vanilla")
+    base_branch = data["project"].get("base_branch", "master")
+    branch = pr_entry.get("branch", "")
+
+    if backend_name == "github":
+        gh_pr = pr_entry.get("gh_pr")
+        if gh_pr:
+            click.echo(f"GitHub PR: {gh_pr}")
+            click.echo("Merge via GitHub, then run 'pm pr sync' to detect it.")
+        else:
+            click.echo("No GitHub PR URL found. Merge manually on GitHub, then run 'pm pr sync'.")
+        return
+
+    # For local/vanilla: find a workdir to merge from
+    workdir = pr_entry.get("workdir")
+    if not workdir or not Path(workdir).exists():
+        # Try to find any workdir
+        workdir = None
+        for p in (data.get("prs") or []):
+            wd = p.get("workdir")
+            if wd and Path(wd).exists() and git_ops.is_git_repo(wd):
+                workdir = wd
+                break
+    if not workdir:
+        click.echo("No workdir found. Start a PR first.", err=True)
+        raise SystemExit(1)
+
+    # Resolve the repo root (for local backend, merge happens in the original repo)
+    repo_url = data["project"].get("repo", "")
+
+    if backend_name == "local":
+        # For local backend, merge in the original repo
+        repo_dir = repo_url if Path(repo_url).exists() else str(Path(workdir))
+        click.echo(f"Merging {branch} into {base_branch} in {repo_dir}...")
+        # Checkout base branch and merge
+        result = git_ops.run_git("checkout", base_branch, cwd=repo_dir, check=False)
+        if result.returncode != 0:
+            click.echo(f"Failed to checkout {base_branch}: {result.stderr.strip()}", err=True)
+            raise SystemExit(1)
+        result = git_ops.run_git("merge", "--no-ff", branch, "-m",
+                                 f"Merge {branch}: {pr_entry.get('title', pr_id)}",
+                                 cwd=repo_dir, check=False)
+        if result.returncode != 0:
+            click.echo(f"Merge failed: {result.stderr.strip()}", err=True)
+            click.echo("Resolve conflicts manually, then run 'pm pr sync'.", err=True)
+            raise SystemExit(1)
+        click.echo(f"Merged {branch} into {base_branch}.")
+    else:
+        # Vanilla: merge in workdir and push
+        click.echo(f"Merging {branch} into {base_branch}...")
+        result = git_ops.run_git("checkout", base_branch, cwd=workdir, check=False)
+        if result.returncode != 0:
+            click.echo(f"Failed to checkout {base_branch}: {result.stderr.strip()}", err=True)
+            raise SystemExit(1)
+        result = git_ops.run_git("merge", "--no-ff", branch, "-m",
+                                 f"Merge {branch}: {pr_entry.get('title', pr_id)}",
+                                 cwd=workdir, check=False)
+        if result.returncode != 0:
+            click.echo(f"Merge failed: {result.stderr.strip()}", err=True)
+            click.echo("Resolve conflicts manually, then run 'pm pr sync'.", err=True)
+            raise SystemExit(1)
+        # Push the merge
+        push_result = git_ops.run_git("push", "origin", base_branch, cwd=workdir, check=False)
+        if push_result.returncode != 0:
+            click.echo(f"Warning: Push failed: {push_result.stderr.strip()}", err=True)
+            click.echo("The merge is local. Push manually when ready.")
+        else:
+            click.echo(f"Pushed merged {base_branch} to origin.")
+
+    # Update status
+    pr_entry["status"] = "merged"
+    save_and_push(data, root, f"pm: merge {pr_id}")
+    click.echo(f"PR {_pr_display_id(pr_entry)} marked as merged.")
+    trigger_tui_refresh()
+
+    # Show newly unblocked PRs
+    prs = data.get("prs") or []
+    ready = graph.ready_prs(prs)
+    if ready:
+        click.echo("\nNewly ready PRs:")
+        for p in ready:
+            click.echo(f"  ⏳ {_pr_display_id(p)}: {p.get('title', '???')}")
+
+
 @pr.command("sync")
 def pr_sync():
     """Check for merged PRs and unblock dependents.

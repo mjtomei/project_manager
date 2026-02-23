@@ -93,6 +93,41 @@ def done_pr(app, fresh: bool = False) -> None:
     run_command(app, cmd, working_message=action_key, action_key=action_key)
 
 
+def review_pr(app, fresh: bool = False) -> None:
+    """Launch review window for the selected PR without changing status."""
+    from pm_core.tui.tech_tree import TechTree
+
+    tree = app.query_one("#tech-tree", TechTree)
+    pr_id = tree.selected_pr_id
+    _log.info("action: review_pr selected=%s fresh=%s", pr_id, fresh)
+    if not pr_id:
+        app.log_message("No PR selected")
+        return
+    action_key = f"Reviewing {pr_id}" + (" (fresh)" if fresh else "")
+    if not guard_pr_action(app, action_key):
+        return
+    app._inflight_pr_action = action_key
+    cmd = f"pr review --fresh {pr_id}" if fresh else f"pr review {pr_id}"
+    run_command(app, cmd, working_message=action_key, action_key=action_key)
+
+
+def merge_pr(app) -> None:
+    """Merge the selected PR."""
+    from pm_core.tui.tech_tree import TechTree
+
+    tree = app.query_one("#tech-tree", TechTree)
+    pr_id = tree.selected_pr_id
+    _log.info("action: merge_pr selected=%s", pr_id)
+    if not pr_id:
+        app.log_message("No PR selected")
+        return
+    action_key = f"Merging {pr_id}"
+    if not guard_pr_action(app, action_key):
+        return
+    app._inflight_pr_action = action_key
+    run_command(app, f"pr merge {pr_id}", working_message=action_key, action_key=action_key)
+
+
 # ---------------------------------------------------------------------------
 # Tree filtering
 # ---------------------------------------------------------------------------
