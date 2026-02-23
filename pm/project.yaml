@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-017
+  active_pr: pr-c773945
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-02-20T02:43:08.956779+00:00'
@@ -907,7 +907,7 @@ prs:
   title: 'Fix assorted bugs: pm status, review loop pane checks, help text, help pane
     keybindings'
   branch: pm/pr-4bd4eac-fix-assorted-bugs-pm-status-review-loop-pane-check
-  status: in_review
+  status: merged
   depends_on: []
   description: ''
   agent_machine: spark-424d
@@ -915,3 +915,70 @@ prs:
   gh_pr_number: 75
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-4bd4eac-fix-assorted-bugs-pm-status-review-l-c61824fc
+- id: pr-757a140
+  plan: null
+  title: Prevent SSH disconnect from typing garbage into pm session terminal
+  branch: pm/pr-757a140-prevent-ssh-disconnect-from-typing-garbage-into-pm
+  status: pending
+  depends_on: []
+  description: When an SSH connection to a running pm session dies, it types a bunch
+    of random characters into the terminal that ran SSH. Try to reproduce this and
+    investigate whether this can be mitigated by the tmux session configuration (e.g.
+    terminal escape sequence filtering, input handling on client disconnect) or by
+    wrapping the SSH process so its broken-pipe output does not reach the active pane.
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  notes: []
+- id: pr-c773945
+  plan: null
+  title: Fix TUI UX issues for new users and shared sessions
+  branch: pm/pr-c773945-fix-tui-ux-issues-for-new-users-and-shared-session
+  status: in_review
+  depends_on: []
+  description: 'Fix the following UX issues:
+
+
+    1. Multi-line project descriptions copy-pasted in the PlanAddScreen get cut off
+    — the add plan prompt should only take a title or file path, and have Claude try
+    to fuzzy search the file path
+
+
+    2. Auto-resize should be disabled for shared sessions — it should stay on the
+    size of the smallest monitor connected, not rebalance to a different size
+
+
+    3. Uppercase vs lowercase keybindings are confusing for new users — make all uppercase-only
+    bindings lowercase when nothing is already mapped to the lowercase version (note:
+    hjkl are in use for navigation, so skip those)
+
+
+    4. Notes pane clutters the window — only auto-start the notes pane when the guide
+    is not being auto-started
+
+
+    5. Both the guide and plan management sessions should tell users it is safe to
+    close them when they are recommending the next step that will start a new session
+
+
+    6. Guide prompt should give exposition on what Claude is — that it can do many
+    things only an expert programmer can do on your computer but can also explain
+    individual pieces or concepts, that the goal of the guide is to allow people who
+    have not programmed or programmed very little to build quality code and learn
+    anything about programming or computers, and to accelerate development and avoid
+    boring repetitive parts; add more emphasis to this in the README
+
+
+    7. Claude sessions should prefer that the user use the plans pane rather than
+    commands, should not autopopulate the command bar with pm plan review since it
+    should not be running it itself, should know it is not supposed to run commands
+    that generate a new Claude session itself except through commands to the TUI
+
+
+    8. Merge the Enter and E key entries in the command help pane into a single entry,
+    placed where the E key entry currently is'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/76
+  gh_pr_number: 76
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-c773945-fix-tui-ux-issues-for-new-users-and--2584c79a
