@@ -127,6 +127,11 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
             _kill_merged_pr_windows(app, result.merged_prs)
         app._update_display()
 
+        # Auto-start ready PRs if enabled (after merged PR detection)
+        if result.merged_prs:
+            from pm_core.tui.auto_start import check_and_start
+            await check_and_start(app)
+
         prs = app._data.get("prs") or []
 
         # Determine sync status message
@@ -201,6 +206,10 @@ async def startup_github_sync(app) -> None:
                 _kill_merged_pr_windows(app, newly_merged)
             app._update_display()
             app.log_message(f"GitHub sync: {result.updated_count} PR(s) updated")
+            # Auto-start ready PRs if enabled
+            if newly_merged:
+                from pm_core.tui.auto_start import check_and_start
+                await check_and_start(app)
         elif result.error:
             _log.warning("GitHub sync error: %s", result.error)
         else:

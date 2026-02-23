@@ -141,6 +141,7 @@ class ProjectManagerApp(App):
         Binding("c", "launch_claude", "Claude", show=True),
         Binding("H", "launch_guide", "Guide", show=True),
         Binding("C", "show_connect", "Connect", show=False),
+        Binding("A", "toggle_auto_start", "Auto-start", show=False),
     ]
 
     def on_key(self, event) -> None:
@@ -169,7 +170,8 @@ class ProjectManagerApp(App):
                        "edit_plan", "view_plan", "launch_notes",
                        "launch_meta", "launch_claude", "launch_guide",
                        "view_log", "refresh", "rebalance", "quit", "show_help",
-                       "toggle_plans", "toggle_tests", "hide_plan", "move_to_plan", "toggle_merged", "cycle_filter"):
+                       "toggle_plans", "toggle_tests", "hide_plan", "move_to_plan", "toggle_merged",
+                       "cycle_filter", "toggle_auto_start"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus:
                 _log.debug("check_action: blocked %s (command bar focused)", action)
@@ -435,6 +437,7 @@ class ProjectManagerApp(App):
             pr_count=len(prs),
             filter_text=filter_text,
             show_assist=not get_global_setting("hide-assist"),
+            auto_start=bool(project.get("auto_start")),
         )
 
     def _update_display(self) -> None:
@@ -585,6 +588,10 @@ class ProjectManagerApp(App):
 
     def action_show_connect(self) -> None:
         pane_ops.show_connect(self)
+
+    def action_toggle_auto_start(self) -> None:
+        from pm_core.tui.auto_start import toggle
+        toggle(self)
 
     def action_quit(self) -> None:
         pane_ops.quit_app(self)
