@@ -483,9 +483,10 @@ COMMANDS
   pm pr import-github           Import existing GitHub PRs into project yaml
   pm pr close [pr-id]           Close and remove a PR (also closes GitHub PR)
   pm pr cleanup [pr-id]         Remove workdir for merged PR
-  pm pr note add <pr-id> <text> Add a note to a PR
-  pm pr note list <pr-id>       List notes on a PR
-  pm pr note delete <pr-id> <id>  Delete a note from a PR
+  pm pr note add <pr-id> <text>        Add a note to a PR
+  pm pr note edit <pr-id> <id> <text>  Edit a note's text
+  pm pr note list <pr-id>              List notes on a PR
+  pm pr note delete <pr-id> <id>       Delete a note from a PR
 
   pm cluster auto               Discover feature clusters automatically
   pm cluster explore            Interactively explore code clusters with Claude
