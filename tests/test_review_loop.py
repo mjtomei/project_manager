@@ -18,6 +18,7 @@ from pm_core.review_loop import (
     _extract_follow_up_verdict,
     _build_prompt_verdict_lines,
     _is_prompt_line,
+    _match_verdict,
     VERDICT_PASS,
     VERDICT_PASS_WITH_SUGGESTIONS,
     VERDICT_NEEDS_WORK,
@@ -92,6 +93,58 @@ class TestParseReviewVerdict:
 
     def test_input_required_bold(self):
         assert parse_review_verdict("**INPUT_REQUIRED**") == VERDICT_INPUT_REQUIRED
+
+
+# --- _match_verdict false positive rejection tests ---
+
+class TestMatchVerdictFalsePositives:
+    """Verify that verdict keywords in non-verdict context are rejected."""
+
+    def test_pr_title_with_input_required(self):
+        """PR title containing INPUT_REQUIRED should not match."""
+        assert _match_verdict("Add INPUT_REQUIRED verdict to review loop for human-guided testing") is None
+
+    def test_pr_title_with_pass(self):
+        assert _match_verdict("Add PASS verdict handling to the review loop") is None
+
+    def test_pr_title_with_needs_work(self):
+        assert _match_verdict("Fix NEEDS_WORK detection in review loop verdict parser") is None
+
+    def test_pr_title_with_pass_with_suggestions(self):
+        assert _match_verdict("Handle PASS_WITH_SUGGESTIONS in auto-merge logic") is None
+
+    def test_pm_pr_list_table_row(self):
+        """Table row from pm pr list output should not match."""
+        assert _match_verdict("| pr-473ac84 | Add INPUT_REQUIRED verdict to review loop | merged |") is None
+
+    def test_descriptive_sentence_with_pass(self):
+        assert _match_verdict("The PASS verdict means the code is ready to merge") is None
+
+    def test_descriptive_sentence_with_needs_work(self):
+        assert _match_verdict("When NEEDS_WORK is returned, the loop continues with fixes") is None
+
+    def test_standalone_verdicts_still_match(self):
+        """Standalone verdict keywords should still be detected."""
+        assert _match_verdict("PASS") == VERDICT_PASS
+        assert _match_verdict("NEEDS_WORK") == VERDICT_NEEDS_WORK
+        assert _match_verdict("PASS_WITH_SUGGESTIONS") == VERDICT_PASS_WITH_SUGGESTIONS
+        assert _match_verdict("INPUT_REQUIRED") == VERDICT_INPUT_REQUIRED
+
+    def test_bold_verdicts_still_match(self):
+        assert _match_verdict("**PASS**") == VERDICT_PASS
+        assert _match_verdict("**NEEDS_WORK**") == VERDICT_NEEDS_WORK
+        assert _match_verdict("**INPUT_REQUIRED**") == VERDICT_INPUT_REQUIRED
+
+    def test_verdict_with_short_prefix(self):
+        """Common verdict preambles should still match."""
+        assert _match_verdict("Verdict: PASS") == VERDICT_PASS
+        assert _match_verdict("Final verdict: NEEDS_WORK") == VERDICT_NEEDS_WORK
+        assert _match_verdict("Overall: PASS_WITH_SUGGESTIONS") == VERDICT_PASS_WITH_SUGGESTIONS
+
+    def test_verdict_with_brief_context(self):
+        """Short surrounding text should still match."""
+        assert _match_verdict("My verdict: **PASS**") == VERDICT_PASS
+        assert _match_verdict("Result: NEEDS_WORK.") == VERDICT_NEEDS_WORK
 
 
 # --- prompt verdict filtering tests ---
@@ -352,7 +405,6 @@ class TestReviewLoopState:
     def test_input_required_defaults(self):
         state = ReviewLoopState(pr_id="pr-001")
         assert state.input_required is False
-        assert not state._input_confirmed.is_set()
 
 
 # --- Helper data for tests ---
@@ -635,104 +687,79 @@ class TestMultipleLoops:
 # --- INPUT_REQUIRED verdict tests ---
 
 class TestInputRequired:
-    def test_confirm_input_when_waiting(self):
-        """confirm_input returns True when state is waiting for input."""
+    def test_confirm_input_legacy_stub(self):
+        """confirm_input always returns False (legacy stub)."""
         state = ReviewLoopState(pr_id="pr-001")
         state.input_required = True
-        assert confirm_input(state) is True
-        assert state._input_confirmed.is_set()
-
-    def test_confirm_input_when_not_waiting(self):
-        """confirm_input returns False when state is not waiting for input."""
-        state = ReviewLoopState(pr_id="pr-001")
         assert confirm_input(state) is False
 
-    @patch("pm_core.review_loop._send_confirmation_and_poll")
+    @patch("pm_core.review_loop._wait_for_follow_up_verdict")
     @patch("pm_core.review_loop._run_claude_review")
-    def test_input_required_pauses_and_resumes(self, mock_review, mock_confirm_poll):
-        """Loop pauses on INPUT_REQUIRED, resumes after confirmation with follow-up verdict."""
+    def test_input_required_polls_for_follow_up(self, mock_review, mock_follow_up):
+        """Loop polls existing pane for follow-up verdict after INPUT_REQUIRED."""
         mock_review.return_value = "Need testing.\n\n**INPUT_REQUIRED**\n\n1. Test the button"
-        mock_confirm_poll.return_value = "Tests passed.\n\n**PASS**"
+        mock_follow_up.return_value = "Tests passed.\n\n**PASS**"
 
         state = ReviewLoopState(pr_id="pr-001")
-
-        # Auto-confirm from a separate thread after a brief delay
-        def auto_confirm():
-            import time
-            # Wait until the state shows input_required
-            for _ in range(50):
-                if state.input_required:
-                    break
-                time.sleep(0.05)
-            confirm_input(state)
-
-        confirmer = threading.Thread(target=auto_confirm, daemon=True)
-        confirmer.start()
-
         result = run_review_loop_sync(state, "/tmp", _PR_DATA)
-        confirmer.join(timeout=5)
 
         assert result.latest_verdict == VERDICT_PASS
         assert result.iteration == 1
         assert result.running is False
+        assert result.input_required is False
         # The final history entry should reflect the follow-up verdict
         assert result.history[-1].verdict == VERDICT_PASS
-        mock_confirm_poll.assert_called_once()
+        mock_follow_up.assert_called_once()
 
-    @patch("pm_core.review_loop._send_confirmation_and_poll")
+    @patch("pm_core.review_loop._wait_for_follow_up_verdict")
     @patch("pm_core.review_loop._run_claude_review")
-    def test_input_required_follow_up_needs_work_continues(self, mock_review, mock_confirm_poll):
-        """After confirmation, if follow-up is NEEDS_WORK, loop continues."""
+    def test_input_required_follow_up_needs_work_continues(self, mock_review, mock_follow_up):
+        """After follow-up NEEDS_WORK, loop continues to next iteration."""
         mock_review.side_effect = [
             "Need testing.\n\n**INPUT_REQUIRED**\n\n1. Test it",
             "All good.\n\n**PASS**",
         ]
-        mock_confirm_poll.return_value = "Issues found after testing.\n\n**NEEDS_WORK**"
+        mock_follow_up.return_value = "Issues found after testing.\n\n**NEEDS_WORK**"
 
         state = ReviewLoopState(pr_id="pr-001")
-
-        def auto_confirm():
-            import time
-            for _ in range(50):
-                if state.input_required:
-                    break
-                time.sleep(0.05)
-            confirm_input(state)
-
-        confirmer = threading.Thread(target=auto_confirm, daemon=True)
-        confirmer.start()
-
         result = run_review_loop_sync(state, "/tmp", _PR_DATA)
-        confirmer.join(timeout=5)
 
         # First iteration: INPUT_REQUIRED → NEEDS_WORK from follow-up
         # Second iteration: PASS from fresh review
         assert result.latest_verdict == VERDICT_PASS
         assert result.iteration == 2
 
+    @patch("pm_core.review_loop._wait_for_follow_up_verdict")
     @patch("pm_core.review_loop._run_claude_review")
-    def test_input_required_stop_requested_during_wait(self, mock_review):
-        """Stop request during INPUT_REQUIRED wait causes loop to exit."""
+    def test_input_required_pane_died_during_wait(self, mock_review, mock_follow_up):
+        """Pane dying during INPUT_REQUIRED wait causes loop to exit with KILLED."""
         mock_review.return_value = "**INPUT_REQUIRED**\n\n1. Test it"
+        mock_follow_up.return_value = None  # pane disappeared
 
         state = ReviewLoopState(pr_id="pr-001")
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA)
 
-        def auto_stop():
-            import time
-            for _ in range(50):
-                if state.input_required:
-                    break
-                time.sleep(0.05)
+        assert result.latest_verdict == VERDICT_KILLED
+        assert result.input_required is False
+        assert result.running is False
+
+    @patch("pm_core.review_loop._wait_for_follow_up_verdict")
+    @patch("pm_core.review_loop._run_claude_review")
+    def test_input_required_stop_requested_during_wait(self, mock_review, mock_follow_up):
+        """Stop request during INPUT_REQUIRED poll causes loop to exit."""
+        mock_review.return_value = "**INPUT_REQUIRED**\n\n1. Test it"
+
+        def side_effect(*args, **kwargs):
+            # Simulate stop requested during polling
             state.stop_requested = True
+            return None
 
-        stopper = threading.Thread(target=auto_stop, daemon=True)
-        stopper.start()
+        state = ReviewLoopState(pr_id="pr-001")
+        mock_follow_up.side_effect = side_effect
 
         result = run_review_loop_sync(state, "/tmp", _PR_DATA)
-        stopper.join(timeout=5)
 
-        assert result.latest_verdict == VERDICT_INPUT_REQUIRED
-        assert result.input_required is False  # cleared on exit
+        assert result.input_required is False
         assert result.running is False
 
 
@@ -785,5 +812,5 @@ class TestGenerateReviewPromptInputRequired:
         data = self._make_data()
         prompt = generate_review_prompt(data, "pr-001", review_loop=True)
         assert "INPUT_REQUIRED" in prompt
-        # Should explain what happens after confirmation
+        # Should explain that user responds directly and Claude gives final verdict
         assert "final verdict" in prompt

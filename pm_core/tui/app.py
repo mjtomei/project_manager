@@ -141,7 +141,6 @@ class ProjectManagerApp(App):
         Binding("H", "launch_guide", "Guide", show=True),
         Binding("C", "show_connect", "Connect", show=False),
         Binding("A", "toggle_auto_start", "Auto-start", show=False),
-        Binding("y", "confirm_input", "Confirm Input", show=False),
     ]
 
     def on_key(self, event) -> None:
@@ -299,6 +298,11 @@ class ProjectManagerApp(App):
         # These must run on the main thread (touch Textual state)
         self.run_worker(sync_mod.startup_github_sync(self))
         self._capture_frame("mount")
+        # Resume review loops for in_review PRs when auto-start is enabled.
+        # State was loaded in _load_state() before this worker started.
+        from pm_core.tui.auto_start import _auto_start_review_loops, is_enabled, get_target
+        if is_enabled(self):
+            _auto_start_review_loops(self, get_target(self))
 
     def _deferred_startup_sync(self) -> None:
         """Blocking startup tasks run in a thread."""
@@ -548,10 +552,6 @@ class ProjectManagerApp(App):
             # zzz d = start strict review loop (stops only on PASS),
             #         or stop loop if running
             review_loop_ui.start_or_stop_loop(self, stop_on_suggestions=False)
-
-    def action_confirm_input(self) -> None:
-        """Confirm manual testing is done for the selected PR's review loop."""
-        review_loop_ui.handle_confirm_input(self)
 
     def action_merge_pr(self) -> None:
         pr_view.merge_pr(self)

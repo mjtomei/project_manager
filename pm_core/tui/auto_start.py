@@ -132,6 +132,9 @@ async def check_and_start(app) -> None:
     Called after sync detects merged PRs. When a target is set, only
     starts ready PRs that are transitive dependencies of the target (or
     the target itself). Without a target, starts all ready PRs.
+
+    Also resumes review loops for in_review PRs that don't have one
+    running (e.g. after a TUI restart).
     """
     if not is_enabled(app):
         return
@@ -139,52 +142,53 @@ async def check_and_start(app) -> None:
         return
 
     prs = app._data.get("prs") or []
-    ready = graph.ready_prs(prs)
-    if not ready:
-        return
-
     target = get_target(app)
 
-    # Compute which PRs are relevant for the target
-    if target:
-        allowed = _transitive_deps(prs, target)
-        allowed.add(target)  # the target itself is also eligible
-    else:
-        allowed = None  # no target = start everything
+    ready = graph.ready_prs(prs)
+    if ready:
+        # Compute which PRs are relevant for the target
+        if target:
+            allowed = _transitive_deps(prs, target)
+            allowed.add(target)  # the target itself is also eligible
+        else:
+            allowed = None  # no target = start everything
 
-    for pr in ready:
-        pr_id = pr["id"]
+        for pr in ready:
+            pr_id = pr["id"]
 
-        # Skip PRs outside the target's dependency tree
-        if allowed is not None and pr_id not in allowed:
-            continue
+            # Skip PRs outside the target's dependency tree
+            if allowed is not None and pr_id not in allowed:
+                continue
 
-        # Skip if already has a workdir (was previously started)
-        if pr.get("workdir"):
-            continue
+            # Skip if already has a workdir (was previously started)
+            if pr.get("workdir"):
+                continue
 
-        _log.info("auto_start: starting ready PR %s", pr_id)
-        app.log_message(f"Auto-start: starting {pr_id}")
+            _log.info("auto_start: starting ready PR %s", pr_id)
+            app.log_message(f"Auto-start: starting {pr_id}")
 
-        try:
-            await _start_pr_quiet(app, pr_id)
-        except Exception as e:
-            _log.exception("auto_start: failed to start %s", pr_id)
-            app.log_message(f"Auto-start error: {e}")
-            continue
+            try:
+                await _start_pr_quiet(app, pr_id)
+            except Exception as e:
+                _log.exception("auto_start: failed to start %s", pr_id)
+                app.log_message(f"Auto-start error: {e}")
+                continue
 
-        # Once the target itself is started, stop starting more PRs.
-        # Auto-start stays enabled — it disables when the target is merged
-        # (handled by _finalize_merge in pr.py).
-        if target and pr_id == target:
-            _log.info("auto_start: target PR %s started, awaiting merge", target)
-            app.log_message(f"Auto-start: target {pr_id} started")
-            break
+            # Once the target itself is started, stop starting more PRs.
+            # Auto-start stays enabled — it disables when the target is merged
+            # (handled by _finalize_merge in pr.py).
+            if target and pr_id == target:
+                _log.info("auto_start: target PR %s started, awaiting merge", target)
+                app.log_message(f"Auto-start: target {pr_id} started")
+                break
 
-    # Reload state after starting PRs
-    app._load_state()
+        # Reload state after starting PRs
+        app._load_state()
+        prs = app._data.get("prs") or []
 
-    # Also auto-start review loops for in_review PRs without active loops
+    # Always resume review loops for in_review PRs without active loops.
+    # This handles TUI restarts where loop state was lost but PR state
+    # is still in_review on disk.
     _auto_start_review_loops(app, target, prs)
 
 

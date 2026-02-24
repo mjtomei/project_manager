@@ -14,11 +14,13 @@ The loop stops on PASS always. By default it also stops on
 PASS_WITH_SUGGESTIONS; set `stop_on_suggestions=False` to keep going
 until full PASS.
 
-When INPUT_REQUIRED is detected, the loop pauses and waits for the
-user to confirm they have performed the requested tests (via a
-``threading.Event``).  Once confirmed, a follow-up message is sent to
-the Claude pane, Claude responds with a final verdict, and the loop
-resumes normal flow.
+When INPUT_REQUIRED is detected, the loop marks the PR as paused and
+polls the existing review pane for a follow-up verdict.  The user
+interacts directly with Claude in the review pane (e.g. performing
+the requested tests and reporting results).  Once Claude emits a new
+verdict (PASS, PASS_WITH_SUGGESTIONS, or NEEDS_WORK), the loop picks
+it up automatically and resumes normal flow — no TUI interaction
+required.
 """
 
 import re
@@ -92,30 +94,51 @@ class ReviewLoopState:
     _ui_notified_done: bool = False
     _ui_notified_input: bool = False
     _transcript_dir: str | None = None
-    # INPUT_REQUIRED pause/resume
+    # INPUT_REQUIRED: set to True while polling for follow-up verdict
     input_required: bool = False
-    _input_confirmed: threading.Event = field(default_factory=threading.Event)
 
 
 def confirm_input(state: ReviewLoopState) -> bool:
-    """Confirm that the user has completed the requested manual testing.
+    """Legacy stub — INPUT_REQUIRED no longer requires manual confirmation.
 
-    Sets the internal event so the review loop thread unblocks and
-    sends a follow-up message to Claude.
-
-    Returns True if the state was waiting for input, False otherwise.
+    The review loop now polls the existing pane for a follow-up verdict
+    automatically.  This function is kept for backward compatibility but
+    always returns False.
     """
-    if not state.input_required:
-        return False
-    state._input_confirmed.set()
-    return True
+    return False
 
 
 def _match_verdict(line: str) -> str | None:
-    """Match a verdict keyword in a line using word-boundary regex."""
+    """Match a verdict keyword only if the line is a standalone verdict declaration.
+
+    Rejects lines where verdict keywords appear incidentally (e.g., in PR
+    titles, table rows, or descriptive text from ``pm pr list`` output).
+    A verdict declaration is a line where the keyword is the dominant content —
+    after removing the keyword, formatting, and common verdict preambles, the
+    remaining text is short.
+    """
     for pattern, verdict in _VERDICT_PATTERNS:
-        if pattern.search(line):
-            return verdict
+        if not pattern.search(line):
+            continue
+        # Extract the non-keyword context of the line
+        context = line
+        for kw in ("PASS_WITH_SUGGESTIONS", "INPUT_REQUIRED", "NEEDS_WORK", "PASS"):
+            context = context.replace(kw, "")
+        # Strip markdown formatting and punctuation
+        context = re.sub(r'[*`#\[\]|]', '', context)
+        context = context.strip(" \t\n\u2014-:()./\\_")
+        # Remove common verdict preambles
+        for prefix in ("verdict", "final verdict", "review verdict",
+                        "my verdict", "overall", "output"):
+            if context.lower().startswith(prefix):
+                context = context[len(prefix):]
+                context = context.strip(" \t\n\u2014-:()./\\_")
+        # If substantial context remains, this is not a verdict declaration
+        if len(context) > 25:
+            _log.debug("_match_verdict: rejected %r — context too long: %r (%d chars)",
+                       line[:80], context[:40], len(context))
+            continue
+        return verdict
     return None
 
 
@@ -402,47 +425,63 @@ def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
     return content
 
 
-def _send_confirmation_and_poll(pr_data: dict, prompt_text: str = "") -> str:
-    """Send input-confirmed message to the review pane and poll for follow-up verdict.
+def _wait_for_follow_up_verdict(pr_data: dict, prompt_text: str,
+                                 state: ReviewLoopState) -> str | None:
+    """Poll the existing review pane for a non-INPUT_REQUIRED verdict.
 
-    After the user confirms they completed the requested manual testing,
-    this function sends a message to the Claude pane and waits for Claude
-    to respond with a final verdict (PASS, PASS_WITH_SUGGESTIONS, or
-    NEEDS_WORK).
+    Used after INPUT_REQUIRED is detected.  The user interacts directly
+    with Claude in the review pane; this function polls until Claude emits
+    a follow-up verdict (PASS, PASS_WITH_SUGGESTIONS, or NEEDS_WORK).
 
-    Returns the captured pane content containing the follow-up verdict.
-    Raises PaneKilledError if the pane disappears.
-    Raises RuntimeError if the review pane can't be found.
+    Checks ``state.stop_requested`` between polls so the loop can be
+    stopped gracefully.
+
+    Returns the captured pane content when a verdict is found, or None if
+    the pane disappeared or stop was requested.
     """
     from pm_core import tmux as tmux_mod
 
     session = _get_pm_session()
     if not session:
-        raise RuntimeError("Not in a pm tmux session")
+        _log.warning("review_loop: no pm session for follow-up polling")
+        return None
 
     window_name = _compute_review_window_name(pr_data)
-    pane_id = _find_claude_pane(session, window_name)
-    if not pane_id:
-        raise RuntimeError(f"Review pane '{window_name}' not found for confirmation")
+    last_verdict: str | None = None
+    stable_count = 0
 
-    # Send confirmation message to the Claude pane
-    msg = (
-        "The user has completed the requested manual testing and confirmed "
-        "the results. Based on this, please provide your final verdict on "
-        "its own line: PASS, PASS_WITH_SUGGESTIONS, or NEEDS_WORK."
-    )
-    tmux_mod.send_keys(pane_id, msg)
-    _log.info("review_loop: sent input confirmation to pane %s", pane_id)
+    while not state.stop_requested:
+        pane_id = _find_claude_pane(session, window_name)
+        if not pane_id:
+            _log.warning("review_loop: review pane gone during INPUT_REQUIRED wait")
+            return None
 
-    # Wait briefly for Claude to start processing
-    time.sleep(2)
+        content = tmux_mod.capture_pane(pane_id, full_scrollback=True)
+        if content.strip():
+            verdict = _extract_verdict_from_content(
+                content, prompt_text,
+                exclude_verdicts={VERDICT_INPUT_REQUIRED},
+            )
+            if verdict:
+                if verdict == last_verdict:
+                    stable_count += 1
+                else:
+                    last_verdict = verdict
+                    stable_count = 1
+                if stable_count >= _STABILITY_POLLS:
+                    _log.info("review_loop: follow-up verdict %s stable", verdict)
+                    return content
+            else:
+                last_verdict = None
+                stable_count = 0
 
-    # Poll for a follow-up verdict, but only accept PASS/PASS_WITH_SUGGESTIONS/NEEDS_WORK
-    # (not INPUT_REQUIRED again).
-    content = _poll_for_follow_up_verdict(pane_id, prompt_text)
-    if content is None:
-        raise PaneKilledError(f"Review pane disappeared during follow-up (window: {window_name})")
-    return content
+        # Sleep in small increments to check stop_requested
+        for _ in range(int(_POLL_INTERVAL / _TICK_INTERVAL)):
+            if state.stop_requested:
+                return None
+            time.sleep(_TICK_INTERVAL)
+
+    return None
 
 
 def _poll_for_follow_up_verdict(pane_id: str, prompt_text: str = "") -> str | None:
@@ -550,66 +589,52 @@ def run_review_loop_sync(
                 except Exception:
                     _log.exception("review_loop: on_iteration callback failed")
 
-            # Handle INPUT_REQUIRED: pause and wait for user confirmation,
-            # then send a message to Claude and poll for follow-up verdict.
+            # Handle INPUT_REQUIRED: poll the existing review pane for a
+            # follow-up verdict.  The user interacts with Claude directly
+            # in the review pane — no TUI interaction required.
             if verdict == VERDICT_INPUT_REQUIRED:
-                _log.info("review_loop: INPUT_REQUIRED — pausing for user input")
-                state._input_confirmed.clear()
+                _log.info("review_loop: INPUT_REQUIRED — polling for follow-up verdict")
                 state.input_required = True
                 # Reset UI notification flag so repeated INPUT_REQUIRED
                 # rounds within the same loop still show a notification.
                 state._ui_notified_input = False
 
-                # Wait for user confirmation (checked every second)
-                while not state._input_confirmed.is_set():
-                    if state.stop_requested:
-                        break
-                    state._input_confirmed.wait(timeout=1.0)
-
+                follow_up_prompt = _regenerate_prompt_text(
+                    pm_root, state.pr_id, state.iteration, state.loop_id,
+                )
+                follow_up_output = _wait_for_follow_up_verdict(
+                    pr_data, follow_up_prompt, state,
+                )
                 state.input_required = False
 
-                if state.stop_requested:
-                    break
-
-                _log.info("review_loop: user confirmed input — polling for follow-up verdict")
-                try:
-                    follow_up_prompt = _regenerate_prompt_text(
-                        pm_root, state.pr_id, state.iteration, state.loop_id,
-                    )
-                    follow_up_output = _send_confirmation_and_poll(
-                        pr_data, prompt_text=follow_up_prompt,
-                    )
-                    verdict = parse_review_verdict(follow_up_output)
-                    # Exclude INPUT_REQUIRED from follow-up — treat as NEEDS_WORK
-                    if verdict == VERDICT_INPUT_REQUIRED:
-                        verdict = VERDICT_NEEDS_WORK
-                    state.latest_verdict = verdict
-                    state.latest_output = follow_up_output
-
-                    # Record the follow-up as part of this iteration's history
-                    state.history[-1] = ReviewIteration(
-                        iteration=state.iteration,
-                        verdict=verdict,
-                        output=follow_up_output,
-                    )
-                    _log.info("review_loop: follow-up verdict=%s", verdict)
-
-                    if on_iteration:
-                        try:
-                            on_iteration(state)
-                        except Exception:
-                            _log.exception("review_loop: on_iteration callback failed")
-
-                except PaneKilledError as e:
-                    _log.warning("review_loop: pane killed during follow-up: %s", e)
+                if follow_up_output is None:
+                    # Pane died or stop requested
+                    if state.stop_requested:
+                        break
                     state.latest_verdict = VERDICT_KILLED
-                    state.latest_output = str(e)
+                    state.latest_output = "Review pane disappeared during INPUT_REQUIRED wait"
                     break
-                except Exception as e:
-                    _log.exception("review_loop: follow-up failed")
-                    state.latest_verdict = "ERROR"
-                    state.latest_output = str(e)
-                    break
+
+                verdict = parse_review_verdict(follow_up_output)
+                # Treat repeated INPUT_REQUIRED as NEEDS_WORK
+                if verdict == VERDICT_INPUT_REQUIRED:
+                    verdict = VERDICT_NEEDS_WORK
+                state.latest_verdict = verdict
+                state.latest_output = follow_up_output
+
+                # Record the follow-up as part of this iteration's history
+                state.history[-1] = ReviewIteration(
+                    iteration=state.iteration,
+                    verdict=verdict,
+                    output=follow_up_output,
+                )
+                _log.info("review_loop: follow-up verdict=%s", verdict)
+
+                if on_iteration:
+                    try:
+                        on_iteration(state)
+                    except Exception:
+                        _log.exception("review_loop: on_iteration callback failed")
 
             if should_stop(verdict, state.stop_on_suggestions):
                 _log.info("review_loop: stopping — verdict=%s", verdict)
