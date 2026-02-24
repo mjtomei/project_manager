@@ -47,22 +47,16 @@ VERDICT_KILLED = "KILLED"
 ALL_VERDICTS = (VERDICT_PASS, VERDICT_PASS_WITH_SUGGESTIONS, VERDICT_NEEDS_WORK,
                 VERDICT_INPUT_REQUIRED)
 
-# Regex patterns for verdict detection.  Use lookahead/lookbehind instead of
-# \b to avoid matching substrings like "PASSWORD" or "PASS" inside "[PASS/FAIL]".
-# Check PASS_WITH_SUGGESTIONS before PASS since PASS is a prefix.
-_VERDICT_PATTERNS = [
-    (re.compile(r'(?<!\w)PASS_WITH_SUGGESTIONS(?!\w)'), VERDICT_PASS_WITH_SUGGESTIONS),
-    (re.compile(r'(?<!\w)INPUT_REQUIRED(?!\w)'), VERDICT_INPUT_REQUIRED),
-    (re.compile(r'(?<!\w)NEEDS_WORK(?!\w)'), VERDICT_NEEDS_WORK),
-    (re.compile(r'(?<!\w)PASS(?!_WITH_SUGGESTIONS|/|\w)'), VERDICT_PASS),
-]
-
 # How often to check pane content for a verdict (seconds)
 _POLL_INTERVAL = 5
 # How often to check pane liveness / stop_requested between content polls (seconds)
 _TICK_INTERVAL = 1
 # Number of consecutive stable polls required before accepting verdict
 _STABILITY_POLLS = 2
+# Minimum seconds after poll start before accepting verdicts.
+# Claude reviews take minutes; verdicts found in the first few seconds are
+# almost certainly false positives from prompt text shown in the pane.
+_VERDICT_GRACE_PERIOD = 20
 
 
 @dataclass
@@ -98,47 +92,18 @@ class ReviewLoopState:
     input_required: bool = False
 
 
-def confirm_input(state: ReviewLoopState) -> bool:
-    """Legacy stub — INPUT_REQUIRED no longer requires manual confirmation.
-
-    The review loop now polls the existing pane for a follow-up verdict
-    automatically.  This function is kept for backward compatibility but
-    always returns False.
-    """
-    return False
-
-
 def _match_verdict(line: str) -> str | None:
-    """Match a verdict keyword only if the line is a standalone verdict declaration.
+    """Match a verdict keyword only when it is the entire line content.
 
-    Rejects lines where verdict keywords appear incidentally (e.g., in PR
-    titles, table rows, or descriptive text from ``pm pr list`` output).
-    A verdict declaration is a line where the keyword is the dominant content —
-    after removing the keyword, formatting, and common verdict preambles, the
-    remaining text is short.
+    After stripping markdown formatting (``*``) and whitespace, the line
+    must be exactly one of the verdict keywords.  This rejects all
+    incidental mentions — PR titles, table rows, prompt instructions,
+    tmux-wrapped fragments, etc.
     """
-    for pattern, verdict in _VERDICT_PATTERNS:
-        if not pattern.search(line):
-            continue
-        # Extract the non-keyword context of the line
-        context = line
-        for kw in ("PASS_WITH_SUGGESTIONS", "INPUT_REQUIRED", "NEEDS_WORK", "PASS"):
-            context = context.replace(kw, "")
-        # Strip markdown formatting and punctuation
-        context = re.sub(r'[*`#\[\]|]', '', context)
-        context = context.strip(" \t\n\u2014-:()./\\_")
-        # Remove common verdict preambles
-        for prefix in ("verdict", "final verdict", "review verdict",
-                        "my verdict", "overall", "output"):
-            if context.lower().startswith(prefix):
-                context = context[len(prefix):]
-                context = context.strip(" \t\n\u2014-:()./\\_")
-        # If substantial context remains, this is not a verdict declaration
-        if len(context) > 25:
-            _log.debug("_match_verdict: rejected %r — context too long: %r (%d chars)",
-                       line[:80], context[:40], len(context))
-            continue
-        return verdict
+    cleaned = re.sub(r'[*`]', '', line).strip()
+    for verdict in ALL_VERDICTS:
+        if cleaned == verdict:
+            return verdict
     return None
 
 
@@ -232,7 +197,8 @@ def _sleep_checking_pane(pane_id: str, seconds: float) -> bool:
 
 
 def _poll_for_verdict(pane_id: str, prompt_text: str = "",
-                      exclude_verdicts: set[str] | None = None) -> str | None:
+                      exclude_verdicts: set[str] | None = None,
+                      grace_period: float = 0) -> str | None:
     """Poll a pane with capture-pane until verdict is stable.
 
     Returns the captured pane content when a verdict is found and stable
@@ -244,6 +210,10 @@ def _poll_for_verdict(pane_id: str, prompt_text: str = "",
         prompt_text: Prompt text for filtering out prompt lines.
         exclude_verdicts: Optional set of verdict strings to skip (e.g.
             ``{VERDICT_INPUT_REQUIRED}`` for follow-up polling).
+        grace_period: Seconds to wait before accepting verdicts.  During
+            the grace period the pane is polled for liveness but verdicts
+            are ignored.  Prevents false positives from prompt text that
+            appears in the pane before Claude starts producing output.
 
     Does NOT check ``stop_requested`` — that is handled between iterations
     by ``run_review_loop_sync`` so the current iteration runs to completion.
@@ -252,14 +222,24 @@ def _poll_for_verdict(pane_id: str, prompt_text: str = "",
 
     last_verdict = None
     stable_count = 0
+    poll_start = time.monotonic()
 
     while True:
         if not tmux_mod.pane_exists(pane_id):
             _log.warning("review_loop: pane %s disappeared", pane_id)
             return None
 
+        in_grace = grace_period > 0 and (time.monotonic() - poll_start) < grace_period
+
         content = tmux_mod.capture_pane(pane_id, full_scrollback=True)
         if not content.strip():
+            if not _sleep_checking_pane(pane_id, _POLL_INTERVAL):
+                _log.warning("review_loop: pane %s gone during sleep", pane_id)
+                return None
+            continue
+
+        if in_grace:
+            # Still in grace period — don't check for verdicts yet
             if not _sleep_checking_pane(pane_id, _POLL_INTERVAL):
                 _log.warning("review_loop: pane %s gone during sleep", pane_id)
                 return None
@@ -419,7 +399,8 @@ def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
         raise RuntimeError(f"Review window '{window_name}' not found after launch")
 
     _log.info("review_loop: polling pane %s in window %s", pane_id, window_name)
-    content = _poll_for_verdict(pane_id, prompt_text=prompt_text)
+    content = _poll_for_verdict(pane_id, prompt_text=prompt_text,
+                                 grace_period=_VERDICT_GRACE_PERIOD)
     if content is None:
         raise PaneKilledError(f"Review pane disappeared (window: {window_name})")
     return content
@@ -482,26 +463,6 @@ def _wait_for_follow_up_verdict(pr_data: dict, prompt_text: str,
             time.sleep(_TICK_INTERVAL)
 
     return None
-
-
-def _poll_for_follow_up_verdict(pane_id: str, prompt_text: str = "") -> str | None:
-    """Poll for a non-INPUT_REQUIRED verdict after sending confirmation.
-
-    Delegates to ``_poll_for_verdict`` with ``exclude_verdicts`` set to
-    skip INPUT_REQUIRED that may still be in the scrollback tail.
-    """
-    return _poll_for_verdict(pane_id, prompt_text,
-                             exclude_verdicts={VERDICT_INPUT_REQUIRED})
-
-
-def _extract_follow_up_verdict(content: str, prompt_text: str = "") -> str | None:
-    """Extract a non-INPUT_REQUIRED verdict from pane content.
-
-    Delegates to ``_extract_verdict_from_content`` with INPUT_REQUIRED
-    excluded, used after sending the input confirmation message.
-    """
-    return _extract_verdict_from_content(content, prompt_text,
-                                         exclude_verdicts={VERDICT_INPUT_REQUIRED})
 
 
 def should_stop(verdict: str, stop_on_suggestions: bool = True) -> bool:

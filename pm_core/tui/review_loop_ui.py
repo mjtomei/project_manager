@@ -210,24 +210,6 @@ def ensure_animation_timer(app) -> None:
         _ensure_poll_timer(app)
 
 
-def handle_confirm_input(app) -> None:
-    """Legacy handler — INPUT_REQUIRED no longer requires TUI confirmation.
-
-    The review loop now polls the existing pane for a follow-up verdict
-    automatically.  The user interacts directly with Claude in the review
-    pane.
-    """
-    # Check if any loop is actually waiting for input
-    for pr_id, state in app._review_loops.items():
-        if state.input_required:
-            app.log_message(
-                f"INPUT_REQUIRED for {pr_id}: interact with Claude in the review pane — "
-                f"the loop will pick up the new verdict automatically",
-            )
-            return
-    app.log_message("No review loop is waiting for input")
-
-
 def _poll_loop_state(app) -> None:
     """Periodic timer callback to update TUI from loop state."""
     any_running = False
