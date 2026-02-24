@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-bc3de02
+  active_pr: pr-0996fb8
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-02-20T02:43:08.956779+00:00'
@@ -1208,7 +1208,7 @@ prs:
   plan: null
   title: Fix auto-start and review loop verdict detection bugs
   branch: pm/pr-bc3de02-fix-auto-start-bugs-session-restart-input-required
-  status: in_review
+  status: merged
   depends_on:
   - pr-473ac84
   description: 'Four auto-start/review-loop bugs:
