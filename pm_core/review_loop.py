@@ -90,6 +90,7 @@ class ReviewLoopState:
     stop_on_suggestions: bool = True
     loop_id: str = field(default_factory=_generate_loop_id)
     _ui_notified_done: bool = False
+    _ui_notified_input: bool = False
     _transcript_dir: str | None = None
     # INPUT_REQUIRED pause/resume
     input_required: bool = False
@@ -576,8 +577,7 @@ def run_review_loop_sync(
                 state._input_confirmed.clear()
                 # Reset UI notification flag so repeated INPUT_REQUIRED
                 # rounds within the same loop still show a notification.
-                if hasattr(state, '_ui_notified_input'):
-                    state._ui_notified_input = False
+                state._ui_notified_input = False
 
                 # Wait for user confirmation (checked every second)
                 while not state._input_confirmed.is_set():

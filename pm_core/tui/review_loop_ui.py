@@ -259,7 +259,7 @@ def _poll_loop_state(app) -> None:
         if state.running:
             any_running = True
             # Notify user when waiting for input (throttled via _ui_notified flags)
-            if state.input_required and not getattr(state, '_ui_notified_input', False):
+            if state.input_required and not state._ui_notified_input:
                 state._ui_notified_input = True
                 app.log_message(
                     f"[cyan bold]⏸ INPUT_REQUIRED[/] for {state.pr_id}: "
