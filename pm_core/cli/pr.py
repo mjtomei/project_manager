@@ -1106,9 +1106,9 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool, transcri
 
 @pr.command("sync")
 def pr_sync():
-    """Check for merged PRs and unblock dependents.
+    """Check for merged PRs and unblock dependents (GitHub backend only).
 
-    Uses the configured backend (vanilla or github) to detect merges.
+    For local/vanilla backends, use 'pm pr merge' instead.
     Needs at least one workdir to exist (created by 'pm pr start').
     """
     root = state_root()
