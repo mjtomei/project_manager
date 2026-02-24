@@ -298,11 +298,13 @@ class ProjectManagerApp(App):
         # These must run on the main thread (touch Textual state)
         self.run_worker(sync_mod.startup_github_sync(self))
         self._capture_frame("mount")
-        # Resume review loops for in_review PRs when auto-start is enabled.
+        # Resume auto-start for all phases when enabled: start ready PRs
+        # (implementation), resume review loops (review), and merge will
+        # follow automatically when review loops complete with PASS.
         # State was loaded in _load_state() before this worker started.
-        from pm_core.tui.auto_start import _auto_start_review_loops, is_enabled, get_target
+        from pm_core.tui.auto_start import check_and_start, is_enabled
         if is_enabled(self):
-            _auto_start_review_loops(self, get_target(self))
+            await check_and_start(self)
 
     def _deferred_startup_sync(self) -> None:
         """Blocking startup tasks run in a thread."""
