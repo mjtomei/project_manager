@@ -262,6 +262,65 @@ class TechTree(Widget):
 
         edges.sort(key=edge_priority)
 
+        # Pre-compute exit/entry y-offsets for each edge so that multiple
+        # connections on the same node fan out across its interior height
+        # instead of all sharing the center line.
+        # Interior rows within a node: 1, 2, 3 (NODE_H=5: border,id,title,status,border)
+        outgoing: dict[str, list[str]] = {}   # src_id -> [dst_ids] sorted by dst row
+        incoming: dict[str, list[str]] = {}   # dst_id -> [src_ids] sorted by src row
+        for dep_id, pr_id in edges:
+            outgoing.setdefault(dep_id, []).append(pr_id)
+            incoming.setdefault(pr_id, []).append(dep_id)
+        # Sort each list by the connected node's row position
+        for src_id, dst_ids in outgoing.items():
+            dst_ids.sort(key=lambda d: self._node_positions[d][1])
+        for dst_id, src_ids in incoming.items():
+            src_ids.sort(key=lambda s: self._node_positions[s][1])
+
+        def _spread_offsets(n: int) -> list[int]:
+            """Distribute n connection points across interior rows 1..3."""
+            if n == 1:
+                return [NODE_H // 2]  # center (row 2)
+            if n == 2:
+                return [1, NODE_H - 2]  # top and bottom interior
+            # n >= 3: spread evenly across rows 1..3
+            return [1 + round(i * (NODE_H - 3) / (n - 1)) for i in range(n)]
+
+        exit_offsets: dict[str, dict[str, int]] = {}   # src -> {dst -> y_offset}
+        entry_offsets: dict[str, dict[str, int]] = {}   # dst -> {src -> y_offset}
+        for src_id, dst_ids in outgoing.items():
+            offsets = _spread_offsets(len(dst_ids))
+            exit_offsets[src_id] = {dst: offsets[i] for i, dst in enumerate(dst_ids)}
+        for dst_id, src_ids in incoming.items():
+            # For same-row edges, match the entry offset to the exit offset
+            # so the line is perfectly straight.  Spread the remaining
+            # (non-same-row) sources across the leftover interior slots.
+            same_row: dict[str, int] = {}   # src -> matched offset
+            other_srcs: list[str] = []
+            dst_row = self._node_positions[dst_id][1]
+            for src in src_ids:
+                src_row = self._node_positions[src][1]
+                if src_row == dst_row and dst_id in exit_offsets.get(src, {}):
+                    same_row[src] = exit_offsets[src][dst_id]
+                else:
+                    other_srcs.append(src)
+            if not other_srcs:
+                # All sources are same-row; just use matched offsets
+                entry_offsets[dst_id] = dict(same_row)
+            else:
+                # Spread non-same-row sources across slots not taken by
+                # same-row edges
+                taken = set(same_row.values())
+                all_offsets = _spread_offsets(len(src_ids))
+                free_offsets = [o for o in all_offsets if o not in taken]
+                # If not enough free slots, fall back to full spread
+                if len(free_offsets) < len(other_srcs):
+                    free_offsets = _spread_offsets(len(other_srcs))
+                mapping = dict(same_row)
+                for i, src in enumerate(other_srcs):
+                    mapping[src] = free_offsets[i]
+                entry_offsets[dst_id] = mapping
+
         # Track used vertical channel positions to avoid overlap
         # Key: x position, Value: set of y ranges that are used
         used_channels: dict[int, list[tuple[int, int]]] = {}
@@ -284,8 +343,10 @@ class TechTree(Widget):
         for dep_id, pr_id in edges:
             sx, sy = node_pos(dep_id)
             ex, ey = node_pos(pr_id)
-            src_y = sy + NODE_H // 2
-            dst_y = ey + NODE_H // 2
+            src_dy = exit_offsets.get(dep_id, {}).get(pr_id, NODE_H // 2)
+            dst_dy = entry_offsets.get(pr_id, {}).get(dep_id, NODE_H // 2)
+            src_y = sy + src_dy
+            dst_y = ey + dst_dy
             arrow_start_x = sx + NODE_W
             arrow_end_x = ex - 1
 
@@ -296,19 +357,16 @@ class TechTree(Widget):
                         safe_write(src_y, x, "─", "dim")
                     safe_write(src_y, arrow_end_x, "▶", "dim")
                 else:
-                    # Find a free vertical channel in the gap
+                    # Find a free vertical channel in the gap.
+                    # Search from the destination side inward so that
+                    # nearer edges use outer channels and peel off
+                    # without crossing farther edges' verticals.
                     gap_start = arrow_start_x + 1
                     gap_end = arrow_end_x - 1
-                    mid_x = gap_start + (gap_end - gap_start) // 2
+                    mid_x = gap_end
 
-                    # Try to find an unused channel position
-                    for offset in range(0, (gap_end - gap_start) // 2 + 1):
-                        test_x = mid_x + offset
-                        if gap_start <= test_x <= gap_end and channel_free(test_x, src_y, dst_y):
-                            mid_x = test_x
-                            break
-                        test_x = mid_x - offset
-                        if gap_start <= test_x <= gap_end and channel_free(test_x, src_y, dst_y):
+                    for test_x in range(gap_end, gap_start - 1, -1):
+                        if channel_free(test_x, src_y, dst_y):
                             mid_x = test_x
                             break
 
