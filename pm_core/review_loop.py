@@ -187,12 +187,19 @@ def _sleep_checking_pane(pane_id: str, seconds: float) -> bool:
     return True
 
 
-def _poll_for_verdict(pane_id: str, prompt_text: str = "") -> str | None:
+def _poll_for_verdict(pane_id: str, prompt_text: str = "",
+                      exclude_verdicts: set[str] | None = None) -> str | None:
     """Poll a pane with capture-pane until verdict is stable.
 
     Returns the captured pane content when a verdict is found and stable
     for ``_STABILITY_POLLS`` consecutive polls.
     Returns None if the pane disappears (user closed window, Claude crashed).
+
+    Args:
+        pane_id: tmux pane to poll.
+        prompt_text: Prompt text for filtering out prompt lines.
+        exclude_verdicts: Optional set of verdict strings to skip (e.g.
+            ``{VERDICT_INPUT_REQUIRED}`` for follow-up polling).
 
     Does NOT check ``stop_requested`` — that is handled between iterations
     by ``run_review_loop_sync`` so the current iteration runs to completion.
@@ -214,7 +221,8 @@ def _poll_for_verdict(pane_id: str, prompt_text: str = "") -> str | None:
                 return None
             continue
 
-        verdict = _extract_verdict_from_content(content, prompt_text)
+        verdict = _extract_verdict_from_content(content, prompt_text,
+                                                exclude_verdicts=exclude_verdicts)
         if verdict:
             if verdict == last_verdict:
                 stable_count += 1
@@ -283,12 +291,19 @@ def _is_prompt_line(stripped_line: str, prompt_verdict_lines: set[str]) -> bool:
     return False
 
 
-def _extract_verdict_from_content(content: str, prompt_text: str = "") -> str | None:
+def _extract_verdict_from_content(content: str, prompt_text: str = "",
+                                   exclude_verdicts: set[str] | None = None) -> str | None:
     """Check if the tail of captured pane content contains a verdict keyword.
 
     Lines that match the prompt text are skipped — the prompt itself contains
     verdict keywords as instructions.  Only verdicts from Claude's actual
     output are returned.
+
+    Args:
+        content: Captured pane content to scan.
+        prompt_text: Prompt text for filtering out prompt lines.
+        exclude_verdicts: Optional set of verdict strings to skip (e.g.
+            ``{VERDICT_INPUT_REQUIRED}`` for follow-up polling).
     """
     lines = content.strip().splitlines()
     tail = lines[-_VERDICT_TAIL_LINES:] if len(lines) > _VERDICT_TAIL_LINES else lines
@@ -302,6 +317,8 @@ def _extract_verdict_from_content(content: str, prompt_text: str = "") -> str | 
         verdict = _match_verdict(stripped)
 
         if verdict:
+            if exclude_verdicts and verdict in exclude_verdicts:
+                continue
             if prompt_verdict_lines and _is_prompt_line(stripped, prompt_verdict_lines):
                 _log.info("review_loop: SKIPPED prompt verdict line: [%s] (verdict=%s)", stripped[:100], verdict)
                 continue
@@ -423,65 +440,21 @@ def _send_confirmation_and_poll(pr_data: dict, prompt_text: str = "") -> str:
 def _poll_for_follow_up_verdict(pane_id: str, prompt_text: str = "") -> str | None:
     """Poll for a non-INPUT_REQUIRED verdict after sending confirmation.
 
-    Similar to _poll_for_verdict but only accepts PASS, PASS_WITH_SUGGESTIONS,
-    or NEEDS_WORK — ignoring any INPUT_REQUIRED that may still be in the tail.
+    Delegates to ``_poll_for_verdict`` with ``exclude_verdicts`` set to
+    skip INPUT_REQUIRED that may still be in the scrollback tail.
     """
-    from pm_core import tmux as tmux_mod
-
-    last_verdict = None
-    stable_count = 0
-
-    while True:
-        if not tmux_mod.pane_exists(pane_id):
-            return None
-
-        content = tmux_mod.capture_pane(pane_id, full_scrollback=True)
-        if not content.strip():
-            if not _sleep_checking_pane(pane_id, _POLL_INTERVAL):
-                return None
-            continue
-
-        verdict = _extract_follow_up_verdict(content, prompt_text)
-        if verdict:
-            if verdict == last_verdict:
-                stable_count += 1
-            else:
-                last_verdict = verdict
-                stable_count = 1
-
-            if stable_count >= _STABILITY_POLLS:
-                _log.info("review_loop: follow-up verdict %s stable", verdict)
-                return content
-        else:
-            last_verdict = None
-            stable_count = 0
-
-        if not _sleep_checking_pane(pane_id, _POLL_INTERVAL):
-            return None
+    return _poll_for_verdict(pane_id, prompt_text,
+                             exclude_verdicts={VERDICT_INPUT_REQUIRED})
 
 
 def _extract_follow_up_verdict(content: str, prompt_text: str = "") -> str | None:
     """Extract a non-INPUT_REQUIRED verdict from pane content.
 
-    Used after sending the input confirmation message.  Scans the tail
-    of the content for PASS, PASS_WITH_SUGGESTIONS, or NEEDS_WORK,
-    skipping any INPUT_REQUIRED keywords.
+    Delegates to ``_extract_verdict_from_content`` with INPUT_REQUIRED
+    excluded, used after sending the input confirmation message.
     """
-    lines = content.strip().splitlines()
-    tail = lines[-_VERDICT_TAIL_LINES:] if len(lines) > _VERDICT_TAIL_LINES else lines
-
-    prompt_verdict_lines = _build_prompt_verdict_lines(prompt_text) if prompt_text else set()
-
-    for line in reversed(tail):
-        stripped = line.strip().strip("*").strip()
-        verdict = _match_verdict(stripped)
-
-        if verdict and verdict != VERDICT_INPUT_REQUIRED:
-            if prompt_verdict_lines and _is_prompt_line(stripped, prompt_verdict_lines):
-                continue
-            _log.info("review_loop: ACCEPTED follow-up verdict: [%s] (verdict=%s)", stripped[:100], verdict)
-            return verdict
-    return None
+    return _extract_verdict_from_content(content, prompt_text,
+                                         exclude_verdicts={VERDICT_INPUT_REQUIRED})
 
 
 def should_stop(verdict: str, stop_on_suggestions: bool = True) -> bool:
