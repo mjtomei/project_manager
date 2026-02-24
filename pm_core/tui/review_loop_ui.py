@@ -301,8 +301,9 @@ def _maybe_auto_merge(app, pr_id: str) -> None:
     merge_cmd += f" {pr_id}"
     pr_view.run_command(app, merge_cmd)
 
-    # Check if the merge succeeded and kick off dependents.
-    # run_command reloads state, so app._data is fresh.
+    # Reload state — the subprocess modified project.yaml on disk
+    # but _run_command_sync doesn't update the in-memory data.
+    app._data = store.load(app._root)
     merged_pr = store.get_pr(app._data, pr_id)
     if merged_pr and merged_pr.get("status") == "merged":
         _log.info("auto_merge: %s merged, starting dependents", pr_id)
@@ -425,6 +426,8 @@ def _poll_impl_idle(app) -> None:
             re_merge_cmd += f" {pr_id}"
             pr_view.run_command(app, re_merge_cmd)
 
+            # Reload state — subprocess modified project.yaml on disk
+            app._data = store.load(app._root)
             merged_pr = store.get_pr(app._data, pr_id)
             if merged_pr and merged_pr.get("status") == "merged":
                 _log.info("merge_idle: %s merged after resolution, starting dependents", pr_id)
@@ -482,7 +485,9 @@ def _auto_review_idle_prs(app, newly_idle: list[tuple[str, dict]]) -> None:
         review_cmd = f"pr review --background {pr_id}"
         pr_view.run_command(app, review_cmd)
 
-        # Reload state to pick up the status change
+        # Reload state — subprocess modified project.yaml on disk
+        # but _run_command_sync doesn't update in-memory data.
+        app._data = store.load(app._root)
         updated_pr = store.get_pr(app._data, pr_id)
         if updated_pr and updated_pr.get("status") == "in_review":
             # Start a review loop (same as _auto_start_review_loops)
