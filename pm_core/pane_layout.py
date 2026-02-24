@@ -36,6 +36,9 @@ _logger = configure_logger("pm.pane_layout")
 
 MOBILE_WIDTH_THRESHOLD = 120
 
+# Auto-resize: proportion of window given to the selected pane
+AUTO_RESIZE_RATIO = 0.65
+
 
 def get_reliable_window_size(
     session: str, window: str, query_session: str | None = None,
@@ -152,6 +155,52 @@ def is_mobile(session: str, window: str = "0") -> bool:
         return True
     width, _ = get_reliable_window_size(session, window)
     return 0 < width < MOBILE_WIDTH_THRESHOLD
+
+
+def auto_resize_selected_pane(pane_id: str, session: str, window: str) -> None:
+    """Resize the selected pane to give it a larger share of the window.
+
+    When a pane is focused, it receives ~65% of the window dimensions
+    so that content (Claude output, TUI tree) is easier to read.
+
+    Controlled by the ``no-auto-resize`` global setting.
+    Skipped in mobile mode (panes are zoomed) and for single-pane windows.
+    """
+    from pm_core.paths import get_global_setting
+    from pm_core import tmux as tmux_mod
+
+    if get_global_setting("no-auto-resize"):
+        return
+
+    try:
+        win_w, win_h = get_reliable_window_size(session, window)
+        if win_w <= 0 or win_h <= 0:
+            return
+
+        geoms = tmux_mod.get_pane_geometries(session, window)
+        if len(geoms) <= 1:
+            return
+
+        # Find current pane dimensions
+        cur_w, cur_h = 0, 0
+        for g in geoms:
+            if g[0] == pane_id:
+                cur_w, cur_h = g[3], g[4]
+                break
+        if cur_w == 0 and cur_h == 0:
+            return
+
+        target_h = int(win_h * AUTO_RESIZE_RATIO)
+        target_w = int(win_w * AUTO_RESIZE_RATIO)
+
+        # Only enlarge — if the pane already occupies a larger share, leave it
+        if target_h > cur_h:
+            tmux_mod.resize_pane(pane_id, "y", target_h)
+        if target_w > cur_w:
+            tmux_mod.resize_pane(pane_id, "x", target_w)
+    except Exception:
+        _logger.debug("auto_resize_selected_pane: failed for %s", pane_id,
+                       exc_info=True)
 
 
 # --- Layout string generation ---

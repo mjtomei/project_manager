@@ -414,11 +414,13 @@ def unzoom_pane(session: str, window: str = "0") -> None:
 
 
 def select_pane_smart(pane_id: str, session: str, window: str) -> None:
-    """Focus a pane, auto-zooming it in mobile mode."""
+    """Focus a pane, auto-zooming in mobile mode or auto-resizing otherwise."""
     from pm_core import pane_layout
     select_pane(pane_id)
     if pane_layout.is_mobile(session, window):
         zoom_pane(pane_id)
+    else:
+        pane_layout.auto_resize_selected_pane(pane_id, session, window)
 
 
 def set_session_option(session: str, option: str, value: str, socket_path: str | None = None) -> None:

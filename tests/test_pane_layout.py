@@ -10,6 +10,8 @@ from pm_core.pane_layout import (
     base_session_name,
     compute_layout,
     is_mobile,
+    auto_resize_selected_pane,
+    AUTO_RESIZE_RATIO,
     _layout_node,
     _checksum,
     get_window_data,
@@ -486,3 +488,90 @@ class TestHealRegistry:
 
         data = load_registry("pm-test")
         assert len(data["windows"]["@30"]["panes"]) == 2
+
+
+class TestAutoResizeSelectedPane:
+    """Test auto-resize behaviour when a pane is selected."""
+
+    @patch("pm_core.tmux.resize_pane")
+    @patch("pm_core.tmux.get_pane_geometries")
+    @patch("pm_core.pane_layout.get_reliable_window_size")
+    @patch("pm_core.paths.get_global_setting", return_value=False)
+    def test_enlarges_small_pane(self, _gs, mock_win, mock_geoms, mock_resize):
+        """A pane smaller than the target ratio is enlarged."""
+        mock_win.return_value = (200, 50)
+        # Two panes: %1 is 100x25, %2 is 100x25
+        mock_geoms.return_value = [
+            ("%1", 0, 0, 100, 25),
+            ("%2", 100, 0, 100, 25),
+        ]
+        auto_resize_selected_pane("%1", "sess", "@0")
+        target_h = int(50 * AUTO_RESIZE_RATIO)
+        target_w = int(200 * AUTO_RESIZE_RATIO)
+        mock_resize.assert_any_call("%1", "y", target_h)
+        mock_resize.assert_any_call("%1", "x", target_w)
+
+    @patch("pm_core.tmux.resize_pane")
+    @patch("pm_core.tmux.get_pane_geometries")
+    @patch("pm_core.pane_layout.get_reliable_window_size")
+    @patch("pm_core.paths.get_global_setting", return_value=False)
+    def test_skips_if_already_large(self, _gs, mock_win, mock_geoms, mock_resize):
+        """A pane already larger than the target ratio is not resized."""
+        mock_win.return_value = (200, 50)
+        # %1 already takes 180x45 (>65%)
+        mock_geoms.return_value = [
+            ("%1", 0, 0, 180, 45),
+            ("%2", 180, 0, 20, 45),
+        ]
+        auto_resize_selected_pane("%1", "sess", "@0")
+        mock_resize.assert_not_called()
+
+    @patch("pm_core.tmux.resize_pane")
+    @patch("pm_core.tmux.get_pane_geometries")
+    @patch("pm_core.pane_layout.get_reliable_window_size")
+    @patch("pm_core.paths.get_global_setting", return_value=True)
+    def test_disabled_by_setting(self, _gs, mock_win, mock_geoms, mock_resize):
+        """Auto-resize is skipped when no-auto-resize setting is on."""
+        mock_win.return_value = (200, 50)
+        mock_geoms.return_value = [
+            ("%1", 0, 0, 100, 25),
+            ("%2", 100, 0, 100, 25),
+        ]
+        auto_resize_selected_pane("%1", "sess", "@0")
+        mock_resize.assert_not_called()
+
+    @patch("pm_core.tmux.resize_pane")
+    @patch("pm_core.tmux.get_pane_geometries")
+    @patch("pm_core.pane_layout.get_reliable_window_size")
+    @patch("pm_core.paths.get_global_setting", return_value=False)
+    def test_single_pane_no_resize(self, _gs, mock_win, mock_geoms, mock_resize):
+        """A single pane window should not trigger any resize."""
+        mock_win.return_value = (200, 50)
+        mock_geoms.return_value = [("%1", 0, 0, 200, 50)]
+        auto_resize_selected_pane("%1", "sess", "@0")
+        mock_resize.assert_not_called()
+
+    @patch("pm_core.tmux.resize_pane")
+    @patch("pm_core.tmux.get_pane_geometries")
+    @patch("pm_core.pane_layout.get_reliable_window_size")
+    @patch("pm_core.paths.get_global_setting", return_value=False)
+    def test_zero_window_size_no_resize(self, _gs, mock_win, mock_geoms, mock_resize):
+        """Zero window size (no client) should not resize."""
+        mock_win.return_value = (0, 0)
+        auto_resize_selected_pane("%1", "sess", "@0")
+        mock_resize.assert_not_called()
+        mock_geoms.assert_not_called()
+
+    @patch("pm_core.tmux.resize_pane", side_effect=Exception("tmux error"))
+    @patch("pm_core.tmux.get_pane_geometries")
+    @patch("pm_core.pane_layout.get_reliable_window_size")
+    @patch("pm_core.paths.get_global_setting", return_value=False)
+    def test_resize_failure_is_silent(self, _gs, mock_win, mock_geoms, mock_resize):
+        """Resize errors are caught and don't propagate."""
+        mock_win.return_value = (200, 50)
+        mock_geoms.return_value = [
+            ("%1", 0, 0, 100, 25),
+            ("%2", 100, 0, 100, 25),
+        ]
+        # Should not raise
+        auto_resize_selected_pane("%1", "sess", "@0")

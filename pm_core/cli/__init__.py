@@ -245,9 +245,11 @@ def set_cmd(setting, value):
       beginner-mode   Add helpful next-step guidance to all Claude sessions
 
       auto-cleanup    Suggest cleaning up old panes in Claude sessions
+
+      no-auto-resize  Disable automatic pane resizing when a pane is selected
     """
     from pm_core.paths import set_global_setting
-    known = {"hide-assist", "hide-merged", "beginner-mode", "auto-cleanup"}
+    known = {"hide-assist", "hide-merged", "beginner-mode", "auto-cleanup", "no-auto-resize"}
     if setting not in known:
         click.echo(f"Unknown setting: {setting}", err=True)
         click.echo(f"Available: {', '.join(sorted(known))}", err=True)
