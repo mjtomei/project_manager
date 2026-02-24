@@ -1003,7 +1003,7 @@ def _pull_after_github_merge(data: dict, pr_entry: dict, workdir: str,
                 _launch_merge_window(data, pr_entry, error_msg,
                                      background=background, transcript=transcript)
                 return False
-            click.echo("Resolve conflicts manually.", err=True)
+            click.echo("Resolve conflicts manually, then re-run 'pm pr merge' to finalize.", err=True)
             return False
         click.echo("Restored stashed changes.")
 
