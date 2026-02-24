@@ -29,6 +29,14 @@ from pm_core.cli.helpers import (
 )
 
 
+# Shared guidance about manual testing / INPUT_REQUIRED for plan prompts.
+# Used in plan add, breakdown, review, and import prompts.
+_MANUAL_TESTING_GUIDANCE = """\
+For each PR, identify if human-guided testing will be needed during review \
+(UI interactions, TUI keybindings, environment-specific behavior, hardware \
+dependencies). Call this out explicitly in the PR description so the review \
+loop can use INPUT_REQUIRED appropriately."""
+
 # --- Plan commands ---
 
 @cli.group()
@@ -114,6 +122,8 @@ in this format:
 Separate PR entries with --- lines. Prefer more small PRs over fewer large ones.
 Order them so independent PRs can be worked on in parallel. Only add depends_on
 when there's a real ordering constraint.
+
+{_MANUAL_TESTING_GUIDANCE}
 
 After writing the PRs section, tell the user to run `pm plan review {plan_id}`
 (key: c in the plans pane) to check consistency and coverage before loading.
@@ -215,6 +225,7 @@ Guidelines:
 - Order them so independent PRs can be worked on in parallel
 - Only add depends_on when there's a real ordering constraint
 - Write the ## PRs section directly into the plan file at {plan_path}
+- {_MANUAL_TESTING_GUIDANCE}
 
 After writing, tell the user to run `pm plan review {plan_id}` (key: c in the
 plans pane) to check consistency and coverage before loading PRs.
@@ -325,6 +336,8 @@ Then check for issues:
    updating? Do remaining PR descriptions need refinement based on what
    was learned from completed PRs?
 
+4. MANUAL TESTING — {_MANUAL_TESTING_GUIDANCE}
+
 For any issues found, you can propose a fix. Fixes can be applied as follows:
 - For PR changes: use `pm pr edit <id> --description "..." --title "..."`
 - For plan updates: edit the plan file directly at {plan_path}
@@ -367,7 +380,9 @@ Check the following:
    it; if it doesn't, the PR should create it. Flag paths that look wrong
    (typos, wrong directory, missing extension).
 
-4. FORMAT — Each PR entry must be parseable by the automated loader.
+4. MANUAL TESTING — {_MANUAL_TESTING_GUIDANCE}
+
+5. FORMAT — Each PR entry must be parseable by the automated loader.
    Required format:
 
    ### PR: <title>
@@ -775,6 +790,8 @@ Use "merged" for done work, "open" for existing open PRs, "proposed" for
 new recommended work. For merged/open PRs reference the original number
 (e.g. "Original: #42"). Group related PRs together with dependencies
 flowing top to bottom.
+
+{_MANUAL_TESTING_GUIDANCE}
 
 Phase 4 — Verify file references (do this immediately after writing):
 Re-read the plan file you just wrote. For every path listed in a **files**

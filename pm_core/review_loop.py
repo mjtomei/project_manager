@@ -8,10 +8,17 @@ Verdicts:
   PASS                 — No changes needed, code is ready to merge.
   PASS_WITH_SUGGESTIONS — Only non-blocking suggestions remain.
   NEEDS_WORK           — Blocking issues found.
+  INPUT_REQUIRED       — Human-guided testing needed before sign-off.
 
 The loop stops on PASS always. By default it also stops on
 PASS_WITH_SUGGESTIONS; set `stop_on_suggestions=False` to keep going
 until full PASS.
+
+When INPUT_REQUIRED is detected, the loop pauses and waits for the
+user to confirm they have performed the requested tests (via a
+``threading.Event``).  Once confirmed, a follow-up message is sent to
+the Claude pane, Claude responds with a final verdict, and the loop
+resumes normal flow.
 """
 
 import re
@@ -32,15 +39,18 @@ _log = configure_logger("pm.review_loop")
 VERDICT_PASS = "PASS"
 VERDICT_PASS_WITH_SUGGESTIONS = "PASS_WITH_SUGGESTIONS"
 VERDICT_NEEDS_WORK = "NEEDS_WORK"
+VERDICT_INPUT_REQUIRED = "INPUT_REQUIRED"
 VERDICT_KILLED = "KILLED"
 
-ALL_VERDICTS = (VERDICT_PASS, VERDICT_PASS_WITH_SUGGESTIONS, VERDICT_NEEDS_WORK)
+ALL_VERDICTS = (VERDICT_PASS, VERDICT_PASS_WITH_SUGGESTIONS, VERDICT_NEEDS_WORK,
+                VERDICT_INPUT_REQUIRED)
 
 # Regex patterns for verdict detection.  Use lookahead/lookbehind instead of
 # \b to avoid matching substrings like "PASSWORD" or "PASS" inside "[PASS/FAIL]".
 # Check PASS_WITH_SUGGESTIONS before PASS since PASS is a prefix.
 _VERDICT_PATTERNS = [
     (re.compile(r'(?<!\w)PASS_WITH_SUGGESTIONS(?!\w)'), VERDICT_PASS_WITH_SUGGESTIONS),
+    (re.compile(r'(?<!\w)INPUT_REQUIRED(?!\w)'), VERDICT_INPUT_REQUIRED),
     (re.compile(r'(?<!\w)NEEDS_WORK(?!\w)'), VERDICT_NEEDS_WORK),
     (re.compile(r'(?<!\w)PASS(?!_WITH_SUGGESTIONS|/|\w)'), VERDICT_PASS),
 ]
@@ -80,7 +90,25 @@ class ReviewLoopState:
     stop_on_suggestions: bool = True
     loop_id: str = field(default_factory=_generate_loop_id)
     _ui_notified_done: bool = False
+    _ui_notified_input: bool = False
     _transcript_dir: str | None = None
+    # INPUT_REQUIRED pause/resume
+    input_required: bool = False
+    _input_confirmed: threading.Event = field(default_factory=threading.Event)
+
+
+def confirm_input(state: ReviewLoopState) -> bool:
+    """Confirm that the user has completed the requested manual testing.
+
+    Sets the internal event so the review loop thread unblocks and
+    sends a follow-up message to Claude.
+
+    Returns True if the state was waiting for input, False otherwise.
+    """
+    if not state.input_required:
+        return False
+    state._input_confirmed.set()
+    return True
 
 
 def _match_verdict(line: str) -> str | None:
@@ -106,6 +134,27 @@ def parse_review_verdict(output: str) -> str:
             return verdict
     # If no clear verdict, assume needs work if there's output
     return VERDICT_NEEDS_WORK if output.strip() else VERDICT_PASS
+
+
+def _regenerate_prompt_text(pm_root: str, pr_id: str, iteration: int = 0,
+                            loop_id: str = "") -> str:
+    """Regenerate the review prompt text for verdict filtering.
+
+    Used to distinguish prompt instructions (which mention verdict keywords)
+    from Claude's actual verdict output.  Returns an empty string on failure.
+    """
+    try:
+        from pathlib import Path
+        from pm_core import store
+        from pm_core.prompt_gen import generate_review_prompt
+        data = store.load(Path(pm_root))
+        return generate_review_prompt(
+            data, pr_id, review_loop=True,
+            review_iteration=iteration, review_loop_id=loop_id,
+        )
+    except Exception as exc:
+        _log.warning("review_loop: could not regenerate prompt text for filtering: %s", exc)
+        return ""
 
 
 def _compute_review_window_name(pr_data: dict) -> str:
@@ -159,12 +208,19 @@ def _sleep_checking_pane(pane_id: str, seconds: float) -> bool:
     return True
 
 
-def _poll_for_verdict(pane_id: str, prompt_text: str = "") -> str | None:
+def _poll_for_verdict(pane_id: str, prompt_text: str = "",
+                      exclude_verdicts: set[str] | None = None) -> str | None:
     """Poll a pane with capture-pane until verdict is stable.
 
     Returns the captured pane content when a verdict is found and stable
     for ``_STABILITY_POLLS`` consecutive polls.
     Returns None if the pane disappears (user closed window, Claude crashed).
+
+    Args:
+        pane_id: tmux pane to poll.
+        prompt_text: Prompt text for filtering out prompt lines.
+        exclude_verdicts: Optional set of verdict strings to skip (e.g.
+            ``{VERDICT_INPUT_REQUIRED}`` for follow-up polling).
 
     Does NOT check ``stop_requested`` — that is handled between iterations
     by ``run_review_loop_sync`` so the current iteration runs to completion.
@@ -186,7 +242,8 @@ def _poll_for_verdict(pane_id: str, prompt_text: str = "") -> str | None:
                 return None
             continue
 
-        verdict = _extract_verdict_from_content(content, prompt_text)
+        verdict = _extract_verdict_from_content(content, prompt_text,
+                                                exclude_verdicts=exclude_verdicts)
         if verdict:
             if verdict == last_verdict:
                 stable_count += 1
@@ -223,7 +280,7 @@ def _build_prompt_verdict_lines(prompt_text: str) -> set[str]:
     result = set()
     for line in prompt_text.splitlines():
         normalized = line.replace("*", "").replace("`", "").strip()
-        if normalized and any(v in normalized for v in ("PASS", "NEEDS_WORK")):
+        if normalized and any(v in normalized for v in ("PASS", "NEEDS_WORK", "INPUT_REQUIRED")):
             result.add(normalized)
     return result
 
@@ -238,7 +295,7 @@ def _is_prompt_line(stripped_line: str, prompt_verdict_lines: set[str]) -> bool:
     """
     # Extract context — text around the verdict keyword
     context = stripped_line
-    for keyword in ("PASS_WITH_SUGGESTIONS", "NEEDS_WORK", "PASS"):
+    for keyword in ("PASS_WITH_SUGGESTIONS", "INPUT_REQUIRED", "NEEDS_WORK", "PASS"):
         context = context.replace(keyword, "")
     context = context.strip(" \t—-:().").strip()
 
@@ -255,12 +312,19 @@ def _is_prompt_line(stripped_line: str, prompt_verdict_lines: set[str]) -> bool:
     return False
 
 
-def _extract_verdict_from_content(content: str, prompt_text: str = "") -> str | None:
+def _extract_verdict_from_content(content: str, prompt_text: str = "",
+                                   exclude_verdicts: set[str] | None = None) -> str | None:
     """Check if the tail of captured pane content contains a verdict keyword.
 
     Lines that match the prompt text are skipped — the prompt itself contains
     verdict keywords as instructions.  Only verdicts from Claude's actual
     output are returned.
+
+    Args:
+        content: Captured pane content to scan.
+        prompt_text: Prompt text for filtering out prompt lines.
+        exclude_verdicts: Optional set of verdict strings to skip (e.g.
+            ``{VERDICT_INPUT_REQUIRED}`` for follow-up polling).
     """
     lines = content.strip().splitlines()
     tail = lines[-_VERDICT_TAIL_LINES:] if len(lines) > _VERDICT_TAIL_LINES else lines
@@ -274,6 +338,8 @@ def _extract_verdict_from_content(content: str, prompt_text: str = "") -> str | 
         verdict = _match_verdict(stripped)
 
         if verdict:
+            if exclude_verdicts and verdict in exclude_verdicts:
+                continue
             if prompt_verdict_lines and _is_prompt_line(stripped, prompt_verdict_lines):
                 _log.info("review_loop: SKIPPED prompt verdict line: [%s] (verdict=%s)", stripped[:100], verdict)
                 continue
@@ -315,23 +381,10 @@ def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
     _launch_review_window(pr_id, pm_root, iteration=iteration, loop_id=loop_id,
                           transcript=transcript)
 
-    # Generate the prompt text so we can filter out prompt lines from
+    # Regenerate the prompt text so we can filter out prompt lines from
     # verdict detection.  The prompt contains verdict keywords as
     # instructions which would otherwise cause false matches.
-    # We load project data from pm_root and regenerate the same prompt
-    # that was sent to Claude, so this adapts to any prompt changes.
-    prompt_text = ""
-    try:
-        from pathlib import Path
-        from pm_core import store
-        from pm_core.prompt_gen import generate_review_prompt
-        data = store.load(Path(pm_root))
-        prompt_text = generate_review_prompt(
-            data, pr_id, review_loop=True,
-            review_iteration=iteration, review_loop_id=loop_id,
-        )
-    except Exception as exc:
-        _log.warning("review_loop: could not generate prompt text for filtering: %s", exc)
+    prompt_text = _regenerate_prompt_text(pm_root, pr_id, iteration, loop_id)
 
     _log.info("review_loop: prompt_text for filtering: %d chars", len(prompt_text))
 
@@ -347,6 +400,69 @@ def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
     if content is None:
         raise PaneKilledError(f"Review pane disappeared (window: {window_name})")
     return content
+
+
+def _send_confirmation_and_poll(pr_data: dict, prompt_text: str = "") -> str:
+    """Send input-confirmed message to the review pane and poll for follow-up verdict.
+
+    After the user confirms they completed the requested manual testing,
+    this function sends a message to the Claude pane and waits for Claude
+    to respond with a final verdict (PASS, PASS_WITH_SUGGESTIONS, or
+    NEEDS_WORK).
+
+    Returns the captured pane content containing the follow-up verdict.
+    Raises PaneKilledError if the pane disappears.
+    Raises RuntimeError if the review pane can't be found.
+    """
+    from pm_core import tmux as tmux_mod
+
+    session = _get_pm_session()
+    if not session:
+        raise RuntimeError("Not in a pm tmux session")
+
+    window_name = _compute_review_window_name(pr_data)
+    pane_id = _find_claude_pane(session, window_name)
+    if not pane_id:
+        raise RuntimeError(f"Review pane '{window_name}' not found for confirmation")
+
+    # Send confirmation message to the Claude pane
+    msg = (
+        "The user has completed the requested manual testing and confirmed "
+        "the results. Based on this, please provide your final verdict on "
+        "its own line: PASS, PASS_WITH_SUGGESTIONS, or NEEDS_WORK."
+    )
+    tmux_mod.send_keys(pane_id, msg)
+    _log.info("review_loop: sent input confirmation to pane %s", pane_id)
+
+    # Wait briefly for Claude to start processing
+    time.sleep(2)
+
+    # Poll for a follow-up verdict, but only accept PASS/PASS_WITH_SUGGESTIONS/NEEDS_WORK
+    # (not INPUT_REQUIRED again).
+    content = _poll_for_follow_up_verdict(pane_id, prompt_text)
+    if content is None:
+        raise PaneKilledError(f"Review pane disappeared during follow-up (window: {window_name})")
+    return content
+
+
+def _poll_for_follow_up_verdict(pane_id: str, prompt_text: str = "") -> str | None:
+    """Poll for a non-INPUT_REQUIRED verdict after sending confirmation.
+
+    Delegates to ``_poll_for_verdict`` with ``exclude_verdicts`` set to
+    skip INPUT_REQUIRED that may still be in the scrollback tail.
+    """
+    return _poll_for_verdict(pane_id, prompt_text,
+                             exclude_verdicts={VERDICT_INPUT_REQUIRED})
+
+
+def _extract_follow_up_verdict(content: str, prompt_text: str = "") -> str | None:
+    """Extract a non-INPUT_REQUIRED verdict from pane content.
+
+    Delegates to ``_extract_verdict_from_content`` with INPUT_REQUIRED
+    excluded, used after sending the input confirmation message.
+    """
+    return _extract_verdict_from_content(content, prompt_text,
+                                         exclude_verdicts={VERDICT_INPUT_REQUIRED})
 
 
 def should_stop(verdict: str, stop_on_suggestions: bool = True) -> bool:
@@ -433,6 +549,67 @@ def run_review_loop_sync(
                     on_iteration(state)
                 except Exception:
                     _log.exception("review_loop: on_iteration callback failed")
+
+            # Handle INPUT_REQUIRED: pause and wait for user confirmation,
+            # then send a message to Claude and poll for follow-up verdict.
+            if verdict == VERDICT_INPUT_REQUIRED:
+                _log.info("review_loop: INPUT_REQUIRED — pausing for user input")
+                state._input_confirmed.clear()
+                state.input_required = True
+                # Reset UI notification flag so repeated INPUT_REQUIRED
+                # rounds within the same loop still show a notification.
+                state._ui_notified_input = False
+
+                # Wait for user confirmation (checked every second)
+                while not state._input_confirmed.is_set():
+                    if state.stop_requested:
+                        break
+                    state._input_confirmed.wait(timeout=1.0)
+
+                state.input_required = False
+
+                if state.stop_requested:
+                    break
+
+                _log.info("review_loop: user confirmed input — polling for follow-up verdict")
+                try:
+                    follow_up_prompt = _regenerate_prompt_text(
+                        pm_root, state.pr_id, state.iteration, state.loop_id,
+                    )
+                    follow_up_output = _send_confirmation_and_poll(
+                        pr_data, prompt_text=follow_up_prompt,
+                    )
+                    verdict = parse_review_verdict(follow_up_output)
+                    # Exclude INPUT_REQUIRED from follow-up — treat as NEEDS_WORK
+                    if verdict == VERDICT_INPUT_REQUIRED:
+                        verdict = VERDICT_NEEDS_WORK
+                    state.latest_verdict = verdict
+                    state.latest_output = follow_up_output
+
+                    # Record the follow-up as part of this iteration's history
+                    state.history[-1] = ReviewIteration(
+                        iteration=state.iteration,
+                        verdict=verdict,
+                        output=follow_up_output,
+                    )
+                    _log.info("review_loop: follow-up verdict=%s", verdict)
+
+                    if on_iteration:
+                        try:
+                            on_iteration(state)
+                        except Exception:
+                            _log.exception("review_loop: on_iteration callback failed")
+
+                except PaneKilledError as e:
+                    _log.warning("review_loop: pane killed during follow-up: %s", e)
+                    state.latest_verdict = VERDICT_KILLED
+                    state.latest_output = str(e)
+                    break
+                except Exception as e:
+                    _log.exception("review_loop: follow-up failed")
+                    state.latest_verdict = "ERROR"
+                    state.latest_output = str(e)
+                    break
 
             if should_stop(verdict, state.stop_on_suggestions):
                 _log.info("review_loop: stopping — verdict=%s", verdict)

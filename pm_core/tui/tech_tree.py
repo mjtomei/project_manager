@@ -25,6 +25,7 @@ VERDICT_MARKERS = {
     "KILLED": "☠",
     "TIMEOUT": "⏱",
     "ERROR": "!",
+    "INPUT_REQUIRED": "⏸",
 }
 
 VERDICT_STYLES = {
@@ -34,6 +35,7 @@ VERDICT_STYLES = {
     "KILLED": "bold red",
     "TIMEOUT": "bold red",
     "ERROR": "bold red",
+    "INPUT_REQUIRED": "bold cyan",
 }
 
 SPINNER_FRAMES = "◐◓◑◒"
@@ -200,6 +202,8 @@ class TechTree(Widget):
                 return ("", "")
             if state.running:
                 spinner = SPINNER_FRAMES[self._anim_frame % len(SPINNER_FRAMES)]
+                if state.input_required:
+                    return (f"⏸{state.iteration}{spinner}", "bold cyan")
                 if state.stop_requested:
                     return (f"⏹{state.iteration}{spinner}", "bold red")
                 return (f"⟳{state.iteration}{spinner}", "bold cyan")

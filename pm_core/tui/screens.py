@@ -179,6 +179,7 @@ class HelpScreen(ModalScreen):
             yield Label("  [bold]zz d[/]   Start loop", classes="help-row")
             yield Label("  [bold]zzz d[/]  Start strict loop", classes="help-row")
             yield Label("  [bold]z d[/]    Stop loop / fresh done", classes="help-row")
+            yield Label("  [bold]y[/]      Confirm input (INPUT_REQUIRED)", classes="help-row")
             yield Label("")
             yield Label("[dim]Press Esc/?/q to close  |  h to discuss pm[/]", classes="help-row")
 
