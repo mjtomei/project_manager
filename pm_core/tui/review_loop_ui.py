@@ -215,7 +215,6 @@ def handle_confirm_input(app) -> None:
     """Handle ``y`` key: confirm input for whichever PR is waiting.
 
     Finds the first review loop in INPUT_REQUIRED state and confirms it.
-    If no loop is waiting, checks the selected PR specifically.
     """
     # First, find any loop waiting for input
     for pr_id, state in app._review_loops.items():

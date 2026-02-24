@@ -574,6 +574,10 @@ def run_review_loop_sync(
                 _log.info("review_loop: INPUT_REQUIRED — pausing for user input")
                 state.input_required = True
                 state._input_confirmed.clear()
+                # Reset UI notification flag so repeated INPUT_REQUIRED
+                # rounds within the same loop still show a notification.
+                if hasattr(state, '_ui_notified_input'):
+                    state._ui_notified_input = False
 
                 # Wait for user confirmation (checked every second)
                 while not state._input_confirmed.is_set():
