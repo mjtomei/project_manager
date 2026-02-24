@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-e29dda7
+  active_pr: pr-473ac84
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-02-20T02:43:08.956779+00:00'
@@ -988,7 +988,7 @@ prs:
   plan: null
   title: Fix bare git backend, improve beginner mode, and TUI enhancements
   branch: pm/pr-7bc134e-fix-bare-git-backend-improve-beginner-mode-and-tui
-  status: in_review
+  status: merged
   depends_on: []
   description: 'Fix bugs and add UI improvements:
 
@@ -1056,3 +1056,43 @@ prs:
   gh_pr_number: 78
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ad9127e-improve-pr-tech-tree-layout-algorith-0b8b1f32
+- id: pr-621b3f5
+  plan: null
+  title: Automate PRs for pm directory changes and new plans
+  branch: pm/pr-621b3f5-automate-prs-for-pm-directory-changes-and-new-plan
+  status: pending
+  depends_on: []
+  description: 'Add a command (e.g. pm sync) that commits any pending pm/ directory
+    changes (project.yaml, plans, etc.) and opens or updates a PR with those changes.
+    Triggered by the user on demand, not automatically. Should handle the common flow:
+    stage pm/ changes, commit, push, and create or update a GitHub PR. Should also
+    support scoping to a specific plan (e.g. pm sync --plan plan-001), which would
+    only include changes to that plan''s file and related project.yaml entries.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  notes: []
+- id: pr-473ac84
+  plan: null
+  title: Add INPUT_REQUIRED verdict to review loop for human-guided testing
+  branch: pm/pr-473ac84-add-input-required-verdict-to-review-loop-for-huma
+  status: in_progress
+  depends_on: []
+  description: Add a new INPUT_REQUIRED verdict to the review prompt and review loop.
+    This verdict is used when Claude determines some human-guided testing is required
+    before the PR can be signed off on. When this verdict is detected, the review
+    loop should pause and wait for the user to confirm they have performed the requested
+    tests. Once confirmed, Claude prints an alternative verdict (PASS, PASS_WITH_SUGGESTIONS,
+    or NEEDS_WORK) and the loop resumes normal flow. The review prompt should be updated
+    to explain when to use INPUT_REQUIRED, what information to include (specific test
+    steps for the user), and how it interacts with the rest of the review loop flow.
+    Additionally, any prompt that leads into PR creation — such as plan review, plan
+    splitting, plan breakdown, etc. — should be updated to proactively identify points
+    where human input or manual testing will likely be required, and call these out
+    explicitly in the PR description. This ensures INPUT_REQUIRED pauses are anticipated
+    from the start rather than being surprises during review.
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/79
+  gh_pr_number: 79
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-473ac84-add-input-required-verdict-to-review-b1a90dba

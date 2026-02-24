@@ -442,14 +442,7 @@ To interact with this session, use commands like:
 
 def handle_plan_action(app, action: str, plan_id: str | None) -> None:
     """Handle plan action shortcuts that involve pane operations."""
-    if action == "view":
-        if plan_id:
-            plan = store.get_plan(app._data, plan_id)
-            if plan and app._root:
-                plan_path = app._root / plan.get("file", "")
-                if plan_path.exists():
-                    launch_pane(app, f"less {plan_path}", "plan")
-    elif action == "edit":
+    if action == "edit":
         if plan_id:
             plan = store.get_plan(app._data, plan_id)
             if plan and app._root:
