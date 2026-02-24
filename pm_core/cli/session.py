@@ -609,15 +609,17 @@ def pane_switch_cmd(session: str, direction: str):
             check=False,
         )
 
-    # If mobile, zoom the newly focused pane
-    if pane_layout.is_mobile(session, window):
-        result = subprocess.run(
-            tmux_mod._tmux_cmd("display", "-t", f"{session}:{window}", "-p", "#{pane_id}"),
-            capture_output=True, text=True,
-        )
-        active = result.stdout.strip()
-        if active:
+    # Mobile: zoom the newly focused pane; desktop: auto-resize it
+    result = subprocess.run(
+        tmux_mod._tmux_cmd("display", "-t", f"{session}:{window}", "-p", "#{pane_id}"),
+        capture_output=True, text=True,
+    )
+    active = result.stdout.strip()
+    if active:
+        if pane_layout.is_mobile(session, window):
             tmux_mod.zoom_pane(active)
+        else:
+            pane_layout.auto_resize_selected_pane(active, session, window)
 
 
 @cli.command("rebalance")

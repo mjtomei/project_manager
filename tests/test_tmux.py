@@ -482,13 +482,15 @@ class TestSelectPaneSmart:
         mock_select.assert_called_once_with("%1")
         mock_zoom.assert_called_once_with("%1")
 
+    @patch("pm_core.pane_layout.auto_resize_selected_pane")
     @patch("pm_core.tmux.zoom_pane")
     @patch("pm_core.tmux.select_pane")
     @patch("pm_core.pane_layout.is_mobile", return_value=False)
-    def test_no_zoom_in_desktop(self, mock_mobile, mock_select, mock_zoom):
+    def test_auto_resizes_in_desktop(self, mock_mobile, mock_select, mock_zoom, mock_resize):
         select_pane_smart("%1", "sess", "0")
         mock_select.assert_called_once_with("%1")
         mock_zoom.assert_not_called()
+        mock_resize.assert_called_once_with("%1", "sess", "0")
 
 
 # ---------------------------------------------------------------------------
