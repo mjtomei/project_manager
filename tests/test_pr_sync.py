@@ -244,8 +244,11 @@ class TestSyncPrs:
         assert "No workdirs found" in result.error
 
     def test_sync_prs_detects_merged_prs(self, tmp_pm_root_with_prs, tmp_path):
-        """sync_prs detects and updates merged PRs."""
+        """sync_prs detects and updates merged PRs (github backend only)."""
         data = store.load(tmp_pm_root_with_prs)
+
+        # Switch to github backend (only github runs merge detection in sync)
+        data["project"]["backend"] = "github"
 
         # Create a fake workdir
         workdir = tmp_path / "workdir"
@@ -317,6 +320,9 @@ class TestSyncPrs:
     def test_sync_prs_quiet_does_not_save(self, tmp_pm_root_with_prs, tmp_path):
         """sync_prs_quiet does not save changes to disk."""
         data = store.load(tmp_pm_root_with_prs)
+
+        # Switch to github backend (only github runs merge detection in sync)
+        data["project"]["backend"] = "github"
 
         # Create a fake workdir
         workdir = tmp_path / "workdir"
@@ -394,6 +400,9 @@ class TestCLIIntegration:
         """sync_prs_quiet returns updated data that CLI can use."""
         data = store.load(tmp_pm_root_with_prs)
 
+        # Switch to github backend (only github runs merge detection in sync)
+        data["project"]["backend"] = "github"
+
         # Create a fake workdir
         workdir = tmp_path / "workdir"
         workdir.mkdir()
@@ -423,6 +432,124 @@ class TestCLIIntegration:
         final_data = store.load(tmp_pm_root_with_prs)
         pr_001_final = next(p for p in final_data["prs"] if p["id"] == "pr-001")
         assert pr_001_final["status"] == "merged"
+
+
+class TestSyncSkipsNonGitHubBackends:
+    """Tests that sync_prs skips merge detection for local/vanilla backends."""
+
+    def test_sync_skips_merge_check_for_local_backend(self, tmp_path):
+        """sync_prs should not call is_merged() for local backend."""
+        root = tmp_path / "pm"
+        root.mkdir()
+        (root / "project.yaml").write_text(
+            "project:\n"
+            "  name: test-project\n"
+            "  repo: /tmp/test-repo\n"
+            "  base_branch: master\n"
+            "  backend: local\n"
+            "prs:\n"
+            "  - id: pr-001\n"
+            "    title: First PR\n"
+            "    status: in_progress\n"
+            "    branch: pm/pr-001-first\n"
+        )
+
+        # Create a fake workdir
+        workdir = tmp_path / "workdir"
+        workdir.mkdir()
+        (workdir / ".git").mkdir()
+
+        data = store.load(root)
+        data["prs"][0]["workdir"] = str(workdir)
+        store.save(data, root)
+
+        mock_backend = MagicMock()
+        mock_backend.is_merged.return_value = True  # Would merge if called
+
+        with patch("pm_core.pr_sync.get_backend", return_value=mock_backend), \
+             patch("pm_core.git_ops.is_git_repo", return_value=True):
+            result = pr_sync.sync_prs(root, force=True)
+
+        # is_merged should never be called for local backend
+        mock_backend.is_merged.assert_not_called()
+        assert result.synced is True
+        assert result.updated_count == 0
+        assert result.merged_prs == []
+
+    def test_sync_skips_merge_check_for_vanilla_backend(self, tmp_path):
+        """sync_prs should not call is_merged() for vanilla backend."""
+        root = tmp_path / "pm"
+        root.mkdir()
+        (root / "project.yaml").write_text(
+            "project:\n"
+            "  name: test-project\n"
+            "  repo: /tmp/test-repo\n"
+            "  base_branch: master\n"
+            "  backend: vanilla\n"
+            "prs:\n"
+            "  - id: pr-001\n"
+            "    title: First PR\n"
+            "    status: in_review\n"
+            "    branch: pm/pr-001-first\n"
+        )
+
+        # Create a fake workdir
+        workdir = tmp_path / "workdir"
+        workdir.mkdir()
+        (workdir / ".git").mkdir()
+
+        data = store.load(root)
+        data["prs"][0]["workdir"] = str(workdir)
+        store.save(data, root)
+
+        mock_backend = MagicMock()
+        mock_backend.is_merged.return_value = True  # Would merge if called
+
+        with patch("pm_core.pr_sync.get_backend", return_value=mock_backend), \
+             patch("pm_core.git_ops.is_git_repo", return_value=True):
+            result = pr_sync.sync_prs(root, force=True)
+
+        # is_merged should never be called for vanilla backend
+        mock_backend.is_merged.assert_not_called()
+        assert result.synced is True
+        assert result.updated_count == 0
+
+    def test_sync_calls_is_merged_for_github_backend(self, tmp_path):
+        """sync_prs should call is_merged() for github backend."""
+        root = tmp_path / "pm"
+        root.mkdir()
+        (root / "project.yaml").write_text(
+            "project:\n"
+            "  name: test-project\n"
+            "  repo: https://github.com/test/repo.git\n"
+            "  base_branch: master\n"
+            "  backend: github\n"
+            "prs:\n"
+            "  - id: pr-001\n"
+            "    title: First PR\n"
+            "    status: in_progress\n"
+            "    branch: pm/pr-001-first\n"
+        )
+
+        # Create a fake workdir
+        workdir = tmp_path / "workdir"
+        workdir.mkdir()
+        (workdir / ".git").mkdir()
+
+        data = store.load(root)
+        data["prs"][0]["workdir"] = str(workdir)
+        store.save(data, root)
+
+        mock_backend = MagicMock()
+        mock_backend.is_merged.return_value = False
+
+        with patch("pm_core.pr_sync.get_backend", return_value=mock_backend), \
+             patch("pm_core.git_ops.is_git_repo", return_value=True):
+            result = pr_sync.sync_prs(root, force=True)
+
+        # is_merged SHOULD be called for github backend
+        mock_backend.is_merged.assert_called_once()
+        assert result.synced is True
 
 
 class TestSyncFromGitHub:

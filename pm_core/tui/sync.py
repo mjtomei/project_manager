@@ -21,7 +21,7 @@ _log = configure_logger("pm.tui.sync")
 def _kill_merged_pr_windows(app, merged_pr_ids: set[str]) -> None:
     """Kill tmux windows for merged PRs since they're no longer accessible from the TUI."""
     from pm_core import tmux as tmux_mod
-    from pm_core.cli.helpers import _pr_display_id
+    from pm_core.cli.helpers import kill_pr_windows
 
     if not app._session_name or not merged_pr_ids:
         return
@@ -33,18 +33,9 @@ def _kill_merged_pr_windows(app, merged_pr_ids: set[str]) -> None:
         pr = store.get_pr(app._data, pr_id)
         if not pr:
             continue
-        display_id = _pr_display_id(pr)
-        # Kill work window (named by display_id, e.g. "#77" or "pr-001")
-        work_win = tmux_mod.find_window_by_name(session, display_id)
-        if work_win:
-            tmux_mod.kill_window(session, work_win["id"])
-            _log.info("Killed work window '%s' for merged %s", display_id, pr_id)
-        # Kill review window (named "review-{display_id}")
-        review_name = f"review-{display_id}"
-        review_win = tmux_mod.find_window_by_name(session, review_name)
-        if review_win:
-            tmux_mod.kill_window(session, review_win["id"])
-            _log.info("Killed review window '%s' for merged %s", review_name, pr_id)
+        killed = kill_pr_windows(session, pr)
+        for win_name in killed:
+            _log.info("Killed window '%s' for merged %s", win_name, pr_id)
 
 
 async def background_sync(app) -> None:
@@ -116,6 +107,13 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
                 save_state=False,
             ))
 
+        # Snapshot PR statuses before reload so we can detect merges that
+        # happened outside of sync (e.g. `pm pr merge` for local/vanilla).
+        old_statuses = {
+            pr["id"]: pr.get("status")
+            for pr in (app._data.get("prs") or [])
+        }
+
         # Reload from disk (picks up any concurrent user changes) and
         # apply sync results (merged PRs) on the main thread.
         app._data = store.load(app._root)
@@ -127,8 +125,19 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
             _kill_merged_pr_windows(app, result.merged_prs)
         app._update_display()
 
+        # Detect PRs that became merged — either via sync or via CLI
+        # (e.g. `pm pr merge` for local/vanilla backends saves status
+        # to disk before triggering a TUI refresh).
+        newly_merged = set(result.merged_prs)
+        for pr in app._data.get("prs") or []:
+            if pr.get("status") == "merged" and old_statuses.get(pr["id"]) != "merged":
+                newly_merged.add(pr["id"])
+
+        if newly_merged - set(result.merged_prs):
+            _kill_merged_pr_windows(app, newly_merged - set(result.merged_prs))
+
         # Auto-start ready PRs if enabled (after merged PR detection)
-        if result.merged_prs:
+        if newly_merged:
             from pm_core.tui.auto_start import check_and_start
             await check_and_start(app)
 

@@ -122,7 +122,7 @@ def merge_pr(app) -> None:
     if not guard_pr_action(app, action_key):
         return
     app._inflight_pr_action = action_key
-    run_command(app, f"pr merge {pr_id}", working_message=action_key, action_key=action_key)
+    run_command(app, f"pr merge --resolve-window {pr_id}", working_message=action_key, action_key=action_key)
 
 
 # ---------------------------------------------------------------------------
@@ -347,16 +347,10 @@ def handle_command_submitted(app, cmd: str) -> None:
         app.run_worker(toggle(app))
         app.query_one("#tech-tree", TechTree).focus()
         return
-    if cmd.startswith("autostart target ") or cmd.startswith("auto-start target ") or cmd.startswith("auto start target "):
+    if cmd.startswith("autostart target") or cmd.startswith("auto-start target") or cmd.startswith("auto start target"):
         from pm_core.tui.auto_start import set_target
         target_pr = cmd.split("target", 1)[1].strip()
         set_target(app, target_pr if target_pr else None)
-        app.query_one("#tech-tree", TechTree).focus()
-        return
-    if cmd in ("autostart target", "auto-start target", "auto start target"):
-        from pm_core.tui.auto_start import set_target
-        # Clear target
-        set_target(app, None)
         app.query_one("#tech-tree", TechTree).focus()
         return
 

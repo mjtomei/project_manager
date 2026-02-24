@@ -269,6 +269,44 @@ Auto-cleanup is enabled. After finishing your main work:
 """
 
 
+def generate_merge_prompt(data: dict, pr_id: str, error_output: str,
+                          session_name: str | None = None) -> str:
+    """Generate a Claude Code prompt for resolving a merge failure.
+
+    Args:
+        data: Project data dict.
+        pr_id: The PR identifier.
+        error_output: Verbatim error output from the failed merge attempt.
+        session_name: If provided, include TUI interaction instructions.
+    """
+    pr = store.get_pr(data, pr_id)
+    if not pr:
+        raise ValueError(f"PR {pr_id} not found")
+
+    branch = pr.get("branch", f"pm/{pr_id}")
+    title = pr.get("title", "")
+    base_branch = data.get("project", {}).get("base_branch", "master")
+
+    tui_block = tui_section(session_name) if session_name else ""
+    beginner_block = _beginner_addendum()
+
+    prompt = f"""You're resolving a merge failure for PR {pr_id}: "{title}"
+
+The merge of `{branch}` into `{base_branch}` failed with the following error:
+
+```
+{error_output}
+```
+
+## Steps
+1. Investigate the error and resolve the issue in the workdir
+2. Run any relevant tests to verify the resolution
+3. Stage and commit the fix
+4. When done, output **MERGED** on its own line
+{tui_block}{beginner_block}"""
+    return prompt.strip()
+
+
 def generate_review_loop_prompt(data: dict, pr_id: str) -> str:
     """Generate a review prompt for the automated review loop.
 

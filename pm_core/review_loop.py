@@ -80,6 +80,7 @@ class ReviewLoopState:
     stop_on_suggestions: bool = True
     loop_id: str = field(default_factory=_generate_loop_id)
     _ui_notified_done: bool = False
+    _transcript_dir: str | None = None
 
 
 def _match_verdict(line: str) -> str | None:

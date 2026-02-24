@@ -35,56 +35,46 @@ class Backend(ABC):
 
 
 class LocalBackend(Backend):
-    """Local-only git, no remote. Merge detection uses local refs only."""
+    """Local-only git, no remote.
+
+    Merge detection is not automatic — ``is_merged()`` always returns False.
+    Use ``pm pr merge`` to merge and mark PRs as merged.
+    """
 
     def is_merged(self, workdir, branch, base_branch):
-        exists = git_ops.run_git(
-            "rev-parse", "--verify", branch, cwd=workdir, check=False,
-        )
-        if exists.returncode != 0:
-            return False
-        result = git_ops.run_git(
-            "merge-base", "--is-ancestor", branch, base_branch,
-            cwd=workdir, check=False,
-        )
-        return result.returncode == 0
+        # Local backend cannot reliably detect merges via git plumbing
+        # (merge-base --is-ancestor gives false positives for rebases).
+        # Merges are tracked explicitly via `pm pr merge`.
+        return False
 
     def pr_instructions(self, branch, title, base_branch, pr_id, gh_pr_url=None):
         return (
             f"- You're on branch `{branch}`\n"
             f"- Commit as you go\n"
-            f"- When ready for review: press `d` in the TUI or run `pm pr review {pr_id}` from the base pm directory (not from this workdir)"
+            f"- When ready for review: press `d` in the TUI or run `pm pr review {pr_id}` from the base pm directory (not from this workdir)\n"
+            f"- To merge: run `pm pr merge {pr_id}` from the base pm directory"
         )
 
 
 class VanillaBackend(Backend):
-    """Vanilla git with a remote. Fetches from origin for merge detection."""
+    """Vanilla git with a remote (non-GitHub).
+
+    Merge detection is not automatic — ``is_merged()`` always returns False.
+    Use ``pm pr merge`` to merge and mark PRs as merged.
+    """
 
     def is_merged(self, workdir, branch, base_branch):
-        # Try to fetch from origin; if no remote exists, fall back to local check
-        fetch = git_ops.run_git("fetch", "origin", cwd=workdir, check=False)
-        refs = [branch]
-        if fetch.returncode == 0:
-            refs.append(f"origin/{branch}")
-        for ref in refs:
-            exists = git_ops.run_git(
-                "rev-parse", "--verify", ref, cwd=workdir, check=False,
-            )
-            if exists.returncode != 0:
-                continue
-            result = git_ops.run_git(
-                "merge-base", "--is-ancestor", ref, base_branch,
-                cwd=workdir, check=False,
-            )
-            if result.returncode == 0:
-                return True
+        # Vanilla backend cannot reliably detect merges via git plumbing
+        # (merge-base --is-ancestor gives false positives for rebases).
+        # Merges are tracked explicitly via `pm pr merge`.
         return False
 
     def pr_instructions(self, branch, title, base_branch, pr_id, gh_pr_url=None):
         return (
             f"- You're on branch `{branch}`\n"
             f"- Commit and push as you go: `git push origin {branch}`\n"
-            f"- When ready for review: press `d` in the TUI or run `pm pr review {pr_id}` from the base pm directory (not from this workdir)"
+            f"- When ready for review: press `d` in the TUI or run `pm pr review {pr_id}` from the base pm directory (not from this workdir)\n"
+            f"- To merge: run `pm pr merge {pr_id}` from the base pm directory"
         )
 
 

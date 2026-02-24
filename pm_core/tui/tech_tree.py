@@ -428,6 +428,11 @@ class TechTree(Widget):
                         safe_write(dst_y, x, "─", "dim")
                     safe_write(dst_y, arrow_end_x, "▶", "dim")
 
+        # Auto-start target detection (for ◎ marker)
+        from pm_core.tui import auto_start as _auto_start
+        auto_start_enabled = _auto_start.is_enabled(self.app)
+        auto_start_target = _auto_start.get_target(self.app) if auto_start_enabled else None
+
         # Draw nodes (skip virtual hidden label IDs)
         for pr_id, (col, row) in self._node_positions.items():
             if pr_id.startswith("_hidden:"):
@@ -455,7 +460,16 @@ class TechTree(Widget):
                 side = "│"
 
             display_id = f"#{pr.get('gh_pr_number')}" if pr.get("gh_pr_number") else pr_id
-            id_line = f"{side} {display_id:<{NODE_W - 4}} {side}"
+            # Mark the auto-start target PR
+            is_auto_target = (auto_start_enabled and auto_start_target == pr_id)
+            max_id_len = NODE_W - 4
+            if is_auto_target:
+                # Reserve 2 chars for " ◎"
+                truncated_id = display_id[:max_id_len - 2]
+                id_content = f"{truncated_id} ◎"
+            else:
+                id_content = display_id[:max_id_len]
+            id_line = f"{side} {id_content:<{max_id_len}} {side}"
             title = pr.get("title", "???")
             max_title_len = NODE_W - 4
             if len(title) > max_title_len:
@@ -470,11 +484,14 @@ class TechTree(Widget):
                 status_text += f" {loop_marker}"
             else:
                 # Show activity spinner for in_progress/in_review PRs
+                # (suppressed when the implementation pane is idle)
                 if status in ("in_progress", "in_review") and pr.get("workdir"):
-                    spinner = SPINNER_FRAMES[self._anim_frame % len(SPINNER_FRAMES)]
-                    marker_offset = 2 + len(status_text) + 1
-                    loop_style = "bold cyan"
-                    status_text += f" {spinner}"
+                    pane_idle = self.app._pane_idle_tracker.is_idle(pr_id)
+                    if not pane_idle:
+                        spinner = SPINNER_FRAMES[self._anim_frame % len(SPINNER_FRAMES)]
+                        marker_offset = 2 + len(status_text) + 1
+                        loop_style = "bold cyan"
+                        status_text += f" {spinner}"
             machine = pr.get("agent_machine")
             if machine:
                 avail = NODE_W - 4 - len(status_text) - 1
@@ -499,6 +516,13 @@ class TechTree(Widget):
                         # Interior of unselected box: node style + background
                         style = f"{node_style} {bg_style}".strip()
                     safe_write(y + dy, x + dx, ch, style)
+
+            # Apply colored style to auto-start target marker (◎) on id_line
+            if is_auto_target:
+                target_dx = 2 + len(truncated_id) + 1  # side + space + id + space
+                id_dy = 1  # id_line is 2nd row (index 1) in box_lines
+                if 0 <= (y + id_dy) < len(style_grid) and 0 <= (x + target_dx) < len(style_grid[0]):
+                    style_grid[y + id_dy][x + target_dx] = f"bold magenta {bg_style}".strip()
 
             # Apply colored style to loop marker / spinner characters
             if marker_offset >= 0 and loop_style:

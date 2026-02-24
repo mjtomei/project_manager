@@ -208,9 +208,6 @@ def ensure_animation_timer(app) -> None:
         _ensure_poll_timer(app)
 
 
-_impl_poll_counter = 0  # frame counter for throttling impl idle polling
-
-
 def _poll_loop_state(app) -> None:
     """Periodic timer callback to update TUI from loop state."""
     any_running = False
@@ -224,9 +221,8 @@ def _poll_loop_state(app) -> None:
             newly_done.append(state)
 
     # Poll implementation pane idle state (throttled to ~every 5s)
-    global _impl_poll_counter
-    _impl_poll_counter += 1
-    if _impl_poll_counter % 5 == 0:
+    app._impl_poll_counter += 1
+    if app._impl_poll_counter % 5 == 0:
         _poll_impl_idle(app)
 
     # Refresh tech tree to update ⟳N markers on PR nodes
@@ -318,8 +314,6 @@ def _maybe_auto_merge(app, pr_id: str) -> None:
         # Mark for idle tracking so _poll_impl_idle discovers the pane
         # and re-attempts the merge after Claude resolves.
         _log.info("auto_merge: %s merge failed, tracking merge window", pr_id)
-        if not hasattr(app, "_pending_merge_prs"):
-            app._pending_merge_prs = set()
         app._pending_merge_prs.add(pr_id)
 
 
@@ -391,7 +385,7 @@ def _poll_impl_idle(app) -> None:
             newly_idle.append((pr_id, pr))
 
     # --- Second pass: merge resolution windows ---
-    pending_merges: set[str] = getattr(app, "_pending_merge_prs", set())
+    pending_merges: set[str] = app._pending_merge_prs
     active_merge_keys: set[str] = set()
 
     for pr_id in list(pending_merges):

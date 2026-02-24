@@ -214,6 +214,13 @@ class ProjectManagerApp(App):
         # Review loop state: dict of pr_id -> ReviewLoopState (supports multiple)
         self._review_loops: dict = {}
         self._review_loop_timer: Timer | None = None
+        # Pane idle tracker: detects when implementation windows go idle
+        from pm_core.pane_idle import PaneIdleTracker
+        self._pane_idle_tracker = PaneIdleTracker()
+        # PRs awaiting merge-conflict resolution (tracked by _poll_impl_idle)
+        self._pending_merge_prs: set[str] = set()
+        # Animation frame counter for impl-pane idle polling throttle
+        self._impl_poll_counter: int = 0
 
     def _consume_z(self) -> int:
         """Atomically read and clear the z modifier count.

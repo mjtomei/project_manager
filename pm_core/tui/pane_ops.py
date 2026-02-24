@@ -337,7 +337,8 @@ Key concepts:
 Common keyboard shortcuts in the TUI:
 - Arrow keys / hjkl: Navigate the PR tree
 - s: Start working on a PR (launches Claude in a new window)
-- d: Mark PR as done (sends for review)
+- d: Review PR (send for review)
+- g: Merge PR
 - e: Edit PR details
 - c: Launch Claude session
 - p: Toggle plans view
@@ -349,7 +350,7 @@ Common keyboard shortcuts in the TUI:
 Common commands:
 - pm pr list: List all PRs
 - pm pr start <id>: Start a PR
-- pm pr review <id>: Mark PR as done
+- pm pr review <id>: Send PR for review
 - pm plan list: List plans
 - pm plan add <name>: Add a new plan
 
