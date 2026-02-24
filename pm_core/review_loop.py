@@ -136,6 +136,27 @@ def parse_review_verdict(output: str) -> str:
     return VERDICT_NEEDS_WORK if output.strip() else VERDICT_PASS
 
 
+def _regenerate_prompt_text(pm_root: str, pr_id: str, iteration: int = 0,
+                            loop_id: str = "") -> str:
+    """Regenerate the review prompt text for verdict filtering.
+
+    Used to distinguish prompt instructions (which mention verdict keywords)
+    from Claude's actual verdict output.  Returns an empty string on failure.
+    """
+    try:
+        from pathlib import Path
+        from pm_core import store
+        from pm_core.prompt_gen import generate_review_prompt
+        data = store.load(Path(pm_root))
+        return generate_review_prompt(
+            data, pr_id, review_loop=True,
+            review_iteration=iteration, review_loop_id=loop_id,
+        )
+    except Exception as exc:
+        _log.warning("review_loop: could not regenerate prompt text for filtering: %s", exc)
+        return ""
+
+
 def _compute_review_window_name(pr_data: dict) -> str:
     """Compute the review window name from PR data (matches cli/pr.py)."""
     gh = pr_data.get("gh_pr_number")
@@ -360,23 +381,10 @@ def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
     _launch_review_window(pr_id, pm_root, iteration=iteration, loop_id=loop_id,
                           transcript=transcript)
 
-    # Generate the prompt text so we can filter out prompt lines from
+    # Regenerate the prompt text so we can filter out prompt lines from
     # verdict detection.  The prompt contains verdict keywords as
     # instructions which would otherwise cause false matches.
-    # We load project data from pm_root and regenerate the same prompt
-    # that was sent to Claude, so this adapts to any prompt changes.
-    prompt_text = ""
-    try:
-        from pathlib import Path
-        from pm_core import store
-        from pm_core.prompt_gen import generate_review_prompt
-        data = store.load(Path(pm_root))
-        prompt_text = generate_review_prompt(
-            data, pr_id, review_loop=True,
-            review_iteration=iteration, review_loop_id=loop_id,
-        )
-    except Exception as exc:
-        _log.warning("review_loop: could not generate prompt text for filtering: %s", exc)
+    prompt_text = _regenerate_prompt_text(pm_root, pr_id, iteration, loop_id)
 
     _log.info("review_loop: prompt_text for filtering: %d chars", len(prompt_text))
 
@@ -546,8 +554,8 @@ def run_review_loop_sync(
             # then send a message to Claude and poll for follow-up verdict.
             if verdict == VERDICT_INPUT_REQUIRED:
                 _log.info("review_loop: INPUT_REQUIRED — pausing for user input")
-                state.input_required = True
                 state._input_confirmed.clear()
+                state.input_required = True
                 # Reset UI notification flag so repeated INPUT_REQUIRED
                 # rounds within the same loop still show a notification.
                 state._ui_notified_input = False
@@ -565,21 +573,9 @@ def run_review_loop_sync(
 
                 _log.info("review_loop: user confirmed input — polling for follow-up verdict")
                 try:
-                    # Regenerate prompt text for filtering
-                    follow_up_prompt = ""
-                    try:
-                        from pathlib import Path
-                        from pm_core import store as _store
-                        from pm_core.prompt_gen import generate_review_prompt
-                        _data = _store.load(Path(pm_root))
-                        follow_up_prompt = generate_review_prompt(
-                            _data, state.pr_id, review_loop=True,
-                            review_iteration=state.iteration,
-                            review_loop_id=state.loop_id,
-                        )
-                    except Exception:
-                        pass
-
+                    follow_up_prompt = _regenerate_prompt_text(
+                        pm_root, state.pr_id, state.iteration, state.loop_id,
+                    )
                     follow_up_output = _send_confirmation_and_poll(
                         pr_data, prompt_text=follow_up_prompt,
                     )
