@@ -139,6 +139,11 @@ class PaneIdleTracker:
         with self._lock:
             return key in self._states
 
+    def tracked_keys(self) -> list[str]:
+        """Return a snapshot of all tracked keys."""
+        with self._lock:
+            return list(self._states.keys())
+
     def mark_active(self, key: str) -> None:
         """Force-reset to active (e.g. when new work starts)."""
         with self._lock:

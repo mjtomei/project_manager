@@ -437,12 +437,12 @@ def _poll_impl_idle(app) -> None:
             # else: still not merged — keep tracking, new window may have been launched
 
     # Unregister stale merge keys
-    for key in list(tracker._states):
+    for key in tracker.tracked_keys():
         if key.startswith("merge:") and key not in active_merge_keys:
             tracker.unregister(key)
 
     # Unregister PRs no longer active
-    for key in list(tracker._states):
+    for key in tracker.tracked_keys():
         if not key.startswith("merge:") and key not in active_pr_ids:
             tracker.unregister(key)
 
