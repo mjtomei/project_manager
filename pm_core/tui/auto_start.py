@@ -5,12 +5,9 @@ logic checks for newly ready PRs (pending, all deps merged) that are in
 the transitive dependency tree of the target PR, and kicks them off
 without changing TUI focus.
 
-Settings stored in project.yaml under ``project``:
-  auto_start: true/false
-  auto_start_target: <pr_id>   # the PR we're working towards
-
-Toggle via TUI key ``A`` (sets selected PR as target) or command bar:
-``autostart``.
+State is purely in-memory (on the app object) — it is lost on TUI
+restart.  Toggle via TUI key ``A`` (sets selected PR as target) or
+command bar: ``autostart``.
 """
 
 import secrets
@@ -26,17 +23,17 @@ _log = configure_logger("pm.tui.auto_start")
 
 def is_enabled(app) -> bool:
     """Check if auto-start mode is active."""
-    return bool(app._data.get("project", {}).get("auto_start"))
+    return bool(app._auto_start)
 
 
 def get_target(app) -> str | None:
     """Get the auto-start target PR (or None)."""
-    return app._data.get("project", {}).get("auto_start_target")
+    return app._auto_start_target
 
 
 def get_transcript_dir(app) -> Path | None:
     """Return the transcript directory for the current auto-start run, or None."""
-    run_id = app._data.get("project", {}).get("auto_start_run_id")
+    run_id = app._auto_start_run_id
     if not run_id or not app._root:
         return None
     return app._root / "transcripts" / run_id
@@ -70,6 +67,15 @@ def _transitive_deps(prs: list[dict], target_id: str) -> set[str]:
     return deps
 
 
+def _disable(app) -> None:
+    """Disable auto-start mode (in-memory only)."""
+    _finalize_all_transcripts(app)
+    app._auto_start = False
+    app._auto_start_target = None
+    app._auto_start_run_id = None
+    app._update_display()
+
+
 async def toggle(app, selected_pr_id: str | None = None) -> None:
     """Toggle auto-start mode.
 
@@ -77,53 +83,42 @@ async def toggle(app, selected_pr_id: str | None = None) -> None:
       then immediately start any ready PRs in the target's dep tree.
     - If auto-start is ON: turn it OFF.
     """
-    project = app._data.setdefault("project", {})
-    current = project.get("auto_start", False)
-
-    if not current:
+    if not app._auto_start:
         # Turn ON — always set target to selected PR
-        project["auto_start"] = True
+        app._auto_start = True
         if selected_pr_id:
-            project["auto_start_target"] = selected_pr_id
+            app._auto_start_target = selected_pr_id
             app.log_message(f"Auto-start: ON → {selected_pr_id}")
         else:
             app.log_message("Auto-start: ON (no target — all ready PRs)")
         # Generate run ID and create transcript directory
         target_tag = selected_pr_id or "all"
         run_id = f"autostart-{target_tag}-{secrets.token_hex(4)}"
-        project["auto_start_run_id"] = run_id
+        app._auto_start_run_id = run_id
         if app._root:
             tdir = app._root / "transcripts" / run_id
             tdir.mkdir(parents=True, exist_ok=True)
             _log.info("auto_start: created transcript dir %s", tdir)
-        store.save(app._data, app._root)
-        _log.info("auto_start: enabled=%s target=%s run_id=%s",
-                  project.get("auto_start"), project.get("auto_start_target"), run_id)
+        _log.info("auto_start: enabled target=%s run_id=%s",
+                  app._auto_start_target, run_id)
         app._update_display()
         # Immediately start any ready PRs
         await check_and_start(app)
     else:
-        # Turn OFF — finalize all transcript symlinks
-        _finalize_all_transcripts(app)
-        project["auto_start"] = False
-        project.pop("auto_start_target", None)
-        project.pop("auto_start_run_id", None)
+        # Turn OFF
+        _disable(app)
         app.log_message("Auto-start: OFF")
-        store.save(app._data, app._root)
         _log.info("auto_start: disabled")
-        app._update_display()
 
 
 def set_target(app, pr_id: str | None) -> None:
     """Set or clear the auto-start target PR."""
-    project = app._data.setdefault("project", {})
     if pr_id:
-        project["auto_start_target"] = pr_id
+        app._auto_start_target = pr_id
         app.log_message(f"Auto-start target: {pr_id}")
     else:
-        project.pop("auto_start_target", None)
+        app._auto_start_target = None
         app.log_message("Auto-start target cleared")
-    store.save(app._data, app._root)
 
 
 async def check_and_start(app) -> None:
@@ -132,6 +127,9 @@ async def check_and_start(app) -> None:
     Called after sync detects merged PRs. When a target is set, only
     starts ready PRs that are transitive dependencies of the target (or
     the target itself). Without a target, starts all ready PRs.
+
+    Also starts review loops for in_review PRs that don't have one
+    running.
     """
     if not is_enabled(app):
         return
@@ -139,52 +137,58 @@ async def check_and_start(app) -> None:
         return
 
     prs = app._data.get("prs") or []
-    ready = graph.ready_prs(prs)
-    if not ready:
-        return
-
     target = get_target(app)
 
-    # Compute which PRs are relevant for the target
+    # Disable auto-start if the target PR has been merged
     if target:
-        allowed = _transitive_deps(prs, target)
-        allowed.add(target)  # the target itself is also eligible
-    else:
-        allowed = None  # no target = start everything
+        target_pr = store.get_pr(app._data, target)
+        if target_pr and target_pr.get("status") == "merged":
+            _log.info("auto_start: target %s merged, disabling", target)
+            app.log_message(f"Auto-start: target {target} merged, disabling")
+            _disable(app)
+            return
 
-    for pr in ready:
-        pr_id = pr["id"]
+    ready = graph.ready_prs(prs)
+    if ready:
+        # Compute which PRs are relevant for the target
+        if target:
+            allowed = _transitive_deps(prs, target)
+            allowed.add(target)  # the target itself is also eligible
+        else:
+            allowed = None  # no target = start everything
 
-        # Skip PRs outside the target's dependency tree
-        if allowed is not None and pr_id not in allowed:
-            continue
+        for pr in ready:
+            pr_id = pr["id"]
 
-        # Skip if already has a workdir (was previously started)
-        if pr.get("workdir"):
-            continue
+            # Skip PRs outside the target's dependency tree
+            if allowed is not None and pr_id not in allowed:
+                continue
 
-        _log.info("auto_start: starting ready PR %s", pr_id)
-        app.log_message(f"Auto-start: starting {pr_id}")
+            # Skip if already has a workdir (was previously started)
+            if pr.get("workdir"):
+                continue
 
-        try:
-            await _start_pr_quiet(app, pr_id)
-        except Exception as e:
-            _log.exception("auto_start: failed to start %s", pr_id)
-            app.log_message(f"Auto-start error: {e}")
-            continue
+            _log.info("auto_start: starting ready PR %s", pr_id)
+            app.log_message(f"Auto-start: starting {pr_id}")
 
-        # Once the target itself is started, stop starting more PRs.
-        # Auto-start stays enabled — it disables when the target is merged
-        # (handled by _finalize_merge in pr.py).
-        if target and pr_id == target:
-            _log.info("auto_start: target PR %s started, awaiting merge", target)
-            app.log_message(f"Auto-start: target {pr_id} started")
-            break
+            try:
+                await _start_pr_quiet(app, pr_id)
+            except Exception as e:
+                _log.exception("auto_start: failed to start %s", pr_id)
+                app.log_message(f"Auto-start error: {e}")
+                continue
 
-    # Reload state after starting PRs
-    app._load_state()
+            # Once the target itself is started, stop starting more PRs.
+            if target and pr_id == target:
+                _log.info("auto_start: target PR %s started, awaiting merge", target)
+                app.log_message(f"Auto-start: target {pr_id} started")
+                break
 
-    # Also auto-start review loops for in_review PRs without active loops
+        # Reload state after starting PRs
+        app._load_state()
+        prs = app._data.get("prs") or []
+
+    # Also start review loops for in_review PRs without active loops
     _auto_start_review_loops(app, target, prs)
 
 

@@ -18,7 +18,6 @@ from pm_core import store
 from pm_core.review_loop import (
     ReviewLoopState,
     start_review_loop_background,
-    confirm_input,
     VERDICT_PASS,
     VERDICT_PASS_WITH_SUGGESTIONS,
     VERDICT_NEEDS_WORK,
@@ -32,7 +31,7 @@ VERDICT_ICONS = {
     VERDICT_PASS: "[green bold]✓ PASS[/]",
     VERDICT_PASS_WITH_SUGGESTIONS: "[yellow bold]~ PASS_WITH_SUGGESTIONS[/]",
     VERDICT_NEEDS_WORK: "[red bold]✗ NEEDS_WORK[/]",
-    VERDICT_INPUT_REQUIRED: "[cyan bold]⏸ INPUT_REQUIRED[/]",
+    VERDICT_INPUT_REQUIRED: "[red bold]⏸ INPUT_REQUIRED[/]",
     "KILLED": "[red bold]☠ KILLED[/]",
     "TIMEOUT": "[red bold]⏱ TIMEOUT[/]",
     "ERROR": "[red bold]! ERROR[/]",
@@ -211,45 +210,6 @@ def ensure_animation_timer(app) -> None:
         _ensure_poll_timer(app)
 
 
-def handle_confirm_input(app) -> None:
-    """Handle ``y`` key: confirm input for whichever PR is waiting.
-
-    Finds the first review loop in INPUT_REQUIRED state and confirms it.
-    """
-    # First, find any loop waiting for input
-    for pr_id, state in app._review_loops.items():
-        if state.input_required:
-            confirm_input_for_pr(app, pr_id)
-            return
-
-    # No loop waiting — inform the user
-    app.log_message("No review loop is waiting for input")
-
-
-def confirm_input_for_pr(app, pr_id: str) -> None:
-    """Confirm that the user has completed manual testing for a PR.
-
-    Called from the TUI when the user presses the confirmation key
-    while a review loop is paused on INPUT_REQUIRED.
-    """
-    loop = app._review_loops.get(pr_id)
-    if not loop:
-        app.log_message(f"No review loop for {pr_id}")
-        return
-
-    if not loop.input_required:
-        app.log_message(f"Review loop for {pr_id} is not waiting for input")
-        return
-
-    if confirm_input(loop):
-        app.log_message(
-            f"[bold]Input confirmed[/] for {pr_id} — waiting for Claude's final verdict...",
-            sticky=3,
-        )
-    else:
-        app.log_message(f"Review loop for {pr_id} is not waiting for input")
-
-
 def _poll_loop_state(app) -> None:
     """Periodic timer callback to update TUI from loop state."""
     any_running = False
@@ -262,8 +222,8 @@ def _poll_loop_state(app) -> None:
             if state.input_required and not state._ui_notified_input:
                 state._ui_notified_input = True
                 app.log_message(
-                    f"[cyan bold]⏸ INPUT_REQUIRED[/] for {state.pr_id}: "
-                    f"perform the requested tests, then press [bold]y[/] to confirm",
+                    f"[red bold]⏸ INPUT_REQUIRED[/] for {state.pr_id}: "
+                    f"interact with Claude in the review pane",
                     sticky=30,
                 )
         elif not state._ui_notified_done:

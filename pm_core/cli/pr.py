@@ -878,20 +878,8 @@ def _finalize_merge(data: dict, root, pr_entry: dict, pr_id: str,
     """Mark PR as merged, kill tmux windows, and show newly ready PRs."""
     pr_entry["status"] = "merged"
 
-    # Clear auto_start_target if this was the target PR (prevent stale references)
-    project = data.get("project", {})
-    if project.get("auto_start_target") == pr_id:
-        project.pop("auto_start_target", None)
-        project["auto_start"] = False
-        # Finalize any remaining transcript symlinks for this run
-        run_id = project.pop("auto_start_run_id", None)
-        if run_id and root:
-            from pm_core.claude_launcher import finalize_transcript as _finalize_t
-            tdir = Path(root) / "transcripts" / run_id
-            if tdir.is_dir():
-                for p in tdir.iterdir():
-                    if p.is_symlink() and p.suffix == ".jsonl":
-                        _finalize_t(p)
+    # Auto-start state is in-memory on the TUI — check_and_start()
+    # detects target-merged and disables it there.
 
     save_and_push(data, root, f"pm: merge {pr_id}")
     click.echo(f"PR {_pr_display_id(pr_entry)} marked as merged.")

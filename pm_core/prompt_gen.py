@@ -195,7 +195,7 @@ Review the code changes in this PR for quality, correctness, and architectural f
    - **PASS** — No changes needed. The code is ready to merge as-is.
    - **PASS_WITH_SUGGESTIONS** — Only non-blocking suggestions remain (style nits, minor refactors, optional improvements). The PR could merge now, but would benefit from small tweaks. List suggestions clearly.
    - **NEEDS_WORK** — Blocking issues found (bugs, missing error handling, architectural problems, test gaps). Separate code-quality fixes from architectural concerns.
-   - **INPUT_REQUIRED** — The code looks correct but you cannot fully verify it without human-guided testing. Use this when the PR involves UI interactions, hardware-dependent behavior, environment-specific setup, or anything that requires a human to manually verify. Include specific, numbered test steps the user should perform. The review loop will pause for the user to complete testing, then ask you for a final verdict."""
+   - **INPUT_REQUIRED** — The code looks correct but you cannot fully verify it without human-guided testing. Use this when the PR involves UI interactions, hardware-dependent behavior, environment-specific setup, or anything that requires a human to manually verify. Include specific, numbered test steps the user should perform. The user will interact with you directly in this pane to report test results, and then you should provide a final verdict."""
 
     base = prompt.strip()
     base += _beginner_addendum()
@@ -237,8 +237,8 @@ This review is running in an automated loop.  After completing your review:
 4. If you need the user to manually test something (**INPUT_REQUIRED**):
    - The code looks correct but requires human verification (e.g. UI behavior, environment-specific setup, hardware interaction, TUI keybindings)
    - List specific, numbered test steps the user should perform
-   - Output: **INPUT_REQUIRED** — the loop will pause and notify the user
-   - After the user confirms testing is complete, you will be asked for a final verdict
+   - Output: **INPUT_REQUIRED** — the user will respond directly in this pane with their test results
+   - After receiving their feedback, provide a final verdict (PASS, PASS_WITH_SUGGESTIONS, or NEEDS_WORK)
 
 IMPORTANT: Always end your response with the verdict keyword on its own line — one of **PASS**, **PASS_WITH_SUGGESTIONS**, **NEEDS_WORK**, or **INPUT_REQUIRED**."""
 

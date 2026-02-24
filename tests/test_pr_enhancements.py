@@ -109,31 +109,31 @@ class TestAutoStartHelpers:
     def test_is_enabled_true(self):
         from pm_core.tui.auto_start import is_enabled
         app = MagicMock()
-        app._data = {"project": {"auto_start": True}}
+        app._auto_start = True
         assert is_enabled(app) is True
 
     def test_is_enabled_false(self):
         from pm_core.tui.auto_start import is_enabled
         app = MagicMock()
-        app._data = {"project": {"auto_start": False}}
+        app._auto_start = False
         assert is_enabled(app) is False
 
     def test_is_enabled_missing(self):
         from pm_core.tui.auto_start import is_enabled
         app = MagicMock()
-        app._data = {"project": {}}
+        app._auto_start = False
         assert is_enabled(app) is False
 
     def test_get_target(self):
         from pm_core.tui.auto_start import get_target
         app = MagicMock()
-        app._data = {"project": {"auto_start_target": "pr-005"}}
+        app._auto_start_target = "pr-005"
         assert get_target(app) == "pr-005"
 
     def test_get_target_none(self):
         from pm_core.tui.auto_start import get_target
         app = MagicMock()
-        app._data = {"project": {}}
+        app._auto_start_target = None
         assert get_target(app) is None
 
 
@@ -338,47 +338,6 @@ class TestPrMerge:
         mock_finalize.assert_called_once()
 
 
-# ---------------------------------------------------------------------------
-# _finalize_merge clears auto_start_target
-# ---------------------------------------------------------------------------
 
-class TestFinalizeMergeClearsTarget:
-    @mock.patch.object(pr_mod, "trigger_tui_refresh")
-    @mock.patch.object(pr_mod, "save_and_push")
-    def test_clears_target_when_merged_pr_is_target(self, mock_save, mock_refresh):
-        """_finalize_merge should clear auto_start_target when merging the target PR."""
-        data = {
-            "project": {
-                "auto_start": True,
-                "auto_start_target": "pr-001",
-            },
-            "prs": [{"id": "pr-001", "title": "Test", "status": "in_review"}],
-        }
-        pr_entry = data["prs"][0]
-
-        with mock.patch("pm_core.cli.pr.kill_pr_windows"), \
-             mock.patch("pm_core.cli.helpers._find_tui_pane", return_value=(None, "sess")):
-            pr_mod._finalize_merge(data, Path("/tmp"), pr_entry, "pr-001")
-
-        assert data["project"].get("auto_start_target") is None
-        assert data["project"]["auto_start"] is False
-
-    @mock.patch.object(pr_mod, "trigger_tui_refresh")
-    @mock.patch.object(pr_mod, "save_and_push")
-    def test_preserves_target_when_merging_different_pr(self, mock_save, mock_refresh):
-        """_finalize_merge should keep auto_start_target when merging a different PR."""
-        data = {
-            "project": {
-                "auto_start": True,
-                "auto_start_target": "pr-005",
-            },
-            "prs": [{"id": "pr-001", "title": "Test", "status": "in_review"}],
-        }
-        pr_entry = data["prs"][0]
-
-        with mock.patch("pm_core.cli.pr.kill_pr_windows"), \
-             mock.patch("pm_core.cli.helpers._find_tui_pane", return_value=(None, "sess")):
-            pr_mod._finalize_merge(data, Path("/tmp"), pr_entry, "pr-001")
-
-        assert data["project"]["auto_start_target"] == "pr-005"
-        assert data["project"]["auto_start"] is True
+# _finalize_merge no longer manages auto-start state (it's in-memory on the TUI).
+# Target-merged detection is handled by check_and_start() in auto_start.py.
