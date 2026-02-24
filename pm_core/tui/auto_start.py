@@ -13,7 +13,9 @@ Toggle via TUI key ``A`` (sets selected PR as target) or command bar:
 ``autostart``.
 """
 
+import secrets
 import sys
+from pathlib import Path
 
 from pm_core.paths import configure_logger
 from pm_core import store, graph
@@ -30,6 +32,25 @@ def is_enabled(app) -> bool:
 def get_target(app) -> str | None:
     """Get the auto-start target PR (or None)."""
     return app._data.get("project", {}).get("auto_start_target")
+
+
+def get_transcript_dir(app) -> Path | None:
+    """Return the transcript directory for the current auto-start run, or None."""
+    run_id = app._data.get("project", {}).get("auto_start_run_id")
+    if not run_id or not app._root:
+        return None
+    return app._root / "transcripts" / run_id
+
+
+def _finalize_all_transcripts(app) -> None:
+    """Finalize all transcript symlinks in the current run directory."""
+    tdir = get_transcript_dir(app)
+    if not tdir or not tdir.is_dir():
+        return
+    from pm_core.claude_launcher import finalize_transcript
+    for p in tdir.iterdir():
+        if p.is_symlink() and p.suffix == ".jsonl":
+            finalize_transcript(p)
 
 
 def _transitive_deps(prs: list[dict], target_id: str) -> set[str]:
@@ -67,16 +88,26 @@ async def toggle(app, selected_pr_id: str | None = None) -> None:
             app.log_message(f"Auto-start: ON → {selected_pr_id}")
         else:
             app.log_message("Auto-start: ON (no target — all ready PRs)")
+        # Generate run ID and create transcript directory
+        target_tag = selected_pr_id or "all"
+        run_id = f"autostart-{target_tag}-{secrets.token_hex(4)}"
+        project["auto_start_run_id"] = run_id
+        if app._root:
+            tdir = app._root / "transcripts" / run_id
+            tdir.mkdir(parents=True, exist_ok=True)
+            _log.info("auto_start: created transcript dir %s", tdir)
         store.save(app._data, app._root)
-        _log.info("auto_start: enabled=%s target=%s",
-                  project.get("auto_start"), project.get("auto_start_target"))
+        _log.info("auto_start: enabled=%s target=%s run_id=%s",
+                  project.get("auto_start"), project.get("auto_start_target"), run_id)
         app._update_display()
         # Immediately start any ready PRs
         await check_and_start(app)
     else:
-        # Turn OFF
+        # Turn OFF — finalize all transcript symlinks
+        _finalize_all_transcripts(app)
         project["auto_start"] = False
         project.pop("auto_start_target", None)
+        project.pop("auto_start_run_id", None)
         app.log_message("Auto-start: OFF")
         store.save(app._data, app._root)
         _log.info("auto_start: disabled")
@@ -113,7 +144,6 @@ async def check_and_start(app) -> None:
         return
 
     target = get_target(app)
-    target_reached = False
 
     # Compute which PRs are relevant for the target
     if target:
@@ -143,23 +173,16 @@ async def check_and_start(app) -> None:
             app.log_message(f"Auto-start error: {e}")
             continue
 
-        # Check if we've reached the target
+        # Once the target itself is started, stop starting more PRs.
+        # Auto-start stays enabled — it disables when the target is merged
+        # (handled by _finalize_merge in pr.py).
         if target and pr_id == target:
-            target_reached = True
-            _log.info("auto_start: reached target PR %s, stopping", target)
-            app.log_message(f"Auto-start: reached target {pr_id}")
+            _log.info("auto_start: target PR %s started, awaiting merge", target)
+            app.log_message(f"Auto-start: target {pr_id} started")
             break
 
     # Reload state after starting PRs
     app._load_state()
-
-    if target_reached:
-        # Disable auto-start after reaching target
-        project = app._data.setdefault("project", {})
-        project["auto_start"] = False
-        project.pop("auto_start_target", None)
-        store.save(app._data, app._root)
-        app.log_message("Auto-start: disabled (target reached)")
 
     # Also auto-start review loops for in_review PRs without active loops
     _auto_start_review_loops(app, target, prs)
@@ -202,19 +225,27 @@ def _auto_start_review_loops(app, target: str | None = None,
         _log.info("auto_start: starting review loop for %s", pr_id)
         app.log_message(f"Auto-start: review loop for {pr_id}")
         from pm_core.tui.review_loop_ui import _start_loop
-        _start_loop(app, pr_id, pr, stop_on_suggestions=False)
+        tdir = get_transcript_dir(app)
+        _start_loop(app, pr_id, pr, stop_on_suggestions=False,
+                     transcript_dir=str(tdir) if tdir else None)
 
 
 async def _start_pr_quiet(app, pr_id: str) -> None:
     """Start a PR without changing TUI focus.
 
-    Runs ``pm pr start <pr_id>`` as a subprocess. Unlike the interactive
-    start_pr in pr_view, this doesn't use the inflight guard or spinner
-    since auto-start can overlap with user actions.
+    Runs ``pm pr start --background <pr_id>`` as a subprocess. The
+    ``--background`` flag tells ``pr start`` to create the tmux window
+    without switching focus.  Unlike the interactive start_pr in pr_view,
+    this doesn't use the inflight guard or spinner since auto-start can
+    overlap with user actions.
     """
     import asyncio
 
-    cmd = [sys.executable, "-m", "pm_core.wrapper", "pr", "start", pr_id]
+    cmd = [sys.executable, "-m", "pm_core.wrapper", "pr", "start", "--background"]
+    tdir = get_transcript_dir(app)
+    if tdir:
+        cmd.extend(["--transcript", str(tdir / f"impl-{pr_id}.jsonl")])
+    cmd.append(pr_id)
     cwd = str(app._root) if app._root else None
 
     proc = await _run_shell_async(
