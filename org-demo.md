@@ -226,7 +226,7 @@ cd $WORK/open-lab-org
 Mark done and sync:
 
 ```bash
-pm pr done pr-001
+pm pr review pr-001
 pm pr sync
 ```
 

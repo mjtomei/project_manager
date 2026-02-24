@@ -18,6 +18,26 @@ STATUS_ICONS = {
     "blocked": "✗",
 }
 
+VERDICT_MARKERS = {
+    "PASS": "✓",
+    "PASS_WITH_SUGGESTIONS": "~",
+    "NEEDS_WORK": "✗",
+    "KILLED": "☠",
+    "TIMEOUT": "⏱",
+    "ERROR": "!",
+}
+
+VERDICT_STYLES = {
+    "PASS": "bold green",
+    "PASS_WITH_SUGGESTIONS": "bold yellow",
+    "NEEDS_WORK": "bold red",
+    "KILLED": "bold red",
+    "TIMEOUT": "bold red",
+    "ERROR": "bold red",
+}
+
+SPINNER_FRAMES = "◐◓◑◒"
+
 STATUS_STYLES = {
     "pending": "white",
     "in_progress": "bold yellow",
@@ -74,10 +94,16 @@ class TechTree(Widget):
         self._hide_merged: bool = get_global_setting("hide-merged")  # toggle: hide merged PRs
         self._hide_closed: bool = True                            # toggle: hide closed PRs
         self._status_filter: str | None = None                    # filter to show only this status
+        self._anim_frame: int = 0                                  # animation frame counter
 
     def on_mount(self) -> None:
         self.prs = self._prs
         self._recompute()
+
+    def apply_project_settings(self, project: dict) -> None:
+        """Apply per-project display settings (overrides globals if present)."""
+        if "hide_merged" in project:
+            self._hide_merged = bool(project["hide_merged"])
 
     def update_prs(self, prs: list[dict]) -> None:
         self._prs = prs
@@ -158,22 +184,33 @@ class TechTree(Widget):
             return False
         return self._ordered_ids[self.selected_index].startswith("_hidden:")
 
-    def _get_loop_marker(self, pr_id: str) -> str:
-        """Return a marker string if a review loop is active for this PR."""
+    def advance_animation(self) -> None:
+        """Advance the animation frame counter (called by poll timer)."""
+        self._anim_frame = (self._anim_frame + 1) % len(SPINNER_FRAMES)
+
+    def _get_loop_marker(self, pr_id: str) -> tuple[str, str]:
+        """Return (marker_text, marker_style) for review loop state.
+
+        Returns a tuple of (text, style) for the marker. Empty strings if no loop.
+        """
         try:
             loops = self.app._review_loops
             state = loops.get(pr_id)
             if not state:
-                return ""
+                return ("", "")
             if state.running:
+                spinner = SPINNER_FRAMES[self._anim_frame % len(SPINNER_FRAMES)]
                 if state.stop_requested:
-                    return f"⏹{state.iteration}"
-                return f"⟳{state.iteration}"
+                    return (f"⏹{state.iteration}{spinner}", "bold red")
+                return (f"⟳{state.iteration}{spinner}", "bold cyan")
             if state.latest_verdict:
-                return ""  # done loops don't need a marker in the tree
+                v = state.latest_verdict
+                marker = VERDICT_MARKERS.get(v, v[:4])
+                style = VERDICT_STYLES.get(v, "")
+                return (f"⟳{state.iteration}{marker}", style)
         except Exception:
             pass
-        return ""
+        return ("", "")
 
     def get_content_width(self, container, viewport):
         if not self._node_positions:
@@ -391,6 +428,11 @@ class TechTree(Widget):
                         safe_write(dst_y, x, "─", "dim")
                     safe_write(dst_y, arrow_end_x, "▶", "dim")
 
+        # Auto-start target detection (for ◎ marker)
+        from pm_core.tui import auto_start as _auto_start
+        auto_start_enabled = _auto_start.is_enabled(self.app)
+        auto_start_target = _auto_start.get_target(self.app) if auto_start_enabled else None
+
         # Draw nodes (skip virtual hidden label IDs)
         for pr_id, (col, row) in self._node_positions.items():
             if pr_id.startswith("_hidden:"):
@@ -418,17 +460,38 @@ class TechTree(Widget):
                 side = "│"
 
             display_id = f"#{pr.get('gh_pr_number')}" if pr.get("gh_pr_number") else pr_id
-            id_line = f"{side} {display_id:<{NODE_W - 4}} {side}"
+            # Mark the auto-start target PR
+            is_auto_target = (auto_start_enabled and auto_start_target == pr_id)
+            max_id_len = NODE_W - 4
+            if is_auto_target:
+                # Reserve 2 chars for " ◎"
+                truncated_id = display_id[:max_id_len - 2]
+                id_content = f"{truncated_id} ◎"
+            else:
+                id_content = display_id[:max_id_len]
+            id_line = f"{side} {id_content:<{max_id_len}} {side}"
             title = pr.get("title", "???")
             max_title_len = NODE_W - 4
             if len(title) > max_title_len:
                 title = title[:max_title_len - 1] + "…"  # Unicode ellipsis
             title_line = f"{side} {title:<{NODE_W - 4}} {side}"
             status_text = f"{icon} {status}"
-            # Show review loop marker if a loop is active for this PR
-            loop_marker = self._get_loop_marker(pr_id)
+            # Show review loop marker or verdict if a loop exists for this PR
+            loop_marker, loop_style = self._get_loop_marker(pr_id)
+            marker_offset = -1  # char offset within status_line where marker starts
             if loop_marker:
+                marker_offset = 2 + len(status_text) + 1  # side + space + base text + space
                 status_text += f" {loop_marker}"
+            else:
+                # Show activity spinner for in_progress/in_review PRs
+                # (suppressed when the implementation pane is idle)
+                if status in ("in_progress", "in_review") and pr.get("workdir"):
+                    pane_idle = self.app._pane_idle_tracker.is_idle(pr_id)
+                    if not pane_idle:
+                        spinner = SPINNER_FRAMES[self._anim_frame % len(SPINNER_FRAMES)]
+                        marker_offset = 2 + len(status_text) + 1
+                        loop_style = "bold cyan"
+                        status_text += f" {spinner}"
             machine = pr.get("agent_machine")
             if machine:
                 avail = NODE_W - 4 - len(status_text) - 1
@@ -453,6 +516,21 @@ class TechTree(Widget):
                         # Interior of unselected box: node style + background
                         style = f"{node_style} {bg_style}".strip()
                     safe_write(y + dy, x + dx, ch, style)
+
+            # Apply colored style to auto-start target marker (◎) on id_line
+            if is_auto_target:
+                target_dx = 2 + len(truncated_id) + 1  # side + space + id + space
+                id_dy = 1  # id_line is 2nd row (index 1) in box_lines
+                if 0 <= (y + id_dy) < len(style_grid) and 0 <= (x + target_dx) < len(style_grid[0]):
+                    style_grid[y + id_dy][x + target_dx] = f"bold magenta {bg_style}".strip()
+
+            # Apply colored style to loop marker / spinner characters
+            if marker_offset >= 0 and loop_style:
+                status_dy = 3  # status_line is 4th row (index 3) in box_lines
+                marker_len = len(loop_marker) if loop_marker else 1
+                for dx in range(marker_offset, marker_offset + marker_len):
+                    if 0 <= (y + status_dy) < len(style_grid) and 0 <= (x + dx) < len(style_grid[0]):
+                        style_grid[y + status_dy][x + dx] = f"{loop_style} {bg_style}".strip()
 
         # Draw plan labels
         for plan_id, label_row in self._plan_label_rows.items():

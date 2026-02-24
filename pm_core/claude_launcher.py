@@ -5,6 +5,7 @@ import logging
 import os
 import shutil
 import subprocess
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -230,11 +231,23 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
     return result.stdout
 
 
+def _claude_project_dir(cwd: str) -> Path:
+    """Compute Claude's project directory for a given working directory.
+
+    Claude Code stores transcripts in ~/.claude/projects/{mangled-path}/
+    where the path has '/' replaced with '-' and '.' replaced with '-'.
+    """
+    mangled = cwd.replace("/", "-").replace(".", "-")
+    return Path.home() / ".claude" / "projects" / mangled
+
+
 def build_claude_shell_cmd(
     prompt: str | None = None,
     session_id: str | None = None,
     resume: bool = False,
     session_tag: str | None = None,
+    transcript: str | None = None,
+    cwd: str | None = None,
 ) -> str:
     """Build a claude shell command string with proper flags and logging.
 
@@ -247,7 +260,28 @@ def build_claude_shell_cmd(
         session_id: Session ID for --session-id or --resume
         resume: If True and session_id is set, use --resume instead of --session-id
         session_tag: Override session tag for skip-permissions check
+        transcript: Path where the transcript symlink should be created.
+            Requires ``cwd`` to compute Claude's native transcript location.
+            Generates a UUID session ID and creates a symlink from
+            ``transcript`` to Claude's native .jsonl file.
+        cwd: Working directory for computing Claude's project dir (required
+            when ``transcript`` is set).
     """
+    # When transcript is requested, generate a UUID and create a symlink
+    if transcript and cwd:
+        sid = str(uuid.uuid4())
+        session_id = sid
+        resume = False
+        claude_dir = _claude_project_dir(cwd)
+        target = claude_dir / f"{sid}.jsonl"
+        transcript_path = Path(transcript)
+        transcript_path.parent.mkdir(parents=True, exist_ok=True)
+        # Remove stale symlink if present
+        if transcript_path.is_symlink() or transcript_path.exists():
+            transcript_path.unlink()
+        transcript_path.symlink_to(target)
+        _log.info("transcript: symlink %s -> %s", transcript_path, target)
+
     from pm_core.paths import skip_permissions_enabled
     skip = " --dangerously-skip-permissions" if skip_permissions_enabled(session_tag) else ""
     cmd = f"claude{skip}"
@@ -264,6 +298,24 @@ def build_claude_shell_cmd(
 
     log_shell_command(cmd, prefix="claude")
     return cmd
+
+
+def finalize_transcript(transcript_path: Path) -> None:
+    """Replace a transcript symlink with a copy of the target file.
+
+    Called when a session finishes so the transcript is self-contained
+    and survives Claude session pruning.  No-op if the path is not a
+    symlink or the target doesn't exist.
+    """
+    if not transcript_path.is_symlink():
+        return
+    target = transcript_path.resolve()
+    if target.exists():
+        transcript_path.unlink()
+        shutil.copy2(target, transcript_path)
+        _log.info("transcript: finalized %s (copied from %s)", transcript_path, target)
+    else:
+        _log.debug("transcript: target %s does not exist, skipping finalize", target)
 
 
 def launch_claude_in_tmux(pane_target: str, prompt: str, cwd: str | None = None) -> None:

@@ -18,6 +18,26 @@ from pm_core import store, guide, pr_sync
 _log = configure_logger("pm.tui.sync")
 
 
+def _kill_merged_pr_windows(app, merged_pr_ids: set[str]) -> None:
+    """Kill tmux windows for merged PRs since they're no longer accessible from the TUI."""
+    from pm_core import tmux as tmux_mod
+    from pm_core.cli.helpers import kill_pr_windows
+
+    if not app._session_name or not merged_pr_ids:
+        return
+    session = app._session_name
+    if not tmux_mod.session_exists(session):
+        return
+
+    for pr_id in merged_pr_ids:
+        pr = store.get_pr(app._data, pr_id)
+        if not pr:
+            continue
+        killed = kill_pr_windows(session, pr)
+        for win_name in killed:
+            _log.info("Killed window '%s' for merged %s", win_name, pr_id)
+
+
 async def background_sync(app) -> None:
     """Pull latest state from git or check guide progress."""
     from pm_core.tui.frame_capture import load_capture_config
@@ -87,6 +107,13 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
                 save_state=False,
             ))
 
+        # Snapshot PR statuses before reload so we can detect merges that
+        # happened outside of sync (e.g. `pm pr merge` for local/vanilla).
+        old_statuses = {
+            pr["id"]: pr.get("status")
+            for pr in (app._data.get("prs") or [])
+        }
+
         # Reload from disk (picks up any concurrent user changes) and
         # apply sync results (merged PRs) on the main thread.
         app._data = store.load(app._root)
@@ -95,7 +122,24 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
                 if pr["id"] in result.merged_prs:
                     pr["status"] = "merged"
             store.save(app._data, app._root)
+            _kill_merged_pr_windows(app, result.merged_prs)
         app._update_display()
+
+        # Detect PRs that became merged — either via sync or via CLI
+        # (e.g. `pm pr merge` for local/vanilla backends saves status
+        # to disk before triggering a TUI refresh).
+        newly_merged = set(result.merged_prs)
+        for pr in app._data.get("prs") or []:
+            if pr.get("status") == "merged" and old_statuses.get(pr["id"]) != "merged":
+                newly_merged.add(pr["id"])
+
+        if newly_merged - set(result.merged_prs):
+            _kill_merged_pr_windows(app, newly_merged - set(result.merged_prs))
+
+        # Auto-start ready PRs if enabled (after merged PR detection)
+        if newly_merged:
+            from pm_core.tui.auto_start import check_and_start
+            await check_and_start(app)
 
         prs = app._data.get("prs") or []
 
@@ -157,15 +201,24 @@ async def startup_github_sync(app) -> None:
             # Reload from disk and apply ALL status changes on the main thread
             app._data = store.load(app._root)
             changed = False
+            newly_merged = set()
             for pr in app._data.get("prs") or []:
                 new_status = result.status_updates.get(pr["id"])
                 if new_status and pr.get("status") != new_status:
+                    if new_status == "merged":
+                        newly_merged.add(pr["id"])
                     pr["status"] = new_status
                     changed = True
             if changed:
                 store.save(app._data, app._root)
+            if newly_merged:
+                _kill_merged_pr_windows(app, newly_merged)
             app._update_display()
             app.log_message(f"GitHub sync: {result.updated_count} PR(s) updated")
+            # Auto-start ready PRs if enabled
+            if newly_merged:
+                from pm_core.tui.auto_start import check_and_start
+                await check_and_start(app)
         elif result.error:
             _log.warning("GitHub sync error: %s", result.error)
         else:

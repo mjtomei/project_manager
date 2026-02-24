@@ -717,7 +717,7 @@ From pm_core/tui/app.py:
 - PRSelected message sent when PR is highlighted or activated (Enter)
 - Enter triggers edit (same as 'e' key)
 - action_start_pr() runs `pm pr start <id>`
-- action_done_pr() runs `pm pr done <id>`
+- action_done_pr() runs `pm pr review <id>`
 - action_launch_claude() opens Claude in new pane
 
 ## Reporting
@@ -1574,7 +1574,7 @@ that PR action commands cannot be triggered concurrently, preventing race condit
 ## Background
 
 The TUI allows keyboard shortcuts to trigger PR actions like "pr start" (s key) and
-"pr done" (d key). Previously, pressing the same key rapidly or triggering conflicting
+"pr review" (d key). Previously, pressing the same key rapidly or triggering conflicting
 actions on different PRs could cause race conditions. The fix adds in-flight action
 tracking: while one PR action runs, all other PR actions are blocked with a "Busy: ..."
 message in the log line.
@@ -1583,7 +1583,7 @@ message in the log line.
 
 You have access to these commands:
 - `pm tui view` - See current TUI state
-- `pm tui send <keys>` - Send keystrokes to TUI (s=start, d=done, j/k=navigate)
+- `pm tui send <keys>` - Send keystrokes to TUI (s=start, d=review, g=merge, j/k=navigate)
 - `pm tui frames` - View captured frames
 - `pm tui clear-frames` - Clear captured frames
 - `tmux list-panes -t <session>` - List panes
@@ -1622,8 +1622,8 @@ Note the IDs assigned (e.g. pr-024, pr-025). Then refresh the TUI:
 - If a pr start is still running (spinner visible), send 'd' key
 - The log line should show "Busy: Starting <pr_id>"
 - The done action should be blocked
-- Note: `pr done` now runs async with a spinner, making the dedup guard critical
-  for preventing conflicts between concurrent start and done operations
+- Note: `pr review` now runs async with a spinner, making the dedup guard critical
+  for preventing conflicts between concurrent start and review operations
 
 ### 4. Test C - Command bar PR action while action is running
 
@@ -1644,15 +1644,15 @@ Note the IDs assigned (e.g. pr-024, pr-025). Then refresh the TUI:
 - Try pressing 'd' on the same PR
 - It should work (no "Busy" message)
 
-### 7. Test F - pr done dedup with start blocked
+### 7. Test F - pr review dedup with start blocked
 
 - Navigate to the first dummy PR
-- Send 'd' key to start `pr done` (runs async with spinner)
+- Send 'd' key to start `pr review` (runs async with spinner)
 - While the spinner is visible, rapidly press 's' to try starting the same PR
-- The log line should show "Busy: Completing <pr_id>"
+- The log line should show "Busy: Reviewing <pr_id>"
 - The start action should be blocked
 - Check `pm tui frames` for a frame with trigger starting with `log_message:Busy:`
-- Wait for pr done to complete, then verify the PR status changed
+- Wait for pr review to complete, then verify the PR status changed
 
 ### 8. Cleanup - Remove dummy PRs
 
@@ -1698,9 +1698,9 @@ Test D - Non-PR actions not blocked: [PASS/FAIL]
 Test E - Action allowed after completion: [PASS/FAIL]
   New action works after previous completes: [Yes/No]
 
-Test F - pr done dedup with start blocked: [PASS/FAIL]
-  pr done runs async with spinner: [Yes/No]
-  Start blocked with Busy message during done: [Yes/No]
+Test F - pr review dedup with start blocked: [PASS/FAIL]
+  pr review runs async with spinner: [Yes/No]
+  Start blocked with Busy message during review: [Yes/No]
   Busy message captured in frames (log_message:Busy:*): [Yes/No]
 
 Cleanup: [PASS/FAIL]
@@ -2101,7 +2101,7 @@ We create a dummy PR to test this — no real PRs are needed.
    - Refresh TUI: `pm tui send r`, wait 2 seconds
 
 2. Trigger the review window:
-   - `pm pr done <dummy_pr_id>`
+   - `pm pr review <dummy_pr_id>`
    - Wait 3 seconds for review window to open
    - Verify a new window appeared:
      `tmux list-windows -t <session> -F "#{window_id} #{window_name}"`

@@ -152,10 +152,12 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]f[/]  Cycle status filter", classes="help-row")
                 yield Label("PR Actions", classes="help-section")
                 yield Label("  [bold]s[/]  Start selected PR", classes="help-row")
-                yield Label("  [bold]d[/]  Mark PR as done", classes="help-row")
+                yield Label("  [bold]d[/]  Review (zz d: loop, zzz d: strict)", classes="help-row")
+                yield Label("  [bold]g[/]  Merge PR", classes="help-row")
                 yield Label("  [bold]e[/] / [bold]Enter[/]  Edit selected PR", classes="help-row")
                 yield Label("  [bold]v[/]  View plan file", classes="help-row")
                 yield Label("  [bold]M[/]  Move to plan", classes="help-row")
+                yield Label("  [bold]A[/]  Auto-start to selected PR / off", classes="help-row")
             yield Label("Panes & Views", classes="help-section")
             if not self._in_plans:
                 yield Label("  [bold]c[/]  Launch Claude session", classes="help-row")

@@ -350,7 +350,7 @@ All Claude sessions launched by pm receive generated prompts from
 - **`generate_prompt(data, pr_id)`** — Work session prompt (used by `pm pr start`).
   Includes PR context, dependencies, task description, workflow instructions.
 - **`generate_review_prompt(data, pr_id, ...)`** — Review session prompt (used by
-  `pm pr done`).  Includes review checklist, plan context, and verdict instructions.
+  `pm pr review`).  Includes review checklist, plan context, and verdict instructions.
   When `review_loop=True`, appends fix/commit/push instructions for automated
   review iterations.
 - **`_build_meta_prompt()`** — This prompt (used by `pm meta`).  Provides

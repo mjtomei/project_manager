@@ -19,7 +19,7 @@ from pm_core import tmux as tmux_mod
 from pm_core import pane_layout
 from pm_core import pane_registry
 from pm_core.backend import get_backend
-from pm_core.claude_launcher import find_claude, build_claude_shell_cmd, clear_session, launch_claude
+from pm_core.claude_launcher import find_claude, build_claude_shell_cmd, clear_session, launch_claude, finalize_transcript
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
@@ -35,6 +35,7 @@ from pm_core.cli.helpers import (
     _resolve_repo_dir,
     _resolve_repo_id,
     _workdirs_dir,
+    kill_pr_windows,
     save_and_push,
     state_root,
     trigger_tui_refresh,
@@ -300,7 +301,7 @@ def pr_select(pr_id: str):
     """Set the active PR.
 
     The active PR is used as the default when commands like pm pr start,
-    pm pr done, pm prompt, etc. are run without specifying a PR ID.
+    pm pr review, pm prompt, etc. are run without specifying a PR ID.
     """
     root = state_root()
     data = store.load(root)
@@ -411,7 +412,11 @@ def pr_ready():
 @click.argument("pr_id", default=None, required=False)
 @click.option("--workdir", default=None, help="Custom work directory")
 @click.option("--fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
-def pr_start(pr_id: str | None, workdir: str, fresh: bool):
+@click.option("--background", is_flag=True, default=False, hidden=True,
+              help="Create tmux window without switching focus (used by auto-start)")
+@click.option("--transcript", default=None, hidden=True,
+              help="Path to save Claude transcript symlink (used by auto-start)")
+def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, transcript: str | None):
     """Start working on a PR: clone, branch, print prompt.
 
     If PR_ID is omitted, uses the active PR if it's pending/ready, or
@@ -473,6 +478,10 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
                 if fresh:
                     tmux_mod.kill_window(pm_session, existing["id"])
                     click.echo(f"Killed existing window '{window_name}'")
+                elif background:
+                    # Window already exists, nothing to do in background mode
+                    click.echo(f"Window '{window_name}' already exists (background mode, no focus change)")
+                    return
                 else:
                     tmux_mod.select_window(pm_session, existing["id"])
                     click.echo(f"Switched to existing window '{window_name}' (session: {pm_session})")
@@ -580,9 +589,11 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
     if pm_session:
         if tmux_mod.session_exists(pm_session):
             window_name = _pr_display_id(pr_entry)
-            cmd = build_claude_shell_cmd(prompt=prompt)
+            cmd = build_claude_shell_cmd(prompt=prompt,
+                                         transcript=transcript, cwd=str(work_path))
             try:
-                tmux_mod.new_window(pm_session, window_name, cmd, str(work_path))
+                tmux_mod.new_window(pm_session, window_name, cmd, str(work_path),
+                                    switch=not background)
                 win = tmux_mod.find_window_by_name(pm_session, window_name)
                 if win:
                     tmux_mod.set_shared_window_size(pm_session, win["id"])
@@ -601,8 +612,10 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool):
 
 
 def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
+                          background: bool = False,
                           review_loop: bool = False, review_iteration: int = 0,
-                          review_loop_id: str = "") -> None:
+                          review_loop_id: str = "",
+                          transcript: str | None = None) -> None:
     """Launch a tmux review window with Claude review + git diff shell."""
     if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
         click.echo("Review window requires tmux.")
@@ -632,7 +645,8 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                                                       review_loop=review_loop,
                                                       review_iteration=review_iteration,
                                                       review_loop_id=review_loop_id)
-    claude_cmd = build_claude_shell_cmd(prompt=review_prompt)
+    claude_cmd = build_claude_shell_cmd(prompt=review_prompt,
+                                         transcript=transcript, cwd=workdir)
 
     window_name = f"review-{display_id}"
 
@@ -655,12 +669,11 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
             click.echo(f"Switched to existing review window '{window_name}'")
             return
 
-    # In review loop mode, always create the window in the background —
-    # the explicit per-session switching below handles moving exactly the
-    # sessions that were watching the old window.  Letting new_window_get_pane
-    # switch would move current_or_base_session even if it wasn't on the
-    # review window.  For non-loop mode, always switch the current session.
-    switch = not review_loop
+    # In review loop mode or background mode, create the window without
+    # switching focus.  For review loops the explicit per-session switching
+    # below handles moving exactly the sessions that were watching the old
+    # window.  Background mode is used by auto-start to avoid stealing focus.
+    switch = not review_loop and not background
 
     try:
         claude_pane = tmux_mod.new_window_get_pane(
@@ -678,6 +691,14 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         # exit codes that break && chains).
         shell = os.environ.get("SHELL", "/bin/bash")
         header = f"Review: {display_id} — {title}"
+        # Use backend-appropriate diff base:
+        #   local:   merge-base between base_branch and HEAD (no remote)
+        #   vanilla/github: origin/{base_branch}...HEAD
+        backend_name = data.get("project", {}).get("backend", "vanilla")
+        if backend_name == "local":
+            diff_ref = base_branch
+        else:
+            diff_ref = f"origin/{base_branch}"
         diff_cmd = (
             f"cd '{workdir}'"
             f" && {{ echo '=== {header} ==='"
@@ -685,10 +706,10 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
             f" && git status"
             f" && echo ''"
             f" && echo '--- Change summary ---'"
-            f" && git --no-pager diff --stat origin/{base_branch}...HEAD"
+            f" && git --no-pager diff --stat {diff_ref}...HEAD"
             f" && echo ''"
             f" && echo '--- Full diff ---'"
-            f" && git --no-pager diff origin/{base_branch}...HEAD"
+            f" && git --no-pager diff {diff_ref}...HEAD"
             f"; }} | less -R"
             f"; exec {shell}"
         )
@@ -777,14 +798,18 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         click.echo(f"Review window error: {e}")
 
 
-@pr.command("done")
+@pr.command("review")
 @click.argument("pr_id", default=None, required=False)
 @click.option("--fresh", is_flag=True, default=False, help="Kill existing review window and create a new one")
+@click.option("--background", is_flag=True, default=False, hidden=True,
+              help="Create review window without switching focus (used by auto-start)")
 @click.option("--review-loop", is_flag=True, default=False, help="Use review loop prompt (fix/commit/push)")
 @click.option("--review-iteration", default=0, type=int, help="Review loop iteration number (for commit messages)")
 @click.option("--review-loop-id", default="", help="Unique review loop identifier (for commit messages)")
-def pr_done(pr_id: str | None, fresh: bool, review_loop: bool, review_iteration: int, review_loop_id: str):
-    """Mark a PR as in_review.
+@click.option("--transcript", default=None, hidden=True,
+              help="Path to save Claude transcript symlink (used by auto-start)")
+def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: bool, review_iteration: int, review_loop_id: str, transcript: str | None):
+    """Mark a PR as in_review and launch a review window.
 
     If PR_ID is omitted, infers from cwd (if inside a workdir) or
     auto-selects when there's exactly one in_progress PR.
@@ -798,7 +823,7 @@ def pr_done(pr_id: str | None, fresh: bool, review_loop: bool, review_iteration:
             prs = data.get("prs") or []
             in_progress = [p for p in prs if p.get("status") == "in_progress"]
             if len(in_progress) == 0:
-                click.echo("No in_progress PRs to mark done.", err=True)
+                click.echo("No in_progress PRs to review.", err=True)
             else:
                 click.echo("Multiple in_progress PRs. Specify one:", err=True)
                 for p in in_progress:
@@ -814,9 +839,11 @@ def pr_done(pr_id: str | None, fresh: bool, review_loop: bool, review_iteration:
         raise SystemExit(1)
     if pr_entry.get("status") == "in_review":
         click.echo(f"PR {pr_id} is already in_review.")
-        _launch_review_window(data, pr_entry, fresh=fresh, review_loop=review_loop,
+        _launch_review_window(data, pr_entry, fresh=fresh, background=background,
+                              review_loop=review_loop,
                               review_iteration=review_iteration,
-                              review_loop_id=review_loop_id)
+                              review_loop_id=review_loop_id,
+                              transcript=transcript)
         return
     if pr_entry.get("status") == "pending":
         click.echo(f"PR {pr_id} is pending — start it first with: pm pr start {pr_id}", err=True)
@@ -836,27 +863,269 @@ def pr_done(pr_id: str | None, fresh: bool, review_loop: bool, review_iteration:
             click.echo("Warning: Failed to upgrade draft PR. It may already be ready or was closed.", err=True)
 
     pr_entry["status"] = "in_review"
-    save_and_push(data, root, f"pm: done {pr_id}")
+    save_and_push(data, root, f"pm: review {pr_id}")
     click.echo(f"PR {_pr_display_id(pr_entry)} marked as in_review.")
     trigger_tui_refresh()
-    _launch_review_window(data, pr_entry, fresh=fresh, review_loop=review_loop,
+    _launch_review_window(data, pr_entry, fresh=fresh, background=background,
+                          review_loop=review_loop,
                           review_iteration=review_iteration,
-                          review_loop_id=review_loop_id)
+                          review_loop_id=review_loop_id,
+                          transcript=transcript)
+
+
+def _finalize_merge(data: dict, root, pr_entry: dict, pr_id: str,
+                    transcript: str | None = None) -> None:
+    """Mark PR as merged, kill tmux windows, and show newly ready PRs."""
+    pr_entry["status"] = "merged"
+
+    # Clear auto_start_target if this was the target PR (prevent stale references)
+    project = data.get("project", {})
+    if project.get("auto_start_target") == pr_id:
+        project.pop("auto_start_target", None)
+        project["auto_start"] = False
+        # Finalize any remaining transcript symlinks for this run
+        run_id = project.pop("auto_start_run_id", None)
+        if run_id and root:
+            from pm_core.claude_launcher import finalize_transcript as _finalize_t
+            tdir = Path(root) / "transcripts" / run_id
+            if tdir.is_dir():
+                for p in tdir.iterdir():
+                    if p.is_symlink() and p.suffix == ".jsonl":
+                        _finalize_t(p)
+
+    save_and_push(data, root, f"pm: merge {pr_id}")
+    click.echo(f"PR {_pr_display_id(pr_entry)} marked as merged.")
+    trigger_tui_refresh()
+
+    # Kill tmux windows for the merged PR (they're inaccessible from the TUI)
+    try:
+        from pm_core.cli.helpers import _find_tui_pane
+        _, session = _find_tui_pane()
+        if session:
+            kill_pr_windows(session, pr_entry)
+    except Exception:
+        pass
+
+    # Finalize merge transcript if provided
+    if transcript:
+        finalize_transcript(Path(transcript))
+
+    # Show newly unblocked PRs
+    prs = data.get("prs") or []
+    ready = graph.ready_prs(prs)
+    if ready:
+        click.echo("\nNewly ready PRs:")
+        for p in ready:
+            click.echo(f"  ⏳ {_pr_display_id(p)}: {p.get('title', '???')}")
+
+
+def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
+                         background: bool = False,
+                         transcript: str | None = None) -> None:
+    """Launch a tmux window with Claude to resolve a merge conflict."""
+    if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
+        click.echo("Merge window requires tmux.")
+        return
+
+    pm_session = _get_pm_session()
+    if not pm_session or not tmux_mod.session_exists(pm_session):
+        click.echo(f"Merge window: tmux session '{pm_session}' not found.")
+        return
+
+    workdir = pr_entry.get("workdir")
+    if not workdir:
+        click.echo(f"Merge window: no workdir for {pr_entry['id']}.")
+        return
+
+    pr_id = pr_entry["id"]
+    display_id = _pr_display_id(pr_entry)
+
+    merge_prompt = prompt_gen.generate_merge_prompt(
+        data, pr_id, error_output, session_name=pm_session,
+    )
+    claude_cmd = build_claude_shell_cmd(prompt=merge_prompt,
+                                         transcript=transcript, cwd=workdir)
+    window_name = f"merge-{display_id}"
+
+    # Kill existing merge window if present
+    existing = tmux_mod.find_window_by_name(pm_session, window_name)
+    if existing:
+        tmux_mod.kill_window(pm_session, existing["id"])
+
+    try:
+        tmux_mod.new_window(
+            pm_session, window_name, claude_cmd, workdir,
+            switch=not background,
+        )
+        click.echo(f"Opened merge resolution window '{window_name}'")
+    except Exception as e:
+        _log.warning("Failed to launch merge window: %s", e)
+        click.echo(f"Merge window error: {e}")
+
+
+@pr.command("merge")
+@click.argument("pr_id", default=None, required=False)
+@click.option("--resolve-window", is_flag=True, default=False, hidden=True,
+              help="On merge conflict, launch a Claude resolution window instead of exiting")
+@click.option("--background", is_flag=True, default=False, hidden=True,
+              help="Create merge window without switching focus (used by auto-start)")
+@click.option("--transcript", default=None, hidden=True,
+              help="Path to save Claude transcript symlink (used by auto-start)")
+def pr_merge(pr_id: str | None, resolve_window: bool, background: bool, transcript: str | None):
+    """Merge a PR's branch into the base branch.
+
+    For local/vanilla backends, performs a local git merge.
+    For GitHub backend, merges via gh CLI if available, otherwise
+    directs the user to merge on GitHub manually.
+    If PR_ID is omitted, infers from cwd or auto-selects.
+    """
+    root = state_root()
+    data = store.load(root)
+
+    if pr_id is None:
+        pr_id = _infer_pr_id(data, status_filter=("in_review",))
+        if pr_id is None:
+            click.echo("No in_review PR to merge.", err=True)
+            raise SystemExit(1)
+        click.echo(f"Auto-selected {pr_id}")
+
+    pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
+
+    if pr_entry.get("status") == "merged":
+        click.echo(f"PR {pr_id} is already merged.", err=True)
+        raise SystemExit(1)
+    if pr_entry.get("status") == "pending":
+        click.echo(f"PR {pr_id} is pending — start and review it first.", err=True)
+        raise SystemExit(1)
+
+    backend_name = data["project"].get("backend", "vanilla")
+    base_branch = data["project"].get("base_branch", "master")
+    branch = pr_entry.get("branch", "")
+
+    if backend_name == "github":
+        gh_pr_number = pr_entry.get("gh_pr_number")
+        workdir = pr_entry.get("workdir")
+        if gh_pr_number and workdir and Path(workdir).exists() and shutil.which("gh"):
+            click.echo(f"Merging GitHub PR #{gh_pr_number} via gh CLI...")
+            merge_result = subprocess.run(
+                ["gh", "pr", "merge", str(gh_pr_number), "--merge"],
+                cwd=workdir, capture_output=True, text=True,
+            )
+            if merge_result.returncode == 0:
+                click.echo(f"GitHub PR #{gh_pr_number} merged.")
+                _finalize_merge(data, root, pr_entry, pr_id, transcript=transcript)
+                return
+            else:
+                click.echo(f"gh pr merge failed: {merge_result.stderr.strip()}", err=True)
+                click.echo("Falling back to manual instructions.", err=True)
+        # Fallback: direct user to merge manually
+        gh_pr = pr_entry.get("gh_pr")
+        if gh_pr:
+            click.echo(f"GitHub PR: {gh_pr}")
+            click.echo("Merge via GitHub, then run 'pm pr sync' to detect it.")
+        else:
+            click.echo("No GitHub PR URL found. Merge manually on GitHub, then run 'pm pr sync'.")
+        return
+
+    # For local/vanilla: merge in the PR's workdir (branch always exists there)
+    workdir = pr_entry.get("workdir")
+    if not workdir or not Path(workdir).exists():
+        click.echo(f"PR {pr_id} workdir not found. Cannot merge without the branch.", err=True)
+        raise SystemExit(1)
+
+    work_path = Path(workdir)
+
+    # Pre-merge check: abort if workdir has uncommitted changes
+    if _workdir_is_dirty(work_path):
+        error_msg = f"Workdir has uncommitted changes: {workdir}"
+        click.echo(error_msg, err=True)
+        click.echo("Commit or stash your changes before merging.", err=True)
+        if resolve_window:
+            _launch_merge_window(data, pr_entry, error_msg, background=background,
+                                 transcript=transcript)
+            return
+        raise SystemExit(1)
+
+    # Fetch latest from origin (important for vanilla backend where others may push)
+    if backend_name == "vanilla":
+        click.echo("Fetching latest from origin...")
+        git_ops.run_git("fetch", "origin", cwd=workdir, check=False)
+
+    # Capture the branch tip before merge for post-merge verification
+    tip_result = git_ops.run_git("rev-parse", branch, cwd=workdir, check=False)
+    branch_tip = tip_result.stdout.strip() if tip_result.returncode == 0 else None
+
+    click.echo(f"Merging {branch} into {base_branch}...")
+    result = git_ops.run_git("checkout", base_branch, cwd=workdir, check=False)
+    if result.returncode != 0:
+        error_msg = f"Failed to checkout {base_branch}: {result.stderr.strip()}"
+        click.echo(error_msg, err=True)
+        if resolve_window:
+            _launch_merge_window(data, pr_entry, error_msg, background=background,
+                                 transcript=transcript)
+            return
+        raise SystemExit(1)
+    result = git_ops.run_git("merge", "--no-ff", branch, "-m",
+                             f"Merge {branch}: {pr_entry.get('title', pr_id)}",
+                             cwd=workdir, check=False)
+    if result.returncode != 0:
+        # Git sends conflict details to stdout, other errors to stderr
+        error_detail = (result.stdout.strip() + "\n" + result.stderr.strip()).strip()
+        error_msg = f"Merge failed:\n{error_detail}" if error_detail else "Merge failed"
+        click.echo(error_msg, err=True)
+        click.echo("Resolve conflicts manually, then run 'pm pr merge' again.", err=True)
+        if resolve_window:
+            _launch_merge_window(data, pr_entry, error_msg, background=background,
+                                 transcript=transcript)
+            return
+        raise SystemExit(1)
+
+    # Post-merge verification: confirm the branch tip is now an ancestor of HEAD
+    if branch_tip:
+        verify = git_ops.run_git(
+            "merge-base", "--is-ancestor", branch_tip, "HEAD",
+            cwd=workdir, check=False,
+        )
+        if verify.returncode != 0:
+            click.echo(f"Warning: Post-merge verification failed — branch tip {branch_tip[:8]} "
+                        f"is not an ancestor of {base_branch} HEAD.", err=True)
+            click.echo("The merge commit exists but may not include all branch commits.", err=True)
+
+    # Push the merged base_branch back to origin (works for both bare and
+    # non-bare repos).  For local backend, origin is the original repo path.
+    push_result = git_ops.run_git("push", "origin", base_branch, cwd=workdir, check=False)
+    if push_result.returncode != 0:
+        click.echo(f"Warning: Push failed: {push_result.stderr.strip()}", err=True)
+        click.echo("The merge is in the workdir. Push or pull manually when ready.")
+    else:
+        click.echo(f"Pushed merged {base_branch} to origin.")
+
+    _finalize_merge(data, root, pr_entry, pr_id, transcript=transcript)
 
 
 @pr.command("sync")
 def pr_sync():
-    """Check for merged PRs and unblock dependents.
+    """Check for merged PRs and unblock dependents (GitHub backend only).
 
-    Uses the configured backend (vanilla or github) to detect merges.
+    For local/vanilla backends, use 'pm pr merge' instead.
     Needs at least one workdir to exist (created by 'pm pr start').
     """
     root = state_root()
     data = store.load(root)
+    backend_name = data["project"].get("backend", "vanilla")
     base_branch = data["project"].get("base_branch", "master")
     prs = data.get("prs") or []
-    backend = get_backend(data)
     updated = 0
+
+    # Only the github backend can reliably auto-detect merges (via API).
+    # Local/vanilla backends rely on `pm pr merge` for explicit tracking.
+    if backend_name != "github":
+        click.echo("Auto-merge detection is only available for the GitHub backend.")
+        click.echo("Use 'pm pr merge <pr-id>' to merge local/vanilla PRs.")
+        return
+
+    backend = get_backend(data)
 
     # Find any existing workdir to check merge status from
     target_workdir = None

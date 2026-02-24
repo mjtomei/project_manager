@@ -2,6 +2,7 @@
 
 from pm_core import store, notes
 from pm_core.backend import get_backend
+from pm_core.paths import get_global_setting
 
 
 def tui_section(session_name: str) -> str:
@@ -88,6 +89,9 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
     # Include PR notes (addendums added after work began)
     pr_notes_block = _format_pr_notes(pr)
 
+    beginner_block = _beginner_addendum()
+    cleanup_block = _auto_cleanup_addendum()
+
     prompt = f"""You're working on PR {pr_id}: "{title}"
 
 This session is managed by `pm`. Run `pm help` to see available commands.
@@ -102,11 +106,11 @@ This session is managed by `pm`. Run `pm help` to see available commands.
 ## Tips
 - This session may be resuming after a restart. Check `git status` and `git log` to see if previous work exists on this branch — if so, continue from there.
 - Before referencing existing code (imports, function calls, class usage), read the source to verify the interface.
-- This workdir is a clone managed by pm. The base pm state (project.yaml, PR status) lives in a separate directory and is not automatically synced with this clone. Commands like `pm pr start` and `pm pr done` should be run from the base directory, not here — your session for {pr_id} is already running.
+- This workdir is a clone managed by pm. The base pm state (project.yaml, PR status) lives in a separate directory and is not automatically synced with this clone. Commands like `pm pr start` and `pm pr review` should be run from the base directory, not here — your session for {pr_id} is already running.
 
 ## Workflow
 {instructions}
-{tui_block}{notes_block}"""
+{tui_block}{notes_block}{beginner_block}{cleanup_block}"""
     return prompt.strip()
 
 
@@ -159,6 +163,13 @@ This PR is part of plan "{plan['name']}" ({plan['id']}). Other PRs in this plan:
     # Include PR notes (addendums)
     pr_notes_block = _format_pr_notes(pr)
 
+    # Backend-appropriate diff command
+    backend_name = data.get("project", {}).get("backend", "vanilla")
+    if backend_name == "local":
+        diff_cmd = f"git diff {base_branch}...HEAD"
+    else:
+        diff_cmd = f"git diff origin/{base_branch}...HEAD"
+
     prompt = f"""You are reviewing PR {pr_id}: "{title}"
 
 ## Task
@@ -168,7 +179,7 @@ Review the code changes in this PR for quality, correctness, and architectural f
 {description}
 {pr_notes_block}{plan_context}{tui_block}
 ## Steps
-1. Run `git diff origin/{base_branch}...HEAD` to see all changes
+1. Run `{diff_cmd}` to see all changes
 2. **Generic checks** — things any codebase should get right:
    - Excessive file/function length, duplicated code, dead or unnecessary code, potential bugs, security issues, confusing code that lacks comments, sufficient test coverage
 3. **Project-specific checks** — does the change fit this codebase?
@@ -186,6 +197,7 @@ Review the code changes in this PR for quality, correctness, and architectural f
    - **NEEDS_WORK** — Blocking issues found (bugs, missing error handling, architectural problems, test gaps). Separate code-quality fixes from architectural concerns."""
 
     base = prompt.strip()
+    base += _beginner_addendum()
     if review_loop:
         base += _review_loop_addendum(pr.get("branch", ""), review_iteration,
                                       review_loop_id)
@@ -222,6 +234,77 @@ This review is running in an automated loop.  After completing your review:
    - Output: **PASS**
 
 IMPORTANT: Always end your response with the verdict keyword on its own line — one of **PASS**, **PASS_WITH_SUGGESTIONS**, or **NEEDS_WORK**."""
+
+
+def _beginner_addendum() -> str:
+    """Return beginner mode addendum if enabled, or empty string."""
+    if not get_global_setting("beginner-mode"):
+        return ""
+    return """
+
+## Beginner Guidance
+
+The user has beginner mode enabled. Please:
+- Explain what you're doing and why at each step
+- After completing work, always recommend clear next steps
+- Suggest which TUI key to press or CLI command to run next
+- If something goes wrong, explain what happened in simple terms
+- Avoid jargon without explanation
+- When committing, explain what a commit is and why we push
+"""
+
+
+def _auto_cleanup_addendum() -> str:
+    """Return auto-cleanup addendum if enabled, or empty string."""
+    if not get_global_setting("auto-cleanup"):
+        return ""
+    return """
+
+## Pane Cleanup
+
+Auto-cleanup is enabled. After finishing your main work:
+- Check for old or dead tmux panes that are no longer needed
+- Suggest the user press `b` in the TUI to rebalance panes after closing panes
+- Remind them they can run `pm pr cleanup <pr-id>` to remove merged PR workdirs
+"""
+
+
+def generate_merge_prompt(data: dict, pr_id: str, error_output: str,
+                          session_name: str | None = None) -> str:
+    """Generate a Claude Code prompt for resolving a merge failure.
+
+    Args:
+        data: Project data dict.
+        pr_id: The PR identifier.
+        error_output: Verbatim error output from the failed merge attempt.
+        session_name: If provided, include TUI interaction instructions.
+    """
+    pr = store.get_pr(data, pr_id)
+    if not pr:
+        raise ValueError(f"PR {pr_id} not found")
+
+    branch = pr.get("branch", f"pm/{pr_id}")
+    title = pr.get("title", "")
+    base_branch = data.get("project", {}).get("base_branch", "master")
+
+    tui_block = tui_section(session_name) if session_name else ""
+    beginner_block = _beginner_addendum()
+
+    prompt = f"""You're resolving a merge failure for PR {pr_id}: "{title}"
+
+The merge of `{branch}` into `{base_branch}` failed with the following error:
+
+```
+{error_output}
+```
+
+## Steps
+1. Investigate the error and resolve the issue in the workdir
+2. Run any relevant tests to verify the resolution
+3. Stage and commit the fix
+4. When done, output **MERGED** on its own line
+{tui_block}{beginner_block}"""
+    return prompt.strip()
 
 
 def generate_review_loop_prompt(data: dict, pr_id: str) -> str:

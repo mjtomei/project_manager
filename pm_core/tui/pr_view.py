@@ -14,7 +14,7 @@ from pm_core.tui._shell import _run_shell, _run_shell_async
 _log = configure_logger("pm.tui.pr_view")
 
 # PR command prefixes that require in-flight action guarding
-PR_ACTION_PREFIXES = ("pr start", "pr done")
+PR_ACTION_PREFIXES = ("pr start", "pr review", "pr merge")
 
 
 # ---------------------------------------------------------------------------
@@ -58,6 +58,7 @@ def handle_pr_selected(app, pr_id: str) -> None:
 def start_pr(app) -> None:
     """Start working on the selected PR."""
     from pm_core.tui.tech_tree import TechTree
+    from pm_core.paths import get_global_setting
 
     fresh = app._consume_z()
     tree = app.query_one("#tech-tree", TechTree)
@@ -67,6 +68,20 @@ def start_pr(app) -> None:
         _log.info("action: start_pr - no PR selected")
         app.log_message("No PR selected")
         return
+
+    # In beginner mode, block starting PRs with unmerged dependencies
+    if get_global_setting("beginner-mode"):
+        pr = store.get_pr(app._data, pr_id)
+        if pr and pr.get("depends_on"):
+            unmerged = []
+            for dep_id in pr["depends_on"]:
+                dep = store.get_pr(app._data, dep_id)
+                if dep and dep.get("status") != "merged":
+                    unmerged.append(f"{dep_id} ({dep.get('status', 'pending')})")
+            if unmerged:
+                app.log_error("Blocked", f"{pr_id} has unmerged deps: {', '.join(unmerged)}")
+                return
+
     action_key = f"Starting {pr_id}" + (" (fresh)" if fresh else "")
     if not guard_pr_action(app, action_key):
         return
@@ -76,7 +91,7 @@ def start_pr(app) -> None:
 
 
 def done_pr(app, fresh: bool = False) -> None:
-    """Mark the selected PR as done."""
+    """Mark the selected PR as in_review and open a review window."""
     from pm_core.tui.tech_tree import TechTree
 
     tree = app.query_one("#tech-tree", TechTree)
@@ -85,12 +100,29 @@ def done_pr(app, fresh: bool = False) -> None:
     if not pr_id:
         app.log_message("No PR selected")
         return
-    action_key = f"Completing {pr_id}" + (" (fresh)" if fresh else "")
+    action_key = f"Reviewing {pr_id}" + (" (fresh)" if fresh else "")
     if not guard_pr_action(app, action_key):
         return
     app._inflight_pr_action = action_key
-    cmd = f"pr done --fresh {pr_id}" if fresh else f"pr done {pr_id}"
+    cmd = f"pr review --fresh {pr_id}" if fresh else f"pr review {pr_id}"
     run_command(app, cmd, working_message=action_key, action_key=action_key)
+
+
+def merge_pr(app) -> None:
+    """Merge the selected PR."""
+    from pm_core.tui.tech_tree import TechTree
+
+    tree = app.query_one("#tech-tree", TechTree)
+    pr_id = tree.selected_pr_id
+    _log.info("action: merge_pr selected=%s", pr_id)
+    if not pr_id:
+        app.log_message("No PR selected")
+        return
+    action_key = f"Merging {pr_id}"
+    if not guard_pr_action(app, action_key):
+        return
+    app._inflight_pr_action = action_key
+    run_command(app, f"pr merge --resolve-window {pr_id}", working_message=action_key, action_key=action_key)
 
 
 # ---------------------------------------------------------------------------
@@ -134,11 +166,14 @@ def hide_plan(app) -> None:
 
 
 def toggle_merged(app) -> None:
-    """Toggle hiding/showing of merged PRs."""
+    """Toggle hiding/showing of merged PRs and persist to project settings."""
     from pm_core.tui.tech_tree import TechTree
 
     tree = app.query_one("#tech-tree", TechTree)
     tree._hide_merged = not tree._hide_merged
+    # Persist to project.yaml (per-project, overrides global)
+    app._data.setdefault("project", {})["hide_merged"] = tree._hide_merged
+    store.save(app._data, app._root)
     tree._recompute()
     tree.refresh(layout=True)
     app._update_filter_status()
@@ -306,6 +341,19 @@ def handle_command_submitted(app, cmd: str) -> None:
             app.query_one("#tech-tree", TechTree).focus()
         return
 
+    # Handle auto-start commands
+    if cmd in ("autostart", "auto-start", "auto start"):
+        from pm_core.tui.auto_start import toggle
+        app.run_worker(toggle(app))
+        app.query_one("#tech-tree", TechTree).focus()
+        return
+    if cmd.startswith("autostart target") or cmd.startswith("auto-start target") or cmd.startswith("auto start target"):
+        from pm_core.tui.auto_start import set_target
+        target_pr = cmd.split("target", 1)[1].strip()
+        set_target(app, target_pr if target_pr else None)
+        app.query_one("#tech-tree", TechTree).focus()
+        return
+
     # Commands that launch interactive Claude sessions need a tmux pane
     if len(parts) >= 3 and parts[0] == "plan" and parts[1] == "add":
         pane_ops.launch_pane(app, f"pm {cmd}", "plan-add")
@@ -316,9 +364,9 @@ def handle_command_submitted(app, cmd: str) -> None:
         if cmd.startswith("pr start"):
             pr_id = parts[-1] if len(parts) >= 3 else "PR"
             working_message = f"Starting {pr_id}"
-        elif cmd.startswith("pr done"):
+        elif cmd.startswith("pr review"):
             pr_id = parts[-1] if len(parts) >= 3 else "PR"
-            working_message = f"Completing {pr_id}"
+            working_message = f"Reviewing {pr_id}"
 
         run_command(app, cmd, working_message=working_message, action_key=action_key)
     if app._plans_visible:

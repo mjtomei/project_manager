@@ -136,19 +136,27 @@ class TestGlobalSettings:
             paths.set_global_setting("test-setting", True)
             assert paths.get_global_setting("test-setting") is True
 
-    def test_set_false_removes_file(self, tmp_path):
-        """set_global_setting(False) removes the file."""
+    def test_set_false_disables_setting(self, tmp_path):
+        """set_global_setting(False) writes 'false' so setting reads as disabled."""
         with patch.object(paths, "pm_home", return_value=tmp_path):
             paths.set_global_setting("test-setting", True)
             assert paths.get_global_setting("test-setting") is True
             paths.set_global_setting("test-setting", False)
             assert paths.get_global_setting("test-setting") is False
+            # File still exists (explicitly disabled vs never set)
+            assert paths.has_global_setting("test-setting") is True
 
     def test_set_false_when_not_exists(self, tmp_path):
-        """set_global_setting(False) when file doesn't exist is a no-op."""
+        """set_global_setting(False) when file doesn't exist creates it."""
         with patch.object(paths, "pm_home", return_value=tmp_path):
             paths.set_global_setting("never-set", False)  # should not raise
             assert paths.get_global_setting("never-set") is False
+            assert paths.has_global_setting("never-set") is True
+
+    def test_has_global_setting_unset(self, tmp_path):
+        """has_global_setting returns False for never-configured settings."""
+        with patch.object(paths, "pm_home", return_value=tmp_path):
+            assert paths.has_global_setting("never-set") is False
 
     def test_file_with_wrong_content(self, tmp_path):
         """Setting file that doesn't contain 'true' returns False."""

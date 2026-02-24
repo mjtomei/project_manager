@@ -139,6 +139,23 @@ def _pr_display_id(pr: dict) -> str:
     return f"#{gh}" if gh else pr["id"]
 
 
+def kill_pr_windows(session: str, pr: dict) -> list[str]:
+    """Kill tmux work and review windows for a PR.
+
+    Returns a list of window names that were killed.
+    """
+    from pm_core import tmux as tmux_mod
+
+    killed = []
+    display_id = _pr_display_id(pr)
+    for win_name in (display_id, f"review-{display_id}", f"merge-{display_id}"):
+        win = tmux_mod.find_window_by_name(session, win_name)
+        if win:
+            tmux_mod.kill_window(session, win["id"])
+            killed.append(win_name)
+    return killed
+
+
 def _resolve_pr_id(data: dict, identifier: str) -> dict | None:
     """Resolve a PR by pm ID (pr-NNN), GitHub PR number (#N or bare integer).
 

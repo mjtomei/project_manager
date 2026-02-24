@@ -61,7 +61,7 @@ pm init                       # creates pm/ inside your repo
 pm plan add "Add authentication"
 pm pr add "Add user model" --plan plan-001
 pm pr start pr-001            # clones, branches, launches Claude
-pm pr done pr-001             # marks in_review
+pm pr review pr-001            # marks in_review
 pm pr sync                    # detects merged branches, unblocks dependents
 ```
 

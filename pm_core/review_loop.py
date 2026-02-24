@@ -1,6 +1,6 @@
 """Review loop: repeatedly run Claude review until PASS.
 
-The loop launches a visible tmux review window (via ``pm pr done
+The loop launches a visible tmux review window (via ``pm pr review
 --fresh --review-loop``) and polls the Claude pane with
 ``tmux capture-pane`` to detect the verdict.
 
@@ -80,6 +80,7 @@ class ReviewLoopState:
     stop_on_suggestions: bool = True
     loop_id: str = field(default_factory=_generate_loop_id)
     _ui_notified_done: bool = False
+    _transcript_dir: str | None = None
 
 
 def _match_verdict(line: str) -> str | None:
@@ -115,13 +116,16 @@ def _compute_review_window_name(pr_data: dict) -> str:
 
 
 def _launch_review_window(pr_id: str, pm_root: str, iteration: int = 0,
-                          loop_id: str = "") -> None:
-    """Launch a review window via ``pm pr done --fresh --review-loop``."""
+                          loop_id: str = "",
+                          transcript: str | None = None) -> None:
+    """Launch a review window via ``pm pr review --fresh --review-loop``."""
     cmd = [sys.executable, "-m", "pm_core.wrapper",
-           "pr", "done", "--fresh", "--review-loop",
+           "pr", "review", "--fresh", "--review-loop",
            "--review-iteration", str(iteration)]
     if loop_id:
         cmd.extend(["--review-loop-id", loop_id])
+    if transcript:
+        cmd.extend(["--transcript", transcript])
     cmd.append(pr_id)
     _log.info("review_loop: launching review window: %s", cmd)
     subprocess.run(cmd, cwd=pm_root, capture_output=True, text=True, timeout=30)
@@ -289,7 +293,8 @@ class PaneKilledError(Exception):
 
 
 def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
-                       iteration: int = 0, loop_id: str = "") -> str:
+                       iteration: int = 0, loop_id: str = "",
+                       transcript: str | None = None) -> str:
     """Launch a review window and poll capture-pane for the verdict.
 
     Returns the captured pane content containing the verdict.
@@ -307,7 +312,8 @@ def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
 
     window_name = _compute_review_window_name(pr_data)
 
-    _launch_review_window(pr_id, pm_root, iteration=iteration, loop_id=loop_id)
+    _launch_review_window(pr_id, pm_root, iteration=iteration, loop_id=loop_id,
+                          transcript=transcript)
 
     # Generate the prompt text so we can filter out prompt lines from
     # verdict detection.  The prompt contains verdict keywords as
@@ -358,19 +364,23 @@ def run_review_loop_sync(
     pr_data: dict,
     on_iteration: Callable[[ReviewLoopState], None] | None = None,
     max_iterations: int = 10,
+    transcript_dir: str | None = None,
 ) -> ReviewLoopState:
     """Run the review loop synchronously (intended for a background thread).
 
     Args:
         state: Mutable state object — the caller can read it to track progress.
-        pm_root: Path to the pm project root (for running ``pm pr done``).
+        pm_root: Path to the pm project root (for running ``pm pr review``).
         pr_data: The PR dict from project data.
         on_iteration: Optional callback fired after each iteration completes.
         max_iterations: Safety cap on number of iterations.
+        transcript_dir: Directory for transcript symlinks (optional).
 
     Returns:
         The final state.
     """
+    # Stash transcript_dir on state so _on_complete_from_thread can finalize
+    state._transcript_dir = transcript_dir
     state.running = True
     state.stop_requested = False
 
@@ -383,10 +393,16 @@ def run_review_loop_sync(
             state.iteration += 1
             _log.info("review_loop: iteration %d for %s", state.iteration, state.pr_id)
 
+            # Compute per-iteration transcript path
+            iter_transcript = None
+            if transcript_dir:
+                iter_transcript = f"{transcript_dir}/review-{state.pr_id}-i{state.iteration}.jsonl"
+
             try:
                 output = _run_claude_review(
                     state.pr_id, pm_root, pr_data,
                     iteration=state.iteration, loop_id=state.loop_id,
+                    transcript=iter_transcript,
                 )
             except PaneKilledError as e:
                 _log.warning("review_loop: pane killed on iteration %d: %s", state.iteration, e)
@@ -441,6 +457,7 @@ def start_review_loop_background(
     on_iteration: Callable[[ReviewLoopState], None] | None = None,
     on_complete: Callable[[ReviewLoopState], None] | None = None,
     max_iterations: int = 10,
+    transcript_dir: str | None = None,
 ) -> threading.Thread:
     """Start the review loop in a background thread.
 
@@ -451,6 +468,7 @@ def start_review_loop_background(
             state, pm_root, pr_data,
             on_iteration=on_iteration,
             max_iterations=max_iterations,
+            transcript_dir=transcript_dir,
         )
         if on_complete:
             try:

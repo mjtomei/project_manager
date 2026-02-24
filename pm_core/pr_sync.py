@@ -218,31 +218,35 @@ def sync_prs(
 
     prs = data.get("prs") or []
     base_branch = data.get("project", {}).get("base_branch", "master")
+    backend_name = data.get("project", {}).get("backend", "vanilla")
     backend = get_backend(data)
 
     updated = 0
     merged_prs = []
 
-    for pr_entry in prs:
-        if pr_entry.get("status") not in ("in_review", "in_progress"):
-            continue
+    # Only the github backend can reliably auto-detect merges (via API).
+    # Local/vanilla backends rely on `pm pr merge` for explicit tracking.
+    if backend_name == "github":
+        for pr_entry in prs:
+            if pr_entry.get("status") not in ("in_review", "in_progress"):
+                continue
 
-        branch = pr_entry.get("branch", "")
-        if not branch:
-            continue
+            branch = pr_entry.get("branch", "")
+            if not branch:
+                continue
 
-        # Prefer PR's own workdir if it exists
-        wd = pr_entry.get("workdir")
-        check_dir = wd if (wd and Path(wd).exists()) else target_workdir
+            # Prefer PR's own workdir if it exists
+            wd = pr_entry.get("workdir")
+            check_dir = wd if (wd and Path(wd).exists()) else target_workdir
 
-        try:
-            if backend.is_merged(str(check_dir), branch, base_branch):
-                pr_entry["status"] = "merged"
-                merged_prs.append(pr_entry["id"])
-                updated += 1
-                _log.info("PR %s detected as merged", pr_entry["id"])
-        except Exception as e:
-            _log.warning("Error checking merge status for %s: %s", pr_entry["id"], e)
+            try:
+                if backend.is_merged(str(check_dir), branch, base_branch):
+                    pr_entry["status"] = "merged"
+                    merged_prs.append(pr_entry["id"])
+                    updated += 1
+                    _log.info("PR %s detected as merged", pr_entry["id"])
+            except Exception as e:
+                _log.warning("Error checking merge status for %s: %s", pr_entry["id"], e)
 
     # Update timestamp
     set_last_sync_timestamp(data, datetime.now(timezone.utc))

@@ -238,18 +238,31 @@ def set_cmd(setting, value):
 
     Available settings:
 
-      hide-assist   Hide the Assist (H) key from the TUI status and footer bars
+      hide-assist     Hide the Assist (H) key from the TUI status and footer bars
 
-      hide-merged   Hide merged PRs in the TUI by default
+      hide-merged     Hide merged PRs in the TUI by default
+
+      beginner-mode   Add helpful next-step guidance to all Claude sessions
+
+      auto-cleanup    Suggest cleaning up old panes in Claude sessions
     """
     from pm_core.paths import set_global_setting
-    known = {"hide-assist", "hide-merged"}
+    known = {"hide-assist", "hide-merged", "beginner-mode", "auto-cleanup"}
     if setting not in known:
         click.echo(f"Unknown setting: {setting}", err=True)
         click.echo(f"Available: {', '.join(sorted(known))}", err=True)
         raise SystemExit(1)
     set_global_setting(setting, value == "on")
     click.echo(f"{setting} = {value}")
+
+
+@cli.command("setting")
+@click.argument("setting")
+@click.argument("value", type=click.Choice(["on", "off"]))
+@click.pass_context
+def setting_cmd(ctx, setting, value):
+    """Alias for 'pm set'. Toggle a global pm setting."""
+    ctx.invoke(set_cmd, setting=setting, value=value)
 
 
 @cli.command("status")
@@ -420,7 +433,7 @@ def _getting_started_text() -> str:
 
   Working with PRs:
      pm pr start                 Clone, branch, launch Claude session
-     pm pr done                  Mark PR as done, push branch
+     pm pr review                Mark PR as in_review, open review window
      pm pr sync                  Check for merges, unblock dependents
      pm push                     Commit and share pm/ changes
 
@@ -464,7 +477,7 @@ COMMANDS
   pm pr graph                   Show dependency tree
   pm pr ready                   Show PRs ready to start
   pm pr start [pr-id]           Clone, branch, launch Claude (tmux window or blocking)
-  pm pr done [pr-id]            Mark PR as in_review, open review window
+  pm pr review [pr-id]          Mark PR as in_review, open review window
   pm pr sync                    Check for merged PRs
   pm pr sync-github             Fetch and update PR statuses from GitHub
   pm pr import-github           Import existing GitHub PRs into project yaml

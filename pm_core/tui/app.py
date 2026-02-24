@@ -116,7 +116,8 @@ class ProjectManagerApp(App):
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("s", "start_pr", "Start PR", show=True),
-        Binding("d", "done_pr", "Done PR", show=True),
+        Binding("d", "done_pr", "Review", show=True),
+        Binding("g", "merge_pr", "Merge", show=True),
 
         Binding("e", "edit_plan", "Edit PR", show=True),
         Binding("v", "view_plan", "View Plan", show=True),
@@ -139,6 +140,7 @@ class ProjectManagerApp(App):
         Binding("c", "launch_claude", "Claude", show=True),
         Binding("H", "launch_guide", "Guide", show=True),
         Binding("C", "show_connect", "Connect", show=False),
+        Binding("A", "toggle_auto_start", "Auto-start", show=False),
     ]
 
     def on_key(self, event) -> None:
@@ -163,17 +165,18 @@ class ProjectManagerApp(App):
 
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """Disable single-key shortcuts when command bar is focused or in guide mode."""
-        if action in ("start_pr", "done_pr",
+        if action in ("start_pr", "done_pr", "merge_pr",
                        "edit_plan", "view_plan", "launch_notes",
                        "launch_meta", "launch_claude", "launch_guide",
                        "view_log", "refresh", "rebalance", "quit", "show_help",
-                       "toggle_plans", "toggle_tests", "hide_plan", "move_to_plan", "toggle_merged", "cycle_filter"):
+                       "toggle_plans", "toggle_tests", "hide_plan", "move_to_plan", "toggle_merged",
+                       "cycle_filter", "toggle_auto_start"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus:
                 _log.debug("check_action: blocked %s (command bar focused)", action)
                 return False
         # Block PR actions when in guide mode or plans view (can't see the PR tree)
-        if action in ("start_pr", "done_pr", "launch_claude", "edit_plan", "view_plan", "hide_plan", "move_to_plan", "toggle_merged", "cycle_filter"):
+        if action in ("start_pr", "done_pr", "merge_pr", "launch_claude", "edit_plan", "view_plan", "hide_plan", "move_to_plan", "toggle_merged", "cycle_filter"):
             prs = self._data.get("prs") or []
             if not prs and self._current_guide_step is not None:
                 _log.debug("check_action: blocked %s (in guide mode, no PRs)", action)
@@ -211,6 +214,13 @@ class ProjectManagerApp(App):
         # Review loop state: dict of pr_id -> ReviewLoopState (supports multiple)
         self._review_loops: dict = {}
         self._review_loop_timer: Timer | None = None
+        # Pane idle tracker: detects when implementation windows go idle
+        from pm_core.pane_idle import PaneIdleTracker
+        self._pane_idle_tracker = PaneIdleTracker()
+        # PRs awaiting merge-conflict resolution (tracked by _poll_impl_idle)
+        self._pending_merge_prs: set[str] = set()
+        # Animation frame counter for impl-pane idle polling throttle
+        self._impl_poll_counter: int = 0
 
     def _consume_z(self) -> int:
         """Atomically read and clear the z modifier count.
@@ -433,6 +443,7 @@ class ProjectManagerApp(App):
             pr_count=len(prs),
             filter_text=filter_text,
             show_assist=not get_global_setting("hide-assist"),
+            auto_start=bool(project.get("auto_start")),
         )
 
     def _update_display(self) -> None:
@@ -443,12 +454,17 @@ class ProjectManagerApp(App):
         self._update_status_bar()
 
         tree = self.query_one("#tech-tree", TechTree)
+        tree.apply_project_settings(self._data.get("project", {}))
         tree.update_plans(self._data.get("plans") or [])
         tree.update_prs(self._data.get("prs") or [])
         active_pr = self._data.get("project", {}).get("active_pr")
         if active_pr:
             tree.select_pr(active_pr)
         self._update_filter_status()
+
+        # Start animation timer if there are active PRs
+        from pm_core.tui.review_loop_ui import ensure_animation_timer
+        ensure_animation_timer(self)
 
     def _update_filter_status(self) -> None:
         """Update the status bar to reflect active filters."""
@@ -518,10 +534,10 @@ class ProjectManagerApp(App):
     def action_done_pr(self) -> None:
         z = self._consume_z()
         if z == 0:
-            # plain d = one-shot done + review window
+            # plain d = mark done (in_progress → in_review) + open review window
             pr_view.done_pr(self)
         elif z == 1:
-            # z d = fresh done (original behaviour), OR stop loop if running
+            # z d = fresh done (kill existing review window), OR stop loop if running
             review_loop_ui.stop_loop_or_fresh_done(self)
         elif z == 2:
             # zz d = start review loop (stops on PASS or PASS_WITH_SUGGESTIONS),
@@ -531,6 +547,9 @@ class ProjectManagerApp(App):
             # zzz d = start strict review loop (stops only on PASS),
             #         or stop loop if running
             review_loop_ui.start_or_stop_loop(self, stop_on_suggestions=False)
+
+    def action_merge_pr(self) -> None:
+        pr_view.merge_pr(self)
 
     def action_hide_plan(self) -> None:
         pr_view.hide_plan(self)
@@ -572,6 +591,11 @@ class ProjectManagerApp(App):
 
     def action_show_connect(self) -> None:
         pane_ops.show_connect(self)
+
+    def action_toggle_auto_start(self) -> None:
+        from pm_core.tui.auto_start import toggle
+        tree = self.query_one("#tech-tree", TechTree)
+        self.run_worker(toggle(self, selected_pr_id=tree.selected_pr_id))
 
     def action_quit(self) -> None:
         pane_ops.quit_app(self)
