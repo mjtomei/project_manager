@@ -39,6 +39,7 @@ from pm_core.cli.helpers import (
     save_and_push,
     state_root,
     trigger_tui_refresh,
+    trigger_tui_restart,
 )
 
 
@@ -1081,6 +1082,11 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool, transcri
                 )
                 if pull_ok:
                     _finalize_merge(data, root, pr_entry, pr_id, transcript=transcript)
+                    # Restart TUI when managing the project_manager repo itself,
+                    # so it picks up the latest pm code from the pull.
+                    repo = data.get("project", {}).get("repo", "")
+                    if "project_manager" in repo or "project-manager" in repo:
+                        trigger_tui_restart()
                 # If not pull_ok and resolve_window, a merge window was launched.
                 # The idle tracker will re-attempt and finalize after resolution.
                 return

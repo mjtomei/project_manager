@@ -380,13 +380,14 @@ def tmp_github_merge_project(tmp_path):
 class TestGitHubMergePull:
     """Tests for pull-after-merge on the GitHub backend."""
 
+    @mock.patch.object(pr_mod, "trigger_tui_restart")
     @mock.patch.object(pr_mod, "_finalize_merge")
     @mock.patch("pm_core.cli.pr.git_ops")
     @mock.patch("subprocess.run")
     @mock.patch("shutil.which", return_value="/usr/bin/gh")
     def test_github_merge_pulls_base_branch(
         self, _mock_which, mock_subprocess, mock_git_ops, mock_finalize,
-        tmp_github_merge_project,
+        mock_restart, tmp_github_merge_project,
     ):
         """After a successful gh merge, should fetch/checkout/pull base branch."""
         # gh pr merge succeeds
@@ -413,6 +414,65 @@ class TestGitHubMergePull:
         assert ("checkout", "master") in git_calls
         mock_git_ops.pull_rebase.assert_called_once()
         mock_finalize.assert_called_once()
+
+    @mock.patch.object(pr_mod, "trigger_tui_restart")
+    @mock.patch.object(pr_mod, "_finalize_merge")
+    @mock.patch("pm_core.cli.pr.git_ops")
+    @mock.patch("subprocess.run")
+    @mock.patch("shutil.which", return_value="/usr/bin/gh")
+    def test_github_merge_restarts_tui_for_project_manager_repo(
+        self, _mock_which, mock_subprocess, mock_git_ops, mock_finalize,
+        mock_restart, tmp_github_merge_project,
+    ):
+        """TUI restart should fire only when managing the project_manager repo."""
+        mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        def run_git_side_effect(*args, **kwargs):
+            if args[0] == "status":
+                return MagicMock(returncode=0, stdout="", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+        mock_git_ops.run_git.side_effect = run_git_side_effect
+        mock_git_ops.pull_rebase.return_value = MagicMock(returncode=0)
+
+        # Set repo to project_manager
+        data = store.load(tmp_github_merge_project["pm_dir"])
+        data["project"]["repo"] = "https://github.com/org/project_manager"
+        store.save(data, tmp_github_merge_project["pm_dir"])
+
+        runner = CliRunner()
+        with mock.patch.object(pr_mod, "state_root",
+                               return_value=tmp_github_merge_project["pm_dir"]):
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+
+        assert result.exit_code == 0
+        mock_restart.assert_called_once()
+
+    @mock.patch.object(pr_mod, "trigger_tui_restart")
+    @mock.patch.object(pr_mod, "_finalize_merge")
+    @mock.patch("pm_core.cli.pr.git_ops")
+    @mock.patch("subprocess.run")
+    @mock.patch("shutil.which", return_value="/usr/bin/gh")
+    def test_github_merge_skips_tui_restart_for_other_repos(
+        self, _mock_which, mock_subprocess, mock_git_ops, mock_finalize,
+        mock_restart, tmp_github_merge_project,
+    ):
+        """TUI restart should NOT fire for non-project_manager repos."""
+        mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        def run_git_side_effect(*args, **kwargs):
+            if args[0] == "status":
+                return MagicMock(returncode=0, stdout="", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+        mock_git_ops.run_git.side_effect = run_git_side_effect
+        mock_git_ops.pull_rebase.return_value = MagicMock(returncode=0)
+
+        runner = CliRunner()
+        with mock.patch.object(pr_mod, "state_root",
+                               return_value=tmp_github_merge_project["pm_dir"]):
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+
+        assert result.exit_code == 0
+        mock_restart.assert_not_called()
 
     @mock.patch.object(pr_mod, "_finalize_merge")
     @mock.patch("pm_core.cli.pr.git_ops")
