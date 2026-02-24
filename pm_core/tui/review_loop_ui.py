@@ -294,9 +294,8 @@ def _maybe_auto_merge(app, pr_id: str) -> None:
     app.log_message(f"Auto-merge: {pr_id} review passed, merging")
 
     from pm_core.tui import pr_view
-    from pm_core.tui import auto_start as _auto_start_mod
     merge_cmd = f"pr merge --resolve-window --background"
-    tdir = _auto_start_mod.get_transcript_dir(app)
+    tdir = _auto_start.get_transcript_dir(app)
     if tdir:
         merge_cmd += f" --transcript {tdir / f'merge-{pr_id}.jsonl'}"
     merge_cmd += f" {pr_id}"
@@ -419,9 +418,8 @@ def _poll_impl_idle(app) -> None:
             app.log_message(f"Merge window idle for {pr_id}, re-attempting merge")
 
             from pm_core.tui import pr_view
-            from pm_core.tui import auto_start as _as_mod
             re_merge_cmd = f"pr merge --resolve-window --background"
-            tdir = _as_mod.get_transcript_dir(app)
+            tdir = _auto_start.get_transcript_dir(app)
             if tdir:
                 re_merge_cmd += f" --transcript {tdir / f'merge-{pr_id}.jsonl'}"
             re_merge_cmd += f" {pr_id}"
@@ -470,8 +468,7 @@ def _auto_review_idle_prs(app, newly_idle: list[tuple[str, dict]]) -> None:
     else:
         allowed = None
 
-    from pm_core.tui import auto_start as _as_mod2
-    tdir = _as_mod2.get_transcript_dir(app)
+    tdir = _auto_start.get_transcript_dir(app)
 
     for pr_id, pr in newly_idle:
         if allowed is not None and pr_id not in allowed:
