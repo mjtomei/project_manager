@@ -141,6 +141,7 @@ class ProjectManagerApp(App):
         Binding("H", "launch_guide", "Guide", show=True),
         Binding("C", "show_connect", "Connect", show=False),
         Binding("A", "toggle_auto_start", "Auto-start", show=False),
+        Binding("y", "confirm_input", "Confirm Input", show=False),
     ]
 
     def on_key(self, event) -> None:
@@ -547,6 +548,10 @@ class ProjectManagerApp(App):
             # zzz d = start strict review loop (stops only on PASS),
             #         or stop loop if running
             review_loop_ui.start_or_stop_loop(self, stop_on_suggestions=False)
+
+    def action_confirm_input(self) -> None:
+        """Confirm manual testing is done for the selected PR's review loop."""
+        review_loop_ui.handle_confirm_input(self)
 
     def action_merge_pr(self) -> None:
         pr_view.merge_pr(self)
