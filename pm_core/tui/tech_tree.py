@@ -690,8 +690,9 @@ class TechTree(Widget):
             if not new_id.startswith("_hidden:"):
                 self.post_message(PRSelected(new_id))
             self.refresh()
-            # Scroll to keep selected node visible
-            self._scroll_selected_into_view()
+            # Scroll to keep selected node visible (defer to after layout
+            # refresh so container dimensions are up to date)
+            self.call_after_refresh(self._scroll_selected_into_view)
 
     def _scroll_to_edge(self, direction: str) -> None:
         """Scroll to the top or bottom edge of the content.
@@ -860,10 +861,20 @@ class TechTree(Widget):
             # bottom edge where it gets obscured by the command bar.
             node_region = Region(x, y, NODE_W, NODE_H + V_GAP + 1)
 
-        if self.parent:
-            self.parent.scroll_to_region(node_region)
-        else:
-            self.scroll_to_region(node_region)
+        container = self.parent if self.parent else self
+        container.scroll_to_region(node_region)
+
+        # Explicit horizontal scroll fallback — scroll_to_region may not
+        # adjust scroll_x when the content has no vertical overflow
+        # (Textual sometimes skips horizontal scrolling in that case).
+        if not pr_id.startswith("_hidden:") and hasattr(container, "scroll_x"):
+            vw = container.size.width if hasattr(container, "size") else 0
+            if vw > 0:
+                node_right = x + NODE_W + 2
+                if x < container.scroll_x:
+                    container.scroll_x = max(0, x - 2)
+                elif node_right > container.scroll_x + vw:
+                    container.scroll_x = node_right - vw
 
     def _scroll_plan_label_to_top(self, pr_id: str) -> None:
         """Scroll so the plan label header for the given PR is at the top of the viewport."""
