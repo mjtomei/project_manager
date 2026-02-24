@@ -221,6 +221,10 @@ class ProjectManagerApp(App):
         self._pending_merge_prs: set[str] = set()
         # Animation frame counter for impl-pane idle polling throttle
         self._impl_poll_counter: int = 0
+        # Auto-start state (purely in-memory, lost on TUI restart)
+        self._auto_start: bool = False
+        self._auto_start_target: str | None = None
+        self._auto_start_run_id: str | None = None
 
     def _consume_z(self) -> int:
         """Atomically read and clear the z modifier count.
@@ -298,13 +302,6 @@ class ProjectManagerApp(App):
         # These must run on the main thread (touch Textual state)
         self.run_worker(sync_mod.startup_github_sync(self))
         self._capture_frame("mount")
-        # Resume auto-start for all phases when enabled: start ready PRs
-        # (implementation), resume review loops (review), and merge will
-        # follow automatically when review loops complete with PASS.
-        # State was loaded in _load_state() before this worker started.
-        from pm_core.tui.auto_start import check_and_start, is_enabled
-        if is_enabled(self):
-            await check_and_start(self)
 
     def _deferred_startup_sync(self) -> None:
         """Blocking startup tasks run in a thread."""
@@ -450,7 +447,7 @@ class ProjectManagerApp(App):
             pr_count=len(prs),
             filter_text=filter_text,
             show_assist=not get_global_setting("hide-assist"),
-            auto_start=bool(project.get("auto_start")),
+            auto_start=self._auto_start,
         )
 
     def _update_display(self) -> None:
