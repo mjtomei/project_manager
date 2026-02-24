@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-c773945
+  active_pr: pr-e29dda7
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-02-20T02:43:08.956779+00:00'
@@ -926,6 +926,8 @@ prs:
     investigate whether this can be mitigated by the tmux session configuration (e.g.
     terminal escape sequence filtering, input handling on client disconnect) or by
     wrapping the SSH process so its broken-pipe output does not reach the active pane.
+    It seems like it might be related to mouse mode and scrolling inputting things
+    in a different way than when mouse mode is disabled.
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
@@ -934,7 +936,7 @@ prs:
   plan: null
   title: Fix TUI UX issues for new users and shared sessions
   branch: pm/pr-c773945-fix-tui-ux-issues-for-new-users-and-shared-session
-  status: in_review
+  status: merged
   depends_on: []
   description: 'Fix the following UX issues:
 
@@ -982,3 +984,75 @@ prs:
   gh_pr_number: 76
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-c773945-fix-tui-ux-issues-for-new-users-and--2584c79a
+- id: pr-7bc134e
+  plan: null
+  title: Fix bare git backend, improve beginner mode, and TUI enhancements
+  branch: pm/pr-7bc134e-fix-bare-git-backend-improve-beginner-mode-and-tui
+  status: in_review
+  depends_on: []
+  description: 'Fix bugs and add UI improvements:
+
+
+    1. Review diff pane for bare git repo doesn''t show changes — code assumes an
+    origin remote and should not for the local git backend
+
+
+    2. Could have prompt addendums active for users with very little experience so
+    Claude makes it easier for them and always recommends next steps, guide prompt
+    should ask and set that flag when there is no project.yaml, flag should be in
+    project.yaml
+
+
+    3. Merge for bare git repo doesn''t work since we assume GitHub merge — need separate
+    review and done keys for bare git backend, as well as separate review and merge
+    commands in the pm tool
+
+
+    4. Should have some auto-cleanup of panes with user confirmation when in beginner
+    mode or an option is enabled, controlled by Claude with prompt addendums
+
+
+    5. Double check that all prompts are aware when we are in a group session and
+    not the main one
+
+
+    6. Confirm that merged prs aren''t hidden by default and that the pr filter persists
+    in the project.yaml
+
+
+    7. Make sure the s key doesn''t work when dependencies aren''t merged already
+    when in beginner mode
+
+
+    8. Windows for a PR should be killed when PR is merged since you can''t access
+    them from the TUI
+
+
+    9. Have a marker for the latest review status in the PR box in the TUI as well
+    as an animation when the session is still working for both start and review sessions
+
+
+    10. Have a mode where PRs that are ready are automatically started and put into
+    review loops when ready, don''t change window focus when in this mode, allow for
+    a designated target PR to stop at'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/77
+  gh_pr_number: 77
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-7bc134e-fix-bare-git-backend-improve-beginne-0b8b1f32
+- id: pr-ad9127e
+  plan: null
+  title: Improve PR tech tree layout algorithm
+  branch: pm/pr-ad9127e-improve-pr-tech-tree-layout-algorithm
+  status: merged
+  depends_on: []
+  description: Look for standard algorithms for laying out nodes in a UI with the
+    fewest crossovers and most straight lines. If there is nothing that exactly matches
+    our use case, use simulated annealing. If a heavy computation is required, make
+    sure it is running in the background and persist the layout for each plan with
+    the other plan metadata.
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/78
+  gh_pr_number: 78
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ad9127e-improve-pr-tech-tree-layout-algorith-0b8b1f32
