@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-473ac84
+  active_pr: pr-bc3de02
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-02-20T02:43:08.956779+00:00'
@@ -300,6 +300,52 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/69
   gh_pr_number: 69
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-017-benchmark-orchestrator-with-tournament-s-012e3bc5
+  notes:
+  - id: note-017-a1
+    text: 'Reasoning mode: enabled vLLM reasoning (reasoning_effort=high, max_completion_tokens=32768)
+      for both test generation and solution generation.'
+    created_at: '2026-02-24T15:20:00Z'
+    last_edited: '2026-02-24T15:20:00Z'
+  - id: note-017-a2
+    text: 'Chain mode (--chain): sequential generation where each candidate/test-suite
+      sees prior attempts. Test suites merged by deduplicating function names.'
+    created_at: '2026-02-24T15:20:01Z'
+    last_edited: '2026-02-24T15:20:01Z'
+  - id: note-017-a3
+    text: 'Parallel exercises (-j/--parallel): concurrent exercise execution via ThreadPoolExecutor.'
+    created_at: '2026-02-24T15:20:02Z'
+    last_edited: '2026-02-24T15:20:02Z'
+  - id: note-017-a4
+    text: 'HyperParams: CLI flags --variant, --temperature, --chain, --test-subsets
+      for per-run overrides.'
+    created_at: '2026-02-24T15:20:03Z'
+    last_edited: '2026-02-24T15:20:03Z'
+  - id: note-017-a5
+    text: 'Prompt improvements: test gen system prompt rewritten for step-by-step
+      reasoning on expected values and exact signature matching. Solution prompts
+      include filenames.'
+    created_at: '2026-02-24T15:20:04Z'
+    last_edited: '2026-02-24T15:20:04Z'
+  - id: note-017-a6
+    text: 'Token accounting: separate tournament_tokens/baseline_tokens on ExerciseResult
+      for pr-018. Schema version bumped to 2.'
+    created_at: '2026-02-24T15:20:05Z'
+    last_edited: '2026-02-24T15:20:05Z'
+  - id: note-017-a7
+    text: Stored generated_test_code on ExerciseResult for pr-019 test quality analysis.
+    created_at: '2026-02-24T15:20:06Z'
+    last_edited: '2026-02-24T15:20:06Z'
+  - id: note-017-a8
+    text: 'Benchmark results (Python, 34 exercises): 120B default T=45.5% B=45.0%
+      D=+0.5%; 120B chain (no reasoning) T=43.4% B=48.6% D=-5.2%; 120B chain+reasoning
+      T=53.8% B=50.1% D=+3.7%; 20B chain T=42.7% B=35.5% D=+7.2%.'
+    created_at: '2026-02-24T15:20:07Z'
+    last_edited: '2026-02-24T15:20:07Z'
+  - id: note-017-a9
+    text: 'Key finding: reasoning mode is the biggest lever (+8pp tournament, +5pp
+      baseline). Tournament selection reliably helps with reasoning enabled.'
+    created_at: '2026-02-24T15:20:08Z'
+    last_edited: '2026-02-24T15:20:08Z'
 - id: pr-018
   plan: plan-002
   title: Baseline measurement and analysis
@@ -1076,7 +1122,7 @@ prs:
   plan: null
   title: Add INPUT_REQUIRED verdict to review loop for human-guided testing
   branch: pm/pr-473ac84-add-input-required-verdict-to-review-loop-for-huma
-  status: in_progress
+  status: merged
   depends_on: []
   description: Add a new INPUT_REQUIRED verdict to the review prompt and review loop.
     This verdict is used when Claude determines some human-guided testing is required
@@ -1096,3 +1142,109 @@ prs:
   gh_pr_number: 79
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-473ac84-add-input-required-verdict-to-review-b1a90dba
+- id: pr-7989302
+  plan: null
+  title: Pull after merge on github backend with conflict resolution
+  branch: pm/pr-7989302-pull-after-merge-on-github-backend-with-conflict-r
+  status: in_review
+  depends_on: []
+  description: After a PR is merged via the github backend, automatically pull the
+    latest changes into the local repo. If there are uncommitted local changes, stash
+    them first, pull, then unstash. If unstashing produces conflicts, treat it as
+    a merge error and use the existing flow to launch a Claude merge session to resolve
+    the conflicts.
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/80
+  gh_pr_number: 80
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-7989302-pull-after-merge-on-github-backend-w-9cfc4712
+- id: pr-0996fb8
+  plan: null
+  title: Fix tmux window-size, horizontal scroll, and session rebalance bugs
+  branch: pm/pr-0996fb8-fix-tmux-window-size-horizontal-scroll-and-session
+  status: in_review
+  depends_on: []
+  description: 'Fix three tmux/session bugs: (1) _register_tmux_bindings in session.py
+    sets window-size=smallest unconditionally on the base session, even for non-shared
+    sessions — should only set this when grouped sessions exist (--global or --group
+    mode). (2) Automatic horizontal scroll in the TUI only works intermittently —
+    reproduce and debug, may be related to cases where no vertical scroll is required.
+    (3) Session does not rebalance on ''pm session'' by default — had to press the
+    b key for a portrait mode session.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/83
+  gh_pr_number: 83
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0996fb8-fix-tmux-window-size-horizontal-scro-9cfc4712
+- id: pr-7f01e33
+  plan: null
+  title: Auto-resize pane to fit Claude output when selected
+  branch: pm/pr-7f01e33-auto-resize-pane-to-fit-claude-output-when-selecte
+  status: in_review
+  depends_on: []
+  description: Intelligently increase the size of a pane to fit Claude's output when
+    a session pane is selected. Apply the same behavior for the TUI pane. Allow disabling
+    in global settings.
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/82
+  gh_pr_number: 82
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-7f01e33-auto-resize-pane-to-fit-claude-outpu-9cfc4712
+- id: pr-97c1be3
+  plan: null
+  title: Add pm pr note subcommand for querying and editing PR notes
+  branch: pm/pr-97c1be3-add-pm-pr-note-subcommand-for-querying-and-editing
+  status: in_review
+  depends_on: []
+  description: Add a 'pm pr note' subcommand with subcommands for querying and editing
+    PR notes. Should support listing notes for a PR, adding a new note, and editing
+    or removing existing notes. Notes are stored in the PR's notes field in project.yaml.
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/81
+  gh_pr_number: 81
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-97c1be3-add-pm-pr-note-subcommand-for-queryi-9cfc4712
+- id: pr-bc3de02
+  plan: null
+  title: Fix auto-start and review loop verdict detection bugs
+  branch: pm/pr-bc3de02-fix-auto-start-bugs-session-restart-input-required
+  status: in_progress
+  depends_on:
+  - pr-473ac84
+  description: 'Four auto-start/review-loop bugs:
+
+
+    1. Killing and restarting a session that has auto-start enabled while a review
+    is running doesn''t result in the review getting restarted properly. The auto-start
+    state is persisted in project.yaml but the in-memory review loop state is lost
+    on TUI restart. Need to make sure that auto-start can resume properly for any
+    initial PR state when the session starts.
+
+
+    2. The INPUT_REQUIRED flow is wrong. It should not require any interaction from
+    the TUI to resolve. The TUI should know when INPUT_REQUIRED is triggered and add
+    the marker to the PR and then remove the marker when a new verdict is supplied.
+    There should be no functionality in the tui like the new y key. Make sure all
+    the prompts and documentation are aware of this change to the flow after implementing
+    it. You don''t have to add awareness, just check for any out of date awareness.
+
+
+    3. The pause marker for INPUT_REQUIRED should be red, not the current color. Update
+    the marker style in the tech tree.
+
+
+    4. Verdict detection produces false positives when verdict keywords appear in
+    non-verdict context (e.g. PR titles from pm pr list output). The _match_verdict()
+    regex matches any occurrence of verdict keywords surrounded by non-word characters,
+    which is too permissive. When Claude runs pm pr list during a review, a PR title
+    like "Add INPUT_REQUIRED verdict to review loop" triggers a false INPUT_REQUIRED
+    verdict. Fix _match_verdict() and/or _extract_verdict_from_content() to require
+    that verdict keywords appear as standalone declarations (e.g. the keyword is the
+    dominant content of the line, or appears at the start/end after stripping formatting).
+    Apply the same stricter detection logic for ALL verdict keywords (PASS, PASS_WITH_SUGGESTIONS,
+    NEEDS_WORK, INPUT_REQUIRED), not just INPUT_REQUIRED.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/84
+  gh_pr_number: 84
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-bc3de02-fix-auto-start-bugs-session-restart--9cfc4712
