@@ -122,6 +122,8 @@ def _extract_verdict_from_content(content: str, prompt_text: str = "",
     tail = lines[-_VERDICT_TAIL_LINES:] if len(lines) > _VERDICT_TAIL_LINES else lines
 
     prompt_verdict_lines = _build_prompt_verdict_lines(prompt_text) if prompt_text else set()
+    _log.info("monitor_loop: extract_verdict: %d total lines, %d tail lines, %d prompt verdict lines, prompt_text=%d chars",
+              len(lines), len(tail), len(prompt_verdict_lines), len(prompt_text))
 
     for line in reversed(tail):
         stripped = line.strip().strip("*").strip()
@@ -290,6 +292,7 @@ def _run_monitor_iteration(pm_root: str, iteration: int = 0,
                             transcript=transcript)
 
     prompt_text = _regenerate_prompt_text(pm_root, iteration, loop_id)
+    _log.info("monitor_loop: prompt_text for filtering: %d chars", len(prompt_text))
 
     time.sleep(2)
 
@@ -365,7 +368,8 @@ def parse_monitor_verdict(output: str) -> str:
         verdict = _match_monitor_verdict(stripped)
         if verdict:
             return verdict
-    return VERDICT_READY if output.strip() else VERDICT_READY
+    # No clear verdict found — default to READY (continue monitoring)
+    return VERDICT_READY
 
 
 def run_monitor_loop_sync(
