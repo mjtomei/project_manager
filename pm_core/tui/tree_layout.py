@@ -20,7 +20,7 @@ from pm_core import graph as graph_mod
 # Character-level gap between independent connected components placed
 # side by side.  Wider than H_GAP (6) to provide a visual cue that
 # these subgraphs are unrelated.
-COMPONENT_GAP_CHARS = 10
+COMPONENT_GAP_CHARS = 6
 
 # Standard column width used for intra-component layout.
 # Imported from tech_tree at module level would create a circular import,
