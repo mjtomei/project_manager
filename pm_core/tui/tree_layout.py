@@ -262,7 +262,7 @@ def compute_tree_layout(
     # Build final ordered_ids from layer orders (x-first, then row)
     for x_off, layer_orders in all_layer_orders:
         for col_idx, layer_order in enumerate(layer_orders):
-            for pid in sorted(layer_order, key=lambda x: combined_row_assignments.get(x, 0)):
+            for pid in sorted(layer_order, key=lambda p: combined_row_assignments.get(p, 0)):
                 layout.node_positions[pid] = combined_positions[pid]
                 layout.ordered_ids.append(pid)
 
