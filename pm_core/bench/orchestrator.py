@@ -20,7 +20,7 @@ from pathlib import Path
 from pm_core.bench.exercises import Exercise, load_exercises
 from pm_core.bench.executor import ScoreResult, execute_tests
 from pm_core.bench.runner import Runner
-from pm_core.bench.solve import Candidate, generate_candidates
+from pm_core.bench.solve import Candidate, HyperParams, generate_candidates
 from pm_core.bench.test_gen import generate_tests
 
 
@@ -58,6 +58,7 @@ class BenchmarkRun:
     model: str
     num_candidates: int
     languages: list[str]
+    hyper: HyperParams | None = None
     results: list[ExerciseResult] = field(default_factory=list)
     total_tokens: int = 0
     total_wall_clock_seconds: float = 0.0
@@ -90,11 +91,20 @@ class BenchmarkRun:
         return self.total_tokens / len(self.results)
 
     def to_dict(self) -> dict:
+        hyper_dict = None
+        if self.hyper:
+            hyper_dict = {
+                "variant": self.hyper.variant,
+                "temperature": self.hyper.temperature,
+                "chain": self.hyper.chain,
+                "test_subset_size": self.hyper.test_subset_size,
+            }
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "model": self.model,
             "num_candidates": self.num_candidates,
             "languages": self.languages,
+            "hyperparams": hyper_dict,
             "tournament_aggregate": self.tournament_aggregate,
             "baseline_aggregate": self.baseline_aggregate,
             "total_tokens": self.total_tokens,
@@ -128,6 +138,7 @@ def run_exercise_tournament(
     model: str,
     num_candidates: int,
     *,
+    hyper: HyperParams | None = None,
     progress_callback: Callable[[str], None] | None = None,
 ) -> ExerciseResult:
     """Run the full tournament pipeline on a single exercise.
@@ -148,14 +159,25 @@ def run_exercise_tournament(
     )
 
     start = time.monotonic()
-    tokens_before = runner.metrics.total_tokens
+
+    def _sum_tokens(gen_results: list) -> int:
+        """Sum total_tokens from GenerationResult or Candidate objects."""
+        total = 0
+        for r in gen_results:
+            stats = getattr(r, "stats", None) or getattr(
+                getattr(r, "generation_result", None), "stats", None
+            )
+            if stats:
+                total += stats.total_tokens
+        return total
 
     try:
         # Step 1: Generate tests from description
         if progress_callback:
             progress_callback("generating tests")
-        gen_test_code, _test_results = generate_tests(
-            exercise, runner, model, num_variants=3
+        gen_test_code, test_results = generate_tests(
+            exercise, runner, model, num_variants=3,
+            chain=hyper.chain if hyper else False,
         )
         result.generated_test_code = gen_test_code
 
@@ -166,6 +188,7 @@ def run_exercise_tournament(
             exercise, runner, model,
             num_candidates=num_candidates,
             tests=gen_test_code,
+            hyper=hyper,
         )
 
         # Step 3: Score each candidate against generated tests (parallel)
@@ -191,18 +214,17 @@ def run_exercise_tournament(
         ref_result = execute_tests(exercise, best_candidate.code)
         result.tournament_score = ref_result.score
 
-        result.tournament_tokens = runner.metrics.total_tokens - tokens_before
+        result.tournament_tokens = _sum_tokens(test_results) + _sum_tokens(candidates)
 
         # Baseline: single pass, scored against reference tests
         if progress_callback:
             progress_callback("running baseline")
-        baseline_tokens_before = runner.metrics.total_tokens
         baseline_candidates = generate_candidates(
             exercise, runner, model, num_candidates=1
         )
         baseline_result = execute_tests(exercise, baseline_candidates[0].code)
         result.baseline_score = baseline_result.score
-        result.baseline_tokens = runner.metrics.total_tokens - baseline_tokens_before
+        result.baseline_tokens = _sum_tokens(baseline_candidates)
 
     except ConnectionError as exc:
         result.error = f"Backend connection error: {exc}"
@@ -210,7 +232,7 @@ def run_exercise_tournament(
         result.error = str(exc)
 
     result.wall_clock_seconds = time.monotonic() - start
-    result.tokens_used = runner.metrics.total_tokens - tokens_before
+    result.tokens_used = result.tournament_tokens + result.baseline_tokens
 
     return result
 
@@ -221,6 +243,8 @@ def run_benchmark(
     *,
     languages: list[str] | None = None,
     slugs: list[str] | None = None,
+    hyper: HyperParams | None = None,
+    parallel: int = 1,
     progress_callback: Callable[[str], None] | None = None,
 ) -> BenchmarkRun:
     """Run the full benchmark across all matching exercises.
@@ -230,6 +254,7 @@ def run_benchmark(
         num_candidates: Number of candidates per exercise for tournament.
         languages: Filter to these languages (default: all).
         slugs: Filter to these exercise slugs.
+        parallel: Number of exercises to run concurrently (default: 1).
         progress_callback: Called with status message updates.
     """
     runner = Runner.create()
@@ -260,7 +285,15 @@ def run_benchmark(
         ]
 
     if not exercises:
-        raise ValueError("No exercises found matching the given filters.")
+        filter_desc = []
+        if languages:
+            filter_desc.append(f"languages={','.join(languages)}")
+        if slugs:
+            filter_desc.append(f"slugs={','.join(slugs)}")
+        raise ValueError(
+            f"No exercises found matching filters: {', '.join(filter_desc)}. "
+            "Run `pm bench exercises -l <language>` to see available slugs."
+        )
 
     langs_used = sorted(set(e.language for e in exercises))
 
@@ -268,22 +301,54 @@ def run_benchmark(
         model=model,
         num_candidates=num_candidates,
         languages=langs_used,
+        hyper=hyper,
     )
 
     bench_start = time.monotonic()
-    for i, exercise in enumerate(exercises):
+    total = len(exercises)
+
+    def _run_one(i: int, exercise: Exercise) -> ExerciseResult:
         def _progress(msg: str, _ex=exercise, _i=i):
             if progress_callback:
                 progress_callback(
-                    f"[{_i + 1}/{len(exercises)}] {_ex.language}/{_ex.slug}: {msg}"
+                    f"[{_i + 1}/{total}] {_ex.language}/{_ex.slug}: {msg}"
                 )
 
         _progress("starting")
         ex_result = run_exercise_tournament(
             exercise, runner, model, num_candidates,
+            hyper=hyper,
             progress_callback=_progress,
         )
-        run.results.append(ex_result)
+
+        # Print intermediate result
+        if progress_callback:
+            if ex_result.error:
+                _progress(f"ERROR — {ex_result.error}")
+            else:
+                delta = ex_result.tournament_score - ex_result.baseline_score
+                _progress(
+                    f"tournament={ex_result.tournament_score:.0%} "
+                    f"baseline={ex_result.baseline_score:.0%} "
+                    f"delta={delta:+.0%}"
+                )
+
+        return ex_result
+
+    if parallel > 1:
+        # Run exercises in parallel — vLLM continuous batching handles
+        # concurrent requests, so this improves GPU utilization even
+        # when individual exercises use chain mode (sequential generation).
+        with ThreadPoolExecutor(max_workers=parallel) as pool:
+            futures = [
+                pool.submit(_run_one, i, ex)
+                for i, ex in enumerate(exercises)
+            ]
+            for future in futures:
+                run.results.append(future.result())
+    else:
+        for i, exercise in enumerate(exercises):
+            run.results.append(_run_one(i, exercise))
 
     run.total_tokens = runner.metrics.total_tokens
     run.total_wall_clock_seconds = time.monotonic() - bench_start

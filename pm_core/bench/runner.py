@@ -14,6 +14,7 @@ import asyncio
 import json
 import os
 import platform
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -64,20 +65,27 @@ class GenerationResult:
 
 @dataclass
 class CostMetrics:
-    """Accumulated cost metrics across multiple generations."""
+    """Accumulated cost metrics across multiple generations.
+
+    Thread-safe: ``record()`` uses an internal lock so metrics stay
+    consistent when the ``Runner`` is shared across threads (e.g.
+    parallel exercise execution in the orchestrator).
+    """
 
     total_prompt_tokens: int = 0
     total_completion_tokens: int = 0
     total_tokens: int = 0
     total_wall_clock_seconds: float = 0.0
     num_requests: int = 0
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def record(self, result: GenerationResult) -> None:
-        self.total_prompt_tokens += result.stats.prompt_tokens
-        self.total_completion_tokens += result.stats.completion_tokens
-        self.total_tokens += result.stats.total_tokens
-        self.total_wall_clock_seconds += result.stats.wall_clock_seconds
-        self.num_requests += 1
+        with self._lock:
+            self.total_prompt_tokens += result.stats.prompt_tokens
+            self.total_completion_tokens += result.stats.completion_tokens
+            self.total_tokens += result.stats.total_tokens
+            self.total_wall_clock_seconds += result.stats.wall_clock_seconds
+            self.num_requests += 1
 
 
 def detect_backend() -> Backend | None:
@@ -144,20 +152,27 @@ def chat_completion(
     model: str,
     messages: list[dict[str, str]],
     temperature: float = 0.7,
-    max_tokens: int = 4096,
-    timeout: float = 120.0,
+    max_tokens: int = 16384,
+    timeout: float = 1200.0,
+    extra_body: dict[str, Any] | None = None,
 ) -> GenerationResult:
     """Send a single chat completion request.
 
     Uses the standard OpenAI /v1/chat/completions endpoint.
+
+    *extra_body* is merged into the request payload, allowing callers to
+    pass backend-specific parameters (e.g. ``chat_template_kwargs``,
+    ``max_completion_tokens``).
     """
     url = urljoin(base_url + "/", "v1/chat/completions")
-    payload = {
+    payload: dict[str, Any] = {
         "model": model,
         "messages": messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
+    if extra_body:
+        payload.update(extra_body)
     data = json.dumps(payload).encode()
     req = urllib.request.Request(
         url,
@@ -175,7 +190,7 @@ def chat_completion(
     usage = body.get("usage", {})
 
     return GenerationResult(
-        content=choice.get("message", {}).get("content", ""),
+        content=choice.get("message", {}).get("content") or "",
         model=body.get("model", model),
         temperature=temperature,
         stats=RequestStats(
@@ -194,8 +209,9 @@ def generate_multiple(
     model: str,
     messages: list[dict[str, str]],
     temperatures: list[float],
-    max_tokens: int = 4096,
-    timeout: float = 120.0,
+    max_tokens: int = 16384,
+    timeout: float = 1200.0,
+    extra_body: dict[str, Any] | None = None,
 ) -> list[GenerationResult]:
     """Generate multiple completions in parallel with different temperatures.
 
@@ -211,6 +227,7 @@ def generate_multiple(
         requests=[(messages, t) for t in temperatures],
         max_tokens=max_tokens,
         timeout=timeout,
+        extra_body=extra_body,
     )
 
 
@@ -219,8 +236,9 @@ def batch_complete(
     *,
     model: str,
     requests: list[tuple[list[dict[str, str]], float]],
-    max_tokens: int = 4096,
-    timeout: float = 120.0,
+    max_tokens: int = 16384,
+    timeout: float = 1200.0,
+    extra_body: dict[str, Any] | None = None,
 ) -> list[GenerationResult]:
     """Run multiple completions in parallel with different messages and temperatures.
 
@@ -235,6 +253,7 @@ def batch_complete(
         requests=requests,
         max_tokens=max_tokens,
         timeout=timeout,
+        extra_body=extra_body,
     ))
 
 
@@ -245,6 +264,7 @@ async def _batch_complete_async(
     requests: list[tuple[list[dict[str, str]], float]],
     max_tokens: int,
     timeout: float,
+    extra_body: dict[str, Any] | None = None,
 ) -> list[GenerationResult]:
     """Async implementation of batch completion."""
     loop = asyncio.get_running_loop()
@@ -258,6 +278,7 @@ async def _batch_complete_async(
                 temperature=t,
                 max_tokens=max_tokens,
                 timeout=timeout,
+                extra_body=extra_body,
             ),
         )
         for msgs, temp in requests
@@ -321,8 +342,9 @@ class Runner:
         model: str,
         messages: list[dict[str, str]],
         temperature: float = 0.7,
-        max_tokens: int = 4096,
-        timeout: float = 120.0,
+        max_tokens: int = 16384,
+        timeout: float = 1200.0,
+        extra_body: dict[str, Any] | None = None,
     ) -> GenerationResult:
         """Run a single chat completion."""
         result = chat_completion(
@@ -332,6 +354,7 @@ class Runner:
             temperature=temperature,
             max_tokens=max_tokens,
             timeout=timeout,
+            extra_body=extra_body,
         )
         self.metrics.record(result)
         return result
@@ -342,8 +365,9 @@ class Runner:
         model: str,
         messages: list[dict[str, str]],
         temperatures: list[float],
-        max_tokens: int = 4096,
-        timeout: float = 120.0,
+        max_tokens: int = 16384,
+        timeout: float = 1200.0,
+        extra_body: dict[str, Any] | None = None,
     ) -> list[GenerationResult]:
         """Generate multiple completions in parallel with different temperatures."""
         results = generate_multiple(
@@ -353,6 +377,7 @@ class Runner:
             temperatures=temperatures,
             max_tokens=max_tokens,
             timeout=timeout,
+            extra_body=extra_body,
         )
         for r in results:
             self.metrics.record(r)
@@ -363,8 +388,9 @@ class Runner:
         *,
         model: str,
         requests: list[tuple[list[dict[str, str]], float]],
-        max_tokens: int = 4096,
-        timeout: float = 120.0,
+        max_tokens: int = 16384,
+        timeout: float = 1200.0,
+        extra_body: dict[str, Any] | None = None,
     ) -> list[GenerationResult]:
         """Run multiple completions in parallel with different messages/temperatures."""
         results = batch_complete(
@@ -373,6 +399,7 @@ class Runner:
             requests=requests,
             max_tokens=max_tokens,
             timeout=timeout,
+            extra_body=extra_body,
         )
         for r in results:
             self.metrics.record(r)

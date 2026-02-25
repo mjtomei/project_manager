@@ -67,7 +67,18 @@ def bench_exercises(language):
               help="Filter exercises by slug substring")
 @click.option("-o", "--output", "output_path", default=None,
               help="Output JSON file path")
-def bench_run(model, candidates, languages, exercise_filter, output_path):
+@click.option("--variant", type=click.Choice(["direct", "chain_of_thought", "test_driven"]),
+              default=None, help="Lock all candidates to one prompt variant")
+@click.option("--temperature", type=float, default=None,
+              help="Lock all candidates to one temperature (0.0-2.0)")
+@click.option("--chain", is_flag=True, default=False,
+              help="Generate sequentially; each candidate sees prior solutions")
+@click.option("--test-subsets", type=int, default=None,
+              help="Each candidate gets a random sample of N test functions")
+@click.option("-j", "--parallel", type=click.IntRange(min=1), default=1,
+              help="Number of exercises to run concurrently (default: 1)")
+def bench_run(model, candidates, languages, exercise_filter, output_path,
+              variant, temperature, chain, test_subsets, parallel):
     """Run benchmark with tournament selection.
 
     MODEL is the model name as reported by the backend's /v1/models endpoint.
@@ -77,17 +88,42 @@ def bench_run(model, candidates, languages, exercise_filter, output_path):
         run_benchmark,
         save_results_json,
     )
+    from pm_core.bench.solve import HyperParams
+
+    # Build and validate hyperparams
+    hyper = None
+    if any(v is not None for v in (variant, temperature, test_subsets)) or chain:
+        hyper = HyperParams(
+            variant=variant,
+            temperature=temperature,
+            chain=chain,
+            test_subset_size=test_subsets,
+        )
+        hyper.validate()
+
+        parts = []
+        if variant:
+            parts.append(f"variant={variant}")
+        if temperature is not None:
+            parts.append(f"temperature={temperature}")
+        if chain:
+            parts.append("chain=on")
+        if test_subsets:
+            parts.append(f"test_subsets={test_subsets}")
+        click.echo(f"Hyperparams: {', '.join(parts)}")
 
     click.echo(f"Starting benchmark: model={model}, N={candidates}")
 
     def on_progress(msg):
-        click.echo(f"  {msg}")
+        print(f"  {msg}", flush=True)
 
     run = run_benchmark(
         model,
         num_candidates=candidates,
         languages=list(languages) if languages else None,
         slugs=[exercise_filter] if exercise_filter else None,
+        hyper=hyper,
+        parallel=parallel,
         progress_callback=on_progress,
     )
 

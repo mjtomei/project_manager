@@ -16,7 +16,7 @@ from pm_core.bench.orchestrator import (
     save_results_json,
 )
 from pm_core.bench.runner import CostMetrics, GenerationResult, RequestStats, Runner
-from pm_core.bench.solve import Candidate
+from pm_core.bench.solve import Candidate, HyperParams
 
 
 class TestBenchmarkRun:
@@ -54,15 +54,28 @@ class TestBenchmarkRun:
                            tokens_used=500, wall_clock_seconds=5.0),
         ]
         d = run.to_dict()
-        assert d["schema_version"] == 1
+        assert d["schema_version"] == 2
         assert d["model"] == "test"
         assert d["num_candidates"] == 4
         assert d["total_tokens"] == 1000
+        assert d["hyperparams"] is None
         assert len(d["results"]) == 1
         assert d["results"][0]["slug"] == "hello"
         assert d["results"][0]["generated_test_code"] == "def test_hello(): pass"
         assert d["results"][0]["tournament_tokens"] == 400
         assert d["results"][0]["baseline_tokens"] == 100
+
+    def test_to_dict_with_hyperparams(self):
+        hyper = HyperParams(variant="direct", temperature=0.7, chain=True, test_subset_size=3)
+        run = BenchmarkRun(model="test", num_candidates=4, languages=["python"],
+                           hyper=hyper)
+        d = run.to_dict()
+        assert d["hyperparams"] == {
+            "variant": "direct",
+            "temperature": 0.7,
+            "chain": True,
+            "test_subset_size": 3,
+        }
 
 
 class TestFormatResultsTable:
@@ -199,6 +212,13 @@ class TestRunExerciseTournament:
         baseline_gen_call = mock_gen_cands.call_args_list[1]
         assert baseline_gen_call[1]["num_candidates"] == 1
 
+        # Token accounting: summed from returned GenerationResult objects
+        # Tournament: 1 test gen result (15 tokens) + 2 candidates (15 each) = 45
+        assert result.tournament_tokens == 45
+        # Baseline: 1 candidate (15 tokens) = 15
+        assert result.baseline_tokens == 15
+        assert result.tokens_used == 60  # tournament + baseline
+
     def test_connection_error_captured(self):
         exercise = _make_exercise()
         runner = mock.MagicMock(spec=Runner)
@@ -210,6 +230,46 @@ class TestRunExerciseTournament:
 
         assert result.error is not None
         assert "connection" in result.error.lower()
+
+    def test_hyper_passed_to_tournament_not_baseline(self):
+        """Hyperparams should be forwarded to tournament candidates but not baseline."""
+        exercise = _make_exercise()
+        runner = mock.MagicMock(spec=Runner)
+        runner.metrics = CostMetrics()
+
+        hyper = HyperParams(variant="direct", temperature=0.5)
+
+        with mock.patch("pm_core.bench.orchestrator.generate_tests") as mock_gt, \
+             mock.patch("pm_core.bench.orchestrator.generate_candidates") as mock_gc, \
+             mock.patch("pm_core.bench.orchestrator.execute_tests") as mock_ex:
+
+            mock_gt.return_value = ("test_code", [])
+            mock_gc.side_effect = [
+                # Tournament candidates
+                [
+                    Candidate(code="sol_a", temperature=0.5, prompt_variant="direct",
+                              model="m", generation_result=_gen_result()),
+                ],
+                # Baseline candidate
+                [
+                    Candidate(code="sol_baseline", temperature=0.0, prompt_variant="direct",
+                              model="m", generation_result=_gen_result()),
+                ],
+            ]
+            mock_ex.return_value = ScoreResult(passed=1, total=1, score=1.0)
+
+            run_exercise_tournament(
+                exercise, runner, "m", num_candidates=1,
+                hyper=hyper,
+            )
+
+        # Tournament call (first) should have hyper
+        tournament_call = mock_gc.call_args_list[0]
+        assert tournament_call[1]["hyper"] is hyper
+
+        # Baseline call (second) should NOT have hyper
+        baseline_call = mock_gc.call_args_list[1]
+        assert baseline_call[1].get("hyper") is None
 
     def test_progress_callback_called(self):
         exercise = _make_exercise()
