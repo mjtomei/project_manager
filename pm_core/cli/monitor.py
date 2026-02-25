@@ -147,9 +147,14 @@ def _create_monitor_window(iteration: int, loop_id: str,
         cwd=repo_dir,
     )
 
-    # Kill existing monitor window and recreate (fresh each iteration)
+    # Kill existing monitor window and recreate (fresh each iteration).
+    # Track which sessions were watching the old window so we can switch
+    # them to the new one (same pattern as review windows).
+    sessions_watching: list[str] = []
     existing = tmux_mod.find_window_by_name(pm_session, MONITOR_WINDOW_NAME)
     if existing:
+        sessions_watching = tmux_mod.sessions_on_window(
+            pm_session, existing["id"])
         tmux_mod.kill_window(pm_session, existing["id"])
 
     # Create the monitor window without switching focus (background)
@@ -162,3 +167,40 @@ def _create_monitor_window(iteration: int, loop_id: str,
     except Exception as e:
         click.echo(f"Monitor: failed to create tmux window: {e}", err=True)
         raise SystemExit(1)
+
+    # Switch sessions that were watching the old monitor window to the new one
+    if sessions_watching:
+        import subprocess
+        new_win = tmux_mod.find_window_by_name(pm_session, MONITOR_WINDOW_NAME)
+        if new_win:
+            client_map: dict[str, str] = {}
+            r = subprocess.run(
+                tmux_mod._tmux_cmd(
+                    "list-clients", "-F",
+                    "#{session_name} #{client_tty}",
+                ),
+                capture_output=True, text=True,
+            )
+            if r.returncode == 0:
+                for line in r.stdout.strip().splitlines():
+                    parts = line.split(None, 1)
+                    if len(parts) == 2:
+                        client_map[parts[0]] = parts[1]
+
+            for sess_name in sessions_watching:
+                subprocess.run(
+                    tmux_mod._tmux_cmd(
+                        "select-window", "-t",
+                        f"{sess_name}:{new_win['index']}",
+                    ),
+                    capture_output=True,
+                )
+                client_tty = client_map.get(sess_name)
+                if client_tty:
+                    subprocess.run(
+                        tmux_mod._tmux_cmd(
+                            "switch-client", "-t", sess_name,
+                            "-c", client_tty,
+                        ),
+                        capture_output=True,
+                    )
