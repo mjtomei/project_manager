@@ -12,13 +12,15 @@ from pm_core.monitor_loop import (
     MonitorLoopState,
     MonitorIteration,
     _extract_verdict_from_content,
-    _build_prompt_verdict_lines,
-    _is_prompt_line,
     _match_monitor_verdict,
     _MAX_HISTORY,
     VERDICT_READY,
     VERDICT_INPUT_REQUIRED,
     VERDICT_KILLED,
+)
+from pm_core.loop_shared import (
+    build_prompt_verdict_lines as _build_prompt_verdict_lines,
+    is_prompt_line as _is_prompt_line,
 )
 
 
@@ -179,30 +181,34 @@ class TestExtractVerdictFromContent:
             )
 
 
+# Monitor-specific keywords for shared helpers
+_MONITOR_KEYWORDS = ("INPUT_REQUIRED", "READY")
+
+
 class TestBuildPromptVerdictLines:
     def test_extracts_verdict_lines_from_real_prompt(self):
         prompt = _get_real_monitor_prompt()
-        lines = _build_prompt_verdict_lines(prompt)
+        lines = _build_prompt_verdict_lines(prompt, _MONITOR_KEYWORDS)
         assert any("READY" in line for line in lines)
         assert any("INPUT_REQUIRED" in line for line in lines)
         assert len(lines) >= 3
 
     def test_empty_prompt(self):
-        assert _build_prompt_verdict_lines("") == set()
+        assert _build_prompt_verdict_lines("", _MONITOR_KEYWORDS) == set()
 
 
 class TestIsPromptLine:
     def test_exact_match(self):
         prompt_lines = {"READY -- All issues handled (or no issues found)."}
-        assert _is_prompt_line("READY -- All issues handled (or no issues found).", prompt_lines) is True
+        assert _is_prompt_line("READY -- All issues handled (or no issues found).", prompt_lines, _MONITOR_KEYWORDS) is True
 
     def test_standalone_verdict_not_prompt(self):
         prompt_lines = {"READY -- All issues handled (or no issues found)."}
-        assert _is_prompt_line("READY", prompt_lines) is False
+        assert _is_prompt_line("READY", prompt_lines, _MONITOR_KEYWORDS) is False
 
     def test_standalone_input_required_not_prompt(self):
         prompt_lines = {"INPUT_REQUIRED -- You need human input."}
-        assert _is_prompt_line("INPUT_REQUIRED", prompt_lines) is False
+        assert _is_prompt_line("INPUT_REQUIRED", prompt_lines, _MONITOR_KEYWORDS) is False
 
 
 # --- MonitorLoopState tests ---

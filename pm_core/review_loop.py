@@ -23,7 +23,6 @@ it up automatically and resumes normal flow — no TUI interaction
 required.
 """
 
-import re
 import secrets
 import subprocess
 import sys
@@ -34,6 +33,14 @@ from datetime import datetime
 from typing import Callable
 
 from pm_core.paths import configure_logger
+from pm_core.loop_shared import (
+    get_pm_session as _get_pm_session_shared,
+    find_claude_pane as _find_claude_pane_shared,
+    sleep_checking_pane,
+    match_verdict,
+    extract_verdict_from_content,
+    STABILITY_POLLS,
+)
 
 _log = configure_logger("pm.review_loop")
 
@@ -47,12 +54,13 @@ VERDICT_KILLED = "KILLED"
 ALL_VERDICTS = (VERDICT_PASS, VERDICT_PASS_WITH_SUGGESTIONS, VERDICT_NEEDS_WORK,
                 VERDICT_INPUT_REQUIRED)
 
+# Keywords used for prompt line filtering (all verdict keywords)
+_REVIEW_KEYWORDS = ("PASS_WITH_SUGGESTIONS", "INPUT_REQUIRED", "NEEDS_WORK", "PASS")
+
 # How often to check pane content for a verdict (seconds)
 _POLL_INTERVAL = 5
 # How often to check pane liveness / stop_requested between content polls (seconds)
 _TICK_INTERVAL = 1
-# Number of consecutive stable polls required before accepting verdict
-_STABILITY_POLLS = 2
 # Minimum seconds after poll start before accepting verdicts.
 # Claude reviews take minutes; verdicts found in the first few seconds are
 # almost certainly false positives from prompt text shown in the pane.
@@ -93,18 +101,8 @@ class ReviewLoopState:
 
 
 def _match_verdict(line: str) -> str | None:
-    """Match a verdict keyword only when it is the entire line content.
-
-    After stripping markdown formatting (``*``) and whitespace, the line
-    must be exactly one of the verdict keywords.  This rejects all
-    incidental mentions — PR titles, table rows, prompt instructions,
-    tmux-wrapped fragments, etc.
-    """
-    cleaned = re.sub(r'[*`]', '', line).strip()
-    for verdict in ALL_VERDICTS:
-        if cleaned == verdict:
-            return verdict
-    return None
+    """Match a verdict keyword only when it is the entire line content."""
+    return match_verdict(line, ALL_VERDICTS)
 
 
 def parse_review_verdict(output: str) -> str:
@@ -170,13 +168,11 @@ def _launch_review_window(pr_id: str, pm_root: str, iteration: int = 0,
 
 def _find_claude_pane(session: str, window_name: str) -> str | None:
     """Find the Claude pane ID in the review window (first pane)."""
-    from pm_core.loop_shared import find_claude_pane
-    return find_claude_pane(session, window_name)
+    return _find_claude_pane_shared(session, window_name)
 
 
 def _sleep_checking_pane(pane_id: str, seconds: float) -> bool:
     """Sleep for *seconds*, checking pane liveness every tick."""
-    from pm_core.loop_shared import sleep_checking_pane
     return sleep_checking_pane(pane_id, seconds, tick=_TICK_INTERVAL)
 
 
@@ -238,7 +234,7 @@ def _poll_for_verdict(pane_id: str, prompt_text: str = "",
                 last_verdict = verdict
                 stable_count = 1
 
-            if stable_count >= _STABILITY_POLLS:
+            if stable_count >= STABILITY_POLLS:
                 _log.info("review_loop: verdict %s stable for %d polls", verdict, stable_count)
                 return content
         else:
@@ -250,95 +246,19 @@ def _poll_for_verdict(pane_id: str, prompt_text: str = "",
             return None
 
 
-# Only scan the tail of captured pane content for verdicts.  The prompt
-# itself contains verdict keywords as instructions — scanning the full
-# scrollback would match those immediately.  30 lines is enough to catch
-# Claude's verdict output without reaching back into the prompt.
-_VERDICT_TAIL_LINES = 30
-
-
-def _build_prompt_verdict_lines(prompt_text: str) -> set[str]:
-    """Build a set of normalized prompt lines that contain verdict keywords.
-
-    Used to distinguish prompt instructions (which mention verdict keywords)
-    from Claude's actual verdict output.  Strips markdown formatting so
-    terminal-wrapped lines can be matched against prompt lines.
-    """
-    result = set()
-    for line in prompt_text.splitlines():
-        normalized = line.replace("*", "").replace("`", "").strip()
-        if normalized and any(v in normalized for v in ("PASS", "NEEDS_WORK", "INPUT_REQUIRED")):
-            result.add(normalized)
-    return result
-
-
-def _is_prompt_line(stripped_line: str, prompt_verdict_lines: set[str]) -> bool:
-    """Check if a verdict-containing line comes from the prompt, not Claude.
-
-    Strategy: extract the "context" around the verdict keyword (the
-    non-keyword text).  If the context also appears in a prompt line,
-    this line is from the prompt.  A standalone keyword like "PASS" or
-    "NEEDS_WORK" has no context and is always treated as a real verdict.
-    """
-    # Extract context — text around the verdict keyword
-    context = stripped_line
-    for keyword in ("PASS_WITH_SUGGESTIONS", "INPUT_REQUIRED", "NEEDS_WORK", "PASS"):
-        context = context.replace(keyword, "")
-    context = context.strip(" \t—-:().").strip()
-
-    # If there's meaningful context (more than just punctuation/whitespace),
-    # check if it appears in any prompt verdict line.
-    if len(context) > 3:
-        # Also strip markdown from the pane line for matching
-        stripped_clean = stripped_line.replace("*", "").replace("`", "").strip()
-        for pvl in prompt_verdict_lines:
-            if context in pvl or stripped_clean in pvl or pvl in stripped_clean:
-                return True
-
-    # No meaningful context — standalone keyword = real verdict
-    return False
-
-
 def _extract_verdict_from_content(content: str, prompt_text: str = "",
                                    exclude_verdicts: set[str] | None = None) -> str | None:
-    """Check if the tail of captured pane content contains a verdict keyword.
-
-    Lines that match the prompt text are skipped — the prompt itself contains
-    verdict keywords as instructions.  Only verdicts from Claude's actual
-    output are returned.
-
-    Args:
-        content: Captured pane content to scan.
-        prompt_text: Prompt text for filtering out prompt lines.
-        exclude_verdicts: Optional set of verdict strings to skip (e.g.
-            ``{VERDICT_INPUT_REQUIRED}`` for follow-up polling).
-    """
-    lines = content.strip().splitlines()
-    tail = lines[-_VERDICT_TAIL_LINES:] if len(lines) > _VERDICT_TAIL_LINES else lines
-
-    prompt_verdict_lines = _build_prompt_verdict_lines(prompt_text) if prompt_text else set()
-    _log.info("review_loop: extract_verdict: %d total lines, %d tail lines, %d prompt verdict lines, prompt_text=%d chars",
-              len(lines), len(tail), len(prompt_verdict_lines), len(prompt_text))
-
-    for line in reversed(tail):
-        stripped = line.strip().strip("*").strip()
-        verdict = _match_verdict(stripped)
-
-        if verdict:
-            if exclude_verdicts and verdict in exclude_verdicts:
-                continue
-            if prompt_verdict_lines and _is_prompt_line(stripped, prompt_verdict_lines):
-                _log.info("review_loop: SKIPPED prompt verdict line: [%s] (verdict=%s)", stripped[:100], verdict)
-                continue
-            _log.info("review_loop: ACCEPTED verdict line: [%s] (verdict=%s)", stripped[:100], verdict)
-            return verdict
-    return None
+    """Check if the tail of captured pane content contains a verdict keyword."""
+    return extract_verdict_from_content(
+        content, verdicts=ALL_VERDICTS, keywords=_REVIEW_KEYWORDS,
+        prompt_text=prompt_text, exclude_verdicts=exclude_verdicts,
+        log_prefix="review_loop",
+    )
 
 
 def _get_pm_session() -> str | None:
     """Get the pm tmux session name."""
-    from pm_core.loop_shared import get_pm_session
-    return get_pm_session()
+    return _get_pm_session_shared()
 
 
 class PaneKilledError(Exception):
@@ -433,7 +353,7 @@ def _wait_for_follow_up_verdict(pr_data: dict, prompt_text: str,
                 else:
                     last_verdict = verdict
                     stable_count = 1
-                if stable_count >= _STABILITY_POLLS:
+                if stable_count >= STABILITY_POLLS:
                     _log.info("review_loop: follow-up verdict %s stable", verdict)
                     return content
             else:

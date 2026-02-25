@@ -14,7 +14,6 @@ monitor pane) and resumes when the user provides direction.  Between
 READY iterations there is a configurable wait time.
 """
 
-import re
 import secrets
 import subprocess
 import sys
@@ -25,6 +24,14 @@ from datetime import datetime
 from typing import Callable
 
 from pm_core.paths import configure_logger
+from pm_core.loop_shared import (
+    get_pm_session as _get_pm_session_shared,
+    find_claude_pane as _find_claude_pane_shared,
+    sleep_checking_pane,
+    match_verdict,
+    extract_verdict_from_content,
+    STABILITY_POLLS,
+)
 
 _log = configure_logger("pm.monitor_loop")
 
@@ -35,18 +42,17 @@ VERDICT_KILLED = "KILLED"
 
 ALL_MONITOR_VERDICTS = (VERDICT_READY, VERDICT_INPUT_REQUIRED)
 
+# Keywords used for prompt line filtering (all verdict keywords)
+_MONITOR_KEYWORDS = ("INPUT_REQUIRED", "READY")
+
 # How often to check pane content for a verdict (seconds)
 _POLL_INTERVAL = 5
 # How often to check pane liveness / stop_requested between content polls
 _TICK_INTERVAL = 1
-# Consecutive stable polls required before accepting verdict
-_STABILITY_POLLS = 2
 # Minimum seconds after iteration start before accepting verdicts
 _VERDICT_GRACE_PERIOD = 30
 # Default wait time between iterations (seconds)
 DEFAULT_ITERATION_WAIT = 120
-# Only scan the tail of captured pane content for verdicts
-_VERDICT_TAIL_LINES = 30
 # Max history entries to keep (monitor runs indefinitely, so cap memory)
 _MAX_HISTORY = 50
 
@@ -85,73 +91,27 @@ class MonitorLoopState:
 
 def _match_monitor_verdict(line: str) -> str | None:
     """Match a monitor verdict keyword when it is the entire line content."""
-    cleaned = re.sub(r'[*`]', '', line).strip()
-    for verdict in ALL_MONITOR_VERDICTS:
-        if cleaned == verdict:
-            return verdict
-    return None
-
-
-def _build_prompt_verdict_lines(prompt_text: str) -> set[str]:
-    """Build a set of normalized prompt lines that contain verdict keywords."""
-    result = set()
-    for line in prompt_text.splitlines():
-        normalized = line.replace("*", "").replace("`", "").strip()
-        if normalized and any(v in normalized for v in ("READY", "INPUT_REQUIRED")):
-            result.add(normalized)
-    return result
-
-
-def _is_prompt_line(stripped_line: str, prompt_verdict_lines: set[str]) -> bool:
-    """Check if a verdict-containing line comes from the prompt, not Claude."""
-    context = stripped_line
-    for keyword in ("INPUT_REQUIRED", "READY"):
-        context = context.replace(keyword, "")
-    context = context.strip(" \t\u2014-:().").strip()
-
-    if len(context) > 3:
-        stripped_clean = stripped_line.replace("*", "").replace("`", "").strip()
-        for pvl in prompt_verdict_lines:
-            if context in pvl or stripped_clean in pvl or pvl in stripped_clean:
-                return True
-    return False
+    return match_verdict(line, ALL_MONITOR_VERDICTS)
 
 
 def _extract_verdict_from_content(content: str, prompt_text: str = "",
                                    exclude_verdicts: set[str] | None = None) -> str | None:
     """Check if the tail of captured pane content contains a monitor verdict."""
-    lines = content.strip().splitlines()
-    tail = lines[-_VERDICT_TAIL_LINES:] if len(lines) > _VERDICT_TAIL_LINES else lines
-
-    prompt_verdict_lines = _build_prompt_verdict_lines(prompt_text) if prompt_text else set()
-    _log.info("monitor_loop: extract_verdict: %d total lines, %d tail lines, %d prompt verdict lines, prompt_text=%d chars",
-              len(lines), len(tail), len(prompt_verdict_lines), len(prompt_text))
-
-    for line in reversed(tail):
-        stripped = line.strip().strip("*").strip()
-        verdict = _match_monitor_verdict(stripped)
-
-        if verdict:
-            if exclude_verdicts and verdict in exclude_verdicts:
-                continue
-            if prompt_verdict_lines and _is_prompt_line(stripped, prompt_verdict_lines):
-                _log.info("monitor_loop: SKIPPED prompt verdict line: [%s]", stripped[:100])
-                continue
-            _log.info("monitor_loop: ACCEPTED verdict line: [%s] (verdict=%s)", stripped[:100], verdict)
-            return verdict
-    return None
+    return extract_verdict_from_content(
+        content, verdicts=ALL_MONITOR_VERDICTS, keywords=_MONITOR_KEYWORDS,
+        prompt_text=prompt_text, exclude_verdicts=exclude_verdicts,
+        log_prefix="monitor_loop",
+    )
 
 
 def _get_pm_session() -> str | None:
     """Get the pm tmux session name."""
-    from pm_core.loop_shared import get_pm_session
-    return get_pm_session()
+    return _get_pm_session_shared()
 
 
 def _find_claude_pane(session: str, window_name: str) -> str | None:
     """Find the Claude pane ID in the monitor window (first pane)."""
-    from pm_core.loop_shared import find_claude_pane
-    return find_claude_pane(session, window_name)
+    return _find_claude_pane_shared(session, window_name)
 
 
 MONITOR_WINDOW_NAME = "monitor"
@@ -174,7 +134,6 @@ def _launch_monitor_window(pm_root: str, iteration: int = 0,
 def _sleep_checking_pane(pane_id: str, seconds: float,
                           state: MonitorLoopState | None = None) -> bool:
     """Sleep for *seconds*, checking pane liveness every tick."""
-    from pm_core.loop_shared import sleep_checking_pane
     return sleep_checking_pane(
         pane_id, seconds, tick=_TICK_INTERVAL,
         stop_check=lambda: state.stop_requested if state else False,
@@ -226,7 +185,7 @@ def _poll_for_verdict(pane_id: str, prompt_text: str = "",
                 last_verdict = verdict
                 stable_count = 1
 
-            if stable_count >= _STABILITY_POLLS:
+            if stable_count >= STABILITY_POLLS:
                 _log.info("monitor_loop: verdict %s stable for %d polls", verdict, stable_count)
                 return content
         else:
@@ -331,7 +290,7 @@ def _wait_for_follow_up_verdict(prompt_text: str,
                 else:
                     last_verdict = verdict
                     stable_count = 1
-                if stable_count >= _STABILITY_POLLS:
+                if stable_count >= STABILITY_POLLS:
                     _log.info("monitor_loop: follow-up verdict %s stable", verdict)
                     return content
             else:

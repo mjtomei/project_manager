@@ -13,14 +13,17 @@ from pm_core.review_loop import (
     ReviewLoopState,
     ReviewIteration,
     _extract_verdict_from_content,
-    _build_prompt_verdict_lines,
-    _is_prompt_line,
     _match_verdict,
     VERDICT_PASS,
     VERDICT_PASS_WITH_SUGGESTIONS,
     VERDICT_NEEDS_WORK,
     VERDICT_INPUT_REQUIRED,
     VERDICT_KILLED,
+    _REVIEW_KEYWORDS,
+)
+from pm_core.loop_shared import (
+    build_prompt_verdict_lines as _build_prompt_verdict_lines,
+    is_prompt_line as _is_prompt_line,
 )
 
 
@@ -312,56 +315,56 @@ class TestExtractVerdictFromContent:
 class TestBuildPromptVerdictLines:
     def test_extracts_verdict_lines_from_real_prompt(self):
         prompt = _get_real_prompt()
-        lines = _build_prompt_verdict_lines(prompt)
+        lines = _build_prompt_verdict_lines(prompt, _REVIEW_KEYWORDS)
         assert any("PASS" in line for line in lines)
         assert any("NEEDS_WORK" in line for line in lines)
         assert any("PASS_WITH_SUGGESTIONS" in line for line in lines)
         assert len(lines) >= 7  # at least 7 lines in the prompt mention verdicts (including INPUT_REQUIRED)
 
     def test_empty_prompt(self):
-        assert _build_prompt_verdict_lines("") == set()
+        assert _build_prompt_verdict_lines("", _REVIEW_KEYWORDS) == set()
 
 
 class TestIsPromptLine:
     def test_exact_match(self):
         prompt_lines = {"PASS — No changes needed. The code is ready to merge as-is."}
-        assert _is_prompt_line("PASS — No changes needed. The code is ready to merge as-is.", prompt_lines) is True
+        assert _is_prompt_line("PASS — No changes needed. The code is ready to merge as-is.", prompt_lines, _REVIEW_KEYWORDS) is True
 
     def test_substring_match_wrapped_line(self):
         prompt_lines = {"PASS_WITH_SUGGESTIONS — Only non-blocking suggestions remain (style nits, minor refactors, optional improvements)."}
-        assert _is_prompt_line("PASS_WITH_SUGGESTIONS — Only non-blocking suggestions remain", prompt_lines) is True
+        assert _is_prompt_line("PASS_WITH_SUGGESTIONS — Only non-blocking suggestions remain", prompt_lines, _REVIEW_KEYWORDS) is True
 
     def test_standalone_verdict_not_prompt(self):
         """A standalone verdict keyword like 'PASS' is NOT from the prompt."""
         prompt_lines = {"PASS — No changes needed. The code is ready to merge as-is."}
-        assert _is_prompt_line("PASS", prompt_lines) is False
+        assert _is_prompt_line("PASS", prompt_lines, _REVIEW_KEYWORDS) is False
 
     def test_standalone_needs_work_not_prompt(self):
         prompt_lines = {"NEEDS_WORK — Blocking issues found."}
-        assert _is_prompt_line("NEEDS_WORK", prompt_lines) is False
+        assert _is_prompt_line("NEEDS_WORK", prompt_lines, _REVIEW_KEYWORDS) is False
 
     def test_standalone_pass_with_suggestions_not_prompt(self):
         prompt_lines = {"PASS_WITH_SUGGESTIONS — Only non-blocking suggestions remain."}
-        assert _is_prompt_line("PASS_WITH_SUGGESTIONS", prompt_lines) is False
+        assert _is_prompt_line("PASS_WITH_SUGGESTIONS", prompt_lines, _REVIEW_KEYWORDS) is False
 
     def test_real_verdict_with_context_from_claude(self):
         """Claude says 'Overall: PASS' — context 'Overall' not in prompt."""
         prompt_lines = {"PASS — No changes needed. The code is ready to merge as-is."}
-        assert _is_prompt_line("Overall: PASS", prompt_lines) is False
+        assert _is_prompt_line("Overall: PASS", prompt_lines, _REVIEW_KEYWORDS) is False
 
     def test_prompt_output_line(self):
         """The prompt line 'Output: PASS' IS from the prompt."""
         prompt_lines = {"- Output: PASS"}
-        assert _is_prompt_line("Output: PASS", prompt_lines) is True
+        assert _is_prompt_line("Output: PASS", prompt_lines, _REVIEW_KEYWORDS) is True
 
     def test_exact_failure_line_from_log(self):
         """The exact line from the log that caused a false positive."""
         prompt = _get_real_prompt()
-        prompt_lines = _build_prompt_verdict_lines(prompt)
+        prompt_lines = _build_prompt_verdict_lines(prompt, _REVIEW_KEYWORDS)
         # After strip().strip("*").strip(), the log showed a wrapped fragment
         # of the IMPORTANT line.  Updated to include INPUT_REQUIRED.
         line = "PASS**, **PASS_WITH_SUGGESTIONS**, **NEEDS_WORK**, or **INPUT_REQUIRED**."
-        assert _is_prompt_line(line, prompt_lines) is True
+        assert _is_prompt_line(line, prompt_lines, _REVIEW_KEYWORDS) is True
 
 
 # --- should_stop tests ---
