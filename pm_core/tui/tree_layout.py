@@ -19,9 +19,9 @@ from datetime import datetime as _dt
 from pm_core import graph as graph_mod
 
 # Character-level gap between independent connected components placed
-# side by side.  Wider than _H_GAP (6) to provide a visual cue that
-# these subgraphs are unrelated.
-COMPONENT_GAP_CHARS = 12
+# side by side.  Matches _H_GAP so columns of PRs stay aligned across
+# components on a uniform grid.
+COMPONENT_GAP_CHARS = 6
 
 # Standard column width used for intra-component layout.
 # Imported from tech_tree at module level would create a circular import,
