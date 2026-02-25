@@ -99,6 +99,7 @@ async def toggle(app, selected_pr_id: str | None = None) -> None:
         target_tag = selected_pr_id or "all"
         run_id = f"autostart-{target_tag}-{secrets.token_hex(4)}"
         app._auto_start_run_id = run_id
+        tdir = None
         if app._root:
             tdir = app._root / "transcripts" / run_id
             tdir.mkdir(parents=True, exist_ok=True)

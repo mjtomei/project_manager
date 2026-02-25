@@ -27,7 +27,7 @@ def find_claude_pane(session: str, window_name: str) -> str | None:
 
 def sleep_checking_pane(pane_id: str, seconds: float,
                         tick: float = 1.0,
-                        stop_check: callable = None) -> bool:
+                        stop_check: "Callable[[], bool] | None" = None) -> bool:
     """Sleep for *seconds*, checking pane liveness every tick.
 
     Returns True if the pane is still alive, False if it disappeared.
