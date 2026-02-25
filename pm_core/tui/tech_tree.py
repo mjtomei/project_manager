@@ -291,9 +291,12 @@ class TechTree(Widget):
         total_h = max_row * (NODE_H + V_GAP)
         total_w = max_x + NODE_W
 
-        # Build a character grid with increased margins to prevent overlapping
-        grid = [[" "] * (total_w + 10) for _ in range(total_h + 4)]
-        style_grid = [[""] * (total_w + 10) for _ in range(total_h + 4)]
+        # Build a character grid.  Extra bottom padding (NODE_H) ensures the
+        # grid is tall enough to scroll the last row's nodes fully into view
+        # above the status/command bars overlaying the viewport bottom.
+        grid_h = total_h + 4 + NODE_H
+        grid = [[" "] * (total_w + 10) for _ in range(grid_h)]
+        style_grid = [[""] * (total_w + 10) for _ in range(grid_h)]
 
         # Safe write helper to prevent out-of-bounds access
         def safe_write(y: int, x: int, char: str, style: str = "") -> None:
