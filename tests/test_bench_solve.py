@@ -9,7 +9,9 @@ from pm_core.bench.exercises import Exercise
 from pm_core.bench.runner import GenerationResult, RequestStats, Runner
 from pm_core.bench.solve import (
     Candidate,
+    HyperParams,
     PROMPT_VARIANTS,
+    _build_chain_context,
     _build_prompt,
     generate_candidates,
 )
@@ -162,3 +164,164 @@ class TestCandidateDataclass:
         assert c.temperature == 0.5
         assert c.prompt_variant == "direct"
         assert c.model == "test-model"
+
+
+# ---------------------------------------------------------------------------
+# Tests — HyperParams
+# ---------------------------------------------------------------------------
+
+class TestHyperParams:
+    def test_defaults_are_none_and_false(self):
+        hp = HyperParams()
+        assert hp.variant is None
+        assert hp.temperature is None
+        assert hp.chain is False
+        assert hp.test_subset_size is None
+
+    def test_validate_passes_for_defaults(self):
+        HyperParams().validate()  # should not raise
+
+    def test_validate_rejects_unknown_variant(self):
+        hp = HyperParams(variant="unknown")
+        with pytest.raises(ValueError, match="Unknown variant"):
+            hp.validate()
+
+    def test_validate_rejects_negative_temperature(self):
+        hp = HyperParams(temperature=-0.1)
+        with pytest.raises(ValueError, match="Temperature"):
+            hp.validate()
+
+    def test_validate_rejects_temperature_above_2(self):
+        hp = HyperParams(temperature=2.1)
+        with pytest.raises(ValueError, match="Temperature"):
+            hp.validate()
+
+    def test_validate_accepts_valid_temperature(self):
+        HyperParams(temperature=0.0).validate()
+        HyperParams(temperature=1.5).validate()
+        HyperParams(temperature=2.0).validate()
+
+    def test_validate_rejects_zero_test_subset(self):
+        hp = HyperParams(test_subset_size=0)
+        with pytest.raises(ValueError, match="test_subset_size"):
+            hp.validate()
+
+    def test_validate_accepts_valid_variant(self):
+        for v in PROMPT_VARIANTS:
+            HyperParams(variant=v).validate()
+
+
+# ---------------------------------------------------------------------------
+# Tests — _build_chain_context
+# ---------------------------------------------------------------------------
+
+class TestBuildChainContext:
+    def test_includes_prior_solutions(self):
+        ctx = _build_chain_context(["solution_1", "solution_2"])
+        assert "Attempt 1" in ctx
+        assert "solution_1" in ctx
+        assert "Attempt 2" in ctx
+        assert "solution_2" in ctx
+        assert "DIFFERENT approach" in ctx
+
+
+# ---------------------------------------------------------------------------
+# Tests — generate_candidates with HyperParams
+# ---------------------------------------------------------------------------
+
+class TestGenerateCandidatesHyper:
+    def _mock_runner(self, n):
+        runner = mock.MagicMock(spec=Runner)
+        runner.complete_batch.return_value = [
+            GenerationResult(content=f"solution {i}", model="m", stats=RequestStats())
+            for i in range(n)
+        ]
+        return runner
+
+    def test_fixed_variant(self):
+        runner = self._mock_runner(4)
+        hyper = HyperParams(variant="direct")
+        candidates = generate_candidates(
+            _exercise(), runner, "m", num_candidates=4, hyper=hyper,
+        )
+        assert all(c.prompt_variant == "direct" for c in candidates)
+
+    def test_fixed_temperature(self):
+        runner = self._mock_runner(4)
+        hyper = HyperParams(temperature=0.7)
+        candidates = generate_candidates(
+            _exercise(), runner, "m", num_candidates=4, hyper=hyper,
+        )
+        assert all(c.temperature == 0.7 for c in candidates)
+
+    def test_chain_mode_uses_sequential_calls(self):
+        """Chain mode should call runner.complete() sequentially, not complete_batch()."""
+        runner = mock.MagicMock(spec=Runner)
+        runner.complete.side_effect = [
+            GenerationResult(content=f"solution {i}", model="m", stats=RequestStats())
+            for i in range(3)
+        ]
+        hyper = HyperParams(chain=True)
+        candidates = generate_candidates(
+            _exercise(), runner, "m", num_candidates=3, hyper=hyper,
+        )
+
+        assert len(candidates) == 3
+        assert runner.complete.call_count == 3
+        runner.complete_batch.assert_not_called()
+
+    def test_chain_mode_passes_prior_solutions(self):
+        """Second and subsequent calls should include prior solutions in prompt."""
+        runner = mock.MagicMock(spec=Runner)
+        runner.complete.side_effect = [
+            GenerationResult(content="sol_0", model="m", stats=RequestStats()),
+            GenerationResult(content="sol_1", model="m", stats=RequestStats()),
+        ]
+        hyper = HyperParams(chain=True)
+        generate_candidates(
+            _exercise(), runner, "m", num_candidates=2, hyper=hyper,
+        )
+
+        # First call: no prior solutions
+        first_msgs = runner.complete.call_args_list[0][1]["messages"]
+        assert "Previous Attempts" not in first_msgs[0]["content"]
+
+        # Second call: should contain first solution
+        second_msgs = runner.complete.call_args_list[1][1]["messages"]
+        assert "sol_0" in second_msgs[0]["content"]
+
+    def test_test_subsets_produces_different_tests(self):
+        """With test_subset_size, each candidate should get a different test sample."""
+        runner = self._mock_runner(4)
+        test_code = (
+            "import pytest\n\n"
+            "def test_a():\n    pass\n\n"
+            "def test_b():\n    pass\n\n"
+            "def test_c():\n    pass\n\n"
+            "def test_d():\n    pass\n"
+        )
+        # Use test_driven variant so tests appear in all prompts
+        hyper = HyperParams(variant="test_driven", test_subset_size=2)
+        generate_candidates(
+            _exercise(), runner, "m", num_candidates=4,
+            tests=test_code, hyper=hyper,
+        )
+
+        # Each request should have test code with subsets applied
+        requests = runner.complete_batch.call_args[1]["requests"]
+        prompts = [r[0][0]["content"] for r in requests]
+        for p in prompts:
+            assert "test_" in p
+            # Each subset should have exactly 2 test functions
+            assert p.count("def test_") == 2
+
+    def test_backward_compat_no_hyper(self):
+        """Without hyper, behavior is unchanged: cycles variants + ramps temps."""
+        runner = self._mock_runner(3)
+        candidates = generate_candidates(
+            _exercise(), runner, "m", num_candidates=3,
+        )
+        variants_used = [c.prompt_variant for c in candidates]
+        variant_keys = list(PROMPT_VARIANTS.keys())
+        for i in range(3):
+            assert variants_used[i] == variant_keys[i % len(variant_keys)]

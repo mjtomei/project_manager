@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 
-def extract_code(text: str) -> str:
+def extract_code(text: str | None) -> str:
     """Extract code from a model response, stripping markdown fences if present."""
+    if not text:
+        return ""
     lines = text.strip().split("\n")
     if lines and lines[0].startswith("```"):
         lines = lines[1:]
