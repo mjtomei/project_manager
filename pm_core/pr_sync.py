@@ -241,7 +241,9 @@ def sync_prs(
 
             try:
                 if backend.is_merged(str(check_dir), branch, base_branch):
+                    from datetime import datetime as _dt, timezone as _tz
                     pr_entry["status"] = "merged"
+                    pr_entry["merged_at"] = _dt.now(_tz.utc).isoformat()
                     merged_prs.append(pr_entry["id"])
                     updated += 1
                     _log.info("PR %s detected as merged", pr_entry["id"])

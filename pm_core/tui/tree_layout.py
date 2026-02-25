@@ -91,7 +91,8 @@ def compute_tree_layout(
             children_of[d].append(node)
 
     # Sugiyama phases
-    layer_orders = _minimize_crossings(layers, parents_of, children_of)
+    layer_orders = _minimize_crossings(layers, parents_of, children_of,
+                                       pr_map=pr_map)
     row_assignments = _assign_coordinates(layer_orders, parents_of, children_of)
 
     # Normalize rows so minimum is 0
@@ -134,12 +135,41 @@ def compute_tree_layout(
 # ---------------------------------------------------------------------------
 
 
+def _activity_sort_key(pr_id: str, pr_map: dict[str, dict]) -> tuple:
+    """Sort key for PRs: active statuses first, then by most recent activity.
+
+    Order: in_progress > in_review > pending > merged > closed.
+    Within each status group, sort by most recent timestamp (descending).
+    """
+    pr = pr_map.get(pr_id)
+    if not pr:
+        return (5, "", pr_id)
+
+    status_priority = {
+        "in_progress": 0,
+        "in_review": 1,
+        "pending": 2,
+        "merged": 3,
+        "closed": 4,
+    }
+    priority = status_priority.get(pr.get("status", "pending"), 5)
+
+    # Use most recent timestamp for ordering within status group
+    ts = (pr.get("merged_at") or pr.get("reviewed_at")
+          or pr.get("started_at") or "")
+
+    # Negate for descending order (most recent first) — ISO timestamps
+    # sort lexicographically, so inverting gives descending order
+    return (priority, "" if not ts else ts, pr_id)
+
+
 def _minimize_crossings(
     layers: list[list[str]],
     parents_of: dict[str, list[str]],
     children_of: dict[str, list[str]],
     *,
     num_sweeps: int = 4,
+    pr_map: dict[str, dict] | None = None,
 ) -> list[list[str]]:
     """Reorder nodes within layers to minimize edge crossings.
 
@@ -151,7 +181,15 @@ def _minimize_crossings(
     seen so far is retained.  This prevents oscillation where a backward
     sweep undoes a good forward ordering (or vice versa).
     """
-    layer_orders = [sorted(layer) for layer in layers]
+    # Initial ordering: sort by activity/status when PR data is available,
+    # otherwise fall back to alphabetical.  This gives the crossing
+    # minimization a better starting point and ensures active PRs appear
+    # at the top within each layer.
+    if pr_map:
+        layer_orders = [sorted(layer, key=lambda pid: _activity_sort_key(pid, pr_map))
+                        for layer in layers]
+    else:
+        layer_orders = [sorted(layer) for layer in layers]
     if len(layer_orders) <= 1:
         return layer_orders
 

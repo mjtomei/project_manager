@@ -126,6 +126,15 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
         old_status = pr_entry.get("status", "pending")
         pr_entry["status"] = status
         changes.append(f"status: {old_status} → {status}")
+        # Record timestamp for status transitions
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        if status == "in_progress" and not pr_entry.get("started_at"):
+            pr_entry["started_at"] = now
+        elif status == "in_review":
+            pr_entry["reviewed_at"] = now
+        elif status == "merged":
+            pr_entry["merged_at"] = now
     if depends_on is not None:
         if depends_on == "":
             pr_entry["depends_on"] = []
@@ -584,8 +593,12 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                 click.echo("Warning: Failed to create draft PR.", err=True)
 
     # Update state — only advance from pending; don't regress in_review/merged
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
     if pr_entry.get("status") == "pending":
         pr_entry["status"] = "in_progress"
+    if not pr_entry.get("started_at"):
+        pr_entry["started_at"] = now
     pr_entry["agent_machine"] = platform.node()
     pr_entry["workdir"] = str(work_path)
     data["project"]["active_pr"] = pr_id
@@ -882,7 +895,9 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
         else:
             click.echo("Warning: Failed to upgrade draft PR. It may already be ready or was closed.", err=True)
 
+    from datetime import datetime, timezone
     pr_entry["status"] = "in_review"
+    pr_entry["reviewed_at"] = datetime.now(timezone.utc).isoformat()
     save_and_push(data, root, f"pm: review {pr_id}")
     click.echo(f"PR {_pr_display_id(pr_entry)} marked as in_review.")
     trigger_tui_refresh()
@@ -896,7 +911,9 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
 def _finalize_merge(data: dict, root, pr_entry: dict, pr_id: str,
                     transcript: str | None = None) -> None:
     """Mark PR as merged, kill tmux windows, and show newly ready PRs."""
+    from datetime import datetime, timezone
     pr_entry["status"] = "merged"
+    pr_entry["merged_at"] = datetime.now(timezone.utc).isoformat()
 
     # Auto-start state is in-memory on the TUI — check_and_start()
     # detects target-merged and disables it there.
