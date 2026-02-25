@@ -259,12 +259,12 @@ class TestContentHasInteractivePrompt:
     def test_empty_content(self):
         assert content_has_interactive_prompt("") is False
 
-    def test_selector_only_in_old_output(self):
-        """Selector in old output (beyond last 20 lines) should not match."""
-        old_lines = ["line " + str(i) for i in range(25)]
-        old_lines[3] = " ❯ 1. Yes, I trust this folder"
-        content = "\n".join(old_lines)
-        assert content_has_interactive_prompt(content) is False
+    def test_selector_anywhere_in_output(self):
+        """Selector anywhere in the pane content should match."""
+        lines = ["line " + str(i) for i in range(25)]
+        lines[3] = " ❯ 1. Yes, I trust this folder"
+        content = "\n".join(lines)
+        assert content_has_interactive_prompt(content) is True
 
     def test_bare_selector_no_text(self):
         """Bare ❯ without following text (e.g. input cursor) should not match."""

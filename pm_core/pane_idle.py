@@ -33,10 +33,7 @@ def content_has_interactive_prompt(content: str) -> bool:
     Detects gum-style selection UIs (trust prompt, permission prompt, etc.)
     where Claude is waiting for user input rather than being genuinely idle.
     """
-    # Only check the last ~20 lines to avoid false matches from old output
-    lines = content.splitlines()
-    tail = "\n".join(lines[-20:]) if len(lines) > 20 else content
-    return bool(_GUM_SELECTOR_RE.search(tail))
+    return bool(_GUM_SELECTOR_RE.search(content))
 
 
 @dataclass
