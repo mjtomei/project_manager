@@ -104,51 +104,79 @@ a natural escalation ladder. Test pass rate is the objective signal for routing:
 
 ## PRs
 
+> **Note:** PRs 012–016 (runner, exercise loader, test gen, solve, executor) were
+> closed without merging and consolidated into pr-017. The original PR sections are
+> preserved below for reference but marked as superseded.
+
 ### PR: Local model runner with OpenAI-compatible API
-- **description**: Create a module that manages local LLM inference via the OpenAI-compatible API exposed by local serving backends (see `pm/plans/plan-002.md` for the broader multi-candidate generation strategy). Support three backends with automatic platform detection: llama.cpp server on macOS, sglang and vllm on Linux. All three expose the same OpenAI-compatible chat/completions endpoint, so the core runner uses a single HTTP client with backend-specific server management (health checks, model listing). Server URL is configured via `PM_BENCH_URL` environment variable with a sensible default per backend (e.g. `http://localhost:8080` for llama.cpp, `http://localhost:30000` for sglang). Support sending prompts to a configurable model, collecting responses, and running multiple generations with different temperatures in parallel. Track token counts and wall-clock time per request for downstream cost analysis. Include a CLI command (`pm bench models`) that detects the available backend, lists loaded models, and validates connectivity.
-- **tests**: Unit tests for API interaction (mock OpenAI-compatible responses), test platform detection logic, test that all three backends use the same request/response format. Integration test (requires running backend, marked slow/CI-optional) that checks connectivity and lists models
+- **status**: closed — superseded by pr-017
+- **description**: Create a module that manages local LLM inference via the OpenAI-compatible API exposed by local serving backends. Support three backends with automatic platform detection: llama.cpp server on macOS, sglang and vllm on Linux.
 - **files**: pm_core/bench/runner.py, pm_core/cli/bench.py
-- **depends_on**:
 
 ---
 
 ### PR: Aider polyglot exercise loader
-- **description**: Load the Exercism exercises used by aider's polyglot benchmark (https://github.com/Aider-AI/aider — see `benchmark/` directory for exercise structure). Each exercise has a problem description, starter code, and a reference test suite. Parse exercises into a structured format: {language, slug, description, starter_code, reference_tests}. Support filtering by language and exercise name. Clone or download the exercise set from aider's benchmark repo and cache it locally under `~/.cache/pm-bench/exercises/`. Include a CLI command (`pm bench exercises`) that downloads/updates the exercise cache and lists available exercises with optional `--language` filter.
-- **tests**: Unit tests for exercise parsing with fixture data (a few sample exercises checked into the test directory). Integration test (marked slow, requires network) that clones the repo and verifies at least 200 exercises are available across the 6 languages (C++, Go, Java, JavaScript, Python, Rust). Test filtering by language and exercise name
+- **status**: closed — superseded by pr-017
+- **description**: Load the Exercism exercises used by aider's polyglot benchmark. Parse exercises into a structured format with filtering by language and exercise name.
 - **files**: pm_core/bench/exercises.py, pm_core/cli/bench.py
-- **depends_on**:
 
 ---
 
 ### PR: Test generation from problem descriptions
-- **description**: Given an exercise's problem description and starter code (but NOT the reference tests), generate test cases using a local model. The core insight from the plan (`pm/plans/plan-002.md`): verification is easier than generation — a model that scores poorly on single-pass coding can generate useful tests that filter better solutions from multiple candidates. Use the problem description and function signatures to produce tests that verify correctness. Generate tests at multiple temperatures and with prompt variations to increase diversity. Deduplicate and validate generated tests (must parse, must be syntactically valid, must reference the correct function names). Return a merged test suite as a single source file string per language's test convention.
-- **tests**: Unit tests for deduplication logic and syntax validation using hardcoded test snippets (no LLM needed). Integration test (marked slow, requires running backend) that loads a real exercise via the exercise loader, calls the runner to generate tests, and validates the output is syntactically correct and references the right function names
+- **status**: closed — superseded by pr-017
+- **description**: Generate test cases from exercise problem descriptions using a local model. Deduplicate and validate generated tests.
 - **files**: pm_core/bench/test_gen.py
-- **depends_on**: Local model runner with OpenAI-compatible API, Aider polyglot exercise loader
 
 ---
 
 ### PR: Multi-candidate solution generation
-- **description**: Given an exercise's starter code, problem description, and a test suite (either generated or reference), produce N candidate solutions using a local model. Vary temperature (0.0 to 1.0) and prompt format (direct, chain-of-thought, example-driven). Multi-model support (querying different models on the same backend) is a stretch goal — the initial implementation should work well with a single model and temperature/prompt diversity. Each candidate is a complete file that should compile and pass the tests. Return candidates as a list of {code, temperature, prompt_variant, model}. See `pm/plans/plan-002.md` for how candidate diversity feeds into tournament selection.
-- **tests**: Unit tests for prompt construction, candidate deduplication, and response parsing using mock runner responses (no LLM needed). Integration test (marked slow, requires running backend) that loads a real exercise, generates N=4 candidates via the runner, and verifies they are syntactically valid and diverse (not all identical)
+- **status**: closed — superseded by pr-017
+- **description**: Produce N candidate solutions using temperature and prompt variant diversity.
 - **files**: pm_core/bench/solve.py
-- **depends_on**: Local model runner with OpenAI-compatible API, Aider polyglot exercise loader
 
 ---
 
 ### PR: Test execution and candidate scoring
-- **description**: Run a test suite against a candidate solution in an isolated environment. Use temporary directories with copies of the exercise scaffold — each candidate gets its own temp directory, solution file is written in, and the language-appropriate test runner is invoked via subprocess with a timeout. Support the 6 polyglot languages with appropriate build/test commands: `pytest` for Python, `go test` for Go, `cargo test` for Rust, `npm test` / `jest` for JavaScript, `javac` + `junit` for Java, `cmake` + `ctest` or `g++` + run for C++. Return per-test pass/fail results and an overall score. Score candidates as (passing_tests / total_tests). Handle compilation failures, timeouts, and runtime errors gracefully.
-- **tests**: Unit tests for scoring logic with mock test results, test timeout handling, test that each language's build/test command is constructed correctly. Integration test that loads a real Python exercise via the exercise loader, writes a known-correct solution, runs the executor against the reference tests, and verifies a perfect score
+- **status**: closed — superseded by pr-017
+- **description**: Run test suites against candidates in isolated environments with 6-language support.
 - **files**: pm_core/bench/executor.py
-- **depends_on**: Aider polyglot exercise loader
 
 ---
 
-### PR: Benchmark orchestrator with tournament selection
-- **description**: Wire together the full pipeline from `pm/plans/plan-002.md`: for each exercise, (1) generate tests from the description, (2) generate N candidate solutions, (3) score each candidate against the generated tests, (4) pick the best candidate, (5) score the best candidate against the reference tests to get the final result. The pipeline embodies the plan's core insight — separating verification (test generation) from generation (solution candidates) lets weaker models punch above their weight through selection pressure. Compare the tournament score against a single-pass baseline (N=1, reference tests only). Collect cost metrics from the runner (total tokens, wall-clock time, tokens per exercise) alongside scores. Report results as a terminal table showing per-exercise and aggregate scores, and save raw results to a JSON file. Add CLI command `pm bench run` with options for model, N candidates, languages, and exercise filter.
-- **tests**: Unit test that tournament selection picks the highest-scoring candidate from mock scores. Integration test (marked slow, requires running backend) that runs the full pipeline on 1-2 Python exercises end-to-end: exercises loaded from cache, tests generated via runner, candidates generated via runner, candidates scored via executor, best selected, and final score computed against reference tests. Verify the JSON output contains all expected fields
-- **files**: pm_core/bench/orchestrator.py, pm_core/cli/bench.py
-- **depends_on**: Test generation from problem descriptions, Multi-candidate solution generation, Test execution and candidate scoring
+### PR: Benchmark: multi-candidate code generation with tournament selection
+- **description**: Collapsed implementation of the full benchmark pipeline. Includes: OpenAI-compatible multi-backend runner (llama.cpp/sglang/vllm), Exercism exercise loader from aider's polyglot-benchmark, test generation from problem descriptions, multi-candidate solution generation, test execution with 6-language support, and tournament orchestrator with baseline comparison, cost metrics, and JSON export. CLI commands: `pm bench models`, `pm bench exercises`, `pm bench run`. Features added during implementation: vLLM reasoning mode support, chain mode (`--chain`) for sequential generation with prior-attempt context, parallel exercise execution (`-j`), and separate tournament/baseline token accounting (schema v2). Supersedes pr-012 through pr-016.
+- **tests**: 44 unit tests covering runner (backend detection, URL config, health checks, chat completion, parallel generation, cost metrics), exercises (parsing, filtering, heuristic fallback), and orchestrator (scoring, formatting, JSON roundtrip)
+- **files**: pm_core/bench/runner.py, pm_core/bench/exercises.py, pm_core/bench/test_gen.py, pm_core/bench/solve.py, pm_core/bench/executor.py, pm_core/bench/orchestrator.py, pm_core/bench/_utils.py, pm_core/bench/__init__.py, pm_core/cli/bench.py, pm_core/paths.py
+- **depends_on**:
+- **manual_testing**: INPUT_REQUIRED — requires a running local inference backend (llama.cpp, sglang, or vllm) with a loaded model. `pm bench models` validates connectivity. `pm bench exercises` requires network access to clone aider's benchmark repo. `pm bench run` exercises the full pipeline and requires language toolchains (pytest for Python, go test, cargo test, npm/jest, javac/junit, g++) for multi-language execution.
+- **results**: Python (34 exercises): 120B chain+reasoning T=53.8% B=50.1% (+3.7pp); 20B chain T=42.7% B=35.5% (+7.2pp). Reasoning mode is the biggest lever.
+
+---
+
+### PR: EvalPlus benchmark loader (HumanEval+ and MBPP+)
+- **description**: Add EvalPlus (HumanEval+ 164 problems, MBPP+ 378 problems) as an exercise source. Python-only function-completion with 80x expanded assert-based test suites — structurally identical to the existing Exercism/Python path. Public leaderboard (evalplus.github.io, 100+ models) enables direct comparison: Qwen2.5-Coder-32B 87.2%/75.1% HE+/MBPP+, DeepSeek-V2 84.8%/76.2%, Qwen2.5-Coder-7B 84.1%/71.7%. Download from HuggingFace JSONL, cache under `~/.cache/pm-bench/evalplus/`. Add `--source evalplus` flag to `pm bench exercises` and `pm bench run`.
+- **tests**: Unit tests for JSONL parsing, Exercise field mapping. Integration: download dataset, verify 164+378 exercises. Manual eval: 20B first (`PM_BENCH_URL=http://localhost:30001 pm bench run openai/gpt-oss-20b -n 8 --chain --temperature 0.0 -j 4 --source evalplus`), then 120B.
+- **files**: pm_core/bench/exercises_evalplus.py, pm_core/cli/bench.py (--source flag), pm_core/bench/exercises.py (refactor for pluggable sources)
+- **depends_on**: Benchmark: multi-candidate code generation with tournament selection
+- **manual_testing**: INPUT_REQUIRED — requires running vLLM backend. Eval order: 20B then 120B. Compare against published pass@1 to gauge tournament selection effectiveness.
+
+---
+
+### PR: LiveCodeBench competitive programming loader
+- **description**: Add LiveCodeBench (880+ problems from LeetCode/AtCoder/Codeforces, continuously updated) as an exercise source. Stdin/stdout evaluation format — requires a new execution path in executor.py that pipes input to the candidate program and compares stdout to expected output (instead of running a test file via pytest). Continuously updated post-training-cutoff to reduce contamination. Download from HuggingFace (`livecodebench/code_generation_lite`), cache under `~/.cache/pm-bench/livecodebench/`. Add `--source livecodebench` and `--difficulty easy/medium/hard` flags.
+- **tests**: Unit tests for dataset parsing, stdin/stdout executor path with known-correct solutions. Integration: download dataset, verify 880+ exercises. Manual eval: start with `--difficulty easy` on 20B to validate stdin/stdout executor, then full range, then 120B.
+- **files**: pm_core/bench/exercises_livecodebench.py, pm_core/bench/executor.py (stdin/stdout path), pm_core/cli/bench.py (--source, --difficulty flags)
+- **depends_on**: Benchmark: multi-candidate code generation with tournament selection
+- **manual_testing**: INPUT_REQUIRED — requires running vLLM backend. The stdin/stdout execution path is new and needs end-to-end validation. Eval order: 20B easy → 20B full → 120B full.
+
+---
+
+### PR: BigCodeBench real-world task loader
+- **description**: Add BigCodeBench (1,140 tasks, 148 hard subset) as an exercise source. Tasks require real library APIs (pandas, numpy, http.client, matplotlib) with unittest+mock-based tests — hardest benchmark, most realistic. Public leaderboard: GPT-4o 61.1%/51.1% complete/instruct, Qwen2.5-Coder-32B ~49.6%. Use instruct_prompt mode (NL instructions, better fit for chat models). Download from HuggingFace (`bigcode/bigcodebench`), cache under `~/.cache/pm-bench/bigcodebench/`. pytest discovers unittest tests natively so basic executor works, but library deps from the `libs` field must be installed. Add `--source bigcodebench`, `--hard`, and `--mode complete/instruct` flags.
+- **tests**: Unit tests for dataset parsing, both prompt modes, libs extraction. Integration: download dataset, verify 1,140 exercises (148 hard). Manual eval: 20B hard subset first (`--hard`, ~148 problems), then full set, then 120B. Compare against GPT-4o 51.1% instruct.
+- **files**: pm_core/bench/exercises_bigcodebench.py, pm_core/cli/bench.py (--source, --hard, --mode flags)
+- **depends_on**: Benchmark: multi-candidate code generation with tournament selection
+- **manual_testing**: INPUT_REQUIRED — requires running vLLM backend and library deps installed in pm venv (pandas, numpy, matplotlib, etc.). Eval order: 20B hard → 20B full → 120B hard.
 
 ---
 
@@ -156,7 +184,7 @@ a natural escalation ladder. Test pass rate is the objective signal for routing:
 - **description**: Add a CLI command `pm bench analyze` that reads benchmark result JSON files produced by the orchestrator and generates comparison reports. Run the benchmark via `pm bench run` in single-pass mode (N=1, no test generation) to establish the baseline, then with tournament (N=8, N=16) and compare. Produce a report showing: baseline vs tournament scores per language, per exercise difficulty tier (easy/medium/hard, based on baseline pass rate — easy: >66% of models solve it, hard: <33%), and aggregate. Include cost analysis — total tokens generated, wall-clock time, and tokens-per-correct-exercise for each configuration, so the accuracy improvement can be weighed against the compute cost (e.g., "N=16 tournament scores 58% vs 40% baseline but costs 20x the tokens"). Identify which exercises benefit most from multi-candidate generation (large delta) vs which are insensitive (model either always gets it or never does). Save analysis results to a JSON file for tracking over time.
 - **tests**: Unit tests for report generation and difficulty tier classification with mock benchmark result JSON. Test cost metric aggregation logic. Integration test (marked slow) that reads real orchestrator output JSON (from a previous `pm bench run`) and produces a valid analysis report
 - **files**: pm_core/bench/analysis.py, pm_core/cli/bench.py
-- **depends_on**: Benchmark orchestrator with tournament selection
+- **depends_on**: Benchmark: multi-candidate code generation with tournament selection
 
 ---
 
@@ -164,4 +192,4 @@ a natural escalation ladder. Test pass rate is the objective signal for routing:
 - **description**: Add a CLI command `pm bench test-quality` that analyzes how well generated tests compare to reference tests. This is critical for validating the plan's core assumption (`pm/plans/plan-002.md`) that verification is easier than generation — if generated tests are poor, tournament selection breaks down regardless of candidate quality. Reads benchmark result JSON from the orchestrator, which includes both generated and reference test outcomes per candidate. Measure: (1) coverage overlap — run each candidate against both generated and reference tests and compute rank correlation (do generated tests rank candidates in the same order as reference tests?), (2) false positives — identify generated tests that pass on candidates that fail all reference tests (using the failed candidates already present in benchmark results), (3) diversity — count distinct pass/fail signatures across generated tests (more signatures = more behavioral coverage). Cross-reference with benchmark results: do exercises where generated tests diverge most from reference tests also show the largest gap between tournament-selected and oracle-selected (best candidate scored against reference tests) scores?
 - **tests**: Unit tests for rank correlation, false positive detection, and diversity metrics using synthetic candidate score data. Integration test (marked slow) that reads real orchestrator output JSON and produces a valid test quality report
 - **files**: pm_core/bench/test_analysis.py, pm_core/cli/bench.py
-- **depends_on**: Benchmark orchestrator with tournament selection
+- **depends_on**: Benchmark: multi-candidate code generation with tournament selection

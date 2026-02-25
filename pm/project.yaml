@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-0996fb8
+  active_pr: pr-017
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-02-20T02:43:08.956779+00:00'
@@ -295,7 +295,11 @@ prs:
     descriptions, multi-candidate solution generation, test execution with 6-language
     support, and tournament orchestrator with baseline comparison, cost metrics, and
     JSON export. CLI commands: pm bench models, pm bench exercises, pm bench run.
-    Supersedes pr-012 through pr-016.'
+    Supersedes pr-012 through pr-016. MANUAL TESTING (INPUT_REQUIRED): Integration
+    testing requires a running local inference backend (llama.cpp, sglang, or vllm)
+    with a loaded model. pm bench models validates connectivity. pm bench exercises
+    requires network access to clone aider''s benchmark repo. pm bench run exercises
+    the full pipeline and needs language toolchains for multi-language execution.'
   agent_machine: spark-424d
   gh_pr: https://github.com/mjtomei/project_manager/pull/69
   gh_pr_number: 69
@@ -346,26 +350,32 @@ prs:
       baseline). Tournament selection reliably helps with reasoning enabled.'
     created_at: '2026-02-24T15:20:08Z'
     last_edited: '2026-02-24T15:20:08Z'
+  - id: note-5971d12
+    text: 'Running the benchmark: pytest must be installed in the pm venv (pip install
+      pytest). Two vLLM containers on NVIDIA GB10 (~128GB unified memory, mxfp4 quant):
+      vllm-120b on port 30000, vllm-20b on port 30001. Stop one to give the other
+      full GPU (docker stop vllm-120b).'
+    created_at: '2026-02-25T11:22:08Z'
+    last_edited: '2026-02-25T11:22:08Z'
 - id: pr-018
   plan: plan-002
   title: Baseline measurement and analysis
   branch: pm/pr-018-baseline-measurement-and-analysis
   status: pending
   depends_on:
-  - pr-017
-  description: 'Add a CLI command `pm bench analyze` that reads benchmark result JSON
-    files produced by the orchestrator and generates comparison reports. Run the benchmark
-    via `pm bench run` in single-pass mode (N=1, no test generation) to establish
+  - pr-409b580
+  description: 'Add a CLI command pm bench analyze that reads benchmark result JSON
+    files (schema v2) produced by the orchestrator and generates comparison reports.
+    pr-017 already outputs separate tournament_tokens/baseline_tokens per ExerciseResult,
+    so cost analysis can compute per-configuration token totals directly. Run the
+    benchmark via pm bench run in single-pass mode (N=1, no test generation) to establish
     the baseline, then with tournament (N=8, N=16) and compare. Produce a report showing:
     baseline vs tournament scores per language, per exercise difficulty tier (easy/medium/hard,
     based on baseline pass rate — easy: >66% of models solve it, hard: <33%), and
     aggregate. Include cost analysis — total tokens generated, wall-clock time, and
-    tokens-per-correct-exercise for each configuration, so the accuracy improvement
-    can be weighed against the compute cost (e.g., "N=16 tournament scores 58% vs
-    40% baseline but costs 20x the tokens"). Identify which exercises benefit most
-    from multi-candidate generation (large delta) vs which are insensitive (model
-    either always gets it or never does). Save analysis results to a JSON file for
-    tracking over time.'
+    tokens-per-correct-exercise for each configuration. Identify which exercises benefit
+    most from multi-candidate generation (large delta) vs which are insensitive. Save
+    analysis results to a JSON file for tracking over time.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
@@ -375,22 +385,20 @@ prs:
   branch: pm/pr-019-generated-test-quality-analysis
   status: pending
   depends_on:
-  - pr-017
-  description: 'Add a CLI command `pm bench test-quality` that analyzes how well generated
-    tests compare to reference tests. This is critical for validating the plan''s
-    core assumption (`pm/plans/plan-002.md`) that verification is easier than generation
-    — if generated tests are poor, tournament selection breaks down regardless of
-    candidate quality. Reads benchmark result JSON from the orchestrator, which includes
-    both generated and reference test outcomes per candidate. Measure: (1) coverage
-    overlap — run each candidate against both generated and reference tests and compute
-    rank correlation (do generated tests rank candidates in the same order as reference
-    tests?), (2) false positives — identify generated tests that pass on candidates
-    that fail all reference tests (using the failed candidates already present in
-    benchmark results), (3) diversity — count distinct pass/fail signatures across
-    generated tests (more signatures = more behavioral coverage). Cross-reference
-    with benchmark results: do exercises where generated tests diverge most from reference
-    tests also show the largest gap between tournament-selected and oracle-selected
-    (best candidate scored against reference tests) scores?'
+  - pr-409b580
+  description: 'Add a CLI command pm bench test-quality that analyzes how well generated
+    tests compare to reference tests. pr-017 stores generated_test_code on ExerciseResult
+    and includes both generated and reference test outcomes per candidate in the JSON
+    output. Measure: (1) coverage overlap — compute rank correlation between generated
+    and reference test scores across candidates (do generated tests rank candidates
+    in the same order as reference tests?), (2) false positives — identify generated
+    tests that pass on candidates failing all reference tests, (3) diversity — count
+    distinct pass/fail signatures across generated tests. Cross-reference with benchmark
+    results: do exercises where generated tests diverge most from reference tests
+    also show the largest gap between tournament-selected and oracle-selected scores?
+    Results from pr-017 notes show tournament selection helps most with reasoning
+    enabled (+3.7pp for 120B, +7.2pp for 20B), suggesting test quality correlates
+    with reasoning capability.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
@@ -1146,7 +1154,7 @@ prs:
   plan: null
   title: Pull after merge on github backend with conflict resolution
   branch: pm/pr-7989302-pull-after-merge-on-github-backend-with-conflict-r
-  status: in_review
+  status: merged
   depends_on: []
   description: After a PR is merged via the github backend, automatically pull the
     latest changes into the local repo. If there are uncommitted local changes, stash
@@ -1162,7 +1170,7 @@ prs:
   plan: null
   title: Fix tmux window-size, horizontal scroll, and session rebalance bugs
   branch: pm/pr-0996fb8-fix-tmux-window-size-horizontal-scroll-and-session
-  status: in_review
+  status: merged
   depends_on: []
   description: 'Fix three tmux/session bugs: (1) _register_tmux_bindings in session.py
     sets window-size=smallest unconditionally on the base session, even for non-shared
@@ -1194,7 +1202,7 @@ prs:
   plan: null
   title: Add pm pr note subcommand for querying and editing PR notes
   branch: pm/pr-97c1be3-add-pm-pr-note-subcommand-for-querying-and-editing
-  status: in_review
+  status: merged
   depends_on: []
   description: Add a 'pm pr note' subcommand with subcommands for querying and editing
     PR notes. Should support listing notes for a PR, adding a new note, and editing
@@ -1248,3 +1256,291 @@ prs:
   gh_pr_number: 84
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-bc3de02-fix-auto-start-bugs-session-restart--9cfc4712
+- id: pr-ac1ffc0
+  plan: null
+  title: Fix post-merge pull to target main repo instead of PR workdir
+  branch: pm/pr-ac1ffc0-fix-post-merge-pull-to-target-main-repo-instead-of
+  status: merged
+  depends_on:
+  - pr-7989302
+  description: '_pull_after_github_merge() passes the PR''s workdir to the pull logic,
+    but the workdir is a worktree checked out to the PR branch, not master. The function
+    checks if the workdir is on the base branch (line 972 of pr.py), sees it''s on
+    the PR branch, and skips the pull every time.
+
+
+    The pull should happen in the main repo directory where the TUI is running (which
+    is on master), not in the PR''s workdir. Use the pm root''s parent directory or
+    the repo path from project.yaml instead of the workdir parameter.
+
+
+    Also verify the stash/unstash and conflict resolution flow works correctly when
+    targeting the main repo directory.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/85
+  gh_pr_number: 85
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ac1ffc0-fix-post-merge-pull-to-target-main-r-f53806a1
+- id: pr-c0167ac
+  plan: null
+  title: Add autonomous monitor session for auto–start issue detection and resolution
+  branch: pm/pr-c0167ac-add-autonomous-monitor-session-for-auto-start-issu
+  status: in_progress
+  depends_on: []
+  description: 'Add an autonomous monitor session that runs alongside auto–start and
+    watches the TUI and tmux windows for issues. The session should:
+
+
+    1. Scan all active tmux panes (session windows, review windows, merge windows)
+    for error states, stuck processes, unexpected output, or failed commands.
+
+
+    2. For issues that don‘t require human input (e.g. a stuck git operation, a failed
+    push that can be retried, a pane that died and needs restarting, a merge conflict
+    that can be auto–resolved), attempt to fix them automatically.
+
+
+    3. For issues that do require human input (e.g. ambiguous merge conflicts, authentication
+    failures, decisions about code direction), surface them to the user in the later
+    described iteration process.
+
+
+    4. Should be aware of the auto–start state machine (which PRs are being started,
+    reviewed, merged) and understand what normal vs abnormal states look like for
+    each phase.
+
+
+    5. Should be told about access to the debug log and tmux pane captures to diagnose
+    issues.
+
+
+    6. Should not interfere with running sessions — read–only observation unless taking
+    a corrective action.
+
+
+    7. Should track general project health — monitor patterns across PRs (recurring
+    test failures, dependency bottlenecks, PRs that are taking unusually long or cycling
+    through too many review iterations) and reason about whether changes to the plan
+    are warranted (e.g. splitting a PR that keeps failing, reordering dependencies,
+    flagging PRs whose scope has drifted from their description). Surface plan change
+    suggestions to the user rather than making them autonomously.
+
+
+    8. Should watch other active claude sessions (via tmux pane captures) for signs
+    of problems — sessions going off–track, producing errors they are not recovering
+    from, or making changes that conflict with other in–flight PRs.
+
+
+    9. Should periodically check master for oversights or gaps in the plan from an
+    architectural perspecitve. Should try to anticipate any future issues or incorrect
+    assumptions made during planning.
+
+
+    10. The monitor loop should work similarly to the review loop but with only two
+    verdicts: READY (all issues handled, ready for next iteration) and INPUT_REQUIRED
+    (needs human input or wants to surface something, pauses the loop). Unlike the
+    review loop, there should be a fixed configurable wait time between iterations.
+
+
+    12. The session should also check for bugs or improvements to the pm tool itself
+    while completing the above steps. Bugs should be appended to pm/bugs.txt and improvements
+    to pm/improvements.txt. Writing to these files should no block the next iteration
+    (verdict stays READY) UNLESS the bug is actively blocking progress and cannot
+    be worked around — only then should it use INPUT_REQUIRED to pause and surface
+    the blocker to the user.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/86
+  gh_pr_number: 86
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-c0167ac-add-autonomous-monitor-session-for-a-448a51be
+- id: pr-98d857a
+  plan: plan-002
+  title: 'Additional benchmark sets: EvalPlus, LiveCodeBench, BigCodeBench'
+  branch: pm/pr-98d857a-additional-benchmark-sets-evalplus-livecodebench-b
+  status: closed
+  depends_on:
+  - pr-017
+  description: 'Add support for three additional benchmark exercise sources with public
+    pass@1 leaderboards, enabling direct comparison of tournament selection results
+    against frontier and open-weight models. The current Exercism/aider benchmark
+    lacks published pass@1 results, making it hard to gauge how close local models
+    + tournament selection get to larger models. (1) EvalPlus (HumanEval+ 164 problems,
+    MBPP+ 378 problems): Python function-completion with 80x expanded test suites,
+    assert-based tests. Available via evalplus pip package or HuggingFace JSONL. Closest
+    to existing Exercism format. Public leaderboard has 100+ models including Qwen2.5-Coder-32B
+    (87.2% HE+), DeepSeek-V2 (84.8%), Claude-3.5-Sonnet (86.0%). (2) LiveCodeBench
+    (880+ competitive programming problems from LeetCode/AtCoder/Codeforces, continuously
+    updated): Stdin/stdout format with input/output test pairs. Different evaluation
+    style requiring I/O redirection. Continuously updated to reduce contamination.
+    (3) BigCodeBench (1,140 tasks requiring real library APIs like pandas, numpy,
+    http.client): Python unittest-based tests with mocking. Harder, more realistic
+    than HumanEval. Public leaderboard: GPT-4o 61.1%, Qwen2.5-Coder-32B ~49.6%. Extend
+    the exercise loader abstraction to support multiple sources via a --source flag
+    on pm bench exercises and pm bench run. Each source implements a common Exercise
+    interface. EvalPlus and BigCodeBench use function-completion with test files (similar
+    to Exercism). LiveCodeBench requires a stdin/stdout execution path in the executor.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  notes: []
+- id: pr-6ef084e
+  plan: plan-002
+  title: EvalPlus benchmark loader (HumanEval+ and MBPP+)
+  branch: pm/pr-6ef084e-evalplus-benchmark-loader-humaneval-and-mbpp
+  status: pending
+  depends_on:
+  - pr-017
+  description: 'Add EvalPlus (HumanEval+ 164 problems, MBPP+ 378 problems) as an exercise
+    source for pm bench. This is the highest-priority benchmark because it is Python-only
+    function-completion with assert-based tests — structurally identical to the existing
+    Exercism/Python path. Public pass@1 leaderboard (evalplus.github.io) has 100+
+    models including local-class: Qwen2.5-Coder-32B 87.2%/75.1% (HE+/MBPP+), DeepSeek-V2
+    84.8%/76.2%, Qwen2.5-Coder-7B 84.1%/71.7%. These numbers let us directly answer
+    "how close does 20B+tournament get to 32B single-pass?"
+
+
+    Exercise format: each problem is a JSONL record with task_id, prompt (function
+    signature + docstring), canonical_solution, entry_point, and test (comprehensive
+    assert-based test harness with a check(candidate) wrapper). Tests are 80x expanded
+    vs original HumanEval. Available from HuggingFace (evalplus/humanevalplus, evalplus/mbppplus)
+    or the evalplus pip package.
+
+
+    Implementation: (1) Add exercises_evalplus.py that downloads HumanEval+ and MBPP+
+    JSONL from HuggingFace, caches under ~/.cache/pm-bench/evalplus/, and parses into
+    Exercise objects (prompt → description, empty dict → starter_code since these
+    are completion-style, test → reference_tests with entry_point-based filename).
+    (2) Extend pm bench exercises --source evalplus to list them. (3) Extend pm bench
+    run --source evalplus to use them. The executor already handles Python/pytest
+    — the test harness just needs the generated code prepended to the check() test
+    block, then run with pytest. (4) Add --source flag to exercises CLI and run CLI
+    (default: exercism for backwards compat). The Exercise dataclass already has all
+    needed fields.
+
+
+    Testing and eval (INPUT_REQUIRED): Unit tests for JSONL parsing and Exercise field
+    mapping. Automated integration: download dataset, verify 164 HE+ and 378 MBPP+
+    exercises load. During review, run full evals and save results for the downstream
+    comparison table (pr-409b580): (1) 20B: PM_BENCH_URL=http://localhost:30001 pm
+    bench run openai/gpt-oss-20b -n 8 --chain --temperature 0.0 -j 4 -l python --source
+    evalplus -o /tmp/bench-20b-evalplus.json. (2) After 20B looks good, 120B: PM_BENCH_URL=http://localhost:30000
+    pm bench run openai/gpt-oss-120b -n 8 --chain --temperature 0.0 -j 4 -l python
+    --source evalplus -o /tmp/bench-120b-evalplus.json. These result JSONs are required
+    artifacts — pr-409b580 consumes them for the cross-benchmark comparison table.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  notes: []
+- id: pr-3060c7e
+  plan: plan-002
+  title: LiveCodeBench competitive programming loader
+  branch: pm/pr-3060c7e-livecodebench-competitive-programming-loader
+  status: pending
+  depends_on:
+  - pr-017
+  description: 'Add LiveCodeBench (880+ competitive programming problems from LeetCode/AtCoder/Codeforces,
+    continuously updated) as an exercise source for pm bench. Stdin/stdout evaluation
+    format — requires a new execution path in executor.py that pipes input to the
+    candidate program and compares stdout to expected output (instead of running a
+    test file via pytest). Continuously updated post-training-cutoff to reduce contamination.
+    Download from HuggingFace (livecodebench/code_generation_lite), cache under ~/.cache/pm-bench/livecodebench/.
+    Add --source livecodebench and --difficulty easy/medium/hard flags.
+
+
+    Implementation: (1) Add exercises_livecodebench.py that downloads the HuggingFace
+    dataset, caches under ~/.cache/pm-bench/livecodebench/, and parses into Exercise
+    objects. question_content → description, starter_code → starter_code dict, test
+    cases → reference_tests encoded as a JSON blob. (2) Add a stdin/stdout execution
+    path in executor.py: pipe each test case input to the candidate program via subprocess
+    stdin and compare stdout to expected output. Score = matching_outputs / total_test_cases.
+    (3) Extend --source livecodebench flag on exercises and run CLI. (4) Support --difficulty
+    easy/medium/hard filter.
+
+
+    Testing and eval (INPUT_REQUIRED): Unit tests for dataset parsing, stdin/stdout
+    executor path with known-correct solutions, difficulty filtering. Automated integration:
+    download dataset, verify 880+ exercises load. During review, run full evals and
+    save results for the downstream comparison table (pr-409b580): (1) 20B easy first
+    to validate stdin/stdout executor: PM_BENCH_URL=http://localhost:30001 pm bench
+    run openai/gpt-oss-20b -n 8 --chain --temperature 0.0 -j 4 -l python --source
+    livecodebench --difficulty easy -o /tmp/bench-20b-lcb-easy.json. (2) 20B full:
+    PM_BENCH_URL=http://localhost:30001 pm bench run openai/gpt-oss-20b -n 8 --chain
+    --temperature 0.0 -j 4 -l python --source livecodebench -o /tmp/bench-20b-lcb-full.json.
+    (3) 120B full: PM_BENCH_URL=http://localhost:30000 pm bench run openai/gpt-oss-120b
+    -n 8 --chain --temperature 0.0 -j 4 -l python --source livecodebench -o /tmp/bench-120b-lcb-full.json.
+    These result JSONs are required artifacts — pr-409b580 consumes them for the cross-benchmark
+    comparison table.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  notes: []
+- id: pr-37b4b31
+  plan: plan-002
+  title: BigCodeBench real-world task loader
+  branch: pm/pr-37b4b31-bigcodebench-real-world-task-loader
+  status: pending
+  depends_on:
+  - pr-017
+  description: 'Add BigCodeBench (1,140 tasks, 148 hard subset) as an exercise source
+    for pm bench. Tasks require real library APIs (pandas, numpy, http.client, matplotlib)
+    with unittest+mock-based tests — hardest benchmark, most realistic. Public leaderboard:
+    GPT-4o 61.1%/51.1% complete/instruct, Qwen2.5-Coder-32B ~49.6%. Use instruct_prompt
+    mode (NL instructions, better fit for chat models served via vLLM). Download from
+    HuggingFace (bigcode/bigcodebench), cache under ~/.cache/pm-bench/bigcodebench/.
+    pytest discovers unittest tests natively so basic executor works, but library
+    deps from the libs field must be installed. Add --source bigcodebench, --hard,
+    and --mode complete/instruct flags.
+
+
+    Implementation: (1) Add exercises_bigcodebench.py that downloads the HuggingFace
+    dataset, caches under ~/.cache/pm-bench/bigcodebench/, and parses into Exercise
+    objects. Use instruct_prompt → description, empty starter_code, test → reference_tests
+    as a unittest file. (2) pytest discovers unittest natively so no executor changes
+    for basic support. Tests use mock.patch — prompt template must instruct model
+    to define task_func at module level. (3) Ensure required libraries from libs field
+    are installed in pm venv. (4) Extend --source bigcodebench flag. Support --mode
+    complete/instruct and --hard for the 148-problem subset.
+
+
+    Testing and eval (INPUT_REQUIRED): Unit tests for dataset parsing, both prompt
+    modes, libs extraction. Automated integration: download dataset, verify 1,140
+    exercises (148 hard). Requires library deps installed in pm venv (pandas, numpy,
+    matplotlib, etc.). During review, run full evals and save results for the downstream
+    comparison table (pr-409b580): (1) 20B hard subset: PM_BENCH_URL=http://localhost:30001
+    pm bench run openai/gpt-oss-20b -n 8 --chain --temperature 0.0 -j 4 -l python
+    --source bigcodebench --hard -o /tmp/bench-20b-bcb-hard.json. (2) 20B full: PM_BENCH_URL=http://localhost:30001
+    pm bench run openai/gpt-oss-20b -n 8 --chain --temperature 0.0 -j 4 -l python
+    --source bigcodebench -o /tmp/bench-20b-bcb-full.json. (3) 120B hard: PM_BENCH_URL=http://localhost:30000
+    pm bench run openai/gpt-oss-120b -n 8 --chain --temperature 0.0 -j 4 -l python
+    --source bigcodebench --hard -o /tmp/bench-120b-bcb-hard.json. These result JSONs
+    are required artifacts — pr-409b580 consumes them for the cross-benchmark comparison
+    table.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  notes: []
+- id: pr-409b580
+  plan: plan-002
+  title: Cross-source integration and comparison table
+  branch: pm/pr-409b580-run-benchmarks-and-publish-comparison-results
+  status: pending
+  depends_on:
+  - pr-6ef084e
+  - pr-3060c7e
+  - pr-37b4b31
+  description: 'After all three benchmark loaders are merged, validate they work together
+    and compile a comparison table against published pass@1 leaderboards. By this
+    point, each benchmark PR has already produced result JSONs from 20B and 120B eval
+    runs during its own review. This PR: (1) Verify cross-source compatibility — run
+    pm bench exercises --source evalplus/livecodebench/bigcodebench in sequence to
+    confirm all three load without conflict, shared --source flag works correctly,
+    and Exercise objects from all sources flow through the orchestrator identically.
+    (2) Compile the comparison table from existing result JSONs: for each benchmark,
+    show 20B baseline, 20B tournament, 120B baseline, 120B tournament alongside published
+    pass@1 for reference models (Qwen2.5-Coder-7B/32B, DeepSeek-V2, GPT-4o). (3) Add
+    results JSON files and a summary markdown under pm/bench-results/. This is the
+    deliverable that answers "how close does local+tournament get to frontier?"'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  notes: []
