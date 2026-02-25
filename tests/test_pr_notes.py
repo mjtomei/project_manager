@@ -172,6 +172,84 @@ class TestPrNoteList:
         assert "Legacy note" in result.output
 
 
+class TestPrNoteEdit:
+    def test_edit_note_text(self, tmp_path):
+        notes = [
+            {"id": "note-abc1234", "text": "Old text", "created_at": "2026-01-15T10:30:00Z", "last_edited": "2026-01-15T10:30:00Z"},
+        ]
+        root = _make_state(tmp_path, notes=notes)
+        runner = CliRunner()
+        result = runner.invoke(cli, ["-C", str(root), "pr", "note", "edit", "pr-001", "note-abc1234", "New text"])
+        assert result.exit_code == 0
+        assert "Updated note" in result.output
+        data = store.load(root)
+        pr = store.get_pr(data, "pr-001")
+        assert len(pr["notes"]) == 1
+        assert pr["notes"][0]["text"] == "New text"
+
+    def test_edit_updates_last_edited(self, tmp_path):
+        notes = [
+            {"id": "note-abc1234", "text": "Old text", "created_at": "2026-01-15T10:30:00Z", "last_edited": "2026-01-15T10:30:00Z"},
+        ]
+        root = _make_state(tmp_path, notes=notes)
+        runner = CliRunner()
+        result = runner.invoke(cli, ["-C", str(root), "pr", "note", "edit", "pr-001", "note-abc1234", "New text"])
+        assert result.exit_code == 0
+        data = store.load(root)
+        pr = store.get_pr(data, "pr-001")
+        note = pr["notes"][0]
+        # created_at should be preserved
+        assert note["created_at"] == "2026-01-15T10:30:00Z"
+        # last_edited should be updated
+        assert note["last_edited"] != "2026-01-15T10:30:00Z"
+        ts_re = r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z"
+        assert re.match(ts_re, note["last_edited"])
+
+    def test_edit_changes_note_id(self, tmp_path):
+        """Note ID is hash-based, so editing text should produce a new ID."""
+        notes = [
+            {"id": "note-abc1234", "text": "Old text", "created_at": "2026-01-15T10:30:00Z", "last_edited": "2026-01-15T10:30:00Z"},
+        ]
+        root = _make_state(tmp_path, notes=notes)
+        runner = CliRunner()
+        result = runner.invoke(cli, ["-C", str(root), "pr", "note", "edit", "pr-001", "note-abc1234", "New text"])
+        assert result.exit_code == 0
+        data = store.load(root)
+        pr = store.get_pr(data, "pr-001")
+        assert pr["notes"][0]["id"] != "note-abc1234"
+        assert pr["notes"][0]["id"].startswith("note-")
+
+    def test_edit_unknown_note(self, tmp_path):
+        notes = [{"id": "note-abc1234", "text": "A note", "created_at": "2026-01-15T10:30:00Z", "last_edited": "2026-01-15T10:30:00Z"}]
+        root = _make_state(tmp_path, notes=notes)
+        runner = CliRunner()
+        result = runner.invoke(cli, ["-C", str(root), "pr", "note", "edit", "pr-001", "note-nope", "New text"])
+        assert result.exit_code != 0
+        assert "not found" in result.output
+
+    def test_edit_unknown_pr(self, tmp_path):
+        root = _make_state(tmp_path)
+        runner = CliRunner()
+        result = runner.invoke(cli, ["-C", str(root), "pr", "note", "edit", "pr-999", "note-abc", "New text"])
+        assert result.exit_code != 0
+
+    def test_edit_preserves_other_notes(self, tmp_path):
+        notes = [
+            {"id": "note-abc1234", "text": "Keep this", "created_at": "2026-01-15T10:30:00Z", "last_edited": "2026-01-15T10:30:00Z"},
+            {"id": "note-def5678", "text": "Edit this", "created_at": "2026-01-16T14:00:00Z", "last_edited": "2026-01-16T14:00:00Z"},
+        ]
+        root = _make_state(tmp_path, notes=notes)
+        runner = CliRunner()
+        result = runner.invoke(cli, ["-C", str(root), "pr", "note", "edit", "pr-001", "note-def5678", "Edited text"])
+        assert result.exit_code == 0
+        data = store.load(root)
+        pr = store.get_pr(data, "pr-001")
+        assert len(pr["notes"]) == 2
+        assert pr["notes"][0]["id"] == "note-abc1234"
+        assert pr["notes"][0]["text"] == "Keep this"
+        assert pr["notes"][1]["text"] == "Edited text"
+
+
 class TestPrNoteDelete:
     def test_delete_note(self, tmp_path):
         notes = [

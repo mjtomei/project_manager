@@ -1413,6 +1413,48 @@ def pr_note_add(pr_id: str, text: str):
     trigger_tui_refresh()
 
 
+@pr_note.command("edit")
+@click.argument("pr_id")
+@click.argument("note_id")
+@click.argument("text")
+def pr_note_edit(pr_id: str, note_id: str, text: str):
+    """Edit the text of an existing note.
+
+    NOTE_ID is the ID of the note to edit (e.g. note-a3f2b1c).
+    TEXT is the new note content. Use quotes for multi-word notes.
+    """
+    root = state_root()
+    data = store.load(root)
+    pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
+
+    notes = pr_entry.get("notes") or []
+    target = None
+    for n in notes:
+        if n["id"] == note_id:
+            target = n
+            break
+
+    if target is None:
+        click.echo(f"Note '{note_id}' not found on {_pr_display_id(pr_entry)}.", err=True)
+        if notes:
+            click.echo("Available notes:", err=True)
+            for n in notes:
+                click.echo(f"  {n['id']}: {n['text']}", err=True)
+        raise SystemExit(1)
+
+    # Update text and regenerate ID (hash is based on text)
+    existing_ids = {n["id"] for n in notes if n["id"] != note_id}
+    new_id = store.generate_note_id(pr_id, text, existing_ids)
+    target["id"] = new_id
+    target["text"] = text
+    target["last_edited"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    save_and_push(data, root, f"pm: edit note on {pr_id}")
+    click.echo(f"Updated note {note_id} → {new_id} on {_pr_display_id(pr_entry)}")
+    trigger_tui_refresh()
+
+
 @pr_note.command("list")
 @click.argument("pr_id")
 def pr_note_list(pr_id: str):
