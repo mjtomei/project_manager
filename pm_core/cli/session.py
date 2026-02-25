@@ -54,14 +54,18 @@ def _register_tmux_bindings(session_name: str) -> None:
 
     Called on both new session creation and reattach so bindings
     survive across sessions (tmux bindings are global).
-    Also sets window-size=smallest on all sessions in the group so the
-    window fits the smallest connected client (everyone sees the full layout).
+    For shared sessions (--global/--group), sets window-size=smallest on
+    all sessions in the group so the window fits the smallest connected
+    client (everyone sees the full layout).
     """
-    # Window follows the smallest client so all connected users see the
-    # full layout without scrolling or clipping.
-    base = session_name.split("~")[0]
-    for s in [base] + tmux_mod.list_grouped_sessions(base):
-        tmux_mod.set_session_option(s, "window-size", "smallest")
+    # Only set window-size=smallest for shared sessions where multiple
+    # users may connect simultaneously.  For normal (non-shared) sessions
+    # the default tmux window-size is fine and avoids issues with the
+    # unattached base session contributing a zero size.
+    if os.environ.get("PM_SHARE_MODE"):
+        base = session_name.split("~")[0]
+        for s in [base] + tmux_mod.list_grouped_sessions(base):
+            tmux_mod.set_session_option(s, "window-size", "smallest")
 
     subprocess.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", "R",
              "run-shell 'pm rebalance'"), check=False)
@@ -99,6 +103,35 @@ def _register_tmux_bindings(session_name: str) -> None:
     # Clean up stale hook from earlier versions that used the wrong name
     subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gu", "after-resize-window"),
             check=False)
+
+
+def _schedule_rebalance(session_name: str) -> None:
+    """Spawn a background process to rebalance all windows after a short delay.
+
+    Used on session reconnect: ``attach()`` blocks, so we schedule the
+    rebalance beforehand.  The delay gives the client time to attach and
+    the window to resize before we recompute the layout.
+    """
+    import sys
+    windows = tmux_mod.list_windows(session_name)
+    if not windows:
+        return
+    window_ids = [w["id"] for w in windows]
+    # Build a Python one-liner that rebalances every window
+    rebalance_calls = "; ".join(
+        f"rebalance({session_name!r}, {wid!r})" for wid in window_ids
+    )
+    subprocess.Popen(
+        [sys.executable, "-c",
+         "import time; time.sleep(0.5); "
+         "from pm_core.pane_layout import rebalance; "
+         + rebalance_calls],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    _log.info("scheduled background rebalance for %d window(s)", len(window_ids))
 
 
 def _session_start(share_global: bool = False, share_group: str | None = None,
@@ -234,9 +267,15 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
                 _log.info("creating new grouped session: %s", grouped)
                 tmux_mod.create_grouped_session(session_name, grouped,
                                                 socket_path=socket_path)
-                tmux_mod.set_session_option(grouped, "window-size", "smallest",
-                                            socket_path=socket_path)
+                if os.environ.get("PM_SHARE_MODE"):
+                    tmux_mod.set_session_option(grouped, "window-size", "smallest",
+                                                socket_path=socket_path)
                 click.echo(f"Attaching to session '{grouped}'...")
+            # Schedule a background rebalance so the layout adapts to
+            # the new client's terminal size on reconnect.  attach()
+            # blocks, so we spawn a background process beforehand that
+            # waits for the client to attach and then rebalances.
+            _schedule_rebalance(session_name)
             tmux_mod.attach(grouped, socket_path=socket_path)
             return
 
@@ -352,8 +391,9 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
     # Create a grouped session so we never attach directly to the base
     grouped = f"{session_name}~1"
     tmux_mod.create_grouped_session(session_name, grouped, socket_path=socket_path)
-    tmux_mod.set_session_option(grouped, "window-size", "smallest",
-                                socket_path=socket_path)
+    if os.environ.get("PM_SHARE_MODE"):
+        tmux_mod.set_session_option(grouped, "window-size", "smallest",
+                                    socket_path=socket_path)
     tmux_mod.attach(grouped, socket_path=socket_path)
 
 

@@ -647,6 +647,9 @@ class TechTree(Widget):
                 else:
                     new_index = min(candidates, key=lambda x: (cur_col - self._node_positions[x[1]][0],
                                                                abs(self._node_positions[x[1]][1] - cur_row)))[0]
+            else:
+                # Already at leftmost column — scroll to left edge
+                self._scroll_to_edge("left")
         elif event.key in ("right", "l"):
             # Move right: must be in a column to the right, prefer same row
             candidates = [(i, pid) for i, pid in enumerate(self._ordered_ids)
@@ -660,6 +663,9 @@ class TechTree(Widget):
                 else:
                     new_index = min(candidates, key=lambda x: (self._node_positions[x[1]][0] - cur_col,
                                                                abs(self._node_positions[x[1]][1] - cur_row)))[0]
+            else:
+                # Already at rightmost column — scroll to right edge
+                self._scroll_to_edge("right")
         elif event.key == "J":
             # Jump to first PR of next plan group, or last PR if on bottom plan
             new_index = self._jump_plan(1)
@@ -690,18 +696,35 @@ class TechTree(Widget):
             if not new_id.startswith("_hidden:"):
                 self.post_message(PRSelected(new_id))
             self.refresh()
-            # Scroll to keep selected node visible
-            self._scroll_selected_into_view()
+            # Scroll to keep selected node visible (defer to after layout
+            # refresh so container dimensions are up to date)
+            self.call_after_refresh(self._scroll_selected_into_view)
 
     def _scroll_to_edge(self, direction: str) -> None:
-        """Scroll to the top or bottom edge of the content.
+        """Scroll to an edge of the content.
 
+        Supports top, bottom, left, and right.
         For bottom: targets well past the last node so it clears the
         status/command bars that overlay the bottom of the viewport.
         """
         from textual.geometry import Region
+        container = self.parent if self.parent else self
         if direction == "top":
             region = Region(0, 0, 1, 1)
+        elif direction == "left":
+            # Scroll to the left edge, keeping vertical position
+            if hasattr(container, "scroll_x"):
+                container.scroll_x = 0
+            return
+        elif direction == "right":
+            # Scroll to the right edge, keeping vertical position
+            real_positions = {k: v for k, v in self._node_positions.items() if not k.startswith("_hidden:")}
+            if real_positions:
+                max_col = max(c for c, r in real_positions.values())
+                right_x = (max_col + 1) * (NODE_W + H_GAP) + 4
+                if hasattr(container, "scroll_x") and hasattr(container, "size"):
+                    container.scroll_x = max(0, right_x - container.size.width)
+            return
         else:
             # Target the very bottom of content with extra margin
             real_positions = {k: v for k, v in self._node_positions.items() if not k.startswith("_hidden:")}
@@ -714,10 +737,7 @@ class TechTree(Widget):
             if self._hidden_label_ids:
                 y += 2 + len(self._hidden_label_ids)
             region = Region(0, y, 1, 1)
-        if self.parent:
-            self.parent.scroll_to_region(region)
-        else:
-            self.scroll_to_region(region)
+        container.scroll_to_region(region, animate=False, force=True)
 
     def _jump_plan_top(self) -> int | None:
         """Return the index of the first PR in the current plan group.
@@ -860,10 +880,26 @@ class TechTree(Widget):
             # bottom edge where it gets obscured by the command bar.
             node_region = Region(x, y, NODE_W, NODE_H + V_GAP + 1)
 
-        if self.parent:
-            self.parent.scroll_to_region(node_region)
-        else:
-            self.scroll_to_region(node_region)
+        container = self.parent if self.parent else self
+        # Use animate=False so the scroll happens immediately (no
+        # animation overriding subsequent adjustments), and force=True
+        # so horizontal scrolling works even when overflow is "auto"
+        # and the scrollbar is hidden.
+        container.scroll_to_region(
+            node_region, animate=False, force=True,
+        )
+
+        # Explicit horizontal scroll fallback — scroll_to_region may not
+        # adjust scroll_x when the content has no vertical overflow
+        # (Textual sometimes skips horizontal scrolling in that case).
+        if not pr_id.startswith("_hidden:") and hasattr(container, "scroll_x"):
+            vw = container.size.width if hasattr(container, "size") else 0
+            if vw > 0:
+                node_right = x + NODE_W + 2
+                if x < container.scroll_x:
+                    container.scroll_x = max(0, x - 2)
+                elif node_right > container.scroll_x + vw:
+                    container.scroll_x = node_right - vw
 
     def _scroll_plan_label_to_top(self, pr_id: str) -> None:
         """Scroll so the plan label header for the given PR is at the top of the viewport."""
@@ -888,4 +924,4 @@ class TechTree(Widget):
         scroller = self.parent if self.parent else self
         viewport_h = scroller.size.height if hasattr(scroller, 'size') else 40
         region = Region(0, label_y, 1, viewport_h)
-        scroller.scroll_to_region(region)
+        scroller.scroll_to_region(region, animate=False, force=True)

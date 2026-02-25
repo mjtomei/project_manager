@@ -58,7 +58,7 @@ class ProjectManagerApp(App):
         layout: vertical;
     }
     #tree-container {
-        width: 2fr;
+        width: 1fr;
         height: 100%;
         overflow: auto auto;
     }
