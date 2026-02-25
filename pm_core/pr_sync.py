@@ -15,6 +15,7 @@ from typing import Optional
 
 from pm_core import store, git_ops, graph
 from pm_core.backend import get_backend
+from pm_core.cli.helpers import _record_status_timestamp
 
 _log = logging.getLogger("pm.pr_sync")
 
@@ -242,6 +243,7 @@ def sync_prs(
             try:
                 if backend.is_merged(str(check_dir), branch, base_branch):
                     pr_entry["status"] = "merged"
+                    _record_status_timestamp(pr_entry, "merged")
                     merged_prs.append(pr_entry["id"])
                     updated += 1
                     _log.info("PR %s detected as merged", pr_entry["id"])
@@ -365,6 +367,7 @@ def sync_from_github(
 
             if new_status != old_status:
                 pr_entry["status"] = new_status
+                _record_status_timestamp(pr_entry, new_status)
                 updated += 1
                 status_updates[pr_id] = new_status
                 _log.info("PR %s: %s → %s (from GitHub)", pr_id, old_status, new_status)

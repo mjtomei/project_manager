@@ -30,6 +30,7 @@ from pm_core.cli.helpers import (
     _make_pr_entry,
     _pr_display_id,
     _pr_id_sort_key,
+    _record_status_timestamp,
     _require_pr,
     _resolve_pr_id,
     _resolve_repo_dir,
@@ -126,6 +127,7 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
         old_status = pr_entry.get("status", "pending")
         pr_entry["status"] = status
         changes.append(f"status: {old_status} → {status}")
+        _record_status_timestamp(pr_entry, status)
     if depends_on is not None:
         if depends_on == "":
             pr_entry["depends_on"] = []
@@ -265,6 +267,7 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
                 raise SystemExit(1)
             pr_entry["status"] = new_status
             changes.append(f"status: {current_status} → {new_status}")
+            _record_status_timestamp(pr_entry, new_status)
         if new_deps_str != current_deps:
             if not new_deps_str:
                 pr_entry["depends_on"] = []
@@ -586,6 +589,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     # Update state — only advance from pending; don't regress in_review/merged
     if pr_entry.get("status") == "pending":
         pr_entry["status"] = "in_progress"
+    _record_status_timestamp(pr_entry, "in_progress")
     pr_entry["agent_machine"] = platform.node()
     pr_entry["workdir"] = str(work_path)
     data["project"]["active_pr"] = pr_id
@@ -883,6 +887,7 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
             click.echo("Warning: Failed to upgrade draft PR. It may already be ready or was closed.", err=True)
 
     pr_entry["status"] = "in_review"
+    _record_status_timestamp(pr_entry, "in_review")
     save_and_push(data, root, f"pm: review {pr_id}")
     click.echo(f"PR {_pr_display_id(pr_entry)} marked as in_review.")
     trigger_tui_refresh()
@@ -897,6 +902,7 @@ def _finalize_merge(data: dict, root, pr_entry: dict, pr_id: str,
                     transcript: str | None = None) -> None:
     """Mark PR as merged, kill tmux windows, and show newly ready PRs."""
     pr_entry["status"] = "merged"
+    _record_status_timestamp(pr_entry, "merged")
 
     # Auto-start state is in-memory on the TUI — check_and_start()
     # detects target-merged and disables it there.
@@ -1270,6 +1276,7 @@ def pr_sync():
 
         if backend.is_merged(str(check_dir), branch, base_branch):
             pr_entry["status"] = "merged"
+            _record_status_timestamp(pr_entry, "merged")
             click.echo(f"  ✅ {_pr_display_id(pr_entry)}: merged")
             updated += 1
 

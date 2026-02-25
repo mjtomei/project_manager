@@ -244,8 +244,8 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
             if not tui_window:
                 tui_window = tmux_mod.get_window_id(session_name)
             if tui_window:
-                pane_registry._respawn_tui(session_name, tui_window)
-                pane_registry.rebalance(session_name, tui_window)
+                pane_layout._respawn_tui(session_name, tui_window)
+                pane_layout.rebalance(session_name, tui_window)
             else:
                 _log.warning("TUI respawn failed — no windows found in session")
                 click.echo("Could not respawn TUI (no windows). "

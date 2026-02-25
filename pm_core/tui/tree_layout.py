@@ -14,13 +14,32 @@ The TechTree widget calls :func:`compute_tree_layout` and uses the resulting
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime as _dt
 
 from pm_core import graph as graph_mod
+
+# Character-level gap between independent connected components placed
+# side by side.  Matches _H_GAP so columns of PRs stay aligned across
+# components on a uniform grid.
+COMPONENT_GAP_CHARS = 6
+
+# Standard column width used for intra-component layout.
+# Imported from tech_tree at module level would create a circular import,
+# so we duplicate the constants here.
+_NODE_W = 24
+_H_GAP = 6
+_COL_WIDTH = _NODE_W + _H_GAP  # 30 chars per column
 
 
 @dataclass
 class TreeLayout:
-    """Result of a layout computation."""
+    """Result of a layout computation.
+
+    ``node_positions`` maps PR IDs to ``(x_char, row)`` where *x_char*
+    is the character offset of the left edge of the node box.  This
+    allows non-uniform horizontal spacing (e.g. wider gaps between
+    independent components than between dependency-connected columns).
+    """
 
     ordered_ids: list[str] = field(default_factory=list)
     node_positions: dict[str, tuple[int, int]] = field(default_factory=dict)
@@ -30,6 +49,58 @@ class TreeLayout:
     plan_group_order: list[str] = field(default_factory=list)
 
 
+def _find_connected_components(
+    prs: list[dict],
+    pr_ids: set[str],
+) -> list[list[dict]]:
+    """Find connected components in the PR dependency graph.
+
+    Uses union-find on the undirected version of the dependency graph.
+    Returns a list of PR lists, one per component.
+    """
+    parent: dict[str, str] = {pr["id"]: pr["id"] for pr in prs}
+
+    def find(x: str) -> str:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: str, b: str) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    for pr in prs:
+        for dep_id in pr.get("depends_on") or []:
+            if dep_id in pr_ids:
+                union(pr["id"], dep_id)
+
+    # Group by root
+    groups: dict[str, list[dict]] = {}
+    for pr in prs:
+        root = find(pr["id"])
+        groups.setdefault(root, []).append(pr)
+
+    return list(groups.values())
+
+
+def _component_sort_key(
+    component: list[dict],
+) -> tuple:
+    """Sort key for components: largest first, then by activity."""
+    # Active PRs (in_progress/in_review) first, then by component size
+    has_active = any(
+        pr.get("status") in ("in_progress", "in_review")
+        for pr in component
+    )
+    return (
+        0 if has_active else 1,
+        -len(component),
+        min(pr["id"] for pr in component),  # deterministic tie-break
+    )
+
+
 def compute_tree_layout(
     all_prs: list[dict],
     *,
@@ -37,8 +108,14 @@ def compute_tree_layout(
     status_filter: str | None = None,
     hide_merged: bool = False,
     hide_closed: bool = True,
+    max_width: int | None = None,
 ) -> TreeLayout:
     """Compute the full tree layout for a set of PRs.
+
+    Independent connected components are laid out side by side when they
+    fit within *max_width* characters (the viewport width).  Components
+    that would cause horizontal scrolling are placed below instead,
+    starting a new row band.
 
     Args:
         all_prs: Complete (unfiltered) list of PR dicts.
@@ -46,6 +123,8 @@ def compute_tree_layout(
         status_filter: If set, show only PRs with this status.
         hide_merged: If True (and no status_filter), hide merged PRs.
         hide_closed: If True (and no status_filter), hide closed PRs.
+        max_width: Maximum content width in characters that fits in the
+            viewport without scrolling.  ``None`` means no limit.
 
     Returns:
         A :class:`TreeLayout` with positions and navigation order.
@@ -76,47 +155,120 @@ def compute_tree_layout(
         return layout
 
     pr_map = {pr["id"]: pr for pr in prs}
-    layers = graph_mod.compute_layers(prs)
-
-    # Build adjacency for layout (only visible nodes)
     pr_ids = set(pr_map.keys())
-    parents_of: dict[str, list[str]] = {}
-    children_of: dict[str, list[str]] = {}
-    for pr in prs:
-        node = pr["id"]
-        parents_of[node] = [d for d in (pr.get("depends_on") or []) if d in pr_ids]
-        children_of.setdefault(node, [])
-        for d in parents_of[node]:
-            children_of.setdefault(d, [])
-            children_of[d].append(node)
 
-    # Sugiyama phases
-    layer_orders = _minimize_crossings(layers, parents_of, children_of)
-    row_assignments = _assign_coordinates(layer_orders, parents_of, children_of)
+    # Find connected components and lay out each independently
+    components = _find_connected_components(prs, pr_ids)
+    components.sort(key=_component_sort_key)
 
-    # Normalize rows so minimum is 0
-    if row_assignments:
-        min_row = min(row_assignments.values())
-        if min_row != 0:
-            for pr_id in row_assignments:
-                row_assignments[pr_id] -= min_row
+    # Lay out each component with Sugiyama
+    comp_layouts: list[tuple[list[dict], list[list[str]], dict[str, int]]] = []
+    for component in components:
+        comp_ids = {pr["id"] for pr in component}
+        parents_of: dict[str, list[str]] = {}
+        children_of: dict[str, list[str]] = {}
+        for pr in component:
+            node = pr["id"]
+            parents_of[node] = [d for d in (pr.get("depends_on") or []) if d in comp_ids]
+            children_of.setdefault(node, [])
+            for d in parents_of[node]:
+                children_of.setdefault(d, [])
+                children_of[d].append(node)
 
-    # Group by plan and adjust rows
+        comp_pr_map = {pr["id"]: pr for pr in component}
+        layers = graph_mod.compute_layers(component)
+        layer_orders = _minimize_crossings(layers, parents_of, children_of,
+                                           pr_map=comp_pr_map)
+        row_assignments = _assign_coordinates(layer_orders, parents_of, children_of)
+
+        # Normalize rows to start at 0
+        if row_assignments:
+            min_row = min(row_assignments.values())
+            if min_row != 0:
+                for pid in row_assignments:
+                    row_assignments[pid] -= min_row
+
+        comp_layouts.append((component, layer_orders, row_assignments))
+
+    # Group components by plan so each plan's components are packed
+    # independently — plans occupy separate row ranges and should each
+    # start at x=0.
+    plan_components: dict[str, list[tuple[list[dict], list[list[str]], dict[str, int]]]] = {}
+    for comp_entry in comp_layouts:
+        component = comp_entry[0]
+        plan_id = (component[0].get("plan") or "_standalone")
+        plan_components.setdefault(plan_id, []).append(comp_entry)
+
+    # Determine plan group ordering (named plans sorted, standalone last)
+    plan_keys = sorted(k for k in plan_components if k != "_standalone")
+    if "_standalone" in plan_components:
+        plan_keys.append("_standalone")
+
+    # Pack components within each plan group into row bands that fit
+    # within max_width characters.  Each plan group resets band_x to 0.
+    combined_row_assignments: dict[str, int] = {}
+    combined_positions: dict[str, tuple[int, int]] = {}  # pr_id -> (x_char, row)
+    all_layer_orders: list[tuple[int, list[list[str]]]] = []
+
+    global_row_offset = 0  # cumulative row offset across plan groups
+    margin = 2  # left padding before first node
+
+    for plan_key in plan_keys:
+        band_x = 0
+        band_row_offset = global_row_offset
+        band_max_rows = 0
+
+        for component, layer_orders, row_assignments in plan_components[plan_key]:
+            num_cols = len(layer_orders)
+            comp_width = num_cols * _NODE_W + max(0, num_cols - 1) * _H_GAP
+            comp_max_row = max(row_assignments.values()) + 1 if row_assignments else 1
+
+            gap = COMPONENT_GAP_CHARS if band_x > 0 else 0
+            needed_x = band_x + gap + comp_width + margin
+            if max_width is not None and band_x > 0 and needed_x > max_width:
+                band_row_offset += band_max_rows
+                band_x = 0
+                band_max_rows = 0
+                gap = 0
+
+            x_offset = band_x + gap + margin
+
+            for col_idx, layer_order in enumerate(layer_orders):
+                node_x = x_offset + col_idx * _COL_WIDTH
+                for pid in layer_order:
+                    r = row_assignments[pid] + band_row_offset
+                    combined_positions[pid] = (node_x, r)
+                    combined_row_assignments[pid] = r
+
+            all_layer_orders.append((x_offset, layer_orders))
+            band_x = x_offset + comp_width - margin
+            band_max_rows = max(band_max_rows, comp_max_row)
+
+        # Advance global row offset past this plan group's content
+        global_row_offset = band_row_offset + band_max_rows
+
+    # Group by plan and adjust rows (operates on combined positions)
     plan_label_rows, plan_group_order = _apply_plan_grouping(
-        prs, row_assignments
+        prs, combined_row_assignments
     )
     layout.plan_label_rows = plan_label_rows
     layout.plan_group_order = plan_group_order
 
-    # Build final ordered_ids and node_positions from layers
-    for col, layer_order in enumerate(layer_orders):
-        for pr_id in sorted(layer_order, key=lambda x: row_assignments.get(x, 0)):
-            layout.node_positions[pr_id] = (col, row_assignments[pr_id])
-            layout.ordered_ids.append(pr_id)
+    # Update positions with plan-adjusted rows
+    for pid in combined_positions:
+        x, _ = combined_positions[pid]
+        combined_positions[pid] = (x, combined_row_assignments[pid])
+
+    # Build final ordered_ids from layer orders (x-first, then row)
+    for x_off, layer_orders in all_layer_orders:
+        for col_idx, layer_order in enumerate(layer_orders):
+            for pid in sorted(layer_order, key=lambda p: combined_row_assignments.get(p, 0)):
+                layout.node_positions[pid] = combined_positions[pid]
+                layout.ordered_ids.append(pid)
 
     # Add hidden plan labels as navigable rows below visible content
     if hidden_plans:
-        max_row = max(row_assignments.values()) if row_assignments else -1
+        max_row = max(combined_row_assignments.values()) if combined_row_assignments else -1
         hidden_row = max_row + 2  # gap after visible content
         for plan_id in sorted(hidden_plans):
             virtual_id = f"_hidden:{plan_id}"
@@ -134,12 +286,48 @@ def compute_tree_layout(
 # ---------------------------------------------------------------------------
 
 
+def _activity_sort_key(pr_id: str, pr_map: dict[str, dict]) -> tuple:
+    """Sort key for PRs: active statuses first, then by most recent activity.
+
+    Order: in_progress > in_review > pending > merged > closed.
+    Within each status group, sort by most recent timestamp (descending).
+    """
+    pr = pr_map.get(pr_id)
+    if not pr:
+        return (5, 0, pr_id)
+
+    status_priority = {
+        "in_progress": 0,
+        "in_review": 1,
+        "pending": 2,
+        "merged": 3,
+        "closed": 4,
+    }
+    priority = status_priority.get(pr.get("status", "pending"), 5)
+
+    # Use most recent timestamp for ordering within status group
+    ts = (pr.get("merged_at") or pr.get("reviewed_at")
+          or pr.get("started_at") or "")
+
+    # Negate epoch for descending order (most recent first).
+    # PRs without timestamps get 0, sorting after all negative values.
+    ts_order: float = 0
+    if ts:
+        try:
+            ts_order = -_dt.fromisoformat(ts).timestamp()
+        except (ValueError, TypeError):
+            pass
+
+    return (priority, ts_order, pr_id)
+
+
 def _minimize_crossings(
     layers: list[list[str]],
     parents_of: dict[str, list[str]],
     children_of: dict[str, list[str]],
     *,
     num_sweeps: int = 4,
+    pr_map: dict[str, dict] | None = None,
 ) -> list[list[str]]:
     """Reorder nodes within layers to minimize edge crossings.
 
@@ -151,7 +339,15 @@ def _minimize_crossings(
     seen so far is retained.  This prevents oscillation where a backward
     sweep undoes a good forward ordering (or vice versa).
     """
-    layer_orders = [sorted(layer) for layer in layers]
+    # Initial ordering: sort by activity/status when PR data is available,
+    # otherwise fall back to alphabetical.  This gives the crossing
+    # minimization a better starting point and ensures active PRs appear
+    # at the top within each layer.
+    if pr_map:
+        layer_orders = [sorted(layer, key=lambda pid: _activity_sort_key(pid, pr_map))
+                        for layer in layers]
+    else:
+        layer_orders = [sorted(layer) for layer in layers]
     if len(layer_orders) <= 1:
         return layer_orders
 

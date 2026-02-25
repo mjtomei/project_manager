@@ -6,6 +6,7 @@ HelpGroup, state management, PR ID resolution, TUI refresh, and session helpers.
 
 import os
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 import click
@@ -247,8 +248,27 @@ def _make_pr_entry(
         "agent_machine": None,
         "gh_pr": gh_pr,
         "gh_pr_number": gh_pr_number,
+        "started_at": None,
+        "reviewed_at": None,
+        "merged_at": None,
         "notes": [],
     }
+
+
+def _record_status_timestamp(pr_entry: dict, status: str) -> None:
+    """Record a timestamp on *pr_entry* for a status transition.
+
+    * ``started_at`` — set once on the first transition to ``in_progress``.
+    * ``reviewed_at`` — updated each time the PR enters ``in_review``.
+    * ``merged_at`` — set when the PR is ``merged``.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    if status == "in_progress" and not pr_entry.get("started_at"):
+        pr_entry["started_at"] = now
+    elif status == "in_review":
+        pr_entry["reviewed_at"] = now
+    elif status == "merged":
+        pr_entry["merged_at"] = now
 
 
 def save_and_push(data: dict, root: Path, message: str = "pm: update state") -> None:

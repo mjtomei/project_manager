@@ -2,7 +2,10 @@
 
 from pm_core.graph import count_crossings
 from pm_core.tui import item_message
-from pm_core.tui.tree_layout import compute_tree_layout, TreeLayout
+from pm_core.tui.tree_layout import (
+    compute_tree_layout, TreeLayout, _activity_sort_key,
+    _find_connected_components, _NODE_W, _H_GAP, COMPONENT_GAP_CHARS,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +80,8 @@ class TestEmptyInputs:
     def test_single_pr(self):
         layout = compute_tree_layout([_pr("pr-a")])
         assert layout.ordered_ids == ["pr-a"]
-        assert layout.node_positions["pr-a"] == (0, 0)
+        # x_char = margin (2) + col_idx (0) * COL_WIDTH (30) = 2
+        assert layout.node_positions["pr-a"] == (2, 0)
 
 
 class TestLinearChain:
@@ -95,8 +99,9 @@ class TestLinearChain:
         assert self.layout.ordered_ids == ["pr-a", "pr-b", "pr-c"]
 
     def test_columns(self):
+        # x_char positions: margin=2, COL_WIDTH=30
         cols = [self.layout.node_positions[pid][0] for pid in self.layout.ordered_ids]
-        assert cols == [0, 1, 2]
+        assert cols == [2, 32, 62]
 
     def test_same_row(self):
         rows = {self.layout.node_positions[pid][1] for pid in self.layout.ordered_ids}
@@ -115,11 +120,11 @@ class TestFanOut:
         self.layout = compute_tree_layout(self.prs)
 
     def test_parent_column_zero(self):
-        assert self.layout.node_positions["pr-a"][0] == 0
+        assert self.layout.node_positions["pr-a"][0] == 2  # margin
 
     def test_children_column_one(self):
-        assert self.layout.node_positions["pr-b"][0] == 1
-        assert self.layout.node_positions["pr-c"][0] == 1
+        assert self.layout.node_positions["pr-b"][0] == 32  # margin + COL_WIDTH
+        assert self.layout.node_positions["pr-c"][0] == 32
 
     def test_children_different_rows(self):
         row_b = self.layout.node_positions["pr-b"][1]
@@ -145,10 +150,10 @@ class TestDiamond:
         self.layout = compute_tree_layout(self.prs)
 
     def test_columns(self):
-        assert self.layout.node_positions["pr-a"][0] == 0
-        assert self.layout.node_positions["pr-b"][0] == 1
-        assert self.layout.node_positions["pr-c"][0] == 1
-        assert self.layout.node_positions["pr-d"][0] == 2
+        assert self.layout.node_positions["pr-a"][0] == 2   # layer 0
+        assert self.layout.node_positions["pr-b"][0] == 32  # layer 1
+        assert self.layout.node_positions["pr-c"][0] == 32  # layer 1
+        assert self.layout.node_positions["pr-d"][0] == 62  # layer 2
 
     def test_no_overlap(self):
         """No two nodes share the same (col, row) position."""
@@ -700,3 +705,181 @@ class TestBruteForceOptimality:
         heuristic = count_crossings(layout.node_positions, prs)
         optimal = _brute_force_min_crossings(prs)
         assert heuristic == optimal, f"heuristic={heuristic} > optimal={optimal}"
+
+
+# ---------------------------------------------------------------------------
+# Activity sort key tests
+# ---------------------------------------------------------------------------
+
+
+class TestActivitySortKey:
+    """Tests for the _activity_sort_key used in crossing minimization seeding."""
+
+    def test_status_priority_order(self):
+        """in_progress < in_review < pending < merged < closed."""
+        pr_map = {
+            "a": {"id": "a", "status": "closed"},
+            "b": {"id": "b", "status": "in_progress"},
+            "c": {"id": "c", "status": "pending"},
+            "d": {"id": "d", "status": "merged"},
+            "e": {"id": "e", "status": "in_review"},
+        }
+        keys = {pid: _activity_sort_key(pid, pr_map) for pid in pr_map}
+        ordered = sorted(pr_map.keys(), key=lambda pid: keys[pid])
+        assert ordered == ["b", "e", "c", "d", "a"]
+
+    def test_recent_timestamp_sorts_first(self):
+        """Within the same status, more recent timestamps should sort first."""
+        pr_map = {
+            "old": {"id": "old", "status": "in_progress",
+                    "started_at": "2024-01-01T00:00:00+00:00"},
+            "new": {"id": "new", "status": "in_progress",
+                    "started_at": "2024-06-15T00:00:00+00:00"},
+        }
+        key_old = _activity_sort_key("old", pr_map)
+        key_new = _activity_sort_key("new", pr_map)
+        assert key_new < key_old, "More recent timestamp should sort first"
+
+    def test_timestamp_before_no_timestamp(self):
+        """PRs with timestamps should sort before PRs without timestamps."""
+        pr_map = {
+            "with_ts": {"id": "with_ts", "status": "pending",
+                        "started_at": "2024-01-01T00:00:00+00:00"},
+            "no_ts": {"id": "no_ts", "status": "pending"},
+        }
+        key_with = _activity_sort_key("with_ts", pr_map)
+        key_without = _activity_sort_key("no_ts", pr_map)
+        assert key_with < key_without, "PR with timestamp should sort before PR without"
+
+    def test_missing_pr_sorts_last(self):
+        """Unknown PR IDs should sort after all known statuses."""
+        pr_map = {"known": {"id": "known", "status": "closed"}}
+        key_known = _activity_sort_key("known", pr_map)
+        key_unknown = _activity_sort_key("unknown", pr_map)
+        assert key_known < key_unknown
+
+    def test_uses_most_recent_timestamp(self):
+        """Should pick merged_at > reviewed_at > started_at."""
+        pr_map = {
+            "pr": {"id": "pr", "status": "merged",
+                   "started_at": "2024-01-01T00:00:00+00:00",
+                   "reviewed_at": "2024-03-01T00:00:00+00:00",
+                   "merged_at": "2024-06-01T00:00:00+00:00"},
+            "pr2": {"id": "pr2", "status": "merged",
+                    "started_at": "2024-01-01T00:00:00+00:00",
+                    "reviewed_at": "2024-03-01T00:00:00+00:00"},
+        }
+        # pr has merged_at (most recent), pr2 only has reviewed_at
+        # So pr should sort before pr2 (merged_at is more recent)
+        key1 = _activity_sort_key("pr", pr_map)
+        key2 = _activity_sort_key("pr2", pr_map)
+        assert key1 < key2
+
+
+# ---------------------------------------------------------------------------
+# Connected components tests
+# ---------------------------------------------------------------------------
+
+
+class TestConnectedComponents:
+    """Tests for _find_connected_components."""
+
+    def test_single_pr(self):
+        prs = [_pr("pr-a")]
+        comps = _find_connected_components(prs, {"pr-a"})
+        assert len(comps) == 1
+        assert comps[0][0]["id"] == "pr-a"
+
+    def test_two_independent(self):
+        prs = [_pr("pr-a"), _pr("pr-b")]
+        comps = _find_connected_components(prs, {"pr-a", "pr-b"})
+        assert len(comps) == 2
+
+    def test_chain_is_one_component(self):
+        prs = [_pr("pr-a"), _pr("pr-b", depends_on=["pr-a"])]
+        comps = _find_connected_components(prs, {"pr-a", "pr-b"})
+        assert len(comps) == 1
+        ids = {pr["id"] for pr in comps[0]}
+        assert ids == {"pr-a", "pr-b"}
+
+    def test_diamond_is_one_component(self):
+        prs = [
+            _pr("pr-a"),
+            _pr("pr-b", depends_on=["pr-a"]),
+            _pr("pr-c", depends_on=["pr-a"]),
+            _pr("pr-d", depends_on=["pr-b", "pr-c"]),
+        ]
+        comps = _find_connected_components(prs, {p["id"] for p in prs})
+        assert len(comps) == 1
+
+    def test_ignores_deps_outside_pr_ids(self):
+        """Dependencies on filtered-out PRs should not merge components."""
+        prs = [_pr("pr-a"), _pr("pr-b", depends_on=["pr-z"])]
+        comps = _find_connected_components(prs, {"pr-a", "pr-b"})
+        assert len(comps) == 2
+
+
+# ---------------------------------------------------------------------------
+# Component packing / max_width tests
+# ---------------------------------------------------------------------------
+
+
+class TestComponentPacking:
+    """Tests for side-by-side component layout and max_width wrapping."""
+
+    def test_independent_prs_side_by_side(self):
+        """Two independent PRs should be placed in the same row band."""
+        prs = [_pr("pr-a"), _pr("pr-b")]
+        layout = compute_tree_layout(prs, max_width=200)
+        row_a = layout.node_positions["pr-a"][1]
+        row_b = layout.node_positions["pr-b"][1]
+        assert row_a == row_b, "Independent PRs should share a row when width allows"
+
+    def test_side_by_side_x_gap(self):
+        """Side-by-side independent PRs have COMPONENT_GAP_CHARS between them."""
+        prs = [_pr("pr-a"), _pr("pr-b")]
+        layout = compute_tree_layout(prs, max_width=200)
+        x_a = layout.node_positions["pr-a"][0]
+        x_b = layout.node_positions["pr-b"][0]
+        # Second node's x should be: first node's x + NODE_W + COMPONENT_GAP_CHARS
+        if x_a < x_b:
+            gap = x_b - (x_a + _NODE_W)
+        else:
+            gap = x_a - (x_b + _NODE_W)
+        assert gap == COMPONENT_GAP_CHARS
+
+    def test_wraps_to_new_row_when_too_wide(self):
+        """Components that exceed max_width should wrap to a new row band."""
+        prs = [_pr("pr-a"), _pr("pr-b"), _pr("pr-c")]
+        # Set max_width so only 2 single-node components fit side by side
+        # Each node needs: margin(2) + NODE_W(24) = 26 for first,
+        # + COMPONENT_GAP(12) + NODE_W(24) = 62 for second
+        narrow_width = 65  # fits 2 but not 3
+        layout = compute_tree_layout(prs, max_width=narrow_width)
+        rows = [layout.node_positions[pid][1] for pid in ["pr-a", "pr-b", "pr-c"]]
+        # At least two should share a row, and at least one should be different
+        assert len(set(rows)) == 2, f"Expected 2 row bands, got rows={rows}"
+
+    def test_no_max_width_all_side_by_side(self):
+        """Without max_width, independent PRs should all be on the same row."""
+        prs = [_pr(f"pr-{i}") for i in range(5)]
+        layout = compute_tree_layout(prs, max_width=None)
+        rows = {layout.node_positions[pid][1] for pid in layout.ordered_ids}
+        assert len(rows) == 1, "All independent PRs should share a row without width limit"
+
+    def test_connected_component_stays_together(self):
+        """PRs in a dependency chain are in one component and not split."""
+        prs = [
+            _pr("pr-a"),
+            _pr("pr-b", depends_on=["pr-a"]),
+            _pr("pr-c"),  # independent
+        ]
+        layout = compute_tree_layout(prs, max_width=200)
+        # pr-a and pr-b should be in different columns (layers)
+        x_a = layout.node_positions["pr-a"][0]
+        x_b = layout.node_positions["pr-b"][0]
+        assert x_a != x_b, "Chained PRs should be in different columns"
+        # pr-c should be side-by-side with the chain (same row band)
+        row_a = layout.node_positions["pr-a"][1]
+        row_c = layout.node_positions["pr-c"][1]
+        assert row_a == row_c, "Independent PR should share row band with chain"
