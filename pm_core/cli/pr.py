@@ -175,8 +175,24 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
             f"{current_desc}\n"
         )
 
+        # Replace unicode characters that cause vim rendering issues with
+        # long wrapped lines (em/en dashes, smart quotes, etc.) with ASCII
+        # equivalents.  They are restored after the editor closes.
+        _UNICODE_TO_ASCII = [
+            ("\u2014", "--"),   # em dash
+            ("\u2013", "-"),    # en dash
+            ("\u2018", "'"),    # left single quote
+            ("\u2019", "'"),    # right single quote
+            ("\u201c", '"'),    # left double quote
+            ("\u201d", '"'),    # right double quote
+            ("\u2026", "..."),  # ellipsis
+        ]
+        editor_template = template
+        for uc, ascii_rep in _UNICODE_TO_ASCII:
+            editor_template = editor_template.replace(uc, ascii_rep)
+
         with tempfile.NamedTemporaryFile(suffix=".md", mode="w", delete=False) as f:
-            f.write(template)
+            f.write(editor_template)
             tmp_path = f.name
 
         try:
@@ -192,6 +208,9 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
 
             with open(tmp_path) as f:
                 raw = f.read()
+            # Restore unicode characters that were replaced for the editor
+            for uc, ascii_rep in _UNICODE_TO_ASCII:
+                raw = raw.replace(ascii_rep, uc)
         finally:
             os.unlink(tmp_path)
 
