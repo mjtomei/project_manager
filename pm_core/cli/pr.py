@@ -910,8 +910,14 @@ def _finalize_merge(data: dict, root, pr_entry: dict, pr_id: str,
 
 def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
                          background: bool = False,
-                         transcript: str | None = None) -> None:
-    """Launch a tmux window with Claude to resolve a merge conflict."""
+                         transcript: str | None = None,
+                         cwd: str | None = None) -> None:
+    """Launch a tmux window with Claude to resolve a merge conflict.
+
+    Args:
+        cwd: Directory to run the merge resolution in.  Defaults to the
+             PR's workdir when *None*.
+    """
     if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
         click.echo("Merge window requires tmux.")
         return
@@ -921,7 +927,7 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
         click.echo(f"Merge window: tmux session '{pm_session}' not found.")
         return
 
-    workdir = pr_entry.get("workdir")
+    workdir = cwd or pr_entry.get("workdir")
     if not workdir:
         click.echo(f"Merge window: no workdir for {pr_entry['id']}.")
         return
@@ -952,13 +958,16 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
         click.echo(f"Merge window error: {e}")
 
 
-def _pull_after_github_merge(data: dict, pr_entry: dict, workdir: str,
+def _pull_after_github_merge(data: dict, pr_entry: dict, repo_dir: str,
                              base_branch: str, resolve_window: bool,
                              background: bool,
                              transcript: str | None) -> bool:
-    """Pull latest base branch after a GitHub merge.
+    """Pull latest base branch in the main repo after a GitHub merge.
 
-    Only pulls if the workdir already has the base branch checked out.
+    *repo_dir* should be the main repository directory (on the base branch),
+    not the PR's workdir (which is on the PR branch).
+
+    Only pulls if *repo_dir* already has the base branch checked out.
     If on a different branch (implying local work in progress), the pull
     is skipped to avoid disrupting the user's working state.
 
@@ -967,27 +976,27 @@ def _pull_after_github_merge(data: dict, pr_entry: dict, workdir: str,
     """
     # Detect current branch — skip pull if not already on base branch
     head_result = git_ops.run_git("rev-parse", "--abbrev-ref", "HEAD",
-                                  cwd=workdir, check=False)
+                                  cwd=repo_dir, check=False)
     current_branch = head_result.stdout.strip() if head_result.returncode == 0 else ""
     if current_branch != base_branch:
-        click.echo(f"Workdir is on '{current_branch}', skipping pull of {base_branch}.")
+        click.echo(f"Repo is on '{current_branch}', skipping pull of {base_branch}.")
         return True
 
-    work_path = Path(workdir)
+    repo_path = Path(repo_dir)
     stashed = False
 
     # Stash uncommitted changes if dirty
-    if _workdir_is_dirty(work_path):
+    if _workdir_is_dirty(repo_path):
         click.echo("Stashing uncommitted changes before pull...")
-        stash_result = git_ops.run_git("stash", cwd=workdir, check=False)
+        stash_result = git_ops.run_git("stash", cwd=repo_dir, check=False)
         if stash_result.returncode == 0 and "No local changes" not in stash_result.stdout:
             stashed = True
         else:
             click.echo("Warning: Could not stash changes.", err=True)
 
     # Fetch and pull base branch
-    git_ops.run_git("fetch", "origin", cwd=workdir, check=False)
-    pull_result = git_ops.pull_rebase(work_path)
+    git_ops.run_git("fetch", "origin", cwd=repo_dir, check=False)
+    pull_result = git_ops.pull_rebase(repo_path)
     if pull_result.returncode != 0:
         click.echo(f"Warning: Pull failed: {pull_result.stderr.strip()}", err=True)
     else:
@@ -995,7 +1004,7 @@ def _pull_after_github_merge(data: dict, pr_entry: dict, workdir: str,
 
     # Pop stash
     if stashed:
-        pop_result = git_ops.run_git("stash", "pop", cwd=workdir, check=False)
+        pop_result = git_ops.run_git("stash", "pop", cwd=repo_dir, check=False)
         if pop_result.returncode != 0:
             error_detail = (pop_result.stdout.strip() + "\n"
                             + pop_result.stderr.strip()).strip()
@@ -1004,7 +1013,8 @@ def _pull_after_github_merge(data: dict, pr_entry: dict, workdir: str,
             click.echo(error_msg, err=True)
             if resolve_window:
                 _launch_merge_window(data, pr_entry, error_msg,
-                                     background=background, transcript=transcript)
+                                     background=background, transcript=transcript,
+                                     cwd=repo_dir)
                 return False
             click.echo("Resolve conflicts manually, then re-run 'pm pr merge' to finalize.", err=True)
             return False
@@ -1076,8 +1086,9 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool, transcri
                     click.echo("Falling back to manual instructions.", err=True)
 
             if gh_merged:
+                repo_dir = str(_resolve_repo_dir(root, data))
                 pull_ok = _pull_after_github_merge(
-                    data, pr_entry, workdir, base_branch,
+                    data, pr_entry, repo_dir, base_branch,
                     resolve_window=resolve_window,
                     background=background,
                     transcript=transcript,
