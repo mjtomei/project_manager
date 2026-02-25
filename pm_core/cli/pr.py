@@ -998,7 +998,17 @@ def _pull_after_github_merge(data: dict, pr_entry: dict, repo_dir: str,
     git_ops.run_git("fetch", "origin", cwd=repo_dir, check=False)
     pull_result = git_ops.pull_rebase(repo_path)
     if pull_result.returncode != 0:
-        click.echo(f"Warning: Pull failed: {pull_result.stderr.strip()}", err=True)
+        error_detail = (pull_result.stdout.strip() + "\n"
+                        + pull_result.stderr.strip()).strip()
+        error_msg = (f"Pull failed in {repo_dir}:\n{error_detail}")
+        click.echo(error_msg, err=True)
+        if resolve_window:
+            _launch_merge_window(data, pr_entry, error_msg,
+                                 background=background, transcript=transcript,
+                                 cwd=repo_dir)
+            return False
+        click.echo("Resolve conflicts manually, then re-run 'pm pr merge' to finalize.", err=True)
+        return False
     else:
         click.echo(f"Pulled latest {base_branch}.")
 
@@ -1008,8 +1018,8 @@ def _pull_after_github_merge(data: dict, pr_entry: dict, repo_dir: str,
         if pop_result.returncode != 0:
             error_detail = (pop_result.stdout.strip() + "\n"
                             + pop_result.stderr.strip()).strip()
-            error_msg = (f"Conflict applying stashed changes after GitHub merge:"
-                         f"\n{error_detail}")
+            error_msg = (f"Conflict applying stashed changes in {repo_dir} "
+                         f"after GitHub merge:\n{error_detail}")
             click.echo(error_msg, err=True)
             if resolve_window:
                 _launch_merge_window(data, pr_entry, error_msg,
