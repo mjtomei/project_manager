@@ -2,7 +2,7 @@
 
 from pm_core.graph import count_crossings
 from pm_core.tui import item_message
-from pm_core.tui.tree_layout import compute_tree_layout, TreeLayout
+from pm_core.tui.tree_layout import compute_tree_layout, TreeLayout, _activity_sort_key
 
 
 # ---------------------------------------------------------------------------
@@ -700,3 +700,72 @@ class TestBruteForceOptimality:
         heuristic = count_crossings(layout.node_positions, prs)
         optimal = _brute_force_min_crossings(prs)
         assert heuristic == optimal, f"heuristic={heuristic} > optimal={optimal}"
+
+
+# ---------------------------------------------------------------------------
+# Activity sort key tests
+# ---------------------------------------------------------------------------
+
+
+class TestActivitySortKey:
+    """Tests for the _activity_sort_key used in crossing minimization seeding."""
+
+    def test_status_priority_order(self):
+        """in_progress < in_review < pending < merged < closed."""
+        pr_map = {
+            "a": {"id": "a", "status": "closed"},
+            "b": {"id": "b", "status": "in_progress"},
+            "c": {"id": "c", "status": "pending"},
+            "d": {"id": "d", "status": "merged"},
+            "e": {"id": "e", "status": "in_review"},
+        }
+        keys = {pid: _activity_sort_key(pid, pr_map) for pid in pr_map}
+        ordered = sorted(pr_map.keys(), key=lambda pid: keys[pid])
+        assert ordered == ["b", "e", "c", "d", "a"]
+
+    def test_recent_timestamp_sorts_first(self):
+        """Within the same status, more recent timestamps should sort first."""
+        pr_map = {
+            "old": {"id": "old", "status": "in_progress",
+                    "started_at": "2024-01-01T00:00:00+00:00"},
+            "new": {"id": "new", "status": "in_progress",
+                    "started_at": "2024-06-15T00:00:00+00:00"},
+        }
+        key_old = _activity_sort_key("old", pr_map)
+        key_new = _activity_sort_key("new", pr_map)
+        assert key_new < key_old, "More recent timestamp should sort first"
+
+    def test_timestamp_before_no_timestamp(self):
+        """PRs with timestamps should sort before PRs without timestamps."""
+        pr_map = {
+            "with_ts": {"id": "with_ts", "status": "pending",
+                        "started_at": "2024-01-01T00:00:00+00:00"},
+            "no_ts": {"id": "no_ts", "status": "pending"},
+        }
+        key_with = _activity_sort_key("with_ts", pr_map)
+        key_without = _activity_sort_key("no_ts", pr_map)
+        assert key_with < key_without, "PR with timestamp should sort before PR without"
+
+    def test_missing_pr_sorts_last(self):
+        """Unknown PR IDs should sort after all known statuses."""
+        pr_map = {"known": {"id": "known", "status": "closed"}}
+        key_known = _activity_sort_key("known", pr_map)
+        key_unknown = _activity_sort_key("unknown", pr_map)
+        assert key_known < key_unknown
+
+    def test_uses_most_recent_timestamp(self):
+        """Should pick merged_at > reviewed_at > started_at."""
+        pr_map = {
+            "pr": {"id": "pr", "status": "merged",
+                   "started_at": "2024-01-01T00:00:00+00:00",
+                   "reviewed_at": "2024-03-01T00:00:00+00:00",
+                   "merged_at": "2024-06-01T00:00:00+00:00"},
+            "pr2": {"id": "pr2", "status": "merged",
+                    "started_at": "2024-01-01T00:00:00+00:00",
+                    "reviewed_at": "2024-03-01T00:00:00+00:00"},
+        }
+        # pr has merged_at (most recent), pr2 only has reviewed_at
+        # So pr should sort before pr2 (merged_at is more recent)
+        key1 = _activity_sort_key("pr", pr_map)
+        key2 = _activity_sort_key("pr2", pr_map)
+        assert key1 < key2

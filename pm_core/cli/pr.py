@@ -127,7 +127,6 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
         pr_entry["status"] = status
         changes.append(f"status: {old_status} → {status}")
         # Record timestamp for status transitions
-        from datetime import datetime, timezone
         now = datetime.now(timezone.utc).isoformat()
         if status == "in_progress" and not pr_entry.get("started_at"):
             pr_entry["started_at"] = now
@@ -593,7 +592,6 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                 click.echo("Warning: Failed to create draft PR.", err=True)
 
     # Update state — only advance from pending; don't regress in_review/merged
-    from datetime import datetime, timezone
     now = datetime.now(timezone.utc).isoformat()
     if pr_entry.get("status") == "pending":
         pr_entry["status"] = "in_progress"
@@ -895,7 +893,6 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
         else:
             click.echo("Warning: Failed to upgrade draft PR. It may already be ready or was closed.", err=True)
 
-    from datetime import datetime, timezone
     pr_entry["status"] = "in_review"
     pr_entry["reviewed_at"] = datetime.now(timezone.utc).isoformat()
     save_and_push(data, root, f"pm: review {pr_id}")
@@ -911,7 +908,6 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
 def _finalize_merge(data: dict, root, pr_entry: dict, pr_id: str,
                     transcript: str | None = None) -> None:
     """Mark PR as merged, kill tmux windows, and show newly ready PRs."""
-    from datetime import datetime, timezone
     pr_entry["status"] = "merged"
     pr_entry["merged_at"] = datetime.now(timezone.utc).isoformat()
 

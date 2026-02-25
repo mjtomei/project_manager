@@ -241,9 +241,8 @@ def sync_prs(
 
             try:
                 if backend.is_merged(str(check_dir), branch, base_branch):
-                    from datetime import datetime as _dt, timezone as _tz
                     pr_entry["status"] = "merged"
-                    pr_entry["merged_at"] = _dt.now(_tz.utc).isoformat()
+                    pr_entry["merged_at"] = datetime.now(timezone.utc).isoformat()
                     merged_prs.append(pr_entry["id"])
                     updated += 1
                     _log.info("PR %s detected as merged", pr_entry["id"])
@@ -367,6 +366,14 @@ def sync_from_github(
 
             if new_status != old_status:
                 pr_entry["status"] = new_status
+                # Record timestamp for status transitions
+                now = datetime.now(timezone.utc).isoformat()
+                if new_status == "in_progress" and not pr_entry.get("started_at"):
+                    pr_entry["started_at"] = now
+                elif new_status == "in_review":
+                    pr_entry["reviewed_at"] = now
+                elif new_status == "merged":
+                    pr_entry["merged_at"] = now
                 updated += 1
                 status_updates[pr_id] = new_status
                 _log.info("PR %s: %s → %s (from GitHub)", pr_id, old_status, new_status)

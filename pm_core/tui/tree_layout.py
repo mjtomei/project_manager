@@ -143,7 +143,7 @@ def _activity_sort_key(pr_id: str, pr_map: dict[str, dict]) -> tuple:
     """
     pr = pr_map.get(pr_id)
     if not pr:
-        return (5, "", pr_id)
+        return (5, 0, pr_id)
 
     status_priority = {
         "in_progress": 0,
@@ -158,9 +158,17 @@ def _activity_sort_key(pr_id: str, pr_map: dict[str, dict]) -> tuple:
     ts = (pr.get("merged_at") or pr.get("reviewed_at")
           or pr.get("started_at") or "")
 
-    # Negate for descending order (most recent first) — ISO timestamps
-    # sort lexicographically, so inverting gives descending order
-    return (priority, "" if not ts else ts, pr_id)
+    # Negate epoch for descending order (most recent first).
+    # PRs without timestamps get 0, sorting after all negative values.
+    ts_order: float = 0
+    if ts:
+        try:
+            from datetime import datetime as _dt
+            ts_order = -_dt.fromisoformat(ts).timestamp()
+        except (ValueError, TypeError):
+            pass
+
+    return (priority, ts_order, pr_id)
 
 
 def _minimize_crossings(
