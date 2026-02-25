@@ -332,6 +332,13 @@ def log_shell_command(cmd: list[str] | str, prefix: str = "shell", returncode: i
         pass  # Silently fail if we can't write to log
 
 
+def bench_cache_dir() -> Path:
+    """Return the bench exercise cache directory (~/.cache/pm-bench/)."""
+    d = Path.home() / ".cache" / "pm-bench"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 SHARED_SOCKET_DIR = Path("/tmp/pm-sessions")
 
 

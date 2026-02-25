@@ -491,6 +491,10 @@ COMMANDS
   pm cluster auto               Discover feature clusters automatically
   pm cluster explore            Interactively explore code clusters with Claude
 
+  pm bench models               List models on local inference backend
+  pm bench exercises            List available benchmark exercises
+  pm bench run <model>          Run benchmark with tournament selection
+
   pm guide                      Guided workflow (init → plan → PRs → start)
   pm notes                      Open session notes in editor
   pm prompt [pr-id]             Print Claude prompt for a PR
@@ -538,7 +542,7 @@ def getting_started_cmd():
 # Import submodules to register their commands on ``cli``.
 # This must be at the bottom of the file, after ``cli`` is defined.
 # ---------------------------------------------------------------------------
-from pm_core.cli import pr, plan, session, tui, guide, meta, cluster  # noqa: E402, F401
+from pm_core.cli import pr, plan, session, tui, guide, meta, cluster, bench  # noqa: E402, F401
 
 
 def main():
