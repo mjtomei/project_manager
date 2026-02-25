@@ -182,12 +182,6 @@ class TechTree(Widget):
         if self.selected_index >= len(self._ordered_ids):
             self.selected_index = max(0, len(self._ordered_ids) - 1)
 
-    def on_resize(self, event) -> None:
-        """Re-layout when viewport size changes (e.g. terminal resize)."""
-        if self._prs:
-            self._recompute()
-            self.refresh(layout=True)
-
     @property
     def selected_pr_id(self) -> str | None:
         if not self._ordered_ids:
