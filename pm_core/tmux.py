@@ -570,6 +570,47 @@ def sessions_on_window(base: str, window_id: str) -> list[str]:
     return result
 
 
+def switch_sessions_to_window(sessions: list[str], session: str, window_name: str) -> None:
+    """Switch the given sessions to the named window.
+
+    Used after killing and recreating a window (review, monitor, etc.)
+    to move sessions that were watching the old window to the new one.
+
+    ``select-window`` alone does NOT update tmux's client tracking.
+    ``switch-client`` to the same session is a visible no-op but
+    triggers tmux to recalculate the window size for the correct display.
+    """
+    if not sessions:
+        return
+    win = find_window_by_name(session, window_name)
+    if not win:
+        return
+
+    # Map session names → client TTYs for switch-client.
+    client_map: dict[str, str] = {}
+    r = subprocess.run(
+        _tmux_cmd("list-clients", "-F", "#{session_name} #{client_tty}"),
+        capture_output=True, text=True,
+    )
+    if r.returncode == 0:
+        for line in r.stdout.strip().splitlines():
+            parts = line.split(None, 1)
+            if len(parts) == 2:
+                client_map[parts[0]] = parts[1]
+
+    for sess_name in sessions:
+        subprocess.run(
+            _tmux_cmd("select-window", "-t", f"{sess_name}:{win['index']}"),
+            capture_output=True,
+        )
+        client_tty = client_map.get(sess_name)
+        if client_tty:
+            subprocess.run(
+                _tmux_cmd("switch-client", "-t", sess_name, "-c", client_tty),
+                capture_output=True,
+            )
+
+
 def set_environment(session: str, key: str, value: str, socket_path: str | None = None) -> None:
     """Set an environment variable in a tmux session."""
     subprocess.run(

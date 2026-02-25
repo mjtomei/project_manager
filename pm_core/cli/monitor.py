@@ -170,37 +170,5 @@ def _create_monitor_window(iteration: int, loop_id: str,
 
     # Switch sessions that were watching the old monitor window to the new one
     if sessions_watching:
-        import subprocess
-        new_win = tmux_mod.find_window_by_name(pm_session, MONITOR_WINDOW_NAME)
-        if new_win:
-            client_map: dict[str, str] = {}
-            r = subprocess.run(
-                tmux_mod._tmux_cmd(
-                    "list-clients", "-F",
-                    "#{session_name} #{client_tty}",
-                ),
-                capture_output=True, text=True,
-            )
-            if r.returncode == 0:
-                for line in r.stdout.strip().splitlines():
-                    parts = line.split(None, 1)
-                    if len(parts) == 2:
-                        client_map[parts[0]] = parts[1]
-
-            for sess_name in sessions_watching:
-                subprocess.run(
-                    tmux_mod._tmux_cmd(
-                        "select-window", "-t",
-                        f"{sess_name}:{new_win['index']}",
-                    ),
-                    capture_output=True,
-                )
-                client_tty = client_map.get(sess_name)
-                if client_tty:
-                    subprocess.run(
-                        tmux_mod._tmux_cmd(
-                            "switch-client", "-t", sess_name,
-                            "-c", client_tty,
-                        ),
-                        capture_output=True,
-                    )
+        tmux_mod.switch_sessions_to_window(
+            sessions_watching, pm_session, MONITOR_WINDOW_NAME)
