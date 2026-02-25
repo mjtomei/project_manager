@@ -25,7 +25,7 @@ class StatusBar(Static):
                        pr_count: int = 0, filter_text: str = "",
                        show_assist: bool = False,
                        auto_start: bool = False,
-                       monitor: bool = False) -> None:
+                       monitor_status: str = "") -> None:
         sync_icons = {
             "synced": "[green]synced[/green]",
             "pulling": "[yellow]pulling...[/yellow]",
@@ -39,7 +39,12 @@ class StatusBar(Static):
         filter_display = f"    [dim]filter:[/dim] [italic]{filter_text}[/italic]" if filter_text else ""
         assist_display = "    [dim]\\[H] Assist[/dim]" if show_assist else ""
         auto_display = "    [bold yellow]AUTO[/bold yellow]" if auto_start else ""
-        monitor_display = "    [bold cyan]MON[/bold cyan]" if monitor else ""
+        if monitor_status == "input_required":
+            monitor_display = "    [bold red]MON!![/bold red]"
+        elif monitor_status == "running":
+            monitor_display = "    [bold cyan]MON[/bold cyan]"
+        else:
+            monitor_display = ""
         self.update(f" Project: [bold]{project_name}[/bold]    {pr_info}{filter_display}    repo: [cyan]{safe_repo}[/cyan]    {sync_display}{auto_display}{monitor_display}{assist_display}")
 
 

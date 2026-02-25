@@ -1,32 +1,119 @@
 """Monitor CLI command.
 
-Launches the autonomous monitor window in tmux with a Claude session
-configured for project health monitoring.
+Launches the autonomous monitor in one of two modes:
+
+- **User mode** (``pm monitor``): runs a full blocking monitor loop that
+  prints iteration verdicts to the terminal.
+- **Internal mode** (``pm monitor --iteration N``): creates a single tmux
+  window for the given iteration (called by the monitor loop engine).
 """
+
+import secrets
+from datetime import datetime
 
 import click
 
 from pm_core import store, prompt_gen
 from pm_core import tmux as tmux_mod
-from pm_core.claude_launcher import build_claude_shell_cmd
-from pm_core.monitor_loop import MONITOR_WINDOW_NAME
+from pm_core.claude_launcher import build_claude_shell_cmd, finalize_transcript
+from pm_core.monitor_loop import (
+    MONITOR_WINDOW_NAME,
+    MonitorLoopState,
+    run_monitor_loop_sync,
+)
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import _get_pm_session, state_root
 
 
-@cli.command("monitor", hidden=True)
-@click.option("--iteration", default=0, type=int, help="Monitor loop iteration number")
-@click.option("--loop-id", default="", help="Unique monitor loop identifier")
+def _run_user_monitor_loop(wait: int, max_iterations: int) -> None:
+    """Run the monitor loop directly from the CLI (blocking)."""
+    root = state_root()
+
+    if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
+        click.echo("Monitor requires tmux.", err=True)
+        raise SystemExit(1)
+
+    pm_session = _get_pm_session()
+    if not pm_session or not tmux_mod.session_exists(pm_session):
+        click.echo(f"Monitor: tmux session '{pm_session}' not found.", err=True)
+        raise SystemExit(1)
+
+    state = MonitorLoopState(iteration_wait=wait)
+
+    # Create transcript directory
+    tdir = root / "transcripts" / f"monitor-{secrets.token_hex(4)}"
+    tdir.mkdir(parents=True, exist_ok=True)
+
+    def _on_iteration(s: MonitorLoopState) -> None:
+        ts = datetime.now().strftime("%H:%M:%S")
+        click.echo(f"[{ts}] Iteration {s.iteration}: {s.latest_verdict}")
+
+    click.echo(f"Starting monitor loop (wait={wait}s, max={max_iterations or 'unlimited'}) ...")
+    click.echo(f"Transcripts: {tdir}")
+    click.echo("Press Ctrl+C to stop.\n")
+
+    try:
+        run_monitor_loop_sync(
+            state,
+            str(root),
+            on_iteration=_on_iteration,
+            max_iterations=max_iterations,
+            transcript_dir=str(tdir),
+        )
+    except KeyboardInterrupt:
+        state.stop_requested = True
+        click.echo("\nStopping monitor loop...")
+
+    # Finalize transcript symlinks
+    from pathlib import Path
+    for p in Path(tdir).iterdir():
+        if p.is_symlink() and p.suffix == ".jsonl":
+            finalize_transcript(p)
+
+    click.echo(
+        f"\nMonitor finished: {state.iteration} iteration(s), "
+        f"last verdict: {state.latest_verdict}"
+    )
+
+
+@cli.command("monitor")
+@click.option("--iteration", default=None, type=int, help="Monitor loop iteration number (internal)")
+@click.option("--loop-id", default=None, help="Unique monitor loop identifier (internal)")
 @click.option("--transcript", default=None, hidden=True,
               help="Path to save Claude transcript symlink")
-def monitor_cmd(iteration: int, loop_id: str, transcript: str | None):
-    """Launch an autonomous monitor session in a tmux window.
+@click.option("--wait", default=120, type=int, help="Seconds between iterations")
+@click.option("--max-iterations", default=0, type=int,
+              help="Maximum iterations (0 = unlimited)")
+def monitor_cmd(iteration: int | None, loop_id: str | None,
+                transcript: str | None, wait: int, max_iterations: int):
+    """Run the autonomous monitor loop.
 
-    This command is called by the monitor loop engine to create (or
-    recreate) the monitor tmux window for each iteration.  It is not
-    intended to be called by users directly.
+    With no arguments, starts a blocking monitor loop that periodically
+    checks project health and prints verdicts to the terminal.
+
+    \b
+    Options:
+      --wait             Seconds between iterations (default: 120)
+      --max-iterations   Stop after N iterations (default: unlimited)
+
+    \b
+    Examples:
+      pm monitor                          # run with defaults
+      pm monitor --wait 60                # check every 60 seconds
+      pm monitor --wait 60 --max-iterations 5
     """
+    if iteration is not None:
+        # Internal mode: create a single tmux window for this iteration
+        _create_monitor_window(iteration, loop_id or "", transcript)
+    else:
+        # User mode: run the full blocking loop
+        _run_user_monitor_loop(wait, max_iterations)
+
+
+def _create_monitor_window(iteration: int, loop_id: str,
+                           transcript: str | None) -> None:
+    """Create (or recreate) the monitor tmux window for one iteration."""
     root = state_root()
     data = store.load(root)
 

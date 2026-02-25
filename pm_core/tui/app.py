@@ -454,7 +454,9 @@ class ProjectManagerApp(App):
             if hidden:
                 filter_text = "hide " + "+".join(hidden)
         status_bar = self.query_one("#status-bar", StatusBar)
-        monitor_running = bool(self._monitor_state and self._monitor_state.running)
+        monitor_status = ""
+        if self._monitor_state and self._monitor_state.running:
+            monitor_status = "input_required" if self._monitor_state.input_required else "running"
         status_bar.update_status(
             project.get("name", "???"),
             project.get("repo", "???"),
@@ -463,7 +465,7 @@ class ProjectManagerApp(App):
             filter_text=filter_text,
             show_assist=not get_global_setting("hide-assist"),
             auto_start=self._auto_start,
-            monitor=monitor_running,
+            monitor_status=monitor_status,
         )
 
     def _update_display(self) -> None:

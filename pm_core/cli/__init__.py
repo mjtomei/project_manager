@@ -517,6 +517,7 @@ COMMANDS
   pm prompt [pr-id]             Print Claude prompt for a PR
   pm tui                        Launch interactive dashboard
   pm meta [task]                Work on pm itself (meta-development session)
+  pm monitor                    Run autonomous monitor loop (blocking)
   pm getting-started            Show getting started guide
 
 OPTIONS

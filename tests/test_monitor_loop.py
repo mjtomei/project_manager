@@ -387,7 +387,7 @@ class TestGenerateMonitorPrompt:
         data = self._make_data()
         prompt = generate_monitor_prompt(data)
         assert "## Role" in prompt
-        assert "watchdog session" in prompt
+        assert "autonomous monitoring" in prompt
 
     def test_includes_pr_summary(self):
         from pm_core.prompt_gen import generate_monitor_prompt
@@ -425,7 +425,6 @@ class TestGenerateMonitorPrompt:
         assert "Auto-Fix Issues" in prompt
         assert "Surface Issues Needing Human Input" in prompt
         assert "Project Health Monitoring" in prompt
-        assert "Cross-Session Conflict Detection" in prompt
         assert "Master Branch Health Check" in prompt
         assert "pm Tool Self-Monitoring" in prompt
 
@@ -441,3 +440,33 @@ class TestGenerateMonitorPrompt:
         data = self._make_data()
         prompt = generate_monitor_prompt(data)
         assert "pm tui view" not in prompt
+
+
+# --- CLI routing tests ---
+
+class TestMonitorCLI:
+    """Test pm monitor CLI routing between user and internal modes."""
+
+    @patch("pm_core.cli.monitor._run_user_monitor_loop")
+    def test_no_iteration_runs_user_loop(self, mock_user_loop):
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+        runner = CliRunner()
+        result = runner.invoke(cli, ["monitor"])
+        mock_user_loop.assert_called_once_with(120, 0)
+
+    @patch("pm_core.cli.monitor._run_user_monitor_loop")
+    def test_custom_wait_and_max(self, mock_user_loop):
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+        runner = CliRunner()
+        result = runner.invoke(cli, ["monitor", "--wait", "60", "--max-iterations", "5"])
+        mock_user_loop.assert_called_once_with(60, 5)
+
+    @patch("pm_core.cli.monitor._create_monitor_window")
+    def test_iteration_provided_creates_window(self, mock_create):
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+        runner = CliRunner()
+        result = runner.invoke(cli, ["monitor", "--iteration", "3"])
+        mock_create.assert_called_once_with(3, "", None)

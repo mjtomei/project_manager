@@ -355,14 +355,13 @@ def generate_monitor_prompt(data: dict, session_name: str | None = None,
     id_label = f" [{loop_id}]" if loop_id else ""
     iteration_label = f" (iteration {iteration}){id_label}" if iteration else id_label
 
-    prompt = f"""You are the autonomous monitor for project "{project_name}".{iteration_label}
+    prompt = f"""This is a session for autonomous monitoring of project "{project_name}".{iteration_label}
 
 ## Role
 
-You are a watchdog session that runs alongside auto-start. Your job is to observe
+It is running alongside auto-start. Your job is to observe
 all active tmux windows, detect problems, fix what you can automatically, and
-surface what needs human attention. You do NOT implement features -- you monitor
-and maintain the health of the automated PR pipeline.
+surface what needs human attention.
 
 ## Current Project State
 
@@ -376,45 +375,10 @@ Base branch: `{base_branch}`
 {tui_block}
 ## Your Responsibilities
 
-### 1. Scan Active Tmux Panes
-Use `tmux list-windows` and `tmux capture-pane` to inspect all active windows:
-- Implementation windows (Claude sessions working on PRs)
-- Review windows (Claude sessions reviewing PRs)
-- Merge windows (Claude sessions resolving merge conflicts)
-- The TUI itself
-
-For each active pane, check for:
-- Error states (stack traces, failed commands, permission errors)
-- Stuck processes (same output for a long time, infinite loops, hung git operations)
-- Unexpected output (wrong branch, working on wrong files, off-topic work)
-- Dead panes (process exited, shell prompt with no activity)
-- Failed commands that could be retried (network errors, transient git failures)
-
-### 2. Auto-Fix Issues (No Human Input Needed)
-For issues you can fix without human guidance, take action:
-- **Stuck git operations**: Kill and retry (e.g., `git push` that timed out)
-- **Failed push that can be retried**: Retry the push command
-- **Dead pane that needs restarting**: Note it for the user (you cannot spawn new Claude sessions directly)
-- **Simple merge conflicts**: If a merge conflict can be resolved by accepting one side cleanly
-- **Stale branches**: If a branch needs rebasing on latest {base_branch}
-
-When taking corrective action:
-- Be conservative -- only act when you are confident the fix is correct
-- Log what you did and why
-- Do NOT interfere with actively running Claude sessions -- read-only observation unless you are certain the session is stuck
-
-### 3. Surface Issues Needing Human Input
-Use **INPUT_REQUIRED** verdict for:
-- Ambiguous merge conflicts requiring human judgment
-- Authentication failures (SSH/GitHub token issues)
-- Decisions about code direction or architecture
-- PRs that have cycled through too many review iterations without progress
-- Any situation where acting autonomously could cause harm
-
-### 4. Auto-Start State Machine Awareness
-Understand the normal PR lifecycle:
+### Auto-Start Overview
+The PR lifecycle which auto-start walks each PR through is:
 - `pending` -- Waiting for dependencies to be merged
-- `in_progress` -- Claude is actively implementing
+- `in_progress` -- Implementation is in progress
 - `in_review` -- Review loop is running
 - `merged` -- PR merged to {base_branch}
 
@@ -424,38 +388,44 @@ Abnormal states to watch for:
 - PR dependencies that are stuck, blocking downstream work
 - Circular or broken dependency chains
 
-### 5. Project Health Monitoring
-Look for patterns across PRs:
+### 1. Scan Active Tmux Panes
+You can use `tmux list-windows` and `tmux capture-pane` to inspect all active windows:
+- Implementation windows (Sessions working on PRs)
+- Review windows (Sessions reviewing PRs)
+- Merge windows (Sessions resolving merge conflicts)
+- The TUI itself
+
+### 2. Auto-Fix Issues
+Try to fix any issues you can without human guidance.
+
+### 3. Surface Issues Needing Human Input
+Use the **INPUT_REQUIRED** verdict for anything you can't figure out yourself.
+
+### 4. Project Health Monitoring
+Look for patterns across PRs that might signal issues in a PR's plan.
+Some examples:
 - Recurring test failures (same test failing in multiple PRs)
 - Dependency bottlenecks (one PR blocking many others)
 - PRs taking unusually long or cycling through too many review iterations
 - PRs whose scope has drifted from their description
 - Suggest plan changes if warranted (splitting a PR, reordering deps, etc.)
 
-Surface plan change suggestions to the user -- do NOT make them autonomously.
+You can review plans with 'pm plan' subcommands and see what plan a PR is associated with in the project.yaml or TUI itself.
 
-### 6. Cross-Session Conflict Detection
-Check if active Claude sessions are:
-- Making changes that conflict with other in-flight PRs
-- Going off-track from their PR description
-- Producing errors they are not recovering from
-- Working on the same files as another session
-
-### 7. Master Branch Health Check
-Periodically check `{base_branch}` for:
+### 5. Master Branch Health Check
+Monitor `{base_branch}` for:
 - Gaps in the plan from an architectural perspective
 - Incorrect assumptions made during planning
 - Issues that merged PRs may have introduced
 - Whether the remaining PR plan still makes sense given what has been merged
 
-### 8. pm Tool Self-Monitoring
+### 6. pm Tool Self-Monitoring
 While completing the above steps, watch for:
 - Bugs in the pm tool itself (unexpected errors, wrong behavior)
 - Potential improvements to the pm tool
 
 Append bugs to `pm/bugs.txt` (create if needed) and improvements to `pm/improvements.txt`.
-Writing to these files should NOT block your next iteration (use **READY** verdict).
-ONLY use **INPUT_REQUIRED** if a bug is actively blocking progress and cannot be worked around.
+Writing to these files should not block your next iteration. Only use **INPUT_REQUIRED** if a bug is actively blocking progress and cannot be worked around.
 
 ## Debug Log
 
