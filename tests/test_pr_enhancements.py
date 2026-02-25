@@ -416,6 +416,15 @@ class TestGitHubMergePull:
         mock_git_ops.pull_rebase.assert_called_once()
         mock_finalize.assert_called_once()
 
+        # Git ops must target the main repo dir, NOT the PR workdir
+        repo_dir = tmp_github_merge_project["pm_dir"].parent
+        workdir = tmp_github_merge_project["workdir"]
+        for call in mock_git_ops.run_git.call_args_list:
+            cwd = Path(call[1].get("cwd"))
+            assert cwd == repo_dir, f"git op cwd={cwd} should be repo dir, not workdir"
+            assert cwd != workdir
+        mock_git_ops.pull_rebase.assert_called_once_with(repo_dir)
+
     @mock.patch.object(pr_mod, "trigger_tui_restart")
     @mock.patch.object(pr_mod, "_finalize_merge")
     @mock.patch("pm_core.cli.pr.git_ops")
@@ -551,7 +560,45 @@ class TestGitHubMergePull:
         assert result.exit_code == 0
         assert "conflict" in result.output.lower()
         mock_launch_window.assert_called_once()
+        # Merge window should target the main repo dir
+        _, lw_kwargs = mock_launch_window.call_args
+        assert lw_kwargs.get("cwd") == str(tmp_github_merge_project["pm_dir"].parent)
         # Finalize should NOT be called — the merge window handles it
+        mock_finalize.assert_not_called()
+
+    @mock.patch.object(pr_mod, "_launch_merge_window")
+    @mock.patch.object(pr_mod, "_finalize_merge")
+    @mock.patch("pm_core.cli.pr.git_ops")
+    @mock.patch("subprocess.run")
+    @mock.patch("shutil.which", return_value="/usr/bin/gh")
+    def test_pull_rebase_failure_launches_merge_window(
+        self, _mock_which, mock_subprocess, mock_git_ops, mock_finalize,
+        mock_launch_window, tmp_github_merge_project,
+    ):
+        """Pull rebase failure should launch a merge resolution window."""
+        mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        def run_git_side_effect(*args, **kwargs):
+            if args[0] == "rev-parse":
+                return MagicMock(returncode=0, stdout="master", stderr="")
+            if args[0] == "status":
+                return MagicMock(returncode=0, stdout="", stderr="")  # clean
+            return MagicMock(returncode=0, stdout="", stderr="")
+        mock_git_ops.run_git.side_effect = run_git_side_effect
+        mock_git_ops.pull_rebase.return_value = MagicMock(
+            returncode=1, stdout="CONFLICT (content)", stderr="rebase failed")
+
+        runner = CliRunner()
+        with mock.patch.object(pr_mod, "state_root",
+                               return_value=tmp_github_merge_project["pm_dir"]):
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
+                                               "--resolve-window"])
+
+        assert result.exit_code == 0
+        assert "pull failed" in result.output.lower()
+        mock_launch_window.assert_called_once()
+        _, lw_kwargs = mock_launch_window.call_args
+        assert lw_kwargs.get("cwd") == str(tmp_github_merge_project["pm_dir"].parent)
         mock_finalize.assert_not_called()
 
     @mock.patch.object(pr_mod, "_finalize_merge")
@@ -626,7 +673,7 @@ class TestGitHubMergePull:
         self, _mock_which, mock_subprocess, mock_git_ops, mock_finalize,
         tmp_github_merge_project,
     ):
-        """Pull should be skipped when workdir is on a feature branch."""
+        """Pull should be skipped when repo is on a feature branch."""
         mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         def run_git_side_effect(*args, **kwargs):
