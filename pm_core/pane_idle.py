@@ -8,6 +8,7 @@ poll timer runs on the main thread.
 """
 
 import hashlib
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -20,6 +21,23 @@ _log = configure_logger("pm.pane_idle")
 # How long (seconds) content must be unchanged before we consider the pane idle.
 DEFAULT_IDLE_THRESHOLD = 30.0
 
+# Regex matching the gum selector character at the start of a line, indicating
+# Claude Code is showing an interactive selection screen (trust prompt,
+# permission prompt, etc.) and waiting for user input.
+_GUM_SELECTOR_RE = re.compile(r"^\s*❯\s+\S", re.MULTILINE)
+
+
+def content_has_interactive_prompt(content: str) -> bool:
+    """Return True if pane content shows a Claude interactive selection screen.
+
+    Detects gum-style selection UIs (trust prompt, permission prompt, etc.)
+    where Claude is waiting for user input rather than being genuinely idle.
+    """
+    # Only check the last ~20 lines to avoid false matches from old output
+    lines = content.splitlines()
+    tail = "\n".join(lines[-20:]) if len(lines) > 20 else content
+    return bool(_GUM_SELECTOR_RE.search(tail))
+
 
 @dataclass
 class PaneIdleState:
@@ -27,6 +45,7 @@ class PaneIdleState:
 
     pane_id: str
     last_content_hash: str = ""
+    last_content: str = ""  # raw content for inspection by callers
     last_change_time: float = field(default_factory=time.monotonic)
     idle: bool = False
     gone: bool = False
@@ -96,6 +115,7 @@ class PaneIdleTracker:
                 return False  # re-registered while we were polling
 
             state.gone = False
+            state.last_content = content
             if content_hash != state.last_content_hash:
                 state.last_content_hash = content_hash
                 state.last_change_time = now
@@ -113,6 +133,12 @@ class PaneIdleTracker:
         with self._lock:
             state = self._states.get(key)
             return state.idle if state else False
+
+    def get_content(self, key: str) -> str:
+        """Return last captured pane content.  Zero-cost read."""
+        with self._lock:
+            state = self._states.get(key)
+            return state.last_content if state else ""
 
     def became_idle(self, key: str) -> bool:
         """Return True once when a pane first transitions to idle.

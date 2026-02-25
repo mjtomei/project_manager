@@ -398,7 +398,15 @@ def _poll_impl_idle(app) -> None:
 
         # Detect newly-idle in_progress PRs for auto-review
         if status == "in_progress" and tracker.became_idle(pr_id):
-            newly_idle.append((pr_id, pr))
+            # Check if Claude is on an interactive selection screen (trust
+            # prompt, permission prompt, etc.) — that's not "done".
+            from pm_core.pane_idle import content_has_interactive_prompt
+            content = tracker.get_content(pr_id)
+            if content_has_interactive_prompt(content):
+                _log.info("impl_idle: %s idle but showing interactive prompt, resetting", pr_id)
+                tracker.mark_active(pr_id)
+            else:
+                newly_idle.append((pr_id, pr))
 
     # --- Second pass: merge resolution windows ---
     pending_merges: set[str] = app._pending_merge_prs
@@ -431,6 +439,14 @@ def _poll_impl_idle(app) -> None:
         tracker.poll(merge_key)
 
         if tracker.became_idle(merge_key):
+            # Check for interactive prompt before treating as idle
+            from pm_core.pane_idle import content_has_interactive_prompt
+            merge_content = tracker.get_content(merge_key)
+            if content_has_interactive_prompt(merge_content):
+                _log.info("merge_idle: %s idle but showing interactive prompt, resetting", pr_id)
+                tracker.mark_active(merge_key)
+                continue
+
             _log.info("merge_idle: merge window idle for %s, re-attempting merge", pr_id)
             app.log_message(f"Merge window idle for {pr_id}, re-attempting merge")
 
