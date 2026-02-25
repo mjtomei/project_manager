@@ -113,15 +113,7 @@ def _get_real_monitor_prompt() -> str:
     return generate_monitor_prompt(data, iteration=1, loop_id="ab12")
 
 
-def _simulate_terminal_wrap(text: str, width: int = 80) -> str:
-    """Simulate how a terminal wraps long lines at a given column width."""
-    out = []
-    for line in text.splitlines():
-        while len(line) > width:
-            out.append(line[:width])
-            line = line[width:]
-        out.append(line)
-    return "\n".join(out)
+from tests.conftest import simulate_terminal_wrap as _simulate_terminal_wrap
 
 
 class TestExtractVerdictFromContent:

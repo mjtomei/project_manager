@@ -178,20 +178,7 @@ def _get_real_prompt() -> str:
                                   review_iteration=1, review_loop_id="ab12")
 
 
-def _simulate_terminal_wrap(text: str, width: int = 80) -> str:
-    """Simulate how a terminal wraps long lines at a given column width.
-
-    This mimics what tmux capture-pane returns when the prompt text is
-    displayed on the command line.  Each input line is broken into chunks
-    of ``width`` characters.
-    """
-    out = []
-    for line in text.splitlines():
-        while len(line) > width:
-            out.append(line[:width])
-            line = line[width:]
-        out.append(line)
-    return "\n".join(out)
+from tests.conftest import simulate_terminal_wrap as _simulate_terminal_wrap
 
 
 class TestExtractVerdictFromContent:

@@ -174,3 +174,163 @@ def extract_verdict_from_content(
             _log.info("%s: ACCEPTED verdict line: [%s] (verdict=%s)", log_prefix, stripped[:100], verdict)
             return verdict
     return None
+
+
+# ---------------------------------------------------------------------------
+# Polling helpers (shared by review_loop and monitor_loop)
+# ---------------------------------------------------------------------------
+
+def poll_for_verdict(
+    pane_id: str,
+    verdicts: tuple[str, ...],
+    keywords: tuple[str, ...],
+    prompt_text: str = "",
+    exclude_verdicts: set[str] | None = None,
+    grace_period: float = 0,
+    poll_interval: float = 5,
+    tick_interval: float = 1,
+    stop_check: Callable[[], bool] | None = None,
+    log_prefix: str = "loop_shared",
+) -> str | None:
+    """Poll a pane until a verdict is stable.
+
+    Returns the captured pane content when a verdict is found and stable
+    for ``STABILITY_POLLS`` consecutive polls.
+    Returns None if the pane disappears or stop is requested.
+
+    Args:
+        pane_id: tmux pane to poll.
+        verdicts: Tuple of valid verdict keyword strings.
+        keywords: Tuple of keyword strings for prompt line filtering.
+        prompt_text: Prompt text for filtering out prompt lines.
+        exclude_verdicts: Optional set of verdict strings to skip.
+        grace_period: Seconds to wait before accepting verdicts.
+        poll_interval: Seconds between verdict checks.
+        tick_interval: Seconds between liveness/stop checks.
+        stop_check: Optional callable; if it returns True, polling stops.
+        log_prefix: Prefix for log messages.
+    """
+    from pm_core import tmux as tmux_mod
+
+    last_verdict = None
+    stable_count = 0
+    poll_start = time.monotonic()
+
+    while True:
+        if stop_check and stop_check():
+            return None
+
+        if not tmux_mod.pane_exists(pane_id):
+            _log.warning("%s: pane %s disappeared", log_prefix, pane_id)
+            return None
+
+        in_grace = grace_period > 0 and (time.monotonic() - poll_start) < grace_period
+
+        content = tmux_mod.capture_pane(pane_id, full_scrollback=True)
+        if not content.strip():
+            if not sleep_checking_pane(pane_id, poll_interval, tick=tick_interval,
+                                       stop_check=stop_check):
+                return None
+            continue
+
+        if in_grace:
+            if not sleep_checking_pane(pane_id, poll_interval, tick=tick_interval,
+                                       stop_check=stop_check):
+                return None
+            continue
+
+        verdict = extract_verdict_from_content(
+            content, verdicts=verdicts, keywords=keywords,
+            prompt_text=prompt_text, exclude_verdicts=exclude_verdicts,
+            log_prefix=log_prefix,
+        )
+        if verdict:
+            if verdict == last_verdict:
+                stable_count += 1
+            else:
+                last_verdict = verdict
+                stable_count = 1
+
+            if stable_count >= STABILITY_POLLS:
+                _log.info("%s: verdict %s stable for %d polls",
+                          log_prefix, verdict, stable_count)
+                return content
+        else:
+            last_verdict = None
+            stable_count = 0
+
+        if not sleep_checking_pane(pane_id, poll_interval, tick=tick_interval,
+                                   stop_check=stop_check):
+            return None
+
+
+def wait_for_follow_up_verdict(
+    session: str,
+    window_name: str,
+    verdicts: tuple[str, ...],
+    keywords: tuple[str, ...],
+    prompt_text: str = "",
+    exclude_verdicts: set[str] | None = None,
+    poll_interval: float = 5,
+    tick_interval: float = 1,
+    stop_check: Callable[[], bool] | None = None,
+    log_prefix: str = "loop_shared",
+) -> str | None:
+    """Poll an existing pane for a follow-up verdict (after INPUT_REQUIRED).
+
+    The user interacts with Claude in the pane; this function polls until
+    Claude emits a follow-up verdict.
+
+    Returns the captured pane content when a verdict is found, or None if
+    the pane disappeared or stop was requested.
+
+    Args:
+        session: tmux session name.
+        window_name: tmux window name containing the pane.
+        verdicts: Tuple of valid verdict keyword strings.
+        keywords: Tuple of keyword strings for prompt line filtering.
+        prompt_text: Prompt text for filtering out prompt lines.
+        exclude_verdicts: Optional set of verdict strings to skip.
+        poll_interval: Seconds between verdict checks.
+        tick_interval: Seconds between liveness/stop checks.
+        stop_check: Optional callable; if it returns True, polling stops.
+        log_prefix: Prefix for log messages.
+    """
+    from pm_core import tmux as tmux_mod
+
+    last_verdict: str | None = None
+    stable_count = 0
+
+    while not (stop_check and stop_check()):
+        pane_id = find_claude_pane(session, window_name)
+        if not pane_id:
+            _log.warning("%s: pane gone during follow-up wait", log_prefix)
+            return None
+
+        content = tmux_mod.capture_pane(pane_id, full_scrollback=True)
+        if content.strip():
+            verdict = extract_verdict_from_content(
+                content, verdicts=verdicts, keywords=keywords,
+                prompt_text=prompt_text, exclude_verdicts=exclude_verdicts,
+                log_prefix=log_prefix,
+            )
+            if verdict:
+                if verdict == last_verdict:
+                    stable_count += 1
+                else:
+                    last_verdict = verdict
+                    stable_count = 1
+                if stable_count >= STABILITY_POLLS:
+                    _log.info("%s: follow-up verdict %s stable",
+                              log_prefix, verdict)
+                    return content
+            else:
+                last_verdict = None
+                stable_count = 0
+
+        for _ in range(int(poll_interval / tick_interval)):
+            if stop_check and stop_check():
+                return None
+            time.sleep(tick_interval)
+
+    return None

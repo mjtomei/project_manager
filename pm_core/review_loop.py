@@ -36,10 +36,10 @@ from pm_core.paths import configure_logger
 from pm_core.loop_shared import (
     get_pm_session as _get_pm_session_shared,
     find_claude_pane as _find_claude_pane_shared,
-    sleep_checking_pane,
     match_verdict,
     extract_verdict_from_content,
-    STABILITY_POLLS,
+    poll_for_verdict as _poll_for_verdict_shared,
+    wait_for_follow_up_verdict as _wait_for_follow_up_shared,
 )
 
 _log = configure_logger("pm.review_loop")
@@ -171,79 +171,21 @@ def _find_claude_pane(session: str, window_name: str) -> str | None:
     return _find_claude_pane_shared(session, window_name)
 
 
-def _sleep_checking_pane(pane_id: str, seconds: float) -> bool:
-    """Sleep for *seconds*, checking pane liveness every tick."""
-    return sleep_checking_pane(pane_id, seconds, tick=_TICK_INTERVAL)
-
-
 def _poll_for_verdict(pane_id: str, prompt_text: str = "",
                       exclude_verdicts: set[str] | None = None,
                       grace_period: float = 0) -> str | None:
     """Poll a pane with capture-pane until verdict is stable.
 
-    Returns the captured pane content when a verdict is found and stable
-    for ``_STABILITY_POLLS`` consecutive polls.
-    Returns None if the pane disappears (user closed window, Claude crashed).
-
-    Args:
-        pane_id: tmux pane to poll.
-        prompt_text: Prompt text for filtering out prompt lines.
-        exclude_verdicts: Optional set of verdict strings to skip (e.g.
-            ``{VERDICT_INPUT_REQUIRED}`` for follow-up polling).
-        grace_period: Seconds to wait before accepting verdicts.  During
-            the grace period the pane is polled for liveness but verdicts
-            are ignored.  Prevents false positives from prompt text that
-            appears in the pane before Claude starts producing output.
-
+    Delegates to the shared ``poll_for_verdict`` in ``loop_shared``.
     Does NOT check ``stop_requested`` — that is handled between iterations
     by ``run_review_loop_sync`` so the current iteration runs to completion.
     """
-    from pm_core import tmux as tmux_mod
-
-    last_verdict = None
-    stable_count = 0
-    poll_start = time.monotonic()
-
-    while True:
-        if not tmux_mod.pane_exists(pane_id):
-            _log.warning("review_loop: pane %s disappeared", pane_id)
-            return None
-
-        in_grace = grace_period > 0 and (time.monotonic() - poll_start) < grace_period
-
-        content = tmux_mod.capture_pane(pane_id, full_scrollback=True)
-        if not content.strip():
-            if not _sleep_checking_pane(pane_id, _POLL_INTERVAL):
-                _log.warning("review_loop: pane %s gone during sleep", pane_id)
-                return None
-            continue
-
-        if in_grace:
-            # Still in grace period — don't check for verdicts yet
-            if not _sleep_checking_pane(pane_id, _POLL_INTERVAL):
-                _log.warning("review_loop: pane %s gone during sleep", pane_id)
-                return None
-            continue
-
-        verdict = _extract_verdict_from_content(content, prompt_text,
-                                                exclude_verdicts=exclude_verdicts)
-        if verdict:
-            if verdict == last_verdict:
-                stable_count += 1
-            else:
-                last_verdict = verdict
-                stable_count = 1
-
-            if stable_count >= STABILITY_POLLS:
-                _log.info("review_loop: verdict %s stable for %d polls", verdict, stable_count)
-                return content
-        else:
-            last_verdict = None
-            stable_count = 0
-
-        if not _sleep_checking_pane(pane_id, _POLL_INTERVAL):
-            _log.warning("review_loop: pane %s gone during sleep", pane_id)
-            return None
+    return _poll_for_verdict_shared(
+        pane_id, verdicts=ALL_VERDICTS, keywords=_REVIEW_KEYWORDS,
+        prompt_text=prompt_text, exclude_verdicts=exclude_verdicts,
+        grace_period=grace_period, poll_interval=_POLL_INTERVAL,
+        tick_interval=_TICK_INTERVAL, log_prefix="review_loop",
+    )
 
 
 def _extract_verdict_from_content(content: str, prompt_text: str = "",
@@ -314,59 +256,20 @@ def _wait_for_follow_up_verdict(pr_data: dict, prompt_text: str,
                                  state: ReviewLoopState) -> str | None:
     """Poll the existing review pane for a non-INPUT_REQUIRED verdict.
 
-    Used after INPUT_REQUIRED is detected.  The user interacts directly
-    with Claude in the review pane; this function polls until Claude emits
-    a follow-up verdict (PASS, PASS_WITH_SUGGESTIONS, or NEEDS_WORK).
-
-    Checks ``state.stop_requested`` between polls so the loop can be
-    stopped gracefully.
-
-    Returns the captured pane content when a verdict is found, or None if
-    the pane disappeared or stop was requested.
+    Delegates to the shared ``wait_for_follow_up_verdict`` in ``loop_shared``.
     """
-    from pm_core import tmux as tmux_mod
-
     session = _get_pm_session()
     if not session:
         _log.warning("review_loop: no pm session for follow-up polling")
         return None
 
     window_name = _compute_review_window_name(pr_data)
-    last_verdict: str | None = None
-    stable_count = 0
-
-    while not state.stop_requested:
-        pane_id = _find_claude_pane(session, window_name)
-        if not pane_id:
-            _log.warning("review_loop: review pane gone during INPUT_REQUIRED wait")
-            return None
-
-        content = tmux_mod.capture_pane(pane_id, full_scrollback=True)
-        if content.strip():
-            verdict = _extract_verdict_from_content(
-                content, prompt_text,
-                exclude_verdicts={VERDICT_INPUT_REQUIRED},
-            )
-            if verdict:
-                if verdict == last_verdict:
-                    stable_count += 1
-                else:
-                    last_verdict = verdict
-                    stable_count = 1
-                if stable_count >= STABILITY_POLLS:
-                    _log.info("review_loop: follow-up verdict %s stable", verdict)
-                    return content
-            else:
-                last_verdict = None
-                stable_count = 0
-
-        # Sleep in small increments to check stop_requested
-        for _ in range(int(_POLL_INTERVAL / _TICK_INTERVAL)):
-            if state.stop_requested:
-                return None
-            time.sleep(_TICK_INTERVAL)
-
-    return None
+    return _wait_for_follow_up_shared(
+        session, window_name, verdicts=ALL_VERDICTS, keywords=_REVIEW_KEYWORDS,
+        prompt_text=prompt_text, exclude_verdicts={VERDICT_INPUT_REQUIRED},
+        poll_interval=_POLL_INTERVAL, tick_interval=_TICK_INTERVAL,
+        stop_check=lambda: state.stop_requested, log_prefix="review_loop",
+    )
 
 
 def should_stop(verdict: str, stop_on_suggestions: bool = True) -> bool:

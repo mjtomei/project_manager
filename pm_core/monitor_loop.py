@@ -27,10 +27,10 @@ from pm_core.paths import configure_logger
 from pm_core.loop_shared import (
     get_pm_session as _get_pm_session_shared,
     find_claude_pane as _find_claude_pane_shared,
-    sleep_checking_pane,
     match_verdict,
     extract_verdict_from_content,
-    STABILITY_POLLS,
+    poll_for_verdict as _poll_for_verdict_shared,
+    wait_for_follow_up_verdict as _wait_for_follow_up_shared,
 )
 
 _log = configure_logger("pm.monitor_loop")
@@ -131,69 +131,22 @@ def _launch_monitor_window(pm_root: str, iteration: int = 0,
     subprocess.run(cmd, cwd=pm_root, capture_output=True, text=True, timeout=30)
 
 
-def _sleep_checking_pane(pane_id: str, seconds: float,
-                          state: MonitorLoopState | None = None) -> bool:
-    """Sleep for *seconds*, checking pane liveness every tick."""
-    return sleep_checking_pane(
-        pane_id, seconds, tick=_TICK_INTERVAL,
-        stop_check=lambda: state.stop_requested if state else False,
-    )
-
-
 def _poll_for_verdict(pane_id: str, prompt_text: str = "",
                       exclude_verdicts: set[str] | None = None,
                       grace_period: float = 0,
                       state: MonitorLoopState | None = None) -> str | None:
     """Poll a pane until a verdict is stable.
 
-    Returns the captured pane content when a verdict is found.
-    Returns None if the pane disappears or stop is requested.
+    Delegates to the shared ``poll_for_verdict`` in ``loop_shared``.
     """
-    from pm_core import tmux as tmux_mod
-
-    last_verdict = None
-    stable_count = 0
-    poll_start = time.monotonic()
-
-    while True:
-        if state and state.stop_requested:
-            return None
-
-        if not tmux_mod.pane_exists(pane_id):
-            _log.warning("monitor_loop: pane %s disappeared", pane_id)
-            return None
-
-        in_grace = grace_period > 0 and (time.monotonic() - poll_start) < grace_period
-
-        content = tmux_mod.capture_pane(pane_id, full_scrollback=True)
-        if not content.strip():
-            if not _sleep_checking_pane(pane_id, _POLL_INTERVAL, state):
-                return None
-            continue
-
-        if in_grace:
-            if not _sleep_checking_pane(pane_id, _POLL_INTERVAL, state):
-                return None
-            continue
-
-        verdict = _extract_verdict_from_content(content, prompt_text,
-                                                 exclude_verdicts=exclude_verdicts)
-        if verdict:
-            if verdict == last_verdict:
-                stable_count += 1
-            else:
-                last_verdict = verdict
-                stable_count = 1
-
-            if stable_count >= STABILITY_POLLS:
-                _log.info("monitor_loop: verdict %s stable for %d polls", verdict, stable_count)
-                return content
-        else:
-            last_verdict = None
-            stable_count = 0
-
-        if not _sleep_checking_pane(pane_id, _POLL_INTERVAL, state):
-            return None
+    return _poll_for_verdict_shared(
+        pane_id, verdicts=ALL_MONITOR_VERDICTS, keywords=_MONITOR_KEYWORDS,
+        prompt_text=prompt_text, exclude_verdicts=exclude_verdicts,
+        grace_period=grace_period, poll_interval=_POLL_INTERVAL,
+        tick_interval=_TICK_INTERVAL,
+        stop_check=lambda: state.stop_requested if state else False,
+        log_prefix="monitor_loop",
+    )
 
 
 class PaneKilledError(Exception):
@@ -260,49 +213,19 @@ def _wait_for_follow_up_verdict(prompt_text: str,
                                  state: MonitorLoopState) -> str | None:
     """Poll the existing monitor pane for a non-INPUT_REQUIRED verdict.
 
-    Used after INPUT_REQUIRED is detected. The user interacts with Claude
-    in the monitor pane. Returns content when a follow-up verdict is found.
+    Delegates to the shared ``wait_for_follow_up_verdict`` in ``loop_shared``.
     """
-    from pm_core import tmux as tmux_mod
-
     session = _get_pm_session()
     if not session:
         return None
 
-    last_verdict: str | None = None
-    stable_count = 0
-
-    while not state.stop_requested:
-        pane_id = _find_claude_pane(session, MONITOR_WINDOW_NAME)
-        if not pane_id:
-            _log.warning("monitor_loop: monitor pane gone during INPUT_REQUIRED wait")
-            return None
-
-        content = tmux_mod.capture_pane(pane_id, full_scrollback=True)
-        if content.strip():
-            verdict = _extract_verdict_from_content(
-                content, prompt_text,
-                exclude_verdicts={VERDICT_INPUT_REQUIRED},
-            )
-            if verdict:
-                if verdict == last_verdict:
-                    stable_count += 1
-                else:
-                    last_verdict = verdict
-                    stable_count = 1
-                if stable_count >= STABILITY_POLLS:
-                    _log.info("monitor_loop: follow-up verdict %s stable", verdict)
-                    return content
-            else:
-                last_verdict = None
-                stable_count = 0
-
-        for _ in range(int(_POLL_INTERVAL / _TICK_INTERVAL)):
-            if state.stop_requested:
-                return None
-            time.sleep(_TICK_INTERVAL)
-
-    return None
+    return _wait_for_follow_up_shared(
+        session, MONITOR_WINDOW_NAME,
+        verdicts=ALL_MONITOR_VERDICTS, keywords=_MONITOR_KEYWORDS,
+        prompt_text=prompt_text, exclude_verdicts={VERDICT_INPUT_REQUIRED},
+        poll_interval=_POLL_INTERVAL, tick_interval=_TICK_INTERVAL,
+        stop_check=lambda: state.stop_requested, log_prefix="monitor_loop",
+    )
 
 
 def parse_monitor_verdict(output: str) -> str:
