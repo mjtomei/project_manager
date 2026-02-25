@@ -170,30 +170,14 @@ def _launch_review_window(pr_id: str, pm_root: str, iteration: int = 0,
 
 def _find_claude_pane(session: str, window_name: str) -> str | None:
     """Find the Claude pane ID in the review window (first pane)."""
-    from pm_core import tmux as tmux_mod
-    win = tmux_mod.find_window_by_name(session, window_name)
-    if not win:
-        return None
-    panes = tmux_mod.get_pane_indices(session, win["index"])
-    if panes:
-        return panes[0][0]
-    return None
+    from pm_core.loop_shared import find_claude_pane
+    return find_claude_pane(session, window_name)
 
 
 def _sleep_checking_pane(pane_id: str, seconds: float) -> bool:
-    """Sleep for *seconds*, checking pane liveness every tick.
-
-    Returns True if the pane is still alive, False if it disappeared.
-    """
-    from pm_core import tmux as tmux_mod
-
-    elapsed = 0.0
-    while elapsed < seconds:
-        time.sleep(_TICK_INTERVAL)
-        elapsed += _TICK_INTERVAL
-        if not tmux_mod.pane_exists(pane_id):
-            return False
-    return True
+    """Sleep for *seconds*, checking pane liveness every tick."""
+    from pm_core.loop_shared import sleep_checking_pane
+    return sleep_checking_pane(pane_id, seconds, tick=_TICK_INTERVAL)
 
 
 def _poll_for_verdict(pane_id: str, prompt_text: str = "",
@@ -353,8 +337,8 @@ def _extract_verdict_from_content(content: str, prompt_text: str = "",
 
 def _get_pm_session() -> str | None:
     """Get the pm tmux session name."""
-    from pm_core.cli.helpers import _get_current_pm_session
-    return _get_current_pm_session()
+    from pm_core.loop_shared import get_pm_session
+    return get_pm_session()
 
 
 class PaneKilledError(Exception):

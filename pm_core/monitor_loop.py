@@ -47,6 +47,8 @@ _VERDICT_GRACE_PERIOD = 30
 DEFAULT_ITERATION_WAIT = 120
 # Only scan the tail of captured pane content for verdicts
 _VERDICT_TAIL_LINES = 30
+# Max history entries to keep (monitor runs indefinitely, so cap memory)
+_MAX_HISTORY = 50
 
 
 @dataclass
@@ -105,7 +107,7 @@ def _is_prompt_line(stripped_line: str, prompt_verdict_lines: set[str]) -> bool:
     context = stripped_line
     for keyword in ("INPUT_REQUIRED", "READY"):
         context = context.replace(keyword, "")
-    context = context.strip(" \t--:().").strip()
+    context = context.strip(" \t\u2014-:().").strip()
 
     if len(context) > 3:
         stripped_clean = stripped_line.replace("*", "").replace("`", "").strip()
@@ -142,20 +144,14 @@ def _extract_verdict_from_content(content: str, prompt_text: str = "",
 
 def _get_pm_session() -> str | None:
     """Get the pm tmux session name."""
-    from pm_core.cli.helpers import _get_current_pm_session
-    return _get_current_pm_session()
+    from pm_core.loop_shared import get_pm_session
+    return get_pm_session()
 
 
 def _find_claude_pane(session: str, window_name: str) -> str | None:
     """Find the Claude pane ID in the monitor window (first pane)."""
-    from pm_core import tmux as tmux_mod
-    win = tmux_mod.find_window_by_name(session, window_name)
-    if not win:
-        return None
-    panes = tmux_mod.get_pane_indices(session, win["index"])
-    if panes:
-        return panes[0][0]
-    return None
+    from pm_core.loop_shared import find_claude_pane
+    return find_claude_pane(session, window_name)
 
 
 MONITOR_WINDOW_NAME = "monitor"
@@ -177,22 +173,12 @@ def _launch_monitor_window(pm_root: str, iteration: int = 0,
 
 def _sleep_checking_pane(pane_id: str, seconds: float,
                           state: MonitorLoopState | None = None) -> bool:
-    """Sleep for *seconds*, checking pane liveness every tick.
-
-    Returns True if the pane is still alive, False if it disappeared.
-    Also checks state.stop_requested if state is provided.
-    """
-    from pm_core import tmux as tmux_mod
-
-    elapsed = 0.0
-    while elapsed < seconds:
-        time.sleep(_TICK_INTERVAL)
-        elapsed += _TICK_INTERVAL
-        if state and state.stop_requested:
-            return True  # pane alive but stopping
-        if not tmux_mod.pane_exists(pane_id):
-            return False
-    return True
+    """Sleep for *seconds*, checking pane liveness every tick."""
+    from pm_core.loop_shared import sleep_checking_pane
+    return sleep_checking_pane(
+        pane_id, seconds, tick=_TICK_INTERVAL,
+        stop_check=lambda: state.stop_requested if state else False,
+    )
 
 
 def _poll_for_verdict(pane_id: str, prompt_text: str = "",
@@ -437,6 +423,9 @@ def run_monitor_loop_sync(
                 summary=state.latest_summary,
             )
             state.history.append(iteration_result)
+            # Cap history to prevent unbounded memory growth
+            if len(state.history) > _MAX_HISTORY:
+                state.history = state.history[-_MAX_HISTORY:]
 
             _log.info("monitor_loop: iteration %d verdict=%s", state.iteration, verdict)
 
