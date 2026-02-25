@@ -151,6 +151,17 @@ class TechTree(Widget):
             return f"{plan_id}: {plan['name']}"
         return plan_id
 
+    def _get_viewport_cols(self) -> int | None:
+        """Return how many columns fit in the viewport, or None if unknown."""
+        try:
+            container = self.parent if self.parent else self
+            vw = container.size.width if hasattr(container, "size") else 0
+            if vw > 0:
+                return max(1, (vw - 4) // (NODE_W + H_GAP))
+        except Exception:
+            pass
+        return None
+
     def _recompute(self) -> None:
         """Recompute layout positions using the tree_layout module."""
         result = compute_tree_layout(
@@ -159,6 +170,7 @@ class TechTree(Widget):
             status_filter=self._status_filter,
             hide_merged=self._hide_merged,
             hide_closed=self._hide_closed,
+            max_cols=self._get_viewport_cols(),
         )
         self._ordered_ids = result.ordered_ids
         self._node_positions = result.node_positions
@@ -169,6 +181,12 @@ class TechTree(Widget):
 
         if self.selected_index >= len(self._ordered_ids):
             self.selected_index = max(0, len(self._ordered_ids) - 1)
+
+    def on_resize(self, event) -> None:
+        """Re-layout when viewport size changes (e.g. terminal resize)."""
+        if self._prs:
+            self._recompute()
+            self.refresh(layout=True)
 
     @property
     def selected_pr_id(self) -> str | None:

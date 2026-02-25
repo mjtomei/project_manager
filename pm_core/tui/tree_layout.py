@@ -17,10 +17,10 @@ from dataclasses import dataclass, field
 
 from pm_core import graph as graph_mod
 
-# Extra empty columns inserted between independent connected components.
-# This makes the visual gap between unconnected subgraphs wider than the
-# normal H_GAP between dependency-connected columns.
-COMPONENT_GAP_COLS = 2
+# Extra empty columns inserted between independent connected components
+# placed side by side.  One column gives a 30-char gap (vs 6-char H_GAP
+# between dependency-connected columns), providing a clear visual break.
+COMPONENT_GAP_COLS = 1
 
 
 @dataclass
@@ -95,13 +95,14 @@ def compute_tree_layout(
     status_filter: str | None = None,
     hide_merged: bool = False,
     hide_closed: bool = True,
+    max_cols: int | None = None,
 ) -> TreeLayout:
     """Compute the full tree layout for a set of PRs.
 
-    Independent connected components are laid out side by side with
-    extra column gaps between them (COMPONENT_GAP_COLS empty columns),
-    providing a visual cue that distinguishes unconnected subgraphs
-    from dependency-connected columns.
+    Independent connected components are laid out side by side when they
+    fit within *max_cols* columns (the viewport width).  Components that
+    would cause horizontal scrolling are placed below instead, starting
+    a new row band.
 
     Args:
         all_prs: Complete (unfiltered) list of PR dicts.
@@ -109,6 +110,9 @@ def compute_tree_layout(
         status_filter: If set, show only PRs with this status.
         hide_merged: If True (and no status_filter), hide merged PRs.
         hide_closed: If True (and no status_filter), hide closed PRs.
+        max_cols: Maximum columns that fit in the viewport without
+            scrolling.  ``None`` means no limit (all components packed
+            side by side).
 
     Returns:
         A :class:`TreeLayout` with positions and navigation order.
@@ -145,17 +149,10 @@ def compute_tree_layout(
     components = _find_connected_components(prs, pr_ids)
     components.sort(key=lambda c: _component_sort_key(c, pr_map))
 
-    # Lay out each component with Sugiyama, then combine side by side
-    col_offset = 0
-    combined_row_assignments: dict[str, int] = {}
-    combined_positions: dict[str, tuple[int, int]] = {}
-    all_layer_orders: list[tuple[int, list[list[str]]]] = []  # (col_offset, layer_orders)
-
+    # Lay out each component with Sugiyama
+    comp_layouts: list[tuple[list[dict], list[list[str]], dict[str, int]]] = []
     for component in components:
-        comp_pr_map = {pr["id"]: pr for pr in component}
-        comp_ids = set(comp_pr_map.keys())
-
-        # Build adjacency for this component
+        comp_ids = {pr["id"] for pr in component}
         parents_of: dict[str, list[str]] = {}
         children_of: dict[str, list[str]] = {}
         for pr in component:
@@ -166,30 +163,56 @@ def compute_tree_layout(
                 children_of.setdefault(d, [])
                 children_of[d].append(node)
 
-        # Sugiyama phases for this component
+        comp_pr_map = {pr["id"]: pr for pr in component}
         layers = graph_mod.compute_layers(component)
         layer_orders = _minimize_crossings(layers, parents_of, children_of,
                                            pr_map=comp_pr_map)
         row_assignments = _assign_coordinates(layer_orders, parents_of, children_of)
 
-        # Normalize rows so minimum is 0
+        # Normalize rows to start at 0
         if row_assignments:
             min_row = min(row_assignments.values())
             if min_row != 0:
                 for pid in row_assignments:
                     row_assignments[pid] -= min_row
 
-        # Store positions with column offset
+        comp_layouts.append((component, layer_orders, row_assignments))
+
+    # Pack components into row bands that fit within max_cols.
+    # Each band is a horizontal strip of components placed side by side.
+    # When the next component won't fit, start a new band below.
+    combined_row_assignments: dict[str, int] = {}
+    combined_positions: dict[str, tuple[int, int]] = {}
+    all_layer_orders: list[tuple[int, list[list[str]]]] = []
+
+    band_col = 0          # current column offset within the band
+    band_row_offset = 0   # row offset for the current band
+    band_max_rows = 0     # tallest component in the current band
+
+    for component, layer_orders, row_assignments in comp_layouts:
         num_cols = len(layer_orders)
+        comp_max_row = max(row_assignments.values()) + 1 if row_assignments else 1
+
+        # Would this component exceed the viewport if placed next to
+        # the current band?
+        needed = band_col + (COMPONENT_GAP_COLS if band_col > 0 else 0) + num_cols
+        if max_cols is not None and band_col > 0 and needed > max_cols:
+            # Start a new row band below the current one
+            band_row_offset += band_max_rows
+            band_col = 0
+            band_max_rows = 0
+
+        col_offset = band_col + (COMPONENT_GAP_COLS if band_col > 0 else 0)
+
         for col_idx, layer_order in enumerate(layer_orders):
             for pid in layer_order:
-                combined_positions[pid] = (col_idx + col_offset, row_assignments[pid])
-                combined_row_assignments[pid] = row_assignments[pid]
+                r = row_assignments[pid] + band_row_offset
+                combined_positions[pid] = (col_idx + col_offset, r)
+                combined_row_assignments[pid] = r
 
         all_layer_orders.append((col_offset, layer_orders))
-
-        # Advance column offset: component columns + gap
-        col_offset += num_cols + COMPONENT_GAP_COLS
+        band_col = col_offset + num_cols
+        band_max_rows = max(band_max_rows, comp_max_row)
 
     # Group by plan and adjust rows (operates on combined positions)
     plan_label_rows, plan_group_order = _apply_plan_grouping(
