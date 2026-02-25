@@ -422,11 +422,7 @@ mechanics will help you distinguish normal operation from genuine problems.
 - `pending` -- Waiting for dependencies to be merged. Auto-start picks up
   PRs whose dependencies are all `merged` and runs `pm pr start`.
 - `in_progress` -- A Claude implementation session is running in a tmux window.
-- `in_review` -- An automated **review loop** is running. This is NOT a single review --
-  it is a loop that reviews the code, fixes any issues it finds, commits and pushes fixes,
-  then reviews again, repeating until the verdict is PASS or PASS_WITH_SUGGESTIONS. The
-  TUI shows the current iteration count as ⟳N on the PR node. A review loop may take
-  many iterations -- this is completely normal.
+- `in_review` -- A review loop is running (iterates until PASS/PASS_WITH_SUGGESTIONS).
 - `merged` -- PR merged to `{base_branch}`. Auto-start then checks for newly-unblocked dependents.
 
 **How transitions work:**
@@ -439,17 +435,13 @@ mechanics will help you distinguish normal operation from genuine problems.
   finishing its work and the review starting.** During this window, the pane will appear
   idle but the transition has not happened yet -- this is expected, not a problem.
 - **in_review -> merged**: When the review loop reaches a PASS or PASS_WITH_SUGGESTIONS
-  verdict, auto-start automatically runs `pm pr merge`. If the merge has conflicts, a
-  merge-resolution Claude window opens; once that finishes (also detected via idle
-  polling), the merge is re-attempted. **You do not need to trigger the merge yourself --
-  auto-start handles it.**
+  verdict, auto-start runs `pm pr merge`. If the merge has conflicts, a merge-resolution
+  Claude window opens; once that finishes (also detected via idle polling), the merge is
+  re-attempted.
 
-**The review loop vs a single review:**
-The `d` key in the TUI starts a single one-shot review. Auto-start does NOT use this --
-it uses a review loop (`zz d`) that iterates automatically. If you see a PR in `in_review`
-with a review loop running (⟳N in the TUI), do NOT press `d` or trigger a manual review --
-the loop is already handling it. Only intervene if the review loop itself appears stuck or
-the review pane is dead/errored.
+Note: `d` in the TUI starts a single one-shot review. To start a review **loop** (which
+auto-start uses), the TUI chord is `zzz d`. If you need to manually kick off a review
+loop for a PR, use `pm tui send` to send `zzz d` while the PR is selected.
 
 **Normal things that look like problems (but aren't):**
 - An `in_progress` PR whose pane has been static for < 60 seconds -- idle detection
