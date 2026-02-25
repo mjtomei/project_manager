@@ -39,6 +39,7 @@ from pm_core.cli.helpers import (
     save_and_push,
     state_root,
     trigger_tui_refresh,
+    trigger_tui_restart,
 )
 
 
@@ -951,6 +952,67 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
         click.echo(f"Merge window error: {e}")
 
 
+def _pull_after_github_merge(data: dict, pr_entry: dict, workdir: str,
+                             base_branch: str, resolve_window: bool,
+                             background: bool,
+                             transcript: str | None) -> bool:
+    """Pull latest base branch after a GitHub merge.
+
+    Only pulls if the workdir already has the base branch checked out.
+    If on a different branch (implying local work in progress), the pull
+    is skipped to avoid disrupting the user's working state.
+
+    Returns True if the pull completed (or was skipped), False if a merge
+    window was launched (caller should skip ``_finalize_merge``).
+    """
+    # Detect current branch — skip pull if not already on base branch
+    head_result = git_ops.run_git("rev-parse", "--abbrev-ref", "HEAD",
+                                  cwd=workdir, check=False)
+    current_branch = head_result.stdout.strip() if head_result.returncode == 0 else ""
+    if current_branch != base_branch:
+        click.echo(f"Workdir is on '{current_branch}', skipping pull of {base_branch}.")
+        return True
+
+    work_path = Path(workdir)
+    stashed = False
+
+    # Stash uncommitted changes if dirty
+    if _workdir_is_dirty(work_path):
+        click.echo("Stashing uncommitted changes before pull...")
+        stash_result = git_ops.run_git("stash", cwd=workdir, check=False)
+        if stash_result.returncode == 0 and "No local changes" not in stash_result.stdout:
+            stashed = True
+        else:
+            click.echo("Warning: Could not stash changes.", err=True)
+
+    # Fetch and pull base branch
+    git_ops.run_git("fetch", "origin", cwd=workdir, check=False)
+    pull_result = git_ops.pull_rebase(work_path)
+    if pull_result.returncode != 0:
+        click.echo(f"Warning: Pull failed: {pull_result.stderr.strip()}", err=True)
+    else:
+        click.echo(f"Pulled latest {base_branch}.")
+
+    # Pop stash
+    if stashed:
+        pop_result = git_ops.run_git("stash", "pop", cwd=workdir, check=False)
+        if pop_result.returncode != 0:
+            error_detail = (pop_result.stdout.strip() + "\n"
+                            + pop_result.stderr.strip()).strip()
+            error_msg = (f"Conflict applying stashed changes after GitHub merge:"
+                         f"\n{error_detail}")
+            click.echo(error_msg, err=True)
+            if resolve_window:
+                _launch_merge_window(data, pr_entry, error_msg,
+                                     background=background, transcript=transcript)
+                return False
+            click.echo("Resolve conflicts manually, then re-run 'pm pr merge' to finalize.", err=True)
+            return False
+        click.echo("Restored stashed changes.")
+
+    return True
+
+
 @pr.command("merge")
 @click.argument("pr_id", default=None, required=False)
 @click.option("--resolve-window", is_flag=True, default=False, hidden=True,
@@ -1000,13 +1062,37 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool, transcri
                 ["gh", "pr", "merge", str(gh_pr_number), "--merge"],
                 cwd=workdir, capture_output=True, text=True,
             )
-            if merge_result.returncode == 0:
+            gh_merged = merge_result.returncode == 0
+            if gh_merged:
                 click.echo(f"GitHub PR #{gh_pr_number} merged.")
-                _finalize_merge(data, root, pr_entry, pr_id, transcript=transcript)
-                return
             else:
-                click.echo(f"gh pr merge failed: {merge_result.stderr.strip()}", err=True)
-                click.echo("Falling back to manual instructions.", err=True)
+                # Check if PR was already merged (e.g. re-attempt after conflict resolution)
+                from pm_core import gh_ops
+                if gh_ops.is_pr_merged(workdir, branch):
+                    click.echo(f"GitHub PR #{gh_pr_number} is already merged.")
+                    gh_merged = True
+                else:
+                    click.echo(f"gh pr merge failed: {merge_result.stderr.strip()}", err=True)
+                    click.echo("Falling back to manual instructions.", err=True)
+
+            if gh_merged:
+                pull_ok = _pull_after_github_merge(
+                    data, pr_entry, workdir, base_branch,
+                    resolve_window=resolve_window,
+                    background=background,
+                    transcript=transcript,
+                )
+                if pull_ok:
+                    _finalize_merge(data, root, pr_entry, pr_id, transcript=transcript)
+                    # Restart TUI when managing the project_manager repo itself,
+                    # so it picks up the latest pm code from the pull.
+                    repo = data.get("project", {}).get("repo", "")
+                    if "project_manager" in repo or "project-manager" in repo:
+                        trigger_tui_restart()
+                # If not pull_ok and resolve_window, a merge window was launched.
+                # The idle tracker will re-attempt and finalize after resolution.
+                return
+
         # Fallback: direct user to merge manually
         gh_pr = pr_entry.get("gh_pr")
         if gh_pr:

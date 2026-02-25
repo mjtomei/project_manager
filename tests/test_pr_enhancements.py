@@ -339,5 +339,318 @@ class TestPrMerge:
 
 
 
+# ---------------------------------------------------------------------------
+# GitHub merge: pull after merge with stash/unstash
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def tmp_github_merge_project(tmp_path):
+    """Create a project with github backend and an in_review PR."""
+    pm_dir = tmp_path / "pm"
+    pm_dir.mkdir()
+
+    workdir = tmp_path / "workdir"
+    workdir.mkdir()
+    (workdir / ".git").mkdir()
+
+    data = {
+        "project": {
+            "name": "test-project",
+            "repo": str(tmp_path),
+            "base_branch": "master",
+            "backend": "github",
+        },
+        "prs": [
+            {
+                "id": "pr-001",
+                "gh_pr_number": 42,
+                "title": "Test PR",
+                "description": "Test",
+                "branch": "pm/pr-001",
+                "status": "in_review",
+                "workdir": str(workdir),
+            }
+        ],
+        "plans": [],
+    }
+    store.save(data, pm_dir)
+    return {"pm_dir": pm_dir, "workdir": workdir, "data": data}
+
+
+class TestGitHubMergePull:
+    """Tests for pull-after-merge on the GitHub backend."""
+
+    @mock.patch.object(pr_mod, "trigger_tui_restart")
+    @mock.patch.object(pr_mod, "_finalize_merge")
+    @mock.patch("pm_core.cli.pr.git_ops")
+    @mock.patch("subprocess.run")
+    @mock.patch("shutil.which", return_value="/usr/bin/gh")
+    def test_github_merge_pulls_base_branch(
+        self, _mock_which, mock_subprocess, mock_git_ops, mock_finalize,
+        mock_restart, tmp_github_merge_project,
+    ):
+        """After a successful gh merge, should fetch and pull when on base branch."""
+        # gh pr merge succeeds
+        mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        def run_git_side_effect(*args, **kwargs):
+            if args[0] == "rev-parse":
+                return MagicMock(returncode=0, stdout="master", stderr="")
+            if args[0] == "status":
+                return MagicMock(returncode=0, stdout="", stderr="")  # clean
+            return MagicMock(returncode=0, stdout="", stderr="")
+        mock_git_ops.run_git.side_effect = run_git_side_effect
+        mock_git_ops.pull_rebase.return_value = MagicMock(returncode=0)
+
+        runner = CliRunner()
+        with mock.patch.object(pr_mod, "state_root",
+                               return_value=tmp_github_merge_project["pm_dir"]):
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+
+        assert result.exit_code == 0
+        assert "merged" in result.output.lower()
+
+        # Should have fetched and pulled (no checkout needed — already on master)
+        git_calls = [c[0] for c in mock_git_ops.run_git.call_args_list]
+        assert ("fetch", "origin") in git_calls
+        mock_git_ops.pull_rebase.assert_called_once()
+        mock_finalize.assert_called_once()
+
+    @mock.patch.object(pr_mod, "trigger_tui_restart")
+    @mock.patch.object(pr_mod, "_finalize_merge")
+    @mock.patch("pm_core.cli.pr.git_ops")
+    @mock.patch("subprocess.run")
+    @mock.patch("shutil.which", return_value="/usr/bin/gh")
+    def test_github_merge_restarts_tui_for_project_manager_repo(
+        self, _mock_which, mock_subprocess, mock_git_ops, mock_finalize,
+        mock_restart, tmp_github_merge_project,
+    ):
+        """TUI restart should fire only when managing the project_manager repo."""
+        mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        def run_git_side_effect(*args, **kwargs):
+            if args[0] == "rev-parse":
+                return MagicMock(returncode=0, stdout="master", stderr="")
+            if args[0] == "status":
+                return MagicMock(returncode=0, stdout="", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+        mock_git_ops.run_git.side_effect = run_git_side_effect
+        mock_git_ops.pull_rebase.return_value = MagicMock(returncode=0)
+
+        # Set repo to project_manager
+        data = store.load(tmp_github_merge_project["pm_dir"])
+        data["project"]["repo"] = "https://github.com/org/project_manager"
+        store.save(data, tmp_github_merge_project["pm_dir"])
+
+        runner = CliRunner()
+        with mock.patch.object(pr_mod, "state_root",
+                               return_value=tmp_github_merge_project["pm_dir"]):
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+
+        assert result.exit_code == 0
+        mock_restart.assert_called_once()
+
+    @mock.patch.object(pr_mod, "trigger_tui_restart")
+    @mock.patch.object(pr_mod, "_finalize_merge")
+    @mock.patch("pm_core.cli.pr.git_ops")
+    @mock.patch("subprocess.run")
+    @mock.patch("shutil.which", return_value="/usr/bin/gh")
+    def test_github_merge_skips_tui_restart_for_other_repos(
+        self, _mock_which, mock_subprocess, mock_git_ops, mock_finalize,
+        mock_restart, tmp_github_merge_project,
+    ):
+        """TUI restart should NOT fire for non-project_manager repos."""
+        mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        def run_git_side_effect(*args, **kwargs):
+            if args[0] == "rev-parse":
+                return MagicMock(returncode=0, stdout="master", stderr="")
+            if args[0] == "status":
+                return MagicMock(returncode=0, stdout="", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+        mock_git_ops.run_git.side_effect = run_git_side_effect
+        mock_git_ops.pull_rebase.return_value = MagicMock(returncode=0)
+
+        runner = CliRunner()
+        with mock.patch.object(pr_mod, "state_root",
+                               return_value=tmp_github_merge_project["pm_dir"]):
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+
+        assert result.exit_code == 0
+        mock_restart.assert_not_called()
+
+    @mock.patch.object(pr_mod, "_finalize_merge")
+    @mock.patch("pm_core.cli.pr.git_ops")
+    @mock.patch("subprocess.run")
+    @mock.patch("shutil.which", return_value="/usr/bin/gh")
+    def test_github_merge_stashes_dirty_workdir(
+        self, _mock_which, mock_subprocess, mock_git_ops, mock_finalize,
+        tmp_github_merge_project,
+    ):
+        """Dirty workdir should be stashed before pull, then unstashed."""
+        mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        def run_git_side_effect(*args, **kwargs):
+            if args[0] == "rev-parse":
+                return MagicMock(returncode=0, stdout="master", stderr="")
+            if args[0] == "status":
+                return MagicMock(returncode=0, stdout=" M file.py\n", stderr="")  # dirty
+            if args[0] == "stash" and len(args) == 1:
+                return MagicMock(returncode=0, stdout="Saved working directory", stderr="")
+            if args[:2] == ("stash", "pop"):
+                return MagicMock(returncode=0, stdout="", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+        mock_git_ops.run_git.side_effect = run_git_side_effect
+        mock_git_ops.pull_rebase.return_value = MagicMock(returncode=0)
+
+        runner = CliRunner()
+        with mock.patch.object(pr_mod, "state_root",
+                               return_value=tmp_github_merge_project["pm_dir"]):
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+
+        assert result.exit_code == 0
+        assert "stash" in result.output.lower()
+
+        git_calls = [c[0] for c in mock_git_ops.run_git.call_args_list]
+        assert ("stash",) in git_calls
+        assert ("stash", "pop") in git_calls
+        mock_finalize.assert_called_once()
+
+    @mock.patch.object(pr_mod, "_launch_merge_window")
+    @mock.patch.object(pr_mod, "_finalize_merge")
+    @mock.patch("pm_core.cli.pr.git_ops")
+    @mock.patch("subprocess.run")
+    @mock.patch("shutil.which", return_value="/usr/bin/gh")
+    def test_stash_pop_conflict_launches_merge_window(
+        self, _mock_which, mock_subprocess, mock_git_ops, mock_finalize,
+        mock_launch_window, tmp_github_merge_project,
+    ):
+        """Stash pop conflicts should launch a merge resolution window."""
+        mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        def run_git_side_effect(*args, **kwargs):
+            if args[0] == "rev-parse":
+                return MagicMock(returncode=0, stdout="master", stderr="")
+            if args[0] == "status":
+                return MagicMock(returncode=0, stdout=" M file.py\n", stderr="")  # dirty
+            if args[0] == "stash" and len(args) == 1:
+                return MagicMock(returncode=0, stdout="Saved working directory", stderr="")
+            if args[:2] == ("stash", "pop"):
+                return MagicMock(returncode=1, stdout="CONFLICT (content): file.py",
+                                 stderr="error: could not restore")
+            return MagicMock(returncode=0, stdout="", stderr="")
+        mock_git_ops.run_git.side_effect = run_git_side_effect
+        mock_git_ops.pull_rebase.return_value = MagicMock(returncode=0)
+
+        runner = CliRunner()
+        with mock.patch.object(pr_mod, "state_root",
+                               return_value=tmp_github_merge_project["pm_dir"]):
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
+                                               "--resolve-window"])
+
+        assert result.exit_code == 0
+        assert "conflict" in result.output.lower()
+        mock_launch_window.assert_called_once()
+        # Finalize should NOT be called — the merge window handles it
+        mock_finalize.assert_not_called()
+
+    @mock.patch.object(pr_mod, "_finalize_merge")
+    @mock.patch("pm_core.cli.pr.git_ops")
+    @mock.patch("subprocess.run")
+    @mock.patch("shutil.which", return_value="/usr/bin/gh")
+    @mock.patch("pm_core.gh_ops.is_pr_merged", return_value=True)
+    def test_already_merged_pr_pulls_and_finalizes(
+        self, _mock_is_merged, _mock_which, mock_subprocess, mock_git_ops,
+        mock_finalize, tmp_github_merge_project,
+    ):
+        """Re-attempt on already-merged PR should still pull and finalize."""
+        # gh pr merge fails (already merged)
+        mock_subprocess.return_value = MagicMock(
+            returncode=1, stdout="", stderr="already been merged")
+
+        def run_git_side_effect(*args, **kwargs):
+            if args[0] == "rev-parse":
+                return MagicMock(returncode=0, stdout="master", stderr="")
+            if args[0] == "status":
+                return MagicMock(returncode=0, stdout="", stderr="")  # clean
+            return MagicMock(returncode=0, stdout="", stderr="")
+        mock_git_ops.run_git.side_effect = run_git_side_effect
+        mock_git_ops.pull_rebase.return_value = MagicMock(returncode=0)
+
+        runner = CliRunner()
+        with mock.patch.object(pr_mod, "state_root",
+                               return_value=tmp_github_merge_project["pm_dir"]):
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+
+        assert result.exit_code == 0
+        assert "already merged" in result.output.lower()
+        mock_finalize.assert_called_once()
+
+    @mock.patch.object(pr_mod, "_finalize_merge")
+    @mock.patch("pm_core.cli.pr.git_ops")
+    @mock.patch("subprocess.run")
+    @mock.patch("shutil.which", return_value="/usr/bin/gh")
+    def test_clean_workdir_skips_stash(
+        self, _mock_which, mock_subprocess, mock_git_ops, mock_finalize,
+        tmp_github_merge_project,
+    ):
+        """Clean workdir should not stash/unstash."""
+        mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        def run_git_side_effect(*args, **kwargs):
+            if args[0] == "rev-parse":
+                return MagicMock(returncode=0, stdout="master", stderr="")
+            if args[0] == "status":
+                return MagicMock(returncode=0, stdout="", stderr="")  # clean
+            return MagicMock(returncode=0, stdout="", stderr="")
+        mock_git_ops.run_git.side_effect = run_git_side_effect
+        mock_git_ops.pull_rebase.return_value = MagicMock(returncode=0)
+
+        runner = CliRunner()
+        with mock.patch.object(pr_mod, "state_root",
+                               return_value=tmp_github_merge_project["pm_dir"]):
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+
+        assert result.exit_code == 0
+        git_calls = [c[0] for c in mock_git_ops.run_git.call_args_list]
+        # Should NOT have stash or stash pop
+        assert ("stash",) not in git_calls
+        assert ("stash", "pop") not in git_calls
+        mock_finalize.assert_called_once()
+
+    @mock.patch.object(pr_mod, "_finalize_merge")
+    @mock.patch("pm_core.cli.pr.git_ops")
+    @mock.patch("subprocess.run")
+    @mock.patch("shutil.which", return_value="/usr/bin/gh")
+    def test_github_merge_skips_pull_when_not_on_base_branch(
+        self, _mock_which, mock_subprocess, mock_git_ops, mock_finalize,
+        tmp_github_merge_project,
+    ):
+        """Pull should be skipped when workdir is on a feature branch."""
+        mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        def run_git_side_effect(*args, **kwargs):
+            if args[0] == "rev-parse":
+                return MagicMock(returncode=0, stdout="pm/pr-001", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+        mock_git_ops.run_git.side_effect = run_git_side_effect
+
+        runner = CliRunner()
+        with mock.patch.object(pr_mod, "state_root",
+                               return_value=tmp_github_merge_project["pm_dir"]):
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+
+        assert result.exit_code == 0
+        assert "skipping pull" in result.output.lower()
+
+        # Should NOT have fetched, stashed, or pulled
+        git_calls = [c[0] for c in mock_git_ops.run_git.call_args_list]
+        assert ("fetch", "origin") not in git_calls
+        assert ("stash",) not in git_calls
+        mock_git_ops.pull_rebase.assert_not_called()
+        # But finalize should still run
+        mock_finalize.assert_called_once()
+
+
 # _finalize_merge no longer manages auto-start state (it's in-memory on the TUI).
 # Target-merged detection is handled by check_and_start() in auto_start.py.

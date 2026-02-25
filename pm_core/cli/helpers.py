@@ -273,6 +273,22 @@ def trigger_tui_refresh() -> None:
         _log.debug("Could not trigger TUI refresh: %s", e)
 
 
+def trigger_tui_restart() -> None:
+    """Send Ctrl+R to the TUI pane to restart it.
+
+    Used after pulling new code so the TUI picks up the latest version.
+    """
+    try:
+        if not tmux_mod.has_tmux():
+            return
+        tui_pane, session = _find_tui_pane()
+        if tui_pane and session:
+            tmux_mod.send_keys_literal(tui_pane, "C-r")
+            _log.debug("Sent restart to TUI pane %s in session %s", tui_pane, session)
+    except Exception as e:
+        _log.debug("Could not trigger TUI restart: %s", e)
+
+
 def _resolve_repo_dir(root: Path, data: dict) -> Path:
     """Determine the target repo directory from pm state.
 
