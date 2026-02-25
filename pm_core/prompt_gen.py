@@ -414,17 +414,45 @@ Base branch: `{base_branch}`
 ## Your Responsibilities
 
 ### Auto-Start Overview
-The PR lifecycle which auto-start walks each PR through is:
-- `pending` -- Waiting for dependencies to be merged
-- `in_progress` -- Implementation is in progress
-- `in_review` -- Review loop is running
-- `merged` -- PR merged to {base_branch}
 
-Abnormal states to watch for:
-- PR stuck in `in_progress` with idle/dead implementation pane
-- PR in `in_review` with no active review loop
+Auto-start manages the full PR lifecycle automatically. Understanding the
+mechanics will help you distinguish normal operation from genuine problems.
+
+**Lifecycle stages:**
+- `pending` -- Waiting for dependencies to be merged. Auto-start picks up
+  PRs whose dependencies are all `merged` and runs `pm pr start`.
+- `in_progress` -- A Claude implementation session is running in a tmux window.
+- `in_review` -- A review loop is running (iterates until PASS/PASS_WITH_SUGGESTIONS).
+- `merged` -- PR merged to `{base_branch}`. Auto-start then checks for newly-unblocked dependents.
+
+**How transitions work:**
+- **pending -> in_progress**: Auto-start detects all deps are merged and launches
+  an implementation window. This happens quickly after a dependency merges.
+- **in_progress -> in_review**: The TUI polls the implementation pane every ~5 seconds,
+  hashing the visible content. When the content stops changing for ~30 seconds, the TUI
+  considers the implementation "idle" (done) and automatically transitions to `in_review`,
+  launching a review loop. **This means there is a normal ~30 second delay between Claude
+  finishing its work and the review starting.** During this window, the pane will appear
+  idle but the transition has not happened yet -- this is expected, not a problem.
+- **in_review -> merged**: When the review loop reaches a PASS or PASS_WITH_SUGGESTIONS
+  verdict, auto-start runs `pm pr merge`. If the merge has conflicts, a merge-resolution
+  Claude window opens; once that finishes (also detected via idle polling), the merge is
+  re-attempted.
+
+**Normal things that look like problems (but aren't):**
+- An `in_progress` PR whose pane has been static for < 60 seconds -- idle detection
+  hasn't fired yet, this is the normal transition window.
+- A PR that just transitioned to `in_review` but has no review window yet -- the review
+  loop is being launched, give it a few seconds.
+- A review loop showing multiple iterations (⟳N in the TUI) -- this is normal, the loop
+  iterates until PASS.
+
+**Abnormal states that DO need attention:**
+- PR stuck in `in_progress` with idle/dead implementation pane for several minutes
+- PR in `in_review` with no active review loop and no recent review activity
 - PR dependencies that are stuck, blocking downstream work
 - Circular or broken dependency chains
+- Implementation pane showing an error/crash rather than completed work
 {auto_start_scope_block}
 ### 1. Scan Active Tmux Panes
 You can use `tmux list-windows` and `tmux capture-pane` to inspect all active windows:
