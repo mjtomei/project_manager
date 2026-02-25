@@ -84,7 +84,7 @@ class TechTree(Widget):
         super().__init__(**kwargs)
         self._prs = prs or []
         self._ordered_ids: list[str] = []
-        self._node_positions: dict[str, tuple[int, int]] = {}  # pr_id -> (col, row) in grid
+        self._node_positions: dict[str, tuple[int, int]] = {}  # pr_id -> (x_char, row)
         self._hidden_plans: set[str] = set()       # plan IDs to hide ("_standalone" for null-plan PRs)
         self._plan_map: dict[str, dict] = {}       # plan_id -> plan dict (for name lookup)
         self._plan_label_rows: dict[str, int] = {} # plan_id -> row number for label

@@ -14,6 +14,7 @@ The TechTree widget calls :func:`compute_tree_layout` and uses the resulting
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime as _dt
 
 from pm_core import graph as graph_mod
 
@@ -86,7 +87,6 @@ def _find_connected_components(
 
 def _component_sort_key(
     component: list[dict],
-    pr_map: dict[str, dict],
 ) -> tuple:
     """Sort key for components: largest first, then by activity."""
     # Active PRs (in_progress/in_review) first, then by component size
@@ -159,7 +159,7 @@ def compute_tree_layout(
 
     # Find connected components and lay out each independently
     components = _find_connected_components(prs, pr_ids)
-    components.sort(key=lambda c: _component_sort_key(c, pr_map))
+    components.sort(key=_component_sort_key)
 
     # Lay out each component with Sugiyama
     comp_layouts: list[tuple[list[dict], list[list[str]], dict[str, int]]] = []
@@ -314,7 +314,6 @@ def _activity_sort_key(pr_id: str, pr_map: dict[str, dict]) -> tuple:
     ts_order: float = 0
     if ts:
         try:
-            from datetime import datetime as _dt
             ts_order = -_dt.fromisoformat(ts).timestamp()
         except (ValueError, TypeError):
             pass
