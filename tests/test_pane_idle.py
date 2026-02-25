@@ -259,14 +259,41 @@ class TestContentHasInteractivePrompt:
     def test_empty_content(self):
         assert content_has_interactive_prompt("") is False
 
-    def test_selector_anywhere_in_output(self):
-        """Selector anywhere in the pane content should match."""
-        lines = ["line " + str(i) for i in range(25)]
-        lines[3] = " ❯ 1. Yes, I trust this folder"
-        content = "\n".join(lines)
+    def test_selector_with_sibling_above(self):
+        """Selector with an indented sibling option above should match."""
+        content = (
+            "   Option A\n"
+            " ❯ Option B\n"
+        )
+        assert content_has_interactive_prompt(content) is True
+
+    def test_selector_with_sibling_below(self):
+        """Selector with an indented sibling option below should match."""
+        content = (
+            " ❯ Option A\n"
+            "   Option B\n"
+        )
         assert content_has_interactive_prompt(content) is True
 
     def test_bare_selector_no_text(self):
         """Bare ❯ without following text (e.g. input cursor) should not match."""
         content = "Some output\n❯ \n"
+        assert content_has_interactive_prompt(content) is False
+
+    def test_input_cursor_with_proposed_message(self):
+        """Claude's input cursor with a proposed message should NOT match."""
+        content = (
+            "Done! Created 3 files.\n"
+            "\n"
+            "❯ Would you like me to run the tests?\n"
+        )
+        assert content_has_interactive_prompt(content) is False
+
+    def test_input_cursor_with_indented_selector(self):
+        """Indented ❯ but no sibling options should NOT match."""
+        content = (
+            "Some output\n"
+            "  ❯ some proposed text\n"
+            "more output\n"
+        )
         assert content_has_interactive_prompt(content) is False

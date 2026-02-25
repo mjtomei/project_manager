@@ -21,10 +21,13 @@ _log = configure_logger("pm.pane_idle")
 # How long (seconds) content must be unchanged before we consider the pane idle.
 DEFAULT_IDLE_THRESHOLD = 30.0
 
-# Regex matching the gum selector character at the start of a line, indicating
-# Claude Code is showing an interactive selection screen (trust prompt,
-# permission prompt, etc.) and waiting for user input.
+# Gum-style selection UIs show a list of options, one marked with ❯.
+# The other options are indented to the same level but without ❯.
+# We detect this by looking for a ❯ line with sibling option lines
+# above or below it at the same indent level — distinguishing it from
+# Claude Code's single input cursor (❯ with a proposed message).
 _GUM_SELECTOR_RE = re.compile(r"^\s*❯\s+\S", re.MULTILINE)
+_GUM_OPTION_RE = re.compile(r"^\s{2,}\S", re.MULTILINE)
 
 
 def content_has_interactive_prompt(content: str) -> bool:
@@ -32,8 +35,22 @@ def content_has_interactive_prompt(content: str) -> bool:
 
     Detects gum-style selection UIs (trust prompt, permission prompt, etc.)
     where Claude is waiting for user input rather than being genuinely idle.
+
+    A gum selection menu has a ❯ on the selected option with other options
+    on adjacent lines at similar indentation.  A bare Claude input cursor
+    (❯ with a proposed message) does NOT have neighbouring option lines,
+    so it won't match.
     """
-    return bool(_GUM_SELECTOR_RE.search(content))
+    lines = content.splitlines()
+    for i, line in enumerate(lines):
+        if not _GUM_SELECTOR_RE.match(line):
+            continue
+        # Check if there's at least one sibling option line adjacent
+        above = lines[i - 1] if i > 0 else ""
+        below = lines[i + 1] if i < len(lines) - 1 else ""
+        if _GUM_OPTION_RE.match(above) or _GUM_OPTION_RE.match(below):
+            return True
+    return False
 
 
 @dataclass
