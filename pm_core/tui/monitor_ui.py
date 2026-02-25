@@ -48,7 +48,9 @@ def start_monitor(app, transcript_dir: str | None = None) -> None:
 
     pm_root = str(store.find_project_root())
 
-    state = MonitorLoopState()
+    state = MonitorLoopState(
+        auto_start_target=getattr(app, '_auto_start_target', None),
+    )
     app._monitor_state = state
 
     _log.info("monitor_ui: starting monitor loop=%s", state.loop_id)

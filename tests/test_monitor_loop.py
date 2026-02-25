@@ -461,4 +461,4 @@ class TestMonitorCLI:
         from pm_core.cli import cli
         runner = CliRunner()
         result = runner.invoke(cli, ["monitor", "--iteration", "3"])
-        mock_create.assert_called_once_with(3, "", None)
+        mock_create.assert_called_once_with(3, "", None, auto_start_target=None)

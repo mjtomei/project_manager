@@ -87,6 +87,8 @@ class MonitorLoopState:
     # INPUT_REQUIRED: set to True while polling for follow-up verdict
     input_required: bool = False
     _transcript_dir: str | None = None
+    # Auto-start target PR (for scoping monitor to the dependency fan-in)
+    auto_start_target: str | None = None
 
 
 def _match_monitor_verdict(line: str) -> str | None:
@@ -119,7 +121,8 @@ MONITOR_WINDOW_NAME = "monitor"
 
 def _launch_monitor_window(pm_root: str, iteration: int = 0,
                             loop_id: str = "",
-                            transcript: str | None = None) -> None:
+                            transcript: str | None = None,
+                            auto_start_target: str | None = None) -> None:
     """Launch the monitor window via ``pm pr start``-style Claude session."""
     cmd = [sys.executable, "-m", "pm_core.wrapper",
            "monitor", "--iteration", str(iteration)]
@@ -127,6 +130,8 @@ def _launch_monitor_window(pm_root: str, iteration: int = 0,
         cmd.extend(["--loop-id", loop_id])
     if transcript:
         cmd.extend(["--transcript", transcript])
+    if auto_start_target:
+        cmd.extend(["--auto-start-target", auto_start_target])
     _log.info("monitor_loop: launching monitor window: %s", cmd)
     subprocess.run(cmd, cwd=pm_root, capture_output=True, text=True, timeout=30)
 
@@ -154,7 +159,8 @@ class PaneKilledError(Exception):
 
 
 def _regenerate_prompt_text(pm_root: str, iteration: int = 0,
-                             loop_id: str = "") -> str:
+                             loop_id: str = "",
+                             auto_start_target: str | None = None) -> str:
     """Regenerate the monitor prompt text for verdict filtering."""
     try:
         from pathlib import Path
@@ -163,6 +169,7 @@ def _regenerate_prompt_text(pm_root: str, iteration: int = 0,
         data = store.load(Path(pm_root))
         return generate_monitor_prompt(
             data, iteration=iteration, loop_id=loop_id,
+            auto_start_target=auto_start_target,
         )
     except Exception as exc:
         _log.warning("monitor_loop: could not regenerate prompt text: %s", exc)
@@ -186,10 +193,12 @@ def _run_monitor_iteration(pm_root: str, iteration: int = 0,
     if not tmux_mod.session_exists(session):
         raise RuntimeError(f"tmux session '{session}' no longer exists")
 
+    target = state.auto_start_target if state else None
     _launch_monitor_window(pm_root, iteration=iteration, loop_id=loop_id,
-                            transcript=transcript)
+                            transcript=transcript, auto_start_target=target)
 
-    prompt_text = _regenerate_prompt_text(pm_root, iteration, loop_id)
+    prompt_text = _regenerate_prompt_text(pm_root, iteration, loop_id,
+                                           auto_start_target=target)
     _log.info("monitor_loop: prompt_text for filtering: %d chars", len(prompt_text))
 
     time.sleep(2)
@@ -325,6 +334,7 @@ def run_monitor_loop_sync(
 
                 follow_up_prompt = _regenerate_prompt_text(
                     pm_root, state.iteration, state.loop_id,
+                    auto_start_target=state.auto_start_target,
                 )
                 follow_up_output = _wait_for_follow_up_verdict(
                     follow_up_prompt, state,

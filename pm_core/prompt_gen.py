@@ -315,7 +315,8 @@ The merge of `{branch}` into `{base_branch}` failed with the following error:
 
 
 def generate_monitor_prompt(data: dict, session_name: str | None = None,
-                            iteration: int = 0, loop_id: str = "") -> str:
+                            iteration: int = 0, loop_id: str = "",
+                            auto_start_target: str | None = None) -> str:
     """Generate a Claude Code prompt for the autonomous monitor session.
 
     The monitor session observes auto-start and watches all active tmux
@@ -327,6 +328,9 @@ def generate_monitor_prompt(data: dict, session_name: str | None = None,
         session_name: If provided, include TUI interaction instructions.
         iteration: Current iteration number (1-based).
         loop_id: Short unique loop identifier.
+        auto_start_target: The PR that auto-start is targeting. When set,
+            the monitor should only intervene on PRs in this PR's
+            transitive dependency fan-in.
     """
     all_prs = data.get("prs") or []
     base_branch = data.get("project", {}).get("base_branch", "master")
@@ -351,6 +355,40 @@ def generate_monitor_prompt(data: dict, session_name: str | None = None,
     plan_summary = "\n".join(plan_lines) if plan_lines else "No plans defined."
 
     tui_block = tui_section(session_name) if session_name else ""
+
+    # Compute auto-start scope (dependency fan-in of the target)
+    auto_start_scope_block = ""
+    if auto_start_target:
+        from pm_core.tui.auto_start import _transitive_deps
+        managed_ids = _transitive_deps(all_prs, auto_start_target)
+        managed_ids.add(auto_start_target)
+        managed_list = ", ".join(sorted(managed_ids))
+        unmanaged = [pr for pr in all_prs if pr["id"] not in managed_ids
+                     and pr.get("workdir")]
+        unmanaged_lines = ""
+        if unmanaged:
+            lines = []
+            for pr in unmanaged:
+                lines.append(f"- {pr['id']}: {pr.get('title', '???')} [{pr.get('status', 'pending')}]")
+            unmanaged_lines = "\n".join(lines)
+
+        auto_start_scope_block = f"""
+### Auto-Start Scope
+
+Auto-start target: **{auto_start_target}**
+Managed PRs (target + its transitive dependencies): {managed_list}
+
+**IMPORTANT**: Only PRs in the managed set above are part of the auto-start pipeline.
+Other PRs may have active tmux windows from manual user activity -- do NOT attempt to
+fix, restart, or interfere with those sessions. You may observe them for cross-session
+conflict detection (e.g. overlapping file edits), but take no corrective action on
+windows belonging to unmanaged PRs.
+"""
+        if unmanaged_lines:
+            auto_start_scope_block += f"""
+PRs with active windows that are NOT managed by auto-start (hands off):
+{unmanaged_lines}
+"""
 
     id_label = f" [{loop_id}]" if loop_id else ""
     iteration_label = f" (iteration {iteration}){id_label}" if iteration else id_label
@@ -387,7 +425,7 @@ Abnormal states to watch for:
 - PR in `in_review` with no active review loop
 - PR dependencies that are stuck, blocking downstream work
 - Circular or broken dependency chains
-
+{auto_start_scope_block}
 ### 1. Scan Active Tmux Panes
 You can use `tmux list-windows` and `tmux capture-pane` to inspect all active windows:
 - Implementation windows (Sessions working on PRs)

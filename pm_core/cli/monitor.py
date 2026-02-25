@@ -85,8 +85,11 @@ def _run_user_monitor_loop(wait: int, max_iterations: int) -> None:
 @click.option("--wait", default=120, type=int, help="Seconds between iterations")
 @click.option("--max-iterations", default=0, type=int,
               help="Maximum iterations (0 = unlimited)")
+@click.option("--auto-start-target", default=None, hidden=True,
+              help="Auto-start target PR ID (passed by monitor loop engine)")
 def monitor_cmd(iteration: int | None, loop_id: str | None,
-                transcript: str | None, wait: int, max_iterations: int):
+                transcript: str | None, wait: int, max_iterations: int,
+                auto_start_target: str | None):
     """Run the autonomous monitor loop.
 
     With no arguments, starts a blocking monitor loop that periodically
@@ -105,14 +108,16 @@ def monitor_cmd(iteration: int | None, loop_id: str | None,
     """
     if iteration is not None:
         # Internal mode: create a single tmux window for this iteration
-        _create_monitor_window(iteration, loop_id or "", transcript)
+        _create_monitor_window(iteration, loop_id or "", transcript,
+                               auto_start_target=auto_start_target)
     else:
         # User mode: run the full blocking loop
         _run_user_monitor_loop(wait, max_iterations)
 
 
 def _create_monitor_window(iteration: int, loop_id: str,
-                           transcript: str | None) -> None:
+                           transcript: str | None,
+                           auto_start_target: str | None = None) -> None:
     """Create (or recreate) the monitor tmux window for one iteration."""
     root = state_root()
     data = store.load(root)
@@ -130,6 +135,7 @@ def _create_monitor_window(iteration: int, loop_id: str,
     monitor_prompt = prompt_gen.generate_monitor_prompt(
         data, session_name=pm_session,
         iteration=iteration, loop_id=loop_id,
+        auto_start_target=auto_start_target,
     )
 
     # Determine a working directory -- use the repo root (parent of pm/ dir)
