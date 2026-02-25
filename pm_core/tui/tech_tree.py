@@ -862,7 +862,13 @@ class TechTree(Widget):
             node_region = Region(x, y, NODE_W, NODE_H + V_GAP + 1)
 
         container = self.parent if self.parent else self
-        container.scroll_to_region(node_region)
+        # Use animate=False so the scroll happens immediately (no
+        # animation overriding subsequent adjustments), and force=True
+        # so horizontal scrolling works even when overflow is "auto"
+        # and the scrollbar is hidden.
+        container.scroll_to_region(
+            node_region, animate=False, force=True,
+        )
 
         # Explicit horizontal scroll fallback — scroll_to_region may not
         # adjust scroll_x when the content has no vertical overflow
