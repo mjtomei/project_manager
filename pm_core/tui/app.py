@@ -316,6 +316,11 @@ class ProjectManagerApp(App):
     def on_resize(self) -> None:
         """Update layout orientation and recompute tree when terminal is resized."""
         self._update_orientation()
+        # Defer recompute so container sizes have settled after the resize
+        self.set_timer(0.1, self._recompute_tree_layout)
+
+    def _recompute_tree_layout(self) -> None:
+        """Recompute TechTree layout after a resize."""
         try:
             tree = self.query_one("#tech-tree", TechTree)
             if tree._prs:
