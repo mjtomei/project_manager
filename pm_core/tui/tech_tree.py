@@ -924,4 +924,4 @@ class TechTree(Widget):
         scroller = self.parent if self.parent else self
         viewport_h = scroller.size.height if hasattr(scroller, 'size') else 40
         region = Region(0, label_y, 1, viewport_h)
-        scroller.scroll_to_region(region)
+        scroller.scroll_to_region(region, animate=False, force=True)
