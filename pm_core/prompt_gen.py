@@ -314,6 +314,186 @@ The merge of `{branch}` into `{base_branch}` failed with the following error:
     return prompt.strip()
 
 
+def generate_monitor_prompt(data: dict, session_name: str | None = None,
+                            iteration: int = 0, loop_id: str = "") -> str:
+    """Generate a Claude Code prompt for the autonomous monitor session.
+
+    The monitor session observes auto-start and watches all active tmux
+    windows for issues, attempting fixes when possible and surfacing
+    problems that need human input.
+
+    Args:
+        data: Project data dict.
+        session_name: If provided, include TUI interaction instructions.
+        iteration: Current iteration number (1-based).
+        loop_id: Short unique loop identifier.
+    """
+    all_prs = data.get("prs") or []
+    base_branch = data.get("project", {}).get("base_branch", "master")
+    project_name = data.get("project", {}).get("name", "unknown")
+
+    # Build PR status summary
+    pr_lines = []
+    for pr in all_prs:
+        status = pr.get("status", "pending")
+        deps = pr.get("depends_on") or []
+        dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
+        workdir = pr.get("workdir") or ""
+        workdir_str = f" [workdir: {workdir}]" if workdir else ""
+        pr_lines.append(f"- {pr['id']}: {pr.get('title', '???')} [{status}]{dep_str}{workdir_str}")
+    pr_summary = "\n".join(pr_lines) if pr_lines else "No PRs defined."
+
+    # Build plan summary
+    plans = data.get("plans") or []
+    plan_lines = []
+    for plan in plans:
+        plan_lines.append(f"- {plan['id']}: {plan.get('name', '???')} [{plan.get('status', 'draft')}]")
+    plan_summary = "\n".join(plan_lines) if plan_lines else "No plans defined."
+
+    tui_block = tui_section(session_name) if session_name else ""
+
+    id_label = f" [{loop_id}]" if loop_id else ""
+    iteration_label = f" (iteration {iteration}){id_label}" if iteration else id_label
+
+    prompt = f"""You are the autonomous monitor for project "{project_name}".{iteration_label}
+
+## Role
+
+You are a watchdog session that runs alongside auto-start. Your job is to observe
+all active tmux windows, detect problems, fix what you can automatically, and
+surface what needs human attention. You do NOT implement features -- you monitor
+and maintain the health of the automated PR pipeline.
+
+## Current Project State
+
+Base branch: `{base_branch}`
+
+### PRs
+{pr_summary}
+
+### Plans
+{plan_summary}
+{tui_block}
+## Your Responsibilities
+
+### 1. Scan Active Tmux Panes
+Use `tmux list-windows` and `tmux capture-pane` to inspect all active windows:
+- Implementation windows (Claude sessions working on PRs)
+- Review windows (Claude sessions reviewing PRs)
+- Merge windows (Claude sessions resolving merge conflicts)
+- The TUI itself
+
+For each active pane, check for:
+- Error states (stack traces, failed commands, permission errors)
+- Stuck processes (same output for a long time, infinite loops, hung git operations)
+- Unexpected output (wrong branch, working on wrong files, off-topic work)
+- Dead panes (process exited, shell prompt with no activity)
+- Failed commands that could be retried (network errors, transient git failures)
+
+### 2. Auto-Fix Issues (No Human Input Needed)
+For issues you can fix without human guidance, take action:
+- **Stuck git operations**: Kill and retry (e.g., `git push` that timed out)
+- **Failed push that can be retried**: Retry the push command
+- **Dead pane that needs restarting**: Note it for the user (you cannot spawn new Claude sessions directly)
+- **Simple merge conflicts**: If a merge conflict can be resolved by accepting one side cleanly
+- **Stale branches**: If a branch needs rebasing on latest {base_branch}
+
+When taking corrective action:
+- Be conservative -- only act when you are confident the fix is correct
+- Log what you did and why
+- Do NOT interfere with actively running Claude sessions -- read-only observation unless you are certain the session is stuck
+
+### 3. Surface Issues Needing Human Input
+Use **INPUT_REQUIRED** verdict for:
+- Ambiguous merge conflicts requiring human judgment
+- Authentication failures (SSH/GitHub token issues)
+- Decisions about code direction or architecture
+- PRs that have cycled through too many review iterations without progress
+- Any situation where acting autonomously could cause harm
+
+### 4. Auto-Start State Machine Awareness
+Understand the normal PR lifecycle:
+- `pending` -- Waiting for dependencies to be merged
+- `in_progress` -- Claude is actively implementing
+- `in_review` -- Review loop is running
+- `merged` -- PR merged to {base_branch}
+
+Abnormal states to watch for:
+- PR stuck in `in_progress` with idle/dead implementation pane
+- PR in `in_review` with no active review loop
+- PR dependencies that are stuck, blocking downstream work
+- Circular or broken dependency chains
+
+### 5. Project Health Monitoring
+Look for patterns across PRs:
+- Recurring test failures (same test failing in multiple PRs)
+- Dependency bottlenecks (one PR blocking many others)
+- PRs taking unusually long or cycling through too many review iterations
+- PRs whose scope has drifted from their description
+- Suggest plan changes if warranted (splitting a PR, reordering deps, etc.)
+
+Surface plan change suggestions to the user -- do NOT make them autonomously.
+
+### 6. Cross-Session Conflict Detection
+Check if active Claude sessions are:
+- Making changes that conflict with other in-flight PRs
+- Going off-track from their PR description
+- Producing errors they are not recovering from
+- Working on the same files as another session
+
+### 7. Master Branch Health Check
+Periodically check `{base_branch}` for:
+- Gaps in the plan from an architectural perspective
+- Incorrect assumptions made during planning
+- Issues that merged PRs may have introduced
+- Whether the remaining PR plan still makes sense given what has been merged
+
+### 8. pm Tool Self-Monitoring
+While completing the above steps, watch for:
+- Bugs in the pm tool itself (unexpected errors, wrong behavior)
+- Potential improvements to the pm tool
+
+Append bugs to `pm/bugs.txt` (create if needed) and improvements to `pm/improvements.txt`.
+Writing to these files should NOT block your next iteration (use **READY** verdict).
+ONLY use **INPUT_REQUIRED** if a bug is actively blocking progress and cannot be worked around.
+
+## Debug Log
+
+The pm debug log is at `~/.pm/debug/`. Use `tail` to inspect recent entries:
+```
+tail -100 ~/.pm/debug/*.log
+```
+
+## How to Inspect Panes
+
+```bash
+# List all windows in the pm session
+tmux list-windows -t <session-name>
+
+# Capture content of a specific pane
+tmux capture-pane -p -t <pane-id>
+
+# Capture with full scrollback
+tmux capture-pane -p -t <pane-id> -S -
+
+# List panes in a window
+tmux list-panes -t <session>:<window>
+```
+
+## Iteration Protocol
+
+1. Perform all monitoring checks described above
+2. Take corrective actions for issues that don't need human input
+3. Compile a brief summary of findings
+4. End with a verdict on its own line:
+   - **READY** -- All issues handled (or no issues found). The monitor will wait and then run another iteration.
+   - **INPUT_REQUIRED** -- You need human input or want to surface an important finding. Describe what you need clearly. The user will interact with you in this pane, and then you should provide a follow-up verdict (**READY** to continue monitoring).
+
+IMPORTANT: Always end your response with the verdict keyword on its own line -- either **READY** or **INPUT_REQUIRED**."""
+
+    return prompt.strip()
+
+
 def generate_review_loop_prompt(data: dict, pr_id: str) -> str:
     """Generate a review prompt for the automated review loop.
 

@@ -225,6 +225,8 @@ class ProjectManagerApp(App):
         self._auto_start: bool = False
         self._auto_start_target: str | None = None
         self._auto_start_run_id: str | None = None
+        # Monitor loop state (purely in-memory, lost on TUI restart)
+        self._monitor_state = None  # MonitorLoopState | None
 
     def _consume_z(self) -> int:
         """Atomically read and clear the z modifier count.
@@ -452,6 +454,7 @@ class ProjectManagerApp(App):
             if hidden:
                 filter_text = "hide " + "+".join(hidden)
         status_bar = self.query_one("#status-bar", StatusBar)
+        monitor_running = bool(self._monitor_state and self._monitor_state.running)
         status_bar.update_status(
             project.get("name", "???"),
             project.get("repo", "???"),
@@ -460,6 +463,7 @@ class ProjectManagerApp(App):
             filter_text=filter_text,
             show_assist=not get_global_setting("hide-assist"),
             auto_start=self._auto_start,
+            monitor=monitor_running,
         )
 
     def _update_display(self) -> None:

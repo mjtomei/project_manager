@@ -235,6 +235,10 @@ def _poll_loop_state(app) -> None:
     if app._impl_poll_counter % 5 == 0:
         _poll_impl_idle(app)
 
+    # Poll monitor loop state
+    from pm_core.tui.monitor_ui import poll_monitor_state
+    poll_monitor_state(app)
+
     # Refresh tech tree to update ⟳N markers on PR nodes
     _refresh_tech_tree(app)
 
@@ -252,11 +256,13 @@ def _poll_loop_state(app) -> None:
             _maybe_auto_merge(app, state.pr_id)
 
     # Stop the timer if no loops are running AND no active PRs need animation
+    # AND monitor is not running
     has_active_prs = any(
         pr.get("status") in ("in_progress", "in_review") and pr.get("workdir")
         for pr in (app._data.get("prs") or [])
     )
-    if not any_running and not has_active_prs:
+    monitor_running = app._monitor_state and app._monitor_state.running
+    if not any_running and not has_active_prs and not monitor_running:
         if app._review_loop_timer:
             app._review_loop_timer.stop()
             app._review_loop_timer = None
