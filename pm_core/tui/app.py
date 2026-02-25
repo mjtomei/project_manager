@@ -314,8 +314,15 @@ class ProjectManagerApp(App):
             pass
 
     def on_resize(self) -> None:
-        """Update layout orientation when terminal is resized."""
+        """Update layout orientation and recompute tree when terminal is resized."""
         self._update_orientation()
+        try:
+            tree = self.query_one("#tech-tree", TechTree)
+            if tree._prs:
+                tree._recompute()
+                tree.refresh(layout=True)
+        except Exception:
+            pass
 
     def _update_orientation(self) -> None:
         """Switch main area between landscape/portrait based on terminal size."""
