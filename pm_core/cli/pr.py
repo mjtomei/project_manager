@@ -273,6 +273,14 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
                 raise SystemExit(1)
             pr_entry["status"] = new_status
             changes.append(f"status: {current_status} → {new_status}")
+            # Record timestamp for status transitions
+            now = datetime.now(timezone.utc).isoformat()
+            if new_status == "in_progress" and not pr_entry.get("started_at"):
+                pr_entry["started_at"] = now
+            elif new_status == "in_review":
+                pr_entry["reviewed_at"] = now
+            elif new_status == "merged":
+                pr_entry["merged_at"] = now
         if new_deps_str != current_deps:
             if not new_deps_str:
                 pr_entry["depends_on"] = []
@@ -1283,6 +1291,7 @@ def pr_sync():
 
         if backend.is_merged(str(check_dir), branch, base_branch):
             pr_entry["status"] = "merged"
+            pr_entry["merged_at"] = datetime.now(timezone.utc).isoformat()
             click.echo(f"  ✅ {_pr_display_id(pr_entry)}: merged")
             updated += 1
 
