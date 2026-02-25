@@ -62,11 +62,10 @@ STATUS_BG = {
 # Status filter cycle order (None = show all)
 STATUS_FILTER_CYCLE = [None, "pending", "in_progress", "in_review", "merged", "closed"]
 
-# Node dimensions (minimums — actual values scale with viewport width)
-MIN_NODE_W = 24
-MAX_NODE_W = 50
+# Node dimensions
+NODE_W = 24
 NODE_H = 5  # 5 lines: top border, id, title, status, bottom border
-MIN_H_GAP = 6
+H_GAP = 6
 V_GAP = 2
 
 
@@ -98,9 +97,6 @@ class TechTree(Widget):
         self._hide_closed: bool = True                            # toggle: hide closed PRs
         self._status_filter: str | None = None                    # filter to show only this status
         self._anim_frame: int = 0                                  # animation frame counter
-        # Dynamic node dimensions (updated in _update_dimensions)
-        self._node_w: int = MIN_NODE_W
-        self._h_gap: int = MIN_H_GAP
 
     def on_mount(self) -> None:
         self.prs = self._prs
@@ -174,40 +170,6 @@ class TechTree(Widget):
         if self.selected_index >= len(self._ordered_ids):
             self.selected_index = max(0, len(self._ordered_ids) - 1)
 
-    def _update_dimensions(self, viewport_width: int) -> None:
-        """Compute NODE_W and H_GAP to fill the viewport width."""
-        real_positions = {k: v for k, v in self._node_positions.items()
-                         if not k.startswith("_hidden:")}
-        if not real_positions:
-            self._node_w = MIN_NODE_W
-            self._h_gap = MIN_H_GAP
-            return
-
-        num_cols = max(c for c, r in real_positions.values()) + 1
-        margin = 4  # left/right padding
-        available = viewport_width - margin
-
-        # Minimum space needed
-        min_total = num_cols * MIN_NODE_W + max(0, num_cols - 1) * MIN_H_GAP
-        if available <= min_total or num_cols == 0:
-            self._node_w = MIN_NODE_W
-            self._h_gap = MIN_H_GAP
-            return
-
-        # First expand nodes up to MAX_NODE_W
-        extra_per_col = min(
-            (available - min_total) // num_cols,
-            MAX_NODE_W - MIN_NODE_W,
-        )
-        self._node_w = MIN_NODE_W + extra_per_col
-
-        # Remaining space goes to H_GAP
-        remaining = available - num_cols * self._node_w
-        if num_cols > 1:
-            self._h_gap = max(MIN_H_GAP, remaining // (num_cols - 1))
-        else:
-            self._h_gap = MIN_H_GAP
-
     @property
     def selected_pr_id(self) -> str | None:
         if not self._ordered_ids:
@@ -260,12 +222,8 @@ class TechTree(Widget):
         real_positions = {k: v for k, v in self._node_positions.items() if not k.startswith("_hidden:")}
         if not real_positions:
             return 40
-        # Update dimensions to fill the viewport, then return the
-        # max of minimum content width and viewport width.
-        self._update_dimensions(viewport.width)
         max_col = max(c for c, r in real_positions.values()) + 1
-        min_width = max_col * (MIN_NODE_W + MIN_H_GAP) + 4
-        return max(min_width, viewport.width)
+        return max_col * (NODE_W + H_GAP) + 4
 
     def get_content_height(self, container, viewport, width):
         if not self._node_positions:
@@ -310,12 +268,8 @@ class TechTree(Widget):
         max_col = max(c for c, r in real_positions.values()) + 1
         max_row = max(r for c, r in real_positions.values()) + 1
 
-        # Use dynamic dimensions (computed in get_content_width)
-        node_w = self._node_w
-        h_gap = self._h_gap
-
         total_h = max_row * (NODE_H + V_GAP)
-        total_w = max_col * (node_w + h_gap)
+        total_w = max_col * (NODE_W + H_GAP)
 
         # Build a character grid with increased margins to prevent overlapping
         grid = [[" "] * (total_w + 10) for _ in range(total_h + 4)]
@@ -330,7 +284,7 @@ class TechTree(Widget):
         # Compute pixel positions
         def node_pos(pr_id):
             col, row = self._node_positions[pr_id]
-            x = col * (node_w + h_gap) + 2
+            x = col * (NODE_W + H_GAP) + 2
             y = row * (NODE_H + V_GAP) + 1
             return x, y
 
@@ -434,7 +388,7 @@ class TechTree(Widget):
             dst_dy = entry_offsets.get(pr_id, {}).get(dep_id, NODE_H // 2)
             src_y = sy + src_dy
             dst_y = ey + dst_dy
-            arrow_start_x = sx + node_w
+            arrow_start_x = sx + NODE_W
             arrow_end_x = ex - 1
 
             if arrow_end_x > arrow_start_x:
@@ -501,18 +455,18 @@ class TechTree(Widget):
             # Box characters - double-line for selected, single-line otherwise
             border = "bold white" if is_selected else "dim"
             if is_selected:
-                top = "╔" + "═" * (node_w - 2) + "╗"
-                bot = "╚" + "═" * (node_w - 2) + "╝"
+                top = "╔" + "═" * (NODE_W - 2) + "╗"
+                bot = "╚" + "═" * (NODE_W - 2) + "╝"
                 side = "║"
             else:
-                top = "┌" + "─" * (node_w - 2) + "┐"
-                bot = "└" + "─" * (node_w - 2) + "┘"
+                top = "┌" + "─" * (NODE_W - 2) + "┐"
+                bot = "└" + "─" * (NODE_W - 2) + "┘"
                 side = "│"
 
             display_id = f"#{pr.get('gh_pr_number')}" if pr.get("gh_pr_number") else pr_id
             # Mark the auto-start target PR
             is_auto_target = (auto_start_enabled and auto_start_target == pr_id)
-            max_id_len = node_w - 4
+            max_id_len = NODE_W - 4
             if is_auto_target:
                 # Reserve 2 chars for " ◎"
                 truncated_id = display_id[:max_id_len - 2]
@@ -521,10 +475,10 @@ class TechTree(Widget):
                 id_content = display_id[:max_id_len]
             id_line = f"{side} {id_content:<{max_id_len}} {side}"
             title = pr.get("title", "???")
-            max_title_len = node_w - 4
+            max_title_len = NODE_W - 4
             if len(title) > max_title_len:
                 title = title[:max_title_len - 1] + "…"  # Unicode ellipsis
-            title_line = f"{side} {title:<{node_w - 4}} {side}"
+            title_line = f"{side} {title:<{NODE_W - 4}} {side}"
             status_text = f"{icon} {status}"
             # Show review loop marker or verdict if a loop exists for this PR
             loop_marker, loop_style = self._get_loop_marker(pr_id)
@@ -544,10 +498,10 @@ class TechTree(Widget):
                         status_text += f" {spinner}"
             machine = pr.get("agent_machine")
             if machine:
-                avail = node_w - 4 - len(status_text) - 1
+                avail = NODE_W - 4 - len(status_text) - 1
                 if avail > 3:
                     status_text += f" {machine[:avail]}"
-            status_line = f"{side} {status_text:<{node_w - 4}} {side}"
+            status_line = f"{side} {status_text:<{NODE_W - 4}} {side}"
 
             box_lines = [top, id_line, title_line, status_line, bot]
             for dy, bl in enumerate(box_lines):
@@ -770,7 +724,7 @@ class TechTree(Widget):
             real_positions = {k: v for k, v in self._node_positions.items() if not k.startswith("_hidden:")}
             if real_positions:
                 max_col = max(c for c, r in real_positions.values())
-                right_x = (max_col + 1) * (self._node_w + self._h_gap) + 4
+                right_x = (max_col + 1) * (NODE_W + H_GAP) + 4
                 if hasattr(container, "scroll_x") and hasattr(container, "size"):
                     container.scroll_x = max(0, right_x - container.size.width)
             return
@@ -923,13 +877,13 @@ class TechTree(Widget):
             node_region = Region(0, y, 60, 1)
         else:
             col, row = self._node_positions[pr_id]
-            x = col * (self._node_w + self._h_gap) + 2
+            x = col * (NODE_W + H_GAP) + 2
             y = row * (NODE_H + V_GAP) + 1
             # Include the full node height plus generous padding below so
             # the node clears the status/command bars that overlay the
             # bottom of the viewport (typically 3-4 lines).
             bottom_padding = 4
-            node_region = Region(x, y, self._node_w, NODE_H + V_GAP + bottom_padding)
+            node_region = Region(x, y, NODE_W, NODE_H + V_GAP + bottom_padding)
 
         container = self.parent if self.parent else self
         from textual.geometry import Spacing
@@ -947,7 +901,7 @@ class TechTree(Widget):
         if not pr_id.startswith("_hidden:") and hasattr(container, "scroll_x"):
             vw = container.size.width if hasattr(container, "size") else 0
             if vw > 0:
-                node_right = x + self._node_w + 2
+                node_right = x + NODE_W + 2
                 if x < container.scroll_x:
                     container.scroll_x = max(0, x - 2)
                 elif node_right > container.scroll_x + vw:

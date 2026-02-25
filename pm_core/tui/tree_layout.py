@@ -17,6 +17,11 @@ from dataclasses import dataclass, field
 
 from pm_core import graph as graph_mod
 
+# Extra empty columns inserted between independent connected components.
+# This makes the visual gap between unconnected subgraphs wider than the
+# normal H_GAP between dependency-connected columns.
+COMPONENT_GAP_COLS = 2
+
 
 @dataclass
 class TreeLayout:
@@ -30,6 +35,59 @@ class TreeLayout:
     plan_group_order: list[str] = field(default_factory=list)
 
 
+def _find_connected_components(
+    prs: list[dict],
+    pr_ids: set[str],
+) -> list[list[dict]]:
+    """Find connected components in the PR dependency graph.
+
+    Uses union-find on the undirected version of the dependency graph.
+    Returns a list of PR lists, one per component.
+    """
+    parent: dict[str, str] = {pr["id"]: pr["id"] for pr in prs}
+
+    def find(x: str) -> str:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: str, b: str) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    for pr in prs:
+        for dep_id in pr.get("depends_on") or []:
+            if dep_id in pr_ids:
+                union(pr["id"], dep_id)
+
+    # Group by root
+    groups: dict[str, list[dict]] = {}
+    for pr in prs:
+        root = find(pr["id"])
+        groups.setdefault(root, []).append(pr)
+
+    return list(groups.values())
+
+
+def _component_sort_key(
+    component: list[dict],
+    pr_map: dict[str, dict],
+) -> tuple:
+    """Sort key for components: largest first, then by activity."""
+    # Active PRs (in_progress/in_review) first, then by component size
+    has_active = any(
+        pr.get("status") in ("in_progress", "in_review")
+        for pr in component
+    )
+    return (
+        0 if has_active else 1,
+        -len(component),
+        min(pr["id"] for pr in component),  # deterministic tie-break
+    )
+
+
 def compute_tree_layout(
     all_prs: list[dict],
     *,
@@ -39,6 +97,11 @@ def compute_tree_layout(
     hide_closed: bool = True,
 ) -> TreeLayout:
     """Compute the full tree layout for a set of PRs.
+
+    Independent connected components are laid out side by side with
+    extra column gaps between them (COMPONENT_GAP_COLS empty columns),
+    providing a visual cue that distinguishes unconnected subgraphs
+    from dependency-connected columns.
 
     Args:
         all_prs: Complete (unfiltered) list of PR dicts.
@@ -76,48 +139,80 @@ def compute_tree_layout(
         return layout
 
     pr_map = {pr["id"]: pr for pr in prs}
-    layers = graph_mod.compute_layers(prs)
-
-    # Build adjacency for layout (only visible nodes)
     pr_ids = set(pr_map.keys())
-    parents_of: dict[str, list[str]] = {}
-    children_of: dict[str, list[str]] = {}
-    for pr in prs:
-        node = pr["id"]
-        parents_of[node] = [d for d in (pr.get("depends_on") or []) if d in pr_ids]
-        children_of.setdefault(node, [])
-        for d in parents_of[node]:
-            children_of.setdefault(d, [])
-            children_of[d].append(node)
 
-    # Sugiyama phases
-    layer_orders = _minimize_crossings(layers, parents_of, children_of,
-                                       pr_map=pr_map)
-    row_assignments = _assign_coordinates(layer_orders, parents_of, children_of)
+    # Find connected components and lay out each independently
+    components = _find_connected_components(prs, pr_ids)
+    components.sort(key=lambda c: _component_sort_key(c, pr_map))
 
-    # Normalize rows so minimum is 0
-    if row_assignments:
-        min_row = min(row_assignments.values())
-        if min_row != 0:
-            for pr_id in row_assignments:
-                row_assignments[pr_id] -= min_row
+    # Lay out each component with Sugiyama, then combine side by side
+    col_offset = 0
+    combined_row_assignments: dict[str, int] = {}
+    combined_positions: dict[str, tuple[int, int]] = {}
+    all_layer_orders: list[tuple[int, list[list[str]]]] = []  # (col_offset, layer_orders)
 
-    # Group by plan and adjust rows
+    for component in components:
+        comp_pr_map = {pr["id"]: pr for pr in component}
+        comp_ids = set(comp_pr_map.keys())
+
+        # Build adjacency for this component
+        parents_of: dict[str, list[str]] = {}
+        children_of: dict[str, list[str]] = {}
+        for pr in component:
+            node = pr["id"]
+            parents_of[node] = [d for d in (pr.get("depends_on") or []) if d in comp_ids]
+            children_of.setdefault(node, [])
+            for d in parents_of[node]:
+                children_of.setdefault(d, [])
+                children_of[d].append(node)
+
+        # Sugiyama phases for this component
+        layers = graph_mod.compute_layers(component)
+        layer_orders = _minimize_crossings(layers, parents_of, children_of,
+                                           pr_map=comp_pr_map)
+        row_assignments = _assign_coordinates(layer_orders, parents_of, children_of)
+
+        # Normalize rows so minimum is 0
+        if row_assignments:
+            min_row = min(row_assignments.values())
+            if min_row != 0:
+                for pid in row_assignments:
+                    row_assignments[pid] -= min_row
+
+        # Store positions with column offset
+        num_cols = len(layer_orders)
+        for col_idx, layer_order in enumerate(layer_orders):
+            for pid in layer_order:
+                combined_positions[pid] = (col_idx + col_offset, row_assignments[pid])
+                combined_row_assignments[pid] = row_assignments[pid]
+
+        all_layer_orders.append((col_offset, layer_orders))
+
+        # Advance column offset: component columns + gap
+        col_offset += num_cols + COMPONENT_GAP_COLS
+
+    # Group by plan and adjust rows (operates on combined positions)
     plan_label_rows, plan_group_order = _apply_plan_grouping(
-        prs, row_assignments
+        prs, combined_row_assignments
     )
     layout.plan_label_rows = plan_label_rows
     layout.plan_group_order = plan_group_order
 
-    # Build final ordered_ids and node_positions from layers
-    for col, layer_order in enumerate(layer_orders):
-        for pr_id in sorted(layer_order, key=lambda x: row_assignments.get(x, 0)):
-            layout.node_positions[pr_id] = (col, row_assignments[pr_id])
-            layout.ordered_ids.append(pr_id)
+    # Update positions with plan-adjusted rows
+    for pid in combined_positions:
+        col, _ = combined_positions[pid]
+        combined_positions[pid] = (col, combined_row_assignments[pid])
+
+    # Build final ordered_ids from layer orders (column-first, then row)
+    for co, layer_orders in all_layer_orders:
+        for col_idx, layer_order in enumerate(layer_orders):
+            for pid in sorted(layer_order, key=lambda x: combined_row_assignments.get(x, 0)):
+                layout.node_positions[pid] = combined_positions[pid]
+                layout.ordered_ids.append(pid)
 
     # Add hidden plan labels as navigable rows below visible content
     if hidden_plans:
-        max_row = max(row_assignments.values()) if row_assignments else -1
+        max_row = max(combined_row_assignments.values()) if combined_row_assignments else -1
         hidden_row = max_row + 2  # gap after visible content
         for plan_id in sorted(hidden_plans):
             virtual_id = f"_hidden:{plan_id}"
