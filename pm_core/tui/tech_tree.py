@@ -151,13 +151,13 @@ class TechTree(Widget):
             return f"{plan_id}: {plan['name']}"
         return plan_id
 
-    def _get_viewport_cols(self) -> int | None:
-        """Return how many columns fit in the viewport, or None if unknown."""
+    def _get_viewport_width(self) -> int | None:
+        """Return viewport width in characters, or None if unknown."""
         try:
             container = self.parent if self.parent else self
             vw = container.size.width if hasattr(container, "size") else 0
             if vw > 0:
-                return max(1, (vw - 4) // (NODE_W + H_GAP))
+                return vw
         except Exception:
             pass
         return None
@@ -170,7 +170,7 @@ class TechTree(Widget):
             status_filter=self._status_filter,
             hide_merged=self._hide_merged,
             hide_closed=self._hide_closed,
-            max_cols=self._get_viewport_cols(),
+            max_width=self._get_viewport_width(),
         )
         self._ordered_ids = result.ordered_ids
         self._node_positions = result.node_positions
@@ -240,8 +240,9 @@ class TechTree(Widget):
         real_positions = {k: v for k, v in self._node_positions.items() if not k.startswith("_hidden:")}
         if not real_positions:
             return 40
-        max_col = max(c for c, r in real_positions.values()) + 1
-        return max_col * (NODE_W + H_GAP) + 4
+        # node_positions stores (x_char, row) — find rightmost node edge
+        max_x = max(x for x, r in real_positions.values())
+        return max_x + NODE_W + 4
 
     def get_content_height(self, container, viewport, width):
         if not self._node_positions:
@@ -283,11 +284,12 @@ class TechTree(Widget):
         real_positions = {k: v for k, v in self._node_positions.items() if not k.startswith("_hidden:")}
         if not real_positions:
             return self._render_hidden_labels_only()
-        max_col = max(c for c, r in real_positions.values()) + 1
-        max_row = max(r for c, r in real_positions.values()) + 1
+        # node_positions stores (x_char, row)
+        max_x = max(x for x, r in real_positions.values())
+        max_row = max(r for x, r in real_positions.values()) + 1
 
         total_h = max_row * (NODE_H + V_GAP)
-        total_w = max_col * (NODE_W + H_GAP)
+        total_w = max_x + NODE_W
 
         # Build a character grid with increased margins to prevent overlapping
         grid = [[" "] * (total_w + 10) for _ in range(total_h + 4)]
@@ -299,10 +301,9 @@ class TechTree(Widget):
                 grid[y][x] = char
                 style_grid[y][x] = style
 
-        # Compute pixel positions
+        # Compute pixel positions — x is stored directly, y from row
         def node_pos(pr_id):
-            col, row = self._node_positions[pr_id]
-            x = col * (NODE_W + H_GAP) + 2
+            x, row = self._node_positions[pr_id]
             y = row * (NODE_H + V_GAP) + 1
             return x, y
 
@@ -741,8 +742,8 @@ class TechTree(Widget):
             # Scroll to the right edge, keeping vertical position
             real_positions = {k: v for k, v in self._node_positions.items() if not k.startswith("_hidden:")}
             if real_positions:
-                max_col = max(c for c, r in real_positions.values())
-                right_x = (max_col + 1) * (NODE_W + H_GAP) + 4
+                max_x = max(x for x, r in real_positions.values())
+                right_x = max_x + NODE_W + 4
                 if hasattr(container, "scroll_x") and hasattr(container, "size"):
                     container.scroll_x = max(0, right_x - container.size.width)
             return
@@ -750,7 +751,7 @@ class TechTree(Widget):
             # Target the very bottom of content with extra margin
             real_positions = {k: v for k, v in self._node_positions.items() if not k.startswith("_hidden:")}
             if real_positions:
-                max_row = max(r for c, r in real_positions.values())
+                max_row = max(r for x, r in real_positions.values())
             else:
                 max_row = 0
             # Position well past the last node's bottom border
@@ -886,7 +887,7 @@ class TechTree(Widget):
             # Calculate their y position: grid height + gap + label index
             real_positions = {k: v for k, v in self._node_positions.items() if not k.startswith("_hidden:")}
             if real_positions:
-                max_row = max(r for c, r in real_positions.values()) + 1
+                max_row = max(r for x, r in real_positions.values()) + 1
                 grid_h = max_row * (NODE_H + V_GAP) + 4
             else:
                 grid_h = 0
@@ -894,8 +895,7 @@ class TechTree(Widget):
             y = grid_h + 1 + label_index
             node_region = Region(0, y, 60, 1)
         else:
-            col, row = self._node_positions[pr_id]
-            x = col * (NODE_W + H_GAP) + 2
+            x, row = self._node_positions[pr_id]
             y = row * (NODE_H + V_GAP) + 1
             # Include the full node height plus generous padding below so
             # the node clears the status/command bars that overlay the

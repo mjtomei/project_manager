@@ -17,15 +17,28 @@ from dataclasses import dataclass, field
 
 from pm_core import graph as graph_mod
 
-# Extra empty columns inserted between independent connected components
-# placed side by side.  One column gives a 30-char gap (vs 6-char H_GAP
-# between dependency-connected columns), providing a clear visual break.
-COMPONENT_GAP_COLS = 1
+# Character-level gap between independent connected components placed
+# side by side.  Wider than H_GAP (6) to provide a visual cue that
+# these subgraphs are unrelated.
+COMPONENT_GAP_CHARS = 10
+
+# Standard column width used for intra-component layout.
+# Imported from tech_tree at module level would create a circular import,
+# so we duplicate the constants here.
+_NODE_W = 24
+_H_GAP = 6
+_COL_WIDTH = _NODE_W + _H_GAP  # 30 chars per column
 
 
 @dataclass
 class TreeLayout:
-    """Result of a layout computation."""
+    """Result of a layout computation.
+
+    ``node_positions`` maps PR IDs to ``(x_char, row)`` where *x_char*
+    is the character offset of the left edge of the node box.  This
+    allows non-uniform horizontal spacing (e.g. wider gaps between
+    independent components than between dependency-connected columns).
+    """
 
     ordered_ids: list[str] = field(default_factory=list)
     node_positions: dict[str, tuple[int, int]] = field(default_factory=dict)
@@ -95,14 +108,14 @@ def compute_tree_layout(
     status_filter: str | None = None,
     hide_merged: bool = False,
     hide_closed: bool = True,
-    max_cols: int | None = None,
+    max_width: int | None = None,
 ) -> TreeLayout:
     """Compute the full tree layout for a set of PRs.
 
     Independent connected components are laid out side by side when they
-    fit within *max_cols* columns (the viewport width).  Components that
-    would cause horizontal scrolling are placed below instead, starting
-    a new row band.
+    fit within *max_width* characters (the viewport width).  Components
+    that would cause horizontal scrolling are placed below instead,
+    starting a new row band.
 
     Args:
         all_prs: Complete (unfiltered) list of PR dicts.
@@ -110,9 +123,8 @@ def compute_tree_layout(
         status_filter: If set, show only PRs with this status.
         hide_merged: If True (and no status_filter), hide merged PRs.
         hide_closed: If True (and no status_filter), hide closed PRs.
-        max_cols: Maximum columns that fit in the viewport without
-            scrolling.  ``None`` means no limit (all components packed
-            side by side).
+        max_width: Maximum content width in characters that fits in the
+            viewport without scrolling.  ``None`` means no limit.
 
     Returns:
         A :class:`TreeLayout` with positions and navigation order.
@@ -178,41 +190,62 @@ def compute_tree_layout(
 
         comp_layouts.append((component, layer_orders, row_assignments))
 
-    # Pack components into row bands that fit within max_cols.
-    # Each band is a horizontal strip of components placed side by side.
-    # When the next component won't fit, start a new band below.
+    # Group components by plan so each plan's components are packed
+    # independently — plans occupy separate row ranges and should each
+    # start at x=0.
+    plan_components: dict[str, list[tuple[list[dict], list[list[str]], dict[str, int]]]] = {}
+    for comp_entry in comp_layouts:
+        component = comp_entry[0]
+        plan_id = (component[0].get("plan") or "_standalone")
+        plan_components.setdefault(plan_id, []).append(comp_entry)
+
+    # Determine plan group ordering (named plans sorted, standalone last)
+    plan_keys = sorted(k for k in plan_components if k != "_standalone")
+    if "_standalone" in plan_components:
+        plan_keys.append("_standalone")
+
+    # Pack components within each plan group into row bands that fit
+    # within max_width characters.  Each plan group resets band_x to 0.
     combined_row_assignments: dict[str, int] = {}
-    combined_positions: dict[str, tuple[int, int]] = {}
+    combined_positions: dict[str, tuple[int, int]] = {}  # pr_id -> (x_char, row)
     all_layer_orders: list[tuple[int, list[list[str]]]] = []
 
-    band_col = 0          # current column offset within the band
-    band_row_offset = 0   # row offset for the current band
-    band_max_rows = 0     # tallest component in the current band
+    global_row_offset = 0  # cumulative row offset across plan groups
+    margin = 2  # left padding before first node
 
-    for component, layer_orders, row_assignments in comp_layouts:
-        num_cols = len(layer_orders)
-        comp_max_row = max(row_assignments.values()) + 1 if row_assignments else 1
+    for plan_key in plan_keys:
+        band_x = 0
+        band_row_offset = global_row_offset
+        band_max_rows = 0
 
-        # Would this component exceed the viewport if placed next to
-        # the current band?
-        needed = band_col + (COMPONENT_GAP_COLS if band_col > 0 else 0) + num_cols
-        if max_cols is not None and band_col > 0 and needed > max_cols:
-            # Start a new row band below the current one
-            band_row_offset += band_max_rows
-            band_col = 0
-            band_max_rows = 0
+        for component, layer_orders, row_assignments in plan_components[plan_key]:
+            num_cols = len(layer_orders)
+            comp_width = num_cols * _NODE_W + max(0, num_cols - 1) * _H_GAP
+            comp_max_row = max(row_assignments.values()) + 1 if row_assignments else 1
 
-        col_offset = band_col + (COMPONENT_GAP_COLS if band_col > 0 else 0)
+            gap = COMPONENT_GAP_CHARS if band_x > 0 else 0
+            needed_x = band_x + gap + comp_width + margin
+            if max_width is not None and band_x > 0 and needed_x > max_width:
+                band_row_offset += band_max_rows
+                band_x = 0
+                band_max_rows = 0
+                gap = 0
 
-        for col_idx, layer_order in enumerate(layer_orders):
-            for pid in layer_order:
-                r = row_assignments[pid] + band_row_offset
-                combined_positions[pid] = (col_idx + col_offset, r)
-                combined_row_assignments[pid] = r
+            x_offset = band_x + gap + margin
 
-        all_layer_orders.append((col_offset, layer_orders))
-        band_col = col_offset + num_cols
-        band_max_rows = max(band_max_rows, comp_max_row)
+            for col_idx, layer_order in enumerate(layer_orders):
+                node_x = x_offset + col_idx * _COL_WIDTH
+                for pid in layer_order:
+                    r = row_assignments[pid] + band_row_offset
+                    combined_positions[pid] = (node_x, r)
+                    combined_row_assignments[pid] = r
+
+            all_layer_orders.append((x_offset, layer_orders))
+            band_x = x_offset + comp_width - margin
+            band_max_rows = max(band_max_rows, comp_max_row)
+
+        # Advance global row offset past this plan group's content
+        global_row_offset = band_row_offset + band_max_rows
 
     # Group by plan and adjust rows (operates on combined positions)
     plan_label_rows, plan_group_order = _apply_plan_grouping(
@@ -223,11 +256,11 @@ def compute_tree_layout(
 
     # Update positions with plan-adjusted rows
     for pid in combined_positions:
-        col, _ = combined_positions[pid]
-        combined_positions[pid] = (col, combined_row_assignments[pid])
+        x, _ = combined_positions[pid]
+        combined_positions[pid] = (x, combined_row_assignments[pid])
 
-    # Build final ordered_ids from layer orders (column-first, then row)
-    for co, layer_orders in all_layer_orders:
+    # Build final ordered_ids from layer orders (x-first, then row)
+    for x_off, layer_orders in all_layer_orders:
         for col_idx, layer_order in enumerate(layer_orders):
             for pid in sorted(layer_order, key=lambda x: combined_row_assignments.get(x, 0)):
                 layout.node_positions[pid] = combined_positions[pid]

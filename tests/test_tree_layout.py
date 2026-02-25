@@ -77,7 +77,8 @@ class TestEmptyInputs:
     def test_single_pr(self):
         layout = compute_tree_layout([_pr("pr-a")])
         assert layout.ordered_ids == ["pr-a"]
-        assert layout.node_positions["pr-a"] == (0, 0)
+        # x_char = margin (2) + col_idx (0) * COL_WIDTH (30) = 2
+        assert layout.node_positions["pr-a"] == (2, 0)
 
 
 class TestLinearChain:
@@ -95,8 +96,9 @@ class TestLinearChain:
         assert self.layout.ordered_ids == ["pr-a", "pr-b", "pr-c"]
 
     def test_columns(self):
+        # x_char positions: margin=2, COL_WIDTH=30
         cols = [self.layout.node_positions[pid][0] for pid in self.layout.ordered_ids]
-        assert cols == [0, 1, 2]
+        assert cols == [2, 32, 62]
 
     def test_same_row(self):
         rows = {self.layout.node_positions[pid][1] for pid in self.layout.ordered_ids}
@@ -115,11 +117,11 @@ class TestFanOut:
         self.layout = compute_tree_layout(self.prs)
 
     def test_parent_column_zero(self):
-        assert self.layout.node_positions["pr-a"][0] == 0
+        assert self.layout.node_positions["pr-a"][0] == 2  # margin
 
     def test_children_column_one(self):
-        assert self.layout.node_positions["pr-b"][0] == 1
-        assert self.layout.node_positions["pr-c"][0] == 1
+        assert self.layout.node_positions["pr-b"][0] == 32  # margin + COL_WIDTH
+        assert self.layout.node_positions["pr-c"][0] == 32
 
     def test_children_different_rows(self):
         row_b = self.layout.node_positions["pr-b"][1]
@@ -145,10 +147,10 @@ class TestDiamond:
         self.layout = compute_tree_layout(self.prs)
 
     def test_columns(self):
-        assert self.layout.node_positions["pr-a"][0] == 0
-        assert self.layout.node_positions["pr-b"][0] == 1
-        assert self.layout.node_positions["pr-c"][0] == 1
-        assert self.layout.node_positions["pr-d"][0] == 2
+        assert self.layout.node_positions["pr-a"][0] == 2   # layer 0
+        assert self.layout.node_positions["pr-b"][0] == 32  # layer 1
+        assert self.layout.node_positions["pr-c"][0] == 32  # layer 1
+        assert self.layout.node_positions["pr-d"][0] == 62  # layer 2
 
     def test_no_overlap(self):
         """No two nodes share the same (col, row) position."""
