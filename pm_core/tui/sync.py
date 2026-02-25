@@ -14,6 +14,7 @@ import copy
 
 from pm_core.paths import configure_logger
 from pm_core import store, guide, pr_sync
+from pm_core.cli.helpers import _record_status_timestamp
 
 _log = configure_logger("pm.tui.sync")
 
@@ -121,6 +122,7 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
             for pr in app._data.get("prs") or []:
                 if pr["id"] in result.merged_prs:
                     pr["status"] = "merged"
+                    _record_status_timestamp(pr, "merged")
             store.save(app._data, app._root)
             _kill_merged_pr_windows(app, result.merged_prs)
         app._update_display()
