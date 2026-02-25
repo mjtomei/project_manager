@@ -956,16 +956,23 @@ def _pull_after_github_merge(data: dict, pr_entry: dict, workdir: str,
                              base_branch: str, resolve_window: bool,
                              background: bool,
                              transcript: str | None) -> bool:
-    """Pull latest base branch after a GitHub merge, with stash/unstash.
+    """Pull latest base branch after a GitHub merge.
 
-    Fetches origin, checks out the base branch, and pulls.  If the workdir
-    has uncommitted changes they are stashed first and re-applied afterwards.
-    When the stash pop produces conflicts and *resolve_window* is set, a
-    Claude merge-resolution window is launched.
+    Only pulls if the workdir already has the base branch checked out.
+    If on a different branch (implying local work in progress), the pull
+    is skipped to avoid disrupting the user's working state.
 
-    Returns True if the pull completed cleanly, False if a merge window was
-    launched (caller should skip ``_finalize_merge``).
+    Returns True if the pull completed (or was skipped), False if a merge
+    window was launched (caller should skip ``_finalize_merge``).
     """
+    # Detect current branch — skip pull if not already on base branch
+    head_result = git_ops.run_git("rev-parse", "--abbrev-ref", "HEAD",
+                                  cwd=workdir, check=False)
+    current_branch = head_result.stdout.strip() if head_result.returncode == 0 else ""
+    if current_branch != base_branch:
+        click.echo(f"Workdir is on '{current_branch}', skipping pull of {base_branch}.")
+        return True
+
     work_path = Path(workdir)
     stashed = False
 
@@ -978,18 +985,13 @@ def _pull_after_github_merge(data: dict, pr_entry: dict, workdir: str,
         else:
             click.echo("Warning: Could not stash changes.", err=True)
 
-    # Fetch and checkout base branch to get the merge commit
+    # Fetch and pull base branch
     git_ops.run_git("fetch", "origin", cwd=workdir, check=False)
-    checkout_result = git_ops.run_git("checkout", base_branch, cwd=workdir, check=False)
-    if checkout_result.returncode != 0:
-        click.echo(f"Warning: Could not checkout {base_branch}: "
-                    f"{checkout_result.stderr.strip()}", err=True)
+    pull_result = git_ops.pull_rebase(work_path)
+    if pull_result.returncode != 0:
+        click.echo(f"Warning: Pull failed: {pull_result.stderr.strip()}", err=True)
     else:
-        pull_result = git_ops.pull_rebase(work_path)
-        if pull_result.returncode != 0:
-            click.echo(f"Warning: Pull failed: {pull_result.stderr.strip()}", err=True)
-        else:
-            click.echo(f"Pulled latest {base_branch}.")
+        click.echo(f"Pulled latest {base_branch}.")
 
     # Pop stash
     if stashed:

@@ -389,11 +389,13 @@ class TestGitHubMergePull:
         self, _mock_which, mock_subprocess, mock_git_ops, mock_finalize,
         mock_restart, tmp_github_merge_project,
     ):
-        """After a successful gh merge, should fetch/checkout/pull base branch."""
+        """After a successful gh merge, should fetch and pull when on base branch."""
         # gh pr merge succeeds
         mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         def run_git_side_effect(*args, **kwargs):
+            if args[0] == "rev-parse":
+                return MagicMock(returncode=0, stdout="master", stderr="")
             if args[0] == "status":
                 return MagicMock(returncode=0, stdout="", stderr="")  # clean
             return MagicMock(returncode=0, stdout="", stderr="")
@@ -408,10 +410,9 @@ class TestGitHubMergePull:
         assert result.exit_code == 0
         assert "merged" in result.output.lower()
 
-        # Should have fetched and checked out base branch
+        # Should have fetched and pulled (no checkout needed — already on master)
         git_calls = [c[0] for c in mock_git_ops.run_git.call_args_list]
         assert ("fetch", "origin") in git_calls
-        assert ("checkout", "master") in git_calls
         mock_git_ops.pull_rebase.assert_called_once()
         mock_finalize.assert_called_once()
 
@@ -428,6 +429,8 @@ class TestGitHubMergePull:
         mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         def run_git_side_effect(*args, **kwargs):
+            if args[0] == "rev-parse":
+                return MagicMock(returncode=0, stdout="master", stderr="")
             if args[0] == "status":
                 return MagicMock(returncode=0, stdout="", stderr="")
             return MagicMock(returncode=0, stdout="", stderr="")
@@ -460,6 +463,8 @@ class TestGitHubMergePull:
         mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         def run_git_side_effect(*args, **kwargs):
+            if args[0] == "rev-parse":
+                return MagicMock(returncode=0, stdout="master", stderr="")
             if args[0] == "status":
                 return MagicMock(returncode=0, stdout="", stderr="")
             return MagicMock(returncode=0, stdout="", stderr="")
@@ -486,6 +491,8 @@ class TestGitHubMergePull:
         mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         def run_git_side_effect(*args, **kwargs):
+            if args[0] == "rev-parse":
+                return MagicMock(returncode=0, stdout="master", stderr="")
             if args[0] == "status":
                 return MagicMock(returncode=0, stdout=" M file.py\n", stderr="")  # dirty
             if args[0] == "stash" and len(args) == 1:
@@ -522,6 +529,8 @@ class TestGitHubMergePull:
         mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         def run_git_side_effect(*args, **kwargs):
+            if args[0] == "rev-parse":
+                return MagicMock(returncode=0, stdout="master", stderr="")
             if args[0] == "status":
                 return MagicMock(returncode=0, stdout=" M file.py\n", stderr="")  # dirty
             if args[0] == "stash" and len(args) == 1:
@@ -560,6 +569,8 @@ class TestGitHubMergePull:
             returncode=1, stdout="", stderr="already been merged")
 
         def run_git_side_effect(*args, **kwargs):
+            if args[0] == "rev-parse":
+                return MagicMock(returncode=0, stdout="master", stderr="")
             if args[0] == "status":
                 return MagicMock(returncode=0, stdout="", stderr="")  # clean
             return MagicMock(returncode=0, stdout="", stderr="")
@@ -587,6 +598,8 @@ class TestGitHubMergePull:
         mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         def run_git_side_effect(*args, **kwargs):
+            if args[0] == "rev-parse":
+                return MagicMock(returncode=0, stdout="master", stderr="")
             if args[0] == "status":
                 return MagicMock(returncode=0, stdout="", stderr="")  # clean
             return MagicMock(returncode=0, stdout="", stderr="")
@@ -603,6 +616,39 @@ class TestGitHubMergePull:
         # Should NOT have stash or stash pop
         assert ("stash",) not in git_calls
         assert ("stash", "pop") not in git_calls
+        mock_finalize.assert_called_once()
+
+    @mock.patch.object(pr_mod, "_finalize_merge")
+    @mock.patch("pm_core.cli.pr.git_ops")
+    @mock.patch("subprocess.run")
+    @mock.patch("shutil.which", return_value="/usr/bin/gh")
+    def test_github_merge_skips_pull_when_not_on_base_branch(
+        self, _mock_which, mock_subprocess, mock_git_ops, mock_finalize,
+        tmp_github_merge_project,
+    ):
+        """Pull should be skipped when workdir is on a feature branch."""
+        mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        def run_git_side_effect(*args, **kwargs):
+            if args[0] == "rev-parse":
+                return MagicMock(returncode=0, stdout="pm/pr-001", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+        mock_git_ops.run_git.side_effect = run_git_side_effect
+
+        runner = CliRunner()
+        with mock.patch.object(pr_mod, "state_root",
+                               return_value=tmp_github_merge_project["pm_dir"]):
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+
+        assert result.exit_code == 0
+        assert "skipping pull" in result.output.lower()
+
+        # Should NOT have fetched, stashed, or pulled
+        git_calls = [c[0] for c in mock_git_ops.run_git.call_args_list]
+        assert ("fetch", "origin") not in git_calls
+        assert ("stash",) not in git_calls
+        mock_git_ops.pull_rebase.assert_not_called()
+        # But finalize should still run
         mock_finalize.assert_called_once()
 
 
