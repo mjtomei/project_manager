@@ -3,10 +3,11 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-017
+  active_pr: pr-ff68ef5
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-02-20T02:43:08.956779+00:00'
+  hide_merged: true
 plans:
 - id: plan-001
   name: Import from existing repo
@@ -287,7 +288,7 @@ prs:
   plan: plan-002
   title: 'Benchmark: multi-candidate code generation with tournament selection'
   branch: pm/pr-017-benchmark-orchestrator-with-tournament-selection-v2
-  status: in_review
+  status: merged
   depends_on: []
   description: 'Collapsed implementation of the full benchmark pipeline from plan-002.
     Includes: OpenAI-compatible multi-backend runner (llama.cpp/sglang/vllm), Exercism
@@ -1285,7 +1286,7 @@ prs:
   plan: null
   title: Add autonomous monitor session for auto–start issue detection and resolution
   branch: pm/pr-c0167ac-add-autonomous-monitor-session-for-auto-start-issu
-  status: in_progress
+  status: in_review
   depends_on: []
   description: 'Add an autonomous monitor session that runs alongside auto–start and
     watches the TUI and tmux windows for issues. The session should:
@@ -1544,3 +1545,123 @@ prs:
   gh_pr: null
   gh_pr_number: null
   notes: []
+- id: pr-2a8c3a5
+  plan: null
+  title: Fix TUI scroll-into-view and improve PR node layout width and spacing
+  branch: pm/pr-2a8c3a5-fix-tui-scroll-into-view-and-improve-pr-node-layou
+  status: merged
+  depends_on: []
+  description: 'Three TUI display issues plus sorting and timestamp tracking:
+
+    1. Pressing K to jump to the bottom-most PR at the bottom plan doesn''t scroll
+    the view down to it
+
+    2. When moving down to a PR, only the top line comes into view instead of the
+    full PR box
+
+    3. PR nodes should take up the full width of the TUI pane instead of being left-justified,
+    with more horizontal spacing between PRs that don''t have dependency connections
+    than ones that do
+
+    4. Sort PRs by when they were started (most recent first or by activity)
+
+    5. Add timestamp fields to PR entries in project.yaml tracking first and most
+    recent start, review, and merge times'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/87
+  gh_pr_number: 87
+  notes:
+  - id: note-c65a465
+    text: Set COMPONENT_GAP_CHARS back to 6 (matching H_GAP) so columns of PRs stay
+      aligned on a uniform grid across independent components.
+    created_at: '2026-02-25T15:00:21Z'
+    last_edited: '2026-02-25T15:00:21Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2a8c3a5-fix-tui-scroll-into-view-and-improve-415a2e6d
+- id: pr-f4fbf19
+  plan: null
+  title: 'Ultrawide monitor support: 3-4 horizontal panes before vertical splitting'
+  branch: pm/pr-f4fbf19-ultrawide-monitor-support-3-4-horizontal-panes-bef
+  status: in_progress
+  depends_on: []
+  description: 'Currently the pane layout splits vertically too early on ultrawide
+    monitors, wasting horizontal space.
+
+
+    Detect ultrawide aspect ratios based on terminal character dimensions (characters
+    are ~2x taller than wide):
+
+    - 21:9 physical ≈ 4.6:1 char ratio (e.g. ~271x59): use 3 horizontal panes before
+    starting vertical splits
+
+    - 32:9 physical ≈ 7.0:1 char ratio (e.g. ~413x59): use 4 horizontal panes before
+    starting vertical splits
+
+    - Standard 16:9 ≈ 3.6:1 char ratio: keep current behavior (2 horizontal then vertical)
+
+
+    Reference: current 32:9 terminal measures 424x59 characters (7.19:1 char ratio).'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/88
+  gh_pr_number: 88
+  started_at: '2026-02-26T15:32:02.274280+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-f4fbf19-ultrawide-monitor-support-3-4-horizo-b6481329
+- id: pr-ff68ef5
+  plan: null
+  title: Single-window focus mode with pane pull/push prefix key
+  branch: pm/pr-ff68ef5-single-window-focus-mode-with-pane-pull-push-prefi
+  status: in_progress
+  depends_on: []
+  description: 'Add an ''a'' prefix key for pulling panes from command windows into
+    the main window and pushing them back.
+
+
+    Behavior:
+
+    - The ''a'' key acts as a prefix for pulling panes from command windows into the
+    main window
+
+    - The same ''a'' prefix sends panes back to their original window
+
+    - Example: ''a s'' on a pending PR starts the implementation window as normal,
+    creates a dummy shell pane in the PR window (to prevent it from being killed and
+    preserve window numbering), and moves the implementation pane to the main window
+
+    - ''a s'' on an already-started PR just pulls the existing pane without creating
+    a new window
+
+    - The dummy pane should display a message explaining the pane movement process
+    to the user
+
+    - The prefix works for any command that creates a window (start, review, notes,
+    guide, etc.)
+
+
+    Single-window focus mode (global setting):
+
+    - When enabled, all commands implicitly use the ''a'' prefix — panes are always
+    pulled to the main window instead of switching windows
+
+    - Without the setting, the ''a'' prefix still works the same way but must be used
+    explicitly
+
+    - The setting is the only difference — the underlying pane pull/push logic is
+    identical
+
+
+    Implementation notes:
+
+    - Window/session creation code should NOT change — this is a layer built on top
+
+    - Shared pane management module for pull/push logic, used by all commands that
+    start their own window'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/89
+  gh_pr_number: 89
+  started_at: '2026-02-26T15:41:30.621658+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ff68ef5-single-window-focus-mode-with-pane-p-b6481329
