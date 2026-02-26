@@ -296,6 +296,7 @@ def execute_stdin_stdout(
     total = len(test_cases)
     passed = 0
     outputs: list[str] = []
+    first_stderr = ""
 
     with tempfile.TemporaryDirectory(prefix="pm-bench-stdin-") as tmp:
         solution_path = Path(tmp) / "solution.py"
@@ -322,16 +323,21 @@ def execute_stdin_stdout(
 
             actual = proc.stdout
             outputs.append(actual)
+            if not first_stderr and proc.stderr:
+                first_stderr = proc.stderr
 
             # Compare normalized output
             if _normalize_output(actual) == _normalize_output(expected):
                 passed += 1
 
-    raw = "\n---\n".join(
+    raw_parts = [
         f"Test {i + 1}: {'PASS' if _normalize_output(outputs[i]) == _normalize_output(case.get('output', '')) else 'FAIL'}"
         for i, case in enumerate(test_cases)
         if i < len(outputs)
-    )
+    ]
+    raw = "\n---\n".join(raw_parts)
+    if first_stderr:
+        raw += f"\n\n--- stderr ---\n{first_stderr}"
 
     score = passed / total if total > 0 else 0.0
     error = None

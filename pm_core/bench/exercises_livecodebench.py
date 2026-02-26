@@ -95,6 +95,7 @@ def _parse_test_cases(raw: str) -> list[dict]:
     try:
         decoded = base64.b64decode(raw)
         decompressed = zlib.decompress(decoded)
+        # LCB dataset uses pickle to wrap a JSON string — no alternative format.
         unpickled = pickle.loads(decompressed)  # noqa: S301
         cases = json.loads(unpickled)
         if isinstance(cases, list):
@@ -226,9 +227,10 @@ def load_exercises(
 
             # Deduplicate by question_id
             qid = row.get("question_id", "")
-            if qid in seen_ids:
+            if qid and qid in seen_ids:
                 continue
-            seen_ids.add(qid)
+            if qid:
+                seen_ids.add(qid)
 
             ex = _parse_problem(row)
             if ex is None:
