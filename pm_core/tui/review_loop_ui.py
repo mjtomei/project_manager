@@ -235,6 +235,10 @@ def _poll_loop_state(app) -> None:
     if app._impl_poll_counter % 5 == 0:
         _poll_impl_idle(app)
 
+    # Poll monitor loop state
+    from pm_core.tui.monitor_ui import poll_monitor_state
+    poll_monitor_state(app)
+
     # Refresh tech tree to update ⟳N markers on PR nodes
     _refresh_tech_tree(app)
 
@@ -252,11 +256,13 @@ def _poll_loop_state(app) -> None:
             _maybe_auto_merge(app, state.pr_id)
 
     # Stop the timer if no loops are running AND no active PRs need animation
+    # AND monitor is not running
     has_active_prs = any(
         pr.get("status") in ("in_progress", "in_review") and pr.get("workdir")
         for pr in (app._data.get("prs") or [])
     )
-    if not any_running and not has_active_prs:
+    monitor_running = app._monitor_state and app._monitor_state.running
+    if not any_running and not has_active_prs and not monitor_running:
         if app._review_loop_timer:
             app._review_loop_timer.stop()
             app._review_loop_timer = None
@@ -392,7 +398,15 @@ def _poll_impl_idle(app) -> None:
 
         # Detect newly-idle in_progress PRs for auto-review
         if status == "in_progress" and tracker.became_idle(pr_id):
-            newly_idle.append((pr_id, pr))
+            # Check if Claude is on an interactive selection screen (trust
+            # prompt, permission prompt, etc.) — that's not "done".
+            from pm_core.pane_idle import content_has_interactive_prompt
+            content = tracker.get_content(pr_id)
+            if content_has_interactive_prompt(content):
+                _log.info("impl_idle: %s idle but showing interactive prompt, resetting", pr_id)
+                tracker.mark_active(pr_id)
+            else:
+                newly_idle.append((pr_id, pr))
 
     # --- Second pass: merge resolution windows ---
     pending_merges: set[str] = app._pending_merge_prs
@@ -425,6 +439,14 @@ def _poll_impl_idle(app) -> None:
         tracker.poll(merge_key)
 
         if tracker.became_idle(merge_key):
+            # Check for interactive prompt before treating as idle
+            from pm_core.pane_idle import content_has_interactive_prompt
+            merge_content = tracker.get_content(merge_key)
+            if content_has_interactive_prompt(merge_content):
+                _log.info("merge_idle: %s idle but showing interactive prompt, resetting", pr_id)
+                tracker.mark_active(merge_key)
+                continue
+
             _log.info("merge_idle: merge window idle for %s, re-attempting merge", pr_id)
             app.log_message(f"Merge window idle for {pr_id}, re-attempting merge")
 

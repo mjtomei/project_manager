@@ -70,6 +70,10 @@ def _transitive_deps(prs: list[dict], target_id: str) -> set[str]:
 def _disable(app) -> None:
     """Disable auto-start mode (in-memory only)."""
     _finalize_all_transcripts(app)
+    # Stop the monitor loop if it's running
+    from pm_core.tui import monitor_ui
+    if monitor_ui.is_running(app):
+        monitor_ui.stop_monitor(app)
     app._auto_start = False
     app._auto_start_target = None
     app._auto_start_run_id = None
@@ -95,6 +99,7 @@ async def toggle(app, selected_pr_id: str | None = None) -> None:
         target_tag = selected_pr_id or "all"
         run_id = f"autostart-{target_tag}-{secrets.token_hex(4)}"
         app._auto_start_run_id = run_id
+        tdir = None
         if app._root:
             tdir = app._root / "transcripts" / run_id
             tdir.mkdir(parents=True, exist_ok=True)

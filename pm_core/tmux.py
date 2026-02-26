@@ -3,6 +3,10 @@
 import os
 import subprocess
 
+from pm_core.paths import configure_logger
+
+_log = configure_logger("pm.tmux")
+
 
 def _tmux_cmd(*args: str, socket_path: str | None = None) -> list[str]:
     """Build a tmux command with optional custom socket.
@@ -559,15 +563,73 @@ def sessions_on_window(base: str, window_id: str) -> list[str]:
     switched to the replacement window after the old one is killed.
     """
     candidates = [base] + list_grouped_sessions(base)
+    _log.info("sessions_on_window: base=%s window_id=%s candidates=%s", base, window_id, candidates)
     result = []
     for name in candidates:
         r = subprocess.run(
             _tmux_cmd("display", "-t", name, "-p", "#{window_id}"),
             capture_output=True, text=True,
         )
-        if r.returncode == 0 and r.stdout.strip() == window_id:
+        cur_wid = r.stdout.strip() if r.returncode == 0 else f"<err:{r.returncode}>"
+        _log.info("sessions_on_window:   %s → current_window_id=%s match=%s",
+                   name, cur_wid, cur_wid == window_id)
+        if r.returncode == 0 and cur_wid == window_id:
             result.append(name)
+    _log.info("sessions_on_window: result=%s", result)
     return result
+
+
+def switch_sessions_to_window(sessions: list[str], session: str, window_name: str) -> None:
+    """Switch the given sessions to the named window.
+
+    Used after killing and recreating a window (review, monitor, etc.)
+    to move sessions that were watching the old window to the new one.
+
+    ``select-window`` alone does NOT update tmux's client tracking.
+    ``switch-client`` to the same session is a visible no-op but
+    triggers tmux to recalculate the window size for the correct display.
+    """
+    _log.info("switch_sessions_to_window: sessions=%s session=%s window_name=%s",
+               sessions, session, window_name)
+    if not sessions:
+        _log.info("switch_sessions_to_window: no sessions, returning")
+        return
+    win = find_window_by_name(session, window_name)
+    if not win:
+        _log.warning("switch_sessions_to_window: window '%s' not found!", window_name)
+        return
+    _log.info("switch_sessions_to_window: found window %s (index=%s)", win["id"], win["index"])
+
+    # Map session names → client TTYs for switch-client.
+    client_map: dict[str, str] = {}
+    r = subprocess.run(
+        _tmux_cmd("list-clients", "-F", "#{session_name} #{client_tty}"),
+        capture_output=True, text=True,
+    )
+    if r.returncode == 0:
+        for line in r.stdout.strip().splitlines():
+            parts = line.split(None, 1)
+            if len(parts) == 2:
+                client_map[parts[0]] = parts[1]
+    _log.info("switch_sessions_to_window: client_map=%s", client_map)
+
+    for sess_name in sessions:
+        sel_r = subprocess.run(
+            _tmux_cmd("select-window", "-t", f"{sess_name}:{win['index']}"),
+            capture_output=True,
+        )
+        _log.info("switch_sessions_to_window: select-window -t %s:%s → rc=%d",
+                   sess_name, win["index"], sel_r.returncode)
+        client_tty = client_map.get(sess_name)
+        if client_tty:
+            sw_r = subprocess.run(
+                _tmux_cmd("switch-client", "-t", sess_name, "-c", client_tty),
+                capture_output=True,
+            )
+            _log.info("switch_sessions_to_window: switch-client -t %s -c %s → rc=%d",
+                       sess_name, client_tty, sw_r.returncode)
+        else:
+            _log.warning("switch_sessions_to_window: no client_tty for %s, skipping switch-client", sess_name)
 
 
 def set_environment(session: str, key: str, value: str, socket_path: str | None = None) -> None:

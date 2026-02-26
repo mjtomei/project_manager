@@ -314,6 +314,243 @@ The merge of `{branch}` into `{base_branch}` failed with the following error:
     return prompt.strip()
 
 
+def generate_monitor_prompt(data: dict, session_name: str | None = None,
+                            iteration: int = 0, loop_id: str = "",
+                            auto_start_target: str | None = None,
+                            meta_pm_root: str | None = None) -> str:
+    """Generate a Claude Code prompt for the autonomous monitor session.
+
+    The monitor session observes auto-start and watches all active tmux
+    windows for issues, attempting fixes when possible and surfacing
+    problems that need human input.
+
+    Args:
+        data: Project data dict.
+        session_name: If provided, include TUI interaction instructions.
+        iteration: Current iteration number (1-based).
+        loop_id: Short unique loop identifier.
+        meta_pm_root: Absolute path to the meta workdir's ``pm/`` directory
+            where bugs.md and improvements.md live.
+        auto_start_target: The PR that auto-start is targeting. When set,
+            the monitor should only intervene on PRs in this PR's
+            transitive dependency fan-in.
+    """
+    if not meta_pm_root:
+        meta_pm_root = "pm"  # fallback to relative path
+
+    all_prs = data.get("prs") or []
+    base_branch = data.get("project", {}).get("base_branch", "master")
+    project_name = data.get("project", {}).get("name", "unknown")
+
+    # Build PR status summary
+    pr_lines = []
+    for pr in all_prs:
+        status = pr.get("status", "pending")
+        deps = pr.get("depends_on") or []
+        dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
+        workdir = pr.get("workdir") or ""
+        workdir_str = f" [workdir: {workdir}]" if workdir else ""
+        pr_lines.append(f"- {pr['id']}: {pr.get('title', '???')} [{status}]{dep_str}{workdir_str}")
+    pr_summary = "\n".join(pr_lines) if pr_lines else "No PRs defined."
+
+    # Build plan summary
+    plans = data.get("plans") or []
+    plan_lines = []
+    for plan in plans:
+        plan_lines.append(f"- {plan['id']}: {plan.get('name', '???')} [{plan.get('status', 'draft')}]")
+    plan_summary = "\n".join(plan_lines) if plan_lines else "No plans defined."
+
+    tui_block = tui_section(session_name) if session_name else ""
+
+    # Compute auto-start scope (dependency fan-in of the target)
+    auto_start_scope_block = ""
+    if auto_start_target:
+        from pm_core.tui.auto_start import _transitive_deps
+        managed_ids = _transitive_deps(all_prs, auto_start_target)
+        managed_ids.add(auto_start_target)
+        managed_list = ", ".join(sorted(managed_ids))
+        unmanaged = [pr for pr in all_prs if pr["id"] not in managed_ids
+                     and pr.get("workdir")]
+        unmanaged_lines = ""
+        if unmanaged:
+            lines = []
+            for pr in unmanaged:
+                lines.append(f"- {pr['id']}: {pr.get('title', '???')} [{pr.get('status', 'pending')}]")
+            unmanaged_lines = "\n".join(lines)
+
+        auto_start_scope_block = f"""
+### Auto-Start Scope
+
+Auto-start target: **{auto_start_target}**
+Managed PRs (target + its transitive dependencies): {managed_list}
+
+**IMPORTANT**: Only PRs in the managed set above are part of the auto-start pipeline.
+Other PRs may have active tmux windows from manual user activity -- do NOT attempt to
+fix, restart, or interfere with those sessions. You may observe them for cross-session
+conflict detection (e.g. overlapping file edits), but take no corrective action on
+windows belonging to unmanaged PRs.
+"""
+        if unmanaged_lines:
+            auto_start_scope_block += f"""
+PRs with active windows that are NOT managed by auto-start (hands off):
+{unmanaged_lines}
+"""
+
+    id_label = f" [{loop_id}]" if loop_id else ""
+    iteration_label = f" (iteration {iteration}){id_label}" if iteration else id_label
+
+    prompt = f"""This is a session for autonomous monitoring of project "{project_name}".{iteration_label}
+
+## Role
+
+It is running alongside auto-start. Your job is to observe
+all active tmux windows, detect problems, fix what you can automatically, and
+surface what needs human attention.
+
+## Current Project State
+
+Base branch: `{base_branch}`
+
+### PRs
+{pr_summary}
+
+### Plans
+{plan_summary}
+{tui_block}
+## Your Responsibilities
+
+### Auto-Start Overview
+
+Auto-start manages the full PR lifecycle automatically. Understanding the
+mechanics will help you distinguish normal operation from genuine problems.
+
+**Lifecycle stages:**
+- `pending` -- Waiting for dependencies to be merged. Auto-start picks up
+  PRs whose dependencies are all `merged` and runs `pm pr start`.
+- `in_progress` -- A Claude implementation session is running in a tmux window.
+- `in_review` -- A review loop is running (iterates until PASS/PASS_WITH_SUGGESTIONS).
+- `merged` -- PR merged to `{base_branch}`. Auto-start then checks for newly-unblocked dependents.
+
+**How transitions work:**
+- **pending -> in_progress**: Auto-start detects all deps are merged and launches
+  an implementation window. This happens quickly after a dependency merges.
+- **in_progress -> in_review**: The TUI polls the implementation pane every ~5 seconds,
+  hashing the visible content. When the content stops changing for ~30 seconds, the TUI
+  considers the implementation "idle" (done) and automatically transitions to `in_review`,
+  launching a review loop. **This means there is a normal ~30 second delay between Claude
+  finishing its work and the review starting.** During this window, the pane will appear
+  idle but the transition has not happened yet -- this is expected, not a problem.
+- **in_review -> merged**: When the review loop reaches a PASS or PASS_WITH_SUGGESTIONS
+  verdict, auto-start runs `pm pr merge`. If the merge has conflicts, a merge-resolution
+  Claude window opens; once that finishes (also detected via idle polling), the merge is
+  re-attempted.
+
+Note: `d` in the TUI starts a single one-shot review. To start a review **loop** (which
+auto-start uses), the TUI chord is `zzz d`. If you need to manually kick off a review
+loop for a PR, use `pm tui send` to send `zzz d` while the PR is selected.
+
+**Normal things that look like problems (but aren't):**
+- An `in_progress` PR whose pane has been static for < 60 seconds -- idle detection
+  hasn't fired yet, this is the normal transition window.
+- A PR that just transitioned to `in_review` but has no review window yet -- the review
+  loop is being launched, give it a few seconds.
+- A review loop showing multiple iterations (⟳N in the TUI) -- this is normal, the loop
+  iterates until PASS.
+
+**Abnormal states that DO need attention:**
+- PR stuck in `in_progress` with idle/dead implementation pane for several minutes
+- PR in `in_review` with no active review loop and no recent review activity
+- PR dependencies that are stuck, blocking downstream work
+- Circular or broken dependency chains
+- Implementation pane showing an error/crash rather than completed work
+{auto_start_scope_block}
+### 1. Scan Active Tmux Panes
+You can use `tmux list-windows` and `tmux capture-pane` to inspect all active windows:
+- Implementation windows (Sessions working on PRs)
+- Review windows (Sessions reviewing PRs)
+- Merge windows (Sessions resolving merge conflicts)
+- The TUI itself
+
+### 2. Auto-Fix Issues
+Try to fix any issues you can without human guidance.
+
+### 3. Surface Issues Needing Human Input
+Use the **INPUT_REQUIRED** verdict for anything you can't figure out yourself.
+
+### 4. Project Health Monitoring
+Look for patterns across PRs that might signal issues in a PR's plan.
+Some examples:
+- Recurring test failures (same test failing in multiple PRs)
+- Dependency bottlenecks (one PR blocking many others)
+- PRs taking unusually long or cycling through too many review iterations
+- PRs whose scope has drifted from their description
+- Suggest plan changes if warranted (splitting a PR, reordering deps, etc.)
+
+You can review plans with 'pm plan' subcommands and see what plan a PR is associated with in the project.yaml or TUI itself.
+
+### 5. Master Branch Health Check
+Monitor `{base_branch}` for:
+- Gaps in the plan from an architectural perspective
+- Incorrect assumptions made during planning
+- Issues that merged PRs may have introduced
+- Whether the remaining PR plan still makes sense given what has been merged
+
+### 6. pm Tool Self-Monitoring
+While completing the above steps, watch for:
+- Bugs in the pm tool itself (unexpected errors, wrong behavior)
+- Potential improvements to the pm tool
+
+Append findings to `{meta_pm_root}/bugs.md` and `{meta_pm_root}/improvements.md` using the plan-compatible PR format:
+
+```
+### PR: Short title describing the fix/improvement
+- **description**: What needs to be done
+- **tests**: Tests that reproduce the bug or verify the improvement
+- **files**: Key files involved
+```
+
+These files are plans that the user can review and act on later via meta mode.
+Do NOT launch `pm meta` or attempt to fix pm itself — just document what you find.
+
+Writing to these files should not block your next iteration. Only use **INPUT_REQUIRED** if a bug is actively blocking progress and cannot be worked around.
+
+## Debug Log
+
+The pm debug log is at `~/.pm/debug/`. Use `tail` to inspect recent entries:
+```
+tail -100 ~/.pm/debug/*.log
+```
+
+## How to Inspect Panes
+
+```bash
+# List all windows in the pm session
+tmux list-windows -t <session-name>
+
+# Capture content of a specific pane
+tmux capture-pane -p -t <pane-id>
+
+# Capture with full scrollback
+tmux capture-pane -p -t <pane-id> -S -
+
+# List panes in a window
+tmux list-panes -t <session>:<window>
+```
+
+## Iteration Protocol
+
+1. Perform all monitoring checks described above
+2. Take corrective actions for issues that don't need human input
+3. Compile a brief summary of findings
+4. End with a verdict on its own line:
+   - **READY** -- All issues handled (or no issues found). The monitor will wait and then run another iteration.
+   - **INPUT_REQUIRED** -- You need human input or want to surface an important finding. Describe what you need clearly. The user will interact with you in this pane, and then you should provide a follow-up verdict (**READY** to continue monitoring).
+
+IMPORTANT: Always end your response with the verdict keyword on its own line -- either **READY** or **INPUT_REQUIRED**."""
+
+    return prompt.strip()
+
+
 def generate_review_loop_prompt(data: dict, pr_id: str) -> str:
     """Generate a review prompt for the automated review loop.
 

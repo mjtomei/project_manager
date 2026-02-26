@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from pm_core.pane_idle import PaneIdleTracker
+from pm_core.pane_idle import PaneIdleTracker, content_has_interactive_prompt
 
 
 @pytest.fixture
@@ -215,3 +215,85 @@ class TestPaneIdleTracker:
         # Re-register with new pane
         tracker.register("pr-001", "%10")
         assert not tracker.is_gone("pr-001")
+
+    @patch("pm_core.pane_idle.tmux_mod.pane_exists", return_value=True)
+    @patch("pm_core.pane_idle.tmux_mod.capture_pane", return_value="hello world")
+    def test_get_content(self, mock_capture, mock_exists, tracker):
+        tracker.register("pr-001", "%5")
+        tracker.poll("pr-001")
+        assert tracker.get_content("pr-001") == "hello world"
+
+    def test_get_content_unknown_key(self, tracker):
+        assert tracker.get_content("nonexistent") == ""
+
+
+class TestContentHasInteractivePrompt:
+    """Tests for the interactive prompt detection helper."""
+
+    def test_trust_prompt(self):
+        content = (
+            " Security guide\n"
+            " ❯ 1. Yes, I trust this folder\n"
+            "   2. No, I don't trust this folder\n"
+        )
+        assert content_has_interactive_prompt(content) is True
+
+    def test_permission_prompt(self):
+        content = (
+            "? Allow Read /path/to/file\n"
+            " ❯ Allow once\n"
+            "   Allow always\n"
+            "   Deny\n"
+        )
+        assert content_has_interactive_prompt(content) is True
+
+    def test_normal_idle_output(self):
+        content = (
+            "$ claude --dangerously-skip-permissions\n"
+            "Claude is working...\n"
+            "Done! Created 3 files.\n"
+            "\n"
+        )
+        assert content_has_interactive_prompt(content) is False
+
+    def test_empty_content(self):
+        assert content_has_interactive_prompt("") is False
+
+    def test_selector_with_sibling_above(self):
+        """Selector with an indented sibling option above should match."""
+        content = (
+            "   Option A\n"
+            " ❯ Option B\n"
+        )
+        assert content_has_interactive_prompt(content) is True
+
+    def test_selector_with_sibling_below(self):
+        """Selector with an indented sibling option below should match."""
+        content = (
+            " ❯ Option A\n"
+            "   Option B\n"
+        )
+        assert content_has_interactive_prompt(content) is True
+
+    def test_bare_selector_no_text(self):
+        """Bare ❯ without following text (e.g. input cursor) should not match."""
+        content = "Some output\n❯ \n"
+        assert content_has_interactive_prompt(content) is False
+
+    def test_input_cursor_with_proposed_message(self):
+        """Claude's input cursor with a proposed message should NOT match."""
+        content = (
+            "Done! Created 3 files.\n"
+            "\n"
+            "❯ Would you like me to run the tests?\n"
+        )
+        assert content_has_interactive_prompt(content) is False
+
+    def test_input_cursor_with_indented_selector(self):
+        """Indented ❯ but no sibling options should NOT match."""
+        content = (
+            "Some output\n"
+            "  ❯ some proposed text\n"
+            "more output\n"
+        )
+        assert content_has_interactive_prompt(content) is False
