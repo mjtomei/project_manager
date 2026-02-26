@@ -2,10 +2,15 @@
 
 Runs test suites against candidate solutions in isolated temporary directories.
 Supports 6 polyglot languages with appropriate build/test commands.
+
+Also provides stdin/stdout execution for competitive programming exercises
+(LiveCodeBench) — pipes input to the candidate program and compares stdout
+to expected output.
 """
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
@@ -245,3 +250,105 @@ def _parse_counts(output: str) -> tuple[int, int]:
         return int(m.group(1)), int(m.group(2))
 
     return 0, 0
+
+
+# ---------------------------------------------------------------------------
+# Stdin/stdout execution for competitive programming (LiveCodeBench)
+# ---------------------------------------------------------------------------
+
+def _normalize_output(text: str) -> str:
+    """Normalize output for comparison: strip trailing whitespace per line."""
+    return "\n".join(line.rstrip() for line in text.strip().splitlines())
+
+
+def execute_stdin_stdout(
+    exercise: Exercise,
+    candidate_code: str,
+    *,
+    timeout: int = 30,
+) -> ScoreResult:
+    """Run a candidate program against stdin/stdout test cases.
+
+    Test cases are stored in ``exercise.reference_tests`` under the key
+    ``_stdin_stdout_tests.json`` as a JSON array of ``{"input": ...,
+    "output": ...}`` objects.
+
+    Each test case pipes *input* to the program's stdin and compares
+    stdout to *output*.  Score = matching / total.
+
+    Args:
+        exercise: Exercise with stdin/stdout test cases in reference_tests.
+        candidate_code: The candidate's Python source code.
+        timeout: Per-test-case timeout in seconds.
+    """
+    tests_json = exercise.reference_tests.get("_stdin_stdout_tests.json", "")
+    if not tests_json:
+        return ScoreResult(error="No stdin/stdout test cases found")
+
+    try:
+        test_cases = json.loads(tests_json)
+    except json.JSONDecodeError:
+        return ScoreResult(error="Invalid test case JSON")
+
+    if not test_cases:
+        return ScoreResult(error="Empty test case list")
+
+    total = len(test_cases)
+    passed = 0
+    outputs: list[str] = []
+
+    with tempfile.TemporaryDirectory(prefix="pm-bench-stdin-") as tmp:
+        solution_path = Path(tmp) / "solution.py"
+        solution_path.write_text(candidate_code)
+
+        for case in test_cases:
+            test_input = case.get("input", "")
+            expected = case.get("output", "")
+
+            try:
+                proc = subprocess.run(
+                    [sys.executable, str(solution_path)],
+                    input=test_input,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                )
+            except subprocess.TimeoutExpired:
+                outputs.append("[TIMEOUT]")
+                continue
+            except OSError as exc:
+                outputs.append(f"[ERROR: {exc}]")
+                continue
+
+            actual = proc.stdout
+            outputs.append(actual)
+
+            # Compare normalized output
+            if _normalize_output(actual) == _normalize_output(expected):
+                passed += 1
+
+    raw = "\n---\n".join(
+        f"Test {i + 1}: {'PASS' if _normalize_output(outputs[i]) == _normalize_output(case.get('output', '')) else 'FAIL'}"
+        for i, case in enumerate(test_cases)
+        if i < len(outputs)
+    )
+
+    score = passed / total if total > 0 else 0.0
+    error = None
+    if passed == 0 and total > 0:
+        # Check if it's a compilation/parse error (all tests failed with stderr)
+        # by seeing if the very first test produced a traceback
+        first_output = outputs[0] if outputs else ""
+        if first_output.startswith("[ERROR") or first_output == "[TIMEOUT]":
+            error = "timeout" if first_output == "[TIMEOUT]" else "execution_error"
+        elif not first_output.strip():
+            error = "compilation_or_parse_error"
+
+    return ScoreResult(
+        passed=passed,
+        total=total,
+        score=score,
+        raw_output=raw,
+        error=error,
+        timed_out=all(o == "[TIMEOUT]" for o in outputs),
+    )
