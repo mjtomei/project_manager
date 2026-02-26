@@ -36,11 +36,10 @@ _logger = configure_logger("pm.pane_layout")
 
 MOBILE_WIDTH_THRESHOLD = 120
 
-# Character-ratio thresholds for ultrawide multi-column layouts.
-# Terminal chars are ~2× taller than wide, so the char ratio is roughly
-# 2× the physical aspect ratio (e.g. 16:9 physical ≈ 3.6:1 char ratio).
-ULTRAWIDE_3_THRESHOLD = 4.2   # 21:9 physical (~4.6:1 char ratio) → 3 columns
-ULTRAWIDE_4_THRESHOLD = 6.0   # 32:9 physical (~7.0:1 char ratio) → 4 columns
+# Minimum character width per horizontal pane column.  The number of
+# side-by-side columns is simply floor((width + 1) / (MIN_PANE_WIDTH + 1))
+# — no aspect-ratio heuristics needed.
+MIN_PANE_WIDTH = 110
 
 
 def get_reliable_window_size(
@@ -175,24 +174,15 @@ def _checksum(layout_body: str) -> str:
     return f"{csum:04x}"
 
 
-def _max_horizontal_panes(w: int, h: int) -> int:
-    """Return the max number of horizontal panes before vertical splitting.
+def _max_horizontal_panes(w: int) -> int:
+    """Return the max number of horizontal columns that fit in *w* chars.
 
-    Ultrawide monitors have extra horizontal space that benefits from more
-    side-by-side panes instead of early vertical splitting:
-
-    - Standard 16:9 (char ratio ~3.6:1): 2 columns (current behavior)
-    - Ultrawide 21:9 (char ratio ~4.6:1): 3 columns
-    - Super-ultrawide 32:9 (char ratio ~7.0:1): 4 columns
+    Each column must be at least MIN_PANE_WIDTH characters wide.
+    N columns require (N − 1) single-char tmux separators, so the
+    constraint is: N * MIN_PANE_WIDTH + (N − 1) ≤ w, i.e.
+    N ≤ (w + 1) / (MIN_PANE_WIDTH + 1).
     """
-    if h <= 0:
-        return 2
-    ratio = w / h
-    if ratio >= ULTRAWIDE_4_THRESHOLD:
-        return 4
-    if ratio >= ULTRAWIDE_3_THRESHOLD:
-        return 3
-    return 2
+    return max(1, (w + 1) // (MIN_PANE_WIDTH + 1))
 
 
 def _distribute_panes(panes: list[int], n_cols: int) -> list[list[int]]:
@@ -254,9 +244,9 @@ def _layout_node(panes, x, y, w, h, force_axis=None):
         return f"{w}x{h},{x},{y},{panes[0]}"
 
     # At the top level (auto axis detection), use multi-column layout
-    # for ultrawide terminals that benefit from 3+ horizontal panes.
+    # when the terminal is wide enough for 3+ columns of MIN_PANE_WIDTH.
     if force_axis is None:
-        n_cols = min(_max_horizontal_panes(w, h), len(panes))
+        n_cols = min(_max_horizontal_panes(w), len(panes))
         if n_cols > 2:
             return _layout_columns(panes, x, y, w, h, n_cols)
 
