@@ -302,6 +302,9 @@ class ProjectManagerApp(App):
         # Run blocking subprocess work off the event loop
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, self._deferred_startup_sync)
+        # Resume auto-start if a breadcrumb was left by a merge-triggered restart
+        from pm_core.tui import auto_start
+        await auto_start.consume_breadcrumb(self)
         # These must run on the main thread (touch Textual state)
         self.run_worker(sync_mod.startup_github_sync(self))
         self._capture_frame("mount")
@@ -679,6 +682,9 @@ class ProjectManagerApp(App):
         pane_ops.quit_app(self)
 
     def action_restart(self) -> None:
+        from pm_core.tui import auto_start
+        if auto_start.has_merge_restart_marker():
+            auto_start.save_breadcrumb(self)
         pane_ops.restart_app(self)
 
     def action_refresh(self) -> None:

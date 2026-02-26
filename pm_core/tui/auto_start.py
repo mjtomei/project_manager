@@ -10,15 +10,19 @@ restart.  Toggle via TUI key ``A`` (sets selected PR as target) or
 command bar: ``autostart``.
 """
 
+import json
 import secrets
 import sys
 from pathlib import Path
 
-from pm_core.paths import configure_logger
+from pm_core.paths import configure_logger, pm_home
 from pm_core import store, graph
 from pm_core.tui._shell import _run_shell_async
 
 _log = configure_logger("pm.tui.auto_start")
+
+_MERGE_RESTART_MARKER = "merge-restart"
+_BREADCRUMB_FILE = "autostart-resume.json"
 
 
 def is_enabled(app) -> bool:
@@ -37,6 +41,90 @@ def get_transcript_dir(app) -> Path | None:
     if not run_id or not app._root:
         return None
     return app._root / "transcripts" / run_id
+
+
+def has_merge_restart_marker() -> bool:
+    """Check if the merge-restart marker file exists."""
+    return (pm_home() / _MERGE_RESTART_MARKER).exists()
+
+
+def save_breadcrumb(app) -> None:
+    """Save auto-start state to a breadcrumb file for resumption after restart.
+
+    Called from action_restart when a merge-restart marker is present.
+    No-op if auto-start is not active. Always deletes the marker.
+    """
+    marker = pm_home() / _MERGE_RESTART_MARKER
+    marker.unlink(missing_ok=True)
+
+    if not is_enabled(app):
+        _log.debug("save_breadcrumb: auto-start not active, skipping")
+        return
+
+    breadcrumb = pm_home() / _BREADCRUMB_FILE
+    data = {
+        "target": app._auto_start_target,
+        "run_id": app._auto_start_run_id,
+    }
+
+    # Persist monitor loop state if it's running
+    from pm_core.tui import monitor_ui
+    if monitor_ui.is_running(app):
+        state = app._monitor_state
+        data["monitor"] = {
+            "meta_pm_root": state.meta_pm_root,
+        }
+
+    breadcrumb.write_text(json.dumps(data))
+    _log.info("save_breadcrumb: wrote %s", data)
+
+
+async def consume_breadcrumb(app) -> None:
+    """Restore auto-start state from a breadcrumb file on startup.
+
+    If the breadcrumb exists, reads it, deletes it (always, even on error),
+    restores auto-start fields, and calls check_and_start.
+    """
+    breadcrumb = pm_home() / _BREADCRUMB_FILE
+    if not breadcrumb.exists():
+        return
+
+    try:
+        data = json.loads(breadcrumb.read_text())
+    except Exception as e:
+        _log.warning("consume_breadcrumb: failed to read breadcrumb: %s", e)
+        return
+    finally:
+        breadcrumb.unlink(missing_ok=True)
+
+    target = data.get("target")
+    run_id = data.get("run_id")
+    _log.info("consume_breadcrumb: restoring target=%s run_id=%s", target, run_id)
+
+    app._auto_start = True
+    app._auto_start_target = target
+    app._auto_start_run_id = run_id
+
+    # Recreate transcript directory if needed
+    if run_id and app._root:
+        tdir = app._root / "transcripts" / run_id
+        tdir.mkdir(parents=True, exist_ok=True)
+
+    app.log_message(f"Auto-start: resumed after merge restart → {target or 'all'}")
+    app._update_display()
+    await check_and_start(app)
+
+    # Resume monitor loop if it was running
+    monitor_data = data.get("monitor")
+    if monitor_data:
+        from pm_core.tui import monitor_ui
+        tdir = get_transcript_dir(app)
+        monitor_ui.start_monitor(
+            app,
+            transcript_dir=str(tdir) if tdir else None,
+            meta_pm_root=monitor_data.get("meta_pm_root"),
+        )
+        _log.info("consume_breadcrumb: resumed monitor loop")
 
 
 def _finalize_all_transcripts(app) -> None:
