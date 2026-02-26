@@ -68,8 +68,8 @@ class ScoreResult:
 def _resolve_solution_path(work_dir: Path, exercise: Exercise, config: dict) -> Path | None:
     """Determine where to write the candidate solution."""
     # Prefer explicit starter_code filename — handles exercise sources where
-    # the slug doesn't match the expected solution filename (e.g. BigCodeBench
-    # slug "bcb-0" but solution must be "task_func.py").
+    # the slug doesn't match the expected solution filename (e.g. slug
+    # "bcb-0" but solution must be "task_func.py").
     if exercise.starter_code:
         first_key = next(iter(exercise.starter_code))
         return work_dir / first_key

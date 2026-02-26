@@ -55,6 +55,8 @@ def bench_exercises(language, source, hard, mode):
 
         download_dataset(hard=hard)
         if hard:
+            # Also cache the full dataset so `bench run` without --hard works
+            # later without a separate download step.
             download_dataset(hard=False, quiet=True)
         exercises = load_bigcodebench_exercises(hard_only=hard, mode=mode)
 
