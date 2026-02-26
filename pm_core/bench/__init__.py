@@ -24,6 +24,11 @@ from pm_core.bench.exercises_bigcodebench import (
     download_dataset as download_bigcodebench,
     load_bigcodebench_exercises,
 )
+from pm_core.bench.exercises_evalplus import (
+    load_evalplus_exercises,
+    sync_evalplus,
+)
+from pm_core.bench.executor import execute_stdin_stdout
 
 __all__ = [
     "Backend",
@@ -34,10 +39,13 @@ __all__ = [
     "chat_completion",
     "detect_backend",
     "download_bigcodebench",
+    "execute_stdin_stdout",
     "generate_multiple",
     "list_languages",
     "list_models",
     "load_bigcodebench_exercises",
+    "load_evalplus_exercises",
     "load_exercises",
+    "sync_evalplus",
     "sync_exercises",
 ]

@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from pm_core.bench.exercises import Exercise, load_exercises
-from pm_core.bench.executor import ScoreResult, execute_tests
+from pm_core.bench.executor import ScoreResult, execute_stdin_stdout, execute_tests
 from pm_core.bench.runner import Runner
 from pm_core.bench.solve import Candidate, HyperParams, generate_candidates
 from pm_core.bench.test_gen import generate_tests
@@ -58,6 +58,7 @@ class BenchmarkRun:
     model: str
     num_candidates: int
     languages: list[str]
+    source: str = "polyglot"  # "polyglot", "livecodebench", or "evalplus"
     hyper: HyperParams | None = None
     results: list[ExerciseResult] = field(default_factory=list)
     total_tokens: int = 0
@@ -100,7 +101,8 @@ class BenchmarkRun:
                 "test_subset_size": self.hyper.test_subset_size,
             }
         return {
-            "schema_version": 2,
+            "schema_version": 3,
+            "source": self.source,
             "model": self.model,
             "num_candidates": self.num_candidates,
             "languages": self.languages,
@@ -171,60 +173,106 @@ def run_exercise_tournament(
                 total += stats.total_tokens
         return total
 
+    is_stdin = exercise.source == "livecodebench"
+
     try:
-        # Step 1: Generate tests from description
-        if progress_callback:
-            progress_callback("generating tests")
-        gen_test_code, test_results = generate_tests(
-            exercise, runner, model, num_variants=3,
-            chain=hyper.chain if hyper else False,
-        )
-        result.generated_test_code = gen_test_code
+        if is_stdin:
+            # Stdin/stdout path: no test generation, score directly
+            # Step 1: Generate N candidate solutions
+            if progress_callback:
+                progress_callback(f"generating {num_candidates} candidates")
+            candidates = generate_candidates(
+                exercise, runner, model,
+                num_candidates=num_candidates,
+                hyper=hyper,
+            )
 
-        # Step 2: Generate N candidate solutions
-        if progress_callback:
-            progress_callback(f"generating {num_candidates} candidates")
-        candidates = generate_candidates(
-            exercise, runner, model,
-            num_candidates=num_candidates,
-            tests=gen_test_code,
-            hyper=hyper,
-        )
+            # Step 2: Score each candidate against stdin/stdout tests (parallel)
+            if progress_callback:
+                progress_callback("scoring candidates (stdin/stdout)")
+            with ThreadPoolExecutor() as pool:
+                futures = [
+                    pool.submit(execute_stdin_stdout, exercise, cand.code)
+                    for cand in candidates
+                ]
+                scored: list[tuple[Candidate, ScoreResult]] = [
+                    (cand, f.result())
+                    for cand, f in zip(candidates, futures)
+                ]
 
-        # Step 3: Score each candidate against generated tests (parallel)
-        if progress_callback:
-            progress_callback("scoring candidates")
-        with ThreadPoolExecutor() as pool:
-            futures = [
-                pool.submit(execute_tests, exercise, cand.code, gen_test_code)
-                for cand in candidates
-            ]
-            scored: list[tuple[Candidate, ScoreResult]] = [
-                (cand, f.result())
-                for cand, f in zip(candidates, futures)
-            ]
+            # Step 3: Pick the best candidate
+            best_candidate, best_result = max(scored, key=lambda x: x[1].score)
+            result.tournament_best_gen_score = best_result.score
+            result.tournament_score = best_result.score
 
-        # Step 4: Pick the best candidate
-        best_candidate, best_gen_result = max(scored, key=lambda x: x[1].score)
-        result.tournament_best_gen_score = best_gen_result.score
+            result.tournament_tokens = _sum_tokens(candidates)
 
-        # Step 5: Score best candidate against reference tests
-        if progress_callback:
-            progress_callback("scoring against reference")
-        ref_result = execute_tests(exercise, best_candidate.code)
-        result.tournament_score = ref_result.score
+            # Baseline: single pass
+            if progress_callback:
+                progress_callback("running baseline")
+            baseline_candidates = generate_candidates(
+                exercise, runner, model, num_candidates=1
+            )
+            baseline_result = execute_stdin_stdout(
+                exercise, baseline_candidates[0].code
+            )
+            result.baseline_score = baseline_result.score
+            result.baseline_tokens = _sum_tokens(baseline_candidates)
+        else:
+            # Standard polyglot path: generate tests → tournament → reference tests
+            # Step 1: Generate tests from description
+            if progress_callback:
+                progress_callback("generating tests")
+            gen_test_code, test_results = generate_tests(
+                exercise, runner, model, num_variants=3,
+                chain=hyper.chain if hyper else False,
+            )
+            result.generated_test_code = gen_test_code
 
-        result.tournament_tokens = _sum_tokens(test_results) + _sum_tokens(candidates)
+            # Step 2: Generate N candidate solutions
+            if progress_callback:
+                progress_callback(f"generating {num_candidates} candidates")
+            candidates = generate_candidates(
+                exercise, runner, model,
+                num_candidates=num_candidates,
+                tests=gen_test_code,
+                hyper=hyper,
+            )
 
-        # Baseline: single pass, scored against reference tests
-        if progress_callback:
-            progress_callback("running baseline")
-        baseline_candidates = generate_candidates(
-            exercise, runner, model, num_candidates=1
-        )
-        baseline_result = execute_tests(exercise, baseline_candidates[0].code)
-        result.baseline_score = baseline_result.score
-        result.baseline_tokens = _sum_tokens(baseline_candidates)
+            # Step 3: Score each candidate against generated tests (parallel)
+            if progress_callback:
+                progress_callback("scoring candidates")
+            with ThreadPoolExecutor() as pool:
+                futures = [
+                    pool.submit(execute_tests, exercise, cand.code, gen_test_code)
+                    for cand in candidates
+                ]
+                scored = [
+                    (cand, f.result())
+                    for cand, f in zip(candidates, futures)
+                ]
+
+            # Step 4: Pick the best candidate
+            best_candidate, best_gen_result = max(scored, key=lambda x: x[1].score)
+            result.tournament_best_gen_score = best_gen_result.score
+
+            # Step 5: Score best candidate against reference tests
+            if progress_callback:
+                progress_callback("scoring against reference")
+            ref_result = execute_tests(exercise, best_candidate.code)
+            result.tournament_score = ref_result.score
+
+            result.tournament_tokens = _sum_tokens(test_results) + _sum_tokens(candidates)
+
+            # Baseline: single pass, scored against reference tests
+            if progress_callback:
+                progress_callback("running baseline")
+            baseline_candidates = generate_candidates(
+                exercise, runner, model, num_candidates=1
+            )
+            baseline_result = execute_tests(exercise, baseline_candidates[0].code)
+            result.baseline_score = baseline_result.score
+            result.baseline_tokens = _sum_tokens(baseline_candidates)
 
     except ConnectionError as exc:
         result.error = f"Backend connection error: {exc}"
@@ -241,9 +289,10 @@ def run_benchmark(
     model: str,
     num_candidates: int = 8,
     *,
-    exercises: list[Exercise] | None = None,
+    source: str = "polyglot",
     languages: list[str] | None = None,
     slugs: list[str] | None = None,
+    difficulty: str | None = None,
     hyper: HyperParams | None = None,
     parallel: int = 1,
     progress_callback: Callable[[str], None] | None = None,
@@ -253,9 +302,10 @@ def run_benchmark(
     Args:
         model: Model name (as reported by /v1/models endpoint).
         num_candidates: Number of candidates per exercise for tournament.
-        exercises: Pre-loaded exercise list (skips default exercism loading).
+        source: Exercise source — "polyglot", "livecodebench", "evalplus", or "bigcodebench".
         languages: Filter to these languages (default: all).
         slugs: Filter to these exercise slugs.
+        difficulty: Filter by difficulty (livecodebench only): easy/medium/hard.
         parallel: Number of exercises to run concurrently (default: 1).
         progress_callback: Called with status message updates.
     """
@@ -269,13 +319,46 @@ def run_benchmark(
             f"Model '{model}' not found. Available: {', '.join(model_ids)}"
         )
 
-    # Load exercises — use provided list or fall back to exercism
-    if exercises is None:
+    # Load exercises from the requested source
+    if source == "livecodebench":
+        from pm_core.bench.exercises_livecodebench import (
+            load_exercises as load_lcb,
+        )
+
+        try:
+            exercises = load_lcb(difficulty=difficulty)
+        except FileNotFoundError:
+            raise FileNotFoundError(
+                "LiveCodeBench cache not found. "
+                "Run `pm bench exercises --source livecodebench` first."
+            ) from None
+    elif source == "evalplus":
+        from pm_core.bench.exercises_evalplus import load_evalplus_exercises
+
+        try:
+            exercises = load_evalplus_exercises()
+        except FileNotFoundError:
+            raise FileNotFoundError(
+                "EvalPlus cache not found. "
+                "Run `pm bench exercises --source evalplus` first."
+            ) from None
+    elif source == "bigcodebench":
+        from pm_core.bench.exercises_bigcodebench import load_bigcodebench_exercises
+
+        try:
+            exercises = load_bigcodebench_exercises()
+        except FileNotFoundError:
+            raise FileNotFoundError(
+                "BigCodeBench cache not found. "
+                "Run `pm bench exercises --source bigcodebench` first."
+            ) from None
+    else:
         try:
             exercises = load_exercises()
         except FileNotFoundError:
             raise FileNotFoundError(
-                "Exercise cache not found. Run `pm bench exercises` first to download."
+                "Exercise cache not found. "
+                "Run `pm bench exercises` first to download."
             ) from None
 
     if languages:
@@ -293,9 +376,11 @@ def run_benchmark(
             filter_desc.append(f"languages={','.join(languages)}")
         if slugs:
             filter_desc.append(f"slugs={','.join(slugs)}")
+        if difficulty:
+            filter_desc.append(f"difficulty={difficulty}")
         raise ValueError(
             f"No exercises found matching filters: {', '.join(filter_desc)}. "
-            "Run `pm bench exercises -l <language>` to see available slugs."
+            "Run `pm bench exercises` to see available exercises."
         )
 
     langs_used = sorted(set(e.language for e in exercises))
@@ -304,6 +389,7 @@ def run_benchmark(
         model=model,
         num_candidates=num_candidates,
         languages=langs_used,
+        source=source,
         hyper=hyper,
     )
 
