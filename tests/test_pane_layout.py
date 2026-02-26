@@ -11,6 +11,9 @@ from pm_core.pane_layout import (
     compute_layout,
     is_mobile,
     _layout_node,
+    _layout_columns,
+    _max_horizontal_panes,
+    _distribute_panes,
     _checksum,
     get_window_data,
     _iter_all_panes,
@@ -20,6 +23,8 @@ from pm_core.pane_layout import (
     unregister_pane,
     _reconcile_registry,
     MOBILE_WIDTH_THRESHOLD,
+    ULTRAWIDE_3_THRESHOLD,
+    ULTRAWIDE_4_THRESHOLD,
 )
 
 
@@ -200,6 +205,165 @@ class TestLayoutSplitDirection:
         """Even slightly taller than wide should use vertical."""
         body = _layout_node([0, 1], 0, 0, 100, 101)
         assert body.startswith("100x101,0,0[")
+
+
+class TestMaxHorizontalPanes:
+    """Test ultrawide detection thresholds."""
+
+    def test_standard_16_9(self):
+        """Standard 16:9 terminal (~3.6:1 char ratio) gets 2 columns."""
+        assert _max_horizontal_panes(200, 56) == 2  # 3.57:1
+
+    def test_standard_200x50(self):
+        """Common test terminal 200x50 (4.0:1) stays at 2 columns."""
+        assert _max_horizontal_panes(200, 50) == 2  # 4.0:1 < 4.2
+
+    def test_ultrawide_21_9(self):
+        """21:9 ultrawide (~4.6:1 char ratio) gets 3 columns."""
+        assert _max_horizontal_panes(271, 59) == 3  # 4.59:1
+
+    def test_super_ultrawide_32_9(self):
+        """32:9 super-ultrawide (~7.0:1 char ratio) gets 4 columns."""
+        assert _max_horizontal_panes(424, 59) == 4  # 7.19:1
+
+    def test_portrait_terminal(self):
+        """Portrait terminal gets 2 columns (minimum)."""
+        assert _max_horizontal_panes(80, 120) == 2
+
+    def test_zero_height(self):
+        """Zero height returns 2 columns (safe fallback)."""
+        assert _max_horizontal_panes(200, 0) == 2
+
+    def test_boundary_below_3col(self):
+        """Just below 3-column threshold stays at 2."""
+        # 4.19:1 < 4.2 threshold
+        assert _max_horizontal_panes(419, 100) == 2
+
+    def test_boundary_at_3col(self):
+        """At 3-column threshold gets 3."""
+        # 4.2:1 = threshold
+        assert _max_horizontal_panes(420, 100) == 3
+
+    def test_boundary_below_4col(self):
+        """Just below 4-column threshold stays at 3."""
+        # 5.99:1 < 6.0 threshold
+        assert _max_horizontal_panes(599, 100) == 3
+
+    def test_boundary_at_4col(self):
+        """At 4-column threshold gets 4."""
+        # 6.0:1 = threshold
+        assert _max_horizontal_panes(600, 100) == 4
+
+
+class TestDistributePanes:
+    """Test pane distribution across columns."""
+
+    def test_fewer_panes_than_cols(self):
+        """Each pane gets its own column."""
+        assert _distribute_panes([0, 1], 3) == [[0], [1]]
+
+    def test_equal_panes_and_cols(self):
+        """One pane per column."""
+        assert _distribute_panes([0, 1, 2], 3) == [[0], [1], [2]]
+
+    def test_four_panes_three_cols(self):
+        """Oldest panes share first column."""
+        assert _distribute_panes([0, 1, 2, 3], 3) == [[0, 1], [2], [3]]
+
+    def test_five_panes_three_cols(self):
+        """Overflow distributed to oldest columns."""
+        assert _distribute_panes([0, 1, 2, 3, 4], 3) == [[0, 1], [2, 3], [4]]
+
+    def test_six_panes_three_cols(self):
+        """Even distribution across 3 columns."""
+        assert _distribute_panes([0, 1, 2, 3, 4, 5], 3) == [[0, 1], [2, 3], [4, 5]]
+
+    def test_five_panes_four_cols(self):
+        """One extra pane in first column."""
+        assert _distribute_panes([0, 1, 2, 3, 4], 4) == [[0, 1], [2], [3], [4]]
+
+    def test_eight_panes_four_cols(self):
+        """Even distribution across 4 columns."""
+        assert _distribute_panes([0, 1, 2, 3, 4, 5, 6, 7], 4) == [
+            [0, 1], [2, 3], [4, 5], [6, 7]]
+
+
+class TestUltrawideLayout:
+    """Test layout generation on ultrawide terminals."""
+
+    def test_3_panes_21_9_all_horizontal(self):
+        """21:9 terminal with 3 panes: three horizontal columns."""
+        body = _layout_node([0, 1, 2], 0, 0, 271, 59)
+        # Top-level horizontal split with 3 children
+        assert body.startswith("271x59,0,0{")
+        # No vertical splits — each pane gets its own column
+        assert "[" not in body
+
+    def test_4_panes_21_9_mixed(self):
+        """21:9 terminal with 4 panes: 3 columns, first has vertical split."""
+        body = _layout_node([0, 1, 2, 3], 0, 0, 271, 59)
+        # Top-level horizontal split
+        assert body.startswith("271x59,0,0{")
+        # First column has 2 panes stacked vertically
+        assert "[" in body
+
+    def test_4_panes_32_9_all_horizontal(self):
+        """32:9 terminal with 4 panes: four horizontal columns."""
+        body = _layout_node([0, 1, 2, 3], 0, 0, 424, 59)
+        # Top-level horizontal split with 4 children
+        assert body.startswith("424x59,0,0{")
+        # No vertical splits — each pane gets its own column
+        assert "[" not in body
+
+    def test_5_panes_32_9_mixed(self):
+        """32:9 terminal with 5 panes: 4 columns, first has vertical split."""
+        body = _layout_node([0, 1, 2, 3, 4], 0, 0, 424, 59)
+        assert body.startswith("424x59,0,0{")
+        # First column has 2 panes stacked vertically
+        assert "[" in body
+
+    def test_2_panes_ultrawide_uses_binary_split(self):
+        """2 panes on ultrawide still uses simple horizontal binary split."""
+        body = _layout_node([0, 1], 0, 0, 271, 59)
+        # Standard horizontal split (not multi-column)
+        assert body.startswith("271x59,0,0{")
+
+    def test_standard_monitor_3_panes_unaffected(self):
+        """Standard 16:9 with 3 panes uses existing binary split."""
+        body = _layout_node([0, 1, 2], 0, 0, 200, 56)
+        # char ratio 3.57:1 < 4.2 threshold → binary split
+        # Binary split gives {left, right} where right has 2 panes
+        assert body.startswith("200x56,0,0{")
+
+    def test_column_widths_sum_correctly_3col(self):
+        """3-column layout widths sum to total width."""
+        body = _layout_columns([0, 1, 2], 0, 0, 271, 59, 3)
+        assert body.startswith("271x59,0,0{")
+        # All panes have height 59: WxH format uses x59
+        assert body.count("x59,") == 4  # root + 3 columns
+        # Pane 0 starts at x=0
+        assert "89x59,0,0,0" in body
+
+    def test_column_widths_sum_correctly_4col(self):
+        """4-column layout widths sum to total width."""
+        body = _layout_columns([0, 1, 2, 3], 0, 0, 424, 59, 4)
+        assert body.startswith("424x59,0,0{")
+        # All 4 pane indices present
+        for i in range(4):
+            assert f",{i}" in body or body.endswith(str(i))
+
+    def test_all_pane_indices_present_ultrawide(self):
+        """All pane indices appear in the layout string."""
+        layout = compute_layout(5, 424, 59)
+        for i in range(5):
+            assert f",{i}" in layout or layout.endswith(str(i))
+
+    def test_compute_layout_ultrawide_has_valid_checksum(self):
+        """Ultrawide layout has valid checksum prefix."""
+        layout = compute_layout(3, 271, 59)
+        checksum_part = layout.split(",")[0]
+        assert len(checksum_part) == 4
+        int(checksum_part, 16)  # should be valid hex
 
 
 # --- Multi-window registry tests ---

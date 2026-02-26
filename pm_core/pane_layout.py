@@ -36,6 +36,12 @@ _logger = configure_logger("pm.pane_layout")
 
 MOBILE_WIDTH_THRESHOLD = 120
 
+# Character-ratio thresholds for ultrawide multi-column layouts.
+# Terminal chars are ~2× taller than wide, so the char ratio is roughly
+# 2× the physical aspect ratio (e.g. 16:9 physical ≈ 3.6:1 char ratio).
+ULTRAWIDE_3_THRESHOLD = 4.2   # 21:9 physical (~4.6:1 char ratio) → 3 columns
+ULTRAWIDE_4_THRESHOLD = 6.0   # 32:9 physical (~7.0:1 char ratio) → 4 columns
+
 
 def get_reliable_window_size(
     session: str, window: str, query_session: str | None = None,
@@ -169,6 +175,74 @@ def _checksum(layout_body: str) -> str:
     return f"{csum:04x}"
 
 
+def _max_horizontal_panes(w: int, h: int) -> int:
+    """Return the max number of horizontal panes before vertical splitting.
+
+    Ultrawide monitors have extra horizontal space that benefits from more
+    side-by-side panes instead of early vertical splitting:
+
+    - Standard 16:9 (char ratio ~3.6:1): 2 columns (current behavior)
+    - Ultrawide 21:9 (char ratio ~4.6:1): 3 columns
+    - Super-ultrawide 32:9 (char ratio ~7.0:1): 4 columns
+    """
+    if h <= 0:
+        return 2
+    ratio = w / h
+    if ratio >= ULTRAWIDE_4_THRESHOLD:
+        return 4
+    if ratio >= ULTRAWIDE_3_THRESHOLD:
+        return 3
+    return 2
+
+
+def _distribute_panes(panes: list[int], n_cols: int) -> list[list[int]]:
+    """Distribute panes across *n_cols* columns, oldest sharing first.
+
+    Returns a list of lists, one per column.  When there are more panes
+    than columns, older panes share columns (stacked vertically) while
+    newer panes get dedicated horizontal space.
+    """
+    if n_cols >= len(panes):
+        return [[p] for p in panes]
+    base, remainder = divmod(len(panes), n_cols)
+    cols: list[list[int]] = []
+    idx = 0
+    for i in range(n_cols):
+        size = base + (1 if i < remainder else 0)
+        cols.append(panes[idx:idx + size])
+        idx += size
+    return cols
+
+
+def _layout_columns(panes: list[int], x: int, y: int, w: int, h: int,
+                    n_cols: int) -> str:
+    """Lay out *panes* in *n_cols* equal-width horizontal columns.
+
+    Panes are distributed across columns with older panes sharing columns
+    first.  Within each multi-pane column, panes are split vertically.
+    Extra pixels go to rightmost (newest) columns.
+    """
+    cols = _distribute_panes(panes, n_cols)
+    separators = n_cols - 1
+    usable_w = w - separators
+    base_w, remainder = divmod(usable_w, n_cols)
+
+    parts: list[str] = []
+    cur_x = x
+    for i, col_panes in enumerate(cols):
+        # Extra pixels go to rightmost (newest) columns
+        col_w = base_w + (1 if i >= n_cols - remainder else 0)
+        col_w = max(1, col_w)
+        if len(col_panes) == 1:
+            parts.append(f"{col_w}x{h},{cur_x},{y},{col_panes[0]}")
+        else:
+            parts.append(
+                _layout_node(col_panes, cur_x, y, col_w, h, force_axis='v'))
+        cur_x += col_w + 1  # +1 for tmux separator
+
+    return f"{w}x{h},{x},{y}{{{','.join(parts)}}}"
+
+
 def _layout_node(panes, x, y, w, h, force_axis=None):
     """Recursively build tmux layout string body.
 
@@ -179,7 +253,14 @@ def _layout_node(panes, x, y, w, h, force_axis=None):
     if len(panes) == 1:
         return f"{w}x{h},{x},{y},{panes[0]}"
 
-    # Split: older group gets fewer panes (left/top, smaller area),
+    # At the top level (auto axis detection), use multi-column layout
+    # for ultrawide terminals that benefit from 3+ horizontal panes.
+    if force_axis is None:
+        n_cols = min(_max_horizontal_panes(w, h), len(panes))
+        if n_cols > 2:
+            return _layout_columns(panes, x, y, w, h, n_cols)
+
+    # Binary split: older group gets fewer panes (left/top, smaller area),
     # newer group gets more space (right/bottom).
     mid = (len(panes) + 1) // 2
     older = panes[:mid]
