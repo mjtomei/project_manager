@@ -58,7 +58,7 @@ class BenchmarkRun:
     model: str
     num_candidates: int
     languages: list[str]
-    source: str = "polyglot"  # "polyglot" or "livecodebench"
+    source: str = "polyglot"  # "polyglot", "livecodebench", or "evalplus"
     hyper: HyperParams | None = None
     results: list[ExerciseResult] = field(default_factory=list)
     total_tokens: int = 0
@@ -302,7 +302,7 @@ def run_benchmark(
     Args:
         model: Model name (as reported by /v1/models endpoint).
         num_candidates: Number of candidates per exercise for tournament.
-        source: Exercise source — "polyglot" or "livecodebench".
+        source: Exercise source — "polyglot", "livecodebench", or "evalplus".
         languages: Filter to these languages (default: all).
         slugs: Filter to these exercise slugs.
         difficulty: Filter by difficulty (livecodebench only): easy/medium/hard.
@@ -331,6 +331,16 @@ def run_benchmark(
             raise FileNotFoundError(
                 "LiveCodeBench cache not found. "
                 "Run `pm bench exercises --source livecodebench` first."
+            ) from None
+    elif source == "evalplus":
+        from pm_core.bench.exercises_evalplus import load_evalplus_exercises
+
+        try:
+            exercises = load_evalplus_exercises()
+        except FileNotFoundError:
+            raise FileNotFoundError(
+                "EvalPlus cache not found. "
+                "Run `pm bench exercises --source evalplus` first."
             ) from None
     else:
         try:

@@ -38,7 +38,8 @@ def bench_models(url):
 
 @bench.command("exercises")
 @click.option("--language", "-l", default=None, help="Filter by language")
-@click.option("--source", type=click.Choice(["polyglot", "livecodebench"]),
+@click.option("--source", "-s",
+              type=click.Choice(["polyglot", "livecodebench", "evalplus"]),
               default="polyglot", help="Exercise source (default: polyglot)")
 @click.option("--difficulty", type=click.Choice(["easy", "medium", "hard"]),
               default=None, help="Filter by difficulty (livecodebench only)")
@@ -64,6 +65,21 @@ def bench_exercises(language, source, difficulty):
             click.echo(f"  {d}: {by_diff[d]}")
 
         if difficulty or language:
+            click.echo("")
+            for ex in exercises:
+                click.echo(f"  {ex.slug}")
+    elif source == "evalplus":
+        from pm_core.bench.exercises_evalplus import sync_evalplus, load_evalplus_exercises
+
+        sync_evalplus()
+        exercises = load_evalplus_exercises()
+        if language:
+            exercises = [e for e in exercises if e.language == language]
+
+        click.echo(f"Source: EvalPlus (HumanEval+ / MBPP+)")
+        click.echo(f"Total exercises: {len(exercises)}")
+
+        if language:
             click.echo("")
             for ex in exercises:
                 click.echo(f"  {ex.slug}")
@@ -95,7 +111,8 @@ def bench_exercises(language, source, difficulty):
               help="Filter exercises by slug substring")
 @click.option("-o", "--output", "output_path", default=None,
               help="Output JSON file path")
-@click.option("--source", type=click.Choice(["polyglot", "livecodebench"]),
+@click.option("--source", "-s",
+              type=click.Choice(["polyglot", "livecodebench", "evalplus"]),
               default="polyglot", help="Exercise source (default: polyglot)")
 @click.option("--difficulty", type=click.Choice(["easy", "medium", "hard"]),
               default=None, help="Filter by difficulty (livecodebench only)")
