@@ -1,0 +1,43 @@
+{
+  "source": "Qwen2.5-Coder Technical Report (arXiv:2409.12186v3), Table 16",
+  "metric": "pass@1 (%)",
+  "models": {
+    "Qwen2.5-Coder-7B-Instruct": {
+      "params": "7B",
+      "humaneval_plus": 84.1,
+      "mbpp_plus": 71.7,
+      "livecodebench": 18.2,
+      "bigcodebench_instruct_full": 40.4,
+      "bigcodebench_instruct_hard": 18.2
+    },
+    "Qwen2.5-Coder-32B-Instruct": {
+      "params": "32B",
+      "humaneval_plus": 87.2,
+      "mbpp_plus": 75.1,
+      "livecodebench": 31.4,
+      "bigcodebench_instruct_full": 49.6,
+      "bigcodebench_instruct_hard": 27.0
+    },
+    "DeepSeek-Coder-V2-Lite-Instruct": {
+      "params": "16B (2.4B active)",
+      "humaneval_plus": 75.6,
+      "mbpp_plus": 70.4,
+      "livecodebench": 16.3,
+      "bigcodebench_instruct_full": 36.8,
+      "bigcodebench_instruct_hard": 16.2
+    },
+    "GPT-4o-2024-08-06": {
+      "params": "unknown (proprietary)",
+      "humaneval_plus": 86.0,
+      "mbpp_plus": 72.5,
+      "livecodebench": 34.6,
+      "bigcodebench_instruct_full": 50.1,
+      "bigcodebench_instruct_hard": 25.0
+    }
+  },
+  "notes": {
+    "livecodebench_period": "2024-07 to 2024-11",
+    "bigcodebench_version": "v0.1.4",
+    "evalplus_datasets": "HumanEval+ (164 problems) and MBPP+ (378 problems)"
+  }
+}

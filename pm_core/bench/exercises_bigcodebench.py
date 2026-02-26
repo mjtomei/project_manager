@@ -8,11 +8,12 @@ Each task provides:
 - complete_prompt: Function signature with docstring (code completion)
 - test: unittest-based test code with mock.patch patterns
 - entry_point: Expected function name (varies per task)
-- libs: Comma-separated required library names
+- libs: Stringified Python list of required library names
 """
 
 from __future__ import annotations
 
+import ast
 import json
 import urllib.error
 import urllib.request
@@ -153,6 +154,7 @@ def _parse_task(task: dict, mode: str, scaffolds_dir: Path) -> Exercise:
         starter_code={solution_file: ""},
         reference_tests={test_filename: test_code},
         path=scaffold,
+        source="bigcodebench",
     )
 
 
@@ -202,10 +204,21 @@ def load_bigcodebench_exercises(
 
 
 def extract_libs(task: dict) -> list[str]:
-    """Extract library names from a task's libs field."""
+    """Extract library names from a task's libs field.
+
+    The field is a stringified Python list like ``"['random', 'itertools']"``.
+    """
     libs_str = task.get("libs", "")
     if not libs_str:
         return []
+    # The field is a stringified Python list — parse it safely.
+    try:
+        parsed = ast.literal_eval(libs_str)
+        if isinstance(parsed, list):
+            return [str(lib).strip() for lib in parsed if str(lib).strip()]
+    except (ValueError, SyntaxError):
+        pass
+    # Fallback: comma-separated
     return [lib.strip() for lib in libs_str.split(",") if lib.strip()]
 
 

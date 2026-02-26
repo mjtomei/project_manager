@@ -1,0 +1,47 @@
+{
+  "timestamp": "2026-02-26T15:03:18Z",
+  "cross_source_verification": {
+    "status": "PASS",
+    "evalplus": {
+      "total_exercises": 542,
+      "humaneval_plus": 164,
+      "mbpp_plus": 378,
+      "language": "python",
+      "source_field": "evalplus",
+      "source_correct": true
+    },
+    "livecodebench": {
+      "total_exercises": 1055,
+      "difficulty_breakdown": {
+        "easy": 322,
+        "medium": 383,
+        "hard": 350
+      },
+      "language": "python",
+      "source_field": "livecodebench",
+      "source_correct": true,
+      "platforms": ["atcoder", "leetcode", "codeforces"]
+    },
+    "bigcodebench": {
+      "total_exercises_full": 1140,
+      "total_exercises_hard": 148,
+      "language": "python",
+      "source_field": "bigcodebench",
+      "source_correct": true,
+      "required_libs_count": 139
+    }
+  },
+  "exercise_type_consistency": {
+    "all_same_class": true,
+    "class_name": "Exercise",
+    "all_have_description": true,
+    "all_have_reference_tests": true
+  },
+  "notes": [
+    "All three loaders produce Exercise objects from the same dataclass.",
+    "The shared --source flag correctly routes to each loader.",
+    "LiveCodeBench exercises carry difficulty and platform metadata.",
+    "BigCodeBench supports hard_only and mode (instruct/complete) parameters.",
+    "EvalPlus exercises include both HumanEval+ (164) and MBPP+ (378) subsets."
+  ]
+}

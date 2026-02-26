@@ -119,6 +119,13 @@ class TestParseTask:
         assert "bcb_7_test.py" in ex.reference_tests
         assert "import unittest" in ex.reference_tests["bcb_7_test.py"]
 
+    def test_source_field(self, tmp_path):
+        task = _sample_task(7)
+        scaffolds = tmp_path / "scaffolds"
+        ex = _parse_task(task, "instruct", scaffolds)
+
+        assert ex.source == "bigcodebench"
+
     def test_scaffold_path(self, tmp_path):
         task = _sample_task(7)
         scaffolds = tmp_path / "scaffolds"
@@ -279,6 +286,15 @@ class TestLibsExtraction:
     def test_extract_libs_whitespace(self):
         task = {"libs": " pandas , numpy "}
         assert extract_libs(task) == ["pandas", "numpy"]
+
+    def test_extract_libs_stringified_list(self):
+        """The HuggingFace field is often a stringified Python list."""
+        task = {"libs": "['random', 'itertools']"}
+        assert extract_libs(task) == ["random", "itertools"]
+
+    def test_extract_libs_stringified_list_single(self):
+        task = {"libs": "['pandas']"}
+        assert extract_libs(task) == ["pandas"]
 
     def test_get_all_required_libs(self, cached_full, monkeypatch):
         monkeypatch.setattr(

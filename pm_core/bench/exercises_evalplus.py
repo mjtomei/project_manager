@@ -197,6 +197,7 @@ def _parse_evalplus_record(record: dict) -> Exercise | None:
         starter_code={},
         reference_tests={test_filename: test_content},
         path=ex_dir,
+        source="evalplus",
     )
 
 
