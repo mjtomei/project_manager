@@ -100,8 +100,17 @@ def _build_prompt(exercise: Exercise, variant: str, tests: str = "") -> str:
     parts = [
         f"Language: {exercise.language}",
         f"\n## Problem Description\n{exercise.description}",
-        f"\n## Starter Code\n```\n{starter}\n```",
     ]
+    if starter:
+        parts.append(f"\n## Starter Code\n```\n{starter}\n```")
+    if exercise.source == "livecodebench":
+        parts.append(
+            "\n## I/O Format\n"
+            "This is a competitive programming problem. "
+            "Read input from stdin and write output to stdout. "
+            "Do NOT define a class or function — write a complete "
+            "standalone program."
+        )
     if tests and variant == "test_driven":
         parts.append(f"\n## Tests\n```\n{tests}\n```")
     parts.append(f"\n## Instructions\n{instruction}")

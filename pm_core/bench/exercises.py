@@ -36,6 +36,11 @@ class Exercise:
     reference_tests: dict[str, str]  # filename -> content
     path: Path = field(repr=False)
 
+    # Optional metadata for source-specific filtering / display
+    source: str = "polyglot"  # "polyglot" or "livecodebench"
+    difficulty: str | None = None  # "easy", "medium", "hard"
+    platform: str | None = None  # "leetcode", "codeforces", "atcoder"
+
     @property
     def id(self) -> str:
         return f"{self.language}/{self.slug}"

@@ -20,6 +20,7 @@ from pm_core.bench.exercises import (
     load_exercises,
     sync_exercises,
 )
+from pm_core.bench.executor import execute_stdin_stdout
 
 __all__ = [
     "Backend",
@@ -29,6 +30,7 @@ __all__ = [
     "Runner",
     "chat_completion",
     "detect_backend",
+    "execute_stdin_stdout",
     "generate_multiple",
     "list_languages",
     "list_models",
