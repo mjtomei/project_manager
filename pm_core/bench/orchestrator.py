@@ -295,6 +295,8 @@ def run_benchmark(
     difficulty: str | None = None,
     hyper: HyperParams | None = None,
     parallel: int = 1,
+    hard: bool = False,
+    mode: str = "instruct",
     progress_callback: Callable[[str], None] | None = None,
 ) -> BenchmarkRun:
     """Run the full benchmark across all matching exercises.
@@ -307,6 +309,8 @@ def run_benchmark(
         slugs: Filter to these exercise slugs.
         difficulty: Filter by difficulty (livecodebench only): easy/medium/hard.
         parallel: Number of exercises to run concurrently (default: 1).
+        hard: BigCodeBench: use the 148-problem hard subset.
+        mode: BigCodeBench: prompt mode ("instruct" or "complete").
         progress_callback: Called with status message updates.
     """
     runner = Runner.create()
@@ -346,7 +350,7 @@ def run_benchmark(
         from pm_core.bench.exercises_bigcodebench import load_bigcodebench_exercises
 
         try:
-            exercises = load_bigcodebench_exercises()
+            exercises = load_bigcodebench_exercises(hard_only=hard, mode=mode)
         except FileNotFoundError:
             raise FileNotFoundError(
                 "BigCodeBench cache not found. "

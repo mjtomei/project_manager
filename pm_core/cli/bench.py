@@ -209,6 +209,8 @@ def bench_run(model, candidates, languages, exercise_filter, output_path,
         difficulty=difficulty,
         hyper=hyper,
         parallel=parallel,
+        hard=hard,
+        mode=mode,
         progress_callback=on_progress,
     )
 
