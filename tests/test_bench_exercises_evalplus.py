@@ -207,6 +207,13 @@ class TestParseEvalplusRecord:
         assert ex.starter_code == {}
         assert len(ex.reference_tests) == 1
 
+    def test_humaneval_source_field(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "pm_core.bench.exercises_evalplus._exercises_dir", lambda: tmp_path
+        )
+        ex = _parse_evalplus_record(_HUMANEVAL_RECORD)
+        assert ex.source == "evalplus"
+
     def test_humaneval_test_file_name(self, tmp_path, monkeypatch):
         monkeypatch.setattr(
             "pm_core.bench.exercises_evalplus._exercises_dir", lambda: tmp_path

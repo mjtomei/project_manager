@@ -13,6 +13,7 @@ Each task provides:
 
 from __future__ import annotations
 
+import ast
 import json
 import urllib.error
 import urllib.request
@@ -211,7 +212,6 @@ def extract_libs(task: dict) -> list[str]:
     if not libs_str:
         return []
     # The field is a stringified Python list — parse it safely.
-    import ast
     try:
         parsed = ast.literal_eval(libs_str)
         if isinstance(parsed, list):

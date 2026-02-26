@@ -58,7 +58,7 @@ class BenchmarkRun:
     model: str
     num_candidates: int
     languages: list[str]
-    source: str = "polyglot"  # "polyglot", "livecodebench", or "evalplus"
+    source: str = "polyglot"  # "polyglot", "evalplus", "livecodebench", or "bigcodebench"
     hyper: HyperParams | None = None
     results: list[ExerciseResult] = field(default_factory=list)
     total_tokens: int = 0
