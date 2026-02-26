@@ -8,6 +8,7 @@ import pytest
 from pm_core.bench.exercises_bigcodebench import (
     _create_scaffolds,
     _parse_task,
+    _slug_sort_key,
     download_dataset,
     extract_libs,
     get_all_required_libs,
@@ -204,7 +205,18 @@ class TestLoadExercises:
         )
         exercises = load_bigcodebench_exercises()
         slugs = [e.slug for e in exercises]
-        assert slugs == sorted(slugs)
+        assert slugs == sorted(slugs, key=_slug_sort_key)
+
+    def test_numeric_sort_order(self, tmp_path, monkeypatch):
+        """Verify bcb-2 sorts before bcb-10 (natural ordering)."""
+        tasks = [_sample_task(i) for i in (10, 2, 1, 20, 3)]
+        cache_dir = _make_cache(tmp_path, tasks)
+        monkeypatch.setattr(
+            "pm_core.bench.exercises_bigcodebench._cache_dir", lambda: cache_dir
+        )
+        exercises = load_bigcodebench_exercises()
+        slugs = [e.slug for e in exercises]
+        assert slugs == ["bcb-1", "bcb-2", "bcb-3", "bcb-10", "bcb-20"]
 
     def test_no_cache_raises(self, tmp_path, monkeypatch):
         monkeypatch.setattr(

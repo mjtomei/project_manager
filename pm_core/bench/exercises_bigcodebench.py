@@ -14,6 +14,7 @@ Each task provides:
 from __future__ import annotations
 
 import json
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -46,8 +47,19 @@ def _fetch_rows(dataset: str, split: str, *, quiet: bool = False) -> list[dict]:
         if not quiet:
             print(f"  Fetching rows {offset}\u2013{offset + _PAGE_SIZE} ...", flush=True)
 
-        with urllib.request.urlopen(url, timeout=60) as resp:
-            data = json.loads(resp.read().decode())
+        try:
+            with urllib.request.urlopen(url, timeout=60) as resp:
+                data = json.loads(resp.read().decode())
+        except urllib.error.HTTPError as exc:
+            raise RuntimeError(
+                f"HuggingFace API returned HTTP {exc.code} for {dataset} "
+                f"(split={split}, offset={offset}). Check the dataset name "
+                f"and split version."
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(
+                f"Cannot reach HuggingFace datasets-server: {exc.reason}"
+            ) from exc
 
         page_rows = [r["row"] for r in data.get("rows", [])]
         if not page_rows:
@@ -144,6 +156,14 @@ def _parse_task(task: dict, mode: str, scaffolds_dir: Path) -> Exercise:
     )
 
 
+def _slug_sort_key(slug: str) -> tuple[str, int]:
+    """Sort key that orders bcb-2 before bcb-10 (numeric, not lexicographic)."""
+    parts = slug.rsplit("-", 1)
+    if len(parts) == 2 and parts[1].isdigit():
+        return (parts[0], int(parts[1]))
+    return (slug, 0)
+
+
 def load_bigcodebench_exercises(
     *,
     hard_only: bool = False,
@@ -176,7 +196,7 @@ def load_bigcodebench_exercises(
     if slug:
         exercises = [e for e in exercises if slug.lower() in e.slug.lower()]
 
-    exercises.sort(key=lambda e: e.slug)
+    exercises.sort(key=lambda e: _slug_sort_key(e.slug))
     return exercises
 
 
