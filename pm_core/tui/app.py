@@ -144,7 +144,7 @@ class ProjectManagerApp(App):
     ]
 
     def on_key(self, event) -> None:
-        """Handle z modifier prefix key (supports z, zz, zzz)."""
+        """Handle z and a modifier prefix keys."""
         cmd_bar = self.query_one("#command-bar", CommandBar)
         if cmd_bar.has_focus:
             return
@@ -158,9 +158,25 @@ class ProjectManagerApp(App):
                 self.log_message(f"[bold]{'z' * self._z_count} …[/]")
             event.prevent_default()
             event.stop()
-        elif event.key == "escape" and self._z_count > 0:
-            self._z_count = 0
-            self._clear_log_message()
+        elif event.key == "a":
+            # In plans/tests view, 'a' has its own meaning — let it through
+            if self._plans_visible or self._tests_visible:
+                return
+            self._a_prefix = not self._a_prefix
+            if self._a_prefix:
+                z_part = f"{'z' * self._z_count} " if self._z_count else ""
+                self.log_message(f"[bold]{z_part}a …[/]")
+            else:
+                self._clear_log_message()
+            event.prevent_default()
+            event.stop()
+        elif event.key == "escape":
+            if self._z_count > 0:
+                self._z_count = 0
+                self._clear_log_message()
+            if self._a_prefix:
+                self._a_prefix = False
+                self._clear_log_message()
             # Don't prevent — let escape also do its normal thing
 
     def check_action(self, action: str, parameters: tuple) -> bool | None:
@@ -211,6 +227,10 @@ class ProjectManagerApp(App):
         self._log_sticky_until: float = 0.0  # monotonic time until which log line is protected
         # z modifier key state (vim-style prefix, supports z/zz/zzz)
         self._z_count: int = 0
+        # a prefix key state (pull/push pane mode)
+        self._a_prefix: bool = False
+        # Pulled pane tracking: window_name -> PulledPaneInfo
+        self._pulled_panes: dict = {}
         # Review loop state: dict of pr_id -> ReviewLoopState (supports multiple)
         self._review_loops: dict = {}
         self._review_loop_timer: Timer | None = None
@@ -236,6 +256,12 @@ class ProjectManagerApp(App):
         count = self._z_count
         self._z_count = 0
         return count
+
+    def _consume_a(self) -> bool:
+        """Atomically read and clear the a prefix flag."""
+        was_set = self._a_prefix
+        self._a_prefix = False
+        return was_set
 
     # --- Frame capture forwarder (called from ~15 sites) ---
 
@@ -548,10 +574,12 @@ class ProjectManagerApp(App):
         pr_view.start_pr(self)
 
     def action_done_pr(self) -> None:
+        from pm_core.tui import pane_pull
+        pull_mode = pane_pull.should_pull(self, self._consume_a())
         z = self._consume_z()
         if z == 0:
             # plain d = mark done (in_progress → in_review) + open review window
-            pr_view.done_pr(self)
+            pr_view.done_pr(self, pull_mode=pull_mode)
         elif z == 1:
             # z d = fresh done (kill existing review window), OR stop loop if running
             review_loop_ui.stop_loop_or_fresh_done(self)

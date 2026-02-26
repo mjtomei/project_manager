@@ -570,6 +570,26 @@ def sessions_on_window(base: str, window_id: str) -> list[str]:
     return result
 
 
+def join_pane(src_pane: str, dst_target: str, direction: str = "h",
+              background: bool = True) -> bool:
+    """Move a pane from one window to another via tmux join-pane.
+
+    Args:
+        src_pane: Source pane ID (e.g. '%42')
+        dst_target: Target specifier (e.g. 'session:@1' or pane ID)
+        direction: 'h' for horizontal, 'v' for vertical
+        background: If True, don't switch focus to the moved pane
+
+    Returns True on success, False on failure.
+    """
+    flag = "-h" if direction == "h" else "-v"
+    args = ["join-pane", "-s", src_pane, "-t", dst_target, flag]
+    if background:
+        args.insert(1, "-d")
+    result = subprocess.run(_tmux_cmd(*args), capture_output=True, text=True)
+    return result.returncode == 0
+
+
 def set_environment(session: str, key: str, value: str, socket_path: str | None = None) -> None:
     """Set an environment variable in a tmux session."""
     subprocess.run(

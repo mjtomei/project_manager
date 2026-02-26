@@ -59,19 +59,39 @@ def start_pr(app) -> None:
     """Start working on the selected PR."""
     from pm_core.tui.tech_tree import TechTree
     from pm_core.paths import get_global_setting
+    from pm_core.tui import pane_pull
+    from pm_core import tmux as tmux_mod
 
     fresh = app._consume_z()
+    pull_mode = pane_pull.should_pull(app, app._consume_a())
     tree = app.query_one("#tech-tree", TechTree)
     pr_id = tree.selected_pr_id
-    _log.info("action: start_pr selected=%s fresh=%s", pr_id, fresh)
+    _log.info("action: start_pr selected=%s fresh=%s pull=%s", pr_id, fresh, pull_mode)
     if not pr_id:
         _log.info("action: start_pr - no PR selected")
         app.log_message("No PR selected")
         return
 
+    pr = store.get_pr(app._data, pr_id)
+    if not pr:
+        app.log_message("PR not found")
+        return
+
+    # Pull mode: toggle or pull existing window without running start
+    if pull_mode and app._session_name:
+        window_name = pane_pull.get_window_name_for_start(pr)
+        # Toggle: if already pulled, push back
+        if pane_pull.is_pulled(app, window_name):
+            pane_pull.push_pane_back(app, window_name)
+            return
+        # If window already exists, just pull (no new window needed)
+        existing = tmux_mod.find_window_by_name(app._session_name, window_name)
+        if existing:
+            pane_pull.pull_pane_from_window(app, window_name)
+            return
+
     # In beginner mode, block starting PRs with unmerged dependencies
     if get_global_setting("beginner-mode"):
-        pr = store.get_pr(app._data, pr_id)
         if pr and pr.get("depends_on"):
             unmerged = []
             for dep_id in pr["depends_on"]:
@@ -87,25 +107,59 @@ def start_pr(app) -> None:
         return
     app._inflight_pr_action = action_key
     cmd = f"pr start --fresh {pr_id}" if fresh else f"pr start {pr_id}"
-    run_command(app, cmd, working_message=action_key, action_key=action_key)
+
+    # In pull mode, pull the pane after the window is created
+    on_complete = None
+    if pull_mode and app._session_name:
+        window_name = pane_pull.get_window_name_for_start(pr)
+        on_complete = lambda: pane_pull.pull_pane_from_window(app, window_name)
+
+    run_command(app, cmd, working_message=action_key, action_key=action_key,
+                on_complete=on_complete)
 
 
-def done_pr(app, fresh: bool = False) -> None:
+def done_pr(app, fresh: bool = False, pull_mode: bool = False) -> None:
     """Mark the selected PR as in_review and open a review window."""
     from pm_core.tui.tech_tree import TechTree
+    from pm_core.tui import pane_pull
+    from pm_core import tmux as tmux_mod
 
     tree = app.query_one("#tech-tree", TechTree)
     pr_id = tree.selected_pr_id
-    _log.info("action: done_pr selected=%s fresh=%s", pr_id, fresh)
+    _log.info("action: done_pr selected=%s fresh=%s pull=%s", pr_id, fresh, pull_mode)
     if not pr_id:
         app.log_message("No PR selected")
         return
+
+    pr = store.get_pr(app._data, pr_id)
+
+    # Pull mode: toggle or pull existing window without running review
+    if pull_mode and pr and app._session_name:
+        window_name = pane_pull.get_window_name_for_review(pr)
+        # Toggle: if already pulled, push back
+        if pane_pull.is_pulled(app, window_name):
+            pane_pull.push_pane_back(app, window_name)
+            return
+        # If window already exists, just pull
+        existing = tmux_mod.find_window_by_name(app._session_name, window_name)
+        if existing:
+            pane_pull.pull_pane_from_window(app, window_name)
+            return
+
     action_key = f"Reviewing {pr_id}" + (" (fresh)" if fresh else "")
     if not guard_pr_action(app, action_key):
         return
     app._inflight_pr_action = action_key
     cmd = f"pr review --fresh {pr_id}" if fresh else f"pr review {pr_id}"
-    run_command(app, cmd, working_message=action_key, action_key=action_key)
+
+    # In pull mode, pull the pane after the review window is created
+    on_complete = None
+    if pull_mode and pr and app._session_name:
+        window_name = pane_pull.get_window_name_for_review(pr)
+        on_complete = lambda: pane_pull.pull_pane_from_window(app, window_name)
+
+    run_command(app, cmd, working_message=action_key, action_key=action_key,
+                on_complete=on_complete)
 
 
 def merge_pr(app) -> None:
@@ -341,6 +395,19 @@ def handle_command_submitted(app, cmd: str) -> None:
             app.query_one("#tech-tree", TechTree).focus()
         return
 
+    # Handle focus mode toggle
+    if cmd in ("focus", "focus-mode"):
+        from pm_core.paths import get_global_setting, set_global_setting
+        current = get_global_setting("focus-mode")
+        set_global_setting("focus-mode", not current)
+        state = "ON" if not current else "OFF"
+        app.log_message(f"Focus mode: {state}")
+        if app._plans_visible:
+            app.query_one("#plans-pane", PlansPane).focus()
+        else:
+            app.query_one("#tech-tree", TechTree).focus()
+        return
+
     # Handle auto-start commands
     if cmd in ("autostart", "auto-start", "auto start"):
         from pm_core.tui.auto_start import toggle
@@ -376,13 +443,15 @@ def handle_command_submitted(app, cmd: str) -> None:
 
 
 def run_command(app, cmd: str, working_message: str | None = None,
-                action_key: str | None = None) -> None:
+                action_key: str | None = None,
+                on_complete: "callable | None" = None) -> None:
     """Execute a pm sub-command.
 
     Args:
         cmd: The command to run (e.g., "pr start pr-001")
         working_message: Optional message to show while running (enables async mode)
         action_key: Optional key for in-flight tracking (set before calling this)
+        on_complete: Optional callback invoked after the command finishes
     """
     parts = shlex.split(cmd)
     if not parts:
@@ -392,13 +461,19 @@ def run_command(app, cmd: str, working_message: str | None = None,
 
     if working_message:
         # Run async with spinner
-        app.run_worker(_run_command_async(app, cmd, parts, working_message, action_key))
+        app.run_worker(_run_command_async(app, cmd, parts, working_message,
+                                          action_key, on_complete=on_complete))
     else:
         # Run sync for quick commands
         app.log_message(f"> {cmd}")
         _run_command_sync(app, parts)
         if action_key:
             app._inflight_pr_action = None
+        if on_complete:
+            try:
+                on_complete()
+            except Exception:
+                _log.exception("on_complete callback failed")
 
 
 def _run_command_sync(app, parts: list[str]) -> None:
@@ -428,7 +503,8 @@ def _run_command_sync(app, parts: list[str]) -> None:
 
 
 async def _run_command_async(app, cmd: str, parts: list[str], working_message: str,
-                             action_key: str | None = None) -> None:
+                             action_key: str | None = None,
+                             on_complete: "callable | None" = None) -> None:
     """Run a command asynchronously with animated spinner."""
     import asyncio
     import itertools
@@ -485,3 +561,10 @@ async def _run_command_async(app, cmd: str, parts: list[str], working_message: s
 
     # Reload state
     app._load_state()
+
+    # Post-completion callback (e.g., pane pull after window creation)
+    if on_complete:
+        try:
+            on_complete()
+        except Exception:
+            _log.exception("on_complete callback failed")
