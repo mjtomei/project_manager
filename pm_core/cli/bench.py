@@ -39,11 +39,15 @@ def bench_models(url):
 @bench.command("exercises")
 @click.option("--language", "-l", default=None, help="Filter by language")
 @click.option("--source", "-s",
-              type=click.Choice(["polyglot", "livecodebench", "evalplus"]),
+              type=click.Choice(["polyglot", "livecodebench", "evalplus", "bigcodebench"]),
               default="polyglot", help="Exercise source (default: polyglot)")
 @click.option("--difficulty", type=click.Choice(["easy", "medium", "hard"]),
               default=None, help="Filter by difficulty (livecodebench only)")
-def bench_exercises(language, source, difficulty):
+@click.option("--hard", is_flag=True, default=False,
+              help="BigCodeBench: use the 148-problem hard subset")
+@click.option("--mode", type=click.Choice(["complete", "instruct"]),
+              default="instruct", help="BigCodeBench: prompt mode")
+def bench_exercises(language, source, difficulty, hard, mode):
     """List available benchmark exercises."""
     if source == "livecodebench":
         from pm_core.bench.exercises_livecodebench import (
@@ -83,6 +87,26 @@ def bench_exercises(language, source, difficulty):
             click.echo("")
             for ex in exercises:
                 click.echo(f"  {ex.slug}")
+    elif source == "bigcodebench":
+        from pm_core.bench.exercises_bigcodebench import (
+            download_dataset,
+            get_all_required_libs,
+            load_bigcodebench_exercises,
+        )
+
+        download_dataset(hard=hard)
+        if hard:
+            download_dataset(hard=False, quiet=True)
+        exercises = load_bigcodebench_exercises(hard_only=hard, mode=mode)
+
+        click.echo(f"Source: BigCodeBench ({'hard' if hard else 'full'}, {mode} mode)")
+        click.echo(f"Total exercises: {len(exercises)}")
+
+        libs = get_all_required_libs(hard_only=hard)
+        if libs:
+            click.echo(f"\nRequired libraries ({len(libs)}):")
+            for lib in sorted(libs):
+                click.echo(f"  {lib}")
     else:
         from pm_core.bench.exercises import sync_exercises, load_exercises
 
@@ -112,7 +136,7 @@ def bench_exercises(language, source, difficulty):
 @click.option("-o", "--output", "output_path", default=None,
               help="Output JSON file path")
 @click.option("--source", "-s",
-              type=click.Choice(["polyglot", "livecodebench", "evalplus"]),
+              type=click.Choice(["polyglot", "livecodebench", "evalplus", "bigcodebench"]),
               default="polyglot", help="Exercise source (default: polyglot)")
 @click.option("--difficulty", type=click.Choice(["easy", "medium", "hard"]),
               default=None, help="Filter by difficulty (livecodebench only)")
@@ -126,9 +150,13 @@ def bench_exercises(language, source, difficulty):
               help="Each candidate gets a random sample of N test functions")
 @click.option("-j", "--parallel", type=click.IntRange(min=1), default=1,
               help="Number of exercises to run concurrently (default: 1)")
+@click.option("--hard", is_flag=True, default=False,
+              help="BigCodeBench: use the 148-problem hard subset")
+@click.option("--mode", type=click.Choice(["complete", "instruct"]),
+              default="instruct", help="BigCodeBench: prompt mode")
 def bench_run(model, candidates, languages, exercise_filter, output_path,
               source, difficulty, variant, temperature, chain, test_subsets,
-              parallel):
+              parallel, hard, mode):
     """Run benchmark with tournament selection.
 
     MODEL is the model name as reported by the backend's /v1/models endpoint.
@@ -161,6 +189,9 @@ def bench_run(model, candidates, languages, exercise_filter, output_path,
         if test_subsets:
             parts.append(f"test_subsets={test_subsets}")
         click.echo(f"Hyperparams: {', '.join(parts)}")
+
+    if source == "bigcodebench":
+        click.echo(f"Source: bigcodebench-{'hard' if hard else 'full'} ({mode})")
 
     click.echo(f"Starting benchmark: model={model}, N={candidates}, source={source}")
     if difficulty:

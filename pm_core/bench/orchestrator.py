@@ -302,7 +302,7 @@ def run_benchmark(
     Args:
         model: Model name (as reported by /v1/models endpoint).
         num_candidates: Number of candidates per exercise for tournament.
-        source: Exercise source — "polyglot", "livecodebench", or "evalplus".
+        source: Exercise source — "polyglot", "livecodebench", "evalplus", or "bigcodebench".
         languages: Filter to these languages (default: all).
         slugs: Filter to these exercise slugs.
         difficulty: Filter by difficulty (livecodebench only): easy/medium/hard.
@@ -341,6 +341,16 @@ def run_benchmark(
             raise FileNotFoundError(
                 "EvalPlus cache not found. "
                 "Run `pm bench exercises --source evalplus` first."
+            ) from None
+    elif source == "bigcodebench":
+        from pm_core.bench.exercises_bigcodebench import load_bigcodebench_exercises
+
+        try:
+            exercises = load_bigcodebench_exercises()
+        except FileNotFoundError:
+            raise FileNotFoundError(
+                "BigCodeBench cache not found. "
+                "Run `pm bench exercises --source bigcodebench` first."
             ) from None
     else:
         try:
