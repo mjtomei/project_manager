@@ -107,10 +107,6 @@ async def toggle(app, selected_pr_id: str | None = None) -> None:
         _log.info("auto_start: enabled target=%s run_id=%s",
                   app._auto_start_target, run_id)
         app._update_display()
-        # Start the autonomous monitor alongside auto-start
-        from pm_core.tui import monitor_ui
-        if not monitor_ui.is_running(app):
-            monitor_ui.start_monitor(app, transcript_dir=str(tdir) if tdir else None)
         # Immediately start any ready PRs
         await check_and_start(app)
     else:

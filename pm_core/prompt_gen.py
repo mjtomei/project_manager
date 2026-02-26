@@ -316,7 +316,8 @@ The merge of `{branch}` into `{base_branch}` failed with the following error:
 
 def generate_monitor_prompt(data: dict, session_name: str | None = None,
                             iteration: int = 0, loop_id: str = "",
-                            auto_start_target: str | None = None) -> str:
+                            auto_start_target: str | None = None,
+                            meta_pm_root: str | None = None) -> str:
     """Generate a Claude Code prompt for the autonomous monitor session.
 
     The monitor session observes auto-start and watches all active tmux
@@ -328,10 +329,15 @@ def generate_monitor_prompt(data: dict, session_name: str | None = None,
         session_name: If provided, include TUI interaction instructions.
         iteration: Current iteration number (1-based).
         loop_id: Short unique loop identifier.
+        meta_pm_root: Absolute path to the meta workdir's ``pm/`` directory
+            where bugs.md and improvements.md live.
         auto_start_target: The PR that auto-start is targeting. When set,
             the monitor should only intervene on PRs in this PR's
             transitive dependency fan-in.
     """
+    if not meta_pm_root:
+        meta_pm_root = "pm"  # fallback to relative path
+
     all_prs = data.get("prs") or []
     base_branch = data.get("project", {}).get("base_branch", "master")
     project_name = data.get("project", {}).get("name", "unknown")
@@ -494,7 +500,18 @@ While completing the above steps, watch for:
 - Bugs in the pm tool itself (unexpected errors, wrong behavior)
 - Potential improvements to the pm tool
 
-Append bugs to `pm/bugs.txt` (create if needed) and improvements to `pm/improvements.txt`.
+Append findings to `{meta_pm_root}/bugs.md` and `{meta_pm_root}/improvements.md` using the plan-compatible PR format:
+
+```
+### PR: Short title describing the fix/improvement
+- **description**: What needs to be done
+- **tests**: Tests that reproduce the bug or verify the improvement
+- **files**: Key files involved
+```
+
+These files are plans that the user can review and act on later via meta mode.
+Do NOT launch `pm meta` or attempt to fix pm itself — just document what you find.
+
 Writing to these files should not block your next iteration. Only use **INPUT_REQUIRED** if a bug is actively blocking progress and cannot be worked around.
 
 ## Debug Log

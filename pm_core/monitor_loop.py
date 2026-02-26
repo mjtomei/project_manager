@@ -89,6 +89,8 @@ class MonitorLoopState:
     _transcript_dir: str | None = None
     # Auto-start target PR (for scoping monitor to the dependency fan-in)
     auto_start_target: str | None = None
+    # Absolute path to the meta workdir's pm/ dir (for bugs.md / improvements.md)
+    meta_pm_root: str | None = None
 
 
 def _match_monitor_verdict(line: str) -> str | None:
@@ -122,7 +124,8 @@ MONITOR_WINDOW_NAME = "monitor"
 def _launch_monitor_window(pm_root: str, iteration: int = 0,
                             loop_id: str = "",
                             transcript: str | None = None,
-                            auto_start_target: str | None = None) -> None:
+                            auto_start_target: str | None = None,
+                            meta_pm_root: str | None = None) -> None:
     """Launch the monitor window via ``pm pr start``-style Claude session."""
     cmd = [sys.executable, "-m", "pm_core.wrapper",
            "monitor", "--iteration", str(iteration)]
@@ -132,8 +135,14 @@ def _launch_monitor_window(pm_root: str, iteration: int = 0,
         cmd.extend(["--transcript", transcript])
     if auto_start_target:
         cmd.extend(["--auto-start-target", auto_start_target])
+    if meta_pm_root:
+        cmd.extend(["--meta-pm-root", meta_pm_root])
     _log.info("monitor_loop: launching monitor window: %s", cmd)
-    subprocess.run(cmd, cwd=pm_root, capture_output=True, text=True, timeout=30)
+    result = subprocess.run(cmd, cwd=pm_root, capture_output=True, text=True, timeout=30)
+    if result.returncode != 0:
+        stderr = result.stderr.strip() if result.stderr else ""
+        _log.error("monitor_loop: launch failed (rc=%d): %s", result.returncode, stderr[:500])
+        raise RuntimeError(f"Monitor window launch failed (rc={result.returncode}): {stderr[:200]}")
 
 
 def _poll_for_verdict(pane_id: str, prompt_text: str = "",
@@ -160,7 +169,8 @@ class PaneKilledError(Exception):
 
 def _regenerate_prompt_text(pm_root: str, iteration: int = 0,
                              loop_id: str = "",
-                             auto_start_target: str | None = None) -> str:
+                             auto_start_target: str | None = None,
+                             meta_pm_root: str | None = None) -> str:
     """Regenerate the monitor prompt text for verdict filtering."""
     try:
         from pathlib import Path
@@ -170,6 +180,7 @@ def _regenerate_prompt_text(pm_root: str, iteration: int = 0,
         return generate_monitor_prompt(
             data, iteration=iteration, loop_id=loop_id,
             auto_start_target=auto_start_target,
+            meta_pm_root=meta_pm_root,
         )
     except Exception as exc:
         _log.warning("monitor_loop: could not regenerate prompt text: %s", exc)
@@ -194,11 +205,14 @@ def _run_monitor_iteration(pm_root: str, iteration: int = 0,
         raise RuntimeError(f"tmux session '{session}' no longer exists")
 
     target = state.auto_start_target if state else None
+    meta_root = state.meta_pm_root if state else None
     _launch_monitor_window(pm_root, iteration=iteration, loop_id=loop_id,
-                            transcript=transcript, auto_start_target=target)
+                            transcript=transcript, auto_start_target=target,
+                            meta_pm_root=meta_root)
 
     prompt_text = _regenerate_prompt_text(pm_root, iteration, loop_id,
-                                           auto_start_target=target)
+                                           auto_start_target=target,
+                                           meta_pm_root=meta_root)
     _log.info("monitor_loop: prompt_text for filtering: %d chars", len(prompt_text))
 
     time.sleep(2)
@@ -208,6 +222,7 @@ def _run_monitor_iteration(pm_root: str, iteration: int = 0,
         raise RuntimeError(f"Monitor window '{MONITOR_WINDOW_NAME}' not found after launch")
 
     _log.info("monitor_loop: polling pane %s in window %s", pane_id, MONITOR_WINDOW_NAME)
+
     content = _poll_for_verdict(pane_id, prompt_text=prompt_text,
                                  grace_period=_VERDICT_GRACE_PERIOD,
                                  state=state)
@@ -335,6 +350,7 @@ def run_monitor_loop_sync(
                 follow_up_prompt = _regenerate_prompt_text(
                     pm_root, state.iteration, state.loop_id,
                     auto_start_target=state.auto_start_target,
+                    meta_pm_root=state.meta_pm_root,
                 )
                 follow_up_output = _wait_for_follow_up_verdict(
                     follow_up_prompt, state,

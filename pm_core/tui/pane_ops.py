@@ -248,9 +248,17 @@ def view_log(app) -> None:
 
 
 def launch_meta(app) -> None:
-    """Launch a meta-development session to work on pm itself."""
+    """Launch a meta-development session to work on pm itself.
+
+    Auto-loads any new PRs from bugs.md and improvements.md into the meta
+    workdir's project.yaml before launching.
+    """
     app._consume_z()  # consume but meta doesn't support --fresh
     _log.info("launch_meta")
+    from pm_core.tui.monitor_ui import load_monitor_plan_prs
+    created = load_monitor_plan_prs(app)
+    if created:
+        app.log_message(f"Loaded {created} PR{'s' if created != 1 else ''} from monitor plans")
     app._run_command("meta")
 
 

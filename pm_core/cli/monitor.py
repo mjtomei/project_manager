@@ -22,8 +22,11 @@ from pm_core.monitor_loop import (
     run_monitor_loop_sync,
 )
 
+from pm_core.paths import configure_logger
 from pm_core.cli import cli
 from pm_core.cli.helpers import _get_pm_session, state_root
+
+_log = configure_logger("pm.cli.monitor")
 
 
 def _run_user_monitor_loop(wait: int, max_iterations: int) -> None:
@@ -87,9 +90,11 @@ def _run_user_monitor_loop(wait: int, max_iterations: int) -> None:
               help="Maximum iterations (0 = unlimited)")
 @click.option("--auto-start-target", default=None, hidden=True,
               help="Auto-start target PR ID (passed by monitor loop engine)")
+@click.option("--meta-pm-root", default=None, hidden=True,
+              help="Absolute path to meta workdir pm/ dir (passed by monitor loop engine)")
 def monitor_cmd(iteration: int | None, loop_id: str | None,
                 transcript: str | None, wait: int, max_iterations: int,
-                auto_start_target: str | None):
+                auto_start_target: str | None, meta_pm_root: str | None):
     """Run the autonomous monitor loop.
 
     With no arguments, starts a blocking monitor loop that periodically
@@ -109,7 +114,8 @@ def monitor_cmd(iteration: int | None, loop_id: str | None,
     if iteration is not None:
         # Internal mode: create a single tmux window for this iteration
         _create_monitor_window(iteration, loop_id or "", transcript,
-                               auto_start_target=auto_start_target)
+                               auto_start_target=auto_start_target,
+                               meta_pm_root=meta_pm_root)
     else:
         # User mode: run the full blocking loop
         _run_user_monitor_loop(wait, max_iterations)
@@ -117,7 +123,8 @@ def monitor_cmd(iteration: int | None, loop_id: str | None,
 
 def _create_monitor_window(iteration: int, loop_id: str,
                            transcript: str | None,
-                           auto_start_target: str | None = None) -> None:
+                           auto_start_target: str | None = None,
+                           meta_pm_root: str | None = None) -> None:
     """Create (or recreate) the monitor tmux window for one iteration."""
     root = state_root()
     data = store.load(root)
@@ -136,6 +143,7 @@ def _create_monitor_window(iteration: int, loop_id: str,
         data, session_name=pm_session,
         iteration=iteration, loop_id=loop_id,
         auto_start_target=auto_start_target,
+        meta_pm_root=meta_pm_root,
     )
 
     # Determine a working directory -- use the repo root (parent of pm/ dir)
@@ -152,9 +160,13 @@ def _create_monitor_window(iteration: int, loop_id: str,
     # them to the new one (same pattern as review windows).
     sessions_watching: list[str] = []
     existing = tmux_mod.find_window_by_name(pm_session, MONITOR_WINDOW_NAME)
+    _log.info("_create_monitor_window: iteration=%d pm_session=%s existing=%s",
+               iteration, pm_session, existing)
     if existing:
         sessions_watching = tmux_mod.sessions_on_window(
             pm_session, existing["id"])
+        _log.info("_create_monitor_window: sessions_watching=%s, killing old window %s",
+                    sessions_watching, existing["id"])
         tmux_mod.kill_window(pm_session, existing["id"])
 
     # Create the monitor window without switching focus (background)
@@ -163,6 +175,8 @@ def _create_monitor_window(iteration: int, loop_id: str,
             pm_session, MONITOR_WINDOW_NAME, claude_cmd, repo_dir,
             switch=False,
         )
+        new_win = tmux_mod.find_window_by_name(pm_session, MONITOR_WINDOW_NAME)
+        _log.info("_create_monitor_window: new window created: %s", new_win)
         click.echo(f"Monitor window launched (iteration {iteration})")
     except Exception as e:
         click.echo(f"Monitor: failed to create tmux window: {e}", err=True)
@@ -170,5 +184,8 @@ def _create_monitor_window(iteration: int, loop_id: str,
 
     # Switch sessions that were watching the old monitor window to the new one
     if sessions_watching:
+        _log.info("_create_monitor_window: switching %s to new monitor window", sessions_watching)
         tmux_mod.switch_sessions_to_window(
             sessions_watching, pm_session, MONITOR_WINDOW_NAME)
+    else:
+        _log.info("_create_monitor_window: no sessions_watching, skipping switch")

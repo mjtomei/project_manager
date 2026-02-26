@@ -163,7 +163,11 @@ def _launch_review_window(pr_id: str, pm_root: str, iteration: int = 0,
         cmd.extend(["--transcript", transcript])
     cmd.append(pr_id)
     _log.info("review_loop: launching review window: %s", cmd)
-    subprocess.run(cmd, cwd=pm_root, capture_output=True, text=True, timeout=30)
+    result = subprocess.run(cmd, cwd=pm_root, capture_output=True, text=True, timeout=30)
+    if result.returncode != 0:
+        stderr = result.stderr.strip() if result.stderr else ""
+        _log.error("review_loop: launch failed (rc=%d): %s", result.returncode, stderr[:500])
+        raise RuntimeError(f"Review window launch failed (rc={result.returncode}): {stderr[:200]}")
 
 
 def _find_claude_pane(session: str, window_name: str) -> str | None:
@@ -245,6 +249,7 @@ def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
         raise RuntimeError(f"Review window '{window_name}' not found after launch")
 
     _log.info("review_loop: polling pane %s in window %s", pane_id, window_name)
+
     content = _poll_for_verdict(pane_id, prompt_text=prompt_text,
                                  grace_period=_VERDICT_GRACE_PERIOD)
     if content is None:

@@ -23,6 +23,29 @@ from pm_core.cli.helpers import (
 PM_REPO_URL = "https://github.com/mjtomei/project_manager.git"
 
 
+def ensure_meta_workdir(session_tag: str | None = None) -> Path:
+    """Ensure the meta workdir exists (clone pm repo if needed).
+
+    Does NOT set the session override or create branches.
+    Returns the workdir path (e.g. ``~/.pm/workdirs/meta-<tag>``).
+    """
+    from pm_core.paths import workdirs_base
+
+    if session_tag is None:
+        pm_session_name = _get_session_name_for_cwd()
+        session_tag = pm_session_name.removeprefix("pm-")
+
+    work_path = workdirs_base() / f"meta-{session_tag}"
+
+    if not work_path.exists():
+        work_path.parent.mkdir(parents=True, exist_ok=True)
+        git_ops.clone(PM_REPO_URL, work_path)
+        git_ops.run_git("checkout", "master", cwd=work_path, check=True)
+        git_ops.pull_rebase(work_path)
+
+    return work_path
+
+
 @cli.command("meta")
 @click.argument("task", default="")
 @click.option("--branch", "-b", default=None, help="Branch name (auto-generated if not specified)")
@@ -74,30 +97,19 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
     pm_session_name = _get_session_name_for_cwd()  # e.g., "pm-omerta_node-7112c169"
     session_tag = pm_session_name.removeprefix("pm-")  # e.g., "omerta_node-7112c169"
 
-    # Workdir uses same tag as session
-    from pm_core.paths import workdirs_base
-    work_path = workdirs_base() / f"meta-{session_tag}"
+    # Ensure the workdir exists (clone if needed)
+    work_path = ensure_meta_workdir(session_tag)
 
-    if not work_path.exists():
-        click.echo(f"Cloning pm from {PM_REPO_URL}...")
-        work_path.parent.mkdir(parents=True, exist_ok=True)
-        git_ops.clone(PM_REPO_URL, work_path)
+    # Check if this is a fresh clone (on master, no meta branch yet)
+    current_branch = git_ops.run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=work_path, check=False)
+    current_branch_name = current_branch.stdout.strip()
+    is_fresh = current_branch_name == "master" and not git_ops.run_git("status", "--porcelain", cwd=work_path, check=False).stdout.strip()
 
-        # Determine base ref
-        if tag:
-            base_ref = tag
-        else:
-            base_ref = "master"
-
-        # Checkout base and create branch
+    if is_fresh:
+        base_ref = tag or "master"
         if tag:
             click.echo(f"Checking out tag {tag}...")
             git_ops.run_git("checkout", tag, cwd=work_path, check=True)
-        else:
-            click.echo(f"Checking out {base_ref}...")
-            git_ops.run_git("checkout", base_ref, cwd=work_path, check=True)
-            click.echo(f"Pulling latest {base_ref}...")
-            git_ops.pull_rebase(work_path)
 
         click.echo(f"Creating branch {branch} from {base_ref}...")
         git_ops.checkout_branch(work_path, branch, create=True)
