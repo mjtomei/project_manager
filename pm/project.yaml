@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-ff68ef5
+  active_pr: pr-37b4b31
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-02-20T02:43:08.956779+00:00'
@@ -1286,7 +1286,7 @@ prs:
   plan: null
   title: Add autonomous monitor session for auto–start issue detection and resolution
   branch: pm/pr-c0167ac-add-autonomous-monitor-session-for-auto-start-issu
-  status: in_review
+  status: merged
   depends_on: []
   description: 'Add an autonomous monitor session that runs alongside auto–start and
     watches the TUI and tmux windows for issues. The session should:
@@ -1354,6 +1354,7 @@ prs:
   gh_pr_number: 86
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-c0167ac-add-autonomous-monitor-session-for-a-448a51be
+  merged_at: '2026-02-26T20:48:04.714413+00:00'
 - id: pr-98d857a
   plan: plan-002
   title: 'Additional benchmark sets: EvalPlus, LiveCodeBench, BigCodeBench'
@@ -1388,7 +1389,7 @@ prs:
   plan: plan-002
   title: EvalPlus benchmark loader (HumanEval+ and MBPP+)
   branch: pm/pr-6ef084e-evalplus-benchmark-loader-humaneval-and-mbpp
-  status: pending
+  status: in_progress
   depends_on:
   - pr-017
   description: 'Add EvalPlus (HumanEval+ 164 problems, MBPP+ 378 problems) as an exercise
@@ -1428,15 +1429,17 @@ prs:
     pm bench run openai/gpt-oss-120b -n 8 --chain --temperature 0.0 -j 4 -l python
     --source evalplus -o /tmp/bench-120b-evalplus.json. These result JSONs are required
     artifacts — pr-409b580 consumes them for the cross-benchmark comparison table.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/90
+  gh_pr_number: 90
   notes: []
+  started_at: '2026-02-26T20:52:12.441271+00:00'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-6ef084e-evalplus-benchmark-loader-humaneval--8e3c5798
 - id: pr-3060c7e
   plan: plan-002
   title: LiveCodeBench competitive programming loader
   branch: pm/pr-3060c7e-livecodebench-competitive-programming-loader
-  status: pending
+  status: in_progress
   depends_on:
   - pr-017
   description: 'Add LiveCodeBench (880+ competitive programming problems from LeetCode/AtCoder/Codeforces,
@@ -1471,15 +1474,17 @@ prs:
     -n 8 --chain --temperature 0.0 -j 4 -l python --source livecodebench -o /tmp/bench-120b-lcb-full.json.
     These result JSONs are required artifacts — pr-409b580 consumes them for the cross-benchmark
     comparison table.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/91
+  gh_pr_number: 91
   notes: []
+  started_at: '2026-02-26T20:52:18.317036+00:00'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-3060c7e-livecodebench-competitive-programmin-8e3c5798
 - id: pr-37b4b31
   plan: plan-002
   title: BigCodeBench real-world task loader
   branch: pm/pr-37b4b31-bigcodebench-real-world-task-loader
-  status: pending
+  status: in_progress
   depends_on:
   - pr-017
   description: 'Add BigCodeBench (1,140 tasks, 148 hard subset) as an exercise source
@@ -1516,10 +1521,12 @@ prs:
     --source bigcodebench --hard -o /tmp/bench-120b-bcb-hard.json. These result JSONs
     are required artifacts — pr-409b580 consumes them for the cross-benchmark comparison
     table.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/92
+  gh_pr_number: 92
   notes: []
+  started_at: '2026-02-26T20:52:24.022031+00:00'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-37b4b31-bigcodebench-real-world-task-loader-8e3c5798
 - id: pr-409b580
   plan: plan-002
   title: Cross-source integration and comparison table
@@ -1581,7 +1588,7 @@ prs:
   plan: null
   title: 'Ultrawide monitor support: 3-4 horizontal panes before vertical splitting'
   branch: pm/pr-f4fbf19-ultrawide-monitor-support-3-4-horizontal-panes-bef
-  status: in_progress
+  status: merged
   depends_on: []
   description: 'Currently the pane layout splits vertically too early on ultrawide
     monitors, wasting horizontal space.
@@ -1604,8 +1611,8 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/88
   gh_pr_number: 88
   started_at: '2026-02-26T15:32:02.274280+00:00'
-  reviewed_at: null
-  merged_at: null
+  reviewed_at: '2026-02-26T18:32:24.674217+00:00'
+  merged_at: '2026-02-26T18:44:20.992499+00:00'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-f4fbf19-ultrawide-monitor-support-3-4-horizo-b6481329
 - id: pr-ff68ef5

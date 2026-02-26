@@ -342,24 +342,6 @@ def generate_monitor_prompt(data: dict, session_name: str | None = None,
     base_branch = data.get("project", {}).get("base_branch", "master")
     project_name = data.get("project", {}).get("name", "unknown")
 
-    # Build PR status summary
-    pr_lines = []
-    for pr in all_prs:
-        status = pr.get("status", "pending")
-        deps = pr.get("depends_on") or []
-        dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
-        workdir = pr.get("workdir") or ""
-        workdir_str = f" [workdir: {workdir}]" if workdir else ""
-        pr_lines.append(f"- {pr['id']}: {pr.get('title', '???')} [{status}]{dep_str}{workdir_str}")
-    pr_summary = "\n".join(pr_lines) if pr_lines else "No PRs defined."
-
-    # Build plan summary
-    plans = data.get("plans") or []
-    plan_lines = []
-    for plan in plans:
-        plan_lines.append(f"- {plan['id']}: {plan.get('name', '???')} [{plan.get('status', 'draft')}]")
-    plan_summary = "\n".join(plan_lines) if plan_lines else "No plans defined."
-
     tui_block = tui_section(session_name) if session_name else ""
 
     # Compute auto-start scope (dependency fan-in of the target)
@@ -369,14 +351,6 @@ def generate_monitor_prompt(data: dict, session_name: str | None = None,
         managed_ids = _transitive_deps(all_prs, auto_start_target)
         managed_ids.add(auto_start_target)
         managed_list = ", ".join(sorted(managed_ids))
-        unmanaged = [pr for pr in all_prs if pr["id"] not in managed_ids
-                     and pr.get("workdir")]
-        unmanaged_lines = ""
-        if unmanaged:
-            lines = []
-            for pr in unmanaged:
-                lines.append(f"- {pr['id']}: {pr.get('title', '???')} [{pr.get('status', 'pending')}]")
-            unmanaged_lines = "\n".join(lines)
 
         auto_start_scope_block = f"""
 ### Auto-Start Scope
@@ -389,11 +363,6 @@ Other PRs may have active tmux windows from manual user activity -- do NOT attem
 fix, restart, or interfere with those sessions. You may observe them for cross-session
 conflict detection (e.g. overlapping file edits), but take no corrective action on
 windows belonging to unmanaged PRs.
-"""
-        if unmanaged_lines:
-            auto_start_scope_block += f"""
-PRs with active windows that are NOT managed by auto-start (hands off):
-{unmanaged_lines}
 """
 
     id_label = f" [{loop_id}]" if loop_id else ""
@@ -411,11 +380,11 @@ surface what needs human attention.
 
 Base branch: `{base_branch}`
 
-### PRs
-{pr_summary}
-
-### Plans
-{plan_summary}
+Use these commands to inspect project state as needed:
+- `pm pr list` -- list all PRs and their status
+- `pm pr graph` -- show the PR dependency tree
+- `pm plan list` -- list all plans
+- `cat pm/project.yaml` -- full project state (PRs, plans, settings)
 {tui_block}
 ## Your Responsibilities
 
