@@ -37,7 +37,7 @@ class Exercise:
     path: Path = field(repr=False)
 
     # Optional metadata for source-specific filtering / display
-    source: str = "polyglot"  # "polyglot" or "livecodebench"
+    source: str = "polyglot"  # "polyglot", "evalplus", "livecodebench", or "bigcodebench"
     difficulty: str | None = None  # "easy", "medium", "hard"
     platform: str | None = None  # "leetcode", "codeforces", "atcoder"
 
