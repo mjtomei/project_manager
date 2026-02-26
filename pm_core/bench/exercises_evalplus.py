@@ -276,7 +276,7 @@ def _transform_test_code(
         )
     else:
         # Fallback: look for old-style ``check(entry_point)`` pattern.
-        cleaned, found = _strip_bare_check_call(lines)
+        cleaned, _found = _strip_bare_check_call(lines)
         setup = "\n".join(cleaned).rstrip()
         body = (
             f"from {module_name} import *\n"
