@@ -8,7 +8,7 @@ Each task provides:
 - complete_prompt: Function signature with docstring (code completion)
 - test: unittest-based test code with mock.patch patterns
 - entry_point: Expected function name (varies per task)
-- libs: Comma-separated required library names
+- libs: Stringified Python list of required library names
 """
 
 from __future__ import annotations
