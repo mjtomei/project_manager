@@ -226,6 +226,15 @@ class TestLoadExercises:
         with pytest.raises(FileNotFoundError, match="BigCodeBench full cache not found"):
             load_bigcodebench_exercises()
 
+    def test_no_hard_cache_error_includes_flag(self, tmp_path, monkeypatch):
+        """Error message for missing hard cache should include --hard flag."""
+        monkeypatch.setattr(
+            "pm_core.bench.exercises_bigcodebench._cache_dir",
+            lambda: tmp_path / "nonexistent",
+        )
+        with pytest.raises(FileNotFoundError, match="--hard"):
+            load_bigcodebench_exercises(hard_only=True)
+
     def test_instruct_mode_default(self, cached_full, monkeypatch):
         monkeypatch.setattr(
             "pm_core.bench.exercises_bigcodebench._cache_dir", lambda: cached_full

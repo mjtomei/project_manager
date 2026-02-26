@@ -184,9 +184,10 @@ def load_bigcodebench_exercises(
     cache_file = _cache_dir() / f"bigcodebench_{suffix}_{_SPLIT}.json"
 
     if not cache_file.is_file():
+        hard_flag = " --hard" if hard_only else ""
         raise FileNotFoundError(
             f"BigCodeBench {suffix} cache not found. "
-            "Run `pm bench exercises --source bigcodebench` to download."
+            f"Run `pm bench exercises --source bigcodebench{hard_flag}` to download."
         )
 
     tasks = json.loads(cache_file.read_text())
