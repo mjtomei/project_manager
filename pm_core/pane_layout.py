@@ -36,6 +36,10 @@ _logger = configure_logger("pm.pane_layout")
 
 MOBILE_WIDTH_THRESHOLD = 120
 
+# Default minimum character width per horizontal pane column.
+# Overridable via `pm set min-pane-width <value>`.
+DEFAULT_MIN_PANE_WIDTH = 100
+
 
 def get_reliable_window_size(
     session: str, window: str, query_session: str | None = None,
@@ -169,6 +173,77 @@ def _checksum(layout_body: str) -> str:
     return f"{csum:04x}"
 
 
+def _get_min_pane_width() -> int:
+    """Read min-pane-width from global settings, or DEFAULT_MIN_PANE_WIDTH."""
+    from pm_core.paths import get_global_setting_value
+    val = get_global_setting_value("min-pane-width", "")
+    try:
+        return max(1, int(val))
+    except ValueError:
+        return DEFAULT_MIN_PANE_WIDTH
+
+
+def _max_horizontal_panes(w: int) -> int:
+    """Return the max number of horizontal columns that fit in *w* chars.
+
+    Each column must be at least min-pane-width characters wide (configurable
+    via ``pm set min-pane-width <value>``, default 100).
+    N columns require (N − 1) single-char tmux separators, so the
+    constraint is: N * min_w + (N − 1) ≤ w, i.e.
+    N ≤ (w + 1) / (min_w + 1).
+    """
+    min_w = _get_min_pane_width()
+    return max(1, (w + 1) // (min_w + 1))
+
+
+def _distribute_panes(panes: list[int], n_cols: int) -> list[list[int]]:
+    """Distribute panes across *n_cols* columns, oldest sharing first.
+
+    Returns a list of lists, one per column.  When there are more panes
+    than columns, older panes share columns (stacked vertically) while
+    newer panes get dedicated horizontal space.
+    """
+    if n_cols >= len(panes):
+        return [[p] for p in panes]
+    base, remainder = divmod(len(panes), n_cols)
+    cols: list[list[int]] = []
+    idx = 0
+    for i in range(n_cols):
+        size = base + (1 if i < remainder else 0)
+        cols.append(panes[idx:idx + size])
+        idx += size
+    return cols
+
+
+def _layout_columns(panes: list[int], x: int, y: int, w: int, h: int,
+                    n_cols: int) -> str:
+    """Lay out *panes* in *n_cols* equal-width horizontal columns.
+
+    Panes are distributed across columns with older panes sharing columns
+    first.  Within each multi-pane column, panes are split vertically.
+    Extra pixels go to rightmost (newest) columns.
+    """
+    cols = _distribute_panes(panes, n_cols)
+    separators = n_cols - 1
+    usable_w = w - separators
+    base_w, remainder = divmod(usable_w, n_cols)
+
+    parts: list[str] = []
+    cur_x = x
+    for i, col_panes in enumerate(cols):
+        # Extra pixels go to rightmost (newest) columns
+        col_w = base_w + (1 if i >= n_cols - remainder else 0)
+        col_w = max(1, col_w)
+        if len(col_panes) == 1:
+            parts.append(f"{col_w}x{h},{cur_x},{y},{col_panes[0]}")
+        else:
+            parts.append(
+                _layout_node(col_panes, cur_x, y, col_w, h, force_axis='v'))
+        cur_x += col_w + 1  # +1 for tmux separator
+
+    return f"{w}x{h},{x},{y}{{{','.join(parts)}}}"
+
+
 def _layout_node(panes, x, y, w, h, force_axis=None):
     """Recursively build tmux layout string body.
 
@@ -179,7 +254,14 @@ def _layout_node(panes, x, y, w, h, force_axis=None):
     if len(panes) == 1:
         return f"{w}x{h},{x},{y},{panes[0]}"
 
-    # Split: older group gets fewer panes (left/top, smaller area),
+    # At the top level (auto axis detection), use multi-column layout
+    # when the terminal is wide enough for 3+ columns of MIN_PANE_WIDTH.
+    if force_axis is None:
+        n_cols = min(_max_horizontal_panes(w), len(panes))
+        if n_cols > 2:
+            return _layout_columns(panes, x, y, w, h, n_cols)
+
+    # Binary split: older group gets fewer panes (left/top, smaller area),
     # newer group gets more space (right/bottom).
     mid = (len(panes) + 1) // 2
     older = panes[:mid]

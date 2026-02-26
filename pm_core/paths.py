@@ -278,6 +278,25 @@ def set_global_setting(name: str, enabled: bool) -> None:
         f.write_text("false\n")
 
 
+def get_global_setting_value(name: str, default: str = "") -> str:
+    """Read a global setting's raw string value.
+
+    Returns *default* if the file doesn't exist or can't be read.
+    """
+    f = pm_home() / "settings" / name
+    try:
+        return f.read_text().strip()
+    except (FileNotFoundError, OSError):
+        return default
+
+
+def set_global_setting_value(name: str, value: str) -> None:
+    """Write a raw string value for a global setting."""
+    d = pm_home() / "settings"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / name).write_text(value + "\n")
+
+
 def clear_session(session_tag: str) -> None:
     """Remove all config files for a session."""
     sd = sessions_dir() / session_tag

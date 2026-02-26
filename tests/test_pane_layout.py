@@ -11,6 +11,9 @@ from pm_core.pane_layout import (
     compute_layout,
     is_mobile,
     _layout_node,
+    _layout_columns,
+    _max_horizontal_panes,
+    _distribute_panes,
     _checksum,
     get_window_data,
     _iter_all_panes,
@@ -20,6 +23,7 @@ from pm_core.pane_layout import (
     unregister_pane,
     _reconcile_registry,
     MOBILE_WIDTH_THRESHOLD,
+    DEFAULT_MIN_PANE_WIDTH,
 )
 
 
@@ -200,6 +204,169 @@ class TestLayoutSplitDirection:
         """Even slightly taller than wide should use vertical."""
         body = _layout_node([0, 1], 0, 0, 100, 101)
         assert body.startswith("100x101,0,0[")
+
+
+class TestMaxHorizontalPanes:
+    """Test width-based column count calculation (default min-pane-width=100)."""
+
+    @patch("pm_core.pane_layout._get_min_pane_width", return_value=100)
+    def test_narrow_terminal(self, _mock):
+        """Narrow terminal (below min-pane-width) gets 1 column."""
+        assert _max_horizontal_panes(80) == 1
+
+    @patch("pm_core.pane_layout._get_min_pane_width", return_value=100)
+    def test_standard_terminal(self, _mock):
+        """Standard 200-col terminal: floor(201/101) = 1 column."""
+        assert _max_horizontal_panes(200) == 1
+
+    @patch("pm_core.pane_layout._get_min_pane_width", return_value=100)
+    def test_exact_2col_boundary(self, _mock):
+        """2 * 100 + 1 separator = 201 → 2 columns."""
+        assert _max_horizontal_panes(201) == 2
+
+    @patch("pm_core.pane_layout._get_min_pane_width", return_value=100)
+    def test_just_below_2col(self, _mock):
+        """200 < 201 → 1 column."""
+        assert _max_horizontal_panes(200) == 1
+
+    @patch("pm_core.pane_layout._get_min_pane_width", return_value=100)
+    def test_exact_3col_boundary(self, _mock):
+        """3 * 100 + 2 separators = 302 → 3 columns."""
+        assert _max_horizontal_panes(302) == 3
+
+    @patch("pm_core.pane_layout._get_min_pane_width", return_value=100)
+    def test_just_below_3col(self, _mock):
+        """301 < 302 → 2 columns."""
+        assert _max_horizontal_panes(301) == 2
+
+    @patch("pm_core.pane_layout._get_min_pane_width", return_value=100)
+    def test_exact_4col_boundary(self, _mock):
+        """4 * 100 + 3 separators = 403 → 4 columns."""
+        assert _max_horizontal_panes(403) == 4
+
+    @patch("pm_core.pane_layout._get_min_pane_width", return_value=100)
+    def test_just_below_4col(self, _mock):
+        """402 < 403 → 3 columns."""
+        assert _max_horizontal_panes(402) == 3
+
+    @patch("pm_core.pane_layout._get_min_pane_width", return_value=100)
+    def test_21_9_ultrawide(self, _mock):
+        """21:9 ultrawide (~271 cols): 2 columns at min=100."""
+        assert _max_horizontal_panes(271) == 2
+
+    @patch("pm_core.pane_layout._get_min_pane_width", return_value=100)
+    def test_32_9_super_ultrawide(self, _mock):
+        """32:9 super-ultrawide (~424 cols): 4 columns at min=100."""
+        assert _max_horizontal_panes(424) == 4
+
+    @patch("pm_core.pane_layout._get_min_pane_width", return_value=80)
+    def test_custom_min_width(self, _mock):
+        """Custom min-pane-width=80: 271 cols → floor(272/81) = 3."""
+        assert _max_horizontal_panes(271) == 3
+
+
+class TestDistributePanes:
+    """Test pane distribution across columns."""
+
+    def test_fewer_panes_than_cols(self):
+        """Each pane gets its own column."""
+        assert _distribute_panes([0, 1], 3) == [[0], [1]]
+
+    def test_equal_panes_and_cols(self):
+        """One pane per column."""
+        assert _distribute_panes([0, 1, 2], 3) == [[0], [1], [2]]
+
+    def test_four_panes_three_cols(self):
+        """Oldest panes share first column."""
+        assert _distribute_panes([0, 1, 2, 3], 3) == [[0, 1], [2], [3]]
+
+    def test_five_panes_three_cols(self):
+        """Overflow distributed to oldest columns."""
+        assert _distribute_panes([0, 1, 2, 3, 4], 3) == [[0, 1], [2, 3], [4]]
+
+    def test_six_panes_three_cols(self):
+        """Even distribution across 3 columns."""
+        assert _distribute_panes([0, 1, 2, 3, 4, 5], 3) == [[0, 1], [2, 3], [4, 5]]
+
+    def test_five_panes_four_cols(self):
+        """One extra pane in first column."""
+        assert _distribute_panes([0, 1, 2, 3, 4], 4) == [[0, 1], [2], [3], [4]]
+
+    def test_eight_panes_four_cols(self):
+        """Even distribution across 4 columns."""
+        assert _distribute_panes([0, 1, 2, 3, 4, 5, 6, 7], 4) == [
+            [0, 1], [2, 3], [4, 5], [6, 7]]
+
+
+@patch("pm_core.pane_layout._get_min_pane_width", return_value=100)
+class TestUltrawideLayout:
+    """Test layout generation on wide terminals (min-pane-width=100)."""
+
+    def test_3_panes_3col_all_horizontal(self, _mock):
+        """302-wide terminal (3 columns) with 3 panes: all horizontal."""
+        body = _layout_node([0, 1, 2], 0, 0, 302, 59)
+        assert body.startswith("302x59,0,0{")
+        assert "[" not in body
+
+    def test_4_panes_3col_mixed(self, _mock):
+        """302-wide terminal (3 columns) with 4 panes: first column splits vertically."""
+        body = _layout_node([0, 1, 2, 3], 0, 0, 302, 59)
+        assert body.startswith("302x59,0,0{")
+        assert "[" in body
+
+    def test_4_panes_4col_all_horizontal(self, _mock):
+        """403-wide terminal (4 columns) with 4 panes: all horizontal."""
+        body = _layout_node([0, 1, 2, 3], 0, 0, 403, 59)
+        assert body.startswith("403x59,0,0{")
+        assert "[" not in body
+
+    def test_5_panes_4col_mixed(self, _mock):
+        """403-wide terminal (4 columns) with 5 panes: first column splits vertically."""
+        body = _layout_node([0, 1, 2, 3, 4], 0, 0, 403, 59)
+        assert body.startswith("403x59,0,0{")
+        assert "[" in body
+
+    def test_2_panes_wide_uses_binary_split(self, _mock):
+        """2 panes on a wide terminal still uses simple binary split."""
+        body = _layout_node([0, 1], 0, 0, 302, 59)
+        assert body.startswith("302x59,0,0{")
+
+    def test_standard_monitor_3_panes_uses_binary_split(self, _mock):
+        """Standard 200-col terminal with 3 panes uses binary split."""
+        body = _layout_node([0, 1, 2], 0, 0, 200, 50)
+        assert body.startswith("200x50,0,0{")
+
+    def test_32_9_gets_4_columns(self, _mock):
+        """32:9 super-ultrawide (~424 cols) gets 4 columns at min=100."""
+        body = _layout_node([0, 1, 2, 3], 0, 0, 424, 59)
+        assert body.startswith("424x59,0,0{")
+        assert "[" not in body
+
+    def test_column_widths_sum_correctly_3col(self, _mock):
+        """3-column layout widths sum to total width."""
+        body = _layout_columns([0, 1, 2], 0, 0, 302, 59, 3)
+        assert body.startswith("302x59,0,0{")
+        assert body.count("x59,") == 4  # root + 3 columns
+
+    def test_column_widths_sum_correctly_4col(self, _mock):
+        """4-column layout widths sum to total width."""
+        body = _layout_columns([0, 1, 2, 3], 0, 0, 424, 59, 4)
+        assert body.startswith("424x59,0,0{")
+        for i in range(4):
+            assert f",{i}" in body or body.endswith(str(i))
+
+    def test_all_pane_indices_present(self, _mock):
+        """All pane indices appear in the layout string."""
+        layout = compute_layout(5, 403, 59)
+        for i in range(5):
+            assert f",{i}" in layout or layout.endswith(str(i))
+
+    def test_compute_layout_has_valid_checksum(self, _mock):
+        """Multi-column layout has valid checksum prefix."""
+        layout = compute_layout(3, 302, 59)
+        checksum_part = layout.split(",")[0]
+        assert len(checksum_part) == 4
+        int(checksum_part, 16)
 
 
 # --- Multi-window registry tests ---
