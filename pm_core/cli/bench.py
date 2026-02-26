@@ -38,25 +38,52 @@ def bench_models(url):
 
 @bench.command("exercises")
 @click.option("--language", "-l", default=None, help="Filter by language")
-def bench_exercises(language):
+@click.option("--source", type=click.Choice(["exercism", "bigcodebench"]),
+              default="exercism", help="Exercise source")
+@click.option("--hard", is_flag=True, default=False,
+              help="BigCodeBench: use the 148-problem hard subset")
+@click.option("--mode", type=click.Choice(["complete", "instruct"]),
+              default="instruct", help="BigCodeBench: prompt mode")
+def bench_exercises(language, source, hard, mode):
     """List available benchmark exercises."""
-    from pm_core.bench.exercises import sync_exercises, load_exercises
+    if source == "bigcodebench":
+        from pm_core.bench.exercises_bigcodebench import (
+            download_dataset,
+            get_all_required_libs,
+            load_bigcodebench_exercises,
+        )
 
-    sync_exercises()
-    exercises = load_exercises(language=language)
+        download_dataset(hard=hard)
+        if hard:
+            download_dataset(hard=False, quiet=True)
+        exercises = load_bigcodebench_exercises(hard_only=hard, mode=mode)
 
-    by_lang: dict[str, int] = {}
-    for ex in exercises:
-        by_lang[ex.language] = by_lang.get(ex.language, 0) + 1
+        click.echo(f"Source: BigCodeBench ({'hard' if hard else 'full'}, {mode} mode)")
+        click.echo(f"Total exercises: {len(exercises)}")
 
-    click.echo(f"Total exercises: {len(exercises)}")
-    for lang in sorted(by_lang):
-        click.echo(f"  {lang}: {by_lang[lang]}")
+        libs = get_all_required_libs(hard_only=hard)
+        if libs:
+            click.echo(f"\nRequired libraries ({len(libs)}):")
+            for lib in sorted(libs):
+                click.echo(f"  {lib}")
+    else:
+        from pm_core.bench.exercises import sync_exercises, load_exercises
 
-    if language:
-        click.echo("")
+        sync_exercises()
+        exercises = load_exercises(language=language)
+
+        by_lang: dict[str, int] = {}
         for ex in exercises:
-            click.echo(f"  {ex.slug}")
+            by_lang[ex.language] = by_lang.get(ex.language, 0) + 1
+
+        click.echo(f"Total exercises: {len(exercises)}")
+        for lang in sorted(by_lang):
+            click.echo(f"  {lang}: {by_lang[lang]}")
+
+        if language:
+            click.echo("")
+            for ex in exercises:
+                click.echo(f"  {ex.slug}")
 
 
 @bench.command("run")
@@ -77,8 +104,15 @@ def bench_exercises(language):
               help="Each candidate gets a random sample of N test functions")
 @click.option("-j", "--parallel", type=click.IntRange(min=1), default=1,
               help="Number of exercises to run concurrently (default: 1)")
+@click.option("--source", type=click.Choice(["exercism", "bigcodebench"]),
+              default="exercism", help="Exercise source")
+@click.option("--hard", is_flag=True, default=False,
+              help="BigCodeBench: use the 148-problem hard subset")
+@click.option("--mode", type=click.Choice(["complete", "instruct"]),
+              default="instruct", help="BigCodeBench: prompt mode")
 def bench_run(model, candidates, languages, exercise_filter, output_path,
-              variant, temperature, chain, test_subsets, parallel):
+              variant, temperature, chain, test_subsets, parallel,
+              source, hard, mode):
     """Run benchmark with tournament selection.
 
     MODEL is the model name as reported by the backend's /v1/models endpoint.
@@ -112,6 +146,20 @@ def bench_run(model, candidates, languages, exercise_filter, output_path,
             parts.append(f"test_subsets={test_subsets}")
         click.echo(f"Hyperparams: {', '.join(parts)}")
 
+    # Load exercises from the selected source
+    loaded_exercises = None
+    if source == "bigcodebench":
+        from pm_core.bench.exercises_bigcodebench import load_bigcodebench_exercises
+
+        source_desc = f"bigcodebench-{'hard' if hard else 'full'} ({mode})"
+        click.echo(f"Source: {source_desc}")
+        loaded_exercises = load_bigcodebench_exercises(
+            hard_only=hard, mode=mode,
+            slug=exercise_filter,
+        )
+        # BigCodeBench is python-only; don't pass exercise_filter again
+        exercise_filter = None
+
     click.echo(f"Starting benchmark: model={model}, N={candidates}")
 
     def on_progress(msg):
@@ -120,6 +168,7 @@ def bench_run(model, candidates, languages, exercise_filter, output_path,
     run = run_benchmark(
         model,
         num_candidates=candidates,
+        exercises=loaded_exercises,
         languages=list(languages) if languages else None,
         slugs=[exercise_filter] if exercise_filter else None,
         hyper=hyper,

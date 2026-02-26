@@ -20,6 +20,10 @@ from pm_core.bench.exercises import (
     load_exercises,
     sync_exercises,
 )
+from pm_core.bench.exercises_bigcodebench import (
+    download_dataset as download_bigcodebench,
+    load_bigcodebench_exercises,
+)
 
 __all__ = [
     "Backend",
@@ -29,9 +33,11 @@ __all__ = [
     "Runner",
     "chat_completion",
     "detect_backend",
+    "download_bigcodebench",
     "generate_multiple",
     "list_languages",
     "list_models",
+    "load_bigcodebench_exercises",
     "load_exercises",
     "sync_exercises",
 ]

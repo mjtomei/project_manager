@@ -241,6 +241,7 @@ def run_benchmark(
     model: str,
     num_candidates: int = 8,
     *,
+    exercises: list[Exercise] | None = None,
     languages: list[str] | None = None,
     slugs: list[str] | None = None,
     hyper: HyperParams | None = None,
@@ -252,6 +253,7 @@ def run_benchmark(
     Args:
         model: Model name (as reported by /v1/models endpoint).
         num_candidates: Number of candidates per exercise for tournament.
+        exercises: Pre-loaded exercise list (skips default exercism loading).
         languages: Filter to these languages (default: all).
         slugs: Filter to these exercise slugs.
         parallel: Number of exercises to run concurrently (default: 1).
@@ -267,13 +269,14 @@ def run_benchmark(
             f"Model '{model}' not found. Available: {', '.join(model_ids)}"
         )
 
-    # Load exercises — always load all, then filter uniformly
-    try:
-        exercises = load_exercises()
-    except FileNotFoundError:
-        raise FileNotFoundError(
-            "Exercise cache not found. Run `pm bench exercises` first to download."
-        ) from None
+    # Load exercises — use provided list or fall back to exercism
+    if exercises is None:
+        try:
+            exercises = load_exercises()
+        except FileNotFoundError:
+            raise FileNotFoundError(
+                "Exercise cache not found. Run `pm bench exercises` first to download."
+            ) from None
 
     if languages:
         lang_set = set(languages)
