@@ -39,35 +39,68 @@ def bench_models(url):
 @bench.command("exercises")
 @click.option("--language", "-l", default=None, help="Filter by language")
 @click.option("--source", "-s",
-              type=click.Choice(["exercism", "evalplus"]), default="exercism",
-              help="Exercise source (default: exercism)")
-def bench_exercises(language, source):
+              type=click.Choice(["polyglot", "livecodebench", "evalplus"]),
+              default="polyglot", help="Exercise source (default: polyglot)")
+@click.option("--difficulty", type=click.Choice(["easy", "medium", "hard"]),
+              default=None, help="Filter by difficulty (livecodebench only)")
+def bench_exercises(language, source, difficulty):
     """List available benchmark exercises."""
-    if source == "evalplus":
+    if source == "livecodebench":
+        from pm_core.bench.exercises_livecodebench import (
+            sync_exercises,
+            load_exercises,
+        )
+
+        sync_exercises()
+        exercises = load_exercises(difficulty=difficulty)
+
+        by_diff: dict[str, int] = {}
+        for ex in exercises:
+            d = ex.difficulty or "unknown"
+            by_diff[d] = by_diff.get(d, 0) + 1
+
+        click.echo(f"Source: LiveCodeBench (stdin/stdout)")
+        click.echo(f"Total exercises: {len(exercises)}")
+        for d in sorted(by_diff):
+            click.echo(f"  {d}: {by_diff[d]}")
+
+        if difficulty or language:
+            click.echo("")
+            for ex in exercises:
+                click.echo(f"  {ex.slug}")
+    elif source == "evalplus":
         from pm_core.bench.exercises_evalplus import sync_evalplus, load_evalplus_exercises
 
         sync_evalplus()
         exercises = load_evalplus_exercises()
         if language:
             exercises = [e for e in exercises if e.language == language]
+
+        click.echo(f"Source: EvalPlus (HumanEval+ / MBPP+)")
+        click.echo(f"Total exercises: {len(exercises)}")
+
+        if language:
+            click.echo("")
+            for ex in exercises:
+                click.echo(f"  {ex.slug}")
     else:
         from pm_core.bench.exercises import sync_exercises, load_exercises
 
         sync_exercises()
         exercises = load_exercises(language=language)
 
-    by_lang: dict[str, int] = {}
-    for ex in exercises:
-        by_lang[ex.language] = by_lang.get(ex.language, 0) + 1
-
-    click.echo(f"Total exercises: {len(exercises)}")
-    for lang in sorted(by_lang):
-        click.echo(f"  {lang}: {by_lang[lang]}")
-
-    if language:
-        click.echo("")
+        by_lang: dict[str, int] = {}
         for ex in exercises:
-            click.echo(f"  {ex.slug}")
+            by_lang[ex.language] = by_lang.get(ex.language, 0) + 1
+
+        click.echo(f"Total exercises: {len(exercises)}")
+        for lang in sorted(by_lang):
+            click.echo(f"  {lang}: {by_lang[lang]}")
+
+        if language:
+            click.echo("")
+            for ex in exercises:
+                click.echo(f"  {ex.slug}")
 
 
 @bench.command("run")
@@ -78,6 +111,11 @@ def bench_exercises(language, source):
               help="Filter exercises by slug substring")
 @click.option("-o", "--output", "output_path", default=None,
               help="Output JSON file path")
+@click.option("--source", "-s",
+              type=click.Choice(["polyglot", "livecodebench", "evalplus"]),
+              default="polyglot", help="Exercise source (default: polyglot)")
+@click.option("--difficulty", type=click.Choice(["easy", "medium", "hard"]),
+              default=None, help="Filter by difficulty (livecodebench only)")
 @click.option("--variant", type=click.Choice(["direct", "chain_of_thought", "test_driven"]),
               default=None, help="Lock all candidates to one prompt variant")
 @click.option("--temperature", type=float, default=None,
@@ -88,11 +126,9 @@ def bench_exercises(language, source):
               help="Each candidate gets a random sample of N test functions")
 @click.option("-j", "--parallel", type=click.IntRange(min=1), default=1,
               help="Number of exercises to run concurrently (default: 1)")
-@click.option("--source", "-s",
-              type=click.Choice(["exercism", "evalplus"]), default="exercism",
-              help="Exercise source (default: exercism)")
 def bench_run(model, candidates, languages, exercise_filter, output_path,
-              variant, temperature, chain, test_subsets, parallel, source):
+              source, difficulty, variant, temperature, chain, test_subsets,
+              parallel):
     """Run benchmark with tournament selection.
 
     MODEL is the model name as reported by the backend's /v1/models endpoint.
@@ -127,6 +163,8 @@ def bench_run(model, candidates, languages, exercise_filter, output_path,
         click.echo(f"Hyperparams: {', '.join(parts)}")
 
     click.echo(f"Starting benchmark: model={model}, N={candidates}, source={source}")
+    if difficulty:
+        click.echo(f"Difficulty filter: {difficulty}")
 
     def on_progress(msg):
         print(f"  {msg}", flush=True)
@@ -134,12 +172,13 @@ def bench_run(model, candidates, languages, exercise_filter, output_path,
     run = run_benchmark(
         model,
         num_candidates=candidates,
+        source=source,
         languages=list(languages) if languages else None,
         slugs=[exercise_filter] if exercise_filter else None,
+        difficulty=difficulty,
         hyper=hyper,
         parallel=parallel,
         progress_callback=on_progress,
-        source=source,
     )
 
     click.echo("")

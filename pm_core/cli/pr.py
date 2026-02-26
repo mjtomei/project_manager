@@ -1076,7 +1076,15 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool, transcri
                     click.echo(f"GitHub PR #{gh_pr_number} is already merged.")
                     gh_merged = True
                 else:
-                    click.echo(f"gh pr merge failed: {merge_result.stderr.strip()}", err=True)
+                    stderr = merge_result.stderr.strip()
+                    click.echo(f"gh pr merge failed: {stderr}", err=True)
+                    if resolve_window:
+                        _launch_merge_window(
+                            data, pr_entry, stderr,
+                            background=background,
+                            transcript=transcript,
+                        )
+                        return
                     click.echo("Falling back to manual instructions.", err=True)
 
             if gh_merged:

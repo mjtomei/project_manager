@@ -54,7 +54,7 @@ class TestBenchmarkRun:
                            tokens_used=500, wall_clock_seconds=5.0),
         ]
         d = run.to_dict()
-        assert d["schema_version"] == 2
+        assert d["schema_version"] == 3
         assert d["model"] == "test"
         assert d["num_candidates"] == 4
         assert d["total_tokens"] == 1000

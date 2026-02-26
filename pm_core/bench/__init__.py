@@ -24,6 +24,7 @@ from pm_core.bench.exercises_evalplus import (
     load_evalplus_exercises,
     sync_evalplus,
 )
+from pm_core.bench.executor import execute_stdin_stdout
 
 __all__ = [
     "Backend",
@@ -33,6 +34,7 @@ __all__ = [
     "Runner",
     "chat_completion",
     "detect_backend",
+    "execute_stdin_stdout",
     "generate_multiple",
     "list_languages",
     "list_models",
