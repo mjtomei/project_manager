@@ -36,10 +36,9 @@ _logger = configure_logger("pm.pane_layout")
 
 MOBILE_WIDTH_THRESHOLD = 120
 
-# Minimum character width per horizontal pane column.  The number of
-# side-by-side columns is simply floor((width + 1) / (MIN_PANE_WIDTH + 1))
-# — no aspect-ratio heuristics needed.
-MIN_PANE_WIDTH = 110
+# Default minimum character width per horizontal pane column.
+# Overridable via `pm set min-pane-width <value>`.
+DEFAULT_MIN_PANE_WIDTH = 100
 
 
 def get_reliable_window_size(
@@ -174,15 +173,27 @@ def _checksum(layout_body: str) -> str:
     return f"{csum:04x}"
 
 
+def _get_min_pane_width() -> int:
+    """Read min-pane-width from global settings, or DEFAULT_MIN_PANE_WIDTH."""
+    from pm_core.paths import get_global_setting_value
+    val = get_global_setting_value("min-pane-width", "")
+    try:
+        return max(1, int(val))
+    except ValueError:
+        return DEFAULT_MIN_PANE_WIDTH
+
+
 def _max_horizontal_panes(w: int) -> int:
     """Return the max number of horizontal columns that fit in *w* chars.
 
-    Each column must be at least MIN_PANE_WIDTH characters wide.
+    Each column must be at least min-pane-width characters wide (configurable
+    via ``pm set min-pane-width <value>``, default 100).
     N columns require (N − 1) single-char tmux separators, so the
-    constraint is: N * MIN_PANE_WIDTH + (N − 1) ≤ w, i.e.
-    N ≤ (w + 1) / (MIN_PANE_WIDTH + 1).
+    constraint is: N * min_w + (N − 1) ≤ w, i.e.
+    N ≤ (w + 1) / (min_w + 1).
     """
-    return max(1, (w + 1) // (MIN_PANE_WIDTH + 1))
+    min_w = _get_min_pane_width()
+    return max(1, (w + 1) // (min_w + 1))
 
 
 def _distribute_panes(panes: list[int], n_cols: int) -> list[list[int]]:
