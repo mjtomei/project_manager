@@ -38,12 +38,23 @@ def bench_models(url):
 
 @bench.command("exercises")
 @click.option("--language", "-l", default=None, help="Filter by language")
-def bench_exercises(language):
+@click.option("--source", "-s",
+              type=click.Choice(["exercism", "evalplus"]), default="exercism",
+              help="Exercise source (default: exercism)")
+def bench_exercises(language, source):
     """List available benchmark exercises."""
-    from pm_core.bench.exercises import sync_exercises, load_exercises
+    if source == "evalplus":
+        from pm_core.bench.exercises_evalplus import sync_evalplus, load_evalplus_exercises
 
-    sync_exercises()
-    exercises = load_exercises(language=language)
+        sync_evalplus()
+        exercises = load_evalplus_exercises()
+        if language:
+            exercises = [e for e in exercises if e.language == language]
+    else:
+        from pm_core.bench.exercises import sync_exercises, load_exercises
+
+        sync_exercises()
+        exercises = load_exercises(language=language)
 
     by_lang: dict[str, int] = {}
     for ex in exercises:
@@ -77,8 +88,11 @@ def bench_exercises(language):
               help="Each candidate gets a random sample of N test functions")
 @click.option("-j", "--parallel", type=click.IntRange(min=1), default=1,
               help="Number of exercises to run concurrently (default: 1)")
+@click.option("--source", "-s",
+              type=click.Choice(["exercism", "evalplus"]), default="exercism",
+              help="Exercise source (default: exercism)")
 def bench_run(model, candidates, languages, exercise_filter, output_path,
-              variant, temperature, chain, test_subsets, parallel):
+              variant, temperature, chain, test_subsets, parallel, source):
     """Run benchmark with tournament selection.
 
     MODEL is the model name as reported by the backend's /v1/models endpoint.
@@ -112,7 +126,7 @@ def bench_run(model, candidates, languages, exercise_filter, output_path,
             parts.append(f"test_subsets={test_subsets}")
         click.echo(f"Hyperparams: {', '.join(parts)}")
 
-    click.echo(f"Starting benchmark: model={model}, N={candidates}")
+    click.echo(f"Starting benchmark: model={model}, N={candidates}, source={source}")
 
     def on_progress(msg):
         print(f"  {msg}", flush=True)
@@ -125,6 +139,7 @@ def bench_run(model, candidates, languages, exercise_filter, output_path,
         hyper=hyper,
         parallel=parallel,
         progress_callback=on_progress,
+        source=source,
     )
 
     click.echo("")

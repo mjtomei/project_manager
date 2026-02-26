@@ -20,6 +20,10 @@ from pm_core.bench.exercises import (
     load_exercises,
     sync_exercises,
 )
+from pm_core.bench.exercises_evalplus import (
+    load_evalplus_exercises,
+    sync_evalplus,
+)
 
 __all__ = [
     "Backend",
@@ -32,6 +36,8 @@ __all__ = [
     "generate_multiple",
     "list_languages",
     "list_models",
+    "load_evalplus_exercises",
     "load_exercises",
+    "sync_evalplus",
     "sync_exercises",
 ]

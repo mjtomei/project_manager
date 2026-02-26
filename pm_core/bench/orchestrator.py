@@ -246,6 +246,7 @@ def run_benchmark(
     hyper: HyperParams | None = None,
     parallel: int = 1,
     progress_callback: Callable[[str], None] | None = None,
+    source: str = "exercism",
 ) -> BenchmarkRun:
     """Run the full benchmark across all matching exercises.
 
@@ -256,6 +257,7 @@ def run_benchmark(
         slugs: Filter to these exercise slugs.
         parallel: Number of exercises to run concurrently (default: 1).
         progress_callback: Called with status message updates.
+        source: Exercise source — ``"exercism"`` or ``"evalplus"``.
     """
     runner = Runner.create()
 
@@ -269,10 +271,17 @@ def run_benchmark(
 
     # Load exercises — always load all, then filter uniformly
     try:
-        exercises = load_exercises()
+        if source == "evalplus":
+            from pm_core.bench.exercises_evalplus import load_evalplus_exercises
+            exercises = load_evalplus_exercises()
+        else:
+            exercises = load_exercises()
     except FileNotFoundError:
+        cmd = "pm bench exercises"
+        if source != "exercism":
+            cmd += f" --source {source}"
         raise FileNotFoundError(
-            "Exercise cache not found. Run `pm bench exercises` first to download."
+            f"Exercise cache not found. Run `{cmd}` first to download."
         ) from None
 
     if languages:
