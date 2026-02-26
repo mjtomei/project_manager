@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import re
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -97,16 +98,21 @@ def _fetch_all_rows(hf_dataset: str, expected_rows: int) -> list[dict]:
             f"&config=default&split=test"
             f"&offset={offset}&length={_PAGE_SIZE}"
         )
-        with urllib.request.urlopen(url, timeout=60) as resp:
-            data = json.loads(resp.read())
+        try:
+            with urllib.request.urlopen(url, timeout=60) as resp:
+                data = json.loads(resp.read())
+        except (urllib.error.URLError, OSError) as exc:
+            raise ConnectionError(
+                f"Failed to download {hf_dataset} from HuggingFace: {exc}"
+            ) from exc
 
-        for entry in data.get("rows", []):
+        fetched_rows = data.get("rows", [])
+        for entry in fetched_rows:
             rows.append(entry["row"])
 
-        fetched = len(data.get("rows", []))
-        if fetched == 0:
+        if not fetched_rows:
             break
-        offset += fetched
+        offset += len(fetched_rows)
 
     return rows
 
@@ -177,17 +183,19 @@ def _parse_evalplus_record(record: dict) -> Exercise | None:
     test_filename = f"{module_name}_test.py"
     test_filepath = ex_dir / test_filename
 
-    if not test_filepath.is_file():
+    if test_filepath.is_file():
+        test_content = test_filepath.read_text(encoding="utf-8")
+    else:
         ex_dir.mkdir(parents=True, exist_ok=True)
-        transformed = _transform_test_code(test_code, entry_point, module_name)
-        test_filepath.write_text(transformed, encoding="utf-8")
+        test_content = _transform_test_code(test_code, entry_point, module_name)
+        test_filepath.write_text(test_content, encoding="utf-8")
 
     return Exercise(
         language="python",
         slug=slug,
         description=prompt,
         starter_code={},
-        reference_tests={test_filename: test_filepath.read_text(encoding="utf-8")},
+        reference_tests={test_filename: test_content},
         path=ex_dir,
     )
 
