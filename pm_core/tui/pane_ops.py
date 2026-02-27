@@ -458,9 +458,17 @@ def handle_plan_action(app, action: str, plan_id: str | None) -> None:
                 if plan_path.exists():
                     editor = find_editor()
                     launch_pane(app, f"{editor} {plan_path}", "plan-edit")
+    elif action == "work":
+        if plan_id:
+            fresh = app._consume_z()
+            fresh_flag = " --fresh" if fresh else ""
+            app._run_command(f"plan work{fresh_flag} {plan_id}",
+                             working_message="Launching plan work session")
     elif action == "breakdown":
         if plan_id:
-            launch_pane(app, f"pm plan breakdown {plan_id}", "plan-breakdown")
+            fresh = app._consume_z()
+            launch_pane(app, f"pm plan breakdown{' --fresh' if fresh else ''} {plan_id}",
+                        "plan-breakdown", fresh=fresh)
     elif action == "deps":
         launch_pane(app, "pm plan deps", "plan-deps")
     elif action == "load":
