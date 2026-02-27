@@ -160,18 +160,19 @@ def pull_pane_from_window(app, window_name: str) -> bool:
 
     # Create a dummy shell BEFORE moving panes so the window survives.
     # Split off the first pane; the dummy stays behind.
-    hint_key = window_name[0] if window_name else "s"
+    # Note: tmux split-window passes the command to sh -c, so we use double
+    # quotes inside to avoid single-quote nesting issues.
     dummy_msg = (
-        "echo ''; "
-        "echo '  Panes pulled to main window.'; "
-        f"echo '  Press a+{hint_key} in the TUI to push back.'; "
-        "echo ''; "
-        "echo '  This placeholder keeps the window alive.'; "
-        "echo '  Press Enter for a shell.'; "
-        "read; exec $SHELL"
+        'echo; '
+        'echo "  Panes pulled to main window."; '
+        'echo "  Use the same key in the TUI (with a prefix) to push back."; '
+        'echo; '
+        'echo "  This placeholder keeps the window alive."; '
+        'echo "  Press Enter for a shell."; '
+        'read; exec "$SHELL"'
     )
     dummy_pane_id = tmux_mod.split_pane_at(
-        pane_ids[0], "h", f"bash -c '{dummy_msg}'", background=True,
+        pane_ids[0], "h", dummy_msg, background=True,
     )
     _log.info("pull_pane: created dummy %s in window '%s'", dummy_pane_id, window_name)
 
