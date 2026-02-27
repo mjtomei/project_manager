@@ -1,14 +1,18 @@
 """Tests for pm_core.cli.helpers — shared CLI utility functions."""
 
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 import pytest
 
 from pm_core.cli.helpers import (
     _infer_pr_id,
+    _make_pr_entry,
     _pr_display_id,
     _pr_id_sort_key,
+    _record_status_timestamp,
     _resolve_pr_id,
+    _touch_updated_at,
 )
 
 
@@ -194,3 +198,85 @@ class TestPrDisplayId:
 
     def test_with_none_gh_number(self):
         assert _pr_display_id({"id": "pr-002", "gh_pr_number": None}) == "pr-002"
+
+
+# ---------------------------------------------------------------------------
+# _make_pr_entry timestamps
+# ---------------------------------------------------------------------------
+
+
+class TestMakePrEntryTimestamps:
+    """Tests for created_at and updated_at in _make_pr_entry."""
+
+    def test_created_at_is_set(self):
+        entry = _make_pr_entry("pr-001", "Test PR", "pm/pr-001-test")
+        assert entry["created_at"] is not None
+        # Should be a valid ISO 8601 timestamp
+        dt = datetime.fromisoformat(entry["created_at"])
+        assert dt.tzinfo is not None
+
+    def test_updated_at_is_set(self):
+        entry = _make_pr_entry("pr-001", "Test PR", "pm/pr-001-test")
+        assert entry["updated_at"] is not None
+        dt = datetime.fromisoformat(entry["updated_at"])
+        assert dt.tzinfo is not None
+
+    def test_created_at_equals_updated_at_on_creation(self):
+        entry = _make_pr_entry("pr-001", "Test PR", "pm/pr-001-test")
+        assert entry["created_at"] == entry["updated_at"]
+
+    def test_started_at_still_none(self):
+        entry = _make_pr_entry("pr-001", "Test PR", "pm/pr-001-test")
+        assert entry["started_at"] is None
+        assert entry["reviewed_at"] is None
+        assert entry["merged_at"] is None
+
+
+# ---------------------------------------------------------------------------
+# _record_status_timestamp — updated_at
+# ---------------------------------------------------------------------------
+
+
+class TestRecordStatusTimestamp:
+    """Tests for _record_status_timestamp setting updated_at."""
+
+    def test_sets_updated_at_on_status_change(self):
+        entry = {"status": "pending"}
+        _record_status_timestamp(entry, "in_progress")
+        assert "updated_at" in entry
+        dt = datetime.fromisoformat(entry["updated_at"])
+        assert dt.tzinfo is not None
+
+    def test_sets_started_at_on_first_in_progress(self):
+        entry = {"status": "pending"}
+        _record_status_timestamp(entry, "in_progress")
+        assert entry["started_at"] is not None
+        assert entry["updated_at"] is not None
+
+    def test_does_not_overwrite_started_at(self):
+        entry = {"status": "in_progress", "started_at": "2024-01-01T00:00:00+00:00"}
+        _record_status_timestamp(entry, "in_progress")
+        assert entry["started_at"] == "2024-01-01T00:00:00+00:00"
+        # But updated_at should be refreshed
+        assert entry["updated_at"] != "2024-01-01T00:00:00+00:00"
+
+
+# ---------------------------------------------------------------------------
+# _touch_updated_at
+# ---------------------------------------------------------------------------
+
+
+class TestTouchUpdatedAt:
+    """Tests for _touch_updated_at."""
+
+    def test_sets_updated_at(self):
+        entry = {}
+        _touch_updated_at(entry)
+        assert "updated_at" in entry
+        dt = datetime.fromisoformat(entry["updated_at"])
+        assert dt.tzinfo is not None
+
+    def test_overwrites_existing(self):
+        entry = {"updated_at": "2024-01-01T00:00:00+00:00"}
+        _touch_updated_at(entry)
+        assert entry["updated_at"] != "2024-01-01T00:00:00+00:00"

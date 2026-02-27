@@ -136,6 +136,7 @@ class ProjectManagerApp(App):
         Binding("M", "move_to_plan", "Move Plan", show=False),
         Binding("X", "toggle_merged", "Toggle Merged", show=False),
         Binding("f", "cycle_filter", "Filter", show=False),
+        Binding("S", "cycle_sort", "Sort", show=False),
         Binding("question_mark", "show_help", "Help", show=True),
         Binding("c", "launch_claude", "Claude", show=True),
         Binding("H", "launch_guide", "Guide", show=True),
@@ -171,13 +172,13 @@ class ProjectManagerApp(App):
                        "launch_meta", "launch_claude", "launch_guide",
                        "view_log", "refresh", "rebalance", "quit", "show_help",
                        "toggle_plans", "toggle_tests", "hide_plan", "move_to_plan", "toggle_merged",
-                       "cycle_filter", "toggle_auto_start", "focus_watcher"):
+                       "cycle_filter", "cycle_sort", "toggle_auto_start", "focus_watcher"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus:
                 _log.debug("check_action: blocked %s (command bar focused)", action)
                 return False
         # Block PR actions when in guide mode or plans view (can't see the PR tree)
-        if action in ("start_pr", "done_pr", "merge_pr", "launch_claude", "edit_plan", "view_plan", "hide_plan", "move_to_plan", "toggle_merged", "cycle_filter"):
+        if action in ("start_pr", "done_pr", "merge_pr", "launch_claude", "edit_plan", "view_plan", "hide_plan", "move_to_plan", "toggle_merged", "cycle_filter", "cycle_sort"):
             prs = self._data.get("prs") or []
             if not prs and self._current_guide_step is not None:
                 _log.debug("check_action: blocked %s (in guide mode, no PRs)", action)
@@ -438,7 +439,7 @@ class ProjectManagerApp(App):
 
     def _update_status_bar(self, sync_state: str = "synced") -> None:
         """Update the status bar with current project info and filter state."""
-        from pm_core.tui.tech_tree import STATUS_ICONS
+        from pm_core.tui.tech_tree import STATUS_ICONS, SORT_FIELDS
         from pm_core.paths import get_global_setting
         if not self._data:
             return
@@ -457,6 +458,11 @@ class ProjectManagerApp(App):
                 hidden.append("closed")
             if hidden:
                 filter_text = "hide " + "+".join(hidden)
+        # Append sort field when not using the default
+        if tree._sort_field:
+            sort_label = dict(SORT_FIELDS).get(tree._sort_field, tree._sort_field)
+            sort_text = f"sort:{sort_label}"
+            filter_text = f"{filter_text} {sort_text}" if filter_text else sort_text
         status_bar = self.query_one("#status-bar", StatusBar)
         watcher_status = ""
         if self._watcher_state and self._watcher_state.running:
@@ -585,6 +591,9 @@ class ProjectManagerApp(App):
 
     def action_cycle_filter(self) -> None:
         pr_view.cycle_filter(self)
+
+    def action_cycle_sort(self) -> None:
+        pr_view.cycle_sort(self)
 
     def action_move_to_plan(self) -> None:
         pr_view.move_to_plan(self)

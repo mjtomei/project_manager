@@ -35,6 +35,7 @@ from pm_core.cli.helpers import (
     _resolve_pr_id,
     _resolve_repo_dir,
     _resolve_repo_id,
+    _touch_updated_at,
     _workdirs_dir,
     kill_pr_windows,
     save_and_push,
@@ -313,6 +314,7 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
             click.echo("No changes made.")
             raise SystemExit(0)
 
+    _touch_updated_at(pr_entry)
     save_and_push(data, root, f"pm: edit {pr_id}")
     click.echo(f"Updated {pr_id}: {', '.join(changes)}")
     trigger_tui_refresh()
