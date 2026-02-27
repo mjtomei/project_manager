@@ -1017,6 +1017,108 @@ def _pull_after_github_merge(data: dict, pr_entry: dict, repo_dir: str,
     return True
 
 
+def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
+                       workdir: str, base_branch: str,
+                       resolve_window: bool, background: bool,
+                       transcript: str | None) -> bool:
+    """Pull merged base branch from a workdir into the main repo.
+
+    For local backend where origin is a non-bare repo with the base branch
+    checked out, ``git push`` fails.  Instead we fetch from the workdir and
+    fast-forward the base branch in the main repo.
+
+    Returns True if successful (caller should finalize), False if a merge
+    window was launched or the update failed.
+    """
+    repo_path = Path(repo_dir)
+
+    # Check what branch is checked out in the repo
+    head_result = git_ops.run_git("rev-parse", "--abbrev-ref", "HEAD",
+                                  cwd=repo_dir, check=False)
+    current = head_result.stdout.strip() if head_result.returncode == 0 else ""
+
+    if current != base_branch:
+        # Not on base branch — update just the ref (no working-tree changes)
+        click.echo(f"Repo is on '{current}', updating {base_branch} ref...")
+        fetch_r = git_ops.run_git(
+            "fetch", workdir, f"{base_branch}:{base_branch}",
+            cwd=repo_dir, check=False,
+        )
+        if fetch_r.returncode == 0:
+            click.echo(f"Updated {base_branch} in repo.")
+            return True
+        error_msg = (f"Could not update {base_branch} ref: "
+                     f"{fetch_r.stderr.strip()}")
+        click.echo(error_msg, err=True)
+        if resolve_window:
+            _launch_merge_window(data, pr_entry, error_msg,
+                                 background=background, transcript=transcript,
+                                 cwd=repo_dir)
+            return False
+        click.echo("Pull manually when ready, then re-run 'pm pr merge'.", err=True)
+        return False
+
+    # On base branch — need to update the working tree too
+    stashed = False
+    if _workdir_is_dirty(repo_path):
+        click.echo("Stashing uncommitted changes before pull...")
+        stash_r = git_ops.run_git("stash", cwd=repo_dir, check=False)
+        if stash_r.returncode == 0 and "No local changes" not in stash_r.stdout:
+            stashed = True
+        else:
+            click.echo("Warning: Could not stash changes.", err=True)
+
+    fetch_r = git_ops.run_git("fetch", workdir, base_branch,
+                              cwd=repo_dir, check=False)
+    if fetch_r.returncode != 0:
+        error_msg = f"Fetch from workdir failed: {fetch_r.stderr.strip()}"
+        click.echo(error_msg, err=True)
+        if resolve_window:
+            _launch_merge_window(data, pr_entry, error_msg,
+                                 background=background, transcript=transcript,
+                                 cwd=repo_dir)
+            return False
+        click.echo("Pull manually when ready, then re-run 'pm pr merge'.", err=True)
+        return False
+
+    merge_r = git_ops.run_git("merge", "--ff-only", "FETCH_HEAD",
+                              cwd=repo_dir, check=False)
+    if merge_r.returncode != 0:
+        error_detail = (merge_r.stdout.strip() + "\n"
+                        + merge_r.stderr.strip()).strip()
+        error_msg = f"Fast-forward of {base_branch} failed:\n{error_detail}"
+        click.echo(error_msg, err=True)
+        if resolve_window:
+            _launch_merge_window(data, pr_entry, error_msg,
+                                 background=background, transcript=transcript,
+                                 cwd=repo_dir)
+            return False
+        click.echo("Pull manually when ready, then re-run 'pm pr merge'.", err=True)
+        return False
+
+    click.echo(f"Updated {base_branch} in repo.")
+
+    # Restore stashed changes
+    if stashed:
+        pop_r = git_ops.run_git("stash", "pop", cwd=repo_dir, check=False)
+        if pop_r.returncode != 0:
+            error_detail = (pop_r.stdout.strip() + "\n"
+                            + pop_r.stderr.strip()).strip()
+            error_msg = (f"Conflict restoring stashed changes after merge:\n"
+                         f"{error_detail}")
+            click.echo(error_msg, err=True)
+            if resolve_window:
+                _launch_merge_window(data, pr_entry, error_msg,
+                                     background=background, transcript=transcript,
+                                     cwd=repo_dir)
+                return False
+            click.echo("Resolve conflicts manually.", err=True)
+            return False
+        click.echo("Restored stashed changes.")
+
+    return True
+
+
 @pr.command("merge")
 @click.argument("pr_id", default=None, required=False)
 @click.option("--resolve-window", is_flag=True, default=False, hidden=True,
@@ -1179,16 +1281,36 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool, transcri
                         f"is not an ancestor of {base_branch} HEAD.", err=True)
             click.echo("The merge commit exists but may not include all branch commits.", err=True)
 
-    # Push the merged base_branch back to origin (works for both bare and
-    # non-bare repos).  For local backend, origin is the original repo path.
-    push_result = git_ops.run_git("push", "origin", base_branch, cwd=workdir, check=False)
-    if push_result.returncode != 0:
-        click.echo(f"Warning: Push failed: {push_result.stderr.strip()}", err=True)
-        click.echo("The merge is in the workdir. Push or pull manually when ready.")
+    # --- Propagate merged base_branch to the main repo / origin ---
+    if backend_name == "local":
+        # Local backend: pull from workdir into the main repo dir
+        repo_dir = str(_resolve_repo_dir(root, data))
+        pull_ok = _pull_from_workdir(
+            data, pr_entry, repo_dir, str(work_path), base_branch,
+            resolve_window=resolve_window, background=background,
+            transcript=transcript,
+        )
+        if not pull_ok:
+            return
+        _finalize_merge(data, root, pr_entry, pr_id, transcript=transcript)
+        repo = data.get("project", {}).get("repo", "")
+        if "project_manager" in repo or "project-manager" in repo:
+            trigger_tui_restart()
     else:
+        # Vanilla backend: push to remote origin
+        push_result = git_ops.run_git("push", "origin", base_branch,
+                                      cwd=workdir, check=False)
+        if push_result.returncode != 0:
+            error_msg = f"Push to origin failed: {push_result.stderr.strip()}"
+            click.echo(error_msg, err=True)
+            if resolve_window:
+                _launch_merge_window(data, pr_entry, error_msg,
+                                     background=background, transcript=transcript)
+                return
+            click.echo("Push manually when ready, then re-run 'pm pr merge'.", err=True)
+            return
         click.echo(f"Pushed merged {base_branch} to origin.")
-
-    _finalize_merge(data, root, pr_entry, pr_id, transcript=transcript)
+        _finalize_merge(data, root, pr_entry, pr_id, transcript=transcript)
 
 
 @pr.command("sync")

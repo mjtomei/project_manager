@@ -234,11 +234,13 @@ class TestPrMerge:
 
     @mock.patch.object(pr_mod, "_finalize_merge")
     @mock.patch("pm_core.cli.pr.git_ops")
-    def test_local_merge_calls_git(self, mock_git_ops, mock_finalize, tmp_merge_project):
-        """pr merge for local backend should run git checkout + merge + push."""
+    def test_local_merge_pulls_into_repo(self, mock_git_ops, mock_finalize, tmp_merge_project):
+        """pr merge for local backend should merge in workdir then pull into repo dir."""
         def run_git_side_effect(*args, **kwargs):
             if args[0] == "status":
-                return MagicMock(returncode=0, stdout="", stderr="")  # clean workdir
+                return MagicMock(returncode=0, stdout="", stderr="")  # clean
+            if args[:2] == ("rev-parse", "--abbrev-ref"):
+                return MagicMock(returncode=0, stdout="master\n", stderr="")
             if args[0] == "rev-parse":
                 return MagicMock(returncode=0, stdout="abc1234\n", stderr="")
             return MagicMock(returncode=0, stdout="", stderr="")
@@ -249,15 +251,49 @@ class TestPrMerge:
             result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
 
         assert result.exit_code == 0
-        # Should have called: status --porcelain, rev-parse, checkout, merge, merge-base --is-ancestor, push
         git_calls = [c[0] for c in mock_git_ops.run_git.call_args_list]
-        assert ("status", "--porcelain") == git_calls[0][:2]  # dirty check
-        assert ("rev-parse", "pm/pr-001") == git_calls[1][:2]  # capture tip
+        # Workdir: dirty check, capture tip, checkout, merge, post-merge verify
+        assert ("status", "--porcelain") == git_calls[0][:2]
+        assert ("rev-parse", "pm/pr-001") == git_calls[1][:2]
         assert ("checkout", "master") == git_calls[2][:2]
         assert git_calls[3][0] == "merge"
-        assert ("merge-base", "--is-ancestor") == git_calls[4][:2]  # post-merge verify
-        assert git_calls[5][:3] == ("push", "origin", "master")
+        assert ("merge-base", "--is-ancestor") == git_calls[4][:2]
+        # Repo dir: check branch, dirty check, fetch from workdir, ff-only merge
+        assert ("rev-parse", "--abbrev-ref", "HEAD") in git_calls
+        assert any(c[0] == "fetch" for c in git_calls)
+        assert ("merge", "--ff-only", "FETCH_HEAD") in git_calls
+        # No push for local backend
+        assert not any(c[:2] == ("push", "origin") for c in git_calls)
         mock_finalize.assert_called_once()
+
+    @mock.patch.object(pr_mod, "_finalize_merge")
+    @mock.patch("pm_core.cli.pr.git_ops")
+    def test_local_merge_pull_failure_launches_merge_window(
+        self, mock_git_ops, mock_finalize, tmp_merge_project
+    ):
+        """When pull into repo dir fails, launch merge window if --resolve-window."""
+        def run_git_side_effect(*args, **kwargs):
+            if args[0] == "status":
+                return MagicMock(returncode=0, stdout="", stderr="")
+            if args[:2] == ("rev-parse", "--abbrev-ref"):
+                return MagicMock(returncode=0, stdout="master\n", stderr="")
+            if args[0] == "rev-parse":
+                return MagicMock(returncode=0, stdout="abc1234\n", stderr="")
+            if args == ("merge", "--ff-only", "FETCH_HEAD"):
+                return MagicMock(returncode=1, stdout="",
+                                 stderr="Not possible to fast-forward")
+            return MagicMock(returncode=0, stdout="", stderr="")
+        mock_git_ops.run_git.side_effect = run_git_side_effect
+
+        runner = CliRunner()
+        with mock.patch.object(pr_mod, "state_root", return_value=tmp_merge_project["pm_dir"]), \
+             mock.patch.object(pr_mod, "_launch_merge_window") as mock_launch:
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
+                                               "--resolve-window"])
+
+        assert result.exit_code == 0
+        mock_launch.assert_called_once()
+        mock_finalize.assert_not_called()
 
     @mock.patch.object(pr_mod, "_finalize_merge")
     @mock.patch("pm_core.cli.pr.git_ops")
@@ -282,21 +318,15 @@ class TestPrMerge:
     @mock.patch("pm_core.cli.pr.git_ops")
     def test_post_merge_verification_warns_on_failure(self, mock_git_ops, mock_finalize, tmp_merge_project):
         """pr merge should warn (but not fail) when post-merge verification fails."""
-        call_count = [0]
         def run_git_side_effect(*args, **kwargs):
-            call_count[0] += 1
             if args[0] == "status":
                 return MagicMock(returncode=0, stdout="", stderr="")  # clean
+            if args[:2] == ("rev-parse", "--abbrev-ref"):
+                return MagicMock(returncode=0, stdout="master\n", stderr="")
             if args[0] == "rev-parse":
                 return MagicMock(returncode=0, stdout="abc1234\n", stderr="")
-            if args[0] == "checkout":
-                return MagicMock(returncode=0, stdout="", stderr="")
-            if args[0] == "merge":
-                return MagicMock(returncode=0, stdout="", stderr="")
             if args[:2] == ("merge-base", "--is-ancestor"):
                 return MagicMock(returncode=1, stdout="", stderr="")  # verification fails
-            if args[0] == "push":
-                return MagicMock(returncode=0, stdout="", stderr="")
             return MagicMock(returncode=0, stdout="", stderr="")
         mock_git_ops.run_git.side_effect = run_git_side_effect
 
@@ -337,6 +367,61 @@ class TestPrMerge:
         assert ("fetch", "origin") == git_calls[1][:2]  # vanilla fetches
         mock_finalize.assert_called_once()
 
+    @mock.patch.object(pr_mod, "_finalize_merge")
+    @mock.patch("pm_core.cli.pr.git_ops")
+    def test_vanilla_push_failure_launches_merge_window(self, mock_git_ops, mock_finalize, tmp_merge_project):
+        """Vanilla push failure with --resolve-window should launch merge window."""
+        data = store.load(tmp_merge_project["pm_dir"])
+        data["project"]["backend"] = "vanilla"
+        store.save(data, tmp_merge_project["pm_dir"])
+
+        def run_git_side_effect(*args, **kwargs):
+            if args[0] == "status":
+                return MagicMock(returncode=0, stdout="", stderr="")
+            if args[0] == "rev-parse":
+                return MagicMock(returncode=0, stdout="abc1234\n", stderr="")
+            if args[0] == "push":
+                return MagicMock(returncode=1, stdout="",
+                                 stderr="rejected: non-fast-forward")
+            return MagicMock(returncode=0, stdout="", stderr="")
+        mock_git_ops.run_git.side_effect = run_git_side_effect
+
+        runner = CliRunner()
+        with mock.patch.object(pr_mod, "state_root", return_value=tmp_merge_project["pm_dir"]), \
+             mock.patch.object(pr_mod, "_launch_merge_window") as mock_launch:
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001",
+                                               "--resolve-window"])
+
+        assert result.exit_code == 0
+        mock_launch.assert_called_once()
+        mock_finalize.assert_not_called()
+
+    @mock.patch.object(pr_mod, "_finalize_merge")
+    @mock.patch("pm_core.cli.pr.git_ops")
+    def test_vanilla_push_failure_without_resolve_window(self, mock_git_ops, mock_finalize, tmp_merge_project):
+        """Vanilla push failure without --resolve-window should not finalize."""
+        data = store.load(tmp_merge_project["pm_dir"])
+        data["project"]["backend"] = "vanilla"
+        store.save(data, tmp_merge_project["pm_dir"])
+
+        def run_git_side_effect(*args, **kwargs):
+            if args[0] == "status":
+                return MagicMock(returncode=0, stdout="", stderr="")
+            if args[0] == "rev-parse":
+                return MagicMock(returncode=0, stdout="abc1234\n", stderr="")
+            if args[0] == "push":
+                return MagicMock(returncode=1, stdout="",
+                                 stderr="rejected: non-fast-forward")
+            return MagicMock(returncode=0, stdout="", stderr="")
+        mock_git_ops.run_git.side_effect = run_git_side_effect
+
+        runner = CliRunner()
+        with mock.patch.object(pr_mod, "state_root", return_value=tmp_merge_project["pm_dir"]):
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+
+        assert result.exit_code == 0
+        assert "Push to origin failed" in result.output
+        mock_finalize.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
