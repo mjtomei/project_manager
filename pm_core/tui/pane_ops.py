@@ -305,7 +305,7 @@ triggered through the TUI so that panes are managed correctly. Instead, tell the
 user which key to press in the TUI:
 - `s` on a PR — start working on it
 - `d` on a PR — mark it as done and start review
-- `p` — toggle plans view, then `a`/`w`/`c`/`l` for plan actions
+- `p` — toggle plans view, then `a`/`w`/`d`/`c`/`l` for plan actions
 
 For plan management, recommend the user switch to the plans pane (`p` key) where \
 they can use dedicated shortcuts rather than typing commands.

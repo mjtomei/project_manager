@@ -276,7 +276,7 @@ walk the user through the remaining steps below.
 
 ### Breaking the plan into PRs
 
-Tell the user to press `w` in the plans view to break the plan into PRs. This
+Tell the user to press `d` in the plans view to break the plan into PRs. This
 launches a session that explores the codebase, writes the plan content,
 and adds a `## PRs` section with individual PR entries. Wait for it to finish,
 then continue to the next step.
@@ -295,13 +295,14 @@ shows progress and the tech tree updates when done.
 
 ### TUI plans view reference
 
-In the TUI, `p` toggles the plans view. The setup flow is `a` → `w` → `c` → `l`:
+In the TUI, `p` toggles the plans view. The setup flow is `a` → `d` → `c` → `l`:
 - `a` — add a new plan (prompts for a title or file path)
-- `w` — break plan into PRs (launches a Claude session)
+- `w` — open a general-purpose Claude work session for the plan
+- `d` — break plan into PRs (launches a Claude session)
 - `c` — review plan (launches a Claude session)
 - `l` — load PRs from plan into the project
 - `e` — edit plan file
-- `v` — view plan file
+- `D` — review/fix PR dependencies
 
 ## Next Step
 
