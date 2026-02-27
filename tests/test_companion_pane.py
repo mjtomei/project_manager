@@ -221,16 +221,15 @@ class TestMergeWindowCompanion:
 
 
 # ---------------------------------------------------------------------------
-# TUI z-prefix for start_pr
+# TUI companion parameter for start_pr
 # ---------------------------------------------------------------------------
 
-class TestTuiStartPrZPrefix:
-    """Test that z-prefix is correctly mapped to companion/fresh flags."""
+class TestTuiStartPrCompanion:
+    """Test that companion parameter controls --companion flag."""
 
     def _make_app(self, z_count=0):
         """Create a mock app with z-prefix state."""
         app = MagicMock()
-        app._z_count = z_count
         app._consume_z = MagicMock(return_value=z_count)
         app._data = {
             "prs": [{"id": "pr-001", "title": "Test", "status": "pending"}],
@@ -247,8 +246,8 @@ class TestTuiStartPrZPrefix:
     @patch("pm_core.tui.pr_view.run_command")
     @patch("pm_core.tui.pr_view.guard_pr_action", return_value=True)
     @patch("pm_core.paths.get_global_setting", return_value=False)
-    def test_no_z_no_companion(self, _setting, _guard, mock_run):
-        """z=0: normal start, no --companion, no --fresh."""
+    def test_no_companion(self, _setting, _guard, mock_run):
+        """Default: no --companion, no --fresh."""
         from pm_core.tui import pr_view
         app = self._make_app(z_count=0)
         app.query_one.return_value = self._make_tree()
@@ -263,13 +262,13 @@ class TestTuiStartPrZPrefix:
     @patch("pm_core.tui.pr_view.run_command")
     @patch("pm_core.tui.pr_view.guard_pr_action", return_value=True)
     @patch("pm_core.paths.get_global_setting", return_value=False)
-    def test_z1_companion_only(self, _setting, _guard, mock_run):
-        """z=1: companion pane, not fresh."""
+    def test_companion_true(self, _setting, _guard, mock_run):
+        """companion=True adds --companion flag."""
         from pm_core.tui import pr_view
-        app = self._make_app(z_count=1)
+        app = self._make_app(z_count=0)
         app.query_one.return_value = self._make_tree()
 
-        pr_view.start_pr(app)
+        pr_view.start_pr(app, companion=True)
 
         cmd = mock_run.call_args[0][1]
         assert "--companion" in cmd
@@ -278,10 +277,10 @@ class TestTuiStartPrZPrefix:
     @patch("pm_core.tui.pr_view.run_command")
     @patch("pm_core.tui.pr_view.guard_pr_action", return_value=True)
     @patch("pm_core.paths.get_global_setting", return_value=False)
-    def test_zz_fresh_no_companion(self, _setting, _guard, mock_run):
-        """z=2 (zz): fresh start, no companion."""
+    def test_z_fresh_preserved(self, _setting, _guard, mock_run):
+        """z prefix still means fresh (backward compat)."""
         from pm_core.tui import pr_view
-        app = self._make_app(z_count=2)
+        app = self._make_app(z_count=1)
         app.query_one.return_value = self._make_tree()
 
         pr_view.start_pr(app)
@@ -293,13 +292,13 @@ class TestTuiStartPrZPrefix:
     @patch("pm_core.tui.pr_view.run_command")
     @patch("pm_core.tui.pr_view.guard_pr_action", return_value=True)
     @patch("pm_core.paths.get_global_setting", return_value=False)
-    def test_zzz_fresh_and_companion(self, _setting, _guard, mock_run):
-        """z=3 (zzz): fresh start with companion."""
+    def test_z_fresh_with_companion(self, _setting, _guard, mock_run):
+        """z prefix (fresh) combined with companion=True."""
         from pm_core.tui import pr_view
-        app = self._make_app(z_count=3)
+        app = self._make_app(z_count=1)
         app.query_one.return_value = self._make_tree()
 
-        pr_view.start_pr(app)
+        pr_view.start_pr(app, companion=True)
 
         cmd = mock_run.call_args[0][1]
         assert "--fresh" in cmd
@@ -307,15 +306,14 @@ class TestTuiStartPrZPrefix:
 
 
 # ---------------------------------------------------------------------------
-# TUI z-prefix for merge_pr
+# TUI companion parameter for merge_pr
 # ---------------------------------------------------------------------------
 
-class TestTuiMergePrZPrefix:
-    """Test that z-prefix enables companion flag for merge."""
+class TestTuiMergePrCompanion:
+    """Test that companion parameter controls --companion flag for merge."""
 
-    def _make_app(self, z_count=0):
+    def _make_app(self):
         app = MagicMock()
-        app._consume_z = MagicMock(return_value=z_count)
         app._inflight_pr_action = None
         return app
 
@@ -326,10 +324,10 @@ class TestTuiMergePrZPrefix:
 
     @patch("pm_core.tui.pr_view.run_command")
     @patch("pm_core.tui.pr_view.guard_pr_action", return_value=True)
-    def test_no_z_no_companion(self, _guard, mock_run):
-        """z=0: normal merge, no --companion."""
+    def test_no_companion(self, _guard, mock_run):
+        """Default: no --companion."""
         from pm_core.tui import pr_view
-        app = self._make_app(z_count=0)
+        app = self._make_app()
         app.query_one.return_value = self._make_tree()
 
         pr_view.merge_pr(app)
@@ -340,13 +338,13 @@ class TestTuiMergePrZPrefix:
 
     @patch("pm_core.tui.pr_view.run_command")
     @patch("pm_core.tui.pr_view.guard_pr_action", return_value=True)
-    def test_z1_companion(self, _guard, mock_run):
-        """z=1: merge with --companion."""
+    def test_companion_true(self, _guard, mock_run):
+        """companion=True adds --companion flag."""
         from pm_core.tui import pr_view
-        app = self._make_app(z_count=1)
+        app = self._make_app()
         app.query_one.return_value = self._make_tree()
 
-        pr_view.merge_pr(app)
+        pr_view.merge_pr(app, companion=True)
 
         cmd = mock_run.call_args[0][1]
         assert "--companion" in cmd

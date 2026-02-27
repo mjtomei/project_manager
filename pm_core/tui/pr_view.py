@@ -55,27 +55,16 @@ def handle_pr_selected(app, pr_id: str) -> None:
 # PR workflow actions
 # ---------------------------------------------------------------------------
 
-def start_pr(app) -> None:
-    """Start working on the selected PR.
-
-    z prefix meanings:
-      (none) = normal start (companion if global setting on)
-      z      = start with companion pane
-      zz     = fresh start (kill existing window)
-      zzz    = fresh start with companion pane
-    """
+def start_pr(app, companion: bool = False) -> None:
+    """Start working on the selected PR."""
     from pm_core.tui.tech_tree import TechTree
     from pm_core.paths import get_global_setting
 
-    z = app._consume_z()
-    # z=0: normal, z=1: companion, z>=2: fresh, z=3: fresh+companion
-    companion = z == 1 or z == 3
-    fresh = z >= 2
-
+    fresh = app._consume_z()
     tree = app.query_one("#tech-tree", TechTree)
     pr_id = tree.selected_pr_id
-    _log.info("action: start_pr selected=%s fresh=%s companion=%s z=%d",
-              pr_id, fresh, companion, z)
+    _log.info("action: start_pr selected=%s fresh=%s companion=%s",
+              pr_id, fresh, companion)
     if not pr_id:
         _log.info("action: start_pr - no PR selected")
         app.log_message("No PR selected")
@@ -131,21 +120,13 @@ def done_pr(app, fresh: bool = False) -> None:
     run_command(app, cmd, working_message=action_key, action_key=action_key)
 
 
-def merge_pr(app) -> None:
-    """Merge the selected PR.
-
-    z prefix meanings:
-      (none) = normal merge (companion if global setting on)
-      z+     = merge with companion pane on conflict resolution window
-    """
+def merge_pr(app, companion: bool = False) -> None:
+    """Merge the selected PR."""
     from pm_core.tui.tech_tree import TechTree
-
-    z = app._consume_z()
-    companion = z >= 1
 
     tree = app.query_one("#tech-tree", TechTree)
     pr_id = tree.selected_pr_id
-    _log.info("action: merge_pr selected=%s companion=%s z=%d", pr_id, companion, z)
+    _log.info("action: merge_pr selected=%s companion=%s", pr_id, companion)
     if not pr_id:
         app.log_message("No PR selected")
         return
