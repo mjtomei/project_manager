@@ -1,7 +1,9 @@
-"""Tests for the plans pane and extract_plan_intro."""
+"""Tests for the plans pane, extract_plan_intro, and plan work prompt."""
 
 import inspect
 import re
+from unittest.mock import patch, MagicMock
+from pathlib import Path
 
 import pytest
 from rich.text import Text
@@ -197,3 +199,122 @@ class TestPlansPane:
         assert "1 PR" in result.plain
         # Should NOT have "1 PRs"
         assert "1 PRs" not in result.plain
+
+
+# --- generate_plan_work_prompt tests ---
+
+class TestGeneratePlanWorkPrompt:
+    def _make_data(self):
+        return {
+            "project": {"name": "test", "repo": "test/repo", "base_branch": "master"},
+            "prs": [
+                {
+                    "id": "pr-001",
+                    "title": "Add feature",
+                    "status": "in_progress",
+                    "plan": "plan-001",
+                    "depends_on": [],
+                },
+                {
+                    "id": "pr-002",
+                    "title": "Fix bug",
+                    "status": "pending",
+                    "plan": "other-plan",
+                },
+            ],
+            "plans": [
+                {
+                    "id": "plan-001",
+                    "name": "Test plan",
+                    "file": "plans/plan-001.md",
+                    "status": "active",
+                },
+            ],
+        }
+
+    @patch("pm_core.prompt_gen.notes.notes_section", return_value="")
+    @patch("pm_core.prompt_gen.store.find_project_root")
+    def test_includes_plan_name(self, mock_root, mock_notes):
+        mock_root.return_value = Path("/tmp/fake")
+        from pm_core.prompt_gen import generate_plan_work_prompt
+        data = self._make_data()
+        prompt = generate_plan_work_prompt(data, "plan-001")
+        assert 'plan-001' in prompt
+        assert 'Test plan' in prompt
+
+    @patch("pm_core.prompt_gen.notes.notes_section", return_value="")
+    @patch("pm_core.prompt_gen.store.find_project_root")
+    def test_includes_plan_prs(self, mock_root, mock_notes):
+        mock_root.return_value = Path("/tmp/fake")
+        from pm_core.prompt_gen import generate_plan_work_prompt
+        data = self._make_data()
+        prompt = generate_plan_work_prompt(data, "plan-001")
+        assert "pr-001" in prompt
+        assert "Add feature" in prompt
+        assert "[in_progress]" in prompt
+
+    @patch("pm_core.prompt_gen.notes.notes_section", return_value="")
+    @patch("pm_core.prompt_gen.store.find_project_root")
+    def test_includes_other_prs(self, mock_root, mock_notes):
+        mock_root.return_value = Path("/tmp/fake")
+        from pm_core.prompt_gen import generate_plan_work_prompt
+        data = self._make_data()
+        prompt = generate_plan_work_prompt(data, "plan-001")
+        assert "## Other PRs" in prompt
+        assert "pr-002" in prompt
+        assert "Fix bug" in prompt
+
+    @patch("pm_core.prompt_gen.notes.notes_section", return_value="")
+    @patch("pm_core.prompt_gen.store.find_project_root")
+    def test_includes_available_commands(self, mock_root, mock_notes):
+        mock_root.return_value = Path("/tmp/fake")
+        from pm_core.prompt_gen import generate_plan_work_prompt
+        data = self._make_data()
+        prompt = generate_plan_work_prompt(data, "plan-001")
+        assert "pm pr list" in prompt
+        assert "pm plan list" in prompt
+        assert "pm pr graph" in prompt
+        assert "pm status" in prompt
+
+    @patch("pm_core.prompt_gen.notes.notes_section", return_value="")
+    @patch("pm_core.prompt_gen.store.find_project_root")
+    def test_includes_tui_section_when_session_provided(self, mock_root, mock_notes):
+        mock_root.return_value = Path("/tmp/fake")
+        from pm_core.prompt_gen import generate_plan_work_prompt
+        data = self._make_data()
+        prompt = generate_plan_work_prompt(data, "plan-001", session_name="pm-test")
+        assert "pm tui view" in prompt
+        assert "pm-test" in prompt
+
+    @patch("pm_core.prompt_gen.notes.notes_section", return_value="")
+    @patch("pm_core.prompt_gen.store.find_project_root")
+    def test_no_tui_section_without_session(self, mock_root, mock_notes):
+        mock_root.return_value = Path("/tmp/fake")
+        from pm_core.prompt_gen import generate_plan_work_prompt
+        data = self._make_data()
+        prompt = generate_plan_work_prompt(data, "plan-001")
+        assert "pm tui view" not in prompt
+
+    def test_raises_for_unknown_plan(self):
+        from pm_core.prompt_gen import generate_plan_work_prompt
+        data = self._make_data()
+        with pytest.raises(ValueError, match="not found"):
+            generate_plan_work_prompt(data, "nonexistent")
+
+    @patch("pm_core.prompt_gen.notes.notes_section", return_value="")
+    @patch("pm_core.prompt_gen.store.find_project_root")
+    def test_warns_against_spawning_sessions(self, mock_root, mock_notes):
+        mock_root.return_value = Path("/tmp/fake")
+        from pm_core.prompt_gen import generate_plan_work_prompt
+        data = self._make_data()
+        prompt = generate_plan_work_prompt(data, "plan-001")
+        assert "Do not run commands that spawn new Claude sessions" in prompt
+
+    @patch("pm_core.prompt_gen.notes.notes_section", return_value="")
+    @patch("pm_core.prompt_gen.store.find_project_root")
+    def test_ends_with_user_driven_message(self, mock_root, mock_notes):
+        mock_root.return_value = Path("/tmp/fake")
+        from pm_core.prompt_gen import generate_plan_work_prompt
+        data = self._make_data()
+        prompt = generate_plan_work_prompt(data, "plan-001")
+        assert "The user will tell you what they need" in prompt
