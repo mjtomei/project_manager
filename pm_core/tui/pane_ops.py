@@ -247,11 +247,25 @@ def view_log(app) -> None:
     launch_pane(app, f"tail -f {log_path}", "log", fresh=fresh)
 
 
-def launch_meta(app) -> None:
+def launch_meta(app, pull_mode: bool = False) -> None:
     """Launch a meta-development session to work on pm itself."""
+    from pm_core.tui import pane_pull
+
     app._consume_z()  # consume but meta doesn't support --fresh
-    _log.info("launch_meta")
-    app._run_command("meta")
+    _log.info("launch_meta pull=%s", pull_mode)
+
+    # Pull mode: toggle or pull existing meta window
+    if pull_mode and app._session_name:
+        result = pane_pull.try_pull_or_push(app, "meta")
+        if result != "proceed":
+            return
+
+    on_complete = None
+    if pull_mode and app._session_name:
+        on_complete = pane_pull.make_on_complete(app, "meta")
+
+    from pm_core.tui import pr_view
+    pr_view.run_command(app, "meta", on_complete=on_complete)
 
 
 def launch_guide(app) -> None:

@@ -179,6 +179,8 @@ class HelpScreen(ModalScreen):
             yield Label("Focus Mode", classes="help-section")
             yield Label("  [bold]a s[/]   Pull/push implementation pane", classes="help-row")
             yield Label("  [bold]a d[/]   Pull/push review pane", classes="help-row")
+            yield Label("  [bold]a g[/]   Pull/push merge pane", classes="help-row")
+            yield Label("  [bold]a m[/]   Pull/push meta pane", classes="help-row")
             yield Label("  [bold]/focus[/]  Toggle focus mode (auto-pull)", classes="help-row")
             yield Label("Review Loop", classes="help-section")
             yield Label("  [bold]zz d[/]   Start loop", classes="help-row")

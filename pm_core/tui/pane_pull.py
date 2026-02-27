@@ -58,6 +58,12 @@ def get_window_name_for_review(pr: dict) -> str:
     return f"review-{_pr_display_id(pr)}"
 
 
+def get_window_name_for_merge(pr: dict) -> str:
+    """Get the expected tmux window name for a PR's merge-resolution window."""
+    from pm_core.cli.helpers import _pr_display_id
+    return f"merge-{_pr_display_id(pr)}"
+
+
 def get_tui_window() -> str | None:
     """Get the window ID containing the TUI pane.
 
@@ -72,6 +78,40 @@ def get_tui_window() -> str | None:
         capture_output=True, text=True,
     )
     return result.stdout.strip() if result.returncode == 0 else None
+
+
+# ---------------------------------------------------------------------------
+# Shared pull/push entry point (used by all window-creating commands)
+# ---------------------------------------------------------------------------
+
+def try_pull_or_push(app, window_name: str) -> str:
+    """Handle pull mode for a window-creating command.
+
+    Checks whether to pull, push back, or create-then-pull.
+    Returns one of:
+      "pulled"  — existing window was pulled to main (caller should return)
+      "pushed"  — already-pulled pane was pushed back (caller should return)
+      "proceed" — no existing window; caller should run the command,
+                  using make_on_complete(app, window_name) as on_complete
+    """
+    # Toggle: if already pulled, push back
+    if is_pulled(app, window_name):
+        push_pane_back(app, window_name)
+        return "pushed"
+
+    # If window already exists, just pull (no new window needed)
+    if app._session_name:
+        existing = tmux_mod.find_window_by_name(app._session_name, window_name)
+        if existing:
+            pull_pane_from_window(app, window_name)
+            return "pulled"
+
+    return "proceed"
+
+
+def make_on_complete(app, window_name: str):
+    """Return an on_complete callback that pulls a window after creation."""
+    return lambda: pull_pane_from_window(app, window_name)
 
 
 # ---------------------------------------------------------------------------

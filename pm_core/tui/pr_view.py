@@ -80,14 +80,8 @@ def start_pr(app) -> None:
     # Pull mode: toggle or pull existing window without running start
     if pull_mode and app._session_name:
         window_name = pane_pull.get_window_name_for_start(pr)
-        # Toggle: if already pulled, push back
-        if pane_pull.is_pulled(app, window_name):
-            pane_pull.push_pane_back(app, window_name)
-            return
-        # If window already exists, just pull (no new window needed)
-        existing = tmux_mod.find_window_by_name(app._session_name, window_name)
-        if existing:
-            pane_pull.pull_pane_from_window(app, window_name)
+        result = pane_pull.try_pull_or_push(app, window_name)
+        if result != "proceed":
             return
 
     # In beginner mode, block starting PRs with unmerged dependencies
@@ -111,8 +105,8 @@ def start_pr(app) -> None:
     # In pull mode, pull the pane after the window is created
     on_complete = None
     if pull_mode and app._session_name:
-        window_name = pane_pull.get_window_name_for_start(pr)
-        on_complete = lambda: pane_pull.pull_pane_from_window(app, window_name)
+        on_complete = pane_pull.make_on_complete(
+            app, pane_pull.get_window_name_for_start(pr))
 
     run_command(app, cmd, working_message=action_key, action_key=action_key,
                 on_complete=on_complete)
@@ -136,14 +130,8 @@ def done_pr(app, fresh: bool = False, pull_mode: bool = False) -> None:
     # Pull mode: toggle or pull existing window without running review
     if pull_mode and pr and app._session_name:
         window_name = pane_pull.get_window_name_for_review(pr)
-        # Toggle: if already pulled, push back
-        if pane_pull.is_pulled(app, window_name):
-            pane_pull.push_pane_back(app, window_name)
-            return
-        # If window already exists, just pull
-        existing = tmux_mod.find_window_by_name(app._session_name, window_name)
-        if existing:
-            pane_pull.pull_pane_from_window(app, window_name)
+        result = pane_pull.try_pull_or_push(app, window_name)
+        if result != "proceed":
             return
 
     action_key = f"Reviewing {pr_id}" + (" (fresh)" if fresh else "")
@@ -155,28 +143,47 @@ def done_pr(app, fresh: bool = False, pull_mode: bool = False) -> None:
     # In pull mode, pull the pane after the review window is created
     on_complete = None
     if pull_mode and pr and app._session_name:
-        window_name = pane_pull.get_window_name_for_review(pr)
-        on_complete = lambda: pane_pull.pull_pane_from_window(app, window_name)
+        on_complete = pane_pull.make_on_complete(
+            app, pane_pull.get_window_name_for_review(pr))
 
     run_command(app, cmd, working_message=action_key, action_key=action_key,
                 on_complete=on_complete)
 
 
-def merge_pr(app) -> None:
+def merge_pr(app, pull_mode: bool = False) -> None:
     """Merge the selected PR."""
     from pm_core.tui.tech_tree import TechTree
+    from pm_core.tui import pane_pull
 
     tree = app.query_one("#tech-tree", TechTree)
     pr_id = tree.selected_pr_id
-    _log.info("action: merge_pr selected=%s", pr_id)
+    _log.info("action: merge_pr selected=%s pull=%s", pr_id, pull_mode)
     if not pr_id:
         app.log_message("No PR selected")
         return
+
+    pr = store.get_pr(app._data, pr_id)
+
+    # Pull mode: toggle or pull existing merge window
+    if pull_mode and pr and app._session_name:
+        window_name = pane_pull.get_window_name_for_merge(pr)
+        result = pane_pull.try_pull_or_push(app, window_name)
+        if result != "proceed":
+            return
+
     action_key = f"Merging {pr_id}"
     if not guard_pr_action(app, action_key):
         return
     app._inflight_pr_action = action_key
-    run_command(app, f"pr merge --resolve-window {pr_id}", working_message=action_key, action_key=action_key)
+
+    # In pull mode, pull the merge window after creation
+    on_complete = None
+    if pull_mode and pr and app._session_name:
+        on_complete = pane_pull.make_on_complete(
+            app, pane_pull.get_window_name_for_merge(pr))
+
+    run_command(app, f"pr merge --resolve-window {pr_id}", working_message=action_key,
+                action_key=action_key, on_complete=on_complete)
 
 
 # ---------------------------------------------------------------------------

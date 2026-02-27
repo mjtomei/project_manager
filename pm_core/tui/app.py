@@ -593,7 +593,9 @@ class ProjectManagerApp(App):
             review_loop_ui.start_or_stop_loop(self, stop_on_suggestions=False)
 
     def action_merge_pr(self) -> None:
-        pr_view.merge_pr(self)
+        from pm_core.tui import pane_pull
+        pull_mode = pane_pull.should_pull(self, self._consume_a())
+        pr_view.merge_pr(self, pull_mode=pull_mode)
 
     def action_hide_plan(self) -> None:
         pr_view.hide_plan(self)
@@ -622,7 +624,9 @@ class ProjectManagerApp(App):
         pane_ops.view_log(self)
 
     def action_launch_meta(self) -> None:
-        pane_ops.launch_meta(self)
+        from pm_core.tui import pane_pull
+        pull_mode = pane_pull.should_pull(self, self._consume_a())
+        pane_ops.launch_meta(self, pull_mode=pull_mode)
 
     def action_rebalance(self) -> None:
         pane_ops.rebalance(self)
