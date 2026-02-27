@@ -1233,13 +1233,19 @@ for plan operations (view, edit, add, review, deps, load).
    - `pm tui view` - command bar should be focused with "plan add " pre-filled
    - `pm tui send Escape` - cancel the command
 
-5. Breakdown plan (w):
+5. Work session (w):
    - `pm tui send w`
+   - Wait 2 seconds
+   - `tmux list-windows` - should see a work window (named "work-<plan-id>")
+   - Note: work launches in a new tmux window, not a pane split
+
+6. Breakdown plan (d):
+   - `pm tui send d`
    - Wait 2 seconds
    - `tmux list-panes` - should see a breakdown pane (role "plan-breakdown")
    - Kill the breakdown pane after verifying
 
-6. Plan deps (D):
+7. Plan deps (D):
    - `pm tui send D`
    - Wait 2 seconds
    - `tmux list-panes` - should see a deps pane (role "plan-deps")
@@ -1294,7 +1300,8 @@ for plan operations (view, edit, add, review, deps, load).
 - Enter and v open the plan file in a pane
 - e opens the plan file in an editor
 - a pre-fills the command bar with "plan add "
-- w launches pm plan breakdown in a pane
+- w launches a plan work session (pm plan work) in a new tmux window
+- d launches pm plan breakdown in a pane
 - D launches pm plan deps in a pane
 - l runs pm plan load as an inline command (no pane)
 - Refresh (r) stays in plans view

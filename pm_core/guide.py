@@ -402,7 +402,7 @@ codebase. Creates a pm/ directory that tracks plans and PRs.
 2. **Plan** (TUI: `p` then `a` / CLI: `pm plan add`): Write a high-level \
 plan describing a feature or goal. Plans are markdown files.
 
-3. **Break down** (TUI: `w` in plans view / CLI: `pm plan breakdown`): \
+3. **Break down** (TUI: `d` in plans view / CLI: `pm plan breakdown`): \
 Launch a Claude session to turn a plan into concrete PRs — small, focused \
 units of work with dependencies forming a tree shown in the TUI.
 
