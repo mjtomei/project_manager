@@ -517,7 +517,7 @@ COMMANDS
   pm prompt [pr-id]             Print Claude prompt for a PR
   pm tui                        Launch interactive dashboard
   pm meta [task]                Work on pm itself (meta-development session)
-  pm monitor                    Run autonomous monitor loop (blocking)
+  pm watcher                    Run autonomous watcher loop (blocking)
   pm getting-started            Show getting started guide
 
 OPTIONS
@@ -560,7 +560,7 @@ def getting_started_cmd():
 # Import submodules to register their commands on ``cli``.
 # This must be at the bottom of the file, after ``cli`` is defined.
 # ---------------------------------------------------------------------------
-from pm_core.cli import pr, plan, session, tui, guide, meta, cluster, bench, monitor  # noqa: E402, F401
+from pm_core.cli import pr, plan, session, tui, guide, meta, cluster, bench, watcher  # noqa: E402, F401
 
 
 def main():

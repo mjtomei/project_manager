@@ -582,7 +582,7 @@ def sessions_on_window(base: str, window_id: str) -> list[str]:
 def switch_sessions_to_window(sessions: list[str], session: str, window_name: str) -> None:
     """Switch the given sessions to the named window.
 
-    Used after killing and recreating a window (review, monitor, etc.)
+    Used after killing and recreating a window (review, watcher, etc.)
     to move sessions that were watching the old window to the new one.
 
     ``select-window`` alone does NOT update tmux's client tracking.

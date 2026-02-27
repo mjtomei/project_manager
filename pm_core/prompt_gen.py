@@ -314,13 +314,13 @@ The merge of `{branch}` into `{base_branch}` failed with the following error:
     return prompt.strip()
 
 
-def generate_monitor_prompt(data: dict, session_name: str | None = None,
+def generate_watcher_prompt(data: dict, session_name: str | None = None,
                             iteration: int = 0, loop_id: str = "",
                             auto_start_target: str | None = None,
                             meta_pm_root: str | None = None) -> str:
-    """Generate a Claude Code prompt for the autonomous monitor session.
+    """Generate a Claude Code prompt for the autonomous watcher session.
 
-    The monitor session observes auto-start and watches all active tmux
+    The watcher session observes auto-start and watches all active tmux
     windows for issues, attempting fixes when possible and surfacing
     problems that need human input.
 

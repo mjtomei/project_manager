@@ -1,6 +1,6 @@
-"""Shared helpers for review_loop and monitor_loop.
+"""Shared helpers for review_loop and watcher_loop.
 
-Extracts functions that were duplicated between the two loop engines
+Extracts functions that were duplicated between the two loop engines (review_loop, watcher_loop)
 so both can import from a single source.
 """
 
@@ -54,7 +54,7 @@ def sleep_checking_pane(pane_id: str, seconds: float,
 
 
 # ---------------------------------------------------------------------------
-# Verdict detection helpers (shared by review_loop and monitor_loop)
+# Verdict detection helpers (shared by review_loop and watcher_loop)
 # ---------------------------------------------------------------------------
 
 # Only scan the tail of captured pane content for verdicts.  The prompt
@@ -177,7 +177,7 @@ def extract_verdict_from_content(
 
 
 # ---------------------------------------------------------------------------
-# Polling helpers (shared by review_loop and monitor_loop)
+# Polling helpers (shared by review_loop and watcher_loop)
 # ---------------------------------------------------------------------------
 
 def poll_for_verdict(

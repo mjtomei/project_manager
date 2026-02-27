@@ -157,7 +157,7 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]v[/]  View plan file", classes="help-row")
                 yield Label("  [bold]M[/]  Move to plan", classes="help-row")
                 yield Label("  [bold]A[/]  Auto-start to selected PR / off", classes="help-row")
-                yield Label("  [bold]w[/]  Focus monitor window", classes="help-row")
+                yield Label("  [bold]w[/]  Focus watcher window", classes="help-row")
             yield Label("Panes & Views", classes="help-section")
             if not self._in_plans:
                 yield Label("  [bold]c[/]  Launch Claude session", classes="help-row")

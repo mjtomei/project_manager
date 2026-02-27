@@ -255,10 +255,10 @@ def launch_meta(app) -> None:
     """
     app._consume_z()  # consume but meta doesn't support --fresh
     _log.info("launch_meta")
-    from pm_core.tui.monitor_ui import load_monitor_plan_prs
-    created = load_monitor_plan_prs(app)
+    from pm_core.tui.watcher_ui import load_watcher_plan_prs
+    created = load_watcher_plan_prs(app)
     if created:
-        app.log_message(f"Loaded {created} PR{'s' if created != 1 else ''} from monitor plans")
+        app.log_message(f"Loaded {created} PR{'s' if created != 1 else ''} from watcher plans")
     app._run_command("meta")
 
 

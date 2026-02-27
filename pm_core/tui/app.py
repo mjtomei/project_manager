@@ -141,7 +141,7 @@ class ProjectManagerApp(App):
         Binding("H", "launch_guide", "Guide", show=True),
         Binding("C", "show_connect", "Connect", show=False),
         Binding("A", "toggle_auto_start", "Auto-start", show=False),
-        Binding("w", "focus_monitor", "Monitor", show=False),
+        Binding("w", "focus_watcher", "Watcher", show=False),
     ]
 
     def on_key(self, event) -> None:
@@ -171,7 +171,7 @@ class ProjectManagerApp(App):
                        "launch_meta", "launch_claude", "launch_guide",
                        "view_log", "refresh", "rebalance", "quit", "show_help",
                        "toggle_plans", "toggle_tests", "hide_plan", "move_to_plan", "toggle_merged",
-                       "cycle_filter", "toggle_auto_start", "focus_monitor"):
+                       "cycle_filter", "toggle_auto_start", "focus_watcher"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus:
                 _log.debug("check_action: blocked %s (command bar focused)", action)
@@ -226,8 +226,8 @@ class ProjectManagerApp(App):
         self._auto_start: bool = False
         self._auto_start_target: str | None = None
         self._auto_start_run_id: str | None = None
-        # Monitor loop state (purely in-memory, lost on TUI restart)
-        self._monitor_state = None  # MonitorLoopState | None
+        # Watcher loop state (purely in-memory, lost on TUI restart)
+        self._watcher_state = None  # WatcherLoopState | None
 
     def _consume_z(self) -> int:
         """Atomically read and clear the z modifier count.
@@ -458,9 +458,9 @@ class ProjectManagerApp(App):
             if hidden:
                 filter_text = "hide " + "+".join(hidden)
         status_bar = self.query_one("#status-bar", StatusBar)
-        monitor_status = ""
-        if self._monitor_state and self._monitor_state.running:
-            monitor_status = "input_required" if self._monitor_state.input_required else "running"
+        watcher_status = ""
+        if self._watcher_state and self._watcher_state.running:
+            watcher_status = "input_required" if self._watcher_state.input_required else "running"
         status_bar.update_status(
             project.get("name", "???"),
             project.get("repo", "???"),
@@ -469,7 +469,7 @@ class ProjectManagerApp(App):
             filter_text=filter_text,
             show_assist=not get_global_setting("hide-assist"),
             auto_start=self._auto_start,
-            monitor_status=monitor_status,
+            watcher_status=watcher_status,
         )
 
     def _update_display(self) -> None:
@@ -623,14 +623,14 @@ class ProjectManagerApp(App):
         tree = self.query_one("#tech-tree", TechTree)
         self.run_worker(toggle(self, selected_pr_id=tree.selected_pr_id))
 
-    def action_focus_monitor(self) -> None:
-        """Focus the monitor window (w key)."""
-        _log.info("action: focus_monitor")
-        from pm_core.tui import auto_start, monitor_ui
-        from pm_core.monitor_loop import MONITOR_WINDOW_NAME
+    def action_focus_watcher(self) -> None:
+        """Focus the watcher window (w key)."""
+        _log.info("action: focus_watcher")
+        from pm_core.tui import auto_start, watcher_ui
+        from pm_core.watcher_loop import WATCHER_WINDOW_NAME
 
         if not auto_start.is_enabled(self):
-            self.log_message("Auto-start must be running to use monitor (press A)")
+            self.log_message("Auto-start must be running to use watcher (press A)")
             return
 
         session = self._session_name
@@ -638,30 +638,30 @@ class ProjectManagerApp(App):
             self.log_message("No tmux session found")
             return
 
-        existing = tmux_mod.find_window_by_name(session, MONITOR_WINDOW_NAME)
+        existing = tmux_mod.find_window_by_name(session, WATCHER_WINDOW_NAME)
         if existing:
-            tmux_mod.select_window(session, MONITOR_WINDOW_NAME)
+            tmux_mod.select_window(session, WATCHER_WINDOW_NAME)
             return
 
-        # No window — check if the monitor loop is running (between iterations)
-        if self._monitor_state and self._monitor_state.running:
-            self.log_message("Monitor is between iterations — window will appear shortly")
-            self._poll_for_monitor_window(attempts=10)
+        # No window — check if the watcher loop is running (between iterations)
+        if self._watcher_state and self._watcher_state.running:
+            self.log_message("Watcher is between iterations — window will appear shortly")
+            self._poll_for_watcher_window(attempts=10)
             return
 
-        # Monitor not running — create plans and start it
-        meta_root = monitor_ui.ensure_monitor_plans(self)
+        # Watcher not running — create plans and start it
+        meta_root = watcher_ui.ensure_watcher_plans(self)
         tdir = auto_start.get_transcript_dir(self)
-        monitor_ui.start_monitor(
+        watcher_ui.start_watcher(
             self,
             transcript_dir=str(tdir) if tdir else None,
             meta_pm_root=str(meta_root) if meta_root else None,
         )
-        self._poll_for_monitor_window(attempts=15)
+        self._poll_for_watcher_window(attempts=15)
 
-    def _poll_for_monitor_window(self, attempts: int = 10) -> None:
-        """Poll for the monitor window to appear and focus it."""
-        from pm_core.monitor_loop import MONITOR_WINDOW_NAME
+    def _poll_for_watcher_window(self, attempts: int = 10) -> None:
+        """Poll for the watcher window to appear and focus it."""
+        from pm_core.watcher_loop import WATCHER_WINDOW_NAME
 
         session = self._session_name
         if not session:
@@ -670,9 +670,9 @@ class ProjectManagerApp(App):
         def _check() -> None:
             nonlocal attempts
             attempts -= 1
-            win = tmux_mod.find_window_by_name(session, MONITOR_WINDOW_NAME)
+            win = tmux_mod.find_window_by_name(session, WATCHER_WINDOW_NAME)
             if win:
-                tmux_mod.select_window(session, MONITOR_WINDOW_NAME)
+                tmux_mod.select_window(session, WATCHER_WINDOW_NAME)
             elif attempts > 0:
                 self.set_timer(1, _check)
 

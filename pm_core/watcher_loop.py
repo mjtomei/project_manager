@@ -1,6 +1,6 @@
-"""Monitor loop: observe auto-start sessions and fix issues autonomously.
+"""Watcher loop: observe auto-start sessions and fix issues autonomously.
 
-The monitor loop launches a Claude session in a tmux window that periodically
+The watcher loop launches a Claude session in a tmux window that periodically
 scans all active panes, checks for errors or stuck processes, and attempts
 corrective actions.  It works similarly to the review loop but with only two
 verdicts:
@@ -10,7 +10,7 @@ Verdicts:
   INPUT_REQUIRED   -- Needs human input or wants to surface something.
 
 The loop pauses on INPUT_REQUIRED (user interacts with Claude in the
-monitor pane) and resumes when the user provides direction.  Between
+watcher pane) and resumes when the user provides direction.  Between
 READY iterations there is a configurable wait time.
 """
 
@@ -33,17 +33,17 @@ from pm_core.loop_shared import (
     wait_for_follow_up_verdict as _wait_for_follow_up_shared,
 )
 
-_log = configure_logger("pm.monitor_loop")
+_log = configure_logger("pm.watcher_loop")
 
-# Monitor verdicts
+# Watcher verdicts
 VERDICT_READY = "READY"
 VERDICT_INPUT_REQUIRED = "INPUT_REQUIRED"
 VERDICT_KILLED = "KILLED"
 
-ALL_MONITOR_VERDICTS = (VERDICT_READY, VERDICT_INPUT_REQUIRED)
+ALL_WATCHER_VERDICTS = (VERDICT_READY, VERDICT_INPUT_REQUIRED)
 
 # Keywords used for prompt line filtering (all verdict keywords)
-_MONITOR_KEYWORDS = ("INPUT_REQUIRED", "READY")
+_WATCHER_KEYWORDS = ("INPUT_REQUIRED", "READY")
 
 # How often to check pane content for a verdict (seconds)
 _POLL_INTERVAL = 5
@@ -53,13 +53,13 @@ _TICK_INTERVAL = 1
 _VERDICT_GRACE_PERIOD = 30
 # Default wait time between iterations (seconds)
 DEFAULT_ITERATION_WAIT = 120
-# Max history entries to keep (monitor runs indefinitely, so cap memory)
+# Max history entries to keep (watcher runs indefinitely, so cap memory)
 _MAX_HISTORY = 50
 
 
 @dataclass
-class MonitorIteration:
-    """Result of a single monitor iteration."""
+class WatcherIteration:
+    """Result of a single watcher iteration."""
     iteration: int
     verdict: str
     summary: str
@@ -72,14 +72,14 @@ def _generate_loop_id() -> str:
 
 
 @dataclass
-class MonitorLoopState:
-    """Tracks the state of a running monitor loop."""
+class WatcherLoopState:
+    """Tracks the state of a running watcher loop."""
     running: bool = False
     stop_requested: bool = False
     iteration: int = 0
     latest_verdict: str = ""
     latest_summary: str = ""
-    history: list[MonitorIteration] = field(default_factory=list)
+    history: list[WatcherIteration] = field(default_factory=list)
     loop_id: str = field(default_factory=_generate_loop_id)
     iteration_wait: float = DEFAULT_ITERATION_WAIT
     _ui_notified_done: bool = False
@@ -87,24 +87,24 @@ class MonitorLoopState:
     # INPUT_REQUIRED: set to True while polling for follow-up verdict
     input_required: bool = False
     _transcript_dir: str | None = None
-    # Auto-start target PR (for scoping monitor to the dependency fan-in)
+    # Auto-start target PR (for scoping watcher to the dependency fan-in)
     auto_start_target: str | None = None
     # Absolute path to the meta workdir's pm/ dir (for bugs.md / improvements.md)
     meta_pm_root: str | None = None
 
 
-def _match_monitor_verdict(line: str) -> str | None:
-    """Match a monitor verdict keyword when it is the entire line content."""
-    return match_verdict(line, ALL_MONITOR_VERDICTS)
+def _match_watcher_verdict(line: str) -> str | None:
+    """Match a watcher verdict keyword when it is the entire line content."""
+    return match_verdict(line, ALL_WATCHER_VERDICTS)
 
 
 def _extract_verdict_from_content(content: str, prompt_text: str = "",
                                    exclude_verdicts: set[str] | None = None) -> str | None:
-    """Check if the tail of captured pane content contains a monitor verdict."""
+    """Check if the tail of captured pane content contains a watcher verdict."""
     return extract_verdict_from_content(
-        content, verdicts=ALL_MONITOR_VERDICTS, keywords=_MONITOR_KEYWORDS,
+        content, verdicts=ALL_WATCHER_VERDICTS, keywords=_WATCHER_KEYWORDS,
         prompt_text=prompt_text, exclude_verdicts=exclude_verdicts,
-        log_prefix="monitor_loop",
+        log_prefix="watcher_loop",
     )
 
 
@@ -114,21 +114,21 @@ def _get_pm_session() -> str | None:
 
 
 def _find_claude_pane(session: str, window_name: str) -> str | None:
-    """Find the Claude pane ID in the monitor window (first pane)."""
+    """Find the Claude pane ID in the watcher window (first pane)."""
     return _find_claude_pane_shared(session, window_name)
 
 
-MONITOR_WINDOW_NAME = "monitor"
+WATCHER_WINDOW_NAME = "watcher"
 
 
-def _launch_monitor_window(pm_root: str, iteration: int = 0,
+def _launch_watcher_window(pm_root: str, iteration: int = 0,
                             loop_id: str = "",
                             transcript: str | None = None,
                             auto_start_target: str | None = None,
                             meta_pm_root: str | None = None) -> None:
-    """Launch the monitor window via ``pm pr start``-style Claude session."""
+    """Launch the watcher window via ``pm pr start``-style Claude session."""
     cmd = [sys.executable, "-m", "pm_core.wrapper",
-           "monitor", "--iteration", str(iteration)]
+           "watcher", "--iteration", str(iteration)]
     if loop_id:
         cmd.extend(["--loop-id", loop_id])
     if transcript:
@@ -137,61 +137,61 @@ def _launch_monitor_window(pm_root: str, iteration: int = 0,
         cmd.extend(["--auto-start-target", auto_start_target])
     if meta_pm_root:
         cmd.extend(["--meta-pm-root", meta_pm_root])
-    _log.info("monitor_loop: launching monitor window: %s", cmd)
+    _log.info("watcher_loop: launching watcher window: %s", cmd)
     result = subprocess.run(cmd, cwd=pm_root, capture_output=True, text=True, timeout=30)
     if result.returncode != 0:
         stderr = result.stderr.strip() if result.stderr else ""
-        _log.error("monitor_loop: launch failed (rc=%d): %s", result.returncode, stderr[:500])
-        raise RuntimeError(f"Monitor window launch failed (rc={result.returncode}): {stderr[:200]}")
+        _log.error("watcher_loop: launch failed (rc=%d): %s", result.returncode, stderr[:500])
+        raise RuntimeError(f"Watcher window launch failed (rc={result.returncode}): {stderr[:200]}")
 
 
 def _poll_for_verdict(pane_id: str, prompt_text: str = "",
                       exclude_verdicts: set[str] | None = None,
                       grace_period: float = 0,
-                      state: MonitorLoopState | None = None) -> str | None:
+                      state: WatcherLoopState | None = None) -> str | None:
     """Poll a pane until a verdict is stable.
 
     Delegates to the shared ``poll_for_verdict`` in ``loop_shared``.
     """
     return _poll_for_verdict_shared(
-        pane_id, verdicts=ALL_MONITOR_VERDICTS, keywords=_MONITOR_KEYWORDS,
+        pane_id, verdicts=ALL_WATCHER_VERDICTS, keywords=_WATCHER_KEYWORDS,
         prompt_text=prompt_text, exclude_verdicts=exclude_verdicts,
         grace_period=grace_period, poll_interval=_POLL_INTERVAL,
         tick_interval=_TICK_INTERVAL,
         stop_check=lambda: state.stop_requested if state else False,
-        log_prefix="monitor_loop",
+        log_prefix="watcher_loop",
     )
 
 
 class PaneKilledError(Exception):
-    """Raised when the monitor pane disappears before producing a verdict."""
+    """Raised when the watcher pane disappears before producing a verdict."""
 
 
 def _regenerate_prompt_text(pm_root: str, iteration: int = 0,
                              loop_id: str = "",
                              auto_start_target: str | None = None,
                              meta_pm_root: str | None = None) -> str:
-    """Regenerate the monitor prompt text for verdict filtering."""
+    """Regenerate the watcher prompt text for verdict filtering."""
     try:
         from pathlib import Path
         from pm_core import store
-        from pm_core.prompt_gen import generate_monitor_prompt
+        from pm_core.prompt_gen import generate_watcher_prompt
         data = store.load(Path(pm_root))
-        return generate_monitor_prompt(
+        return generate_watcher_prompt(
             data, iteration=iteration, loop_id=loop_id,
             auto_start_target=auto_start_target,
             meta_pm_root=meta_pm_root,
         )
     except Exception as exc:
-        _log.warning("monitor_loop: could not regenerate prompt text: %s", exc)
+        _log.warning("watcher_loop: could not regenerate prompt text: %s", exc)
         return ""
 
 
-def _run_monitor_iteration(pm_root: str, iteration: int = 0,
+def _run_watcher_iteration(pm_root: str, iteration: int = 0,
                             loop_id: str = "",
                             transcript: str | None = None,
-                            state: MonitorLoopState | None = None) -> str:
-    """Launch a monitor window and poll for the verdict.
+                            state: WatcherLoopState | None = None) -> str:
+    """Launch a watcher window and poll for the verdict.
 
     Returns the captured pane content containing the verdict.
     Raises PaneKilledError if the pane disappears.
@@ -206,36 +206,36 @@ def _run_monitor_iteration(pm_root: str, iteration: int = 0,
 
     target = state.auto_start_target if state else None
     meta_root = state.meta_pm_root if state else None
-    _launch_monitor_window(pm_root, iteration=iteration, loop_id=loop_id,
+    _launch_watcher_window(pm_root, iteration=iteration, loop_id=loop_id,
                             transcript=transcript, auto_start_target=target,
                             meta_pm_root=meta_root)
 
     prompt_text = _regenerate_prompt_text(pm_root, iteration, loop_id,
                                            auto_start_target=target,
                                            meta_pm_root=meta_root)
-    _log.info("monitor_loop: prompt_text for filtering: %d chars", len(prompt_text))
+    _log.info("watcher_loop: prompt_text for filtering: %d chars", len(prompt_text))
 
     time.sleep(2)
 
-    pane_id = _find_claude_pane(session, MONITOR_WINDOW_NAME)
+    pane_id = _find_claude_pane(session, WATCHER_WINDOW_NAME)
     if not pane_id:
-        raise RuntimeError(f"Monitor window '{MONITOR_WINDOW_NAME}' not found after launch")
+        raise RuntimeError(f"Watcher window '{WATCHER_WINDOW_NAME}' not found after launch")
 
-    _log.info("monitor_loop: polling pane %s in window %s", pane_id, MONITOR_WINDOW_NAME)
+    _log.info("watcher_loop: polling pane %s in window %s", pane_id, WATCHER_WINDOW_NAME)
 
     content = _poll_for_verdict(pane_id, prompt_text=prompt_text,
                                  grace_period=_VERDICT_GRACE_PERIOD,
                                  state=state)
     if content is None:
         if state and state.stop_requested:
-            raise PaneKilledError("Monitor stopped by user")
-        raise PaneKilledError(f"Monitor pane disappeared (window: {MONITOR_WINDOW_NAME})")
+            raise PaneKilledError("Watcher stopped by user")
+        raise PaneKilledError(f"Watcher pane disappeared (window: {WATCHER_WINDOW_NAME})")
     return content
 
 
 def _wait_for_follow_up_verdict(prompt_text: str,
-                                 state: MonitorLoopState) -> str | None:
-    """Poll the existing monitor pane for a non-INPUT_REQUIRED verdict.
+                                 state: WatcherLoopState) -> str | None:
+    """Poll the existing watcher pane for a non-INPUT_REQUIRED verdict.
 
     Delegates to the shared ``wait_for_follow_up_verdict`` in ``loop_shared``.
     """
@@ -244,34 +244,34 @@ def _wait_for_follow_up_verdict(prompt_text: str,
         return None
 
     return _wait_for_follow_up_shared(
-        session, MONITOR_WINDOW_NAME,
-        verdicts=ALL_MONITOR_VERDICTS, keywords=_MONITOR_KEYWORDS,
+        session, WATCHER_WINDOW_NAME,
+        verdicts=ALL_WATCHER_VERDICTS, keywords=_WATCHER_KEYWORDS,
         prompt_text=prompt_text, exclude_verdicts={VERDICT_INPUT_REQUIRED},
         poll_interval=_POLL_INTERVAL, tick_interval=_TICK_INTERVAL,
-        stop_check=lambda: state.stop_requested, log_prefix="monitor_loop",
+        stop_check=lambda: state.stop_requested, log_prefix="watcher_loop",
     )
 
 
-def parse_monitor_verdict(output: str) -> str:
-    """Extract a monitor verdict from Claude output."""
+def parse_watcher_verdict(output: str) -> str:
+    """Extract a watcher verdict from Claude output."""
     lines = output.strip().splitlines()
     for line in reversed(lines):
         stripped = line.strip().strip("*").strip()
-        verdict = _match_monitor_verdict(stripped)
+        verdict = _match_watcher_verdict(stripped)
         if verdict:
             return verdict
-    # No clear verdict found — default to READY (continue monitoring)
+    # No clear verdict found — default to READY (continue watching)
     return VERDICT_READY
 
 
-def run_monitor_loop_sync(
-    state: MonitorLoopState,
+def run_watcher_loop_sync(
+    state: WatcherLoopState,
     pm_root: str,
-    on_iteration: Callable[[MonitorLoopState], None] | None = None,
+    on_iteration: Callable[[WatcherLoopState], None] | None = None,
     max_iterations: int = 0,
     transcript_dir: str | None = None,
-) -> MonitorLoopState:
-    """Run the monitor loop synchronously (intended for a background thread).
+) -> WatcherLoopState:
+    """Run the watcher loop synchronously (intended for a background thread).
 
     Args:
         state: Mutable state object.
@@ -290,18 +290,18 @@ def run_monitor_loop_sync(
     try:
         while max_iterations == 0 or state.iteration < max_iterations:
             if state.stop_requested:
-                _log.info("monitor_loop: stop requested after %d iterations", state.iteration)
+                _log.info("watcher_loop: stop requested after %d iterations", state.iteration)
                 break
 
             state.iteration += 1
-            _log.info("monitor_loop: iteration %d", state.iteration)
+            _log.info("watcher_loop: iteration %d", state.iteration)
 
             iter_transcript = None
             if transcript_dir:
-                iter_transcript = f"{transcript_dir}/monitor-i{state.iteration}.jsonl"
+                iter_transcript = f"{transcript_dir}/watcher-i{state.iteration}.jsonl"
 
             try:
-                output = _run_monitor_iteration(
+                output = _run_watcher_iteration(
                     pm_root,
                     iteration=state.iteration,
                     loop_id=state.loop_id,
@@ -309,21 +309,21 @@ def run_monitor_loop_sync(
                     state=state,
                 )
             except PaneKilledError as e:
-                _log.warning("monitor_loop: pane killed on iteration %d: %s", state.iteration, e)
+                _log.warning("watcher_loop: pane killed on iteration %d: %s", state.iteration, e)
                 state.latest_verdict = VERDICT_KILLED
                 state.latest_summary = str(e)
                 break
             except Exception as e:
-                _log.exception("monitor_loop: iteration %d failed", state.iteration)
+                _log.exception("watcher_loop: iteration %d failed", state.iteration)
                 state.latest_verdict = "ERROR"
                 state.latest_summary = str(e)
                 break
 
-            verdict = parse_monitor_verdict(output)
+            verdict = parse_watcher_verdict(output)
             state.latest_verdict = verdict
             state.latest_summary = output[-500:] if len(output) > 500 else output
 
-            iteration_result = MonitorIteration(
+            iteration_result = WatcherIteration(
                 iteration=state.iteration,
                 verdict=verdict,
                 summary=state.latest_summary,
@@ -333,17 +333,17 @@ def run_monitor_loop_sync(
             if len(state.history) > _MAX_HISTORY:
                 state.history = state.history[-_MAX_HISTORY:]
 
-            _log.info("monitor_loop: iteration %d verdict=%s", state.iteration, verdict)
+            _log.info("watcher_loop: iteration %d verdict=%s", state.iteration, verdict)
 
             if on_iteration:
                 try:
                     on_iteration(state)
                 except Exception:
-                    _log.exception("monitor_loop: on_iteration callback failed")
+                    _log.exception("watcher_loop: on_iteration callback failed")
 
             # Handle INPUT_REQUIRED
             if verdict == VERDICT_INPUT_REQUIRED:
-                _log.info("monitor_loop: INPUT_REQUIRED -- polling for follow-up")
+                _log.info("watcher_loop: INPUT_REQUIRED -- polling for follow-up")
                 state.input_required = True
                 state._ui_notified_input = False
 
@@ -361,35 +361,35 @@ def run_monitor_loop_sync(
                     if state.stop_requested:
                         break
                     state.latest_verdict = VERDICT_KILLED
-                    state.latest_summary = "Monitor pane disappeared during INPUT_REQUIRED wait"
+                    state.latest_summary = "Watcher pane disappeared during INPUT_REQUIRED wait"
                     break
 
-                verdict = parse_monitor_verdict(follow_up_output)
+                verdict = parse_watcher_verdict(follow_up_output)
                 # Treat repeated INPUT_REQUIRED as READY (continue loop)
                 if verdict == VERDICT_INPUT_REQUIRED:
                     verdict = VERDICT_READY
                 state.latest_verdict = verdict
                 state.latest_summary = follow_up_output[-500:] if len(follow_up_output) > 500 else follow_up_output
 
-                state.history[-1] = MonitorIteration(
+                state.history[-1] = WatcherIteration(
                     iteration=state.iteration,
                     verdict=verdict,
                     summary=state.latest_summary,
                 )
-                _log.info("monitor_loop: follow-up verdict=%s", verdict)
+                _log.info("watcher_loop: follow-up verdict=%s", verdict)
 
                 if on_iteration:
                     try:
                         on_iteration(state)
                     except Exception:
-                        _log.exception("monitor_loop: on_iteration callback failed")
+                        _log.exception("watcher_loop: on_iteration callback failed")
 
             if state.stop_requested:
                 break
 
             # READY verdict: wait before next iteration
             if verdict == VERDICT_READY:
-                _log.info("monitor_loop: waiting %ds before next iteration",
+                _log.info("watcher_loop: waiting %ds before next iteration",
                           state.iteration_wait)
                 wait_start = time.monotonic()
                 while time.monotonic() - wait_start < state.iteration_wait:
@@ -403,20 +403,20 @@ def run_monitor_loop_sync(
     return state
 
 
-def start_monitor_loop_background(
-    state: MonitorLoopState,
+def start_watcher_loop_background(
+    state: WatcherLoopState,
     pm_root: str,
-    on_iteration: Callable[[MonitorLoopState], None] | None = None,
-    on_complete: Callable[[MonitorLoopState], None] | None = None,
+    on_iteration: Callable[[WatcherLoopState], None] | None = None,
+    on_complete: Callable[[WatcherLoopState], None] | None = None,
     max_iterations: int = 0,
     transcript_dir: str | None = None,
 ) -> threading.Thread:
-    """Start the monitor loop in a background thread.
+    """Start the watcher loop in a background thread.
 
     Returns the thread so the caller can join it if needed.
     """
     def _run():
-        run_monitor_loop_sync(
+        run_watcher_loop_sync(
             state, pm_root,
             on_iteration=on_iteration,
             max_iterations=max_iterations,
@@ -426,8 +426,8 @@ def start_monitor_loop_background(
             try:
                 on_complete(state)
             except Exception:
-                _log.exception("monitor_loop: on_complete callback failed")
+                _log.exception("watcher_loop: on_complete callback failed")
 
-    thread = threading.Thread(target=_run, daemon=True, name="monitor-loop")
+    thread = threading.Thread(target=_run, daemon=True, name="watcher-loop")
     thread.start()
     return thread

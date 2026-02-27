@@ -1,18 +1,18 @@
-"""Tests for pm_core.monitor_loop and pm_core.prompt_gen monitor prompt."""
+"""Tests for pm_core.watcher_loop and pm_core.prompt_gen watcher prompt."""
 
 from unittest.mock import patch, MagicMock
 
 import pytest
 
-from pm_core.monitor_loop import (
-    parse_monitor_verdict,
-    run_monitor_loop_sync,
-    start_monitor_loop_background,
+from pm_core.watcher_loop import (
+    parse_watcher_verdict,
+    run_watcher_loop_sync,
+    start_watcher_loop_background,
     PaneKilledError,
-    MonitorLoopState,
-    MonitorIteration,
+    WatcherLoopState,
+    WatcherIteration,
     _extract_verdict_from_content,
-    _match_monitor_verdict,
+    _match_watcher_verdict,
     _MAX_HISTORY,
     VERDICT_READY,
     VERDICT_INPUT_REQUIRED,
@@ -24,82 +24,82 @@ from pm_core.loop_shared import (
 )
 
 
-# --- parse_monitor_verdict tests ---
+# --- parse_watcher_verdict tests ---
 
-class TestParseMonitorVerdict:
+class TestParseWatcherVerdict:
     def test_ready(self):
-        assert parse_monitor_verdict("All clear.\n\n**READY**") == VERDICT_READY
+        assert parse_watcher_verdict("All clear.\n\n**READY**") == VERDICT_READY
 
     def test_ready_plain(self):
-        assert parse_monitor_verdict("READY") == VERDICT_READY
+        assert parse_watcher_verdict("READY") == VERDICT_READY
 
     def test_input_required(self):
         output = "Need human help.\n\n**INPUT_REQUIRED**\n\nPlease check auth"
-        assert parse_monitor_verdict(output) == VERDICT_INPUT_REQUIRED
+        assert parse_watcher_verdict(output) == VERDICT_INPUT_REQUIRED
 
     def test_input_required_plain(self):
-        assert parse_monitor_verdict("INPUT_REQUIRED") == VERDICT_INPUT_REQUIRED
+        assert parse_watcher_verdict("INPUT_REQUIRED") == VERDICT_INPUT_REQUIRED
 
     def test_input_required_bold(self):
-        assert parse_monitor_verdict("**INPUT_REQUIRED**") == VERDICT_INPUT_REQUIRED
+        assert parse_watcher_verdict("**INPUT_REQUIRED**") == VERDICT_INPUT_REQUIRED
 
     def test_empty_output_is_ready(self):
-        """No verdict found defaults to READY (continue monitoring)."""
-        assert parse_monitor_verdict("") == VERDICT_READY
+        """No verdict found defaults to READY (continue watching)."""
+        assert parse_watcher_verdict("") == VERDICT_READY
 
     def test_no_verdict_defaults_to_ready(self):
-        assert parse_monitor_verdict("Some monitoring output with no verdict") == VERDICT_READY
+        assert parse_watcher_verdict("Some watching output with no verdict") == VERDICT_READY
 
     def test_verdict_on_own_line_wins(self):
         output = "Initial: INPUT_REQUIRED\n\nREADY"
-        assert parse_monitor_verdict(output) == VERDICT_READY
+        assert parse_watcher_verdict(output) == VERDICT_READY
 
 
-# --- _match_monitor_verdict false positive rejection tests ---
+# --- _match_watcher_verdict false positive rejection tests ---
 
-class TestMatchMonitorVerdictFalsePositives:
+class TestMatchWatcherVerdictFalsePositives:
     def test_standalone_verdicts_match(self):
-        assert _match_monitor_verdict("READY") == VERDICT_READY
-        assert _match_monitor_verdict("INPUT_REQUIRED") == VERDICT_INPUT_REQUIRED
+        assert _match_watcher_verdict("READY") == VERDICT_READY
+        assert _match_watcher_verdict("INPUT_REQUIRED") == VERDICT_INPUT_REQUIRED
 
     def test_bold_verdicts_match(self):
-        assert _match_monitor_verdict("**READY**") == VERDICT_READY
-        assert _match_monitor_verdict("**INPUT_REQUIRED**") == VERDICT_INPUT_REQUIRED
+        assert _match_watcher_verdict("**READY**") == VERDICT_READY
+        assert _match_watcher_verdict("**INPUT_REQUIRED**") == VERDICT_INPUT_REQUIRED
 
     def test_whitespace_around_keyword(self):
-        assert _match_monitor_verdict("  READY  ") == VERDICT_READY
-        assert _match_monitor_verdict("  **INPUT_REQUIRED**  ") == VERDICT_INPUT_REQUIRED
+        assert _match_watcher_verdict("  READY  ") == VERDICT_READY
+        assert _match_watcher_verdict("  **INPUT_REQUIRED**  ") == VERDICT_INPUT_REQUIRED
 
     def test_any_extra_text_rejected(self):
-        assert _match_monitor_verdict("Verdict: READY") is None
-        assert _match_monitor_verdict("Status: INPUT_REQUIRED") is None
-        assert _match_monitor_verdict("My verdict: **READY**") is None
+        assert _match_watcher_verdict("Verdict: READY") is None
+        assert _match_watcher_verdict("Status: INPUT_REQUIRED") is None
+        assert _match_watcher_verdict("My verdict: **READY**") is None
 
     def test_descriptive_sentence(self):
-        assert _match_monitor_verdict("The READY verdict means continue monitoring") is None
-        assert _match_monitor_verdict("When INPUT_REQUIRED is returned, the loop pauses") is None
+        assert _match_watcher_verdict("The READY verdict means continue watching") is None
+        assert _match_watcher_verdict("When INPUT_REQUIRED is returned, the loop pauses") is None
 
     def test_prompt_instruction_line_rejected(self):
         line = "IMPORTANT: Always end your response with the verdict keyword on its own line -- either **READY** or"
-        assert _match_monitor_verdict(line) is None
+        assert _match_watcher_verdict(line) is None
 
     def test_tmux_wrapped_fragments_rejected(self):
-        assert _match_monitor_verdict("READY)") is None
-        assert _match_monitor_verdict("INPUT_REQUIRED)") is None
-        assert _match_monitor_verdict("(READY,") is None
+        assert _match_watcher_verdict("READY)") is None
+        assert _match_watcher_verdict("INPUT_REQUIRED)") is None
+        assert _match_watcher_verdict("(READY,") is None
 
     def test_review_verdicts_not_matched(self):
-        """Monitor should not match review loop verdicts."""
-        assert _match_monitor_verdict("PASS") is None
-        assert _match_monitor_verdict("NEEDS_WORK") is None
-        assert _match_monitor_verdict("PASS_WITH_SUGGESTIONS") is None
+        """Watcher should not match review loop verdicts."""
+        assert _match_watcher_verdict("PASS") is None
+        assert _match_watcher_verdict("NEEDS_WORK") is None
+        assert _match_watcher_verdict("PASS_WITH_SUGGESTIONS") is None
 
 
 # --- prompt verdict filtering tests ---
 
-def _get_real_monitor_prompt() -> str:
-    """Generate the actual monitor prompt from prompt_gen."""
-    from pm_core.prompt_gen import generate_monitor_prompt
+def _get_real_watcher_prompt() -> str:
+    """Generate the actual watcher prompt from prompt_gen."""
+    from pm_core.prompt_gen import generate_watcher_prompt
     data = {
         "project": {"name": "test", "repo": "test/repo", "base_branch": "master"},
         "prs": [{
@@ -110,7 +110,7 @@ def _get_real_monitor_prompt() -> str:
             "status": "in_progress",
         }],
     }
-    return generate_monitor_prompt(data, iteration=1, loop_id="ab12")
+    return generate_watcher_prompt(data, iteration=1, loop_id="ab12")
 
 
 from tests.conftest import simulate_terminal_wrap as _simulate_terminal_wrap
@@ -122,30 +122,30 @@ class TestExtractVerdictFromContent:
         assert _extract_verdict_from_content(content) == VERDICT_READY
 
     def test_real_verdict_after_prompt(self):
-        prompt = _get_real_monitor_prompt()
-        content = prompt + "\n\n" + "\n".join(["monitoring text"] * 40) + "\n\n**READY**"
+        prompt = _get_real_watcher_prompt()
+        content = prompt + "\n\n" + "\n".join(["watching text"] * 40) + "\n\n**READY**"
         assert _extract_verdict_from_content(content, prompt_text=prompt) == VERDICT_READY
 
     def test_input_required_after_prompt(self):
-        prompt = _get_real_monitor_prompt()
-        content = prompt + "\n\n" + "\n".join(["monitoring text"] * 40) + "\n\n**INPUT_REQUIRED**"
+        prompt = _get_real_watcher_prompt()
+        content = prompt + "\n\n" + "\n".join(["watching text"] * 40) + "\n\n**INPUT_REQUIRED**"
         assert _extract_verdict_from_content(content, prompt_text=prompt) == VERDICT_INPUT_REQUIRED
 
     def test_no_prompt_text_no_false_positive(self):
-        prompt = _get_real_monitor_prompt()
+        prompt = _get_real_watcher_prompt()
         assert _extract_verdict_from_content(prompt) is None
 
     def test_raw_prompt_not_detected(self):
-        prompt = _get_real_monitor_prompt()
+        prompt = _get_real_watcher_prompt()
         assert _extract_verdict_from_content(prompt, prompt_text=prompt) is None
 
     def test_terminal_wrapped_prompt_not_detected(self):
-        prompt = _get_real_monitor_prompt()
+        prompt = _get_real_watcher_prompt()
         wrapped = _simulate_terminal_wrap(prompt, width=80)
         assert _extract_verdict_from_content(wrapped, prompt_text=prompt) is None
 
     def test_terminal_wrapped_prompt_narrow_not_detected(self):
-        prompt = _get_real_monitor_prompt()
+        prompt = _get_real_watcher_prompt()
         wrapped = _simulate_terminal_wrap(prompt, width=60)
         assert _extract_verdict_from_content(wrapped, prompt_text=prompt) is None
 
@@ -158,7 +158,7 @@ class TestExtractVerdictFromContent:
 
     def test_verdict_line_variations_from_prompt_all_filtered(self):
         """Every line in the prompt that contains a verdict keyword should be filtered."""
-        prompt = _get_real_monitor_prompt()
+        prompt = _get_real_watcher_prompt()
         for line in prompt.splitlines():
             stripped = line.strip().strip("*").strip()
             if not stripped:
@@ -173,41 +173,41 @@ class TestExtractVerdictFromContent:
             )
 
 
-# Monitor-specific keywords for shared helpers
-_MONITOR_KEYWORDS = ("INPUT_REQUIRED", "READY")
+# Watcher-specific keywords for shared helpers
+_WATCHER_KEYWORDS = ("INPUT_REQUIRED", "READY")
 
 
 class TestBuildPromptVerdictLines:
     def test_extracts_verdict_lines_from_real_prompt(self):
-        prompt = _get_real_monitor_prompt()
-        lines = _build_prompt_verdict_lines(prompt, _MONITOR_KEYWORDS)
+        prompt = _get_real_watcher_prompt()
+        lines = _build_prompt_verdict_lines(prompt, _WATCHER_KEYWORDS)
         assert any("READY" in line for line in lines)
         assert any("INPUT_REQUIRED" in line for line in lines)
         assert len(lines) >= 3
 
     def test_empty_prompt(self):
-        assert _build_prompt_verdict_lines("", _MONITOR_KEYWORDS) == set()
+        assert _build_prompt_verdict_lines("", _WATCHER_KEYWORDS) == set()
 
 
 class TestIsPromptLine:
     def test_exact_match(self):
         prompt_lines = {"READY -- All issues handled (or no issues found)."}
-        assert _is_prompt_line("READY -- All issues handled (or no issues found).", prompt_lines, _MONITOR_KEYWORDS) is True
+        assert _is_prompt_line("READY -- All issues handled (or no issues found).", prompt_lines, _WATCHER_KEYWORDS) is True
 
     def test_standalone_verdict_not_prompt(self):
         prompt_lines = {"READY -- All issues handled (or no issues found)."}
-        assert _is_prompt_line("READY", prompt_lines, _MONITOR_KEYWORDS) is False
+        assert _is_prompt_line("READY", prompt_lines, _WATCHER_KEYWORDS) is False
 
     def test_standalone_input_required_not_prompt(self):
         prompt_lines = {"INPUT_REQUIRED -- You need human input."}
-        assert _is_prompt_line("INPUT_REQUIRED", prompt_lines, _MONITOR_KEYWORDS) is False
+        assert _is_prompt_line("INPUT_REQUIRED", prompt_lines, _WATCHER_KEYWORDS) is False
 
 
-# --- MonitorLoopState tests ---
+# --- WatcherLoopState tests ---
 
-class TestMonitorLoopState:
+class TestWatcherLoopState:
     def test_defaults(self):
-        state = MonitorLoopState()
+        state = WatcherLoopState()
         assert state.running is False
         assert state.stop_requested is False
         assert state.iteration == 0
@@ -217,128 +217,128 @@ class TestMonitorLoopState:
         assert len(state.loop_id) == 4  # 2 bytes = 4 hex chars
 
     def test_unique_loop_ids(self):
-        ids = {MonitorLoopState().loop_id for _ in range(10)}
+        ids = {WatcherLoopState().loop_id for _ in range(10)}
         assert len(ids) == 10
 
     def test_input_required_defaults(self):
-        state = MonitorLoopState()
+        state = WatcherLoopState()
         assert state.input_required is False
 
 
-# --- run_monitor_loop_sync tests ---
+# --- run_watcher_loop_sync tests ---
 
-class TestRunMonitorLoopSync:
-    @patch("pm_core.monitor_loop._run_monitor_iteration")
+class TestRunWatcherLoopSync:
+    @patch("pm_core.watcher_loop._run_watcher_iteration")
     def test_stops_on_max_iterations(self, mock_iter):
         mock_iter.return_value = "All clear.\n\n**READY**"
-        state = MonitorLoopState()
+        state = WatcherLoopState()
         # Bypass the wait between iterations
         state.iteration_wait = 0
-        result = run_monitor_loop_sync(state, "/tmp", max_iterations=2)
+        result = run_watcher_loop_sync(state, "/tmp", max_iterations=2)
         assert result.iteration == 2
         assert result.latest_verdict == VERDICT_READY
         assert result.running is False
         assert len(result.history) == 2
 
-    @patch("pm_core.monitor_loop._run_monitor_iteration")
+    @patch("pm_core.watcher_loop._run_watcher_iteration")
     def test_stop_requested(self, mock_iter):
         def side_effect(*args, **kwargs):
             state.stop_requested = True
             return "**READY**"
 
         mock_iter.side_effect = side_effect
-        state = MonitorLoopState()
+        state = WatcherLoopState()
         state.iteration_wait = 0
-        result = run_monitor_loop_sync(state, "/tmp")
+        result = run_watcher_loop_sync(state, "/tmp")
         assert result.iteration == 1
         assert result.running is False
 
-    @patch("pm_core.monitor_loop._run_monitor_iteration")
+    @patch("pm_core.watcher_loop._run_watcher_iteration")
     def test_pane_killed_stops_loop(self, mock_iter):
         mock_iter.side_effect = PaneKilledError("pane disappeared")
-        state = MonitorLoopState()
-        result = run_monitor_loop_sync(state, "/tmp")
+        state = WatcherLoopState()
+        result = run_watcher_loop_sync(state, "/tmp")
         assert result.latest_verdict == VERDICT_KILLED
         assert result.running is False
         assert result.iteration == 1
 
-    @patch("pm_core.monitor_loop._run_monitor_iteration")
+    @patch("pm_core.watcher_loop._run_watcher_iteration")
     def test_exception_stops_loop(self, mock_iter):
         mock_iter.side_effect = RuntimeError("setup failure")
-        state = MonitorLoopState()
-        result = run_monitor_loop_sync(state, "/tmp")
+        state = WatcherLoopState()
+        result = run_watcher_loop_sync(state, "/tmp")
         assert result.latest_verdict == "ERROR"
         assert result.running is False
 
-    @patch("pm_core.monitor_loop._run_monitor_iteration")
+    @patch("pm_core.watcher_loop._run_watcher_iteration")
     def test_calls_on_iteration_callback(self, mock_iter):
         mock_iter.return_value = "**READY**"
         callback = MagicMock()
-        state = MonitorLoopState()
+        state = WatcherLoopState()
         state.iteration_wait = 0
-        run_monitor_loop_sync(state, "/tmp", on_iteration=callback, max_iterations=1)
+        run_watcher_loop_sync(state, "/tmp", on_iteration=callback, max_iterations=1)
         callback.assert_called_once_with(state)
 
-    @patch("pm_core.monitor_loop._run_monitor_iteration")
+    @patch("pm_core.watcher_loop._run_watcher_iteration")
     def test_history_capped(self, mock_iter):
         """History doesn't grow beyond _MAX_HISTORY entries."""
         mock_iter.return_value = "**READY**"
-        state = MonitorLoopState()
+        state = WatcherLoopState()
         state.iteration_wait = 0
-        run_monitor_loop_sync(state, "/tmp", max_iterations=_MAX_HISTORY + 10)
+        run_watcher_loop_sync(state, "/tmp", max_iterations=_MAX_HISTORY + 10)
         assert len(state.history) <= _MAX_HISTORY
 
-    @patch("pm_core.monitor_loop._wait_for_follow_up_verdict")
-    @patch("pm_core.monitor_loop._run_monitor_iteration")
+    @patch("pm_core.watcher_loop._wait_for_follow_up_verdict")
+    @patch("pm_core.watcher_loop._run_watcher_iteration")
     def test_input_required_polls_for_follow_up(self, mock_iter, mock_follow_up):
         mock_iter.return_value = "Need help.\n\n**INPUT_REQUIRED**\n\nCheck auth"
         mock_follow_up.return_value = "OK resolved.\n\n**READY**"
 
-        state = MonitorLoopState()
+        state = WatcherLoopState()
         state.iteration_wait = 0
-        result = run_monitor_loop_sync(state, "/tmp", max_iterations=1)
+        result = run_watcher_loop_sync(state, "/tmp", max_iterations=1)
 
         assert result.latest_verdict == VERDICT_READY
         assert result.iteration == 1
         assert result.input_required is False
         mock_follow_up.assert_called_once()
 
-    @patch("pm_core.monitor_loop._wait_for_follow_up_verdict")
-    @patch("pm_core.monitor_loop._run_monitor_iteration")
+    @patch("pm_core.watcher_loop._wait_for_follow_up_verdict")
+    @patch("pm_core.watcher_loop._run_watcher_iteration")
     def test_input_required_repeated_becomes_ready(self, mock_iter, mock_follow_up):
         """Repeated INPUT_REQUIRED in follow-up is treated as READY."""
         mock_iter.return_value = "**INPUT_REQUIRED**"
         mock_follow_up.return_value = "Still need help.\n\n**INPUT_REQUIRED**"
 
-        state = MonitorLoopState()
+        state = WatcherLoopState()
         state.iteration_wait = 0
-        result = run_monitor_loop_sync(state, "/tmp", max_iterations=1)
+        result = run_watcher_loop_sync(state, "/tmp", max_iterations=1)
 
         # Repeated INPUT_REQUIRED is converted to READY
         assert result.latest_verdict == VERDICT_READY
 
-    @patch("pm_core.monitor_loop._wait_for_follow_up_verdict")
-    @patch("pm_core.monitor_loop._run_monitor_iteration")
+    @patch("pm_core.watcher_loop._wait_for_follow_up_verdict")
+    @patch("pm_core.watcher_loop._run_watcher_iteration")
     def test_input_required_pane_died(self, mock_iter, mock_follow_up):
         mock_iter.return_value = "**INPUT_REQUIRED**"
         mock_follow_up.return_value = None  # pane disappeared
 
-        state = MonitorLoopState()
-        result = run_monitor_loop_sync(state, "/tmp")
+        state = WatcherLoopState()
+        result = run_watcher_loop_sync(state, "/tmp")
 
         assert result.latest_verdict == VERDICT_KILLED
         assert result.input_required is False
         assert result.running is False
 
 
-class TestStartMonitorLoopBackground:
-    @patch("pm_core.monitor_loop._run_monitor_iteration")
+class TestStartWatcherLoopBackground:
+    @patch("pm_core.watcher_loop._run_watcher_iteration")
     def test_runs_in_background_thread(self, mock_iter):
         mock_iter.return_value = "**READY**"
-        state = MonitorLoopState()
+        state = WatcherLoopState()
         state.iteration_wait = 0
         complete_callback = MagicMock()
-        thread = start_monitor_loop_background(
+        thread = start_watcher_loop_background(
             state, "/tmp",
             on_complete=complete_callback,
             max_iterations=1,
@@ -350,9 +350,9 @@ class TestStartMonitorLoopBackground:
         complete_callback.assert_called_once_with(state)
 
 
-# --- generate_monitor_prompt tests ---
+# --- generate_watcher_prompt tests ---
 
-class TestGenerateMonitorPrompt:
+class TestGenerateWatcherPrompt:
     def _make_data(self):
         return {
             "project": {"name": "test", "repo": "test/repo", "base_branch": "master"},
@@ -375,44 +375,44 @@ class TestGenerateMonitorPrompt:
         }
 
     def test_includes_role_section(self):
-        from pm_core.prompt_gen import generate_monitor_prompt
+        from pm_core.prompt_gen import generate_watcher_prompt
         data = self._make_data()
-        prompt = generate_monitor_prompt(data)
+        prompt = generate_watcher_prompt(data)
         assert "## Role" in prompt
         assert "autonomous monitoring" in prompt
 
     def test_includes_pr_summary(self):
-        from pm_core.prompt_gen import generate_monitor_prompt
+        from pm_core.prompt_gen import generate_watcher_prompt
         data = self._make_data()
-        prompt = generate_monitor_prompt(data)
+        prompt = generate_watcher_prompt(data)
         assert "pr-001" in prompt
         assert "Add feature" in prompt
 
     def test_includes_plan_summary(self):
-        from pm_core.prompt_gen import generate_monitor_prompt
+        from pm_core.prompt_gen import generate_watcher_prompt
         data = self._make_data()
-        prompt = generate_monitor_prompt(data)
+        prompt = generate_watcher_prompt(data)
         assert "plan-001" in prompt
         assert "Test plan" in prompt
 
     def test_includes_verdicts(self):
-        from pm_core.prompt_gen import generate_monitor_prompt
+        from pm_core.prompt_gen import generate_watcher_prompt
         data = self._make_data()
-        prompt = generate_monitor_prompt(data)
+        prompt = generate_watcher_prompt(data)
         assert "**READY**" in prompt
         assert "**INPUT_REQUIRED**" in prompt
 
     def test_includes_iteration_label(self):
-        from pm_core.prompt_gen import generate_monitor_prompt
+        from pm_core.prompt_gen import generate_watcher_prompt
         data = self._make_data()
-        prompt = generate_monitor_prompt(data, iteration=3, loop_id="ab12")
+        prompt = generate_watcher_prompt(data, iteration=3, loop_id="ab12")
         assert "(iteration 3)" in prompt
         assert "[ab12]" in prompt
 
     def test_includes_responsibilities(self):
-        from pm_core.prompt_gen import generate_monitor_prompt
+        from pm_core.prompt_gen import generate_watcher_prompt
         data = self._make_data()
-        prompt = generate_monitor_prompt(data)
+        prompt = generate_watcher_prompt(data)
         assert "Scan Active Tmux Panes" in prompt
         assert "Auto-Fix Issues" in prompt
         assert "Surface Issues Needing Human Input" in prompt
@@ -421,44 +421,44 @@ class TestGenerateMonitorPrompt:
         assert "pm Tool Self-Monitoring" in prompt
 
     def test_includes_tui_section_when_session_provided(self):
-        from pm_core.prompt_gen import generate_monitor_prompt
+        from pm_core.prompt_gen import generate_watcher_prompt
         data = self._make_data()
-        prompt = generate_monitor_prompt(data, session_name="pm-test-session")
+        prompt = generate_watcher_prompt(data, session_name="pm-test-session")
         assert "pm tui view" in prompt
         assert "pm-test-session" in prompt
 
     def test_no_tui_section_without_session(self):
-        from pm_core.prompt_gen import generate_monitor_prompt
+        from pm_core.prompt_gen import generate_watcher_prompt
         data = self._make_data()
-        prompt = generate_monitor_prompt(data)
+        prompt = generate_watcher_prompt(data)
         assert "pm tui view" not in prompt
 
 
 # --- CLI routing tests ---
 
-class TestMonitorCLI:
-    """Test pm monitor CLI routing between user and internal modes."""
+class TestWatcherCLI:
+    """Test pm watcher CLI routing between user and internal modes."""
 
-    @patch("pm_core.cli.monitor._run_user_monitor_loop")
+    @patch("pm_core.cli.watcher._run_user_watcher_loop")
     def test_no_iteration_runs_user_loop(self, mock_user_loop):
         from click.testing import CliRunner
         from pm_core.cli import cli
         runner = CliRunner()
-        result = runner.invoke(cli, ["monitor"])
+        result = runner.invoke(cli, ["watcher"])
         mock_user_loop.assert_called_once_with(120, 0)
 
-    @patch("pm_core.cli.monitor._run_user_monitor_loop")
+    @patch("pm_core.cli.watcher._run_user_watcher_loop")
     def test_custom_wait_and_max(self, mock_user_loop):
         from click.testing import CliRunner
         from pm_core.cli import cli
         runner = CliRunner()
-        result = runner.invoke(cli, ["monitor", "--wait", "60", "--max-iterations", "5"])
+        result = runner.invoke(cli, ["watcher", "--wait", "60", "--max-iterations", "5"])
         mock_user_loop.assert_called_once_with(60, 5)
 
-    @patch("pm_core.cli.monitor._create_monitor_window")
+    @patch("pm_core.cli.watcher._create_watcher_window")
     def test_iteration_provided_creates_window(self, mock_create):
         from click.testing import CliRunner
         from pm_core.cli import cli
         runner = CliRunner()
-        result = runner.invoke(cli, ["monitor", "--iteration", "3"])
+        result = runner.invoke(cli, ["watcher", "--iteration", "3"])
         mock_create.assert_called_once_with(3, "", None, auto_start_target=None, meta_pm_root=None)

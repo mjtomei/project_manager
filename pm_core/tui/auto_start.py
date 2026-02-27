@@ -67,11 +67,11 @@ def save_breadcrumb(app) -> None:
         "run_id": app._auto_start_run_id,
     }
 
-    # Persist monitor loop state if it's running
-    from pm_core.tui import monitor_ui
-    if monitor_ui.is_running(app):
-        state = app._monitor_state
-        data["monitor"] = {
+    # Persist watcher loop state if it's running
+    from pm_core.tui import watcher_ui
+    if watcher_ui.is_running(app):
+        state = app._watcher_state
+        data["watcher"] = {
             "meta_pm_root": state.meta_pm_root,
         }
 
@@ -114,17 +114,17 @@ async def consume_breadcrumb(app) -> None:
     app._update_display()
     await check_and_start(app)
 
-    # Resume monitor loop if it was running
-    monitor_data = data.get("monitor")
-    if monitor_data:
-        from pm_core.tui import monitor_ui
+    # Resume watcher loop if it was running
+    watcher_data = data.get("watcher")
+    if watcher_data:
+        from pm_core.tui import watcher_ui
         tdir = get_transcript_dir(app)
-        monitor_ui.start_monitor(
+        watcher_ui.start_watcher(
             app,
             transcript_dir=str(tdir) if tdir else None,
-            meta_pm_root=monitor_data.get("meta_pm_root"),
+            meta_pm_root=watcher_data.get("meta_pm_root"),
         )
-        _log.info("consume_breadcrumb: resumed monitor loop")
+        _log.info("consume_breadcrumb: resumed watcher loop")
 
 
 def _finalize_all_transcripts(app) -> None:
@@ -158,10 +158,10 @@ def _transitive_deps(prs: list[dict], target_id: str) -> set[str]:
 def _disable(app) -> None:
     """Disable auto-start mode (in-memory only)."""
     _finalize_all_transcripts(app)
-    # Stop the monitor loop if it's running
-    from pm_core.tui import monitor_ui
-    if monitor_ui.is_running(app):
-        monitor_ui.stop_monitor(app)
+    # Stop the watcher loop if it's running
+    from pm_core.tui import watcher_ui
+    if watcher_ui.is_running(app):
+        watcher_ui.stop_watcher(app)
     app._auto_start = False
     app._auto_start_target = None
     app._auto_start_run_id = None

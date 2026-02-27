@@ -1,10 +1,10 @@
-"""Monitor loop UI integration for the TUI.
+"""Watcher loop UI integration for the TUI.
 
-Manages starting/stopping the autonomous monitor loop and updating
-the TUI display.  The monitor runs alongside auto-start and watches
+Manages starting/stopping the autonomous watcher loop and updating
+the TUI display.  The watcher runs alongside auto-start and watches
 all active tmux panes for issues.
 
-Only one monitor loop can run at a time (unlike review loops which
+Only one watcher loop can run at a time (unlike review loops which
 are per-PR).
 """
 
@@ -12,31 +12,31 @@ from pathlib import Path
 
 from pm_core.paths import configure_logger
 from pm_core import store
-from pm_core.monitor_loop import (
-    MonitorLoopState,
-    start_monitor_loop_background,
+from pm_core.watcher_loop import (
+    WatcherLoopState,
+    start_watcher_loop_background,
     VERDICT_READY,
     VERDICT_INPUT_REQUIRED,
 )
 
-_log = configure_logger("pm.tui.monitor_ui")
+_log = configure_logger("pm.tui.watcher_ui")
 
-# Plan definitions for monitor-generated files
-MONITOR_PLANS = {
+# Plan definitions for watcher-generated files
+WATCHER_PLANS = {
     "bugs": {
         "name": "Bugs",
         "file": "bugs.md",
-        "description": "# Bugs\n\nBugs discovered by the autonomous monitor.\n\n## PRs\n",
+        "description": "# Bugs\n\nBugs discovered by the autonomous watcher.\n\n## PRs\n",
     },
     "improvements": {
         "name": "Improvements",
         "file": "improvements.md",
-        "description": "# Improvements\n\nImprovements suggested by the autonomous monitor.\n\n## PRs\n",
+        "description": "# Improvements\n\nImprovements suggested by the autonomous watcher.\n\n## PRs\n",
     },
 }
 
 
-def ensure_monitor_plans(app) -> Path | None:
+def ensure_watcher_plans(app) -> Path | None:
     """Create and register bugs.md and improvements.md as plans in the meta workdir.
 
     Returns the meta workdir's ``pm/`` root (where bugs.md lives), or None on error.
@@ -46,7 +46,7 @@ def ensure_monitor_plans(app) -> Path | None:
     try:
         meta_workdir = ensure_meta_workdir()
     except Exception:
-        _log.exception("monitor_ui: failed to ensure meta workdir")
+        _log.exception("watcher_ui: failed to ensure meta workdir")
         return None
 
     root = meta_workdir / "pm"
@@ -64,7 +64,7 @@ def ensure_monitor_plans(app) -> Path | None:
         data["plans"] = []
 
     changed = False
-    for plan_id, info in MONITOR_PLANS.items():
+    for plan_id, info in WATCHER_PLANS.items():
         if plan_id in existing_plan_ids:
             continue
         data["plans"].append({
@@ -77,16 +77,16 @@ def ensure_monitor_plans(app) -> Path | None:
         if not plan_path.exists():
             plan_path.write_text(info["description"])
         changed = True
-        _log.info("monitor_ui: created monitor plan %s (%s) in %s", plan_id, info["file"], root)
+        _log.info("watcher_ui: created watcher plan %s (%s) in %s", plan_id, info["file"], root)
 
     if changed:
         from pm_core.cli.helpers import save_and_push
-        save_and_push(data, root, "pm: register monitor plans")
+        save_and_push(data, root, "pm: register watcher plans")
 
     return root
 
 
-def load_monitor_plan_prs(app) -> int:
+def load_watcher_plan_prs(app) -> int:
     """Load PRs from bugs.md and improvements.md into the meta workdir's project.yaml.
 
     Returns the number of PRs created.
@@ -99,7 +99,7 @@ def load_monitor_plan_prs(app) -> int:
     try:
         meta_workdir = ensure_meta_workdir()
     except Exception:
-        _log.exception("monitor_ui: failed to ensure meta workdir for PR loading")
+        _log.exception("watcher_ui: failed to ensure meta workdir for PR loading")
         return 0
 
     root = meta_workdir / "pm"
@@ -114,7 +114,7 @@ def load_monitor_plan_prs(app) -> int:
     existing_titles = {p.get("title", ""): p["id"] for p in data["prs"]}
     total_created = 0
 
-    for plan_id, info in MONITOR_PLANS.items():
+    for plan_id, info in WATCHER_PLANS.items():
         plan_path = root / info["file"]
         if not plan_path.exists():
             continue
@@ -148,16 +148,16 @@ def load_monitor_plan_prs(app) -> int:
             data["prs"].append(entry)
             existing_titles[pr["title"]] = pr_id
             total_created += 1
-            _log.info("monitor_ui: loaded PR %s: %s (plan=%s) in %s", pr_id, pr["title"], plan_id, root)
+            _log.info("watcher_ui: loaded PR %s: %s (plan=%s) in %s", pr_id, pr["title"], plan_id, root)
 
     if total_created:
-        save_and_push(data, root, "pm: load monitor plan PRs")
+        save_and_push(data, root, "pm: load watcher plan PRs")
 
     return total_created
 
 
-# Icons for monitor verdicts (used in log line)
-MONITOR_VERDICT_ICONS = {
+# Icons for watcher verdicts (used in log line)
+WATCHER_VERDICT_ICONS = {
     VERDICT_READY: "[green bold]OK READY[/]",
     VERDICT_INPUT_REQUIRED: "[red bold]!! INPUT_REQUIRED[/]",
     "KILLED": "[red bold]X KILLED[/]",
@@ -170,31 +170,31 @@ MONITOR_VERDICT_ICONS = {
 # Start / stop
 # ---------------------------------------------------------------------------
 
-def start_monitor(app, transcript_dir: str | None = None,
+def start_watcher(app, transcript_dir: str | None = None,
                    meta_pm_root: str | None = None) -> None:
-    """Start the monitor loop."""
+    """Start the watcher loop."""
     from pm_core import tmux as tmux_mod
 
     if not tmux_mod.in_tmux():
-        app.log_message("Monitor requires tmux.")
+        app.log_message("Watcher requires tmux.")
         return
 
     # Don't start if already running
-    if app._monitor_state and app._monitor_state.running:
-        app.log_message("Monitor is already running.")
+    if app._watcher_state and app._watcher_state.running:
+        app.log_message("Watcher is already running.")
         return
 
     pm_root = str(store.find_project_root())
 
-    state = MonitorLoopState(
+    state = WatcherLoopState(
         auto_start_target=getattr(app, '_auto_start_target', None),
         meta_pm_root=meta_pm_root,
     )
-    app._monitor_state = state
+    app._watcher_state = state
 
-    _log.info("monitor_ui: starting monitor loop=%s", state.loop_id)
+    _log.info("watcher_ui: starting watcher loop=%s", state.loop_id)
     app.log_message(
-        "[bold]Monitor started[/] -- watching for issues",
+        "[bold]Watcher started[/] -- watching for issues",
         sticky=3,
     )
 
@@ -202,7 +202,7 @@ def start_monitor(app, transcript_dir: str | None = None,
     from pm_core.tui.review_loop_ui import _ensure_poll_timer
     _ensure_poll_timer(app)
 
-    start_monitor_loop_background(
+    start_watcher_loop_background(
         state=state,
         pm_root=pm_root,
         on_iteration=lambda s: _on_iteration_from_thread(app, s),
@@ -211,21 +211,21 @@ def start_monitor(app, transcript_dir: str | None = None,
     )
 
 
-def stop_monitor(app) -> None:
-    """Request graceful stop of the monitor loop."""
-    state = app._monitor_state
+def stop_watcher(app) -> None:
+    """Request graceful stop of the watcher loop."""
+    state = app._watcher_state
     if not state or not state.running:
-        app.log_message("No monitor loop running.")
+        app.log_message("No watcher loop running.")
         return
 
-    _log.info("monitor_ui: stopping monitor loop")
+    _log.info("watcher_ui: stopping watcher loop")
     state.stop_requested = True
-    app.log_message("[bold]Monitor stopping[/] (finishing current iteration)...")
+    app.log_message("[bold]Watcher stopping[/] (finishing current iteration)...")
 
 
 def is_running(app) -> bool:
-    """Check if the monitor loop is running."""
-    state = app._monitor_state
+    """Check if the watcher loop is running."""
+    state = app._watcher_state
     return bool(state and state.running)
 
 
@@ -233,15 +233,15 @@ def is_running(app) -> bool:
 # Background thread callbacks
 # ---------------------------------------------------------------------------
 
-def _on_iteration_from_thread(app, state: MonitorLoopState) -> None:
+def _on_iteration_from_thread(app, state: WatcherLoopState) -> None:
     """Called from the background thread after each iteration."""
-    _log.info("monitor_ui: iteration %d verdict=%s",
+    _log.info("watcher_ui: iteration %d verdict=%s",
               state.iteration, state.latest_verdict)
 
 
-def _on_complete_from_thread(app, state: MonitorLoopState) -> None:
+def _on_complete_from_thread(app, state: WatcherLoopState) -> None:
     """Called from the background thread when the loop finishes."""
-    _log.info("monitor_ui: loop complete -- verdict=%s iterations=%d",
+    _log.info("watcher_ui: loop complete -- verdict=%s iterations=%d",
               state.latest_verdict, state.iteration)
 
     # Finalize transcripts
@@ -253,7 +253,7 @@ def _on_complete_from_thread(app, state: MonitorLoopState) -> None:
         if tdir_path.is_dir():
             for p in tdir_path.iterdir():
                 if (p.is_symlink() and p.suffix == ".jsonl"
-                        and p.name.startswith("monitor-")):
+                        and p.name.startswith("watcher-")):
                     finalize_transcript(p)
 
 
@@ -261,12 +261,12 @@ def _on_complete_from_thread(app, state: MonitorLoopState) -> None:
 # Poll timer integration (called from _poll_loop_state)
 # ---------------------------------------------------------------------------
 
-def poll_monitor_state(app) -> None:
-    """Check monitor state and notify user as needed.
+def poll_watcher_state(app) -> None:
+    """Check watcher state and notify user as needed.
 
     Called from the shared 1-second poll timer in review_loop_ui.
     """
-    state = app._monitor_state
+    state = app._watcher_state
     if not state:
         return
 
@@ -275,15 +275,15 @@ def poll_monitor_state(app) -> None:
         if state.input_required and not state._ui_notified_input:
             state._ui_notified_input = True
             app.log_message(
-                "[red bold]!! Monitor INPUT_REQUIRED[/]: "
-                "check the monitor pane for details",
+                "[red bold]!! Watcher INPUT_REQUIRED[/]: "
+                "check the watcher pane for details",
                 sticky=30,
             )
     elif not state._ui_notified_done:
         state._ui_notified_done = True
-        verdict_icon = MONITOR_VERDICT_ICONS.get(state.latest_verdict, state.latest_verdict)
+        verdict_icon = WATCHER_VERDICT_ICONS.get(state.latest_verdict, state.latest_verdict)
         app.log_message(
-            f"Monitor stopped: {verdict_icon} "
+            f"Watcher stopped: {verdict_icon} "
             f"({state.iteration} iteration{'s' if state.iteration != 1 else ''})",
             sticky=10,
         )
