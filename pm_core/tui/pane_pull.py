@@ -193,6 +193,13 @@ def pull_pane_from_window(app, window_name: str) -> bool:
             _log.error("pull_pane: join_pane failed for %s", pane_id)
 
     if not moved:
+        # Clean up the dummy — no panes were moved so nothing to track
+        if dummy_pane_id and tmux_mod.pane_exists(dummy_pane_id):
+            subprocess.run(
+                tmux_mod._tmux_cmd("kill-pane", "-t", dummy_pane_id),
+                check=False,
+            )
+            _log.info("pull_pane: killed orphan dummy %s", dummy_pane_id)
         app.log_message("Failed to pull panes")
         return False
 
@@ -309,20 +316,3 @@ def _cleanup_pull(app, session: str, main_window: str | None,
         pane_layout.rebalance(session, main_window)
 
     app._pulled_panes.pop(window_name, None)
-
-
-def cleanup_dead_pulls(app) -> None:
-    """Remove entries from _pulled_panes for panes that no longer exist."""
-    pulled = getattr(app, "_pulled_panes", {})
-    for window_name in list(pulled):
-        info = pulled[window_name]
-        alive = [pid for pid in info.pulled_pane_ids
-                 if tmux_mod.pane_exists(pid)]
-        if not alive:
-            del pulled[window_name]
-            _log.info("cleanup_dead_pulls: removed dead pull for '%s'",
-                      window_name)
-        elif len(alive) < len(info.pulled_pane_ids):
-            info.pulled_pane_ids = alive
-            _log.info("cleanup_dead_pulls: trimmed dead panes from '%s'",
-                      window_name)
