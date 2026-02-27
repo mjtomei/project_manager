@@ -144,19 +144,20 @@ class TestPlansPane:
         pane = PlansPane()
         expected = {
             "a": "add",
-            "w": "breakdown",
+            "w": "work",
+            "d": "breakdown",
             "D": "deps",
             "l": "load",
-            "v": "view",
             "e": "edit",
             "c": "review",
         }
         assert pane._KEY_ACTIONS == expected
 
-    def test_breakdown_key_is_not_review(self):
-        """Regression: pressing 'w' must route to 'breakdown', not 'review'."""
+    def test_work_and_breakdown_keys(self):
+        """Verify w→work and d→breakdown key mappings."""
         pane = PlansPane()
-        assert pane._KEY_ACTIONS["w"] == "breakdown"
+        assert pane._KEY_ACTIONS["w"] == "work"
+        assert pane._KEY_ACTIONS["d"] == "breakdown"
         assert pane._KEY_ACTIONS["c"] == "review"
 
     def test_handler_routes_match_key_actions(self):
@@ -176,6 +177,11 @@ class TestPlansPane:
             assert re.search(pattern, src, re.DOTALL), (
                 f"action '{action}' does not route to 'pm plan {action}' in handle_plan_action"
             )
+        # work runs via _run_command (creates its own tmux window)
+        pattern = r'action\s*==\s*"work".*?_run_command\(.*?plan work'
+        assert re.search(pattern, src, re.DOTALL), (
+            "action 'work' does not route to 'plan work' via _run_command in handle_plan_action"
+        )
         # load runs inline (no pane) via _run_command
         pattern = r'action\s*==\s*"load".*?_run_command\(.*?plan load'
         assert re.search(pattern, src, re.DOTALL), (

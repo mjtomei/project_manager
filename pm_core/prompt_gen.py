@@ -520,6 +520,86 @@ IMPORTANT: Always end your response with the verdict keyword on its own line -- 
     return prompt.strip()
 
 
+def generate_plan_work_prompt(data: dict, plan_id: str,
+                              session_name: str | None = None) -> str:
+    """Generate a Claude Code prompt for a general-purpose plan work session.
+
+    Args:
+        data: Project data dict (from project.yaml).
+        plan_id: The plan to generate a prompt for.
+        session_name: If provided, include TUI interaction instructions
+            targeting this tmux session.
+    """
+    plan_entry = store.get_plan(data, plan_id)
+    if not plan_entry:
+        raise ValueError(f"Plan {plan_id} not found")
+
+    plan_name = plan_entry.get("name", "Untitled")
+    plan_file = plan_entry.get("file", "")
+
+    # Read plan file content and session notes
+    plan_content = ""
+    notes_block = ""
+    try:
+        root = store.find_project_root()
+        plan_path = root / plan_file
+        if plan_path.exists():
+            plan_content = plan_path.read_text()
+        notes_block = notes.notes_section(root)
+    except FileNotFoundError:
+        pass
+
+    # Build PR context
+    all_prs = data.get("prs") or []
+    plan_prs = [pr for pr in all_prs if pr.get("plan") == plan_id]
+    other_prs = [pr for pr in all_prs if pr.get("plan") != plan_id]
+
+    plan_pr_lines = []
+    for pr in plan_prs:
+        status = pr.get("status", "pending")
+        deps = pr.get("depends_on") or []
+        dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
+        plan_pr_lines.append(f"- {pr['id']}: {pr.get('title', '???')} [{status}]{dep_str}")
+
+    plan_prs_section = "\n".join(plan_pr_lines) if plan_pr_lines else "(no PRs linked to this plan)"
+
+    other_prs_section = ""
+    if other_prs:
+        lines = []
+        for pr in other_prs:
+            status = pr.get("status", "pending")
+            lines.append(f"- {pr['id']}: {pr.get('title', '???')} [{status}] (plan: {pr.get('plan', '?')})")
+        other_prs_section = "\n## Other PRs\n" + "\n".join(lines) + "\n"
+
+    tui_block = tui_section(session_name) if session_name else ""
+    beginner_block = _beginner_addendum()
+    cleanup_block = _auto_cleanup_addendum()
+
+    prompt = f"""You're working on plan {plan_id}: "{plan_name}"
+
+This session is managed by `pm`. Run `pm help` to see available commands.
+
+## Plan
+{plan_content if plan_content else f"(plan file: {plan_file})"}
+
+## Project State
+PRs in this plan:
+{plan_prs_section}
+{other_prs_section}
+## Available Commands
+- `pm pr list` — list PRs and status
+- `pm plan list` — list plans
+- `pm pr graph` — show PR dependency tree
+- `pm status` — show project overview
+{tui_block}
+## Important
+Do not run commands that spawn new Claude sessions (pm pr start, pm plan add, etc.).
+Use `pm tui send` to trigger TUI actions instead.
+{notes_block}{beginner_block}{cleanup_block}
+The user will tell you what they need."""
+    return prompt.strip()
+
+
 def generate_review_loop_prompt(data: dict, pr_id: str) -> str:
     """Generate a review prompt for the automated review loop.
 

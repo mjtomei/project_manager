@@ -11,8 +11,10 @@ import click
 from pm_core import store, notes
 from pm_core.plan_parser import parse_plan_prs
 from pm_core import review as review_mod
-from pm_core.claude_launcher import find_claude, launch_claude, clear_session
+from pm_core.claude_launcher import find_claude, launch_claude, clear_session, build_claude_shell_cmd
 from pm_core.prompt_gen import tui_section
+from pm_core import git_ops
+from pm_core import tmux as tmux_mod
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
@@ -23,6 +25,8 @@ from pm_core.cli.helpers import (
     _pr_display_id,
     _require_plan,
     _resolve_repo_dir,
+    _resolve_repo_id,
+    _workdirs_dir,
     save_and_push,
     state_root,
     trigger_tui_refresh,
@@ -422,6 +426,102 @@ Let them know it is safe to close this pane — loading runs instantly without a
         click.echo("Claude CLI not found. Copy-paste this prompt into Claude Code:")
         click.echo()
         click.echo(f"---\n{prompt}\n---")
+
+
+@plan.command("work")
+@click.argument("plan_id", default=None, required=False)
+@click.option("--fresh", is_flag=True, default=False, help="Kill existing window and start fresh")
+def plan_work(plan_id: str | None, fresh: bool):
+    """Launch a general-purpose Claude session scoped to a plan.
+
+    Creates a workdir for the plan (or reuses an existing one) and opens
+    a Claude session with full project context in a tmux window.
+
+    If PLAN_ID is omitted, auto-selects when there's exactly one plan.
+    """
+    root = state_root()
+    data = store.load(root)
+
+    plan_id = _auto_select_plan(data, plan_id)
+    plan_entry = _require_plan(data, plan_id)
+
+    pm_session = _get_pm_session()
+
+    # Fast path: if window already exists, switch to it (or kill if --fresh)
+    window_name = f"work-{plan_id}"
+    if pm_session and tmux_mod.session_exists(pm_session):
+        existing = tmux_mod.find_window_by_name(pm_session, window_name)
+        if existing:
+            if fresh:
+                tmux_mod.kill_window(pm_session, existing["id"])
+                click.echo(f"Killed existing window '{window_name}'")
+            else:
+                tmux_mod.select_window(pm_session, existing["id"])
+                click.echo(f"Switched to existing window '{window_name}' (session: {pm_session})")
+                return
+
+    # Create or reuse workdir
+    existing_workdir = plan_entry.get("workdir")
+    if existing_workdir and Path(existing_workdir).exists():
+        work_path = Path(existing_workdir)
+        click.echo(f"Reusing workdir: {work_path}")
+        if git_ops.is_git_repo(work_path):
+            click.echo("Updating workdir...")
+            git_ops.pull_rebase(work_path)
+    else:
+        repo_url = data["project"]["repo"]
+        base_branch = data["project"].get("base_branch", "master")
+        project_dir = _workdirs_dir(data)
+        project_dir.mkdir(parents=True, exist_ok=True)
+
+        work_path = project_dir / f"plan-work-{plan_id}"
+        if work_path.exists():
+            click.echo(f"Reusing workdir: {work_path}")
+            if git_ops.is_git_repo(work_path):
+                click.echo("Updating workdir...")
+                git_ops.pull_rebase(work_path)
+        else:
+            click.echo(f"Cloning {repo_url}...")
+            git_ops.clone(repo_url, work_path, branch=base_branch)
+            _resolve_repo_id(data, work_path, root)
+
+        plan_entry["workdir"] = str(work_path)
+        save_and_push(data, root, f"pm: plan work {plan_id}")
+        trigger_tui_refresh()
+
+    click.echo(f"Work directory: {work_path}")
+
+    from pm_core import prompt_gen
+    prompt = prompt_gen.generate_plan_work_prompt(data, plan_id, session_name=pm_session)
+
+    claude = find_claude()
+    if not claude:
+        click.echo(f"\n{'='*60}")
+        click.echo("CLAUDE PROMPT:")
+        click.echo(f"{'='*60}\n")
+        click.echo(prompt)
+        return
+
+    # Try to launch in the pm tmux session
+    if pm_session and tmux_mod.session_exists(pm_session):
+        cmd = build_claude_shell_cmd(prompt=prompt, cwd=str(work_path))
+        try:
+            tmux_mod.new_window(pm_session, window_name, cmd, str(work_path))
+            win = tmux_mod.find_window_by_name(pm_session, window_name)
+            if win:
+                tmux_mod.set_shared_window_size(pm_session, win["id"])
+            click.echo(f"Launched Claude in tmux window '{window_name}' (session: {pm_session})")
+            return
+        except Exception as e:
+            click.echo(f"Failed to create tmux window: {e}", err=True)
+            click.echo("Launching Claude in current terminal...")
+
+    # Fall through: launch interactively in current terminal
+    session_key = f"plan:work:{plan_id}"
+    if fresh:
+        clear_session(root, session_key)
+    click.echo("Launching Claude...")
+    launch_claude(prompt, cwd=str(work_path), session_key=session_key, pm_root=root, resume=not fresh)
 
 
 @plan.command("deps")
