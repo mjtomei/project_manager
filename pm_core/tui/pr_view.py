@@ -60,7 +60,6 @@ def start_pr(app) -> None:
     from pm_core.tui.tech_tree import TechTree
     from pm_core.paths import get_global_setting
     from pm_core.tui import pane_pull
-    from pm_core import tmux as tmux_mod
 
     fresh = app._consume_z()
     pull_mode = pane_pull.should_pull(app, app._consume_a())
@@ -116,7 +115,6 @@ def done_pr(app, fresh: bool = False, pull_mode: bool = False) -> None:
     """Mark the selected PR as in_review and open a review window."""
     from pm_core.tui.tech_tree import TechTree
     from pm_core.tui import pane_pull
-    from pm_core import tmux as tmux_mod
 
     tree = app.query_one("#tech-tree", TechTree)
     pr_id = tree.selected_pr_id

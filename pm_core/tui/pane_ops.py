@@ -187,6 +187,7 @@ def find_editor() -> str:
 def edit_plan(app) -> None:
     """Edit the selected PR in an interactive editor."""
     from pm_core.tui.tech_tree import TechTree
+    app._consume_a()  # clear stale prefix
     fresh = app._consume_z()
     _log.info("edit_plan fresh=%s", fresh)
     tree = app.query_one("#tech-tree", TechTree)
@@ -200,6 +201,7 @@ def edit_plan(app) -> None:
 def view_plan(app) -> None:
     """Open the plan file associated with the selected PR in a pane."""
     from pm_core.tui.tech_tree import TechTree
+    app._consume_a()  # clear stale prefix
     fresh = app._consume_z()
     _log.info("view_plan fresh=%s", fresh)
     tree = app.query_one("#tech-tree", TechTree)
@@ -229,6 +231,7 @@ def view_plan(app) -> None:
 
 def launch_notes(app) -> None:
     """Launch the notes editor in a pane."""
+    app._consume_a()  # clear stale prefix
     fresh = app._consume_z()
     _log.info("launch_notes fresh=%s", fresh)
     root = app._root or (Path.cwd() / "pm")
@@ -238,6 +241,7 @@ def launch_notes(app) -> None:
 
 def view_log(app) -> None:
     """View the TUI log file in a pane."""
+    app._consume_a()  # clear stale prefix
     fresh = app._consume_z()
     _log.info("view_log fresh=%s", fresh)
     log_path = command_log_file()
@@ -270,6 +274,7 @@ def launch_meta(app, pull_mode: bool = False) -> None:
 
 def launch_guide(app) -> None:
     """Launch the guide (setup or assist depending on project state)."""
+    app._consume_a()  # clear stale prefix
     fresh = app._consume_z()
     _log.info("launch_guide fresh=%s", fresh)
     launch_pane(app, "pm guide", "guide", fresh=fresh)
@@ -277,6 +282,7 @@ def launch_guide(app) -> None:
 
 def launch_claude(app) -> None:
     """Launch an interactive Claude session in the project directory."""
+    app._consume_a()  # clear stale prefix
     fresh = app._consume_z()
     from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
     claude = find_claude()
@@ -324,6 +330,7 @@ The user will tell you what they need."""
 
 def launch_discuss(app) -> None:
     """Launch a Claude pane to discuss the pm tool and answer questions about it."""
+    app._consume_a()  # clear stale prefix
     fresh = app._consume_z()
     _log.info("launch_discuss fresh=%s", fresh)
     from pm_core.claude_launcher import find_claude, build_claude_shell_cmd

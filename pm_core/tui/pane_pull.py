@@ -257,15 +257,8 @@ def push_pane_back(app, window_name: str) -> bool:
 
     pr_window_index = win["index"]
 
-    # Kill the dummy pane first
-    if tmux_mod.pane_exists(pull_info.dummy_pane_id):
-        subprocess.run(
-            tmux_mod._tmux_cmd("kill-pane", "-t", pull_info.dummy_pane_id),
-            check=False,
-        )
-        _log.info("push_pane: killed dummy %s", pull_info.dummy_pane_id)
-
-    # Move each pulled pane back to the command window
+    # Move each pulled pane back to the command window BEFORE killing the
+    # dummy — the dummy is the only pane keeping the window alive.
     pushed = 0
     for pane_id in pull_info.pulled_pane_ids:
         if not tmux_mod.pane_exists(pane_id):
@@ -278,6 +271,14 @@ def push_pane_back(app, window_name: str) -> bool:
             _log.info("push_pane: moved %s back to '%s'", pane_id, window_name)
         else:
             _log.error("push_pane: join_pane back failed for %s", pane_id)
+
+    # Now kill the dummy pane (no longer needed to keep the window alive)
+    if tmux_mod.pane_exists(pull_info.dummy_pane_id):
+        subprocess.run(
+            tmux_mod._tmux_cmd("kill-pane", "-t", pull_info.dummy_pane_id),
+            check=False,
+        )
+        _log.info("push_pane: killed dummy %s", pull_info.dummy_pane_id)
 
     # Cleanup main window registrations and rebalance
     _cleanup_pull(app, session, main_window, window_name, pull_info)
