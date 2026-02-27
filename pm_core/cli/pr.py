@@ -35,7 +35,6 @@ from pm_core.cli.helpers import (
     _resolve_pr_id,
     _resolve_repo_dir,
     _resolve_repo_id,
-    _touch_updated_at,
     _workdirs_dir,
     kill_pr_windows,
     save_and_push,
@@ -314,7 +313,7 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
             click.echo("No changes made.")
             raise SystemExit(0)
 
-    _touch_updated_at(pr_entry)
+    _record_status_timestamp(pr_entry)
     save_and_push(data, root, f"pm: edit {pr_id}")
     click.echo(f"Updated {pr_id}: {', '.join(changes)}")
     trigger_tui_refresh()
@@ -1510,7 +1509,7 @@ def pr_note_add(pr_id: str, text: str):
     notes.append({"id": note_id, "text": text, "created_at": created_at, "last_edited": created_at})
     pr_entry["notes"] = notes
 
-    _touch_updated_at(pr_entry)
+    _record_status_timestamp(pr_entry)
     save_and_push(data, root, f"pm: note on {pr_id}")
     click.echo(f"Added note {note_id} to {_pr_display_id(pr_entry)}")
     trigger_tui_refresh()
@@ -1553,7 +1552,7 @@ def pr_note_edit(pr_id: str, note_id: str, text: str):
     target["text"] = text
     target["last_edited"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    _touch_updated_at(pr_entry)
+    _record_status_timestamp(pr_entry)
     save_and_push(data, root, f"pm: edit note on {pr_id}")
     click.echo(f"Updated note {note_id} → {new_id} on {_pr_display_id(pr_entry)}")
     trigger_tui_refresh()
@@ -1599,7 +1598,7 @@ def pr_note_delete(pr_id: str, note_id: str):
                 click.echo(f"  {n['id']}: {n['text']}", err=True)
         raise SystemExit(1)
 
-    _touch_updated_at(pr_entry)
+    _record_status_timestamp(pr_entry)
     save_and_push(data, root, f"pm: delete note on {pr_id}")
     click.echo(f"Deleted note {note_id} from {_pr_display_id(pr_entry)}")
     trigger_tui_refresh()

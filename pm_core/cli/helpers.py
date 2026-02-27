@@ -258,13 +258,15 @@ def _make_pr_entry(
     }
 
 
-def _record_status_timestamp(pr_entry: dict, status: str) -> None:
-    """Record a timestamp on *pr_entry* for a status transition.
+def _record_status_timestamp(pr_entry: dict, status: str | None = None) -> None:
+    """Record timestamps on *pr_entry*.
+
+    Always sets ``updated_at``.  When *status* is provided, also sets
+    the status-specific timestamp:
 
     * ``started_at`` — set once on the first transition to ``in_progress``.
     * ``reviewed_at`` — updated each time the PR enters ``in_review``.
     * ``merged_at`` — set when the PR is ``merged``.
-    * ``updated_at`` — always updated on any status change.
     """
     now = datetime.now(timezone.utc).isoformat()
     pr_entry["updated_at"] = now
@@ -274,11 +276,6 @@ def _record_status_timestamp(pr_entry: dict, status: str) -> None:
         pr_entry["reviewed_at"] = now
     elif status == "merged":
         pr_entry["merged_at"] = now
-
-
-def _touch_updated_at(pr_entry: dict) -> None:
-    """Set ``updated_at`` to now (UTC).  Called on any PR modification."""
-    pr_entry["updated_at"] = datetime.now(timezone.utc).isoformat()
 
 
 def save_and_push(data: dict, root: Path, message: str = "pm: update state") -> None:

@@ -12,7 +12,6 @@ from pm_core.cli.helpers import (
     _pr_id_sort_key,
     _record_status_timestamp,
     _resolve_pr_id,
-    _touch_updated_at,
 )
 
 
@@ -262,21 +261,28 @@ class TestRecordStatusTimestamp:
 
 
 # ---------------------------------------------------------------------------
-# _touch_updated_at
+# _record_status_timestamp without status (updated_at only)
 # ---------------------------------------------------------------------------
 
 
-class TestTouchUpdatedAt:
-    """Tests for _touch_updated_at."""
+class TestRecordStatusTimestampNoStatus:
+    """Tests for _record_status_timestamp called without a status arg."""
 
     def test_sets_updated_at(self):
         entry = {}
-        _touch_updated_at(entry)
+        _record_status_timestamp(entry)
         assert "updated_at" in entry
         dt = datetime.fromisoformat(entry["updated_at"])
         assert dt.tzinfo is not None
 
     def test_overwrites_existing(self):
         entry = {"updated_at": "2024-01-01T00:00:00+00:00"}
-        _touch_updated_at(entry)
+        _record_status_timestamp(entry)
         assert entry["updated_at"] != "2024-01-01T00:00:00+00:00"
+
+    def test_does_not_set_status_timestamps(self):
+        entry = {}
+        _record_status_timestamp(entry)
+        assert "started_at" not in entry
+        assert "reviewed_at" not in entry
+        assert "merged_at" not in entry
