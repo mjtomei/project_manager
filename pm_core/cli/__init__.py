@@ -441,12 +441,13 @@ def _getting_started_text() -> str:
   Or use individual CLI commands:
      pm init                     Initialize pm/ directory
      pm plan add "name"          Add a plan (launches Claude)
+     pm plan work                Open Claude session for plan-level work
      pm plan breakdown           Break plan into PRs (launches Claude)
      pm plan review              Review plan consistency (launches Claude)
      pm plan load                Load PRs from plan file
 
   In the TUI, press p to open the plans view.  Plan action keys:
-     a=add  w=breakdown  c=review  l=load  e=edit  v=view
+     a=add  w=work  d=breakdown  c=review  l=load  e=edit  D=deps
 
   Working with PRs:
      pm pr start                 Clone, branch, launch Claude session
