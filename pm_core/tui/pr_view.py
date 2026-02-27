@@ -56,14 +56,26 @@ def handle_pr_selected(app, pr_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 def start_pr(app) -> None:
-    """Start working on the selected PR."""
+    """Start working on the selected PR.
+
+    z prefix meanings:
+      (none) = normal start (companion if global setting on)
+      z      = start with companion pane
+      zz     = fresh start (kill existing window)
+      zzz    = fresh start with companion pane
+    """
     from pm_core.tui.tech_tree import TechTree
     from pm_core.paths import get_global_setting
 
-    fresh = app._consume_z()
+    z = app._consume_z()
+    # z=0: normal, z=1: companion, z>=2: fresh, z=3: fresh+companion
+    companion = z == 1 or z == 3
+    fresh = z >= 2
+
     tree = app.query_one("#tech-tree", TechTree)
     pr_id = tree.selected_pr_id
-    _log.info("action: start_pr selected=%s fresh=%s", pr_id, fresh)
+    _log.info("action: start_pr selected=%s fresh=%s companion=%s z=%d",
+              pr_id, fresh, companion, z)
     if not pr_id:
         _log.info("action: start_pr - no PR selected")
         app.log_message("No PR selected")
@@ -82,11 +94,22 @@ def start_pr(app) -> None:
                 app.log_error("Blocked", f"{pr_id} has unmerged deps: {', '.join(unmerged)}")
                 return
 
-    action_key = f"Starting {pr_id}" + (" (fresh)" if fresh else "")
+    suffix = ""
+    if fresh:
+        suffix += " (fresh)"
+    if companion:
+        suffix += " (companion)"
+    action_key = f"Starting {pr_id}{suffix}"
     if not guard_pr_action(app, action_key):
         return
     app._inflight_pr_action = action_key
-    cmd = f"pr start --fresh {pr_id}" if fresh else f"pr start {pr_id}"
+    cmd_parts = ["pr start"]
+    if fresh:
+        cmd_parts.append("--fresh")
+    if companion:
+        cmd_parts.append("--companion")
+    cmd_parts.append(pr_id)
+    cmd = " ".join(cmd_parts)
     run_command(app, cmd, working_message=action_key, action_key=action_key)
 
 
@@ -109,20 +132,32 @@ def done_pr(app, fresh: bool = False) -> None:
 
 
 def merge_pr(app) -> None:
-    """Merge the selected PR."""
+    """Merge the selected PR.
+
+    z prefix meanings:
+      (none) = normal merge (companion if global setting on)
+      z+     = merge with companion pane on conflict resolution window
+    """
     from pm_core.tui.tech_tree import TechTree
+
+    z = app._consume_z()
+    companion = z >= 1
 
     tree = app.query_one("#tech-tree", TechTree)
     pr_id = tree.selected_pr_id
-    _log.info("action: merge_pr selected=%s", pr_id)
+    _log.info("action: merge_pr selected=%s companion=%s z=%d", pr_id, companion, z)
     if not pr_id:
         app.log_message("No PR selected")
         return
-    action_key = f"Merging {pr_id}"
+    suffix = " (companion)" if companion else ""
+    action_key = f"Merging {pr_id}{suffix}"
     if not guard_pr_action(app, action_key):
         return
     app._inflight_pr_action = action_key
-    run_command(app, f"pr merge --resolve-window {pr_id}", working_message=action_key, action_key=action_key)
+    cmd = f"pr merge --resolve-window {pr_id}"
+    if companion:
+        cmd += " --companion"
+    run_command(app, cmd, working_message=action_key, action_key=action_key)
 
 
 # ---------------------------------------------------------------------------
