@@ -678,11 +678,11 @@ def _add_companion_pane(pm_session: str, window_info: dict, workdir: str,
     # Check if companion already exists (2+ panes = already has one)
     panes = tmux_mod.get_pane_indices(pm_session, win_index)
     if len(panes) >= 2:
-        click.echo(f"Window already has a companion pane.")
+        click.echo("Window already has a companion pane.")
         return
 
     if not panes:
-        click.echo(f"Could not find panes in window.")
+        click.echo("Could not find panes in window.")
         return
 
     claude_pane = panes[0][0]
@@ -708,7 +708,7 @@ def _add_companion_pane(pm_session: str, window_info: dict, workdir: str,
     pane_registry.save_registry(pm_session, reg)
 
     pane_layout.rebalance(pm_session, win_id)
-    click.echo(f"Added companion pane.")
+    click.echo("Added companion pane.")
 
 
 def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
