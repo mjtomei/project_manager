@@ -413,8 +413,7 @@ def _finalize_detected_merge(app, pr_id: str, merge_key: str,
             pass
 
     # Clear merge input_required state if it was set
-    if hasattr(app, '_merge_input_required_prs'):
-        app._merge_input_required_prs.discard(pr_id)
+    app._merge_input_required_prs.discard(pr_id)
 
     _log.info("merge_verdict: %s directly marked as merged", pr_id)
     app.log_message(f"[green bold]✓ Merged[/] {pr_id} (conflict resolved by Claude)")
