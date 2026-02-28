@@ -420,14 +420,14 @@ class TestFinalizeDetectedMerge:
     @patch("pm_core.tui.auto_start.check_and_start")
     def test_does_not_call_attempt_merge(self, mock_check_start,
                                           mock_timestamp, mock_save, mock_kill):
-        """_finalize_detected_merge does NOT call _attempt_merge_and_check (no infinite loop)."""
+        """_finalize_detected_merge does NOT call _attempt_merge (no infinite loop)."""
         from pm_core.tui.review_loop_ui import _finalize_detected_merge
 
         pr = _make_pr("pr-001", status="in_review")
         app = _make_app(prs=[pr])
         tracker = MagicMock()
 
-        with patch("pm_core.tui.review_loop_ui._attempt_merge_and_check") as mock_attempt:
+        with patch("pm_core.tui.review_loop_ui._attempt_merge") as mock_attempt:
             _finalize_detected_merge(app, "pr-001", "merge:pr-001",
                                       tracker, set(), set())
             mock_attempt.assert_not_called()

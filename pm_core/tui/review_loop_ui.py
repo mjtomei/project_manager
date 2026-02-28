@@ -363,11 +363,6 @@ def _attempt_merge(app, pr_id: str, *, resolve_window: bool = False) -> bool:
     return bool(merged_pr and merged_pr.get("status") == "merged")
 
 
-# Keep old names as aliases for backward compatibility with tests
-_attempt_merge_and_check = lambda app, pr_id: _attempt_merge(app, pr_id, resolve_window=True)
-_attempt_merge_no_window = lambda app, pr_id: _attempt_merge(app, pr_id, resolve_window=False)
-
-
 def _on_merge_success(app, pr_id: str, merge_key: str, tracker,
                       pending_merges: set, active_merge_keys: set) -> None:
     """Clean up tracking state and kick off dependents after a successful merge.
@@ -436,8 +431,6 @@ def _handle_merge_input_required(app, pr_id: str, merge_key: str) -> None:
     verdict detection will finalize.
     """
     # Track which PRs have merge input_required (for TUI display)
-    if not hasattr(app, '_merge_input_required_prs'):
-        app._merge_input_required_prs = set()
     app._merge_input_required_prs.add(pr_id)
 
     # Reset the verdict tracker so we can detect MERGED after the user helps
