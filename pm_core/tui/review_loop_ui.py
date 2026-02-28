@@ -317,21 +317,8 @@ def _maybe_auto_merge(app, pr_id: str) -> None:
     _log.info("auto_merge: review passed for %s, merging", pr_id)
     app.log_message(f"Auto-merge: {pr_id} review passed, merging")
 
-    from pm_core.tui import pr_view
-    merge_cmd = f"pr merge --resolve-window --background"
-    tdir = _auto_start.get_transcript_dir(app)
-    if tdir:
-        merge_cmd += f" --transcript {tdir / f'merge-{pr_id}.jsonl'}"
-    merge_cmd += f" {pr_id}"
-    pr_view.run_command(app, merge_cmd)
-
-    # Reload state — the subprocess modified project.yaml on disk
-    # but _run_command_sync doesn't update the in-memory data.
-    app._data = store.load(app._root)
-    merged_pr = store.get_pr(app._data, pr_id)
-    if merged_pr and merged_pr.get("status") == "merged":
+    if _attempt_merge_and_check(app, pr_id):
         _log.info("auto_merge: %s merged, starting dependents", pr_id)
-        # check_and_start is async — schedule it via run_worker
         app.run_worker(_auto_start.check_and_start(app))
     else:
         # Merge failed (conflict) — a resolve window was launched.
