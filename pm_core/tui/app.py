@@ -584,7 +584,7 @@ class ProjectManagerApp(App):
             pr_view.done_pr(self, pull_mode=pull_mode)
         elif z == 1:
             # z d = fresh done (kill existing review window), OR stop loop if running
-            review_loop_ui.stop_loop_or_fresh_done(self)
+            review_loop_ui.stop_loop_or_fresh_done(self, pull_mode=pull_mode)
         elif z == 2:
             # zz d = start review loop (stops on PASS or PASS_WITH_SUGGESTIONS),
             #        or stop loop if running

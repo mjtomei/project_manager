@@ -55,7 +55,7 @@ def _get_selected_pr(app) -> tuple[str | None, dict | None]:
 # z d  — fresh done or stop loop
 # ---------------------------------------------------------------------------
 
-def stop_loop_or_fresh_done(app) -> None:
+def stop_loop_or_fresh_done(app, pull_mode: bool = False) -> None:
     """Handle ``z d``: stop a running loop, or do a fresh done."""
     pr_id, pr = _get_selected_pr(app)
     if not pr_id:
@@ -68,7 +68,7 @@ def stop_loop_or_fresh_done(app) -> None:
     else:
         # Original z d behaviour: fresh done
         from pm_core.tui import pr_view
-        pr_view.done_pr(app, fresh=True)
+        pr_view.done_pr(app, fresh=True, pull_mode=pull_mode)
 
 
 # ---------------------------------------------------------------------------
