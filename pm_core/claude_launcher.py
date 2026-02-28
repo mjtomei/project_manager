@@ -5,7 +5,6 @@ import logging
 import os
 import shutil
 import subprocess
-import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -294,18 +293,8 @@ def build_claude_shell_cmd(
             cmd += f" --session-id {session_id}"
 
     if prompt and not resume:
-        # Tmux has a command-length limit (~64KB).  When the prompt is large
-        # (e.g. plan content with many PRs), write it to a temp file and use
-        # shell expansion so the tmux command stays short.
-        _PROMPT_FILE_THRESHOLD = 16_000  # bytes – well under tmux limit
-        if len(prompt) > _PROMPT_FILE_THRESHOLD:
-            fd, prompt_file = tempfile.mkstemp(prefix="pm-prompt-", suffix=".txt")
-            with os.fdopen(fd, "w") as f:
-                f.write(prompt)
-            cmd += f' "$(cat {prompt_file})"'
-        else:
-            escaped = prompt.replace("'", "'\\''")
-            cmd += f" '{escaped}'"
+        escaped = prompt.replace("'", "'\\''")
+        cmd += f" '{escaped}'"
 
     log_shell_command(cmd, prefix="claude")
     return cmd
