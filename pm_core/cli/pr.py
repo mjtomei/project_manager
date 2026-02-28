@@ -967,16 +967,19 @@ def _pull_after_github_merge(data: dict, pr_entry: dict, repo_dir: str,
         return True
 
     repo_path = Path(repo_dir)
-    stashed = False
 
-    # Stash uncommitted changes if dirty
+    # Abort if repo has uncommitted changes — let the user (or a merge
+    # window) decide how to handle them rather than silently stashing.
     if _workdir_is_dirty(repo_path):
-        click.echo("Stashing uncommitted changes before pull...")
-        stash_result = git_ops.run_git("stash", cwd=repo_dir, check=False)
-        if stash_result.returncode == 0 and "No local changes" not in stash_result.stdout:
-            stashed = True
-        else:
-            click.echo("Warning: Could not stash changes.", err=True)
+        error_msg = f"Repo has uncommitted changes: {repo_dir}"
+        click.echo(error_msg, err=True)
+        click.echo("Commit or stash your changes before pulling.", err=True)
+        if resolve_window:
+            _launch_merge_window(data, pr_entry, error_msg,
+                                 background=background, transcript=transcript,
+                                 cwd=repo_dir)
+            return False
+        return False
 
     # Fetch and pull base branch
     git_ops.run_git("fetch", "origin", cwd=repo_dir, check=False)
@@ -995,24 +998,6 @@ def _pull_after_github_merge(data: dict, pr_entry: dict, repo_dir: str,
         return False
     else:
         click.echo(f"Pulled latest {base_branch}.")
-
-    # Pop stash
-    if stashed:
-        pop_result = git_ops.run_git("stash", "pop", cwd=repo_dir, check=False)
-        if pop_result.returncode != 0:
-            error_detail = (pop_result.stdout.strip() + "\n"
-                            + pop_result.stderr.strip()).strip()
-            error_msg = (f"Conflict applying stashed changes in {repo_dir} "
-                         f"after GitHub merge:\n{error_detail}")
-            click.echo(error_msg, err=True)
-            if resolve_window:
-                _launch_merge_window(data, pr_entry, error_msg,
-                                     background=background, transcript=transcript,
-                                     cwd=repo_dir)
-                return False
-            click.echo("Resolve conflicts manually, then re-run 'pm pr merge' to finalize.", err=True)
-            return False
-        click.echo("Restored stashed changes.")
 
     return True
 
@@ -1058,15 +1043,18 @@ def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
         click.echo("Pull manually when ready, then re-run 'pm pr merge'.", err=True)
         return False
 
-    # On base branch — need to update the working tree too
-    stashed = False
+    # On base branch — need to update the working tree too.
+    # Abort if repo has uncommitted changes rather than silently stashing.
     if _workdir_is_dirty(repo_path):
-        click.echo("Stashing uncommitted changes before pull...")
-        stash_r = git_ops.run_git("stash", cwd=repo_dir, check=False)
-        if stash_r.returncode == 0 and "No local changes" not in stash_r.stdout:
-            stashed = True
-        else:
-            click.echo("Warning: Could not stash changes.", err=True)
+        error_msg = f"Repo has uncommitted changes: {repo_dir}"
+        click.echo(error_msg, err=True)
+        click.echo("Commit or stash your changes before pulling.", err=True)
+        if resolve_window:
+            _launch_merge_window(data, pr_entry, error_msg,
+                                 background=background, transcript=transcript,
+                                 cwd=repo_dir)
+            return False
+        return False
 
     fetch_r = git_ops.run_git("fetch", workdir, base_branch,
                               cwd=repo_dir, check=False)
@@ -1097,25 +1085,6 @@ def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
         return False
 
     click.echo(f"Updated {base_branch} in repo.")
-
-    # Restore stashed changes
-    if stashed:
-        pop_r = git_ops.run_git("stash", "pop", cwd=repo_dir, check=False)
-        if pop_r.returncode != 0:
-            error_detail = (pop_r.stdout.strip() + "\n"
-                            + pop_r.stderr.strip()).strip()
-            error_msg = (f"Conflict restoring stashed changes after merge:\n"
-                         f"{error_detail}")
-            click.echo(error_msg, err=True)
-            if resolve_window:
-                _launch_merge_window(data, pr_entry, error_msg,
-                                     background=background, transcript=transcript,
-                                     cwd=repo_dir)
-                return False
-            click.echo("Resolve conflicts manually.", err=True)
-            return False
-        click.echo("Restored stashed changes.")
-
     return True
 
 
