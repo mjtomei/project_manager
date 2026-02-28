@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-409b580
+  active_pr: pr-a3a24e5
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-02-20T02:43:08.956779+00:00'
@@ -1537,7 +1537,7 @@ prs:
   plan: plan-002
   title: Cross-source integration and comparison table
   branch: pm/pr-409b580-run-benchmarks-and-publish-comparison-results
-  status: in_review
+  status: merged
   depends_on:
   - pr-6ef084e
   - pr-3060c7e
@@ -1561,6 +1561,7 @@ prs:
   started_at: '2026-02-26T22:21:18.483490+00:00'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-409b580-run-benchmarks-and-publish-compariso-4ce00db9
   reviewed_at: '2026-02-26T23:05:20.901290+00:00'
+  merged_at: '2026-02-26T23:11:43.990481+00:00'
 - id: pr-2a8c3a5
   plan: null
   title: Fix TUI scroll-into-view and improve PR node layout width and spacing
@@ -1628,7 +1629,7 @@ prs:
   plan: null
   title: Single-window focus mode with pane pull/push prefix key
   branch: pm/pr-ff68ef5-single-window-focus-mode-with-pane-pull-push-prefi
-  status: in_progress
+  status: in_review
   depends_on: []
   description: 'Add an ''a'' prefix key for pulling panes from command windows into
     the main window and pushing them back.
@@ -1677,7 +1678,141 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/89
   gh_pr_number: 89
   started_at: '2026-02-26T15:41:30.621658+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-02-27T10:21:50.275823+00:00'
   merged_at: null
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ff68ef5-single-window-focus-mode-with-pane-p-b6481329
+- id: pr-0f4baf1
+  plan: null
+  title: 'Fix local backend merge: pull from workdir instead of push'
+  branch: pm/pr-0f4baf1-fix-local-backend-merge-pull-from-workdir-instead-
+  status: merged
+  depends_on: []
+  description: 'For local backend, git push origin base_branch fails when origin is
+    a non-bare repo with the branch checked out. Replace push with fetch+ff-merge
+    from the workdir into the repo dir. Add merge window error handling for local
+    and vanilla backends matching the GitHub backend pattern. Implementation is on
+    branch: pm/fix-local-merge-push'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/95
+  gh_pr_number: 95
+  started_at: '2026-02-27T03:20:01.028962+00:00'
+  reviewed_at: '2026-02-27T03:27:52.125503+00:00'
+  merged_at: '2026-02-27T10:13:09.267401+00:00'
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0f4baf1-fix-local-backend-merge-pull-from-wo-2b310716
+- id: pr-f81ca27
+  plan: null
+  title: Add timestamp tracking and time-based PR sorting in TUI
+  branch: pm/pr-f81ca27-add-timestamp-tracking-and-time-based-pr-sorting-i
+  status: in_review
+  depends_on: []
+  description: 'We already track started_at, reviewed_at, and merged_at timestamps
+    on PR entries. Add two new timestamp fields: created_at (set when a PR is first
+    added via pm pr add) and updated_at (set whenever the PR entry is modified — status
+    changes, edits, notes, etc). Then in the TUI, sort PRs by most recent interaction
+    (updated_at) by default, and add a sort menu letting the user choose from all
+    available time fields (created_at, started_at, reviewed_at, merged_at, updated_at).'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/96
+  gh_pr_number: 96
+  started_at: '2026-02-27T03:23:37.480179+00:00'
+  reviewed_at: '2026-02-27T10:52:26.716549+00:00'
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-f81ca27-add-timestamp-tracking-and-time-base-2b310716
+- id: pr-b764a0c
+  plan: null
+  title: 'Add plan worker pane: generic Claude session with project context'
+  branch: pm/pr-b764a0c-add-plan-worker-pane-generic-claude-session-with-p
+  status: in_review
+  depends_on: []
+  description: 'Add a new pane type for working on plan–level or project–level tasks
+    that aren‘t tied to a single PR lifecycle. Unlike implementation/review panes,
+    this is an open–ended interactive session where the user works with Claude on
+    arbitrary tasks. Key properties: (1) Gets its own workdir (cloned from the repo
+    like PR workdirs). (2) Prompt includes project context (plan details, project
+    state, available pm commands) but no specific task — the user drives the conversation.
+    (3) Not scoped to a single PR — operates at the plan or project level. (4) No
+    verdict loop — it‘s an interactive session, not an automated cycle. (5) Could
+    be launched via something like pm plan work <plan–id> or similar. The prompt should
+    be generic and not reference any specific tools beyond pm itself. Should be launchable
+    from the plans pane in the tui with the w key, remap breakdown to d.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/97
+  gh_pr_number: 97
+  started_at: '2026-02-27T10:12:26.609316+00:00'
+  reviewed_at: '2026-02-27T10:54:51.311772+00:00'
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-b764a0c-add-plan-worker-pane-generic-claude--2b310716
+- id: pr-0a7d9ee
+  plan: null
+  title: Add companion workdir pane for implementation and merge windows
+  branch: pm/pr-0a7d9ee-add-companion-workdir-pane-for-implementation-and-
+  status: in_review
+  depends_on: []
+  description: 'Review windows already open a second pane cd''ed into the PR workdir.
+    Add the same capability for implementation and merge windows. Behavior: a prefix
+    key (like PR #89''s focus mode prefix) opens a companion shell pane in the PR''s
+    workdir alongside the Claude pane. If the window was already started without the
+    companion pane, rerunning with the prefix should reuse the existing window but
+    add the second pane rather than recreating the window. Also add a global setting
+    (similar to PR #89''s approach) that enables the companion pane by default for
+    all new implementation and merge windows without needing the prefix.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/98
+  gh_pr_number: 98
+  started_at: '2026-02-27T10:25:31.728215+00:00'
+  reviewed_at: '2026-02-27T10:59:41.317075+00:00'
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0a7d9ee-add-companion-workdir-pane-for-imple-61867a33
+- id: pr-4f6b5d4
+  plan: null
+  title: 'Fix _pull_from_workdir: launch merge session on dirty repo instead of stashing'
+  branch: pm/pr-4f6b5d4-fix-pull-from-workdir-launch-merge-session-on-dirt
+  status: merged
+  depends_on: []
+  description: 'Both _pull_from_workdir (local backend) and _pull_after_github_merge
+    (GitHub backend) have the same stash bugs: (1) If the operation fails after stashing
+    (pull failure, fetch failure, ff-merge failure), the function returns False without
+    popping the stash — user''s changes are silently orphaned in git stash. (2) If
+    git stash itself fails, the functions just warn and continue operating on the
+    dirty working tree, risking data loss. The fix for both functions: remove stash/unstash
+    logic entirely. If the repo dir is dirty, detect it upfront and launch a merge
+    window (when --resolve-window) to let Claude resolve the situation, or warn and
+    return False. This matches the pattern already used for dirty workdir detection
+    in pr_merge itself.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/99
+  gh_pr_number: 99
+  started_at: '2026-02-27T18:43:30.408570+00:00'
+  reviewed_at: '2026-02-28T00:29:56.332212+00:00'
+  merged_at: '2026-02-28T00:31:27.582019+00:00'
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-4f6b5d4-fix-pull-from-workdir-launch-merge-s-61867a33
+- id: pr-a3a24e5
+  plan: null
+  title: Detect MERGED verdict from merge windows and finalize regardless of auto-start
+  branch: pm/pr-a3a24e5-detect-merged-verdict-from-merge-windows-and-final
+  status: merged
+  depends_on: []
+  description: 'Merge windows tell Claude to output MERGED on its own line when done,
+    but nothing ever parses that verdict. The current system instead relies on idle
+    detection (30s of no pane content change) then re-running pm pr merge, and this
+    whole flow is gated behind auto-start being enabled. Fix: (1) Add actual MERGED
+    verdict detection to merge window pane polling, similar to how review_loop detects
+    PASS/NEEDS_WORK verdicts. (2) When MERGED is detected, call _finalize_merge directly
+    to mark the PR as merged and unblock dependents. (3) This should work whether
+    auto-start is enabled or not — the merge window is already open and Claude already
+    did the work, finalization should not depend on auto-start. The idle-based re-attempt
+    can remain as a fallback but should not be the primary mechanism.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/100
+  gh_pr_number: 100
+  started_at: '2026-02-28T00:57:58.526336+00:00'
+  reviewed_at: '2026-02-28T01:16:04.500026+00:00'
+  merged_at: '2026-02-28T01:23:59.075800+00:00'
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a3a24e5-detect-merged-verdict-from-merge-win-3f86f2fc
