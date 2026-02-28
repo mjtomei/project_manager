@@ -87,15 +87,23 @@ def _find_connected_components(
 
 def _component_sort_key(
     component: list[dict],
+    sort_field: str | None = None,
 ) -> tuple:
-    """Sort key for components: largest first, then by activity."""
-    # Active PRs (in_progress/in_review) first, then by component size
+    """Sort key for components: active first, then by timestamp, then size."""
+    # Active PRs (in_progress/in_review) first
     has_active = any(
         pr.get("status") in ("in_progress", "in_review")
         for pr in component
     )
+    # Best timestamp across all PRs in the component (most recent wins).
+    pr_map = {pr["id"]: pr for pr in component}
+    best_ts = min(
+        _activity_sort_key(pr["id"], pr_map, sort_field)
+        for pr in component
+    )
     return (
         0 if has_active else 1,
+        best_ts,
         -len(component),
         min(pr["id"] for pr in component),  # deterministic tie-break
     )
@@ -162,7 +170,7 @@ def compute_tree_layout(
 
     # Find connected components and lay out each independently
     components = _find_connected_components(prs, pr_ids)
-    components.sort(key=_component_sort_key)
+    components.sort(key=lambda c: _component_sort_key(c, sort_field))
 
     # Lay out each component with Sugiyama
     comp_layouts: list[tuple[list[dict], list[list[str]], dict[str, int]]] = []
