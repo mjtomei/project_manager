@@ -15,6 +15,10 @@ Keybindings (mapped to the ``d`` key — "Review" — in the TUI):
 
 from pm_core.paths import configure_logger
 from pm_core import store
+from pm_core.loop_shared import (
+    extract_verdict_from_content,
+    VerdictStabilityTracker,
+)
 from pm_core.review_loop import (
     ReviewLoopState,
     start_review_loop_background,
@@ -25,6 +29,10 @@ from pm_core.review_loop import (
 )
 
 _log = configure_logger("pm.tui.review_loop_ui")
+
+# Tracks consecutive polls where MERGED was detected per merge key.
+# Uses the same stability mechanism as review/watcher verdict detection.
+_merge_verdict_tracker = VerdictStabilityTracker()
 
 # Icons for review verdicts (used in log line)
 VERDICT_ICONS = {
@@ -309,21 +317,8 @@ def _maybe_auto_merge(app, pr_id: str) -> None:
     _log.info("auto_merge: review passed for %s, merging", pr_id)
     app.log_message(f"Auto-merge: {pr_id} review passed, merging")
 
-    from pm_core.tui import pr_view
-    merge_cmd = f"pr merge --resolve-window --background"
-    tdir = _auto_start.get_transcript_dir(app)
-    if tdir:
-        merge_cmd += f" --transcript {tdir / f'merge-{pr_id}.jsonl'}"
-    merge_cmd += f" {pr_id}"
-    pr_view.run_command(app, merge_cmd)
-
-    # Reload state — the subprocess modified project.yaml on disk
-    # but _run_command_sync doesn't update the in-memory data.
-    app._data = store.load(app._root)
-    merged_pr = store.get_pr(app._data, pr_id)
-    if merged_pr and merged_pr.get("status") == "merged":
+    if _attempt_merge_and_check(app, pr_id):
         _log.info("auto_merge: %s merged, starting dependents", pr_id)
-        # check_and_start is async — schedule it via run_worker
         app.run_worker(_auto_start.check_and_start(app))
     else:
         # Merge failed (conflict) — a resolve window was launched.
@@ -331,6 +326,75 @@ def _maybe_auto_merge(app, pr_id: str) -> None:
         # and re-attempts the merge after Claude resolves.
         _log.info("auto_merge: %s merge failed, tracking merge window", pr_id)
         app._pending_merge_prs.add(pr_id)
+
+
+# ---------------------------------------------------------------------------
+# Merge attempt + check (shared by verdict detection and idle fallback)
+# ---------------------------------------------------------------------------
+
+def _attempt_merge_and_check(app, pr_id: str) -> bool:
+    """Run ``pm pr merge --resolve-window --background`` and return True if merged.
+
+    Reloads project state from disk after the subprocess finishes.
+    Shared by MERGED verdict detection and idle-based fallback to avoid
+    duplicating the command construction / reload / check logic.
+    """
+    from pm_core.tui import auto_start as _auto_start
+    from pm_core.tui import pr_view
+
+    merge_cmd = "pr merge --resolve-window --background"
+    tdir = _auto_start.get_transcript_dir(app)
+    if tdir:
+        merge_cmd += f" --transcript {tdir / f'merge-{pr_id}.jsonl'}"
+    merge_cmd += f" {pr_id}"
+    pr_view.run_command(app, merge_cmd)
+
+    # Reload state — subprocess modified project.yaml on disk
+    app._data = store.load(app._root)
+    merged_pr = store.get_pr(app._data, pr_id)
+    return bool(merged_pr and merged_pr.get("status") == "merged")
+
+
+def _on_merge_success(app, pr_id: str, merge_key: str, tracker,
+                      pending_merges: set, active_merge_keys: set) -> None:
+    """Clean up tracking state and kick off dependents after a successful merge.
+
+    Shared by MERGED verdict detection and idle-based fallback.
+    """
+    from pm_core.tui import auto_start as _auto_start
+
+    pending_merges.discard(pr_id)
+    tracker.unregister(merge_key)
+    active_merge_keys.discard(merge_key)
+    _merge_verdict_tracker.reset(merge_key)
+    # check_and_start returns early if auto-start is off
+    app.run_worker(_auto_start.check_and_start(app))
+
+
+# ---------------------------------------------------------------------------
+# Merge verdict finalization
+# ---------------------------------------------------------------------------
+
+def _finalize_detected_merge(app, pr_id: str, merge_key: str,
+                             tracker, pending_merges: set,
+                             active_merge_keys: set) -> None:
+    """Finalize a merge after MERGED verdict is detected from the pane.
+
+    Re-runs ``pm pr merge --background`` to complete the merge (Claude
+    already resolved the conflict and committed).  Works whether
+    auto-start is enabled or not.
+    """
+    if _attempt_merge_and_check(app, pr_id):
+        _log.info("merge_verdict: %s successfully merged", pr_id)
+        _on_merge_success(app, pr_id, merge_key, tracker,
+                          pending_merges, active_merge_keys)
+    else:
+        # Merge command didn't finalize — maybe Claude's commit wasn't enough.
+        # Add to pending_merges so idle fallback can re-attempt.
+        _log.warning("merge_verdict: MERGED detected for %s but merge not finalized, "
+                     "will retry via idle fallback", pr_id)
+        pending_merges.add(pr_id)
+        _merge_verdict_tracker.reset(merge_key)
 
 
 # ---------------------------------------------------------------------------
@@ -409,10 +473,19 @@ def _poll_impl_idle(app) -> None:
                 newly_idle.append((pr_id, pr))
 
     # --- Second pass: merge resolution windows ---
+    # Discover merge windows for ALL in_review PRs, not just
+    # _pending_merge_prs.  This ensures MERGED verdict detection works
+    # whether auto-start is enabled or not.
     pending_merges: set[str] = app._pending_merge_prs
+    merge_pr_candidates: set[str] = set(pending_merges)
+
+    for pr in (app._data.get("prs") or []):
+        if pr.get("status") == "in_review":
+            merge_pr_candidates.add(pr["id"])
+
     active_merge_keys: set[str] = set()
 
-    for pr_id in list(pending_merges):
+    for pr_id in list(merge_pr_candidates):
         pr = store.get_pr(app._data, pr_id)
         if not pr:
             pending_merges.discard(pr_id)
@@ -422,10 +495,10 @@ def _poll_impl_idle(app) -> None:
             pending_merges.discard(pr_id)
             merge_key = f"merge:{pr_id}"
             tracker.unregister(merge_key)
+            _merge_verdict_tracker.reset(merge_key)
             continue
 
         merge_key = f"merge:{pr_id}"
-        active_merge_keys.add(merge_key)
         window_name = f"merge-{_pr_display_id(pr)}"
 
         # Lazy pane resolution
@@ -436,7 +509,28 @@ def _poll_impl_idle(app) -> None:
             else:
                 continue
 
+        active_merge_keys.add(merge_key)
         tracker.poll(merge_key)
+
+        # --- Primary: check for MERGED verdict ---
+        merge_content = tracker.get_content(merge_key)
+        if merge_content:
+            verdict = extract_verdict_from_content(
+                merge_content,
+                verdicts=("MERGED",),
+                keywords=("MERGED",),
+                log_prefix="merge_verdict",
+            )
+            if _merge_verdict_tracker.update(merge_key, verdict):
+                _log.info("merge_verdict: MERGED detected for %s (stable)", pr_id)
+                app.log_message(f"MERGED detected for {pr_id}, finalizing merge")
+                _finalize_detected_merge(app, pr_id, merge_key, tracker,
+                                         pending_merges, active_merge_keys)
+                continue
+
+        # --- Fallback: idle detection (for _pending_merge_prs entries only) ---
+        if pr_id not in pending_merges:
+            continue
 
         if tracker.became_idle(merge_key):
             # Check for interactive prompt before treating as idle
@@ -450,29 +544,17 @@ def _poll_impl_idle(app) -> None:
             _log.info("merge_idle: merge window idle for %s, re-attempting merge", pr_id)
             app.log_message(f"Merge window idle for {pr_id}, re-attempting merge")
 
-            from pm_core.tui import pr_view
-            re_merge_cmd = f"pr merge --resolve-window --background"
-            tdir = _auto_start.get_transcript_dir(app)
-            if tdir:
-                re_merge_cmd += f" --transcript {tdir / f'merge-{pr_id}.jsonl'}"
-            re_merge_cmd += f" {pr_id}"
-            pr_view.run_command(app, re_merge_cmd)
-
-            # Reload state — subprocess modified project.yaml on disk
-            app._data = store.load(app._root)
-            merged_pr = store.get_pr(app._data, pr_id)
-            if merged_pr and merged_pr.get("status") == "merged":
+            if _attempt_merge_and_check(app, pr_id):
                 _log.info("merge_idle: %s merged after resolution, starting dependents", pr_id)
-                pending_merges.discard(pr_id)
-                tracker.unregister(merge_key)
-                active_merge_keys.discard(merge_key)
-                app.run_worker(_auto_start.check_and_start(app))
+                _on_merge_success(app, pr_id, merge_key, tracker,
+                                  pending_merges, active_merge_keys)
             # else: still not merged — keep tracking, new window may have been launched
 
-    # Unregister stale merge keys
+    # Unregister stale merge keys and clean up verdict stability state
     for key in tracker.tracked_keys():
         if key.startswith("merge:") and key not in active_merge_keys:
             tracker.unregister(key)
+            _merge_verdict_tracker.reset(key)
 
     # Unregister PRs no longer active
     for key in tracker.tracked_keys():
