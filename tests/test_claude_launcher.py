@@ -127,6 +127,28 @@ class TestBuildClaudeShellCmd:
         assert "--resume abc" in result
         assert "'test'" not in result
 
+    @patch("pm_core.claude_launcher.log_shell_command")
+    @patch("pm_core.paths.skip_permissions_enabled", return_value=False)
+    def test_long_prompt_uses_temp_file(self, mock_sp, mock_log):
+        long_prompt = "x" * 20_000
+        result = build_claude_shell_cmd(prompt=long_prompt)
+        # Should use $(cat ...) instead of inline quoting
+        assert "$(cat " in result
+        assert "pm-prompt-" in result
+        # The temp file should contain the prompt
+        import re
+        m = re.search(r'\$\(cat ([^)]+)\)', result)
+        assert m
+        with open(m.group(1)) as f:
+            assert f.read() == long_prompt
+
+    @patch("pm_core.claude_launcher.log_shell_command")
+    @patch("pm_core.paths.skip_permissions_enabled", return_value=False)
+    def test_short_prompt_uses_inline(self, mock_sp, mock_log):
+        result = build_claude_shell_cmd(prompt="short prompt")
+        assert "$(cat " not in result
+        assert "'short prompt'" in result
+
 
 # ---------------------------------------------------------------------------
 # launch_claude_print_background
