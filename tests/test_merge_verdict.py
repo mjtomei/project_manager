@@ -12,8 +12,66 @@ import pytest
 from pm_core.loop_shared import (
     extract_verdict_from_content,
     match_verdict,
+    VerdictStabilityTracker,
     STABILITY_POLLS,
 )
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: VerdictStabilityTracker (shared helper)
+# ---------------------------------------------------------------------------
+
+class TestVerdictStabilityTracker:
+    """Tests for the non-blocking stability tracker from loop_shared."""
+
+    def test_returns_false_on_first_detection(self):
+        t = VerdictStabilityTracker()
+        assert t.update("k", "MERGED") is False
+
+    def test_returns_true_after_stability_polls(self):
+        t = VerdictStabilityTracker()
+        for _ in range(STABILITY_POLLS - 1):
+            assert t.update("k", "MERGED") is False
+        assert t.update("k", "MERGED") is True
+
+    def test_resets_on_none(self):
+        t = VerdictStabilityTracker()
+        t.update("k", "MERGED")
+        t.update("k", None)
+        # Needs full STABILITY_POLLS again
+        for _ in range(STABILITY_POLLS - 1):
+            assert t.update("k", "MERGED") is False
+        assert t.update("k", "MERGED") is True
+
+    def test_resets_on_different_verdict(self):
+        t = VerdictStabilityTracker()
+        t.update("k", "MERGED")
+        t.update("k", "PASS")  # different verdict resets count
+        assert t.update("k", "PASS") is True  # 2nd consecutive PASS
+
+    def test_independent_keys(self):
+        t = VerdictStabilityTracker()
+        t.update("a", "MERGED")
+        t.update("b", "MERGED")
+        # Each key tracks independently
+        assert t.update("a", "MERGED") is True
+        assert t.update("b", "MERGED") is True
+
+    def test_reset_clears_single_key(self):
+        t = VerdictStabilityTracker()
+        t.update("a", "MERGED")
+        t.update("b", "MERGED")
+        t.reset("a")
+        assert t.update("a", "MERGED") is False  # reset
+        assert t.update("b", "MERGED") is True   # unaffected
+
+    def test_clear_clears_all(self):
+        t = VerdictStabilityTracker()
+        t.update("a", "MERGED")
+        t.update("b", "MERGED")
+        t.clear()
+        assert t.update("a", "MERGED") is False
+        assert t.update("b", "MERGED") is False
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +204,7 @@ class TestPollMergeVerdictDetection:
     def setup_method(self):
         """Reset module-level state between tests."""
         from pm_core.tui import review_loop_ui
-        review_loop_ui._merge_verdict_stable.clear()
+        review_loop_ui._merge_verdict_tracker.clear()
 
     @patch("pm_core.tui.review_loop_ui._find_impl_pane", return_value="%42")
     @patch("pm_core.tui.review_loop_ui._refresh_tech_tree")
@@ -154,7 +212,7 @@ class TestPollMergeVerdictDetection:
     def test_merged_detected_after_stability(self, mock_finalize, mock_refresh,
                                               mock_find_pane):
         """MERGED verdict triggers finalization after STABILITY_POLLS consecutive detections."""
-        from pm_core.tui.review_loop_ui import _poll_impl_idle, _merge_verdict_stable
+        from pm_core.tui.review_loop_ui import _poll_impl_idle
 
         pr = _make_pr("pr-001", status="in_review")
         app = _make_app(prs=[pr])
@@ -169,10 +227,8 @@ class TestPollMergeVerdictDetection:
         # Poll multiple times to reach stability
         for i in range(STABILITY_POLLS):
             _poll_impl_idle(app)
-            merge_key = "merge:pr-001"
             if i < STABILITY_POLLS - 1:
                 assert mock_finalize.call_count == 0
-                assert _merge_verdict_stable.get(merge_key, 0) == i + 1
 
         # On the final poll, finalize should be called
         assert mock_finalize.call_count == 1
@@ -182,9 +238,10 @@ class TestPollMergeVerdictDetection:
 
     @patch("pm_core.tui.review_loop_ui._find_impl_pane", return_value="%42")
     @patch("pm_core.tui.review_loop_ui._refresh_tech_tree")
-    def test_no_merged_no_finalization(self, mock_refresh, mock_find_pane):
+    @patch("pm_core.tui.review_loop_ui._finalize_detected_merge")
+    def test_no_merged_no_finalization(self, mock_finalize, mock_refresh, mock_find_pane):
         """Without MERGED verdict, no finalization happens."""
-        from pm_core.tui.review_loop_ui import _poll_impl_idle, _merge_verdict_stable
+        from pm_core.tui.review_loop_ui import _poll_impl_idle
 
         pr = _make_pr("pr-001", status="in_review")
         app = _make_app(prs=[pr])
@@ -200,13 +257,16 @@ class TestPollMergeVerdictDetection:
         for _ in range(5):
             _poll_impl_idle(app)
 
-        assert "merge:pr-001" not in _merge_verdict_stable
+        mock_finalize.assert_not_called()
 
     @patch("pm_core.tui.review_loop_ui._find_impl_pane", return_value="%42")
     @patch("pm_core.tui.review_loop_ui._refresh_tech_tree")
-    def test_stability_resets_when_merged_disappears(self, mock_refresh, mock_find_pane):
-        """If MERGED disappears from pane content, stability counter resets."""
-        from pm_core.tui.review_loop_ui import _poll_impl_idle, _merge_verdict_stable
+    @patch("pm_core.tui.review_loop_ui._finalize_detected_merge")
+    def test_stability_resets_when_merged_disappears(self, mock_finalize,
+                                                      mock_refresh, mock_find_pane):
+        """If MERGED disappears from pane content, stability counter resets
+        and finalization is not triggered even after enough total detections."""
+        from pm_core.tui.review_loop_ui import _poll_impl_idle
 
         pr = _make_pr("pr-001", status="in_review")
         app = _make_app(prs=[pr])
@@ -220,12 +280,16 @@ class TestPollMergeVerdictDetection:
         # First poll: MERGED detected
         tracker.get_content.return_value = "\n".join(["work..."] * 40 + ["MERGED"])
         _poll_impl_idle(app)
-        assert _merge_verdict_stable.get("merge:pr-001") == 1
+        assert mock_finalize.call_count == 0
 
-        # Second poll: MERGED gone (Claude doing more work)
+        # Second poll: MERGED gone (Claude doing more work) — resets stability
         tracker.get_content.return_value = "still working..."
         _poll_impl_idle(app)
-        assert "merge:pr-001" not in _merge_verdict_stable
+
+        # Third poll: MERGED back — needs STABILITY_POLLS consecutive again
+        tracker.get_content.return_value = "\n".join(["work..."] * 40 + ["MERGED"])
+        _poll_impl_idle(app)
+        assert mock_finalize.call_count == 0  # only 1 consecutive, not stable yet
 
     @patch("pm_core.tui.review_loop_ui._find_impl_pane", return_value=None)
     @patch("pm_core.tui.review_loop_ui._refresh_tech_tree")
@@ -297,72 +361,51 @@ class TestFinalizeDetectedMerge:
 
     def setup_method(self):
         from pm_core.tui import review_loop_ui
-        review_loop_ui._merge_verdict_stable.clear()
+        review_loop_ui._merge_verdict_tracker.clear()
 
     @patch("pm_core.tui.review_loop_ui.store")
     @patch("pm_core.tui.auto_start.check_and_start")
     @patch("pm_core.tui.auto_start.get_transcript_dir", return_value=None)
-    @patch("pm_core.tui.pr_view.run_command")
-    def test_successful_finalization(self, mock_run_cmd, mock_tdir,
+    @patch("pm_core.tui.review_loop_ui._attempt_merge_and_check", return_value=True)
+    def test_successful_finalization(self, mock_attempt, mock_tdir,
                                       mock_check_start, mock_store):
         """When merge succeeds, cleans up tracking state and kicks off dependents."""
-        from pm_core.tui.review_loop_ui import _finalize_detected_merge, _merge_verdict_stable
+        from pm_core.tui.review_loop_ui import _finalize_detected_merge
 
         app = _make_app()
         tracker = MagicMock()
         pending = {"pr-001"}
         active_keys = {"merge:pr-001"}
-        _merge_verdict_stable["merge:pr-001"] = 2
-
-        # After run_command, reload shows PR as merged
-        merged_pr = _make_pr("pr-001", status="merged")
-        mock_store.load.return_value = {"prs": [merged_pr]}
-        mock_store.get_pr.return_value = merged_pr
 
         _finalize_detected_merge(app, "pr-001", "merge:pr-001",
                                   tracker, pending, active_keys)
 
-        # Verify merge command was run
-        mock_run_cmd.assert_called_once()
-        cmd_arg = mock_run_cmd.call_args[0][1]
-        assert "pr merge" in cmd_arg
-        assert "pr-001" in cmd_arg
+        # Verify merge was attempted
+        mock_attempt.assert_called_once_with(app, "pr-001")
 
         # Tracking state cleaned up
         assert "pr-001" not in pending
         assert "merge:pr-001" not in active_keys
-        assert "merge:pr-001" not in _merge_verdict_stable
         tracker.unregister.assert_called_once_with("merge:pr-001")
 
         # Dependents kicked off
         app.run_worker.assert_called_once()
 
-    @patch("pm_core.tui.review_loop_ui.store")
-    @patch("pm_core.tui.auto_start.get_transcript_dir", return_value=None)
-    @patch("pm_core.tui.pr_view.run_command")
-    def test_merge_not_finalized_adds_to_pending(self, mock_run_cmd, mock_tdir,
-                                                   mock_store):
+    @patch("pm_core.tui.review_loop_ui._attempt_merge_and_check", return_value=False)
+    def test_merge_not_finalized_adds_to_pending(self, mock_attempt):
         """When merge command doesn't finalize, PR is added to pending_merges for idle fallback."""
-        from pm_core.tui.review_loop_ui import _finalize_detected_merge, _merge_verdict_stable
+        from pm_core.tui.review_loop_ui import _finalize_detected_merge
 
         app = _make_app()
         tracker = MagicMock()
         pending = set()
         active_keys = {"merge:pr-001"}
-        _merge_verdict_stable["merge:pr-001"] = 2
-
-        # After run_command, PR is still in_review (merge didn't complete)
-        still_reviewing = _make_pr("pr-001", status="in_review")
-        mock_store.load.return_value = {"prs": [still_reviewing]}
-        mock_store.get_pr.return_value = still_reviewing
 
         _finalize_detected_merge(app, "pr-001", "merge:pr-001",
                                   tracker, pending, active_keys)
 
         # PR added to pending for idle fallback
         assert "pr-001" in pending
-        # Stability state cleared so detection can restart
-        assert "merge:pr-001" not in _merge_verdict_stable
         # Tracker not unregistered (keep watching)
         tracker.unregister.assert_not_called()
         # No worker started
@@ -374,16 +417,13 @@ class TestMergeVerdictCleanup:
 
     def setup_method(self):
         from pm_core.tui import review_loop_ui
-        review_loop_ui._merge_verdict_stable.clear()
+        review_loop_ui._merge_verdict_tracker.clear()
 
     @patch("pm_core.tui.review_loop_ui._find_impl_pane", return_value="%42")
     @patch("pm_core.tui.review_loop_ui._refresh_tech_tree")
     def test_already_merged_pr_cleans_up(self, mock_refresh, mock_find_pane):
-        """PRs that are already merged get cleaned up from verdict state."""
-        from pm_core.tui.review_loop_ui import _poll_impl_idle, _merge_verdict_stable
-
-        # Pre-seed verdict state as if we were tracking
-        _merge_verdict_stable["merge:pr-001"] = 1
+        """PRs that are already merged get cleaned up from tracking."""
+        from pm_core.tui.review_loop_ui import _poll_impl_idle
 
         pr = _make_pr("pr-001", status="merged")
         app = _make_app(prs=[pr], pending_merges={"pr-001"})
@@ -393,5 +433,4 @@ class TestMergeVerdictCleanup:
 
         _poll_impl_idle(app)
 
-        assert "merge:pr-001" not in _merge_verdict_stable
         tracker.unregister.assert_called_with("merge:pr-001")
