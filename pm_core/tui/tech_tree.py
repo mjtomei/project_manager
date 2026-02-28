@@ -511,10 +511,10 @@ class TechTree(Widget):
                 status_text += f" {loop_marker}"
             else:
                 # Show activity spinner for in_progress/in_review PRs
-                # (suppressed when the implementation pane is idle)
+                # (suppressed when the implementation pane is idle or untracked)
                 if status in ("in_progress", "in_review") and pr.get("workdir"):
-                    pane_idle = self.app._pane_idle_tracker.is_idle(pr_id)
-                    if not pane_idle:
+                    tracker = self.app._pane_idle_tracker
+                    if tracker.is_tracked(pr_id) and not tracker.is_idle(pr_id):
                         spinner = SPINNER_FRAMES[self._anim_frame % len(SPINNER_FRAMES)]
                         marker_offset = 2 + len(status_text) + 1
                         loop_style = "bold cyan"
