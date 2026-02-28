@@ -432,14 +432,32 @@ After resolving the conflict:
 
     if backend == "local":
         propagation_step = (
-            f"4. Update the origin repo directory so `{base_branch}` matches\n"
-            f"   (see Repository Setup above for details)"
+            f"4. Update the origin repo directory (`{repo_url}`) so its `{base_branch}` matches this workdir's.\n"
+            f"   Stash any uncommitted changes first, fetch from this workdir, fast-forward, then restore the stash."
         )
+        merged_desc = f"The conflict is resolved, merged, and the origin repo directory is updated."
     else:
         propagation_step = (
-            f"4. Push the merged `{base_branch}` to origin and update the local repo dir\n"
-            f"   (see Repository Setup above for details)"
+            f"4. Push the merged `{base_branch}` to origin.\n"
+            f"5. Update the local repo dir (`{repo_url}`) so its `{base_branch}` is up to date.\n"
+            f"   Stash any uncommitted changes first, pull from origin, then restore the stash."
         )
+        merged_desc = f"The conflict is resolved, merged, pushed to origin, and the local repo dir is updated."
+
+    if backend == "local":
+        steps_block = f"""## Steps
+1. Investigate the error and resolve the issue in the workdir
+2. Complete the merge: ensure `{base_branch}` includes changes from `{branch}`
+3. Run any relevant tests to verify the resolution
+{propagation_step}
+5. End with a verdict on its own line — one of:"""
+    else:
+        steps_block = f"""## Steps
+1. Investigate the error and resolve the issue in the workdir
+2. Complete the merge: ensure `{base_branch}` includes changes from `{branch}`
+3. Run any relevant tests to verify the resolution
+{propagation_step}
+6. End with a verdict on its own line — one of:"""
 
     prompt = f"""You're resolving a merge failure for PR {pr_id}: "{title}"
 
@@ -453,19 +471,14 @@ The merge of `{branch}` into `{base_branch}` failed with the following error:
 
 Resolve the merge conflict so that `{base_branch}` contains the merged result of both branches.
 
-## Steps
-1. Investigate the error and resolve the issue in the workdir
-2. Complete the merge: ensure `{base_branch}` includes changes from `{branch}`
-3. Run any relevant tests to verify the resolution
-{propagation_step}
-5. End with a verdict on its own line — one of:
-   - **MERGED** — The conflict is resolved and merged. Everything is done.
+{steps_block}
+   - **MERGED** — {merged_desc}
    - **INPUT_REQUIRED** — You cannot resolve the conflict automatically and need human help.
      Describe what you need clearly: which files conflict, what the competing changes are,
      and what decision the user needs to make. The user will interact with you directly in
      this pane, and then you should resolve and provide a final **MERGED** verdict.
 
-IMPORTANT: Always end your response with the verdict keyword on its own line — either **MERGED** or **INPUT_REQUIRED**.
+IMPORTANT: Do NOT report MERGED until ALL steps above are complete, including updating the repo directory. Always end your response with the verdict keyword on its own line — either **MERGED** or **INPUT_REQUIRED**.
 {tui_block}{notes_block}{beginner_block}"""
     return prompt.strip()
 
