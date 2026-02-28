@@ -458,11 +458,10 @@ class ProjectManagerApp(App):
                 hidden.append("closed")
             if hidden:
                 filter_text = "hide " + "+".join(hidden)
-        # Append sort field when not using the default
+        # Sort field label (shown separately from filter)
+        sort_text = ""
         if tree._sort_field:
-            sort_label = dict(SORT_FIELDS).get(tree._sort_field, tree._sort_field)
-            sort_text = f"sort:{sort_label}"
-            filter_text = f"{filter_text} {sort_text}" if filter_text else sort_text
+            sort_text = dict(SORT_FIELDS).get(tree._sort_field, tree._sort_field)
         status_bar = self.query_one("#status-bar", StatusBar)
         watcher_status = ""
         if self._watcher_state and self._watcher_state.running:
@@ -473,6 +472,7 @@ class ProjectManagerApp(App):
             sync_state,
             pr_count=len(prs),
             filter_text=filter_text,
+            sort_text=sort_text,
             show_assist=not get_global_setting("hide-assist"),
             auto_start=self._auto_start,
             watcher_status=watcher_status,

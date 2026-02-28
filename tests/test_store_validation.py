@@ -129,3 +129,105 @@ class TestValidatePRStatuses:
         data = store.load(tmp_pm_root)
 
         assert data["prs"] is None
+
+
+class TestTimestampBackfill:
+    """Tests for created_at/updated_at backfill on load."""
+
+    def test_backfill_from_started_at(self, tmp_pm_root):
+        """PRs without created_at/updated_at get backfilled from started_at."""
+        (tmp_pm_root / "project.yaml").write_text(
+            "project:\n"
+            "  name: test\n"
+            "  repo: /tmp/repo\n"
+            "  base_branch: master\n"
+            "prs:\n"
+            "  - id: pr-001\n"
+            "    status: in_progress\n"
+            "    started_at: '2024-03-01T00:00:00+00:00'\n"
+        )
+
+        data = store.load(tmp_pm_root)
+        pr = data["prs"][0]
+
+        assert pr["created_at"] == "2024-03-01T00:00:00+00:00"
+        assert pr["updated_at"] == "2024-03-01T00:00:00+00:00"
+
+    def test_backfill_updated_at_prefers_merged(self, tmp_pm_root):
+        """updated_at backfill picks merged_at (most recent lifecycle event)."""
+        (tmp_pm_root / "project.yaml").write_text(
+            "project:\n"
+            "  name: test\n"
+            "  repo: /tmp/repo\n"
+            "  base_branch: master\n"
+            "prs:\n"
+            "  - id: pr-001\n"
+            "    status: merged\n"
+            "    started_at: '2024-01-01T00:00:00+00:00'\n"
+            "    reviewed_at: '2024-02-01T00:00:00+00:00'\n"
+            "    merged_at: '2024-03-01T00:00:00+00:00'\n"
+        )
+
+        data = store.load(tmp_pm_root)
+        pr = data["prs"][0]
+
+        assert pr["updated_at"] == "2024-03-01T00:00:00+00:00"
+
+    def test_backfill_created_at_prefers_started(self, tmp_pm_root):
+        """created_at backfill picks started_at (earliest lifecycle event)."""
+        (tmp_pm_root / "project.yaml").write_text(
+            "project:\n"
+            "  name: test\n"
+            "  repo: /tmp/repo\n"
+            "  base_branch: master\n"
+            "prs:\n"
+            "  - id: pr-001\n"
+            "    status: merged\n"
+            "    started_at: '2024-01-01T00:00:00+00:00'\n"
+            "    reviewed_at: '2024-02-01T00:00:00+00:00'\n"
+            "    merged_at: '2024-03-01T00:00:00+00:00'\n"
+        )
+
+        data = store.load(tmp_pm_root)
+        pr = data["prs"][0]
+
+        assert pr["created_at"] == "2024-01-01T00:00:00+00:00"
+
+    def test_no_backfill_when_fields_exist(self, tmp_pm_root):
+        """Existing created_at/updated_at are not overwritten."""
+        (tmp_pm_root / "project.yaml").write_text(
+            "project:\n"
+            "  name: test\n"
+            "  repo: /tmp/repo\n"
+            "  base_branch: master\n"
+            "prs:\n"
+            "  - id: pr-001\n"
+            "    status: in_progress\n"
+            "    created_at: '2024-01-01T00:00:00+00:00'\n"
+            "    updated_at: '2024-06-01T00:00:00+00:00'\n"
+            "    started_at: '2024-03-01T00:00:00+00:00'\n"
+        )
+
+        data = store.load(tmp_pm_root)
+        pr = data["prs"][0]
+
+        assert pr["created_at"] == "2024-01-01T00:00:00+00:00"
+        assert pr["updated_at"] == "2024-06-01T00:00:00+00:00"
+
+    def test_no_timestamps_stays_none(self, tmp_pm_root):
+        """PRs with no timestamps at all get None (not crash)."""
+        (tmp_pm_root / "project.yaml").write_text(
+            "project:\n"
+            "  name: test\n"
+            "  repo: /tmp/repo\n"
+            "  base_branch: master\n"
+            "prs:\n"
+            "  - id: pr-001\n"
+            "    status: pending\n"
+        )
+
+        data = store.load(tmp_pm_root)
+        pr = data["prs"][0]
+
+        assert pr["created_at"] is None
+        assert pr["updated_at"] is None
