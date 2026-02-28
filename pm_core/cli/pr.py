@@ -943,11 +943,11 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
         click.echo(f"Merge window error: {e}")
 
 
-def _pull_after_github_merge(data: dict, pr_entry: dict, repo_dir: str,
+def _pull_after_merge(data: dict, pr_entry: dict, repo_dir: str,
                              base_branch: str, resolve_window: bool,
                              background: bool,
                              transcript: str | None) -> bool:
-    """Pull latest base branch in the main repo after a GitHub merge.
+    """Pull latest base branch into the main repo after a merge.
 
     *repo_dir* should be the main repository directory (on the base branch),
     not the PR's workdir (which is on the PR branch).
@@ -1161,7 +1161,7 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool, transcri
 
             if gh_merged:
                 repo_dir = str(_resolve_repo_dir(root, data))
-                pull_ok = _pull_after_github_merge(
+                pull_ok = _pull_after_merge(
                     data, pr_entry, repo_dir, base_branch,
                     resolve_window=resolve_window,
                     background=background,
@@ -1280,7 +1280,21 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool, transcri
             click.echo("Push manually when ready, then re-run 'pm pr merge'.", err=True)
             return
         click.echo(f"Pushed merged {base_branch} to origin.")
+        # Pull into the main repo dir so it stays up to date
+        repo_dir = str(_resolve_repo_dir(root, data))
+        pull_ok = _pull_after_merge(
+            data, pr_entry, repo_dir, base_branch,
+            resolve_window=resolve_window,
+            background=background,
+            transcript=transcript,
+        )
+        if not pull_ok:
+            # Merge window launched for pull conflict — don't finalize yet
+            return
         _finalize_merge(data, root, pr_entry, pr_id, transcript=transcript)
+        repo = data.get("project", {}).get("repo", "")
+        if "project_manager" in repo or "project-manager" in repo:
+            trigger_tui_restart()
 
 
 @pr.command("sync")
