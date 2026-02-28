@@ -152,10 +152,12 @@ class ProjectManagerApp(App):
             if self._z_count >= 3:
                 # zzz → cancel (toggle off)
                 self._z_count = 0
+                self._a_prefix = False
                 self._clear_log_message()
             else:
                 self._z_count += 1
-                self.log_message(f"[bold]{'z' * self._z_count} …[/]")
+                a_part = "a " if self._a_prefix else ""
+                self.log_message(f"[bold]{a_part}{'z' * self._z_count} …[/]")
             event.prevent_default()
             event.stop()
         elif event.key == "a":
