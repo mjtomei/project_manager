@@ -280,6 +280,14 @@ def push_pane_back(app, window_name: str) -> bool:
         else:
             _log.error("push_pane: join_pane back failed for %s", pane_id)
 
+    # If no panes were pushed back (all dead), just clean up tracking
+    # without killing the dummy (it keeps the window alive for the user).
+    if pushed == 0:
+        _log.warning("push_pane: all pulled panes dead for '%s', cleaning up", window_name)
+        _cleanup_pull(app, session, main_window, window_name, pull_info)
+        app.log_message(f"Panes from '{window_name}' no longer exist")
+        return False
+
     # Now kill the dummy pane (no longer needed to keep the window alive)
     if tmux_mod.pane_exists(pull_info.dummy_pane_id):
         subprocess.run(
