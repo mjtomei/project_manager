@@ -896,12 +896,19 @@ def _finalize_merge(data: dict, root, pr_entry: dict, pr_id: str,
 def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
                          background: bool = False,
                          transcript: str | None = None,
-                         cwd: str | None = None) -> None:
+                         cwd: str | None = None,
+                         pull_from_workdir: str | None = None,
+                         pull_from_origin: bool = False) -> None:
     """Launch a tmux window with Claude to resolve a merge conflict.
 
     Args:
         cwd: Directory to run the merge resolution in.  Defaults to the
              PR's workdir when *None*.
+        pull_from_workdir: When set, this is a pull-from-workdir failure
+             (local backend).  The value is the workdir path containing
+             the merged branch.
+        pull_from_origin: When True, this is a pull-from-origin failure
+             (vanilla/github backend).
     """
     if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
         click.echo("Merge window requires tmux.")
@@ -922,15 +929,22 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
 
     merge_prompt = prompt_gen.generate_merge_prompt(
         data, pr_id, error_output, session_name=pm_session,
+        pull_from_workdir=pull_from_workdir,
+        pull_from_origin=pull_from_origin,
     )
     claude_cmd = build_claude_shell_cmd(prompt=merge_prompt,
                                          transcript=transcript, cwd=workdir)
     window_name = f"merge-{display_id}"
 
-    # Kill existing merge window if present
+    # No-op if a merge window is already running for this PR
     existing = tmux_mod.find_window_by_name(pm_session, window_name)
     if existing:
-        tmux_mod.kill_window(pm_session, existing["id"])
+        if background:
+            click.echo(f"Merge window '{window_name}' already exists (background mode, no-op)")
+            return
+        tmux_mod.select_window(pm_session, existing["id"])
+        click.echo(f"Switched to existing merge window '{window_name}'")
+        return
 
     try:
         tmux_mod.new_window(
@@ -978,7 +992,7 @@ def _pull_after_merge(data: dict, pr_entry: dict, repo_dir: str,
         if resolve_window:
             _launch_merge_window(data, pr_entry, error_msg,
                                  background=background, transcript=transcript,
-                                 cwd=repo_dir)
+                                 cwd=repo_dir, pull_from_origin=True)
             return False
         return False
 
@@ -993,7 +1007,7 @@ def _pull_after_merge(data: dict, pr_entry: dict, repo_dir: str,
         if resolve_window:
             _launch_merge_window(data, pr_entry, error_msg,
                                  background=background, transcript=transcript,
-                                 cwd=repo_dir)
+                                 cwd=repo_dir, pull_from_origin=True)
             return False
         click.echo("Resolve conflicts manually, then re-run 'pm pr merge' to finalize.", err=True)
         return False
@@ -1039,7 +1053,7 @@ def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
         if resolve_window:
             _launch_merge_window(data, pr_entry, error_msg,
                                  background=background, transcript=transcript,
-                                 cwd=repo_dir)
+                                 cwd=repo_dir, pull_from_workdir=workdir)
             return False
         click.echo("Pull manually when ready, then re-run 'pm pr merge'.", err=True)
         return False
@@ -1053,7 +1067,7 @@ def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
         if resolve_window:
             _launch_merge_window(data, pr_entry, error_msg,
                                  background=background, transcript=transcript,
-                                 cwd=repo_dir)
+                                 cwd=repo_dir, pull_from_workdir=workdir)
             return False
         return False
 
@@ -1065,7 +1079,7 @@ def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
         if resolve_window:
             _launch_merge_window(data, pr_entry, error_msg,
                                  background=background, transcript=transcript,
-                                 cwd=repo_dir)
+                                 cwd=repo_dir, pull_from_workdir=workdir)
             return False
         click.echo("Pull manually when ready, then re-run 'pm pr merge'.", err=True)
         return False
@@ -1080,7 +1094,7 @@ def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
         if resolve_window:
             _launch_merge_window(data, pr_entry, error_msg,
                                  background=background, transcript=transcript,
-                                 cwd=repo_dir)
+                                 cwd=repo_dir, pull_from_workdir=workdir)
             return False
         click.echo("Pull manually when ready, then re-run 'pm pr merge'.", err=True)
         return False

@@ -285,7 +285,9 @@ Auto-cleanup is enabled. After finishing your main work:
 
 
 def generate_merge_prompt(data: dict, pr_id: str, error_output: str,
-                          session_name: str | None = None) -> str:
+                          session_name: str | None = None,
+                          pull_from_workdir: str | None = None,
+                          pull_from_origin: bool = False) -> str:
     """Generate a Claude Code prompt for resolving a merge failure.
 
     Args:
@@ -293,6 +295,13 @@ def generate_merge_prompt(data: dict, pr_id: str, error_output: str,
         pr_id: The PR identifier.
         error_output: Verbatim error output from the failed merge attempt.
         session_name: If provided, include TUI interaction instructions.
+        pull_from_workdir: When set, this is a pull-from-workdir failure
+            (local backend).  The value is the workdir path that contains
+            the already-merged base branch.  The merge window runs in the
+            *repo dir* and needs to pull/integrate from the workdir.
+        pull_from_origin: When True, this is a pull-from-origin failure
+            (vanilla/github backend).  The merge window runs in the
+            *repo dir* and needs to pull origin into the local checkout.
     """
     pr = store.get_pr(data, pr_id)
     if not pr:
@@ -300,22 +309,92 @@ def generate_merge_prompt(data: dict, pr_id: str, error_output: str,
 
     branch = pr.get("branch", f"pm/{pr_id}")
     title = pr.get("title", "")
+    workdir = pr.get("workdir", "")
     base_branch = data.get("project", {}).get("base_branch", "master")
 
     backend = data.get("project", {}).get("backend", "vanilla")
     repo_url = data.get("project", {}).get("repo", "")
 
+    tui_block = tui_section(session_name) if session_name else ""
+    beginner_block = _beginner_addendum()
+
+    # --- Pull-from-workdir variant ---
+    # When this is set, the merge window is running in the *repo dir* and
+    # needs to integrate the already-merged base branch from the workdir.
+    if pull_from_workdir:
+        prompt = f"""You're updating the local repo after a successful merge of PR {pr_id}: "{title}"
+
+The PR branch `{branch}` has already been merged into `{base_branch}` in the workdir,
+but pulling that result into the main repo directory failed:
+
+```
+{error_output}
+```
+
+## Context
+
+You are running in the **main repo directory** (not the PR workdir).
+The workdir at `{pull_from_workdir}` has the correct merged `{base_branch}`.
+This repo directory needs its `{base_branch}` updated to match the workdir's.
+
+## Steps
+1. Investigate the error above and fix whatever is blocking the update
+   (e.g. stash uncommitted changes, resolve diverged branches)
+2. Fetch and integrate `{base_branch}` from the workdir into this repo directory
+3. Restore any stashed changes
+4. Verify that `{base_branch}` now contains the merge commit from the workdir
+5. End with a verdict on its own line — one of:
+   - **MERGED** — The repo directory is updated. Everything is done.
+   - **INPUT_REQUIRED** — You need human help to resolve this.
+
+IMPORTANT: Always end your response with the verdict keyword on its own line — either **MERGED** or **INPUT_REQUIRED**.
+{tui_block}{beginner_block}"""
+        return prompt.strip()
+
+    # --- Pull-from-origin variant (vanilla/github) ---
+    if pull_from_origin:
+        prompt = f"""You're updating the local repo after a successful merge of PR {pr_id}: "{title}"
+
+The PR branch `{branch}` has already been merged and pushed to origin,
+but updating the local repo directory failed:
+
+```
+{error_output}
+```
+
+## Context
+
+You are running in the **main repo directory** (`{repo_url}`), not the PR workdir.
+Origin already has the correct merged `{base_branch}`.
+This local checkout needs its `{base_branch}` updated to match origin.
+
+## Steps
+1. Investigate the error above and fix whatever is blocking the update
+   (e.g. stash uncommitted changes, resolve diverged branches)
+2. Pull `{base_branch}` from origin into this repo directory
+3. Restore any stashed changes
+4. Verify that `{base_branch}` is now up to date with origin
+5. End with a verdict on its own line — one of:
+   - **MERGED** — The repo directory is updated. Everything is done.
+   - **INPUT_REQUIRED** — You need human help to resolve this.
+
+IMPORTANT: Always end your response with the verdict keyword on its own line — either **MERGED** or **INPUT_REQUIRED**.
+{tui_block}{beginner_block}"""
+        return prompt.strip()
+
+    # --- Standard merge-conflict variant ---
     if backend == "local":
         backend_block = f"""
 ## Repository Setup (local backend)
 
 This is a **local-only** git project — origin points to a local directory (`{repo_url}`),
 not a remote server.  The origin repo is non-bare with `{base_branch}` checked out, so
-`git push origin {base_branch}` will be rejected.
+pushing to origin will be rejected.
 
 After you resolve the conflict and commit the merge on `{base_branch}` in this workdir,
-the pm system will automatically pull the result back into the origin repo.  You do NOT
-need to push — just ensure `{base_branch}` has the correct merge commit here.
+you must also update the origin repo directory (`{repo_url}`) so its `{base_branch}`
+matches this workdir's.  Fetch from this workdir into the repo dir and fast-forward.
+If the repo dir has uncommitted changes, stash them first and restore after.
 """
     elif backend == "github":
         backend_block = f"""
@@ -325,9 +404,9 @@ This project is hosted on GitHub.  The repo dir (`{repo_url}`) is a local checko
 that should also be kept up to date.
 
 After resolving the conflict:
-1. Push the merged `{base_branch}` to origin: `git push origin {base_branch}`
-2. Update the local repo dir: `cd {repo_url} && git stash && git pull --rebase && git stash pop`
-   (stash first if there are uncommitted changes like pm/project.yaml)
+1. Push the merged `{base_branch}` to origin
+2. Update the local repo dir (`{repo_url}`) so its `{base_branch}` is up to date
+   (stash any uncommitted changes first if needed, and restore after)
 """
     else:
         backend_block = f"""
@@ -337,13 +416,10 @@ This project uses a remote git server.  The repo dir (`{repo_url}`) is a local c
 that should also be kept up to date.
 
 After resolving the conflict:
-1. Push the merged `{base_branch}` to origin: `git push origin {base_branch}`
-2. Update the local repo dir: `cd {repo_url} && git stash && git pull --rebase && git stash pop`
-   (stash first if there are uncommitted changes like pm/project.yaml)
+1. Push the merged `{base_branch}` to origin
+2. Update the local repo dir (`{repo_url}`) so its `{base_branch}` is up to date
+   (stash any uncommitted changes first if needed, and restore after)
 """
-
-    tui_block = tui_section(session_name) if session_name else ""
-    beginner_block = _beginner_addendum()
 
     # Include session notes if available
     notes_block = ""
@@ -353,9 +429,12 @@ After resolving the conflict:
     except FileNotFoundError:
         pass
 
-    # For local backend, step 4 is handled by the pm system automatically
+
     if backend == "local":
-        propagation_step = "4. The pm system will propagate the merge to the origin repo automatically"
+        propagation_step = (
+            f"4. Update the origin repo directory so `{base_branch}` matches\n"
+            f"   (see Repository Setup above for details)"
+        )
     else:
         propagation_step = (
             f"4. Push the merged `{base_branch}` to origin and update the local repo dir\n"

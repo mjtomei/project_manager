@@ -339,10 +339,8 @@ def _attempt_merge(app, pr_id: str, *, resolve_window: bool = False) -> bool:
         resolve_window: If True, pass ``--resolve-window`` so a Claude
             merge-resolution window opens on conflict.  Used by
             ``_maybe_auto_merge`` for the initial merge attempt.
-            The idle fallback passes False to prevent cascading windows.
-
-    NOT used by verdict-detected finalization (see ``_finalize_detected_merge``)
-    to avoid re-running the merge command and causing infinite loops.
+            Verdict-detected finalization and idle fallback pass False
+            to prevent cascading windows.
     """
     from pm_core.tui import auto_start as _auto_start
     from pm_core.tui import pr_view
@@ -388,35 +386,26 @@ def _finalize_detected_merge(app, pr_id: str, merge_key: str,
                              active_merge_keys: set) -> None:
     """Finalize a merge after MERGED verdict is detected from the pane.
 
-    Directly marks the PR as merged in project.yaml without re-running
-    ``pm pr merge``.  The merge window Claude session has already
-    resolved the conflict, committed, and pushed — re-running the merge
-    command would risk opening another merge window (infinite loop).
+    Re-runs ``pm pr merge`` which will see the branch is already merged
+    ("Already up to date"), handle propagation (pull-from-workdir for
+    local backend, push for vanilla/github), mark the PR as merged, and
+    trigger a TUI refresh via the normal CLI path.
     """
-    from pm_core.cli.helpers import _record_status_timestamp, save_and_push, kill_pr_windows
-
-    pr_entry = store.get_pr(app._data, pr_id)
-    if not pr_entry:
-        _log.warning("merge_verdict: PR %s not found for finalization", pr_id)
-        return
-
-    pr_entry["status"] = "merged"
-    _record_status_timestamp(pr_entry, "merged")
-    save_and_push(app._data, app._root, f"pm: merge {pr_id}")
-
-    # Kill tmux windows for the merged PR
-    session = app._session_name
-    if session:
-        try:
-            kill_pr_windows(session, pr_entry)
-        except Exception:
-            pass
-
     # Clear merge input_required state if it was set
     app._merge_input_required_prs.discard(pr_id)
 
-    _log.info("merge_verdict: %s directly marked as merged", pr_id)
-    app.log_message(f"[green bold]✓ Merged[/] {pr_id} (conflict resolved by Claude)")
+    if _attempt_merge(app, pr_id, resolve_window=False):
+        _log.info("merge_verdict: %s finalized via pm pr merge", pr_id)
+        app.log_message(f"[green bold]✓ Merged[/] {pr_id} (conflict resolved by Claude)")
+    else:
+        _log.warning("merge_verdict: pm pr merge failed for %s after MERGED verdict", pr_id)
+        app.log_message(
+            f"[yellow]Warning:[/] merge finalization failed for {pr_id} — "
+            f"run 'pm pr merge {pr_id}' manually",
+            sticky=30,
+        )
+        return
+
     _on_merge_success(app, pr_id, merge_key, tracker,
                       pending_merges, active_merge_keys)
 
