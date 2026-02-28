@@ -244,6 +244,17 @@ class TestGeneratePlanWorkPrompt:
 
     @patch("pm_core.prompt_gen.notes.notes_section", return_value="")
     @patch("pm_core.prompt_gen.store.find_project_root")
+    def test_points_to_plan_file(self, mock_root, mock_notes):
+        mock_root.return_value = Path("/tmp/fake")
+        from pm_core.prompt_gen import generate_plan_work_prompt
+        data = self._make_data()
+        prompt = generate_plan_work_prompt(data, "plan-001")
+        # Should reference the file path, not embed content
+        assert "plans/plan-001.md" in prompt
+        assert "Read the plan file" in prompt
+
+    @patch("pm_core.prompt_gen.notes.notes_section", return_value="")
+    @patch("pm_core.prompt_gen.store.find_project_root")
     def test_includes_plan_prs(self, mock_root, mock_notes):
         mock_root.return_value = Path("/tmp/fake")
         from pm_core.prompt_gen import generate_plan_work_prompt

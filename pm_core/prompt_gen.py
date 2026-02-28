@@ -537,14 +537,10 @@ def generate_plan_work_prompt(data: dict, plan_id: str,
     plan_name = plan_entry.get("name", "Untitled")
     plan_file = plan_entry.get("file", "")
 
-    # Read plan file content and session notes
-    plan_content = ""
+    # Session notes (plan file is read from disk by Claude, not inlined)
     notes_block = ""
     try:
         root = store.find_project_root()
-        plan_path = root / plan_file
-        if plan_path.exists():
-            plan_content = plan_path.read_text()
         notes_block = notes.notes_section(root)
     except FileNotFoundError:
         pass
@@ -580,7 +576,7 @@ def generate_plan_work_prompt(data: dict, plan_id: str,
 This session is managed by `pm`. Run `pm help` to see available commands.
 
 ## Plan
-{plan_content if plan_content else f"(plan file: {plan_file})"}
+Read the plan file at `{plan_file}` for full details.
 
 ## Project State
 PRs in this plan:
