@@ -321,15 +321,25 @@ need to push — just ensure `{base_branch}` has the correct merge commit here.
         backend_block = f"""
 ## Repository Setup (GitHub backend)
 
-This project is hosted on GitHub.  After resolving the conflict, push the merged
-`{base_branch}` to origin: `git push origin {base_branch}`
+This project is hosted on GitHub.  The repo dir (`{repo_url}`) is a local checkout
+that should also be kept up to date.
+
+After resolving the conflict:
+1. Push the merged `{base_branch}` to origin: `git push origin {base_branch}`
+2. Update the local repo dir: `cd {repo_url} && git stash && git pull --rebase && git stash pop`
+   (stash first if there are uncommitted changes like pm/project.yaml)
 """
     else:
         backend_block = f"""
 ## Repository Setup (vanilla git backend)
 
-This project uses a remote git server.  After resolving the conflict, push the merged
-`{base_branch}` to origin: `git push origin {base_branch}`
+This project uses a remote git server.  The repo dir (`{repo_url}`) is a local checkout
+that should also be kept up to date.
+
+After resolving the conflict:
+1. Push the merged `{base_branch}` to origin: `git push origin {base_branch}`
+2. Update the local repo dir: `cd {repo_url} && git stash && git pull --rebase && git stash pop`
+   (stash first if there are uncommitted changes like pm/project.yaml)
 """
 
     tui_block = tui_section(session_name) if session_name else ""
@@ -347,7 +357,10 @@ This project uses a remote git server.  After resolving the conflict, push the m
     if backend == "local":
         propagation_step = "4. The pm system will propagate the merge to the origin repo automatically"
     else:
-        propagation_step = f"4. Push the merged `{base_branch}` to origin: `git push origin {base_branch}`"
+        propagation_step = (
+            f"4. Push the merged `{base_branch}` to origin and update the local repo dir\n"
+            f"   (see Repository Setup above for details)"
+        )
 
     prompt = f"""You're resolving a merge failure for PR {pr_id}: "{title}"
 
