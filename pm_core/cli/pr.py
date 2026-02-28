@@ -1217,57 +1217,59 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool, transcri
     if _workdir_is_dirty(work_path):
         error_msg = f"Workdir has uncommitted changes: {workdir}"
         click.echo(error_msg, err=True)
-        click.echo("Commit or stash your changes before merging.", err=True)
         if resolve_window:
+            click.echo("Commit or stash your changes before merging.", err=True)
             _launch_merge_window(data, pr_entry, error_msg, background=background,
                                  transcript=transcript)
             return
-        raise SystemExit(1)
+        # The merge prompt already handled the merge — skip straight to
+        # propagation so the PR can be finalized.
+        click.echo("Skipping merge (merge prompt handled it).")
+    else:
+        # Fetch latest from origin (important for vanilla backend where others may push)
+        if backend_name == "vanilla":
+            click.echo("Fetching latest from origin...")
+            git_ops.run_git("fetch", "origin", cwd=workdir, check=False)
 
-    # Fetch latest from origin (important for vanilla backend where others may push)
-    if backend_name == "vanilla":
-        click.echo("Fetching latest from origin...")
-        git_ops.run_git("fetch", "origin", cwd=workdir, check=False)
+        # Capture the branch tip before merge for post-merge verification
+        tip_result = git_ops.run_git("rev-parse", branch, cwd=workdir, check=False)
+        branch_tip = tip_result.stdout.strip() if tip_result.returncode == 0 else None
 
-    # Capture the branch tip before merge for post-merge verification
-    tip_result = git_ops.run_git("rev-parse", branch, cwd=workdir, check=False)
-    branch_tip = tip_result.stdout.strip() if tip_result.returncode == 0 else None
+        click.echo(f"Merging {branch} into {base_branch}...")
+        result = git_ops.run_git("checkout", base_branch, cwd=workdir, check=False)
+        if result.returncode != 0:
+            error_msg = f"Failed to checkout {base_branch}: {result.stderr.strip()}"
+            click.echo(error_msg, err=True)
+            if resolve_window:
+                _launch_merge_window(data, pr_entry, error_msg, background=background,
+                                     transcript=transcript)
+                return
+            raise SystemExit(1)
+        result = git_ops.run_git("merge", "--no-ff", branch, "-m",
+                                 f"Merge {branch}: {pr_entry.get('title', pr_id)}",
+                                 cwd=workdir, check=False)
+        if result.returncode != 0:
+            # Git sends conflict details to stdout, other errors to stderr
+            error_detail = (result.stdout.strip() + "\n" + result.stderr.strip()).strip()
+            error_msg = f"Merge failed:\n{error_detail}" if error_detail else "Merge failed"
+            click.echo(error_msg, err=True)
+            click.echo("Resolve conflicts manually, then run 'pm pr merge' again.", err=True)
+            if resolve_window:
+                _launch_merge_window(data, pr_entry, error_msg, background=background,
+                                     transcript=transcript)
+                return
+            raise SystemExit(1)
 
-    click.echo(f"Merging {branch} into {base_branch}...")
-    result = git_ops.run_git("checkout", base_branch, cwd=workdir, check=False)
-    if result.returncode != 0:
-        error_msg = f"Failed to checkout {base_branch}: {result.stderr.strip()}"
-        click.echo(error_msg, err=True)
-        if resolve_window:
-            _launch_merge_window(data, pr_entry, error_msg, background=background,
-                                 transcript=transcript)
-            return
-        raise SystemExit(1)
-    result = git_ops.run_git("merge", "--no-ff", branch, "-m",
-                             f"Merge {branch}: {pr_entry.get('title', pr_id)}",
-                             cwd=workdir, check=False)
-    if result.returncode != 0:
-        # Git sends conflict details to stdout, other errors to stderr
-        error_detail = (result.stdout.strip() + "\n" + result.stderr.strip()).strip()
-        error_msg = f"Merge failed:\n{error_detail}" if error_detail else "Merge failed"
-        click.echo(error_msg, err=True)
-        click.echo("Resolve conflicts manually, then run 'pm pr merge' again.", err=True)
-        if resolve_window:
-            _launch_merge_window(data, pr_entry, error_msg, background=background,
-                                 transcript=transcript)
-            return
-        raise SystemExit(1)
-
-    # Post-merge verification: confirm the branch tip is now an ancestor of HEAD
-    if branch_tip:
-        verify = git_ops.run_git(
-            "merge-base", "--is-ancestor", branch_tip, "HEAD",
-            cwd=workdir, check=False,
-        )
-        if verify.returncode != 0:
-            click.echo(f"Warning: Post-merge verification failed — branch tip {branch_tip[:8]} "
-                        f"is not an ancestor of {base_branch} HEAD.", err=True)
-            click.echo("The merge commit exists but may not include all branch commits.", err=True)
+        # Post-merge verification: confirm the branch tip is now an ancestor of HEAD
+        if branch_tip:
+            verify = git_ops.run_git(
+                "merge-base", "--is-ancestor", branch_tip, "HEAD",
+                cwd=workdir, check=False,
+            )
+            if verify.returncode != 0:
+                click.echo(f"Warning: Post-merge verification failed — branch tip {branch_tip[:8]} "
+                            f"is not an ancestor of {base_branch} HEAD.", err=True)
+                click.echo("The merge commit exists but may not include all branch commits.", err=True)
 
     # --- Propagate merged base_branch to the main repo / origin ---
     if backend_name == "local":
