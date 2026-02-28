@@ -171,9 +171,14 @@ def pull_pane_from_window(app, window_name: str) -> bool:
         'echo "  Press Enter for a shell."; '
         'read; exec "$SHELL"'
     )
-    dummy_pane_id = tmux_mod.split_pane_at(
-        pane_ids[0], "h", dummy_msg, background=True,
-    )
+    try:
+        dummy_pane_id = tmux_mod.split_pane_at(
+            pane_ids[0], "h", dummy_msg, background=True,
+        )
+    except Exception:
+        _log.exception("pull_pane: failed to create dummy pane in '%s'", window_name)
+        app.log_message("Failed to create placeholder pane")
+        return False
     _log.info("pull_pane: created dummy %s in window '%s'", dummy_pane_id, window_name)
 
     # Move each original pane to the main window

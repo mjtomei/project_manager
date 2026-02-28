@@ -168,6 +168,9 @@ class ProjectManagerApp(App):
             if self._a_prefix:
                 z_part = f"{'z' * self._z_count} " if self._z_count else ""
                 self.log_message(f"[bold]{z_part}a …[/]")
+            elif self._z_count:
+                # Toggled a off but z is still active — restore z display
+                self.log_message(f"[bold]{'z' * self._z_count} …[/]")
             else:
                 self._clear_log_message()
             event.prevent_default()
