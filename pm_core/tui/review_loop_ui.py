@@ -317,7 +317,7 @@ def _maybe_auto_merge(app, pr_id: str) -> None:
     _log.info("auto_merge: review passed for %s, merging", pr_id)
     app.log_message(f"Auto-merge: {pr_id} review passed, merging")
 
-    if _attempt_merge_and_check(app, pr_id):
+    if _attempt_merge(app, pr_id, resolve_window=True):
         _log.info("auto_merge: %s merged, starting dependents", pr_id)
         app.run_worker(_auto_start.check_and_start(app))
     else:
@@ -332,12 +332,14 @@ def _maybe_auto_merge(app, pr_id: str) -> None:
 # Merge attempt (initial auto-merge after review passes)
 # ---------------------------------------------------------------------------
 
-def _attempt_merge_and_check(app, pr_id: str) -> bool:
-    """Run ``pm pr merge --resolve-window --background`` and return True if merged.
+def _attempt_merge(app, pr_id: str, *, resolve_window: bool = False) -> bool:
+    """Run ``pm pr merge --background`` and return True if merged.
 
-    Used by ``_maybe_auto_merge`` for the initial merge attempt after a
-    review passes.  If the merge has a conflict, ``--resolve-window``
-    causes a Claude merge-resolution window to open.
+    Args:
+        resolve_window: If True, pass ``--resolve-window`` so a Claude
+            merge-resolution window opens on conflict.  Used by
+            ``_maybe_auto_merge`` for the initial merge attempt.
+            The idle fallback passes False to prevent cascading windows.
 
     NOT used by verdict-detected finalization (see ``_finalize_detected_merge``)
     to avoid re-running the merge command and causing infinite loops.
@@ -345,7 +347,10 @@ def _attempt_merge_and_check(app, pr_id: str) -> bool:
     from pm_core.tui import auto_start as _auto_start
     from pm_core.tui import pr_view
 
-    merge_cmd = "pr merge --resolve-window --background"
+    merge_cmd = "pr merge"
+    if resolve_window:
+        merge_cmd += " --resolve-window"
+    merge_cmd += " --background"
     tdir = _auto_start.get_transcript_dir(app)
     if tdir:
         merge_cmd += f" --transcript {tdir / f'merge-{pr_id}.jsonl'}"
@@ -358,25 +363,9 @@ def _attempt_merge_and_check(app, pr_id: str) -> bool:
     return bool(merged_pr and merged_pr.get("status") == "merged")
 
 
-def _attempt_merge_no_window(app, pr_id: str) -> bool:
-    """Run ``pm pr merge --background`` (without ``--resolve-window``) and return True if merged.
-
-    Used by the idle fallback path.  If the merge fails, it will NOT open
-    a new merge window — preventing cascading merge windows.
-    """
-    from pm_core.tui import auto_start as _auto_start
-    from pm_core.tui import pr_view
-
-    merge_cmd = "pr merge --background"
-    tdir = _auto_start.get_transcript_dir(app)
-    if tdir:
-        merge_cmd += f" --transcript {tdir / f'merge-{pr_id}.jsonl'}"
-    merge_cmd += f" {pr_id}"
-    pr_view.run_command(app, merge_cmd)
-
-    app._data = store.load(app._root)
-    merged_pr = store.get_pr(app._data, pr_id)
-    return bool(merged_pr and merged_pr.get("status") == "merged")
+# Keep old names as aliases for backward compatibility with tests
+_attempt_merge_and_check = lambda app, pr_id: _attempt_merge(app, pr_id, resolve_window=True)
+_attempt_merge_no_window = lambda app, pr_id: _attempt_merge(app, pr_id, resolve_window=False)
 
 
 def _on_merge_success(app, pr_id: str, merge_key: str, tracker,
@@ -612,7 +601,7 @@ def _poll_impl_idle(app) -> None:
             _log.info("merge_idle: merge window idle for %s, re-attempting merge", pr_id)
             app.log_message(f"Merge window idle for {pr_id}, re-attempting merge")
 
-            if _attempt_merge_no_window(app, pr_id):
+            if _attempt_merge(app, pr_id, resolve_window=False):
                 _log.info("merge_idle: %s merged after resolution, starting dependents", pr_id)
                 _on_merge_success(app, pr_id, merge_key, tracker,
                                   pending_merges, active_merge_keys)
