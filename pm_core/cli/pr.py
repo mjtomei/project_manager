@@ -988,13 +988,15 @@ def _pull_after_merge(data: dict, pr_entry: dict, repo_dir: str,
     if _workdir_is_dirty(repo_path):
         error_msg = f"Repo has uncommitted changes: {repo_dir}"
         click.echo(error_msg, err=True)
-        click.echo("Commit or stash your changes before pulling.", err=True)
         if resolve_window:
+            click.echo("Commit or stash your changes before pulling.", err=True)
             _launch_merge_window(data, pr_entry, error_msg,
                                  background=background, transcript=transcript,
                                  cwd=repo_dir, pull_from_origin=True)
             return False
-        return False
+        # Skip pull — the merge prompt already handled propagation.
+        click.echo("Skipping pull (merge prompt handled propagation).")
+        return True
 
     # Fetch and pull base branch
     git_ops.run_git("fetch", "origin", cwd=repo_dir, check=False)
@@ -1063,13 +1065,15 @@ def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
     if _workdir_is_dirty(repo_path):
         error_msg = f"Repo has uncommitted changes: {repo_dir}"
         click.echo(error_msg, err=True)
-        click.echo("Commit or stash your changes before pulling.", err=True)
         if resolve_window:
+            click.echo("Commit or stash your changes before pulling.", err=True)
             _launch_merge_window(data, pr_entry, error_msg,
                                  background=background, transcript=transcript,
                                  cwd=repo_dir, pull_from_workdir=workdir)
             return False
-        return False
+        # Skip pull — the merge prompt already handled propagation.
+        click.echo("Skipping pull (merge prompt handled propagation).")
+        return True
 
     fetch_r = git_ops.run_git("fetch", workdir, base_branch,
                               cwd=repo_dir, check=False)

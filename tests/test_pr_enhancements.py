@@ -577,11 +577,11 @@ class TestGitHubMergePull:
     @mock.patch("pm_core.cli.pr.git_ops")
     @mock.patch("subprocess.run")
     @mock.patch("shutil.which", return_value="/usr/bin/gh")
-    def test_github_merge_aborts_pull_on_dirty_workdir(
+    def test_github_merge_skips_pull_on_dirty_workdir(
         self, _mock_which, mock_subprocess, mock_git_ops, mock_finalize,
         tmp_github_merge_project,
     ):
-        """Dirty workdir should abort pull (no stashing) and skip finalize."""
+        """Dirty repo without --resolve-window skips pull and proceeds to finalize."""
         mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         def run_git_side_effect(*args, **kwargs):
@@ -598,14 +598,12 @@ class TestGitHubMergePull:
             result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
 
         assert result.exit_code == 0
-        assert "uncommitted changes" in result.output.lower()
+        assert "skipping pull" in result.output.lower()
 
-        git_calls = [c[0] for c in mock_git_ops.run_git.call_args_list]
-        # Should NOT have stashed, fetched, or pulled
-        assert ("stash",) not in git_calls
-        assert ("fetch", "origin") not in git_calls
+        # Pull skipped — merge prompt already handled propagation
         mock_git_ops.pull_rebase.assert_not_called()
-        mock_finalize.assert_not_called()
+        # But finalize still runs
+        mock_finalize.assert_called_once()
 
     @mock.patch.object(pr_mod, "_launch_merge_window")
     @mock.patch.object(pr_mod, "_finalize_merge")
