@@ -302,6 +302,36 @@ def generate_merge_prompt(data: dict, pr_id: str, error_output: str,
     title = pr.get("title", "")
     base_branch = data.get("project", {}).get("base_branch", "master")
 
+    backend = data.get("project", {}).get("backend", "vanilla")
+    repo_url = data.get("project", {}).get("repo", "")
+
+    if backend == "local":
+        backend_block = f"""
+## Repository Setup (local backend)
+
+This is a **local-only** git project — origin points to a local directory (`{repo_url}`),
+not a remote server.  The origin repo is non-bare with `{base_branch}` checked out, so
+`git push origin {base_branch}` will be rejected.
+
+After you resolve the conflict and commit the merge on `{base_branch}` in this workdir,
+the pm system will automatically pull the result back into the origin repo.  You do NOT
+need to push — just ensure `{base_branch}` has the correct merge commit here.
+"""
+    elif backend == "github":
+        backend_block = f"""
+## Repository Setup (GitHub backend)
+
+This project is hosted on GitHub.  After resolving the conflict, push the merged
+`{base_branch}` to origin: `git push origin {base_branch}`
+"""
+    else:
+        backend_block = f"""
+## Repository Setup (vanilla git backend)
+
+This project uses a remote git server.  After resolving the conflict, push the merged
+`{base_branch}` to origin: `git push origin {base_branch}`
+"""
+
     tui_block = tui_section(session_name) if session_name else ""
     beginner_block = _beginner_addendum()
 
@@ -313,6 +343,12 @@ def generate_merge_prompt(data: dict, pr_id: str, error_output: str,
     except FileNotFoundError:
         pass
 
+    # For local backend, step 4 is handled by the pm system automatically
+    if backend == "local":
+        propagation_step = "4. The pm system will propagate the merge to the origin repo automatically"
+    else:
+        propagation_step = f"4. Push the merged `{base_branch}` to origin: `git push origin {base_branch}`"
+
     prompt = f"""You're resolving a merge failure for PR {pr_id}: "{title}"
 
 The merge of `{branch}` into `{base_branch}` failed with the following error:
@@ -320,24 +356,22 @@ The merge of `{branch}` into `{base_branch}` failed with the following error:
 ```
 {error_output}
 ```
-
+{backend_block}
 ## Goal
 
 Resolve the merge conflict so that `{base_branch}` contains the merged result of both branches.
-The workdir is a clone — after resolving, the merge must also be propagated back to the
-origin repository so the repo dir has the updated `{base_branch}`.
 
 ## Steps
 1. Investigate the error and resolve the issue in the workdir
 2. Complete the merge: ensure `{base_branch}` includes changes from `{branch}`
 3. Run any relevant tests to verify the resolution
-4. Push the merged `{base_branch}` to origin: `git push origin {base_branch}`
+{propagation_step}
 5. End with a verdict on its own line — one of:
-   - **MERGED** — The conflict is resolved, merged, and pushed. Everything is done.
+   - **MERGED** — The conflict is resolved and merged. Everything is done.
    - **INPUT_REQUIRED** — You cannot resolve the conflict automatically and need human help.
      Describe what you need clearly: which files conflict, what the competing changes are,
      and what decision the user needs to make. The user will interact with you directly in
-     this pane, and then you should resolve, push, and provide a final **MERGED** verdict.
+     this pane, and then you should resolve and provide a final **MERGED** verdict.
 
 IMPORTANT: Always end your response with the verdict keyword on its own line — either **MERGED** or **INPUT_REQUIRED**.
 {tui_block}{notes_block}{beginner_block}"""
