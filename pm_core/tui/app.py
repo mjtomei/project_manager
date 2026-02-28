@@ -221,6 +221,8 @@ class ProjectManagerApp(App):
         self._pane_idle_tracker = PaneIdleTracker()
         # PRs awaiting merge-conflict resolution (tracked by _poll_impl_idle)
         self._pending_merge_prs: set[str] = set()
+        # PRs whose merge window needs human input (INPUT_REQUIRED verdict)
+        self._merge_input_required_prs: set[str] = set()
         # Animation frame counter for impl-pane idle polling throttle
         self._impl_poll_counter: int = 0
         # Auto-start state (purely in-memory, lost on TUI restart)

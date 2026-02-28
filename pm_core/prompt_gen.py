@@ -321,11 +321,25 @@ The merge of `{branch}` into `{base_branch}` failed with the following error:
 {error_output}
 ```
 
+## Goal
+
+Resolve the merge conflict so that `{base_branch}` contains the merged result of both branches.
+The workdir is a clone — after resolving, the merge must also be propagated back to the
+origin repository so the repo dir has the updated `{base_branch}`.
+
 ## Steps
 1. Investigate the error and resolve the issue in the workdir
-2. Run any relevant tests to verify the resolution
-3. Stage and commit the fix
-4. When done, output **MERGED** on its own line
+2. Complete the merge: ensure `{base_branch}` includes changes from `{branch}`
+3. Run any relevant tests to verify the resolution
+4. Push the merged `{base_branch}` to origin: `git push origin {base_branch}`
+5. End with a verdict on its own line — one of:
+   - **MERGED** — The conflict is resolved, merged, and pushed. Everything is done.
+   - **INPUT_REQUIRED** — You cannot resolve the conflict automatically and need human help.
+     Describe what you need clearly: which files conflict, what the competing changes are,
+     and what decision the user needs to make. The user will interact with you directly in
+     this pane, and then you should resolve, push, and provide a final **MERGED** verdict.
+
+IMPORTANT: Always end your response with the verdict keyword on its own line — either **MERGED** or **INPUT_REQUIRED**.
 {tui_block}{notes_block}{beginner_block}"""
     return prompt.strip()
 

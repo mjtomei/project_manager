@@ -205,27 +205,32 @@ class TechTree(Widget):
         self._anim_frame = (self._anim_frame + 1) % len(SPINNER_FRAMES)
 
     def _get_loop_marker(self, pr_id: str) -> tuple[str, str]:
-        """Return (marker_text, marker_style) for review loop state.
+        """Return (marker_text, marker_style) for review loop or merge state.
 
-        Returns a tuple of (text, style) for the marker. Empty strings if no loop.
+        Returns a tuple of (text, style) for the marker. Empty strings if no loop
+        and no merge input required.
         """
         try:
             loops = self.app._review_loops
             state = loops.get(pr_id)
-            if not state:
-                return ("", "")
-            if state.running:
+            if state:
+                if state.running:
+                    spinner = SPINNER_FRAMES[self._anim_frame % len(SPINNER_FRAMES)]
+                    if state.input_required:
+                        return (f"⏸{state.iteration}{spinner}", "bold red")
+                    if state.stop_requested:
+                        return (f"⏹{state.iteration}{spinner}", "bold red")
+                    return (f"⟳{state.iteration}{spinner}", "bold cyan")
+                if state.latest_verdict:
+                    v = state.latest_verdict
+                    marker = VERDICT_MARKERS.get(v, v[:4])
+                    style = VERDICT_STYLES.get(v, "")
+                    return (f"⟳{state.iteration}{marker}", style)
+            # Check for merge INPUT_REQUIRED (no review loop, but merge needs help)
+            merge_input = getattr(self.app, '_merge_input_required_prs', set())
+            if pr_id in merge_input:
                 spinner = SPINNER_FRAMES[self._anim_frame % len(SPINNER_FRAMES)]
-                if state.input_required:
-                    return (f"⏸{state.iteration}{spinner}", "bold red")
-                if state.stop_requested:
-                    return (f"⏹{state.iteration}{spinner}", "bold red")
-                return (f"⟳{state.iteration}{spinner}", "bold cyan")
-            if state.latest_verdict:
-                v = state.latest_verdict
-                marker = VERDICT_MARKERS.get(v, v[:4])
-                style = VERDICT_STYLES.get(v, "")
-                return (f"⟳{state.iteration}{marker}", style)
+                return (f"⏸M{spinner}", "bold red")
         except Exception:
             pass
         return ("", "")
