@@ -1324,10 +1324,11 @@ Boundary behavior: [PASS/FAIL]
 
 ## Part 3: Plan Actions
 Enter (view plan): [PASS/FAIL] - <pane created? role correct?>
-v (view plan): [PASS/FAIL] - <pane created? role correct?>
 e (edit plan): [PASS/FAIL] - <pane created? role correct?>
 a (add plan): [PASS/FAIL] - <command bar pre-filled?>
-w (review plan): [PASS/FAIL] - <pane created? role correct?>
+w (work session): [PASS/FAIL] - <new tmux window created?>
+d (breakdown): [PASS/FAIL] - <pane created? role correct?>
+c (review plan): [PASS/FAIL] - <pane created? role correct?>
 D (plan deps): [PASS/FAIL] - <pane created? role correct?>
 
 ## Part 4: Refresh Persistence
