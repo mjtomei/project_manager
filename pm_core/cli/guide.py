@@ -132,19 +132,27 @@ def _run_guide(fresh=False):
 @click.argument("notes_file", default=None, required=False)
 @click.option("--disable-splash", is_flag=True, help="Disable the splash screen for this repo.")
 def notes_cmd(notes_file: str | None, disable_splash: bool):
-    """Open the session notes file in your editor.
+    """Open the session notes editor.
+
+    Notes are organized into sections that target different prompts.
+    All sections are shown in a single editable view; on save, content
+    is routed to the appropriate backing files.
 
     Shows a welcome splash screen before opening the editor.
     Use --disable-splash to permanently disable it for this repo.
     """
-    if notes_file is None:
+    import subprocess
+    import tempfile
+
+    # Determine the pm root directory
+    if notes_file is not None:
+        pm_dir = Path(notes_file).parent
+    else:
         try:
-            root = state_root()
+            pm_dir = state_root()
         except (FileNotFoundError, SystemExit):
-            root = Path.cwd() / "pm"
-        notes_file = str(root / notes.NOTES_FILENAME)
-    path = Path(notes_file)
-    pm_dir = path.parent
+            pm_dir = Path.cwd() / "pm"
+
     no_splash_marker = pm_dir / ".no-notes-splash"
     editor = find_editor()
 
@@ -153,30 +161,47 @@ def notes_cmd(notes_file: str | None, disable_splash: bool):
         click.echo("Splash screen disabled for this repo.")
         return
 
-    # Ensure file exists
-    if not path.exists():
-        pm_dir.mkdir(parents=True, exist_ok=True)
-        path.write_text("")
+    # Ensure files exist and gitignore is correct
+    pm_dir.mkdir(parents=True, exist_ok=True)
+    notes.ensure_notes_file(pm_dir)
 
-    # Skip splash if disabled
-    if no_splash_marker.exists():
-        os.execvp(editor, [editor, notes_file])
+    # Build composite template and write to temp file
+    template = notes.build_edit_template(pm_dir)
+    with tempfile.NamedTemporaryFile(suffix=".md", mode="w", delete=False) as f:
+        f.write(template)
+        tmp_path = f.name
 
-    # Show the welcome content as a splash screen
-    import sys
-    sys.stdout.write("\033[2J\033[H")  # clear + home
-    sys.stdout.write(notes.NOTES_WELCOME)
-    sys.stdout.flush()
-
-    # Wait for a single keypress (raw mode)
-    import tty
-    import termios
-    fd = sys.stdin.fileno()
-    old = termios.tcgetattr(fd)
     try:
-        tty.setraw(fd)
-        sys.stdin.read(1)
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        # Show splash if not disabled
+        if not no_splash_marker.exists():
+            import sys
+            sys.stdout.write("\033[2J\033[H")  # clear + home
+            sys.stdout.write(notes.NOTES_WELCOME)
+            sys.stdout.flush()
 
-    os.execvp(editor, [editor, notes_file])
+            # Wait for a single keypress (raw mode)
+            import tty
+            import termios
+            fd = sys.stdin.fileno()
+            old = termios.tcgetattr(fd)
+            try:
+                tty.setraw(fd)
+                sys.stdin.read(1)
+            finally:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+        # Open editor
+        ret = subprocess.call([editor, tmp_path])
+        if ret != 0:
+            click.echo(f"Editor exited with code {ret}, changes not saved.", err=True)
+            return
+
+        # Parse edited template and save sections
+        edited = Path(tmp_path).read_text()
+        sections = notes.parse_edit_template(edited)
+        notes.save_sections(pm_dir, sections)
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass

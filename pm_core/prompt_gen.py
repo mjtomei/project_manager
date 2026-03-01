@@ -80,7 +80,7 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
     notes_block = ""
     try:
         root = store.find_project_root()
-        notes_block = notes.notes_section(root)
+        notes_block = notes.notes_section(root, "impl")
     except FileNotFoundError:
         pass
 
@@ -164,7 +164,7 @@ This PR is part of plan "{plan['name']}" ({plan['id']}). Other PRs in this plan:
     notes_block = ""
     try:
         root = store.find_project_root()
-        notes_block = notes.notes_section(root)
+        notes_block = notes.notes_section(root, "review")
     except FileNotFoundError:
         pass
 
@@ -309,7 +309,7 @@ def generate_merge_prompt(data: dict, pr_id: str, error_output: str,
     notes_block = ""
     try:
         root = store.find_project_root()
-        notes_block = notes.notes_section(root)
+        notes_block = notes.notes_section(root, "merge")
     except FileNotFoundError:
         pass
 
@@ -364,7 +364,7 @@ def generate_watcher_prompt(data: dict, session_name: str | None = None,
     notes_block = ""
     try:
         root = store.find_project_root()
-        notes_block = notes.notes_section(root)
+        notes_block = notes.notes_section(root, "watcher")
     except FileNotFoundError:
         pass
 

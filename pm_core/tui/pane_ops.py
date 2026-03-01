@@ -231,9 +231,7 @@ def launch_notes(app) -> None:
     """Launch the notes editor in a pane."""
     fresh = app._consume_z()
     _log.info("launch_notes fresh=%s", fresh)
-    root = app._root or (Path.cwd() / "pm")
-    notes_path = root / notes.NOTES_FILENAME
-    launch_pane(app, f"pm notes {notes_path}", "notes", fresh=fresh)
+    launch_pane(app, "pm notes", "notes", fresh=fresh)
 
 
 def view_log(app) -> None:
