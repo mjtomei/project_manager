@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-f81ca27
+  active_pr: pr-ff68ef5
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-02-20T02:43:08.956779+00:00'
@@ -1705,7 +1705,7 @@ prs:
   plan: null
   title: Add timestamp tracking and time-based PR sorting in TUI
   branch: pm/pr-f81ca27-add-timestamp-tracking-and-time-based-pr-sorting-i
-  status: in_review
+  status: merged
   depends_on: []
   description: 'We already track started_at, reviewed_at, and merged_at timestamps
     on PR entries. Add two new timestamp fields: created_at (set when a PR is first
@@ -1816,3 +1816,206 @@ prs:
   merged_at: '2026-02-28T01:23:59.075800+00:00'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a3a24e5-detect-merged-verdict-from-merge-win-3f86f2fc
+- id: pr-7e9795e
+  plan: null
+  title: 'Fix infinite merge window loop: don''t pass --resolve-window after MERGED
+    verdict'
+  branch: pm/pr-7e9795e-fix-infinite-merge-window-loop-don-t-pass-resolve-
+  status: in_review
+  depends_on: []
+  description: 'The merge window prompt and verdict handling need a complete overhaul:
+
+
+    **Prompt changes:**
+
+    - Make it clear that the goal is both to resolve the merge conflict AND ensure
+    the repo dir (origin) is updated with the merged code, not just the workdir.
+
+    - Add an INPUT_REQUIRED verdict for when Claude cannot resolve the conflict and
+    needs human help. This should be clearly described in the prompt alongside MERGED.
+
+
+    **Verdict handling changes:**
+
+    - When MERGED is detected, trust it: directly mark the PR as merged in project.yaml
+    and propagate to the repo dir. Do NOT re-run the full pm pr merge command (which
+    currently causes an infinite loop because it passes --resolve-window, and if the
+    re-run fails it opens another merge window, Claude resolves again, outputs MERGED,
+    repeat).
+
+    - When INPUT_REQUIRED is detected, mark the PR in the TUI similar to how review
+    INPUT_REQUIRED works — surface it to the user so they know human intervention
+    is needed. Stop retrying.
+
+
+    **TUI changes:**
+
+    - Add a visual indicator on the PR in the TUI when a merge window needs human
+    input (similar to the existing review INPUT_REQUIRED marker).
+
+
+    **Testing:**
+
+    - Create a test project with a local backend to verify: set up a scenario where
+    the merge has a conflict, the merge window resolves it, MERGED verdict correctly
+    finalizes without looping, and INPUT_REQUIRED correctly surfaces to the user.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/101
+  gh_pr_number: 101
+  started_at: '2026-02-28T04:23:58.632492+00:00'
+  reviewed_at: '2026-02-28T04:34:21.876591+00:00'
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-7e9795e-fix-infinite-merge-window-loop-don-t-d4ad18b8
+- id: pr-30888b1
+  plan: null
+  title: Fold plan breakdown into plan add step and remove separate breakdown prompt
+  branch: pm/pr-30888b1-fold-plan-breakdown-into-plan-add-step-and-remove-
+  status: pending
+  depends_on: []
+  description: 'The plan add prompt already does a good job breaking the project down
+    into PRs. The separate breakdown step (triggered by ''w'' in the plans pane) adds
+    an extra manual step that doesn''t add much value since we have the review prompt
+    to catch issues. Simplify the flow: fold the first-pass PR breakdown directly
+    into the plan add step so that when a plan is created, it already includes the
+    PR breakdown. Remove the separate breakdown prompt/command. This reduces the number
+    of steps to go from idea to actionable PRs.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-3116896
+  plan: null
+  title: Move Claude panes from current window into their own window
+  branch: pm/pr-3116896-move-claude-panes-from-current-window-into-their-o
+  status: pending
+  depends_on:
+  - pr-ff68ef5
+  description: 'After PR #89 (single-window focus mode) lands, Claude panes get generated
+    in the current tmux window. Add functionality to move these Claude panes out of
+    the current window and into their own dedicated window. This is the reverse of
+    the pull operation — a push/eject action that takes a Claude pane that was pulled
+    into the current window and moves it back to its own window.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-8a60987
+  plan: null
+  title: Split notes.txt into committed and gitignored files with section-based editing
+  branch: pm/pr-8a60987-split-notes-txt-into-committed-and-gitignored-file
+  status: pending
+  depends_on: []
+  description: 'Split notes.txt into structured sections that target different prompts
+    and git tracking.
+
+
+    The notes file (pm/notes.txt) currently has a single block of text included in
+    the implementation prompt only. This PR restructures it into sections:
+
+
+    Committed sections (tracked in git, shared with team):
+
+    - General: included in all prompts (impl, review, merge, watcher)
+
+    - Implementation: included only in implementation prompts
+
+    - Review: included only in review prompts
+
+    - Merge: included only in merge prompts
+
+    - Watcher: included only in watcher prompts
+
+
+    Local section (gitignored, per-user):
+
+    - Local: general-purpose notes not committed to the repo, included in all prompts
+
+
+    The notes pane in the TUI should show all sections in a single editable view.
+    On save, content is routed to the appropriate files based on which section it
+    belongs to. The committed sections live in pm/notes.txt (or similar) and the local
+    section lives in a gitignored file.
+
+
+    prompt_gen.py already includes session notes in all prompts (impl, review, merge,
+    watcher) -- this PR needs to update notes.py to parse sections and expose per-prompt
+    filtering so each prompt generator can request the relevant sections.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-89296d3
+  plan: null
+  title: Harden window management against unexpected pane state
+  branch: pm/pr-89296d3-harden-window-management-against-unexpected-pane-s
+  status: pending
+  depends_on: []
+  description: 'Problem: Window management code assumes clean state when creating
+    and looking up panes. This breaks when windows already exist with unexpected panes
+    (e.g., user manually split a pane, or a previous session left stale windows).
+
+
+    The most concrete bug: hardcoded pane index 0 assumptions. find_claude_pane in
+    loop_shared.py, get_first_pane_id in tmux.py, and merge verdict polling in review_loop_ui.py
+    all grab panes[0][0], assuming the Claude pane is always the first pane. If a
+    window already had a pane at index 0 before the Claude pane was created, the code
+    polls the wrong pane.
+
+
+    Scope:
+
+
+    1. Rename-or-create window pattern: When creating a named window (impl, review,
+    merge, watcher), if a window with that name already exists but has unexpected
+    pane state (wrong pane count, unregistered panes), rename the existing window
+    (e.g., append -stale-<ts>) and create a fresh one. Do not silently reuse a window
+    that might have user-created panes.
+
+
+    2. Stop relying on pane index 0: Use the pane registry or pane IDs returned from
+    window creation instead of assuming panes[0] is Claude. new_window_get_pane already
+    returns the actual pane ID -- thread that through to callers. For verdict polling,
+    look up the registered Claude pane rather than grabbing the first pane.
+
+
+    3. Validate window state after creation: After new_window + split_pane, verify
+    the expected number of panes exist before proceeding. If creation partially failed,
+    log and bail rather than silently operating on wrong panes.
+
+
+    4. Protect against duplicate window names: find_window_by_name returns the first
+    match. If multiple windows share a name (possible after races or manual renames),
+    log a warning and disambiguate or clean up duplicates.
+
+
+    Key locations:
+
+    - pm_core/loop_shared.py:find_claude_pane -- hardcoded panes[0][0]
+
+    - pm_core/tmux.py:get_first_pane_id -- hardcoded panes[0][0]
+
+    - pm_core/tui/review_loop_ui.py -- merge verdict polling grabs panes[0][0]
+
+    - pm_core/cli/pr.py -- window kill/recreate in pr_start, pr_review, _launch_merge_window
+
+    - pm_core/tmux.py:find_window_by_name -- returns first match only
+
+    - Pane registry (pm_core/tui/pane_registry.py) -- should be the source of truth
+    for pane lookups'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []

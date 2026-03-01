@@ -160,6 +160,14 @@ This PR is part of plan "{plan['name']}" ({plan['id']}). Other PRs in this plan:
 
     tui_block = tui_section(session_name) if session_name else ""
 
+    # Include session notes if available
+    notes_block = ""
+    try:
+        root = store.find_project_root()
+        notes_block = notes.notes_section(root)
+    except FileNotFoundError:
+        pass
+
     # Include PR notes (addendums)
     pr_notes_block = _format_pr_notes(pr)
 
@@ -177,7 +185,7 @@ Review the code changes in this PR for quality, correctness, and architectural f
 
 ## Description
 {description}
-{pr_notes_block}{plan_context}{tui_block}
+{pr_notes_block}{plan_context}{tui_block}{notes_block}
 ## Steps
 1. Run `{diff_cmd}` to see all changes
 2. **Generic checks** — things any codebase should get right:
@@ -297,6 +305,14 @@ def generate_merge_prompt(data: dict, pr_id: str, error_output: str,
     tui_block = tui_section(session_name) if session_name else ""
     beginner_block = _beginner_addendum()
 
+    # Include session notes if available
+    notes_block = ""
+    try:
+        root = store.find_project_root()
+        notes_block = notes.notes_section(root)
+    except FileNotFoundError:
+        pass
+
     prompt = f"""You're resolving a merge failure for PR {pr_id}: "{title}"
 
 The merge of `{branch}` into `{base_branch}` failed with the following error:
@@ -310,7 +326,7 @@ The merge of `{branch}` into `{base_branch}` failed with the following error:
 2. Run any relevant tests to verify the resolution
 3. Stage and commit the fix
 4. When done, output **MERGED** on its own line
-{tui_block}{beginner_block}"""
+{tui_block}{notes_block}{beginner_block}"""
     return prompt.strip()
 
 
@@ -343,6 +359,14 @@ def generate_watcher_prompt(data: dict, session_name: str | None = None,
     project_name = data.get("project", {}).get("name", "unknown")
 
     tui_block = tui_section(session_name) if session_name else ""
+
+    # Include session notes if available
+    notes_block = ""
+    try:
+        root = store.find_project_root()
+        notes_block = notes.notes_section(root)
+    except FileNotFoundError:
+        pass
 
     # Compute auto-start scope (dependency fan-in of the target)
     auto_start_scope_block = ""
@@ -385,7 +409,7 @@ Use these commands to inspect project state as needed:
 - `pm pr graph` -- show the PR dependency tree
 - `pm plan list` -- list all plans
 - `cat pm/project.yaml` -- full project state (PRs, plans, settings)
-{tui_block}
+{tui_block}{notes_block}
 ## Your Responsibilities
 
 ### Auto-Start Overview
