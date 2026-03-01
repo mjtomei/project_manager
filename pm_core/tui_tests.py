@@ -1216,36 +1216,30 @@ for plan operations (view, edit, add, review, deps, load).
    - Check pane registry for role "plan"
    - Kill the plan pane after verifying
 
-2. View plan file (v):
-   - `pm tui send v`
-   - Wait 1 second
-   - `tmux list-panes` - should see a new plan pane
-   - Kill the plan pane after verifying
-
-3. Edit plan (e):
+2. Edit plan (e):
    - `pm tui send e`
    - Wait 1 second
    - `tmux list-panes` - should see editor pane (role "plan-edit")
    - Kill the editor pane after verifying
 
-4. Add plan (a):
+3. Add plan (a):
    - `pm tui send a`
    - `pm tui view` - command bar should be focused with "plan add " pre-filled
    - `pm tui send Escape` - cancel the command
 
-5. Work session (w):
+4. Work session (w):
    - `pm tui send w`
    - Wait 2 seconds
    - `tmux list-windows` - should see a work window (named "work-<plan-id>")
    - Note: work launches in a new tmux window, not a pane split
 
-6. Breakdown plan (d):
+5. Breakdown plan (d):
    - `pm tui send d`
    - Wait 2 seconds
    - `tmux list-panes` - should see a breakdown pane (role "plan-breakdown")
    - Kill the breakdown pane after verifying
 
-7. Plan deps (D):
+6. Plan deps (D):
    - `pm tui send D`
    - Wait 2 seconds
    - `tmux list-panes` - should see a deps pane (role "plan-deps")
@@ -1297,7 +1291,7 @@ for plan operations (view, edit, add, review, deps, load).
 - p toggles between plans view and tree view
 - Plans view shows all plans with names, status, PR counts, and intro text
 - Navigation keys (Up/Down, j/k) move selection between plans
-- Enter and v open the plan file in a pane
+- Enter opens the plan file in a pane
 - e opens the plan file in an editor
 - a pre-fills the command bar with "plan add "
 - w launches a plan work session (pm plan work) in a new tmux window
