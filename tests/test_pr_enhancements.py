@@ -297,14 +297,12 @@ class TestPrMerge:
 
     @mock.patch.object(pr_mod, "_finalize_merge")
     @mock.patch("pm_core.cli.pr.git_ops")
-    def test_dirty_workdir_skips_merge(self, mock_git_ops, mock_finalize, tmp_merge_project):
-        """Dirty workdir without --resolve-window skips merge and proceeds to finalize."""
+    def test_dirty_workdir_aborts_merge(self, mock_git_ops, mock_finalize, tmp_merge_project):
+        """pr merge should abort if the workdir has uncommitted changes."""
         # Make status --porcelain return dirty output
         def run_git_side_effect(*args, **kwargs):
             if args[0] == "status":
                 return MagicMock(returncode=0, stdout=" M some_file.py\n", stderr="")
-            if args[:2] == ("rev-parse", "--abbrev-ref"):
-                return MagicMock(returncode=0, stdout="master\n", stderr="")
             return MagicMock(returncode=0, stdout="", stderr="")
         mock_git_ops.run_git.side_effect = run_git_side_effect
 
@@ -312,10 +310,9 @@ class TestPrMerge:
         with mock.patch.object(pr_mod, "state_root", return_value=tmp_merge_project["pm_dir"]):
             result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
 
-        assert result.exit_code == 0
-        assert "skipping merge" in result.output.lower()
-        # Merge skipped but finalize still runs (propagation handles repo dir)
-        mock_finalize.assert_called_once()
+        assert result.exit_code != 0
+        assert "uncommitted changes" in result.output
+        mock_finalize.assert_not_called()
 
     @mock.patch.object(pr_mod, "_finalize_merge")
     @mock.patch("pm_core.cli.pr.git_ops")
@@ -580,11 +577,11 @@ class TestGitHubMergePull:
     @mock.patch("pm_core.cli.pr.git_ops")
     @mock.patch("subprocess.run")
     @mock.patch("shutil.which", return_value="/usr/bin/gh")
-    def test_github_merge_skips_pull_on_dirty_workdir(
+    def test_github_merge_aborts_pull_on_dirty_workdir(
         self, _mock_which, mock_subprocess, mock_git_ops, mock_finalize,
         tmp_github_merge_project,
     ):
-        """Dirty repo without --resolve-window skips pull and proceeds to finalize."""
+        """Dirty repo dir should abort pull (no stashing) and skip finalize."""
         mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         def run_git_side_effect(*args, **kwargs):
@@ -601,12 +598,11 @@ class TestGitHubMergePull:
             result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
 
         assert result.exit_code == 0
-        assert "skipping pull" in result.output.lower()
+        assert "uncommitted changes" in result.output.lower()
 
-        # Pull skipped — merge prompt already handled propagation
+        # Should NOT have pulled
         mock_git_ops.pull_rebase.assert_not_called()
-        # But finalize still runs
-        mock_finalize.assert_called_once()
+        mock_finalize.assert_not_called()
 
     @mock.patch.object(pr_mod, "_launch_merge_window")
     @mock.patch.object(pr_mod, "_finalize_merge")

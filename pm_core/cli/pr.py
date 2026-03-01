@@ -988,15 +988,12 @@ def _pull_after_merge(data: dict, pr_entry: dict, repo_dir: str,
     if _workdir_is_dirty(repo_path):
         error_msg = f"Repo has uncommitted changes: {repo_dir}"
         click.echo(error_msg, err=True)
+        click.echo("Commit or stash your changes before pulling.", err=True)
         if resolve_window:
-            click.echo("Commit or stash your changes before pulling.", err=True)
             _launch_merge_window(data, pr_entry, error_msg,
                                  background=background, transcript=transcript,
                                  cwd=repo_dir, pull_from_origin=True)
-            return False
-        # Skip pull — the merge prompt already handled propagation.
-        click.echo("Skipping pull (merge prompt handled propagation).")
-        return True
+        return False
 
     # Fetch and pull base branch
     git_ops.run_git("fetch", "origin", cwd=repo_dir, check=False)
@@ -1065,15 +1062,12 @@ def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
     if _workdir_is_dirty(repo_path):
         error_msg = f"Repo has uncommitted changes: {repo_dir}"
         click.echo(error_msg, err=True)
+        click.echo("Commit or stash your changes before pulling.", err=True)
         if resolve_window:
-            click.echo("Commit or stash your changes before pulling.", err=True)
             _launch_merge_window(data, pr_entry, error_msg,
                                  background=background, transcript=transcript,
                                  cwd=repo_dir, pull_from_workdir=workdir)
-            return False
-        # Skip pull — the merge prompt already handled propagation.
-        click.echo("Skipping pull (merge prompt handled propagation).")
-        return True
+        return False
 
     fetch_r = git_ops.run_git("fetch", workdir, base_branch,
                               cwd=repo_dir, check=False)
@@ -1230,14 +1224,12 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
         # Pre-merge check: abort if workdir has uncommitted changes
         error_msg = f"Workdir has uncommitted changes: {workdir}"
         click.echo(error_msg, err=True)
+        click.echo("Commit or stash your changes before merging.", err=True)
         if resolve_window:
-            click.echo("Commit or stash your changes before merging.", err=True)
             _launch_merge_window(data, pr_entry, error_msg, background=background,
                                  transcript=transcript)
             return
-        # The merge prompt already handled the merge — skip straight to
-        # propagation so the PR can be finalized.
-        click.echo("Skipping merge (merge prompt handled it).")
+        raise SystemExit(1)
     else:
         # Fetch latest from origin (important for vanilla backend where others may push)
         if backend_name == "vanilla":

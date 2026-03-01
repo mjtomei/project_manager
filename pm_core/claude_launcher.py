@@ -88,7 +88,6 @@ def find_claude() -> str | None:
     return shutil.which("claude")
 
 
-
 def _skip_permissions() -> bool:
     """Check if skip-permissions is enabled for current session.
 
