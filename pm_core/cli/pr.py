@@ -44,6 +44,169 @@ from pm_core.cli.helpers import (
 )
 
 
+# ---------------------------------------------------------------------------
+# PR edit helpers (shared between interactive editor and flag-based paths)
+# ---------------------------------------------------------------------------
+
+# Replace unicode characters that cause vim rendering issues with
+# long wrapped lines (em/en dashes, smart quotes, etc.) with ASCII
+# equivalents.  They are restored when parsing.
+_UNICODE_TO_ASCII = [
+    ("\u2014", "--"),   # em dash
+    ("\u2013", "-"),    # en dash
+    ("\u2018", "'"),    # left single quote
+    ("\u2019", "'"),    # right single quote
+    ("\u201c", '"'),    # left double quote
+    ("\u201d", '"'),    # right double quote
+    ("\u2026", "..."),  # ellipsis
+]
+
+
+def _restore_unicode(text: str) -> str:
+    """Restore unicode characters that were replaced for the editor."""
+    for uc, ascii_rep in _UNICODE_TO_ASCII:
+        text = text.replace(ascii_rep, uc)
+    return text
+
+
+def _parse_pr_edit_raw(raw: str) -> dict:
+    """Parse a PR edit template into structured fields.
+
+    Returns a dict with keys: title, status, depends_on_str, note_texts,
+    description.  Fields not found in the template are ``None``
+    (except *note_texts* which defaults to ``[]`` and *description*
+    which defaults to ``""``).
+
+    Note: callers should run ``_restore_unicode()`` on the raw content
+    first if the template was ASCII-ified.
+    """
+    desc_lines: list[str] = []
+    note_lines: list[str] = []
+    in_desc = False
+    in_notes = False
+    title = None
+    status = None
+    deps_str = None
+
+    for line in raw.splitlines():
+        if line.startswith("#"):
+            if "description" in line.lower() and "below" in line.lower():
+                in_desc = True
+                in_notes = False
+            elif "notes" in line.lower():
+                in_notes = True
+            continue
+        if in_desc:
+            desc_lines.append(line)
+        elif in_notes:
+            stripped = line.strip()
+            if stripped.startswith("- "):
+                text = stripped[2:]
+                text = re.sub(
+                    r'\s+#\s+\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$', '', text
+                )
+                note_lines.append(text)
+        elif line.startswith("title:"):
+            title = line[len("title:"):].strip()
+        elif line.startswith("status:"):
+            status = line[len("status:"):].strip()
+        elif line.startswith("depends_on:"):
+            deps_str = line[len("depends_on:"):].strip()
+
+    return {
+        "title": title,
+        "status": status,
+        "depends_on_str": deps_str,
+        "note_texts": note_lines,
+        "description": "\n".join(desc_lines).strip(),
+    }
+
+
+def _apply_pr_edit(root: Path, pr_id: str, parsed: dict) -> list[str]:
+    """Apply parsed PR edit changes.  Loads fresh data each time.
+
+    Returns a list of change description strings (empty if nothing
+    changed).  Invalid status values and unknown dependency IDs are
+    silently skipped so this is safe to call from a background watcher.
+    """
+    data = store.load(root)
+    pr_entry = store.get_pr(data, pr_id)
+    if not pr_entry:
+        return []
+
+    changes: list[str] = []
+
+    # Title
+    if parsed["title"] is not None:
+        if parsed["title"] != pr_entry.get("title", ""):
+            pr_entry["title"] = parsed["title"]
+            changes.append(f"title={parsed['title']}")
+
+    # Description
+    if parsed["description"] != pr_entry.get("description", "").strip():
+        pr_entry["description"] = parsed["description"]
+        changes.append("description updated")
+
+    # Status (skip invalid values silently)
+    valid_statuses = {"pending", "in_progress", "in_review", "merged", "closed"}
+    if parsed["status"] is not None:
+        current_status = pr_entry.get("status", "pending")
+        if parsed["status"] != current_status and parsed["status"] in valid_statuses:
+            pr_entry["status"] = parsed["status"]
+            changes.append(f"status: {current_status} → {parsed['status']}")
+            _record_status_timestamp(pr_entry, parsed["status"])
+
+    # Dependencies (skip unknown IDs silently)
+    if parsed["depends_on_str"] is not None:
+        current_deps = ", ".join(pr_entry.get("depends_on") or [])
+        if parsed["depends_on_str"] != current_deps:
+            if not parsed["depends_on_str"]:
+                pr_entry["depends_on"] = []
+                changes.append("depends_on cleared")
+            else:
+                deps = [d.strip() for d in parsed["depends_on_str"].split(",")]
+                existing_ids = {p["id"] for p in (data.get("prs") or [])}
+                unknown = [d for d in deps if d not in existing_ids]
+                if not unknown:
+                    pr_entry["depends_on"] = deps
+                    changes.append(f"depends_on={', '.join(deps)}")
+
+    # Notes reconciliation
+    current_notes = pr_entry.get("notes") or []
+    old_texts = [n["text"] for n in current_notes]
+    if parsed["note_texts"] != old_texts:
+        old_by_text: dict[str, list] = {}
+        for n in current_notes:
+            old_by_text.setdefault(n["text"], []).append(n)
+        new_notes = []
+        existing_note_ids: set[str] = set()
+        for text in parsed["note_texts"]:
+            if text in old_by_text and old_by_text[text]:
+                reused = old_by_text[text].pop(0)
+                new_notes.append(reused)
+                existing_note_ids.add(reused["id"])
+            else:
+                note_id = store.generate_note_id(pr_id, text, existing_note_ids)
+                now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                new_notes.append({
+                    "id": note_id, "text": text,
+                    "created_at": now, "last_edited": now,
+                })
+                existing_note_ids.add(note_id)
+        new_notes.sort(
+            key=lambda n: n.get("last_edited") or n.get("created_at", "")
+        )
+        pr_entry["notes"] = new_notes
+        changes.append("notes updated")
+
+    if changes:
+        _record_status_timestamp(pr_entry)
+        save_and_push(data, root, f"pm: edit {pr_id}")
+        trigger_tui_refresh()
+
+    return changes
+
+
 # --- PR commands ---
 
 @cli.group()
@@ -143,13 +306,15 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
             changes.append(f"depends_on={', '.join(deps)}")
 
     if not changes:
-        # No flags given — open in $EDITOR
-        import tempfile
-        editor = os.environ.get("EDITOR", os.environ.get("VISUAL", "vi"))
-        current_title = pr_entry.get("title", "")
-        current_desc = pr_entry.get("description", "")
-        current_deps = ", ".join(pr_entry.get("depends_on") or [])
-        current_status = pr_entry.get("status", "pending")
+        # No flags given — open in $EDITOR with live save
+        from pm_core.editor import run_watched_editor
+
+        # Capture original state for post-edit comparison
+        orig_title = pr_entry.get("title", "")
+        orig_desc = pr_entry.get("description", "").strip()
+        orig_status = pr_entry.get("status", "pending")
+        orig_deps = ", ".join(pr_entry.get("depends_on") or [])
+        orig_notes = [n["text"] for n in (pr_entry.get("notes") or [])]
 
         current_notes = pr_entry.get("notes") or []
         notes_lines = ""
@@ -164,154 +329,55 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
         template = (
             f"# Editing {pr_id}\n"
             f"# Lines starting with # are ignored.\n"
-            f"# Save and exit to apply changes. Exit without saving to cancel.\n"
+            f"# Changes are saved each time you write the file.\n"
             f"\n"
-            f"title: {current_title}\n"
-            f"status: {current_status}\n"
-            f"depends_on: {current_deps}\n"
+            f"title: {orig_title}\n"
+            f"status: {orig_status}\n"
+            f"depends_on: {orig_deps}\n"
             f"\n"
             f"# Notes (bulleted list, one per line starting with '- '):\n"
             f"{notes_lines}"
             f"\n"
             f"# Description (everything below this line):\n"
-            f"{current_desc}\n"
+            f"{orig_desc}\n"
         )
 
-        # Replace unicode characters that cause vim rendering issues with
-        # long wrapped lines (em/en dashes, smart quotes, etc.) with ASCII
-        # equivalents.  They are restored after the editor closes.
-        _UNICODE_TO_ASCII = [
-            ("\u2014", "--"),   # em dash
-            ("\u2013", "-"),    # en dash
-            ("\u2018", "'"),    # left single quote
-            ("\u2019", "'"),    # right single quote
-            ("\u201c", '"'),    # left double quote
-            ("\u201d", '"'),    # right double quote
-            ("\u2026", "..."),  # ellipsis
-        ]
         editor_template = template
         for uc, ascii_rep in _UNICODE_TO_ASCII:
             editor_template = editor_template.replace(uc, ascii_rep)
 
-        with tempfile.NamedTemporaryFile(suffix=".md", mode="w", delete=False) as f:
-            f.write(editor_template)
-            tmp_path = f.name
+        def on_save(raw: str) -> None:
+            _apply_pr_edit(root, pr_id, _parse_pr_edit_raw(_restore_unicode(raw)))
 
-        try:
-            mtime_before = os.path.getmtime(tmp_path)
-            ret = subprocess.call([editor, tmp_path])
-            if ret != 0:
-                click.echo("Editor exited with error. No changes made.", err=True)
-                raise SystemExit(1)
-            mtime_after = os.path.getmtime(tmp_path)
-            if mtime_before == mtime_after:
-                click.echo("No changes made.")
-                raise SystemExit(0)
-
-            with open(tmp_path) as f:
-                raw = f.read()
-            # Restore unicode characters that were replaced for the editor
-            for uc, ascii_rep in _UNICODE_TO_ASCII:
-                raw = raw.replace(ascii_rep, uc)
-        finally:
-            os.unlink(tmp_path)
-
-        # Parse the edited file — three sections:
-        # 1. metadata fields (title:, status:, depends_on:)
-        # 2. notes (between # Notes and # Description comments)
-        # 3. description (after # Description comment)
-        desc_lines = []
-        note_lines = []
-        in_desc = False
-        in_notes = False
-        new_title = current_title
-        new_status = current_status
-        new_deps_str = current_deps
-        for line in raw.splitlines():
-            if line.startswith("#"):
-                if "description" in line.lower() and "below" in line.lower():
-                    in_desc = True
-                    in_notes = False
-                elif "notes" in line.lower():
-                    in_notes = True
-                continue
-            if in_desc:
-                desc_lines.append(line)
-            elif in_notes:
-                stripped = line.strip()
-                if stripped.startswith("- "):
-                    text = stripped[2:]
-                    # Strip trailing timestamp comment added by template
-                    text = re.sub(r'\s+#\s+\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$', '', text)
-                    note_lines.append(text)
-                # skip blank lines and non-bulleted lines in notes section
-            elif line.startswith("title:"):
-                new_title = line[len("title:"):].strip()
-            elif line.startswith("status:"):
-                new_status = line[len("status:"):].strip()
-            elif line.startswith("depends_on:"):
-                new_deps_str = line[len("depends_on:"):].strip()
-
-        new_desc = "\n".join(desc_lines).strip()
-
-        if new_title != current_title:
-            pr_entry["title"] = new_title
-            changes.append(f"title={new_title}")
-        if new_desc != current_desc.strip():
-            pr_entry["description"] = new_desc
-            changes.append("description updated")
-        if new_status != current_status:
-            valid = {"pending", "in_progress", "in_review", "merged", "closed"}
-            if new_status not in valid:
-                click.echo(f"Invalid status '{new_status}'. Must be one of: {', '.join(sorted(valid))}", err=True)
-                raise SystemExit(1)
-            pr_entry["status"] = new_status
-            changes.append(f"status: {current_status} → {new_status}")
-            _record_status_timestamp(pr_entry, new_status)
-        if new_deps_str != current_deps:
-            if not new_deps_str:
-                pr_entry["depends_on"] = []
-                changes.append("depends_on cleared")
-            else:
-                deps = [d.strip() for d in new_deps_str.split(",")]
-                existing_ids = {p["id"] for p in (data.get("prs") or [])}
-                unknown = [d for d in deps if d not in existing_ids]
-                if unknown:
-                    click.echo(f"Unknown PR IDs: {', '.join(unknown)}", err=True)
-                    raise SystemExit(1)
-                pr_entry["depends_on"] = deps
-                changes.append(f"depends_on={', '.join(deps)}")
-
-        # Reconcile notes: compare old text list with new text list
-        # Edits are treated as delete + add (new hash ID)
-        old_texts = [n["text"] for n in current_notes]
-        if note_lines != old_texts:
-            # Build new notes list: keep existing IDs for unchanged, generate new for added
-            old_by_text = {}
-            for n in current_notes:
-                old_by_text.setdefault(n["text"], []).append(n)
-            new_notes = []
-            existing_note_ids = set()
-            for text in note_lines:
-                if text in old_by_text and old_by_text[text]:
-                    # Reuse existing note entry
-                    reused = old_by_text[text].pop(0)
-                    new_notes.append(reused)
-                    existing_note_ids.add(reused["id"])
-                else:
-                    # New or edited note — generate new ID and timestamp
-                    note_id = store.generate_note_id(pr_id, text, existing_note_ids)
-                    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-                    new_notes.append({"id": note_id, "text": text, "created_at": now, "last_edited": now})
-                    existing_note_ids.add(note_id)
-            # Sort by last_edited so most recently touched notes appear last
-            new_notes.sort(key=lambda n: n.get("last_edited") or n.get("created_at", ""))
-            pr_entry["notes"] = new_notes
-            changes.append("notes updated")
-
-        if not changes:
+        ret, modified = run_watched_editor(editor_template, on_save)
+        if ret != 0:
+            click.echo("Editor exited with error.", err=True)
+            raise SystemExit(1)
+        if not modified:
             click.echo("No changes made.")
             raise SystemExit(0)
+
+        # Report cumulative changes (original → final state)
+        data_final = store.load(root)
+        pr_final = store.get_pr(data_final, pr_id)
+        if pr_final.get("title", "") != orig_title:
+            changes.append(f"title={pr_final['title']}")
+        if pr_final.get("description", "").strip() != orig_desc:
+            changes.append("description updated")
+        if pr_final.get("status", "pending") != orig_status:
+            changes.append(f"status: {orig_status} → {pr_final['status']}")
+        final_deps = ", ".join(pr_final.get("depends_on") or [])
+        if final_deps != orig_deps:
+            changes.append(f"depends_on={final_deps}")
+        final_notes = [n["text"] for n in (pr_final.get("notes") or [])]
+        if final_notes != orig_notes:
+            changes.append("notes updated")
+
+        if changes:
+            click.echo(f"Updated {pr_id}: {', '.join(changes)}")
+        else:
+            click.echo("No changes detected.")
+        return
 
     _record_status_timestamp(pr_entry)
     save_and_push(data, root, f"pm: edit {pr_id}")

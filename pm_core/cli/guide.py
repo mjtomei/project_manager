@@ -136,13 +136,13 @@ def notes_cmd(notes_file: str | None, disable_splash: bool):
 
     Notes are organized into sections that target different prompts.
     All sections are shown in a single editable view; on save, content
-    is routed to the appropriate backing files.
+    is routed to the appropriate backing files.  Changes are persisted
+    each time you save — you don't need to close the editor.
 
     Shows a welcome splash screen before opening the editor.
     Use --disable-splash to permanently disable it for this repo.
     """
-    import subprocess
-    import tempfile
+    from pm_core.editor import run_watched_editor
 
     # Determine the pm root directory
     if notes_file is not None:
@@ -154,7 +154,6 @@ def notes_cmd(notes_file: str | None, disable_splash: bool):
             pm_dir = Path.cwd() / "pm"
 
     no_splash_marker = pm_dir / ".no-notes-splash"
-    editor = find_editor()
 
     if disable_splash:
         no_splash_marker.touch()
@@ -165,43 +164,30 @@ def notes_cmd(notes_file: str | None, disable_splash: bool):
     pm_dir.mkdir(parents=True, exist_ok=True)
     notes.ensure_notes_file(pm_dir)
 
-    # Build composite template and write to temp file
     template = notes.build_edit_template(pm_dir)
-    with tempfile.NamedTemporaryFile(suffix=".md", mode="w", delete=False) as f:
-        f.write(template)
-        tmp_path = f.name
 
-    try:
-        # Show splash if not disabled
-        if not no_splash_marker.exists():
-            import sys
-            sys.stdout.write("\033[2J\033[H")  # clear + home
-            sys.stdout.write(notes.NOTES_WELCOME)
-            sys.stdout.flush()
-
-            # Wait for a single keypress (raw mode)
-            import tty
-            import termios
-            fd = sys.stdin.fileno()
-            old = termios.tcgetattr(fd)
-            try:
-                tty.setraw(fd)
-                sys.stdin.read(1)
-            finally:
-                termios.tcsetattr(fd, termios.TCSADRAIN, old)
-
-        # Open editor
-        ret = subprocess.call([editor, tmp_path])
-        if ret != 0:
-            click.echo(f"Editor exited with code {ret}, changes not saved.", err=True)
-            return
-
-        # Parse edited template and save sections
-        edited = Path(tmp_path).read_text()
-        sections = notes.parse_edit_template(edited)
+    def on_save(content: str) -> None:
+        sections = notes.parse_edit_template(content)
         notes.save_sections(pm_dir, sections)
-    finally:
+
+    # Show splash if not disabled
+    if not no_splash_marker.exists():
+        import sys
+        sys.stdout.write("\033[2J\033[H")  # clear + home
+        sys.stdout.write(notes.NOTES_WELCOME)
+        sys.stdout.flush()
+
+        # Wait for a single keypress (raw mode)
+        import tty
+        import termios
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
         try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
+            tty.setraw(fd)
+            sys.stdin.read(1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+    ret, _ = run_watched_editor(template, on_save)
+    if ret != 0:
+        click.echo(f"Editor exited with code {ret}.", err=True)
