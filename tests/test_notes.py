@@ -10,6 +10,7 @@ from pm_core.notes import (
     ensure_notes_file,
     load_notes,
     load_sections,
+    notes_for_prompt,
     notes_section,
     parse_edit_template,
     save_sections,
@@ -355,3 +356,95 @@ class TestNotesSection:
         (tmp_path / LOCAL_NOTES_FILENAME).write_text("")
         result = notes_section(tmp_path, "unknown")
         assert "G" in result
+
+
+# ---------------------------------------------------------------------------
+# notes_for_prompt (two-block prompt integration)
+# ---------------------------------------------------------------------------
+
+class TestNotesForPrompt:
+    def test_empty_notes_returns_empty_tuple(self, tmp_path):
+        (tmp_path / NOTES_FILENAME).write_text("")
+        (tmp_path / LOCAL_NOTES_FILENAME).write_text("")
+        general, specific = notes_for_prompt(tmp_path, "impl")
+        assert general == ""
+        assert specific == ""
+
+    def test_general_block_includes_general_and_local(self, tmp_path):
+        (tmp_path / NOTES_FILENAME).write_text("## General\n\nG notes\n")
+        (tmp_path / LOCAL_NOTES_FILENAME).write_text("L notes\n")
+        general, _ = notes_for_prompt(tmp_path, "impl")
+        assert "## Session Notes" in general
+        assert "G notes" in general
+        assert "L notes" in general
+
+    def test_general_block_excludes_specific_sections(self, tmp_path):
+        (tmp_path / NOTES_FILENAME).write_text(
+            "## General\n\nG\n\n## Implementation\n\nI\n\n## Review\n\nR\n"
+        )
+        (tmp_path / LOCAL_NOTES_FILENAME).write_text("")
+        general, _ = notes_for_prompt(tmp_path, "impl")
+        assert "I" not in general
+        assert "R" not in general
+
+    def test_specific_block_for_impl(self, tmp_path):
+        (tmp_path / NOTES_FILENAME).write_text("## Implementation\n\nimpl instructions\n")
+        (tmp_path / LOCAL_NOTES_FILENAME).write_text("")
+        _, specific = notes_for_prompt(tmp_path, "impl")
+        assert "## Additional Implementation Instructions" in specific
+        assert "for implementation sessions" in specific
+        assert "impl instructions" in specific
+
+    def test_specific_block_for_review(self, tmp_path):
+        (tmp_path / NOTES_FILENAME).write_text("## Review\n\nreview instructions\n")
+        (tmp_path / LOCAL_NOTES_FILENAME).write_text("")
+        _, specific = notes_for_prompt(tmp_path, "review")
+        assert "## Additional Review Instructions" in specific
+        assert "for review sessions" in specific
+        assert "review instructions" in specific
+
+    def test_specific_block_for_merge(self, tmp_path):
+        (tmp_path / NOTES_FILENAME).write_text("## Merge\n\nmerge instructions\n")
+        (tmp_path / LOCAL_NOTES_FILENAME).write_text("")
+        _, specific = notes_for_prompt(tmp_path, "merge")
+        assert "## Additional Merge Instructions" in specific
+        assert "merge instructions" in specific
+
+    def test_specific_block_for_watcher(self, tmp_path):
+        (tmp_path / NOTES_FILENAME).write_text("## Watcher\n\nwatcher instructions\n")
+        (tmp_path / LOCAL_NOTES_FILENAME).write_text("")
+        _, specific = notes_for_prompt(tmp_path, "watcher")
+        assert "## Additional Watcher Instructions" in specific
+        assert "watcher instructions" in specific
+
+    def test_specific_block_empty_when_no_content(self, tmp_path):
+        (tmp_path / NOTES_FILENAME).write_text("## General\n\nG\n")
+        (tmp_path / LOCAL_NOTES_FILENAME).write_text("")
+        _, specific = notes_for_prompt(tmp_path, "impl")
+        assert specific == ""
+
+    def test_specific_block_excludes_other_types(self, tmp_path):
+        (tmp_path / NOTES_FILENAME).write_text(
+            "## Review\n\nreview stuff\n\n## Implementation\n\nimpl stuff\n"
+        )
+        (tmp_path / LOCAL_NOTES_FILENAME).write_text("")
+        _, specific = notes_for_prompt(tmp_path, "review")
+        assert "review stuff" in specific
+        assert "impl stuff" not in specific
+
+    def test_both_blocks_populated(self, tmp_path):
+        (tmp_path / NOTES_FILENAME).write_text(
+            "## General\n\nG\n\n## Implementation\n\nI\n"
+        )
+        (tmp_path / LOCAL_NOTES_FILENAME).write_text("L\n")
+        general, specific = notes_for_prompt(tmp_path, "impl")
+        assert "G" in general
+        assert "L" in general
+        assert "I" in specific
+        assert "## Session Notes" in general
+        assert "## Additional Implementation Instructions" in specific
+
+    def test_missing_files(self, tmp_path):
+        general, specific = notes_for_prompt(tmp_path, "impl")
+        assert general == ""
+        assert specific == ""

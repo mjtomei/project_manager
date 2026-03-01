@@ -33,11 +33,11 @@ PROMPT_SECTIONS: dict[str, tuple[str, ...]] = {
 # Descriptions shown in the edit template header lines.
 _SECTION_DESCS: dict[str, str] = {
     "General": "included in all prompts",
-    "Implementation": "implementation prompts only",
-    "Review": "review prompts only",
-    "Merge": "merge prompts only",
-    "Watcher": "watcher prompts only",
-    "Local": "all prompts — gitignored, stays on your machine",
+    "Implementation": "additional instructions for implementation sessions",
+    "Review": "additional instructions for review sessions",
+    "Merge": "additional instructions for merge sessions",
+    "Watcher": "additional instructions for watcher sessions",
+    "Local": "included in all prompts — gitignored, stays on your machine",
 }
 
 # Regex matching a section header line (e.g. "## General" or "## General — desc").
@@ -68,10 +68,10 @@ NOTES_WELCOME = """\
 ~           Notes are organized into sections that target different prompts.
 ~
 ~               ## General        — included in all prompts (committed)
-~               ## Implementation — implementation prompts only
-~               ## Review         — review prompts only
-~               ## Merge          — merge prompts only
-~               ## Watcher        — watcher prompts only
+~               ## Implementation — additional instructions for implementation sessions
+~               ## Review         — additional instructions for review sessions
+~               ## Merge          — additional instructions for merge sessions
+~               ## Watcher        — additional instructions for watcher sessions
 ~               ## Local          — all prompts (gitignored)
 ~
 ~           Press any key to start editing.
@@ -301,3 +301,51 @@ def notes_section(root: Path, prompt_type: str | None = None) -> str:
 
     combined = "\n\n".join(parts)
     return f"\n## Session Notes\n{combined}\n"
+
+
+# Mapping from prompt_type to the specific section name.
+_PROMPT_SPECIFIC: dict[str, str] = {
+    "impl": "Implementation",
+    "review": "Review",
+    "merge": "Merge",
+    "watcher": "Watcher",
+}
+
+
+def notes_for_prompt(root: Path, prompt_type: str) -> tuple[str, str]:
+    """Return (general_block, specific_block) for a prompt type.
+
+    *general_block* contains General + Local content, formatted as a
+    ``## Session Notes`` section.  *specific_block* contains the
+    prompt-specific section (e.g. Review for ``"review"``), framed as
+    additional user instructions.
+
+    Each block is an empty string when no relevant content exists.
+    """
+    sections = load_sections(root)
+
+    # General block: General + Local
+    general_parts = [
+        sections[s].strip()
+        for s in ("General", "Local")
+        if sections.get(s, "").strip()
+    ]
+    general_block = ""
+    if general_parts:
+        combined = "\n\n".join(general_parts)
+        general_block = f"\n## Session Notes\n{combined}\n"
+
+    # Specific block: the prompt-type section
+    specific_block = ""
+    section_name = _PROMPT_SPECIFIC.get(prompt_type, "")
+    if section_name:
+        content = sections.get(section_name, "").strip()
+        if content:
+            label = section_name.lower()
+            specific_block = (
+                f"\n## Additional {section_name} Instructions\n"
+                f"The following notes were provided by the user "
+                f"for {label} sessions:\n\n{content}\n"
+            )
+
+    return general_block, specific_block

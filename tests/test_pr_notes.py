@@ -465,14 +465,14 @@ class TestPromptGenNotes:
             "prs": [pr],
         }
 
-    @patch("pm_core.prompt_gen.notes.notes_section", return_value="")
+    @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
     @patch("pm_core.prompt_gen.store.find_project_root")
     def test_no_notes(self, mock_root, mock_notes):
         data = self._data()
         prompt = generate_prompt(data, "pr-001")
         assert "PR Notes" not in prompt
 
-    @patch("pm_core.prompt_gen.notes.notes_section", return_value="")
+    @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
     @patch("pm_core.prompt_gen.store.find_project_root")
     def test_with_notes(self, mock_root, mock_notes):
         data = self._data(notes=[
@@ -484,7 +484,7 @@ class TestPromptGenNotes:
         assert "Use the new API" in prompt
         assert "Don't touch auth module" in prompt
 
-    @patch("pm_core.prompt_gen.notes.notes_section", return_value="")
+    @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
     @patch("pm_core.prompt_gen.store.find_project_root")
     def test_prompt_includes_timestamps(self, mock_root, mock_notes):
         data = self._data(notes=[
@@ -493,7 +493,7 @@ class TestPromptGenNotes:
         prompt = generate_prompt(data, "pr-001")
         assert "2026-01-15T10:30:00Z" in prompt
 
-    @patch("pm_core.prompt_gen.notes.notes_section", return_value="")
+    @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
     @patch("pm_core.prompt_gen.store.find_project_root")
     def test_prompt_handles_missing_timestamp(self, mock_root, mock_notes):
         """Legacy notes without timestamps still render."""
