@@ -136,7 +136,7 @@ class ProjectManagerApp(App):
         Binding("M", "move_to_plan", "Move Plan", show=False),
         Binding("X", "toggle_merged", "Toggle Merged", show=False),
         Binding("f", "cycle_filter", "Filter", show=False),
-        Binding("S", "cycle_sort", "Sort", show=False),
+        Binding("F", "cycle_sort", "Sort", show=False),
         Binding("question_mark", "show_help", "Help", show=True),
         Binding("c", "launch_claude", "Claude", show=True),
         Binding("H", "launch_guide", "Guide", show=True),
