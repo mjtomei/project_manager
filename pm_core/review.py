@@ -13,14 +13,9 @@ from pm_core.claude_launcher import launch_claude_print_background, find_claude
 
 REVIEW_PROMPTS = {
     "plan-add": (
-        'Read the plan file at {path}. Does it contain a substantive plan description '
-        '(not just the template placeholder "<!-- Describe the plan here -->" or similar)? '
-        'Output PASS if yes, NEEDS_FIX if no, followed by a brief explanation.'
-    ),
-    "plan-breakdown": (
-        'Read the plan file at {path}. Does it have a "## PRs" section with at least one '
-        '"### PR:" entry that has description, tests, files fields? '
-        'Output PASS if yes, NEEDS_FIX if no, followed by what\'s missing.'
+        'Read the plan file at {path}. Does it have a substantive plan description AND '
+        'a "## PRs" section with at least one "### PR:" entry that has description, tests, '
+        'files fields? Output PASS if yes, NEEDS_FIX if no, followed by what\'s missing.'
     ),
     "plan-deps": (
         'Run `pm pr list` and `pm pr graph`. Check for: circular dependencies, '

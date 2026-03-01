@@ -105,8 +105,6 @@ class PlansPane(Widget):
         output.append("\n")
         output.append("  a", style="bold")
         output.append("=add  ", style="dim")
-        output.append("w", style="bold")
-        output.append("=breakdown  ", style="dim")
         output.append("c", style="bold")
         output.append("=review  ", style="dim")
         output.append("l", style="bold")
@@ -147,7 +145,6 @@ class PlansPane(Widget):
     # Map keys to PlanAction strings — keep in sync with on_plan_action in app.py
     _KEY_ACTIONS: dict[str, str] = {
         "a": "add",
-        "w": "breakdown",
         "D": "deps",
         "l": "load",
         "e": "edit",
