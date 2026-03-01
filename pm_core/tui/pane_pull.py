@@ -318,13 +318,18 @@ def push_pane_back(app, window_name: str) -> bool:
 
 def _cleanup_pull(app, session: str, main_window: str | None,
                   window_name: str, pull_info: PulledPaneInfo) -> None:
-    """Unregister pulled panes from main window and rebalance."""
-    for pane_id in pull_info.pulled_pane_ids:
-        pane_registry.unregister_pane(session, pane_id)
+    """Remove pulled pane entries from the main window registry and rebalance.
 
+    Uses targeted removal from the main window only, rather than
+    ``unregister_pane`` which removes from *all* windows.  This preserves
+    the panes' original registration in the command window so that
+    rebalance continues to work after push-back.
+    """
     if main_window:
         data = pane_registry.load_registry(session)
         wdata = pane_registry.get_window_data(data, main_window)
+        pulled_ids = set(pull_info.pulled_pane_ids)
+        wdata["panes"] = [p for p in wdata["panes"] if p["id"] not in pulled_ids]
         wdata["user_modified"] = False
         pane_registry.save_registry(session, data)
         pane_layout.rebalance(session, main_window)

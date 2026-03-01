@@ -274,9 +274,9 @@ class ProjectManagerApp(App):
     # --- Command execution forwarder (called from pane_ops.py) ---
 
     def _run_command(self, cmd: str, working_message: str | None = None,
-                     action_key: str | None = None) -> None:
+                     action_key: str | None = None, on_complete=None) -> None:
         pr_view.run_command(self, cmd, working_message=working_message,
-                            action_key=action_key)
+                            action_key=action_key, on_complete=on_complete)
 
     # --- Compose and lifecycle ---
 

@@ -268,8 +268,7 @@ def launch_meta(app, pull_mode: bool = False) -> None:
     if pull_mode and app._session_name:
         on_complete = pane_pull.make_on_complete(app, "meta")
 
-    from pm_core.tui import pr_view
-    pr_view.run_command(app, "meta", on_complete=on_complete)
+    app._run_command("meta", on_complete=on_complete)
 
 
 def launch_guide(app) -> None:
