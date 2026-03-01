@@ -6,7 +6,7 @@ from rich.text import Text
 from rich.console import RenderableType
 
 from pm_core.tui import item_message
-from pm_core.tui.tree_layout import compute_tree_layout
+from pm_core.tui.tree_layout import compute_tree_layout, SORT_FIELDS, SORT_FIELD_KEYS
 
 
 STATUS_ICONS = {
@@ -96,6 +96,7 @@ class TechTree(Widget):
         self._hide_merged: bool = get_global_setting("hide-merged")  # toggle: hide merged PRs
         self._hide_closed: bool = True                            # toggle: hide closed PRs
         self._status_filter: str | None = None                    # filter to show only this status
+        self._sort_field: str | None = None                       # sort field (None = updated_at default)
         self._anim_frame: int = 0                                  # animation frame counter
 
     def on_mount(self) -> None:
@@ -171,6 +172,7 @@ class TechTree(Widget):
             hide_merged=self._hide_merged,
             hide_closed=self._hide_closed,
             max_width=self._get_viewport_width(),
+            sort_field=self._sort_field,
         )
         self._ordered_ids = result.ordered_ids
         self._node_positions = result.node_positions

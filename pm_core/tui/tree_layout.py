@@ -87,15 +87,23 @@ def _find_connected_components(
 
 def _component_sort_key(
     component: list[dict],
+    sort_field: str | None = None,
 ) -> tuple:
-    """Sort key for components: largest first, then by activity."""
-    # Active PRs (in_progress/in_review) first, then by component size
+    """Sort key for components: active first, then by timestamp, then size."""
+    # Active PRs (in_progress/in_review) first
     has_active = any(
         pr.get("status") in ("in_progress", "in_review")
         for pr in component
     )
+    # Best timestamp across all PRs in the component (most recent wins).
+    pr_map = {pr["id"]: pr for pr in component}
+    best_ts = min(
+        _activity_sort_key(pr["id"], pr_map, sort_field)
+        for pr in component
+    )
     return (
         0 if has_active else 1,
+        best_ts,
         -len(component),
         min(pr["id"] for pr in component),  # deterministic tie-break
     )
@@ -109,6 +117,7 @@ def compute_tree_layout(
     hide_merged: bool = False,
     hide_closed: bool = True,
     max_width: int | None = None,
+    sort_field: str | None = None,
 ) -> TreeLayout:
     """Compute the full tree layout for a set of PRs.
 
@@ -125,6 +134,8 @@ def compute_tree_layout(
         hide_closed: If True (and no status_filter), hide closed PRs.
         max_width: Maximum content width in characters that fits in the
             viewport without scrolling.  ``None`` means no limit.
+        sort_field: Timestamp field to sort by within status groups.
+            ``None`` (default) uses ``updated_at`` with fallback chain.
 
     Returns:
         A :class:`TreeLayout` with positions and navigation order.
@@ -159,7 +170,7 @@ def compute_tree_layout(
 
     # Find connected components and lay out each independently
     components = _find_connected_components(prs, pr_ids)
-    components.sort(key=_component_sort_key)
+    components.sort(key=lambda c: _component_sort_key(c, sort_field))
 
     # Lay out each component with Sugiyama
     comp_layouts: list[tuple[list[dict], list[list[str]], dict[str, int]]] = []
@@ -178,7 +189,8 @@ def compute_tree_layout(
         comp_pr_map = {pr["id"]: pr for pr in component}
         layers = graph_mod.compute_layers(component)
         layer_orders = _minimize_crossings(layers, parents_of, children_of,
-                                           pr_map=comp_pr_map)
+                                           pr_map=comp_pr_map,
+                                           sort_field=sort_field)
         row_assignments = _assign_coordinates(layer_orders, parents_of, children_of)
 
         # Normalize rows to start at 0
@@ -286,11 +298,33 @@ def compute_tree_layout(
 # ---------------------------------------------------------------------------
 
 
-def _activity_sort_key(pr_id: str, pr_map: dict[str, dict]) -> tuple:
+# Available sort fields for the TUI sort menu.
+# Each entry is (field_key, display_label).
+SORT_FIELDS = [
+    ("updated_at", "updated"),
+    ("created_at", "created"),
+    ("started_at", "started"),
+    ("reviewed_at", "reviewed"),
+    ("merged_at", "merged"),
+]
+
+# Just the keys, for cycling.
+SORT_FIELD_KEYS = [k for k, _ in SORT_FIELDS]
+
+
+def _activity_sort_key(
+    pr_id: str,
+    pr_map: dict[str, dict],
+    sort_field: str | None = None,
+) -> tuple:
     """Sort key for PRs: active statuses first, then by most recent activity.
 
     Order: in_progress > in_review > pending > merged > closed.
-    Within each status group, sort by most recent timestamp (descending).
+    Within each status group, sort by *sort_field* timestamp (descending).
+
+    When *sort_field* is ``None`` (the default), uses ``updated_at`` with
+    fallback chain: ``merged_at`` > ``reviewed_at`` > ``started_at``
+    > ``created_at``.
     """
     pr = pr_map.get(pr_id)
     if not pr:
@@ -305,9 +339,13 @@ def _activity_sort_key(pr_id: str, pr_map: dict[str, dict]) -> tuple:
     }
     priority = status_priority.get(pr.get("status", "pending"), 5)
 
-    # Use most recent timestamp for ordering within status group
-    ts = (pr.get("merged_at") or pr.get("reviewed_at")
-          or pr.get("started_at") or "")
+    # Use the requested sort field, falling back through the chain.
+    if sort_field:
+        ts = pr.get(sort_field) or ""
+    else:
+        ts = (pr.get("updated_at") or pr.get("merged_at")
+              or pr.get("reviewed_at") or pr.get("started_at")
+              or pr.get("created_at") or "")
 
     # Negate epoch for descending order (most recent first).
     # PRs without timestamps get 0, sorting after all negative values.
@@ -328,6 +366,7 @@ def _minimize_crossings(
     *,
     num_sweeps: int = 4,
     pr_map: dict[str, dict] | None = None,
+    sort_field: str | None = None,
 ) -> list[list[str]]:
     """Reorder nodes within layers to minimize edge crossings.
 
@@ -344,7 +383,7 @@ def _minimize_crossings(
     # minimization a better starting point and ensures active PRs appear
     # at the top within each layer.
     if pr_map:
-        layer_orders = [sorted(layer, key=lambda pid: _activity_sort_key(pid, pr_map))
+        layer_orders = [sorted(layer, key=lambda pid: _activity_sort_key(pid, pr_map, sort_field))
                         for layer in layers]
     else:
         layer_orders = [sorted(layer) for layer in layers]

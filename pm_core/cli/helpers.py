@@ -237,6 +237,7 @@ def _make_pr_entry(
     gh_pr_number: int | None = None,
 ) -> dict:
     """Create a standard PR entry dict with all required keys."""
+    now = datetime.now(timezone.utc).isoformat()
     return {
         "id": pr_id,
         "plan": plan,
@@ -248,6 +249,8 @@ def _make_pr_entry(
         "agent_machine": None,
         "gh_pr": gh_pr,
         "gh_pr_number": gh_pr_number,
+        "created_at": now,
+        "updated_at": now,
         "started_at": None,
         "reviewed_at": None,
         "merged_at": None,
@@ -255,14 +258,18 @@ def _make_pr_entry(
     }
 
 
-def _record_status_timestamp(pr_entry: dict, status: str) -> None:
-    """Record a timestamp on *pr_entry* for a status transition.
+def _record_status_timestamp(pr_entry: dict, status: str | None = None) -> None:
+    """Record timestamps on *pr_entry*.
+
+    Always sets ``updated_at``.  When *status* is provided, also sets
+    the status-specific timestamp:
 
     * ``started_at`` — set once on the first transition to ``in_progress``.
     * ``reviewed_at`` — updated each time the PR enters ``in_review``.
     * ``merged_at`` — set when the PR is ``merged``.
     """
     now = datetime.now(timezone.utc).isoformat()
+    pr_entry["updated_at"] = now
     if status == "in_progress" and not pr_entry.get("started_at"):
         pr_entry["started_at"] = now
     elif status == "in_review":

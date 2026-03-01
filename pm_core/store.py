@@ -60,6 +60,16 @@ def _validate_pr_statuses(data: dict) -> None:
         if status not in VALID_PR_STATES:
             # Default invalid statuses to "pending"
             pr["status"] = "pending"
+        # Backfill created_at / updated_at for PRs that predate these fields.
+        # Use the best available timestamp so sorting works immediately.
+        if not pr.get("created_at"):
+            pr["created_at"] = (pr.get("started_at")
+                                or pr.get("reviewed_at")
+                                or pr.get("merged_at"))
+        if not pr.get("updated_at"):
+            pr["updated_at"] = (pr.get("merged_at")
+                                or pr.get("reviewed_at")
+                                or pr.get("started_at"))
 
 
 def save(data: dict, root: Optional[Path] = None) -> None:
