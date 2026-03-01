@@ -25,7 +25,7 @@ class PulledPaneInfo:
     """Tracks panes that were pulled from a command window into the main window."""
     pr_window_name: str        # Name of the original command window (e.g. "#42")
     pr_window_id: str          # Window ID of the command window (e.g. "@5")
-    pulled_pane_ids: list      # Pane IDs moved to main window (may be multiple)
+    pulled_pane_ids: list[str]  # Pane IDs moved to main window (may be multiple)
     dummy_pane_id: str         # Dummy shell left in the command window
 
 
@@ -43,7 +43,7 @@ def should_pull(app, explicit_a: bool) -> bool:
 
 def is_pulled(app, window_name: str) -> bool:
     """Check if panes from the given window are currently pulled to main."""
-    return window_name in getattr(app, "_pulled_panes", {})
+    return window_name in app._pulled_panes
 
 
 def get_window_name_for_start(pr: dict) -> str:

@@ -598,6 +598,7 @@ class ProjectManagerApp(App):
     def action_merge_pr(self) -> None:
         from pm_core.tui import pane_pull
         pull_mode = pane_pull.should_pull(self, self._consume_a())
+        self._consume_z()  # merge doesn't use z, but clear stale state
         pr_view.merge_pr(self, pull_mode=pull_mode)
 
     def action_hide_plan(self) -> None:
