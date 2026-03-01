@@ -449,7 +449,7 @@ def handle_command_submitted(app, cmd: str) -> None:
 
 def run_command(app, cmd: str, working_message: str | None = None,
                 action_key: str | None = None,
-                on_complete: "callable | None" = None) -> None:
+                on_complete=None) -> None:
     """Execute a pm sub-command.
 
     Args:
@@ -509,7 +509,7 @@ def _run_command_sync(app, parts: list[str]) -> None:
 
 async def _run_command_async(app, cmd: str, parts: list[str], working_message: str,
                              action_key: str | None = None,
-                             on_complete: "callable | None" = None) -> None:
+                             on_complete=None) -> None:
     """Run a command asynchronously with animated spinner."""
     import asyncio
     import itertools

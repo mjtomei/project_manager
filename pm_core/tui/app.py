@@ -176,10 +176,8 @@ class ProjectManagerApp(App):
             event.prevent_default()
             event.stop()
         elif event.key == "escape":
-            if self._z_count > 0:
+            if self._z_count > 0 or self._a_prefix:
                 self._z_count = 0
-                self._clear_log_message()
-            if self._a_prefix:
                 self._a_prefix = False
                 self._clear_log_message()
             # Don't prevent — let escape also do its normal thing
@@ -746,6 +744,7 @@ class ProjectManagerApp(App):
     def action_toggle_plans(self) -> None:
         """Toggle between plans view and tech tree view."""
         _log.info("action: toggle_plans visible=%s", self._plans_visible)
+        self._a_prefix = False  # 'a' has different meaning in plans view
         if self._plans_visible:
             # When toggling off during setup, restore guide view
             prs = self._data.get("prs") or []
@@ -811,6 +810,7 @@ class ProjectManagerApp(App):
     def action_toggle_tests(self) -> None:
         """Toggle between tests view and tech tree view."""
         _log.info("action: toggle_tests visible=%s", self._tests_visible)
+        self._a_prefix = False  # clear prefix on view switch
         if self._tests_visible:
             self._show_normal_view()
         else:
