@@ -332,7 +332,8 @@ def _maybe_auto_merge(app, pr_id: str) -> None:
 # Merge attempt (initial auto-merge after review passes)
 # ---------------------------------------------------------------------------
 
-def _attempt_merge(app, pr_id: str, *, resolve_window: bool = False) -> bool:
+def _attempt_merge(app, pr_id: str, *, resolve_window: bool = False,
+                    propagation_only: bool = False) -> bool:
     """Run ``pm pr merge --background`` and return True if merged.
 
     Args:
@@ -341,6 +342,9 @@ def _attempt_merge(app, pr_id: str, *, resolve_window: bool = False) -> bool:
             ``_maybe_auto_merge`` for the initial merge attempt.
             Verdict-detected finalization and idle fallback pass False
             to prevent cascading windows.
+        propagation_only: If True, pass ``--propagation-only`` to skip
+            the workdir merge and go straight to the pull-into-repo-dir
+            step (step 2 of two-step merge).
     """
     from pm_core.tui import auto_start as _auto_start
     from pm_core.tui import pr_view
@@ -348,6 +352,8 @@ def _attempt_merge(app, pr_id: str, *, resolve_window: bool = False) -> bool:
     merge_cmd = "pr merge"
     if resolve_window:
         merge_cmd += " --resolve-window"
+    if propagation_only:
+        merge_cmd += " --propagation-only"
     merge_cmd += " --background"
     tdir = _auto_start.get_transcript_dir(app)
     if tdir:
@@ -378,6 +384,34 @@ def _on_merge_success(app, pr_id: str, merge_key: str, tracker,
 
 
 # ---------------------------------------------------------------------------
+# Merge window management
+# ---------------------------------------------------------------------------
+
+def _kill_merge_window(app, pr_id: str) -> None:
+    """Kill the merge tmux window for a PR.
+
+    Uses the PR's display ID to find and kill the merge window.
+    """
+    from pm_core import tmux as tmux_mod
+    from pm_core.cli.helpers import _pr_display_id
+
+    session = app._session_name
+    if not session:
+        return
+
+    pr = store.get_pr(app._data, pr_id)
+    if not pr:
+        return
+
+    display_id = _pr_display_id(pr)
+    window_name = f"merge-{display_id}"
+    win = tmux_mod.find_window_by_name(session, window_name)
+    if win:
+        tmux_mod.kill_window(session, window_name)
+        _log.info("killed merge window %s for %s", window_name, pr_id)
+
+
+# ---------------------------------------------------------------------------
 # Merge verdict finalization
 # ---------------------------------------------------------------------------
 
@@ -386,28 +420,67 @@ def _finalize_detected_merge(app, pr_id: str, merge_key: str,
                              active_merge_keys: set) -> None:
     """Finalize a merge after MERGED verdict is detected from the pane.
 
-    Re-runs ``pm pr merge`` which will see the branch is already merged
-    ("Already up to date"), handle propagation (pull-from-workdir for
-    local backend, push for vanilla/github), mark the PR as merged, and
-    trigger a TUI refresh via the normal CLI path.
+    Two-phase logic:
+    - Step 1 MERGED (not in _merge_propagation_phase): Kill current merge
+      window, attempt propagation (--propagation-only --resolve-window).
+      If that succeeds immediately, clean up. Otherwise add to propagation
+      phase for step 2.
+    - Step 2 MERGED (in _merge_propagation_phase): Kill current merge
+      window, attempt propagation (--propagation-only, no resolve window).
+      Clean up regardless.
     """
     # Clear merge input_required state if it was set
     app._merge_input_required_prs.discard(pr_id)
 
-    if _attempt_merge(app, pr_id, resolve_window=False):
-        _log.info("merge_verdict: %s finalized via pm pr merge", pr_id)
-        app.log_message(f"[green bold]✓ Merged[/] {pr_id} (conflict resolved by Claude)")
-    else:
-        _log.warning("merge_verdict: pm pr merge failed for %s after MERGED verdict", pr_id)
-        app.log_message(
-            f"[yellow]Warning:[/] merge finalization failed for {pr_id} — "
-            f"run 'pm pr merge {pr_id}' manually",
-            sticky=30,
-        )
-        return
+    # Kill the current merge window and clean up tracker state
+    _kill_merge_window(app, pr_id)
+    tracker.unregister(merge_key)
+    active_merge_keys.discard(merge_key)
+    _merge_verdict_tracker.reset(merge_key)
 
-    _on_merge_success(app, pr_id, merge_key, tracker,
-                      pending_merges, active_merge_keys)
+    in_propagation = pr_id in app._merge_propagation_phase
+
+    if not in_propagation:
+        # Step 1 just completed — attempt propagation with resolve_window
+        _log.info("merge_verdict: step 1 MERGED for %s, attempting propagation", pr_id)
+        app.log_message(f"Step 1 merged for {pr_id}, propagating to repo dir")
+
+        if _attempt_merge(app, pr_id, propagation_only=True, resolve_window=True):
+            # Propagation succeeded immediately
+            _log.info("merge_verdict: %s propagation succeeded, fully merged", pr_id)
+            app.log_message(f"[green bold]✓ Merged[/] {pr_id} (conflict resolved by Claude)")
+            pending_merges.discard(pr_id)
+            app.run_worker(
+                __import__("pm_core.tui.auto_start", fromlist=["check_and_start"])
+                .check_and_start(app)
+            )
+        else:
+            # Propagation failed — a resolve window was launched (step 2)
+            _log.info("merge_verdict: %s propagation needs resolution (step 2)", pr_id)
+            app._merge_propagation_phase.add(pr_id)
+            # Keep in pending_merges so idle tracker picks up the new window
+    else:
+        # Step 2 just completed — attempt propagation WITHOUT resolve_window
+        _log.info("merge_verdict: step 2 MERGED for %s, finalizing propagation", pr_id)
+        app.log_message(f"Step 2 merged for {pr_id}, finalizing")
+
+        if _attempt_merge(app, pr_id, propagation_only=True, resolve_window=False):
+            _log.info("merge_verdict: %s fully merged after step 2", pr_id)
+            app.log_message(f"[green bold]✓ Merged[/] {pr_id} (conflict resolved by Claude)")
+        else:
+            _log.warning("merge_verdict: propagation failed for %s after step 2 MERGED", pr_id)
+            app.log_message(
+                f"[yellow]Warning:[/] propagation failed for {pr_id} — "
+                f"run 'pm pr merge --propagation-only {pr_id}' manually",
+                sticky=30,
+            )
+
+        # Clean up regardless
+        app._merge_propagation_phase.discard(pr_id)
+        pending_merges.discard(pr_id)
+        # check_and_start returns early if auto-start is off or merge failed
+        from pm_core.tui import auto_start as _auto_start
+        app.run_worker(_auto_start.check_and_start(app))
 
 
 def _handle_merge_input_required(app, pr_id: str, merge_key: str) -> None:
@@ -582,8 +655,11 @@ def _poll_impl_idle(app) -> None:
             _log.info("merge_idle: merge window idle for %s, re-attempting merge", pr_id)
             app.log_message(f"Merge window idle for {pr_id}, re-attempting merge")
 
-            if _attempt_merge(app, pr_id, resolve_window=False):
+            prop_only = pr_id in app._merge_propagation_phase
+            if _attempt_merge(app, pr_id, resolve_window=False,
+                              propagation_only=prop_only):
                 _log.info("merge_idle: %s merged after resolution, starting dependents", pr_id)
+                app._merge_propagation_phase.discard(pr_id)
                 _on_merge_success(app, pr_id, merge_key, tracker,
                                   pending_merges, active_merge_keys)
             # else: still not merged — keep tracking

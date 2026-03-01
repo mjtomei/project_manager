@@ -191,6 +191,7 @@ def _make_app(prs=None, pending_merges=None, session_name="test-session"):
     app._root = "/tmp/test-root"
     app._session_name = session_name
     app._pending_merge_prs = pending_merges or set()
+    app._merge_propagation_phase = set()
     app._review_loops = {}
     app._impl_poll_counter = 4  # Will be 5 on next increment → triggers poll
     app._review_loop_timer = MagicMock()
@@ -373,20 +374,19 @@ class TestPollMergeVerdictDetection:
 
 
 class TestFinalizeDetectedMerge:
-    """Tests for _finalize_detected_merge helper.
+    """Tests for _finalize_detected_merge two-step merge logic.
 
-    _finalize_detected_merge re-runs ``pm pr merge`` to finalize the merge,
-    handle propagation (pull-from-workdir, push), and update the TUI via the
-    normal CLI path.
+    Step 1 MERGED: kills merge window, attempts propagation with resolve_window.
+    Step 2 MERGED: kills merge window, attempts propagation without resolve_window.
     """
 
     def setup_method(self):
         from pm_core.tui import review_loop_ui
         review_loop_ui._merge_verdict_tracker.clear()
 
-    @patch("pm_core.tui.auto_start.check_and_start")
-    def test_calls_attempt_merge(self, mock_check_start):
-        """MERGED verdict re-runs pm pr merge to finalize and propagate."""
+    @patch("pm_core.tui.review_loop_ui._kill_merge_window")
+    def test_step1_propagation_succeeds(self, mock_kill_window):
+        """Step 1 MERGED + immediate propagation success → fully merged."""
         from pm_core.tui.review_loop_ui import _finalize_detected_merge
 
         pr = _make_pr("pr-001", status="in_review")
@@ -398,19 +398,23 @@ class TestFinalizeDetectedMerge:
         with patch("pm_core.tui.review_loop_ui._attempt_merge", return_value=True) as mock_attempt:
             _finalize_detected_merge(app, "pr-001", "merge:pr-001",
                                       tracker, pending, active_keys)
-            mock_attempt.assert_called_once_with(app, "pr-001", resolve_window=False)
+            mock_attempt.assert_called_once_with(
+                app, "pr-001", propagation_only=True, resolve_window=True)
 
+        # Kill window called
+        mock_kill_window.assert_called_once_with(app, "pr-001")
         # Tracking state cleaned up
         assert "pr-001" not in pending
         assert "merge:pr-001" not in active_keys
         tracker.unregister.assert_called_once_with("merge:pr-001")
-
+        # Not in propagation phase (succeeded immediately)
+        assert "pr-001" not in app._merge_propagation_phase
         # Dependents kicked off
         app.run_worker.assert_called_once()
 
-    @patch("pm_core.tui.auto_start.check_and_start")
-    def test_attempt_merge_failure_logs_warning(self, mock_check_start):
-        """If pm pr merge fails after MERGED verdict, a warning is logged."""
+    @patch("pm_core.tui.review_loop_ui._kill_merge_window")
+    def test_step1_propagation_fails_enters_phase2(self, mock_kill_window):
+        """Step 1 MERGED + propagation failure → enters propagation phase."""
         from pm_core.tui.review_loop_ui import _finalize_detected_merge
 
         pr = _make_pr("pr-001", status="in_review")
@@ -423,28 +427,64 @@ class TestFinalizeDetectedMerge:
             _finalize_detected_merge(app, "pr-001", "merge:pr-001",
                                       tracker, pending, active_keys)
 
-        # Dependents NOT kicked off (merge failed)
-        app.run_worker.assert_not_called()
-        # Tracking state NOT cleaned up (merge didn't succeed)
+        # Now in propagation phase (step 2)
+        assert "pr-001" in app._merge_propagation_phase
+        # Still in pending_merges for idle tracker to discover new window
         assert "pr-001" in pending
-        assert "merge:pr-001" in active_keys
-
-    def test_pr_not_found_logs_warning(self):
-        """If pm pr merge fails (PR not in data), finalization warns gracefully."""
-        from pm_core.tui.review_loop_ui import _finalize_detected_merge
-
-        app = _make_app(prs=[])  # no PRs
-        tracker = MagicMock()
-
-        with patch("pm_core.tui.review_loop_ui._attempt_merge", return_value=False):
-            _finalize_detected_merge(app, "pr-999", "merge:pr-999",
-                                      tracker, set(), set())
-
-        # No worker started (merge failed)
+        # Dependents NOT kicked off
         app.run_worker.assert_not_called()
 
     @patch("pm_core.tui.auto_start.check_and_start")
-    def test_clears_merge_input_required(self, mock_check_start):
+    @patch("pm_core.tui.review_loop_ui._kill_merge_window")
+    def test_step2_propagation_succeeds(self, mock_kill_window, mock_check_start):
+        """Step 2 MERGED → propagation without resolve_window, fully merged."""
+        from pm_core.tui.review_loop_ui import _finalize_detected_merge
+
+        pr = _make_pr("pr-001", status="in_review")
+        app = _make_app(prs=[pr])
+        app._merge_propagation_phase.add("pr-001")
+        tracker = MagicMock()
+        pending = {"pr-001"}
+        active_keys = {"merge:pr-001"}
+
+        with patch("pm_core.tui.review_loop_ui._attempt_merge", return_value=True) as mock_attempt:
+            _finalize_detected_merge(app, "pr-001", "merge:pr-001",
+                                      tracker, pending, active_keys)
+            mock_attempt.assert_called_once_with(
+                app, "pr-001", propagation_only=True, resolve_window=False)
+
+        # Cleaned up from propagation phase
+        assert "pr-001" not in app._merge_propagation_phase
+        assert "pr-001" not in pending
+        # Dependents kicked off
+        app.run_worker.assert_called_once()
+
+    @patch("pm_core.tui.auto_start.check_and_start")
+    @patch("pm_core.tui.review_loop_ui._kill_merge_window")
+    def test_step2_propagation_fails_warns(self, mock_kill_window, mock_check_start):
+        """Step 2 MERGED + propagation failure → warning, cleaned up."""
+        from pm_core.tui.review_loop_ui import _finalize_detected_merge
+
+        pr = _make_pr("pr-001", status="in_review")
+        app = _make_app(prs=[pr])
+        app._merge_propagation_phase.add("pr-001")
+        tracker = MagicMock()
+        pending = {"pr-001"}
+        active_keys = {"merge:pr-001"}
+
+        with patch("pm_core.tui.review_loop_ui._attempt_merge", return_value=False):
+            _finalize_detected_merge(app, "pr-001", "merge:pr-001",
+                                      tracker, pending, active_keys)
+
+        # Cleaned up from propagation phase (no infinite retry)
+        assert "pr-001" not in app._merge_propagation_phase
+        assert "pr-001" not in pending
+        # Warning logged
+        warning_msgs = [c[0][0] for c in app.log_message.call_args_list]
+        assert any("Warning" in m or "propagation failed" in m for m in warning_msgs)
+
+    @patch("pm_core.tui.review_loop_ui._kill_merge_window")
+    def test_clears_merge_input_required(self, mock_kill_window):
         """MERGED verdict clears merge INPUT_REQUIRED state if it was set."""
         from pm_core.tui.review_loop_ui import _finalize_detected_merge
 

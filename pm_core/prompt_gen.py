@@ -391,34 +391,23 @@ This is a **local-only** git project — origin points to a local directory (`{r
 not a remote server.  The origin repo is non-bare with `{base_branch}` checked out, so
 pushing to origin will be rejected.
 
-After you resolve the conflict and commit the merge on `{base_branch}` in this workdir,
-you must also update the origin repo directory (`{repo_url}`) so its `{base_branch}`
-matches this workdir's.  Fetch from this workdir into the repo dir and fast-forward.
-If the repo dir has uncommitted changes, stash them first and restore after.
+Resolve the conflict and commit the merge on `{base_branch}` in this workdir.
 """
     elif backend == "github":
         backend_block = f"""
 ## Repository Setup (GitHub backend)
 
-This project is hosted on GitHub.  The repo dir (`{repo_url}`) is a local checkout
-that should also be kept up to date.
+This project is hosted on GitHub.
 
-After resolving the conflict:
-1. Push the merged `{base_branch}` to origin
-2. Update the local repo dir (`{repo_url}`) so its `{base_branch}` is up to date
-   (stash any uncommitted changes first if needed, and restore after)
+After resolving the conflict, push the merged `{base_branch}` to origin.
 """
     else:
         backend_block = f"""
 ## Repository Setup (vanilla git backend)
 
-This project uses a remote git server.  The repo dir (`{repo_url}`) is a local checkout
-that should also be kept up to date.
+This project uses a remote git server.
 
-After resolving the conflict:
-1. Push the merged `{base_branch}` to origin
-2. Update the local repo dir (`{repo_url}`) so its `{base_branch}` is up to date
-   (stash any uncommitted changes first if needed, and restore after)
+After resolving the conflict, push the merged `{base_branch}` to origin.
 """
 
     # Include session notes if available
@@ -431,33 +420,20 @@ After resolving the conflict:
 
 
     if backend == "local":
-        propagation_step = (
-            f"4. Update the origin repo directory (`{repo_url}`) so its `{base_branch}` matches this workdir's.\n"
-            f"   Stash any uncommitted changes first, fetch from this workdir, fast-forward, then restore the stash."
-        )
-        merged_desc = f"The conflict is resolved, merged, and the origin repo directory is updated."
-    else:
-        propagation_step = (
-            f"4. Push the merged `{base_branch}` to origin.\n"
-            f"5. Update the local repo dir (`{repo_url}`) so its `{base_branch}` is up to date.\n"
-            f"   Stash any uncommitted changes first, pull from origin, then restore the stash."
-        )
-        merged_desc = f"The conflict is resolved, merged, pushed to origin, and the local repo dir is updated."
-
-    if backend == "local":
+        merged_desc = f"The conflict is resolved and the merge is committed on `{base_branch}` in this workdir."
         steps_block = f"""## Steps
 1. Investigate the error and resolve the issue in the workdir
 2. Complete the merge: ensure `{base_branch}` includes changes from `{branch}`
 3. Run any relevant tests to verify the resolution
-{propagation_step}
+4. End with a verdict on its own line — one of:"""
+    else:
+        merged_desc = f"The conflict is resolved, merged, and pushed to origin."
+        steps_block = f"""## Steps
+1. Investigate the error and resolve the issue in the workdir
+2. Complete the merge: ensure `{base_branch}` includes changes from `{branch}`
+3. Run any relevant tests to verify the resolution
+4. Push the merged `{base_branch}` to origin
 5. End with a verdict on its own line — one of:"""
-    else:
-        steps_block = f"""## Steps
-1. Investigate the error and resolve the issue in the workdir
-2. Complete the merge: ensure `{base_branch}` includes changes from `{branch}`
-3. Run any relevant tests to verify the resolution
-{propagation_step}
-6. End with a verdict on its own line — one of:"""
 
     prompt = f"""You're resolving a merge failure for PR {pr_id}: "{title}"
 
@@ -478,7 +454,7 @@ Resolve the merge conflict so that `{base_branch}` contains the merged result of
      and what decision the user needs to make. The user will interact with you directly in
      this pane, and then you should resolve and provide a final **MERGED** verdict.
 
-IMPORTANT: Do NOT report MERGED until ALL steps above are complete, including updating the repo directory. Always end your response with the verdict keyword on its own line — either **MERGED** or **INPUT_REQUIRED**.
+IMPORTANT: Do NOT report MERGED until ALL steps above are complete. Always end your response with the verdict keyword on its own line — either **MERGED** or **INPUT_REQUIRED**.
 {tui_block}{notes_block}{beginner_block}"""
     return prompt.strip()
 
