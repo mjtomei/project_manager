@@ -896,12 +896,19 @@ def _finalize_merge(data: dict, root, pr_entry: dict, pr_id: str,
 def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
                          background: bool = False,
                          transcript: str | None = None,
-                         cwd: str | None = None) -> None:
+                         cwd: str | None = None,
+                         pull_from_workdir: str | None = None,
+                         pull_from_origin: bool = False) -> None:
     """Launch a tmux window with Claude to resolve a merge conflict.
 
     Args:
         cwd: Directory to run the merge resolution in.  Defaults to the
              PR's workdir when *None*.
+        pull_from_workdir: When set, this is a pull-from-workdir failure
+             (local backend).  The value is the workdir path containing
+             the merged branch.
+        pull_from_origin: When True, this is a pull-from-origin failure
+             (vanilla/github backend).
     """
     if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
         click.echo("Merge window requires tmux.")
@@ -922,15 +929,22 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
 
     merge_prompt = prompt_gen.generate_merge_prompt(
         data, pr_id, error_output, session_name=pm_session,
+        pull_from_workdir=pull_from_workdir,
+        pull_from_origin=pull_from_origin,
     )
     claude_cmd = build_claude_shell_cmd(prompt=merge_prompt,
                                          transcript=transcript, cwd=workdir)
     window_name = f"merge-{display_id}"
 
-    # Kill existing merge window if present
+    # No-op if a merge window is already running for this PR
     existing = tmux_mod.find_window_by_name(pm_session, window_name)
     if existing:
-        tmux_mod.kill_window(pm_session, existing["id"])
+        if background:
+            click.echo(f"Merge window '{window_name}' already exists (background mode, no-op)")
+            return
+        tmux_mod.select_window(pm_session, existing["id"])
+        click.echo(f"Switched to existing merge window '{window_name}'")
+        return
 
     try:
         tmux_mod.new_window(
@@ -943,11 +957,11 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
         click.echo(f"Merge window error: {e}")
 
 
-def _pull_after_github_merge(data: dict, pr_entry: dict, repo_dir: str,
-                             base_branch: str, resolve_window: bool,
-                             background: bool,
-                             transcript: str | None) -> bool:
-    """Pull latest base branch in the main repo after a GitHub merge.
+def _pull_after_merge(data: dict, pr_entry: dict, repo_dir: str,
+                      base_branch: str, resolve_window: bool,
+                      background: bool,
+                      transcript: str | None) -> bool:
+    """Pull latest base branch into the main repo after a merge.
 
     *repo_dir* should be the main repository directory (on the base branch),
     not the PR's workdir (which is on the PR branch).
@@ -978,8 +992,7 @@ def _pull_after_github_merge(data: dict, pr_entry: dict, repo_dir: str,
         if resolve_window:
             _launch_merge_window(data, pr_entry, error_msg,
                                  background=background, transcript=transcript,
-                                 cwd=repo_dir)
-            return False
+                                 cwd=repo_dir, pull_from_origin=True)
         return False
 
     # Fetch and pull base branch
@@ -993,7 +1006,7 @@ def _pull_after_github_merge(data: dict, pr_entry: dict, repo_dir: str,
         if resolve_window:
             _launch_merge_window(data, pr_entry, error_msg,
                                  background=background, transcript=transcript,
-                                 cwd=repo_dir)
+                                 cwd=repo_dir, pull_from_origin=True)
             return False
         click.echo("Resolve conflicts manually, then re-run 'pm pr merge' to finalize.", err=True)
         return False
@@ -1039,7 +1052,7 @@ def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
         if resolve_window:
             _launch_merge_window(data, pr_entry, error_msg,
                                  background=background, transcript=transcript,
-                                 cwd=repo_dir)
+                                 cwd=repo_dir, pull_from_workdir=workdir)
             return False
         click.echo("Pull manually when ready, then re-run 'pm pr merge'.", err=True)
         return False
@@ -1053,8 +1066,7 @@ def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
         if resolve_window:
             _launch_merge_window(data, pr_entry, error_msg,
                                  background=background, transcript=transcript,
-                                 cwd=repo_dir)
-            return False
+                                 cwd=repo_dir, pull_from_workdir=workdir)
         return False
 
     fetch_r = git_ops.run_git("fetch", workdir, base_branch,
@@ -1065,7 +1077,7 @@ def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
         if resolve_window:
             _launch_merge_window(data, pr_entry, error_msg,
                                  background=background, transcript=transcript,
-                                 cwd=repo_dir)
+                                 cwd=repo_dir, pull_from_workdir=workdir)
             return False
         click.echo("Pull manually when ready, then re-run 'pm pr merge'.", err=True)
         return False
@@ -1080,7 +1092,7 @@ def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
         if resolve_window:
             _launch_merge_window(data, pr_entry, error_msg,
                                  background=background, transcript=transcript,
-                                 cwd=repo_dir)
+                                 cwd=repo_dir, pull_from_workdir=workdir)
             return False
         click.echo("Pull manually when ready, then re-run 'pm pr merge'.", err=True)
         return False
@@ -1097,7 +1109,10 @@ def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
               help="Create merge window without switching focus (used by auto-start)")
 @click.option("--transcript", default=None, hidden=True,
               help="Path to save Claude transcript symlink (used by auto-start)")
-def pr_merge(pr_id: str | None, resolve_window: bool, background: bool, transcript: str | None):
+@click.option("--propagation-only", is_flag=True, default=False, hidden=True,
+              help="Skip workdir merge, go straight to pull into repo dir (step 2)")
+def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
+             transcript: str | None, propagation_only: bool):
     """Merge a PR's branch into the base branch.
 
     For local/vanilla backends, performs a local git merge.
@@ -1133,35 +1148,42 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool, transcri
         gh_pr_number = pr_entry.get("gh_pr_number")
         workdir = pr_entry.get("workdir")
         if gh_pr_number and workdir and Path(workdir).exists() and shutil.which("gh"):
-            click.echo(f"Merging GitHub PR #{gh_pr_number} via gh CLI...")
-            merge_result = subprocess.run(
-                ["gh", "pr", "merge", str(gh_pr_number), "--merge"],
-                cwd=workdir, capture_output=True, text=True,
-            )
-            gh_merged = merge_result.returncode == 0
-            if gh_merged:
-                click.echo(f"GitHub PR #{gh_pr_number} merged.")
+            gh_merged = False
+
+            if propagation_only:
+                # Step 2: skip gh pr merge, go straight to pull into repo dir
+                click.echo(f"Propagation only: skipping gh pr merge for #{gh_pr_number}")
+                gh_merged = True
             else:
-                # Check if PR was already merged (e.g. re-attempt after conflict resolution)
-                from pm_core import gh_ops
-                if gh_ops.is_pr_merged(workdir, branch):
-                    click.echo(f"GitHub PR #{gh_pr_number} is already merged.")
-                    gh_merged = True
+                click.echo(f"Merging GitHub PR #{gh_pr_number} via gh CLI...")
+                merge_result = subprocess.run(
+                    ["gh", "pr", "merge", str(gh_pr_number), "--merge"],
+                    cwd=workdir, capture_output=True, text=True,
+                )
+                gh_merged = merge_result.returncode == 0
+                if gh_merged:
+                    click.echo(f"GitHub PR #{gh_pr_number} merged.")
                 else:
-                    stderr = merge_result.stderr.strip()
-                    click.echo(f"gh pr merge failed: {stderr}", err=True)
-                    if resolve_window:
-                        _launch_merge_window(
-                            data, pr_entry, stderr,
-                            background=background,
-                            transcript=transcript,
-                        )
-                        return
-                    click.echo("Falling back to manual instructions.", err=True)
+                    # Check if PR was already merged (e.g. re-attempt after conflict resolution)
+                    from pm_core import gh_ops
+                    if gh_ops.is_pr_merged(workdir, branch):
+                        click.echo(f"GitHub PR #{gh_pr_number} is already merged.")
+                        gh_merged = True
+                    else:
+                        stderr = merge_result.stderr.strip()
+                        click.echo(f"gh pr merge failed: {stderr}", err=True)
+                        if resolve_window:
+                            _launch_merge_window(
+                                data, pr_entry, stderr,
+                                background=background,
+                                transcript=transcript,
+                            )
+                            return
+                        click.echo("Falling back to manual instructions.", err=True)
 
             if gh_merged:
                 repo_dir = str(_resolve_repo_dir(root, data))
-                pull_ok = _pull_after_github_merge(
+                pull_ok = _pull_after_merge(
                     data, pr_entry, repo_dir, base_branch,
                     resolve_window=resolve_window,
                     background=background,
@@ -1195,8 +1217,11 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool, transcri
 
     work_path = Path(workdir)
 
-    # Pre-merge check: abort if workdir has uncommitted changes
-    if _workdir_is_dirty(work_path):
+    if propagation_only:
+        # Step 2: skip workdir merge, go straight to propagation
+        click.echo("Propagation only: skipping workdir merge.")
+    elif _workdir_is_dirty(work_path):
+        # Pre-merge check: abort if workdir has uncommitted changes
         error_msg = f"Workdir has uncommitted changes: {workdir}"
         click.echo(error_msg, err=True)
         click.echo("Commit or stash your changes before merging.", err=True)
@@ -1205,51 +1230,51 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool, transcri
                                  transcript=transcript)
             return
         raise SystemExit(1)
+    else:
+        # Fetch latest from origin (important for vanilla backend where others may push)
+        if backend_name == "vanilla":
+            click.echo("Fetching latest from origin...")
+            git_ops.run_git("fetch", "origin", cwd=workdir, check=False)
 
-    # Fetch latest from origin (important for vanilla backend where others may push)
-    if backend_name == "vanilla":
-        click.echo("Fetching latest from origin...")
-        git_ops.run_git("fetch", "origin", cwd=workdir, check=False)
+        # Capture the branch tip before merge for post-merge verification
+        tip_result = git_ops.run_git("rev-parse", branch, cwd=workdir, check=False)
+        branch_tip = tip_result.stdout.strip() if tip_result.returncode == 0 else None
 
-    # Capture the branch tip before merge for post-merge verification
-    tip_result = git_ops.run_git("rev-parse", branch, cwd=workdir, check=False)
-    branch_tip = tip_result.stdout.strip() if tip_result.returncode == 0 else None
+        click.echo(f"Merging {branch} into {base_branch}...")
+        result = git_ops.run_git("checkout", base_branch, cwd=workdir, check=False)
+        if result.returncode != 0:
+            error_msg = f"Failed to checkout {base_branch}: {result.stderr.strip()}"
+            click.echo(error_msg, err=True)
+            if resolve_window:
+                _launch_merge_window(data, pr_entry, error_msg, background=background,
+                                     transcript=transcript)
+                return
+            raise SystemExit(1)
+        result = git_ops.run_git("merge", "--no-ff", branch, "-m",
+                                 f"Merge {branch}: {pr_entry.get('title', pr_id)}",
+                                 cwd=workdir, check=False)
+        if result.returncode != 0:
+            # Git sends conflict details to stdout, other errors to stderr
+            error_detail = (result.stdout.strip() + "\n" + result.stderr.strip()).strip()
+            error_msg = f"Merge failed:\n{error_detail}" if error_detail else "Merge failed"
+            click.echo(error_msg, err=True)
+            click.echo("Resolve conflicts manually, then run 'pm pr merge' again.", err=True)
+            if resolve_window:
+                _launch_merge_window(data, pr_entry, error_msg, background=background,
+                                     transcript=transcript)
+                return
+            raise SystemExit(1)
 
-    click.echo(f"Merging {branch} into {base_branch}...")
-    result = git_ops.run_git("checkout", base_branch, cwd=workdir, check=False)
-    if result.returncode != 0:
-        error_msg = f"Failed to checkout {base_branch}: {result.stderr.strip()}"
-        click.echo(error_msg, err=True)
-        if resolve_window:
-            _launch_merge_window(data, pr_entry, error_msg, background=background,
-                                 transcript=transcript)
-            return
-        raise SystemExit(1)
-    result = git_ops.run_git("merge", "--no-ff", branch, "-m",
-                             f"Merge {branch}: {pr_entry.get('title', pr_id)}",
-                             cwd=workdir, check=False)
-    if result.returncode != 0:
-        # Git sends conflict details to stdout, other errors to stderr
-        error_detail = (result.stdout.strip() + "\n" + result.stderr.strip()).strip()
-        error_msg = f"Merge failed:\n{error_detail}" if error_detail else "Merge failed"
-        click.echo(error_msg, err=True)
-        click.echo("Resolve conflicts manually, then run 'pm pr merge' again.", err=True)
-        if resolve_window:
-            _launch_merge_window(data, pr_entry, error_msg, background=background,
-                                 transcript=transcript)
-            return
-        raise SystemExit(1)
-
-    # Post-merge verification: confirm the branch tip is now an ancestor of HEAD
-    if branch_tip:
-        verify = git_ops.run_git(
-            "merge-base", "--is-ancestor", branch_tip, "HEAD",
-            cwd=workdir, check=False,
-        )
-        if verify.returncode != 0:
-            click.echo(f"Warning: Post-merge verification failed — branch tip {branch_tip[:8]} "
-                        f"is not an ancestor of {base_branch} HEAD.", err=True)
-            click.echo("The merge commit exists but may not include all branch commits.", err=True)
+        # Post-merge verification: confirm the branch tip is now an ancestor of HEAD
+        if branch_tip:
+            verify = git_ops.run_git(
+                "merge-base", "--is-ancestor", branch_tip, "HEAD",
+                cwd=workdir, check=False,
+            )
+            if verify.returncode != 0:
+                click.echo(f"Warning: Post-merge verification failed — branch tip {branch_tip[:8]} "
+                            f"is not an ancestor of {base_branch} HEAD.", err=True)
+                click.echo("The merge commit exists but may not include all branch commits.", err=True)
 
     # --- Propagate merged base_branch to the main repo / origin ---
     if backend_name == "local":
@@ -1267,20 +1292,37 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool, transcri
         if "project_manager" in repo or "project-manager" in repo:
             trigger_tui_restart()
     else:
-        # Vanilla backend: push to remote origin
-        push_result = git_ops.run_git("push", "origin", base_branch,
-                                      cwd=workdir, check=False)
-        if push_result.returncode != 0:
-            error_msg = f"Push to origin failed: {push_result.stderr.strip()}"
-            click.echo(error_msg, err=True)
-            if resolve_window:
-                _launch_merge_window(data, pr_entry, error_msg,
-                                     background=background, transcript=transcript)
+        if not propagation_only:
+            # Vanilla backend: push to remote origin (already done in step 1 or by Claude)
+            push_result = git_ops.run_git("push", "origin", base_branch,
+                                          cwd=workdir, check=False)
+            if push_result.returncode != 0:
+                error_msg = f"Push to origin failed: {push_result.stderr.strip()}"
+                click.echo(error_msg, err=True)
+                if resolve_window:
+                    _launch_merge_window(data, pr_entry, error_msg,
+                                         background=background, transcript=transcript)
+                    return
+                click.echo("Push manually when ready, then re-run 'pm pr merge'.", err=True)
                 return
-            click.echo("Push manually when ready, then re-run 'pm pr merge'.", err=True)
+            click.echo(f"Pushed merged {base_branch} to origin.")
+        else:
+            click.echo("Propagation only: skipping push to origin.")
+        # Pull into the main repo dir so it stays up to date
+        repo_dir = str(_resolve_repo_dir(root, data))
+        pull_ok = _pull_after_merge(
+            data, pr_entry, repo_dir, base_branch,
+            resolve_window=resolve_window,
+            background=background,
+            transcript=transcript,
+        )
+        if not pull_ok:
+            # Merge window launched for pull conflict — don't finalize yet
             return
-        click.echo(f"Pushed merged {base_branch} to origin.")
         _finalize_merge(data, root, pr_entry, pr_id, transcript=transcript)
+        repo = data.get("project", {}).get("repo", "")
+        if "project_manager" in repo or "project-manager" in repo:
+            trigger_tui_restart()
 
 
 @pr.command("sync")
