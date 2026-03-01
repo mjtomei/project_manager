@@ -63,7 +63,13 @@ _UNICODE_TO_ASCII = [
 
 
 def _restore_unicode(text: str) -> str:
-    """Restore unicode characters that were replaced for the editor."""
+    """Restore unicode characters that were replaced for the editor.
+
+    Only safe to call on content fields (title, description, note text).
+    Must NOT be applied to raw template text because the en-dash
+    restoration (``-`` → ``–``) corrupts structural elements like
+    note bullet prefixes (``- ``) and YAML-style field values.
+    """
     for uc, ascii_rep in _UNICODE_TO_ASCII:
         text = text.replace(ascii_rep, uc)
     return text
@@ -77,8 +83,9 @@ def _parse_pr_edit_raw(raw: str) -> dict:
     (except *note_texts* which defaults to ``[]`` and *description*
     which defaults to ``""``).
 
-    Note: callers should run ``_restore_unicode()`` on the raw content
-    first if the template was ASCII-ified.
+    Unicode restoration is applied per-field to title, description, and
+    note texts after parsing, so structural syntax (``- `` prefixes,
+    field names) is never corrupted.
     """
     desc_lines: list[str] = []
     note_lines: list[str] = []
@@ -113,12 +120,14 @@ def _parse_pr_edit_raw(raw: str) -> dict:
         elif line.startswith("depends_on:"):
             deps_str = line[len("depends_on:"):].strip()
 
+    # Restore unicode only in content fields — never in status or deps
+    # which would corrupt values like "in_progress" or structural syntax.
     return {
-        "title": title,
+        "title": _restore_unicode(title) if title is not None else None,
         "status": status,
         "depends_on_str": deps_str,
-        "note_texts": note_lines,
-        "description": "\n".join(desc_lines).strip(),
+        "note_texts": [_restore_unicode(t) for t in note_lines],
+        "description": _restore_unicode("\n".join(desc_lines).strip()),
     }
 
 
@@ -347,7 +356,7 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
             editor_template = editor_template.replace(uc, ascii_rep)
 
         def on_save(raw: str) -> None:
-            _apply_pr_edit(root, pr_id, _parse_pr_edit_raw(_restore_unicode(raw)))
+            _apply_pr_edit(root, pr_id, _parse_pr_edit_raw(raw))
 
         ret, modified = run_watched_editor(editor_template, on_save)
         if ret != 0:

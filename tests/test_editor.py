@@ -127,8 +127,8 @@ class TestRunWatchedEditor:
 class TestParsePrEditRaw:
     """Test the extracted PR edit template parser.
 
-    Note: _parse_pr_edit_raw is a pure parser — unicode restoration
-    should be done by the caller via _restore_unicode() before calling.
+    _parse_pr_edit_raw applies unicode restoration per-field (title,
+    description, note texts) so structural syntax is never corrupted.
     """
 
     def test_parses_all_fields(self):
@@ -171,3 +171,38 @@ class TestParsePrEditRaw:
         from pm_core.cli.pr import _restore_unicode
         restored = _restore_unicode("Em dash -- here")
         assert "\u2014" in restored
+
+    def test_parse_restores_unicode_in_content_fields(self):
+        """Unicode restoration is applied per-field, not to raw template."""
+        from pm_core.cli.pr import _parse_pr_edit_raw
+        raw = (
+            "title: Title with -- em dash\n"
+            "status: in_progress\n"
+            "depends_on: pr-002\n"
+            "\n"
+            "# Notes:\n"
+            "- Note with -- em dash\n"
+            "\n"
+            "# Description (everything below this line):\n"
+            "Desc with -- em dash\n"
+        )
+        parsed = _parse_pr_edit_raw(raw)
+        # Content fields get unicode restoration
+        assert "\u2014" in parsed["title"]
+        assert "\u2014" in parsed["note_texts"][0]
+        assert "\u2014" in parsed["description"]
+        # Structural fields are NOT corrupted
+        assert parsed["status"] == "in_progress"
+        assert parsed["depends_on_str"] == "pr-002"
+
+    def test_parse_note_prefix_not_corrupted(self):
+        """The '- ' note prefix must not be converted to en-dash."""
+        from pm_core.cli.pr import _parse_pr_edit_raw
+        raw = (
+            "# Notes:\n"
+            "- My note\n"
+            "\n"
+            "# Description (everything below this line):\n"
+        )
+        parsed = _parse_pr_edit_raw(raw)
+        assert parsed["note_texts"] == ["My note"]
