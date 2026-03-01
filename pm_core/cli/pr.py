@@ -958,9 +958,9 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
 
 
 def _pull_after_merge(data: dict, pr_entry: dict, repo_dir: str,
-                             base_branch: str, resolve_window: bool,
-                             background: bool,
-                             transcript: str | None) -> bool:
+                      base_branch: str, resolve_window: bool,
+                      background: bool,
+                      transcript: str | None) -> bool:
     """Pull latest base branch into the main repo after a merge.
 
     *repo_dir* should be the main repository directory (on the base branch),

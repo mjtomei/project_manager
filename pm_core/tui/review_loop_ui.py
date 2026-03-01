@@ -450,10 +450,8 @@ def _finalize_detected_merge(app, pr_id: str, merge_key: str,
             _log.info("merge_verdict: %s propagation succeeded, fully merged", pr_id)
             app.log_message(f"[green bold]✓ Merged[/] {pr_id} (conflict resolved by Claude)")
             pending_merges.discard(pr_id)
-            app.run_worker(
-                __import__("pm_core.tui.auto_start", fromlist=["check_and_start"])
-                .check_and_start(app)
-            )
+            from pm_core.tui import auto_start as _auto_start
+            app.run_worker(_auto_start.check_and_start(app))
         else:
             # Propagation failed — a resolve window was launched (step 2)
             _log.info("merge_verdict: %s propagation needs resolution (step 2)", pr_id)
