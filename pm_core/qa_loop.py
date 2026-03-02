@@ -70,6 +70,8 @@ class QALoopState:
     latest_output: str = ""
     made_changes: bool = False
     qa_workdir: str | None = None
+    # Set by qa_loop_ui after the completion callback has run once
+    _ui_complete_notified: bool = False
 
 
 # ---------------------------------------------------------------------------

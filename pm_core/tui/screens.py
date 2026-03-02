@@ -276,7 +276,7 @@ class HelpScreen(ModalScreen):
             yield Label("  [bold]zzz d[/]  Start strict loop", classes="help-row")
             yield Label("  [bold]z d[/]    Stop loop / fresh done", classes="help-row")
             yield Label("")
-            yield Label("[dim]Press Esc/?/q to close  |  h to discuss pm[/]", classes="help-row")
+            yield Label("[dim]Press Esc/? to close  |  h to discuss pm[/]", classes="help-row")
 
     def action_scroll_down(self) -> None:
         self.query_one("#help-container", VerticalScroll).scroll_down()

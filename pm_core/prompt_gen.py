@@ -710,18 +710,13 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
     workdir = pr.get("workdir", "")
     base_branch = data.get("project", {}).get("base_branch", "master")
 
-    # Get instruction library summary
-    try:
-        root = store.find_project_root()
-        library_summary = qa_instructions.instruction_summary_for_prompt(root)
-    except FileNotFoundError:
-        library_summary = "No instruction library found."
-
-    # Notes
+    # Get instruction library summary and notes
+    library_summary = "No instruction library found."
     general_notes_block = ""
     qa_specific_block = ""
     try:
         root = store.find_project_root()
+        library_summary = qa_instructions.instruction_summary_for_prompt(root)
         general_notes_block, qa_specific_block = notes.notes_for_prompt(root, "qa")
     except FileNotFoundError:
         pass

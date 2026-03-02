@@ -8,7 +8,6 @@ from pm_core.paths import configure_logger
 from pm_core import store
 from pm_core.qa_loop import (
     QALoopState,
-    QAScenario,
     VERDICT_PASS,
     VERDICT_NEEDS_WORK,
     VERDICT_INPUT_REQUIRED,
@@ -68,7 +67,7 @@ def poll_qa_state(app) -> None:
         if not state.running and state.latest_verdict:
             _on_qa_complete(app, state)
             # Remove completed loops (keep for one poll cycle)
-            if hasattr(state, "_ui_complete_notified"):
+            if state._ui_complete_notified:
                 del app._qa_loops[pr_id]
             else:
                 state._ui_complete_notified = True
@@ -82,7 +81,7 @@ def _on_qa_update(app, state: QALoopState) -> None:
 
 def _on_qa_complete(app, state: QALoopState) -> None:
     """Handle QA completion — trigger appropriate lifecycle transition."""
-    if hasattr(state, "_ui_complete_notified"):
+    if state._ui_complete_notified:
         return
 
     pr_id = state.pr_id

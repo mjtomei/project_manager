@@ -767,6 +767,8 @@ class ProjectManagerApp(App):
             cmd_bar.value = ""
             if self._plans_visible:
                 self.query_one("#plans-pane", PlansPane).focus()
+            elif self._qa_visible:
+                self.query_one("#qa-pane", QAPane).focus()
             else:
                 self.query_one("#tech-tree", TechTree).focus()
 
