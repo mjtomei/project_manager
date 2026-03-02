@@ -1,6 +1,5 @@
 """Tests for PR notes feature — hash-based note IDs, CLI commands, prompt gen."""
 
-import os
 import re
 from unittest.mock import patch
 
@@ -328,26 +327,15 @@ class TestPrEditNotes:
         root = _make_state(tmp_path, notes=notes)
         runner = CliRunner()
 
-        # Simulate editor that saves the template unchanged
-        def fake_editor(args):
-            # args is [editor_path, tmp_file] — just leave file as-is
-            return 0
+        def fake_watched_editor(template, on_save, **kwargs):
+            # Save unchanged template — should detect no changes
+            on_save(template)
+            return 0, True
 
-        with patch("subprocess.call", side_effect=fake_editor):
-            # Touch the file to update mtime (so the "no changes" check is bypassed)
-            original_call = os.path.getmtime
+        with patch("pm_core.editor.run_watched_editor", side_effect=fake_watched_editor):
+            result = runner.invoke(cli, ["-C", str(root), "pr", "edit", "pr-001"])
 
-            def patched_getmtime(path):
-                result = original_call(path)
-                patched_getmtime.call_count = getattr(patched_getmtime, 'call_count', 0) + 1
-                if patched_getmtime.call_count == 1:
-                    return result - 1  # first call returns older mtime
-                return result
-
-            with patch("os.path.getmtime", side_effect=patched_getmtime):
-                result = runner.invoke(cli, ["-C", str(root), "pr", "edit", "pr-001"])
-
-        # Notes should be unchanged — either "No changes" or notes not in changes list
+        # Notes should be unchanged
         data = store.load(root)
         pr = store.get_pr(data, "pr-001")
         assert len(pr["notes"]) == 2
@@ -361,28 +349,13 @@ class TestPrEditNotes:
         root = _make_state(tmp_path)
         runner = CliRunner()
 
-        def fake_editor(args):
-            # args is [editor_path, tmp_file] — inject a new note
-            tmp_file = args[1]
-            with open(tmp_file) as f:
-                content = f.read()
-            content = content.replace("# (no notes)\n", "- Brand new note\n")
-            with open(tmp_file, "w") as f:
-                f.write(content)
-            return 0
+        def fake_watched_editor(template, on_save, **kwargs):
+            content = template.replace("# (no notes)\n", "- Brand new note\n")
+            on_save(content)
+            return 0, True
 
-        with patch("subprocess.call", side_effect=fake_editor):
-            original_call = os.path.getmtime
-
-            def patched_getmtime(path):
-                result = original_call(path)
-                patched_getmtime.call_count = getattr(patched_getmtime, 'call_count', 0) + 1
-                if patched_getmtime.call_count == 1:
-                    return result - 1
-                return result
-
-            with patch("os.path.getmtime", side_effect=patched_getmtime):
-                result = runner.invoke(cli, ["-C", str(root), "pr", "edit", "pr-001"])
+        with patch("pm_core.editor.run_watched_editor", side_effect=fake_watched_editor):
+            result = runner.invoke(cli, ["-C", str(root), "pr", "edit", "pr-001"])
 
         assert result.exit_code == 0
         data = store.load(root)
@@ -403,31 +376,16 @@ class TestPrEditNotes:
         root = _make_state(tmp_path, notes=notes)
         runner = CliRunner()
 
-        def fake_editor(args):
-            # Add a third note to trigger the reconciliation path
-            tmp_file = args[1]
-            with open(tmp_file) as f:
-                content = f.read()
-            content = content.replace(
+        def fake_watched_editor(template, on_save, **kwargs):
+            content = template.replace(
                 "# Description (everything below this line):",
                 "- Third note\n\n# Description (everything below this line):"
             )
-            with open(tmp_file, "w") as f:
-                f.write(content)
-            return 0
+            on_save(content)
+            return 0, True
 
-        with patch("subprocess.call", side_effect=fake_editor):
-            original_call = os.path.getmtime
-
-            def patched_getmtime(path):
-                result = original_call(path)
-                patched_getmtime.call_count = getattr(patched_getmtime, 'call_count', 0) + 1
-                if patched_getmtime.call_count == 1:
-                    return result - 1
-                return result
-
-            with patch("os.path.getmtime", side_effect=patched_getmtime):
-                result = runner.invoke(cli, ["-C", str(root), "pr", "edit", "pr-001"])
+        with patch("pm_core.editor.run_watched_editor", side_effect=fake_watched_editor):
+            result = runner.invoke(cli, ["-C", str(root), "pr", "edit", "pr-001"])
 
         assert result.exit_code == 0
         data = store.load(root)
@@ -465,14 +423,14 @@ class TestPromptGenNotes:
             "prs": [pr],
         }
 
-    @patch("pm_core.prompt_gen.notes.notes_section", return_value="")
+    @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
     @patch("pm_core.prompt_gen.store.find_project_root")
     def test_no_notes(self, mock_root, mock_notes):
         data = self._data()
         prompt = generate_prompt(data, "pr-001")
         assert "PR Notes" not in prompt
 
-    @patch("pm_core.prompt_gen.notes.notes_section", return_value="")
+    @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
     @patch("pm_core.prompt_gen.store.find_project_root")
     def test_with_notes(self, mock_root, mock_notes):
         data = self._data(notes=[
@@ -484,7 +442,7 @@ class TestPromptGenNotes:
         assert "Use the new API" in prompt
         assert "Don't touch auth module" in prompt
 
-    @patch("pm_core.prompt_gen.notes.notes_section", return_value="")
+    @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
     @patch("pm_core.prompt_gen.store.find_project_root")
     def test_prompt_includes_timestamps(self, mock_root, mock_notes):
         data = self._data(notes=[
@@ -493,7 +451,7 @@ class TestPromptGenNotes:
         prompt = generate_prompt(data, "pr-001")
         assert "2026-01-15T10:30:00Z" in prompt
 
-    @patch("pm_core.prompt_gen.notes.notes_section", return_value="")
+    @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
     @patch("pm_core.prompt_gen.store.find_project_root")
     def test_prompt_handles_missing_timestamp(self, mock_root, mock_notes):
         """Legacy notes without timestamps still render."""

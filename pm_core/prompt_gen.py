@@ -77,10 +77,11 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
     instructions = backend.pr_instructions(branch, title, base_branch, pr_id, gh_pr_url)
 
     # Include session notes if available
-    notes_block = ""
+    general_notes_block = ""
+    impl_specific_block = ""
     try:
         root = store.find_project_root()
-        notes_block = notes.notes_section(root)
+        general_notes_block, impl_specific_block = notes.notes_for_prompt(root, "impl")
     except FileNotFoundError:
         pass
 
@@ -110,7 +111,7 @@ This session is managed by `pm`. Run `pm help` to see available commands.
 
 ## Workflow
 {instructions}
-{tui_block}{notes_block}{beginner_block}{cleanup_block}"""
+{tui_block}{general_notes_block}{impl_specific_block}{beginner_block}{cleanup_block}"""
     return prompt.strip()
 
 
@@ -161,10 +162,11 @@ This PR is part of plan "{plan['name']}" ({plan['id']}). Other PRs in this plan:
     tui_block = tui_section(session_name) if session_name else ""
 
     # Include session notes if available
-    notes_block = ""
+    general_notes_block = ""
+    review_specific_block = ""
     try:
         root = store.find_project_root()
-        notes_block = notes.notes_section(root)
+        general_notes_block, review_specific_block = notes.notes_for_prompt(root, "review")
     except FileNotFoundError:
         pass
 
@@ -185,7 +187,7 @@ Review the code changes in this PR for quality, correctness, and architectural f
 
 ## Description
 {description}
-{pr_notes_block}{plan_context}{tui_block}{notes_block}
+{pr_notes_block}{plan_context}{tui_block}{general_notes_block}
 ## Steps
 1. Run `{diff_cmd}` to see all changes
 2. **Generic checks** — things any codebase should get right:
@@ -206,6 +208,7 @@ Review the code changes in this PR for quality, correctness, and architectural f
    - **INPUT_REQUIRED** — The code looks correct but you cannot fully verify it without human-guided testing. Use this when the PR involves UI interactions, hardware-dependent behavior, environment-specific setup, or anything that requires a human to manually verify. Include specific, numbered test steps the user should perform. The user will interact with you directly in this pane to report test results, and then you should provide a final verdict."""
 
     base = prompt.strip()
+    base += review_specific_block
     base += _beginner_addendum()
     if review_loop:
         base += _review_loop_addendum(pr.get("branch", ""), review_iteration,
@@ -318,6 +321,15 @@ def generate_merge_prompt(data: dict, pr_id: str, error_output: str,
     tui_block = tui_section(session_name) if session_name else ""
     beginner_block = _beginner_addendum()
 
+    # Include session notes if available
+    general_notes_block = ""
+    merge_specific_block = ""
+    try:
+        root = store.find_project_root()
+        general_notes_block, merge_specific_block = notes.notes_for_prompt(root, "merge")
+    except FileNotFoundError:
+        pass
+
     # --- Pull-from-workdir variant ---
     # When this is set, the merge window is running in the *repo dir* and
     # needs to integrate the already-merged base branch from the workdir.
@@ -348,7 +360,7 @@ This repo directory needs its `{base_branch}` updated to match the workdir's.
    - **INPUT_REQUIRED** — You need human help to resolve this.
 
 IMPORTANT: Always end your response with the verdict keyword on its own line — either **MERGED** or **INPUT_REQUIRED**.
-{tui_block}{beginner_block}"""
+{tui_block}{general_notes_block}{merge_specific_block}{beginner_block}"""
         return prompt.strip()
 
     # --- Pull-from-origin variant (vanilla/github) ---
@@ -379,7 +391,7 @@ This local checkout needs its `{base_branch}` updated to match origin.
    - **INPUT_REQUIRED** — You need human help to resolve this.
 
 IMPORTANT: Always end your response with the verdict keyword on its own line — either **MERGED** or **INPUT_REQUIRED**.
-{tui_block}{beginner_block}"""
+{tui_block}{general_notes_block}{merge_specific_block}{beginner_block}"""
         return prompt.strip()
 
     # --- Standard merge-conflict variant ---
@@ -409,15 +421,6 @@ This project uses a remote git server.
 
 After resolving the conflict, push the merged `{base_branch}` to origin.
 """
-
-    # Include session notes if available
-    notes_block = ""
-    try:
-        root = store.find_project_root()
-        notes_block = notes.notes_section(root)
-    except FileNotFoundError:
-        pass
-
 
     if backend == "local":
         merged_desc = f"The conflict is resolved and the merge is committed on `{base_branch}` in this workdir."
@@ -455,7 +458,7 @@ Resolve the merge conflict so that `{base_branch}` contains the merged result of
      this pane, and then you should resolve and provide a final **MERGED** verdict.
 
 IMPORTANT: Do NOT report MERGED until ALL steps above are complete. Always end your response with the verdict keyword on its own line — either **MERGED** or **INPUT_REQUIRED**.
-{tui_block}{notes_block}{beginner_block}"""
+{tui_block}{general_notes_block}{merge_specific_block}{beginner_block}"""
     return prompt.strip()
 
 
@@ -490,10 +493,11 @@ def generate_watcher_prompt(data: dict, session_name: str | None = None,
     tui_block = tui_section(session_name) if session_name else ""
 
     # Include session notes if available
-    notes_block = ""
+    general_notes_block = ""
+    watcher_specific_block = ""
     try:
         root = store.find_project_root()
-        notes_block = notes.notes_section(root)
+        general_notes_block, watcher_specific_block = notes.notes_for_prompt(root, "watcher")
     except FileNotFoundError:
         pass
 
@@ -538,7 +542,7 @@ Use these commands to inspect project state as needed:
 - `pm pr graph` -- show the PR dependency tree
 - `pm plan list` -- list all plans
 - `cat pm/project.yaml` -- full project state (PRs, plans, settings)
-{tui_block}{notes_block}
+{tui_block}{general_notes_block}
 ## Your Responsibilities
 
 ### Auto-Start Overview
@@ -668,7 +672,7 @@ tmux list-panes -t <session>:<window>
    - **READY** -- All issues handled (or no issues found). The monitor will wait and then run another iteration.
    - **INPUT_REQUIRED** -- You need human input or want to surface an important finding. Describe what you need clearly. The user will interact with you in this pane, and then you should provide a follow-up verdict (**READY** to continue monitoring).
 
-IMPORTANT: Always end your response with the verdict keyword on its own line -- either **READY** or **INPUT_REQUIRED**."""
+IMPORTANT: Always end your response with the verdict keyword on its own line -- either **READY** or **INPUT_REQUIRED**.{watcher_specific_block}"""
 
     return prompt.strip()
 
