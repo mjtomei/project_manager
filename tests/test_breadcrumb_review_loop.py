@@ -454,13 +454,12 @@ class TestTuiRestartCommand:
 
         runner = CliRunner()
         with patch("pm_core.cli.tui._find_tui_pane", return_value=("%42", "pm-test-12345678")), \
-             patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
+             patch("pm_core.cli.tui.tmux_mod") as mock_tmux:
             result = runner.invoke(tui_restart, [])
 
         assert result.exit_code == 0
         assert "Sent restart" in result.output
-        mock_run.assert_called_once()
+        mock_tmux.send_keys_literal.assert_called_once_with("%42", "C-r")
 
     def test_restart_with_breadcrumb(self, tmp_path):
         from click.testing import CliRunner
@@ -469,13 +468,28 @@ class TestTuiRestartCommand:
         runner = CliRunner()
         with patch("pm_core.cli.tui._find_tui_pane", return_value=("%42", "pm-test-12345678")), \
              patch("pm_core.paths.pm_home", return_value=tmp_path), \
-             patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
+             patch("pm_core.cli.tui.tmux_mod") as mock_tmux:
             result = runner.invoke(tui_restart, ["--breadcrumb"])
 
         assert result.exit_code == 0
         assert "merge-restart marker" in result.output
         assert (tmp_path / "merge-restart").exists()
+        mock_tmux.send_keys_literal.assert_called_once_with("%42", "C-r")
+
+    def test_restart_breadcrumb_cleaned_on_failure(self, tmp_path):
+        from click.testing import CliRunner
+        from pm_core.cli.tui import tui_restart
+
+        runner = CliRunner()
+        with patch("pm_core.cli.tui._find_tui_pane", return_value=("%42", "pm-test-12345678")), \
+             patch("pm_core.paths.pm_home", return_value=tmp_path), \
+             patch("pm_core.cli.tui.tmux_mod") as mock_tmux:
+            mock_tmux.send_keys_literal.side_effect = Exception("tmux error")
+            result = runner.invoke(tui_restart, ["--breadcrumb"])
+
+        assert result.exit_code != 0
+        # Marker should be cleaned up on failure
+        assert not (tmp_path / "merge-restart").exists()
 
     def test_restart_no_tui_pane(self):
         from click.testing import CliRunner

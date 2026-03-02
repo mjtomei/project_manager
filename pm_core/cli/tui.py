@@ -210,20 +210,24 @@ def tui_restart(breadcrumb: bool, session: str | None):
         pm tui restart                  # Clean restart (no state preserved)
         pm tui restart --breadcrumb     # Restart preserving loop state
     """
-    import subprocess
-
     pane_id, sess = _find_tui_pane(session)
     if not pane_id:
         click.echo("No TUI pane found. Is there a pm tmux session running?", err=True)
         raise SystemExit(1)
 
+    marker = None
     if breadcrumb:
         from pm_core.paths import pm_home
         marker = pm_home() / "merge-restart"
         marker.touch()
         click.echo("Wrote merge-restart marker for state persistence")
 
-    subprocess.run(tmux_mod._tmux_cmd("send-keys", "-t", pane_id, "C-r"), check=True)
+    try:
+        tmux_mod.send_keys_literal(pane_id, "C-r")
+    except Exception:
+        if marker and marker.exists():
+            marker.unlink(missing_ok=True)
+        raise
     click.echo(f"Sent restart to TUI pane {pane_id} (session: {sess})")
 
 
