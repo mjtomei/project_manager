@@ -287,6 +287,18 @@ def run_qa_sync(
     _log.info("QA execution phase: %d scenarios for %s",
               len(state.scenarios), state.pr_id)
 
+    # Record HEAD sha before execution so we can detect new commits later
+    pre_qa_head = None
+    if workdir_path and Path(workdir_path).is_dir():
+        try:
+            result = git_ops.run_git(
+                "rev-parse", "HEAD", cwd=workdir_path, check=False,
+            )
+            if result.returncode == 0:
+                pre_qa_head = result.stdout.strip()
+        except Exception:
+            pass
+
     # Ensure the QA window exists and get the base pane for splitting
     win = tmux_mod.find_window_by_name(session, window_name)
     if not win:
@@ -374,10 +386,9 @@ def run_qa_sync(
     # --- Aggregate verdicts ---
     verdicts = list(state.scenario_verdicts.values())
 
-    # Check for changes via git status
+    # Check for changes via git status (uncommitted files)
     if workdir_path and Path(workdir_path).is_dir():
         try:
-            from pm_core import git_ops
             result = git_ops.run_git(
                 "status", "--porcelain", cwd=workdir_path, check=False,
             )
@@ -386,16 +397,16 @@ def run_qa_sync(
         except Exception:
             pass
 
-        # Also check if any commits were pushed
-        try:
-            result = git_ops.run_git(
-                "log", "--oneline", "origin/HEAD..HEAD",
-                cwd=workdir_path, check=False,
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                state.made_changes = True
-        except Exception:
-            pass
+        # Check if HEAD moved since QA started (new commits by QA scenarios)
+        if pre_qa_head:
+            try:
+                result = git_ops.run_git(
+                    "rev-parse", "HEAD", cwd=workdir_path, check=False,
+                )
+                if result.returncode == 0 and result.stdout.strip() != pre_qa_head:
+                    state.made_changes = True
+            except Exception:
+                pass
 
     # Determine overall verdict
     if VERDICT_NEEDS_WORK in verdicts or state.made_changes:
