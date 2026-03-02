@@ -548,13 +548,15 @@ class TestCurrentOrBaseSession:
 
 class TestNewWindowGetPane:
     @patch("pm_core.tmux.current_or_base_session", return_value="sess")
-    @patch("pm_core.tmux.find_window_by_name", return_value={"id": "@1", "index": "1", "name": "review"})
+    @patch("pm_core.tmux.get_window_id_for_pane", return_value="@1")
     @patch("pm_core.tmux.subprocess.run")
-    def test_returns_pane_id(self, mock_run, mock_fwbn, mock_cobs):
+    def test_returns_pane_id(self, mock_run, mock_gwifp, mock_cobs):
         # new-window -P -F returns pane ID on stdout
         mock_run.return_value = MagicMock(returncode=0, stdout="%5\n")
         result = new_window_get_pane("sess", "review", "bash", "/tmp")
         assert result == "%5"
+        # switch=True should derive window ID from pane, not name lookup
+        mock_gwifp.assert_called_once_with("%5")
 
     @patch("pm_core.tmux.subprocess.run")
     def test_returns_none_when_stdout_empty(self, mock_run):

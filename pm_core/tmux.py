@@ -172,11 +172,12 @@ def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
     if not pane_id:
         return None
     if switch:
-        win = find_window_by_name(session, name)
-        if win:
+        # Use pane-derived window ID (avoids name-lookup side effects)
+        win_id = get_window_id_for_pane(pane_id)
+        if win_id:
             current = current_or_base_session(session)
             subprocess.run(
-                _tmux_cmd("select-window", "-t", f"{current}:{win['index']}"),
+                _tmux_cmd("select-window", "-t", f"{current}:{win_id}"),
                 capture_output=True,
             )
     return pane_id
