@@ -14,6 +14,7 @@ Verdicts (shared with review):
 
 import re
 import secrets
+import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
@@ -25,6 +26,7 @@ from pm_core.loop_shared import (
     find_claude_pane,
     get_pm_session,
     extract_verdict_from_content,
+    tail_contains,
     VerdictStabilityTracker,
 )
 
@@ -41,6 +43,7 @@ _QA_KEYWORDS = ("INPUT_REQUIRED", "NEEDS_WORK", "PASS")
 _POLL_INTERVAL = 5
 _TICK_INTERVAL = 1
 _VERDICT_GRACE_PERIOD = 30  # QA sessions take a while to run
+_PLANNER_TIMEOUT = 60 * 60  # seconds to wait for planner output
 
 
 @dataclass
@@ -98,7 +101,8 @@ def create_scenario_workdir(qa_workdir: Path, scenario_index: int) -> Path:
 
 def _compute_qa_window_name(pr_data: dict) -> str:
     """Compute the QA tmux window name from PR data."""
-    display_id = pr_data.get("display_id") or pr_data.get("id", "unknown")
+    from pm_core.cli.helpers import _pr_display_id
+    display_id = _pr_display_id(pr_data)
     return f"qa-{display_id}"
 
 
@@ -109,55 +113,64 @@ def _compute_qa_window_name(pr_data: dict) -> str:
 def parse_qa_plan(output: str) -> list[QAScenario]:
     """Parse planner output into a list of QAScenarios.
 
-    Expected format:
-    ## QA Plan
+    Expected format (ALL CAPS markers, no markdown):
 
-    ### 1. [Scenario Title]
-    - **focus**: What to test
-    - **instruction**: path/to/file.md (optional)
-    - **steps**: Key test steps
+    QA_PLAN_START
 
-    ### 2. ...
+    SCENARIO 1: Scenario Title
+    FOCUS: What to test
+    INSTRUCTION: path/to/file.md (optional)
+    STEPS: Key test steps
+
+    SCENARIO 2: ...
+
+    QA_PLAN_END
     """
     scenarios: list[QAScenario] = []
 
-    # Split on ### headings
-    chunks = re.split(r'^###\s+', output, flags=re.MULTILINE)
+    # Extract content between markers (if present)
+    m = re.search(r'QA_PLAN_START\s*\n(.*?)QA_PLAN_END', output, re.DOTALL)
+    body = m.group(1) if m else output
 
-    for chunk in chunks[1:]:  # skip preamble before first ###
+    # Split on SCENARIO N: lines
+    chunks = re.split(r'^[ \t]*SCENARIO\s+', body, flags=re.MULTILINE)
+
+    for chunk in chunks[1:]:  # skip preamble before first SCENARIO
         lines = chunk.strip().splitlines()
         if not lines:
             continue
 
-        # Parse heading: "1. Scenario Title" or "1. [Scenario Title]"
+        # Parse heading: "1: Scenario Title"
         heading = lines[0].strip()
-        m = re.match(r'(\d+)\.\s*\[?(.*?)\]?\s*$', heading)
-        if not m:
+        hm = re.match(r'(\d+)[:.]\s*(.+)', heading)
+        if not hm:
             continue
-        index = int(m.group(1))
-        title = m.group(2).strip()
+        index = int(hm.group(1))
+        title = hm.group(2).strip()
 
         focus = ""
         instruction_path = None
         steps = ""
 
-        body = "\n".join(lines[1:])
-        # Extract structured fields
-        focus_m = re.search(r'\*\*focus\*\*:\s*(.+)', body)
+        rest = "\n".join(lines[1:])
+
+        focus_m = re.search(r'^[ \t]*FOCUS:\s*(.+)', rest, re.MULTILINE)
         if focus_m:
             focus = focus_m.group(1).strip()
 
-        instr_m = re.search(r'\*\*instruction\*\*:\s*(.+)', body)
+        instr_m = re.search(r'^[ \t]*INSTRUCTION:\s*(.+)', rest, re.MULTILINE)
         if instr_m:
             path_str = instr_m.group(1).strip()
             if path_str.lower() not in ("none", "n/a", "-"):
                 instruction_path = path_str
 
-        steps_m = re.search(r'\*\*steps\*\*:\s*(.+)', body, re.DOTALL)
+        # STEPS: capture everything until the next field or end of chunk
+        steps_m = re.search(
+            r'^[ \t]*STEPS:\s*(.+?)(?=\n[ \t]*(?:FOCUS|INSTRUCTION|SCENARIO):|\Z)',
+            rest, re.MULTILINE | re.DOTALL,
+        )
         if steps_m:
             steps = steps_m.group(1).strip()
-            # Trim at the next field or heading
-            steps = re.split(r'\n\s*-\s*\*\*', steps)[0].strip()
 
         scenarios.append(QAScenario(
             index=index,
@@ -193,6 +206,7 @@ def run_qa_sync(
     Returns the updated state.
     """
     from pm_core import tmux as tmux_mod, prompt_gen, git_ops, store
+    from pm_core import pane_layout, pane_registry
     from pm_core.claude_launcher import build_claude_shell_cmd
 
     state.running = True
@@ -243,7 +257,8 @@ def run_qa_sync(
 
         # Poll until the planner produces a QA Plan or exits
         plan_found = False
-        for _ in range(120):  # up to 10 minutes
+        deadline = time.monotonic() + _PLANNER_TIMEOUT
+        while time.monotonic() < deadline:
             if state.stop_requested:
                 break
             if not tmux_mod.pane_exists(planner_pane):
@@ -251,7 +266,7 @@ def run_qa_sync(
                 break
 
             content = tmux_mod.capture_pane(planner_pane, full_scrollback=True)
-            if "## QA Plan" in content or "### 1." in content:
+            if tail_contains(content, "QA_PLAN_END"):
                 state.plan_output = content
                 plan_found = True
                 break
@@ -272,8 +287,8 @@ def run_qa_sync(
         if not state.scenarios:
             _log.warning("Planner produced no scenarios for %s", state.pr_id)
             state.running = False
-            state.latest_verdict = VERDICT_PASS
-            state.latest_output = "Planner produced no scenarios — defaulting to PASS"
+            state.latest_verdict = VERDICT_INPUT_REQUIRED
+            state.latest_output = "Planner produced no parseable scenarios — needs human review"
             _notify()
             return state
 
@@ -312,6 +327,17 @@ def run_qa_sync(
         panes = tmux_mod.get_pane_indices(session, win["index"])
         base_pane = panes[0][0] if panes else None
 
+    # Derive window ID from the base pane for registry/layout ops
+    qa_win_id = None
+    if base_pane:
+        wid_result = subprocess.run(
+            tmux_mod._tmux_cmd("display", "-t", base_pane, "-p", "#{window_id}"),
+            capture_output=True, text=True,
+        )
+        qa_win_id = wid_result.stdout.strip() or None
+        if qa_win_id:
+            tmux_mod.set_shared_window_size(session, qa_win_id)
+
     # Launch child panes
     for scenario in state.scenarios:
         if state.stop_requested:
@@ -335,6 +361,27 @@ def run_qa_sync(
         scenario.pane_id = pane_id
         _log.info("Launched scenario %d (%s) in pane %s",
                    scenario.index, scenario.title, pane_id)
+
+        # Register pane for layout management
+        if pane_id and qa_win_id:
+            pane_registry.register_pane(
+                session, qa_win_id, pane_id,
+                f"qa-scenario-{scenario.index}", child_cmd,
+            )
+
+    # Register planner pane too (it's still in the window)
+    if base_pane and qa_win_id:
+        pane_registry.register_pane(
+            session, qa_win_id, base_pane, "qa-planner", "planner",
+        )
+
+    # Reset user_modified and rebalance (same pattern as review windows)
+    if qa_win_id:
+        reg = pane_registry.load_registry(session)
+        wdata = pane_registry.get_window_data(reg, qa_win_id)
+        wdata["user_modified"] = False
+        pane_registry.save_registry(session, reg)
+        pane_layout.rebalance(session, qa_win_id)
 
     state.latest_output = f"Running {len(state.scenarios)} scenario(s)..."
     _notify()

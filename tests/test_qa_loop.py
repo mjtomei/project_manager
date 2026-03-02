@@ -17,17 +17,19 @@ from pm_core.qa_loop import (
 class TestParseQAPlan:
     def test_basic_plan(self):
         output = """
-## QA Plan
+QA_PLAN_START
 
-### 1. [Login Flow]
-- **focus**: User authentication
-- **instruction**: pm/qa/instructions/login.md
-- **steps**: Test login and logout
+SCENARIO 1: Login Flow
+FOCUS: User authentication
+INSTRUCTION: pm/qa/instructions/login.md
+STEPS: Test login and logout
 
-### 2. [Dashboard]
-- **focus**: Main dashboard rendering
-- **instruction**: none
-- **steps**: Verify dashboard loads
+SCENARIO 2: Dashboard
+FOCUS: Main dashboard rendering
+INSTRUCTION: none
+STEPS: Verify dashboard loads
+
+QA_PLAN_END
 """
         scenarios = parse_qa_plan(output)
         assert len(scenarios) == 2
@@ -41,9 +43,11 @@ class TestParseQAPlan:
 
     def test_no_brackets_in_title(self):
         output = """
-### 1. Simple Title
-- **focus**: Something
-- **steps**: Do stuff
+QA_PLAN_START
+SCENARIO 1: Simple Title
+FOCUS: Something
+STEPS: Do stuff
+QA_PLAN_END
 """
         scenarios = parse_qa_plan(output)
         assert len(scenarios) == 1
@@ -51,12 +55,34 @@ class TestParseQAPlan:
 
     def test_instruction_none(self):
         output = """
-### 1. [Test]
-- **focus**: Testing
-- **instruction**: n/a
+QA_PLAN_START
+SCENARIO 1: Test
+FOCUS: Testing
+INSTRUCTION: n/a
+QA_PLAN_END
 """
         scenarios = parse_qa_plan(output)
         assert scenarios[0].instruction_path is None
+
+    def test_multiline_steps(self):
+        output = """
+QA_PLAN_START
+
+SCENARIO 1: Login Flow
+FOCUS: User authentication
+INSTRUCTION: none
+STEPS: Test login
+  - Step 1: Open the login page
+  - Step 2: Enter credentials
+  - Step 3: Verify redirect
+
+QA_PLAN_END
+"""
+        scenarios = parse_qa_plan(output)
+        assert len(scenarios) == 1
+        assert "Step 1" in scenarios[0].steps
+        assert "Step 2" in scenarios[0].steps
+        assert "Step 3" in scenarios[0].steps
 
     def test_empty_output(self):
         assert parse_qa_plan("") == []
@@ -64,8 +90,10 @@ class TestParseQAPlan:
 
     def test_malformed_heading(self):
         output = """
-### Not numbered
-- **focus**: Something
+QA_PLAN_START
+SCENARIO Not numbered
+FOCUS: Something
+QA_PLAN_END
 """
         scenarios = parse_qa_plan(output)
         assert len(scenarios) == 0
