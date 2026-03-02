@@ -17,7 +17,6 @@ from pm_core.cli import cli
 from pm_core.cli.helpers import (
     _get_pm_session,
     _resolve_repo_dir,
-    save_and_push,
     state_root,
     trigger_tui_refresh,
 )
