@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-7f01e33
+  active_pr: pr-001
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -2676,14 +2676,22 @@ prs:
     \ decisions that need human judgment\n  - The watcher prompt and auto-start logic\
     \ around INPUT_REQUIRED may also need adjustment since QA handles the testing\
     \ concern separately\n  - Review loop iteration callbacks and UI notifications\
-    \ for INPUT_REQUIRED should be revisited\n\nReminder: all associated documentation\
-    \ and prompts should be updated, including help screens, keybinding references,\
-    \ and any workflow documentation."
+    \ for INPUT_REQUIRED should be revisited\n\n## Manual Testing Required\nDuring\
+    \ review, INPUT_REQUIRED should be used to verify:\n- QA pane display and keyboard\
+    \ navigation (q=toggle, j/k=navigate, Enter=run, e=edit, a=add)\n- Review → QA\
+    \ → merge auto-transition flow with auto-start enabled\n- QA planner session spawning\
+    \ and child scenario panes in tmux\n- pm qa CLI commands: list, show, add, edit,\
+    \ run, standalone\n- Tech tree renders \U0001F9EA icon and magenta style for qa\
+    \ status\n- Help screen shows updated keybindings (t=start QA, q=toggle QA pane)\n\
+    - QA notes recorded on PR after completion\n- QA work directory creation under\
+    \ ~/.pm/workdirs/qa/\n\nReminder: all associated documentation and prompts should\
+    \ be updated, including help screens, keybinding references, and any workflow\
+    \ documentation."
   agent_machine: spark-424d
   gh_pr: https://github.com/mjtomei/project_manager/pull/116
   gh_pr_number: 116
   created_at: '2026-03-02T04:20:36.108360+00:00'
-  updated_at: '2026-03-02T04:32:01.071677+00:00'
+  updated_at: '2026-03-02T14:34:20.356570+00:00'
   started_at: '2026-03-02T04:32:01.071677+00:00'
   reviewed_at: null
   merged_at: null
@@ -2811,6 +2819,43 @@ prs:
   gh_pr_number: null
   created_at: '2026-03-02T14:04:23.544247+00:00'
   updated_at: '2026-03-02T14:04:23.544247+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-182df67
+  plan: plan-qa
+  title: Add automated performance and efficiency proposal framework
+  branch: pm/pr-182df67-add-automated-performance-and-efficiency-proposal-
+  status: pending
+  depends_on:
+  - pr-ee1ff04
+  - pr-fe499f2
+  description: 'Framework for automatically proposing and testing methods to improve
+    code generation performance and efficiency. Includes metrics collection (token
+    usage, code quality scores, test pass rates), A/B testing infrastructure for comparing
+    approaches, and a feedback loop that evaluates proposals against baseline measurements.
+    Targets: generating equivalent or higher quality code with fewer tokens, and producing
+    code that is more robust to adversarial inputs.
+
+
+    This also serves as a foundation for creating new LLM benchmarks that match real-world
+    usage — fully specified projects with QA pipelines produce measurable, reproducible
+    end-to-end outcomes (feature completeness, test pass rates, token efficiency,
+    robustness) on realistic software engineering tasks.
+
+
+    Depends on Phase 1 QA infrastructure being complete (pr-ee1ff04 for the QA loop,
+    pr-fe499f2 for persistent test results that enable comparison across optimization
+    iterations).
+
+
+    Reminder: all associated documentation and prompts should be updated.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-02T14:34:44.765598+00:00'
+  updated_at: '2026-03-02T14:34:44.765598+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
