@@ -3,10 +3,10 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-30888b1
+  active_pr: pr-92301fc
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
-  last_pr_sync: '2026-02-20T02:43:08.956779+00:00'
+  last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
   hide_merged: true
 plans:
 - id: plan-001
@@ -863,7 +863,7 @@ prs:
   plan: plan-003
   title: Add file locking to project.yaml read-modify-write operations
   branch: pm/pr-f38005f-add-file-locking-to-project-yaml-read-modify-write
-  status: pending
+  status: in_review
   depends_on:
   - pr-022
   description: 'Add advisory file locking to store.py so that concurrent processes
@@ -875,11 +875,14 @@ prs:
     GitHub API calls must be restructured to do the external call first, then acquire
     the lock, load fresh state, merge results, and save. Lock timeout of 2 seconds
     with clear error message.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: null
-  updated_at: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/109
+  gh_pr_number: 109
+  created_at: '2026-03-02T01:04:39.190560+00:00'
+  updated_at: '2026-03-02T01:27:28.059956+00:00'
+  started_at: '2026-03-02T01:04:39.190560+00:00'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-f38005f-add-file-locking-to-project-yaml-rea-6142872c
+  reviewed_at: '2026-03-02T01:27:28.059956+00:00'
 - id: pr-c11d04f
   plan: plan-003
   title: Add notes field to PRs for post-start addendums
@@ -1297,10 +1300,18 @@ prs:
   agent_machine: spark-424d
   gh_pr: https://github.com/mjtomei/project_manager/pull/82
   gh_pr_number: 82
-  notes: []
+  notes:
+  - id: note-be06609
+    text: 'Review testing (review-loop 9a46 i1): Created throwaway project at /tmp/pm-test-autoresize
+      with session pm-pm-test-autoresize-f3dc7d3f. Verified: (1) auto_resize_selected_pane
+      correctly enlarges the focused pane to 65% of window width (100→130 in a 200-wide
+      window), (2) switching to another pane shifts the 65% allocation, (3) no-auto-resize=true
+      correctly disables resizing, (4) all 103 unit tests pass.'
+    created_at: '2026-03-02T00:35:07Z'
+    last_edited: '2026-03-02T00:35:07Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-7f01e33-auto-resize-pane-to-fit-claude-outpu-9cfc4712
   created_at: null
-  updated_at: null
+  updated_at: '2026-03-02T00:35:07.784915+00:00'
 - id: pr-97c1be3
   plan: null
   title: Add pm pr note subcommand for querying and editing PR notes
@@ -1874,10 +1885,20 @@ prs:
   started_at: '2026-02-27T10:12:26.609316+00:00'
   reviewed_at: '2026-02-27T10:54:51.311772+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-8a49c79
+    text: 'Review testing: Created throwaway project at /tmp/pm-test-plan-work with
+      local backend. Unable to launch pm session from non-terminal (expected). Verified
+      TUI plans view keybindings via the main session. Code review confirms the new
+      w=work/d=breakdown keybindings are correctly wired: plans_pane.py _KEY_ACTIONS
+      dict, help screen (screens.py), shortcut bar rendering, and event.stop() prevents
+      d key conflict with tree view done_pr. All 30 test_plans_pane.py tests pass.
+      5 pre-existing test failures unrelated to this PR.'
+    created_at: '2026-03-02T00:32:58Z'
+    last_edited: '2026-03-02T00:32:58Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-b764a0c-add-plan-worker-pane-generic-claude--2b310716
   created_at: '2026-02-27T10:12:26.609316+00:00'
-  updated_at: '2026-02-27T10:54:51.311772+00:00'
+  updated_at: '2026-03-02T00:32:58.363142+00:00'
 - id: pr-0a7d9ee
   plan: null
   title: Add companion workdir pane for implementation and merge windows
@@ -1898,10 +1919,18 @@ prs:
   started_at: '2026-02-27T10:25:31.728215+00:00'
   reviewed_at: '2026-02-27T10:59:41.317075+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-3070712
+    text: 'Review iteration 1 testing: Set up throwaway project at /tmp/companion-test-proj.
+      TUI session was created and verified basic rendering. Help screen companion
+      pane section could not be verified (running pm binary uses master, not PR branch).
+      All 13 unit tests pass. 6 pre-existing test failures on master confirmed - none
+      caused by this PR.'
+    created_at: '2026-03-02T01:02:32Z'
+    last_edited: '2026-03-02T01:02:32Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0a7d9ee-add-companion-workdir-pane-for-imple-61867a33
   created_at: '2026-02-27T10:25:31.728215+00:00'
-  updated_at: '2026-02-27T10:59:41.317075+00:00'
+  updated_at: '2026-03-02T01:02:32.462428+00:00'
 - id: pr-4f6b5d4
   plan: null
   title: 'Fix _pull_from_workdir: launch merge session on dirty repo instead of stashing'
@@ -2011,7 +2040,7 @@ prs:
   plan: null
   title: Fold plan breakdown into plan add step and remove separate breakdown prompt
   branch: pm/pr-30888b1-fold-plan-breakdown-into-plan-add-step-and-remove-
-  status: in_progress
+  status: in_review
   depends_on: []
   description: 'The plan add prompt already does a good job breaking the project down
     into PRs. The separate breakdown step (triggered by ''w'' in the plans pane) adds
@@ -2024,11 +2053,11 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/104
   gh_pr_number: 104
   started_at: '2026-03-01T17:51:46.490716+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-03-02T00:28:13.443852+00:00'
   merged_at: null
   notes: []
   created_at: '2026-03-01T17:51:46.490716+00:00'
-  updated_at: '2026-03-01T17:51:46.490716+00:00'
+  updated_at: '2026-03-02T00:28:13.443852+00:00'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-30888b1-fold-plan-breakdown-into-plan-add-st-c82777eb
 - id: pr-3116896
   plan: null
@@ -2090,7 +2119,7 @@ prs:
   plan: null
   title: Harden window management against unexpected pane state
   branch: pm/pr-89296d3-harden-window-management-against-unexpected-pane-s
-  status: in_progress
+  status: in_review
   depends_on: []
   description: 'Problem: Window management code assumes clean state when creating
     and looking up panes. This breaks when windows already exist with unexpected panes
@@ -2150,9 +2179,166 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/102
   gh_pr_number: 102
   started_at: '2026-03-01T17:48:54.305206+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-03-02T00:28:30.910840+00:00'
   merged_at: null
   notes: []
   created_at: '2026-03-01T17:48:54.305206+00:00'
-  updated_at: '2026-03-01T17:49:04.675344+00:00'
+  updated_at: '2026-03-02T00:28:30.910840+00:00'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-89296d3-harden-window-management-against-une-c82777eb
+- id: pr-eee190a
+  plan: null
+  title: Add —disconnect–others flag to pm session to disconnect stale clients
+  branch: pm/pr-eee190a-add-exclusive-flag-to-pm-session-to-disconnect-sta
+  status: merged
+  depends_on: []
+  description: 'When using a shared (—group) tmux session, a client with a small terminal
+    can cause all other clients to be stuck in mobile mode. The stale small client
+    forces window–size=smallest to shrink all windows for every viewer. Add a  —disconnect–others
+    (–d) option to pm session that detaches all other clients when connecting: list
+    all clients on the session group, detach each one, then proceed with normal attach.
+    This allows users to reclaim the session and force window sizing to match their
+    own terminal.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/107
+  gh_pr_number: 107
+  created_at: '2026-03-02T00:25:03.873507+00:00'
+  updated_at: '2026-03-02T01:45:26.789638+00:00'
+  started_at: '2026-03-02T00:35:40.208323+00:00'
+  reviewed_at: '2026-03-02T00:43:36.459116+00:00'
+  merged_at: '2026-03-02T01:45:26.789638+00:00'
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eee190a-add-exclusive-flag-to-pm-session-to--6142872c
+- id: pr-0e03c9b
+  plan: null
+  title: Add set_shared_window_size call to watcher window creation
+  branch: pm/pr-0e03c9b-add-set-shared-window-size-call-to-watcher-window-
+  status: merged
+  depends_on: []
+  description: 'The watcher/monitor window created by _create_watcher_window() in
+    cli/watcher.py does not call tmux_mod.set_shared_window_size() after creating
+    the window. All other window creators (cli/pr.py for PR work and review windows,
+    cli/meta.py for meta windows, pane_layout.py for TUI respawn) do call it. This
+    causes inconsistent window sizing in shared sessions. Fix: after creating the
+    watcher window, find it by name and call set_shared_window_size().'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/106
+  gh_pr_number: 106
+  created_at: '2026-03-02T00:25:06.428240+00:00'
+  updated_at: '2026-03-02T01:35:26.856702+00:00'
+  started_at: '2026-03-02T00:30:12.934658+00:00'
+  reviewed_at: '2026-03-02T00:35:54.105316+00:00'
+  merged_at: '2026-03-02T01:35:26.856702+00:00'
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0e03c9b-add-set-shared-window-size-call-to-w-6142872c
+- id: pr-92301fc
+  plan: null
+  title: Defer PR re-sort until TUI is idle for configurable timeout
+  branch: pm/pr-92301fc-defer-pr-re-sort-until-tui-is-idle-for-configurabl
+  status: in_review
+  depends_on: []
+  description: Currently, PR re-sorts happen immediately when project state changes,
+    which can be disorienting if the user is actively navigating the TUI (e.g. their
+    selected PR jumps position). Re-sort should only trigger after the TUI has been
+    idle (no user interaction) for a configurable amount of time, defaulting to 10
+    seconds. This prevents the list from shifting under the user mid-navigation while
+    still keeping it fresh when they step away.
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/105
+  gh_pr_number: 105
+  created_at: '2026-03-02T00:29:21.099342+00:00'
+  updated_at: '2026-03-02T01:00:23.796516+00:00'
+  started_at: '2026-03-02T00:29:39.194707+00:00'
+  reviewed_at: '2026-03-02T00:43:40.296320+00:00'
+  merged_at: null
+  notes:
+  - id: note-a20044a
+    text: 'Review-loop 7d7d i1 TUI test: Created test project in /tmp/test-resort-pr
+      with 5 PRs (mix of statuses). TUI rendered correctly, R (reload) picked up yaml
+      changes, r (refresh/sync) triggered deferred path. Fixed bug: _resort_pending
+      was only cleared in update_prs/apply_pending_resort but not in direct _recompute()
+      calls from pr_view.py (filter/sort/hide). Consolidated clearing into _recompute()
+      and added test.'
+    created_at: '2026-03-02T01:00:23Z'
+    last_edited: '2026-03-02T01:00:23Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-92301fc-defer-pr-re-sort-until-tui-is-idle-f-6142872c
+- id: pr-ff5030f
+  plan: null
+  title: 'Fix stale tests: plans pane key map and watcher prompt assertions'
+  branch: pm/pr-ff5030f-fix-stale-tests-plans-pane-key-map-and-watcher-pro
+  status: merged
+  depends_on: []
+  description: 'Update 3 tests that fell out of sync with source changes: remove v/view
+    from plans pane key action test (removed in 81b1929), and update watcher prompt
+    tests to check for inspection commands instead of inline PR/plan data (changed
+    in 6a94d46). Changes on branch pm/pr-ff5030f-fix-stale-tests.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/108
+  gh_pr_number: 108
+  created_at: '2026-03-02T00:57:47.219490+00:00'
+  updated_at: '2026-03-02T01:48:47.705889+00:00'
+  started_at: '2026-03-02T01:02:59.405578+00:00'
+  reviewed_at: '2026-03-02T01:14:13.094484+00:00'
+  merged_at: '2026-03-02T01:48:47.705889+00:00'
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ff5030f-fix-stale-tests-plans-pane-key-map-a-6142872c
+- id: pr-1fedcf8
+  plan: null
+  title: Skip git pull/checkout in start when workdir has in–progress changes
+  branch: pm/pr-1fedcf8-skip-git-pull-checkout-in-start-when-workdir-has-i
+  status: in_review
+  depends_on: []
+  description: pm pr start runs git pull —rebase and checkout_branch on reused workdirs
+    even when they have uncommitted in–progress changes, causing failures. Should
+    skip these git operations when the workdir is dirty. Also update the start prompt
+    to explicitly warn that the directory may contain uncommitted implementation work
+    from a previous session if that warning is not already present.
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/110
+  gh_pr_number: 110
+  created_at: '2026-03-02T01:20:49.010885+00:00'
+  updated_at: '2026-03-02T01:27:10.848403+00:00'
+  started_at: '2026-03-02T01:22:22.788754+00:00'
+  reviewed_at: '2026-03-02T01:27:10.848403+00:00'
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-1fedcf8-skip-git-pull-checkout-in-start-when-6142872c
+- id: pr-4f8e02b
+  plan: null
+  title: Persist review loop state across TUI restarts using breadcrumb files
+  branch: pm/pr-4f8e02b-persist-review-loop-state-across-tui-restarts-usin
+  status: in_progress
+  depends_on: []
+  description: 'Review loop state (iteration count, verdicts, history) is stored only
+    in memory and lost on TUI restart. When a merge triggers a restart, auto-start
+    re-detects in_review PRs and restarts loops from iteration 0 with no history.
+
+
+    Fix by:
+
+    1. Saving ReviewLoopState to breadcrumb files alongside existing auto-start state
+    (autostart-resume.json) so loops resume at the correct iteration with history
+    intact.
+
+    2. Only persist/restore review loop state on merge-triggered restarts, NOT on
+    manual Ctrl+R restarts (current breadcrumb gate via merge-restart marker already
+    handles this).
+
+    3. Add a `pm tui restart` CLI command that restarts the TUI from the command line,
+    with a flag (e.g. --breadcrumb) to enable breadcrumb file creation for state persistence.
+    This gives CLI callers the same merge-restart behavior that trigger_tui_restart()
+    provides internally.
+
+
+    Key locations: auto_start.py save_breadcrumb/consume_breadcrumb (lines 51-127),
+    review_loop.py ReviewLoopState (lines 84-100), app.py _review_loops dict (line
+    215), cli/helpers.py trigger_tui_restart (lines 303-322).'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/111
+  gh_pr_number: 111
+  created_at: '2026-03-02T01:34:17.359036+00:00'
+  updated_at: '2026-03-02T01:37:45.114694+00:00'
+  started_at: '2026-03-02T01:37:45.114694+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-4f8e02b-persist-review-loop-state-across-tui-2c888e9b
