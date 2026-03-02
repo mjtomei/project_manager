@@ -135,7 +135,8 @@ def _schedule_rebalance(session_name: str) -> None:
 
 
 def _session_start(share_global: bool = False, share_group: str | None = None,
-                   start_dir: str | None = None):
+                   start_dir: str | None = None,
+                   disconnect_others: bool = False):
     """Start a tmux session with TUI + notes editor.
 
     If no project exists yet, starts pm guide instead of the TUI so
@@ -146,6 +147,8 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
         share_group: Make session accessible to this Unix group.
         start_dir: Compute session tag from this directory instead of cwd.
                    Used when joining another user's shared session.
+        disconnect_others: Detach all other clients from the session group
+                          before attaching.
     """
     _log.info("session_cmd started")
     if not tmux_mod.has_tmux():
@@ -271,6 +274,20 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
                     tmux_mod.set_session_option(grouped, "window-size", "smallest",
                                                 socket_path=socket_path)
                 click.echo(f"Attaching to session '{grouped}'...")
+            # Disconnect other clients if requested (before attaching so
+            # window-size recalculates based only on our terminal).
+            if disconnect_others:
+                clients = tmux_mod.list_clients_in_group(
+                    session_name, socket_path=socket_path)
+                if clients:
+                    _log.info("disconnecting %d other client(s)", len(clients))
+                    for c in clients:
+                        _log.info("detaching client %s (session %s)",
+                                  c["tty"], c["session"])
+                        tmux_mod.detach_client(c["tty"],
+                                               socket_path=socket_path)
+                    click.echo(f"Disconnected {len(clients)} other client(s).")
+
             # Schedule a background rebalance so the layout adapts to
             # the new client's terminal size on reconnect.  attach()
             # blocks, so we spawn a background process beforehand that
@@ -406,8 +423,10 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
               default=None, help="Project directory (for joining another user's session)")
 @click.option("--print-connect", is_flag=True, default=False,
               help="Print the tmux command others can use to connect (no pm required)")
+@click.option("--disconnect-others", "-d", is_flag=True, default=False,
+              help="Detach all other clients before attaching (reclaim window sizing)")
 @click.pass_context
-def session(ctx, share_global, share_group, start_dir, print_connect):
+def session(ctx, share_global, share_group, start_dir, print_connect, disconnect_others):
     """Manage tmux sessions for pm.
 
     Without a subcommand, starts or attaches to the pm session.
@@ -445,7 +464,7 @@ def session(ctx, share_global, share_group, start_dir, print_connect):
         click.echo("--global and --group are mutually exclusive", err=True)
         raise SystemExit(1)
     _session_start(share_global=share_global, share_group=share_group,
-                   start_dir=start_dir)
+                   start_dir=start_dir, disconnect_others=disconnect_others)
 
 
 @session.command("name")

@@ -199,6 +199,25 @@ def toggle_merged(app) -> None:
         app.log_message("Merged PRs shown")
 
 
+def cycle_sort(app) -> None:
+    """Cycle through sort fields: updated -> created -> started -> reviewed -> merged."""
+    from pm_core.tui.tech_tree import TechTree, SORT_FIELDS, SORT_FIELD_KEYS
+
+    tree = app.query_one("#tech-tree", TechTree)
+    current = tree._sort_field
+    try:
+        idx = SORT_FIELD_KEYS.index(current)
+    except ValueError:
+        idx = -1  # None (default) maps to before the first entry
+    next_idx = (idx + 1) % len(SORT_FIELD_KEYS)
+    tree._sort_field = SORT_FIELD_KEYS[next_idx]
+    tree._recompute()
+    tree.refresh(layout=True)
+    app._update_filter_status()
+    label = dict(SORT_FIELDS)[tree._sort_field]
+    app.log_message(f"Sort: {label}")
+
+
 def cycle_filter(app) -> None:
     """Cycle through status filters: all -> pending -> in_progress -> ..."""
     from pm_core.tui.tech_tree import TechTree, STATUS_FILTER_CYCLE, STATUS_ICONS
@@ -250,6 +269,7 @@ def move_to_plan(app) -> None:
 def handle_plan_pick(app, pr_id: str, result) -> None:
     """Handle the result from PlanPickerScreen."""
     from pm_core.tui.tech_tree import TechTree
+    from pm_core.cli.helpers import _record_status_timestamp
 
     if result is None:
         return  # Cancelled
@@ -272,6 +292,7 @@ def handle_plan_pick(app, pr_id: str, result) -> None:
             plan_path.parent.mkdir(parents=True, exist_ok=True)
             plan_path.write_text(f"# {title}\n\n<!-- Describe the plan here -->\n")
         pr["plan"] = plan_id
+        _record_status_timestamp(pr)
         store.save(app._data, app._root)
         app._load_state()
         app.log_message(f"Moved {pr_id} → {plan_id}: {title} (new)")
@@ -282,6 +303,7 @@ def handle_plan_pick(app, pr_id: str, result) -> None:
             app.log_message("Already standalone")
             return
         pr.pop("plan", None)
+        _record_status_timestamp(pr)
         store.save(app._data, app._root)
         app._load_state()
         app.log_message(f"Moved {pr_id} → Standalone")
@@ -292,6 +314,7 @@ def handle_plan_pick(app, pr_id: str, result) -> None:
             app.log_message("Already in that plan")
             return
         pr["plan"] = result
+        _record_status_timestamp(pr)
         store.save(app._data, app._root)
         app._load_state()
         tree = app.query_one("#tech-tree", TechTree)

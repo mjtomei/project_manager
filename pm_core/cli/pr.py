@@ -44,6 +44,178 @@ from pm_core.cli.helpers import (
 )
 
 
+# ---------------------------------------------------------------------------
+# PR edit helpers (shared between interactive editor and flag-based paths)
+# ---------------------------------------------------------------------------
+
+# Replace unicode characters that cause vim rendering issues with
+# long wrapped lines (em/en dashes, smart quotes, etc.) with ASCII
+# equivalents.  They are restored when parsing.
+_UNICODE_TO_ASCII = [
+    ("\u2014", "--"),   # em dash
+    ("\u2013", "-"),    # en dash
+    ("\u2018", "'"),    # left single quote
+    ("\u2019", "'"),    # right single quote
+    ("\u201c", '"'),    # left double quote
+    ("\u201d", '"'),    # right double quote
+    ("\u2026", "..."),  # ellipsis
+]
+
+
+def _restore_unicode(text: str) -> str:
+    """Restore unicode characters that were replaced for the editor.
+
+    Only safe to call on content fields (title, description, note text).
+    Must NOT be applied to raw template text because the en-dash
+    restoration (``-`` → ``–``) corrupts structural elements like
+    note bullet prefixes (``- ``) and YAML-style field values.
+    """
+    for uc, ascii_rep in _UNICODE_TO_ASCII:
+        text = text.replace(ascii_rep, uc)
+    return text
+
+
+def _parse_pr_edit_raw(raw: str) -> dict:
+    """Parse a PR edit template into structured fields.
+
+    Returns a dict with keys: title, status, depends_on_str, note_texts,
+    description.  Fields not found in the template are ``None``
+    (except *note_texts* which defaults to ``[]`` and *description*
+    which defaults to ``""``).
+
+    Unicode restoration is applied per-field to title, description, and
+    note texts after parsing, so structural syntax (``- `` prefixes,
+    field names) is never corrupted.
+    """
+    desc_lines: list[str] = []
+    note_lines: list[str] = []
+    in_desc = False
+    in_notes = False
+    title = None
+    status = None
+    deps_str = None
+
+    for line in raw.splitlines():
+        if line.startswith("#"):
+            if "description" in line.lower() and "below" in line.lower():
+                in_desc = True
+                in_notes = False
+            elif "notes" in line.lower():
+                in_notes = True
+            continue
+        if in_desc:
+            desc_lines.append(line)
+        elif in_notes:
+            stripped = line.strip()
+            if stripped.startswith("- "):
+                text = stripped[2:]
+                text = re.sub(
+                    r'\s+#\s+\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$', '', text
+                )
+                note_lines.append(text)
+        elif line.startswith("title:"):
+            title = line[len("title:"):].strip()
+        elif line.startswith("status:"):
+            status = line[len("status:"):].strip()
+        elif line.startswith("depends_on:"):
+            deps_str = line[len("depends_on:"):].strip()
+
+    # Restore unicode only in content fields — never in status or deps
+    # which would corrupt values like "in_progress" or structural syntax.
+    return {
+        "title": _restore_unicode(title) if title is not None else None,
+        "status": status,
+        "depends_on_str": deps_str,
+        "note_texts": [_restore_unicode(t) for t in note_lines],
+        "description": _restore_unicode("\n".join(desc_lines).strip()),
+    }
+
+
+def _apply_pr_edit(root: Path, pr_id: str, parsed: dict) -> list[str]:
+    """Apply parsed PR edit changes.  Loads fresh data each time.
+
+    Returns a list of change description strings (empty if nothing
+    changed).  Invalid status values and unknown dependency IDs are
+    silently skipped so this is safe to call from a background watcher.
+    """
+    data = store.load(root)
+    pr_entry = store.get_pr(data, pr_id)
+    if not pr_entry:
+        return []
+
+    changes: list[str] = []
+
+    # Title
+    if parsed["title"] is not None:
+        if parsed["title"] != pr_entry.get("title", ""):
+            pr_entry["title"] = parsed["title"]
+            changes.append(f"title={parsed['title']}")
+
+    # Description
+    if parsed["description"] != pr_entry.get("description", "").strip():
+        pr_entry["description"] = parsed["description"]
+        changes.append("description updated")
+
+    # Status (skip invalid values silently)
+    valid_statuses = {"pending", "in_progress", "in_review", "merged", "closed"}
+    if parsed["status"] is not None:
+        current_status = pr_entry.get("status", "pending")
+        if parsed["status"] != current_status and parsed["status"] in valid_statuses:
+            pr_entry["status"] = parsed["status"]
+            changes.append(f"status: {current_status} → {parsed['status']}")
+            _record_status_timestamp(pr_entry, parsed["status"])
+
+    # Dependencies (skip unknown IDs silently)
+    if parsed["depends_on_str"] is not None:
+        current_deps = ", ".join(pr_entry.get("depends_on") or [])
+        if parsed["depends_on_str"] != current_deps:
+            if not parsed["depends_on_str"]:
+                pr_entry["depends_on"] = []
+                changes.append("depends_on cleared")
+            else:
+                deps = [d.strip() for d in parsed["depends_on_str"].split(",")]
+                existing_ids = {p["id"] for p in (data.get("prs") or [])}
+                unknown = [d for d in deps if d not in existing_ids]
+                if not unknown:
+                    pr_entry["depends_on"] = deps
+                    changes.append(f"depends_on={', '.join(deps)}")
+
+    # Notes reconciliation
+    current_notes = pr_entry.get("notes") or []
+    old_texts = [n["text"] for n in current_notes]
+    if parsed["note_texts"] != old_texts:
+        old_by_text: dict[str, list] = {}
+        for n in current_notes:
+            old_by_text.setdefault(n["text"], []).append(n)
+        new_notes = []
+        existing_note_ids: set[str] = set()
+        for text in parsed["note_texts"]:
+            if text in old_by_text and old_by_text[text]:
+                reused = old_by_text[text].pop(0)
+                new_notes.append(reused)
+                existing_note_ids.add(reused["id"])
+            else:
+                note_id = store.generate_note_id(pr_id, text, existing_note_ids)
+                now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                new_notes.append({
+                    "id": note_id, "text": text,
+                    "created_at": now, "last_edited": now,
+                })
+                existing_note_ids.add(note_id)
+        new_notes.sort(
+            key=lambda n: n.get("last_edited") or n.get("created_at", "")
+        )
+        pr_entry["notes"] = new_notes
+        changes.append("notes updated")
+
+    if changes:
+        _record_status_timestamp(pr_entry)
+        save_and_push(data, root, f"pm: edit {pr_id}")
+        trigger_tui_refresh()
+
+    return changes
+
+
 # --- PR commands ---
 
 @cli.group()
@@ -143,13 +315,15 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
             changes.append(f"depends_on={', '.join(deps)}")
 
     if not changes:
-        # No flags given — open in $EDITOR
-        import tempfile
-        editor = os.environ.get("EDITOR", os.environ.get("VISUAL", "vi"))
-        current_title = pr_entry.get("title", "")
-        current_desc = pr_entry.get("description", "")
-        current_deps = ", ".join(pr_entry.get("depends_on") or [])
-        current_status = pr_entry.get("status", "pending")
+        # No flags given — open in $EDITOR with live save
+        from pm_core.editor import run_watched_editor
+
+        # Capture original state for post-edit comparison
+        orig_title = pr_entry.get("title", "")
+        orig_desc = pr_entry.get("description", "").strip()
+        orig_status = pr_entry.get("status", "pending")
+        orig_deps = ", ".join(pr_entry.get("depends_on") or [])
+        orig_notes = [n["text"] for n in (pr_entry.get("notes") or [])]
 
         current_notes = pr_entry.get("notes") or []
         notes_lines = ""
@@ -164,155 +338,57 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
         template = (
             f"# Editing {pr_id}\n"
             f"# Lines starting with # are ignored.\n"
-            f"# Save and exit to apply changes. Exit without saving to cancel.\n"
+            f"# Changes are saved each time you write the file.\n"
             f"\n"
-            f"title: {current_title}\n"
-            f"status: {current_status}\n"
-            f"depends_on: {current_deps}\n"
+            f"title: {orig_title}\n"
+            f"status: {orig_status}\n"
+            f"depends_on: {orig_deps}\n"
             f"\n"
             f"# Notes (bulleted list, one per line starting with '- '):\n"
             f"{notes_lines}"
             f"\n"
             f"# Description (everything below this line):\n"
-            f"{current_desc}\n"
+            f"{orig_desc}\n"
         )
 
-        # Replace unicode characters that cause vim rendering issues with
-        # long wrapped lines (em/en dashes, smart quotes, etc.) with ASCII
-        # equivalents.  They are restored after the editor closes.
-        _UNICODE_TO_ASCII = [
-            ("\u2014", "--"),   # em dash
-            ("\u2013", "-"),    # en dash
-            ("\u2018", "'"),    # left single quote
-            ("\u2019", "'"),    # right single quote
-            ("\u201c", '"'),    # left double quote
-            ("\u201d", '"'),    # right double quote
-            ("\u2026", "..."),  # ellipsis
-        ]
         editor_template = template
         for uc, ascii_rep in _UNICODE_TO_ASCII:
             editor_template = editor_template.replace(uc, ascii_rep)
 
-        with tempfile.NamedTemporaryFile(suffix=".md", mode="w", delete=False) as f:
-            f.write(editor_template)
-            tmp_path = f.name
+        def on_save(raw: str) -> None:
+            _apply_pr_edit(root, pr_id, _parse_pr_edit_raw(raw))
 
-        try:
-            mtime_before = os.path.getmtime(tmp_path)
-            ret = subprocess.call([editor, tmp_path])
-            if ret != 0:
-                click.echo("Editor exited with error. No changes made.", err=True)
-                raise SystemExit(1)
-            mtime_after = os.path.getmtime(tmp_path)
-            if mtime_before == mtime_after:
-                click.echo("No changes made.")
-                raise SystemExit(0)
-
-            with open(tmp_path) as f:
-                raw = f.read()
-            # Restore unicode characters that were replaced for the editor
-            for uc, ascii_rep in _UNICODE_TO_ASCII:
-                raw = raw.replace(ascii_rep, uc)
-        finally:
-            os.unlink(tmp_path)
-
-        # Parse the edited file — three sections:
-        # 1. metadata fields (title:, status:, depends_on:)
-        # 2. notes (between # Notes and # Description comments)
-        # 3. description (after # Description comment)
-        desc_lines = []
-        note_lines = []
-        in_desc = False
-        in_notes = False
-        new_title = current_title
-        new_status = current_status
-        new_deps_str = current_deps
-        for line in raw.splitlines():
-            if line.startswith("#"):
-                if "description" in line.lower() and "below" in line.lower():
-                    in_desc = True
-                    in_notes = False
-                elif "notes" in line.lower():
-                    in_notes = True
-                continue
-            if in_desc:
-                desc_lines.append(line)
-            elif in_notes:
-                stripped = line.strip()
-                if stripped.startswith("- "):
-                    text = stripped[2:]
-                    # Strip trailing timestamp comment added by template
-                    text = re.sub(r'\s+#\s+\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$', '', text)
-                    note_lines.append(text)
-                # skip blank lines and non-bulleted lines in notes section
-            elif line.startswith("title:"):
-                new_title = line[len("title:"):].strip()
-            elif line.startswith("status:"):
-                new_status = line[len("status:"):].strip()
-            elif line.startswith("depends_on:"):
-                new_deps_str = line[len("depends_on:"):].strip()
-
-        new_desc = "\n".join(desc_lines).strip()
-
-        if new_title != current_title:
-            pr_entry["title"] = new_title
-            changes.append(f"title={new_title}")
-        if new_desc != current_desc.strip():
-            pr_entry["description"] = new_desc
-            changes.append("description updated")
-        if new_status != current_status:
-            valid = {"pending", "in_progress", "in_review", "merged", "closed"}
-            if new_status not in valid:
-                click.echo(f"Invalid status '{new_status}'. Must be one of: {', '.join(sorted(valid))}", err=True)
-                raise SystemExit(1)
-            pr_entry["status"] = new_status
-            changes.append(f"status: {current_status} → {new_status}")
-            _record_status_timestamp(pr_entry, new_status)
-        if new_deps_str != current_deps:
-            if not new_deps_str:
-                pr_entry["depends_on"] = []
-                changes.append("depends_on cleared")
-            else:
-                deps = [d.strip() for d in new_deps_str.split(",")]
-                existing_ids = {p["id"] for p in (data.get("prs") or [])}
-                unknown = [d for d in deps if d not in existing_ids]
-                if unknown:
-                    click.echo(f"Unknown PR IDs: {', '.join(unknown)}", err=True)
-                    raise SystemExit(1)
-                pr_entry["depends_on"] = deps
-                changes.append(f"depends_on={', '.join(deps)}")
-
-        # Reconcile notes: compare old text list with new text list
-        # Edits are treated as delete + add (new hash ID)
-        old_texts = [n["text"] for n in current_notes]
-        if note_lines != old_texts:
-            # Build new notes list: keep existing IDs for unchanged, generate new for added
-            old_by_text = {}
-            for n in current_notes:
-                old_by_text.setdefault(n["text"], []).append(n)
-            new_notes = []
-            existing_note_ids = set()
-            for text in note_lines:
-                if text in old_by_text and old_by_text[text]:
-                    # Reuse existing note entry
-                    reused = old_by_text[text].pop(0)
-                    new_notes.append(reused)
-                    existing_note_ids.add(reused["id"])
-                else:
-                    # New or edited note — generate new ID and timestamp
-                    note_id = store.generate_note_id(pr_id, text, existing_note_ids)
-                    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-                    new_notes.append({"id": note_id, "text": text, "created_at": now, "last_edited": now})
-                    existing_note_ids.add(note_id)
-            # Sort by last_edited so most recently touched notes appear last
-            new_notes.sort(key=lambda n: n.get("last_edited") or n.get("created_at", ""))
-            pr_entry["notes"] = new_notes
-            changes.append("notes updated")
-
-        if not changes:
+        ret, modified = run_watched_editor(editor_template, on_save)
+        if ret != 0:
+            click.echo("Editor exited with error.", err=True)
+            raise SystemExit(1)
+        if not modified:
             click.echo("No changes made.")
             raise SystemExit(0)
 
+        # Report cumulative changes (original → final state)
+        data_final = store.load(root)
+        pr_final = store.get_pr(data_final, pr_id)
+        if pr_final.get("title", "") != orig_title:
+            changes.append(f"title={pr_final['title']}")
+        if pr_final.get("description", "").strip() != orig_desc:
+            changes.append("description updated")
+        if pr_final.get("status", "pending") != orig_status:
+            changes.append(f"status: {orig_status} → {pr_final['status']}")
+        final_deps = ", ".join(pr_final.get("depends_on") or [])
+        if final_deps != orig_deps:
+            changes.append(f"depends_on={final_deps}")
+        final_notes = [n["text"] for n in (pr_final.get("notes") or [])]
+        if final_notes != orig_notes:
+            changes.append("notes updated")
+
+        if changes:
+            click.echo(f"Updated {pr_id}: {', '.join(changes)}")
+        else:
+            click.echo("No changes detected.")
+        return
+
+    _record_status_timestamp(pr_entry)
     save_and_push(data, root, f"pm: edit {pr_id}")
     click.echo(f"Updated {pr_id}: {', '.join(changes)}")
     trigger_tui_refresh()
@@ -972,7 +1048,9 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
                          background: bool = False,
                          transcript: str | None = None,
                          cwd: str | None = None,
-                         companion: bool = False) -> None:
+                         companion: bool = False,
+                         pull_from_workdir: str | None = None,
+                         pull_from_origin: bool = False) -> None:
     """Launch a tmux window with Claude to resolve a merge conflict.
 
     Args:
@@ -981,6 +1059,11 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
         companion: If True (or the ``companion-pane`` global setting is
                    enabled), a companion shell pane is opened alongside
                    the Claude pane.
+        pull_from_workdir: When set, this is a pull-from-workdir failure
+             (local backend).  The value is the workdir path containing
+             the merged branch.
+        pull_from_origin: When True, this is a pull-from-origin failure
+             (vanilla/github backend).
     """
     if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
         click.echo("Merge window requires tmux.")
@@ -1004,15 +1087,22 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
 
     merge_prompt = prompt_gen.generate_merge_prompt(
         data, pr_id, error_output, session_name=pm_session,
+        pull_from_workdir=pull_from_workdir,
+        pull_from_origin=pull_from_origin,
     )
     claude_cmd = build_claude_shell_cmd(prompt=merge_prompt,
                                          transcript=transcript, cwd=workdir)
     window_name = f"merge-{display_id}"
 
-    # Kill existing merge window if present
+    # No-op if a merge window is already running for this PR
     existing = tmux_mod.find_window_by_name(pm_session, window_name)
     if existing:
-        tmux_mod.kill_window(pm_session, existing["id"])
+        if background:
+            click.echo(f"Merge window '{window_name}' already exists (background mode, no-op)")
+            return
+        tmux_mod.select_window(pm_session, existing["id"])
+        click.echo(f"Switched to existing merge window '{window_name}'")
+        return
 
     try:
         if use_companion:
@@ -1035,12 +1125,12 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
         click.echo(f"Merge window error: {e}")
 
 
-def _pull_after_github_merge(data: dict, pr_entry: dict, repo_dir: str,
-                             base_branch: str, resolve_window: bool,
-                             background: bool,
-                             transcript: str | None,
-                             companion: bool = False) -> bool:
-    """Pull latest base branch in the main repo after a GitHub merge.
+def _pull_after_merge(data: dict, pr_entry: dict, repo_dir: str,
+                      base_branch: str, resolve_window: bool,
+                      background: bool,
+                      transcript: str | None,
+                      companion: bool = False) -> bool:
+    """Pull latest base branch into the main repo after a merge.
 
     *repo_dir* should be the main repository directory (on the base branch),
     not the PR's workdir (which is on the PR branch).
@@ -1061,16 +1151,19 @@ def _pull_after_github_merge(data: dict, pr_entry: dict, repo_dir: str,
         return True
 
     repo_path = Path(repo_dir)
-    stashed = False
 
-    # Stash uncommitted changes if dirty
+    # Abort if repo has uncommitted changes — let the user (or a merge
+    # window) decide how to handle them rather than silently stashing.
     if _workdir_is_dirty(repo_path):
-        click.echo("Stashing uncommitted changes before pull...")
-        stash_result = git_ops.run_git("stash", cwd=repo_dir, check=False)
-        if stash_result.returncode == 0 and "No local changes" not in stash_result.stdout:
-            stashed = True
-        else:
-            click.echo("Warning: Could not stash changes.", err=True)
+        error_msg = f"Repo has uncommitted changes: {repo_dir}"
+        click.echo(error_msg, err=True)
+        click.echo("Commit or stash your changes before pulling.", err=True)
+        if resolve_window:
+            _launch_merge_window(data, pr_entry, error_msg,
+                                 background=background, transcript=transcript,
+                                 cwd=repo_dir, companion=companion,
+                                 pull_from_origin=True)
+        return False
 
     # Fetch and pull base branch
     git_ops.run_git("fetch", "origin", cwd=repo_dir, check=False)
@@ -1083,30 +1176,14 @@ def _pull_after_github_merge(data: dict, pr_entry: dict, repo_dir: str,
         if resolve_window:
             _launch_merge_window(data, pr_entry, error_msg,
                                  background=background, transcript=transcript,
-                                 cwd=repo_dir, companion=companion)
+                                 cwd=repo_dir, companion=companion,
+                                 pull_from_origin=True)
             return False
         click.echo("Resolve conflicts manually, then re-run 'pm pr merge' to finalize.", err=True)
         return False
     else:
         click.echo(f"Pulled latest {base_branch}.")
 
-    # Pop stash
-    if stashed:
-        pop_result = git_ops.run_git("stash", "pop", cwd=repo_dir, check=False)
-        if pop_result.returncode != 0:
-            error_detail = (pop_result.stdout.strip() + "\n"
-                            + pop_result.stderr.strip()).strip()
-            error_msg = (f"Conflict applying stashed changes in {repo_dir} "
-                         f"after GitHub merge:\n{error_detail}")
-            click.echo(error_msg, err=True)
-            if resolve_window:
-                _launch_merge_window(data, pr_entry, error_msg,
-                                     background=background, transcript=transcript,
-                                     cwd=repo_dir, companion=companion)
-                return False
-            click.echo("Resolve conflicts manually, then re-run 'pm pr merge' to finalize.", err=True)
-            return False
-        click.echo("Restored stashed changes.")
 
     return True
 
@@ -1148,20 +1225,24 @@ def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
         if resolve_window:
             _launch_merge_window(data, pr_entry, error_msg,
                                  background=background, transcript=transcript,
-                                 cwd=repo_dir, companion=companion)
+                                 cwd=repo_dir, companion=companion,
+                                 pull_from_workdir=workdir)
             return False
         click.echo("Pull manually when ready, then re-run 'pm pr merge'.", err=True)
         return False
 
-    # On base branch — need to update the working tree too
-    stashed = False
+    # On base branch — need to update the working tree too.
+    # Abort if repo has uncommitted changes rather than silently stashing.
     if _workdir_is_dirty(repo_path):
-        click.echo("Stashing uncommitted changes before pull...")
-        stash_r = git_ops.run_git("stash", cwd=repo_dir, check=False)
-        if stash_r.returncode == 0 and "No local changes" not in stash_r.stdout:
-            stashed = True
-        else:
-            click.echo("Warning: Could not stash changes.", err=True)
+        error_msg = f"Repo has uncommitted changes: {repo_dir}"
+        click.echo(error_msg, err=True)
+        click.echo("Commit or stash your changes before pulling.", err=True)
+        if resolve_window:
+            _launch_merge_window(data, pr_entry, error_msg,
+                                 background=background, transcript=transcript,
+                                 cwd=repo_dir, companion=companion,
+                                 pull_from_workdir=workdir)
+        return False
 
     fetch_r = git_ops.run_git("fetch", workdir, base_branch,
                               cwd=repo_dir, check=False)
@@ -1171,7 +1252,8 @@ def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
         if resolve_window:
             _launch_merge_window(data, pr_entry, error_msg,
                                  background=background, transcript=transcript,
-                                 cwd=repo_dir, companion=companion)
+                                 cwd=repo_dir, companion=companion,
+                                 pull_from_workdir=workdir)
             return False
         click.echo("Pull manually when ready, then re-run 'pm pr merge'.", err=True)
         return False
@@ -1186,30 +1268,13 @@ def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
         if resolve_window:
             _launch_merge_window(data, pr_entry, error_msg,
                                  background=background, transcript=transcript,
-                                 cwd=repo_dir, companion=companion)
+                                 cwd=repo_dir, companion=companion,
+                                 pull_from_workdir=workdir)
             return False
         click.echo("Pull manually when ready, then re-run 'pm pr merge'.", err=True)
         return False
 
     click.echo(f"Updated {base_branch} in repo.")
-
-    # Restore stashed changes
-    if stashed:
-        pop_r = git_ops.run_git("stash", "pop", cwd=repo_dir, check=False)
-        if pop_r.returncode != 0:
-            error_detail = (pop_r.stdout.strip() + "\n"
-                            + pop_r.stderr.strip()).strip()
-            error_msg = (f"Conflict restoring stashed changes after merge:\n"
-                         f"{error_detail}")
-            click.echo(error_msg, err=True)
-            if resolve_window:
-                _launch_merge_window(data, pr_entry, error_msg,
-                                     background=background, transcript=transcript,
-                                     cwd=repo_dir, companion=companion)
-                return False
-            click.echo("Resolve conflicts manually.", err=True)
-            return False
-        click.echo("Restored stashed changes.")
 
     return True
 
@@ -1224,7 +1289,10 @@ def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
               help="Path to save Claude transcript symlink (used by auto-start)")
 @click.option("--companion", is_flag=True, default=False,
               help="Open a companion shell pane alongside the merge resolution window")
-def pr_merge(pr_id: str | None, resolve_window: bool, background: bool, transcript: str | None, companion: bool):
+@click.option("--propagation-only", is_flag=True, default=False, hidden=True,
+              help="Skip workdir merge, go straight to pull into repo dir (step 2)")
+def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
+             transcript: str | None, companion: bool, propagation_only: bool):
     """Merge a PR's branch into the base branch.
 
     For local/vanilla backends, performs a local git merge.
@@ -1260,36 +1328,43 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool, transcri
         gh_pr_number = pr_entry.get("gh_pr_number")
         workdir = pr_entry.get("workdir")
         if gh_pr_number and workdir and Path(workdir).exists() and shutil.which("gh"):
-            click.echo(f"Merging GitHub PR #{gh_pr_number} via gh CLI...")
-            merge_result = subprocess.run(
-                ["gh", "pr", "merge", str(gh_pr_number), "--merge"],
-                cwd=workdir, capture_output=True, text=True,
-            )
-            gh_merged = merge_result.returncode == 0
-            if gh_merged:
-                click.echo(f"GitHub PR #{gh_pr_number} merged.")
+            gh_merged = False
+
+            if propagation_only:
+                # Step 2: skip gh pr merge, go straight to pull into repo dir
+                click.echo(f"Propagation only: skipping gh pr merge for #{gh_pr_number}")
+                gh_merged = True
             else:
-                # Check if PR was already merged (e.g. re-attempt after conflict resolution)
-                from pm_core import gh_ops
-                if gh_ops.is_pr_merged(workdir, branch):
-                    click.echo(f"GitHub PR #{gh_pr_number} is already merged.")
-                    gh_merged = True
+                click.echo(f"Merging GitHub PR #{gh_pr_number} via gh CLI...")
+                merge_result = subprocess.run(
+                    ["gh", "pr", "merge", str(gh_pr_number), "--merge"],
+                    cwd=workdir, capture_output=True, text=True,
+                )
+                gh_merged = merge_result.returncode == 0
+                if gh_merged:
+                    click.echo(f"GitHub PR #{gh_pr_number} merged.")
                 else:
-                    stderr = merge_result.stderr.strip()
-                    click.echo(f"gh pr merge failed: {stderr}", err=True)
-                    if resolve_window:
-                        _launch_merge_window(
-                            data, pr_entry, stderr,
-                            background=background,
-                            transcript=transcript,
-                            companion=companion,
-                        )
-                        return
-                    click.echo("Falling back to manual instructions.", err=True)
+                    # Check if PR was already merged (e.g. re-attempt after conflict resolution)
+                    from pm_core import gh_ops
+                    if gh_ops.is_pr_merged(workdir, branch):
+                        click.echo(f"GitHub PR #{gh_pr_number} is already merged.")
+                        gh_merged = True
+                    else:
+                        stderr = merge_result.stderr.strip()
+                        click.echo(f"gh pr merge failed: {stderr}", err=True)
+                        if resolve_window:
+                            _launch_merge_window(
+                                data, pr_entry, stderr,
+                                background=background,
+                                transcript=transcript,
+                                companion=companion,
+                            )
+                            return
+                        click.echo("Falling back to manual instructions.", err=True)
 
             if gh_merged:
                 repo_dir = str(_resolve_repo_dir(root, data))
-                pull_ok = _pull_after_github_merge(
+                pull_ok = _pull_after_merge(
                     data, pr_entry, repo_dir, base_branch,
                     resolve_window=resolve_window,
                     background=background,
@@ -1324,8 +1399,11 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool, transcri
 
     work_path = Path(workdir)
 
-    # Pre-merge check: abort if workdir has uncommitted changes
-    if _workdir_is_dirty(work_path):
+    if propagation_only:
+        # Step 2: skip workdir merge, go straight to propagation
+        click.echo("Propagation only: skipping workdir merge.")
+    elif _workdir_is_dirty(work_path):
+        # Pre-merge check: abort if workdir has uncommitted changes
         error_msg = f"Workdir has uncommitted changes: {workdir}"
         click.echo(error_msg, err=True)
         click.echo("Commit or stash your changes before merging.", err=True)
@@ -1334,51 +1412,51 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool, transcri
                                  transcript=transcript, companion=companion)
             return
         raise SystemExit(1)
+    else:
+        # Fetch latest from origin (important for vanilla backend where others may push)
+        if backend_name == "vanilla":
+            click.echo("Fetching latest from origin...")
+            git_ops.run_git("fetch", "origin", cwd=workdir, check=False)
 
-    # Fetch latest from origin (important for vanilla backend where others may push)
-    if backend_name == "vanilla":
-        click.echo("Fetching latest from origin...")
-        git_ops.run_git("fetch", "origin", cwd=workdir, check=False)
+        # Capture the branch tip before merge for post-merge verification
+        tip_result = git_ops.run_git("rev-parse", branch, cwd=workdir, check=False)
+        branch_tip = tip_result.stdout.strip() if tip_result.returncode == 0 else None
 
-    # Capture the branch tip before merge for post-merge verification
-    tip_result = git_ops.run_git("rev-parse", branch, cwd=workdir, check=False)
-    branch_tip = tip_result.stdout.strip() if tip_result.returncode == 0 else None
+        click.echo(f"Merging {branch} into {base_branch}...")
+        result = git_ops.run_git("checkout", base_branch, cwd=workdir, check=False)
+        if result.returncode != 0:
+            error_msg = f"Failed to checkout {base_branch}: {result.stderr.strip()}"
+            click.echo(error_msg, err=True)
+            if resolve_window:
+                _launch_merge_window(data, pr_entry, error_msg, background=background,
+                                     transcript=transcript, companion=companion)
+                return
+            raise SystemExit(1)
+        result = git_ops.run_git("merge", "--no-ff", branch, "-m",
+                                 f"Merge {branch}: {pr_entry.get('title', pr_id)}",
+                                 cwd=workdir, check=False)
+        if result.returncode != 0:
+            # Git sends conflict details to stdout, other errors to stderr
+            error_detail = (result.stdout.strip() + "\n" + result.stderr.strip()).strip()
+            error_msg = f"Merge failed:\n{error_detail}" if error_detail else "Merge failed"
+            click.echo(error_msg, err=True)
+            click.echo("Resolve conflicts manually, then run 'pm pr merge' again.", err=True)
+            if resolve_window:
+                _launch_merge_window(data, pr_entry, error_msg, background=background,
+                                     transcript=transcript, companion=companion)
+                return
+            raise SystemExit(1)
 
-    click.echo(f"Merging {branch} into {base_branch}...")
-    result = git_ops.run_git("checkout", base_branch, cwd=workdir, check=False)
-    if result.returncode != 0:
-        error_msg = f"Failed to checkout {base_branch}: {result.stderr.strip()}"
-        click.echo(error_msg, err=True)
-        if resolve_window:
-            _launch_merge_window(data, pr_entry, error_msg, background=background,
-                                 transcript=transcript, companion=companion)
-            return
-        raise SystemExit(1)
-    result = git_ops.run_git("merge", "--no-ff", branch, "-m",
-                             f"Merge {branch}: {pr_entry.get('title', pr_id)}",
-                             cwd=workdir, check=False)
-    if result.returncode != 0:
-        # Git sends conflict details to stdout, other errors to stderr
-        error_detail = (result.stdout.strip() + "\n" + result.stderr.strip()).strip()
-        error_msg = f"Merge failed:\n{error_detail}" if error_detail else "Merge failed"
-        click.echo(error_msg, err=True)
-        click.echo("Resolve conflicts manually, then run 'pm pr merge' again.", err=True)
-        if resolve_window:
-            _launch_merge_window(data, pr_entry, error_msg, background=background,
-                                 transcript=transcript, companion=companion)
-            return
-        raise SystemExit(1)
-
-    # Post-merge verification: confirm the branch tip is now an ancestor of HEAD
-    if branch_tip:
-        verify = git_ops.run_git(
-            "merge-base", "--is-ancestor", branch_tip, "HEAD",
-            cwd=workdir, check=False,
-        )
-        if verify.returncode != 0:
-            click.echo(f"Warning: Post-merge verification failed — branch tip {branch_tip[:8]} "
-                        f"is not an ancestor of {base_branch} HEAD.", err=True)
-            click.echo("The merge commit exists but may not include all branch commits.", err=True)
+        # Post-merge verification: confirm the branch tip is now an ancestor of HEAD
+        if branch_tip:
+            verify = git_ops.run_git(
+                "merge-base", "--is-ancestor", branch_tip, "HEAD",
+                cwd=workdir, check=False,
+            )
+            if verify.returncode != 0:
+                click.echo(f"Warning: Post-merge verification failed — branch tip {branch_tip[:8]} "
+                            f"is not an ancestor of {base_branch} HEAD.", err=True)
+                click.echo("The merge commit exists but may not include all branch commits.", err=True)
 
     # --- Propagate merged base_branch to the main repo / origin ---
     if backend_name == "local":
@@ -1396,21 +1474,39 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool, transcri
         if "project_manager" in repo or "project-manager" in repo:
             trigger_tui_restart()
     else:
-        # Vanilla backend: push to remote origin
-        push_result = git_ops.run_git("push", "origin", base_branch,
-                                      cwd=workdir, check=False)
-        if push_result.returncode != 0:
-            error_msg = f"Push to origin failed: {push_result.stderr.strip()}"
-            click.echo(error_msg, err=True)
-            if resolve_window:
-                _launch_merge_window(data, pr_entry, error_msg,
-                                     background=background, transcript=transcript,
-                                     companion=companion)
+        if not propagation_only:
+            # Vanilla backend: push to remote origin (already done in step 1 or by Claude)
+            push_result = git_ops.run_git("push", "origin", base_branch,
+                                          cwd=workdir, check=False)
+            if push_result.returncode != 0:
+                error_msg = f"Push to origin failed: {push_result.stderr.strip()}"
+                click.echo(error_msg, err=True)
+                if resolve_window:
+                    _launch_merge_window(data, pr_entry, error_msg,
+                                         background=background, transcript=transcript,
+                                         companion=companion)
+                    return
+                click.echo("Push manually when ready, then re-run 'pm pr merge'.", err=True)
                 return
-            click.echo("Push manually when ready, then re-run 'pm pr merge'.", err=True)
+            click.echo(f"Pushed merged {base_branch} to origin.")
+        else:
+            click.echo("Propagation only: skipping push to origin.")
+        # Pull into the main repo dir so it stays up to date
+        repo_dir = str(_resolve_repo_dir(root, data))
+        pull_ok = _pull_after_merge(
+            data, pr_entry, repo_dir, base_branch,
+            resolve_window=resolve_window,
+            background=background,
+            transcript=transcript,
+            companion=companion,
+        )
+        if not pull_ok:
+            # Merge window launched for pull conflict — don't finalize yet
             return
-        click.echo(f"Pushed merged {base_branch} to origin.")
         _finalize_merge(data, root, pr_entry, pr_id, transcript=transcript)
+        repo = data.get("project", {}).get("repo", "")
+        if "project_manager" in repo or "project-manager" in repo:
+            trigger_tui_restart()
 
 
 @pr.command("sync")
@@ -1730,6 +1826,7 @@ def pr_note_add(pr_id: str, text: str):
     notes.append({"id": note_id, "text": text, "created_at": created_at, "last_edited": created_at})
     pr_entry["notes"] = notes
 
+    _record_status_timestamp(pr_entry)
     save_and_push(data, root, f"pm: note on {pr_id}")
     click.echo(f"Added note {note_id} to {_pr_display_id(pr_entry)}")
     trigger_tui_refresh()
@@ -1772,6 +1869,7 @@ def pr_note_edit(pr_id: str, note_id: str, text: str):
     target["text"] = text
     target["last_edited"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+    _record_status_timestamp(pr_entry)
     save_and_push(data, root, f"pm: edit note on {pr_id}")
     click.echo(f"Updated note {note_id} → {new_id} on {_pr_display_id(pr_entry)}")
     trigger_tui_refresh()
@@ -1817,6 +1915,7 @@ def pr_note_delete(pr_id: str, note_id: str):
                 click.echo(f"  {n['id']}: {n['text']}", err=True)
         raise SystemExit(1)
 
+    _record_status_timestamp(pr_entry)
     save_and_push(data, root, f"pm: delete note on {pr_id}")
     click.echo(f"Deleted note {note_id} from {_pr_display_id(pr_entry)}")
     trigger_tui_refresh()

@@ -210,6 +210,7 @@ async def startup_github_sync(app) -> None:
                     if new_status == "merged":
                         newly_merged.add(pr["id"])
                     pr["status"] = new_status
+                    _record_status_timestamp(pr, new_status)
                     changed = True
             if changed:
                 store.save(app._data, app._root)

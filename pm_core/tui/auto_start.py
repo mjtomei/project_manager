@@ -241,7 +241,18 @@ async def check_and_start(app) -> None:
             _disable(app)
             return
 
+    # Collect PRs that should be started: pending with all deps merged,
+    # plus in_progress PRs (whose window may have been killed).
+    # ``pm pr start --background`` is a no-op when the window already exists.
     ready = graph.ready_prs(prs)
+    merged_ids = {pr["id"] for pr in prs if pr.get("status") == "merged"}
+    for pr in prs:
+        if pr.get("status") != "in_progress":
+            continue
+        deps = pr.get("depends_on") or []
+        if all(d in merged_ids for d in deps):
+            ready.append(pr)
+
     if ready:
         # Compute which PRs are relevant for the target
         if target:
@@ -255,10 +266,6 @@ async def check_and_start(app) -> None:
 
             # Skip PRs outside the target's dependency tree
             if allowed is not None and pr_id not in allowed:
-                continue
-
-            # Skip if already has a workdir (was previously started)
-            if pr.get("workdir"):
                 continue
 
             _log.info("auto_start: starting ready PR %s", pr_id)

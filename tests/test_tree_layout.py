@@ -759,7 +759,7 @@ class TestActivitySortKey:
         assert key_known < key_unknown
 
     def test_uses_most_recent_timestamp(self):
-        """Should pick merged_at > reviewed_at > started_at."""
+        """Default chain: updated_at > merged_at > reviewed_at > started_at > created_at."""
         pr_map = {
             "pr": {"id": "pr", "status": "merged",
                    "started_at": "2024-01-01T00:00:00+00:00",
@@ -774,6 +774,50 @@ class TestActivitySortKey:
         key1 = _activity_sort_key("pr", pr_map)
         key2 = _activity_sort_key("pr2", pr_map)
         assert key1 < key2
+
+    def test_updated_at_takes_priority(self):
+        """updated_at should be preferred over other timestamps."""
+        pr_map = {
+            "pr_updated": {"id": "pr_updated", "status": "in_progress",
+                           "updated_at": "2024-06-01T00:00:00+00:00",
+                           "started_at": "2024-01-01T00:00:00+00:00"},
+            "pr_old": {"id": "pr_old", "status": "in_progress",
+                       "started_at": "2024-05-01T00:00:00+00:00"},
+        }
+        key_updated = _activity_sort_key("pr_updated", pr_map)
+        key_old = _activity_sort_key("pr_old", pr_map)
+        assert key_updated < key_old
+
+    def test_created_at_fallback(self):
+        """created_at is used when no other timestamps are set."""
+        pr_map = {
+            "new": {"id": "new", "status": "pending",
+                    "created_at": "2024-06-01T00:00:00+00:00"},
+            "old": {"id": "old", "status": "pending",
+                    "created_at": "2024-01-01T00:00:00+00:00"},
+        }
+        key_new = _activity_sort_key("new", pr_map)
+        key_old = _activity_sort_key("old", pr_map)
+        assert key_new < key_old
+
+    def test_sort_field_parameter(self):
+        """sort_field restricts sorting to a specific timestamp field."""
+        pr_map = {
+            "pr_a": {"id": "pr_a", "status": "in_review",
+                     "started_at": "2024-06-01T00:00:00+00:00",
+                     "reviewed_at": "2024-01-01T00:00:00+00:00"},
+            "pr_b": {"id": "pr_b", "status": "in_review",
+                     "started_at": "2024-01-01T00:00:00+00:00",
+                     "reviewed_at": "2024-06-01T00:00:00+00:00"},
+        }
+        # With sort_field="started_at", pr_a (June) should sort before pr_b (Jan)
+        key_a = _activity_sort_key("pr_a", pr_map, sort_field="started_at")
+        key_b = _activity_sort_key("pr_b", pr_map, sort_field="started_at")
+        assert key_a < key_b
+        # With sort_field="reviewed_at", pr_b (June) should sort before pr_a (Jan)
+        key_a = _activity_sort_key("pr_a", pr_map, sort_field="reviewed_at")
+        key_b = _activity_sort_key("pr_b", pr_map, sort_field="reviewed_at")
+        assert key_b < key_a
 
 
 # ---------------------------------------------------------------------------

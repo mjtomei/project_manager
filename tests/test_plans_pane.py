@@ -147,7 +147,6 @@ class TestPlansPane:
             "w": "breakdown",
             "D": "deps",
             "l": "load",
-            "v": "view",
             "e": "edit",
             "c": "review",
         }

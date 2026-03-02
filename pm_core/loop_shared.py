@@ -66,6 +66,46 @@ VERDICT_TAIL_LINES = 30
 STABILITY_POLLS = 2
 
 
+class VerdictStabilityTracker:
+    """Track verdict stability across non-blocking polls.
+
+    Used by the TUI timer callback to detect when a verdict has been
+    stable for ``STABILITY_POLLS`` consecutive polls.  The blocking
+    ``poll_for_verdict`` has its own inline stability loop, but this
+    class serves the same purpose for callers that cannot block.
+    """
+
+    def __init__(self) -> None:
+        self._counts: dict[str, tuple[str, int]] = {}  # key -> (verdict, count)
+
+    def update(self, key: str, verdict: str | None) -> bool:
+        """Record a poll result and return True when the verdict is stable.
+
+        Args:
+            key: Tracking key (e.g. ``merge:pr-001``).
+            verdict: Detected verdict, or None if no verdict found.
+
+        Returns:
+            True if *verdict* is non-None and has been seen on
+            ``STABILITY_POLLS`` consecutive calls for *key*.
+        """
+        if verdict is None:
+            self._counts.pop(key, None)
+            return False
+        prev_verdict, prev_count = self._counts.get(key, (None, 0))
+        count = prev_count + 1 if verdict == prev_verdict else 1
+        self._counts[key] = (verdict, count)
+        return count >= STABILITY_POLLS
+
+    def reset(self, key: str) -> None:
+        """Clear stability state for *key*."""
+        self._counts.pop(key, None)
+
+    def clear(self) -> None:
+        """Clear all stability state."""
+        self._counts.clear()
+
+
 def match_verdict(line: str, verdicts: tuple[str, ...]) -> str | None:
     """Match a verdict keyword when it is the entire line content.
 

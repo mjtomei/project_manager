@@ -518,6 +518,9 @@ COMMANDS
   pm tui                        Launch interactive dashboard
   pm meta [task]                Work on pm itself (meta-development session)
   pm watcher                    Run autonomous watcher loop (blocking)
+  pm rebalance                  Re-enable auto-balanced pane layout
+  pm set <setting> <value>      Configure a global pm setting
+  pm which                      Print path to pm_core package being used
   pm getting-started            Show getting started guide
 
 OPTIONS

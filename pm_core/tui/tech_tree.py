@@ -6,7 +6,7 @@ from rich.text import Text
 from rich.console import RenderableType
 
 from pm_core.tui import item_message
-from pm_core.tui.tree_layout import compute_tree_layout
+from pm_core.tui.tree_layout import compute_tree_layout, SORT_FIELDS, SORT_FIELD_KEYS
 
 
 STATUS_ICONS = {
@@ -96,6 +96,7 @@ class TechTree(Widget):
         self._hide_merged: bool = get_global_setting("hide-merged")  # toggle: hide merged PRs
         self._hide_closed: bool = True                            # toggle: hide closed PRs
         self._status_filter: str | None = None                    # filter to show only this status
+        self._sort_field: str | None = None                       # sort field (None = updated_at default)
         self._anim_frame: int = 0                                  # animation frame counter
 
     def on_mount(self) -> None:
@@ -171,6 +172,7 @@ class TechTree(Widget):
             hide_merged=self._hide_merged,
             hide_closed=self._hide_closed,
             max_width=self._get_viewport_width(),
+            sort_field=self._sort_field,
         )
         self._ordered_ids = result.ordered_ids
         self._node_positions = result.node_positions
@@ -203,27 +205,32 @@ class TechTree(Widget):
         self._anim_frame = (self._anim_frame + 1) % len(SPINNER_FRAMES)
 
     def _get_loop_marker(self, pr_id: str) -> tuple[str, str]:
-        """Return (marker_text, marker_style) for review loop state.
+        """Return (marker_text, marker_style) for review loop or merge state.
 
-        Returns a tuple of (text, style) for the marker. Empty strings if no loop.
+        Returns a tuple of (text, style) for the marker. Empty strings if no loop
+        and no merge input required.
         """
         try:
             loops = self.app._review_loops
             state = loops.get(pr_id)
-            if not state:
-                return ("", "")
-            if state.running:
+            if state:
+                if state.running:
+                    spinner = SPINNER_FRAMES[self._anim_frame % len(SPINNER_FRAMES)]
+                    if state.input_required:
+                        return (f"⏸{state.iteration}{spinner}", "bold red")
+                    if state.stop_requested:
+                        return (f"⏹{state.iteration}{spinner}", "bold red")
+                    return (f"⟳{state.iteration}{spinner}", "bold cyan")
+                if state.latest_verdict:
+                    v = state.latest_verdict
+                    marker = VERDICT_MARKERS.get(v, v[:4])
+                    style = VERDICT_STYLES.get(v, "")
+                    return (f"⟳{state.iteration}{marker}", style)
+            # Check for merge INPUT_REQUIRED (no review loop, but merge needs help)
+            merge_input = getattr(self.app, '_merge_input_required_prs', set())
+            if pr_id in merge_input:
                 spinner = SPINNER_FRAMES[self._anim_frame % len(SPINNER_FRAMES)]
-                if state.input_required:
-                    return (f"⏸{state.iteration}{spinner}", "bold red")
-                if state.stop_requested:
-                    return (f"⏹{state.iteration}{spinner}", "bold red")
-                return (f"⟳{state.iteration}{spinner}", "bold cyan")
-            if state.latest_verdict:
-                v = state.latest_verdict
-                marker = VERDICT_MARKERS.get(v, v[:4])
-                style = VERDICT_STYLES.get(v, "")
-                return (f"⟳{state.iteration}{marker}", style)
+                return (f"⏸M{spinner}", "bold red")
         except Exception:
             pass
         return ("", "")
@@ -504,10 +511,10 @@ class TechTree(Widget):
                 status_text += f" {loop_marker}"
             else:
                 # Show activity spinner for in_progress/in_review PRs
-                # (suppressed when the implementation pane is idle)
+                # (suppressed when the implementation pane is idle or untracked)
                 if status in ("in_progress", "in_review") and pr.get("workdir"):
-                    pane_idle = self.app._pane_idle_tracker.is_idle(pr_id)
-                    if not pane_idle:
+                    tracker = self.app._pane_idle_tracker
+                    if tracker.is_tracked(pr_id) and not tracker.is_idle(pr_id):
                         spinner = SPINNER_FRAMES[self._anim_frame % len(SPINNER_FRAMES)]
                         marker_offset = 2 + len(status_text) + 1
                         loop_style = "bold cyan"
