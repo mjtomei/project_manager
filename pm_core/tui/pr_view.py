@@ -393,6 +393,11 @@ def handle_command_submitted(app, cmd: str) -> None:
         app.query_one("#tech-tree", TechTree).focus()
         return
 
+    # Restart command (replaces the old Ctrl+R binding)
+    if cmd == "restart":
+        app.action_restart()
+        return
+
     # Commands that launch interactive Claude sessions need a tmux pane
     if len(parts) >= 3 and parts[0] == "plan" and parts[1] == "add":
         pane_ops.launch_pane(app, f"pm {cmd}", "plan-add")

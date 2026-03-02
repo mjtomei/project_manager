@@ -129,7 +129,8 @@ class ProjectManagerApp(App):
         Binding("r", "refresh", "Refresh", show=True),
         Binding("R", "reload", "Reload", show=False),
         Binding("b", "rebalance", "Rebalance", show=True),
-        Binding("ctrl+r", "restart", "Restart", show=False),
+        # Restart is available via /restart in the command bar (no keybinding
+        # to avoid accidental loss of in-memory state like review loops).
         Binding("slash", "focus_command", "Command", show=True),
         Binding("escape", "unfocus_command", "Back", show=False),
         Binding("p", "toggle_plans", "Plans", show=True),

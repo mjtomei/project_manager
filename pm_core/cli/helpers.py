@@ -301,11 +301,13 @@ def trigger_tui_refresh() -> None:
 
 
 def trigger_tui_restart() -> None:
-    """Send Ctrl+R to the TUI pane to restart it.
+    """Send /restart command to the TUI pane to restart it.
 
     Used after pulling new code so the TUI picks up the latest version.
     Writes a merge-restart marker so the TUI can distinguish this from
-    a user-initiated Ctrl+R and preserve auto-start state.
+    a user-initiated restart and preserve auto-start state.
+
+    Sends the key sequence: / (focus command bar), restart, Enter (submit).
     """
     try:
         if not tmux_mod.has_tmux():
@@ -316,7 +318,7 @@ def trigger_tui_restart() -> None:
             marker = pm_home() / "merge-restart"
             marker.touch()
             _log.debug("Wrote merge-restart marker %s", marker)
-            tmux_mod.send_keys_literal(tui_pane, "C-r")
+            tmux_mod.send_keys(tui_pane, "/restart")
             _log.debug("Sent restart to TUI pane %s in session %s", tui_pane, session)
     except Exception as e:
         _log.debug("Could not trigger TUI restart: %s", e)

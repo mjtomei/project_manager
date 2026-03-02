@@ -177,7 +177,7 @@ class HelpScreen(ModalScreen):
             yield Label("  [bold]z[/]  Modifier: kill existing before next", classes="help-row")
             yield Label("  [bold]r[/]  Refresh / sync with GitHub", classes="help-row")
             yield Label("  [bold]C[/]  Show shared connect command", classes="help-row")
-            yield Label("  [bold]Ctrl+R[/]  Restart TUI", classes="help-row")
+            yield Label("  [bold]/restart[/]  Restart TUI", classes="help-row")
             yield Label("  [bold]?[/]  Show this help", classes="help-row")
             yield Label("  [bold]q[/]  Detach from session", classes="help-row")
             yield Label("Review Loop", classes="help-section")
