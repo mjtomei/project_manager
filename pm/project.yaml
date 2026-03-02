@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-0a7d9ee
+  active_pr: pr-4f8e02b
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -29,6 +29,18 @@ plans:
   name: project metrics and optimization
   file: plans/plan-c493724.md
   status: draft
+- id: plan-qa
+  name: Fully specified project from project.yaml
+  file: plans/plan-qa.md
+  status: active
+- id: bugs
+  name: ''
+  file: bugs.md
+  status: active
+- id: improvements
+  name: ''
+  file: improvements.md
+  status: active
 prs:
 - id: pr-001
   plan: plan-001
@@ -807,7 +819,7 @@ prs:
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
-  plan: plan-003
+  plan: improvements
   created_at: null
   updated_at: null
 - id: pr-3563708
@@ -1004,7 +1016,7 @@ prs:
   created_at: null
   updated_at: null
 - id: pr-e29dda7
-  plan: null
+  plan: bugs
   title: Investigate and fix tmux server crash on session kill
   branch: pm/pr-e29dda7-investigate-and-fix-tmux-server-crash-on-session-k
   status: pending
@@ -1058,7 +1070,7 @@ prs:
   created_at: null
   updated_at: null
 - id: pr-757a140
-  plan: null
+  plan: bugs
   title: Prevent SSH disconnect from typing garbage into pm session terminal
   branch: pm/pr-757a140-prevent-ssh-disconnect-from-typing-garbage-into-pm
   status: pending
@@ -1207,7 +1219,7 @@ prs:
   created_at: null
   updated_at: null
 - id: pr-621b3f5
-  plan: null
+  plan: improvements
   title: Automate PRs for pm directory changes and new plans
   branch: pm/pr-621b3f5-automate-prs-for-pm-directory-changes-and-new-plan
   status: pending
@@ -1289,7 +1301,7 @@ prs:
   created_at: null
   updated_at: null
 - id: pr-7f01e33
-  plan: null
+  plan: improvements
   title: Auto-resize pane to fit Claude output when selected
   branch: pm/pr-7f01e33-auto-resize-pane-to-fit-claude-output-when-selecte
   status: in_review
@@ -1761,7 +1773,7 @@ prs:
   created_at: '2026-02-26T15:32:02.274280+00:00'
   updated_at: '2026-02-26T18:44:20.992499+00:00'
 - id: pr-ff68ef5
-  plan: null
+  plan: improvements
   title: Single-window focus mode with pane pull/push prefix key
   branch: pm/pr-ff68ef5-single-window-focus-mode-with-pane-pull-push-prefi
   status: in_review
@@ -1863,7 +1875,7 @@ prs:
   created_at: '2026-02-27T03:23:37.480179+00:00'
   updated_at: '2026-02-27T10:52:26.716549+00:00'
 - id: pr-b764a0c
-  plan: null
+  plan: improvements
   title: 'Add plan worker pane: generic Claude session with project context'
   branch: pm/pr-b764a0c-add-plan-worker-pane-generic-claude-session-with-p
   status: in_review
@@ -1903,7 +1915,7 @@ prs:
   plan: null
   title: Add companion workdir pane for implementation and merge windows
   branch: pm/pr-0a7d9ee-add-companion-workdir-pane-for-implementation-and-
-  status: in_review
+  status: merged
   depends_on: []
   description: 'Review windows already open a second pane cd''ed into the PR workdir.
     Add the same capability for implementation and merge windows. Behavior: a prefix
@@ -1918,7 +1930,7 @@ prs:
   gh_pr_number: 98
   started_at: '2026-02-27T10:25:31.728215+00:00'
   reviewed_at: '2026-02-27T10:59:41.317075+00:00'
-  merged_at: null
+  merged_at: '2026-03-02T02:45:01.186667+00:00'
   notes:
   - id: note-3070712
     text: 'Review iteration 1 testing: Set up throwaway project at /tmp/companion-test-proj.
@@ -1943,7 +1955,7 @@ prs:
     last_edited: '2026-03-02T02:22:54Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0a7d9ee-add-companion-workdir-pane-for-imple-61867a33
   created_at: '2026-02-27T10:25:31.728215+00:00'
-  updated_at: '2026-03-02T02:22:54.655166+00:00'
+  updated_at: '2026-03-02T02:45:01.186667+00:00'
 - id: pr-4f6b5d4
   plan: null
   title: 'Fix _pull_from_workdir: launch merge session on dirty repo instead of stashing'
@@ -2050,7 +2062,7 @@ prs:
   created_at: '2026-02-28T04:23:58.632492+00:00'
   updated_at: '2026-02-28T04:34:21.876591+00:00'
 - id: pr-30888b1
-  plan: null
+  plan: improvements
   title: Fold plan breakdown into plan add step and remove separate breakdown prompt
   branch: pm/pr-30888b1-fold-plan-breakdown-into-plan-add-step-and-remove-
   status: in_review
@@ -2073,7 +2085,7 @@ prs:
   updated_at: '2026-03-02T00:28:13.443852+00:00'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-30888b1-fold-plan-breakdown-into-plan-add-st-c82777eb
 - id: pr-3116896
-  plan: null
+  plan: improvements
   title: Move Claude panes from current window into their own window
   branch: pm/pr-3116896-move-claude-panes-from-current-window-into-their-o
   status: pending
@@ -2129,7 +2141,7 @@ prs:
   updated_at: '2026-03-02T00:09:52.423211+00:00'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8a60987-split-notes-txt-into-committed-and-g-c82777eb
 - id: pr-89296d3
-  plan: null
+  plan: bugs
   title: Harden window management against unexpected pane state
   branch: pm/pr-89296d3-harden-window-management-against-unexpected-pane-s
   status: in_review
@@ -2244,7 +2256,7 @@ prs:
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0e03c9b-add-set-shared-window-size-call-to-w-6142872c
 - id: pr-92301fc
-  plan: null
+  plan: improvements
   title: Defer PR re-sort until TUI is idle for configurable timeout
   branch: pm/pr-92301fc-defer-pr-re-sort-until-tui-is-idle-for-configurabl
   status: in_review
@@ -2295,10 +2307,10 @@ prs:
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ff5030f-fix-stale-tests-plans-pane-key-map-a-6142872c
 - id: pr-1fedcf8
-  plan: null
+  plan: bugs
   title: Skip git pull/checkout in start when workdir has in–progress changes
   branch: pm/pr-1fedcf8-skip-git-pull-checkout-in-start-when-workdir-has-i
-  status: in_review
+  status: merged
   depends_on: []
   description: pm pr start runs git pull —rebase and checkout_branch on reused workdirs
     even when they have uncommitted in–progress changes, causing failures. Should
@@ -2309,14 +2321,14 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/110
   gh_pr_number: 110
   created_at: '2026-03-02T01:20:49.010885+00:00'
-  updated_at: '2026-03-02T01:27:10.848403+00:00'
+  updated_at: '2026-03-02T02:45:41.461868+00:00'
   started_at: '2026-03-02T01:22:22.788754+00:00'
   reviewed_at: '2026-03-02T01:27:10.848403+00:00'
-  merged_at: null
+  merged_at: '2026-03-02T02:45:41.461868+00:00'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-1fedcf8-skip-git-pull-checkout-in-start-when-6142872c
 - id: pr-4f8e02b
-  plan: null
+  plan: bugs
   title: Persist review loop state across TUI restarts using breadcrumb files
   branch: pm/pr-4f8e02b-persist-review-loop-state-across-tui-restarts-usin
   status: in_review
@@ -2349,7 +2361,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/111
   gh_pr_number: 111
   created_at: '2026-03-02T01:34:17.359036+00:00'
-  updated_at: '2026-03-02T02:22:59.049078+00:00'
+  updated_at: '2026-03-02T03:00:19.769458+00:00'
   started_at: '2026-03-02T01:37:45.114694+00:00'
   reviewed_at: '2026-03-02T02:11:33.662780+00:00'
   merged_at: null
@@ -2364,12 +2376,34 @@ prs:
       All scenarios behave as designed.'
     created_at: '2026-03-02T02:22:59Z'
     last_edited: '2026-03-02T02:22:59Z'
+  - id: note-cb76cc9
+    text: 'Manual TUI Test (iteration 2, after fix): Found and fixed bug where save_breadcrumb
+      was gated on auto-start being active, dropping manually-started review loops.
+      After fix: (1) Manual loop without auto-start: started zz d on pr-002 (loop=7e78),
+      simulated merge-triggered restart (touch marker + C-r). After restart: loop
+      resumed at iteration 2 with same loop ID, auto-start stayed OFF. PASS. (2) Marker/breadcrumb
+      cleanup: both merge-restart marker and autostart-resume.json consumed correctly.
+      PASS.'
+    created_at: '2026-03-02T02:45:34Z'
+    last_edited: '2026-03-02T02:45:34Z'
+  - id: note-9899206
+    text: 'End-to-end merge-triggered restart test: Set up project-manager-named repo
+      with 3 PRs and proper git branches. Started manual review loop on pr-002 (loop=3dcc).
+      Ran ''pm pr merge pr-003 --propagation-only'' from INSIDE the test tmux session.
+      Since repo name contains ''project-manager'', trigger_tui_restart() fired, wrote
+      merge-restart marker, sent C-r. TUI restarted and: (1) review loop resumed at
+      iteration 2 with same loop ID 3dcc, (2) auto-start stayed OFF, (3) marker+breadcrumb
+      consumed. Full end-to-end path verified: pm pr merge -> trigger_tui_restart
+      -> action_restart -> save_breadcrumb -> TUI exit/restart -> consume_breadcrumb
+      -> _start_loop(resume_state). PASS.'
+    created_at: '2026-03-02T03:00:19Z'
+    last_edited: '2026-03-02T03:00:19Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-4f8e02b-persist-review-loop-state-across-tui-2c888e9b
 - id: pr-b7310c3
-  plan: null
+  plan: bugs
   title: Let git handle dirty-file detection during merge instead of pre-blocking
   branch: pm/pr-b7310c3-let-git-handle-dirty-file-detection-during-merge-i
-  status: in_review
+  status: merged
   depends_on: []
   description: 'The _workdir_is_dirty() check in pr.py blocks merges if ANY file is
     dirty, even when the merge won''t touch those files. This forces unnecessary stashing
@@ -2388,17 +2422,26 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/112
   gh_pr_number: 112
   created_at: '2026-03-02T01:58:22.009752+00:00'
-  updated_at: '2026-03-02T02:31:51.470407+00:00'
+  updated_at: '2026-03-02T03:16:28.314875+00:00'
   started_at: '2026-03-02T02:09:02.463897+00:00'
   reviewed_at: '2026-03-02T02:31:51.470407+00:00'
-  merged_at: null
-  notes: []
+  merged_at: '2026-03-02T03:16:28.314875+00:00'
+  notes:
+  - id: note-558d908
+    text: 'TUI testing (review-loop a924 i3): All 7 tests passed. Test project /tmp/pm-tui-lock-test
+      (cleaned up). Verified: (1) dirty pm/ files don''t block merge when no overlap,
+      (2) overlapping dirty files stash-retry works, (3) pm/ overlap triggers TUI
+      lock, (4) MergeLockScreen overlay appears on R key with merge-lock file, (5)
+      auto-dismiss on lock removal, (6) Escape key force-dismiss removes lock file,
+      (7) hint appears after ~10s delay.'
+    created_at: '2026-03-02T03:01:17Z'
+    last_edited: '2026-03-02T03:01:17Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-b7310c3-let-git-handle-dirty-file-detection--27e0a73b
 - id: pr-923f22b
-  plan: null
+  plan: bugs
   title: Add TUI watchdog for dead background threads and stale state
   branch: pm/pr-923f22b-add-tui-watchdog-for-dead-background-threads-and-s
-  status: in_progress
+  status: in_review
   depends_on: []
   description: 'Background threads (review loops, watcher) can die silently, leaving
     in-memory state flags (state.running=True) stuck, which causes stale spinners
@@ -2430,9 +2473,468 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/113
   gh_pr_number: 113
   created_at: '2026-03-02T02:29:03.713168+00:00'
-  updated_at: '2026-03-02T02:34:58.036488+00:00'
+  updated_at: '2026-03-02T02:56:54.736623+00:00'
   started_at: '2026-03-02T02:34:58.036488+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-03-02T02:56:54.736623+00:00'
   merged_at: null
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-923f22b-add-tui-watchdog-for-dead-background-27e0a73b
+- id: pr-7f958f3
+  plan: improvements
+  title: Change TUI restart from Ctrl+R to a typed character sequence
+  branch: pm/pr-7f958f3-change-tui-restart-from-ctrl-r-to-a-typed-characte
+  status: in_review
+  depends_on: []
+  description: 'The TUI restart is currently bound to Ctrl+R, which is easy to hit
+    accidentally and causes loss of all in-memory state (review loops, watcher, auto-start).
+    Change it to a typed character sequence (e.g. a chord or multi-key sequence) to
+    make it intentional and harder to trigger by mistake.
+
+
+    Current binding: Binding(''ctrl+r'', ''action_restart'', ''Restart'', show=False)
+    in app.py line 132. The action_restart method (app.py:706) checks for merge-restart
+    markers and calls pane_ops.restart_app().
+
+
+    Also used by trigger_tui_restart() in cli/helpers.py which sends Ctrl+R to the
+    TUI pane — this must be updated to send the new sequence instead.
+
+
+    Reminder: all associated documentation and prompts must be updated, including
+    help screens, keybinding references in prompts (watcher prompt, monitor prompt,
+    etc.), and any references to Ctrl+R in code comments or docstrings.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/114
+  gh_pr_number: 114
+  created_at: '2026-03-02T02:56:06.968805+00:00'
+  updated_at: '2026-03-02T03:38:04.475565+00:00'
+  started_at: '2026-03-02T02:56:46.721498+00:00'
+  reviewed_at: '2026-03-02T03:08:03.583632+00:00'
+  merged_at: null
+  notes:
+  - id: note-24ba7e2
+    text: 'Review-loop testing (i1): Tested /restart in /tmp/pm-restart-test. Found
+      race condition in trigger_tui_restart: sending /restart as single tmux send-keys
+      arg causes chars to arrive before Textual processes / focus change. Fixed by
+      splitting into two send_keys calls with 0.1s sleep. Also fixed tui_tests.py
+      instructions. All 1406 tests pass.'
+    created_at: '2026-03-02T03:17:51Z'
+    last_edited: '2026-03-02T03:17:51Z'
+  - id: note-bfefe46
+    text: 'Review-loop testing (i1, reviewer 1531): Tested /restart in /tmp/pm-restart-test-1531.
+      Confirmed: (1) ''/'' correctly focuses command bar, (2) typing ''restart'' enters
+      text in command bar, (3) Enter submits and triggers action_restart. Fixed race
+      condition in tui_tests.py heal test instructions (send ''/'' separately from
+      ''restart'' to avoid tmux send-keys race). Updated stale Ctrl+R reference in
+      project.yaml. All 1406 tests pass.'
+    created_at: '2026-03-02T03:31:58Z'
+    last_edited: '2026-03-02T03:31:58Z'
+  - id: note-a43a1ad
+    text: 'Review-loop testing (i2, reviewer 1531): Tested /restart in /tmp/pm-restart-test-1531-i2.
+      Confirmed: (1) ''/'' focuses command bar, (2) typing ''restart'' + Enter triggers
+      action_restart and TUI restarts, (3) Programmatic path (send-keys -l ''/'',
+      sleep, ''restart'' + Enter) also works, (4) Old Ctrl+R binding is gone (no effect),
+      (5) Help screen shows ''/restart'' instead of ''Ctrl+R''. No stale Ctrl+R references
+      found in codebase. All changes are correct and complete.'
+    created_at: '2026-03-02T03:38:04Z'
+    last_edited: '2026-03-02T03:38:04Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-7f958f3-change-tui-restart-from-ctrl-r-to-a--48107183
+- id: pr-7122c11
+  plan: improvements
+  title: Refine watcher INPUT_REQUIRED to distinguish project-wide vs branch-specific
+    issues
+  branch: pm/pr-7122c11-refine-watcher-input-required-to-distinguish-proje
+  status: in_progress
+  depends_on: []
+  description: 'When the watcher detects an issue on a single branch that is already
+    paused by a review loop INPUT_REQUIRED, it should NOT report INPUT_REQUIRED itself
+    — the review loop already handles branch-level pausing. The watcher''s INPUT_REQUIRED
+    should only be used for:
+
+
+    1. Fundamental issues with the project or plan that should pause ALL progress
+    (e.g., broken base branch, plan contradictions, infrastructure failures)
+
+    2. Issues on a branch that is NOT already paused by a review loop (e.g., an in_progress
+    implementation that is stuck but has no review loop watching it)
+
+
+    If a branch is paused by its own review loop''s INPUT_REQUIRED, the watcher should
+    note the situation in its summary but output READY, not INPUT_REQUIRED. This prevents
+    a single branch needing human input from blocking all other branches in the project.
+
+
+    Changes needed in the watcher prompt (prompt_gen.py generate_watcher_prompt, around
+    lines 600-675):
+
+    - Add explicit guidance distinguishing project-wide blockers from branch-specific
+    blockers
+
+    - Tell the watcher to check if a branch already has an active review loop INPUT_REQUIRED
+    before escalating
+
+    - Clarify that READY is appropriate when branch-specific issues are already being
+    handled by their respective review loops
+
+
+    Reminder: all associated documentation and prompts should be updated, including
+    any references to the watcher''s INPUT_REQUIRED behavior in help text, docstrings,
+    or other prompt templates.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/115
+  gh_pr_number: 115
+  created_at: '2026-03-02T03:07:32.581497+00:00'
+  updated_at: '2026-03-02T03:08:34.327716+00:00'
+  started_at: '2026-03-02T03:08:34.327716+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-7122c11-refine-watcher-input-required-to-dis-48107183
+- id: pr-6a06089
+  plan: improvements
+  title: Warn when workdir is out of date with master during implementation start
+  branch: pm/pr-6a06089-warn-when-workdir-is-out-of-date-with-master-durin
+  status: pending
+  depends_on: []
+  description: 'When pm pr start reuses an existing workdir, inform Claude in the
+    implementation prompt whether the workdir''s base branch is behind master. This
+    lets the implementation agent proactively address expected or existing merge conflicts
+    without actually merging — e.g., adapting code to upstream changes, resolving
+    import conflicts, or adjusting to renamed interfaces.
+
+
+    The prompt should include:
+
+    - How many commits behind master the workdir''s base branch is
+
+    - Optionally a summary of what changed upstream (files modified, key commits)
+
+    - Guidance that Claude can address compatibility issues proactively but should
+    NOT merge master into the branch
+
+
+    This information should be computed at start time (e.g. git rev-list --count HEAD..origin/master)
+    and injected into the prompt context.
+
+
+    Reminder: all associated documentation and prompts should be updated.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-02T04:20:21.031139+00:00'
+  updated_at: '2026-03-02T04:20:21.031139+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-ee1ff04
+  plan: plan-qa
+  title: Add optional quality assurance step with test instruction library and review–QA
+    loop
+  branch: pm/pr-ee1ff04-add-optional-quality-assurance-step-with-test-inst
+  status: in_progress
+  depends_on: []
+  description: "Add an optional quality assurance (QA) / manual testing step to the\
+    \ PR lifecycle that sits between review and merge. This creates a review-QA loop:\
+    \ when QA makes changes, review is re-triggered; when review makes changes, QA\
+    \ is re-triggered. The loop continues until QA passes with no changes for a configurable\
+    \ number of iterations (default: 1).\n\n## QA Step Behavior\n- Optional: the standard\
+    \ implementation → review → merge flow still works without it\n- Triggered by\
+    \ the user when they want manual/integration testing of a PR\n- The user points\
+    \ to a test instruction prompt that describes how to set up and run manual tests\n\
+    - The QA agent can fix bugs it finds, but any changes re-trigger review\n- If\
+    \ review makes changes, that re-triggers QA\n- Loop terminates when QA completes\
+    \ with no changes for N iterations (default N=1)\n\n## Test Instruction Library\n\
+    - A managed collection of prompts that guide the QA agent on how to exercise a\
+    \ given tool or feature\n- Stored as files in a known location (e.g. pm/qa/ or\
+    \ pm/instructions/)\n- Each instruction has a title and short description\n- Only\
+    \ titles and descriptions are copied into QA prompts — the agent reads the full\
+    \ instruction file on demand\n- Accessible via a list-style CLI command (e.g.\
+    \ pm qa list)\n- The existing notes.txt review section pattern is an example of\
+    \ this — instructions that guide testing but currently only trigger during manual\
+    \ review\n\n## TUI Integration\n- Add a TUI pane for browsing, accessing, and\
+    \ editing test instructions\n- Instructions should be listable with titles and\
+    \ short descriptions\n- Editing launches the user's editor on the instruction\
+    \ file\n\n## Prompt Design\n- QA agent prompt includes the list of available instruction\
+    \ titles and descriptions, plus the path to the specific instruction for this\
+    \ PR\n- QA agent reads the full instruction content itself rather than having\
+    \ it inlined\n- QA agent is aware of all available instructions so it can reference\
+    \ related ones if needed\n\n## QA Session Recording and Work Directories\n- QA\
+    \ activity should be recorded as notes on the PR (what was tested, what was found,\
+    \ what was fixed) so there is a persistent record of QA outcomes\n- QA work directories\
+    \ (throwaway test projects, test environments) should be tracked — record their\
+    \ paths on the PR so they can be inspected or cleaned up later\n- Work directories\
+    \ should be created automatically by pm (e.g. under ~/.pm/qa/ or similar) instead\
+    \ of relying on the QA session to create ad-hoc directories in /tmp\n- Automatic\
+    \ creation ensures consistent naming, discoverability, and cleanup\n\n## QA for\
+    \ Existing Features (not just new PRs)\n- Need a flow for sending existing, already-merged\
+    \ features through QA — not just new PRs\n- This could use dummy/QA-only PRs on\
+    \ GitHub that target the current master and exist solely to run QA instructions\
+    \ against existing functionality\n- Alternatively, a standalone QA mode that runs\
+    \ against master without requiring a PR at all\n- This enables regression testing,\
+    \ periodic health checks, and validating features that were merged before QA was\
+    \ introduced\n- The QA instruction library naturally supports this since instructions\
+    \ are feature-oriented, not PR-oriented\n\n## Impact on INPUT_REQUIRED Flow\n\
+    - The review loop's INPUT_REQUIRED verdict currently serves as the mechanism for\
+    \ human-guided testing — the reviewer asks the user to manually verify UI behavior,\
+    \ environment-specific setup, etc. QA replaces this for the most part. The INPUT_REQUIRED\
+    \ flow in the review loop should be updated:\n  - Review should focus on code\
+    \ correctness and no longer request manual testing via INPUT_REQUIRED\n  - INPUT_REQUIRED\
+    \ in review should be reserved for genuine ambiguities in the PR spec or architectural\
+    \ decisions that need human judgment\n  - The watcher prompt and auto-start logic\
+    \ around INPUT_REQUIRED may also need adjustment since QA handles the testing\
+    \ concern separately\n  - Review loop iteration callbacks and UI notifications\
+    \ for INPUT_REQUIRED should be revisited\n\n## Manual Testing Required\nDuring\
+    \ review, INPUT_REQUIRED should be used to verify:\n- QA pane display and keyboard\
+    \ navigation (q=toggle, j/k=navigate, Enter=run, e=edit, a=add)\n- Review → QA\
+    \ → merge auto-transition flow with auto-start enabled\n- QA planner session spawning\
+    \ and child scenario panes in tmux\n- pm qa CLI commands: list, show, add, edit,\
+    \ run, standalone\n- Tech tree renders \U0001F9EA icon and magenta style for qa\
+    \ status\n- Help screen shows updated keybindings (t=start QA, q=toggle QA pane)\n\
+    - QA notes recorded on PR after completion\n- QA work directory creation under\
+    \ ~/.pm/workdirs/qa/\n\nReminder: all associated documentation and prompts should\
+    \ be updated, including help screens, keybinding references, and any workflow\
+    \ documentation."
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/116
+  gh_pr_number: 116
+  created_at: '2026-03-02T04:20:36.108360+00:00'
+  updated_at: '2026-03-02T14:34:20.356570+00:00'
+  started_at: '2026-03-02T04:32:01.071677+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ee1ff04-add-optional-quality-assurance-step--808818af
+- id: pr-fe499f2
+  plan: plan-qa
+  title: Persist generated QA tests across iterations of the QA loop
+  branch: pm/pr-fe499f2-persist-generated-qa-tests-across-iterations-of-th
+  status: pending
+  depends_on:
+  - pr-ee1ff04
+  description: 'When the QA loop runs multiple iterations (QA finds bugs → review
+    fixes → QA re-runs), the generated test plan and test results should persist across
+    iterations rather than being regenerated from scratch each time. This allows:
+
+
+    - Incremental testing: only re-run tests affected by changes, not the full suite
+
+    - Test history: track which tests passed/failed across iterations to detect regressions
+    or flaky behavior
+
+    - Stability detection: the loop termination condition (no changes for N iterations)
+    can reference specific test results rather than just ''any changes made''
+
+
+    Storage could be alongside the QA work directory or as structured data in the
+    PR''s QA notes. The format should support both human review and programmatic access
+    by the QA agent on subsequent iterations.
+
+
+    Reminder: all associated documentation and prompts should be updated.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-02T14:04:03.801710+00:00'
+  updated_at: '2026-03-02T14:04:03.801710+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-25681a9
+  plan: plan-qa
+  title: Support user stories at PR creation and edit time for QA test generation
+  branch: pm/pr-25681a9-support-user-stories-at-pr-creation-and-edit-time-
+  status: pending
+  depends_on:
+  - pr-ee1ff04
+  description: 'Add support for attaching user stories to PRs at creation time (pm
+    pr add --story) or via the PR edit screen. User stories describe the intended
+    user-facing behavior and are used during the QA planning step to guide test generation
+    — ensuring QA tests exercise the feature from the user''s perspective rather than
+    just testing implementation details.
+
+
+    User stories should be:
+
+    - Editable via pm pr edit or the TUI PR detail panel
+
+    - Stored as a field on the PR in project.yaml
+
+    - Passed to the QA agent during the test planning/generation phase
+
+    - Optional: PRs without user stories still go through QA using only the PR description
+    and test instructions
+
+
+    The QA agent uses user stories to generate acceptance-style tests that verify
+    the feature works end-to-end from a user''s point of view, complementing the unit/integration
+    tests from the review step.
+
+
+    Reminder: all associated documentation and prompts should be updated.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-02T14:04:13.218092+00:00'
+  updated_at: '2026-03-02T14:04:13.218092+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-a792886
+  plan: plan-qa
+  title: Add pause-after-QA-plan mode with global setting, prefix key, and per-PR
+    field
+  branch: pm/pr-a792886-add-pause-after-qa-plan-mode-with-global-setting-p
+  status: pending
+  depends_on:
+  - pr-ee1ff04
+  description: 'Add a mode that pauses QA execution after test generation so the user
+    can review and approve the proposed test plan before tests are run. Three ways
+    to activate:
+
+
+    1. **Global setting**: A project-level setting in project.yaml (e.g. qa_pause_after_plan:
+    true) that always pauses after QA generates a proposed set of tests. Default:
+    false.
+
+
+    2. **Prefix key**: A modifier/prefix key before the QA keybinding in the TUI that
+    activates pause-after-plan for a single QA run without changing the global setting.
+    E.g., if ''q'' starts QA, then some prefix + ''q'' starts QA with pause enabled
+    for just that run.
+
+
+    3. **Per-PR field**: A field on the PR in project.yaml (e.g. qa_pause: true) that
+    can be set at PR creation time (pm pr add --qa-pause) or via the edit screen (pm
+    pr edit --qa-pause). This marks specific PRs for pause-after-plan regardless of
+    the global setting.
+
+
+    When paused, the QA agent should present the proposed test plan and wait for user
+    approval (INPUT_REQUIRED or similar). The user can approve, modify, or reject
+    the plan. After approval, QA proceeds with execution.
+
+
+    Priority order: per-PR field overrides global setting; prefix key overrides both
+    for that single run.
+
+
+    Reminder: all associated documentation and prompts should be updated.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-02T14:04:23.544247+00:00'
+  updated_at: '2026-03-02T14:04:23.544247+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-182df67
+  plan: plan-qa
+  title: Add automated performance and efficiency proposal framework
+  branch: pm/pr-182df67-add-automated-performance-and-efficiency-proposal-
+  status: pending
+  depends_on:
+  - pr-ee1ff04
+  - pr-fe499f2
+  description: 'Framework for automatically proposing and testing methods to improve
+    code generation performance and efficiency. Includes metrics collection (token
+    usage, code quality scores, test pass rates), A/B testing infrastructure for comparing
+    approaches, and a feedback loop that evaluates proposals against baseline measurements.
+    Targets: generating equivalent or higher quality code with fewer tokens, and producing
+    code that is more robust to adversarial inputs.
+
+
+    This also serves as a foundation for creating new LLM benchmarks that match real-world
+    usage — fully specified projects with QA pipelines produce measurable, reproducible
+    end-to-end outcomes (feature completeness, test pass rates, token efficiency,
+    robustness) on realistic software engineering tasks.
+
+
+    Depends on Phase 1 QA infrastructure being complete (pr-ee1ff04 for the QA loop,
+    pr-fe499f2 for persistent test results that enable comparison across optimization
+    iterations).
+
+
+    Reminder: all associated documentation and prompts should be updated.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-02T14:34:44.765598+00:00'
+  updated_at: '2026-03-02T14:34:44.765598+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-9dfdbd5
+  plan: bugs
+  title: Fix dependency code not propagated to new workdir masters
+  branch: pm/pr-9dfdbd5-fix-dependency-code-not-propagated-to-new-workdir-
+  status: pending
+  depends_on: []
+  description: When pm pr start creates a new workdir for a PR with merged dependencies,
+    it clones from the main repo master which lacks merged PR code from workdirs.
+    New workdirs start without dependency code, forcing manual merges.
+  created_at: null
+  updated_at: null
+- id: pr-156a4d0
+  plan: bugs
+  title: Fix merged PR branches not pushed to main repo origin
+  branch: pm/pr-156a4d0-fix-merged-pr-branches-not-pushed-to-main-repo-ori
+  status: in_progress
+  depends_on: []
+  description: pm pr merge pushes base branch to origin but not the PR feature branch.
+    Downstream workdirs cannot access dependency code via git fetch origin.
+  created_at: '2026-03-02T17:02:40.155710+00:00'
+  updated_at: '2026-03-02T17:02:40.155710+00:00'
+  gh_pr: https://github.com/mjtomei/project_manager/pull/117
+  gh_pr_number: 117
+  started_at: '2026-03-02T17:02:40.155710+00:00'
+  agent_machine: spark-424d
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-156a4d0-fix-merged-pr-branches-not-pushed-to-35caed6a
+- id: pr-b53bfe2
+  plan: bugs
+  title: Fix trust prompt blocking implementation sessions
+  branch: pm/pr-b53bfe2-fix-trust-prompt-blocking-implementation-sessions
+  status: pending
+  depends_on: []
+  description: Claude Code trust prompt blocks automated sessions in new workdirs.
+    The existing --dangerously-skip-permissions flag is too broad. Need targeted auto-accept
+    via settings or TUI detection.
+  created_at: null
+  updated_at: null
+- id: pr-f821a63
+  plan: bugs
+  title: Fix auto-start not re-scanning after manual status changes
+  branch: pm/pr-f821a63-fix-auto-start-not-re-scanning-after-manual-status
+  status: pending
+  depends_on: []
+  description: Auto-start only scans on startup and after merge events. Manual status
+    changes (e.g. resetting PRs to pending) are not detected until the next merge
+    or 5-minute background sync.
+  created_at: null
+  updated_at: null
+- id: pr-80b04db
+  plan: bugs
+  title: Fix merge propagation overwriting project.yaml with stale PR branch data
+  branch: pm/pr-80b04db-fix-merge-propagation-overwriting-project-yaml-wit
+  status: pending
+  depends_on: []
+  description: When pm pr merge merges a PR branch into master, the branch's stale
+    project.yaml overwrites master's, reverting other PRs' statuses. Need to exclude
+    project.yaml from branch merges or always take master's version.
+  created_at: null
+  updated_at: null
+- id: pr-fd01c70
+  plan: improvements
+  title: Add periodic auto-start scan for state changes
+  branch: pm/pr-fd01c70-add-periodic-auto-start-scan-for-state-changes
+  status: pending
+  depends_on: []
+  description: Add a periodic scan (every 30-60 seconds) for newly-ready PRs, complementing
+    the existing event-based triggers. Handles manual resets, external state changes,
+    and crash recovery.
+  created_at: null
+  updated_at: null
