@@ -308,6 +308,8 @@ def trigger_tui_restart() -> None:
     a user-initiated restart and preserve auto-start state.
 
     Sends the key sequence: / (focus command bar), restart, Enter (submit).
+    The "/" must be sent separately so Textual processes the focus change
+    before the remaining characters arrive.
     """
     try:
         if not tmux_mod.has_tmux():
@@ -318,7 +320,13 @@ def trigger_tui_restart() -> None:
             marker = pm_home() / "merge-restart"
             marker.touch()
             _log.debug("Wrote merge-restart marker %s", marker)
-            tmux_mod.send_keys(tui_pane, "/restart")
+            # Send "/" first to focus the command bar, then "restart" + Enter.
+            # A short sleep is needed so Textual processes the "/" binding
+            # and focuses the command bar before the text arrives.
+            import time
+            tmux_mod.send_keys_literal(tui_pane, "/")
+            time.sleep(0.1)
+            tmux_mod.send_keys(tui_pane, "restart")
             _log.debug("Sent restart to TUI pane %s in session %s", tui_pane, session)
     except Exception as e:
         _log.debug("Could not trigger TUI restart: %s", e)
