@@ -1,0 +1,107 @@
+"""Tests for the QA loop orchestration."""
+
+import pytest
+
+from pm_core.qa_loop import (
+    parse_qa_plan,
+    QAScenario,
+    QALoopState,
+    create_qa_workdir,
+    create_scenario_workdir,
+    VERDICT_PASS,
+    VERDICT_NEEDS_WORK,
+    VERDICT_INPUT_REQUIRED,
+)
+
+
+class TestParseQAPlan:
+    def test_basic_plan(self):
+        output = """
+## QA Plan
+
+### 1. [Login Flow]
+- **focus**: User authentication
+- **instruction**: pm/qa/instructions/login.md
+- **steps**: Test login and logout
+
+### 2. [Dashboard]
+- **focus**: Main dashboard rendering
+- **instruction**: none
+- **steps**: Verify dashboard loads
+"""
+        scenarios = parse_qa_plan(output)
+        assert len(scenarios) == 2
+        assert scenarios[0].index == 1
+        assert scenarios[0].title == "Login Flow"
+        assert scenarios[0].focus == "User authentication"
+        assert scenarios[0].instruction_path == "pm/qa/instructions/login.md"
+        assert scenarios[1].index == 2
+        assert scenarios[1].title == "Dashboard"
+        assert scenarios[1].instruction_path is None
+
+    def test_no_brackets_in_title(self):
+        output = """
+### 1. Simple Title
+- **focus**: Something
+- **steps**: Do stuff
+"""
+        scenarios = parse_qa_plan(output)
+        assert len(scenarios) == 1
+        assert scenarios[0].title == "Simple Title"
+
+    def test_instruction_none(self):
+        output = """
+### 1. [Test]
+- **focus**: Testing
+- **instruction**: n/a
+"""
+        scenarios = parse_qa_plan(output)
+        assert scenarios[0].instruction_path is None
+
+    def test_empty_output(self):
+        assert parse_qa_plan("") == []
+        assert parse_qa_plan("No plan here") == []
+
+    def test_malformed_heading(self):
+        output = """
+### Not numbered
+- **focus**: Something
+"""
+        scenarios = parse_qa_plan(output)
+        assert len(scenarios) == 0
+
+
+class TestQAWorkdirs:
+    def test_create_qa_workdir(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        wd = create_qa_workdir("pr-001", "abc123")
+        assert wd.exists()
+        assert "qa" in str(wd)
+        assert "pr-001-abc123" in str(wd)
+
+    def test_create_scenario_workdir(self, tmp_path):
+        d = create_scenario_workdir(tmp_path, 1)
+        assert d.exists()
+        assert d.name == "scenario-1"
+
+
+class TestQALoopState:
+    def test_defaults(self):
+        state = QALoopState(pr_id="pr-001")
+        assert state.pr_id == "pr-001"
+        assert state.running is False
+        assert state.planning_phase is True
+        assert state.scenarios == []
+        assert state.latest_verdict == ""
+
+    def test_loop_id_generated(self):
+        s1 = QALoopState(pr_id="pr-001")
+        s2 = QALoopState(pr_id="pr-001")
+        assert s1.loop_id != s2.loop_id
+
+
+class TestVerdictConstants:
+    def test_verdict_values(self):
+        assert VERDICT_PASS == "PASS"
+        assert VERDICT_NEEDS_WORK == "NEEDS_WORK"
+        assert VERDICT_INPUT_REQUIRED == "INPUT_REQUIRED"

@@ -130,7 +130,7 @@ def _transition_pr_status(app, pr_id: str, from_status: str, to_status: str) -> 
             return
         current = pr.get("status", "")
         if current == from_status:
-            store.update_pr(data, pr_id, {"status": to_status})
+            pr["status"] = to_status
             store.save(app._root, data)
             _log.info("Transitioned %s: %s → %s", pr_id, from_status, to_status)
     except Exception:
@@ -142,7 +142,11 @@ def _record_qa_note(app, state: QALoopState) -> None:
     if not app._root:
         return
     try:
+        from datetime import datetime, timezone
         data = store.load(app._root)
+        pr = store.get_pr(data, state.pr_id)
+        if not pr:
+            return
         summary_parts = []
         for s in state.scenarios:
             v = state.scenario_verdicts.get(s.index, "?")
@@ -150,7 +154,13 @@ def _record_qa_note(app, state: QALoopState) -> None:
         note_text = f"QA {state.latest_verdict}: " + "; ".join(summary_parts)
         if state.made_changes:
             note_text += " [changes committed]"
-        store.add_pr_note(data, state.pr_id, note_text)
+        notes = pr.get("notes") or []
+        existing_ids = {n["id"] for n in notes}
+        note_id = store.generate_note_id(state.pr_id, note_text, existing_ids)
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        notes.append({"id": note_id, "text": note_text,
+                       "created_at": now, "last_edited": now})
+        pr["notes"] = notes
         store.save(app._root, data)
     except Exception:
         _log.exception("Failed to record QA note for %s", state.pr_id)
