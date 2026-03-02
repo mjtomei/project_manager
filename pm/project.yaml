@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-92301fc
+  active_pr: pr-0a7d9ee
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -1928,9 +1928,22 @@ prs:
       caused by this PR.'
     created_at: '2026-03-02T01:02:32Z'
     last_edited: '2026-03-02T01:02:32Z'
+  - id: note-4d823d5
+    text: "TUI testing complete (test project /tmp/companion-test, now cleaned up):\n\
+      - Help screen: Companion Pane section renders correctly between Panes & Views\
+      \ and Other\n- S key: Creates 2-pane window (Claude + companion shell in workdir)\
+      \ - PASS\n- S key idempotency: Reuses existing window, shows 'already has companion\
+      \ pane' - PASS  \n- Lowercase s: Creates 1-pane window (no companion) - PASS\n\
+      - S on existing 1-pane window: Adds companion pane (1->2 panes) - PASS\n- G\
+      \ key: Creates 2-pane merge resolution window on conflict - PASS\n- Global companion-pane\
+      \ setting: Lowercase s creates 2-pane window when setting is true - PASS\n-\
+      \ All 13 unit tests pass. 6 pre-existing test failures on master unrelated to\
+      \ this PR."
+    created_at: '2026-03-02T02:22:54Z'
+    last_edited: '2026-03-02T02:22:54Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0a7d9ee-add-companion-workdir-pane-for-imple-61867a33
   created_at: '2026-02-27T10:25:31.728215+00:00'
-  updated_at: '2026-03-02T01:02:32.462428+00:00'
+  updated_at: '2026-03-02T02:22:54.655166+00:00'
 - id: pr-4f6b5d4
   plan: null
   title: 'Fix _pull_from_workdir: launch merge session on dirty repo instead of stashing'
@@ -2306,7 +2319,7 @@ prs:
   plan: null
   title: Persist review loop state across TUI restarts using breadcrumb files
   branch: pm/pr-4f8e02b-persist-review-loop-state-across-tui-restarts-usin
-  status: in_progress
+  status: in_review
   depends_on: []
   description: 'Review loop state (iteration count, verdicts, history) is stored only
     in memory and lost on TUI restart. When a merge triggers a restart, auto-start
@@ -2336,9 +2349,90 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/111
   gh_pr_number: 111
   created_at: '2026-03-02T01:34:17.359036+00:00'
-  updated_at: '2026-03-02T01:37:45.114694+00:00'
+  updated_at: '2026-03-02T02:22:59.049078+00:00'
   started_at: '2026-03-02T01:37:45.114694+00:00'
+  reviewed_at: '2026-03-02T02:11:33.662780+00:00'
+  merged_at: null
+  notes:
+  - id: note-6aaddc6
+    text: 'Manual TUI Test (review iteration 2): Test project at /tmp/pm-breadcrumb-test.
+      (1) Auto-start + review loop activation: PASS - pressed A, TUI showed AUTO,
+      review loop started for pr-002 (loop=e024). (2) pm tui restart --breadcrumb:
+      PASS - after restart, AUTO preserved, loop resumed at iteration 2 with same
+      loop ID, status showed ''resumed at iteration 1''. (3) Clean restart without
+      --breadcrumb: PASS - AUTO gone, no review loop, state correctly not preserved.
+      All scenarios behave as designed.'
+    created_at: '2026-03-02T02:22:59Z'
+    last_edited: '2026-03-02T02:22:59Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-4f8e02b-persist-review-loop-state-across-tui-2c888e9b
+- id: pr-b7310c3
+  plan: null
+  title: Let git handle dirty-file detection during merge instead of pre-blocking
+  branch: pm/pr-b7310c3-let-git-handle-dirty-file-detection-during-merge-i
+  status: in_review
+  depends_on: []
+  description: 'The _workdir_is_dirty() check in pr.py blocks merges if ANY file is
+    dirty, even when the merge won''t touch those files. This forces unnecessary stashing
+    or committing of pm/ metadata.
+
+
+    Fix: remove the broad _workdir_is_dirty() pre-check from _pull_after_merge, _pull_from_workdir,
+    and pr_merge. Let git merge attempt to proceed — git already succeeds when dirty
+    files don''t overlap with merge changes. If git fails due to dirty file overlap,
+    stash the conflicting files and retry the merge, then unstash after. Only lock
+    the TUI with an overlay (e.g. ''Merging pr-xxx, please wait...'') if pm/ files
+    were among the stashed files, since those are what the TUI reads/writes. Non-pm
+    overlap stashes don''t need TUI locking. The vanilla backend pull --rebase path
+    needs to switch to fetch + merge since rebase requires a fully clean tree.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/112
+  gh_pr_number: 112
+  created_at: '2026-03-02T01:58:22.009752+00:00'
+  updated_at: '2026-03-02T02:31:51.470407+00:00'
+  started_at: '2026-03-02T02:09:02.463897+00:00'
+  reviewed_at: '2026-03-02T02:31:51.470407+00:00'
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-b7310c3-let-git-handle-dirty-file-detection--27e0a73b
+- id: pr-923f22b
+  plan: null
+  title: Add TUI watchdog for dead background threads and stale state
+  branch: pm/pr-923f22b-add-tui-watchdog-for-dead-background-threads-and-s
+  status: in_progress
+  depends_on: []
+  description: 'Background threads (review loops, watcher) can die silently, leaving
+    in-memory state flags (state.running=True) stuck, which causes stale spinners
+    and blocks auto-start/merge flows. The shared poll timer (_poll_loop_state) is
+    also a single point of failure — if it crashes, all verdict detection, idle polling,
+    and animations break.
+
+
+    Add a TUI watchdog that periodically checks:
+
+    1. Review loop threads: compare thread.is_alive() against state.running — if thread
+    dead but running=True, force running=False and announce failure
+
+    2. Watcher loop thread: same is_alive() vs state.running check
+
+    3. Poll timer health: track last-tick timestamp in _poll_loop_state; if watchdog
+    sees it hasn''t fired in >5s, log the error and restart the timer
+
+    4. Merge tracking sets: detect entries in _pending_merge_prs or _merge_propagation_phase
+    whose merge windows no longer exist, and clean them up
+
+    5. Auto-start subprocess health: detect if a spawned pm pr start --background
+    process hung or died without completing
+
+
+    The watchdog should run on its own lightweight timer (e.g. every 30s) separate
+    from the main poll timer, so it can detect and recover from poll timer failures.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/113
+  gh_pr_number: 113
+  created_at: '2026-03-02T02:29:03.713168+00:00'
+  updated_at: '2026-03-02T02:34:58.036488+00:00'
+  started_at: '2026-03-02T02:34:58.036488+00:00'
   reviewed_at: null
   merged_at: null
   notes: []
-  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-4f8e02b-persist-review-loop-state-across-tui-2c888e9b
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-923f22b-add-tui-watchdog-for-dead-background-27e0a73b
