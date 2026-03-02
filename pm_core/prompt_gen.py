@@ -601,7 +601,30 @@ You can use `tmux list-windows` and `tmux capture-pane` to inspect all active wi
 Try to fix any issues you can without human guidance.
 
 ### 3. Surface Issues Needing Human Input
-Use the **INPUT_REQUIRED** verdict for anything you can't figure out yourself.
+
+Use **INPUT_REQUIRED** only for **project-wide blockers** that should pause ALL progress.
+Do NOT use INPUT_REQUIRED for branch-specific issues that a review loop is already handling.
+
+**Use INPUT_REQUIRED for:**
+- Broken base branch (`{base_branch}`) that blocks all PRs
+- Plan contradictions or missing dependencies that affect the whole project
+- Infrastructure failures (CI down, repo access issues, tmux session corruption)
+- A branch that is stuck but has NO active review loop watching it (e.g., an
+  `in_progress` implementation that has crashed with no review loop to catch it)
+
+**Use READY (not INPUT_REQUIRED) when:**
+- A branch's review loop has already emitted INPUT_REQUIRED — the review loop
+  already pauses that branch and surfaces the issue to the user. Mention it in
+  your summary but do not escalate.
+- A single PR is failing reviews but the review loop is still iterating — the
+  loop handles this automatically.
+- Issues are confined to one branch and that branch has its own active review
+  loop or merge resolution window.
+
+**Why this matters:** The watcher's INPUT_REQUIRED pauses the *entire* watcher
+loop, blocking monitoring of *all* branches. A single branch needing human input
+should not prevent the watcher from monitoring the rest of the project. Branch-level
+pausing is the review loop's job.
 
 ### 4. Project Health Monitoring
 Look for patterns across PRs that might signal issues in a PR's plan.
@@ -638,7 +661,7 @@ Append findings to `{meta_pm_root}/bugs.md` and `{meta_pm_root}/improvements.md`
 These files are plans that the user can review and act on later via meta mode.
 Do NOT launch `pm meta` or attempt to fix pm itself — just document what you find.
 
-Writing to these files should not block your next iteration. Only use **INPUT_REQUIRED** if a bug is actively blocking progress and cannot be worked around.
+Writing to these files should not block your next iteration. Only use **INPUT_REQUIRED** if a pm bug is actively blocking **project-wide** progress and cannot be worked around.
 
 ## Debug Log
 
@@ -667,10 +690,12 @@ tmux list-panes -t <session>:<window>
 
 1. Perform all monitoring checks described above
 2. Take corrective actions for issues that don't need human input
-3. Compile a brief summary of findings
+3. Compile a brief summary of findings (include the status of any branch-level INPUT_REQUIRED situations even though you are not escalating them)
 4. End with a verdict on its own line:
-   - **READY** -- All issues handled (or no issues found). The monitor will wait and then run another iteration.
-   - **INPUT_REQUIRED** -- You need human input or want to surface an important finding. Describe what you need clearly. The user will interact with you in this pane, and then you should provide a follow-up verdict (**READY** to continue monitoring).
+   - **READY** -- All issues handled, or remaining issues are branch-specific and already managed by their review loops. The monitor will wait and then run another iteration.
+   - **INPUT_REQUIRED** -- A **project-wide** blocker needs human input, OR an unmonitored branch is stuck with no review loop to handle it. Describe what you need clearly. The user will interact with you in this pane, and then you should provide a follow-up verdict (**READY** to continue monitoring).
+
+Remember: if a branch's own review loop has already emitted INPUT_REQUIRED, that branch is already paused and the user has been notified. Report it in your summary but output **READY** so the watcher continues monitoring the rest of the project.
 
 IMPORTANT: Always end your response with the verdict keyword on its own line -- either **READY** or **INPUT_REQUIRED**.{watcher_specific_block}"""
 

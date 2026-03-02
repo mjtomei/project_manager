@@ -6,8 +6,14 @@ corrective actions.  It works similarly to the review loop but with only two
 verdicts:
 
 Verdicts:
-  READY            -- All issues handled, wait for next iteration.
-  INPUT_REQUIRED   -- Needs human input or wants to surface something.
+  READY            -- All issues handled, wait for next iteration.  Also used
+                      when branch-specific issues are already managed by their
+                      own review loops (the watcher notes them but does not
+                      escalate).
+  INPUT_REQUIRED   -- A project-wide blocker needs human input, or a branch
+                      is stuck with no review loop to handle it.  The watcher
+                      should NOT use this for branches whose review loops have
+                      already emitted INPUT_REQUIRED.
 
 The loop pauses on INPUT_REQUIRED (user interacts with Claude in the
 watcher pane) and resumes when the user provides direction.  Between

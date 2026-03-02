@@ -433,6 +433,20 @@ class TestGenerateWatcherPrompt:
         prompt = generate_watcher_prompt(data)
         assert "pm tui view" not in prompt
 
+    def test_distinguishes_project_wide_vs_branch_specific(self):
+        """Prompt guides watcher to only use INPUT_REQUIRED for project-wide blockers."""
+        from pm_core.prompt_gen import generate_watcher_prompt
+        data = self._make_data()
+        prompt = generate_watcher_prompt(data)
+        # Should tell watcher to use INPUT_REQUIRED only for project-wide blockers
+        assert "project-wide" in prompt.lower()
+        # Should warn against escalating branch-specific review loop INPUT_REQUIRED
+        assert "review loop" in prompt.lower()
+        # Should explain that branch-level issues should result in READY
+        assert "Use READY (not INPUT_REQUIRED) when" in prompt
+        # Should explain why this matters
+        assert "pauses the *entire* watcher" in prompt
+
 
 # --- CLI routing tests ---
 
