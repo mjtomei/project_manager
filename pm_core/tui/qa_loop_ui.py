@@ -131,7 +131,7 @@ def _transition_pr_status(app, pr_id: str, from_status: str, to_status: str) -> 
         current = pr.get("status", "")
         if current == from_status:
             pr["status"] = to_status
-            store.save(app._root, data)
+            store.save(data, app._root)
             _log.info("Transitioned %s: %s → %s", pr_id, from_status, to_status)
     except Exception:
         _log.exception("Failed to transition PR status for %s", pr_id)
@@ -161,6 +161,6 @@ def _record_qa_note(app, state: QALoopState) -> None:
         notes.append({"id": note_id, "text": note_text,
                        "created_at": now, "last_edited": now})
         pr["notes"] = notes
-        store.save(app._root, data)
+        store.save(data, app._root)
     except Exception:
         _log.exception("Failed to record QA note for %s", state.pr_id)

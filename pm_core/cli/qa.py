@@ -2,7 +2,6 @@
 
 import os
 import subprocess
-import sys
 
 import click
 
@@ -213,7 +212,7 @@ def qa_standalone(instruction_id: str):
     """
     import time
     from pm_core import qa_instructions, store, prompt_gen
-    from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
+    from pm_core.claude_launcher import build_claude_shell_cmd
     from pm_core import tmux as tmux_mod
 
     root = state_root()

@@ -322,7 +322,7 @@ def _maybe_start_qa(app, pr_id: str) -> None:
         pr = store.get_pr(data, pr_id)
         if pr and pr.get("status") == "in_review":
             pr["status"] = "qa"
-            store.save(app._root, data)
+            store.save(data, app._root)
             app._data = store.load(app._root)
             _log.info("auto_qa: transitioned %s to qa status", pr_id)
             app.log_message(f"Auto-QA: {pr_id} review passed, starting QA")
