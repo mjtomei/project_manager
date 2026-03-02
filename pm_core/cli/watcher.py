@@ -177,6 +177,8 @@ def _create_watcher_window(iteration: int, loop_id: str,
         )
         new_win = tmux_mod.find_window_by_name(pm_session, WATCHER_WINDOW_NAME)
         _log.info("_create_watcher_window: new window created: %s", new_win)
+        if new_win:
+            tmux_mod.set_shared_window_size(pm_session, new_win["id"])
         click.echo(f"Watcher window launched (iteration {iteration})")
     except Exception as e:
         click.echo(f"Watcher: failed to create tmux window: {e}", err=True)
