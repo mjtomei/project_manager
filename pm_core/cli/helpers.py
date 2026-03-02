@@ -322,6 +322,42 @@ def trigger_tui_restart() -> None:
         _log.debug("Could not trigger TUI restart: %s", e)
 
 
+def trigger_tui_merge_lock(pr_display_id: str) -> None:
+    """Write merge-lock marker and signal TUI to show overlay.
+
+    Called before stashing pm/ files during merge so the TUI pauses
+    reads/writes while the files are temporarily reverted.
+    """
+    try:
+        from pm_core.paths import pm_home
+        lock = pm_home() / "merge-lock"
+        lock.write_text(pr_display_id)
+        _log.debug("Wrote merge-lock marker for %s", pr_display_id)
+        # Signal TUI to reload — it will see the lock and show overlay
+        if not tmux_mod.has_tmux():
+            return
+        tui_pane, session = _find_tui_pane()
+        if tui_pane and session:
+            tmux_mod.send_keys_literal(tui_pane, "R")
+    except Exception as e:
+        _log.debug("Could not set merge lock: %s", e)
+
+
+def trigger_tui_merge_unlock() -> None:
+    """Remove merge-lock marker.
+
+    The TUI's MergeLockScreen polls for this file and auto-dismisses
+    when it disappears, then reloads state.
+    """
+    try:
+        from pm_core.paths import pm_home
+        lock = pm_home() / "merge-lock"
+        lock.unlink(missing_ok=True)
+        _log.debug("Removed merge-lock marker")
+    except Exception as e:
+        _log.debug("Could not remove merge lock: %s", e)
+
+
 def _resolve_repo_dir(root: Path, data: dict) -> Path:
     """Determine the target repo directory from pm state.
 

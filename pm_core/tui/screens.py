@@ -7,6 +7,54 @@ from textual.widgets import Label
 from textual.screen import ModalScreen
 
 
+class MergeLockScreen(ModalScreen):
+    """Non-dismissable overlay shown while pm/ files are stashed during merge.
+
+    Polls for the merge-lock marker file and auto-dismisses when it
+    disappears, then triggers a state reload.
+    """
+
+    CSS = """
+    MergeLockScreen {
+        align: center middle;
+    }
+    #merge-lock-container {
+        width: 50;
+        height: auto;
+        background: $surface;
+        border: solid $warning;
+        padding: 1 2;
+    }
+    #merge-lock-title {
+        text-align: center;
+        text-style: bold;
+        color: $warning;
+        margin-bottom: 1;
+    }
+    #merge-lock-msg {
+        text-align: center;
+    }
+    """
+
+    def __init__(self, pr_display_id: str = ""):
+        super().__init__()
+        self._pr_display_id = pr_display_id
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="merge-lock-container"):
+            yield Label("Merging...", id="merge-lock-title")
+            msg = f"Merging {self._pr_display_id}, please wait..." if self._pr_display_id else "Merge in progress, please wait..."
+            yield Label(msg, id="merge-lock-msg")
+
+    def on_mount(self) -> None:
+        self.set_interval(0.3, self._check_lock)
+
+    def _check_lock(self) -> None:
+        from pm_core.paths import pm_home
+        if not (pm_home() / "merge-lock").exists():
+            self.dismiss()
+
+
 class ConnectScreen(ModalScreen):
     """Modal popup showing the tmux connect command for shared sessions."""
 
