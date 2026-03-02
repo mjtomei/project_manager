@@ -507,9 +507,11 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                     click.echo(f"Window '{window_name}' already exists (background mode, no focus change)")
                     return
                 else:
-                    tmux_mod.select_window(pm_session, existing["id"])
-                    click.echo(f"Switched to existing window '{window_name}' (session: {pm_session})")
-                    return
+                    if pane_registry.try_reuse_or_rename_stale(pm_session, existing):
+                        tmux_mod.select_window(pm_session, existing["id"])
+                        click.echo(f"Switched to existing window '{window_name}' (session: {pm_session})")
+                        return
+                    click.echo(f"Existing window '{window_name}' is stale, creating fresh")
 
     repo_url = data["project"]["repo"]
     base_branch = data["project"].get("base_branch", "master")
@@ -617,11 +619,16 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
             cmd = build_claude_shell_cmd(prompt=prompt,
                                          transcript=transcript, cwd=str(work_path))
             try:
-                tmux_mod.new_window(pm_session, window_name, cmd, str(work_path),
-                                    switch=not background)
+                claude_pane = tmux_mod.new_window_get_pane(
+                    pm_session, window_name, cmd, str(work_path),
+                    switch=not background)
                 win = tmux_mod.find_window_by_name(pm_session, window_name)
                 if win:
                     tmux_mod.set_shared_window_size(pm_session, win["id"])
+                    # Register the impl pane
+                    if claude_pane:
+                        pane_registry.register_pane(
+                            pm_session, win["id"], claude_pane, "impl-claude", cmd)
                 click.echo(f"Launched Claude in tmux window '{window_name}' (session: {pm_session})")
                 return
             except Exception as e:
@@ -690,9 +697,11 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
             tmux_mod.kill_window(pm_session, existing["id"])
             click.echo(f"Killed existing review window '{window_name}'")
         else:
-            tmux_mod.select_window(pm_session, existing["id"])
-            click.echo(f"Switched to existing review window '{window_name}'")
-            return
+            if pane_registry.try_reuse_or_rename_stale(pm_session, existing):
+                tmux_mod.select_window(pm_session, existing["id"])
+                click.echo(f"Switched to existing review window '{window_name}'")
+                return
+            click.echo(f"Existing review window '{window_name}' is stale, creating fresh")
 
     # In review loop mode or background mode, create the window without
     # switching focus.  For review loops the explicit per-session switching
@@ -739,6 +748,14 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
             f"; exec {shell}"
         )
         diff_pane = tmux_mod.split_pane_at(claude_pane, "h", diff_cmd, background=True)
+
+        # Post-creation validation: verify we have exactly 2 panes
+        post_panes = tmux_mod.get_pane_indices(pm_session, claude_pane)
+        if len(post_panes) != 2:
+            _log.error("_launch_review_window: expected 2 panes after split, got %d — aborting",
+                       len(post_panes))
+            click.echo(f"Review window error: unexpected pane count ({len(post_panes)}), expected 2")
+            return
 
         # Register review panes under the review window (multi-window safe).
         # Derive window ID from the pane we just created rather than
@@ -933,10 +950,15 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
         tmux_mod.kill_window(pm_session, existing["id"])
 
     try:
-        tmux_mod.new_window(
+        claude_pane = tmux_mod.new_window_get_pane(
             pm_session, window_name, claude_cmd, workdir,
             switch=not background,
         )
+        if claude_pane:
+            win = tmux_mod.find_window_by_name(pm_session, window_name)
+            if win:
+                pane_registry.register_pane(
+                    pm_session, win["id"], claude_pane, "merge-claude", claude_cmd)
         click.echo(f"Opened merge resolution window '{window_name}'")
     except Exception as e:
         _log.warning("Failed to launch merge window: %s", e)

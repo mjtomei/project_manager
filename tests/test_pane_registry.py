@@ -15,6 +15,9 @@ from pm_core.pane_registry import (
     unregister_pane,
     kill_and_unregister,
     find_live_pane_by_role,
+    find_claude_pane_in_window,
+    is_window_state_clean,
+    try_reuse_or_rename_stale,
     _reconcile_registry,
 )
 
@@ -425,3 +428,166 @@ class TestReconcileRegistry:
         removed = _reconcile_registry("sess", "0")
         assert removed == []
         mock_save.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# find_claude_pane_in_window
+# ---------------------------------------------------------------------------
+
+class TestFindClaudePaneInWindow:
+    @patch("pm_core.pane_registry.load_registry")
+    @patch("pm_core.tmux.get_pane_indices")
+    def test_finds_alive_claude_pane(self, mock_indices, mock_load):
+        mock_load.return_value = {
+            "windows": {
+                "@1": {"panes": [
+                    {"id": "%1", "role": "review-claude"},
+                    {"id": "%2", "role": "review-diff"},
+                ]},
+            },
+        }
+        mock_indices.return_value = [("%1", 0), ("%2", 1)]
+        result = find_claude_pane_in_window("sess", "@1")
+        assert result == "%1"
+
+    @patch("pm_core.pane_registry.load_registry")
+    @patch("pm_core.tmux.get_pane_indices")
+    def test_returns_none_when_claude_pane_dead(self, mock_indices, mock_load):
+        mock_load.return_value = {
+            "windows": {
+                "@1": {"panes": [
+                    {"id": "%1", "role": "impl-claude"},
+                ]},
+            },
+        }
+        mock_indices.return_value = [("%5", 0)]  # %1 not alive
+        result = find_claude_pane_in_window("sess", "@1")
+        assert result is None
+
+    @patch("pm_core.pane_registry.load_registry")
+    def test_returns_none_for_unregistered_window(self, mock_load):
+        mock_load.return_value = {"windows": {}}
+        result = find_claude_pane_in_window("sess", "@1")
+        assert result is None
+
+    @patch("pm_core.pane_registry.load_registry")
+    @patch("pm_core.tmux.get_pane_indices")
+    def test_skips_non_claude_roles(self, mock_indices, mock_load):
+        mock_load.return_value = {
+            "windows": {
+                "@1": {"panes": [
+                    {"id": "%1", "role": "review-diff"},
+                    {"id": "%2", "role": "tui"},
+                ]},
+            },
+        }
+        mock_indices.return_value = [("%1", 0), ("%2", 1)]
+        result = find_claude_pane_in_window("sess", "@1")
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# is_window_state_clean
+# ---------------------------------------------------------------------------
+
+class TestIsWindowStateClean:
+    @patch("pm_core.pane_registry.load_registry")
+    @patch("pm_core.tmux.get_pane_details")
+    def test_no_panes_is_stale(self, mock_details, mock_load):
+        mock_details.return_value = []
+        mock_load.return_value = {"windows": {}}
+        assert is_window_state_clean("sess", "@1") is False
+
+    @patch("pm_core.pane_registry.load_registry")
+    @patch("pm_core.tmux.get_pane_details")
+    def test_registered_all_alive_with_claude(self, mock_details, mock_load):
+        mock_details.return_value = [
+            {"id": "%1", "index": "0", "current_command": "claude", "start_command": "bash"},
+        ]
+        mock_load.return_value = {
+            "windows": {
+                "@1": {"panes": [{"id": "%1", "role": "impl-claude"}]},
+            },
+        }
+        assert is_window_state_clean("sess", "@1") is True
+
+    @patch("pm_core.pane_registry.load_registry")
+    @patch("pm_core.tmux.get_pane_details")
+    def test_registered_dead_pane_is_stale(self, mock_details, mock_load):
+        mock_details.return_value = [
+            {"id": "%5", "index": "0", "current_command": "bash", "start_command": "bash"},
+        ]
+        mock_load.return_value = {
+            "windows": {
+                "@1": {"panes": [{"id": "%1", "role": "impl-claude"}]},
+            },
+        }
+        # %1 registered but only %5 alive → dead registered pane
+        assert is_window_state_clean("sess", "@1") is False
+
+    @patch("pm_core.pane_registry.load_registry")
+    @patch("pm_core.tmux.get_pane_details")
+    def test_unregistered_pane_is_stale(self, mock_details, mock_load):
+        mock_details.return_value = [
+            {"id": "%1", "index": "0", "current_command": "claude", "start_command": "bash"},
+            {"id": "%5", "index": "1", "current_command": "bash", "start_command": "bash"},
+        ]
+        mock_load.return_value = {
+            "windows": {
+                "@1": {"panes": [{"id": "%1", "role": "impl-claude"}]},
+            },
+        }
+        # %5 is alive but unregistered (user split)
+        assert is_window_state_clean("sess", "@1") is False
+
+    @patch("pm_core.pane_registry.load_registry")
+    @patch("pm_core.tmux.get_pane_details")
+    def test_no_registry_single_claude_is_clean(self, mock_details, mock_load):
+        mock_details.return_value = [
+            {"id": "%1", "index": "0", "current_command": "claude", "start_command": "bash"},
+        ]
+        mock_load.return_value = {"windows": {}}
+        assert is_window_state_clean("sess", "@1") is True
+
+    @patch("pm_core.pane_registry.load_registry")
+    @patch("pm_core.tmux.get_pane_details")
+    def test_no_registry_single_shell_is_stale(self, mock_details, mock_load):
+        mock_details.return_value = [
+            {"id": "%1", "index": "0", "current_command": "bash", "start_command": "bash"},
+        ]
+        mock_load.return_value = {"windows": {}}
+        assert is_window_state_clean("sess", "@1") is False
+
+    @patch("pm_core.pane_registry.load_registry")
+    @patch("pm_core.tmux.get_pane_details")
+    def test_registered_all_alive_no_claude_is_stale(self, mock_details, mock_load):
+        """Registered panes alive but none running claude → stale."""
+        mock_details.return_value = [
+            {"id": "%1", "index": "0", "current_command": "bash", "start_command": "bash"},
+        ]
+        mock_load.return_value = {
+            "windows": {
+                "@1": {"panes": [{"id": "%1", "role": "impl-claude"}]},
+            },
+        }
+        assert is_window_state_clean("sess", "@1") is False
+
+
+# ---------------------------------------------------------------------------
+# try_reuse_or_rename_stale
+# ---------------------------------------------------------------------------
+
+class TestTryReuseOrRenameStale:
+    @patch("pm_core.pane_registry.is_window_state_clean", return_value=True)
+    def test_returns_true_when_clean(self, mock_clean):
+        existing = {"id": "@1", "name": "impl-pr001", "index": "1"}
+        assert try_reuse_or_rename_stale("sess", existing) is True
+
+    @patch("pm_core.tmux.rename_window")
+    @patch("pm_core.pane_registry.is_window_state_clean", return_value=False)
+    def test_renames_when_stale(self, mock_clean, mock_rename):
+        existing = {"id": "@1", "name": "impl-pr001", "index": "1"}
+        assert try_reuse_or_rename_stale("sess", existing) is False
+        mock_rename.assert_called_once()
+        stale_name = mock_rename.call_args[0][2]
+        assert stale_name.startswith("impl-pr001--stale--")

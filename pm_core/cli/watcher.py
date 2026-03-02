@@ -171,12 +171,25 @@ def _create_watcher_window(iteration: int, loop_id: str,
 
     # Create the watcher window without switching focus (background)
     try:
-        tmux_mod.new_window_get_pane(
+        claude_pane = tmux_mod.new_window_get_pane(
             pm_session, WATCHER_WINDOW_NAME, claude_cmd, repo_dir,
             switch=False,
         )
         new_win = tmux_mod.find_window_by_name(pm_session, WATCHER_WINDOW_NAME)
         _log.info("_create_watcher_window: new window created: %s", new_win)
+
+        # Register the watcher pane
+        if claude_pane and new_win:
+            from pm_core import pane_registry
+            pane_registry.register_pane(
+                pm_session, new_win["id"], claude_pane, "watcher-claude", claude_cmd)
+
+        # Post-creation validation: verify 1 pane
+        if claude_pane:
+            post_panes = tmux_mod.get_pane_indices(pm_session, claude_pane)
+            if len(post_panes) != 1:
+                _log.error("_create_watcher_window: expected 1 pane, got %d", len(post_panes))
+
         click.echo(f"Watcher window launched (iteration {iteration})")
     except Exception as e:
         click.echo(f"Watcher: failed to create tmux window: {e}", err=True)

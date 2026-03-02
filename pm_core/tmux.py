@@ -154,31 +154,32 @@ def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
     """Create a new tmux window and return its initial pane ID.
 
     Like new_window but returns the pane ID so callers can split on it.
-    Returns None if the window couldn't be found after creation.
+    Uses ``-P -F`` to capture the pane ID directly from the ``new-window``
+    command, avoiding the racy ``panes[0][0]`` lookup.
+
+    Returns None if the window couldn't be created.
 
     Set *switch* to False to create the window without changing the
     active window (useful for background operations like the review loop).
     """
     target = f"{session}:"
-    subprocess.run(
-        _tmux_cmd("new-window", "-d", "-t", target, "-n", name, "-c", cwd, cmd),
-        check=True,
+    result = subprocess.run(
+        _tmux_cmd("new-window", "-d", "-t", target, "-n", name, "-c", cwd,
+                  "-P", "-F", "#{pane_id}", cmd),
+        capture_output=True, text=True, check=True,
     )
-    win = find_window_by_name(session, name)
-    if not win:
+    pane_id = result.stdout.strip()
+    if not pane_id:
         return None
     if switch:
-        # Switch the current grouped session to the new window
-        current = current_or_base_session(session)
-        subprocess.run(
-            _tmux_cmd("select-window", "-t", f"{current}:{win['index']}"),
-            capture_output=True,
-        )
-    # Discover the pane ID
-    panes = get_pane_indices(session, win["index"])
-    if panes:
-        return panes[0][0]
-    return None
+        win = find_window_by_name(session, name)
+        if win:
+            current = current_or_base_session(session)
+            subprocess.run(
+                _tmux_cmd("select-window", "-t", f"{current}:{win['index']}"),
+                capture_output=True,
+            )
+    return pane_id
 
 
 def create_window(session: str, cmd: str) -> tuple[str, str]:
@@ -371,12 +372,142 @@ def list_windows(session: str) -> list[dict]:
     return windows
 
 
+def find_all_windows_by_name(session: str, name: str) -> list[dict]:
+    """Return ALL windows matching *name* (there may be duplicates)."""
+    return [w for w in list_windows(session) if w["name"] == name]
+
+
 def find_window_by_name(session: str, name: str) -> dict | None:
-    """Find a window by name. Returns {id, index, name} or None."""
-    for w in list_windows(session):
-        if w["name"] == name:
-            return w
-    return None
+    """Find a window by name. Returns {id, index, name} or None.
+
+    When multiple windows share the same name, scores each window using
+    ``score_window_validity`` and returns the highest-scoring one.  Lower-
+    scoring duplicates are renamed to ``{name}--stale--{epoch}``.
+    """
+    matches = find_all_windows_by_name(session, name)
+    if not matches:
+        return None
+    if len(matches) == 1:
+        return matches[0]
+
+    # Multiple windows with same name — disambiguate
+    import time
+    _log.warning("find_window_by_name: %d windows named '%s': %s",
+                 len(matches), name, [m["id"] for m in matches])
+
+    scored = []
+    for w in matches:
+        score = score_window_validity(session, w["id"], w["name"])
+        scored.append((score, w))
+
+    # Sort by score descending, then by window index descending (newest) for ties
+    scored.sort(key=lambda t: (t[0], int(t[1]["index"])), reverse=True)
+    best = scored[0][1]
+
+    # Rename lower-scoring duplicates (use index suffix to avoid collisions)
+    epoch = int(time.time())
+    for idx, (score, w) in enumerate(scored[1:]):
+        suffix = f"-{idx}" if idx else ""
+        stale_name = f"{name}--stale--{epoch}{suffix}"
+        _log.warning("find_window_by_name: renaming duplicate %s (score=%d) to '%s'",
+                     w["id"], score, stale_name)
+        rename_window(session, w["id"], stale_name)
+
+    return best
+
+
+def rename_window(session: str, window_id_or_index: str, new_name: str) -> None:
+    """Rename a tmux window."""
+    subprocess.run(
+        _tmux_cmd("rename-window", "-t", f"{session}:{window_id_or_index}", new_name),
+        check=False,
+    )
+
+
+def get_pane_details(session: str, window: str) -> list[dict]:
+    """Return details for all panes in a window.
+
+    Each dict has keys: id, index, current_command, start_command.
+    """
+    result = subprocess.run(
+        _tmux_cmd("list-panes", "-t", f"{session}:{window}",
+                  "-F", "#{pane_id} #{pane_index} #{pane_current_command} #{pane_start_command}"),
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return []
+    details = []
+    for line in result.stdout.strip().splitlines():
+        parts = line.split(None, 3)
+        if len(parts) >= 4:
+            details.append({
+                "id": parts[0],
+                "index": parts[1],
+                "current_command": parts[2],
+                "start_command": parts[3],
+            })
+        elif len(parts) == 3:
+            details.append({
+                "id": parts[0],
+                "index": parts[1],
+                "current_command": parts[2],
+                "start_command": "",
+            })
+    return details
+
+
+def score_window_validity(session: str, window_id: str, window_name: str) -> int:
+    """Score how likely a window is to be a real pm-managed window.
+
+    Higher scores indicate stronger confidence.  Used to disambiguate
+    when multiple windows share the same name.
+    """
+    import re as _re
+    from pm_core import pane_registry
+
+    score = 0
+
+    # +10 if pane registry has entries for this window
+    reg = pane_registry.load_registry(session)
+    wdata = reg.get("windows", {}).get(window_id)
+    if wdata and wdata.get("panes"):
+        registered_panes = wdata["panes"]
+        score += 10
+
+        # -5 if registered panes are all dead
+        panes = get_pane_indices(session, window_id)
+        live_ids = {p[0] for p in panes}
+        if not any(p["id"] in live_ids for p in registered_panes):
+            score -= 5
+    else:
+        registered_panes = []
+
+    # Get pane details for heuristic checks
+    details = get_pane_details(session, window_id)
+
+    # +5 if any pane is running claude
+    for d in details:
+        if "claude" in d.get("current_command", "").lower() or \
+           "claude" in d.get("start_command", "").lower():
+            score += 5
+            break
+
+    # +3 if pane count matches expected for window type
+    expected = 1
+    if window_name.startswith("review-"):
+        expected = 2
+    if len(details) == expected:
+        score += 3
+
+    # +2 if pane content has pm-specific markers
+    for d in details[:2]:  # check at most 2 panes
+        content = capture_pane(d["id"])
+        tail = "\n".join(content.splitlines()[-20:]) if content else ""
+        if _re.search(r'pm |PR |pm_core|pr-[a-f0-9]', tail):
+            score += 2
+            break
+
+    return score
 
 
 def select_window(session: str, window: str) -> bool:

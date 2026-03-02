@@ -162,6 +162,123 @@ def find_live_pane_by_role(session: str, role: str,
     return None
 
 
+def find_claude_pane_in_window(session: str, window_id: str) -> str | None:
+    """Find a live pane whose role contains ``claude`` in the given window.
+
+    Searches the pane registry for roles like ``review-claude``,
+    ``impl-claude``, ``merge-claude``, ``watcher-claude``, etc.
+    Returns the pane ID if found and alive, None otherwise.
+    """
+    from pm_core import tmux as tmux_mod
+
+    data = load_registry(session)
+    wdata = data.get("windows", {}).get(window_id)
+    if not wdata:
+        return None
+
+    live_panes = tmux_mod.get_pane_indices(session, window_id)
+    live_ids = {p[0] for p in live_panes}
+
+    for pane in wdata.get("panes", []):
+        if "claude" in pane.get("role", "") and pane.get("id") in live_ids:
+            _logger.info("find_claude_pane_in_window: found %s role=%s in %s",
+                         pane["id"], pane["role"], window_id)
+            return pane["id"]
+    return None
+
+
+def is_window_state_clean(session: str, window_id: str) -> bool:
+    """Check whether a pm-managed window is in a clean, expected state.
+
+    Returns True if the window looks healthy, False if it appears stale
+    or has been modified by the user (extra splits, dead panes, etc.).
+    """
+    from pm_core import tmux as tmux_mod
+
+    pane_details = tmux_mod.get_pane_details(session, window_id)
+    if not pane_details:
+        _logger.info("is_window_state_clean: no panes in %s — stale", window_id)
+        return False
+
+    data = load_registry(session)
+    wdata = data.get("windows", {}).get(window_id)
+
+    if not wdata or not wdata.get("panes"):
+        # No registry entry — use heuristic checks
+        has_claude = any(
+            "claude" in d.get("current_command", "").lower() or
+            "claude" in d.get("start_command", "").lower()
+            for d in pane_details
+        )
+        if len(pane_details) == 1 and has_claude:
+            # Single pane running claude — likely a pre-registration impl window
+            return True
+        if len(pane_details) > 1 and not has_claude:
+            # Multiple panes, none running claude — likely stale
+            _logger.info("is_window_state_clean: %s has %d panes, none running claude — stale",
+                         window_id, len(pane_details))
+            return False
+        if len(pane_details) == 1 and not has_claude:
+            # Single pane running a shell — user took over
+            _logger.info("is_window_state_clean: %s has 1 pane not running claude — stale",
+                         window_id)
+            return False
+        # Ambiguous — assume clean
+        return True
+
+    # Registry exists — verify registered panes are alive
+    live_ids = {d["id"] for d in pane_details}
+    registered_ids = {p["id"] for p in wdata["panes"]}
+
+    dead_registered = registered_ids - live_ids
+    if dead_registered:
+        _logger.info("is_window_state_clean: %s has dead registered panes %s — stale",
+                     window_id, dead_registered)
+        return False
+
+    # Check for unregistered panes (user-created splits)
+    unregistered = live_ids - registered_ids
+    if unregistered:
+        _logger.info("is_window_state_clean: %s has unregistered panes %s — user modified",
+                     window_id, unregistered)
+        return False
+
+    # Verify at least one pane is running claude
+    has_claude = any(
+        "claude" in d.get("current_command", "").lower() or
+        "claude" in d.get("start_command", "").lower()
+        for d in pane_details
+        if d["id"] in registered_ids
+    )
+    if not has_claude:
+        _logger.info("is_window_state_clean: %s no registered panes running claude — stale",
+                     window_id)
+        return False
+
+    return True
+
+
+def try_reuse_or_rename_stale(session: str, existing: dict) -> bool:
+    """Check an existing window and either reuse it or rename it as stale.
+
+    Returns True if the window is clean and the caller should switch to it
+    (and then return).  Returns False if the window was stale and was renamed
+    — the caller should proceed to create a fresh window.
+    """
+    import time as _time
+    from pm_core import tmux as tmux_mod
+
+    if is_window_state_clean(session, existing["id"]):
+        return True
+
+    window_name = existing["name"]
+    stale_name = f"{window_name}--stale--{int(_time.time())}"
+    _logger.warning("try_reuse_or_rename_stale: window '%s' (%s) is stale, "
+                    "renaming to '%s'", window_name, existing["id"], stale_name)
+    tmux_mod.rename_window(session, existing["id"], stale_name)
+    return False
+
+
 def _reconcile_registry(session: str, window: str,
                         query_session: str | None = None) -> list[str]:
     """Remove registry panes that no longer exist in tmux. Returns removed IDs.
