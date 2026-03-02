@@ -173,7 +173,7 @@ class ProjectManagerApp(App):
                        "merge_pr", "merge_pr_companion",
                        "edit_plan", "view_plan", "launch_notes",
                        "launch_meta", "launch_claude", "launch_guide",
-                       "view_log", "refresh", "rebalance", "quit", "show_help",
+                       "view_log", "refresh", "rebalance", "show_help",
                        "toggle_plans", "toggle_qa", "start_qa_on_pr", "hide_plan", "move_to_plan", "toggle_merged",
                        "cycle_filter", "cycle_sort", "toggle_auto_start", "focus_watcher"):
             cmd_bar = self.query_one("#command-bar", CommandBar)

@@ -229,7 +229,7 @@ def sync_prs(
     # Local/vanilla backends rely on `pm pr merge` for explicit tracking.
     if backend_name == "github":
         for pr_entry in prs:
-            if pr_entry.get("status") not in ("in_review", "in_progress"):
+            if pr_entry.get("status") not in ("in_review", "in_progress", "qa"):
                 continue
 
             branch = pr_entry.get("branch", "")

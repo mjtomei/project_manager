@@ -1577,7 +1577,7 @@ def pr_sync():
         raise SystemExit(1)
 
     for pr_entry in prs:
-        if pr_entry.get("status") not in ("in_review", "in_progress"):
+        if pr_entry.get("status") not in ("in_review", "in_progress", "qa"):
             continue
         branch = pr_entry.get("branch", "")
         # Prefer PR's own workdir if it exists
