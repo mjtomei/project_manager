@@ -67,6 +67,30 @@ def save_breadcrumb(app) -> None:
         "run_id": app._auto_start_run_id,
     }
 
+    # Persist review loop state for running loops
+    review_loops = {}
+    for pr_id, rstate in app._review_loops.items():
+        if not rstate.running:
+            continue
+        review_loops[pr_id] = {
+            "iteration": rstate.iteration,
+            "latest_verdict": rstate.latest_verdict,
+            "stop_on_suggestions": rstate.stop_on_suggestions,
+            "loop_id": rstate.loop_id,
+            "input_required": rstate.input_required,
+            "_transcript_dir": rstate._transcript_dir,
+            "history": [
+                {
+                    "iteration": h.iteration,
+                    "verdict": h.verdict,
+                    "timestamp": h.timestamp,
+                }
+                for h in rstate.history
+            ],
+        }
+    if review_loops:
+        data["review_loops"] = review_loops
+
     # Persist watcher loop state if it's running
     from pm_core.tui import watcher_ui
     if watcher_ui.is_running(app):
@@ -110,9 +134,51 @@ async def consume_breadcrumb(app) -> None:
         tdir = app._root / "transcripts" / run_id
         tdir.mkdir(parents=True, exist_ok=True)
 
+    # Restore review loop state before check_and_start so it sees existing loops
+    review_loops_data = data.get("review_loops", {})
+    if review_loops_data:
+        from pm_core.review_loop import ReviewLoopState, ReviewIteration
+        for pr_id, loop_data in review_loops_data.items():
+            rstate = ReviewLoopState(
+                pr_id=pr_id,
+                iteration=loop_data.get("iteration", 0),
+                latest_verdict=loop_data.get("latest_verdict", ""),
+                stop_on_suggestions=loop_data.get("stop_on_suggestions", True),
+                loop_id=loop_data.get("loop_id", secrets.token_hex(2)),
+                input_required=loop_data.get("input_required", False),
+                _transcript_dir=loop_data.get("_transcript_dir"),
+            )
+            for h in loop_data.get("history", []):
+                rstate.history.append(ReviewIteration(
+                    iteration=h["iteration"],
+                    verdict=h["verdict"],
+                    output="",  # not stored in breadcrumb
+                    timestamp=h.get("timestamp", ""),
+                ))
+            app._review_loops[pr_id] = rstate
+        _log.info("consume_breadcrumb: restored %d review loop state(s)", len(review_loops_data))
+
     app.log_message(f"Auto-start: resumed after merge restart → {target or 'all'}")
     app._update_display()
     await check_and_start(app)
+
+    # Restart review loops that were running before the restart
+    if review_loops_data:
+        from pm_core.tui.review_loop_ui import _start_loop
+        for pr_id in review_loops_data:
+            rstate = app._review_loops.get(pr_id)
+            if rstate and not rstate.running:
+                pr = store.get_pr(app._data, pr_id)
+                if pr and pr.get("status") == "in_review":
+                    tdir = get_transcript_dir(app)
+                    _start_loop(
+                        app, pr_id, pr, rstate.stop_on_suggestions,
+                        transcript_dir=str(tdir) if tdir else rstate._transcript_dir,
+                        resume_state=rstate,
+                    )
+                    app.log_message(
+                        f"Review loop resumed for {pr_id} at iteration {rstate.iteration}"
+                    )
 
     # Resume watcher loop if it was running
     watcher_data = data.get("watcher")

@@ -103,8 +103,14 @@ def start_or_stop_loop(app, stop_on_suggestions: bool) -> None:
 # ---------------------------------------------------------------------------
 
 def _start_loop(app, pr_id: str, pr: dict | None, stop_on_suggestions: bool,
-                transcript_dir: str | None = None) -> None:
-    """Start a review loop for the given PR."""
+                transcript_dir: str | None = None,
+                resume_state: ReviewLoopState | None = None) -> None:
+    """Start a review loop for the given PR.
+
+    When *resume_state* is provided, the loop continues from the saved
+    iteration count and history instead of starting fresh.  Used by
+    breadcrumb restoration after merge-triggered TUI restarts.
+    """
     from pm_core import tmux as tmux_mod
 
     if not pr:
@@ -123,13 +129,21 @@ def _start_loop(app, pr_id: str, pr: dict | None, stop_on_suggestions: bool,
     # Get pm_root for launching the review window
     pm_root = str(store.find_project_root())
 
-    # Create state
-    mode = "strict" if not stop_on_suggestions else "normal"
-    state = ReviewLoopState(pr_id=pr_id, stop_on_suggestions=stop_on_suggestions)
-    app._review_loops[pr_id] = state
+    # Create or reuse state
+    if resume_state:
+        state = resume_state
+        state.stop_requested = False
+        state._ui_notified_done = False
+        state._ui_notified_input = False
+        app._review_loops[pr_id] = state
+        mode_label = f"resumed at iteration {state.iteration}"
+        _log.info("review_loop_ui: resuming loop for %s at iteration %d", pr_id, state.iteration)
+    else:
+        state = ReviewLoopState(pr_id=pr_id, stop_on_suggestions=stop_on_suggestions)
+        app._review_loops[pr_id] = state
+        mode_label = "strict (PASS only)" if not stop_on_suggestions else "normal"
+        _log.info("review_loop_ui: starting %s loop for %s", mode_label, pr_id)
 
-    _log.info("review_loop_ui: starting %s loop for %s", mode, pr_id)
-    mode_label = "strict (PASS only)" if not stop_on_suggestions else "normal"
     app.log_message(
         f"[bold]Review loop started[/] for {pr_id} [{mode_label}] loop={state.loop_id} — z d to stop",
         sticky=3,
