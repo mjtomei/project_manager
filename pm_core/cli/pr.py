@@ -39,6 +39,8 @@ from pm_core.cli.helpers import (
     kill_pr_windows,
     save_and_push,
     state_root,
+    trigger_tui_merge_lock,
+    trigger_tui_merge_unlock,
     trigger_tui_refresh,
     trigger_tui_restart,
 )
@@ -1143,6 +1145,10 @@ def _pull_after_merge(data: dict, pr_entry: dict, repo_dir: str,
     If on a different branch (implying local work in progress), the pull
     is skipped to avoid disrupting the user's working state.
 
+    Dirty files are tolerated — git merge succeeds when they don't overlap
+    with incoming changes.  If they do overlap, the dirty files are stashed,
+    the merge is retried, and the stash is popped afterward.
+
     Returns True if the pull completed (or was skipped), False if a merge
     window was launched (caller should skip ``_finalize_merge``).
     """
@@ -1155,26 +1161,28 @@ def _pull_after_merge(data: dict, pr_entry: dict, repo_dir: str,
         return True
 
     repo_path = Path(repo_dir)
+    pr_display = _pr_display_id(pr_entry)
 
-    # Abort if repo has uncommitted changes — let the user (or a merge
-    # window) decide how to handle them rather than silently stashing.
-    if _workdir_is_dirty(repo_path):
-        error_msg = f"Repo has uncommitted changes: {repo_dir}"
-        click.echo(error_msg, err=True)
-        click.echo("Commit or stash your changes before pulling.", err=True)
-        if resolve_window:
-            _launch_merge_window(data, pr_entry, error_msg,
-                                 background=background, transcript=transcript,
-                                 cwd=repo_dir, companion=companion,
-                                 pull_from_origin=True)
-        return False
-
-    # Fetch and pull base branch
+    # Fetch + merge (not pull --rebase, which requires a fully clean tree)
     git_ops.run_git("fetch", "origin", cwd=repo_dir, check=False)
-    pull_result = git_ops.pull_rebase(repo_path)
-    if pull_result.returncode != 0:
-        error_detail = (pull_result.stdout.strip() + "\n"
-                        + pull_result.stderr.strip()).strip()
+    merge_result = git_ops.run_git("merge", "--ff-only",
+                                   f"origin/{base_branch}",
+                                   cwd=repo_dir, check=False)
+
+    # If merge failed due to dirty-file overlap, stash and retry
+    stash_info = None
+    if merge_result.returncode != 0 and _is_dirty_overlap_error(merge_result):
+        stash_info = _stash_for_merge(repo_path, pr_display)
+        if stash_info:
+            merge_result = git_ops.run_git("merge", "--ff-only",
+                                           f"origin/{base_branch}",
+                                           cwd=repo_dir, check=False)
+
+    if merge_result.returncode != 0:
+        if stash_info:
+            _unstash_after_merge(repo_path, stash_info)
+        error_detail = (merge_result.stdout.strip() + "\n"
+                        + merge_result.stderr.strip()).strip()
         error_msg = (f"Pull failed in {repo_dir}:\n{error_detail}")
         click.echo(error_msg, err=True)
         if resolve_window:
@@ -1185,10 +1193,10 @@ def _pull_after_merge(data: dict, pr_entry: dict, repo_dir: str,
             return False
         click.echo("Resolve conflicts manually, then re-run 'pm pr merge' to finalize.", err=True)
         return False
-    else:
-        click.echo(f"Pulled latest {base_branch}.")
 
-
+    if stash_info:
+        _unstash_after_merge(repo_path, stash_info)
+    click.echo(f"Pulled latest {base_branch}.")
     return True
 
 
@@ -1236,17 +1244,9 @@ def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
         return False
 
     # On base branch — need to update the working tree too.
-    # Abort if repo has uncommitted changes rather than silently stashing.
-    if _workdir_is_dirty(repo_path):
-        error_msg = f"Repo has uncommitted changes: {repo_dir}"
-        click.echo(error_msg, err=True)
-        click.echo("Commit or stash your changes before pulling.", err=True)
-        if resolve_window:
-            _launch_merge_window(data, pr_entry, error_msg,
-                                 background=background, transcript=transcript,
-                                 cwd=repo_dir, companion=companion,
-                                 pull_from_workdir=workdir)
-        return False
+    # Dirty files are tolerated; git merge --ff-only succeeds when they
+    # don't overlap with the incoming changes.
+    pr_display = _pr_display_id(pr_entry)
 
     fetch_r = git_ops.run_git("fetch", workdir, base_branch,
                               cwd=repo_dir, check=False)
@@ -1264,7 +1264,18 @@ def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
 
     merge_r = git_ops.run_git("merge", "--ff-only", "FETCH_HEAD",
                               cwd=repo_dir, check=False)
+
+    # If merge failed due to dirty-file overlap, stash and retry
+    stash_info = None
+    if merge_r.returncode != 0 and _is_dirty_overlap_error(merge_r):
+        stash_info = _stash_for_merge(repo_path, pr_display)
+        if stash_info:
+            merge_r = git_ops.run_git("merge", "--ff-only", "FETCH_HEAD",
+                                      cwd=repo_dir, check=False)
+
     if merge_r.returncode != 0:
+        if stash_info:
+            _unstash_after_merge(repo_path, stash_info)
         error_detail = (merge_r.stdout.strip() + "\n"
                         + merge_r.stderr.strip()).strip()
         error_msg = f"Fast-forward of {base_branch} failed:\n{error_detail}"
@@ -1278,6 +1289,8 @@ def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
         click.echo("Pull manually when ready, then re-run 'pm pr merge'.", err=True)
         return False
 
+    if stash_info:
+        _unstash_after_merge(repo_path, stash_info)
     click.echo(f"Updated {base_branch} in repo.")
 
     return True
@@ -1406,16 +1419,6 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
     if propagation_only:
         # Step 2: skip workdir merge, go straight to propagation
         click.echo("Propagation only: skipping workdir merge.")
-    elif _workdir_is_dirty(work_path):
-        # Pre-merge check: abort if workdir has uncommitted changes
-        error_msg = f"Workdir has uncommitted changes: {workdir}"
-        click.echo(error_msg, err=True)
-        click.echo("Commit or stash your changes before merging.", err=True)
-        if resolve_window:
-            _launch_merge_window(data, pr_entry, error_msg, background=background,
-                                 transcript=transcript, companion=companion)
-            return
-        raise SystemExit(1)
     else:
         # Fetch latest from origin (important for vanilla backend where others may push)
         if backend_name == "vanilla":
@@ -1427,8 +1430,18 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
         branch_tip = tip_result.stdout.strip() if tip_result.returncode == 0 else None
 
         click.echo(f"Merging {branch} into {base_branch}...")
+
+        # Checkout base branch — stash dirty files if they overlap
+        stash_info = None
         result = git_ops.run_git("checkout", base_branch, cwd=workdir, check=False)
+        if result.returncode != 0 and _is_dirty_overlap_error(result):
+            # Workdir is a pm-managed clone, no TUI overlay needed
+            stash_info = _stash_for_merge(work_path, lock_tui=False)
+            if stash_info:
+                result = git_ops.run_git("checkout", base_branch, cwd=workdir, check=False)
         if result.returncode != 0:
+            if stash_info:
+                _unstash_after_merge(work_path, stash_info)
             error_msg = f"Failed to checkout {base_branch}: {result.stderr.strip()}"
             click.echo(error_msg, err=True)
             if resolve_window:
@@ -1436,10 +1449,15 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
                                      transcript=transcript, companion=companion)
                 return
             raise SystemExit(1)
+
         result = git_ops.run_git("merge", "--no-ff", branch, "-m",
                                  f"Merge {branch}: {pr_entry.get('title', pr_id)}",
                                  cwd=workdir, check=False)
         if result.returncode != 0:
+            # Abort the failed merge before unstashing
+            git_ops.run_git("merge", "--abort", cwd=workdir, check=False)
+            if stash_info:
+                _unstash_after_merge(work_path, stash_info)
             # Git sends conflict details to stdout, other errors to stderr
             error_detail = (result.stdout.strip() + "\n" + result.stderr.strip()).strip()
             error_msg = f"Merge failed:\n{error_detail}" if error_detail else "Merge failed"
@@ -1461,6 +1479,9 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
                 click.echo(f"Warning: Post-merge verification failed — branch tip {branch_tip[:8]} "
                             f"is not an ancestor of {base_branch} HEAD.", err=True)
                 click.echo("The merge commit exists but may not include all branch commits.", err=True)
+
+        if stash_info:
+            _unstash_after_merge(work_path, stash_info)
 
     # --- Propagate merged base_branch to the main repo / origin ---
     if backend_name == "local":
@@ -1701,6 +1722,82 @@ def _workdir_is_dirty(work_path: Path) -> bool:
     """Check if a workdir has uncommitted changes."""
     result = git_ops.run_git("status", "--porcelain", cwd=work_path, check=False)
     return bool(result.stdout.strip())
+
+
+# ---------------------------------------------------------------------------
+# Stash-retry helpers for merge operations
+# ---------------------------------------------------------------------------
+
+def _is_dirty_overlap_error(result: subprocess.CompletedProcess) -> bool:
+    """True if a git operation failed because dirty files would be overwritten."""
+    combined = result.stderr + result.stdout
+    return "would be overwritten" in combined
+
+
+def _dirty_file_paths(cwd: Path) -> list[str]:
+    """Return relative paths of dirty files in the working tree."""
+    result = git_ops.run_git("status", "--porcelain", cwd=cwd, check=False)
+    paths = []
+    for line in result.stdout.strip().splitlines():
+        if not line.strip():
+            continue
+        # porcelain format: XY filename  (or XY orig -> renamed)
+        path = line[3:]
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1]
+        paths.append(path)
+    return paths
+
+
+def _stash_for_merge(cwd: Path, pr_display_id: str = "",
+                     lock_tui: bool = True) -> dict | None:
+    """Stash dirty files so a merge can proceed.
+
+    If pm/ files are among the dirty files and *lock_tui* is True, writes
+    a merge-lock marker so the TUI shows an overlay while the files are
+    temporarily reverted.
+
+    Returns a dict with stash metadata (``has_pm``, ``count``) on success,
+    or None if stashing failed or there was nothing to stash.
+    """
+    dirty = _dirty_file_paths(cwd)
+    if not dirty:
+        return None
+
+    has_pm = any(p.startswith("pm/") or p.startswith("pm\\") for p in dirty)
+
+    if has_pm and lock_tui:
+        trigger_tui_merge_lock(pr_display_id)
+
+    click.echo(f"Stashing {len(dirty)} dirty file(s) to proceed with merge...")
+    stash_r = git_ops.run_git("stash", "push", "--include-untracked",
+                               "-m", "pm: auto-stash for merge",
+                               cwd=cwd, check=False)
+    if stash_r.returncode != 0:
+        click.echo(f"Failed to stash: {stash_r.stderr.strip()}", err=True)
+        if has_pm and lock_tui:
+            trigger_tui_merge_unlock()
+        return None
+
+    return {"has_pm": has_pm, "count": len(dirty), "lock_tui": lock_tui}
+
+
+def _unstash_after_merge(cwd: Path, info: dict) -> bool:
+    """Pop the stash and remove the TUI merge-lock if one was set.
+
+    Returns True if the stash popped cleanly.
+    """
+    pop_r = git_ops.run_git("stash", "pop", cwd=cwd, check=False)
+    clean = pop_r.returncode == 0
+
+    if info.get("has_pm") and info.get("lock_tui"):
+        trigger_tui_merge_unlock()
+
+    if clean:
+        click.echo(f"Restored {info['count']} stashed file(s).")
+    else:
+        click.echo("Warning: stash pop had conflicts. Resolve manually.", err=True)
+    return clean
 
 
 def _cleanup_pr(pr_entry: dict, data: dict, root: Path, force: bool) -> bool:

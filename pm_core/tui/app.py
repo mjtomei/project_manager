@@ -24,7 +24,7 @@ from pm_core.plan_parser import extract_plan_intro
 
 from pm_core.tui.widgets import TreeScroll, StatusBar, LogLine
 from pm_core.tui.screens import (
-    ConnectScreen, HelpScreen, PlanPickerScreen, PlanAddScreen,
+    ConnectScreen, HelpScreen, MergeLockScreen, PlanPickerScreen, PlanAddScreen,
 )
 from pm_core.tui import pane_ops
 from pm_core.tui import frame_capture
@@ -319,6 +319,15 @@ class ProjectManagerApp(App):
 
     def _deferred_startup_sync(self) -> None:
         """Blocking startup tasks run in a thread."""
+        # Clean up any stale merge-lock from a previous crash
+        try:
+            from pm_core.paths import pm_home
+            lock = pm_home() / "merge-lock"
+            if lock.exists():
+                _log.warning("Removing stale merge-lock file on startup")
+                lock.unlink(missing_ok=True)
+        except Exception:
+            pass
         pane_ops.heal_registry(self._session_name)
         try:
             if self._session_name:
@@ -722,7 +731,25 @@ class ProjectManagerApp(App):
             self.log_message("Refreshing...")
 
     def action_reload(self) -> None:
-        """Reload state from disk without triggering PR sync."""
+        """Reload state from disk without triggering PR sync.
+
+        If a merge-lock marker exists, shows a MergeLockScreen overlay
+        instead of reloading (pm/ files may be temporarily stashed).
+        """
+        from pm_core.paths import pm_home
+        lock = pm_home() / "merge-lock"
+        if lock.exists():
+            # Show overlay if not already showing one
+            if not any(isinstance(s, MergeLockScreen) for s in self.screen_stack):
+                pr_id = ""
+                try:
+                    pr_id = lock.read_text().strip()
+                except Exception:
+                    pass
+                _log.info("merge-lock detected for %s, showing overlay", pr_id)
+                self.push_screen(MergeLockScreen(pr_id),
+                                 callback=lambda _: self._load_state())
+            return
         _log.info("action: reload (state only)")
         self._load_state()
 
