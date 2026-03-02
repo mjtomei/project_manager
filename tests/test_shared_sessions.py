@@ -684,3 +684,88 @@ class TestGetShareUsers:
             with patch.dict(os.environ, {"USER": "root"}):
                 users = paths.get_share_users(group_name=None)
         assert users == ["alice"]
+
+
+# ---------------------------------------------------------------------------
+# tmux: list_clients_in_group
+# ---------------------------------------------------------------------------
+
+class TestListClientsInGroup:
+    """Verify list_clients_in_group filters clients to the session group."""
+
+    @patch("pm_core.tmux.subprocess.run")
+    @patch("pm_core.tmux.list_grouped_sessions", return_value=["base~1", "base~2"])
+    def test_returns_clients_in_group(self, _mock_grouped, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="/dev/pts/0 base~1\n/dev/pts/1 base~2\n/dev/pts/2 other-session\n",
+        )
+        clients = tmux.list_clients_in_group("base")
+        assert len(clients) == 2
+        assert clients[0] == {"tty": "/dev/pts/0", "session": "base~1"}
+        assert clients[1] == {"tty": "/dev/pts/1", "session": "base~2"}
+
+    @patch("pm_core.tmux.subprocess.run")
+    @patch("pm_core.tmux.list_grouped_sessions", return_value=["base~1"])
+    def test_includes_base_session_clients(self, _mock_grouped, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="/dev/pts/0 base\n",
+        )
+        clients = tmux.list_clients_in_group("base")
+        assert len(clients) == 1
+        assert clients[0]["session"] == "base"
+
+    @patch("pm_core.tmux.subprocess.run")
+    @patch("pm_core.tmux.list_grouped_sessions", return_value=[])
+    def test_no_clients(self, _mock_grouped, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="")
+        clients = tmux.list_clients_in_group("base")
+        assert clients == []
+
+    @patch("pm_core.tmux.subprocess.run")
+    @patch("pm_core.tmux.list_grouped_sessions", return_value=["base~1"])
+    def test_excludes_unrelated_sessions(self, _mock_grouped, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="/dev/pts/0 unrelated\n/dev/pts/1 base~1\n",
+        )
+        clients = tmux.list_clients_in_group("base")
+        assert len(clients) == 1
+        assert clients[0]["session"] == "base~1"
+
+    @patch("pm_core.tmux.subprocess.run")
+    @patch("pm_core.tmux.list_grouped_sessions", return_value=[])
+    def test_passes_socket_path(self, _mock_grouped, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="")
+        tmux.list_clients_in_group("base", socket_path="/tmp/sock")
+        cmd = mock_run.call_args[0][0]
+        assert "-S" in cmd
+        assert "/tmp/sock" in cmd
+
+    @patch("pm_core.tmux.subprocess.run")
+    @patch("pm_core.tmux.list_grouped_sessions", return_value=[])
+    def test_handles_list_clients_failure(self, _mock_grouped, mock_run):
+        mock_run.return_value = MagicMock(returncode=1, stdout="")
+        clients = tmux.list_clients_in_group("base")
+        assert clients == []
+
+
+# ---------------------------------------------------------------------------
+# tmux: detach_client
+# ---------------------------------------------------------------------------
+
+class TestDetachClient:
+    """Verify detach_client sends the correct tmux command."""
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_detaches_by_tty(self, mock_run):
+        tmux.detach_client("/dev/pts/3")
+        cmd = mock_run.call_args[0][0]
+        assert cmd == ["tmux", "detach-client", "-t", "/dev/pts/3"]
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_passes_socket_path(self, mock_run):
+        tmux.detach_client("/dev/pts/3", socket_path="/tmp/sock")
+        cmd = mock_run.call_args[0][0]
+        assert cmd == ["tmux", "-S", "/tmp/sock", "detach-client", "-t", "/dev/pts/3"]

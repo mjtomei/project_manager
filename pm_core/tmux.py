@@ -639,3 +639,32 @@ def set_environment(session: str, key: str, value: str, socket_path: str | None 
                    socket_path=socket_path),
         check=False,
     )
+
+
+def list_clients_in_group(base: str, socket_path: str | None = None) -> list[dict]:
+    """List all clients attached to any session in the group (base + base~*).
+
+    Returns list of dicts with keys: tty, session.
+    """
+    result = subprocess.run(
+        _tmux_cmd("list-clients", "-F", "#{client_tty} #{session_name}",
+                   socket_path=socket_path),
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return []
+    group_sessions = {base} | set(list_grouped_sessions(base, socket_path=socket_path))
+    clients = []
+    for line in result.stdout.strip().splitlines():
+        parts = line.split(None, 1)
+        if len(parts) == 2 and parts[1] in group_sessions:
+            clients.append({"tty": parts[0], "session": parts[1]})
+    return clients
+
+
+def detach_client(tty: str, socket_path: str | None = None) -> None:
+    """Detach a tmux client by its TTY."""
+    subprocess.run(
+        _tmux_cmd("detach-client", "-t", tty, socket_path=socket_path),
+        check=False,
+    )
