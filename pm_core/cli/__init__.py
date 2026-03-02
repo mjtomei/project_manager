@@ -316,9 +316,9 @@ def status_cmd():
     click.echo(f"\nPRs: {len(prs)} total")
     status_icons = {
         "pending": "⏳", "in_progress": "🔨", "in_review": "👀",
-        "merged": "✅", "closed": "🚫",
+        "qa": "🧪", "merged": "✅", "closed": "🚫",
     }
-    for s in ("pending", "in_progress", "in_review", "merged", "closed"):
+    for s in ("pending", "in_progress", "in_review", "qa", "merged", "closed"):
         if s in counts:
             click.echo(f"  {status_icons.get(s, '?')} {s}: {counts[s]}")
 
@@ -508,6 +508,13 @@ COMMANDS
   pm cluster auto               Discover feature clusters automatically
   pm cluster explore            Interactively explore code clusters with Claude
 
+  pm qa list                     List QA instructions and regression tests
+  pm qa add <name>               Create a new QA instruction
+  pm qa edit <id>                Edit a QA instruction
+  pm qa show <id>                Show full content of a QA instruction
+  pm qa run <id> --pr <pr-id>    Run a QA instruction against a PR
+  pm qa standalone <id>          Run a QA instruction against master
+
   pm bench models               List models on local inference backend
   pm bench exercises            List available benchmark exercises
   pm bench run <model>          Run benchmark with tournament selection
@@ -563,7 +570,7 @@ def getting_started_cmd():
 # Import submodules to register their commands on ``cli``.
 # This must be at the bottom of the file, after ``cli`` is defined.
 # ---------------------------------------------------------------------------
-from pm_core.cli import pr, plan, session, tui, guide, meta, cluster, bench, watcher  # noqa: E402, F401
+from pm_core.cli import pr, plan, session, tui, guide, meta, cluster, bench, watcher, qa  # noqa: E402, F401
 
 
 def main():

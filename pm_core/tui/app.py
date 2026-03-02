@@ -19,7 +19,7 @@ from pm_core.tui.tech_tree import TechTree, PRSelected
 from pm_core.tui.command_bar import CommandBar, CommandSubmitted
 from pm_core.tui.guide_progress import GuideProgress
 from pm_core.tui.plans_pane import PlansPane, PlanSelected, PlanActivated, PlanAction
-from pm_core.tui.tests_pane import TestsPane, TestSelected, TestActivated
+from pm_core.tui.qa_pane import QAPane, QAItemSelected, QAItemActivated
 from pm_core.plan_parser import extract_plan_intro
 
 from pm_core.tui.widgets import TreeScroll, StatusBar, LogLine
@@ -100,13 +100,13 @@ class ProjectManagerApp(App):
         width: 1fr;
         padding: 1 2;
     }
-    #tests-container {
+    #qa-container {
         width: 100%;
         height: 100%;
         display: none;
         overflow: auto auto;
     }
-    TestsPane {
+    QAPane {
         height: auto;
         width: 1fr;
         padding: 1 2;
@@ -114,7 +114,7 @@ class ProjectManagerApp(App):
     """
 
     BINDINGS = [
-        Binding("q", "quit", "Quit"),
+        Binding("q", "toggle_qa", "QA"),
         Binding("s", "start_pr", "Start PR", show=True),
         Binding("S", "start_pr_companion", "Start+Companion", show=False),
         Binding("d", "done_pr", "Review", show=True),
@@ -133,7 +133,7 @@ class ProjectManagerApp(App):
         Binding("slash", "focus_command", "Command", show=True),
         Binding("escape", "unfocus_command", "Back", show=False),
         Binding("p", "toggle_plans", "Plans", show=True),
-        Binding("t", "toggle_tests", "Tests", show=True),
+        Binding("t", "start_qa_on_pr", "QA Run", show=True),
         Binding("x", "hide_plan", "Hide Plan", show=False),
         Binding("M", "move_to_plan", "Move Plan", show=False),
         Binding("X", "toggle_merged", "Toggle Merged", show=False),
@@ -174,7 +174,7 @@ class ProjectManagerApp(App):
                        "edit_plan", "view_plan", "launch_notes",
                        "launch_meta", "launch_claude", "launch_guide",
                        "view_log", "refresh", "rebalance", "quit", "show_help",
-                       "toggle_plans", "toggle_tests", "hide_plan", "move_to_plan", "toggle_merged",
+                       "toggle_plans", "toggle_qa", "start_qa_on_pr", "hide_plan", "move_to_plan", "toggle_merged",
                        "cycle_filter", "cycle_sort", "toggle_auto_start", "focus_watcher"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus:
@@ -189,8 +189,8 @@ class ProjectManagerApp(App):
             if self._plans_visible:
                 _log.debug("check_action: blocked %s (in plans view)", action)
                 return False
-            if self._tests_visible:
-                _log.debug("check_action: blocked %s (in tests view)", action)
+            if self._qa_visible:
+                _log.debug("check_action: blocked %s (in QA view)", action)
                 return False
         return True
 
@@ -202,7 +202,7 @@ class ProjectManagerApp(App):
         self._current_guide_step: str | None = None
         self._guide_auto_launched = False
         self._plans_visible = False
-        self._tests_visible = False
+        self._qa_visible = False
         # Frame capture state (always enabled)
         self._frame_rate: int = DEFAULT_FRAME_RATE
         self._frame_buffer_size: int = DEFAULT_FRAME_BUFFER_SIZE
@@ -236,6 +236,8 @@ class ProjectManagerApp(App):
         self._auto_start_run_id: str | None = None
         # Watcher loop state (purely in-memory, lost on TUI restart)
         self._watcher_state = None  # WatcherLoopState | None
+        # QA loop state (purely in-memory)
+        self._qa_loops: dict = {}
 
     def _consume_z(self) -> int:
         """Atomically read and clear the z modifier count.
@@ -271,8 +273,8 @@ class ProjectManagerApp(App):
                 yield GuideProgress(id="guide-progress")
             with Vertical(id="plans-container"):
                 yield PlansPane(id="plans-pane")
-            with Vertical(id="tests-container"):
-                yield TestsPane(id="tests-pane")
+            with Vertical(id="qa-container"):
+                yield QAPane(id="qa-pane")
         yield LogLine(id="log-line")
         yield CommandBar(id="command-bar")
 
@@ -388,8 +390,8 @@ class ProjectManagerApp(App):
         prs = self._data.get("prs") or []
         if self._plans_visible:
             self._show_plans_view()
-        elif self._tests_visible:
-            self._show_tests_view()
+        elif self._qa_visible:
+            self._show_qa_view()
         elif not prs:
             state, _ = guide.detect_state(self._root)
             self._show_guide_view(state)
@@ -400,21 +402,21 @@ class ProjectManagerApp(App):
         """Show the guide progress view during setup steps."""
         self._current_guide_step = state
         self._plans_visible = False
-        self._tests_visible = False
+        self._qa_visible = False
 
         # Update guide progress widget
         guide_widget = self.query_one("#guide-progress", GuideProgress)
         guide_widget.update_step(state)
 
-        # Show guide progress, hide tech tree, plans, and tests
+        # Show guide progress, hide tech tree, plans, and QA
         tree_container = self.query_one("#tree-container")
         guide_container = self.query_one("#guide-progress-container")
         plans_container = self.query_one("#plans-container")
-        tests_container = self.query_one("#tests-container")
+        qa_container = self.query_one("#qa-container")
         tree_container.styles.display = "none"
         guide_container.styles.display = "block"
         plans_container.styles.display = "none"
-        tests_container.styles.display = "none"
+        qa_container.styles.display = "none"
 
         # Update status bar for guide mode
         status_bar = self.query_one("#status-bar", StatusBar)
@@ -437,14 +439,14 @@ class ProjectManagerApp(App):
         tree_container = self.query_one("#tree-container")
         guide_container = self.query_one("#guide-progress-container")
         plans_container = self.query_one("#plans-container")
-        tests_container = self.query_one("#tests-container")
+        qa_container = self.query_one("#qa-container")
         tree_container.styles.display = "block"
         guide_container.styles.display = "none"
         plans_container.styles.display = "none"
-        tests_container.styles.display = "none"
+        qa_container.styles.display = "none"
         self._current_guide_step = None
         self._plans_visible = False
-        self._tests_visible = False
+        self._qa_visible = False
         # Restore status bar to normal view
         self._update_status_bar()
         self.query_one("#tech-tree", TechTree).focus()
@@ -769,7 +771,7 @@ class ProjectManagerApp(App):
 
     def action_show_help(self) -> None:
         _log.debug("action: show_help")
-        self.push_screen(HelpScreen(in_plans=self._plans_visible, in_tests=self._tests_visible))
+        self.push_screen(HelpScreen(in_plans=self._plans_visible, in_qa=self._qa_visible))
 
     # --- Plans view ---
 
@@ -778,13 +780,13 @@ class ProjectManagerApp(App):
         tree_container = self.query_one("#tree-container")
         guide_container = self.query_one("#guide-progress-container")
         plans_container = self.query_one("#plans-container")
-        tests_container = self.query_one("#tests-container")
+        qa_container = self.query_one("#qa-container")
         tree_container.styles.display = "none"
         guide_container.styles.display = "none"
         plans_container.styles.display = "block"
-        tests_container.styles.display = "none"
+        qa_container.styles.display = "none"
         self._plans_visible = True
-        self._tests_visible = False
+        self._qa_visible = False
         self._current_guide_step = None
         self._refresh_plans_pane()
         plans_pane = self.query_one("#plans-pane", PlansPane)
@@ -856,49 +858,70 @@ class ProjectManagerApp(App):
         else:
             pane_ops.handle_plan_action(self, message.action, plan_id)
 
-    # --- Tests view ---
+    # --- QA view ---
 
-    def _show_tests_view(self) -> None:
-        """Show the tests list view."""
+    def _show_qa_view(self) -> None:
+        """Show the QA instructions list view."""
         tree_container = self.query_one("#tree-container")
         guide_container = self.query_one("#guide-progress-container")
         plans_container = self.query_one("#plans-container")
-        tests_container = self.query_one("#tests-container")
+        qa_container = self.query_one("#qa-container")
         tree_container.styles.display = "none"
         guide_container.styles.display = "none"
         plans_container.styles.display = "none"
-        tests_container.styles.display = "block"
-        self._tests_visible = True
+        qa_container.styles.display = "block"
+        self._qa_visible = True
         self._plans_visible = False
         self._current_guide_step = None
-        self._refresh_tests_pane()
-        tests_pane = self.query_one("#tests-pane", TestsPane)
-        tests_pane.focus()
+        self._refresh_qa_pane()
+        qa_pane = self.query_one("#qa-pane", QAPane)
+        qa_pane.focus()
         # Update status bar
-        from pm_core import tui_tests
-        tests = tui_tests.list_tests()
+        from pm_core import qa_instructions
+        if self._root:
+            all_items = qa_instructions.list_all(self._root)
+            total = len(all_items.get("instructions", [])) + len(all_items.get("regression", []))
+        else:
+            total = 0
         status_bar = self.query_one("#status-bar", StatusBar)
-        status_bar.update(f" [bold]Tests[/bold]    {len(tests)} test(s)    [dim]t=back to tree[/dim]")
-        self.call_after_refresh(self._capture_frame, "show_tests_view")
+        status_bar.update(f" [bold]QA[/bold]    {total} item(s)    [dim]q=back to tree[/dim]")
+        self.call_after_refresh(self._capture_frame, "show_qa_view")
 
-    def _refresh_tests_pane(self) -> None:
-        """Refresh the tests pane with current data."""
-        from pm_core import tui_tests
-        tests = tui_tests.list_tests()
-        tests_pane = self.query_one("#tests-pane", TestsPane)
-        tests_pane.update_tests(tests)
+    def _refresh_qa_pane(self) -> None:
+        """Refresh the QA pane with current data."""
+        from pm_core import qa_instructions
+        if self._root:
+            all_items = qa_instructions.list_all(self._root)
+        else:
+            all_items = {"instructions": [], "regression": []}
+        qa_pane = self.query_one("#qa-pane", QAPane)
+        qa_pane.update_items(all_items)
 
-    def action_toggle_tests(self) -> None:
-        """Toggle between tests view and tech tree view."""
-        _log.info("action: toggle_tests visible=%s", self._tests_visible)
-        if self._tests_visible:
+    def action_toggle_qa(self) -> None:
+        """Toggle QA instructions pane."""
+        _log.info("action: toggle_qa visible=%s", self._qa_visible)
+        if self._qa_visible:
             self._show_normal_view()
         else:
-            self._show_tests_view()
+            self._show_qa_view()
 
-    def on_test_selected(self, message: TestSelected) -> None:
-        _log.debug("test selected: %s", message.test_id)
+    def action_start_qa_on_pr(self) -> None:
+        """Start QA on the selected PR."""
+        from pm_core.tui import qa_loop_ui
+        tree = self.query_one("#tech-tree", TechTree)
+        pr_id = tree.selected_pr_id
+        if not pr_id:
+            self.log_message("No PR selected")
+            return
+        qa_loop_ui.start_qa(self, pr_id)
 
-    def on_test_activated(self, message: TestActivated) -> None:
-        """Launch Claude with the selected test prompt."""
-        pane_ops.launch_test(self, message.test_id)
+    def on_qa_item_selected(self, message: QAItemSelected) -> None:
+        _log.debug("qa item selected: %s", message.item_id)
+
+    def on_qa_item_activated(self, message: QAItemActivated) -> None:
+        """Launch QA item (instruction or regression test)."""
+        pane_ops.launch_qa_item(self, message.item_id)
+
+    def action_help_quit(self) -> None:
+        """Override Textual's ctrl+c handler."""
+        self.log_message("Press ctrl+b d to detach from tmux")

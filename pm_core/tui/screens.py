@@ -170,7 +170,6 @@ class HelpScreen(ModalScreen):
         Binding("escape", "dismiss", "Close"),
         Binding("question_mark", "dismiss", "Close"),
         Binding("h", "discuss", "Discuss"),
-        Binding("q", "dismiss", "Close"),
         Binding("j", "scroll_down", "Scroll down", show=False),
         Binding("k", "scroll_up", "Scroll up", show=False),
         Binding("J", "page_down", "Page down", show=False),
@@ -206,19 +205,21 @@ class HelpScreen(ModalScreen):
     }
     """
 
-    def __init__(self, in_plans: bool = False, in_tests: bool = False):
+    def __init__(self, in_plans: bool = False, in_qa: bool = False):
         super().__init__()
         self._in_plans = in_plans
-        self._in_tests = in_tests
+        self._in_qa = in_qa
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="help-container"):
             yield Label("Keyboard Shortcuts", id="help-title")
-            if self._in_tests:
-                yield Label("Test Navigation", classes="help-section")
+            if self._in_qa:
+                yield Label("QA Navigation", classes="help-section")
                 yield Label("  [bold]↑↓[/] or [bold]jk[/]  Move selection", classes="help-row")
-                yield Label("  [bold]Enter[/]  Run selected test", classes="help-row")
-                yield Label("  [bold]t[/]  Back to tree view", classes="help-row")
+                yield Label("  [bold]Enter[/]  Run selected item", classes="help-row")
+                yield Label("  [bold]e[/]  Edit item", classes="help-row")
+                yield Label("  [bold]a[/]  Add instruction", classes="help-row")
+                yield Label("  [bold]q[/]  Back to tree view", classes="help-row")
             elif self._in_plans:
                 yield Label("Plan Navigation", classes="help-section")
                 yield Label("  [bold]↑↓[/] or [bold]jk[/]  Move selection", classes="help-row")
@@ -257,7 +258,8 @@ class HelpScreen(ModalScreen):
             yield Label("  [bold]m[/]  Meta: work on pm itself", classes="help-row")
             yield Label("  [bold]L[/]  View TUI log", classes="help-row")
             yield Label("  [bold]p[/]  Toggle plans view", classes="help-row")
-            yield Label("  [bold]t[/]  Toggle tests view", classes="help-row")
+            yield Label("  [bold]t[/]  Start QA on selected PR", classes="help-row")
+            yield Label("  [bold]q[/]  Toggle QA instructions", classes="help-row")
             yield Label("  [bold]b[/]  Rebalance panes", classes="help-row")
             yield Label("Companion Pane", classes="help-section")
             yield Label("  [bold]S[/]  Start PR with companion pane", classes="help-row")
@@ -268,7 +270,7 @@ class HelpScreen(ModalScreen):
             yield Label("  [bold]C[/]  Show shared connect command", classes="help-row")
             yield Label("  [bold]Ctrl+R[/]  Restart TUI", classes="help-row")
             yield Label("  [bold]?[/]  Show this help", classes="help-row")
-            yield Label("  [bold]q[/]  Detach from session", classes="help-row")
+            yield Label("  [bold]ctrl+b d[/]  Detach from session", classes="help-row")
             yield Label("Review Loop", classes="help-section")
             yield Label("  [bold]zz d[/]   Start loop", classes="help-row")
             yield Label("  [bold]zzz d[/]  Start strict loop", classes="help-row")

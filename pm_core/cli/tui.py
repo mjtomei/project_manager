@@ -381,22 +381,31 @@ def tui_test(test_id: str | None, list_tests_flag: bool, session: str | None,
              file_bugs: bool, fix_bugs: bool):
     """Run TUI regression tests using Claude as the test executor.
 
-    These tests launch Claude with a specific test prompt that instructs it
-    to interact with the TUI and tmux, verify behavior, and report results.
+    Tests are stored as QA instruction files in pm/qa/regression/.
+    Use 'pm qa list' for the full QA library (instructions + regression).
 
     Examples:
         pm tui test --list              # List available tests
         pm tui test pane-layout         # Run pane layout test
         pm tui test session-resume      # Run session resume test
     """
-    from pm_core import tui_tests
+    from pm_core import qa_instructions
+
+    try:
+        root = state_root()
+    except FileNotFoundError:
+        root = Path.home() / ".pm"
 
     if list_tests_flag:
-        tests = tui_tests.list_tests()
-        click.echo("Available TUI tests:\n")
+        tests = qa_instructions.list_regression_tests(root)
+        click.echo("Available TUI tests (from pm/qa/regression/):\n")
         for t in tests:
-            click.echo(f"  {t['id']:20} {t['name']}")
-            click.echo(f"  {' '*20} {t['description']}\n")
+            click.echo(f"  {t['id']:20} {t['title']}")
+            desc = t.get('description', '')
+            if desc:
+                click.echo(f"  {' '*20} {desc}\n")
+            else:
+                click.echo()
         return
 
     if not test_id:
@@ -404,35 +413,21 @@ def tui_test(test_id: str | None, list_tests_flag: bool, session: str | None,
         click.echo("Run 'pm tui test --list' to see available tests.")
         raise SystemExit(1)
 
-    test_info = tui_tests.ALL_TESTS.get(test_id)
-    if not test_info:
+    item = qa_instructions.get_instruction(root, test_id, category="regression")
+    if not item:
         click.echo(f"Unknown test: {test_id}", err=True)
         click.echo("Run 'pm tui test --list' to see available tests.")
         raise SystemExit(1)
 
-    prompt = test_info["prompt"]
-    init_fn = test_info.get("init")
-    cleanup_fn = test_info.get("cleanup")
-    init_context = None
+    prompt = item.get("body", "")
+    title = item.get("title", test_id)
     cwd = None
 
-    if init_fn:
-        # Test provides its own setup (e.g. creating a git repo).
-        # Claude will start the session itself during the test.
-        click.echo(f"Running init for test: {test_info['name']}...")
-        init_context = init_fn()
-        sess = init_context["session_name"]
-        pane_id = init_context.get("pane_id")
-        cwd = init_context["cwd"]
-        # Format placeholders into prompt
-        prompt_ctx = init_context.get("prompt_context", {})
-        prompt = prompt.format(**prompt_ctx)
-    else:
-        # Existing flow — find a running TUI session
-        pane_id, sess = _find_tui_pane(session)
-        if not sess:
-            click.echo("No pm tmux session found. Start one with 'pm session'.", err=True)
-            raise SystemExit(1)
+    # Find a running TUI session
+    pane_id, sess = _find_tui_pane(session)
+    if not sess:
+        click.echo("No pm tmux session found. Start one with 'pm session'.", err=True)
+        raise SystemExit(1)
 
     # Build bug-handling addendum
     bug_addendum = ""
@@ -481,27 +476,18 @@ To interact with this session, use commands like:
 - tmux list-panes -t {sess} -F "#{{pane_id}} #{{pane_width}}x#{{pane_height}} #{{pane_current_command}}"
 - cat ~/.pm/pane-registry/{sess}.json
 
+## QA Regression Test: {title}
+
 {prompt}
 {bug_addendum}
 """
 
-    click.echo(f"Running test: {test_info['name']}")
+    click.echo(f"Running test: {title}")
     click.echo(f"Session: {sess}")
-    click.echo(f"Claude cwd: {cwd}")
     click.echo("-" * 60)
 
     # Launch Claude with the test prompt (no session resume for tests)
     from pm_core.claude_launcher import launch_claude
-    try:
-        root = state_root()
-    except FileNotFoundError:
-        root = Path.home() / ".pm"
-    rc = 1
-    try:
-        rc = launch_claude(full_prompt, session_key=f"tui-test:{test_id}",
-                           pm_root=root, cwd=cwd, resume=False)
-    finally:
-        if cleanup_fn and init_context:
-            click.echo("Cleaning up test session...")
-            cleanup_fn(init_context)
+    rc = launch_claude(full_prompt, session_key=f"tui-test:{test_id}",
+                       pm_root=root, cwd=cwd, resume=False)
     raise SystemExit(rc)

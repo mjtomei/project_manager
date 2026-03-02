@@ -13,6 +13,7 @@ STATUS_ICONS = {
     "pending": "○",
     "in_progress": "●",
     "in_review": "◎",
+    "qa": "🧪",
     "merged": "✓",
     "closed": "✗",
     "blocked": "✗",
@@ -44,6 +45,7 @@ STATUS_STYLES = {
     "pending": "white",
     "in_progress": "bold yellow",
     "in_review": "bold cyan",
+    "qa": "bold magenta",
     "merged": "bold green",
     "closed": "dim red",
     "blocked": "bold red",
@@ -54,13 +56,14 @@ STATUS_BG = {
     "pending": "",                # no background
     "in_progress": "on #333300",  # subtle yellow
     "in_review": "on #003333",    # subtle cyan
+    "qa": "on #330033",           # subtle magenta
     "merged": "on #003300",       # subtle green
     "closed": "on #220000",       # dim red
     "blocked": "on #330000",      # subtle red
 }
 
 # Status filter cycle order (None = show all)
-STATUS_FILTER_CYCLE = [None, "pending", "in_progress", "in_review", "merged", "closed"]
+STATUS_FILTER_CYCLE = [None, "pending", "in_progress", "in_review", "qa", "merged", "closed"]
 
 # Node dimensions
 NODE_W = 24
