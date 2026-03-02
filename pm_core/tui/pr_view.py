@@ -47,8 +47,9 @@ def handle_pr_selected(app, pr_id: str) -> None:
 
     # Persist selection so TUI restarts on this PR
     if app._data.get("project", {}).get("active_pr") != pr_id:
-        app._data["project"]["active_pr"] = pr_id
-        store.save(app._data, app._root)
+        app._data = store.locked_update(
+            app._root, lambda d: d["project"].__setitem__("active_pr", pr_id)
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -172,8 +173,10 @@ def toggle_merged(app) -> None:
     tree = app.query_one("#tech-tree", TechTree)
     tree._hide_merged = not tree._hide_merged
     # Persist to project.yaml (per-project, overrides global)
-    app._data.setdefault("project", {})["hide_merged"] = tree._hide_merged
-    store.save(app._data, app._root)
+    hide = tree._hide_merged
+    app._data = store.locked_update(
+        app._root, lambda d: d.setdefault("project", {}).__setitem__("hide_merged", hide)
+    )
     tree._recompute()
     tree.refresh(layout=True)
     app._update_filter_status()
@@ -267,17 +270,22 @@ def handle_plan_pick(app, pr_id: str, result) -> None:
         plan_id = store.next_plan_id(app._data)
         plan_file = f"plans/{plan_id}.md"
         entry = {"id": plan_id, "name": title, "file": plan_file, "status": "draft"}
-        if app._data.get("plans") is None:
-            app._data["plans"] = []
-        app._data["plans"].append(entry)
-        # Create plan file
+        # Create plan file (idempotent, safe outside lock)
         if app._root:
             plan_path = app._root / plan_file
             plan_path.parent.mkdir(parents=True, exist_ok=True)
             plan_path.write_text(f"# {title}\n\n<!-- Describe the plan here -->\n")
-        pr["plan"] = plan_id
-        _record_status_timestamp(pr)
-        store.save(app._data, app._root)
+
+        def apply_new_plan(data):
+            if data.get("plans") is None:
+                data["plans"] = []
+            data["plans"].append(entry)
+            p = store.get_pr(data, pr_id)
+            if p:
+                p["plan"] = plan_id
+                _record_status_timestamp(p)
+
+        app._data = store.locked_update(app._root, apply_new_plan)
         app._load_state()
         app.log_message(f"Moved {pr_id} → {plan_id}: {title} (new)")
     elif result == "_standalone":
@@ -286,9 +294,14 @@ def handle_plan_pick(app, pr_id: str, result) -> None:
         if not old_plan:
             app.log_message("Already standalone")
             return
-        pr.pop("plan", None)
-        _record_status_timestamp(pr)
-        store.save(app._data, app._root)
+
+        def apply_standalone(data):
+            p = store.get_pr(data, pr_id)
+            if p:
+                p.pop("plan", None)
+                _record_status_timestamp(p)
+
+        app._data = store.locked_update(app._root, apply_standalone)
         app._load_state()
         app.log_message(f"Moved {pr_id} → Standalone")
     elif isinstance(result, str):
@@ -297,9 +310,15 @@ def handle_plan_pick(app, pr_id: str, result) -> None:
         if result == old_plan:
             app.log_message("Already in that plan")
             return
-        pr["plan"] = result
-        _record_status_timestamp(pr)
-        store.save(app._data, app._root)
+        target_plan = result
+
+        def apply_move(data):
+            p = store.get_pr(data, pr_id)
+            if p:
+                p["plan"] = target_plan
+                _record_status_timestamp(p)
+
+        app._data = store.locked_update(app._root, apply_move)
         app._load_state()
         tree = app.query_one("#tech-tree", TechTree)
         display = tree.get_plan_display_name(result)

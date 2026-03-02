@@ -372,8 +372,13 @@ def _resolve_repo_id(data: dict, workdir: Path, root: Path) -> None:
     result = git_ops.run_git("rev-list", "--max-parents=0", "HEAD", cwd=workdir, check=False)
     lines = result.stdout.strip().splitlines() if result.returncode == 0 else []
     if lines:
-        data["project"]["repo_id"] = lines[0]
-        save_and_push(data, root, "pm: cache repo_id")
+        repo_id = lines[0]
+        data["project"]["repo_id"] = repo_id
+
+        def apply(d):
+            d.setdefault("project", {})["repo_id"] = repo_id
+
+        store.locked_update(root, apply)
 
 
 def _infer_pr_id(data: dict, status_filter: tuple[str, ...] | None = None) -> str | None:

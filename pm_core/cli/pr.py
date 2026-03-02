@@ -37,7 +37,6 @@ from pm_core.cli.helpers import (
     _resolve_repo_id,
     _workdirs_dir,
     kill_pr_windows,
-    save_and_push,
     state_root,
     trigger_tui_refresh,
     trigger_tui_restart,
@@ -132,85 +131,88 @@ def _parse_pr_edit_raw(raw: str) -> dict:
 
 
 def _apply_pr_edit(root: Path, pr_id: str, parsed: dict) -> list[str]:
-    """Apply parsed PR edit changes.  Loads fresh data each time.
+    """Apply parsed PR edit changes under the project.yaml lock.
 
     Returns a list of change description strings (empty if nothing
     changed).  Invalid status values and unknown dependency IDs are
     silently skipped so this is safe to call from a background watcher.
     """
-    data = store.load(root)
-    pr_entry = store.get_pr(data, pr_id)
-    if not pr_entry:
-        return []
-
     changes: list[str] = []
 
-    # Title
-    if parsed["title"] is not None:
-        if parsed["title"] != pr_entry.get("title", ""):
-            pr_entry["title"] = parsed["title"]
-            changes.append(f"title={parsed['title']}")
+    def apply(data):
+        pr_entry = store.get_pr(data, pr_id)
+        if not pr_entry:
+            return
 
-    # Description
-    if parsed["description"] != pr_entry.get("description", "").strip():
-        pr_entry["description"] = parsed["description"]
-        changes.append("description updated")
+        # Title
+        if parsed["title"] is not None:
+            if parsed["title"] != pr_entry.get("title", ""):
+                pr_entry["title"] = parsed["title"]
+                changes.append(f"title={parsed['title']}")
 
-    # Status (skip invalid values silently)
-    valid_statuses = {"pending", "in_progress", "in_review", "merged", "closed"}
-    if parsed["status"] is not None:
-        current_status = pr_entry.get("status", "pending")
-        if parsed["status"] != current_status and parsed["status"] in valid_statuses:
-            pr_entry["status"] = parsed["status"]
-            changes.append(f"status: {current_status} → {parsed['status']}")
-            _record_status_timestamp(pr_entry, parsed["status"])
+        # Description
+        if parsed["description"] != pr_entry.get("description", "").strip():
+            pr_entry["description"] = parsed["description"]
+            changes.append("description updated")
 
-    # Dependencies (skip unknown IDs silently)
-    if parsed["depends_on_str"] is not None:
-        current_deps = ", ".join(pr_entry.get("depends_on") or [])
-        if parsed["depends_on_str"] != current_deps:
-            if not parsed["depends_on_str"]:
-                pr_entry["depends_on"] = []
-                changes.append("depends_on cleared")
-            else:
-                deps = [d.strip() for d in parsed["depends_on_str"].split(",")]
-                existing_ids = {p["id"] for p in (data.get("prs") or [])}
-                unknown = [d for d in deps if d not in existing_ids]
-                if not unknown:
-                    pr_entry["depends_on"] = deps
-                    changes.append(f"depends_on={', '.join(deps)}")
+        # Status (skip invalid values silently)
+        valid_statuses = {"pending", "in_progress", "in_review", "merged", "closed"}
+        if parsed["status"] is not None:
+            current_status = pr_entry.get("status", "pending")
+            if parsed["status"] != current_status and parsed["status"] in valid_statuses:
+                pr_entry["status"] = parsed["status"]
+                changes.append(f"status: {current_status} → {parsed['status']}")
+                _record_status_timestamp(pr_entry, parsed["status"])
 
-    # Notes reconciliation
-    current_notes = pr_entry.get("notes") or []
-    old_texts = [n["text"] for n in current_notes]
-    if parsed["note_texts"] != old_texts:
-        old_by_text: dict[str, list] = {}
-        for n in current_notes:
-            old_by_text.setdefault(n["text"], []).append(n)
-        new_notes = []
-        existing_note_ids: set[str] = set()
-        for text in parsed["note_texts"]:
-            if text in old_by_text and old_by_text[text]:
-                reused = old_by_text[text].pop(0)
-                new_notes.append(reused)
-                existing_note_ids.add(reused["id"])
-            else:
-                note_id = store.generate_note_id(pr_id, text, existing_note_ids)
-                now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-                new_notes.append({
-                    "id": note_id, "text": text,
-                    "created_at": now, "last_edited": now,
-                })
-                existing_note_ids.add(note_id)
-        new_notes.sort(
-            key=lambda n: n.get("last_edited") or n.get("created_at", "")
-        )
-        pr_entry["notes"] = new_notes
-        changes.append("notes updated")
+        # Dependencies (skip unknown IDs silently)
+        if parsed["depends_on_str"] is not None:
+            current_deps = ", ".join(pr_entry.get("depends_on") or [])
+            if parsed["depends_on_str"] != current_deps:
+                if not parsed["depends_on_str"]:
+                    pr_entry["depends_on"] = []
+                    changes.append("depends_on cleared")
+                else:
+                    deps = [d.strip() for d in parsed["depends_on_str"].split(",")]
+                    existing_ids = {p["id"] for p in (data.get("prs") or [])}
+                    unknown = [d for d in deps if d not in existing_ids]
+                    if not unknown:
+                        pr_entry["depends_on"] = deps
+                        changes.append(f"depends_on={', '.join(deps)}")
+
+        # Notes reconciliation
+        current_notes = pr_entry.get("notes") or []
+        old_texts = [n["text"] for n in current_notes]
+        if parsed["note_texts"] != old_texts:
+            old_by_text: dict[str, list] = {}
+            for n in current_notes:
+                old_by_text.setdefault(n["text"], []).append(n)
+            new_notes = []
+            existing_note_ids: set[str] = set()
+            for text in parsed["note_texts"]:
+                if text in old_by_text and old_by_text[text]:
+                    reused = old_by_text[text].pop(0)
+                    new_notes.append(reused)
+                    existing_note_ids.add(reused["id"])
+                else:
+                    note_id = store.generate_note_id(pr_id, text, existing_note_ids)
+                    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                    new_notes.append({
+                        "id": note_id, "text": text,
+                        "created_at": now, "last_edited": now,
+                    })
+                    existing_note_ids.add(note_id)
+            new_notes.sort(
+                key=lambda n: n.get("last_edited") or n.get("created_at", "")
+            )
+            pr_entry["notes"] = new_notes
+            changes.append("notes updated")
+
+        if changes:
+            _record_status_timestamp(pr_entry)
+
+    store.locked_update(root, apply)
 
     if changes:
-        _record_status_timestamp(pr_entry)
-        save_and_push(data, root, f"pm: edit {pr_id}")
         trigger_tui_refresh()
 
     return changes
@@ -259,12 +261,13 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
     entry = _make_pr_entry(pr_id, title, branch, plan=plan_id,
                            depends_on=deps, description=desc)
 
-    if data.get("prs") is None:
-        data["prs"] = []
-    data["prs"].append(entry)
-    data["project"]["active_pr"] = pr_id
+    def apply(data):
+        if data.get("prs") is None:
+            data["prs"] = []
+        data["prs"].append(entry)
+        data["project"]["active_pr"] = pr_id
 
-    save_and_push(data, root, f"pm: add {pr_id}")
+    store.locked_update(root, apply)
     click.echo(f"Created {_pr_display_id(entry)}: {title} (now active)")
     click.echo(f"  branch: {branch}")
     if deps:
@@ -388,8 +391,26 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
             click.echo("No changes detected.")
         return
 
-    _record_status_timestamp(pr_entry)
-    save_and_push(data, root, f"pm: edit {pr_id}")
+    # Apply flag-based changes under lock
+    def apply(data):
+        pr = store.get_pr(data, pr_id)
+        if not pr:
+            return
+        if title is not None:
+            pr["title"] = title
+        if desc is not None:
+            pr["description"] = desc
+        if status is not None:
+            pr["status"] = status
+            _record_status_timestamp(pr, status)
+        if depends_on is not None:
+            if depends_on == "":
+                pr["depends_on"] = []
+            else:
+                pr["depends_on"] = [d.strip() for d in depends_on.split(",")]
+        _record_status_timestamp(pr)
+
+    store.locked_update(root, apply)
     click.echo(f"Updated {pr_id}: {', '.join(changes)}")
     trigger_tui_refresh()
 
@@ -407,8 +428,7 @@ def pr_select(pr_id: str):
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
 
-    data["project"]["active_pr"] = pr_id
-    save_and_push(data, root)
+    store.locked_update(root, lambda d: d["project"].__setitem__("active_pr", pr_id))
     click.echo(f"Active PR: {pr_id} ({pr_entry.get('title', '???')})")
     trigger_tui_refresh()
 
@@ -638,6 +658,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
 
     # For GitHub backend: push branch and create draft PR if not already set
     backend_name = data["project"].get("backend", "vanilla")
+    gh_pr_info = None
     if backend_name == "github" and not pr_entry.get("gh_pr_number"):
         base_branch = data["project"].get("base_branch", "master")
         title = pr_entry.get("title", pr_id)
@@ -654,25 +675,34 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         else:
             click.echo("Creating draft PR on GitHub...")
             from pm_core import gh_ops
-            pr_info = gh_ops.create_draft_pr(str(work_path), title, base_branch, desc)
-            if pr_info:
-                pr_entry["gh_pr"] = pr_info["url"]
-                pr_entry["gh_pr_number"] = pr_info["number"]
-                click.echo(f"Draft PR created: {pr_info['url']}")
+            gh_pr_info = gh_ops.create_draft_pr(str(work_path), title, base_branch, desc)
+            if gh_pr_info:
+                click.echo(f"Draft PR created: {gh_pr_info['url']}")
             else:
                 click.echo("Warning: Failed to create draft PR.", err=True)
 
-    # Update state — only advance from pending; don't regress in_review/merged
-    if pr_entry.get("status") == "pending":
-        pr_entry["status"] = "in_progress"
-    _record_status_timestamp(pr_entry, "in_progress")
-    pr_entry["agent_machine"] = platform.node()
-    pr_entry["workdir"] = str(work_path)
-    data["project"]["active_pr"] = pr_id
-    save_and_push(data, root, f"pm: start {pr_id}")
+    # Update state under lock — only advance from pending; don't regress in_review/merged
+    machine = platform.node()
+    work_path_str = str(work_path)
+
+    def apply(data):
+        pr = store.get_pr(data, pr_id)
+        if not pr:
+            return
+        if pr.get("status") == "pending":
+            pr["status"] = "in_progress"
+        _record_status_timestamp(pr, "in_progress")
+        pr["agent_machine"] = machine
+        pr["workdir"] = work_path_str
+        if gh_pr_info:
+            pr["gh_pr"] = gh_pr_info["url"]
+            pr["gh_pr_number"] = gh_pr_info["number"]
+        data["project"]["active_pr"] = pr_id
+
+    data = store.locked_update(root, apply)
     trigger_tui_refresh()
 
-    click.echo(f"\nPR {_pr_display_id(pr_entry)} is now in_progress on {platform.node()}")
+    click.echo(f"\nPR {_pr_display_id(pr_entry)} is now in_progress on {machine}")
     click.echo(f"Work directory: {work_path}")
 
     prompt = prompt_gen.generate_prompt(data, pr_id, session_name=pm_session)
@@ -908,7 +938,7 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
         click.echo(f"PR {pr_id} is pending — start it first with: pm pr start {pr_id}", err=True)
         raise SystemExit(1)
 
-    # For GitHub backend: upgrade draft PR to ready for review
+    # For GitHub backend: upgrade draft PR to ready for review (before lock)
     backend_name = data["project"].get("backend", "vanilla")
     gh_pr_number = pr_entry.get("gh_pr_number")
     workdir = pr_entry.get("workdir")
@@ -921,9 +951,14 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
         else:
             click.echo("Warning: Failed to upgrade draft PR. It may already be ready or was closed.", err=True)
 
-    pr_entry["status"] = "in_review"
-    _record_status_timestamp(pr_entry, "in_review")
-    save_and_push(data, root, f"pm: review {pr_id}")
+    def apply(data):
+        pr = store.get_pr(data, pr_id)
+        if not pr:
+            return
+        pr["status"] = "in_review"
+        _record_status_timestamp(pr, "in_review")
+
+    store.locked_update(root, apply)
     click.echo(f"PR {_pr_display_id(pr_entry)} marked as in_review.")
     trigger_tui_refresh()
     _launch_review_window(data, pr_entry, fresh=fresh, background=background,
@@ -936,13 +971,14 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
 def _finalize_merge(data: dict, root, pr_entry: dict, pr_id: str,
                     transcript: str | None = None) -> None:
     """Mark PR as merged, kill tmux windows, and show newly ready PRs."""
-    pr_entry["status"] = "merged"
-    _record_status_timestamp(pr_entry, "merged")
+    def apply(data):
+        pr = store.get_pr(data, pr_id)
+        if not pr:
+            return
+        pr["status"] = "merged"
+        _record_status_timestamp(pr, "merged")
 
-    # Auto-start state is in-memory on the TUI — check_and_start()
-    # detects target-merged and disables it there.
-
-    save_and_push(data, root, f"pm: merge {pr_id}")
+    data = store.locked_update(root, apply)
     click.echo(f"PR {_pr_display_id(pr_entry)} marked as merged.")
     trigger_tui_refresh()
 
@@ -1442,6 +1478,8 @@ def pr_sync():
         click.echo("No workdirs found. Run 'pm pr start' on a PR first.", err=True)
         raise SystemExit(1)
 
+    # Check merge status outside the lock (network/git calls)
+    merged_ids = set()
     for pr_entry in prs:
         if pr_entry.get("status") not in ("in_review", "in_progress"):
             continue
@@ -1451,19 +1489,24 @@ def pr_sync():
         check_dir = wd if (wd and Path(wd).exists()) else target_workdir
 
         if backend.is_merged(str(check_dir), branch, base_branch):
-            pr_entry["status"] = "merged"
-            _record_status_timestamp(pr_entry, "merged")
+            merged_ids.add(pr_entry["id"])
             click.echo(f"  ✅ {_pr_display_id(pr_entry)}: merged")
             updated += 1
 
     if updated:
-        save_and_push(data, root, f"pm: sync - {updated} PRs merged")
+        def apply(data):
+            for pr in data.get("prs") or []:
+                if pr["id"] in merged_ids:
+                    pr["status"] = "merged"
+                    _record_status_timestamp(pr, "merged")
+
+        data = store.locked_update(root, apply)
         trigger_tui_refresh()
     else:
         click.echo("No new merges detected.")
 
     # Show newly unblocked PRs
-    ready = graph.ready_prs(prs)
+    ready = graph.ready_prs(data.get("prs") or [])
     if ready:
         click.echo("\nNewly ready PRs:")
         for p in ready:
@@ -1533,35 +1576,30 @@ def pr_import_github(gh_state: str):
 
     repo_dir = str(_resolve_repo_dir(root, data))
 
+    # Network call first (outside lock)
     click.echo("Fetching PRs from GitHub...")
     gh_prs = gh_ops.list_prs(repo_dir, state=gh_state)
     if not gh_prs:
         click.echo("No PRs found on GitHub.")
         return
 
-    # Build lookup of existing entries by branch and gh_pr_number
+    # Build entries to import from network results
+    entries_to_import = []
     existing_branches = {p.get("branch") for p in (data.get("prs") or [])}
     existing_gh_numbers = {p.get("gh_pr_number") for p in (data.get("prs") or []) if p.get("gh_pr_number")}
+    existing_ids = {p["id"] for p in (data.get("prs") or [])}
 
-    if data.get("prs") is None:
-        data["prs"] = []
-
-    imported = 0
     skipped = 0
     for gh_pr in gh_prs:
         branch = gh_pr.get("headRefName", "")
         number = gh_pr.get("number")
         title = gh_pr.get("title", "")
 
-        # Skip if already tracked
         if branch in existing_branches or number in existing_gh_numbers:
             skipped += 1
             continue
 
         status = _gh_state_to_status(gh_pr.get("state", "OPEN"), gh_pr.get("isDraft", False))
-
-        # Generate a hash-based pr_id from title + body
-        existing_ids = {p["id"] for p in data["prs"]}
         url = gh_pr.get("url", "")
         body = gh_pr.get("body", "") or ""
         pr_id = store.generate_pr_id(title, body, existing_ids)
@@ -1569,16 +1607,25 @@ def pr_import_github(gh_state: str):
         entry = _make_pr_entry(pr_id, title, branch, status=status,
                                description=body, gh_pr=url,
                                gh_pr_number=number)
-        data["prs"].append(entry)
+        entries_to_import.append(entry)
         existing_ids.add(pr_id)
         existing_branches.add(branch)
         existing_gh_numbers.add(number)
-        imported += 1
         click.echo(f"  + {pr_id}: {title} [{status}] (#{number})")
 
-    if imported:
-        save_and_push(data, root, "pm: import github PRs")
-        click.echo(f"\nImported {imported} PR(s), skipped {skipped} already tracked.")
+    if entries_to_import:
+        def apply(data):
+            if data.get("prs") is None:
+                data["prs"] = []
+            # Re-check existing to avoid duplicates from concurrent imports
+            current_branches = {p.get("branch") for p in data["prs"]}
+            current_gh_numbers = {p.get("gh_pr_number") for p in data["prs"] if p.get("gh_pr_number")}
+            for entry in entries_to_import:
+                if entry.get("branch") not in current_branches and entry.get("gh_pr_number") not in current_gh_numbers:
+                    data["prs"].append(entry)
+
+        store.locked_update(root, apply)
+        click.echo(f"\nImported {len(entries_to_import)} PR(s), skipped {skipped} already tracked.")
         trigger_tui_refresh()
     else:
         click.echo(f"No new PRs to import ({skipped} already tracked).")
@@ -1626,16 +1673,19 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool):
     data = store.load(root)
 
     if prune:
-        prs = data.get("prs") or []
-        pruned = 0
-        for p in prs:
-            wd = p.get("workdir")
-            if wd and not Path(wd).exists():
-                click.echo(f"  {p['id']}: cleared missing workdir {wd}")
-                p["workdir"] = None
-                pruned += 1
+        def apply_prune(data):
+            count = 0
+            for p in data.get("prs") or []:
+                wd = p.get("workdir")
+                if wd and not Path(wd).exists():
+                    click.echo(f"  {p['id']}: cleared missing workdir {wd}")
+                    p["workdir"] = None
+                    count += 1
+            apply_prune.count = count
+
+        store.locked_update(root, apply_prune)
+        pruned = apply_prune.count
         if pruned:
-            save_and_push(data, root, f"pm: prune {pruned} missing workdirs")
             trigger_tui_refresh()
             click.echo(f"Pruned {pruned} stale workdir reference(s).")
         else:
@@ -1650,14 +1700,20 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool):
             click.echo("No PR workdirs to clean up.")
             return
         click.echo(f"Cleaning up {len(with_workdir)} workdir(s)...")
-        cleaned = 0
+        # Do filesystem cleanup first (outside lock), collect cleaned IDs
+        cleaned_ids = set()
         for pr_entry in with_workdir:
             if _cleanup_pr(pr_entry, data, root, force):
-                cleaned += 1
-        if cleaned:
-            save_and_push(data, root, f"pm: cleanup {cleaned} workdirs")
+                cleaned_ids.add(pr_entry["id"])
+        if cleaned_ids:
+            def apply_cleanup_all(data):
+                for pr in data.get("prs") or []:
+                    if pr["id"] in cleaned_ids:
+                        pr["workdir"] = None
+
+            store.locked_update(root, apply_cleanup_all)
             trigger_tui_refresh()
-        click.echo(f"Cleaned {cleaned}/{len(with_workdir)} workdirs.")
+        click.echo(f"Cleaned {len(cleaned_ids)}/{len(with_workdir)} workdirs.")
         return
 
     if pr_id is None:
@@ -1685,9 +1741,17 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool):
         click.echo(f"Warning: {pr_id} status is '{pr_entry.get('status')}' (not merged).", err=True)
         click.echo("Cleaning up anyway.", err=True)
 
+    target_id = pr_entry["id"]
     if _cleanup_pr(pr_entry, data, root, force):
-        save_and_push(data, root, f"pm: cleanup {pr_entry['id']}")
+        store.locked_update(root, lambda d: _clear_workdir(d, target_id))
         trigger_tui_refresh()
+
+
+def _clear_workdir(data: dict, pr_id: str) -> None:
+    """Clear the workdir field for a PR (used inside locked_update)."""
+    pr = store.get_pr(data, pr_id)
+    if pr:
+        pr["workdir"] = None
 
 
 @pr.group("note")
@@ -1709,16 +1773,20 @@ def pr_note_add(pr_id: str, text: str):
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
 
-    notes = pr_entry.get("notes") or []
-    existing_ids = {n["id"] for n in notes}
-    note_id = store.generate_note_id(pr_id, text, existing_ids)
+    note_id = store.generate_note_id(pr_id, text)
     created_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    note = {"id": note_id, "text": text, "created_at": created_at, "last_edited": created_at}
 
-    notes.append({"id": note_id, "text": text, "created_at": created_at, "last_edited": created_at})
-    pr_entry["notes"] = notes
+    def apply(data):
+        pr = store.get_pr(data, pr_id)
+        if not pr:
+            return
+        notes = pr.get("notes") or []
+        notes.append(note)
+        pr["notes"] = notes
+        _record_status_timestamp(pr)
 
-    _record_status_timestamp(pr_entry)
-    save_and_push(data, root, f"pm: note on {pr_id}")
+    store.locked_update(root, apply)
     click.echo(f"Added note {note_id} to {_pr_display_id(pr_entry)}")
     trigger_tui_refresh()
 
@@ -1738,13 +1806,13 @@ def pr_note_edit(pr_id: str, note_id: str, text: str):
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
 
+    # Validate note exists (on stale data, but good enough for error messages)
     notes = pr_entry.get("notes") or []
     target = None
     for n in notes:
         if n["id"] == note_id:
             target = n
             break
-
     if target is None:
         click.echo(f"Note '{note_id}' not found on {_pr_display_id(pr_entry)}.", err=True)
         if notes:
@@ -1753,15 +1821,21 @@ def pr_note_edit(pr_id: str, note_id: str, text: str):
                 click.echo(f"  {n['id']}: {n['text']}", err=True)
         raise SystemExit(1)
 
-    # Update text and regenerate ID (hash is based on text)
-    existing_ids = {n["id"] for n in notes if n["id"] != note_id}
-    new_id = store.generate_note_id(pr_id, text, existing_ids)
-    target["id"] = new_id
-    target["text"] = text
-    target["last_edited"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    new_id = store.generate_note_id(pr_id, text)
 
-    _record_status_timestamp(pr_entry)
-    save_and_push(data, root, f"pm: edit note on {pr_id}")
+    def apply(data):
+        pr = store.get_pr(data, pr_id)
+        if not pr:
+            return
+        for n in pr.get("notes") or []:
+            if n["id"] == note_id:
+                n["id"] = new_id
+                n["text"] = text
+                n["last_edited"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                break
+        _record_status_timestamp(pr)
+
+    store.locked_update(root, apply)
     click.echo(f"Updated note {note_id} → {new_id} on {_pr_display_id(pr_entry)}")
     trigger_tui_refresh()
 
@@ -1794,11 +1868,9 @@ def pr_note_delete(pr_id: str, note_id: str):
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
 
+    # Validate note exists
     notes = pr_entry.get("notes") or []
-    original_len = len(notes)
-    pr_entry["notes"] = [n for n in notes if n["id"] != note_id]
-
-    if len(pr_entry["notes"]) == original_len:
+    if not any(n["id"] == note_id for n in notes):
         click.echo(f"Note '{note_id}' not found on {_pr_display_id(pr_entry)}.", err=True)
         if notes:
             click.echo("Available notes:", err=True)
@@ -1806,8 +1878,14 @@ def pr_note_delete(pr_id: str, note_id: str):
                 click.echo(f"  {n['id']}: {n['text']}", err=True)
         raise SystemExit(1)
 
-    _record_status_timestamp(pr_entry)
-    save_and_push(data, root, f"pm: delete note on {pr_id}")
+    def apply(data):
+        pr = store.get_pr(data, pr_id)
+        if not pr:
+            return
+        pr["notes"] = [n for n in (pr.get("notes") or []) if n["id"] != note_id]
+        _record_status_timestamp(pr)
+
+    store.locked_update(root, apply)
     click.echo(f"Deleted note {note_id} from {_pr_display_id(pr_entry)}")
     trigger_tui_refresh()
 
@@ -1854,21 +1932,21 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool):
         except Exception as e:
             click.echo(f"Warning: Could not close GitHub PR: {e}", err=True)
 
-    # Remove workdir if exists
+    # Remove workdir if exists (filesystem op, safe outside lock)
     workdir = pr_entry.get("workdir")
     if workdir and Path(workdir).exists():
         shutil.rmtree(workdir)
         click.echo(f"Removed workdir: {workdir}")
 
-    # Remove PR from list
-    prs = data.get("prs") or []
-    data["prs"] = [p for p in prs if p["id"] != pr_id]
+    # Remove PR from list and update active_pr under lock
+    target_id = pr_id
 
-    # Update active_pr if needed
-    if data.get("project", {}).get("active_pr") == pr_id:
-        remaining = data.get("prs") or []
-        data["project"]["active_pr"] = remaining[0]["id"] if remaining else None
+    def apply(data):
+        data["prs"] = [p for p in (data.get("prs") or []) if p["id"] != target_id]
+        if data.get("project", {}).get("active_pr") == target_id:
+            remaining = data.get("prs") or []
+            data["project"]["active_pr"] = remaining[0]["id"] if remaining else None
 
-    save_and_push(data, root, f"pm: close {pr_id}")
+    store.locked_update(root, apply)
     click.echo(f"Removed {pr_id}: {pr_entry.get('title', '???')}")
     trigger_tui_refresh()
