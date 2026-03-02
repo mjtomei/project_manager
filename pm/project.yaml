@@ -29,6 +29,10 @@ plans:
   name: project metrics and optimization
   file: plans/plan-c493724.md
   status: draft
+- id: plan-qa
+  name: Fully specified project from project.yaml
+  file: plans/plan-qa.md
+  status: active
 prs:
 - id: pr-001
   plan: plan-001
@@ -2616,7 +2620,7 @@ prs:
   merged_at: null
   notes: []
 - id: pr-ee1ff04
-  plan: null
+  plan: plan-qa
   title: Add optional quality assurance step with test instruction library and review–QA
     loop
   branch: pm/pr-ee1ff04-add-optional-quality-assurance-step-with-test-inst
@@ -2686,7 +2690,7 @@ prs:
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ee1ff04-add-optional-quality-assurance-step--808818af
 - id: pr-fe499f2
-  plan: null
+  plan: plan-qa
   title: Persist generated QA tests across iterations of the QA loop
   branch: pm/pr-fe499f2-persist-generated-qa-tests-across-iterations-of-th
   status: pending
@@ -2722,7 +2726,7 @@ prs:
   merged_at: null
   notes: []
 - id: pr-25681a9
-  plan: null
+  plan: plan-qa
   title: Support user stories at PR creation and edit time for QA test generation
   branch: pm/pr-25681a9-support-user-stories-at-pr-creation-and-edit-time-
   status: pending
@@ -2763,7 +2767,7 @@ prs:
   merged_at: null
   notes: []
 - id: pr-a792886
-  plan: null
+  plan: plan-qa
   title: Add pause-after-QA-plan mode with global setting, prefix key, and per-PR
     field
   branch: pm/pr-a792886-add-pause-after-qa-plan-mode-with-global-setting-p
