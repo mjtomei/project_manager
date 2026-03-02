@@ -515,11 +515,16 @@ def pr_ready():
               help="Create tmux window without switching focus (used by auto-start)")
 @click.option("--transcript", default=None, hidden=True,
               help="Path to save Claude transcript symlink (used by auto-start)")
-def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, transcript: str | None):
+@click.option("--companion", is_flag=True, default=False,
+              help="Open a companion shell pane in the PR workdir")
+def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, transcript: str | None, companion: bool):
     """Start working on a PR: clone, branch, print prompt.
 
     If PR_ID is omitted, uses the active PR if it's pending/ready, or
     auto-selects the next ready PR (when there's exactly one).
+
+    With --companion (or the ``companion-pane`` global setting), a second
+    shell pane is opened alongside the Claude pane, cd'ed into the workdir.
     """
     root = state_root()
     data = store.load(root)
@@ -568,6 +573,10 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     # Determine tmux session name (used for fast-path check and later launch)
     pm_session = _get_pm_session()
 
+    # Resolve companion: explicit flag or global setting
+    from pm_core.paths import get_global_setting
+    use_companion = companion or get_global_setting("companion-pane")
+
     # Fast path: if window already exists, switch to it (or kill it if --fresh)
     if pm_session:
         if tmux_mod.session_exists(pm_session):
@@ -577,6 +586,14 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                 if fresh:
                     tmux_mod.kill_window(pm_session, existing["id"])
                     click.echo(f"Killed existing window '{window_name}'")
+                elif use_companion and not background:
+                    # Add companion pane to existing window if missing
+                    impl_workdir = pr_entry.get("workdir") or workdir
+                    if impl_workdir:
+                        _add_companion_pane(pm_session, existing, impl_workdir, "impl")
+                    tmux_mod.select_window(pm_session, existing["id"])
+                    click.echo(f"Switched to existing window '{window_name}' (session: {pm_session})")
+                    return
                 elif background:
                     # Window already exists, nothing to do in background mode
                     click.echo(f"Window '{window_name}' already exists (background mode, no focus change)")
@@ -692,11 +709,21 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
             cmd = build_claude_shell_cmd(prompt=prompt,
                                          transcript=transcript, cwd=str(work_path))
             try:
-                tmux_mod.new_window(pm_session, window_name, cmd, str(work_path),
-                                    switch=not background)
-                win = tmux_mod.find_window_by_name(pm_session, window_name)
-                if win:
-                    tmux_mod.set_shared_window_size(pm_session, win["id"])
+                if use_companion:
+                    claude_pane = tmux_mod.new_window_get_pane(
+                        pm_session, window_name, cmd, str(work_path),
+                        switch=not background,
+                    )
+                    if claude_pane:
+                        win = tmux_mod.find_window_by_name(pm_session, window_name)
+                        if win:
+                            _add_companion_pane(pm_session, win, str(work_path), "impl")
+                else:
+                    tmux_mod.new_window(pm_session, window_name, cmd, str(work_path),
+                                        switch=not background)
+                    win = tmux_mod.find_window_by_name(pm_session, window_name)
+                    if win:
+                        tmux_mod.set_shared_window_size(pm_session, win["id"])
                 click.echo(f"Launched Claude in tmux window '{window_name}' (session: {pm_session})")
                 return
             except Exception as e:
@@ -709,6 +736,55 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         clear_session(root, session_key)
     click.echo("Launching Claude...")
     launch_claude(prompt, cwd=str(work_path), session_key=session_key, pm_root=root, resume=not fresh)
+
+
+def _add_companion_pane(pm_session: str, window_info: dict, workdir: str,
+                        role_prefix: str) -> None:
+    """Add a companion shell pane to an existing tmux window.
+
+    Splits the first pane horizontally with a shell cd'ed into *workdir*.
+    Registers both panes in the pane registry and rebalances the layout.
+
+    If the window already has 2+ panes (companion already present), this
+    is a no-op.
+    """
+    win_id = window_info["id"]
+    win_index = window_info["index"]
+
+    # Check if companion already exists (2+ panes = already has one)
+    panes = tmux_mod.get_pane_indices(pm_session, win_index)
+    if len(panes) >= 2:
+        click.echo("Window already has a companion pane.")
+        return
+
+    if not panes:
+        click.echo("Could not find panes in window.")
+        return
+
+    claude_pane = panes[0][0]
+
+    # Split horizontally with an interactive shell in the workdir
+    shell = os.environ.get("SHELL", "/bin/bash")
+    companion_cmd = f"cd '{workdir}' && exec {shell}"
+    companion_pane = tmux_mod.split_pane_at(claude_pane, "h", companion_cmd,
+                                             background=True)
+
+    # Register panes for layout management
+    tmux_mod.set_shared_window_size(pm_session, win_id)
+    pane_registry.register_pane(pm_session, win_id, claude_pane,
+                                f"{role_prefix}-claude", "claude")
+    if companion_pane:
+        pane_registry.register_pane(pm_session, win_id, companion_pane,
+                                    f"{role_prefix}-companion", "companion-shell")
+
+    # Reset user_modified so rebalance works correctly
+    reg = pane_registry.load_registry(pm_session)
+    wdata = pane_registry.get_window_data(reg, win_id)
+    wdata["user_modified"] = False
+    pane_registry.save_registry(pm_session, reg)
+
+    pane_layout.rebalance(pm_session, win_id)
+    click.echo("Added companion pane.")
 
 
 def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
@@ -972,6 +1048,7 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
                          background: bool = False,
                          transcript: str | None = None,
                          cwd: str | None = None,
+                         companion: bool = False,
                          pull_from_workdir: str | None = None,
                          pull_from_origin: bool = False) -> None:
     """Launch a tmux window with Claude to resolve a merge conflict.
@@ -979,6 +1056,9 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
     Args:
         cwd: Directory to run the merge resolution in.  Defaults to the
              PR's workdir when *None*.
+        companion: If True (or the ``companion-pane`` global setting is
+                   enabled), a companion shell pane is opened alongside
+                   the Claude pane.
         pull_from_workdir: When set, this is a pull-from-workdir failure
              (local backend).  The value is the workdir path containing
              the merged branch.
@@ -998,6 +1078,9 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
     if not workdir:
         click.echo(f"Merge window: no workdir for {pr_entry['id']}.")
         return
+
+    from pm_core.paths import get_global_setting
+    use_companion = companion or get_global_setting("companion-pane")
 
     pr_id = pr_entry["id"]
     display_id = _pr_display_id(pr_entry)
@@ -1022,10 +1105,20 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
         return
 
     try:
-        tmux_mod.new_window(
-            pm_session, window_name, claude_cmd, workdir,
-            switch=not background,
-        )
+        if use_companion:
+            claude_pane = tmux_mod.new_window_get_pane(
+                pm_session, window_name, claude_cmd, workdir,
+                switch=not background,
+            )
+            if claude_pane:
+                win = tmux_mod.find_window_by_name(pm_session, window_name)
+                if win:
+                    _add_companion_pane(pm_session, win, workdir, "merge")
+        else:
+            tmux_mod.new_window(
+                pm_session, window_name, claude_cmd, workdir,
+                switch=not background,
+            )
         click.echo(f"Opened merge resolution window '{window_name}'")
     except Exception as e:
         _log.warning("Failed to launch merge window: %s", e)
@@ -1035,7 +1128,8 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
 def _pull_after_merge(data: dict, pr_entry: dict, repo_dir: str,
                       base_branch: str, resolve_window: bool,
                       background: bool,
-                      transcript: str | None) -> bool:
+                      transcript: str | None,
+                      companion: bool = False) -> bool:
     """Pull latest base branch into the main repo after a merge.
 
     *repo_dir* should be the main repository directory (on the base branch),
@@ -1067,7 +1161,8 @@ def _pull_after_merge(data: dict, pr_entry: dict, repo_dir: str,
         if resolve_window:
             _launch_merge_window(data, pr_entry, error_msg,
                                  background=background, transcript=transcript,
-                                 cwd=repo_dir, pull_from_origin=True)
+                                 cwd=repo_dir, companion=companion,
+                                 pull_from_origin=True)
         return False
 
     # Fetch and pull base branch
@@ -1081,12 +1176,14 @@ def _pull_after_merge(data: dict, pr_entry: dict, repo_dir: str,
         if resolve_window:
             _launch_merge_window(data, pr_entry, error_msg,
                                  background=background, transcript=transcript,
-                                 cwd=repo_dir, pull_from_origin=True)
+                                 cwd=repo_dir, companion=companion,
+                                 pull_from_origin=True)
             return False
         click.echo("Resolve conflicts manually, then re-run 'pm pr merge' to finalize.", err=True)
         return False
     else:
         click.echo(f"Pulled latest {base_branch}.")
+
 
     return True
 
@@ -1094,7 +1191,8 @@ def _pull_after_merge(data: dict, pr_entry: dict, repo_dir: str,
 def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
                        workdir: str, base_branch: str,
                        resolve_window: bool, background: bool,
-                       transcript: str | None) -> bool:
+                       transcript: str | None,
+                       companion: bool = False) -> bool:
     """Pull merged base branch from a workdir into the main repo.
 
     For local backend where origin is a non-bare repo with the base branch
@@ -1127,7 +1225,8 @@ def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
         if resolve_window:
             _launch_merge_window(data, pr_entry, error_msg,
                                  background=background, transcript=transcript,
-                                 cwd=repo_dir, pull_from_workdir=workdir)
+                                 cwd=repo_dir, companion=companion,
+                                 pull_from_workdir=workdir)
             return False
         click.echo("Pull manually when ready, then re-run 'pm pr merge'.", err=True)
         return False
@@ -1141,7 +1240,8 @@ def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
         if resolve_window:
             _launch_merge_window(data, pr_entry, error_msg,
                                  background=background, transcript=transcript,
-                                 cwd=repo_dir, pull_from_workdir=workdir)
+                                 cwd=repo_dir, companion=companion,
+                                 pull_from_workdir=workdir)
         return False
 
     fetch_r = git_ops.run_git("fetch", workdir, base_branch,
@@ -1152,7 +1252,8 @@ def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
         if resolve_window:
             _launch_merge_window(data, pr_entry, error_msg,
                                  background=background, transcript=transcript,
-                                 cwd=repo_dir, pull_from_workdir=workdir)
+                                 cwd=repo_dir, companion=companion,
+                                 pull_from_workdir=workdir)
             return False
         click.echo("Pull manually when ready, then re-run 'pm pr merge'.", err=True)
         return False
@@ -1167,12 +1268,14 @@ def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
         if resolve_window:
             _launch_merge_window(data, pr_entry, error_msg,
                                  background=background, transcript=transcript,
-                                 cwd=repo_dir, pull_from_workdir=workdir)
+                                 cwd=repo_dir, companion=companion,
+                                 pull_from_workdir=workdir)
             return False
         click.echo("Pull manually when ready, then re-run 'pm pr merge'.", err=True)
         return False
 
     click.echo(f"Updated {base_branch} in repo.")
+
     return True
 
 
@@ -1184,10 +1287,12 @@ def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
               help="Create merge window without switching focus (used by auto-start)")
 @click.option("--transcript", default=None, hidden=True,
               help="Path to save Claude transcript symlink (used by auto-start)")
+@click.option("--companion", is_flag=True, default=False,
+              help="Open a companion shell pane alongside the merge resolution window")
 @click.option("--propagation-only", is_flag=True, default=False, hidden=True,
               help="Skip workdir merge, go straight to pull into repo dir (step 2)")
 def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
-             transcript: str | None, propagation_only: bool):
+             transcript: str | None, companion: bool, propagation_only: bool):
     """Merge a PR's branch into the base branch.
 
     For local/vanilla backends, performs a local git merge.
@@ -1252,6 +1357,7 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
                                 data, pr_entry, stderr,
                                 background=background,
                                 transcript=transcript,
+                                companion=companion,
                             )
                             return
                         click.echo("Falling back to manual instructions.", err=True)
@@ -1263,6 +1369,7 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
                     resolve_window=resolve_window,
                     background=background,
                     transcript=transcript,
+                    companion=companion,
                 )
                 if pull_ok:
                     _finalize_merge(data, root, pr_entry, pr_id, transcript=transcript)
@@ -1302,7 +1409,7 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
         click.echo("Commit or stash your changes before merging.", err=True)
         if resolve_window:
             _launch_merge_window(data, pr_entry, error_msg, background=background,
-                                 transcript=transcript)
+                                 transcript=transcript, companion=companion)
             return
         raise SystemExit(1)
     else:
@@ -1322,7 +1429,7 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
             click.echo(error_msg, err=True)
             if resolve_window:
                 _launch_merge_window(data, pr_entry, error_msg, background=background,
-                                     transcript=transcript)
+                                     transcript=transcript, companion=companion)
                 return
             raise SystemExit(1)
         result = git_ops.run_git("merge", "--no-ff", branch, "-m",
@@ -1336,7 +1443,7 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
             click.echo("Resolve conflicts manually, then run 'pm pr merge' again.", err=True)
             if resolve_window:
                 _launch_merge_window(data, pr_entry, error_msg, background=background,
-                                     transcript=transcript)
+                                     transcript=transcript, companion=companion)
                 return
             raise SystemExit(1)
 
@@ -1358,7 +1465,7 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
         pull_ok = _pull_from_workdir(
             data, pr_entry, repo_dir, str(work_path), base_branch,
             resolve_window=resolve_window, background=background,
-            transcript=transcript,
+            transcript=transcript, companion=companion,
         )
         if not pull_ok:
             return
@@ -1376,7 +1483,8 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
                 click.echo(error_msg, err=True)
                 if resolve_window:
                     _launch_merge_window(data, pr_entry, error_msg,
-                                         background=background, transcript=transcript)
+                                         background=background, transcript=transcript,
+                                         companion=companion)
                     return
                 click.echo("Push manually when ready, then re-run 'pm pr merge'.", err=True)
                 return
@@ -1390,6 +1498,7 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
             resolve_window=resolve_window,
             background=background,
             transcript=transcript,
+            companion=companion,
         )
         if not pull_ok:
             # Merge window launched for pull conflict — don't finalize yet
