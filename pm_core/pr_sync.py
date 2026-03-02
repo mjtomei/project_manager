@@ -255,7 +255,16 @@ def sync_prs(
 
     # Save if requested and there were changes
     if save_state:
-        store.save(data, root)
+        merged_set = set(merged_prs)
+
+        def apply(fresh_data):
+            for pr in fresh_data.get("prs") or []:
+                if pr["id"] in merged_set:
+                    pr["status"] = "merged"
+                    _record_status_timestamp(pr, "merged")
+            set_last_sync_timestamp(fresh_data, datetime.now(timezone.utc))
+
+        store.locked_update(root, apply)
 
     # Get ready PRs
     ready = graph.ready_prs(prs)
@@ -385,7 +394,15 @@ def sync_from_github(
     set_last_sync_timestamp(data, datetime.now(timezone.utc))
 
     if save_state and updated:
-        store.save(data, root)
+        def apply(fresh_data):
+            for pr in fresh_data.get("prs") or []:
+                new_status = status_updates.get(pr["id"])
+                if new_status and pr.get("status") != new_status:
+                    pr["status"] = new_status
+                    _record_status_timestamp(pr, new_status)
+            set_last_sync_timestamp(fresh_data, datetime.now(timezone.utc))
+
+        store.locked_update(root, apply)
 
     # Closed PRs keep status "closed" in the yaml but are not auto-removed.
     # This avoids losing PRs that were auto-closed by GitHub (e.g. when a

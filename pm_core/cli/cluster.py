@@ -125,9 +125,12 @@ def cluster_auto(threshold, max_commits, weights, output_fmt):
         plan_path.parent.mkdir(parents=True, exist_ok=True)
         plan_path.write_text(md)
 
-        plans = data.setdefault("plans", [])
-        plans.append({"id": plan_id, "name": plan_name, "file": plan_file, "status": "draft"})
-        save_and_push(data, root, f"pm: cluster auto → {plan_id}")
+        entry = {"id": plan_id, "name": plan_name, "file": plan_file, "status": "draft"}
+
+        def apply(data):
+            data.setdefault("plans", []).append(entry)
+
+        store.locked_update(root, apply)
         trigger_tui_refresh()
 
         click.echo(f"Plan written to {plan_path}")

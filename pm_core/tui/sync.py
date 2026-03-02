@@ -115,16 +115,20 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
             for pr in (app._data.get("prs") or [])
         }
 
-        # Reload from disk (picks up any concurrent user changes) and
-        # apply sync results (merged PRs) on the main thread.
-        app._data = store.load(app._root)
+        # Reload from disk and apply sync results (merged PRs) atomically.
         if result.merged_prs:
-            for pr in app._data.get("prs") or []:
-                if pr["id"] in result.merged_prs:
-                    pr["status"] = "merged"
-                    _record_status_timestamp(pr, "merged")
-            store.save(app._data, app._root)
+            merged_set = set(result.merged_prs)
+
+            def apply_merged(data):
+                for pr in data.get("prs") or []:
+                    if pr["id"] in merged_set:
+                        pr["status"] = "merged"
+                        _record_status_timestamp(pr, "merged")
+
+            app._data = store.locked_update(app._root, apply_merged)
             _kill_merged_pr_windows(app, result.merged_prs)
+        else:
+            app._data = store.load(app._root)
         app._update_display()
 
         # Detect PRs that became merged — either via sync or via CLI
@@ -200,20 +204,20 @@ async def startup_github_sync(app) -> None:
             None, lambda: pr_sync.sync_from_github(app._root, data_copy, save_state=False))
 
         if result.synced and result.updated_count > 0:
-            # Reload from disk and apply ALL status changes on the main thread
-            app._data = store.load(app._root)
-            changed = False
+            # Apply ALL status changes atomically under lock
+            updates = result.status_updates
             newly_merged = set()
-            for pr in app._data.get("prs") or []:
-                new_status = result.status_updates.get(pr["id"])
-                if new_status and pr.get("status") != new_status:
-                    if new_status == "merged":
-                        newly_merged.add(pr["id"])
-                    pr["status"] = new_status
-                    _record_status_timestamp(pr, new_status)
-                    changed = True
-            if changed:
-                store.save(app._data, app._root)
+
+            def apply_github(data):
+                for pr in data.get("prs") or []:
+                    new_status = updates.get(pr["id"])
+                    if new_status and pr.get("status") != new_status:
+                        if new_status == "merged":
+                            newly_merged.add(pr["id"])
+                        pr["status"] = new_status
+                        _record_status_timestamp(pr, new_status)
+
+            app._data = store.locked_update(app._root, apply_github)
             if newly_merged:
                 _kill_merged_pr_windows(app, newly_merged)
             app._update_display()

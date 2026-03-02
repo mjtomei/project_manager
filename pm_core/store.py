@@ -1,12 +1,19 @@
 """YAML read/write for project.yaml state management."""
 
+import errno
+import fcntl
 import hashlib
+import logging
 import os
 import re
+import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import yaml
+
+_log = logging.getLogger("pm.store")
 
 
 def find_project_root(start: Optional[str] = None) -> Path:
@@ -79,6 +86,80 @@ def save(data: dict, root: Optional[Path] = None) -> None:
     path = root / "project.yaml"
     with open(path, "w") as f:
         yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+
+
+# ---------------------------------------------------------------------------
+# Advisory file locking for read-modify-write operations
+# ---------------------------------------------------------------------------
+
+LOCK_TIMEOUT_SECONDS = 2.0
+
+
+class StoreLockTimeout(Exception):
+    """Raised when the project.yaml lock cannot be acquired within the timeout."""
+
+
+@contextmanager
+def _lock(root: Path, timeout: float = LOCK_TIMEOUT_SECONDS):
+    """Acquire an exclusive advisory lock on project.yaml.lock.
+
+    Yields the open lock file descriptor. The lock is released when the
+    context manager exits (even on exception).
+    """
+    lock_path = root / "project.yaml.lock"
+    deadline = time.monotonic() + timeout
+    fd = open(lock_path, "w")
+    try:
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError as e:
+                if e.errno not in (errno.EACCES, errno.EAGAIN):
+                    raise
+                if time.monotonic() >= deadline:
+                    fd.close()
+                    raise StoreLockTimeout(
+                        f"Could not acquire lock on {lock_path} within "
+                        f"{timeout}s — another pm process may be writing "
+                        f"project.yaml. If no other process is running, "
+                        f"delete {lock_path} and retry."
+                    ) from None
+                time.sleep(0.05)
+        yield fd
+    finally:
+        if not fd.closed:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            fd.close()
+
+
+def locked_update(
+    root: Path,
+    fn: Callable[[dict], None],
+    validate: bool = True,
+    timeout: float = LOCK_TIMEOUT_SECONDS,
+) -> dict:
+    """Atomic read-modify-write for project.yaml.
+
+    Acquires an exclusive advisory lock, loads fresh state from disk,
+    calls ``fn(data)`` to apply mutations in-place, saves, and releases
+    the lock.  Returns the updated data dict.
+
+    The lock must **never** be held across network calls.  If your
+    operation needs to call GitHub/git first, do that *before* calling
+    ``locked_update`` and pass the results into ``fn`` via a closure.
+
+    Raises ``StoreLockTimeout`` if the lock cannot be acquired within
+    *timeout* seconds (default 2).
+    """
+    with _lock(root, timeout):
+        data = load(root, validate=validate)
+        fn(data)
+        save(data, root)
+    return data
 
 
 def next_plan_id(data: dict) -> str:
