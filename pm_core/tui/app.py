@@ -147,6 +147,8 @@ class ProjectManagerApp(App):
 
     def on_key(self, event) -> None:
         """Handle z modifier prefix key (supports z, zz, zzz)."""
+        import time as _time
+        self._last_interaction = _time.monotonic()
         cmd_bar = self.query_one("#command-bar", CommandBar)
         if cmd_bar.has_focus:
             return
@@ -233,6 +235,9 @@ class ProjectManagerApp(App):
         self._auto_start_run_id: str | None = None
         # Watcher loop state (purely in-memory, lost on TUI restart)
         self._watcher_state = None  # WatcherLoopState | None
+        # Deferred re-sort: track last user interaction for idle detection
+        self._last_interaction: float = 0.0  # monotonic timestamp
+        self._resort_check_timer: Timer | None = None
 
     def _consume_z(self) -> int:
         """Atomically read and clear the z modifier count.
@@ -482,8 +487,15 @@ class ProjectManagerApp(App):
             watcher_status=watcher_status,
         )
 
-    def _update_display(self) -> None:
-        """Refresh all widgets with current data."""
+    def _update_display(self, defer_resort: bool = False) -> None:
+        """Refresh all widgets with current data.
+
+        Args:
+            defer_resort: When True, defer the layout recomputation (re-sort)
+                until the TUI has been idle for the configured timeout.  PR
+                data (status, titles) is still updated immediately so nodes
+                show fresh content at their current positions.
+        """
         if not self._data:
             return
 
@@ -492,7 +504,15 @@ class ProjectManagerApp(App):
         tree = self.query_one("#tech-tree", TechTree)
         tree.apply_project_settings(self._data.get("project", {}))
         tree.update_plans(self._data.get("plans") or [])
-        tree.update_prs(self._data.get("prs") or [])
+
+        # Decide whether to defer the layout recompute (re-sort).
+        if defer_resort and not self._is_tui_idle():
+            tree.update_prs(self._data.get("prs") or [], recompute=False)
+            self._schedule_resort_check()
+            _log.debug("Deferred re-sort (TUI active)")
+        else:
+            tree.update_prs(self._data.get("prs") or [])
+
         active_pr = self._data.get("project", {}).get("active_pr")
         if active_pr:
             tree.select_pr(active_pr)
@@ -505,6 +525,52 @@ class ProjectManagerApp(App):
     def _update_filter_status(self) -> None:
         """Update the status bar to reflect active filters."""
         self._update_status_bar()
+
+    # --- Deferred re-sort (idle detection) ---
+
+    DEFAULT_RESORT_IDLE_TIMEOUT = 10.0  # seconds
+
+    def _get_resort_idle_timeout(self) -> float:
+        """Return the configured re-sort idle timeout in seconds."""
+        from pm_core.paths import get_global_setting_value
+        try:
+            return float(get_global_setting_value("resort-idle-timeout",
+                                                  str(self.DEFAULT_RESORT_IDLE_TIMEOUT)))
+        except (ValueError, TypeError):
+            return self.DEFAULT_RESORT_IDLE_TIMEOUT
+
+    def _is_tui_idle(self) -> bool:
+        """Return True if the TUI has been idle for the configured timeout."""
+        if self._last_interaction == 0.0:
+            return True  # No interaction yet (startup) — treat as idle
+        import time as _time
+        return (_time.monotonic() - self._last_interaction) >= self._get_resort_idle_timeout()
+
+    def _schedule_resort_check(self) -> None:
+        """Schedule a one-shot timer to check idle state and apply pending re-sort."""
+        if self._resort_check_timer is not None:
+            self._resort_check_timer.stop()
+            self._resort_check_timer = None
+        import time as _time
+        timeout = self._get_resort_idle_timeout()
+        elapsed = _time.monotonic() - self._last_interaction
+        delay = max(1.0, timeout - elapsed)
+        self._resort_check_timer = self.set_timer(delay, self._check_deferred_resort)
+
+    def _check_deferred_resort(self) -> None:
+        """Apply deferred re-sort if TUI is idle, otherwise reschedule."""
+        self._resort_check_timer = None
+        try:
+            tree = self.query_one("#tech-tree", TechTree)
+        except Exception:
+            return
+        if not tree._resort_pending:
+            return
+        if self._is_tui_idle():
+            tree.apply_pending_resort()
+            _log.debug("Applied deferred re-sort (TUI idle)")
+        else:
+            self._schedule_resort_check()
 
     def log_message(self, msg: str, capture: bool = True, sticky: float = 0) -> None:
         """Show a message in the log line."""
