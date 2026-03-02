@@ -8,11 +8,17 @@ from textual.screen import ModalScreen
 
 
 class MergeLockScreen(ModalScreen):
-    """Non-dismissable overlay shown while pm/ files are stashed during merge.
+    """Overlay shown while pm/ files are stashed during merge.
 
     Polls for the merge-lock marker file and auto-dismisses when it
-    disappears, then triggers a state reload.
+    disappears, then triggers a state reload.  Users can press Escape
+    to force-dismiss (removes the lock file) in case the merge process
+    crashed.
     """
+
+    BINDINGS = [
+        Binding("escape", "force_dismiss", "Force close", show=False),
+    ]
 
     CSS = """
     MergeLockScreen {
@@ -34,33 +40,60 @@ class MergeLockScreen(ModalScreen):
     #merge-lock-msg {
         text-align: center;
     }
+    #merge-lock-hint {
+        text-align: center;
+        color: $text-muted;
+        margin-top: 1;
+        display: none;
+    }
     """
 
     _DOT_FRAMES = ("", ".", "..", "...")
+    _HINT_AFTER_TICKS = 34  # ~10 seconds at 0.3s interval
 
     def __init__(self, pr_display_id: str = ""):
         super().__init__()
         self._pr_display_id = pr_display_id
         self._dot_index = 0
+        self._tick_count = 0
+
+    @property
+    def _prefix(self) -> str:
+        if self._pr_display_id:
+            return f"Merging {self._pr_display_id}, please wait"
+        return "Merge in progress, please wait"
 
     def compose(self) -> ComposeResult:
         with Vertical(id="merge-lock-container"):
             yield Label("Merging...", id="merge-lock-title")
-            prefix = f"Merging {self._pr_display_id}, please wait" if self._pr_display_id else "Merge in progress, please wait"
-            yield Label(prefix + "...", id="merge-lock-msg")
+            yield Label(self._prefix + "...", id="merge-lock-msg")
+            yield Label("[dim]Press Esc to force close[/]", id="merge-lock-hint")
 
     def on_mount(self) -> None:
         self.set_interval(0.3, self._tick)
 
     def _tick(self) -> None:
         """Advance the dot animation and check if the lock file was removed."""
+        self._tick_count += 1
         self._dot_index = (self._dot_index + 1) % len(self._DOT_FRAMES)
-        prefix = f"Merging {self._pr_display_id}, please wait" if self._pr_display_id else "Merge in progress, please wait"
-        self.query_one("#merge-lock-msg", Label).update(prefix + self._DOT_FRAMES[self._dot_index])
+        self.query_one("#merge-lock-msg", Label).update(
+            self._prefix + self._DOT_FRAMES[self._dot_index]
+        )
+
+        # Show escape hint after ~10 seconds
+        if self._tick_count == self._HINT_AFTER_TICKS:
+            self.query_one("#merge-lock-hint", Label).styles.display = "block"
 
         from pm_core.paths import pm_home
         if not (pm_home() / "merge-lock").exists():
             self.dismiss()
+
+    def action_force_dismiss(self) -> None:
+        """Remove the lock file and dismiss — escape hatch for stale locks."""
+        from pm_core.paths import pm_home
+        lock = pm_home() / "merge-lock"
+        lock.unlink(missing_ok=True)
+        self.dismiss()
 
 
 class ConnectScreen(ModalScreen):

@@ -316,6 +316,15 @@ class ProjectManagerApp(App):
 
     def _deferred_startup_sync(self) -> None:
         """Blocking startup tasks run in a thread."""
+        # Clean up any stale merge-lock from a previous crash
+        try:
+            from pm_core.paths import pm_home
+            lock = pm_home() / "merge-lock"
+            if lock.exists():
+                _log.warning("Removing stale merge-lock file on startup")
+                lock.unlink(missing_ok=True)
+        except Exception:
+            pass
         pane_ops.heal_registry(self._session_name)
         try:
             if self._session_name:
@@ -729,7 +738,8 @@ class ProjectManagerApp(App):
                 except Exception:
                     pass
                 _log.info("merge-lock detected for %s, showing overlay", pr_id)
-                self.push_screen(MergeLockScreen(pr_id))
+                self.push_screen(MergeLockScreen(pr_id),
+                                 callback=lambda _: self._load_state())
             return
         _log.info("action: reload (state only)")
         self._load_state()
