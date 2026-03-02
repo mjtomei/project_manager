@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-89296d3
+  active_pr: pr-30888b1
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-02-20T02:43:08.956779+00:00'
@@ -2006,12 +2006,12 @@ prs:
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-7e9795e-fix-infinite-merge-window-loop-don-t-d4ad18b8
   created_at: '2026-02-28T04:23:58.632492+00:00'
-  updated_at: '2026-03-02T00:02:09.451150+00:00'
+  updated_at: '2026-02-28T04:34:21.876591+00:00'
 - id: pr-30888b1
   plan: null
   title: Fold plan breakdown into plan add step and remove separate breakdown prompt
   branch: pm/pr-30888b1-fold-plan-breakdown-into-plan-add-step-and-remove-
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'The plan add prompt already does a good job breaking the project down
     into PRs. The separate breakdown step (triggered by ''w'' in the plans pane) adds
@@ -2020,15 +2020,16 @@ prs:
     into the plan add step so that when a plan is created, it already includes the
     PR breakdown. Remove the separate breakdown prompt/command. This reduces the number
     of steps to go from idea to actionable PRs.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  started_at: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/104
+  gh_pr_number: 104
+  started_at: '2026-03-01T17:51:46.490716+00:00'
   reviewed_at: null
   merged_at: null
   notes: []
-  created_at: null
-  updated_at: null
+  created_at: '2026-03-01T17:51:46.490716+00:00'
+  updated_at: '2026-03-01T17:51:46.490716+00:00'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-30888b1-fold-plan-breakdown-into-plan-add-st-c82777eb
 - id: pr-3116896
   plan: null
   title: Move Claude panes from current window into their own window
@@ -2052,63 +2053,49 @@ prs:
   updated_at: null
 - id: pr-8a60987
   plan: null
-  title: Split notes.txt into committed and gitignored files with section-based editing
+  title: Split notes.txt into committed and gitignored files with section–based editing
   branch: pm/pr-8a60987-split-notes-txt-into-committed-and-gitignored-file
-  status: pending
+  status: merged
   depends_on: []
-  description: 'Split notes.txt into structured sections that target different prompts
-    and git tracking.
-
-
-    The notes file (pm/notes.txt) currently has a single block of text included in
-    the implementation prompt only. This PR restructures it into sections:
-
-
-    Committed sections (tracked in git, shared with team):
-
-    - General: included in all prompts (impl, review, merge, watcher)
-
-    - Implementation: included only in implementation prompts
-
-    - Review: included only in review prompts
-
-    - Merge: included only in merge prompts
-
-    - Watcher: included only in watcher prompts
-
-
-    Local section (gitignored, per-user):
-
-    - Local: general-purpose notes not committed to the repo, included in all prompts
-
-
-    The notes pane in the TUI should show all sections in a single editable view.
-    On save, content is routed to the appropriate files based on which section it
-    belongs to. The committed sections live in pm/notes.txt (or similar) and the local
-    section lives in a gitignored file.
-
-
-    prompt_gen.py already includes session notes in all prompts (impl, review, merge,
-    watcher) -- this PR needs to update notes.py to parse sections and expose per-prompt
-    filtering so each prompt generator can request the relevant sections.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  started_at: null
-  reviewed_at: null
-  merged_at: null
+  description: "Split notes.txt into structured sections that target different prompts\
+    \ and git tracking. Use a custom edit screen similar to the way pr edit works\
+    \ now. Different sections should have dedicated files.\n\nThe notes file (pm/notes.txt)\
+    \ currently has a single block of text included in the implementation prompt only.\
+    \ This PR restructures it into sections:\n\nCommitted sections (tracked in git,\
+    \ shared with team):\n– General: included in all prompts (impl, review, merge,\
+    \ watcher)\n– Implementation: included only in implementation prompts\n– Review:\
+    \ included only in review prompts\n– Merge: included only in merge prompts\n–\
+    \ Watcher: included only in watcher prompts\n\nLocal section (gitignored, per–user):\n\
+    – Local: general–purpose notes not committed to the repo, included in all prompts.\
+    \ The backing file for this section should be in the .gitignore. No other files\
+    \ for notes sections should be in the gitignore. \n\nThe notes pane in the TUI\
+    \ should show all sections in a single editable view. On save, content is routed\
+    \ to the appropriate files based on which section it belongs to. The committed\
+    \ sections live in pm/notes.txt (or similar) and the local section lives in a\
+    \ gitignored file.\n\nprompt_gen.py already includes session notes in all prompts\
+    \ (impl, review, merge, watcher) — this PR needs to update notes.py to parse sections\
+    \ and expose per–prompt filtering so each prompt generator can request the relevant\
+    \ sections."
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/103
+  gh_pr_number: 103
+  started_at: '2026-03-01T17:48:42.496421+00:00'
+  reviewed_at: '2026-03-01T23:17:07.960771+00:00'
+  merged_at: '2026-03-02T00:09:52.423211+00:00'
   notes: []
-  created_at: null
-  updated_at: null
+  created_at: '2026-03-01T17:48:42.496421+00:00'
+  updated_at: '2026-03-02T00:09:52.423211+00:00'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8a60987-split-notes-txt-into-committed-and-g-c82777eb
 - id: pr-89296d3
   plan: null
   title: Harden window management against unexpected pane state
   branch: pm/pr-89296d3-harden-window-management-against-unexpected-pane-s
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'Problem: Window management code assumes clean state when creating
     and looking up panes. This breaks when windows already exist with unexpected panes
-    (e.g., user manually split a pane, or a previous session left stale windows).
+    (e.g., user manually split a pane, or a previous session left stale windows or
+    panes).
 
 
     The most concrete bug: hardcoded pane index 0 assumptions. find_claude_pane in
@@ -2121,16 +2108,16 @@ prs:
     Scope:
 
 
-    1. Rename-or-create window pattern: When creating a named window (impl, review,
+    1. Rename–or–create window pattern: When creating a named window (impl, review,
     merge, watcher), if a window with that name already exists but has unexpected
     pane state (wrong pane count, unregistered panes), rename the existing window
-    (e.g., append -stale-<ts>) and create a fresh one. Do not silently reuse a window
-    that might have user-created panes.
+    (e.g., append –stale–<ts>) and create a fresh one. Do not silently reuse a window
+    that might have user–created panes.
 
 
     2. Stop relying on pane index 0: Use the pane registry or pane IDs returned from
     window creation instead of assuming panes[0] is Claude. new_window_get_pane already
-    returns the actual pane ID -- thread that through to callers. For verdict polling,
+    returns the actual pane ID — thread that through to callers. For verdict polling,
     look up the registered Claude pane rather than grabbing the first pane.
 
 
@@ -2141,29 +2128,31 @@ prs:
 
     4. Protect against duplicate window names: find_window_by_name returns the first
     match. If multiple windows share a name (possible after races or manual renames),
-    log a warning and disambiguate or clean up duplicates.
+    log a warning and disambiguate or clean up duplicates. Try to intelligently select
+    the one that has pm managed panes to have the pm expected name.
 
 
     Key locations:
 
-    - pm_core/loop_shared.py:find_claude_pane -- hardcoded panes[0][0]
+    – pm_core/loop_shared.py:find_claude_pane — hardcoded panes[0][0]
 
-    - pm_core/tmux.py:get_first_pane_id -- hardcoded panes[0][0]
+    – pm_core/tmux.py:get_first_pane_id — hardcoded panes[0][0]
 
-    - pm_core/tui/review_loop_ui.py -- merge verdict polling grabs panes[0][0]
+    – pm_core/tui/review_loop_ui.py — merge verdict polling grabs panes[0][0]
 
-    - pm_core/cli/pr.py -- window kill/recreate in pr_start, pr_review, _launch_merge_window
+    – pm_core/cli/pr.py — window kill/recreate in pr_start, pr_review, _launch_merge_window
 
-    - pm_core/tmux.py:find_window_by_name -- returns first match only
+    – pm_core/tmux.py:find_window_by_name — returns first match only
 
-    - Pane registry (pm_core/tui/pane_registry.py) -- should be the source of truth
+    – Pane registry (pm_core/tui/pane_registry.py) — should be the source of truth
     for pane lookups'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  started_at: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/102
+  gh_pr_number: 102
+  started_at: '2026-03-01T17:48:54.305206+00:00'
   reviewed_at: null
   merged_at: null
   notes: []
-  created_at: null
-  updated_at: null
+  created_at: '2026-03-01T17:48:54.305206+00:00'
+  updated_at: '2026-03-01T17:49:04.675344+00:00'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-89296d3-harden-window-management-against-une-c82777eb
