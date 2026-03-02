@@ -381,19 +381,18 @@ class TestGenerateWatcherPrompt:
         assert "## Role" in prompt
         assert "autonomous monitoring" in prompt
 
-    def test_includes_pr_summary(self):
+    def test_includes_pr_inspection_commands(self):
         from pm_core.prompt_gen import generate_watcher_prompt
         data = self._make_data()
         prompt = generate_watcher_prompt(data)
-        assert "pr-001" in prompt
-        assert "Add feature" in prompt
+        assert "pm pr list" in prompt
+        assert "pm pr graph" in prompt
 
-    def test_includes_plan_summary(self):
+    def test_includes_plan_inspection_commands(self):
         from pm_core.prompt_gen import generate_watcher_prompt
         data = self._make_data()
         prompt = generate_watcher_prompt(data)
-        assert "plan-001" in prompt
-        assert "Test plan" in prompt
+        assert "pm plan list" in prompt
 
     def test_includes_verdicts(self):
         from pm_core.prompt_gen import generate_watcher_prompt
