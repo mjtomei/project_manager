@@ -8,7 +8,6 @@ Checks performed:
 2. Watcher loop thread: same is_alive() vs state.running check
 3. Poll timer health: last-tick timestamp stale >5s → restart timer
 4. Merge tracking sets: stale entries with no live merge window → cleanup
-5. Auto-start subprocess health: long-running starts → log warning
 """
 
 import time
@@ -237,6 +236,7 @@ def _check_stale_merge_tracking(app) -> None:
 
     for pr_id in stale_propagation:
         app._merge_propagation_phase.discard(pr_id)
+        app._merge_input_required_prs.discard(pr_id)
         _log.info("watchdog: cleaned up stale merge propagation for %s", pr_id)
 
     if stale_pending or stale_propagation:
