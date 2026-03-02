@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-4f8e02b
+  active_pr: pr-ee1ff04
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -2632,7 +2632,7 @@ prs:
   title: Add optional quality assurance step with test instruction library and review–QA
     loop
   branch: pm/pr-ee1ff04-add-optional-quality-assurance-step-with-test-inst
-  status: in_progress
+  status: in_review
   depends_on: []
   description: "Add an optional quality assurance (QA) / manual testing step to the\
     \ PR lifecycle that sits between review and merge. This creates a review-QA loop:\
@@ -2699,11 +2699,36 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/116
   gh_pr_number: 116
   created_at: '2026-03-02T04:20:36.108360+00:00'
-  updated_at: '2026-03-02T14:34:20.356570+00:00'
+  updated_at: '2026-03-02T17:53:14.109875+00:00'
   started_at: '2026-03-02T04:32:01.071677+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-03-02T17:09:13.345809+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-25dc606
+    text: 'Review i3 TUI test: Created throwaway project in /tmp/qa-test-project.
+      QA pane shows correctly with instructions/regression sections, j/k navigation
+      works, help screen shows QA-specific keybindings, tech tree renders qa status
+      with test tube icon and magenta style, q toggles QA pane. All 1435 tests pass.'
+    created_at: '2026-03-02T17:26:58Z'
+    last_edited: '2026-03-02T17:26:58Z'
+  - id: note-ffc0b14
+    text: 'Review i4 TUI test: Created throwaway project in /tmp/qa-test-project-i4.
+      Found and fixed 3 store.save argument-order bugs (args were swapped in review_loop_ui.py:325,
+      qa_loop_ui.py:134, qa_loop_ui.py:164). Fixed 2 unused imports in cli/qa.py (sys,
+      find_claude). All 1435 tests pass.'
+    created_at: '2026-03-02T17:42:01Z'
+    last_edited: '2026-03-02T17:42:01Z'
+  - id: note-cb3155b
+    text: 'Review i5 TUI test: Created throwaway project in /tmp/qa-test-project-i5.
+      Tested pm qa list and pm qa show commands with branch code (PYTHONPATH override).
+      Fixed 5 issues: (1) action_unfocus_command missing QA view handling, (2) help
+      screen footer claiming q=close when q is not bound to dismiss, (3) unused QAScenario
+      import in qa_loop_ui.py, (4) _ui_complete_notified monkey-patched instead of
+      dataclass field, (5) duplicate store.find_project_root() calls in generate_qa_planner_prompt.
+      Could not test QA TUI pane directly because the running TUI uses the installed
+      (master) code, not this branch. All 1435 tests pass.'
+    created_at: '2026-03-02T17:53:14Z'
+    last_edited: '2026-03-02T17:53:14Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ee1ff04-add-optional-quality-assurance-step--808818af
 - id: pr-fe499f2
   plan: plan-qa
@@ -2938,3 +2963,54 @@ prs:
     and crash recovery.
   created_at: null
   updated_at: null
+- id: pr-ad7bd98
+  plan: bugs
+  title: Fix arrow crossing in TUI tech tree when dependencies are vertically stacked
+  branch: pm/pr-ad7bd98-fix-arrow-crossing-in-tui-tech-tree-when-dependenc
+  status: pending
+  depends_on: []
+  description: 'When a PR node has two incoming dependency arrows and one source is
+    horizontally aligned while the other is below it, the layout draws both arrows
+    to the same (top) slot on the target node. This causes the arrows to cross unnecessarily.
+
+
+    Fix: when there are two incoming arrows and one source is below the horizontal:
+
+    - If only one incoming arrow, route it to the bottom connection slot instead of
+    the top
+
+    - If multiple incoming arrows, push the horizontal arrow up to the top slot and
+    route the lower arrow to the bottom slot, so they don''t cross
+
+
+    More generally, incoming arrows should be assigned to connection slots (top/middle/bottom)
+    based on the vertical position of their source node relative to the target, to
+    minimize crossings.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-02T17:13:14.854503+00:00'
+  updated_at: '2026-03-02T17:13:14.854503+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-f200b9e
+  plan: improvements
+  title: Make review loop max iterations a project setting with default of 100
+  branch: pm/pr-f200b9e-make-review-loop-max-iterations-a-project-setting-
+  status: pending
+  depends_on: []
+  description: The review loop max_iterations is hardcoded to 10 in review_loop.py
+    (line 294). Make this a configurable project setting in project.yaml (e.g. review_max_iterations
+    under the project section) and increase the default to 100. The setting should
+    be read at loop start time and passed through to run_review_loop_sync.
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-02T18:18:28.282153+00:00'
+  updated_at: '2026-03-02T18:18:28.282153+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
