@@ -49,23 +49,24 @@ def has_merge_restart_marker() -> bool:
 
 
 def save_breadcrumb(app) -> None:
-    """Save auto-start state to a breadcrumb file for resumption after restart.
+    """Save state to a breadcrumb file for resumption after restart.
 
     Called from action_restart when a merge-restart marker is present.
-    No-op if auto-start is not active. Always deletes the marker.
+    Always deletes the marker.  Persists auto-start state (if active),
+    running review loops, and watcher state.  Writes a breadcrumb whenever
+    there is *anything* worth preserving — even a manually-started review
+    loop without auto-start.
     """
     marker = pm_home() / _MERGE_RESTART_MARKER
     marker.unlink(missing_ok=True)
 
-    if not is_enabled(app):
-        _log.debug("save_breadcrumb: auto-start not active, skipping")
-        return
+    data: dict = {}
 
-    breadcrumb = pm_home() / _BREADCRUMB_FILE
-    data = {
-        "target": app._auto_start_target,
-        "run_id": app._auto_start_run_id,
-    }
+    # Persist auto-start state if active
+    if is_enabled(app):
+        data["auto_start"] = True
+        data["target"] = app._auto_start_target
+        data["run_id"] = app._auto_start_run_id
 
     # Persist review loop state for running loops
     review_loops = {}
@@ -99,6 +100,11 @@ def save_breadcrumb(app) -> None:
             "meta_pm_root": state.meta_pm_root,
         }
 
+    if not data:
+        _log.debug("save_breadcrumb: nothing to persist, skipping")
+        return
+
+    breadcrumb = pm_home() / _BREADCRUMB_FILE
     breadcrumb.write_text(json.dumps(data))
     _log.info("save_breadcrumb: wrote %s", data)
 
@@ -121,18 +127,25 @@ async def consume_breadcrumb(app) -> None:
     finally:
         breadcrumb.unlink(missing_ok=True)
 
+    # Restore auto-start state only if it was active before the restart.
+    # The "auto_start" key is explicit; for backward compat with older
+    # breadcrumbs that always implied auto-start, treat presence of
+    # "target" or "run_id" as auto-start enabled.
+    had_auto_start = data.get("auto_start", bool(data.get("target") or data.get("run_id")))
     target = data.get("target")
     run_id = data.get("run_id")
-    _log.info("consume_breadcrumb: restoring target=%s run_id=%s", target, run_id)
+    _log.info("consume_breadcrumb: restoring auto_start=%s target=%s run_id=%s",
+              had_auto_start, target, run_id)
 
-    app._auto_start = True
-    app._auto_start_target = target
-    app._auto_start_run_id = run_id
+    if had_auto_start:
+        app._auto_start = True
+        app._auto_start_target = target
+        app._auto_start_run_id = run_id
 
-    # Recreate transcript directory if needed
-    if run_id and app._root:
-        tdir = app._root / "transcripts" / run_id
-        tdir.mkdir(parents=True, exist_ok=True)
+        # Recreate transcript directory if needed
+        if run_id and app._root:
+            tdir = app._root / "transcripts" / run_id
+            tdir.mkdir(parents=True, exist_ok=True)
 
     # Restore review loop state before check_and_start so it sees existing loops
     review_loops_data = data.get("review_loops", {})
@@ -158,9 +171,14 @@ async def consume_breadcrumb(app) -> None:
             app._review_loops[pr_id] = rstate
         _log.info("consume_breadcrumb: restored %d review loop state(s)", len(review_loops_data))
 
-    app.log_message(f"Auto-start: resumed after merge restart → {target or 'all'}")
+    if had_auto_start:
+        app.log_message(f"Auto-start: resumed after merge restart → {target or 'all'}")
+    elif review_loops_data:
+        app.log_message("Resumed review loop state after restart")
     app._update_display()
-    await check_and_start(app)
+
+    if had_auto_start:
+        await check_and_start(app)
 
     # Restart review loops that were running before the restart
     if review_loops_data:

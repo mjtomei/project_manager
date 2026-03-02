@@ -94,6 +94,9 @@ class TestSaveBreadcrumbReviewLoops:
         assert breadcrumb.exists()
         data = json.loads(breadcrumb.read_text())
 
+        # Auto-start state is saved
+        assert data.get("auto_start") is True
+
         assert "review_loops" in data
         loops = data["review_loops"]
         assert "pr-001" in loops
@@ -119,6 +122,8 @@ class TestSaveBreadcrumbReviewLoops:
             save_breadcrumb(app)
 
         data = json.loads((tmp_path / "autostart-resume.json").read_text())
+        # Auto-start data is still saved, but no review loops
+        assert data.get("auto_start") is True
         assert "review_loops" not in data
 
     def test_saves_multiple_loops(self, tmp_path):
@@ -143,7 +148,8 @@ class TestSaveBreadcrumbReviewLoops:
         assert "pr-001" in data["review_loops"]
         assert "pr-002" in data["review_loops"]
 
-    def test_no_breadcrumb_when_auto_start_disabled(self, tmp_path):
+    def test_no_breadcrumb_when_nothing_to_save(self, tmp_path):
+        """No breadcrumb file when auto-start is off and no loops are running."""
         app = _make_app(auto_start=False)
         (tmp_path / "merge-restart").touch()
 
@@ -152,6 +158,31 @@ class TestSaveBreadcrumbReviewLoops:
             save_breadcrumb(app)
 
         assert not (tmp_path / "autostart-resume.json").exists()
+
+    def test_saves_manual_loop_without_auto_start(self, tmp_path):
+        """A manually-started review loop is saved even without auto-start."""
+        state = _make_running_state("pr-001", iteration=2)
+        app = _make_app(auto_start=False, review_loops={"pr-001": state})
+        (tmp_path / "merge-restart").touch()
+
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
+             patch("pm_core.tui.watcher_ui.is_running", return_value=False):
+            from pm_core.tui.auto_start import save_breadcrumb
+            save_breadcrumb(app)
+
+        breadcrumb = tmp_path / "autostart-resume.json"
+        assert breadcrumb.exists()
+        data = json.loads(breadcrumb.read_text())
+
+        # No auto-start keys
+        assert "auto_start" not in data
+        assert "target" not in data
+        assert "run_id" not in data
+
+        # But review loop is preserved
+        assert "review_loops" in data
+        assert "pr-001" in data["review_loops"]
+        assert data["review_loops"]["pr-001"]["iteration"] == 2
 
     def test_history_output_not_stored(self, tmp_path):
         """Breadcrumb should not include full output text (too large)."""
@@ -295,6 +326,55 @@ class TestConsumeBreadcrumbReviewLoops:
 
         assert app._auto_start is True
         assert app._review_loops == {}
+
+    def test_restores_manual_loop_without_auto_start(self, tmp_path):
+        """Manual review loop (no auto-start) should be restored and restarted."""
+        breadcrumb_data = {
+            "review_loops": {
+                "pr-001": {
+                    "iteration": 2,
+                    "latest_verdict": "NEEDS_WORK",
+                    "stop_on_suggestions": True,
+                    "loop_id": "mn56",
+                    "input_required": False,
+                    "_transcript_dir": "/tmp/transcripts",
+                    "history": [
+                        {"iteration": 1, "verdict": "NEEDS_WORK", "timestamp": "2025-01-01T00:00:00"},
+                        {"iteration": 2, "verdict": "NEEDS_WORK", "timestamp": "2025-01-01T00:01:00"},
+                    ],
+                }
+            },
+        }
+        (tmp_path / "autostart-resume.json").write_text(json.dumps(breadcrumb_data))
+
+        pr_data = {"id": "pr-001", "status": "in_review", "workdir": "/tmp/wd"}
+
+        app = _make_app(auto_start=False, root=tmp_path)
+        app._update_display = MagicMock()
+        app.log_message = MagicMock()
+
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
+             patch("pm_core.tui.auto_start.check_and_start", new_callable=AsyncMock) as mock_cas, \
+             patch("pm_core.tui.auto_start.store") as mock_store, \
+             patch("pm_core.tui.review_loop_ui._start_loop") as mock_start:
+            mock_store.get_pr.return_value = pr_data
+            from pm_core.tui.auto_start import consume_breadcrumb
+            _run_async(consume_breadcrumb(app))
+
+        # Auto-start should NOT be enabled
+        assert app._auto_start is False
+
+        # check_and_start should NOT have been called
+        mock_cas.assert_not_awaited()
+
+        # Review loop state should be restored and restarted
+        assert "pr-001" in app._review_loops
+        rstate = app._review_loops["pr-001"]
+        assert rstate.iteration == 2
+        assert rstate.loop_id == "mn56"
+        mock_start.assert_called_once()
+        _, kwargs = mock_start.call_args
+        assert kwargs.get("resume_state") is rstate
 
     def test_breadcrumb_deleted_after_consumption(self, tmp_path):
         breadcrumb_data = {"target": "pr-001", "run_id": "run-123"}
