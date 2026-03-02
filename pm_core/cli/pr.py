@@ -959,6 +959,16 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
             switch=not background,
         )
         if claude_pane:
+            # Post-creation validation: verify exactly 1 pane
+            post_panes = tmux_mod.get_pane_indices(pm_session, claude_pane)
+            if len(post_panes) != 1:
+                _log.error("_launch_merge_window: expected 1 pane, got %d — aborting",
+                           len(post_panes))
+                click.echo(f"Merge window error: unexpected pane count ({len(post_panes)}), expected 1")
+                win = tmux_mod.find_window_by_name(pm_session, window_name)
+                if win:
+                    tmux_mod.kill_window(pm_session, win["id"])
+                return
             win = tmux_mod.find_window_by_name(pm_session, window_name)
             if win:
                 pane_registry.register_pane(

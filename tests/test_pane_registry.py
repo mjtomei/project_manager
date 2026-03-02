@@ -560,6 +560,17 @@ class TestIsWindowStateClean:
 
     @patch("pm_core.pane_registry.load_registry")
     @patch("pm_core.tmux.get_pane_details")
+    def test_no_registry_multi_pane_with_claude_is_clean(self, mock_details, mock_load):
+        """Multiple unregistered panes with one running claude — ambiguous, assume clean."""
+        mock_details.return_value = [
+            {"id": "%1", "index": "0", "current_command": "claude", "start_command": "bash"},
+            {"id": "%2", "index": "1", "current_command": "less", "start_command": "less"},
+        ]
+        mock_load.return_value = {"windows": {}}
+        assert is_window_state_clean("sess", "@1") is True
+
+    @patch("pm_core.pane_registry.load_registry")
+    @patch("pm_core.tmux.get_pane_details")
     def test_registered_all_alive_no_claude_is_stale(self, mock_details, mock_load):
         """Registered panes alive but none running claude → stale."""
         mock_details.return_value = [
