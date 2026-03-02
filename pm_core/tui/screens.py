@@ -36,20 +36,28 @@ class MergeLockScreen(ModalScreen):
     }
     """
 
+    _DOT_FRAMES = ("", ".", "..", "...")
+
     def __init__(self, pr_display_id: str = ""):
         super().__init__()
         self._pr_display_id = pr_display_id
+        self._dot_index = 0
 
     def compose(self) -> ComposeResult:
         with Vertical(id="merge-lock-container"):
             yield Label("Merging...", id="merge-lock-title")
-            msg = f"Merging {self._pr_display_id}, please wait..." if self._pr_display_id else "Merge in progress, please wait..."
-            yield Label(msg, id="merge-lock-msg")
+            prefix = f"Merging {self._pr_display_id}, please wait" if self._pr_display_id else "Merge in progress, please wait"
+            yield Label(prefix + "...", id="merge-lock-msg")
 
     def on_mount(self) -> None:
-        self.set_interval(0.3, self._check_lock)
+        self.set_interval(0.3, self._tick)
 
-    def _check_lock(self) -> None:
+    def _tick(self) -> None:
+        """Advance the dot animation and check if the lock file was removed."""
+        self._dot_index = (self._dot_index + 1) % len(self._DOT_FRAMES)
+        prefix = f"Merging {self._pr_display_id}, please wait" if self._pr_display_id else "Merge in progress, please wait"
+        self.query_one("#merge-lock-msg", Label).update(prefix + self._DOT_FRAMES[self._dot_index])
+
         from pm_core.paths import pm_home
         if not (pm_home() / "merge-lock").exists():
             self.dismiss()
