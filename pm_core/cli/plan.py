@@ -69,11 +69,8 @@ def plan_add(name: str, description: str, fresh: bool):
         "file": plan_file,
         "status": "draft",
     }
-    if data.get("plans") is None:
-        data["plans"] = []
-    data["plans"].append(entry)
 
-    # Create the plan file
+    # Create the plan file (idempotent, safe outside lock)
     plan_path = root / plan_file
     plan_path.parent.mkdir(parents=True, exist_ok=True)
     plan_path.write_text(f"# {name}\n\n<!-- Describe the plan here -->\n")
@@ -81,7 +78,12 @@ def plan_add(name: str, description: str, fresh: bool):
     # Ensure notes file exists
     notes.ensure_notes_file(root)
 
-    save_and_push(data, root, f"pm: add plan {plan_id}")
+    def apply(data):
+        if data.get("plans") is None:
+            data["plans"] = []
+        data["plans"].append(entry)
+
+    store.locked_update(root, apply)
     click.echo(f"Created plan {plan_id}: {name}")
     click.echo(f"  Plan file: {plan_path}")
     trigger_tui_refresh()
@@ -562,7 +564,7 @@ def plan_load(plan_id: str | None):
             title_to_id[pr["title"]] = pr_id
             existing_ids.add(pr_id)
 
-    created = 0
+    new_entries = []
     for pr in prs:
         pr_id = title_to_id[pr["title"]]
 
@@ -589,15 +591,22 @@ def plan_load(plan_id: str | None):
         entry = _make_pr_entry(pr_id, pr["title"], branch,
                                plan=plan_id, depends_on=deps,
                                description=desc)
-        data["prs"].append(entry)
+        new_entries.append(entry)
         existing_titles[pr["title"]] = pr_id
-        created += 1
         click.echo(f"  Created {pr_id}: {pr['title']}")
 
-    if created:
-        save_and_push(data, root, f"pm: load plan {plan_id}")
+    if new_entries:
+        def apply(data):
+            if data.get("prs") is None:
+                data["prs"] = []
+            current_ids = {p["id"] for p in data["prs"]}
+            for entry in new_entries:
+                if entry["id"] not in current_ids:
+                    data["prs"].append(entry)
+
+        store.locked_update(root, apply)
         trigger_tui_refresh()
-    click.echo(f"\nLoaded {created} PRs from plan {plan_id}.")
+    click.echo(f"\nLoaded {len(new_entries)} PRs from plan {plan_id}.")
 
 
 @plan.command("fixes")
