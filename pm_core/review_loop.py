@@ -98,6 +98,8 @@ class ReviewLoopState:
     _transcript_dir: str | None = None
     # INPUT_REQUIRED: set to True while polling for follow-up verdict
     input_required: bool = False
+    # Thread reference (set by caller after start_review_loop_background)
+    _thread: threading.Thread | None = None
 
 
 def _match_verdict(line: str) -> str | None:

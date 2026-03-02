@@ -138,8 +138,8 @@ def _start_loop(app, pr_id: str, pr: dict | None, stop_on_suggestions: bool,
     # Ensure the poll timer is running
     _ensure_poll_timer(app)
 
-    # Start the background loop
-    start_review_loop_background(
+    # Start the background loop and store the thread reference
+    thread = start_review_loop_background(
         state=state,
         pm_root=pm_root,
         pr_data=pr,
@@ -147,6 +147,7 @@ def _start_loop(app, pr_id: str, pr: dict | None, stop_on_suggestions: bool,
         on_complete=lambda s: _on_complete_from_thread(app, s),
         transcript_dir=transcript_dir,
     )
+    state._thread = thread
 
 
 def _stop_loop(app, pr_id: str) -> None:
@@ -220,6 +221,9 @@ def ensure_animation_timer(app) -> None:
 
 def _poll_loop_state(app) -> None:
     """Periodic timer callback to update TUI from loop state."""
+    import time as _time
+    app._poll_last_tick = _time.monotonic()
+
     any_running = False
     newly_done = []
 

@@ -91,6 +91,8 @@ class WatcherLoopState:
     auto_start_target: str | None = None
     # Absolute path to the meta workdir's pm/ dir (for bugs.md / improvements.md)
     meta_pm_root: str | None = None
+    # Thread reference (set by caller after start_watcher_loop_background)
+    _thread: threading.Thread | None = None
 
 
 def _match_watcher_verdict(line: str) -> str | None:

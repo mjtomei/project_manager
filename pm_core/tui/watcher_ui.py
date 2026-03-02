@@ -202,13 +202,14 @@ def start_watcher(app, transcript_dir: str | None = None,
     from pm_core.tui.review_loop_ui import _ensure_poll_timer
     _ensure_poll_timer(app)
 
-    start_watcher_loop_background(
+    thread = start_watcher_loop_background(
         state=state,
         pm_root=pm_root,
         on_iteration=lambda s: _on_iteration_from_thread(app, s),
         on_complete=lambda s: _on_complete_from_thread(app, s),
         transcript_dir=transcript_dir,
     )
+    state._thread = thread
 
 
 def stop_watcher(app) -> None:
