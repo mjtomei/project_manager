@@ -5,7 +5,12 @@ yields a high probability of producing fully user-ready software with all planne
 features. Once an initial iteration is working, enable automated proposals and
 testing of methods for improving performance and efficiency — including generating
 equivalent or higher quality code with fewer tokens, and producing code that is
-more robust to adversarial agents.
+more robust to adversarial agents. This also serves as a foundation for creating
+new LLM benchmarks that match real-world usage far better than existing ones —
+fully specified projects with QA pipelines produce measurable, reproducible
+end-to-end outcomes (feature completeness, test pass rates, token efficiency,
+robustness) on realistic software engineering tasks rather than isolated coding
+puzzles.
 
 ## Phase 1: Quality Assurance Pipeline
 
