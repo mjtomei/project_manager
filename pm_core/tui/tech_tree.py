@@ -114,7 +114,6 @@ class TechTree(Widget):
         self.prs = prs
         if recompute:
             self._recompute()
-            self._resort_pending = False
             self.refresh(layout=True)
         else:
             # Data updated but layout deferred — re-render nodes at current
@@ -127,7 +126,6 @@ class TechTree(Widget):
         if not self._resort_pending:
             return
         self._recompute()
-        self._resort_pending = False
         self.refresh(layout=True)
 
     def select_pr(self, pr_id: str) -> None:
@@ -181,6 +179,7 @@ class TechTree(Widget):
 
     def _recompute(self) -> None:
         """Recompute layout positions using the tree_layout module."""
+        self._resort_pending = False
         result = compute_tree_layout(
             self._prs,
             hidden_plans=self._hidden_plans,

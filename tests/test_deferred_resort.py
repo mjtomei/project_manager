@@ -34,7 +34,7 @@ class TestTechTreeDeferredResort:
         """update_prs(recompute=True) recomputes layout and clears pending flag."""
         tree = self._make_tree()
         tree._resort_pending = True  # simulate pending state
-        with patch.object(tree, '_recompute'):
+        with patch.object(tree, '_recompute', side_effect=lambda: setattr(tree, '_resort_pending', False)):
             tree.update_prs(SAMPLE_PRS, recompute=True)
 
         assert tree._prs == SAMPLE_PRS
@@ -56,7 +56,7 @@ class TestTechTreeDeferredResort:
     def test_update_prs_default_recompute_true(self):
         """update_prs() defaults to recompute=True."""
         tree = self._make_tree()
-        with patch.object(tree, '_recompute'):
+        with patch.object(tree, '_recompute', side_effect=lambda: setattr(tree, '_resort_pending', False)):
             tree.update_prs(SAMPLE_PRS)
 
         assert tree._resort_pending is False
@@ -66,7 +66,7 @@ class TestTechTreeDeferredResort:
         """apply_pending_resort() recomputes and clears flag when pending."""
         tree = self._make_tree()
         tree._resort_pending = True
-        with patch.object(tree, '_recompute') as mock_recompute:
+        with patch.object(tree, '_recompute', side_effect=lambda: setattr(tree, '_resort_pending', False)) as mock_recompute:
             tree.apply_pending_resort()
 
         mock_recompute.assert_called_once()
@@ -82,6 +82,31 @@ class TestTechTreeDeferredResort:
 
         mock_recompute.assert_not_called()
         tree.refresh.assert_not_called()
+
+    def test_recompute_clears_resort_pending(self):
+        """Direct _recompute() calls (e.g. from filter/sort) clear pending flag."""
+        tree = self._make_tree()
+        tree._resort_pending = True
+        tree._hidden_plans = set()
+        tree._status_filter = None
+        tree._hide_merged = False
+        tree._hide_closed = True
+        tree._sort_field = None
+        tree.selected_index = 0
+        # Call real _recompute — it should clear the flag
+        from pm_core.tui.tech_tree import TechTree
+        mock_result = MagicMock()
+        mock_result.ordered_ids = []
+        mock_result.node_positions = {}
+        mock_result.plan_label_rows = {}
+        mock_result.hidden_plan_label_rows = {}
+        mock_result.hidden_label_ids = []
+        mock_result.plan_group_order = []
+        with patch('pm_core.tui.tech_tree.compute_tree_layout', return_value=mock_result), \
+             patch.object(tree, '_get_viewport_width', return_value=80):
+            TechTree._recompute(tree)
+
+        assert tree._resort_pending is False
 
 
 # ---------------------------------------------------------------------------
