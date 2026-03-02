@@ -629,10 +629,11 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
             else:
                 shutil.move(str(tmp_path), str(work_path))
 
-    if work_path.exists() and git_ops.is_git_repo(work_path) and _workdir_is_dirty(work_path):
+    is_git = work_path.exists() and git_ops.is_git_repo(work_path)
+    if is_git and _workdir_is_dirty(work_path):
         click.echo("Workdir has uncommitted changes — skipping git pull/checkout.")
     else:
-        if work_path.exists() and git_ops.is_git_repo(work_path):
+        if is_git:
             click.echo(f"Updating {work_path}...")
             git_ops.pull_rebase(work_path)
 
