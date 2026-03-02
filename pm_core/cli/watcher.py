@@ -175,25 +175,25 @@ def _create_watcher_window(iteration: int, loop_id: str,
             pm_session, WATCHER_WINDOW_NAME, claude_cmd, repo_dir,
             switch=False,
         )
-        new_win = tmux_mod.find_window_by_name(pm_session, WATCHER_WINDOW_NAME)
-        _log.info("_create_watcher_window: new window created: %s", new_win)
+        # Derive window ID directly from pane (avoids name-lookup race)
+        watcher_win_id = tmux_mod.get_window_id_for_pane(claude_pane) if claude_pane else ""
+        _log.info("_create_watcher_window: new pane %s in window %s", claude_pane, watcher_win_id)
 
         # Post-creation validation: verify 1 pane (before registration)
-        if claude_pane:
-            post_panes = tmux_mod.get_pane_indices(pm_session, claude_pane)
+        if claude_pane and watcher_win_id:
+            post_panes = tmux_mod.get_pane_indices(pm_session, watcher_win_id)
             if len(post_panes) != 1:
                 _log.error("_create_watcher_window: expected 1 pane, got %d — aborting",
                            len(post_panes))
                 click.echo(f"Watcher window error: unexpected pane count ({len(post_panes)}), expected 1")
-                if new_win:
-                    tmux_mod.kill_window(pm_session, new_win["id"])
+                tmux_mod.kill_window(pm_session, watcher_win_id)
                 raise SystemExit(1)
 
         # Register the watcher pane
-        if claude_pane and new_win:
+        if claude_pane and watcher_win_id:
             from pm_core import pane_registry
             pane_registry.register_pane(
-                pm_session, new_win["id"], claude_pane, "watcher-claude", claude_cmd)
+                pm_session, watcher_win_id, claude_pane, "watcher-claude", claude_cmd)
 
         click.echo(f"Watcher window launched (iteration {iteration})")
     except Exception as e:

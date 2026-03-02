@@ -347,6 +347,20 @@ def get_window_id(session: str) -> str:
     return result.stdout.strip()
 
 
+def get_window_id_for_pane(pane_id: str) -> str:
+    """Return the window ID (e.g. ``@3``) that contains *pane_id*.
+
+    Uses ``tmux display -t <pane> -p '#{window_id}'`` which is more
+    reliable than looking up by name (avoids race with duplicate names).
+    Returns an empty string on failure.
+    """
+    result = subprocess.run(
+        _tmux_cmd("display", "-t", pane_id, "-p", "#{window_id}"),
+        capture_output=True, text=True,
+    )
+    return result.stdout.strip()
+
+
 def swap_pane(src_pane: str, dst_pane: str) -> None:
     """Swap two panes."""
     subprocess.run(
@@ -407,8 +421,7 @@ def find_window_by_name(session: str, name: str) -> dict | None:
     # Rename lower-scoring duplicates (use index suffix to avoid collisions)
     epoch = int(time.time())
     for idx, (score, w) in enumerate(scored[1:]):
-        suffix = f"-{idx}" if idx else ""
-        stale_name = f"{name}--stale--{epoch}{suffix}"
+        stale_name = f"{name}--stale--{epoch}-{idx}"
         _log.warning("find_window_by_name: renaming duplicate %s (score=%d) to '%s'",
                      w["id"], score, stale_name)
         rename_window(session, w["id"], stale_name)

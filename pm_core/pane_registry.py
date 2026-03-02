@@ -223,7 +223,10 @@ def is_window_state_clean(session: str, window_id: str) -> bool:
             _logger.info("is_window_state_clean: %s has 1 pane not running claude — stale",
                          window_id)
             return False
-        # Ambiguous — assume clean
+        # Multiple panes with at least one running claude but no registry —
+        # likely a pre-registration window with a companion pane; assume clean.
+        _logger.info("is_window_state_clean: %s has %d unregistered panes with claude — "
+                     "ambiguous, assuming clean", window_id, len(pane_details))
         return True
 
     # Registry exists — verify registered panes are alive

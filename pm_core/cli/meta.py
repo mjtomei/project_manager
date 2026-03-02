@@ -196,13 +196,14 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
             try:
                 claude_pane = tmux_mod.new_window_get_pane(
                     pm_session, window_name, cmd, str(work_path))
-                win = tmux_mod.find_window_by_name(pm_session, window_name)
-                if win:
-                    tmux_mod.set_shared_window_size(pm_session, win["id"])
-                    if claude_pane:
-                        from pm_core import pane_registry
+                if claude_pane:
+                    from pm_core import pane_registry
+                    # Derive window ID directly from pane (avoids name-lookup race)
+                    meta_win_id = tmux_mod.get_window_id_for_pane(claude_pane)
+                    if meta_win_id:
+                        tmux_mod.set_shared_window_size(pm_session, meta_win_id)
                         pane_registry.register_pane(
-                            pm_session, win["id"], claude_pane, "meta-claude", cmd)
+                            pm_session, meta_win_id, claude_pane, "meta-claude", cmd)
                 click.echo(f"Launched meta session in window '{window_name}'")
                 return
             except Exception as e:

@@ -18,6 +18,7 @@ from pm_core.tmux import (
     get_pane_indices,
     get_pane_geometries,
     get_window_id,
+    get_window_id_for_pane,
     get_window_size,
     swap_pane,
     list_windows,
@@ -230,6 +231,21 @@ class TestGetWindowId:
     def test_returns_id(self, mock_run, mock_cobs):
         mock_run.return_value = MagicMock(returncode=0, stdout="@1\n")
         assert get_window_id("sess") == "@1"
+
+
+class TestGetWindowIdForPane:
+    @patch("pm_core.tmux.subprocess.run")
+    def test_returns_window_id(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="@3\n")
+        assert get_window_id_for_pane("%5") == "@3"
+        cmd = mock_run.call_args[0][0]
+        assert "display" in cmd
+        assert "%5" in cmd
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_returns_empty_on_failure(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=1, stdout="")
+        assert get_window_id_for_pane("%99") == ""
 
 
 # ---------------------------------------------------------------------------
