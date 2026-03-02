@@ -755,6 +755,10 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
             _log.error("_launch_review_window: expected 2 panes after split, got %d — aborting",
                        len(post_panes))
             click.echo(f"Review window error: unexpected pane count ({len(post_panes)}), expected 2")
+            # Kill the partially-created window to avoid leaving orphans
+            win = tmux_mod.find_window_by_name(pm_session, window_name)
+            if win:
+                tmux_mod.kill_window(pm_session, win["id"])
             return
 
         # Register review panes under the review window (multi-window safe).
