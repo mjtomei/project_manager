@@ -137,7 +137,6 @@ class HelpScreen(ModalScreen):
                 yield Label("Plan Actions", classes="help-section")
                 yield Label("  [bold]a[/]  Add a new plan", classes="help-row")
                 yield Label("  [bold]e[/]  Edit plan file", classes="help-row")
-                yield Label("  [bold]w[/]  Break plan into PRs", classes="help-row")
                 yield Label("  [bold]c[/]  Review plan-PR consistency", classes="help-row")
                 yield Label("  [bold]l[/]  Load PRs from plan", classes="help-row")
                 yield Label("Cross-plan", classes="help-section")
