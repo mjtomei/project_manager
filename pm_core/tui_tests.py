@@ -2176,7 +2176,7 @@ Test that TUI restart heals registry corruption.
    - Write the modified JSON back to the registry file
 2. Verify corruptions in registry: `cat ~/.pm/pane-registry/<base>.json`
 3. Restart TUI to trigger _heal_registry:
-   - `pm tui send /restart` then `pm tui send Enter` (restart via command bar; plain R is reload which won't heal)
+   - `pm tui send /` then `pm tui send restart` then `pm tui send Enter` (restart via command bar; plain R is reload which won't heal)
    - Wait 3 seconds
 4. Check registry: `cat ~/.pm/pane-registry/<base>.json`
    - Fake dead pane (%9999) should be GONE
@@ -2191,7 +2191,7 @@ Test that TUI restart heals registry corruption.
    - Load the JSON, remove the entry with role "tui" from current window's panes
    - Write modified JSON back
 2. Verify TUI pane is missing from registry
-3. Restart TUI: `pm tui send /restart` then `pm tui send Enter`, wait 3 seconds
+3. Restart TUI: `pm tui send /` then `pm tui send restart` then `pm tui send Enter`, wait 3 seconds
 4. Check registry:
    - TUI pane re-registered in current window
    - Should have role "tui" and order 0
