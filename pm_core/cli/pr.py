@@ -646,12 +646,16 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
             else:
                 shutil.move(str(tmp_path), str(work_path))
 
-    if work_path.exists() and git_ops.is_git_repo(work_path):
-        click.echo(f"Updating {work_path}...")
-        git_ops.pull_rebase(work_path)
+    is_git = work_path.exists() and git_ops.is_git_repo(work_path)
+    if is_git and _workdir_is_dirty(work_path):
+        click.echo("Workdir has uncommitted changes — skipping git pull/checkout.")
+    else:
+        if is_git:
+            click.echo(f"Updating {work_path}...")
+            git_ops.pull_rebase(work_path)
 
-    click.echo(f"Checking out branch {branch}...")
-    git_ops.checkout_branch(work_path, branch, create=True)
+        click.echo(f"Checking out branch {branch}...")
+        git_ops.checkout_branch(work_path, branch, create=True)
 
     # For GitHub backend: push branch and create draft PR if not already set
     backend_name = data["project"].get("backend", "vanilla")
