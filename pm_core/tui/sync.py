@@ -125,7 +125,7 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
                     _record_status_timestamp(pr, "merged")
             store.save(app._data, app._root)
             _kill_merged_pr_windows(app, result.merged_prs)
-        app._update_display()
+        app._update_display(defer_resort=True)
 
         # Detect PRs that became merged — either via sync or via CLI
         # (e.g. `pm pr merge` for local/vanilla backends saves status
@@ -216,7 +216,7 @@ async def startup_github_sync(app) -> None:
                 store.save(app._data, app._root)
             if newly_merged:
                 _kill_merged_pr_windows(app, newly_merged)
-            app._update_display()
+            app._update_display(defer_resort=True)
             app.log_message(f"GitHub sync: {result.updated_count} PR(s) updated")
             # Auto-start ready PRs if enabled
             if newly_merged:

@@ -98,6 +98,7 @@ class TechTree(Widget):
         self._status_filter: str | None = None                    # filter to show only this status
         self._sort_field: str | None = None                       # sort field (None = updated_at default)
         self._anim_frame: int = 0                                  # animation frame counter
+        self._resort_pending: bool = False                         # deferred re-sort waiting for idle
 
     def on_mount(self) -> None:
         self.prs = self._prs
@@ -108,9 +109,22 @@ class TechTree(Widget):
         if "hide_merged" in project:
             self._hide_merged = bool(project["hide_merged"])
 
-    def update_prs(self, prs: list[dict]) -> None:
+    def update_prs(self, prs: list[dict], recompute: bool = True) -> None:
         self._prs = prs
         self.prs = prs
+        if recompute:
+            self._recompute()
+            self.refresh(layout=True)
+        else:
+            # Data updated but layout deferred — re-render nodes at current
+            # positions so status/title changes are visible immediately.
+            self._resort_pending = True
+            self.refresh()
+
+    def apply_pending_resort(self) -> None:
+        """Apply a deferred re-sort if one is pending."""
+        if not self._resort_pending:
+            return
         self._recompute()
         self.refresh(layout=True)
 
@@ -165,6 +179,7 @@ class TechTree(Widget):
 
     def _recompute(self) -> None:
         """Recompute layout positions using the tree_layout module."""
+        self._resort_pending = False
         result = compute_tree_layout(
             self._prs,
             hidden_plans=self._hidden_plans,
