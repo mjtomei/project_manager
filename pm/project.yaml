@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-ff68ef5
+  active_pr: pr-89296d3
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-02-20T02:43:08.956779+00:00'
@@ -40,6 +40,8 @@ prs:
     so results are available without blocking the interactive flow
   agent_machine: null
   gh_pr: null
+  created_at: null
+  updated_at: null
 - id: pr-002
   plan: plan-001
   title: Include cluster suggestions in import prompt
@@ -52,6 +54,8 @@ prs:
     which can be used, modified, or ignored
   agent_machine: null
   gh_pr: null
+  created_at: null
+  updated_at: null
 - id: pr-003
   plan: plan-001
   title: Add cluster-first option to guide workflow
@@ -63,6 +67,8 @@ prs:
     and automated starting points
   agent_machine: null
   gh_pr: null
+  created_at: null
+  updated_at: null
 - id: pr-004
   plan: plan-001
   title: Smart repo-size detection with approach recommendation
@@ -75,6 +81,8 @@ prs:
     suggestion
   agent_machine: null
   gh_pr: null
+  created_at: null
+  updated_at: null
 - id: pr-005
   plan: plan-001
   title: Improve git remote detection in pm init
@@ -88,6 +96,8 @@ prs:
   agent_machine: spark-424d
   gh_pr: null
   workdir: null
+  created_at: null
+  updated_at: null
 - id: pr-006
   plan: plan-001
   title: Add automatic PR sync on TUI refresh and periodic background check
@@ -101,6 +111,8 @@ prs:
   agent_machine: spark-424d
   gh_pr: null
   workdir: null
+  created_at: null
+  updated_at: null
 - id: pr-007
   plan: plan-001
   title: 'GitHub backend: Create draft PR at start, upgrade on done'
@@ -115,6 +127,8 @@ prs:
   agent_machine: spark-424d
   gh_pr: null
   workdir: null
+  created_at: null
+  updated_at: null
 - id: pr-009
   plan: plan-001
   title: Auto-rebalance after pane launch
@@ -126,6 +140,8 @@ prs:
   agent_machine: spark-424d
   gh_pr: null
   workdir: null
+  created_at: null
+  updated_at: null
 - id: pr-010
   plan: plan-001
   title: Isolate workdir pm state from main repo
@@ -154,6 +170,8 @@ prs:
   agent_machine: spark-424d
   gh_pr: null
   workdir: null
+  created_at: null
+  updated_at: null
 - id: pr-011
   title: Fix plans pane w key launching wrong action
   branch: null
@@ -186,6 +204,8 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/32
   gh_pr_number: 32
   workdir: null
+  created_at: null
+  updated_at: null
 - id: pr-012
   plan: plan-002
   title: Local model runner with OpenAI-compatible API
@@ -209,6 +229,8 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/33
   gh_pr_number: 33
   workdir: null
+  created_at: null
+  updated_at: null
 - id: pr-013
   plan: plan-002
   title: Aider polyglot exercise loader
@@ -227,6 +249,8 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/34
   gh_pr_number: 34
   workdir: null
+  created_at: null
+  updated_at: null
 - id: pr-014
   plan: plan-002
   title: Test generation from problem descriptions
@@ -247,6 +271,8 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/35
   gh_pr_number: 35
   workdir: null
+  created_at: null
+  updated_at: null
 - id: pr-015
   plan: plan-002
   title: Multi-candidate solution generation
@@ -265,6 +291,8 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/36
   gh_pr_number: 36
   workdir: null
+  created_at: null
+  updated_at: null
 - id: pr-016
   plan: plan-002
   title: Test execution and candidate scoring
@@ -284,6 +312,8 @@ prs:
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
+  created_at: null
+  updated_at: null
 - id: pr-017
   plan: plan-002
   title: 'Benchmark: multi-candidate code generation with tournament selection'
@@ -358,6 +388,8 @@ prs:
       full GPU (docker stop vllm-120b).'
     created_at: '2026-02-25T11:22:08Z'
     last_edited: '2026-02-25T11:22:08Z'
+  created_at: null
+  updated_at: null
 - id: pr-018
   plan: plan-002
   title: Baseline measurement and analysis
@@ -380,6 +412,8 @@ prs:
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
+  created_at: null
+  updated_at: null
 - id: pr-019
   plan: plan-002
   title: Generated test quality analysis
@@ -403,6 +437,8 @@ prs:
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
+  created_at: null
+  updated_at: null
 - id: pr-020
   plan: null
   title: Fix TUI command deduplication for concurrent PR actions
@@ -419,6 +455,8 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/38
   gh_pr_number: 38
   workdir: null
+  created_at: null
+  updated_at: null
 - id: pr-021
   plan: null
   title: Fix tmux commands to target current grouped session instead of base
@@ -433,6 +471,8 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/39
   gh_pr_number: 39
   workdir: null
+  created_at: null
+  updated_at: null
 - id: pr-022
   plan: plan-003
   title: Handle merging pm directory changes across clones
@@ -447,6 +487,8 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/40
   gh_pr_number: 40
   workdir: null
+  created_at: null
+  updated_at: null
 - id: pr-023
   plan: null
   title: Fix rebalance layout for grouped sessions with different terminal sizes
@@ -462,6 +504,8 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/41
   gh_pr_number: 41
   workdir: null
+  created_at: null
+  updated_at: null
 - id: pr-024
   plan: plan-003
   title: Add multi-user support to sessions
@@ -480,6 +524,8 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/52
   gh_pr_number: 52
   workdir: null
+  created_at: null
+  updated_at: null
 - id: pr-142f20c
   plan: plan-e4fa5cb
   title: Convert cli.py to cli/ package and extract shared helpers
@@ -501,6 +547,8 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/57
   gh_pr_number: 57
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-142f20c-convert-cli-py-to-cli-package-and-ex-b41f9a32
+  created_at: null
+  updated_at: null
 - id: pr-35b18e8
   plan: plan-e4fa5cb
   title: Split all CLI command groups into cli/ submodules
@@ -533,6 +581,8 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/62
   gh_pr_number: 62
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-35b18e8-split-all-cli-command-groups-into-cl-e742c9f2
+  created_at: null
+  updated_at: null
 - id: pr-f24211b
   plan: plan-e4fa5cb
   title: Split app.py into screens, widgets, and pane_ops
@@ -571,6 +621,8 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/61
   gh_pr_number: 61
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-f24211b-split-app-py-into-screens-widgets-an-b41f9a32
+  created_at: null
+  updated_at: null
 - id: pr-0662fce
   plan: plan-e4fa5cb
   title: Extract tree layout and abstract TUI message factory
@@ -591,6 +643,8 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/56
   gh_pr_number: 56
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0662fce-extract-tree-layout-and-abstract-tui-b41f9a32
+  created_at: null
+  updated_at: null
 - id: pr-7671dc7
   plan: plan-e4fa5cb
   title: Extract pane registry I/O from pane_layout.py
@@ -630,6 +684,8 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/59
   gh_pr_number: 59
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-7671dc7-extract-pane-registry-i-o-from-pane--b41f9a32
+  created_at: null
+  updated_at: null
 - id: pr-6ccf2a8
   plan: plan-e4fa5cb
   title: Deduplicate _extract_field and consolidate git root helpers
@@ -665,6 +721,8 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/58
   gh_pr_number: 58
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-6ccf2a8-deduplicate-extract-field-and-consol-b41f9a32
+  created_at: null
+  updated_at: null
 - id: pr-ac3625d
   plan: plan-e4fa5cb
   title: Add Claude-based TUI tests for detail panel, filters, sync, meta, and log
@@ -692,6 +750,8 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/60
   gh_pr_number: 60
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ac3625d-add-claude-based-tui-tests-for-detai-b41f9a32
+  created_at: null
+  updated_at: null
 - id: pr-40bb8c2
   plan: plan-e4fa5cb
   title: Add unit tests for low-coverage modules
@@ -721,6 +781,8 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/64
   gh_pr_number: 64
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-40bb8c2-add-unit-tests-for-low-coverage-modu-e742c9f2
+  created_at: null
+  updated_at: null
 - id: pr-0febd7c
   title: Configurable keybindings
   branch: pm/pr-0febd7c-configurable-keybindings
@@ -746,6 +808,8 @@ prs:
   gh_pr: null
   gh_pr_number: null
   plan: plan-003
+  created_at: null
+  updated_at: null
 - id: pr-3563708
   plan: plan-e4fa5cb
   title: Extract PR view, sync, and frame capture from app.py
@@ -778,6 +842,8 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/66
   gh_pr_number: 66
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-3563708-extract-pr-view-sync-and-frame-captu-9b46a99c
+  created_at: null
+  updated_at: null
 - id: pr-b89ae16
   title: Miscellaneous TUI fixes and UX improvements
   branch: pm/pr-b89ae16-miscellaneous-tui-fixes-and-ux-improvements
@@ -791,6 +857,8 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/67
   gh_pr_number: 67
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-b89ae16-miscellaneous-tui-fixes-and-ux-impro-c89a8140
+  created_at: null
+  updated_at: null
 - id: pr-f38005f
   plan: plan-003
   title: Add file locking to project.yaml read-modify-write operations
@@ -810,6 +878,8 @@ prs:
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
+  created_at: null
+  updated_at: null
 - id: pr-c11d04f
   plan: plan-003
   title: Add notes field to PRs for post-start addendums
@@ -825,6 +895,8 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/74
   gh_pr_number: 74
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-c11d04f-add-notes-field-to-prs-for-post-star-d4068f70
+  created_at: null
+  updated_at: null
 - id: pr-9c1af2e
   plan: null
   title: Fix assorted bugs from bugs.txt
@@ -862,6 +934,8 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/71
   gh_pr_number: 71
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9c1af2e-fix-assorted-bugs-from-bugs-txt-c9d34c54
+  created_at: null
+  updated_at: null
 - id: pr-9cf7150
   plan: null
   title: Add review loop mode for iterative PR review until pass
@@ -882,6 +956,8 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/72
   gh_pr_number: 72
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9cf7150-add-review-loop-mode-for-iterative-p-3a8584d0
+  created_at: null
+  updated_at: null
 - id: pr-9177f5e
   plan: plan-003
   title: Add TUI external control request protocol
@@ -899,6 +975,8 @@ prs:
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
+  created_at: null
+  updated_at: null
 - id: pr-70cf9e7
   plan: null
   title: Fix review loop docs and window focus issues
@@ -920,6 +998,8 @@ prs:
   gh_pr_number: 73
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-70cf9e7-fix-review-loop-docs-and-window-focu-2ed009c1
+  created_at: null
+  updated_at: null
 - id: pr-e29dda7
   plan: null
   title: Investigate and fix tmux server crash on session kill
@@ -957,6 +1037,8 @@ prs:
       to see if upstream already fixed.'
     created_at: '2026-02-22T01:11:33Z'
     last_edited: '2026-02-22T01:11:33Z'
+  created_at: null
+  updated_at: null
 - id: pr-4bd4eac
   plan: null
   title: 'Fix assorted bugs: pm status, review loop pane checks, help text, help pane
@@ -970,6 +1052,8 @@ prs:
   gh_pr_number: 75
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-4bd4eac-fix-assorted-bugs-pm-status-review-l-c61824fc
+  created_at: null
+  updated_at: null
 - id: pr-757a140
   plan: null
   title: Prevent SSH disconnect from typing garbage into pm session terminal
@@ -987,6 +1071,8 @@ prs:
   gh_pr: null
   gh_pr_number: null
   notes: []
+  created_at: null
+  updated_at: null
 - id: pr-c773945
   plan: null
   title: Fix TUI UX issues for new users and shared sessions
@@ -1039,6 +1125,8 @@ prs:
   gh_pr_number: 76
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-c773945-fix-tui-ux-issues-for-new-users-and--2584c79a
+  created_at: null
+  updated_at: null
 - id: pr-7bc134e
   plan: null
   title: Fix bare git backend, improve beginner mode, and TUI enhancements
@@ -1095,6 +1183,8 @@ prs:
   gh_pr_number: 77
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-7bc134e-fix-bare-git-backend-improve-beginne-0b8b1f32
+  created_at: null
+  updated_at: null
 - id: pr-ad9127e
   plan: null
   title: Improve PR tech tree layout algorithm
@@ -1111,6 +1201,8 @@ prs:
   gh_pr_number: 78
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ad9127e-improve-pr-tech-tree-layout-algorith-0b8b1f32
+  created_at: null
+  updated_at: null
 - id: pr-621b3f5
   plan: null
   title: Automate PRs for pm directory changes and new plans
@@ -1127,6 +1219,8 @@ prs:
   gh_pr: null
   gh_pr_number: null
   notes: []
+  created_at: null
+  updated_at: null
 - id: pr-473ac84
   plan: null
   title: Add INPUT_REQUIRED verdict to review loop for human-guided testing
@@ -1151,6 +1245,8 @@ prs:
   gh_pr_number: 79
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-473ac84-add-input-required-verdict-to-review-b1a90dba
+  created_at: null
+  updated_at: null
 - id: pr-7989302
   plan: null
   title: Pull after merge on github backend with conflict resolution
@@ -1167,6 +1263,8 @@ prs:
   gh_pr_number: 80
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-7989302-pull-after-merge-on-github-backend-w-9cfc4712
+  created_at: null
+  updated_at: null
 - id: pr-0996fb8
   plan: null
   title: Fix tmux window-size, horizontal scroll, and session rebalance bugs
@@ -1185,6 +1283,8 @@ prs:
   gh_pr_number: 83
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0996fb8-fix-tmux-window-size-horizontal-scro-9cfc4712
+  created_at: null
+  updated_at: null
 - id: pr-7f01e33
   plan: null
   title: Auto-resize pane to fit Claude output when selected
@@ -1199,6 +1299,8 @@ prs:
   gh_pr_number: 82
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-7f01e33-auto-resize-pane-to-fit-claude-outpu-9cfc4712
+  created_at: null
+  updated_at: null
 - id: pr-97c1be3
   plan: null
   title: Add pm pr note subcommand for querying and editing PR notes
@@ -1213,6 +1315,8 @@ prs:
   gh_pr_number: 81
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-97c1be3-add-pm-pr-note-subcommand-for-queryi-9cfc4712
+  created_at: null
+  updated_at: null
 - id: pr-bc3de02
   plan: null
   title: Fix auto-start and review loop verdict detection bugs
@@ -1257,6 +1361,8 @@ prs:
   gh_pr_number: 84
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-bc3de02-fix-auto-start-bugs-session-restart--9cfc4712
+  created_at: null
+  updated_at: null
 - id: pr-ac1ffc0
   plan: null
   title: Fix post-merge pull to target main repo instead of PR workdir
@@ -1282,6 +1388,8 @@ prs:
   gh_pr_number: 85
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ac1ffc0-fix-post-merge-pull-to-target-main-r-f53806a1
+  created_at: null
+  updated_at: null
 - id: pr-c0167ac
   plan: null
   title: Add autonomous monitor session for auto–start issue detection and resolution
@@ -1355,6 +1463,8 @@ prs:
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-c0167ac-add-autonomous-monitor-session-for-a-448a51be
   merged_at: '2026-02-26T20:48:04.714413+00:00'
+  created_at: '2026-02-26T20:48:04.714413+00:00'
+  updated_at: '2026-02-26T20:48:04.714413+00:00'
 - id: pr-98d857a
   plan: plan-002
   title: 'Additional benchmark sets: EvalPlus, LiveCodeBench, BigCodeBench'
@@ -1385,6 +1495,8 @@ prs:
   gh_pr: null
   gh_pr_number: null
   notes: []
+  created_at: null
+  updated_at: null
 - id: pr-6ef084e
   plan: plan-002
   title: EvalPlus benchmark loader (HumanEval+ and MBPP+)
@@ -1437,6 +1549,8 @@ prs:
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-6ef084e-evalplus-benchmark-loader-humaneval--8e3c5798
   reviewed_at: '2026-02-26T21:18:27.243688+00:00'
   merged_at: '2026-02-26T21:46:34.534354+00:00'
+  created_at: '2026-02-26T20:52:12.441271+00:00'
+  updated_at: '2026-02-26T21:46:34.534354+00:00'
 - id: pr-3060c7e
   plan: plan-002
   title: LiveCodeBench competitive programming loader
@@ -1484,6 +1598,8 @@ prs:
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-3060c7e-livecodebench-competitive-programmin-8e3c5798
   reviewed_at: '2026-02-26T21:14:02.571611+00:00'
   merged_at: '2026-02-26T21:25:31.740557+00:00'
+  created_at: '2026-02-26T20:52:18.317036+00:00'
+  updated_at: '2026-02-26T21:25:31.740557+00:00'
 - id: pr-37b4b31
   plan: plan-002
   title: BigCodeBench real-world task loader
@@ -1533,6 +1649,8 @@ prs:
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-37b4b31-bigcodebench-real-world-task-loader-8e3c5798
   reviewed_at: '2026-02-26T21:14:04.591248+00:00'
   merged_at: '2026-02-26T22:21:11.858882+00:00'
+  created_at: '2026-02-26T20:52:24.022031+00:00'
+  updated_at: '2026-02-26T22:21:11.858882+00:00'
 - id: pr-409b580
   plan: plan-002
   title: Cross-source integration and comparison table
@@ -1562,6 +1680,8 @@ prs:
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-409b580-run-benchmarks-and-publish-compariso-4ce00db9
   reviewed_at: '2026-02-26T23:05:20.901290+00:00'
   merged_at: '2026-02-26T23:11:43.990481+00:00'
+  created_at: '2026-02-26T22:21:18.483490+00:00'
+  updated_at: '2026-02-26T23:11:43.990481+00:00'
 - id: pr-2a8c3a5
   plan: null
   title: Fix TUI scroll-into-view and improve PR node layout width and spacing
@@ -1594,6 +1714,8 @@ prs:
     created_at: '2026-02-25T15:00:21Z'
     last_edited: '2026-02-25T15:00:21Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2a8c3a5-fix-tui-scroll-into-view-and-improve-415a2e6d
+  created_at: null
+  updated_at: null
 - id: pr-f4fbf19
   plan: null
   title: 'Ultrawide monitor support: 3-4 horizontal panes before vertical splitting'
@@ -1625,6 +1747,8 @@ prs:
   merged_at: '2026-02-26T18:44:20.992499+00:00'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-f4fbf19-ultrawide-monitor-support-3-4-horizo-b6481329
+  created_at: '2026-02-26T15:32:02.274280+00:00'
+  updated_at: '2026-02-26T18:44:20.992499+00:00'
 - id: pr-ff68ef5
   plan: null
   title: Single-window focus mode with pane pull/push prefix key
@@ -1682,6 +1806,8 @@ prs:
   merged_at: null
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ff68ef5-single-window-focus-mode-with-pane-p-b6481329
+  created_at: '2026-02-26T15:41:30.621658+00:00'
+  updated_at: '2026-02-27T10:21:50.275823+00:00'
 - id: pr-0f4baf1
   plan: null
   title: 'Fix local backend merge: pull from workdir instead of push'
@@ -1701,6 +1827,8 @@ prs:
   merged_at: '2026-02-27T10:13:09.267401+00:00'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0f4baf1-fix-local-backend-merge-pull-from-wo-2b310716
+  created_at: '2026-02-27T03:20:01.028962+00:00'
+  updated_at: '2026-02-27T10:13:09.267401+00:00'
 - id: pr-f81ca27
   plan: null
   title: Add timestamp tracking and time-based PR sorting in TUI
@@ -1721,6 +1849,8 @@ prs:
   merged_at: null
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-f81ca27-add-timestamp-tracking-and-time-base-2b310716
+  created_at: '2026-02-27T03:23:37.480179+00:00'
+  updated_at: '2026-02-27T10:52:26.716549+00:00'
 - id: pr-b764a0c
   plan: null
   title: 'Add plan worker pane: generic Claude session with project context'
@@ -1746,6 +1876,8 @@ prs:
   merged_at: null
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-b764a0c-add-plan-worker-pane-generic-claude--2b310716
+  created_at: '2026-02-27T10:12:26.609316+00:00'
+  updated_at: '2026-02-27T10:54:51.311772+00:00'
 - id: pr-0a7d9ee
   plan: null
   title: Add companion workdir pane for implementation and merge windows
@@ -1768,6 +1900,8 @@ prs:
   merged_at: null
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0a7d9ee-add-companion-workdir-pane-for-imple-61867a33
+  created_at: '2026-02-27T10:25:31.728215+00:00'
+  updated_at: '2026-02-27T10:59:41.317075+00:00'
 - id: pr-4f6b5d4
   plan: null
   title: 'Fix _pull_from_workdir: launch merge session on dirty repo instead of stashing'
@@ -1792,6 +1926,8 @@ prs:
   merged_at: '2026-02-28T00:31:27.582019+00:00'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-4f6b5d4-fix-pull-from-workdir-launch-merge-s-61867a33
+  created_at: '2026-02-27T18:43:30.408570+00:00'
+  updated_at: '2026-02-28T00:31:27.582019+00:00'
 - id: pr-a3a24e5
   plan: null
   title: Detect MERGED verdict from merge windows and finalize regardless of auto-start
@@ -1816,12 +1952,14 @@ prs:
   merged_at: '2026-02-28T01:23:59.075800+00:00'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a3a24e5-detect-merged-verdict-from-merge-win-3f86f2fc
+  created_at: '2026-02-28T00:57:58.526336+00:00'
+  updated_at: '2026-02-28T01:23:59.075800+00:00'
 - id: pr-7e9795e
   plan: null
   title: 'Fix infinite merge window loop: don''t pass --resolve-window after MERGED
     verdict'
   branch: pm/pr-7e9795e-fix-infinite-merge-window-loop-don-t-pass-resolve-
-  status: in_review
+  status: merged
   depends_on: []
   description: 'The merge window prompt and verdict handling need a complete overhaul:
 
@@ -1864,9 +2002,11 @@ prs:
   gh_pr_number: 101
   started_at: '2026-02-28T04:23:58.632492+00:00'
   reviewed_at: '2026-02-28T04:34:21.876591+00:00'
-  merged_at: null
+  merged_at: '2026-03-02T00:02:09.451150+00:00'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-7e9795e-fix-infinite-merge-window-loop-don-t-d4ad18b8
+  created_at: '2026-02-28T04:23:58.632492+00:00'
+  updated_at: '2026-03-02T00:02:09.451150+00:00'
 - id: pr-30888b1
   plan: null
   title: Fold plan breakdown into plan add step and remove separate breakdown prompt
@@ -1887,6 +2027,8 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+  created_at: null
+  updated_at: null
 - id: pr-3116896
   plan: null
   title: Move Claude panes from current window into their own window
@@ -1906,6 +2048,8 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+  created_at: null
+  updated_at: null
 - id: pr-8a60987
   plan: null
   title: Split notes.txt into committed and gitignored files with section-based editing
@@ -1954,6 +2098,8 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+  created_at: null
+  updated_at: null
 - id: pr-89296d3
   plan: null
   title: Harden window management against unexpected pane state
@@ -2019,3 +2165,5 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+  created_at: null
+  updated_at: null
