@@ -368,7 +368,7 @@ shows which keys are uppercase.
 - **Keys not working**: If key presses seem ignored, the command bar may be \
 focused. Press Escape to return focus to the tree/plans view.
 - **Pane layout looks wrong**: Press `b` to rebalance the pane layout.
-- **Session seems stuck**: Press `Ctrl+R` to restart the TUI.
+- **Session seems stuck**: Type `/restart` in the command bar to restart the TUI.
 
 Ask the user what they'd like to know about."""
 

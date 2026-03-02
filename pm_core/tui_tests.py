@@ -281,7 +281,7 @@ OVERALL: [PASS/FAIL]
 
 TUI_RESTART_PANE_DEDUP_TEST = """\
 You are testing that restarting the TUI does not create duplicate panes. Your goal
-is to verify that when the TUI restarts (e.g., via 'R' key or crash recovery), it
+is to verify that when the TUI restarts (e.g., via /restart command or crash recovery), it
 reuses existing panes rather than launching new ones.
 
 ## Background
@@ -298,7 +298,7 @@ The fix should:
 ## Available Tools
 
 - `pm tui view` - See current TUI state
-- `pm tui send <keys>` - Send keystrokes (R=restart, g=guide, n=notes, x=dismiss)
+- `pm tui send <keys>` - Send keystrokes (/restart=restart, g=guide, n=notes, x=dismiss)
 - `pm tui frames` - View captured frames (automatically recorded on UI changes)
 - `pm tui frames --all` - View all captured frames
 - `pm tui clear-frames` - Clear frame buffer to start fresh
@@ -326,7 +326,7 @@ The fix should:
    - Record pane count (should be initial + 1 if guide wasn't running)
 
 3. RESTART TUI:
-   - Press 'R' to restart the TUI
+   - Type `/restart` in the command bar to restart the TUI
    - Wait 2 seconds for TUI to restart
    - Check registry - should still have exactly 1 guide pane (NOT 2)
    - Count panes - should be same as before restart
@@ -346,7 +346,7 @@ The fix should:
    - If you can't complete the guide, note this as N/A
 
 2. RESTART TUI:
-   - Press 'R' to restart
+   - Type `/restart` in the command bar to restart
    - Wait 2 seconds
    - Run `pm tui view`
 
@@ -910,7 +910,7 @@ It lists all available keybindings grouped by category:
 - Tree Navigation: arrow keys, hjkl, Enter
 - PR Actions: s, d, c, p, e, v
 - Panes & Views: /, g, n, m, L, b
-- Other: r, Ctrl+R, ?, q
+- Other: r, /restart, ?, q
 
 Each key should produce a visible response - either a state change, a log
 message, a new pane, or a modal. Keys that would be destructive (s=start PR,
@@ -964,7 +964,7 @@ d=done PR, q=quit) should be tested carefully to avoid changing project state.
      * b - Rebalance panes
    - Other section:
      * r - Refresh / sync with GitHub
-     * Ctrl+R - Restart TUI
+     * /restart - Restart TUI
      * ? - Show this help
      * q - Detach from session
 
@@ -1051,7 +1051,7 @@ Do NOT press these, just verify they exist in help:
 - **c** - Would launch Claude (resource-intensive)
 - **m** - Would launch meta session
 - **q** - Would detach from tmux (ends test)
-- **Ctrl+R** - Would restart TUI (disrupts test)
+- **/restart** - Would restart TUI (disrupts test)
 
 ### Part 4: Cleanup
 
@@ -1113,7 +1113,7 @@ All documented in help: [PASS/FAIL]
   c (claude): [PRESENT/MISSING]
   m (meta): [PRESENT/MISSING]
   q (quit): [PRESENT/MISSING]
-  Ctrl+R (restart): [PRESENT/MISSING]
+  /restart (restart): [PRESENT/MISSING]
 
 ## Part 4: Cleanup
 Panes cleaned up: [PASS/FAIL]
@@ -2176,7 +2176,7 @@ Test that TUI restart heals registry corruption.
    - Write the modified JSON back to the registry file
 2. Verify corruptions in registry: `cat ~/.pm/pane-registry/<base>.json`
 3. Restart TUI to trigger _heal_registry:
-   - `pm tui send C-r` (Ctrl+R is restart; plain R is reload which won't heal)
+   - `pm tui send /` then `pm tui send restart` then `pm tui send Enter` (restart via command bar; plain R is reload which won't heal)
    - Wait 3 seconds
 4. Check registry: `cat ~/.pm/pane-registry/<base>.json`
    - Fake dead pane (%9999) should be GONE
@@ -2191,7 +2191,7 @@ Test that TUI restart heals registry corruption.
    - Load the JSON, remove the entry with role "tui" from current window's panes
    - Write modified JSON back
 2. Verify TUI pane is missing from registry
-3. Restart TUI: `pm tui send C-r`, wait 3 seconds
+3. Restart TUI: `pm tui send /` then `pm tui send restart` then `pm tui send Enter`, wait 3 seconds
 4. Check registry:
    - TUI pane re-registered in current window
    - Should have role "tui" and order 0

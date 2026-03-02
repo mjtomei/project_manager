@@ -2333,7 +2333,7 @@ prs:
     intact.
 
     2. Only persist/restore review loop state on merge-triggered restarts, NOT on
-    manual Ctrl+R restarts (current breadcrumb gate via merge-restart marker already
+    manual /restart restarts (current breadcrumb gate via merge-restart marker already
     handles this).
 
     3. Add a `pm tui restart` CLI command that restarts the TUI from the command line,
