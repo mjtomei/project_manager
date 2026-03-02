@@ -244,7 +244,7 @@ what's already done and what comes next. Focus on the **next** item.
 
 **IMPORTANT:** You are guiding the user, not doing everything yourself. After
 init, direct the user to interact with the TUI to create plans and load PRs.
-Do NOT run `pm plan add`, `pm plan breakdown`, or `pm plan load` yourself —
+Do NOT run `pm plan add` or `pm plan load` yourself —
 instead tell the user which keys to press in the TUI and what to expect.
 
 ### Initializing the project
@@ -400,29 +400,26 @@ TUI (key shortcuts) or CLI commands:
 codebase. Creates a pm/ directory that tracks plans and PRs.
 
 2. **Plan** (TUI: `p` then `a` / CLI: `pm plan add`): Write a high-level \
-plan describing a feature or goal. Plans are markdown files.
+plan describing a feature or goal, then break it down into concrete PRs — \
+small, focused units of work with dependencies forming a tree shown in the TUI.
 
-3. **Break down** (TUI: `w` in plans view / CLI: `pm plan breakdown`): \
-Launch a Claude session to turn a plan into concrete PRs — small, focused \
-units of work with dependencies forming a tree shown in the TUI.
-
-4. **Review** (TUI: `c` in plans view / CLI: `pm plan review`): Launch a \
+3. **Review** (TUI: `c` in plans view / CLI: `pm plan review`): Launch a \
 Claude session to check plan-PR consistency and coverage before loading.
 
-5. **Load** (TUI: `l` in plans view / CLI: `pm plan load`): Load PRs from \
+4. **Load** (TUI: `l` in plans view / CLI: `pm plan load`): Load PRs from \
 the plan file into the project. Runs instantly — no Claude session needed. \
 In the TUI, press `p` to leave plans view and see the tech tree.
 
-6. **Work** (TUI: `s` on a PR / CLI: `pm pr start`): Start a PR to open \
+5. **Work** (TUI: `s` on a PR / CLI: `pm pr start`): Start a PR to open \
 a Claude session focused on that task. Claude works in a dedicated branch \
 and directory.
 
-7. **Review** (TUI: `d` on a PR / CLI: `pm pr review`): Mark a PR as ready \
+6. **Review** (TUI: `d` on a PR / CLI: `pm pr review`): Mark a PR as ready \
 for review. \
 This pushes the branch, creates a GitHub pull request, and opens a new \
 tmux window with a Claude review session that checks the code.
 
-8. **Merge**: After review, PRs get merged. pm detects this automatically \
+7. **Merge**: After review, PRs get merged. pm detects this automatically \
 and updates the tree.
 
 At any point the user might need to: add new plans, add or reorder PRs, \

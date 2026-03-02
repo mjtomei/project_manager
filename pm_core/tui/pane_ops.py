@@ -298,12 +298,12 @@ These are safe to run directly — they only read state:
 ## Important: Use the TUI for actions that launch sessions
 
 Do NOT run commands that launch new Claude sessions yourself (e.g. `pm pr start`, \
-`pm pr done`, `pm plan add`, `pm plan breakdown`, `pm plan review`). These must be \
+`pm pr done`, `pm plan add`, `pm plan review`). These must be \
 triggered through the TUI so that panes are managed correctly. Instead, tell the \
 user which key to press in the TUI:
 - `s` on a PR — start working on it
 - `d` on a PR — mark it as done and start review
-- `p` — toggle plans view, then `a`/`w`/`c`/`l` for plan actions
+- `p` — toggle plans view, then `a`/`c`/`l` for plan actions
 
 For plan management, recommend the user switch to the plans pane (`p` key) where \
 they can use dedicated shortcuts rather than typing commands.
@@ -456,9 +456,6 @@ def handle_plan_action(app, action: str, plan_id: str | None) -> None:
                 if plan_path.exists():
                     editor = find_editor()
                     launch_pane(app, f"{editor} {plan_path}", "plan-edit")
-    elif action == "breakdown":
-        if plan_id:
-            launch_pane(app, f"pm plan breakdown {plan_id}", "plan-breakdown")
     elif action == "deps":
         launch_pane(app, "pm plan deps", "plan-deps")
     elif action == "load":

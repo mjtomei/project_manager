@@ -133,7 +133,6 @@ class TestPlansPane:
         result = pane.render()
         text = result.plain
         assert "add" in text
-        assert "breakdown" in text
         assert "review" in text
         assert "load" in text
         assert "edit" in text
@@ -144,33 +143,20 @@ class TestPlansPane:
         pane = PlansPane()
         expected = {
             "a": "add",
-            "w": "breakdown",
             "D": "deps",
             "l": "load",
-            "v": "view",
             "e": "edit",
             "c": "review",
         }
         assert pane._KEY_ACTIONS == expected
 
-    def test_breakdown_key_is_not_review(self):
-        """Regression: pressing 'w' must route to 'breakdown', not 'review'."""
-        pane = PlansPane()
-        assert pane._KEY_ACTIONS["w"] == "breakdown"
-        assert pane._KEY_ACTIONS["c"] == "review"
-
     def test_handler_routes_match_key_actions(self):
-        """Verify handle_plan_action routes each action to the matching pm command.
-
-        This catches swapped conditions like:
-            elif action == "breakdown":
-                launch_pane(app, "pm plan review ...", "plan-review")  # WRONG
-        """
+        """Verify handle_plan_action routes each action to the matching pm command."""
         from pm_core.tui.pane_ops import handle_plan_action
         src = inspect.getsource(handle_plan_action)
         # For pane-launching actions, verify the action check and the
         # command string use the SAME action word.
-        for action in ("breakdown", "review"):
+        for action in ("review",):
             # Find: action == "<action>" ... pm plan <action>
             pattern = rf'action\s*==\s*"{action}".*?launch_pane\(.*?pm plan {action}'
             assert re.search(pattern, src, re.DOTALL), (
