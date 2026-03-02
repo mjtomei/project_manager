@@ -37,7 +37,6 @@ from pm_core.cli.helpers import (
     _resolve_repo_id,
     _workdirs_dir,
     kill_pr_windows,
-    save_and_push,
     state_root,
     trigger_tui_refresh,
     trigger_tui_restart,
@@ -1933,21 +1932,21 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool):
         except Exception as e:
             click.echo(f"Warning: Could not close GitHub PR: {e}", err=True)
 
-    # Remove workdir if exists
+    # Remove workdir if exists (filesystem op, safe outside lock)
     workdir = pr_entry.get("workdir")
     if workdir and Path(workdir).exists():
         shutil.rmtree(workdir)
         click.echo(f"Removed workdir: {workdir}")
 
-    # Remove PR from list
-    prs = data.get("prs") or []
-    data["prs"] = [p for p in prs if p["id"] != pr_id]
+    # Remove PR from list and update active_pr under lock
+    target_id = pr_id
 
-    # Update active_pr if needed
-    if data.get("project", {}).get("active_pr") == pr_id:
-        remaining = data.get("prs") or []
-        data["project"]["active_pr"] = remaining[0]["id"] if remaining else None
+    def apply(data):
+        data["prs"] = [p for p in (data.get("prs") or []) if p["id"] != target_id]
+        if data.get("project", {}).get("active_pr") == target_id:
+            remaining = data.get("prs") or []
+            data["project"]["active_pr"] = remaining[0]["id"] if remaining else None
 
-    save_and_push(data, root, f"pm: close {pr_id}")
+    store.locked_update(root, apply)
     click.echo(f"Removed {pr_id}: {pr_entry.get('title', '???')}")
     trigger_tui_refresh()
