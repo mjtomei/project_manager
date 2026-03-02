@@ -159,7 +159,7 @@ def _apply_pr_edit(root: Path, pr_id: str, parsed: dict) -> list[str]:
         changes.append("description updated")
 
     # Status (skip invalid values silently)
-    valid_statuses = {"pending", "in_progress", "in_review", "merged", "closed"}
+    valid_statuses = {"pending", "in_progress", "in_review", "qa", "merged", "closed"}
     if parsed["status"] is not None:
         current_status = pr_entry.get("status", "pending")
         if parsed["status"] != current_status and parsed["status"] in valid_statuses:
@@ -281,8 +281,8 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
 @click.option("--title", default=None, help="New title")
 @click.option("--depends-on", "depends_on", default=None, help="Comma-separated PR IDs (replaces existing)")
 @click.option("--description", "desc", default=None, help="New description")
-@click.option("--status", default=None, type=click.Choice(["pending", "in_progress", "in_review", "merged", "closed"]),
-              help="New status (pending, in_progress, in_review, merged, closed)")
+@click.option("--status", default=None, type=click.Choice(["pending", "in_progress", "in_review", "qa", "merged", "closed"]),
+              help="New status (pending, in_progress, in_review, qa, merged, closed)")
 def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | None, status: str | None):
     """Edit an existing PR's title, description, dependencies, or status."""
     root = state_root()
@@ -461,7 +461,9 @@ def pr_list(workdirs: bool):
         "pending": "⏳",
         "in_progress": "🔨",
         "in_review": "👀",
+        "qa": "🧪",
         "merged": "✅",
+        "closed": "🚫",
         "blocked": "🚫",
     }
     for p in prs:

@@ -555,6 +555,8 @@ mechanics will help you distinguish normal operation from genuine problems.
   PRs whose dependencies are all `merged` and runs `pm pr start`.
 - `in_progress` -- A Claude implementation session is running in a tmux window.
 - `in_review` -- A review loop is running (iterates until PASS/PASS_WITH_SUGGESTIONS).
+- `qa` -- QA testing is running. QA scenarios execute in parallel; if they find
+  issues and commit fixes, the PR returns to `in_review` for another review cycle.
 - `merged` -- PR merged to `{base_branch}`. Auto-start then checks for newly-unblocked dependents.
 
 **How transitions work:**
@@ -566,10 +568,13 @@ mechanics will help you distinguish normal operation from genuine problems.
   launching a review loop. **This means there is a normal ~30 second delay between Claude
   finishing its work and the review starting.** During this window, the pane will appear
   idle but the transition has not happened yet -- this is expected, not a problem.
-- **in_review -> merged**: When the review loop reaches a PASS or PASS_WITH_SUGGESTIONS
-  verdict, auto-start runs `pm pr merge`. If the merge has conflicts, a merge-resolution
-  Claude window opens; once that finishes (also detected via idle polling), the merge is
-  re-attempted.
+- **in_review -> qa**: When the review loop reaches a PASS or PASS_WITH_SUGGESTIONS
+  verdict, auto-start transitions the PR to `qa` and launches QA scenarios.
+- **qa -> merged**: When QA passes with no changes, auto-start runs `pm pr merge`.
+  If QA finds issues or commits fixes, the PR returns to `in_review` for re-review.
+- **in_review/qa -> merged (merge conflicts)**: If the merge has conflicts, a
+  merge-resolution Claude window opens; once that finishes (also detected via idle
+  polling), the merge is re-attempted.
 
 Note: `d` in the TUI starts a single one-shot review. To start a review **loop** (which
 auto-start uses), the TUI chord is `zzz d`. If you need to manually kick off a review
