@@ -18,10 +18,15 @@ from pm_core.tmux import (
     get_pane_indices,
     get_pane_geometries,
     get_window_id,
+    get_window_id_for_pane,
     get_window_size,
     swap_pane,
     list_windows,
+    find_all_windows_by_name,
     find_window_by_name,
+    rename_window,
+    get_pane_details,
+    score_window_validity,
     select_window,
     select_pane_smart,
     is_zoomed,
@@ -228,6 +233,21 @@ class TestGetWindowId:
         assert get_window_id("sess") == "@1"
 
 
+class TestGetWindowIdForPane:
+    @patch("pm_core.tmux.subprocess.run")
+    def test_returns_window_id(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="@3\n")
+        assert get_window_id_for_pane("%5") == "@3"
+        cmd = mock_run.call_args[0][0]
+        assert "display" in cmd
+        assert "%5" in cmd
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_returns_empty_on_failure(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=1, stdout="")
+        assert get_window_id_for_pane("%99") == ""
+
+
 # ---------------------------------------------------------------------------
 # swap_pane
 # ---------------------------------------------------------------------------
@@ -264,6 +284,25 @@ class TestListWindows:
         assert list_windows("sess") == []
 
 
+class TestFindAllWindowsByName:
+    @patch("pm_core.tmux.list_windows")
+    def test_returns_all_matches(self, mock_lw):
+        mock_lw.return_value = [
+            {"id": "@0", "index": "0", "name": "review-pr-001"},
+            {"id": "@1", "index": "1", "name": "review-pr-001"},
+            {"id": "@2", "index": "2", "name": "main"},
+        ]
+        result = find_all_windows_by_name("sess", "review-pr-001")
+        assert len(result) == 2
+        assert result[0]["id"] == "@0"
+        assert result[1]["id"] == "@1"
+
+    @patch("pm_core.tmux.list_windows")
+    def test_no_matches(self, mock_lw):
+        mock_lw.return_value = [{"id": "@0", "index": "0", "name": "main"}]
+        assert find_all_windows_by_name("sess", "missing") == []
+
+
 class TestFindWindowByName:
     @patch("pm_core.tmux.list_windows")
     def test_found(self, mock_lw):
@@ -279,6 +318,115 @@ class TestFindWindowByName:
     def test_not_found(self, mock_lw):
         mock_lw.return_value = [{"id": "@0", "index": "0", "name": "main"}]
         assert find_window_by_name("sess", "missing") is None
+
+    @patch("pm_core.tmux.rename_window")
+    @patch("pm_core.tmux.score_window_validity")
+    @patch("pm_core.tmux.list_windows")
+    def test_disambiguates_duplicates(self, mock_lw, mock_score, mock_rename):
+        mock_lw.return_value = [
+            {"id": "@0", "index": "0", "name": "review-pr-001"},
+            {"id": "@1", "index": "1", "name": "review-pr-001"},
+        ]
+        # @1 has higher score
+        mock_score.side_effect = lambda s, wid, wn: 15 if wid == "@1" else 5
+        result = find_window_by_name("sess", "review-pr-001")
+        assert result["id"] == "@1"
+        # @0 should be renamed
+        mock_rename.assert_called_once()
+        renamed_id = mock_rename.call_args[0][1]
+        assert renamed_id == "@0"
+
+    @patch("pm_core.tmux.rename_window")
+    @patch("pm_core.tmux.score_window_validity")
+    @patch("pm_core.tmux.list_windows")
+    def test_three_duplicates_get_unique_stale_names(self, mock_lw, mock_score, mock_rename):
+        mock_lw.return_value = [
+            {"id": "@0", "index": "0", "name": "impl"},
+            {"id": "@1", "index": "1", "name": "impl"},
+            {"id": "@2", "index": "2", "name": "impl"},
+        ]
+        mock_score.side_effect = lambda s, wid, wn: {"@0": 3, "@1": 10, "@2": 5}[wid]
+        result = find_window_by_name("sess", "impl")
+        assert result["id"] == "@1"
+        assert mock_rename.call_count == 2
+        stale_names = [c[0][2] for c in mock_rename.call_args_list]
+        assert len(set(stale_names)) == 2  # unique names
+
+
+class TestRenameWindow:
+    @patch("pm_core.tmux.subprocess.run")
+    def test_calls_rename(self, mock_run):
+        rename_window("sess", "@1", "new-name")
+        cmd = mock_run.call_args[0][0]
+        assert "rename-window" in cmd
+        assert "new-name" in cmd
+
+
+class TestGetPaneDetails:
+    @patch("pm_core.tmux.subprocess.run")
+    def test_parses_output(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="%0 0 bash bash -c claude\n%1 1 less less -R\n",
+        )
+        result = get_pane_details("sess", "@1")
+        assert len(result) == 2
+        assert result[0]["id"] == "%0"
+        assert result[0]["current_command"] == "bash"
+        assert result[0]["start_command"] == "bash -c claude"
+        assert result[1]["id"] == "%1"
+        assert result[1]["current_command"] == "less"
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_three_parts_only(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="%0 0 bash\n",
+        )
+        result = get_pane_details("sess", "@1")
+        assert len(result) == 1
+        assert result[0]["start_command"] == ""
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_empty_on_error(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=1, stdout="")
+        assert get_pane_details("sess", "@1") == []
+
+
+class TestScoreWindowValidity:
+    @patch("pm_core.tmux.capture_pane", return_value="")
+    @patch("pm_core.tmux.get_pane_details", return_value=[
+        {"id": "%0", "index": "0", "current_command": "claude", "start_command": "bash"},
+    ])
+    @patch("pm_core.tmux.get_pane_indices", return_value=[("%0", 0)])
+    @patch("pm_core.pane_registry.load_registry", return_value={
+        "windows": {"@1": {"panes": [{"id": "%0", "role": "impl-claude"}]}},
+    })
+    def test_registered_alive_claude_window(self, mock_reg, mock_gpi, mock_gpd, mock_cap):
+        score = score_window_validity("sess", "@1", "impl-pr001")
+        # +10 registry + 5 claude + 3 pane count (1 pane, non-review)
+        assert score >= 15
+
+    @patch("pm_core.tmux.capture_pane", return_value="")
+    @patch("pm_core.tmux.get_pane_details", return_value=[
+        {"id": "%0", "index": "0", "current_command": "bash", "start_command": "bash"},
+    ])
+    @patch("pm_core.tmux.get_pane_indices", return_value=[("%0", 0)])
+    @patch("pm_core.pane_registry.load_registry", return_value={"windows": {}})
+    def test_unregistered_no_claude(self, mock_reg, mock_gpi, mock_gpd, mock_cap):
+        score = score_window_validity("sess", "@1", "impl-pr001")
+        # +3 for pane count (1 pane, non-review), no registry, no claude
+        assert score == 3
+
+    @patch("pm_core.tmux.capture_pane", return_value="")
+    @patch("pm_core.tmux.get_pane_details", return_value=[])
+    @patch("pm_core.tmux.get_pane_indices", return_value=[])
+    @patch("pm_core.pane_registry.load_registry", return_value={
+        "windows": {"@1": {"panes": [{"id": "%0", "role": "impl-claude"}]}},
+    })
+    def test_registered_all_dead(self, mock_reg, mock_gpi, mock_gpd, mock_cap):
+        score = score_window_validity("sess", "@1", "impl-pr001")
+        # +10 registry - 5 all dead = 5, no claude, pane count 0 != 1
+        assert score == 5
 
 
 # ---------------------------------------------------------------------------
@@ -399,37 +547,26 @@ class TestCurrentOrBaseSession:
 # ---------------------------------------------------------------------------
 
 class TestNewWindowGetPane:
-    @patch("pm_core.tmux.get_pane_indices", return_value=[("%5", 0)])
     @patch("pm_core.tmux.current_or_base_session", return_value="sess")
-    @patch("pm_core.tmux.find_window_by_name", return_value={"id": "@1", "index": "1", "name": "review"})
+    @patch("pm_core.tmux.get_window_id_for_pane", return_value="@1")
     @patch("pm_core.tmux.subprocess.run")
-    def test_returns_pane_id(self, mock_run, mock_fwbn, mock_cobs, mock_gpi):
-        mock_run.return_value = MagicMock(returncode=0)
+    def test_returns_pane_id(self, mock_run, mock_gwifp, mock_cobs):
+        # new-window -P -F returns pane ID on stdout
+        mock_run.return_value = MagicMock(returncode=0, stdout="%5\n")
         result = new_window_get_pane("sess", "review", "bash", "/tmp")
         assert result == "%5"
+        # switch=True should derive window ID from pane, not name lookup
+        mock_gwifp.assert_called_once_with("%5")
 
-    @patch("pm_core.tmux.find_window_by_name", return_value=None)
     @patch("pm_core.tmux.subprocess.run")
-    def test_returns_none_when_window_not_found(self, mock_run, mock_fwbn):
-        mock_run.return_value = MagicMock(returncode=0)
+    def test_returns_none_when_stdout_empty(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="")
         result = new_window_get_pane("sess", "review", "bash", "/tmp")
         assert result is None
 
-    @patch("pm_core.tmux.get_pane_indices", return_value=[])
-    @patch("pm_core.tmux.current_or_base_session", return_value="sess")
-    @patch("pm_core.tmux.find_window_by_name", return_value={"id": "@1", "index": "1", "name": "review"})
     @patch("pm_core.tmux.subprocess.run")
-    def test_returns_none_when_no_panes(self, mock_run, mock_fwbn, mock_cobs, mock_gpi):
-        mock_run.return_value = MagicMock(returncode=0)
-        result = new_window_get_pane("sess", "review", "bash", "/tmp")
-        assert result is None
-
-    @patch("pm_core.tmux.get_pane_indices", return_value=[("%5", 0)])
-    @patch("pm_core.tmux.current_or_base_session", return_value="sess")
-    @patch("pm_core.tmux.find_window_by_name", return_value={"id": "@1", "index": "1", "name": "review"})
-    @patch("pm_core.tmux.subprocess.run")
-    def test_switch_false_skips_select_window(self, mock_run, mock_fwbn, mock_cobs, mock_gpi):
-        mock_run.return_value = MagicMock(returncode=0)
+    def test_switch_false_skips_select_window(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="%5\n")
         result = new_window_get_pane("sess", "review", "bash", "/tmp", switch=False)
         assert result == "%5"
         # select-window should NOT have been called — only new-window
@@ -437,7 +574,6 @@ class TestNewWindowGetPane:
         cmds = [c[0][0] for c in calls]
         assert any("new-window" in cmd for cmd in cmds)
         assert not any("select-window" in cmd for cmd in cmds)
-        mock_cobs.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

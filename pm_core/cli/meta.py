@@ -164,9 +164,12 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
         if tmux_mod.session_exists(pm_session):
             existing = tmux_mod.find_window_by_name(pm_session, window_name)
             if existing:
-                tmux_mod.select_window(pm_session, existing["index"])
-                click.echo(f"Switched to existing window '{window_name}'")
-                return
+                from pm_core import pane_registry
+                if pane_registry.try_reuse_or_rename_stale(pm_session, existing):
+                    tmux_mod.select_window(pm_session, existing["index"])
+                    click.echo(f"Switched to existing window '{window_name}'")
+                    return
+                click.echo(f"Existing window '{window_name}' is stale, creating fresh")
 
     # Launch Claude
     claude = find_claude()
@@ -191,10 +194,16 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
     if pm_session:
         if tmux_mod.session_exists(pm_session):
             try:
-                tmux_mod.new_window(pm_session, window_name, cmd, str(work_path))
-                win = tmux_mod.find_window_by_name(pm_session, window_name)
-                if win:
-                    tmux_mod.set_shared_window_size(pm_session, win["id"])
+                claude_pane = tmux_mod.new_window_get_pane(
+                    pm_session, window_name, cmd, str(work_path))
+                if claude_pane:
+                    from pm_core import pane_registry
+                    # Derive window ID directly from pane (avoids name-lookup race)
+                    meta_win_id = tmux_mod.get_window_id_for_pane(claude_pane)
+                    if meta_win_id:
+                        tmux_mod.set_shared_window_size(pm_session, meta_win_id)
+                        pane_registry.register_pane(
+                            pm_session, meta_win_id, claude_pane, "meta-claude", cmd)
                 click.echo(f"Launched meta session in window '{window_name}'")
                 return
             except Exception as e:

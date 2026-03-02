@@ -20,13 +20,28 @@ def get_pm_session() -> str | None:
 
 
 def find_claude_pane(session: str, window_name: str) -> str | None:
-    """Find the Claude pane ID in a window (first pane)."""
+    """Find the Claude pane ID in a named window.
+
+    Checks the pane registry first (most reliable), then falls back to
+    ``panes[0][0]`` with a warning for unregistered windows.
+    """
     from pm_core import tmux as tmux_mod
+    from pm_core import pane_registry
+
     win = tmux_mod.find_window_by_name(session, window_name)
     if not win:
         return None
+
+    # Try registry first
+    pane_id = pane_registry.find_claude_pane_in_window(session, win["id"])
+    if pane_id:
+        return pane_id
+
+    # Fallback: first pane (legacy behavior)
     panes = tmux_mod.get_pane_indices(session, win["index"])
     if panes:
+        _log.warning("find_claude_pane: no registry entry for window '%s' (%s), "
+                     "falling back to panes[0][0]=%s", window_name, win["id"], panes[0][0])
         return panes[0][0]
     return None
 

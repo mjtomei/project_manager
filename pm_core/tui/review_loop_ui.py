@@ -507,15 +507,14 @@ def _handle_merge_input_required(app, pr_id: str, merge_key: str) -> None:
 # ---------------------------------------------------------------------------
 
 def _find_impl_pane(session: str, window_name: str) -> str | None:
-    """Find the first pane ID in an implementation window."""
-    from pm_core import tmux as tmux_mod
-    win = tmux_mod.find_window_by_name(session, window_name)
-    if not win:
-        return None
-    panes = tmux_mod.get_pane_indices(session, win["index"])
-    if panes:
-        return panes[0][0]
-    return None
+    """Find the Claude pane in an implementation/merge window.
+
+    Delegates to :func:`pm_core.loop_shared.find_claude_pane` which
+    checks the pane registry first, then falls back to ``panes[0][0]``
+    with a warning for unregistered windows.
+    """
+    from pm_core.loop_shared import find_claude_pane
+    return find_claude_pane(session, window_name)
 
 
 def _poll_impl_idle(app) -> None:
