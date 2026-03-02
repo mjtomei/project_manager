@@ -178,20 +178,30 @@ TUI Keybindings:
 
 Navigation:
   Up/Down, j/k     Navigate PR list
+  Left/Right, h/l  Navigate tree columns
+  J/K              Jump to next/prev plan
   Enter            Select/expand PR
 
-Actions:
-  g                Launch guide pane
+PR Actions:
+  s                Start selected PR
+  d                Review (zz d: loop, zzz d: strict)
+  g                Merge PR
+  e                Edit selected PR
+  t                Start QA on selected PR
+
+Views:
+  p                Toggle plans view
+  q                Toggle QA instructions view
   n                Open notes
-  c                Launch Claude for selected PR
-  r                Refresh state
-
-Guide Mode:
-  x                Dismiss guide view
-
-General:
-  q                Quit TUI
+  c                Launch Claude session
+  L                View TUI log
   ?                Show help
+
+Other:
+  r                Refresh / sync
+  b                Rebalance panes
+  A                Toggle auto-start
+  ctrl+b d         Detach from session
 """)
 
 

@@ -351,7 +351,8 @@ Common keyboard shortcuts in the TUI:
 - ?: Show help
 - /: Open command bar
 - b: Rebalance panes
-- q: Detach from session
+- q: Toggle QA instructions view
+- t: Start QA on selected PR
 
 Common commands:
 - pm pr list: List all PRs
