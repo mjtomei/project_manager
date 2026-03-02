@@ -233,6 +233,10 @@ class ProjectManagerApp(App):
         self._auto_start_run_id: str | None = None
         # Watcher loop state (purely in-memory, lost on TUI restart)
         self._watcher_state = None  # WatcherLoopState | None
+        # Poll timer health: monotonic timestamp of last _poll_loop_state tick
+        self._poll_last_tick: float = 0.0
+        # Watchdog timer (separate from poll timer, runs every 30s)
+        self._watchdog_timer: Timer | None = None
 
     def _consume_z(self) -> int:
         """Atomically read and clear the z modifier count.
@@ -297,6 +301,9 @@ class ProjectManagerApp(App):
         self._update_orientation()
         # Background sync interval: 5 minutes for automatic PR sync
         self._sync_timer = self.set_interval(300, self._background_sync)
+        # Start the watchdog timer (separate from poll timer, runs every 30s)
+        from pm_core.tui.watchdog import start_watchdog
+        start_watchdog(self)
         # Run heavier startup tasks (heal_registry, tmux bindings) in a
         # background thread so they don't block input processing.
         self.run_worker(self._deferred_startup(), exclusive=False)
