@@ -6,6 +6,7 @@ Committed sections (tracked in git, in notes.txt):
   - General: included in all prompts
   - Implementation: included only in implementation prompts
   - Review: included only in review prompts
+  - QA: included only in QA prompts
   - Merge: included only in merge prompts
   - Watcher: included only in watcher prompts
 

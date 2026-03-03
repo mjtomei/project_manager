@@ -321,6 +321,17 @@ class TestNotesSection:
         assert "L" in result
         assert "I" not in result
 
+    def test_qa_includes_general_qa_local(self, tmp_path):
+        (tmp_path / NOTES_FILENAME).write_text(
+            "## General\n\nG\n\n## QA\n\nQ\n\n## Implementation\n\nI\n"
+        )
+        (tmp_path / LOCAL_NOTES_FILENAME).write_text("L\n")
+        result = notes_section(tmp_path, "qa")
+        assert "G" in result
+        assert "Q" in result
+        assert "L" in result
+        assert "I" not in result
+
     def test_merge_includes_general_merge_local(self, tmp_path):
         (tmp_path / NOTES_FILENAME).write_text(
             "## General\n\nG\n\n## Merge\n\nM\n\n## Watcher\n\nW\n"
@@ -404,6 +415,14 @@ class TestNotesForPrompt:
         assert "## Additional Review Instructions" in specific
         assert "for review sessions" in specific
         assert "review instructions" in specific
+
+    def test_specific_block_for_qa(self, tmp_path):
+        (tmp_path / NOTES_FILENAME).write_text("## QA\n\nqa instructions\n")
+        (tmp_path / LOCAL_NOTES_FILENAME).write_text("")
+        _, specific = notes_for_prompt(tmp_path, "qa")
+        assert "## Additional QA Instructions" in specific
+        assert "for qa sessions" in specific
+        assert "qa instructions" in specific
 
     def test_specific_block_for_merge(self, tmp_path):
         (tmp_path / NOTES_FILENAME).write_text("## Merge\n\nmerge instructions\n")
