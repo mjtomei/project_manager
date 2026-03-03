@@ -363,9 +363,12 @@ def _auto_start_qa_loops(app, target: str | None = None,
         pr_id = pr["id"]
         if allowed is not None and pr_id not in allowed:
             continue
-        # Skip if QA is already running for this PR
+        # Skip if QA is already running or just completed (awaiting
+        # poll_qa_state processing).  Without the latest_verdict check,
+        # a sync-triggered check_and_start could race with poll_qa_state
+        # and restart QA before the completion handler runs.
         qa_loop = app._qa_loops.get(pr_id)
-        if qa_loop and qa_loop.running:
+        if qa_loop and (qa_loop.running or qa_loop.latest_verdict):
             continue
         # Skip if no workdir
         if not pr.get("workdir"):
