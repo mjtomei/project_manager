@@ -10,7 +10,7 @@ Keybinding variants (set up by app.action_start_qa_on_pr):
   zzz t  — start/stop QA loop (strict: only clean PASS)
 """
 
-from pm_core.paths import configure_logger
+from pm_core.paths import configure_logger, get_global_setting_value
 from pm_core import store
 from pm_core.qa_loop import (
     QALoopState,
@@ -23,6 +23,15 @@ from pm_core.qa_loop import (
 from pm_core.loop_shared import get_pm_session
 
 _log = configure_logger("pm.tui.qa_loop_ui")
+
+
+def _get_qa_pass_count() -> int:
+    """Read qa-pass-count from global settings, default 1."""
+    val = get_global_setting_value("qa-pass-count", "")
+    try:
+        return max(1, int(val))
+    except ValueError:
+        return 1
 
 
 def _get_selected_pr(app) -> tuple[str | None, dict | None]:
@@ -172,6 +181,8 @@ def start_or_stop_qa_loop(app, pr_id: str, strict: bool) -> None:
     existing = app._qa_loops.get(pr_id)
     if existing and existing.running:
         existing.stop_requested = True
+        # Also remove self-driving registration
+        app._self_driving_qa.pop(pr_id, None)
         mode = "strict" if strict else "lenient"
         app.log_message(f"[bold]QA loop stopping[/] for {pr_id} (finishing current run)...")
         _log.info("qa_loop_ui: stopping QA loop for %s (mode=%s)", pr_id, mode)
@@ -181,22 +192,30 @@ def start_or_stop_qa_loop(app, pr_id: str, strict: bool) -> None:
     # after capturing which sessions were watching them.
     app._qa_loops.pop(pr_id, None)
 
+    # Register self-driving QA state
+    app._self_driving_qa[pr_id] = {
+        "strict": strict,
+        "pass_count": 0,
+        "required_passes": _get_qa_pass_count(),
+    }
+
     # Start a new QA loop
     state = QALoopState(pr_id=pr_id)
-    state._qa_loop_mode = True
-    state._qa_loop_strict = strict
 
     def on_update(s: QALoopState):
         app.call_from_thread(_on_qa_update, app, s)
 
     app._qa_loops[pr_id] = state
 
+    required = app._self_driving_qa[pr_id]["required_passes"]
     mode_label = "strict (PASS only)" if strict else "lenient"
+    passes_label = f", {required} pass{'es' if required > 1 else ''} required" if required > 1 else ""
     app.log_message(
-        f"[bold]QA loop started[/] for {pr_id} [{mode_label}] — z t to stop",
+        f"[bold]QA loop started[/] for {pr_id} [{mode_label}{passes_label}] — z t to stop",
         sticky=3,
     )
-    _log.info("qa_loop_ui: starting QA loop for %s (mode=%s)", pr_id, mode_label)
+    _log.info("qa_loop_ui: starting QA loop for %s (mode=%s, passes=%d)",
+              pr_id, mode_label, required)
 
     start_qa_background(state, app._root, pr, on_update)
 
@@ -244,24 +263,51 @@ def _on_qa_update(app, state: QALoopState) -> None:
 def _on_qa_complete(app, state: QALoopState) -> None:
     """Handle QA completion — trigger appropriate lifecycle transition.
 
-    In loop mode (zz t / zzz t), a non-passing verdict restarts the loop
-    instead of just transitioning status.
+    Self-driving mode (zz t / zzz t):
+      - PASS (no changes): increment pass_count; if >= required_passes,
+        remove from self-driving and trigger merge. Otherwise restart QA.
+      - NEEDS_WORK / changes: reset pass_count, transition to in_review,
+        and directly start a review loop (independent of auto-start).
+      - INPUT_REQUIRED: pause self-driving loop for human input.
+
+    Legacy mode (plain t or auto-start):
+      - PASS: trigger auto-merge.
+      - NEEDS_WORK: transition to in_review, rely on auto-start.
     """
     if state._ui_complete_notified:
         return
 
     pr_id = state.pr_id
     verdict = state.latest_verdict
-    is_loop = getattr(state, "_qa_loop_mode", False)
-    is_strict = getattr(state, "_qa_loop_strict", False)
+    sd = app._self_driving_qa.get(pr_id)
 
-    _log.info("QA complete for %s: verdict=%s changes=%s loop=%s strict=%s",
-              pr_id, verdict, state.made_changes, is_loop, is_strict)
+    _log.info("QA complete for %s: verdict=%s changes=%s self_driving=%s",
+              pr_id, verdict, state.made_changes, bool(sd))
 
     if verdict == VERDICT_PASS and not state.made_changes:
-        # All scenarios passed with no changes → ready to merge
-        app.log_message(f"[green bold]QA PASS[/] for {pr_id} — ready to merge")
-        _trigger_auto_merge(app, pr_id)
+        # All scenarios passed with no changes
+        if sd:
+            sd["pass_count"] += 1
+            required = sd["required_passes"]
+            if sd["pass_count"] >= required:
+                app._self_driving_qa.pop(pr_id, None)
+                app.log_message(
+                    f"[green bold]QA PASS[/] for {pr_id} "
+                    f"({sd['pass_count']}/{required} consecutive) — ready to merge"
+                )
+                _trigger_auto_merge(app, pr_id)
+            else:
+                app.log_message(
+                    f"[green]QA PASS[/] for {pr_id} "
+                    f"({sd['pass_count']}/{required} consecutive) — restarting QA"
+                )
+                _log.info("QA self-driving: %d/%d passes, restarting QA",
+                          sd["pass_count"], required)
+                start_qa(app, pr_id)
+        else:
+            # Legacy path
+            app.log_message(f"[green bold]QA PASS[/] for {pr_id} — ready to merge")
+            _trigger_auto_merge(app, pr_id)
     elif verdict == VERDICT_NEEDS_WORK or state.made_changes:
         # Issues found or changes committed → back to review
         app.log_message(
@@ -269,31 +315,57 @@ def _on_qa_complete(app, state: QALoopState) -> None:
         )
         _transition_pr_status(app, pr_id, "qa", "in_review")
         # Clear the stale review loop entry from the previous review pass
-        # so _auto_start_review_loops can start a fresh one.
         app._review_loops.pop(pr_id, None)
-        # Reload in-memory state so auto-start sees the new status,
-        # then trigger check_and_start to restart the review loop.
+        # Reload in-memory state
         if app._root:
             app._data = store.load(app._root)
-        from pm_core.tui import auto_start as _auto_start
-        if _auto_start.is_enabled(app):
-            app.run_worker(_auto_start.check_and_start(app))
 
-        # In loop mode, re-queue QA after review completes
-        # (auto-start handles the review→QA transition automatically)
-        if is_loop:
-            _log.info("QA loop: NEEDS_WORK — review loop will re-trigger QA via auto-start")
+        if sd:
+            # Self-driving: reset pass count and directly start review loop
+            sd["pass_count"] = 0
+            _log.info("QA self-driving: NEEDS_WORK — starting review loop directly")
+            _start_self_driving_review(app, pr_id, sd["strict"])
+        else:
+            # Legacy: rely on auto-start
+            from pm_core.tui import auto_start as _auto_start
+            if _auto_start.is_enabled(app):
+                app.run_worker(_auto_start.check_and_start(app))
     elif verdict == VERDICT_INPUT_REQUIRED:
         app.log_message(
             f"[red bold]QA INPUT_REQUIRED[/] for {pr_id} — paused for human input"
         )
-        if is_loop:
-            _log.info("QA loop: INPUT_REQUIRED — loop paused, awaiting human input")
+        if sd:
+            _log.info("QA self-driving: INPUT_REQUIRED — loop paused")
     else:
         app.log_message(f"QA finished for {pr_id}: {verdict}")
 
     # Record QA results as a PR note
     _record_qa_note(app, state)
+
+
+def _start_self_driving_review(app, pr_id: str, strict: bool) -> None:
+    """Start a review loop for a self-driving QA PR (independent of auto-start).
+
+    The z-prefix carries through:
+      zz t  (strict=False) → review stop_on_suggestions=True
+      zzz t (strict=True)  → review stop_on_suggestions=False
+    """
+    from pm_core.tui import review_loop_ui
+
+    if not app._root:
+        return
+
+    data = store.load(app._root)
+    pr = store.get_pr(data, pr_id)
+    if not pr:
+        _log.warning("_start_self_driving_review: PR %s not found", pr_id)
+        return
+
+    stop_on_suggestions = not strict
+    _log.info("Self-driving review for %s (stop_on_suggestions=%s)",
+              pr_id, stop_on_suggestions)
+    review_loop_ui._start_loop(app, pr_id, pr,
+                                stop_on_suggestions=stop_on_suggestions)
 
 
 def _trigger_auto_merge(app, pr_id: str) -> None:

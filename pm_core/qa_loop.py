@@ -4,7 +4,7 @@ Two-phase process:
   Phase 1 — Planning: A Claude session analyzes the PR and generates
   a structured test plan.
   Phase 2 — Execution: Each scenario from the plan becomes a child
-  QA session, running as parallel panes inside a single QA tmux window.
+  QA session, running in its own tmux window (qa-{display_id}-s{N}).
 
 Verdicts (shared with review):
   PASS           — Scenario passed, no issues found.
@@ -12,6 +12,7 @@ Verdicts (shared with review):
   INPUT_REQUIRED — Genuine ambiguity requiring human judgment.
 """
 
+import json
 import re
 import secrets
 import subprocess
@@ -82,7 +83,9 @@ class QAScenario:
     focus: str
     instruction_path: str | None = None
     steps: str = ""
-    pane_id: str | None = None
+    window_name: str | None = None
+    worktree_path: str | None = None
+    worktree_branch: str | None = None
 
 
 @dataclass
@@ -101,6 +104,7 @@ class QALoopState:
     latest_output: str = ""
     made_changes: bool = False
     qa_workdir: str | None = None
+    pre_qa_head: str | None = None
     # Set by qa_loop_ui after the completion callback has run once
     _ui_complete_notified: bool = False
 
@@ -116,11 +120,61 @@ def create_qa_workdir(pr_id: str, loop_id: str) -> Path:
     return workdir
 
 
-def create_scenario_workdir(qa_workdir: Path, scenario_index: int) -> Path:
-    """Create an empty child subdirectory for a scenario."""
-    d = qa_workdir / f"scenario-{scenario_index}"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+def create_scenario_workdir(qa_workdir: Path, scenario_index: int,
+                            repo_root: Path | None = None,
+                            pr_id: str = "",
+                            loop_id: str = "") -> tuple[Path, str, Path]:
+    """Create a worktree + scratch dir for one QA scenario.
+
+    When *repo_root* is provided (worktree mode), creates:
+      - ``{qa_workdir}/worktree-{N}/``  — git worktree (isolated branch)
+      - ``{qa_workdir}/scratch-{N}/``   — empty temp dir for throwaway tests
+
+    Falls back to a plain empty directory when *repo_root* is None (legacy).
+
+    Returns ``(worktree_path, branch_name, scratch_path)``.
+    """
+    from pm_core import git_ops
+
+    scratch = qa_workdir / f"scratch-{scenario_index}"
+    scratch.mkdir(parents=True, exist_ok=True)
+
+    if repo_root is None:
+        # Legacy: plain empty directory, no worktree
+        d = qa_workdir / f"scenario-{scenario_index}"
+        d.mkdir(parents=True, exist_ok=True)
+        return d, "", scratch
+
+    branch_name = f"qa-tmp-{pr_id}-{loop_id}-s{scenario_index}"
+    wt_path = qa_workdir / f"worktree-{scenario_index}"
+
+    # Clean up stale worktree/branch from a previous attempt
+    if wt_path.exists():
+        git_ops.remove_worktree(repo_root, wt_path)
+    git_ops.delete_branch(repo_root, branch_name)
+
+    git_ops.create_worktree(repo_root, branch_name, wt_path)
+    return wt_path, branch_name, scratch
+
+
+def _setup_worktree_override(worktree_path: Path) -> None:
+    """Configure the worktree so Claude sessions in it use the correct pm_core.
+
+    Computes the session tag for the worktree and sets the override path
+    to point at the parent of the currently-running ``pm_core`` package.
+    """
+    import pm_core
+    from pm_core.paths import get_session_tag, set_override_path
+
+    tag = get_session_tag(start_path=worktree_path)
+    if not tag:
+        _log.warning("Could not get session tag for worktree %s", worktree_path)
+        return
+
+    pm_core_parent = Path(pm_core.__file__).parent.parent
+    set_override_path(tag, pm_core_parent)
+    _log.info("Set override for worktree %s (tag=%s) → %s",
+              worktree_path, tag, pm_core_parent)
 
 
 # ---------------------------------------------------------------------------
@@ -128,10 +182,75 @@ def create_scenario_workdir(qa_workdir: Path, scenario_index: int) -> Path:
 # ---------------------------------------------------------------------------
 
 def _compute_qa_window_name(pr_data: dict) -> str:
-    """Compute the QA tmux window name from PR data."""
+    """Compute the main QA tmux window name from PR data."""
     from pm_core.cli.helpers import _pr_display_id
     display_id = _pr_display_id(pr_data)
     return f"qa-{display_id}"
+
+
+def _scenario_window_name(pr_data: dict, scenario_index: int) -> str:
+    """Compute the tmux window name for a single scenario.
+
+    Returns e.g. ``qa-#116-s3``.
+    """
+    from pm_core.cli.helpers import _pr_display_id
+    display_id = _pr_display_id(pr_data)
+    return f"qa-{display_id}-s{scenario_index}"
+
+
+def _get_scenario_pane(session: str, window_name: str) -> str | None:
+    """Return the first pane ID inside a scenario window, or None."""
+    from pm_core import tmux as tmux_mod
+    win = tmux_mod.find_window_by_name(session, window_name)
+    if not win:
+        return None
+    panes = tmux_mod.get_pane_indices(session, win["index"])
+    if panes:
+        return panes[0][0]
+    return None
+
+
+def _cleanup_stale_scenario_windows(session: str, pr_data: dict) -> None:
+    """Kill stale scenario windows and the main QA window from previous runs."""
+    from pm_core import tmux as tmux_mod
+    from pm_core.cli.helpers import _pr_display_id
+
+    display_id = _pr_display_id(pr_data)
+    qa_prefix = f"qa-{display_id}-s"
+    main_name = f"qa-{display_id}"
+
+    all_windows = tmux_mod.list_windows(session)
+    for win in all_windows:
+        if win["name"].startswith(qa_prefix) or win["name"] == main_name:
+            _log.info("Killing stale QA window %s", win["name"])
+            tmux_mod.kill_window(session, win["id"])
+
+
+# ---------------------------------------------------------------------------
+# Status file management
+# ---------------------------------------------------------------------------
+
+def _write_status_file(status_path: Path, pr_id: str,
+                       scenarios: list[QAScenario],
+                       scenario_verdicts: dict[int, str],
+                       overall: str = "") -> None:
+    """Atomically write the qa_status.json file."""
+    data = {
+        "pr_id": pr_id,
+        "scenarios": [
+            {
+                "index": s.index,
+                "title": s.title,
+                "verdict": scenario_verdicts.get(s.index, ""),
+                "window_name": s.window_name or "",
+            }
+            for s in scenarios
+        ],
+        "overall": overall,
+    }
+    tmp_path = status_path.with_suffix(".tmp")
+    tmp_path.write_text(json.dumps(data, indent=2))
+    tmp_path.rename(status_path)
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +274,7 @@ def parse_qa_plan(output: str) -> list[QAScenario]:
     QA_PLAN_END
     """
     scenarios: list[QAScenario] = []
+    placeholder_titles = {"Scenario Title", "..."}
 
     # The prompt template also contains example markers, so we can't
     # rely on matching START/END pairs.  Instead, find the last
@@ -212,8 +332,7 @@ def parse_qa_plan(output: str) -> list[QAScenario]:
             steps = steps_m.group(1).strip()
 
         # Reject placeholder/example scenarios (e.g. from prompt template)
-        _placeholder_titles = {"Scenario Title", "..."}
-        if title in _placeholder_titles or title.startswith("<"):
+        if title in placeholder_titles or title.startswith("<"):
             _log.warning("Skipping placeholder scenario %d: %r", index, title)
             continue
 
@@ -226,6 +345,46 @@ def parse_qa_plan(output: str) -> list[QAScenario]:
         ))
 
     return scenarios
+
+
+# ---------------------------------------------------------------------------
+# Worktree merge-back
+# ---------------------------------------------------------------------------
+
+def _merge_scenario_commits(state: QALoopState, repo_root: Path | None,
+                            pr_data: dict) -> None:
+    """Cherry-pick scenario worktree commits back to the PR branch.
+
+    For each scenario with a worktree branch that has commits ahead of
+    ``state.pre_qa_head``, cherry-picks those commits onto the PR branch.
+    Pushes the PR branch once at the end if any commits were picked.
+    """
+    from pm_core import git_ops
+
+    if not repo_root or not state.pre_qa_head:
+        return
+
+    any_picked = False
+    for scenario in state.scenarios:
+        if not scenario.worktree_branch:
+            continue
+
+        result = git_ops.cherry_pick_range(
+            repo_root, scenario.worktree_branch, state.pre_qa_head,
+        )
+        if result["picked"] > 0:
+            any_picked = True
+            state.made_changes = True
+            _log.info("Merged %d commit(s) from scenario %d (%d skipped)",
+                      result["picked"], scenario.index, result["skipped"])
+
+    # Push once if any commits were cherry-picked
+    if any_picked:
+        branch = pr_data.get("branch", "")
+        if branch:
+            git_ops.run_git("push", "origin", branch,
+                            cwd=repo_root, check=False)
+            _log.info("Pushed merged QA commits to %s", branch)
 
 
 # ---------------------------------------------------------------------------
@@ -243,8 +402,8 @@ def run_qa_sync(
 
     1. Launch planning session in QA window, poll for plan output
     2. Parse plan into scenarios
-    3. Launch child panes (one per scenario) inside the QA window
-    4. Poll all child panes for verdicts
+    3. Launch each scenario in its own tmux window
+    4. Poll all scenario windows for verdicts
     5. Aggregate verdicts, detect changes via git status
     6. Set final state
 
@@ -273,6 +432,9 @@ def run_qa_sync(
 
     data = store.load(pm_root)
 
+    # Status file path (inside QA workdir)
+    status_path = Path(state.qa_workdir) / "qa_status.json"
+
     def _notify():
         if on_update:
             on_update(state)
@@ -288,15 +450,30 @@ def run_qa_sync(
         )
         cmd = build_claude_shell_cmd(prompt=planner_prompt)
 
-        # Kill any stale QA window from a previous run
-        existing = tmux_mod.find_window_by_name(session, window_name)
-        if existing:
-            _log.info("Killing stale QA window %s", window_name)
-            tmux_mod.kill_window(session, existing["index"])
+        # If the main QA window already exists, remember which sessions
+        # were watching it so we can switch them to the replacement window
+        # (same pattern as the review loop's --fresh window replacement).
+        sessions_on_qa: list[str] = []
+        existing_win = tmux_mod.find_window_by_name(session, window_name)
+        if existing_win:
+            sessions_on_qa = tmux_mod.sessions_on_window(
+                session, existing_win["id"],
+            )
+            _cleanup_stale_scenario_windows(session, pr_data)
 
-        # Create QA window with planner pane
-        tmux_mod.new_window(session, window_name, cmd, cwd=workdir_path)
+        # Create QA window with planner pane (switch=False; we handle
+        # session switching explicitly below to preserve focus)
+        tmux_mod.new_window(session, window_name, cmd, cwd=workdir_path,
+                            switch=False)
         time.sleep(2)  # let tmux register the new window
+
+        # Switch sessions that were watching the old QA window to the new one
+        if sessions_on_qa:
+            tmux_mod.switch_sessions_to_window(
+                sessions_on_qa, session, window_name)
+        elif not existing_win:
+            # First-time creation — select the window so user sees it
+            tmux_mod.select_window(session, window_name)
 
         # Wait for the planner to finish (poll for plan output)
         planner_pane = find_claude_pane(session, window_name)
@@ -371,126 +548,145 @@ def run_qa_sync(
               len(state.scenarios), state.pr_id)
 
     # Record HEAD sha before execution so we can detect new commits later
-    pre_qa_head = None
-    if workdir_path and Path(workdir_path).is_dir():
+    state.pre_qa_head = None
+    repo_root = Path(workdir_path) if workdir_path and Path(workdir_path).is_dir() else None
+    if repo_root:
         try:
             result = git_ops.run_git(
                 "rev-parse", "HEAD", cwd=workdir_path, check=False,
             )
             if result.returncode == 0:
-                pre_qa_head = result.stdout.strip()
+                state.pre_qa_head = result.stdout.strip()
         except Exception:
             pass
 
-    # Ensure the QA window exists and get the base pane for splitting
+    # Ensure the main QA window exists (has the planner pane)
     win = tmux_mod.find_window_by_name(session, window_name)
+    planner_pane = None
     if not win:
-        base_pane = tmux_mod.new_window_get_pane(
+        planner_pane = tmux_mod.new_window_get_pane(
             session, window_name, "echo 'QA execution'", cwd=workdir_path,
             switch=False,
         )
     else:
         panes = tmux_mod.get_pane_indices(session, win["index"])
-        base_pane = panes[0][0] if panes else None
+        planner_pane = panes[0][0] if panes else None
 
-    # Derive window ID from the base pane for registry/layout ops
-    qa_win_id = None
-    if base_pane:
-        wid_result = subprocess.run(
-            tmux_mod._tmux_cmd("display", "-t", base_pane, "-p", "#{window_id}"),
-            capture_output=True, text=True,
-        )
-        qa_win_id = wid_result.stdout.strip() or None
-        if qa_win_id:
-            tmux_mod.set_shared_window_size(session, qa_win_id)
-
-    # Launch child panes
+    # Launch each scenario in its own tmux window (with worktree isolation)
     for scenario in state.scenarios:
         if state.stop_requested:
             break
 
-        child_workdir = create_scenario_workdir(
-            Path(state.qa_workdir), scenario.index
+        wt_path, wt_branch, scratch_path = create_scenario_workdir(
+            Path(state.qa_workdir), scenario.index,
+            repo_root=repo_root,
+            pr_id=state.pr_id,
+            loop_id=state.loop_id,
         )
+        scenario.worktree_path = str(wt_path)
+        scenario.worktree_branch = wt_branch
+
+        # Set up override so Claude in the worktree uses the correct pm_core
+        if wt_branch:
+            _setup_worktree_override(wt_path)
+
         child_prompt = prompt_gen.generate_qa_child_prompt(
-            data, state.pr_id, scenario, str(child_workdir), session,
+            data, state.pr_id, scenario,
+            workdir=str(wt_path),
+            session_name=session,
+            worktree_mode=bool(wt_branch),
+            scratch_dir=str(scratch_path),
         )
         child_cmd = build_claude_shell_cmd(prompt=child_prompt)
 
-        # Split a new pane in the QA window
-        pane_id = None
-        if base_pane:
-            try:
-                pane_id = tmux_mod.split_pane_at(
-                    base_pane, "v", child_cmd, background=True,
-                )
-            except Exception:
-                _log.warning("Failed to split pane for scenario %d "
-                             "(window may be too small for more panes)",
-                             scenario.index)
-        scenario.pane_id = pane_id
-        _log.info("Launched scenario %d (%s) in pane %s",
-                   scenario.index, scenario.title, pane_id)
-
-        # Register pane and rebalance after each split so the next
-        # split has enough room in the window.
-        if pane_id and qa_win_id:
-            try:
-                pane_registry.register_pane(
-                    session, qa_win_id, pane_id,
-                    f"qa-scenario-{scenario.index}", child_cmd,
-                )
-                reg = pane_registry.load_registry(session)
-                wdata = pane_registry.get_window_data(reg, qa_win_id)
-                wdata["user_modified"] = False
-                pane_registry.save_registry(session, reg)
-                pane_layout.rebalance(session, qa_win_id)
-            except Exception:
-                _log.exception("Failed to register/rebalance scenario %d",
-                               scenario.index)
-
-    # Register planner pane too (it's still in the window)
-    if base_pane and qa_win_id:
+        # Launch window with cwd=worktree_path so Claude has the full codebase
+        scenario_cwd = str(wt_path) if wt_branch else workdir_path
+        win_name = _scenario_window_name(pr_data, scenario.index)
         try:
-            pane_registry.register_pane(
-                session, qa_win_id, base_pane, "qa-planner", "planner",
-            )
-            pane_layout.rebalance(session, qa_win_id)
+            tmux_mod.new_window(session, win_name, child_cmd,
+                                cwd=scenario_cwd, switch=False)
+            scenario.window_name = win_name
         except Exception:
-            _log.exception("Failed to register planner pane")
+            _log.warning("Failed to create window for scenario %d",
+                         scenario.index)
+        _log.info("Launched scenario %d (%s) in window %s (worktree=%s)",
+                   scenario.index, scenario.title, win_name,
+                   bool(wt_branch))
+
+    # Add status pane to the main QA window (split planner pane horizontally)
+    if planner_pane:
+        try:
+            # Use the script path directly (avoids PYTHONPATH issues)
+            _qa_status_script = Path(__file__).parent / "qa_status.py"
+            status_cmd = (
+                f"python3 {_qa_status_script} {status_path} {session}"
+            )
+            status_pane = tmux_mod.split_pane_at(
+                planner_pane, "h", status_cmd, background=True,
+            )
+
+            # Register both panes and rebalance the main window only
+            qa_win = tmux_mod.find_window_by_name(session, window_name)
+            if qa_win:
+                qa_win_id = None
+                wid_result = subprocess.run(
+                    tmux_mod._tmux_cmd("display", "-t", planner_pane,
+                                       "-p", "#{window_id}"),
+                    capture_output=True, text=True,
+                )
+                qa_win_id = wid_result.stdout.strip() or None
+                if qa_win_id:
+                    pane_registry.register_pane(
+                        session, qa_win_id, planner_pane,
+                        "qa-planner", "planner",
+                    )
+                    pane_registry.register_pane(
+                        session, qa_win_id, status_pane,
+                        "qa-status", status_cmd,
+                    )
+                    pane_layout.rebalance(session, qa_win_id)
+        except Exception:
+            _log.exception("Failed to create status pane")
+
+    # Write initial status file
+    _write_status_file(status_path, state.pr_id, state.scenarios,
+                       state.scenario_verdicts)
 
     state.latest_output = f"Running {len(state.scenarios)} scenario(s)..."
     _notify()
 
-    # --- Poll all child panes for verdicts ---
+    # --- Poll all scenario windows for verdicts ---
     tracker = VerdictStabilityTracker()
-    pending = {s.index for s in state.scenarios if s.pane_id}
+    pending = {s.index for s in state.scenarios if s.window_name}
     grace_start = time.monotonic()
 
     while pending and not state.stop_requested:
         time.sleep(_POLL_INTERVAL)
 
         in_grace = (time.monotonic() - grace_start) < _VERDICT_GRACE_PERIOD
+        verdicts_changed = False
 
         for scenario in state.scenarios:
-            if scenario.index not in pending or not scenario.pane_id:
+            if scenario.index not in pending or not scenario.window_name:
                 continue
 
-            if not tmux_mod.pane_exists(scenario.pane_id):
-                # Pane exited without verdict — treat as inconclusive,
-                # not as a pass.  A crashed or unexpectedly-exited pane
+            pane_id = _get_scenario_pane(session, scenario.window_name)
+            if pane_id is None:
+                # Window exited without verdict — treat as inconclusive,
+                # not as a pass.  A crashed or unexpectedly-exited window
                 # should not silently pass QA.
-                _log.warning("Scenario %d pane exited without verdict",
+                _log.warning("Scenario %d window exited without verdict",
                              scenario.index)
                 state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
                 pending.discard(scenario.index)
+                verdicts_changed = True
                 continue
 
             if in_grace:
                 continue
 
             content = tmux_mod.capture_pane(
-                scenario.pane_id, full_scrollback=True,
+                pane_id, full_scrollback=True,
             )
             verdict = extract_verdict_from_content(
                 content,
@@ -503,6 +699,7 @@ def run_qa_sync(
             if tracker.update(key, verdict):
                 state.scenario_verdicts[scenario.index] = verdict
                 pending.discard(scenario.index)
+                verdicts_changed = True
                 _log.info("Scenario %d (%s) verdict: %s",
                           scenario.index, scenario.title, verdict)
                 state.latest_output = (
@@ -510,11 +707,32 @@ def run_qa_sync(
                 )
                 _notify()
 
+        # Update status file whenever a verdict changes
+        if verdicts_changed:
+            _write_status_file(status_path, state.pr_id, state.scenarios,
+                               state.scenario_verdicts)
+
+    # --- Cleanup scenario windows ---
+    # Kill ALL windows matching the qa-{display_id}-s* pattern (not just
+    # known scenarios) to catch stale duplicates from previous runs.
+    _cleanup_stale_scenario_windows(session, pr_data)
+
+    # --- Merge back scenario worktree commits ---
+    _merge_scenario_commits(state, repo_root, pr_data)
+
+    # --- Worktree cleanup ---
+    if repo_root:
+        for scenario in state.scenarios:
+            if scenario.worktree_path:
+                git_ops.remove_worktree(repo_root, Path(scenario.worktree_path))
+            if scenario.worktree_branch:
+                git_ops.delete_branch(repo_root, scenario.worktree_branch)
+
     # --- Aggregate verdicts ---
     verdicts = list(state.scenario_verdicts.values())
 
-    # Check for changes via git status (uncommitted files)
-    if workdir_path and Path(workdir_path).is_dir():
+    # Check for uncommitted files in the main workdir
+    if repo_root:
         try:
             result = git_ops.run_git(
                 "status", "--porcelain", cwd=workdir_path, check=False,
@@ -524,17 +742,6 @@ def run_qa_sync(
         except Exception:
             pass
 
-        # Check if HEAD moved since QA started (new commits by QA scenarios)
-        if pre_qa_head:
-            try:
-                result = git_ops.run_git(
-                    "rev-parse", "HEAD", cwd=workdir_path, check=False,
-                )
-                if result.returncode == 0 and result.stdout.strip() != pre_qa_head:
-                    state.made_changes = True
-            except Exception:
-                pass
-
     # Determine overall verdict
     if VERDICT_NEEDS_WORK in verdicts or state.made_changes:
         state.latest_verdict = VERDICT_NEEDS_WORK
@@ -542,6 +749,10 @@ def run_qa_sync(
         state.latest_verdict = VERDICT_INPUT_REQUIRED
     else:
         state.latest_verdict = VERDICT_PASS
+
+    # Write final status file with overall verdict
+    _write_status_file(status_path, state.pr_id, state.scenarios,
+                       state.scenario_verdicts, overall=state.latest_verdict)
 
     state.running = False
     summary_parts = []
