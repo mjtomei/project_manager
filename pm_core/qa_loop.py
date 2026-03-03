@@ -674,6 +674,15 @@ def run_qa_sync(
     # --- Poll all scenario windows for verdicts ---
     tracker = VerdictStabilityTracker()
     pending = {s.index for s in state.scenarios if s.window_name}
+
+    # Scenarios that failed to create a window get INPUT_REQUIRED immediately
+    # so they are not silently ignored in the final aggregation.
+    for scenario in state.scenarios:
+        if not scenario.window_name:
+            _log.warning("Scenario %d has no window — marking INPUT_REQUIRED",
+                         scenario.index)
+            state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+
     grace_start = time.monotonic()
 
     while pending and not state.stop_requested:

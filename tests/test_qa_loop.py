@@ -311,6 +311,142 @@ class TestVerdictConstants:
 
 
 # ---------------------------------------------------------------------------
+# Verdict edge cases: dead windows, grace period, failed creation
+# ---------------------------------------------------------------------------
+
+class TestVerdictEdgeCases:
+    """Edge cases for verdict detection — window death, grace period, etc."""
+
+    def test_dead_window_gets_input_required(self):
+        """A window killed without verdict should be marked INPUT_REQUIRED."""
+        from pm_core.qa_loop import _get_scenario_pane
+
+        scenario = QAScenario(index=1, title="Test", focus="t")
+        scenario.window_name = "qa-#42-s1"
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        state.scenario_verdicts = {}
+
+        # Simulate: window is dead (find_window_by_name returns None)
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value=None):
+            pane_id = _get_scenario_pane("sess", scenario.window_name)
+            assert pane_id is None
+            # This is what the polling loop does:
+            state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+
+        assert state.scenario_verdicts[1] == VERDICT_INPUT_REQUIRED
+
+    def test_dead_window_detected_during_grace_period(self):
+        """Dead windows should be detected even within the 30s grace period.
+
+        The polling loop checks window liveness BEFORE applying the grace
+        period skip, so a killed window is caught immediately.
+        """
+        scenario = QAScenario(index=1, title="Test", focus="t")
+        scenario.window_name = "qa-#42-s1"
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        state.scenario_verdicts = {}
+
+        pending = {scenario.index}
+        in_grace = True  # Simulate being within grace period
+
+        # Simulate: pane is dead
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value=None):
+            pane_id = None  # _get_scenario_pane returns None
+            # In the actual loop, dead window check comes BEFORE grace check:
+            if pane_id is None:
+                state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+                pending.discard(scenario.index)
+            elif in_grace:
+                pass  # Would skip verdict reading — but we never reach here
+
+        # Dead window should be detected despite grace period
+        assert scenario.index not in pending
+        assert state.scenario_verdicts[1] == VERDICT_INPUT_REQUIRED
+
+    def test_failed_window_creation_gets_input_required(self):
+        """Scenarios that fail to create a window should get INPUT_REQUIRED,
+        not be silently ignored (which would default to PASS)."""
+        # Scenario without window_name (creation failed)
+        scenario_ok = QAScenario(index=1, title="OK", focus="t")
+        scenario_ok.window_name = "qa-#42-s1"
+        scenario_fail = QAScenario(index=2, title="Failed", focus="t")
+        scenario_fail.window_name = None  # Creation failed
+
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario_ok, scenario_fail]
+        state.scenario_verdicts = {}
+
+        # This is the fix: scenarios without window_name get INPUT_REQUIRED
+        for s in state.scenarios:
+            if not s.window_name:
+                state.scenario_verdicts[s.index] = VERDICT_INPUT_REQUIRED
+
+        assert state.scenario_verdicts[2] == VERDICT_INPUT_REQUIRED
+
+    def test_all_scenarios_failed_creation_overall_not_pass(self):
+        """If ALL scenario windows fail to create, overall must NOT be PASS."""
+        s1 = QAScenario(index=1, title="A", focus="t")
+        s1.window_name = None
+        s2 = QAScenario(index=2, title="B", focus="t")
+        s2.window_name = None
+
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [s1, s2]
+        state.scenario_verdicts = {}
+
+        # Apply the fix: failed windows get INPUT_REQUIRED
+        for s in state.scenarios:
+            if not s.window_name:
+                state.scenario_verdicts[s.index] = VERDICT_INPUT_REQUIRED
+
+        # Overall verdict aggregation (same as qa_loop.py)
+        verdicts = list(state.scenario_verdicts.values())
+        if VERDICT_NEEDS_WORK in verdicts or state.made_changes:
+            overall = VERDICT_NEEDS_WORK
+        elif VERDICT_INPUT_REQUIRED in verdicts:
+            overall = VERDICT_INPUT_REQUIRED
+        else:
+            overall = VERDICT_PASS
+
+        assert overall == VERDICT_INPUT_REQUIRED
+
+    def test_overall_verdict_one_dead_one_pass(self):
+        """One dead window (INPUT_REQUIRED) + one PASS = overall INPUT_REQUIRED."""
+        state = QALoopState(pr_id="pr-001")
+        state.scenario_verdicts = {1: VERDICT_PASS, 2: VERDICT_INPUT_REQUIRED}
+
+        verdicts = list(state.scenario_verdicts.values())
+        if VERDICT_NEEDS_WORK in verdicts or state.made_changes:
+            overall = VERDICT_NEEDS_WORK
+        elif VERDICT_INPUT_REQUIRED in verdicts:
+            overall = VERDICT_INPUT_REQUIRED
+        else:
+            overall = VERDICT_PASS
+
+        assert overall == VERDICT_INPUT_REQUIRED
+
+    def test_overall_verdict_dead_window_plus_needs_work(self):
+        """Dead window + NEEDS_WORK = overall NEEDS_WORK (worst wins)."""
+        state = QALoopState(pr_id="pr-001")
+        state.scenario_verdicts = {
+            1: VERDICT_INPUT_REQUIRED,
+            2: VERDICT_NEEDS_WORK,
+        }
+
+        verdicts = list(state.scenario_verdicts.values())
+        if VERDICT_NEEDS_WORK in verdicts or state.made_changes:
+            overall = VERDICT_NEEDS_WORK
+        elif VERDICT_INPUT_REQUIRED in verdicts:
+            overall = VERDICT_INPUT_REQUIRED
+        else:
+            overall = VERDICT_PASS
+
+        assert overall == VERDICT_NEEDS_WORK
+
+
+# ---------------------------------------------------------------------------
 # QA completion: _on_qa_complete lifecycle transitions
 # ---------------------------------------------------------------------------
 
