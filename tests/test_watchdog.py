@@ -15,6 +15,8 @@ from pm_core.tui.watchdog import (
     _check_stale_merge_tracking,
     _poll_timer_needed,
     _watchdog_tick,
+    start_watchdog,
+    stop_watchdog,
     WATCHDOG_INTERVAL,
     _POLL_STALE_THRESHOLD,
 )
@@ -377,3 +379,64 @@ class TestConstants:
 
     def test_poll_stale_threshold(self):
         assert _POLL_STALE_THRESHOLD == 5.0
+
+
+# ---------------------------------------------------------------------------
+# start_watchdog / stop_watchdog
+# ---------------------------------------------------------------------------
+
+class TestStartStopWatchdog:
+    def test_start_sets_timer(self):
+        app = _make_app()
+        assert app._watchdog_timer is None
+        start_watchdog(app)
+        app.set_interval.assert_called_once()
+        assert app._watchdog_timer is not None
+
+    def test_idempotent_no_duplicate_timer(self):
+        """Calling start_watchdog twice must not create a second timer."""
+        app = _make_app()
+        start_watchdog(app)
+        first_timer = app._watchdog_timer
+        assert app.set_interval.call_count == 1
+
+        start_watchdog(app)
+        assert app.set_interval.call_count == 1  # not called again
+        assert app._watchdog_timer is first_timer  # same timer object
+
+    @patch("pm_core.tui.watchdog._log")
+    def test_idempotent_single_log_message(self, mock_log):
+        """Only one 'watchdog: started' log per session."""
+        app = _make_app()
+        start_watchdog(app)
+        start_watchdog(app)
+        start_watchdog(app)
+        started_calls = [
+            c for c in mock_log.info.call_args_list
+            if "watchdog: started" in str(c)
+        ]
+        assert len(started_calls) == 1
+
+    def test_stop_clears_timer(self):
+        app = _make_app()
+        start_watchdog(app)
+        timer = app._watchdog_timer
+        stop_watchdog(app)
+        timer.stop.assert_called_once()
+        assert app._watchdog_timer is None
+
+    def test_stop_then_restart(self):
+        """After stop, start should create a new timer."""
+        app = _make_app()
+        start_watchdog(app)
+        stop_watchdog(app)
+        assert app._watchdog_timer is None
+
+        start_watchdog(app)
+        assert app._watchdog_timer is not None
+        assert app.set_interval.call_count == 2  # called twice total
+
+    def test_stop_noop_when_not_started(self):
+        """Stopping when no timer exists should not crash."""
+        app = _make_app()
+        stop_watchdog(app)  # should not raise
