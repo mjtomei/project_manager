@@ -586,6 +586,71 @@ class TestInputRequiredPause:
         log_calls = [str(c) for c in app.log_message.call_args_list]
         assert any("paused" in c.lower() or "human input" in c.lower() for c in log_calls)
 
+    def test_input_required_then_restart_with_zz_t(self, tmp_path):
+        """After INPUT_REQUIRED pause, zz t should start a fresh self-driving loop."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete, start_or_stop_qa_loop
+
+        app = _make_app(tmp_path)
+        app._self_driving_qa["pr-001"] = {
+            "strict": False, "pass_count": 1, "required_passes": 2
+        }
+
+        # Phase 1: QA completes with INPUT_REQUIRED — loop pauses
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_INPUT_REQUIRED
+        state.made_changes = False
+
+        with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
+             patch("pm_core.tui.qa_loop_ui.start_qa"), \
+             patch("pm_core.tui.qa_loop_ui._trigger_auto_merge"):
+            _on_qa_complete(app, state)
+
+        assert "pr-001" in app._self_driving_qa
+        # Simulate poll_qa_state cleaning up the completed loop
+        app._qa_loops.pop("pr-001", None)
+
+        # Phase 2: User does manual intervention, then presses zz t to restart
+        with patch("pm_core.tui.qa_loop_ui.start_qa_background") as mock_bg:
+            start_or_stop_qa_loop(app, "pr-001", strict=False)
+
+        # Should have started a new loop
+        mock_bg.assert_called_once()
+        assert "pr-001" in app._qa_loops
+        assert "pr-001" in app._self_driving_qa
+        # pass_count should be reset to 0 (fresh loop)
+        assert app._self_driving_qa["pr-001"]["pass_count"] == 0
+
+    def test_input_required_restart_with_stale_loop_state(self, tmp_path):
+        """zz t restart works even if stale loop state hasn't been cleaned up yet."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete, start_or_stop_qa_loop
+
+        app = _make_app(tmp_path)
+        app._self_driving_qa["pr-001"] = {
+            "strict": True, "pass_count": 0, "required_passes": 1
+        }
+
+        # Phase 1: QA completes with INPUT_REQUIRED
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_INPUT_REQUIRED
+        state.made_changes = False
+
+        with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
+             patch("pm_core.tui.qa_loop_ui.start_qa"), \
+             patch("pm_core.tui.qa_loop_ui._trigger_auto_merge"):
+            _on_qa_complete(app, state)
+
+        # Stale loop state still in app._qa_loops (poll hasn't cleaned up)
+        app._qa_loops["pr-001"] = state
+
+        # Phase 2: User presses zz t — should still work
+        with patch("pm_core.tui.qa_loop_ui.start_qa_background") as mock_bg:
+            start_or_stop_qa_loop(app, "pr-001", strict=True)
+
+        # New loop should have started (stale state replaced)
+        mock_bg.assert_called_once()
+        new_state = app._qa_loops["pr-001"]
+        assert new_state is not state  # New state, not the old one
+
 
 # ---------------------------------------------------------------------------
 # z-prefix dispatch in action_start_qa_on_pr
