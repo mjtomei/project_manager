@@ -181,7 +181,7 @@ class ProjectManagerApp(App):
                 _log.debug("check_action: blocked %s (command bar focused)", action)
                 return False
         # Block PR actions when in guide mode or plans view (can't see the PR tree)
-        if action in ("start_pr", "start_pr_companion", "done_pr", "merge_pr", "merge_pr_companion", "launch_claude", "edit_plan", "view_plan", "hide_plan", "move_to_plan", "toggle_merged", "cycle_filter", "cycle_sort"):
+        if action in ("start_pr", "start_pr_companion", "done_pr", "merge_pr", "merge_pr_companion", "launch_claude", "edit_plan", "view_plan", "hide_plan", "move_to_plan", "toggle_merged", "cycle_filter", "cycle_sort", "start_qa_on_pr"):
             prs = self._data.get("prs") or []
             if not prs and self._current_guide_step is not None:
                 _log.debug("check_action: blocked %s (in guide mode, no PRs)", action)
