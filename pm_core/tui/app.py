@@ -959,6 +959,3 @@ class ProjectManagerApp(App):
             else:
                 self.log_message("No QA item selected")
 
-    def action_help_quit(self) -> None:
-        """Override Textual's ctrl+c handler."""
-        self.log_message("Press ctrl+b d to detach from tmux")
