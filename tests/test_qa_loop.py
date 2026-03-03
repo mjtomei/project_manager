@@ -584,3 +584,166 @@ class TestMaybeStartQA:
         pr = store.get_pr(data, "pr-001")
         assert pr["status"] == "in_review"
         mock_start.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Self-driving QA: NEEDS_WORK → review → QA loop
+# ---------------------------------------------------------------------------
+
+class TestSelfDrivingQALoop:
+    """Tests for the self-driving QA loop (zz t / zzz t).
+
+    Verifies that when QA completes with NEEDS_WORK in self-driving mode,
+    the review loop is started directly (not via auto-start), and that
+    when review passes, QA restarts to complete the loop.
+    """
+
+    def _make_app(self, tmp_path, *, pr_status="qa"):
+        """Create a mock TUI app with self-driving QA state."""
+        pm_dir = tmp_path / "pm"
+        pm_dir.mkdir()
+        from pm_core import store
+        data = {
+            "project": {"name": "test", "repo": "/tmp/r", "base_branch": "master"},
+            "prs": [{"id": "pr-001", "title": "T", "branch": "b",
+                      "status": pr_status, "workdir": str(tmp_path / "wd"),
+                      "notes": []}],
+        }
+        store.save(data, pm_dir)
+
+        app = MagicMock()
+        app._root = pm_dir
+        app._data = data
+        app._auto_start = False  # Self-driving works independently of auto-start
+        app._auto_start_target = None
+        app._qa_loops = {}
+        app._review_loops = {}
+        app._self_driving_qa = {
+            "pr-001": {"strict": False, "pass_count": 0, "required_passes": 1}
+        }
+        return app
+
+    def test_needs_work_starts_review_directly(self, tmp_path):
+        """Self-driving QA NEEDS_WORK should call _start_self_driving_review,
+        not rely on auto-start."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete
+
+        app = self._make_app(tmp_path)
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_NEEDS_WORK
+        state.made_changes = False
+        state.scenarios = [QAScenario(index=1, title="Test", focus="test")]
+        state.scenario_verdicts = {1: VERDICT_NEEDS_WORK}
+
+        with patch("pm_core.tui.qa_loop_ui._start_self_driving_review") as mock_review, \
+             patch("pm_core.tui.qa_loop_ui._record_qa_note"):
+            _on_qa_complete(app, state)
+
+        mock_review.assert_called_once_with(app, "pr-001", False)
+        # run_worker should NOT be called (not using auto-start path)
+        app.run_worker.assert_not_called()
+
+    def test_needs_work_resets_pass_count(self, tmp_path):
+        """Self-driving QA NEEDS_WORK should reset pass_count to 0."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete
+
+        app = self._make_app(tmp_path)
+        app._self_driving_qa["pr-001"]["pass_count"] = 2  # Had previous passes
+
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_NEEDS_WORK
+        state.made_changes = False
+        state.scenarios = [QAScenario(index=1, title="Test", focus="test")]
+        state.scenario_verdicts = {1: VERDICT_NEEDS_WORK}
+
+        with patch("pm_core.tui.qa_loop_ui._start_self_driving_review"), \
+             patch("pm_core.tui.qa_loop_ui._record_qa_note"):
+            _on_qa_complete(app, state)
+
+        assert app._self_driving_qa["pr-001"]["pass_count"] == 0
+
+    def test_strict_mode_passes_through(self, tmp_path):
+        """zzz t (strict=True) should pass strict=True to _start_self_driving_review."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete
+
+        app = self._make_app(tmp_path)
+        app._self_driving_qa["pr-001"]["strict"] = True
+
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_NEEDS_WORK
+        state.made_changes = False
+        state.scenarios = [QAScenario(index=1, title="Test", focus="test")]
+        state.scenario_verdicts = {1: VERDICT_NEEDS_WORK}
+
+        with patch("pm_core.tui.qa_loop_ui._start_self_driving_review") as mock_review, \
+             patch("pm_core.tui.qa_loop_ui._record_qa_note"):
+            _on_qa_complete(app, state)
+
+        mock_review.assert_called_once_with(app, "pr-001", True)
+
+    def test_pass_increments_pass_count(self, tmp_path):
+        """Self-driving QA PASS should increment pass_count."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete
+
+        app = self._make_app(tmp_path)
+        app._self_driving_qa["pr-001"]["required_passes"] = 3
+
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_PASS
+        state.made_changes = False
+        state.scenarios = [QAScenario(index=1, title="Test", focus="test")]
+        state.scenario_verdicts = {1: VERDICT_PASS}
+
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start, \
+             patch("pm_core.tui.qa_loop_ui._record_qa_note"):
+            _on_qa_complete(app, state)
+
+        # pass_count should be 1, required is 3, so QA should restart
+        assert app._self_driving_qa["pr-001"]["pass_count"] == 1
+        mock_start.assert_called_once_with(app, "pr-001")
+
+    def test_pass_with_enough_passes_triggers_merge(self, tmp_path):
+        """Self-driving QA with enough consecutive passes triggers merge."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete
+
+        app = self._make_app(tmp_path)
+        app._self_driving_qa["pr-001"]["required_passes"] = 2
+        app._self_driving_qa["pr-001"]["pass_count"] = 1  # Already had one pass
+
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_PASS
+        state.made_changes = False
+        state.scenarios = [QAScenario(index=1, title="Test", focus="test")]
+        state.scenario_verdicts = {1: VERDICT_PASS}
+
+        with patch("pm_core.tui.qa_loop_ui._trigger_auto_merge") as mock_merge, \
+             patch("pm_core.tui.qa_loop_ui._record_qa_note"):
+            _on_qa_complete(app, state)
+
+        mock_merge.assert_called_once_with(app, "pr-001")
+        # Self-driving state should be removed after reaching required passes
+        assert "pr-001" not in app._self_driving_qa
+
+    def test_made_changes_with_pass_verdict_still_returns_to_review(self, tmp_path):
+        """Self-driving QA: PASS with changes should return to review (not merge)."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete
+        from pm_core import store
+
+        app = self._make_app(tmp_path)
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_PASS
+        state.made_changes = True  # Changes committed → needs re-review
+        state.scenarios = [QAScenario(index=1, title="Test", focus="test")]
+        state.scenario_verdicts = {1: VERDICT_PASS}
+
+        with patch("pm_core.tui.qa_loop_ui._start_self_driving_review") as mock_review, \
+             patch("pm_core.tui.qa_loop_ui._record_qa_note"):
+            _on_qa_complete(app, state)
+
+        # PR should transition to in_review, not merge
+        data = store.load(app._root)
+        pr = store.get_pr(data, "pr-001")
+        assert pr["status"] == "in_review"
+        mock_review.assert_called_once()
+        # pass_count should be reset
+        assert app._self_driving_qa["pr-001"]["pass_count"] == 0
