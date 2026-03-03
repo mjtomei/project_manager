@@ -49,23 +49,48 @@ def has_merge_restart_marker() -> bool:
 
 
 def save_breadcrumb(app) -> None:
-    """Save auto-start state to a breadcrumb file for resumption after restart.
+    """Save state to a breadcrumb file for resumption after restart.
 
     Called from action_restart when a merge-restart marker is present.
-    No-op if auto-start is not active. Always deletes the marker.
+    Always deletes the marker.  Persists auto-start state (if active),
+    running review loops, and watcher state.  Writes a breadcrumb whenever
+    there is *anything* worth preserving — even a manually-started review
+    loop without auto-start.
     """
     marker = pm_home() / _MERGE_RESTART_MARKER
     marker.unlink(missing_ok=True)
 
-    if not is_enabled(app):
-        _log.debug("save_breadcrumb: auto-start not active, skipping")
-        return
+    data: dict = {}
 
-    breadcrumb = pm_home() / _BREADCRUMB_FILE
-    data = {
-        "target": app._auto_start_target,
-        "run_id": app._auto_start_run_id,
-    }
+    # Persist auto-start state if active
+    if is_enabled(app):
+        data["auto_start"] = True
+        data["target"] = app._auto_start_target
+        data["run_id"] = app._auto_start_run_id
+
+    # Persist review loop state for running loops
+    review_loops = {}
+    for pr_id, rstate in app._review_loops.items():
+        if not rstate.running:
+            continue
+        review_loops[pr_id] = {
+            "iteration": rstate.iteration,
+            "latest_verdict": rstate.latest_verdict,
+            "stop_on_suggestions": rstate.stop_on_suggestions,
+            "loop_id": rstate.loop_id,
+            "input_required": rstate.input_required,
+            "_transcript_dir": rstate._transcript_dir,
+            "history": [
+                {
+                    "iteration": h.iteration,
+                    "verdict": h.verdict,
+                    "timestamp": h.timestamp,
+                }
+                for h in rstate.history
+            ],
+        }
+    if review_loops:
+        data["review_loops"] = review_loops
 
     # Persist watcher loop state if it's running
     from pm_core.tui import watcher_ui
@@ -75,6 +100,11 @@ def save_breadcrumb(app) -> None:
             "meta_pm_root": state.meta_pm_root,
         }
 
+    if not data:
+        _log.debug("save_breadcrumb: nothing to persist, skipping")
+        return
+
+    breadcrumb = pm_home() / _BREADCRUMB_FILE
     breadcrumb.write_text(json.dumps(data))
     _log.info("save_breadcrumb: wrote %s", data)
 
@@ -97,22 +127,76 @@ async def consume_breadcrumb(app) -> None:
     finally:
         breadcrumb.unlink(missing_ok=True)
 
+    # Restore auto-start state only if it was active before the restart.
+    # The "auto_start" key is explicit; for backward compat with older
+    # breadcrumbs that always implied auto-start, treat presence of
+    # "target" or "run_id" as auto-start enabled.
+    had_auto_start = data.get("auto_start", bool(data.get("target") or data.get("run_id")))
     target = data.get("target")
     run_id = data.get("run_id")
-    _log.info("consume_breadcrumb: restoring target=%s run_id=%s", target, run_id)
+    _log.info("consume_breadcrumb: restoring auto_start=%s target=%s run_id=%s",
+              had_auto_start, target, run_id)
 
-    app._auto_start = True
-    app._auto_start_target = target
-    app._auto_start_run_id = run_id
+    if had_auto_start:
+        app._auto_start = True
+        app._auto_start_target = target
+        app._auto_start_run_id = run_id
 
-    # Recreate transcript directory if needed
-    if run_id and app._root:
-        tdir = app._root / "transcripts" / run_id
-        tdir.mkdir(parents=True, exist_ok=True)
+        # Recreate transcript directory if needed
+        if run_id and app._root:
+            tdir = app._root / "transcripts" / run_id
+            tdir.mkdir(parents=True, exist_ok=True)
 
-    app.log_message(f"Auto-start: resumed after merge restart → {target or 'all'}")
+    # Restore review loop state before check_and_start so it sees existing loops
+    review_loops_data = data.get("review_loops", {})
+    if review_loops_data:
+        from pm_core.review_loop import ReviewLoopState, ReviewIteration
+        for pr_id, loop_data in review_loops_data.items():
+            rstate = ReviewLoopState(
+                pr_id=pr_id,
+                iteration=loop_data.get("iteration", 0),
+                latest_verdict=loop_data.get("latest_verdict", ""),
+                stop_on_suggestions=loop_data.get("stop_on_suggestions", True),
+                loop_id=loop_data.get("loop_id", secrets.token_hex(2)),
+                input_required=loop_data.get("input_required", False),
+                _transcript_dir=loop_data.get("_transcript_dir"),
+            )
+            for h in loop_data.get("history", []):
+                rstate.history.append(ReviewIteration(
+                    iteration=h["iteration"],
+                    verdict=h["verdict"],
+                    output="",  # not stored in breadcrumb
+                    timestamp=h.get("timestamp", ""),
+                ))
+            app._review_loops[pr_id] = rstate
+        _log.info("consume_breadcrumb: restored %d review loop state(s)", len(review_loops_data))
+
+    if had_auto_start:
+        app.log_message(f"Auto-start: resumed after merge restart → {target or 'all'}")
+    elif review_loops_data:
+        app.log_message("Resumed review loop state after restart")
     app._update_display()
-    await check_and_start(app)
+
+    if had_auto_start:
+        await check_and_start(app)
+
+    # Restart review loops that were running before the restart
+    if review_loops_data:
+        from pm_core.tui.review_loop_ui import _start_loop
+        for pr_id in review_loops_data:
+            rstate = app._review_loops.get(pr_id)
+            if rstate and not rstate.running:
+                pr = store.get_pr(app._data, pr_id)
+                if pr and pr.get("status") == "in_review":
+                    tdir = get_transcript_dir(app)
+                    _start_loop(
+                        app, pr_id, pr, rstate.stop_on_suggestions,
+                        transcript_dir=str(tdir) if tdir else rstate._transcript_dir,
+                        resume_state=rstate,
+                    )
+                    app.log_message(
+                        f"Review loop resumed for {pr_id} at iteration {rstate.iteration}"
+                    )
 
     # Resume watcher loop if it was running
     watcher_data = data.get("watcher")

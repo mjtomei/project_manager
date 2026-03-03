@@ -195,6 +195,42 @@ General:
 """)
 
 
+@tui.command("restart")
+@click.option("--breadcrumb", is_flag=True,
+              help="Write merge-restart marker to preserve auto-start and review loop state")
+@click.option("--session", "-s", default=None, help="Specify pm session name")
+def tui_restart(breadcrumb: bool, session: str | None):
+    """Restart the TUI.
+
+    Sends Ctrl+R to the TUI pane. With --breadcrumb, writes a
+    merge-restart marker so the TUI preserves auto-start and review loop
+    state across the restart (same behavior as merge-triggered restarts).
+
+    Examples:
+        pm tui restart                  # Clean restart (no state preserved)
+        pm tui restart --breadcrumb     # Restart preserving loop state
+    """
+    pane_id, sess = _find_tui_pane(session)
+    if not pane_id:
+        click.echo("No TUI pane found. Is there a pm tmux session running?", err=True)
+        raise SystemExit(1)
+
+    marker = None
+    if breadcrumb:
+        from pm_core.paths import pm_home
+        marker = pm_home() / "merge-restart"
+        marker.touch()
+        click.echo("Wrote merge-restart marker for state persistence")
+
+    try:
+        tmux_mod.send_keys_literal(pane_id, "C-r")
+    except Exception:
+        if marker and marker.exists():
+            marker.unlink(missing_ok=True)
+        raise
+    click.echo(f"Sent restart to TUI pane {pane_id} (session: {sess})")
+
+
 @tui.command("clear-history")
 @click.option("--session", "-s", default=None, help="Specify pm session name")
 def tui_clear_history(session: str | None):
