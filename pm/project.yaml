@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-442e51c
+  active_pr: pr-4fd59d4
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -3138,6 +3138,26 @@ prs:
   gh_pr_number: null
   created_at: '2026-03-03T04:13:33.757811+00:00'
   updated_at: '2026-03-03T04:13:33.757811+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-4fd59d4
+  plan: improvements
+  title: Separate fresh and looping review onto different prefix keys
+  branch: pm/pr-4fd59d4-separate-fresh-and-looping-review-onto-different-p
+  status: pending
+  depends_on: []
+  description: Both fresh review (single pass) and looping review (iterates until
+    pass) are currently on the same z prefix key, making them easy to confuse. Move
+    them to different prefix keys so the user can clearly choose between a one-shot
+    fresh review and a looping review. Update keybindings in app.py, help screens,
+    and any documentation or prompts that reference the z prefix.
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-03T17:53:04.828595+00:00'
+  updated_at: '2026-03-03T17:53:04.828595+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
