@@ -98,6 +98,85 @@ QA_PLAN_END
         scenarios = parse_qa_plan(output)
         assert len(scenarios) == 0
 
+    def test_pane_with_prompt_template_and_real_plan(self):
+        """When pane content contains both the prompt template example AND
+        real planner output, parse_qa_plan should pick the real plan (last
+        QA_PLAN_END)."""
+        # Simulates pane content: prompt template first, then Claude's output
+        output = """
+## Output Format
+
+```
+QA_PLAN_START
+
+SCENARIO 1: Scenario Title
+FOCUS: What area/behavior to test
+INSTRUCTION: path/to/instruction.md (or "none" if no existing instruction applies)
+STEPS: Key test steps to perform
+
+SCENARIO 2: Scenario Title
+FOCUS: ...
+INSTRUCTION: ...
+STEPS: ...
+
+QA_PLAN_END
+```
+
+---
+
+Here is my QA plan:
+
+QA_PLAN_START
+
+SCENARIO 1: Unit Test Coverage
+FOCUS: Verify parse_qa_plan handles edge cases
+INSTRUCTION: pm/qa/regression/qa-parser.md
+STEPS: Run pytest with coverage
+
+SCENARIO 2: CLI Integration
+FOCUS: Test pm qa run command
+INSTRUCTION: none
+STEPS: Run pm qa run and check output
+
+QA_PLAN_END
+"""
+        scenarios = parse_qa_plan(output)
+        assert len(scenarios) == 2
+        # Should get the REAL scenarios, not the template placeholders
+        assert scenarios[0].title == "Unit Test Coverage"
+        assert scenarios[0].focus == "Verify parse_qa_plan handles edge cases"
+        assert scenarios[0].instruction_path == "pm/qa/regression/qa-parser.md"
+        assert scenarios[1].title == "CLI Integration"
+        assert scenarios[1].instruction_path is None
+
+    def test_pane_with_only_prompt_template(self):
+        """When pane content only has the prompt template (planner hasn't
+        produced output yet), parse_qa_plan still parses it.  The polling
+        layer (tail_contains + count check) is responsible for preventing
+        this from being accepted prematurely."""
+        # This is the template example from the planner prompt
+        output = """
+QA_PLAN_START
+
+SCENARIO 1: Scenario Title
+FOCUS: What area/behavior to test
+INSTRUCTION: path/to/instruction.md (or "none" if no existing instruction applies)
+STEPS: Key test steps to perform
+
+SCENARIO 2: Scenario Title
+FOCUS: ...
+INSTRUCTION: ...
+STEPS: ...
+
+QA_PLAN_END
+"""
+        # parse_qa_plan itself doesn't know about the template — it just
+        # parses whatever it gets.  The count-based guard in run_qa_sync
+        # prevents this single-template content from being accepted.
+        scenarios = parse_qa_plan(output)
+        assert len(scenarios) == 2
+        assert scenarios[0].title == "Scenario Title"  # template data
+
 
 class TestQAWorkdirs:
     def test_create_qa_workdir(self, tmp_path, monkeypatch):

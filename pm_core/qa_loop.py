@@ -128,9 +128,20 @@ def parse_qa_plan(output: str) -> list[QAScenario]:
     """
     scenarios: list[QAScenario] = []
 
-    # Extract content between markers (if present)
-    m = re.search(r'QA_PLAN_START\s*\n(.*?)QA_PLAN_END', output, re.DOTALL)
-    body = m.group(1) if m else output
+    # The prompt template also contains example markers, so we can't
+    # rely on matching START/END pairs.  Instead, find the last
+    # QA_PLAN_END and scan backwards for the real SCENARIO 1: line.
+    end_m = list(re.finditer(r'QA_PLAN_END', output))
+    if end_m:
+        end_pos = end_m[-1].start()
+        # Find the last "SCENARIO 1:" before that END marker
+        s1_matches = list(re.finditer(
+            r'^[ \t]*SCENARIO\s+1:', output[:end_pos], re.MULTILINE,
+        ))
+        start_pos = s1_matches[-1].start() if s1_matches else 0
+        body = output[start_pos:end_pos]
+    else:
+        body = output
 
     # Split on SCENARIO N: lines
     chunks = re.split(r'^[ \t]*SCENARIO\s+', body, flags=re.MULTILINE)
@@ -267,9 +278,14 @@ def run_qa_sync(
 
             content = tmux_mod.capture_pane(planner_pane, full_scrollback=True)
             if tail_contains(content, "QA_PLAN_END"):
-                state.plan_output = content
-                plan_found = True
-                break
+                # The planner prompt template contains QA_PLAN_END as an
+                # example.  Require 2+ occurrences in the full scrollback
+                # (one from the template, one from actual planner output)
+                # to avoid parsing the template as the real plan.
+                if content.count("QA_PLAN_END") >= 2:
+                    state.plan_output = content
+                    plan_found = True
+                    break
 
             time.sleep(5)
 
@@ -364,24 +380,34 @@ def run_qa_sync(
 
         # Register pane for layout management
         if pane_id and qa_win_id:
-            pane_registry.register_pane(
-                session, qa_win_id, pane_id,
-                f"qa-scenario-{scenario.index}", child_cmd,
-            )
+            try:
+                pane_registry.register_pane(
+                    session, qa_win_id, pane_id,
+                    f"qa-scenario-{scenario.index}", child_cmd,
+                )
+            except Exception:
+                _log.exception("Failed to register pane for scenario %d",
+                               scenario.index)
 
     # Register planner pane too (it's still in the window)
     if base_pane and qa_win_id:
-        pane_registry.register_pane(
-            session, qa_win_id, base_pane, "qa-planner", "planner",
-        )
+        try:
+            pane_registry.register_pane(
+                session, qa_win_id, base_pane, "qa-planner", "planner",
+            )
+        except Exception:
+            _log.exception("Failed to register planner pane")
 
     # Reset user_modified and rebalance (same pattern as review windows)
     if qa_win_id:
-        reg = pane_registry.load_registry(session)
-        wdata = pane_registry.get_window_data(reg, qa_win_id)
-        wdata["user_modified"] = False
-        pane_registry.save_registry(session, reg)
-        pane_layout.rebalance(session, qa_win_id)
+        try:
+            reg = pane_registry.load_registry(session)
+            wdata = pane_registry.get_window_data(reg, qa_win_id)
+            wdata["user_modified"] = False
+            pane_registry.save_registry(session, reg)
+            pane_layout.rebalance(session, qa_win_id)
+        except Exception:
+            _log.exception("Failed to rebalance QA window layout")
 
     state.latest_output = f"Running {len(state.scenarios)} scenario(s)..."
     _notify()
@@ -401,10 +427,12 @@ def run_qa_sync(
                 continue
 
             if not tmux_mod.pane_exists(scenario.pane_id):
-                # Pane exited without verdict
+                # Pane exited without verdict — treat as inconclusive,
+                # not as a pass.  A crashed or unexpectedly-exited pane
+                # should not silently pass QA.
                 _log.warning("Scenario %d pane exited without verdict",
                              scenario.index)
-                state.scenario_verdicts[scenario.index] = VERDICT_PASS
+                state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
                 pending.discard(scenario.index)
                 continue
 
