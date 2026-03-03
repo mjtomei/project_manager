@@ -18,7 +18,6 @@ from pm_core.qa_loop import (
     VERDICT_NEEDS_WORK,
     VERDICT_INPUT_REQUIRED,
     start_qa_background,
-    _cleanup_stale_scenario_windows,
     _compute_qa_window_name,
 )
 from pm_core.loop_shared import get_pm_session
@@ -114,9 +113,13 @@ def start_qa(app, pr_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 def fresh_start_qa(app, pr_id: str) -> None:
-    """Stop running QA (if any), kill old windows, and restart.
+    """Stop running QA (if any) and restart with fresh windows.
 
     Handles ``z t``.
+
+    Note: old window cleanup is deferred to ``run_qa_sync``'s planning
+    phase so it can first capture which sessions are watching the old QA
+    window and switch them to the replacement.
     """
     if not app._root:
         app.log_message("No project root")
@@ -137,12 +140,8 @@ def fresh_start_qa(app, pr_id: str) -> None:
     # Remove from loops dict so start_qa doesn't see it as running
     app._qa_loops.pop(pr_id, None)
 
-    # Kill old QA windows
-    session = get_pm_session()
-    if session:
-        _cleanup_stale_scenario_windows(session, pr)
-
-    # Start fresh
+    # Start fresh — run_qa_sync will clean up old windows after capturing
+    # which sessions were watching them (for proper session switching).
     app.log_message(f"Fresh QA start for {pr_id}...")
     start_qa(app, pr_id)
 
@@ -178,11 +177,9 @@ def start_or_stop_qa_loop(app, pr_id: str, strict: bool) -> None:
         _log.info("qa_loop_ui: stopping QA loop for %s (mode=%s)", pr_id, mode)
         return
 
-    # Clean up stale windows from a previous run (or aborted loop)
+    # Remove stale loop state — run_qa_sync will clean up old windows
+    # after capturing which sessions were watching them.
     app._qa_loops.pop(pr_id, None)
-    session = get_pm_session()
-    if session:
-        _cleanup_stale_scenario_windows(session, pr)
 
     # Start a new QA loop
     state = QALoopState(pr_id=pr_id)
