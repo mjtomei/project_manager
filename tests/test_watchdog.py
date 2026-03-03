@@ -272,6 +272,22 @@ class TestCheckStaleMergeTracking:
         assert "abc123" not in app._pending_merge_prs
         app.log_message.assert_called_once()
 
+    @patch("pm_core.tmux.find_window_by_name", return_value=None)
+    @patch("pm_core.store.get_pr")
+    def test_cleans_input_required_with_stale_pending(self, mock_get_pr, mock_find_win):
+        """When a stale pending merge is cleaned, _merge_input_required_prs is too."""
+        pr = {"id": "abc123", "status": "in_review", "gh_pr_number": 42}
+        mock_get_pr.return_value = pr
+
+        app = _make_app(
+            pending_merge_prs={"abc123"},
+            merge_input_required_prs={"abc123"},
+            data={"prs": [pr]},
+        )
+        _check_stale_merge_tracking(app)
+        assert "abc123" not in app._pending_merge_prs
+        assert "abc123" not in app._merge_input_required_prs
+
     @patch("pm_core.tmux.find_window_by_name")
     @patch("pm_core.store.get_pr")
     def test_keeps_active_pending_merge(self, mock_get_pr, mock_find_win):
