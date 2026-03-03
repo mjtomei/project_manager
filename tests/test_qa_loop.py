@@ -216,9 +216,11 @@ class TestQAWorkdirs:
         assert "pr-001-abc123" in str(wd)
 
     def test_create_scenario_workdir(self, tmp_path):
-        d = create_scenario_workdir(tmp_path, 1)
+        d, branch, scratch = create_scenario_workdir(tmp_path, 1)
         assert d.exists()
         assert d.name == "scenario-1"
+        assert branch == ""
+        assert scratch.exists()
 
 
 class TestQALoopState:

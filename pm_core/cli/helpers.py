@@ -141,7 +141,7 @@ def _pr_display_id(pr: dict) -> str:
 
 
 def kill_pr_windows(session: str, pr: dict) -> list[str]:
-    """Kill tmux work and review windows for a PR.
+    """Kill tmux work, review, merge, and QA windows for a PR.
 
     Returns a list of window names that were killed.
     """
@@ -149,11 +149,20 @@ def kill_pr_windows(session: str, pr: dict) -> list[str]:
 
     killed = []
     display_id = _pr_display_id(pr)
-    for win_name in (display_id, f"review-{display_id}", f"merge-{display_id}"):
+    for win_name in (display_id, f"review-{display_id}", f"merge-{display_id}",
+                     f"qa-{display_id}"):
         win = tmux_mod.find_window_by_name(session, win_name)
         if win:
             tmux_mod.kill_window(session, win["id"])
             killed.append(win_name)
+
+    # Also kill any QA scenario windows (qa-{display_id}-s1, etc.)
+    qa_prefix = f"qa-{display_id}-s"
+    for win in tmux_mod.list_windows(session):
+        if win.get("name", "").startswith(qa_prefix):
+            tmux_mod.kill_window(session, win["id"])
+            killed.append(win["name"])
+
     return killed
 
 
