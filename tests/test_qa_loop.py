@@ -723,6 +723,253 @@ class TestMaybeStartQA:
 
 
 # ---------------------------------------------------------------------------
+# _maybe_start_qa: auto-start scoping with dependency trees
+# ---------------------------------------------------------------------------
+
+class TestMaybeStartQAScoping:
+    """Verify _maybe_start_qa respects auto-start target scoping.
+
+    Tests the full scenario: auto-start targets PR-C, only PRs in
+    PR-C's transitive dependency tree (or PR-C itself) should auto-start QA.
+    PRs outside the tree should NOT.
+    """
+
+    def _make_app(self, tmp_path, *, prs, auto_start=True, target=None):
+        """Create a mock TUI app with multiple PRs on disk."""
+        pm_dir = tmp_path / "pm"
+        pm_dir.mkdir()
+        from pm_core import store
+        data = {
+            "project": {"name": "test", "repo": "/tmp/r", "base_branch": "master"},
+            "prs": prs,
+        }
+        store.save(data, pm_dir)
+
+        app = MagicMock()
+        app._root = pm_dir
+        app._data = data
+        app._auto_start = auto_start
+        app._auto_start_target = target
+        app._qa_loops = {}
+        app._self_driving_qa = {}
+        return app
+
+    def test_transitions_pr_in_target_dep_tree(self, tmp_path):
+        """PR in the target's transitive dependency tree transitions to qa."""
+        from pm_core.tui.review_loop_ui import _maybe_start_qa
+        from pm_core import store
+
+        prs = [
+            {"id": "pr-a", "title": "A", "branch": "a", "status": "in_review",
+             "workdir": "/tmp/wa", "depends_on": [], "notes": []},
+            {"id": "pr-b", "title": "B", "branch": "b", "status": "pending",
+             "workdir": "/tmp/wb", "depends_on": ["pr-a"], "notes": []},
+        ]
+        app = self._make_app(tmp_path, prs=prs, target="pr-b")
+
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+            _maybe_start_qa(app, "pr-a")
+
+        data = store.load(app._root)
+        pr = store.get_pr(data, "pr-a")
+        assert pr["status"] == "qa"
+        mock_start.assert_called_once_with(app, "pr-a")
+
+    def test_transitions_target_pr_itself(self, tmp_path):
+        """The auto-start target PR itself transitions to qa."""
+        from pm_core.tui.review_loop_ui import _maybe_start_qa
+        from pm_core import store
+
+        prs = [
+            {"id": "pr-a", "title": "A", "branch": "a", "status": "merged",
+             "workdir": "/tmp/wa", "depends_on": [], "notes": []},
+            {"id": "pr-b", "title": "B", "branch": "b", "status": "in_review",
+             "workdir": "/tmp/wb", "depends_on": ["pr-a"], "notes": []},
+        ]
+        app = self._make_app(tmp_path, prs=prs, target="pr-b")
+
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+            _maybe_start_qa(app, "pr-b")
+
+        data = store.load(app._root)
+        pr = store.get_pr(data, "pr-b")
+        assert pr["status"] == "qa"
+        mock_start.assert_called_once_with(app, "pr-b")
+
+    def test_skips_pr_outside_target_dep_tree(self, tmp_path):
+        """PR NOT in the target's dependency tree is NOT transitioned."""
+        from pm_core.tui.review_loop_ui import _maybe_start_qa
+        from pm_core import store
+
+        prs = [
+            {"id": "pr-a", "title": "A", "branch": "a", "status": "in_review",
+             "workdir": "/tmp/wa", "depends_on": [], "notes": []},
+            {"id": "pr-b", "title": "B", "branch": "b", "status": "pending",
+             "workdir": "/tmp/wb", "depends_on": [], "notes": []},
+            {"id": "pr-c", "title": "C", "branch": "c", "status": "pending",
+             "workdir": "/tmp/wc", "depends_on": ["pr-b"], "notes": []},
+        ]
+        # Target is pr-c, which depends on pr-b only — pr-a is outside the tree
+        app = self._make_app(tmp_path, prs=prs, target="pr-c")
+
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+            _maybe_start_qa(app, "pr-a")
+
+        data = store.load(app._root)
+        pr = store.get_pr(data, "pr-a")
+        assert pr["status"] == "in_review"  # unchanged
+        mock_start.assert_not_called()
+
+    def test_no_target_allows_all_prs(self, tmp_path):
+        """Without a target, any in_review PR transitions to qa."""
+        from pm_core.tui.review_loop_ui import _maybe_start_qa
+        from pm_core import store
+
+        prs = [
+            {"id": "pr-x", "title": "X", "branch": "x", "status": "in_review",
+             "workdir": "/tmp/wx", "depends_on": [], "notes": []},
+        ]
+        app = self._make_app(tmp_path, prs=prs, target=None)
+
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+            _maybe_start_qa(app, "pr-x")
+
+        data = store.load(app._root)
+        pr = store.get_pr(data, "pr-x")
+        assert pr["status"] == "qa"
+        mock_start.assert_called_once_with(app, "pr-x")
+
+    def test_skips_pr_not_in_review_status(self, tmp_path):
+        """PR that is not in_review status is not transitioned even if in tree."""
+        from pm_core.tui.review_loop_ui import _maybe_start_qa
+        from pm_core import store
+
+        prs = [
+            {"id": "pr-a", "title": "A", "branch": "a", "status": "pending",
+             "workdir": "/tmp/wa", "depends_on": [], "notes": []},
+            {"id": "pr-b", "title": "B", "branch": "b", "status": "pending",
+             "workdir": "/tmp/wb", "depends_on": ["pr-a"], "notes": []},
+        ]
+        app = self._make_app(tmp_path, prs=prs, target="pr-b")
+
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+            _maybe_start_qa(app, "pr-a")
+
+        data = store.load(app._root)
+        pr = store.get_pr(data, "pr-a")
+        assert pr["status"] == "pending"  # unchanged
+        mock_start.assert_not_called()
+
+
+class TestPollTriggersQA:
+    """Integration: _poll_loop_state with VERDICT_PASS triggers _maybe_start_qa."""
+
+    def _make_app(self, tmp_path, *, prs, auto_start=True, target=None):
+        """Create mock app with review loop state."""
+        pm_dir = tmp_path / "pm"
+        pm_dir.mkdir()
+        from pm_core import store
+        data = {
+            "project": {"name": "test", "repo": "/tmp/r", "base_branch": "master"},
+            "prs": prs,
+        }
+        store.save(data, pm_dir)
+
+        app = MagicMock()
+        app._root = pm_dir
+        app._data = data
+        app._auto_start = auto_start
+        app._auto_start_target = target
+        app._review_loops = {}
+        app._qa_loops = {}
+        app._self_driving_qa = {}
+        app._watcher_state = None
+        app._impl_poll_counter = 0
+        return app
+
+    def test_verdict_pass_triggers_maybe_start_qa(self, tmp_path):
+        """When _poll_loop_state sees VERDICT_PASS, _maybe_start_qa is called."""
+        from pm_core.tui.review_loop_ui import _poll_loop_state
+        from pm_core.review_loop import ReviewLoopState, VERDICT_PASS
+        from pm_core import store
+
+        prs = [
+            {"id": "pr-001", "title": "T", "branch": "b", "status": "in_review",
+             "workdir": "/tmp/w", "depends_on": [], "notes": []},
+        ]
+        app = self._make_app(tmp_path, prs=prs, target="pr-001")
+
+        # Create a completed review loop state
+        state = ReviewLoopState(pr_id="pr-001")
+        state.running = False
+        state.latest_verdict = VERDICT_PASS
+        state.iteration = 1
+        app._review_loops["pr-001"] = state
+
+        with patch("pm_core.tui.review_loop_ui._maybe_start_qa") as mock_qa, \
+             patch("pm_core.tui.review_loop_ui._refresh_tech_tree"), \
+             patch("pm_core.tui.review_loop_ui._poll_impl_idle"), \
+             patch("pm_core.tui.watcher_ui.poll_watcher_state"), \
+             patch("pm_core.tui.qa_loop_ui.poll_qa_state"):
+            _poll_loop_state(app)
+
+        mock_qa.assert_called_once_with(app, "pr-001")
+
+    def test_verdict_pass_with_suggestions_triggers_qa(self, tmp_path):
+        """PASS_WITH_SUGGESTIONS also triggers auto-QA."""
+        from pm_core.tui.review_loop_ui import _poll_loop_state
+        from pm_core.review_loop import ReviewLoopState, VERDICT_PASS_WITH_SUGGESTIONS
+        from pm_core import store
+
+        prs = [
+            {"id": "pr-001", "title": "T", "branch": "b", "status": "in_review",
+             "workdir": "/tmp/w", "depends_on": [], "notes": []},
+        ]
+        app = self._make_app(tmp_path, prs=prs, target="pr-001")
+
+        state = ReviewLoopState(pr_id="pr-001")
+        state.running = False
+        state.latest_verdict = VERDICT_PASS_WITH_SUGGESTIONS
+        state.iteration = 1
+        app._review_loops["pr-001"] = state
+
+        with patch("pm_core.tui.review_loop_ui._maybe_start_qa") as mock_qa, \
+             patch("pm_core.tui.review_loop_ui._refresh_tech_tree"), \
+             patch("pm_core.tui.review_loop_ui._poll_impl_idle"), \
+             patch("pm_core.tui.watcher_ui.poll_watcher_state"), \
+             patch("pm_core.tui.qa_loop_ui.poll_qa_state"):
+            _poll_loop_state(app)
+
+        mock_qa.assert_called_once_with(app, "pr-001")
+
+    def test_verdict_needs_work_does_not_trigger_qa(self, tmp_path):
+        """NEEDS_WORK verdict should NOT trigger auto-QA."""
+        from pm_core.tui.review_loop_ui import _poll_loop_state
+        from pm_core.review_loop import ReviewLoopState, VERDICT_NEEDS_WORK
+
+        prs = [
+            {"id": "pr-001", "title": "T", "branch": "b", "status": "in_review",
+             "workdir": "/tmp/w", "depends_on": [], "notes": []},
+        ]
+        app = self._make_app(tmp_path, prs=prs, target="pr-001")
+
+        state = ReviewLoopState(pr_id="pr-001")
+        state.running = False
+        state.latest_verdict = VERDICT_NEEDS_WORK
+        state.iteration = 1
+        app._review_loops["pr-001"] = state
+
+        with patch("pm_core.tui.review_loop_ui._maybe_start_qa") as mock_qa, \
+             patch("pm_core.tui.review_loop_ui._refresh_tech_tree"), \
+             patch("pm_core.tui.review_loop_ui._poll_impl_idle"), \
+             patch("pm_core.tui.watcher_ui.poll_watcher_state"), \
+             patch("pm_core.tui.qa_loop_ui.poll_qa_state"):
+            _poll_loop_state(app)
+
+        mock_qa.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # Self-driving QA: NEEDS_WORK → review → QA loop
 # ---------------------------------------------------------------------------
 
