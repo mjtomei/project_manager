@@ -9,13 +9,13 @@ X key toggles merged PR visibility.
 ## Background
 
 The TUI tech tree can be filtered by PR status:
-- F key cycles through: all -> pending -> in_progress -> in_review -> merged -> closed -> all
+- F key cycles through: all -> pending -> in_progress -> in_review -> qa -> merged -> closed -> all
 - X key toggles hiding/showing merged PRs
 - When a filter is active, only PRs matching that status are shown in the tree
 - The status bar displays the current filter
 - The log line shows a message on each filter change
 
-Status icons used: ○ pending, ● in_progress, ◎ in_review, ✓ merged, ✗ closed
+Status icons used: ○ pending, ● in_progress, ◎ in_review, 🧪 qa, ✓ merged, ✗ closed
 
 ## Available Tools
 
@@ -32,7 +32,7 @@ Status icons used: ○ pending, ● in_progress, ◎ in_review, ✓ merged, ✗ 
 
 1. Run `pm tui clear-frames` to start with empty frame buffer
 2. Run `pm pr list` to inventory all PRs and their statuses
-   - Count how many PRs exist in each status (pending, in_progress, in_review, merged, closed)
+   - Count how many PRs exist in each status (pending, in_progress, in_review, qa, merged, closed)
    - This is your reference for verifying filter results
 3. Run `pm tui view` to verify TUI is running and showing the tech tree
 4. If in guide mode, press 'x' to dismiss
@@ -65,21 +65,28 @@ Status icons used: ○ pending, ● in_progress, ◎ in_review, ✓ merged, ✗ 
    - Log line should show "Filter: ◎ in_review"
    - Count visible PR nodes -- should match in_review count
 
-5. Fourth press -- filter to "merged":
+5. Fourth press -- filter to "qa":
+   - `pm tui send f`
+   - Wait 1 second
+   - `pm tui view`
+   - Log line should show "Filter: 🧪 qa"
+   - Count visible PR nodes -- should match qa count
+
+6. Fifth press -- filter to "merged":
    - `pm tui send f`
    - Wait 1 second
    - `pm tui view`
    - Log line should show "Filter: ✓ merged"
    - Count visible PR nodes -- should match merged count
 
-6. Fifth press -- filter to "closed":
+7. Sixth press -- filter to "closed":
    - `pm tui send f`
    - Wait 1 second
    - `pm tui view`
    - Log line should show "Filter: ✗ closed"
    - Count visible PR nodes -- should match closed count
 
-7. Sixth press -- back to "all":
+8. Seventh press -- back to "all":
    - `pm tui send f`
    - Wait 1 second
    - `pm tui view`
@@ -152,7 +159,7 @@ Status icons used: ○ pending, ● in_progress, ◎ in_review, ✓ merged, ✗ 
 ## Expected Behavior
 
 From pm_core/tui/app.py action_cycle_filter():
-- STATUS_FILTER_CYCLE = [None, "pending", "in_progress", "in_review", "merged", "closed"]
+- STATUS_FILTER_CYCLE = [None, "pending", "in_progress", "in_review", "qa", "merged", "closed"]
 - Cycles through the list, wrapping around to None (all)
 - Calls tree._recompute() and tree.refresh(layout=True) after each change
 - Logs "Filter: {icon} {status}" or "Filter: all"
@@ -178,6 +185,7 @@ PR inventory from pm pr list:
   pending: <N>
   in_progress: <N>
   in_review: <N>
+  qa: <N>
   merged: <N>
   closed: <N>
 
@@ -188,6 +196,8 @@ Filter pending: [PASS/FAIL] - <visible count> PRs (expected <N>)
 Filter in_progress: [PASS/FAIL] - <visible count> PRs (expected <N>)
   Log message: <message seen>
 Filter in_review: [PASS/FAIL] - <visible count> PRs (expected <N>)
+  Log message: <message seen>
+Filter qa: [PASS/FAIL] - <visible count> PRs (expected <N>)
   Log message: <message seen>
 Filter merged: [PASS/FAIL] - <visible count> PRs (expected <N>)
   Log message: <message seen>
@@ -213,7 +223,7 @@ Filter cleared when reset: [PASS/FAIL]
 
 ## Part 5: Frame Analysis
 Total frames captured: <N>
-Filter frames: <N> (expected ~8 for F presses + 2 for X presses)
+Filter frames: <N> (expected ~9 for F presses + 2 for X presses)
 
 ## Issues Found
 <list any bugs, incorrect counts, or unexpected behavior>
