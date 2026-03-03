@@ -790,15 +790,21 @@ that may expose bugs.
 
 def generate_qa_child_prompt(data: dict, pr_id: str,
                              scenario, workdir: str,
-                             session_name: str | None = None) -> str:
+                             session_name: str | None = None,
+                             worktree_mode: bool = False,
+                             scratch_dir: str | None = None) -> str:
     """Generate a prompt for a QA child session executing one scenario.
 
     Args:
         data: Project data dict.
         pr_id: PR identifier.
         scenario: QAScenario dataclass instance.
-        workdir: Child scenario's own workdir (for throwaway test projects).
+        workdir: Child scenario's own workdir (worktree in worktree_mode,
+            or a plain directory otherwise).
         session_name: tmux session name.
+        worktree_mode: When True, the child runs in a git worktree; commits
+            are cherry-picked back by the orchestrator.
+        scratch_dir: Path to a scratch directory for throwaway test projects.
     """
     pr = store.get_pr(data, pr_id)
     if not pr:
@@ -821,6 +827,39 @@ Follow its procedures as applicable to this scenario.
     # Include PR notes (prior QA results, addendums)
     pr_notes_block = _format_pr_notes(pr)
 
+    # Workdir description and execution instructions differ by mode
+    scratch_line = f"\n- **Scratch dir** (throwaway test projects): {scratch_dir}" if scratch_dir else ""
+    if worktree_mode:
+        workdir_block = f"""\
+- **Your workdir** (isolated worktree): {workdir}{scratch_line}
+- **PR workdir** (canonical source): {pr_workdir}"""
+        execution_block = f"""\
+1. Inspect and test the code in your workdir (an isolated worktree of the PR branch)
+2. Execute the test steps described above
+3. If you find issues and can fix them:
+   - Implement the fix in your workdir (your current directory)
+   - Commit with message prefix `qa: `
+   - Do NOT push — commits are cherry-picked back automatically
+4. End with a verdict on its own line — one of:
+   - **PASS** — Scenario passed, no issues found
+   - **NEEDS_WORK** — Issues found (explain what and whether you fixed them)
+   - **INPUT_REQUIRED** — Genuine ambiguity requiring human judgment"""
+    else:
+        workdir_block = f"""\
+- **PR workdir** (source code): {pr_workdir}
+- **Your workdir** (throwaway test projects): {workdir}"""
+        execution_block = f"""\
+1. Inspect the PR's code in the PR workdir
+2. Execute the test steps described above
+3. If you find issues and can fix them:
+   - Implement the fix in the PR workdir
+   - Commit with message prefix `qa: `
+   - Push: `git push origin {branch}`
+4. End with a verdict on its own line — one of:
+   - **PASS** — Scenario passed, no issues found
+   - **NEEDS_WORK** — Issues found (explain what and whether you fixed them)
+   - **INPUT_REQUIRED** — Genuine ambiguity requiring human judgment"""
+
     prompt = f"""You are running QA scenario {scenario.index}: "{scenario.title}"
 
 ## Context
@@ -828,8 +867,7 @@ Follow its procedures as applicable to this scenario.
 - **PR**: {pr_id} — "{title}"
 - **Branch**: {branch}
 - **Base branch**: {base_branch}
-- **PR workdir** (source code): {pr_workdir}
-- **Your workdir** (throwaway test projects): {workdir}
+{workdir_block}
 {pr_notes_block}
 ## Scenario
 
@@ -840,16 +878,7 @@ Follow its procedures as applicable to this scenario.
 {instruction_block}
 ## Execution
 
-1. Inspect the PR's code in the PR workdir
-2. Execute the test steps described above
-3. If you find issues and can fix them:
-   - Implement the fix in the PR workdir
-   - Commit with message prefix `qa: `
-   - Push: `git push origin {branch}`
-4. End with a verdict on its own line — one of:
-   - **PASS** — Scenario passed, no issues found
-   - **NEEDS_WORK** — Issues found (explain what and whether you fixed them)
-   - **INPUT_REQUIRED** — Genuine ambiguity requiring human judgment
+{execution_block}
 
 IMPORTANT: Always end your response with the verdict keyword on its own line."""
     return prompt.strip()

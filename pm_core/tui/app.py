@@ -238,6 +238,8 @@ class ProjectManagerApp(App):
         self._watcher_state = None  # WatcherLoopState | None
         # QA loop state (purely in-memory)
         self._qa_loops: dict = {}
+        # Self-driving QA state (zz t / zzz t — tracks pass counts per PR)
+        self._self_driving_qa: dict = {}
 
     def _consume_z(self) -> int:
         """Atomically read and clear the z modifier count.
@@ -909,14 +911,29 @@ class ProjectManagerApp(App):
             self._show_qa_view()
 
     def action_start_qa_on_pr(self) -> None:
-        """Start QA on the selected PR."""
+        """Start QA on the selected PR.
+
+        Keybinding variants (same z-prefix pattern as review):
+          t      — one-shot QA run (or focus existing window)
+          z t    — fresh start (stop running QA, kill old windows, restart)
+          zz t   — start/stop QA loop (lenient)
+          zzz t  — start/stop QA loop (strict)
+        """
         from pm_core.tui import qa_loop_ui
         tree = self.query_one("#tech-tree", TechTree)
         pr_id = tree.selected_pr_id
         if not pr_id:
             self.log_message("No PR selected")
             return
-        qa_loop_ui.start_qa(self, pr_id)
+        z = self._consume_z()
+        if z == 0:
+            qa_loop_ui.focus_or_start_qa(self, pr_id)
+        elif z == 1:
+            qa_loop_ui.fresh_start_qa(self, pr_id)
+        elif z == 2:
+            qa_loop_ui.start_or_stop_qa_loop(self, pr_id, strict=False)
+        else:
+            qa_loop_ui.start_or_stop_qa_loop(self, pr_id, strict=True)
 
     def on_qaitem_selected(self, message: QAItemSelected) -> None:
         _log.debug("qa item selected: %s", message.item_id)

@@ -187,7 +187,7 @@ PR Actions:
   d                Review (zz d: loop, zzz d: strict)
   g                Merge PR
   e                Edit selected PR
-  t                Start QA on selected PR
+  t                Start QA (z t: fresh, zz t: loop, zzz t: strict)
 
 Views:
   p                Toggle plans view
