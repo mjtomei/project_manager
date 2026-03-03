@@ -455,6 +455,68 @@ class TestFreshStartZT:
         # Self-driving state should be cleared
         assert "pr-001" not in app._self_driving_qa
 
+    def test_fresh_start_clears_loops_before_start(self, tmp_path):
+        """z t must remove old loop from _qa_loops before calling start_qa,
+        so start_qa doesn't hit the 'already running' guard."""
+        from pm_core.tui.qa_loop_ui import fresh_start_qa
+
+        app = _make_app(tmp_path)
+        old_state = QALoopState(pr_id="pr-001")
+        old_state.running = True
+        app._qa_loops["pr-001"] = old_state
+
+        loops_snapshot = []
+
+        def capture_start(a, pr_id):
+            # Capture the state of _qa_loops at the time start_qa is called
+            loops_snapshot.append(dict(a._qa_loops))
+
+        with patch("pm_core.tui.qa_loop_ui.start_qa", side_effect=capture_start):
+            fresh_start_qa(app, "pr-001")
+
+        # At the time start_qa was called, _qa_loops should not contain pr-001
+        assert len(loops_snapshot) == 1
+        assert "pr-001" not in loops_snapshot[0]
+
+    def test_fresh_start_new_state_has_planning_phase(self, tmp_path):
+        """z t creates a new QALoopState with planning_phase=True (starts from scratch)."""
+        from pm_core.tui.qa_loop_ui import fresh_start_qa
+
+        app = _make_app(tmp_path)
+        old_state = QALoopState(pr_id="pr-001")
+        old_state.running = True
+        old_state.planning_phase = False  # old state past planning
+        old_state.scenarios = [MagicMock()]  # old state had scenarios
+        app._qa_loops["pr-001"] = old_state
+
+        with patch("pm_core.tui.qa_loop_ui.start_qa_background"):
+            fresh_start_qa(app, "pr-001")
+
+        # The new state in _qa_loops should be fresh
+        new_state = app._qa_loops.get("pr-001")
+        assert new_state is not None
+        assert new_state is not old_state
+        assert new_state.planning_phase is True
+        assert new_state.scenarios == []
+        assert new_state.stop_requested is False
+
+    def test_fresh_start_does_not_call_cleanup_directly(self, tmp_path):
+        """Window cleanup is deferred to run_qa_sync planning phase,
+        not called immediately by fresh_start_qa."""
+        from pm_core.tui.qa_loop_ui import fresh_start_qa
+
+        app = _make_app(tmp_path)
+        old_state = QALoopState(pr_id="pr-001")
+        old_state.running = True
+        app._qa_loops["pr-001"] = old_state
+
+        with patch("pm_core.tui.qa_loop_ui.start_qa"), \
+             patch("pm_core.qa_loop._cleanup_stale_scenario_windows") as mock_cleanup:
+            fresh_start_qa(app, "pr-001")
+
+        # _cleanup_stale_scenario_windows should NOT be called by fresh_start_qa
+        mock_cleanup.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # Step 11: INPUT_REQUIRED pauses self-driving loop
