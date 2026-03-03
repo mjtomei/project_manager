@@ -148,7 +148,11 @@ def create_scenario_workdir(qa_workdir: Path, scenario_index: int,
     branch_name = f"qa-tmp-{pr_id}-{loop_id}-s{scenario_index}"
     wt_path = qa_workdir / f"worktree-{scenario_index}"
 
-    # Clean up stale worktree/branch from a previous attempt
+    # Clean up stale worktree/branch from a previous attempt.
+    # Always prune first — a previous run may have deleted the worktree
+    # directory without calling `git worktree remove`, leaving a stale
+    # entry that prevents branch deletion and re-creation.
+    git_ops.run_git("worktree", "prune", cwd=repo_root, check=False)
     if wt_path.exists():
         git_ops.remove_worktree(repo_root, wt_path)
     git_ops.delete_branch(repo_root, branch_name)
