@@ -5,6 +5,7 @@ Replaces the old tests_pane.py.  Shows two sections with visual dividers:
 2. Regression Tests — from pm/qa/regression/
 """
 
+from textual.message import Message
 from textual.widget import Widget
 from textual.reactive import reactive
 from rich.text import Text
@@ -13,6 +14,14 @@ from rich.console import RenderableType
 from pm_core.tui import item_message
 
 QAItemSelected, QAItemActivated = item_message("QAItem", "item_id")
+
+
+class QAAction(Message):
+    """Fired when a QA action shortcut is pressed (a=add, e=edit)."""
+    def __init__(self, action: str, item_id: str | None = None) -> None:
+        self.action = action
+        self.item_id = item_id
+        super().__init__()
 
 
 class QAPane(Widget):
@@ -115,17 +124,6 @@ class QAPane(Widget):
                                   style="dim italic" if not is_selected else "italic")
                 output.append("\n")
 
-        # Footer
-        output.append("\n")
-        output.append("  Enter", style="bold")
-        output.append("=run  ", style="dim")
-        output.append("e", style="bold")
-        output.append("=edit  ", style="dim")
-        output.append("a", style="bold")
-        output.append("=add  ", style="dim")
-        output.append("q", style="bold")
-        output.append("=back\n", style="dim")
-
         return output
 
     def _entry_lines(self, item: dict) -> int:
@@ -166,15 +164,21 @@ class QAPane(Widget):
                 self.refresh()
                 self._scroll_selected_into_view()
                 self.post_message(QAItemSelected(self.selected_item_id))
-            event.prevent_default()
+            event.stop()
         elif event.key in ("down", "j"):
             if current_pos < len(selectable) - 1:
                 self.selected_index = selectable[current_pos + 1]
                 self.refresh()
                 self._scroll_selected_into_view()
                 self.post_message(QAItemSelected(self.selected_item_id))
-            event.prevent_default()
+            event.stop()
         elif event.key == "enter":
             if self.selected_item_id:
                 self.post_message(QAItemActivated(self.selected_item_id))
-            event.prevent_default()
+            event.stop()
+        elif event.key == "a":
+            self.post_message(QAAction("add"))
+            event.stop()
+        elif event.key == "e":
+            self.post_message(QAAction("edit", self.selected_item_id))
+            event.stop()

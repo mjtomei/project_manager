@@ -26,7 +26,7 @@ from pm_core.loop_shared import (
     find_claude_pane,
     get_pm_session,
     extract_verdict_from_content,
-    tail_contains,
+    VERDICT_TAIL_LINES,
     VerdictStabilityTracker,
 )
 
@@ -44,6 +44,34 @@ _POLL_INTERVAL = 5
 _TICK_INTERVAL = 1
 _VERDICT_GRACE_PERIOD = 30  # QA sessions take a while to run
 _PLANNER_TIMEOUT = 60 * 60  # seconds to wait for planner output
+_PLANNER_GRACE = 15  # seconds before accepting planner completion
+_DEFAULT_MAX_SCENARIOS = 0  # 0 = unlimited
+
+
+def _get_max_scenarios() -> int:
+    """Read qa-max-scenarios from global settings, or _DEFAULT_MAX_SCENARIOS."""
+    from pm_core.paths import get_global_setting_value
+    val = get_global_setting_value("qa-max-scenarios", "")
+    try:
+        return max(0, int(val))
+    except ValueError:
+        return _DEFAULT_MAX_SCENARIOS
+
+def _tail_has_marker_on_own_line(content: str, marker: str,
+                                 tail_lines: int = VERDICT_TAIL_LINES) -> bool:
+    """Check if *marker* appears as the entire content of a line in the tail.
+
+    Same whole-line matching strategy as the review loop's
+    ``match_verdict()`` — the marker must be the full line (after
+    stripping whitespace and markdown formatting), not a substring.
+    """
+    lines = content.strip().splitlines()
+    tail = lines[-tail_lines:] if len(lines) > tail_lines else lines
+    for line in tail:
+        cleaned = re.sub(r'[*`]', '', line).strip()
+        if cleaned == marker:
+            return True
+    return False
 
 
 @dataclass
@@ -209,7 +237,7 @@ def run_qa_sync(
     pm_root: Path,
     pr_data: dict,
     on_update: Callable[[QALoopState], None] | None = None,
-    max_scenarios: int = 5,
+    max_scenarios: int | None = None,
 ) -> QALoopState:
     """Orchestrate QA planning + parallel execution (blocking).
 
@@ -260,11 +288,19 @@ def run_qa_sync(
         )
         cmd = build_claude_shell_cmd(prompt=planner_prompt)
 
+        # Kill any stale QA window from a previous run
+        existing = tmux_mod.find_window_by_name(session, window_name)
+        if existing:
+            _log.info("Killing stale QA window %s", window_name)
+            tmux_mod.kill_window(session, existing["index"])
+
         # Create QA window with planner pane
         tmux_mod.new_window(session, window_name, cmd, cwd=workdir_path)
+        time.sleep(2)  # let tmux register the new window
 
         # Wait for the planner to finish (poll for plan output)
         planner_pane = find_claude_pane(session, window_name)
+        _log.info("Planner pane: %s (window=%s)", planner_pane, window_name)
         if not planner_pane:
             _log.error("Could not find planner pane")
             state.running = False
@@ -272,9 +308,16 @@ def run_qa_sync(
             state.latest_output = "Could not find planner pane"
             return state
 
-        # Poll until the planner produces a QA Plan or exits
+        # Poll until the planner produces a QA Plan or exits.
+        # Same strategy as the review loop's verdict detection:
+        #   - Only scan the tail of the pane (last VERDICT_TAIL_LINES)
+        #   - Require QA_PLAN_END to be the entire line content
+        #   - Grace period: the prompt template also has QA_PLAN_END on
+        #     its own line, so we wait _PLANNER_GRACE seconds for Claude
+        #     to generate enough output to push the prompt out of the tail.
         plan_found = False
         deadline = time.monotonic() + _PLANNER_TIMEOUT
+        poll_start = time.monotonic()
         while time.monotonic() < deadline:
             if state.stop_requested:
                 break
@@ -283,15 +326,15 @@ def run_qa_sync(
                 break
 
             content = tmux_mod.capture_pane(planner_pane, full_scrollback=True)
-            if tail_contains(content, "QA_PLAN_END"):
-                # The planner prompt template contains QA_PLAN_END as an
-                # example.  Require 2+ occurrences in the full scrollback
-                # (one from the template, one from actual planner output)
-                # to avoid parsing the template as the real plan.
-                if content.count("QA_PLAN_END") >= 2:
-                    state.plan_output = content
-                    plan_found = True
-                    break
+            elapsed = time.monotonic() - poll_start
+            has_end = _tail_has_marker_on_own_line(content, "QA_PLAN_END")
+            _log.info("planner poll: has_end=%s content_len=%d elapsed=%.0fs",
+                      has_end, len(content), elapsed)
+
+            if elapsed >= _PLANNER_GRACE and has_end:
+                state.plan_output = content
+                plan_found = True
+                break
 
             time.sleep(5)
 
@@ -314,9 +357,10 @@ def run_qa_sync(
             _notify()
             return state
 
-        # Limit scenarios
-        if len(state.scenarios) > max_scenarios:
-            state.scenarios = state.scenarios[:max_scenarios]
+        # Limit scenarios if a cap is configured
+        cap = max_scenarios if max_scenarios is not None else _get_max_scenarios()
+        if cap > 0 and len(state.scenarios) > cap:
+            state.scenarios = state.scenarios[:cap]
 
         state.planning_phase = False
         state.latest_output = f"Plan: {len(state.scenarios)} scenario(s)"
@@ -519,7 +563,7 @@ def start_qa_background(
     pm_root: Path,
     pr_data: dict,
     on_update: Callable[[QALoopState], None] | None = None,
-    max_scenarios: int = 5,
+    max_scenarios: int | None = None,
 ) -> threading.Thread:
     """Start QA in a background thread. Returns the thread."""
     def _run():

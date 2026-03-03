@@ -19,7 +19,7 @@ from pm_core.tui.tech_tree import TechTree, PRSelected
 from pm_core.tui.command_bar import CommandBar, CommandSubmitted
 from pm_core.tui.guide_progress import GuideProgress
 from pm_core.tui.plans_pane import PlansPane, PlanSelected, PlanActivated, PlanAction
-from pm_core.tui.qa_pane import QAPane, QAItemSelected, QAItemActivated
+from pm_core.tui.qa_pane import QAPane, QAItemSelected, QAItemActivated, QAAction
 from pm_core.plan_parser import extract_plan_intro
 
 from pm_core.tui.widgets import TreeScroll, StatusBar, LogLine
@@ -887,7 +887,7 @@ class ProjectManagerApp(App):
         else:
             total = 0
         status_bar = self.query_one("#status-bar", StatusBar)
-        status_bar.update(f" [bold]QA[/bold]    {total} item(s)    [dim]q=back to tree[/dim]")
+        status_bar.update(f" [bold]QA[/bold]    {total} item(s)    [dim]Enter=run  e=edit  a=add  q=back[/dim]")
         self.call_after_refresh(self._capture_frame, "show_qa_view")
 
     def _refresh_qa_pane(self) -> None:
@@ -918,12 +918,29 @@ class ProjectManagerApp(App):
             return
         qa_loop_ui.start_qa(self, pr_id)
 
-    def on_qa_item_selected(self, message: QAItemSelected) -> None:
+    def on_qaitem_selected(self, message: QAItemSelected) -> None:
         _log.debug("qa item selected: %s", message.item_id)
 
-    def on_qa_item_activated(self, message: QAItemActivated) -> None:
+    def on_qaitem_activated(self, message: QAItemActivated) -> None:
         """Launch QA item (instruction or regression test)."""
         pane_ops.launch_qa_item(self, message.item_id)
+
+    def on_qaaction(self, message: QAAction) -> None:
+        """Handle QA pane action shortcuts (add, edit)."""
+        message.stop()
+        _log.info("qa action: %s (item=%s)", message.action, message.item_id)
+        if message.action == "add":
+            pane_ops.launch_pane(self, "pm qa add new-instruction", "qa-add")
+        elif message.action == "edit":
+            if message.item_id:
+                parts = message.item_id.split(":", 1)
+                if len(parts) == 2:
+                    category, qa_id = parts
+                    pane_ops.launch_pane(
+                        self, f"pm qa edit {qa_id} --category {category}", "qa-edit"
+                    )
+            else:
+                self.log_message("No QA item selected")
 
     def action_help_quit(self) -> None:
         """Override Textual's ctrl+c handler."""

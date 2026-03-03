@@ -57,10 +57,22 @@ def sleep_checking_pane(pane_id: str, seconds: float,
 # Verdict detection helpers (shared by review_loop and watcher_loop)
 # ---------------------------------------------------------------------------
 
-# Only scan the tail of captured pane content for verdicts.  The prompt
-# itself contains verdict keywords as instructions — scanning the full
+# Only scan the tail of captured pane content for verdicts / markers.
+# The prompt itself contains keywords as instructions — scanning the full
 # scrollback would match those immediately.
 VERDICT_TAIL_LINES = 30
+
+
+def tail_contains(content: str, marker: str,
+                  tail_lines: int = VERDICT_TAIL_LINES) -> bool:
+    """Check whether *marker* appears in the last *tail_lines* of *content*.
+
+    Used to detect machine-readable markers (verdicts, plan delimiters, etc.)
+    while ignoring the prompt text that may contain the same keywords.
+    """
+    lines = content.strip().splitlines()
+    tail = lines[-tail_lines:] if len(lines) > tail_lines else lines
+    return any(marker in line for line in tail)
 
 # Consecutive stable polls required before accepting verdict
 STABILITY_POLLS = 2
