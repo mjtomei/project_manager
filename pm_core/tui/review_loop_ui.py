@@ -202,6 +202,10 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
 def _ensure_poll_timer(app) -> None:
     """Start the poll timer if not already running."""
     if not app._review_loop_timer:
+        # Reset tick tracking so the watchdog treats this as a fresh start
+        # (grace period) rather than flagging a stale tick left over from a
+        # previous timer session.
+        app._poll_last_tick = 0.0
         app._review_loop_timer = app.set_interval(1.0, lambda: _poll_loop_state(app))
 
 

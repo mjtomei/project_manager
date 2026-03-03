@@ -240,6 +240,31 @@ class TestCheckPollTimer:
         app = _make_app()
         assert _poll_timer_needed(app) is False
 
+    def test_no_false_positive_stale_tick_from_previous_timer(self):
+        """A stale tick left over from a previous timer session must not trigger.
+
+        Scenario: poll timer ran, stopped itself (no active loops), then a new
+        loop starts and _ensure_poll_timer creates a fresh timer.  Before the
+        new timer's first tick, the watchdog fires.  The old _poll_last_tick
+        value is >5s stale — but this should NOT be flagged because
+        _ensure_poll_timer resets _poll_last_tick to 0.0 (grace period).
+        """
+        from pm_core.tui.review_loop_ui import _ensure_poll_timer
+
+        state = ReviewLoopState(pr_id="abc123")
+        state.running = True
+        app = _make_app(
+            review_loops={"abc123": state},
+            poll_last_tick=time.monotonic() - 100,  # stale from old timer
+        )
+        # Simulate _ensure_poll_timer being called (as _start_loop does)
+        _ensure_poll_timer(app)
+        # _poll_last_tick should have been reset to 0.0 (grace period)
+        assert app._poll_last_tick == 0.0
+        # Watchdog should NOT trigger
+        _check_poll_timer(app)
+        app.log_message.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # 4. Stale merge tracking
