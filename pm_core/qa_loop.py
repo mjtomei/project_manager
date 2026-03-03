@@ -214,8 +214,17 @@ def _get_scenario_pane(session: str, window_name: str) -> str | None:
     return None
 
 
-def _cleanup_stale_scenario_windows(session: str, pr_data: dict) -> None:
-    """Kill stale scenario windows and the main QA window from previous runs."""
+def _cleanup_stale_scenario_windows(session: str, pr_data: dict,
+                                    include_main: bool = True) -> None:
+    """Kill stale scenario windows and optionally the main QA window.
+
+    Args:
+        session: tmux session name.
+        pr_data: PR data dict (needs ``id`` and optionally ``gh_pr_number``).
+        include_main: When True (default), also kill the main ``qa-{id}``
+            window.  Pass False after execution to keep the main window
+            alive so its status pane can display the aggregated verdict.
+    """
     from pm_core import tmux as tmux_mod
     from pm_core.cli.helpers import _pr_display_id
 
@@ -225,7 +234,10 @@ def _cleanup_stale_scenario_windows(session: str, pr_data: dict) -> None:
 
     all_windows = tmux_mod.list_windows(session)
     for win in all_windows:
-        if win["name"].startswith(qa_prefix) or win["name"] == main_name:
+        if win["name"].startswith(qa_prefix):
+            _log.info("Killing stale QA window %s", win["name"])
+            tmux_mod.kill_window(session, win["id"])
+        elif include_main and win["name"] == main_name:
             _log.info("Killing stale QA window %s", win["name"])
             tmux_mod.kill_window(session, win["id"])
 
@@ -719,7 +731,9 @@ def run_qa_sync(
     # --- Cleanup scenario windows ---
     # Kill ALL windows matching the qa-{display_id}-s* pattern (not just
     # known scenarios) to catch stale duplicates from previous runs.
-    _cleanup_stale_scenario_windows(session, pr_data)
+    # Keep the main QA window alive so its status pane can display the
+    # aggregated verdict and the user can focus it with 't'.
+    _cleanup_stale_scenario_windows(session, pr_data, include_main=False)
 
     # --- Merge back scenario worktree commits ---
     _merge_scenario_commits(state, repo_root, pr_data)

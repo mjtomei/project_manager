@@ -259,34 +259,46 @@ class TestScenarioWindowName:
 
 
 class TestCleanupStaleScenarioWindows:
+    _WINDOWS = [
+        {"id": "@1", "index": "0", "name": "tui"},
+        {"id": "@2", "index": "1", "name": "qa-#42"},
+        {"id": "@3", "index": "2", "name": "qa-#42-s1"},
+        {"id": "@4", "index": "3", "name": "qa-#42-s2"},
+        {"id": "@5", "index": "4", "name": "other-window"},
+    ]
+
+    def _run_cleanup(self, pr_data, include_main=True):
+        mock_tmux = MagicMock()
+        mock_tmux.list_windows.return_value = list(self._WINDOWS)
+        with patch("pm_core.qa_loop._log"), \
+             patch("pm_core.tmux.list_windows", mock_tmux.list_windows), \
+             patch("pm_core.tmux.kill_window", mock_tmux.kill_window):
+            _cleanup_stale_scenario_windows("pm-test", pr_data,
+                                            include_main=include_main)
+        return [c[0][1] for c in mock_tmux.kill_window.call_args_list]
+
     def test_kills_matching_windows(self):
         """_cleanup_stale_scenario_windows kills stale QA windows."""
-        mock_tmux = MagicMock()
-        mock_tmux.list_windows.return_value = [
-            {"id": "@1", "index": "0", "name": "tui"},
-            {"id": "@2", "index": "1", "name": "qa-#42"},
-            {"id": "@3", "index": "2", "name": "qa-#42-s1"},
-            {"id": "@4", "index": "3", "name": "qa-#42-s2"},
-            {"id": "@5", "index": "4", "name": "other-window"},
-        ]
         pr_data = {"id": "pr-abc", "gh_pr_number": 42}
-
-        with patch("pm_core.qa_loop._log"):
-            import pm_core.qa_loop as qa_mod
-            orig_tmux = getattr(qa_mod, '_cleanup_stale_scenario_windows')
-            # Patch the tmux import used inside the function
-            with patch.object(qa_mod, '_cleanup_stale_scenario_windows',
-                              wraps=orig_tmux):
-                with patch("pm_core.tmux.list_windows", mock_tmux.list_windows), \
-                     patch("pm_core.tmux.kill_window", mock_tmux.kill_window):
-                    _cleanup_stale_scenario_windows("pm-test", pr_data)
+        killed_ids = self._run_cleanup(pr_data)
 
         # Verify kill_window was called for qa-#42, qa-#42-s1, qa-#42-s2
-        kill_calls = [c for c in mock_tmux.kill_window.call_args_list]
-        killed_ids = [c[0][1] for c in kill_calls]
         assert "@2" in killed_ids  # qa-#42
         assert "@3" in killed_ids  # qa-#42-s1
         assert "@4" in killed_ids  # qa-#42-s2
+        assert "@1" not in killed_ids  # tui — should not be killed
+        assert "@5" not in killed_ids  # other-window — should not be killed
+
+    def test_include_main_false_keeps_main_window(self):
+        """include_main=False kills scenario windows but keeps the main QA window."""
+        pr_data = {"id": "pr-abc", "gh_pr_number": 42}
+        killed_ids = self._run_cleanup(pr_data, include_main=False)
+
+        # Scenario windows killed
+        assert "@3" in killed_ids  # qa-#42-s1
+        assert "@4" in killed_ids  # qa-#42-s2
+        # Main QA window preserved
+        assert "@2" not in killed_ids  # qa-#42 — should be kept
         assert "@1" not in killed_ids  # tui — should not be killed
         assert "@5" not in killed_ids  # other-window — should not be killed
 
