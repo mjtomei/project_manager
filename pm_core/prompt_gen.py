@@ -755,29 +755,32 @@ instruction file at the paths shown below.
 
 ## Output Format
 
-Generate a structured QA plan in exactly this format:
+Your output is machine-parsed.  Use ALL CAPS markers exactly as shown.
+Do NOT use markdown headings — use the plain-text markers below.
 
-## QA Plan
+```
+QA_PLAN_START
 
-### 1. [Scenario Title]
-- **focus**: What area/behavior to test
-- **instruction**: path/to/instruction.md (or "none" if no existing instruction applies)
-- **steps**: Key test steps to perform
+SCENARIO 1: <descriptive title for this scenario>
+FOCUS: <what area or behavior to test>
+INSTRUCTION: <path/to/instruction.md or "none" if no existing instruction applies>
+STEPS: <concrete test steps to perform>
 
-### 2. [Scenario Title]
-- **focus**: ...
-- **instruction**: ...
-- **steps**: ...
+SCENARIO 2: <descriptive title for next scenario>
+FOCUS: <what area or behavior to test>
+INSTRUCTION: <path or "none">
+STEPS: <concrete test steps>
 
-(Continue for each scenario — aim for 2-5 scenarios covering the most
-important aspects of the PR.)
+QA_PLAN_END
+```
 
-## Guidelines
+IMPORTANT: Replace ALL angle-bracket placeholders above with real content.
+Do NOT copy the example format verbatim — fill in actual scenario titles,
+focus areas, and detailed test steps specific to THIS PR.
 
-- Focus on what this PR actually changes — don't test unrelated areas
-- Reference existing regression tests when they cover relevant functionality
-- Keep scenarios focused and testable — each should have a clear pass/fail
-- Prioritize: correctness > integration > edge cases > polish
+Include as many scenarios as required to fully exercise the functionality
+of the PR.  Exercise the core functionality as well as any edge cases
+that may expose bugs.
 {general_notes_block}{qa_specific_block}"""
     return prompt.strip()
 

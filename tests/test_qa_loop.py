@@ -84,6 +84,38 @@ QA_PLAN_END
         assert "Step 2" in scenarios[0].steps
         assert "Step 3" in scenarios[0].steps
 
+    def test_placeholder_scenarios_rejected(self):
+        """Prompt template examples must not be parsed as real scenarios."""
+        output = """
+QA_PLAN_START
+
+SCENARIO 1: Scenario Title
+FOCUS: What area/behavior to test
+INSTRUCTION: path/to/instruction.md
+STEPS: Key test steps to perform
+
+SCENARIO 2: Scenario Title
+FOCUS: ...
+INSTRUCTION: ...
+STEPS: ...
+
+QA_PLAN_END
+"""
+        scenarios = parse_qa_plan(output)
+        assert len(scenarios) == 0
+
+    def test_angle_bracket_placeholders_rejected(self):
+        """Angle-bracket placeholders from the prompt example are rejected."""
+        output = """
+QA_PLAN_START
+SCENARIO 1: <descriptive title for this scenario>
+FOCUS: <what area or behavior to test>
+STEPS: <concrete test steps>
+QA_PLAN_END
+"""
+        scenarios = parse_qa_plan(output)
+        assert len(scenarios) == 0
+
     def test_empty_output(self):
         assert parse_qa_plan("") == []
         assert parse_qa_plan("No plan here") == []
@@ -150,11 +182,9 @@ QA_PLAN_END
         assert scenarios[1].instruction_path is None
 
     def test_pane_with_only_prompt_template(self):
-        """When pane content only has the prompt template (planner hasn't
-        produced output yet), parse_qa_plan still parses it.  The polling
-        layer (tail_contains + count check) is responsible for preventing
-        this from being accepted prematurely."""
-        # This is the template example from the planner prompt
+        """When pane content only has the prompt template, placeholder
+        scenarios are now rejected by parse_qa_plan itself, preventing
+        the planner's example format from being treated as real scenarios."""
         output = """
 QA_PLAN_START
 
@@ -170,12 +200,8 @@ STEPS: ...
 
 QA_PLAN_END
 """
-        # parse_qa_plan itself doesn't know about the template — it just
-        # parses whatever it gets.  The count-based guard in run_qa_sync
-        # prevents this single-template content from being accepted.
         scenarios = parse_qa_plan(output)
-        assert len(scenarios) == 2
-        assert scenarios[0].title == "Scenario Title"  # template data
+        assert len(scenarios) == 0  # placeholder titles are rejected
 
 
 class TestQAWorkdirs:

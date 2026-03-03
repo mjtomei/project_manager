@@ -183,6 +183,12 @@ def parse_qa_plan(output: str) -> list[QAScenario]:
         if steps_m:
             steps = steps_m.group(1).strip()
 
+        # Reject placeholder/example scenarios (e.g. from prompt template)
+        _placeholder_titles = {"Scenario Title", "..."}
+        if title in _placeholder_titles or title.startswith("<"):
+            _log.warning("Skipping placeholder scenario %d: %r", index, title)
+            continue
+
         scenarios.append(QAScenario(
             index=index,
             title=title,
