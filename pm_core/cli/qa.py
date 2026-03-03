@@ -244,7 +244,7 @@ def qa_standalone(instruction_id: str):
 
     cmd = build_claude_shell_cmd(prompt=prompt)
     # Launch as tmux window if in a session, otherwise blocking
-    session = tmux_mod.get_current_session()
+    session = tmux_mod.get_session_name() if tmux_mod.in_tmux() else None
     if session:
         window_name = f"qa-{instruction_id}"
         tmux_mod.new_window(session, window_name, cmd, cwd=workdir)
