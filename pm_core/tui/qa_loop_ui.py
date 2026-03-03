@@ -100,6 +100,13 @@ def _on_qa_complete(app, state: QALoopState) -> None:
             f"[yellow bold]QA NEEDS_WORK[/] for {pr_id} — returning to review"
         )
         _transition_pr_status(app, pr_id, "qa", "in_review")
+        # Reload in-memory state so auto-start sees the new status,
+        # then trigger check_and_start to restart the review loop.
+        if app._root:
+            app._data = store.load(app._root)
+        from pm_core.tui import auto_start as _auto_start
+        if _auto_start.is_enabled(app):
+            app.run_worker(_auto_start.check_and_start(app))
     elif verdict == VERDICT_INPUT_REQUIRED:
         app.log_message(
             f"[red bold]QA INPUT_REQUIRED[/] for {pr_id} — paused for human input"

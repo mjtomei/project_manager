@@ -1,6 +1,7 @@
 """Tests for the QA loop orchestration."""
 
 import pytest
+from unittest.mock import patch, MagicMock
 
 from pm_core.qa_loop import (
     parse_qa_plan,
@@ -11,6 +12,8 @@ from pm_core.qa_loop import (
     VERDICT_PASS,
     VERDICT_NEEDS_WORK,
     VERDICT_INPUT_REQUIRED,
+    _scenario_window_name,
+    _cleanup_stale_scenario_windows,
 )
 
 
@@ -233,8 +236,209 @@ class TestQALoopState:
         assert s1.loop_id != s2.loop_id
 
 
+class TestQAScenario:
+    def test_window_name_field(self):
+        """QAScenario uses window_name (not pane_id)."""
+        s = QAScenario(index=1, title="Test", focus="Testing")
+        assert s.window_name is None
+        s.window_name = "qa-#42-s1"
+        assert s.window_name == "qa-#42-s1"
+
+
+class TestScenarioWindowName:
+    def test_with_gh_pr_number(self):
+        pr_data = {"id": "pr-abc", "gh_pr_number": 116}
+        assert _scenario_window_name(pr_data, 1) == "qa-#116-s1"
+        assert _scenario_window_name(pr_data, 3) == "qa-#116-s3"
+
+    def test_without_gh_pr_number(self):
+        pr_data = {"id": "pr-abc"}
+        assert _scenario_window_name(pr_data, 2) == "qa-pr-abc-s2"
+
+
+class TestCleanupStaleScenarioWindows:
+    def test_kills_matching_windows(self):
+        """_cleanup_stale_scenario_windows kills stale QA windows."""
+        mock_tmux = MagicMock()
+        mock_tmux.list_windows.return_value = [
+            {"id": "@1", "index": "0", "name": "tui"},
+            {"id": "@2", "index": "1", "name": "qa-#42"},
+            {"id": "@3", "index": "2", "name": "qa-#42-s1"},
+            {"id": "@4", "index": "3", "name": "qa-#42-s2"},
+            {"id": "@5", "index": "4", "name": "other-window"},
+        ]
+        pr_data = {"id": "pr-abc", "gh_pr_number": 42}
+
+        with patch("pm_core.qa_loop._log"):
+            import pm_core.qa_loop as qa_mod
+            orig_tmux = getattr(qa_mod, '_cleanup_stale_scenario_windows')
+            # Patch the tmux import used inside the function
+            with patch.object(qa_mod, '_cleanup_stale_scenario_windows',
+                              wraps=orig_tmux):
+                with patch("pm_core.tmux.list_windows", mock_tmux.list_windows), \
+                     patch("pm_core.tmux.kill_window", mock_tmux.kill_window):
+                    _cleanup_stale_scenario_windows("pm-test", pr_data)
+
+        # Verify kill_window was called for qa-#42, qa-#42-s1, qa-#42-s2
+        kill_calls = [c for c in mock_tmux.kill_window.call_args_list]
+        killed_ids = [c[0][1] for c in kill_calls]
+        assert "@2" in killed_ids  # qa-#42
+        assert "@3" in killed_ids  # qa-#42-s1
+        assert "@4" in killed_ids  # qa-#42-s2
+        assert "@1" not in killed_ids  # tui — should not be killed
+        assert "@5" not in killed_ids  # other-window — should not be killed
+
+
 class TestVerdictConstants:
     def test_verdict_values(self):
         assert VERDICT_PASS == "PASS"
         assert VERDICT_NEEDS_WORK == "NEEDS_WORK"
         assert VERDICT_INPUT_REQUIRED == "INPUT_REQUIRED"
+
+
+# ---------------------------------------------------------------------------
+# QA completion: _on_qa_complete lifecycle transitions
+# ---------------------------------------------------------------------------
+
+class TestOnQAComplete:
+    """Tests for qa_loop_ui._on_qa_complete lifecycle transitions."""
+
+    def _make_app(self, tmp_path):
+        """Create a mock TUI app with a qa-status PR on disk."""
+        pm_dir = tmp_path / "pm"
+        pm_dir.mkdir()
+        from pm_core import store
+        data = {
+            "project": {"name": "test", "repo": "/tmp/r", "base_branch": "master"},
+            "prs": [{"id": "pr-001", "title": "T", "branch": "b",
+                      "status": "qa", "workdir": str(tmp_path / "wd"),
+                      "notes": []}],
+        }
+        store.save(data, pm_dir)
+
+        app = MagicMock()
+        app._root = pm_dir
+        app._data = data
+        app._auto_start = True
+        app._auto_start_target = "pr-001"
+        app._qa_loops = {}
+        app._review_loops = {}
+        return app
+
+    def test_pass_triggers_auto_merge(self, tmp_path):
+        """QA PASS with no changes should trigger auto-merge."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete
+
+        app = self._make_app(tmp_path)
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_PASS
+        state.made_changes = False
+
+        with patch("pm_core.tui.qa_loop_ui._trigger_auto_merge") as mock_merge, \
+             patch("pm_core.tui.qa_loop_ui._record_qa_note"):
+            _on_qa_complete(app, state)
+
+        mock_merge.assert_called_once_with(app, "pr-001")
+
+    def test_needs_work_transitions_to_in_review(self, tmp_path):
+        """QA NEEDS_WORK should transition PR from qa → in_review."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete
+        from pm_core import store
+
+        app = self._make_app(tmp_path)
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_NEEDS_WORK
+        state.made_changes = False
+
+        with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
+             patch("pm_core.tui.auto_start.check_and_start"):
+            _on_qa_complete(app, state)
+
+        # Verify the on-disk status changed to in_review
+        data = store.load(app._root)
+        pr = store.get_pr(data, "pr-001")
+        assert pr["status"] == "in_review"
+
+    def test_needs_work_reloads_app_data(self, tmp_path):
+        """QA NEEDS_WORK should reload app._data so auto-start sees new status."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete
+
+        app = self._make_app(tmp_path)
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_NEEDS_WORK
+        state.made_changes = False
+
+        with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
+             patch("pm_core.tui.auto_start.check_and_start"):
+            _on_qa_complete(app, state)
+
+        # app._data should reflect the in_review status
+        pr = next(p for p in app._data["prs"] if p["id"] == "pr-001")
+        assert pr["status"] == "in_review"
+
+    def test_needs_work_triggers_check_and_start(self, tmp_path):
+        """QA NEEDS_WORK should trigger check_and_start to restart review loop."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete
+
+        app = self._make_app(tmp_path)
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_NEEDS_WORK
+        state.made_changes = False
+
+        with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
+             patch("pm_core.tui.auto_start.check_and_start") as mock_check:
+            _on_qa_complete(app, state)
+
+        # check_and_start should be scheduled via run_worker
+        app.run_worker.assert_called_once()
+
+    def test_made_changes_transitions_to_in_review(self, tmp_path):
+        """QA PASS with changes should transition PR back to in_review."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete
+        from pm_core import store
+
+        app = self._make_app(tmp_path)
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_PASS
+        state.made_changes = True  # Changes committed during QA
+
+        with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
+             patch("pm_core.tui.auto_start.check_and_start"):
+            _on_qa_complete(app, state)
+
+        data = store.load(app._root)
+        pr = store.get_pr(data, "pr-001")
+        assert pr["status"] == "in_review"
+
+    def test_input_required_leaves_qa_status(self, tmp_path):
+        """QA INPUT_REQUIRED should leave PR in qa status."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete
+        from pm_core import store
+
+        app = self._make_app(tmp_path)
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_INPUT_REQUIRED
+        state.made_changes = False
+
+        with patch("pm_core.tui.qa_loop_ui._record_qa_note"):
+            _on_qa_complete(app, state)
+
+        data = store.load(app._root)
+        pr = store.get_pr(data, "pr-001")
+        assert pr["status"] == "qa"
+
+    def test_no_restart_when_auto_start_disabled(self, tmp_path):
+        """With auto-start off, NEEDS_WORK should not call check_and_start."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete
+
+        app = self._make_app(tmp_path)
+        app._auto_start = False  # Disabled
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_NEEDS_WORK
+        state.made_changes = False
+
+        with patch("pm_core.tui.qa_loop_ui._record_qa_note"):
+            _on_qa_complete(app, state)
+
+        # check_and_start should NOT be called
+        app.run_worker.assert_not_called()
