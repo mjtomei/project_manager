@@ -442,3 +442,66 @@ class TestOnQAComplete:
 
         # check_and_start should NOT be called
         app.run_worker.assert_not_called()
+
+    def test_needs_work_clears_stale_review_loop(self, tmp_path):
+        """QA NEEDS_WORK should clear the old review loop entry so
+        _auto_start_review_loops can start a fresh one."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete
+
+        app = self._make_app(tmp_path)
+        # Simulate a stale review loop from the previous review pass
+        app._review_loops = {"pr-001": MagicMock(running=False)}
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_NEEDS_WORK
+        state.made_changes = False
+
+        with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
+             patch("pm_core.tui.auto_start.check_and_start"):
+            _on_qa_complete(app, state)
+
+        # Old review loop entry should be removed
+        assert "pr-001" not in app._review_loops
+
+    def test_needs_work_records_qa_note(self, tmp_path):
+        """QA NEEDS_WORK should record a QA note on the PR."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete
+        from pm_core import store
+
+        app = self._make_app(tmp_path)
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_NEEDS_WORK
+        state.made_changes = False
+        state.scenarios = [QAScenario(index=1, title="Login Flow",
+                                       focus="auth")]
+        state.scenario_verdicts = {1: VERDICT_NEEDS_WORK}
+
+        with patch("pm_core.tui.auto_start.check_and_start"):
+            _on_qa_complete(app, state)
+
+        data = store.load(app._root)
+        pr = store.get_pr(data, "pr-001")
+        notes = pr.get("notes") or []
+        assert len(notes) == 1
+        assert "QA NEEDS_WORK:" in notes[0]["text"]
+        assert "Login Flow: NEEDS_WORK" in notes[0]["text"]
+
+    def test_needs_work_with_changes_records_changes_committed(self, tmp_path):
+        """QA NEEDS_WORK with changes should record '[changes committed]' in note."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete
+        from pm_core import store
+
+        app = self._make_app(tmp_path)
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_NEEDS_WORK
+        state.made_changes = True
+        state.scenarios = [QAScenario(index=1, title="Test", focus="test")]
+        state.scenario_verdicts = {1: VERDICT_NEEDS_WORK}
+
+        with patch("pm_core.tui.auto_start.check_and_start"):
+            _on_qa_complete(app, state)
+
+        data = store.load(app._root)
+        pr = store.get_pr(data, "pr-001")
+        notes = pr.get("notes") or []
+        assert len(notes) == 1
+        assert "[changes committed]" in notes[0]["text"]

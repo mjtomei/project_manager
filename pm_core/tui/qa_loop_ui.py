@@ -2,6 +2,12 @@
 
 Parallel to review_loop_ui.py — manages starting/stopping QA loops and
 updating the TUI display.
+
+Keybinding variants (set up by app.action_start_qa_on_pr):
+  t      — one-shot QA run
+  z t    — fresh start (stop running QA, kill old windows, restart)
+  zz t   — start/stop QA loop (lenient: PASS or PASS_WITH_SUGGESTIONS)
+  zzz t  — start/stop QA loop (strict: only clean PASS)
 """
 
 from pm_core.paths import configure_logger
@@ -12,15 +18,67 @@ from pm_core.qa_loop import (
     VERDICT_NEEDS_WORK,
     VERDICT_INPUT_REQUIRED,
     start_qa_background,
+    _cleanup_stale_scenario_windows,
+    _compute_qa_window_name,
 )
+from pm_core.loop_shared import get_pm_session
 
 _log = configure_logger("pm.tui.qa_loop_ui")
+
+
+def _get_selected_pr(app) -> tuple[str | None, dict | None]:
+    """Return (pr_id, pr_dict) for the selected PR, or (None, None)."""
+    from pm_core.tui.tech_tree import TechTree
+    tree = app.query_one("#tech-tree", TechTree)
+    pr_id = tree.selected_pr_id
+    if not pr_id or not app._root:
+        return None, None
+    data = store.load(app._root)
+    pr = store.get_pr(data, pr_id)
+    return pr_id, pr
+
+
+# ---------------------------------------------------------------------------
+# t — one-shot QA (or focus existing window)
+# ---------------------------------------------------------------------------
+
+def focus_or_start_qa(app, pr_id: str) -> None:
+    """Focus the existing QA window if it exists, otherwise start a new QA run.
+
+    Called when the user presses plain ``t``.  Unlike ``start_qa`` (used by
+    auto-start and internal callers), this never kills stale windows — it
+    just focuses the main QA window so the user can inspect its output.
+    """
+    if not app._root:
+        app.log_message("No project root")
+        return
+
+    data = store.load(app._root)
+    pr = store.get_pr(data, pr_id)
+    if not pr:
+        app.log_message(f"PR not found: {pr_id}")
+        return
+
+    # If the main QA window already exists, just focus it
+    from pm_core import tmux as tmux_mod
+    session = get_pm_session()
+    if session:
+        window_name = _compute_qa_window_name(pr)
+        win = tmux_mod.find_window_by_name(session, window_name)
+        if win:
+            tmux_mod.select_window(session, window_name)
+            app.log_message(f"Focused QA window for {pr_id}")
+            return
+
+    # No existing window — start a new QA session
+    start_qa(app, pr_id)
 
 
 def start_qa(app, pr_id: str) -> None:
     """Start a QA session for a PR.
 
     Creates QALoopState, starts background QA thread.
+    Called by auto-start and internal callers (fresh_start, loop start).
     """
     if not app._root:
         app.log_message("No project root")
@@ -51,6 +109,105 @@ def start_qa(app, pr_id: str) -> None:
     start_qa_background(state, app._root, pr, on_update)
 
 
+# ---------------------------------------------------------------------------
+# z t — fresh start
+# ---------------------------------------------------------------------------
+
+def fresh_start_qa(app, pr_id: str) -> None:
+    """Stop running QA (if any), kill old windows, and restart.
+
+    Handles ``z t``.
+    """
+    if not app._root:
+        app.log_message("No project root")
+        return
+
+    data = store.load(app._root)
+    pr = store.get_pr(data, pr_id)
+    if not pr:
+        app.log_message(f"PR not found: {pr_id}")
+        return
+
+    # Stop any running QA for this PR
+    existing = app._qa_loops.get(pr_id)
+    if existing and existing.running:
+        existing.stop_requested = True
+        _log.info("fresh_start_qa: stopping running QA for %s", pr_id)
+
+    # Remove from loops dict so start_qa doesn't see it as running
+    app._qa_loops.pop(pr_id, None)
+
+    # Kill old QA windows
+    session = get_pm_session()
+    if session:
+        _cleanup_stale_scenario_windows(session, pr)
+
+    # Start fresh
+    app.log_message(f"Fresh QA start for {pr_id}...")
+    start_qa(app, pr_id)
+
+
+# ---------------------------------------------------------------------------
+# zz t / zzz t — QA loop (start or stop)
+# ---------------------------------------------------------------------------
+
+def start_or_stop_qa_loop(app, pr_id: str, strict: bool) -> None:
+    """Start or stop a QA loop for the given PR.
+
+    ``zz t`` (strict=False): lenient — stop on PASS (accept minor suggestions).
+    ``zzz t`` (strict=True): strict — stop only on clean PASS with no changes.
+
+    If a QA loop is already running, this stops it instead.
+    """
+    if not app._root:
+        app.log_message("No project root")
+        return
+
+    data = store.load(app._root)
+    pr = store.get_pr(data, pr_id)
+    if not pr:
+        app.log_message(f"PR not found: {pr_id}")
+        return
+
+    # If a QA loop is running, stop it
+    existing = app._qa_loops.get(pr_id)
+    if existing and existing.running:
+        existing.stop_requested = True
+        mode = "strict" if strict else "lenient"
+        app.log_message(f"[bold]QA loop stopping[/] for {pr_id} (finishing current run)...")
+        _log.info("qa_loop_ui: stopping QA loop for %s (mode=%s)", pr_id, mode)
+        return
+
+    # Clean up stale windows from a previous run (or aborted loop)
+    app._qa_loops.pop(pr_id, None)
+    session = get_pm_session()
+    if session:
+        _cleanup_stale_scenario_windows(session, pr)
+
+    # Start a new QA loop
+    state = QALoopState(pr_id=pr_id)
+    state._qa_loop_mode = True
+    state._qa_loop_strict = strict
+
+    def on_update(s: QALoopState):
+        app.call_from_thread(_on_qa_update, app, s)
+
+    app._qa_loops[pr_id] = state
+
+    mode_label = "strict (PASS only)" if strict else "lenient"
+    app.log_message(
+        f"[bold]QA loop started[/] for {pr_id} [{mode_label}] — z t to stop",
+        sticky=3,
+    )
+    _log.info("qa_loop_ui: starting QA loop for %s (mode=%s)", pr_id, mode_label)
+
+    start_qa_background(state, app._root, pr, on_update)
+
+
+# ---------------------------------------------------------------------------
+# Stop (public API for command bar etc.)
+# ---------------------------------------------------------------------------
+
 def stop_qa(app, pr_id: str) -> None:
     """Request graceful stop of QA for a PR."""
     state = app._qa_loops.get(pr_id)
@@ -60,6 +217,10 @@ def stop_qa(app, pr_id: str) -> None:
     else:
         app.log_message(f"No QA running for {pr_id}")
 
+
+# ---------------------------------------------------------------------------
+# Polling (called from shared poll timer)
+# ---------------------------------------------------------------------------
 
 def poll_qa_state(app) -> None:
     """Called from the shared poll timer to update QA state in the TUI."""
@@ -73,6 +234,10 @@ def poll_qa_state(app) -> None:
                 state._ui_complete_notified = True
 
 
+# ---------------------------------------------------------------------------
+# Internal callbacks
+# ---------------------------------------------------------------------------
+
 def _on_qa_update(app, state: QALoopState) -> None:
     """Handle QA progress update — log to TUI."""
     if state.latest_output:
@@ -80,15 +245,21 @@ def _on_qa_update(app, state: QALoopState) -> None:
 
 
 def _on_qa_complete(app, state: QALoopState) -> None:
-    """Handle QA completion — trigger appropriate lifecycle transition."""
+    """Handle QA completion — trigger appropriate lifecycle transition.
+
+    In loop mode (zz t / zzz t), a non-passing verdict restarts the loop
+    instead of just transitioning status.
+    """
     if state._ui_complete_notified:
         return
 
     pr_id = state.pr_id
     verdict = state.latest_verdict
+    is_loop = getattr(state, "_qa_loop_mode", False)
+    is_strict = getattr(state, "_qa_loop_strict", False)
 
-    _log.info("QA complete for %s: verdict=%s changes=%s",
-              pr_id, verdict, state.made_changes)
+    _log.info("QA complete for %s: verdict=%s changes=%s loop=%s strict=%s",
+              pr_id, verdict, state.made_changes, is_loop, is_strict)
 
     if verdict == VERDICT_PASS and not state.made_changes:
         # All scenarios passed with no changes → ready to merge
@@ -100,6 +271,9 @@ def _on_qa_complete(app, state: QALoopState) -> None:
             f"[yellow bold]QA NEEDS_WORK[/] for {pr_id} — returning to review"
         )
         _transition_pr_status(app, pr_id, "qa", "in_review")
+        # Clear the stale review loop entry from the previous review pass
+        # so _auto_start_review_loops can start a fresh one.
+        app._review_loops.pop(pr_id, None)
         # Reload in-memory state so auto-start sees the new status,
         # then trigger check_and_start to restart the review loop.
         if app._root:
@@ -107,10 +281,17 @@ def _on_qa_complete(app, state: QALoopState) -> None:
         from pm_core.tui import auto_start as _auto_start
         if _auto_start.is_enabled(app):
             app.run_worker(_auto_start.check_and_start(app))
+
+        # In loop mode, re-queue QA after review completes
+        # (auto-start handles the review→QA transition automatically)
+        if is_loop:
+            _log.info("QA loop: NEEDS_WORK — review loop will re-trigger QA via auto-start")
     elif verdict == VERDICT_INPUT_REQUIRED:
         app.log_message(
             f"[red bold]QA INPUT_REQUIRED[/] for {pr_id} — paused for human input"
         )
+        if is_loop:
+            _log.info("QA loop: INPUT_REQUIRED — loop paused, awaiting human input")
     else:
         app.log_message(f"QA finished for {pr_id}: {verdict}")
 
