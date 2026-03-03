@@ -1,7 +1,7 @@
-"""Shared helpers for review_loop and watcher_loop.
+"""Shared helpers for review_loop, qa_loop, and watcher_loop.
 
-Extracts functions that were duplicated between the two loop engines (review_loop, watcher_loop)
-so both can import from a single source.
+Extracts functions that were duplicated between the loop engines
+so all can import from a single source.
 """
 
 import re

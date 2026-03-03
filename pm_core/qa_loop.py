@@ -202,16 +202,8 @@ def _scenario_window_name(pr_data: dict, scenario_index: int) -> str:
     return f"qa-{display_id}-s{scenario_index}"
 
 
-def _get_scenario_pane(session: str, window_name: str) -> str | None:
-    """Return the first pane ID inside a scenario window, or None."""
-    from pm_core import tmux as tmux_mod
-    win = tmux_mod.find_window_by_name(session, window_name)
-    if not win:
-        return None
-    panes = tmux_mod.get_pane_indices(session, win["index"])
-    if panes:
-        return panes[0][0]
-    return None
+# Alias for backward compat with tests; prefer find_claude_pane directly.
+_get_scenario_pane = find_claude_pane
 
 
 def _cleanup_stale_scenario_windows(session: str, pr_data: dict,
