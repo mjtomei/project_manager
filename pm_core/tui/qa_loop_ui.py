@@ -148,6 +148,8 @@ def fresh_start_qa(app, pr_id: str) -> None:
 
     # Remove from loops dict so start_qa doesn't see it as running
     app._qa_loops.pop(pr_id, None)
+    # Clear self-driving state so the fresh start is a one-shot QA
+    app._self_driving_qa.pop(pr_id, None)
 
     # Start fresh — run_qa_sync will clean up old windows after capturing
     # which sessions were watching them (for proper session switching).
