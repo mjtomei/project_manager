@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-ee1ff04
+  active_pr: pr-442e51c
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -2632,7 +2632,7 @@ prs:
   title: Add optional quality assurance step with test instruction library and review–QA
     loop
   branch: pm/pr-ee1ff04-add-optional-quality-assurance-step-with-test-inst
-  status: in_review
+  status: pending
   depends_on: []
   description: "Add an optional quality assurance (QA) / manual testing step to the\
     \ PR lifecycle that sits between review and merge. This creates a review-QA loop:\
@@ -3010,6 +3010,134 @@ prs:
   gh_pr_number: null
   created_at: '2026-03-02T18:18:28.282153+00:00'
   updated_at: '2026-03-02T18:18:28.282153+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-860969d
+  plan: improvements
+  title: Move hardcoded loop timeouts to project settings and increase defaults to
+    60 minutes
+  branch: pm/pr-860969d-move-hardcoded-loop-timeouts-to-project-settings-a
+  status: pending
+  depends_on: []
+  description: 'Multiple time limits across verdict-waiting loops are hardcoded as
+    module-level constants. Move them all to project settings in project.yaml and
+    increase any that are under 60 minutes to 60 minutes as the default.
+
+
+    Constants to extract:
+
+
+    review_loop.py:
+
+    - _POLL_INTERVAL = 5 (verdict poll interval, seconds)
+
+    - _TICK_INTERVAL = 1 (liveness check interval, seconds)
+
+    - _VERDICT_GRACE_PERIOD = 20 (min wait before accepting verdicts, seconds)
+
+    - timeout=30 on subprocess launch (line 166)
+
+    - time.sleep(2) window appear wait (line 245)
+
+
+    watcher_loop.py:
+
+    - _POLL_INTERVAL = 5
+
+    - _TICK_INTERVAL = 1
+
+    - _VERDICT_GRACE_PERIOD = 30
+
+    - DEFAULT_ITERATION_WAIT = 120 (wait between watcher iterations)
+
+    - timeout=30 on subprocess launch (line 141)
+
+    - time.sleep(2) window appear wait (line 218)
+
+
+    loop_shared.py:
+
+    - VERDICT_TAIL_LINES = 30 (lines to scan for verdicts)
+
+    - STABILITY_POLLS = 2 (consecutive stable polls before accepting)
+
+
+    pane_idle.py:
+
+    - DEFAULT_IDLE_THRESHOLD = 30.0 (seconds of unchanged content before idle)
+
+
+    auto_start.py:
+
+    - timeout=300 on _start_pr_quiet subprocess (line 360)
+
+
+    review_loop_ui.py:
+
+    - 1.0 second poll timer interval (line 204)
+
+    - impl poll throttle every 5 ticks (line 243)
+
+
+    The 60-minute default increase applies specifically to the subprocess timeouts
+    (currently 30s for window launch, 300s for auto-start) since these are the ones
+    that can cause loops to abort prematurely when Claude takes a long time. Poll
+    intervals and grace periods should keep sensible defaults but still be configurable.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-02T23:28:28.300859+00:00'
+  updated_at: '2026-03-02T23:28:28.300859+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-442e51c
+  plan: bugs
+  title: Fix tmux commands targeting one session disconnecting other sessions
+  branch: pm/pr-442e51c-fix-tmux-commands-targeting-one-session-disconnect
+  status: pending
+  depends_on: []
+  description: 'Bug: when an agent sends tmux commands (especially ''q'') using the
+    -t flag to target a specific session, it sometimes disconnects or affects a different
+    session instead. The user reports being repeatedly disconnected from their active
+    session when another agent targets a different session with -t.
+
+
+    Possible causes to investigate:
+
+    - tmux -t target resolution ambiguity: if the session name is a prefix of another
+    session name, tmux may match the wrong one
+
+    - The ''q'' key being sent to the wrong pane/window if the target resolves incorrectly
+
+    - Session group behavior: if sessions are grouped, commands targeting one member
+    may affect others
+
+    - Race condition: if the target session doesn''t exist yet or was just created,
+    the command may fall through to the current session
+
+
+    Steps to reproduce:
+
+    1. Have two active pm sessions (e.g. pm-project_manager-xxx and pm-food-yyy)
+
+    2. From one session, have an agent send a tmux command with -t targeting the other
+    session
+
+    3. Observe that the first session gets disconnected or receives the command instead
+
+
+    Fix should ensure tmux commands are precisely targeted and cannot leak to other
+    sessions. Consider using exact match flags or full session:window.pane targeting
+    to prevent ambiguous resolution.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-03T04:13:33.757811+00:00'
+  updated_at: '2026-03-03T04:13:33.757811+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
