@@ -657,6 +657,28 @@ class TestOnQAComplete:
         assert len(notes) == 1
         assert "[changes committed]" in notes[0]["text"]
 
+    def test_qa_note_includes_workdir_path(self, tmp_path):
+        """QA note should include the workdir path for inspection/cleanup."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete
+        from pm_core import store
+
+        app = self._make_app(tmp_path)
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_NEEDS_WORK
+        state.made_changes = False
+        state.qa_workdir = "/home/user/.pm/workdirs/qa/pr-001-a1b2"
+        state.scenarios = [QAScenario(index=1, title="Test", focus="test")]
+        state.scenario_verdicts = {1: VERDICT_NEEDS_WORK}
+
+        with patch("pm_core.tui.auto_start.check_and_start"):
+            _on_qa_complete(app, state)
+
+        data = store.load(app._root)
+        pr = store.get_pr(data, "pr-001")
+        notes = pr.get("notes") or []
+        assert len(notes) == 1
+        assert "(workdir: /home/user/.pm/workdirs/qa/pr-001-a1b2)" in notes[0]["text"]
+
 
 # ---------------------------------------------------------------------------
 # _maybe_start_qa: review → QA transition

@@ -412,6 +412,8 @@ def _record_qa_note(app, state: QALoopState) -> None:
         note_text = f"QA {state.latest_verdict}: " + "; ".join(summary_parts)
         if state.made_changes:
             note_text += " [changes committed]"
+        if state.qa_workdir:
+            note_text += f" (workdir: {state.qa_workdir})"
         notes = pr.get("notes") or []
         existing_ids = {n["id"] for n in notes}
         note_id = store.generate_note_id(state.pr_id, note_text, existing_ids)
