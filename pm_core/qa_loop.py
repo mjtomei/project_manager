@@ -418,25 +418,35 @@ def run_qa_sync(
         child_cmd = build_claude_shell_cmd(prompt=child_prompt)
 
         # Split a new pane in the QA window
+        pane_id = None
         if base_pane:
-            pane_id = tmux_mod.split_pane_at(
-                base_pane, "v", child_cmd, background=True,
-            )
-        else:
-            pane_id = None
+            try:
+                pane_id = tmux_mod.split_pane_at(
+                    base_pane, "v", child_cmd, background=True,
+                )
+            except Exception:
+                _log.warning("Failed to split pane for scenario %d "
+                             "(window may be too small for more panes)",
+                             scenario.index)
         scenario.pane_id = pane_id
         _log.info("Launched scenario %d (%s) in pane %s",
                    scenario.index, scenario.title, pane_id)
 
-        # Register pane for layout management
+        # Register pane and rebalance after each split so the next
+        # split has enough room in the window.
         if pane_id and qa_win_id:
             try:
                 pane_registry.register_pane(
                     session, qa_win_id, pane_id,
                     f"qa-scenario-{scenario.index}", child_cmd,
                 )
+                reg = pane_registry.load_registry(session)
+                wdata = pane_registry.get_window_data(reg, qa_win_id)
+                wdata["user_modified"] = False
+                pane_registry.save_registry(session, reg)
+                pane_layout.rebalance(session, qa_win_id)
             except Exception:
-                _log.exception("Failed to register pane for scenario %d",
+                _log.exception("Failed to register/rebalance scenario %d",
                                scenario.index)
 
     # Register planner pane too (it's still in the window)
@@ -445,19 +455,9 @@ def run_qa_sync(
             pane_registry.register_pane(
                 session, qa_win_id, base_pane, "qa-planner", "planner",
             )
-        except Exception:
-            _log.exception("Failed to register planner pane")
-
-    # Reset user_modified and rebalance (same pattern as review windows)
-    if qa_win_id:
-        try:
-            reg = pane_registry.load_registry(session)
-            wdata = pane_registry.get_window_data(reg, qa_win_id)
-            wdata["user_modified"] = False
-            pane_registry.save_registry(session, reg)
             pane_layout.rebalance(session, qa_win_id)
         except Exception:
-            _log.exception("Failed to rebalance QA window layout")
+            _log.exception("Failed to register planner pane")
 
     state.latest_output = f"Running {len(state.scenarios)} scenario(s)..."
     _notify()
