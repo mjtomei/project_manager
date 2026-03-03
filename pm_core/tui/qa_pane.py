@@ -152,6 +152,12 @@ class QAPane(Widget):
         if not self.has_focus:
             return
 
+        # 'a' (add) works even when the list is empty
+        if event.key == "a":
+            self.post_message(QAAction("add"))
+            event.stop()
+            return
+
         selectable = self._selectable_indices()
         if not selectable:
             return
@@ -175,9 +181,6 @@ class QAPane(Widget):
         elif event.key == "enter":
             if self.selected_item_id:
                 self.post_message(QAItemActivated(self.selected_item_id))
-            event.stop()
-        elif event.key == "a":
-            self.post_message(QAAction("add"))
             event.stop()
         elif event.key == "e":
             self.post_message(QAAction("edit", self.selected_item_id))

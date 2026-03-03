@@ -467,6 +467,20 @@ class TestQAPaneKeyBindings:
         for key in ["up", "k", "down", "j", "enter", "a", "e"]:
             assert f'"{key}"' in source, f"Missing handler for key: {key}"
 
+    def test_add_key_before_selectable_check(self):
+        """The 'a' key handler must fire even when no items are selectable.
+
+        This verifies that on_key handles 'a' before the early return for
+        empty selectable indices, so users can add the first instruction.
+        """
+        from pm_core.tui.qa_pane import QAPane
+        source = inspect.getsource(QAPane.on_key)
+        a_pos = source.index('"a"')
+        selectable_check = source.index("if not selectable")
+        assert a_pos < selectable_check, (
+            "'a' key handler must appear before the 'if not selectable' guard"
+        )
+
 
 class TestQAPaneHelpScreen:
     """Verify help screen shows QA navigation keybindings."""
