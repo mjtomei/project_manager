@@ -360,6 +360,9 @@ def sync_from_github(
             elif gh_state == "CLOSED":
                 new_status = "closed"
             elif gh_state == "OPEN":
+                # Preserve "qa" status — it's a local refinement of in_review
+                if old_status == "qa":
+                    continue
                 new_status = "in_progress" if is_draft else "in_review"
             else:
                 _log.warning("Unknown GitHub state '%s' for %s", gh_state, pr_id)
