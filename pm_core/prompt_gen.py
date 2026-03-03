@@ -726,6 +726,9 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
     except FileNotFoundError:
         pass
 
+    # Include PR notes (prior QA results, addendums)
+    pr_notes_block = _format_pr_notes(pr)
+
     prompt = f"""You are a QA planner analyzing PR {pr_id}: "{title}"
 
 ## Task
@@ -744,7 +747,7 @@ to verify this PR works correctly.
 
 Inspect the diff yourself — run `git diff {base_branch}...HEAD` in the workdir
 to see what changed.  Read source files as needed to understand the context.
-
+{pr_notes_block}
 ## QA Instruction Library
 
 These are available QA instructions and regression tests.  Reference any that
@@ -815,6 +818,9 @@ Read the full instruction at: `{scenario.instruction_path}`
 Follow its procedures as applicable to this scenario.
 """
 
+    # Include PR notes (prior QA results, addendums)
+    pr_notes_block = _format_pr_notes(pr)
+
     prompt = f"""You are running QA scenario {scenario.index}: "{scenario.title}"
 
 ## Context
@@ -824,7 +830,7 @@ Follow its procedures as applicable to this scenario.
 - **Base branch**: {base_branch}
 - **PR workdir** (source code): {pr_workdir}
 - **Your workdir** (throwaway test projects): {workdir}
-
+{pr_notes_block}
 ## Scenario
 
 **Focus**: {scenario.focus}
