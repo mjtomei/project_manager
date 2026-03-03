@@ -625,9 +625,13 @@ def run_qa_sync(
         except Exception:
             _log.warning("Failed to create window for scenario %d",
                          scenario.index)
-        _log.info("Launched scenario %d (%s) in window %s (worktree=%s)",
-                   scenario.index, scenario.title, win_name,
-                   bool(wt_branch))
+        if scenario.window_name:
+            _log.info("Launched scenario %d (%s) in window %s (worktree=%s)",
+                       scenario.index, scenario.title, win_name,
+                       bool(wt_branch))
+        else:
+            _log.warning("Scenario %d (%s) window creation failed (worktree=%s)",
+                          scenario.index, scenario.title, bool(wt_branch))
 
     # Add status pane to the main QA window (split planner pane horizontally)
     if planner_pane:
@@ -677,11 +681,16 @@ def run_qa_sync(
 
     # Scenarios that failed to create a window get INPUT_REQUIRED immediately
     # so they are not silently ignored in the final aggregation.
+    has_failed_creation = False
     for scenario in state.scenarios:
         if not scenario.window_name:
             _log.warning("Scenario %d has no window — marking INPUT_REQUIRED",
                          scenario.index)
             state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+            has_failed_creation = True
+    if has_failed_creation:
+        _write_status_file(status_path, state.pr_id, state.scenarios,
+                           state.scenario_verdicts)
 
     grace_start = time.monotonic()
 

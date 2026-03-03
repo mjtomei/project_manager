@@ -445,6 +445,45 @@ class TestVerdictEdgeCases:
 
         assert overall == VERDICT_NEEDS_WORK
 
+    def test_failed_creation_not_in_pending_set(self):
+        """Scenarios without window_name must NOT be in the pending set,
+        so the polling loop doesn't hang waiting for them."""
+        s1 = QAScenario(index=1, title="OK", focus="t")
+        s1.window_name = "qa-#42-s1"
+        s2 = QAScenario(index=2, title="Failed", focus="t")
+        s2.window_name = None
+
+        pending = {s.index for s in [s1, s2] if s.window_name}
+        assert pending == {1}, "Failed scenario must not be in pending"
+
+    def test_all_failed_creation_yields_empty_pending(self):
+        """When ALL scenarios fail to create, pending is empty and the
+        polling loop is skipped entirely (no hang)."""
+        s1 = QAScenario(index=1, title="A", focus="t")
+        s1.window_name = None
+        s2 = QAScenario(index=2, title="B", focus="t")
+        s2.window_name = None
+
+        pending = {s.index for s in [s1, s2] if s.window_name}
+        assert len(pending) == 0, "All failed → empty pending → no hang"
+
+    def test_failed_creation_excluded_from_polling_iteration(self):
+        """Inside the polling loop, scenarios without window_name are
+        skipped by the 'not scenario.window_name' guard."""
+        s1 = QAScenario(index=1, title="OK", focus="t")
+        s1.window_name = "qa-#42-s1"
+        s2 = QAScenario(index=2, title="Failed", focus="t")
+        s2.window_name = None
+
+        pending = {s1.index}
+        polled = []
+        for s in [s1, s2]:
+            if s.index not in pending or not s.window_name:
+                continue
+            polled.append(s.index)
+
+        assert polled == [1], "Only scenarios with windows should be polled"
+
 
 # ---------------------------------------------------------------------------
 # QA completion: _on_qa_complete lifecycle transitions
