@@ -323,6 +323,7 @@ class TestOnQAComplete:
         app._auto_start_target = "pr-001"
         app._qa_loops = {}
         app._review_loops = {}
+        app._self_driving_qa = {}
         return app
 
     def test_pass_triggers_auto_merge(self, tmp_path):
@@ -505,3 +506,67 @@ class TestOnQAComplete:
         notes = pr.get("notes") or []
         assert len(notes) == 1
         assert "[changes committed]" in notes[0]["text"]
+
+
+# ---------------------------------------------------------------------------
+# _maybe_start_qa: review → QA transition
+# ---------------------------------------------------------------------------
+
+class TestMaybeStartQA:
+    """Tests for review_loop_ui._maybe_start_qa."""
+
+    def _make_app(self, tmp_path, *, auto_start=True, pr_status="in_review"):
+        """Create a mock TUI app with a PR on disk."""
+        pm_dir = tmp_path / "pm"
+        pm_dir.mkdir()
+        from pm_core import store
+        data = {
+            "project": {"name": "test", "repo": "/tmp/r", "base_branch": "master"},
+            "prs": [{"id": "pr-001", "title": "T", "branch": "b",
+                      "status": pr_status, "workdir": str(tmp_path / "wd"),
+                      "notes": []}],
+        }
+        store.save(data, pm_dir)
+
+        app = MagicMock()
+        app._root = pm_dir
+        app._data = data
+        app._auto_start = auto_start
+        app._auto_start_target = "pr-001"
+        app._qa_loops = {}
+        app._self_driving_qa = {}
+        return app
+
+    def test_self_driving_bypasses_auto_start(self, tmp_path):
+        """Self-driving QA should transition review→qa even with auto-start off."""
+        from pm_core.tui.review_loop_ui import _maybe_start_qa
+        from pm_core import store
+
+        app = self._make_app(tmp_path, auto_start=False)
+        app._self_driving_qa = {"pr-001": {"strict": False, "pass_count": 0,
+                                            "required_passes": 1}}
+
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+            _maybe_start_qa(app, "pr-001")
+
+        # PR should transition to qa
+        data = store.load(app._root)
+        pr = store.get_pr(data, "pr-001")
+        assert pr["status"] == "qa"
+        mock_start.assert_called_once_with(app, "pr-001")
+
+    def test_no_transition_without_auto_start_or_self_driving(self, tmp_path):
+        """Without auto-start or self-driving, _maybe_start_qa should be a no-op."""
+        from pm_core.tui.review_loop_ui import _maybe_start_qa
+        from pm_core import store
+
+        app = self._make_app(tmp_path, auto_start=False)
+
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+            _maybe_start_qa(app, "pr-001")
+
+        # PR should remain in_review
+        data = store.load(app._root)
+        pr = store.get_pr(data, "pr-001")
+        assert pr["status"] == "in_review"
+        mock_start.assert_not_called()

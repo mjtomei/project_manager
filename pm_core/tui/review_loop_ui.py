@@ -298,23 +298,35 @@ def _refresh_tech_tree(app) -> None:
 # ---------------------------------------------------------------------------
 
 def _maybe_start_qa(app, pr_id: str) -> None:
-    """Transition a PR from in_review → qa and start QA, if auto-start is enabled.
+    """Transition a PR from in_review → qa and start QA.
 
-    After review passes, instead of merging directly, the PR goes through QA.
+    Called when review passes.  Works in two modes:
+
+    - **Self-driving QA** (``zz t`` / ``zzz t``): always transitions,
+      independent of auto-start.  The self-driving NEEDS_WORK path starts
+      a review loop directly, so the review→QA transition must also be
+      independent.
+    - **Auto-start mode**: only transitions if auto-start is enabled and
+      the PR is within the target scope.
+
     QA completion is handled by qa_loop_ui which triggers merge on QA PASS.
     """
     from pm_core.tui import auto_start as _auto_start
-    if not _auto_start.is_enabled(app):
+
+    sd = getattr(app, '_self_driving_qa', {}).get(pr_id)
+
+    if not sd and not _auto_start.is_enabled(app):
         return
 
-    # Scope to auto-start target's dependency tree
-    target = _auto_start.get_target(app)
-    if target:
-        prs = app._data.get("prs") or []
-        allowed = _auto_start._transitive_deps(prs, target)
-        allowed.add(target)
-        if pr_id not in allowed:
-            return
+    # Scope to auto-start target's dependency tree (skip for self-driving)
+    if not sd:
+        target = _auto_start.get_target(app)
+        if target:
+            prs = app._data.get("prs") or []
+            allowed = _auto_start._transitive_deps(prs, target)
+            allowed.add(target)
+            if pr_id not in allowed:
+                return
 
     # Transition PR status to "qa"
     if app._root:
