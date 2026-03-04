@@ -550,6 +550,8 @@ def run_qa_sync(
         # Parse the plan
         if state.plan_output:
             state.scenarios = parse_qa_plan(state.plan_output)
+            _log.info("QA plan parsed: %d scenario(s) for %s",
+                      len(state.scenarios), state.pr_id)
 
         if not state.scenarios:
             _log.warning("Planner produced no scenarios for %s", state.pr_id)
