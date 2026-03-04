@@ -59,13 +59,28 @@ def _truncate(text: str, width: int) -> str:
     return text[:width - 1] + "\u2026"
 
 
+def _pad_line(text: str, cols: int) -> str:
+    """Pad a line with spaces to exactly *cols* visible characters.
+
+    Counts only visible characters (strips ANSI escape sequences for
+    length calculation) so the padding clears any leftover content from
+    a previous render cycle.
+    """
+    import re as _re
+    visible_len = len(_re.sub(r'\033\[[0-9;]*m', '', text))
+    if visible_len < cols:
+        return text + " " * (cols - visible_len)
+    return text
+
+
 def _render(status: dict | None, selected: int, rows: int, cols: int) -> str:
     """Render the status dashboard as an ANSI string."""
     lines: list[str] = []
 
     if status is None:
         lines.append(f"{_DIM}Waiting for qa_status.json...{_RESET}")
-        return _CLEAR_SCREEN + "\n".join(lines)
+        return _CLEAR_SCREEN + "\n".join(
+            _pad_line(l, cols) for l in lines)
 
     pr_id = status.get("pr_id", "?")
     scenarios = status.get("scenarios", [])
@@ -74,8 +89,8 @@ def _render(status: dict | None, selected: int, rows: int, cols: int) -> str:
     lines.append(f"{_BOLD}QA Status: {pr_id}{_RESET}")
     lines.append("")
 
-    # Header
-    title_width = max(cols - 20, 10)
+    # Fixed columns: prefix(2) + idx(3) + gap(2) + gap(2) + verdict(14) = 23
+    title_width = max(cols - 28, 10)
     lines.append(f"  {'#':>3}  {'Scenario':<{title_width}}  {'Verdict'}")
     lines.append(f"  {'---':>3}  {'-' * title_width}  {'-' * 14}")
 
@@ -110,7 +125,13 @@ def _render(status: dict | None, selected: int, rows: int, cols: int) -> str:
     lines.append("")
     lines.append(f"{_DIM}  j/k: navigate  Enter: go to window  q: quit{_RESET}")
 
-    return _CLEAR_SCREEN + "\n".join(lines)
+    # Pad each line to full width to clear stale content from previous renders
+    padded = [_pad_line(l, cols) for l in lines]
+    # Fill remaining rows with blank lines to clear any old content below
+    while len(padded) < rows:
+        padded.append(" " * cols)
+
+    return _CLEAR_SCREEN + "\n".join(padded)
 
 
 def _switch_to_window(session: str, window_name: str) -> None:
