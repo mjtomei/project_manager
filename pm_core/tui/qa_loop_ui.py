@@ -292,12 +292,15 @@ def _on_qa_complete(app, state: QALoopState) -> None:
             sd["pass_count"] += 1
             required = sd["required_passes"]
             if sd["pass_count"] >= required:
-                app._self_driving_qa.pop(pr_id, None)
                 app.log_message(
                     f"[green bold]QA PASS[/] for {pr_id} "
                     f"({sd['pass_count']}/{required} consecutive) — ready to merge"
                 )
+                # Trigger merge BEFORE removing self-driving state so
+                # _trigger_auto_merge sees the entry and uses force=True
+                # (bypassing auto-start scope checks).
                 _trigger_auto_merge(app, pr_id)
+                app._self_driving_qa.pop(pr_id, None)
             else:
                 app.log_message(
                     f"[green]QA PASS[/] for {pr_id} "

@@ -873,6 +873,28 @@ class TestEdgeCases:
 
         mock_merge.assert_called_once_with(app, "pr-001", force=False)
 
+    def test_self_driving_merge_force_in_full_flow(self, tmp_path):
+        """End-to-end: _on_qa_complete with pass_count reaching required_passes
+        should call _maybe_auto_merge with force=True even though it also
+        removes the self-driving entry (pop must happen AFTER merge trigger)."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete
+
+        app = _make_app(tmp_path, auto_start=False)
+        app._self_driving_qa["pr-001"] = {
+            "strict": False, "pass_count": 0, "required_passes": 1
+        }
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_PASS
+        state.made_changes = False
+
+        with patch("pm_core.tui.review_loop_ui._maybe_auto_merge") as mock_merge, \
+             patch("pm_core.tui.qa_loop_ui._record_qa_note"):
+            _on_qa_complete(app, state)
+
+        mock_merge.assert_called_once_with(app, "pr-001", force=True)
+        # Self-driving state should still be cleaned up after merge
+        assert "pr-001" not in app._self_driving_qa
+
     def test_stale_loop_removed_on_new_start(self, tmp_path):
         """Starting a new loop removes stale (non-running) loop state."""
         from pm_core.tui.qa_loop_ui import start_or_stop_qa_loop
