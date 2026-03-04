@@ -371,10 +371,20 @@ def _start_self_driving_review(app, pr_id: str, strict: bool) -> None:
 
 
 def _trigger_auto_merge(app, pr_id: str) -> None:
-    """Trigger auto-merge after QA passes, if auto-start is enabled."""
+    """Trigger auto-merge after QA passes.
+
+    Works in two modes:
+    - Self-driving QA (zz t / zzz t): always triggers merge (independent
+      of auto-start) via ``force=True``.
+    - Auto-start / legacy: delegates to ``_maybe_auto_merge`` which
+      checks auto-start status and scope.
+    """
     from pm_core.tui.review_loop_ui import _maybe_auto_merge
-    # _maybe_auto_merge checks auto-start status and scope internally
-    _maybe_auto_merge(app, pr_id)
+
+    # Self-driving QA operates independently of auto-start — use
+    # force=True so _maybe_auto_merge skips the enabled/scope checks.
+    sd = getattr(app, '_self_driving_qa', {}).get(pr_id)
+    _maybe_auto_merge(app, pr_id, force=bool(sd))
 
 
 def _transition_pr_status(app, pr_id: str, from_status: str, to_status: str) -> None:

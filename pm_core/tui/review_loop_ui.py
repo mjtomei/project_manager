@@ -351,8 +351,8 @@ def _maybe_start_qa(app, pr_id: str) -> None:
 # Auto-merge passing reviews
 # ---------------------------------------------------------------------------
 
-def _maybe_auto_merge(app, pr_id: str) -> None:
-    """Auto-merge a PR after a passing review, if auto-start is enabled.
+def _maybe_auto_merge(app, pr_id: str, *, force: bool = False) -> None:
+    """Auto-merge a PR after a passing review/QA.
 
     Runs ``pm pr merge --resolve-window --background <pr_id>``
     synchronously, then triggers ``auto_start.check_and_start()`` to
@@ -360,19 +360,24 @@ def _maybe_auto_merge(app, pr_id: str) -> None:
     ``--resolve-window`` causes a Claude merge-resolution window to open;
     we register ``merge:<pr_id>`` in the idle tracker so
     ``_poll_impl_idle`` can detect when it finishes and re-attempt.
+
+    Args:
+        force: Skip the auto-start enabled/scope checks.  Used by
+            self-driving QA which operates independently of auto-start.
     """
     from pm_core.tui import auto_start as _auto_start
-    if not _auto_start.is_enabled(app):
+    if not force and not _auto_start.is_enabled(app):
         return
 
     # Scope to auto-start target's dependency tree
-    target = _auto_start.get_target(app)
-    if target:
-        prs = app._data.get("prs") or []
-        allowed = _auto_start._transitive_deps(prs, target)
-        allowed.add(target)
-        if pr_id not in allowed:
-            return
+    if not force:
+        target = _auto_start.get_target(app)
+        if target:
+            prs = app._data.get("prs") or []
+            allowed = _auto_start._transitive_deps(prs, target)
+            allowed.add(target)
+            if pr_id not in allowed:
+                return
 
     _log.info("auto_merge: review passed for %s, merging", pr_id)
     app.log_message(f"Auto-merge: {pr_id} review passed, merging")

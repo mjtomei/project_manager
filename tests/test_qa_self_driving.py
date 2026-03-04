@@ -843,6 +843,36 @@ class TestEdgeCases:
         with patch("pm_core.tui.qa_loop_ui.get_global_setting_value", return_value="abc"):
             assert _get_qa_pass_count() == 1
 
+    def test_self_driving_merge_uses_force(self, tmp_path):
+        """Self-driving QA should call _maybe_auto_merge with force=True.
+
+        Without force, _maybe_auto_merge early-returns when auto-start is
+        disabled, which would break the zz t / zzz t flow.
+        """
+        from pm_core.tui.qa_loop_ui import _trigger_auto_merge
+
+        app = _make_app(tmp_path, auto_start=False)
+        app._self_driving_qa["pr-001"] = {
+            "strict": False, "pass_count": 1, "required_passes": 1
+        }
+
+        with patch("pm_core.tui.review_loop_ui._maybe_auto_merge") as mock_merge:
+            _trigger_auto_merge(app, "pr-001")
+
+        mock_merge.assert_called_once_with(app, "pr-001", force=True)
+
+    def test_non_self_driving_merge_no_force(self, tmp_path):
+        """Non-self-driving QA should call _maybe_auto_merge without force."""
+        from pm_core.tui.qa_loop_ui import _trigger_auto_merge
+
+        app = _make_app(tmp_path, auto_start=True)
+        # No self-driving state
+
+        with patch("pm_core.tui.review_loop_ui._maybe_auto_merge") as mock_merge:
+            _trigger_auto_merge(app, "pr-001")
+
+        mock_merge.assert_called_once_with(app, "pr-001", force=False)
+
     def test_stale_loop_removed_on_new_start(self, tmp_path):
         """Starting a new loop removes stale (non-running) loop state."""
         from pm_core.tui.qa_loop_ui import start_or_stop_qa_loop
