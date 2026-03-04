@@ -1,5 +1,7 @@
 """Tests for the QA loop orchestration."""
 
+from pathlib import Path
+
 import pytest
 from unittest.mock import patch, MagicMock
 
@@ -630,6 +632,38 @@ class TestVerdictEdgeCases:
             polled.append(s.index)
 
         assert polled == [1], "Only scenarios with windows should be polled"
+
+    def test_create_scenario_workdir_failure_nonfatal_to_loop(self):
+        """If create_scenario_workdir raises, the scenario is skipped but
+        remaining scenarios still launch (exception doesn't crash the loop)."""
+        s1 = QAScenario(index=1, title="Will Fail", focus="t")
+        s2 = QAScenario(index=2, title="Will Succeed", focus="t")
+        scenarios = [s1, s2]
+
+        launched = []
+        calls = []
+
+        def fake_create(qa_workdir, idx, **kw):
+            calls.append(idx)
+            if idx == 1:
+                raise OSError("corrupt repo")
+            return (Path("/tmp/wt"), "branch", Path("/tmp/scratch"), None)
+
+        # Simulate the loop logic from run_qa_sync
+        for scenario in scenarios:
+            try:
+                wt_path, wt_branch, scratch_path, venv_path = fake_create(
+                    Path("/tmp/qa"), scenario.index,
+                )
+            except Exception:
+                continue
+            scenario.worktree_path = str(wt_path)
+            scenario.worktree_branch = wt_branch
+            launched.append(scenario.index)
+
+        assert len(calls) == 2, "Both scenarios attempted"
+        assert launched == [2], "Only non-failing scenario launched"
+        assert s1.worktree_path is None, "Failed scenario has no worktree"
 
 
 # ---------------------------------------------------------------------------

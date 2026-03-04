@@ -604,12 +604,17 @@ def run_qa_sync(
         if state.stop_requested:
             break
 
-        wt_path, wt_branch, scratch_path, venv_path = create_scenario_workdir(
-            Path(state.qa_workdir), scenario.index,
-            repo_root=repo_root,
-            pr_id=state.pr_id,
-            loop_id=state.loop_id,
-        )
+        try:
+            wt_path, wt_branch, scratch_path, venv_path = create_scenario_workdir(
+                Path(state.qa_workdir), scenario.index,
+                repo_root=repo_root,
+                pr_id=state.pr_id,
+                loop_id=state.loop_id,
+            )
+        except Exception:
+            _log.warning("Failed to create workdir for scenario %d, skipping",
+                         scenario.index)
+            continue
         scenario.worktree_path = str(wt_path)
         scenario.worktree_branch = wt_branch
 
