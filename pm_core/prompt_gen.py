@@ -759,9 +759,9 @@ instruction file at the paths shown below.
 ## Output Format
 
 Your output is machine-parsed.  Use ALL CAPS markers exactly as shown.
-Do NOT use markdown headings — use the plain-text markers below.
+Do NOT use markdown headings or code fences — output the plain-text markers
+directly at the start of a line.
 
-```
 QA_PLAN_START
 
 SCENARIO 1: <descriptive title for this scenario>
@@ -775,7 +775,6 @@ INSTRUCTION: <path or "none">
 STEPS: <concrete test steps>
 
 QA_PLAN_END
-```
 
 IMPORTANT: Replace ALL angle-bracket placeholders above with real content.
 Do NOT copy the example format verbatim — fill in actual scenario titles,

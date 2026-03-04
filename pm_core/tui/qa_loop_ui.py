@@ -341,7 +341,8 @@ def _on_qa_complete(app, state: QALoopState) -> None:
     else:
         app.log_message(f"QA finished for {pr_id}: {verdict}")
 
-    # Record QA results as a PR note
+    # Record QA results as a PR note — do this last so it captures the
+    # final state, but log failures loudly since status already transitioned.
     _record_qa_note(app, state)
 
 
@@ -408,12 +409,14 @@ def _transition_pr_status(app, pr_id: str, from_status: str, to_status: str) -> 
 def _record_qa_note(app, state: QALoopState) -> None:
     """Record QA results as a note on the PR."""
     if not app._root:
+        _log.warning("Cannot record QA note: no project root")
         return
     try:
         from datetime import datetime, timezone
         data = store.load(app._root)
         pr = store.get_pr(data, state.pr_id)
         if not pr:
+            _log.warning("Cannot record QA note: PR %s not found", state.pr_id)
             return
         summary_parts = []
         for s in state.scenarios:

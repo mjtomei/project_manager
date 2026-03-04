@@ -16,6 +16,7 @@ import json
 import re
 import secrets
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -94,7 +95,7 @@ class QALoopState:
     pr_id: str
     running: bool = False
     stop_requested: bool = False
-    loop_id: str = field(default_factory=lambda: secrets.token_hex(2))
+    loop_id: str = field(default_factory=lambda: secrets.token_hex(8))
     iteration: int = 0
     planning_phase: bool = True
     plan_output: str = ""
@@ -123,16 +124,18 @@ def create_qa_workdir(pr_id: str, loop_id: str) -> Path:
 def create_scenario_workdir(qa_workdir: Path, scenario_index: int,
                             repo_root: Path | None = None,
                             pr_id: str = "",
-                            loop_id: str = "") -> tuple[Path, str, Path]:
-    """Create a worktree + scratch dir for one QA scenario.
+                            loop_id: str = "") -> tuple[Path, str, Path, Path | None]:
+    """Create a worktree + scratch dir + venv for one QA scenario.
 
     When *repo_root* is provided (worktree mode), creates:
       - ``{qa_workdir}/worktree-{N}/``  — git worktree (isolated branch)
       - ``{qa_workdir}/scratch-{N}/``   — empty temp dir for throwaway tests
+      - ``{qa_workdir}/venv-{N}/``      — ``--system-site-packages`` venv
 
     Falls back to a plain empty directory when *repo_root* is None (legacy).
 
-    Returns ``(worktree_path, branch_name, scratch_path)``.
+    Returns ``(worktree_path, branch_name, scratch_path, venv_path)``.
+    ``venv_path`` is ``None`` in legacy mode.
     """
     from pm_core import git_ops
 
@@ -143,7 +146,7 @@ def create_scenario_workdir(qa_workdir: Path, scenario_index: int,
         # Legacy: plain empty directory, no worktree
         d = qa_workdir / f"scenario-{scenario_index}"
         d.mkdir(parents=True, exist_ok=True)
-        return d, "", scratch
+        return d, "", scratch, None
 
     branch_name = f"qa-tmp-{pr_id}-{loop_id}-s{scenario_index}"
     wt_path = qa_workdir / f"worktree-{scenario_index}"
@@ -158,7 +161,21 @@ def create_scenario_workdir(qa_workdir: Path, scenario_index: int,
     git_ops.delete_branch(repo_root, branch_name)
 
     git_ops.create_worktree(repo_root, branch_name, wt_path)
-    return wt_path, branch_name, scratch
+
+    # Create a --system-site-packages venv so pip installs stay local
+    venv_path = qa_workdir / f"venv-{scenario_index}"
+    if not venv_path.exists():
+        try:
+            subprocess.run(
+                [sys.executable, "-m", "venv", "--system-site-packages",
+                 str(venv_path)],
+                check=True, capture_output=True,
+            )
+        except Exception:
+            _log.warning("Failed to create venv for scenario %d, continuing without",
+                         scenario_index)
+            venv_path = None
+    return wt_path, branch_name, scratch, venv_path
 
 
 def _setup_worktree_override(worktree_path: Path) -> None:
@@ -585,7 +602,7 @@ def run_qa_sync(
         if state.stop_requested:
             break
 
-        wt_path, wt_branch, scratch_path = create_scenario_workdir(
+        wt_path, wt_branch, scratch_path, venv_path = create_scenario_workdir(
             Path(state.qa_workdir), scenario.index,
             repo_root=repo_root,
             pr_id=state.pr_id,
@@ -606,6 +623,10 @@ def run_qa_sync(
             scratch_dir=str(scratch_path),
         )
         child_cmd = build_claude_shell_cmd(prompt=child_prompt)
+
+        # Activate the scenario venv so pip installs stay local
+        if venv_path:
+            child_cmd = f"VIRTUAL_ENV={venv_path} PATH={venv_path}/bin:$PATH {child_cmd}"
 
         # Launch window with cwd=worktree_path so Claude has the full codebase
         scenario_cwd = str(wt_path) if wt_branch else workdir_path

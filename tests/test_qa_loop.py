@@ -216,11 +216,59 @@ class TestQAWorkdirs:
         assert "pr-001-abc123" in str(wd)
 
     def test_create_scenario_workdir(self, tmp_path):
-        d, branch, scratch = create_scenario_workdir(tmp_path, 1)
+        d, branch, scratch, venv = create_scenario_workdir(tmp_path, 1)
         assert d.exists()
         assert d.name == "scenario-1"
         assert branch == ""
         assert scratch.exists()
+        assert venv is None
+
+    def test_create_scenario_workdir_venv(self, tmp_path):
+        """Worktree mode creates a --system-site-packages venv."""
+        qa_workdir = tmp_path / "qa"
+        qa_workdir.mkdir()
+
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+
+        with patch("pm_core.git_ops.run_git", return_value=MagicMock(returncode=0)), \
+             patch("pm_core.git_ops.create_worktree"), \
+             patch("pm_core.git_ops.remove_worktree"), \
+             patch("pm_core.git_ops.delete_branch"):
+            _, _, _, venv_path = create_scenario_workdir(
+                qa_workdir, 1, repo_root=repo_root,
+                pr_id="pr-001", loop_id="abc",
+            )
+
+        assert venv_path is not None
+        assert venv_path.name == "venv-1"
+        assert venv_path.exists()
+        # Verify the venv has the expected bin directory
+        assert (venv_path / "bin" / "python").exists() or (venv_path / "bin" / "python3").exists()
+
+    def test_create_scenario_workdir_venv_failure_nonfatal(self, tmp_path):
+        """Venv creation failure is non-fatal — returns venv_path=None."""
+        qa_workdir = tmp_path / "qa"
+        qa_workdir.mkdir()
+
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+
+        with patch("pm_core.git_ops.run_git", return_value=MagicMock(returncode=0)), \
+             patch("pm_core.git_ops.create_worktree"), \
+             patch("pm_core.git_ops.remove_worktree"), \
+             patch("pm_core.git_ops.delete_branch"), \
+             patch("pm_core.qa_loop.subprocess.run",
+                   side_effect=OSError("venv failed")):
+            wt_path, branch, scratch, venv_path = create_scenario_workdir(
+                qa_workdir, 1, repo_root=repo_root,
+                pr_id="pr-001", loop_id="abc",
+            )
+
+        # Worktree and scratch still created, venv is None
+        assert wt_path is not None
+        assert scratch.exists()
+        assert venv_path is None
 
 
 class TestQALoopState:
