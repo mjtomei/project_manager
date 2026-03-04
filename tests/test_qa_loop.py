@@ -14,6 +14,7 @@ from pm_core.qa_loop import (
     VERDICT_INPUT_REQUIRED,
     _scenario_window_name,
     _cleanup_stale_scenario_windows,
+    _tail_has_marker_on_own_line,
 )
 
 
@@ -205,6 +206,104 @@ QA_PLAN_END
 """
         scenarios = parse_qa_plan(output)
         assert len(scenarios) == 0  # placeholder titles are rejected
+
+    def test_current_prompt_template_plus_real_plan(self):
+        """Simulates actual pane content with the current prompt template
+        (angle-bracket placeholders) followed by Claude's real output."""
+        output = """You are a QA planner analyzing PR pr-001: "Add feature X"
+
+## Output Format
+
+Your output is machine-parsed.  Use ALL CAPS markers exactly as shown.
+Do NOT use markdown headings or code fences — output the plain-text markers
+directly at the start of a line.
+
+QA_PLAN_START
+
+SCENARIO 1: <descriptive title for this scenario>
+FOCUS: <what area or behavior to test>
+INSTRUCTION: <path/to/instruction.md or "none" if no existing instruction applies>
+STEPS: <concrete test steps to perform>
+
+SCENARIO 2: <descriptive title for next scenario>
+FOCUS: <what area or behavior to test>
+INSTRUCTION: <path or "none">
+STEPS: <concrete test steps>
+
+QA_PLAN_END
+
+IMPORTANT: Replace ALL angle-bracket placeholders above with real content.
+
+Here is my QA plan based on the PR changes:
+
+QA_PLAN_START
+
+SCENARIO 1: Feature X unit test coverage
+FOCUS: Verify new functions handle edge cases
+INSTRUCTION: pm/qa/instructions/tui-manual-test.md
+STEPS: 1. Run pytest on test_feature_x.py 2. Check coverage for new module 3. Verify error handling paths
+
+SCENARIO 2: Feature X integration with existing UI
+FOCUS: End-to-end flow through the TUI
+INSTRUCTION: none
+STEPS: 1. Launch TUI with test project 2. Navigate to feature X panel 3. Exercise all interactions
+
+SCENARIO 3: Regression — existing functionality unbroken
+FOCUS: Ensure no regressions in adjacent code
+INSTRUCTION: none
+STEPS: 1. Run full test suite 2. Verify no new warnings
+
+QA_PLAN_END
+"""
+        scenarios = parse_qa_plan(output)
+        assert len(scenarios) == 3
+        assert scenarios[0].title == "Feature X unit test coverage"
+        assert scenarios[0].instruction_path == "pm/qa/instructions/tui-manual-test.md"
+        assert scenarios[1].title == "Feature X integration with existing UI"
+        assert scenarios[1].instruction_path is None
+        assert scenarios[2].title == "Regression — existing functionality unbroken"
+
+
+class TestTailHasMarkerOnOwnLine:
+    """Tests for _tail_has_marker_on_own_line — the function that detects
+    QA_PLAN_END in the tail of pane content."""
+
+    def test_marker_on_own_line(self):
+        content = "line1\nline2\nQA_PLAN_END\nline4"
+        assert _tail_has_marker_on_own_line(content, "QA_PLAN_END") is True
+
+    def test_marker_as_substring_not_matched(self):
+        content = "line1\nThis line has QA_PLAN_END embedded\nline3"
+        assert _tail_has_marker_on_own_line(content, "QA_PLAN_END") is False
+
+    def test_marker_with_markdown_bold(self):
+        content = "line1\n**QA_PLAN_END**\nline3"
+        assert _tail_has_marker_on_own_line(content, "QA_PLAN_END") is True
+
+    def test_marker_with_backticks(self):
+        content = "line1\n`QA_PLAN_END`\nline3"
+        assert _tail_has_marker_on_own_line(content, "QA_PLAN_END") is True
+
+    def test_marker_with_leading_whitespace(self):
+        content = "line1\n   QA_PLAN_END   \nline3"
+        assert _tail_has_marker_on_own_line(content, "QA_PLAN_END") is True
+
+    def test_marker_outside_tail(self):
+        """Marker beyond tail_lines should not be detected."""
+        lines = [f"line{i}" for i in range(50)]
+        lines[5] = "QA_PLAN_END"  # placed early, outside last 30 lines
+        content = "\n".join(lines)
+        assert _tail_has_marker_on_own_line(content, "QA_PLAN_END") is False
+
+    def test_marker_inside_tail(self):
+        """Marker within tail_lines should be detected."""
+        lines = [f"line{i}" for i in range(50)]
+        lines[45] = "QA_PLAN_END"  # within last 30 lines
+        content = "\n".join(lines)
+        assert _tail_has_marker_on_own_line(content, "QA_PLAN_END") is True
+
+    def test_empty_content(self):
+        assert _tail_has_marker_on_own_line("", "QA_PLAN_END") is False
 
 
 class TestQAWorkdirs:
