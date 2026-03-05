@@ -228,9 +228,22 @@ def create_container(
     # --- Create pm user with matching uid/gid, then sleep ---
     host_uid = os.getuid()
     host_gid = os.getgid()
+    # Handle images that already have a user/group with the target UID/GID
+    # (e.g. ubuntu:22.04 has ubuntu:1000).  Rename the existing user/group
+    # to 'pm' instead of trying to create a duplicate.
     setup = (
-        f"groupadd -g {host_gid} {_CONTAINER_USER} 2>/dev/null; "
-        f"useradd -u {host_uid} -g {host_gid} -m -s /bin/bash {_CONTAINER_USER} 2>/dev/null; "
+        f"existing_grp=$(getent group {host_gid} 2>/dev/null | cut -d: -f1); "
+        f"if [ -n \"$existing_grp\" ] && [ \"$existing_grp\" != \"{_CONTAINER_USER}\" ]; then "
+        f"  groupmod -n {_CONTAINER_USER} \"$existing_grp\" 2>/dev/null; "
+        f"elif [ -z \"$existing_grp\" ]; then "
+        f"  groupadd -g {host_gid} {_CONTAINER_USER} 2>/dev/null; "
+        f"fi; "
+        f"existing_usr=$(getent passwd {host_uid} 2>/dev/null | cut -d: -f1); "
+        f"if [ -n \"$existing_usr\" ] && [ \"$existing_usr\" != \"{_CONTAINER_USER}\" ]; then "
+        f"  usermod -l {_CONTAINER_USER} -d {_CONTAINER_HOME} -m \"$existing_usr\" 2>/dev/null; "
+        f"elif [ -z \"$existing_usr\" ]; then "
+        f"  useradd -u {host_uid} -g {host_gid} -m -s /bin/bash {_CONTAINER_USER} 2>/dev/null; "
+        f"fi; "
         f"exec sleep infinity"
     )
     cmd.extend([config.image, "bash", "-c", setup])
