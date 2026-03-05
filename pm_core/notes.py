@@ -6,6 +6,7 @@ Committed sections (tracked in git, in notes.txt):
   - General: included in all prompts
   - Implementation: included only in implementation prompts
   - Review: included only in review prompts
+  - QA: included only in QA prompts
   - Merge: included only in merge prompts
   - Watcher: included only in watcher prompts
 
@@ -19,13 +20,14 @@ import re
 NOTES_FILENAME = "notes.txt"
 LOCAL_NOTES_FILENAME = "notes-local.txt"
 
-COMMITTED_SECTIONS = ("General", "Implementation", "Review", "Merge", "Watcher")
+COMMITTED_SECTIONS = ("General", "Implementation", "Review", "QA", "Merge", "Watcher")
 ALL_SECTIONS = (*COMMITTED_SECTIONS, "Local")
 
 # Which sections are included in each prompt type.
 PROMPT_SECTIONS: dict[str, tuple[str, ...]] = {
     "impl": ("General", "Implementation", "Local"),
     "review": ("General", "Review", "Local"),
+    "qa": ("General", "QA", "Local"),
     "merge": ("General", "Merge", "Local"),
     "watcher": ("General", "Watcher", "Local"),
 }
@@ -35,6 +37,7 @@ _SECTION_DESCS: dict[str, str] = {
     "General": "included in all prompts",
     "Implementation": "additional instructions for implementation sessions",
     "Review": "additional instructions for review sessions",
+    "QA": "additional instructions for QA sessions",
     "Merge": "additional instructions for merge sessions",
     "Watcher": "additional instructions for watcher sessions",
     "Local": "included in all prompts — gitignored, stays on your machine",
@@ -70,6 +73,7 @@ NOTES_WELCOME = """\
 ~               ## General        — included in all prompts (committed)
 ~               ## Implementation — additional instructions for implementation sessions
 ~               ## Review         — additional instructions for review sessions
+~               ## QA             — additional instructions for QA sessions
 ~               ## Merge          — additional instructions for merge sessions
 ~               ## Watcher        — additional instructions for watcher sessions
 ~               ## Local          — all prompts (gitignored)
@@ -307,6 +311,7 @@ def notes_section(root: Path, prompt_type: str | None = None) -> str:
 _PROMPT_SPECIFIC: dict[str, str] = {
     "impl": "Implementation",
     "review": "Review",
+    "qa": "QA",
     "merge": "Merge",
     "watcher": "Watcher",
 }

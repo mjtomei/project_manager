@@ -35,6 +35,8 @@ class TestValidatePRStatuses:
             "    status: merged\n"
             "  - id: pr-005\n"
             "    status: closed\n"
+            "  - id: pr-006\n"
+            "    status: qa\n"
         )
 
         data = store.load(tmp_pm_root)
@@ -45,6 +47,7 @@ class TestValidatePRStatuses:
         assert statuses["pr-003"] == "in_review"
         assert statuses["pr-004"] == "merged"
         assert statuses["pr-005"] == "closed"
+        assert statuses["pr-006"] == "qa"
 
     def test_invalid_status_normalized_to_pending(self, tmp_pm_root):
         """Invalid PR status is normalized to 'pending' on load."""

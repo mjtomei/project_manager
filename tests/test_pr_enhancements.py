@@ -18,19 +18,21 @@ from pm_core.cli.helpers import kill_pr_windows
 
 class TestKillPrWindows:
     def test_kills_work_and_review_windows(self):
-        """kill_pr_windows kills both work and review windows."""
+        """kill_pr_windows kills work, review, and QA windows."""
         pr = {"id": "pr-001"}
         with patch("pm_core.tmux.find_window_by_name", side_effect=lambda sess, name: {"id": f"@{name}"}) as mock_find, \
-             patch("pm_core.tmux.kill_window") as mock_kill:
+             patch("pm_core.tmux.kill_window") as mock_kill, \
+             patch("pm_core.tmux.list_windows", return_value=[]):
             killed = kill_pr_windows("test-session", pr)
-        assert killed == ["pr-001", "review-pr-001", "merge-pr-001"]
-        assert mock_kill.call_count == 3
+        assert killed == ["pr-001", "review-pr-001", "merge-pr-001", "qa-pr-001"]
+        assert mock_kill.call_count == 4
 
     def test_skips_missing_windows(self):
         """kill_pr_windows skips windows that don't exist."""
         pr = {"id": "pr-001"}
         with patch("pm_core.tmux.find_window_by_name", return_value=None), \
-             patch("pm_core.tmux.kill_window") as mock_kill:
+             patch("pm_core.tmux.kill_window") as mock_kill, \
+             patch("pm_core.tmux.list_windows", return_value=[]):
             killed = kill_pr_windows("test-session", pr)
         assert killed == []
         mock_kill.assert_not_called()
@@ -39,9 +41,10 @@ class TestKillPrWindows:
         """kill_pr_windows uses GitHub PR number as display ID when available."""
         pr = {"id": "pr-001", "gh_pr_number": 42}
         with patch("pm_core.tmux.find_window_by_name", side_effect=lambda sess, name: {"id": f"@{name}"}), \
-             patch("pm_core.tmux.kill_window"):
+             patch("pm_core.tmux.kill_window"), \
+             patch("pm_core.tmux.list_windows", return_value=[]):
             killed = kill_pr_windows("test-session", pr)
-        assert killed == ["#42", "review-#42", "merge-#42"]
+        assert killed == ["#42", "review-#42", "merge-#42", "qa-#42"]
 
 
 # ---------------------------------------------------------------------------
@@ -135,6 +138,166 @@ class TestAutoStartHelpers:
         app = MagicMock()
         app._auto_start_target = None
         assert get_target(app) is None
+
+
+# ---------------------------------------------------------------------------
+# _auto_start_qa_loops
+# ---------------------------------------------------------------------------
+
+class TestAutoStartQALoops:
+    """Tests for _auto_start_qa_loops recovery and filtering."""
+
+    def _make_app(self, prs, target=None):
+        """Create a mock app with auto-start enabled."""
+        app = MagicMock()
+        app._auto_start = True
+        app._auto_start_target = target
+        app._data = {"prs": prs}
+        app._qa_loops = {}
+        return app
+
+    def test_starts_qa_for_qa_status_pr(self):
+        """QA loop is started for a PR in qa status with a workdir."""
+        from pm_core.tui.auto_start import _auto_start_qa_loops
+        prs = [
+            {"id": "pr-a", "status": "qa", "workdir": "/tmp/w", "depends_on": []},
+        ]
+        app = self._make_app(prs)
+
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+            _auto_start_qa_loops(app, target=None, prs=prs)
+        mock_start.assert_called_once_with(app, "pr-a")
+
+    def test_skips_non_qa_status(self):
+        """PRs not in qa status are ignored."""
+        from pm_core.tui.auto_start import _auto_start_qa_loops
+        prs = [
+            {"id": "pr-a", "status": "in_review", "workdir": "/tmp/w", "depends_on": []},
+            {"id": "pr-b", "status": "pending", "workdir": "/tmp/w", "depends_on": []},
+            {"id": "pr-c", "status": "merged", "workdir": "/tmp/w", "depends_on": []},
+        ]
+        app = self._make_app(prs)
+
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+            _auto_start_qa_loops(app, target=None, prs=prs)
+        mock_start.assert_not_called()
+
+    def test_skips_pr_without_workdir(self):
+        """PRs without a workdir are skipped."""
+        from pm_core.tui.auto_start import _auto_start_qa_loops
+        prs = [
+            {"id": "pr-a", "status": "qa", "depends_on": []},
+        ]
+        app = self._make_app(prs)
+
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+            _auto_start_qa_loops(app, target=None, prs=prs)
+        mock_start.assert_not_called()
+
+    def test_respects_target_dependency_tree(self):
+        """Only QA PRs in the target's dependency tree are started."""
+        from pm_core.tui.auto_start import _auto_start_qa_loops
+        prs = [
+            {"id": "pr-a", "status": "qa", "workdir": "/tmp/a", "depends_on": []},
+            {"id": "pr-b", "status": "qa", "workdir": "/tmp/b", "depends_on": ["pr-a"]},
+            {"id": "pr-c", "status": "qa", "workdir": "/tmp/c", "depends_on": []},  # outside tree
+        ]
+        app = self._make_app(prs, target="pr-b")
+
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+            _auto_start_qa_loops(app, target="pr-b", prs=prs)
+        # pr-a (dep of pr-b) and pr-b (target) should be started; pr-c should not
+        started_ids = [c[0][1] for c in mock_start.call_args_list]
+        assert "pr-a" in started_ids
+        assert "pr-b" in started_ids
+        assert "pr-c" not in started_ids
+
+    def test_skips_running_qa_loop(self):
+        """PRs with a running QA loop are skipped."""
+        from pm_core.tui.auto_start import _auto_start_qa_loops
+        from pm_core.qa_loop import QALoopState
+        prs = [
+            {"id": "pr-a", "status": "qa", "workdir": "/tmp/w", "depends_on": []},
+        ]
+        app = self._make_app(prs)
+        running_state = QALoopState(pr_id="pr-a")
+        running_state.running = True
+        app._qa_loops["pr-a"] = running_state
+
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+            _auto_start_qa_loops(app, target=None, prs=prs)
+        mock_start.assert_not_called()
+
+    def test_skips_completed_qa_loop_awaiting_poll(self):
+        """PRs with a completed QA loop (verdict set, not yet cleaned up) are skipped.
+
+        This prevents a race between check_and_start (triggered by sync)
+        and poll_qa_state (which processes completions).
+        """
+        from pm_core.tui.auto_start import _auto_start_qa_loops
+        from pm_core.qa_loop import QALoopState
+        prs = [
+            {"id": "pr-a", "status": "qa", "workdir": "/tmp/w", "depends_on": []},
+        ]
+        app = self._make_app(prs)
+        done_state = QALoopState(pr_id="pr-a")
+        done_state.running = False
+        done_state.latest_verdict = "PASS"
+        app._qa_loops["pr-a"] = done_state
+
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+            _auto_start_qa_loops(app, target=None, prs=prs)
+        mock_start.assert_not_called()
+
+    def test_noop_when_auto_start_disabled(self):
+        """No QA loops started when auto-start is off."""
+        from pm_core.tui.auto_start import _auto_start_qa_loops
+        prs = [
+            {"id": "pr-a", "status": "qa", "workdir": "/tmp/w", "depends_on": []},
+        ]
+        app = MagicMock()
+        app._auto_start = False
+        app._qa_loops = {}
+
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+            _auto_start_qa_loops(app, target=None, prs=prs)
+        mock_start.assert_not_called()
+
+    def test_no_target_starts_all_qa_prs(self):
+        """Without a target, all qa-status PRs get QA started."""
+        from pm_core.tui.auto_start import _auto_start_qa_loops
+        prs = [
+            {"id": "pr-a", "status": "qa", "workdir": "/tmp/a", "depends_on": []},
+            {"id": "pr-b", "status": "qa", "workdir": "/tmp/b", "depends_on": []},
+        ]
+        app = self._make_app(prs, target=None)
+
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+            _auto_start_qa_loops(app, target=None, prs=prs)
+        assert mock_start.call_count == 2
+
+    def test_recovery_after_restart_starts_qa(self):
+        """After TUI restart (empty _qa_loops), qa-status PRs get QA started.
+
+        Simulates the breadcrumb recovery path: auto-start is re-enabled,
+        _qa_loops is empty (in-memory state lost), and _auto_start_qa_loops
+        picks up qa-status PRs.
+        """
+        from pm_core.tui.auto_start import _auto_start_qa_loops
+        prs = [
+            {"id": "pr-a", "status": "qa", "workdir": "/tmp/a", "depends_on": []},
+            {"id": "pr-b", "status": "qa", "workdir": "/tmp/b", "depends_on": ["pr-a"]},
+            {"id": "pr-c", "status": "in_review", "workdir": "/tmp/c", "depends_on": []},
+        ]
+        # Simulates post-restart: auto-start enabled, empty qa_loops
+        app = self._make_app(prs, target="pr-b")
+        assert app._qa_loops == {}
+
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+            _auto_start_qa_loops(app, target="pr-b", prs=prs)
+        # pr-a and pr-b are in qa status and in dep tree; pr-c is in_review
+        started_ids = [c[0][1] for c in mock_start.call_args_list]
+        assert set(started_ids) == {"pr-a", "pr-b"}
 
 
 # ---------------------------------------------------------------------------

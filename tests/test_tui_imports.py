@@ -124,11 +124,11 @@ class TestPaneOpsImports:
         from pm_core.tui.pane_ops import launch_meta
         assert callable(launch_meta)
 
-    def test_launch_test(self):
-        from pm_core.tui.pane_ops import launch_test
-        sig = inspect.signature(launch_test)
+    def test_launch_qa_item(self):
+        from pm_core.tui.pane_ops import launch_qa_item
+        sig = inspect.signature(launch_qa_item)
         params = list(sig.parameters.keys())
-        assert params == ["app", "test_id"]
+        assert params == ["app", "item_id"]
 
     def test_handle_plan_action(self):
         from pm_core.tui.pane_ops import handle_plan_action

@@ -716,17 +716,19 @@ class TestActivitySortKey:
     """Tests for the _activity_sort_key used in crossing minimization seeding."""
 
     def test_status_priority_order(self):
-        """in_progress < in_review < pending < merged < closed."""
+        """in_progress < in_review/qa < pending < merged < closed."""
         pr_map = {
             "a": {"id": "a", "status": "closed"},
             "b": {"id": "b", "status": "in_progress"},
             "c": {"id": "c", "status": "pending"},
             "d": {"id": "d", "status": "merged"},
             "e": {"id": "e", "status": "in_review"},
+            "f": {"id": "f", "status": "qa"},
         }
         keys = {pid: _activity_sort_key(pid, pr_map) for pid in pr_map}
         ordered = sorted(pr_map.keys(), key=lambda pid: keys[pid])
-        assert ordered == ["b", "e", "c", "d", "a"]
+        # qa has same priority as in_review (both 1), so they sort by id within group
+        assert ordered == ["b", "e", "f", "c", "d", "a"]
 
     def test_recent_timestamp_sorts_first(self):
         """Within the same status, more recent timestamps should sort first."""

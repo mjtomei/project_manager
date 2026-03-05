@@ -2361,10 +2361,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/111
   gh_pr_number: 111
   created_at: '2026-03-02T01:34:17.359036+00:00'
-  updated_at: '2026-03-03T21:24:15.655072+00:00'
+  updated_at: '2026-03-03T21:58:32.312195+00:00'
   started_at: '2026-03-02T01:37:45.114694+00:00'
   reviewed_at: '2026-03-02T02:11:33.662780+00:00'
-  merged_at: '2026-03-03T21:24:15.655072+00:00'
+  merged_at: '2026-03-03T21:58:32.312195+00:00' 
   notes:
   - id: note-6aaddc6
     text: 'Manual TUI Test (review iteration 2): Test project at /tmp/pm-breadcrumb-test.
@@ -2729,6 +2729,21 @@ prs:
       (master) code, not this branch. All 1435 tests pass.'
     created_at: '2026-03-02T17:53:14Z'
     last_edited: '2026-03-02T17:53:14Z'
+  - id: note-a0269b1
+    text: 'QA NEEDS_WORK: QA planner session spawns and parses scenario plan: NEEDS_WORK;
+      QA scenario child execution in isolated worktrees: NEEDS_WORK; Self-driving
+      QA loop with zz t (lenient mode): PASS; Self-driving QA loop with zzz t (strict
+      mode): PASS; Fresh start QA with z t: PASS; QA pane display and keyboard navigation:
+      PASS; pm qa CLI commands: PASS; Review-to-QA auto-transition via auto-start:
+      PASS; Tech tree renders QA status with test tube icon and magenta style: PASS;
+      QA notes recorded on PR after completion: NEEDS_WORK; QA work directory creation
+      and management: PASS; Optional QA — standard flow still works without QA: PASS;
+      QA verdict edge cases — window exit without verdict: PASS; QA scenario creation
+      failure handling: PASS; QA status preservation during GitHub sync: PASS; Help
+      screen shows updated keybindings for QA: PASS; Self-driving QA INPUT_REQUIRED
+      pauses the loop: PASS [changes committed]'
+    created_at: '2026-03-03T21:56:22Z'
+    last_edited: '2026-03-03T21:56:22Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ee1ff04-add-optional-quality-assurance-step--808818af
 - id: pr-fe499f2
   plan: plan-qa

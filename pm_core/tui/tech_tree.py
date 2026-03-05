@@ -3,6 +3,7 @@
 from textual.widget import Widget
 from textual.reactive import reactive
 from rich.text import Text
+from rich.cells import cell_len
 from rich.console import RenderableType
 
 from pm_core.tui import item_message
@@ -13,6 +14,7 @@ STATUS_ICONS = {
     "pending": "○",
     "in_progress": "●",
     "in_review": "◎",
+    "qa": "🧪",
     "merged": "✓",
     "closed": "✗",
     "blocked": "✗",
@@ -44,6 +46,7 @@ STATUS_STYLES = {
     "pending": "white",
     "in_progress": "bold yellow",
     "in_review": "bold cyan",
+    "qa": "bold magenta",
     "merged": "bold green",
     "closed": "dim red",
     "blocked": "bold red",
@@ -54,13 +57,14 @@ STATUS_BG = {
     "pending": "",                # no background
     "in_progress": "on #333300",  # subtle yellow
     "in_review": "on #003333",    # subtle cyan
+    "qa": "on #330033",           # subtle magenta
     "merged": "on #003300",       # subtle green
     "closed": "on #220000",       # dim red
     "blocked": "on #330000",      # subtle red
 }
 
 # Status filter cycle order (None = show all)
-STATUS_FILTER_CYCLE = [None, "pending", "in_progress", "in_review", "merged", "closed"]
+STATUS_FILTER_CYCLE = [None, "pending", "in_progress", "in_review", "qa", "merged", "closed"]
 
 # Node dimensions
 NODE_W = 24
@@ -521,16 +525,20 @@ class TechTree(Widget):
                         status_text += f" {spinner}"
             machine = pr.get("agent_machine")
             if machine:
-                avail = NODE_W - 4 - len(status_text) - 1
+                avail = NODE_W - 4 - cell_len(status_text) - 1
                 if avail > 3:
                     status_text += f" {machine[:avail]}"
-            status_line = f"{side} {status_text:<{NODE_W - 4}} {side}"
+            # Pad using visual width to handle wide chars (e.g. 🧪 emoji)
+            visual_w = cell_len(status_text)
+            pad = NODE_W - 4 - visual_w
+            status_line = f"{side} {status_text}{' ' * max(0, pad)} {side}"
 
             box_lines = [top, id_line, title_line, status_line, bot]
             for dy, bl in enumerate(box_lines):
-                for dx, ch in enumerate(bl):
+                grid_dx = 0
+                for char_idx, ch in enumerate(bl):
                     is_border = (dy == 0 or dy == len(box_lines) - 1
-                                 or dx == 0 or dx == len(bl) - 1)
+                                 or char_idx == 0 or char_idx == len(bl) - 1)
                     if is_selected:
                         if is_border:
                             style = "bold cyan"
@@ -542,7 +550,14 @@ class TechTree(Widget):
                     else:
                         # Interior of unselected box: node style + background
                         style = f"{node_style} {bg_style}".strip()
-                    safe_write(y + dy, x + dx, ch, style)
+                    safe_write(y + dy, x + grid_dx, ch, style)
+                    cw = cell_len(ch)
+                    # Mark continuation cells for wide characters (e.g. 🧪)
+                    for k in range(1, cw):
+                        if 0 <= (y + dy) < len(grid) and 0 <= (x + grid_dx + k) < len(grid[0]):
+                            grid[y + dy][x + grid_dx + k] = ""
+                            style_grid[y + dy][x + grid_dx + k] = style
+                    grid_dx += cw
 
             # Apply colored style to auto-start target marker (◎) on id_line
             if is_auto_target:
