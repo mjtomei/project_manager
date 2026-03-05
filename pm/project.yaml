@@ -3166,8 +3166,9 @@ prs:
   plan: plan-qa
   title: Isolate QA scenario workers in containers
   branch: pm/pr-d568b98-isolate-qa-scenario-workers-in-containers
-  status: pending
-  depends_on: []
+  status: in_review
+  depends_on:
+  - pr-ee1ff04
   description: Run QA scenario workers inside containers (e.g. Docker) instead of
     directly on the host. This provides isolation so that scenario workers cannot
     interfere with each other or with the host system during testing - they can safely
@@ -3177,15 +3178,16 @@ prs:
     available. The QA planner spawns containers instead of bare tmux panes. Container
     lifecycle (create, monitor, collect results, teardown) should be managed by pm.
     Support configurable base images and resource limits per container.
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/120
+  gh_pr_number: 120
   created_at: '2026-03-05T16:15:56.346064+00:00'
-  updated_at: '2026-03-05T16:15:56.346064+00:00'
-  started_at: null
-  reviewed_at: null
+  updated_at: '2026-03-05T17:41:10.481774+00:00'
+  started_at: '2026-03-05T16:33:07.507872+00:00'
+  reviewed_at: '2026-03-05T17:41:10.481774+00:00'
   merged_at: null
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-d568b98-isolate-qa-scenario-workers-in-conta-03871242
 - id: pr-76fa48d
   plan: improvements
   title: Auto-retry Claude sessions on 500 and usage limit errors
