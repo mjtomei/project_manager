@@ -33,7 +33,9 @@ _DIM = "\033[2m"
 _BOLD = "\033[1m"
 _REVERSE = "\033[7m"
 _RESET = "\033[0m"
-_CLEAR_SCREEN = "\033[2J\033[H"
+_HIDE_CURSOR = "\033[?25l"
+_SHOW_CURSOR = "\033[?25h"
+_CLEAR_SCREEN = "\033[H\033[2J"
 
 _VERDICT_COLORS = {
     "PASS": _GREEN,
@@ -189,7 +191,9 @@ def _run_interactive(path: Path, session: str) -> None:
     old_settings = termios.tcgetattr(fd)
 
     try:
-        tty.setraw(fd)
+        tty.setcbreak(fd)
+        sys.stdout.write(_HIDE_CURSOR)
+        sys.stdout.flush()
 
         while True:
             status = _load_status(path)
@@ -229,7 +233,7 @@ def _run_interactive(path: Path, session: str) -> None:
 
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-        sys.stdout.write(_CLEAR_SCREEN)
+        sys.stdout.write(_SHOW_CURSOR + _CLEAR_SCREEN)
         sys.stdout.flush()
 
 
