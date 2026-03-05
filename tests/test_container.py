@@ -364,6 +364,18 @@ class TestWrapClaudeCmd:
         mock_create.assert_called_once()
         mock_exec.assert_called_once()
 
+    @patch("pm_core.container.create_container",
+           side_effect=Exception("Docker daemon not running"))
+    @patch("pm_core.container.load_container_config",
+           return_value=ContainerConfig())
+    @patch("pm_core.container.is_container_mode_enabled", return_value=True)
+    def test_fallback_when_docker_unavailable(self, mock_enabled, mock_config,
+                                               mock_create):
+        """wrap_claude_cmd falls back to original command when Docker fails."""
+        cmd, cname = wrap_claude_cmd("claude 'hello'", "/workdir", label="impl")
+        assert cmd == "claude 'hello'"
+        assert cname == ""
+
     @patch("pm_core.container.build_exec_cmd", return_value="docker exec ...")
     @patch("pm_core.container.create_container", return_value="cid")
     @patch("pm_core.container.load_container_config",

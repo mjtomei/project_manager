@@ -552,8 +552,34 @@ def _launch_scenarios_in_containers(
             )
             scenario.container_name = cname
         except Exception:
-            _log.warning("Failed to create container for scenario %d",
-                         scenario.index)
+            _log.warning(
+                "Failed to create container for scenario %d "
+                "— falling back to host execution",
+                scenario.index, exc_info=True,
+            )
+            # Fall back to plain tmux execution for this scenario
+            host_prompt = prompt_gen.generate_qa_child_prompt(
+                data, state.pr_id, scenario,
+                workdir=str(wt_path),
+                session_name=session,
+                worktree_mode=bool(wt_branch),
+                scratch_dir=str(scratch_path),
+            )
+            host_cmd = build_claude_shell_cmd(prompt=host_prompt)
+            if wt_branch:
+                _setup_worktree_override(wt_path)
+            win_name = _scenario_window_name(pr_data, scenario.index)
+            try:
+                tmux_mod.new_window(session, win_name, host_cmd,
+                                    cwd=str(wt_path), switch=False)
+                scenario.window_name = win_name
+                _log.info(
+                    "Launched scenario %d (%s) in tmux (container fallback)",
+                    scenario.index, scenario.title,
+                )
+            except Exception:
+                _log.warning("Failed to create fallback window for scenario %d",
+                             scenario.index)
             continue
 
         # Build docker exec command and launch in a tmux window.
