@@ -27,6 +27,8 @@ from pm_core.container import (
     CONTAINER_PREFIX,
     _CONTAINER_WORKDIR,
     _CONTAINER_SCRATCH,
+    _CONTAINER_USER,
+    _CONTAINER_HOME,
 )
 
 
@@ -148,8 +150,11 @@ class TestCreateContainer:
         assert args[0] == "run"
         assert "-d" in args
         assert f"/my/workdir:{_CONTAINER_WORKDIR}" in " ".join(args)
-        assert args[-2] == "sleep"
-        assert args[-1] == "infinity"
+        # Entrypoint creates pm user then execs sleep infinity
+        assert args[-3] == "bash"
+        assert args[-2] == "-c"
+        assert "useradd" in args[-1]
+        assert "sleep infinity" in args[-1]
 
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_docker")
@@ -211,13 +216,30 @@ class TestCreateContainer:
         config = ContainerConfig()
 
         with patch("pm_core.container.Path.home", return_value=Path("/home/user")), \
-             patch.object(Path, "is_dir", return_value=True):
+             patch.object(Path, "is_dir", return_value=True), \
+             patch.object(Path, "exists", return_value=True):
             create_container(name="test", config=config, workdir=Path("/w"))
 
         args_str = " ".join(mock_docker.call_args[0])
-        assert "/home/user/.claude:/root/.claude" in args_str
+        assert f"/home/user/.claude:{_CONTAINER_HOME}/.claude" in args_str
         # Should NOT be read-only
-        assert "/home/user/.claude:/root/.claude:ro" not in args_str
+        assert f"/home/user/.claude:{_CONTAINER_HOME}/.claude:ro" not in args_str
+
+    @patch("pm_core.container._resolve_claude_binary", return_value=None)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_docker")
+    def test_mounts_claude_json(self, mock_docker, mock_rm, mock_bin):
+        """~/.claude.json is mounted read-write for Claude config."""
+        mock_docker.return_value = MagicMock(stdout="id\n")
+        config = ContainerConfig()
+
+        with patch("pm_core.container.Path.home", return_value=Path("/home/user")), \
+             patch.object(Path, "is_dir", return_value=True), \
+             patch.object(Path, "exists", return_value=True):
+            create_container(name="test", config=config, workdir=Path("/w"))
+
+        args_str = " ".join(mock_docker.call_args[0])
+        assert f"/home/user/.claude.json:{_CONTAINER_HOME}/.claude.json" in args_str
 
     @patch("pm_core.container._resolve_claude_binary")
     @patch("pm_core.container.remove_container")
@@ -296,6 +318,7 @@ class TestBuildExecCmd:
     def test_basic(self):
         cmd = build_exec_cmd("my-container", "claude 'hello world'")
         assert "docker exec -it" in cmd
+        assert f"-u {_CONTAINER_USER}" in cmd
         assert "my-container" in cmd
         assert "claude" in cmd
         assert "hello world" in cmd
@@ -306,6 +329,8 @@ class TestBuildExecCmd:
         assert parts[0] == "docker"
         assert parts[1] == "exec"
         assert parts[2] == "-it"
+        assert parts[3] == "-u"
+        assert parts[4] == _CONTAINER_USER
 
 
 class TestWrapClaudeCmd:

@@ -41,6 +41,8 @@ DEFAULT_CPU_LIMIT = "2.0"
 CONTAINER_PREFIX = "pm-"
 _CONTAINER_WORKDIR = "/workspace"
 _CONTAINER_SCRATCH = "/scratch"
+_CONTAINER_USER = "pm"
+_CONTAINER_HOME = f"/home/{_CONTAINER_USER}"
 
 # Env vars to pass through to the container
 _CLAUDE_ENV_VARS = (
@@ -189,13 +191,17 @@ def create_container(
         _log.warning("Claude binary not found on host — "
                      "container will need claude pre-installed in image")
 
-    # --- Claude config (~/.claude) ---
-    # Mounted read-write: Claude needs to write session state, history,
+    # --- Claude config (~/.claude and ~/.claude.json) ---
+    # Both mounted read-write: Claude needs to write session state, history,
     # file caches, etc.  Each container session gets its own session ID
     # so concurrent writes don't conflict.
     claude_config = Path.home() / ".claude"
     if claude_config.is_dir():
-        cmd.extend(["-v", f"{claude_config}:/root/.claude"])
+        cmd.extend(["-v", f"{claude_config}:{_CONTAINER_HOME}/.claude"])
+
+    claude_json = Path.home() / ".claude.json"
+    if claude_json.exists():
+        cmd.extend(["-v", f"{claude_json}:{_CONTAINER_HOME}/.claude.json"])
 
     # --- Additional mounts ---
     if extra_ro_mounts:
@@ -219,7 +225,15 @@ def create_container(
     for mount in config.extra_mounts:
         cmd.extend(["-v", mount])
 
-    cmd.extend([config.image, "sleep", "infinity"])
+    # --- Create pm user with matching uid/gid, then sleep ---
+    host_uid = os.getuid()
+    host_gid = os.getgid()
+    setup = (
+        f"groupadd -g {host_gid} {_CONTAINER_USER} 2>/dev/null; "
+        f"useradd -u {host_uid} -g {host_gid} -m -s /bin/bash {_CONTAINER_USER} 2>/dev/null; "
+        f"exec sleep infinity"
+    )
+    cmd.extend([config.image, "bash", "-c", setup])
 
     result = _run_docker(*cmd, timeout=60)
     container_id = result.stdout.strip()
@@ -234,7 +248,7 @@ def build_exec_cmd(name: str, shell_cmd: str) -> str:
     (same as the non-container path).
     """
     escaped = shlex.quote(shell_cmd)
-    return f"docker exec -it {shlex.quote(name)} bash -c {escaped}"
+    return f"docker exec -it -u {_CONTAINER_USER} {shlex.quote(name)} bash -c {escaped}"
 
 
 def remove_container(name: str) -> None:
