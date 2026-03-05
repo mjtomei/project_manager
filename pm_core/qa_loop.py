@@ -556,8 +556,9 @@ def _launch_scenarios_in_containers(
                          scenario.index)
             continue
 
-        # Build docker exec command and launch in a tmux window
-        exec_cmd = container_mod.build_exec_cmd(cname, claude_cmd)
+        # Build docker exec command and launch in a tmux window.
+        # cleanup=False: QA containers are batch-removed by cleanup_qa_containers
+        exec_cmd = container_mod.build_exec_cmd(cname, claude_cmd, cleanup=False)
         win_name = _scenario_window_name(pr_data, scenario.index)
         try:
             tmux_mod.new_window(session, win_name, exec_cmd,

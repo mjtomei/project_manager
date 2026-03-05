@@ -323,9 +323,20 @@ class TestBuildExecCmd:
         assert "claude" in cmd
         assert "hello world" in cmd
 
+    def test_includes_cleanup_by_default(self):
+        cmd = build_exec_cmd("my-container", "claude 'hi'")
+        assert "docker rm -f" in cmd
+        assert cmd.endswith(">/dev/null 2>&1")
+
+    def test_no_cleanup_when_disabled(self):
+        cmd = build_exec_cmd("my-container", "claude 'hi'", cleanup=False)
+        assert "docker rm -f" not in cmd
+
     def test_shell_safety(self):
         cmd = build_exec_cmd("name-with-special", "claude 'prompt with $vars'")
-        parts = shlex.split(cmd)
+        # Split only the exec portion (before the cleanup suffix)
+        exec_part = cmd.split(";")[0].strip()
+        parts = shlex.split(exec_part)
         assert parts[0] == "docker"
         assert parts[1] == "exec"
         assert parts[2] == "-it"

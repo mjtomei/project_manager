@@ -241,14 +241,18 @@ def create_container(
     return container_id
 
 
-def build_exec_cmd(name: str, shell_cmd: str) -> str:
+def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True) -> str:
     """Build a ``docker exec -it`` command string for use in a tmux window.
 
-    When the exec'd process exits, the tmux window exits too
-    (same as the non-container path).
+    When the exec'd process exits, the container is removed (unless
+    *cleanup* is False) and the tmux window exits too — same as the
+    non-container path.
     """
     escaped = shlex.quote(shell_cmd)
-    return f"docker exec -it -u {_CONTAINER_USER} {shlex.quote(name)} bash -c {escaped}"
+    exec_part = f"docker exec -it -u {_CONTAINER_USER} {shlex.quote(name)} bash -c {escaped}"
+    if cleanup:
+        return f"{exec_part}; docker rm -f {shlex.quote(name)} >/dev/null 2>&1"
+    return exec_part
 
 
 def remove_container(name: str) -> None:
