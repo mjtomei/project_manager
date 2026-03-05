@@ -711,6 +711,26 @@ class TestOnQAComplete:
 
         mock_merge.assert_called_once_with(app, "pr-001")
 
+    def test_pass_without_auto_start_does_not_merge(self, tmp_path):
+        """QA PASS without auto-start should not trigger auto-merge."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete
+
+        app = self._make_app(tmp_path)
+        app._auto_start = False  # auto-start disabled
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_PASS
+        state.made_changes = False
+
+        with patch("pm_core.tui.qa_loop_ui._trigger_auto_merge") as mock_merge, \
+             patch("pm_core.tui.qa_loop_ui._record_qa_note"):
+            _on_qa_complete(app, state)
+
+        mock_merge.assert_not_called()
+        # Should inform user to merge manually
+        app.log_message.assert_called()
+        msg = app.log_message.call_args[0][0]
+        assert "merge manually" in msg
+
     def test_needs_work_transitions_to_in_review(self, tmp_path):
         """QA NEEDS_WORK should transition PR from qa → in_review."""
         from pm_core.tui.qa_loop_ui import _on_qa_complete
