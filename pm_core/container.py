@@ -16,9 +16,10 @@ Container lifecycle:
   -> monitor via tmux pane capture (unchanged) -> cleanup: ``docker rm -f``
 
 Requirements:
-  - The configured base image must include tools needed by the session
-    (git, python, etc.).  The default ubuntu:22.04 may need ``apt-get
-    install git`` or use a custom image with tools pre-installed.
+  - The default pm-dev:latest image includes git, python3, pip, node/npm,
+    curl, jq, and build-essential.  It is auto-built from the bundled
+    Dockerfile on first use.  Users can swap in a custom image via
+    ``pm container set image <image>``.
   - Docker must be installed and the current user must have access.
 """
 
@@ -35,7 +36,7 @@ from pm_core.paths import configure_logger
 _log = configure_logger("pm.container")
 
 # Default settings
-DEFAULT_IMAGE = "ubuntu:22.04"
+DEFAULT_IMAGE = "pm-dev:latest"
 DEFAULT_MEMORY_LIMIT = "4g"
 DEFAULT_CPU_LIMIT = "2.0"
 CONTAINER_PREFIX = "pm-"
@@ -61,6 +62,48 @@ class ContainerConfig:
     cpu_limit: str = DEFAULT_CPU_LIMIT
     env: dict[str, str] = field(default_factory=dict)
     extra_mounts: list[str] = field(default_factory=list)
+
+
+def _get_dockerfile_path() -> Path:
+    """Return the path to the bundled Dockerfile."""
+    return Path(__file__).resolve().parent.parent / "Dockerfile"
+
+
+def build_image(tag: str = DEFAULT_IMAGE, quiet: bool = False) -> None:
+    """Build the pm developer base image from the bundled Dockerfile.
+
+    Args:
+        tag: Docker image tag (default: pm-dev:latest).
+        quiet: Suppress build output.
+    """
+    dockerfile = _get_dockerfile_path()
+    if not dockerfile.exists():
+        raise FileNotFoundError(f"Dockerfile not found: {dockerfile}")
+
+    cmd = ["docker", "build", "-t", tag, "-f", str(dockerfile), str(dockerfile.parent)]
+    _log.info("Building image %s from %s", tag, dockerfile)
+    result = subprocess.run(
+        cmd,
+        capture_output=quiet,
+        text=True,
+        timeout=600,
+    )
+    if result.returncode != 0:
+        msg = result.stderr if quiet else "see output above"
+        raise RuntimeError(f"Image build failed: {msg}")
+    _log.info("Built image %s", tag)
+
+
+def image_exists(tag: str = DEFAULT_IMAGE) -> bool:
+    """Check if a Docker image exists locally."""
+    try:
+        result = subprocess.run(
+            ["docker", "image", "inspect", tag],
+            capture_output=True, timeout=10,
+        )
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
 
 
 def _docker_available() -> bool:
@@ -170,6 +213,11 @@ def create_container(
         Container ID.
     """
     remove_container(name)
+
+    # Auto-build the pm-dev image if it's the default and not yet built
+    if config.image == DEFAULT_IMAGE and not image_exists(config.image):
+        _log.info("Default image %s not found — building automatically", config.image)
+        build_image(tag=config.image, quiet=True)
 
     cmd = [
         "run", "-d",
