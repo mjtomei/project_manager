@@ -28,6 +28,7 @@ import secrets
 import shlex
 import shutil
 import subprocess
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -92,6 +93,9 @@ def build_image(tag: str = DEFAULT_IMAGE, quiet: bool = False) -> None:
         msg = result.stderr if quiet else "see output above"
         raise RuntimeError(f"Image build failed: {msg}")
     _log.info("Built image %s", tag)
+
+
+_build_lock = threading.Lock()
 
 
 def image_exists(tag: str = DEFAULT_IMAGE) -> bool:
@@ -214,10 +218,13 @@ def create_container(
     """
     remove_container(name)
 
-    # Auto-build the pm-dev image if it's the default and not yet built
+    # Auto-build the pm-dev image if it's the default and not yet built.
+    # Use a lock so concurrent create_container calls don't all build at once.
     if config.image == DEFAULT_IMAGE and not image_exists(config.image):
-        _log.info("Default image %s not found — building automatically", config.image)
-        build_image(tag=config.image, quiet=True)
+        with _build_lock:
+            if not image_exists(config.image):
+                _log.info("Default image %s not found — building automatically", config.image)
+                build_image(tag=config.image, quiet=True)
 
     cmd = [
         "run", "-d",
