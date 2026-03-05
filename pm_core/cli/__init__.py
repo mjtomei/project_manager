@@ -12,6 +12,7 @@ Command groups are split into submodules:
 - cli.guide    — Guided workflow and notes
 - cli.meta     — Meta-development (working on pm itself)
 - cli.cluster  — Codebase analysis and clustering
+- cli.container — Container isolation management
 """
 
 from pathlib import Path
@@ -515,6 +516,12 @@ COMMANDS
   pm qa run <id> --pr <pr-id>    Run a QA instruction against a PR
   pm qa standalone <id>          Run a QA instruction against master
 
+  pm container status            Show container isolation settings
+  pm container enable            Enable container isolation for Claude sessions
+  pm container disable           Disable container isolation
+  pm container set <key> <val>   Configure container image, memory, cpu
+  pm container cleanup           Remove stale pm containers
+
   pm bench models               List models on local inference backend
   pm bench exercises            List available benchmark exercises
   pm bench run <model>          Run benchmark with tournament selection
@@ -570,7 +577,7 @@ def getting_started_cmd():
 # Import submodules to register their commands on ``cli``.
 # This must be at the bottom of the file, after ``cli`` is defined.
 # ---------------------------------------------------------------------------
-from pm_core.cli import pr, plan, session, tui, guide, meta, cluster, bench, watcher, qa  # noqa: E402, F401
+from pm_core.cli import pr, plan, session, tui, guide, meta, cluster, bench, watcher, qa, container  # noqa: E402, F401
 
 
 def main():

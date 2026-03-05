@@ -81,9 +81,9 @@ class TestLoadContainerConfig:
     @patch("pm_core.paths.get_global_setting_value")
     def test_loads_from_settings(self, mock_get):
         mock_get.side_effect = lambda name, default="": {
-            "qa-container-image": "custom:v2",
-            "qa-container-memory-limit": "16g",
-            "qa-container-cpu-limit": "8.0",
+            "container-image": "custom:v2",
+            "container-memory-limit": "16g",
+            "container-cpu-limit": "8.0",
         }.get(name, default)
 
         cfg = load_container_config()
@@ -105,7 +105,7 @@ class TestIsContainerModeEnabled:
     def test_enabled(self, mock_get):
         mock_get.return_value = True
         assert is_container_mode_enabled() is True
-        mock_get.assert_called_with("qa-container-enabled")
+        mock_get.assert_called_with("container-enabled")
 
     @patch("pm_core.paths.get_global_setting")
     def test_disabled(self, mock_get):

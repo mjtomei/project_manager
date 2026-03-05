@@ -80,18 +80,18 @@ def load_container_config() -> ContainerConfig:
     from pm_core.paths import get_global_setting_value
 
     return ContainerConfig(
-        image=get_global_setting_value("qa-container-image", DEFAULT_IMAGE),
+        image=get_global_setting_value("container-image", DEFAULT_IMAGE),
         memory_limit=get_global_setting_value(
-            "qa-container-memory-limit", DEFAULT_MEMORY_LIMIT),
+            "container-memory-limit", DEFAULT_MEMORY_LIMIT),
         cpu_limit=get_global_setting_value(
-            "qa-container-cpu-limit", DEFAULT_CPU_LIMIT),
+            "container-cpu-limit", DEFAULT_CPU_LIMIT),
     )
 
 
 def is_container_mode_enabled() -> bool:
     """Check if container isolation is enabled for Claude sessions."""
     from pm_core.paths import get_global_setting
-    return get_global_setting("qa-container-enabled")
+    return get_global_setting("container-enabled")
 
 
 def _run_docker(*args: str, check: bool = True,
