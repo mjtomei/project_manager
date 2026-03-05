@@ -3,7 +3,8 @@
 Wraps Claude CLI commands in Docker containers to provide isolation.
 Each containerised session gets:
   - The working directory bind-mounted as /workspace (read-write)
-  - Claude CLI config available inside the container
+  - The host's claude binary bind-mounted at /usr/local/bin/claude
+  - Claude config (~/.claude) mounted read-write for auth and session state
   - Configurable resource limits (memory, CPU)
 
 The user experience is transparent: tmux windows look the same, but the
@@ -13,11 +14,18 @@ claude process runs inside a resource-limited container via
 Container lifecycle:
   create (detached, sleeping) -> tmux window runs ``docker exec -it``
   -> monitor via tmux pane capture (unchanged) -> cleanup: ``docker rm -f``
+
+Requirements:
+  - The configured base image must include tools needed by the session
+    (git, python, etc.).  The default ubuntu:22.04 may need ``apt-get
+    install git`` or use a custom image with tools pre-installed.
+  - Docker must be installed and the current user must have access.
 """
 
 import os
 import secrets
 import shlex
+import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -96,6 +104,23 @@ def _run_docker(*args: str, check: bool = True,
 
 
 # ---------------------------------------------------------------------------
+# Claude binary resolution
+# ---------------------------------------------------------------------------
+
+def _resolve_claude_binary() -> Path | None:
+    """Find the real path to the claude CLI binary on the host.
+
+    Follows symlinks to get the actual binary (e.g.
+    ~/.local/bin/claude -> ~/.local/share/claude/versions/X.Y.Z).
+    Returns None if claude is not found.
+    """
+    which = shutil.which("claude")
+    if not which:
+        return None
+    return Path(which).resolve()
+
+
+# ---------------------------------------------------------------------------
 # Container naming
 # ---------------------------------------------------------------------------
 
@@ -121,10 +146,16 @@ def create_container(
     extra_ro_mounts: dict[Path, str] | None = None,
     extra_rw_mounts: dict[Path, str] | None = None,
 ) -> str:
-    """Create a detached container with the workdir mounted.
+    """Create a detached container with the workdir and claude mounted.
 
     The container runs ``sleep infinity`` and stays alive for
     ``docker exec -it`` from a tmux window.
+
+    Automatically:
+      - Bind-mounts the host's claude binary at /usr/local/bin/claude
+      - Mounts ~/.claude read-write (for auth and session state)
+      - Passes through Claude-related env vars
+      - Applies resource limits from config
 
     Args:
         name: Container name (must be unique).
@@ -147,32 +178,44 @@ def create_container(
         "-w", _CONTAINER_WORKDIR,
     ]
 
-    # Read-only mounts
+    # --- Claude binary ---
+    # Mount the resolved claude binary into the container so the
+    # ``claude`` command works inside.
+    claude_bin = _resolve_claude_binary()
+    if claude_bin and claude_bin.exists():
+        cmd.extend(["-v", f"{claude_bin}:/usr/local/bin/claude:ro"])
+        _log.info("Mounting claude binary: %s", claude_bin)
+    else:
+        _log.warning("Claude binary not found on host — "
+                     "container will need claude pre-installed in image")
+
+    # --- Claude config (~/.claude) ---
+    # Mounted read-write: Claude needs to write session state, history,
+    # file caches, etc.  Each container session gets its own session ID
+    # so concurrent writes don't conflict.
+    claude_config = Path.home() / ".claude"
+    if claude_config.is_dir():
+        cmd.extend(["-v", f"{claude_config}:/root/.claude"])
+
+    # --- Additional mounts ---
     if extra_ro_mounts:
         for host_path, container_path in extra_ro_mounts.items():
             cmd.extend(["-v", f"{host_path}:{container_path}:ro"])
 
-    # Read-write mounts
     if extra_rw_mounts:
         for host_path, container_path in extra_rw_mounts.items():
             cmd.extend(["-v", f"{host_path}:{container_path}"])
 
-    # Pass through Claude-related env vars
+    # --- Environment ---
     for env_var in _CLAUDE_ENV_VARS:
         val = os.environ.get(env_var)
         if val:
             cmd.extend(["-e", f"{env_var}={val}"])
 
-    # Custom env vars from config
     for k, v in config.env.items():
         cmd.extend(["-e", f"{k}={v}"])
 
-    # Mount Claude config dir if it exists
-    claude_config = Path.home() / ".claude"
-    if claude_config.is_dir():
-        cmd.extend(["-v", f"{claude_config}:/root/.claude:ro"])
-
-    # Extra mounts from config
+    # Extra mounts from config (user-specified, e.g. data dirs)
     for mount in config.extra_mounts:
         cmd.extend(["-v", mount])
 

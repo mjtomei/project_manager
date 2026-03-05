@@ -20,6 +20,7 @@ from pm_core.container import (
     wrap_claude_cmd,
     _docker_available,
     _make_container_name,
+    _resolve_claude_binary,
     DEFAULT_IMAGE,
     DEFAULT_MEMORY_LIMIT,
     DEFAULT_CPU_LIMIT,
@@ -201,9 +202,11 @@ class TestCreateContainer:
         assert "ANTHROPIC_API_KEY=sk-test" in args_str
         assert "CUSTOM_VAR=custom_val" in args_str
 
+    @patch("pm_core.container._resolve_claude_binary", return_value=None)
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_docker")
-    def test_mounts_claude_config(self, mock_docker, mock_rm):
+    def test_mounts_claude_config_rw(self, mock_docker, mock_rm, mock_bin):
+        """~/.claude is mounted read-write so Claude can write session state."""
         mock_docker.return_value = MagicMock(stdout="id\n")
         config = ContainerConfig()
 
@@ -212,7 +215,57 @@ class TestCreateContainer:
             create_container(name="test", config=config, workdir=Path("/w"))
 
         args_str = " ".join(mock_docker.call_args[0])
-        assert "/home/user/.claude:/root/.claude:ro" in args_str
+        assert "/home/user/.claude:/root/.claude" in args_str
+        # Should NOT be read-only
+        assert "/home/user/.claude:/root/.claude:ro" not in args_str
+
+    @patch("pm_core.container._resolve_claude_binary")
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_docker")
+    def test_mounts_claude_binary(self, mock_docker, mock_rm, mock_resolve):
+        """Host claude binary is bind-mounted at /usr/local/bin/claude."""
+        mock_docker.return_value = MagicMock(stdout="id\n")
+        # Simulate a resolved binary that exists
+        fake_bin = Path("/home/user/.local/share/claude/versions/1.0.0")
+        mock_resolve.return_value = fake_bin
+
+        config = ContainerConfig()
+        with patch.object(Path, "exists", return_value=True), \
+             patch.object(Path, "is_dir", return_value=False):
+            create_container(name="test", config=config, workdir=Path("/w"))
+
+        args_str = " ".join(mock_docker.call_args[0])
+        assert f"{fake_bin}:/usr/local/bin/claude:ro" in args_str
+
+    @patch("pm_core.container._resolve_claude_binary", return_value=None)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_docker")
+    def test_no_binary_still_creates_container(self, mock_docker, mock_rm, mock_resolve):
+        """Container creation succeeds even if claude binary is not found."""
+        mock_docker.return_value = MagicMock(stdout="id\n")
+        config = ContainerConfig()
+
+        with patch.object(Path, "is_dir", return_value=False):
+            cid = create_container(name="test", config=config, workdir=Path("/w"))
+
+        assert cid == "id"
+        # Should not contain /usr/local/bin/claude mount
+        args_str = " ".join(mock_docker.call_args[0])
+        assert "/usr/local/bin/claude" not in args_str
+
+
+class TestResolveClaudeBinary:
+    @patch("shutil.which", return_value="/usr/local/bin/claude")
+    def test_resolves_symlink(self, mock_which):
+        result = _resolve_claude_binary()
+        assert result is not None
+        # Path.resolve() is called on the result
+        mock_which.assert_called_once_with("claude")
+
+    @patch("shutil.which", return_value=None)
+    def test_returns_none_when_not_found(self, mock_which):
+        result = _resolve_claude_binary()
+        assert result is None
 
 
 class TestCreateQAContainer:
