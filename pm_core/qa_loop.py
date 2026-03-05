@@ -832,10 +832,15 @@ def run_qa_sync(
             pass
 
     # Determine execution mode (container vs tmux)
-    from pm_core.container import is_container_mode_enabled
+    from pm_core.container import is_container_mode_enabled, _docker_available
     use_containers = is_container_mode_enabled()
     if use_containers:
-        _log.info("Container mode enabled for QA execution")
+        if _docker_available():
+            _log.info("Container mode enabled for QA execution")
+        else:
+            _log.warning("Container mode enabled but Docker unavailable "
+                         "— falling back to host execution")
+            use_containers = False
 
     # Ensure the main QA window exists (has the planner pane)
     win = tmux_mod.find_window_by_name(session, window_name)
