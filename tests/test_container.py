@@ -1,4 +1,4 @@
-"""Tests for container isolation of QA scenario workers."""
+"""Tests for container isolation of Claude sessions."""
 
 import shlex
 from pathlib import Path
@@ -8,14 +8,18 @@ import pytest
 
 from pm_core.container import (
     ContainerConfig,
-    container_name,
+    qa_container_name,
     load_container_config,
     is_container_mode_enabled,
-    create_scenario_container,
+    create_container,
+    create_qa_container,
     build_exec_cmd,
     remove_container,
-    cleanup_containers,
+    cleanup_qa_containers,
+    cleanup_all_containers,
+    wrap_claude_cmd,
     _docker_available,
+    _make_container_name,
     DEFAULT_IMAGE,
     DEFAULT_MEMORY_LIMIT,
     DEFAULT_CPU_LIMIT,
@@ -48,16 +52,26 @@ class TestContainerConfig:
 
 
 class TestContainerName:
-    def test_format(self):
-        name = container_name("pr-abc123", "loop456", 3)
-        assert name == f"{CONTAINER_PREFIX}pr-abc123-loop456-s3"
+    def test_qa_format(self):
+        name = qa_container_name("pr-abc123", "loop456", 3)
+        assert name == f"{CONTAINER_PREFIX}qa-pr-abc123-loop456-s3"
 
-    def test_different_indices(self):
-        n1 = container_name("pr-x", "loop", 1)
-        n2 = container_name("pr-x", "loop", 2)
+    def test_qa_different_indices(self):
+        n1 = qa_container_name("pr-x", "loop", 1)
+        n2 = qa_container_name("pr-x", "loop", 2)
         assert n1 != n2
         assert n1.endswith("-s1")
         assert n2.endswith("-s2")
+
+    def test_make_container_name_has_prefix(self):
+        name = _make_container_name("impl")
+        assert name.startswith(f"{CONTAINER_PREFIX}impl-")
+        assert len(name) > len(f"{CONTAINER_PREFIX}impl-")
+
+    def test_make_container_name_unique(self):
+        n1 = _make_container_name("test")
+        n2 = _make_container_name("test")
+        assert n1 != n2
 
 
 class TestLoadContainerConfig:
@@ -113,43 +127,62 @@ class TestDockerAvailable:
         assert _docker_available() is False
 
 
-class TestCreateScenarioContainer:
+class TestCreateContainer:
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_docker")
-    def test_creates_container_with_correct_args(self, mock_docker, mock_rm):
-        mock_docker.return_value = MagicMock(stdout="abc123container\n")
+    def test_creates_with_workdir(self, mock_docker, mock_rm):
+        mock_docker.return_value = MagicMock(stdout="abc123\n")
 
-        config = ContainerConfig(image="test-image:v1", memory_limit="2g",
-                                 cpu_limit="1.0")
-        cid = create_scenario_container(
-            name="pm-qa-test-s1",
+        config = ContainerConfig(image="test:v1", memory_limit="2g", cpu_limit="1.0")
+        cid = create_container(
+            name="pm-test",
             config=config,
-            repo_root=Path("/repo"),
-            worktree_path=Path("/worktrees/w1"),
-            scratch_path=Path("/scratch/s1"),
+            workdir=Path("/my/workdir"),
         )
 
-        assert cid == "abc123container"
-        mock_rm.assert_called_once_with("pm-qa-test-s1")
+        assert cid == "abc123"
+        mock_rm.assert_called_once_with("pm-test")
 
-        # Check docker run args
         args = mock_docker.call_args[0]
         assert args[0] == "run"
         assert "-d" in args
-        assert "--name" in args
-        idx = list(args).index("--name")
-        assert args[idx + 1] == "pm-qa-test-s1"
-        assert "--memory" in args
-        assert "2g" in args
-        assert "--cpus" in args
-        assert "1.0" in args
-        # Check mounts
-        assert f"/worktrees/w1:{_CONTAINER_WORKDIR}" in " ".join(args)
-        assert f"/scratch/s1:{_CONTAINER_SCRATCH}" in " ".join(args)
-        assert "/repo:/repo:ro" in " ".join(args)
-        # Should end with sleep infinity
+        assert f"/my/workdir:{_CONTAINER_WORKDIR}" in " ".join(args)
         assert args[-2] == "sleep"
         assert args[-1] == "infinity"
+
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_docker")
+    def test_extra_ro_mounts(self, mock_docker, mock_rm):
+        mock_docker.return_value = MagicMock(stdout="id\n")
+        config = ContainerConfig()
+
+        create_container(
+            name="test",
+            config=config,
+            workdir=Path("/w"),
+            extra_ro_mounts={Path("/repo"): "/repo"},
+        )
+
+        args_str = " ".join(mock_docker.call_args[0])
+        assert "/repo:/repo:ro" in args_str
+
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_docker")
+    def test_extra_rw_mounts(self, mock_docker, mock_rm):
+        mock_docker.return_value = MagicMock(stdout="id\n")
+        config = ContainerConfig()
+
+        create_container(
+            name="test",
+            config=config,
+            workdir=Path("/w"),
+            extra_rw_mounts={Path("/scratch"): "/scratch"},
+        )
+
+        args_str = " ".join(mock_docker.call_args[0])
+        assert "/scratch:/scratch" in args_str
+        # Should NOT have :ro suffix
+        assert "/scratch:/scratch:ro" not in args_str
 
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_docker")
@@ -158,16 +191,13 @@ class TestCreateScenarioContainer:
 
         config = ContainerConfig(env={"CUSTOM_VAR": "custom_val"})
         with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test"}):
-            create_scenario_container(
+            create_container(
                 name="test",
                 config=config,
-                repo_root=Path("/r"),
-                worktree_path=Path("/w"),
-                scratch_path=Path("/s"),
+                workdir=Path("/w"),
             )
 
-        args = mock_docker.call_args[0]
-        args_str = " ".join(args)
+        args_str = " ".join(mock_docker.call_args[0])
         assert "ANTHROPIC_API_KEY=sk-test" in args_str
         assert "CUSTOM_VAR=custom_val" in args_str
 
@@ -179,33 +209,34 @@ class TestCreateScenarioContainer:
 
         with patch("pm_core.container.Path.home", return_value=Path("/home/user")), \
              patch.object(Path, "is_dir", return_value=True):
-            create_scenario_container(
-                name="test",
-                config=config,
-                repo_root=Path("/r"),
-                worktree_path=Path("/w"),
-                scratch_path=Path("/s"),
-            )
+            create_container(name="test", config=config, workdir=Path("/w"))
 
         args_str = " ".join(mock_docker.call_args[0])
         assert "/home/user/.claude:/root/.claude:ro" in args_str
 
-    @patch("pm_core.container.remove_container")
-    @patch("pm_core.container._run_docker")
-    def test_extra_mounts(self, mock_docker, mock_rm):
-        mock_docker.return_value = MagicMock(stdout="id\n")
-        config = ContainerConfig(extra_mounts=["/data:/data:ro"])
 
-        create_scenario_container(
-            name="test",
+class TestCreateQAContainer:
+    @patch("pm_core.container.create_container")
+    def test_delegates_with_qa_mounts(self, mock_create):
+        mock_create.return_value = "qa-id"
+
+        config = ContainerConfig()
+        cid = create_qa_container(
+            name="pm-qa-test-s1",
             config=config,
-            repo_root=Path("/r"),
-            worktree_path=Path("/w"),
-            scratch_path=Path("/s"),
+            repo_root=Path("/repo"),
+            worktree_path=Path("/worktrees/w1"),
+            scratch_path=Path("/scratch/s1"),
         )
 
-        args_str = " ".join(mock_docker.call_args[0])
-        assert "/data:/data:ro" in args_str
+        assert cid == "qa-id"
+        mock_create.assert_called_once_with(
+            name="pm-qa-test-s1",
+            config=config,
+            workdir=Path("/worktrees/w1"),
+            extra_ro_mounts={Path("/repo"): "/repo"},
+            extra_rw_mounts={Path("/scratch/s1"): _CONTAINER_SCRATCH},
+        )
 
 
 class TestBuildExecCmd:
@@ -213,18 +244,51 @@ class TestBuildExecCmd:
         cmd = build_exec_cmd("my-container", "claude 'hello world'")
         assert "docker exec -it" in cmd
         assert "my-container" in cmd
-        # The claude command should be properly quoted
         assert "claude" in cmd
         assert "hello world" in cmd
 
     def test_shell_safety(self):
-        # Ensure shell metacharacters in container name are quoted
         cmd = build_exec_cmd("name-with-special", "claude 'prompt with $vars'")
-        # Should be parseable as a shell command
         parts = shlex.split(cmd)
         assert parts[0] == "docker"
         assert parts[1] == "exec"
         assert parts[2] == "-it"
+
+
+class TestWrapClaudeCmd:
+    @patch("pm_core.container.is_container_mode_enabled", return_value=False)
+    def test_passthrough_when_disabled(self, mock_enabled):
+        cmd, cname = wrap_claude_cmd("claude 'hello'", "/workdir")
+        assert cmd == "claude 'hello'"
+        assert cname == ""
+
+    @patch("pm_core.container.build_exec_cmd", return_value="docker exec ...")
+    @patch("pm_core.container.create_container", return_value="cid123")
+    @patch("pm_core.container.load_container_config",
+           return_value=ContainerConfig())
+    @patch("pm_core.container.is_container_mode_enabled", return_value=True)
+    def test_wraps_when_enabled(self, mock_enabled, mock_config,
+                                 mock_create, mock_exec):
+        cmd, cname = wrap_claude_cmd("claude 'hi'", "/workdir", label="impl")
+        assert cmd == "docker exec ..."
+        assert cname.startswith(f"{CONTAINER_PREFIX}impl-")
+        mock_create.assert_called_once()
+        mock_exec.assert_called_once()
+
+    @patch("pm_core.container.build_exec_cmd", return_value="docker exec ...")
+    @patch("pm_core.container.create_container", return_value="cid")
+    @patch("pm_core.container.load_container_config",
+           return_value=ContainerConfig())
+    @patch("pm_core.container.is_container_mode_enabled", return_value=True)
+    def test_passes_extra_mounts(self, mock_enabled, mock_config,
+                                  mock_create, mock_exec):
+        ro = {Path("/repo"): "/repo"}
+        rw = {Path("/scratch"): "/scratch"}
+        wrap_claude_cmd("claude", "/w", extra_ro_mounts=ro, extra_rw_mounts=rw)
+
+        call_kwargs = mock_create.call_args[1]
+        assert call_kwargs["extra_ro_mounts"] == ro
+        assert call_kwargs["extra_rw_mounts"] == rw
 
 
 class TestRemoveContainer:
@@ -238,13 +302,13 @@ class TestRemoveContainer:
 class TestCleanupContainers:
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_docker")
-    def test_cleans_up_matching_containers(self, mock_docker, mock_rm):
+    def test_cleans_up_qa_containers(self, mock_docker, mock_rm):
         mock_docker.return_value = MagicMock(
             returncode=0,
             stdout="pm-qa-pr1-loop1-s1\npm-qa-pr1-loop1-s2\n",
         )
 
-        count = cleanup_containers("pr1", "loop1")
+        count = cleanup_qa_containers("pr1", "loop1")
         assert count == 2
         assert mock_rm.call_count == 2
         mock_rm.assert_any_call("pm-qa-pr1-loop1-s1")
@@ -253,18 +317,30 @@ class TestCleanupContainers:
     @patch("pm_core.container._run_docker")
     def test_no_containers(self, mock_docker):
         mock_docker.return_value = MagicMock(returncode=0, stdout="")
-        count = cleanup_containers("pr1", "loop1")
+        count = cleanup_qa_containers("pr1", "loop1")
         assert count == 0
 
     @patch("pm_core.container._run_docker")
     def test_docker_failure(self, mock_docker):
         mock_docker.return_value = MagicMock(returncode=1, stdout="")
-        count = cleanup_containers("pr1", "loop1")
+        count = cleanup_qa_containers("pr1", "loop1")
         assert count == 0
 
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_docker")
+    def test_cleanup_all(self, mock_docker, mock_rm):
+        mock_docker.return_value = MagicMock(
+            returncode=0,
+            stdout="pm-impl-abc\npm-review-def\npm-qa-pr1-x-s1\n",
+        )
 
-class TestQALoopContainerIntegration:
-    """Test that QA loop correctly integrates with container mode."""
+        count = cleanup_all_containers()
+        assert count == 3
+        assert mock_rm.call_count == 3
+
+
+class TestIntegration:
+    """Test that session launchers integrate with container wrapping."""
 
     def test_container_mode_branches_exist(self):
         """Verify that the container launcher function is importable."""
@@ -275,6 +351,10 @@ class TestQALoopContainerIntegration:
 
     @patch("pm_core.container.is_container_mode_enabled", return_value=False)
     def test_disabled_by_default(self, mock_enabled):
-        """Container mode is off by default."""
         from pm_core.container import is_container_mode_enabled
         assert is_container_mode_enabled() is False
+
+    def test_wrap_claude_cmd_importable_from_expected_sites(self):
+        """Verify wrap_claude_cmd is accessible where it's used."""
+        from pm_core.container import wrap_claude_cmd
+        assert callable(wrap_claude_cmd)

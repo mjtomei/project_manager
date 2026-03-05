@@ -539,11 +539,11 @@ def _launch_scenarios_in_containers(
         claude_cmd = build_claude_shell_cmd(prompt=child_prompt)
 
         # Create and start the detached container
-        cname = container_mod.container_name(
+        cname = container_mod.qa_container_name(
             state.pr_id, state.loop_id, scenario.index,
         )
         try:
-            container_mod.create_scenario_container(
+            container_mod.create_qa_container(
                 name=cname,
                 config=config,
                 repo_root=repo_root or Path(workdir_path),
@@ -905,7 +905,7 @@ def run_qa_sync(
     # --- Cleanup ---
     if use_containers:
         from pm_core import container as container_mod
-        container_mod.cleanup_containers(state.pr_id, state.loop_id)
+        container_mod.cleanup_qa_containers(state.pr_id, state.loop_id)
     else:
         # Kill ALL windows matching the qa-{display_id}-s* pattern (not just
         # known scenarios) to catch stale duplicates from previous runs.

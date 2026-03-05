@@ -204,7 +204,13 @@ def qa_run(instruction_id: str, pr_id: str | None):
 
 @qa.group("container")
 def qa_container():
-    """Manage container isolation for QA scenario workers."""
+    """Manage container isolation for Claude sessions.
+
+    When enabled, all Claude sessions (implementation, review, QA, watcher)
+    run inside Docker containers for isolation.  Only the Claude process
+    itself runs in the container — companion panes and status panes remain
+    on the host.
+    """
 
 
 @qa_container.command("status")
@@ -233,7 +239,7 @@ def qa_container_status():
 
 @qa_container.command("enable")
 def qa_container_enable():
-    """Enable container isolation for QA scenario workers."""
+    """Enable container isolation for Claude sessions."""
     from pm_core.paths import set_global_setting
     from pm_core.container import _docker_available
 
@@ -243,12 +249,12 @@ def qa_container_enable():
         raise SystemExit(1)
 
     set_global_setting("qa-container-enabled", True)
-    click.echo("Container isolation enabled for QA scenarios.")
+    click.echo("Container isolation enabled.")
 
 
 @qa_container.command("disable")
 def qa_container_disable():
-    """Disable container isolation (run QA in tmux windows on the host)."""
+    """Disable container isolation (run Claude directly on the host)."""
     from pm_core.paths import set_global_setting
 
     set_global_setting("qa-container-enabled", False)
@@ -271,9 +277,9 @@ def qa_container_set(key: str, value: str):
 
 
 @qa_container.command("cleanup")
-@click.option("--pr", "pr_id", default=None, help="PR ID to clean up containers for")
+@click.option("--pr", "pr_id", default=None, help="Filter by PR ID")
 def qa_container_cleanup(pr_id: str | None):
-    """Remove stale QA containers."""
+    """Remove stale pm containers."""
     from pm_core.container import _run_docker, remove_container, CONTAINER_PREFIX
 
     result = _run_docker(
@@ -287,7 +293,7 @@ def qa_container_cleanup(pr_id: str | None):
 
     lines = result.stdout.strip().splitlines()
     if not lines or not lines[0]:
-        click.echo("No QA containers found.")
+        click.echo("No pm containers found.")
         return
 
     removed = 0
