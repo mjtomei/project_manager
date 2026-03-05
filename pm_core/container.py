@@ -293,13 +293,18 @@ def wrap_claude_cmd(
     config = load_container_config()
     cname = _make_container_name(label)
 
-    create_container(
-        name=cname,
-        config=config,
-        workdir=Path(workdir),
-        extra_ro_mounts=extra_ro_mounts,
-        extra_rw_mounts=extra_rw_mounts,
-    )
+    try:
+        create_container(
+            name=cname,
+            config=config,
+            workdir=Path(workdir),
+            extra_ro_mounts=extra_ro_mounts,
+            extra_rw_mounts=extra_rw_mounts,
+        )
+    except Exception:
+        _log.warning("Failed to create container %s — falling back to host",
+                     cname, exc_info=True)
+        return claude_cmd, ""
 
     exec_cmd = build_exec_cmd(cname, claude_cmd)
     _log.info("Wrapped claude command in container %s", cname)

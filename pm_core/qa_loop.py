@@ -904,15 +904,14 @@ def run_qa_sync(
     _poll_tmux_verdicts(state, session, status_path, _notify)
 
     # --- Cleanup ---
+    # Kill ALL windows matching the qa-{display_id}-s* pattern (not just
+    # known scenarios) to catch stale duplicates from previous runs.
+    # Keep the main QA window alive so its status pane can display the
+    # aggregated verdict and the user can focus it with 't'.
+    _cleanup_stale_scenario_windows(session, pr_data, include_main=False)
     if use_containers:
         from pm_core import container as container_mod
         container_mod.cleanup_qa_containers(state.pr_id, state.loop_id)
-    else:
-        # Kill ALL windows matching the qa-{display_id}-s* pattern (not just
-        # known scenarios) to catch stale duplicates from previous runs.
-        # Keep the main QA window alive so its status pane can display the
-        # aggregated verdict and the user can focus it with 't'.
-        _cleanup_stale_scenario_windows(session, pr_data, include_main=False)
 
     # --- Merge back scenario worktree commits ---
     _merge_scenario_commits(state, repo_root, pr_data)
