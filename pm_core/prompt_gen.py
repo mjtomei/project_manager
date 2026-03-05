@@ -205,7 +205,7 @@ Review the code changes in this PR for quality, correctness, and architectural f
    - **PASS** — No changes needed. The code is ready to merge as-is.
    - **PASS_WITH_SUGGESTIONS** — Only non-blocking suggestions remain (style nits, minor refactors, optional improvements). The PR could merge now, but would benefit from small tweaks. List suggestions clearly.
    - **NEEDS_WORK** — Blocking issues found (bugs, missing error handling, architectural problems, test gaps). Separate code-quality fixes from architectural concerns.
-   - **INPUT_REQUIRED** — The code looks correct but you cannot fully verify it without human-guided testing. Use this when the PR involves UI interactions, hardware-dependent behavior, environment-specific setup, or anything that requires a human to manually verify. Include specific, numbered test steps the user should perform. The user will interact with you directly in this pane to report test results, and then you should provide a final verdict."""
+   - **INPUT_REQUIRED** — Reserved for genuine ambiguities in the PR spec or architectural decisions that need human judgment. Do NOT use this for manual testing — QA handles testing separately. Include specific questions that need the user's decision."""
 
     base = prompt.strip()
     base += review_specific_block
@@ -245,11 +245,11 @@ This review is running in an automated loop.  After completing your review:
 3. If the code is ready to merge as-is (**PASS**):
    - Output: **PASS**
 
-4. If you need the user to manually test something (**INPUT_REQUIRED**):
-   - The code looks correct but requires human verification (e.g. UI behavior, environment-specific setup, hardware interaction, TUI keybindings)
-   - List specific, numbered test steps the user should perform
-   - Output: **INPUT_REQUIRED** — the user will respond directly in this pane with their test results
-   - After receiving their feedback, provide a final verdict (PASS, PASS_WITH_SUGGESTIONS, or NEEDS_WORK)
+4. If you have a genuine question requiring human judgment (**INPUT_REQUIRED**):
+   - Reserved for genuine ambiguities in the PR spec or architectural decisions that need human judgment
+   - Do NOT use this for manual testing — QA handles testing separately
+   - Include specific questions that need the user's decision
+   - Output: **INPUT_REQUIRED** — the user will respond directly in this pane
 
 IMPORTANT: Always end your response with the verdict keyword on its own line — one of **PASS**, **PASS_WITH_SUGGESTIONS**, **NEEDS_WORK**, or **INPUT_REQUIRED**."""
 
@@ -555,6 +555,8 @@ mechanics will help you distinguish normal operation from genuine problems.
   PRs whose dependencies are all `merged` and runs `pm pr start`.
 - `in_progress` -- A Claude implementation session is running in a tmux window.
 - `in_review` -- A review loop is running (iterates until PASS/PASS_WITH_SUGGESTIONS).
+- `qa` -- QA testing is running. QA scenarios execute in parallel; if they find
+  issues and commit fixes, the PR returns to `in_review` for another review cycle.
 - `merged` -- PR merged to `{base_branch}`. Auto-start then checks for newly-unblocked dependents.
 
 **How transitions work:**
@@ -566,10 +568,13 @@ mechanics will help you distinguish normal operation from genuine problems.
   launching a review loop. **This means there is a normal ~30 second delay between Claude
   finishing its work and the review starting.** During this window, the pane will appear
   idle but the transition has not happened yet -- this is expected, not a problem.
-- **in_review -> merged**: When the review loop reaches a PASS or PASS_WITH_SUGGESTIONS
-  verdict, auto-start runs `pm pr merge`. If the merge has conflicts, a merge-resolution
-  Claude window opens; once that finishes (also detected via idle polling), the merge is
-  re-attempted.
+- **in_review -> qa**: When the review loop reaches a PASS or PASS_WITH_SUGGESTIONS
+  verdict, auto-start transitions the PR to `qa` and launches QA scenarios.
+- **qa -> merged**: When QA passes with no changes, auto-start runs `pm pr merge`.
+  If QA finds issues or commits fixes, the PR returns to `in_review` for re-review.
+- **in_review/qa -> merged (merge conflicts)**: If the merge has conflicts, a
+  merge-resolution Claude window opens; once that finishes (also detected via idle
+  polling), the merge is re-attempted.
 
 Note: `d` in the TUI starts a single one-shot review. To start a review **loop** (which
 auto-start uses), the TUI chord is `zzz d`. If you need to manually kick off a review
@@ -685,3 +690,251 @@ def generate_review_loop_prompt(data: dict, pr_id: str) -> str:
     review loop (``zz d`` / ``zzz d``) where Claude iterates until PASS.
     """
     return generate_review_prompt(data, pr_id, review_loop=True)
+
+
+# ---------------------------------------------------------------------------
+# QA prompts
+# ---------------------------------------------------------------------------
+
+def generate_qa_planner_prompt(data: dict, pr_id: str,
+                               session_name: str | None = None) -> str:
+    """Generate a prompt for the QA planning session.
+
+    The planner analyzes the PR and the instruction library to generate
+    a structured QA plan with test scenarios.
+    """
+    from pm_core import qa_instructions
+
+    pr = store.get_pr(data, pr_id)
+    if not pr:
+        raise ValueError(f"PR {pr_id} not found")
+
+    title = pr.get("title", "")
+    description = pr.get("description", "").strip()
+    branch = pr.get("branch", f"pm/{pr_id}")
+    workdir = pr.get("workdir", "")
+    base_branch = data.get("project", {}).get("base_branch", "master")
+
+    # Get instruction library summary and notes
+    library_summary = "No instruction library found."
+    general_notes_block = ""
+    qa_specific_block = ""
+    try:
+        root = store.find_project_root()
+        library_summary = qa_instructions.instruction_summary_for_prompt(root)
+        general_notes_block, qa_specific_block = notes.notes_for_prompt(root, "qa")
+    except FileNotFoundError:
+        pass
+
+    # Include PR notes (prior QA results, addendums)
+    pr_notes_block = _format_pr_notes(pr)
+
+    prompt = f"""You are a QA planner analyzing PR {pr_id}: "{title}"
+
+## Task
+
+Analyze this PR's changes and the available QA instruction library to generate
+a structured test plan.  Your goal is to identify the most important scenarios
+to verify this PR works correctly.
+
+## PR Context
+
+- **Title**: {title}
+- **Description**: {description}
+- **Branch**: {branch}
+- **Base branch**: {base_branch}
+- **Workdir**: {workdir}
+
+Inspect the diff yourself — run `git diff {base_branch}...HEAD` in the workdir
+to see what changed.  Read source files as needed to understand the context.
+{pr_notes_block}
+## QA Instruction Library
+
+These are available QA instructions and regression tests.  Reference any that
+are relevant to this PR's changes.  You can read the full content of any
+instruction file at the paths shown below.
+
+{library_summary}
+
+## Output Format
+
+Your output is machine-parsed.  Use ALL CAPS markers exactly as shown.
+Do NOT use markdown headings or code fences — output the plain-text markers
+directly at the start of a line.
+
+QA_PLAN_START
+
+SCENARIO 1: <descriptive title for this scenario>
+FOCUS: <what area or behavior to test>
+INSTRUCTION: <path/to/instruction.md or "none" if no existing instruction applies>
+STEPS: <concrete test steps to perform>
+
+SCENARIO 2: <descriptive title for next scenario>
+FOCUS: <what area or behavior to test>
+INSTRUCTION: <path or "none">
+STEPS: <concrete test steps>
+
+QA_PLAN_END
+
+IMPORTANT: Replace ALL angle-bracket placeholders above with real content.
+Do NOT copy the example format verbatim — fill in actual scenario titles,
+focus areas, and detailed test steps specific to THIS PR.
+
+Include as many scenarios as required to fully exercise the functionality
+of the PR.  Exercise the core functionality as well as any edge cases
+that may expose bugs.
+{general_notes_block}{qa_specific_block}"""
+    return prompt.strip()
+
+
+def generate_qa_child_prompt(data: dict, pr_id: str,
+                             scenario, workdir: str,
+                             session_name: str | None = None,
+                             worktree_mode: bool = False,
+                             scratch_dir: str | None = None) -> str:
+    """Generate a prompt for a QA child session executing one scenario.
+
+    Args:
+        data: Project data dict.
+        pr_id: PR identifier.
+        scenario: QAScenario dataclass instance.
+        workdir: Child scenario's own workdir (worktree in worktree_mode,
+            or a plain directory otherwise).
+        session_name: tmux session name.
+        worktree_mode: When True, the child runs in a git worktree; commits
+            are cherry-picked back by the orchestrator.
+        scratch_dir: Path to a scratch directory for throwaway test projects.
+    """
+    pr = store.get_pr(data, pr_id)
+    if not pr:
+        raise ValueError(f"PR {pr_id} not found")
+
+    title = pr.get("title", "")
+    branch = pr.get("branch", f"pm/{pr_id}")
+    pr_workdir = pr.get("workdir", "")
+    base_branch = data.get("project", {}).get("base_branch", "master")
+
+    instruction_block = ""
+    if scenario.instruction_path:
+        instruction_block = f"""
+## Instruction Reference
+
+Read the full instruction at: `{scenario.instruction_path}`
+Follow its procedures as applicable to this scenario.
+"""
+
+    # Include PR notes (prior QA results, addendums)
+    pr_notes_block = _format_pr_notes(pr)
+
+    # Workdir description and execution instructions differ by mode
+    scratch_line = f"\n- **Scratch dir** (throwaway test projects): {scratch_dir}" if scratch_dir else ""
+    if worktree_mode:
+        workdir_block = f"""\
+- **Your workdir** (isolated worktree): {workdir}{scratch_line}
+- **PR workdir** (canonical source): {pr_workdir}"""
+        execution_block = f"""\
+1. Inspect and test the code in your workdir (an isolated worktree of the PR branch)
+2. Execute the test steps described above
+3. If you find issues and can fix them:
+   - Implement the fix in your workdir (your current directory)
+   - Commit with message prefix `qa: `
+   - Do NOT push — commits are cherry-picked back automatically
+4. End with a verdict on its own line — one of:
+   - **PASS** — Scenario passed, no issues found
+   - **NEEDS_WORK** — Issues found (explain what and whether you fixed them)
+   - **INPUT_REQUIRED** — Genuine ambiguity requiring human judgment"""
+    else:
+        workdir_block = f"""\
+- **PR workdir** (source code): {pr_workdir}
+- **Your workdir** (throwaway test projects): {workdir}"""
+        execution_block = f"""\
+1. Inspect the PR's code in the PR workdir
+2. Execute the test steps described above
+3. If you find issues and can fix them:
+   - Implement the fix in the PR workdir
+   - Commit with message prefix `qa: `
+   - Push: `git push origin {branch}`
+4. End with a verdict on its own line — one of:
+   - **PASS** — Scenario passed, no issues found
+   - **NEEDS_WORK** — Issues found (explain what and whether you fixed them)
+   - **INPUT_REQUIRED** — Genuine ambiguity requiring human judgment"""
+
+    prompt = f"""You are running QA scenario {scenario.index}: "{scenario.title}"
+
+## Context
+
+- **PR**: {pr_id} — "{title}"
+- **Branch**: {branch}
+- **Base branch**: {base_branch}
+{workdir_block}
+{pr_notes_block}
+## Scenario
+
+**Focus**: {scenario.focus}
+
+**Steps**:
+{scenario.steps}
+{instruction_block}
+## Execution
+
+{execution_block}
+
+IMPORTANT: Always end your response with the verdict keyword on its own line."""
+    return prompt.strip()
+
+
+def generate_standalone_qa_prompt(data: dict, instruction_id: str,
+                                  session_name: str | None = None) -> str:
+    """Generate a prompt for running QA against master without a PR.
+
+    Args:
+        data: Project data dict.
+        instruction_id: ID of the instruction to run.
+        session_name: tmux session name.
+    """
+    from pm_core import qa_instructions
+
+    base_branch = data.get("project", {}).get("base_branch", "master")
+
+    try:
+        root = store.find_project_root()
+        item = qa_instructions.get_instruction(root, instruction_id, "instructions")
+        if item is None:
+            item = qa_instructions.get_instruction(root, instruction_id, "regression")
+    except FileNotFoundError:
+        item = None
+
+    instruction_block = ""
+    if item:
+        instruction_block = f"""
+## Instruction
+
+Read the full instruction at: `{item['path']}`
+Follow its procedures.
+"""
+
+    repo_url = data.get("project", {}).get("repo", "")
+
+    tui_block = tui_section(session_name) if session_name else ""
+
+    prompt = f"""You are running a standalone QA session against the {base_branch} branch.
+
+## Context
+
+- **Repo**: {repo_url}
+- **Branch**: {base_branch}
+- **Instruction**: {instruction_id}
+
+This is not a PR review — you are testing the current state of the codebase.
+{instruction_block}{tui_block}
+## Execution
+
+1. Follow the instruction steps
+2. Report your findings
+3. End with a verdict on its own line — one of:
+   - **PASS** — All checks passed
+   - **NEEDS_WORK** — Issues found (describe them)
+   - **INPUT_REQUIRED** — Need human input
+
+IMPORTANT: Always end your response with the verdict keyword on its own line."""
+    return prompt.strip()

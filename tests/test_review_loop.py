@@ -776,12 +776,12 @@ class TestGenerateReviewPromptInputRequired:
         data = self._make_data()
         prompt = generate_review_prompt(data, "pr-001")
         assert "INPUT_REQUIRED" in prompt
-        assert "human-guided testing" in prompt
+        assert "human judgment" in prompt
 
     def test_review_loop_prompt_includes_input_required(self):
         from pm_core.prompt_gen import generate_review_prompt
         data = self._make_data()
         prompt = generate_review_prompt(data, "pr-001", review_loop=True)
         assert "INPUT_REQUIRED" in prompt
-        # Should explain that user responds directly and Claude gives final verdict
-        assert "final verdict" in prompt
+        # Should explain that it's reserved for genuine ambiguities
+        assert "human judgment" in prompt

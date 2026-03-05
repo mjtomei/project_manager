@@ -92,7 +92,7 @@ def _component_sort_key(
     """Sort key for components: active first, then by timestamp, then size."""
     # Active PRs (in_progress/in_review) first
     has_active = any(
-        pr.get("status") in ("in_progress", "in_review")
+        pr.get("status") in ("in_progress", "in_review", "qa")
         for pr in component
     )
     # Best timestamp across all PRs in the component (most recent wins).
@@ -333,6 +333,7 @@ def _activity_sort_key(
     status_priority = {
         "in_progress": 0,
         "in_review": 1,
+        "qa": 1,
         "pending": 2,
         "merged": 3,
         "closed": 4,

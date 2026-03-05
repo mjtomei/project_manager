@@ -313,7 +313,7 @@ class TestSyncPrs:
              patch("pm_core.git_ops.is_git_repo", return_value=True):
             result = pr_sync.sync_prs(tmp_pm_root_with_prs, force=True)
 
-        # Only in_progress and in_review should be checked
+        # Only in_progress, in_review, and qa should be checked
         # pr-003 is pending, so should not be in merged_prs
         assert "pr-003" not in result.merged_prs
 
@@ -666,3 +666,152 @@ class TestSyncFromGitHub:
         # Should still return synced=True but with no updates
         assert result.synced is True
         assert result.updated_count == 0
+
+    def test_sync_from_github_preserves_qa_status_when_open(self, tmp_pm_root_github):
+        """sync_from_github preserves local 'qa' status when GitHub shows OPEN."""
+        data = store.load(tmp_pm_root_github)
+        # Set pr-002 to qa status (simulating local QA in progress)
+        data["prs"][1]["status"] = "qa"
+        store.save(data, tmp_pm_root_github)
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = json.dumps({
+            "state": "OPEN",
+            "isDraft": False,
+            "mergedAt": None
+        })
+
+        with patch("subprocess.run", return_value=mock_result):
+            result = pr_sync.sync_from_github(tmp_pm_root_github, save_state=False)
+
+        assert result.synced is True
+        # qa PR should NOT be in status_updates (it was skipped)
+        assert "pr-002" not in result.status_updates
+        # Verify the qa status is still intact in the data
+        data_after = store.load(tmp_pm_root_github)
+        pr_002 = next(p for p in data_after["prs"] if p["id"] == "pr-002")
+        assert pr_002["status"] == "qa"
+
+    def test_sync_from_github_qa_pr_still_transitions_on_merge(self, tmp_pm_root_github):
+        """sync_from_github transitions qa PR to merged when GitHub shows MERGED."""
+        data = store.load(tmp_pm_root_github)
+        data["prs"][1]["status"] = "qa"
+        store.save(data, tmp_pm_root_github)
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = json.dumps({
+            "state": "MERGED",
+            "isDraft": False,
+            "mergedAt": "2024-01-15T10:00:00Z"
+        })
+
+        with patch("subprocess.run", return_value=mock_result):
+            result = pr_sync.sync_from_github(tmp_pm_root_github, save_state=False)
+
+        assert result.synced is True
+        assert "pr-002" in result.merged_prs
+
+    def test_sync_from_github_qa_pr_still_transitions_on_close(self, tmp_pm_root_github):
+        """sync_from_github transitions qa PR to closed when GitHub shows CLOSED."""
+        data = store.load(tmp_pm_root_github)
+        data["prs"][1]["status"] = "qa"
+        store.save(data, tmp_pm_root_github)
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = json.dumps({
+            "state": "CLOSED",
+            "isDraft": False,
+            "mergedAt": None
+        })
+
+        with patch("subprocess.run", return_value=mock_result):
+            result = pr_sync.sync_from_github(tmp_pm_root_github, save_state=False)
+
+        assert result.synced is True
+        assert "pr-002" in result.closed_prs
+
+
+class TestSyncIncludesQaStatus:
+    """Tests that qa-status PRs are included in sync operations."""
+
+    def test_sync_prs_includes_qa_in_merge_detection(self, tmp_path):
+        """sync_prs checks qa-status PRs for merge status alongside in_review/in_progress."""
+        root = tmp_path / "pm"
+        root.mkdir()
+        (root / "project.yaml").write_text(
+            "project:\n"
+            "  name: test-project\n"
+            "  repo: https://github.com/test/repo.git\n"
+            "  base_branch: master\n"
+            "  backend: github\n"
+            "prs:\n"
+            "  - id: pr-qa\n"
+            "    title: QA PR\n"
+            "    status: qa\n"
+            "    branch: pm/pr-qa-branch\n"
+        )
+
+        workdir = tmp_path / "workdir"
+        workdir.mkdir()
+        (workdir / ".git").mkdir()
+
+        data = store.load(root)
+        data["prs"][0]["workdir"] = str(workdir)
+        store.save(data, root)
+
+        mock_backend = MagicMock()
+        mock_backend.is_merged.return_value = True
+
+        with patch("pm_core.pr_sync.get_backend", return_value=mock_backend), \
+             patch("pm_core.git_ops.is_git_repo", return_value=True):
+            result = pr_sync.sync_prs(root, force=True)
+
+        # qa-status PR should be checked and detected as merged
+        mock_backend.is_merged.assert_called_once()
+        assert "pr-qa" in result.merged_prs
+
+    def test_sync_prs_does_not_check_merged_or_closed(self, tmp_path):
+        """sync_prs skips merged/closed PRs but includes qa."""
+        root = tmp_path / "pm"
+        root.mkdir()
+        (root / "project.yaml").write_text(
+            "project:\n"
+            "  name: test-project\n"
+            "  repo: https://github.com/test/repo.git\n"
+            "  base_branch: master\n"
+            "  backend: github\n"
+            "prs:\n"
+            "  - id: pr-merged\n"
+            "    title: Merged PR\n"
+            "    status: merged\n"
+            "    branch: pm/pr-merged\n"
+            "  - id: pr-closed\n"
+            "    title: Closed PR\n"
+            "    status: closed\n"
+            "    branch: pm/pr-closed\n"
+            "  - id: pr-qa\n"
+            "    title: QA PR\n"
+            "    status: qa\n"
+            "    branch: pm/pr-qa\n"
+        )
+
+        workdir = tmp_path / "workdir"
+        workdir.mkdir()
+        (workdir / ".git").mkdir()
+
+        data = store.load(root)
+        data["prs"][2]["workdir"] = str(workdir)
+        store.save(data, root)
+
+        mock_backend = MagicMock()
+        mock_backend.is_merged.return_value = False
+
+        with patch("pm_core.pr_sync.get_backend", return_value=mock_backend), \
+             patch("pm_core.git_ops.is_git_repo", return_value=True):
+            pr_sync.sync_prs(root, force=True)
+
+        # Only qa PR should be checked (merged/closed are skipped)
+        assert mock_backend.is_merged.call_count == 1

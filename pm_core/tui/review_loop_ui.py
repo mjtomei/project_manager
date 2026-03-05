@@ -225,10 +225,11 @@ def ensure_animation_timer(app) -> None:
     the spinner animation runs for in_progress/in_review PRs.
     """
     has_active = any(
-        pr.get("status") in ("in_progress", "in_review") and pr.get("workdir")
+        pr.get("status") in ("in_progress", "in_review", "qa") and pr.get("workdir")
         for pr in (app._data.get("prs") or [])
     )
-    if has_active or any(s.running for s in app._review_loops.values()):
+    qa_running = any(s.running for s in app._qa_loops.values())
+    if has_active or any(s.running for s in app._review_loops.values()) or qa_running:
         _ensure_poll_timer(app)
 
 
@@ -261,6 +262,10 @@ def _poll_loop_state(app) -> None:
     from pm_core.tui.watcher_ui import poll_watcher_state
     poll_watcher_state(app)
 
+    # Poll QA loop state
+    from pm_core.tui.qa_loop_ui import poll_qa_state
+    poll_qa_state(app)
+
     # Refresh tech tree to update ⟳N markers on PR nodes
     _refresh_tech_tree(app)
 
@@ -273,18 +278,19 @@ def _poll_loop_state(app) -> None:
             sticky=10,
         )
 
-        # Auto-merge passing PRs when auto-start is enabled
+        # Auto-start next step: review pass → QA (then QA pass → merge)
         if state.latest_verdict in (VERDICT_PASS, VERDICT_PASS_WITH_SUGGESTIONS):
-            _maybe_auto_merge(app, state.pr_id)
+            _maybe_start_qa(app, state.pr_id)
 
     # Stop the timer if no loops are running AND no active PRs need animation
     # AND watcher is not running
     has_active_prs = any(
-        pr.get("status") in ("in_progress", "in_review") and pr.get("workdir")
+        pr.get("status") in ("in_progress", "in_review", "qa") and pr.get("workdir")
         for pr in (app._data.get("prs") or [])
     )
+    qa_running = any(s.running for s in app._qa_loops.values())
     watcher_running = app._watcher_state and app._watcher_state.running
-    if not any_running and not has_active_prs and not watcher_running:
+    if not any_running and not has_active_prs and not watcher_running and not qa_running:
         if app._review_loop_timer:
             app._review_loop_timer.stop()
             app._review_loop_timer = None
@@ -302,11 +308,65 @@ def _refresh_tech_tree(app) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Auto-QA after passing review
+# ---------------------------------------------------------------------------
+
+def _maybe_start_qa(app, pr_id: str) -> None:
+    """Transition a PR from in_review → qa and start QA.
+
+    Called when review passes.  Works in two modes:
+
+    - **Self-driving QA** (``zz t`` / ``zzz t``): always transitions,
+      independent of auto-start.  The self-driving NEEDS_WORK path starts
+      a review loop directly, so the review→QA transition must also be
+      independent.
+    - **Auto-start mode**: only transitions if auto-start is enabled and
+      the PR is within the target scope.
+
+    QA completion is handled by qa_loop_ui which triggers merge on QA PASS.
+    """
+    from pm_core.tui import auto_start as _auto_start
+
+    sd = getattr(app, '_self_driving_qa', {}).get(pr_id)
+
+    if not sd and not _auto_start.is_enabled(app):
+        return
+
+    # Scope to auto-start target's dependency tree (skip for self-driving)
+    if not sd:
+        target = _auto_start.get_target(app)
+        if target:
+            prs = app._data.get("prs") or []
+            allowed = _auto_start._transitive_deps(prs, target)
+            allowed.add(target)
+            if pr_id not in allowed:
+                return
+
+    # Transition PR status to "qa"
+    if app._root:
+        data = store.load(app._root)
+        pr = store.get_pr(data, pr_id)
+        if pr and pr.get("status") == "in_review":
+            pr["status"] = "qa"
+            store.save(data, app._root)
+            app._data = store.load(app._root)
+            _log.info("auto_qa: transitioned %s to qa status", pr_id)
+            app.log_message(f"Auto-QA: {pr_id} review passed, starting QA")
+
+            # Start QA loop
+            from pm_core.tui import qa_loop_ui
+            qa_loop_ui.start_qa(app, pr_id)
+        else:
+            _log.debug("auto_qa: %s not in_review (status=%s), skipping",
+                       pr_id, pr.get("status") if pr else "missing")
+
+
+# ---------------------------------------------------------------------------
 # Auto-merge passing reviews
 # ---------------------------------------------------------------------------
 
-def _maybe_auto_merge(app, pr_id: str) -> None:
-    """Auto-merge a PR after a passing review, if auto-start is enabled.
+def _maybe_auto_merge(app, pr_id: str, *, force: bool = False) -> None:
+    """Auto-merge a PR after a passing review/QA.
 
     Runs ``pm pr merge --resolve-window --background <pr_id>``
     synchronously, then triggers ``auto_start.check_and_start()`` to
@@ -314,19 +374,24 @@ def _maybe_auto_merge(app, pr_id: str) -> None:
     ``--resolve-window`` causes a Claude merge-resolution window to open;
     we register ``merge:<pr_id>`` in the idle tracker so
     ``_poll_impl_idle`` can detect when it finishes and re-attempt.
+
+    Args:
+        force: Skip the auto-start enabled/scope checks.  Used by
+            self-driving QA which operates independently of auto-start.
     """
     from pm_core.tui import auto_start as _auto_start
-    if not _auto_start.is_enabled(app):
+    if not force and not _auto_start.is_enabled(app):
         return
 
     # Scope to auto-start target's dependency tree
-    target = _auto_start.get_target(app)
-    if target:
-        prs = app._data.get("prs") or []
-        allowed = _auto_start._transitive_deps(prs, target)
-        allowed.add(target)
-        if pr_id not in allowed:
-            return
+    if not force:
+        target = _auto_start.get_target(app)
+        if target:
+            prs = app._data.get("prs") or []
+            allowed = _auto_start._transitive_deps(prs, target)
+            allowed.add(target)
+            if pr_id not in allowed:
+                return
 
     _log.info("auto_merge: review passed for %s, merging", pr_id)
     app.log_message(f"Auto-merge: {pr_id} review passed, merging")

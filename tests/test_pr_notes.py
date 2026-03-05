@@ -7,7 +7,10 @@ from click.testing import CliRunner
 
 from pm_core import store
 from pm_core.cli import cli
-from pm_core.prompt_gen import generate_prompt, generate_review_prompt
+from pm_core.prompt_gen import (
+    generate_prompt, generate_review_prompt,
+    generate_qa_planner_prompt, generate_qa_child_prompt,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -482,5 +485,44 @@ class TestPromptGenNotes:
         ])
         prompt = generate_review_prompt(data, "pr-001")
         assert "Legacy note" in prompt
+
+    @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
+    @patch("pm_core.qa_instructions.instruction_summary_for_prompt", return_value="No instructions.")
+    @patch("pm_core.prompt_gen.store.find_project_root")
+    def test_qa_planner_no_notes(self, mock_root, mock_instr, mock_notes):
+        data = self._data()
+        prompt = generate_qa_planner_prompt(data, "pr-001")
+        assert "PR Notes" not in prompt
+
+    @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
+    @patch("pm_core.qa_instructions.instruction_summary_for_prompt", return_value="No instructions.")
+    @patch("pm_core.prompt_gen.store.find_project_root")
+    def test_qa_planner_with_notes(self, mock_root, mock_instr, mock_notes):
+        """QA planner should see prior QA results from PR notes."""
+        data = self._data(notes=[
+            {"id": "note-abc", "text": "QA NEEDS_WORK: Login: NEEDS_WORK", "created_at": "2026-01-15T10:30:00Z"},
+        ])
+        prompt = generate_qa_planner_prompt(data, "pr-001")
+        assert "## PR Notes" in prompt
+        assert "QA NEEDS_WORK: Login: NEEDS_WORK" in prompt
+        assert "2026-01-15T10:30:00Z" in prompt
+
+    def test_qa_child_no_notes(self):
+        from pm_core.qa_loop import QAScenario
+        data = self._data()
+        scenario = QAScenario(index=1, title="Test", focus="testing", steps="Run tests")
+        prompt = generate_qa_child_prompt(data, "pr-001", scenario, "/tmp/workdir")
+        assert "PR Notes" not in prompt
+
+    def test_qa_child_with_notes(self):
+        """QA child sessions should see prior QA results from PR notes."""
+        from pm_core.qa_loop import QAScenario
+        data = self._data(notes=[
+            {"id": "note-abc", "text": "QA PASS: All passed", "created_at": "2026-01-15T10:30:00Z"},
+        ])
+        scenario = QAScenario(index=1, title="Test", focus="testing", steps="Run tests")
+        prompt = generate_qa_child_prompt(data, "pr-001", scenario, "/tmp/workdir")
+        assert "## PR Notes" in prompt
+        assert "QA PASS: All passed" in prompt
 
 

@@ -375,6 +375,9 @@ async def check_and_start(app) -> None:
     # Also start review loops for in_review PRs without active loops
     _auto_start_review_loops(app, target, prs)
 
+    # Start QA for qa-status PRs without active QA loops
+    _auto_start_qa_loops(app, target, prs)
+
 
 def _auto_start_review_loops(app, target: str | None = None,
                               prs: list[dict] | None = None) -> None:
@@ -416,6 +419,49 @@ def _auto_start_review_loops(app, target: str | None = None,
         tdir = get_transcript_dir(app)
         _start_loop(app, pr_id, pr, stop_on_suggestions=False,
                      transcript_dir=str(tdir) if tdir else None)
+
+
+def _auto_start_qa_loops(app, target: str | None = None,
+                          prs: list[dict] | None = None) -> None:
+    """Start QA loops for qa-status PRs that don't have one running.
+
+    Only activates when auto-start mode is enabled. When a target is set,
+    only starts loops for PRs in the target's dependency tree.
+    """
+    if not is_enabled(app):
+        return
+
+    if prs is None:
+        prs = app._data.get("prs") or []
+
+    # Scope to target's dependency tree if set
+    if target:
+        allowed = _transitive_deps(prs, target)
+        allowed.add(target)
+    else:
+        allowed = None
+
+    for pr in prs:
+        if pr.get("status") != "qa":
+            continue
+        pr_id = pr["id"]
+        if allowed is not None and pr_id not in allowed:
+            continue
+        # Skip if QA is already running or just completed (awaiting
+        # poll_qa_state processing).  Without the latest_verdict check,
+        # a sync-triggered check_and_start could race with poll_qa_state
+        # and restart QA before the completion handler runs.
+        qa_loop = app._qa_loops.get(pr_id)
+        if qa_loop and (qa_loop.running or qa_loop.latest_verdict):
+            continue
+        # Skip if no workdir
+        if not pr.get("workdir"):
+            continue
+
+        _log.info("auto_start: starting QA loop for %s", pr_id)
+        app.log_message(f"Auto-start: QA for {pr_id}")
+        from pm_core.tui import qa_loop_ui
+        qa_loop_ui.start_qa(app, pr_id)
 
 
 async def _start_pr_quiet(app, pr_id: str) -> None:

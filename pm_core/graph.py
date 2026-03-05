@@ -143,7 +143,9 @@ def render_static_graph(prs: list[dict]) -> str:
         "pending": "⏳",
         "in_progress": "🔨",
         "in_review": "👀",
+        "qa": "🧪",
         "merged": "✅",
+        "closed": "🚫",
         "blocked": "🚫",
     }
 

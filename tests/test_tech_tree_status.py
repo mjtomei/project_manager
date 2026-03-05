@@ -92,7 +92,7 @@ class TestStatusBackground:
 class TestAllStatusesCovered:
     """Tests to ensure all expected statuses are covered."""
 
-    EXPECTED_STATUSES = {"pending", "in_progress", "in_review", "merged", "closed", "blocked"}
+    EXPECTED_STATUSES = {"pending", "in_progress", "in_review", "qa", "merged", "closed", "blocked"}
 
     def test_icons_cover_all_statuses(self):
         """STATUS_ICONS covers all expected statuses."""
