@@ -2364,7 +2364,7 @@ prs:
   updated_at: '2026-03-03T21:58:32.312195+00:00'
   started_at: '2026-03-02T01:37:45.114694+00:00'
   reviewed_at: '2026-03-02T02:11:33.662780+00:00'
-  merged_at: '2026-03-03T21:58:32.312195+00:00' 
+  merged_at: '2026-03-03T21:58:32.312195+00:00'
   notes:
   - id: note-6aaddc6
     text: 'Manual TUI Test (review iteration 2): Test project at /tmp/pm-breadcrumb-test.
@@ -3201,7 +3201,19 @@ prs:
   started_at: '2026-03-05T16:33:07.507872+00:00'
   reviewed_at: '2026-03-05T17:41:10.481774+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-51bf287
+    text: 'QA NEEDS_WORK: Container CLI commands - enable, disable, status, set, cleanup:
+      PASS; QA scenarios launch in containers when container mode is enabled: PASS;
+      QA scenarios launch in tmux without containers when container mode is disabled:
+      PASS; Container wrapping for implementation sessions (pr start): PASS; Container
+      wrapping for review sessions: PASS; Graceful fallback when Docker is unavailable:
+      NEEDS_WORK; Container resource limits and configuration: PASS; Container cleanup
+      command with stale containers: PASS; Container user UID mapping: PASS; Environment
+      variable passthrough to containers: PASS; QA container lifecycle - concurrent
+      scenarios and cleanup: PASS [changes committed] (workdir: /home/matt/.pm/workdirs/qa/pr-d568b98-2f59e442b0e21087)'
+    created_at: '2026-03-05T18:26:42Z'
+    last_edited: '2026-03-05T18:26:42Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-d568b98-isolate-qa-scenario-workers-in-conta-03871242
 - id: pr-76fa48d
   plan: improvements
