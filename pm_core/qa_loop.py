@@ -87,6 +87,7 @@ class QAScenario:
     window_name: str | None = None
     worktree_path: str | None = None
     worktree_branch: str | None = None
+    container_name: str | None = None
 
 
 @dataclass
@@ -413,6 +414,248 @@ def _merge_scenario_commits(state: QALoopState, repo_root: Path | None,
 
 
 # ---------------------------------------------------------------------------
+# Scenario launching helpers
+# ---------------------------------------------------------------------------
+
+def _launch_scenarios_in_tmux(
+    state: QALoopState,
+    data: dict,
+    pr_data: dict,
+    session: str,
+    repo_root: Path | None,
+    workdir_path: str,
+) -> None:
+    """Launch each scenario in its own tmux window (with worktree isolation)."""
+    from pm_core import tmux as tmux_mod, prompt_gen
+    from pm_core.claude_launcher import build_claude_shell_cmd
+
+    for scenario in state.scenarios:
+        if state.stop_requested:
+            break
+
+        try:
+            wt_path, wt_branch, scratch_path, venv_path = create_scenario_workdir(
+                Path(state.qa_workdir), scenario.index,
+                repo_root=repo_root,
+                pr_id=state.pr_id,
+                loop_id=state.loop_id,
+            )
+        except Exception:
+            _log.warning("Failed to create workdir for scenario %d, skipping",
+                         scenario.index)
+            continue
+        scenario.worktree_path = str(wt_path)
+        scenario.worktree_branch = wt_branch
+
+        # Set up override so Claude in the worktree uses the correct pm_core
+        if wt_branch:
+            _setup_worktree_override(wt_path)
+
+        child_prompt = prompt_gen.generate_qa_child_prompt(
+            data, state.pr_id, scenario,
+            workdir=str(wt_path),
+            session_name=session,
+            worktree_mode=bool(wt_branch),
+            scratch_dir=str(scratch_path),
+        )
+        child_cmd = build_claude_shell_cmd(prompt=child_prompt)
+
+        # Activate the scenario venv so pip installs stay local
+        if venv_path:
+            child_cmd = f"VIRTUAL_ENV={venv_path} PATH={venv_path}/bin:$PATH {child_cmd}"
+
+        # Launch window with cwd=worktree_path so Claude has the full codebase
+        scenario_cwd = str(wt_path) if wt_branch else workdir_path
+        win_name = _scenario_window_name(pr_data, scenario.index)
+        try:
+            tmux_mod.new_window(session, win_name, child_cmd,
+                                cwd=scenario_cwd, switch=False)
+            scenario.window_name = win_name
+        except Exception:
+            _log.warning("Failed to create window for scenario %d",
+                         scenario.index)
+        if scenario.window_name:
+            _log.info("Launched scenario %d (%s) in window %s (worktree=%s)",
+                       scenario.index, scenario.title, win_name,
+                       bool(wt_branch))
+        else:
+            _log.warning("Scenario %d (%s) window creation failed (worktree=%s)",
+                          scenario.index, scenario.title, bool(wt_branch))
+
+
+def _launch_scenarios_in_containers(
+    state: QALoopState,
+    data: dict,
+    pr_data: dict,
+    session: str,
+    repo_root: Path | None,
+    workdir_path: str,
+) -> None:
+    """Launch each scenario in a Docker container, presented via a tmux window.
+
+    Each scenario gets:
+      1. A detached container (``sleep infinity``) with the worktree mounted
+      2. A tmux window running ``docker exec -it <container> claude ...``
+
+    The user sees the same tmux windows as in non-container mode, but the
+    claude process is isolated inside the container.  Polling and verdict
+    extraction happen via tmux pane capture, identical to the tmux path.
+    """
+    from pm_core import tmux as tmux_mod, prompt_gen
+    from pm_core import container as container_mod
+    from pm_core.claude_launcher import build_claude_shell_cmd
+
+    config = container_mod.load_container_config()
+
+    for scenario in state.scenarios:
+        if state.stop_requested:
+            break
+
+        try:
+            wt_path, wt_branch, scratch_path, venv_path = create_scenario_workdir(
+                Path(state.qa_workdir), scenario.index,
+                repo_root=repo_root,
+                pr_id=state.pr_id,
+                loop_id=state.loop_id,
+            )
+        except Exception:
+            _log.warning("Failed to create workdir for scenario %d, skipping",
+                         scenario.index)
+            continue
+        scenario.worktree_path = str(wt_path)
+        scenario.worktree_branch = wt_branch
+
+        # In container mode, paths inside the container are fixed
+        container_workdir = container_mod._CONTAINER_WORKDIR
+        container_scratch = container_mod._CONTAINER_SCRATCH
+
+        child_prompt = prompt_gen.generate_qa_child_prompt(
+            data, state.pr_id, scenario,
+            workdir=container_workdir,
+            session_name=None,  # No tmux session inside containers
+            worktree_mode=bool(wt_branch),
+            scratch_dir=container_scratch,
+        )
+        claude_cmd = build_claude_shell_cmd(prompt=child_prompt)
+
+        # Create and start the detached container
+        cname = container_mod.container_name(
+            state.pr_id, state.loop_id, scenario.index,
+        )
+        try:
+            container_mod.create_scenario_container(
+                name=cname,
+                config=config,
+                repo_root=repo_root or Path(workdir_path),
+                worktree_path=wt_path,
+                scratch_path=scratch_path,
+            )
+            scenario.container_name = cname
+        except Exception:
+            _log.warning("Failed to create container for scenario %d",
+                         scenario.index)
+            continue
+
+        # Build docker exec command and launch in a tmux window
+        exec_cmd = container_mod.build_exec_cmd(cname, claude_cmd)
+        win_name = _scenario_window_name(pr_data, scenario.index)
+        try:
+            tmux_mod.new_window(session, win_name, exec_cmd,
+                                cwd=workdir_path, switch=False)
+            scenario.window_name = win_name
+        except Exception:
+            _log.warning("Failed to create window for scenario %d",
+                         scenario.index)
+
+        if scenario.window_name:
+            _log.info("Launched scenario %d (%s) in container %s (window %s)",
+                       scenario.index, scenario.title, cname, win_name)
+        else:
+            _log.warning("Scenario %d (%s) container/window creation failed",
+                          scenario.index, scenario.title)
+
+
+# ---------------------------------------------------------------------------
+# Verdict polling helpers
+# ---------------------------------------------------------------------------
+
+def _poll_tmux_verdicts(
+    state: QALoopState,
+    session: str,
+    status_path: Path,
+    _notify,
+) -> None:
+    """Poll tmux scenario windows for verdicts."""
+    from pm_core import tmux as tmux_mod
+
+    tracker = VerdictStabilityTracker()
+    pending = {s.index for s in state.scenarios if s.window_name}
+
+    # Scenarios that failed to create a window get INPUT_REQUIRED immediately
+    has_failed_creation = False
+    for scenario in state.scenarios:
+        if not scenario.window_name:
+            _log.warning("Scenario %d has no window — marking INPUT_REQUIRED",
+                         scenario.index)
+            state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+            has_failed_creation = True
+    if has_failed_creation:
+        _write_status_file(status_path, state.pr_id, state.scenarios,
+                           state.scenario_verdicts)
+
+    grace_start = time.monotonic()
+
+    while pending and not state.stop_requested:
+        time.sleep(_POLL_INTERVAL)
+
+        in_grace = (time.monotonic() - grace_start) < _VERDICT_GRACE_PERIOD
+        verdicts_changed = False
+
+        for scenario in state.scenarios:
+            if scenario.index not in pending or not scenario.window_name:
+                continue
+
+            pane_id = _get_scenario_pane(session, scenario.window_name)
+            if pane_id is None:
+                _log.warning("Scenario %d window exited without verdict",
+                             scenario.index)
+                state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+                pending.discard(scenario.index)
+                verdicts_changed = True
+                continue
+
+            if in_grace:
+                continue
+
+            content = tmux_mod.capture_pane(
+                pane_id, full_scrollback=True,
+            )
+            verdict = extract_verdict_from_content(
+                content,
+                verdicts=ALL_VERDICTS,
+                keywords=_QA_KEYWORDS,
+                log_prefix=f"qa-{scenario.index}",
+            )
+
+            key = f"qa-{state.pr_id}-{scenario.index}"
+            if tracker.update(key, verdict):
+                state.scenario_verdicts[scenario.index] = verdict
+                pending.discard(scenario.index)
+                verdicts_changed = True
+                _log.info("Scenario %d (%s) verdict: %s",
+                          scenario.index, scenario.title, verdict)
+                state.latest_output = (
+                    f"Scenario {scenario.index} ({scenario.title}): {verdict}"
+                )
+                _notify()
+
+        if verdicts_changed:
+            _write_status_file(status_path, state.pr_id, state.scenarios,
+                               state.scenario_verdicts)
+
+
+
+# ---------------------------------------------------------------------------
 # Core orchestration
 # ---------------------------------------------------------------------------
 
@@ -587,6 +830,12 @@ def run_qa_sync(
         except Exception:
             pass
 
+    # Determine execution mode (container vs tmux)
+    from pm_core.container import is_container_mode_enabled
+    use_containers = is_container_mode_enabled()
+    if use_containers:
+        _log.info("Container mode enabled for QA execution")
+
     # Ensure the main QA window exists (has the planner pane)
     win = tmux_mod.find_window_by_name(session, window_name)
     planner_pane = None
@@ -599,59 +848,14 @@ def run_qa_sync(
         panes = tmux_mod.get_pane_indices(session, win["index"])
         planner_pane = panes[0][0] if panes else None
 
-    # Launch each scenario in its own tmux window (with worktree isolation)
-    for scenario in state.scenarios:
-        if state.stop_requested:
-            break
-
-        try:
-            wt_path, wt_branch, scratch_path, venv_path = create_scenario_workdir(
-                Path(state.qa_workdir), scenario.index,
-                repo_root=repo_root,
-                pr_id=state.pr_id,
-                loop_id=state.loop_id,
-            )
-        except Exception:
-            _log.warning("Failed to create workdir for scenario %d, skipping",
-                         scenario.index)
-            continue
-        scenario.worktree_path = str(wt_path)
-        scenario.worktree_branch = wt_branch
-
-        # Set up override so Claude in the worktree uses the correct pm_core
-        if wt_branch:
-            _setup_worktree_override(wt_path)
-
-        child_prompt = prompt_gen.generate_qa_child_prompt(
-            data, state.pr_id, scenario,
-            workdir=str(wt_path),
-            session_name=session,
-            worktree_mode=bool(wt_branch),
-            scratch_dir=str(scratch_path),
+    if use_containers:
+        _launch_scenarios_in_containers(
+            state, data, pr_data, session, repo_root, workdir_path,
         )
-        child_cmd = build_claude_shell_cmd(prompt=child_prompt)
-
-        # Activate the scenario venv so pip installs stay local
-        if venv_path:
-            child_cmd = f"VIRTUAL_ENV={venv_path} PATH={venv_path}/bin:$PATH {child_cmd}"
-
-        # Launch window with cwd=worktree_path so Claude has the full codebase
-        scenario_cwd = str(wt_path) if wt_branch else workdir_path
-        win_name = _scenario_window_name(pr_data, scenario.index)
-        try:
-            tmux_mod.new_window(session, win_name, child_cmd,
-                                cwd=scenario_cwd, switch=False)
-            scenario.window_name = win_name
-        except Exception:
-            _log.warning("Failed to create window for scenario %d",
-                         scenario.index)
-        if scenario.window_name:
-            _log.info("Launched scenario %d (%s) in window %s (worktree=%s)",
-                       scenario.index, scenario.title, win_name,
-                       bool(wt_branch))
-        else:
-            _log.warning("Scenario %d (%s) window creation failed (worktree=%s)",
-                          scenario.index, scenario.title, bool(wt_branch))
+    else:
+        _launch_scenarios_in_tmux(
+            state, data, pr_data, session, repo_root, workdir_path,
+        )
 
     # Add status pane to the main QA window (split planner pane horizontally)
     if planner_pane:
@@ -695,83 +899,19 @@ def run_qa_sync(
     state.latest_output = f"Running {len(state.scenarios)} scenario(s)..."
     _notify()
 
-    # --- Poll all scenario windows for verdicts ---
-    tracker = VerdictStabilityTracker()
-    pending = {s.index for s in state.scenarios if s.window_name}
+    # --- Poll for verdicts (always via tmux — containers also use tmux windows) ---
+    _poll_tmux_verdicts(state, session, status_path, _notify)
 
-    # Scenarios that failed to create a window get INPUT_REQUIRED immediately
-    # so they are not silently ignored in the final aggregation.
-    has_failed_creation = False
-    for scenario in state.scenarios:
-        if not scenario.window_name:
-            _log.warning("Scenario %d has no window — marking INPUT_REQUIRED",
-                         scenario.index)
-            state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
-            has_failed_creation = True
-    if has_failed_creation:
-        _write_status_file(status_path, state.pr_id, state.scenarios,
-                           state.scenario_verdicts)
-
-    grace_start = time.monotonic()
-
-    while pending and not state.stop_requested:
-        time.sleep(_POLL_INTERVAL)
-
-        in_grace = (time.monotonic() - grace_start) < _VERDICT_GRACE_PERIOD
-        verdicts_changed = False
-
-        for scenario in state.scenarios:
-            if scenario.index not in pending or not scenario.window_name:
-                continue
-
-            pane_id = _get_scenario_pane(session, scenario.window_name)
-            if pane_id is None:
-                # Window exited without verdict — treat as inconclusive,
-                # not as a pass.  A crashed or unexpectedly-exited window
-                # should not silently pass QA.
-                _log.warning("Scenario %d window exited without verdict",
-                             scenario.index)
-                state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
-                pending.discard(scenario.index)
-                verdicts_changed = True
-                continue
-
-            if in_grace:
-                continue
-
-            content = tmux_mod.capture_pane(
-                pane_id, full_scrollback=True,
-            )
-            verdict = extract_verdict_from_content(
-                content,
-                verdicts=ALL_VERDICTS,
-                keywords=_QA_KEYWORDS,
-                log_prefix=f"qa-{scenario.index}",
-            )
-
-            key = f"qa-{state.pr_id}-{scenario.index}"
-            if tracker.update(key, verdict):
-                state.scenario_verdicts[scenario.index] = verdict
-                pending.discard(scenario.index)
-                verdicts_changed = True
-                _log.info("Scenario %d (%s) verdict: %s",
-                          scenario.index, scenario.title, verdict)
-                state.latest_output = (
-                    f"Scenario {scenario.index} ({scenario.title}): {verdict}"
-                )
-                _notify()
-
-        # Update status file whenever a verdict changes
-        if verdicts_changed:
-            _write_status_file(status_path, state.pr_id, state.scenarios,
-                               state.scenario_verdicts)
-
-    # --- Cleanup scenario windows ---
-    # Kill ALL windows matching the qa-{display_id}-s* pattern (not just
-    # known scenarios) to catch stale duplicates from previous runs.
-    # Keep the main QA window alive so its status pane can display the
-    # aggregated verdict and the user can focus it with 't'.
-    _cleanup_stale_scenario_windows(session, pr_data, include_main=False)
+    # --- Cleanup ---
+    if use_containers:
+        from pm_core import container as container_mod
+        container_mod.cleanup_containers(state.pr_id, state.loop_id)
+    else:
+        # Kill ALL windows matching the qa-{display_id}-s* pattern (not just
+        # known scenarios) to catch stale duplicates from previous runs.
+        # Keep the main QA window alive so its status pane can display the
+        # aggregated verdict and the user can focus it with 't'.
+        _cleanup_stale_scenario_windows(session, pr_data, include_main=False)
 
     # --- Merge back scenario worktree commits ---
     _merge_scenario_commits(state, repo_root, pr_data)
