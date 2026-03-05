@@ -3,11 +3,11 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-4fd59d4
+  active_pr: pr-d568b98
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
-  hide_merged: true
+  hide_merged: false
 plans:
 - id: plan-001
   name: Import from existing repo
@@ -2331,7 +2331,7 @@ prs:
   plan: bugs
   title: Persist review loop state across TUI restarts using breadcrumb files
   branch: pm/pr-4f8e02b-persist-review-loop-state-across-tui-restarts-usin
-  status: in_review
+  status: merged
   depends_on: []
   description: 'Review loop state (iteration count, verdicts, history) is stored only
     in memory and lost on TUI restart. When a merge triggers a restart, auto-start
@@ -2361,10 +2361,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/111
   gh_pr_number: 111
   created_at: '2026-03-02T01:34:17.359036+00:00'
-  updated_at: '2026-03-02T03:00:19.769458+00:00'
+  updated_at: '2026-03-03T21:24:15.655072+00:00'
   started_at: '2026-03-02T01:37:45.114694+00:00'
   reviewed_at: '2026-03-02T02:11:33.662780+00:00'
-  merged_at: null
+  merged_at: '2026-03-03T21:24:15.655072+00:00'
   notes:
   - id: note-6aaddc6
     text: 'Manual TUI Test (review iteration 2): Test project at /tmp/pm-breadcrumb-test.
@@ -2632,7 +2632,7 @@ prs:
   title: Add optional quality assurance step with test instruction library and review–QA
     loop
   branch: pm/pr-ee1ff04-add-optional-quality-assurance-step-with-test-inst
-  status: pending
+  status: merged
   depends_on: []
   description: "Add an optional quality assurance (QA) / manual testing step to the\
     \ PR lifecycle that sits between review and merge. This creates a review-QA loop:\
@@ -2699,10 +2699,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/116
   gh_pr_number: 116
   created_at: '2026-03-02T04:20:36.108360+00:00'
-  updated_at: '2026-03-02T17:53:14.109875+00:00'
+  updated_at: '2026-03-05T16:25:50.133826+00:00'
   started_at: '2026-03-02T04:32:01.071677+00:00'
-  reviewed_at: '2026-03-02T17:09:13.345809+00:00'
-  merged_at: null
+  reviewed_at: '2026-03-03T20:54:33.777726+00:00'
+  merged_at: '2026-03-05T16:25:50.133826+00:00'
   notes:
   - id: note-25dc606
     text: 'Review i3 TUI test: Created throwaway project in /tmp/qa-test-project.
@@ -3158,6 +3158,171 @@ prs:
   gh_pr_number: null
   created_at: '2026-03-03T17:53:04.828595+00:00'
   updated_at: '2026-03-03T17:53:04.828595+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-d568b98
+  plan: plan-qa
+  title: Isolate QA scenario workers in containers
+  branch: pm/pr-d568b98-isolate-qa-scenario-workers-in-containers
+  status: pending
+  depends_on: []
+  description: Run QA scenario workers inside containers (e.g. Docker) instead of
+    directly on the host. This provides isolation so that scenario workers cannot
+    interfere with each other or with the host system during testing - they can safely
+    install packages, modify system state, create throwaway projects, and exercise
+    destructive test scenarios without risk. Each scenario worker gets its own container
+    with the repo mounted or cloned in, Claude installed, and the necessary tools
+    available. The QA planner spawns containers instead of bare tmux panes. Container
+    lifecycle (create, monitor, collect results, teardown) should be managed by pm.
+    Support configurable base images and resource limits per container.
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-05T16:15:56.346064+00:00'
+  updated_at: '2026-03-05T16:15:56.346064+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-76fa48d
+  plan: improvements
+  title: Auto-retry Claude sessions on 500 and usage limit errors
+  branch: pm/pr-76fa48d-auto-retry-claude-sessions-on-500-and-usage-limit
+  status: pending
+  depends_on: []
+  description: Detect when a Claude session hits a 500 server error or a usage/rate
+    limit error by monitoring the session output. For usage limit errors, parse the
+    retry-after time from the error message and wait until that time before retrying
+    the last message. For 500 errors, wait a configurable duration (set in pm settings,
+    e.g. error_retry_delay_seconds) before retrying. This should work across all pm-managed
+    Claude sessions (workers, reviewers, QA, etc.) by hooking into the pane output
+    monitoring. Include a retry count limit to avoid infinite loops on persistent
+    failures. Log retries so the user can see what happened.
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-05T04:16:36.023786+00:00'
+  updated_at: '2026-03-05T04:16:36.023786+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-9fc6e27
+  plan: improvements
+  title: Keep PR description and notes in sync during development
+  branch: pm/pr-9fc6e27-keep-pr-description-and-notes-in-sync-during-deve
+  status: pending
+  depends_on: []
+  description: PR descriptions frequently become stale as the spec evolves during
+    implementation, causing review and QA prompts to reference outdated requirements.
+    Add mechanisms to keep descriptions current - e.g. auto-update the description
+    from the actual diff/commits when significant changes land, prompt the worker
+    to summarize what changed, or provide a simple command to refresh the description.
+    Also fix the notes workflow from workdirs - currently adding notes from a workdir
+    clone does not reliably propagate back to the base session's project.yaml. Notes
+    added by workers or reviewers in workdirs should be written to the canonical store
+    so they appear in the TUI and in prompts immediately. This may involve writing
+    notes to the base repo's project.yaml directly or using a shared notes sidecar
+    file that the base session watches.
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-05T04:05:44.730881+00:00'
+  updated_at: '2026-03-05T04:05:44.730881+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-7f38bd9
+  plan: improvements
+  title: Review loop mode for scenario-based unit test generation
+  branch: pm/pr-7f38bd9-review-loop-mode-for-scenario-based-unit-test-gen
+  status: pending
+  depends_on: []
+  description: Add a mode to the review loop that uses the QA-style planner/scenario-worker
+    pattern (from PR 116) to generate unit tests. A planner session analyzes the PR
+    diff and existing test coverage, then creates test scenarios describing what needs
+    to be tested (edge cases, error paths, integration points, regressions). Scenario
+    worker panes are spawned in parallel, each taking a scenario and writing actual
+    unit tests for it. The generated tests are committed to the branch. This gives
+    the review loop the ability to not just review code but also strengthen test coverage
+    as part of the review cycle, using the same distributed worker architecture that
+    QA already uses.
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-04T19:42:37.749200+00:00'
+  updated_at: '2026-03-04T19:42:37.749200+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-d71ef39
+  plan: improvements
+  title: Pre-init onboarding flow for dependencies and setup
+  branch: pm/pr-d71ef39-pre-init-onboarding-flow-for-dependencies-and-set
+  status: pending
+  depends_on: []
+  description: Add an onboarding flow that runs before pm init for new users. The
+    flow should check whether Claude Code is installed and, if not, guide the user
+    through installing and configuring it (API key, authentication, etc.). Once Claude
+    is available, launch a Claude session that helps the user set up the GitHub CLI
+    (gh) if they want it, or alternatively gives them a short primer on git basics
+    for users who are less familiar. This lowers the barrier to entry for non-developer
+    users who want to use pm but don't have the prerequisite tooling configured yet.
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-04T16:32:31.704195+00:00'
+  updated_at: '2026-03-04T16:32:31.704195+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-073910f
+  plan: improvements
+  title: Per-session tmux server isolation
+  branch: pm/pr-073910f-per-session-tmux-server-isolation
+  status: pending
+  depends_on: []
+  description: Give each pm session its own dedicated tmux server (socket) instead
+    of sharing the default server. This prevents Claude sessions from accidentally
+    targeting panes in the wrong pm session. The infrastructure is partially in place
+    via _tmux_cmd() and PM_TMUX_SOCKET (currently only used for shared/multi-user
+    mode). Extend this to always use a dedicated socket at a well-known path (e.g.
+    /tmp/pm-sessions/pm-{session_tag}). Update pm session attach/list commands to
+    locate sessions by their sockets. Ensure grouped session support continues to
+    work correctly with per-session servers.
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-04T16:29:30.649058+00:00'
+  updated_at: '2026-03-04T16:29:30.649058+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-72f1278
+  plan: improvements
+  title: OOM-aware memory watchdog for session process management
+  branch: pm/pr-72f1278-oom-aware-memory-watchdog-for-session-process-mana
+  status: pending
+  depends_on: []
+  description: Add a background thread that monitors system memory utilization and
+    proactively kills the largest memory-consuming processes owned by our pm session
+    before the OS OOM killer intervenes and randomly kills the main pm process. The
+    watchdog should identify child Claude sessions spawned by pm (tmux panes), rank
+    them by RSS, and terminate the biggest consumers when memory pressure crosses
+    a configurable threshold. Maintain a persistent log of what was killed, when,
+    and how much memory it was using, so the user can see what happened and restart
+    work if needed.
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-04T16:23:15.847530+00:00'
+  updated_at: '2026-03-04T16:23:15.847530+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
