@@ -430,6 +430,10 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True) -> str:
     When the exec'd process exits, the container is removed (unless
     *cleanup* is False) and the tmux window exits too — same as the
     non-container path.
+
+    Note: this uses raw ``docker rm`` rather than remove_container() since
+    it runs in a tmux shell, not in the pm process.  Push proxy threads are
+    daemon threads and will be cleaned up on pm exit or container reuse.
     """
     escaped = shlex.quote(shell_cmd)
     exec_part = f"docker exec -it -u {_CONTAINER_USER} {shlex.quote(name)} bash -c {escaped}"

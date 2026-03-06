@@ -112,6 +112,13 @@ class TestPushProxyBranchValidation:
         assert resp["exit_code"] == 1
         assert "rejected" in resp["stderr"]
 
+    def test_rejects_multiple_refspecs(self, proxy, sock_path):
+        """Multiple refspecs must be rejected to prevent pushing to extra branches."""
+        resp = _send_request(sock_path,
+                             {"args": ["origin", "pm/pr-123-feature", "main"]})
+        assert resp["exit_code"] == 1
+        assert "could not determine" in resp["stderr"]
+
     def test_rejects_all_flag(self, proxy, sock_path):
         resp = _send_request(sock_path, {"args": ["--all"]})
         assert resp["exit_code"] == 1

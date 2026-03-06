@@ -201,6 +201,11 @@ class PushProxy:
             positional.append(arg)
 
         if len(positional) >= 2:
+            # Reject multiple refspecs — only single-branch push is allowed.
+            # git push origin branch1 branch2 would push both; we must not
+            # validate only the first and let the rest through.
+            if len(positional) > 2:
+                return None
             refspec = positional[1]
             # refspec can be "branch", "src:dst", "refs/heads/branch", etc.
             if ":" in refspec:
