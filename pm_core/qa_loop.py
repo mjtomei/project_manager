@@ -470,54 +470,21 @@ def _launch_scenario_0(
     if wt_branch:
         _setup_worktree_override(wt_path)
 
-    use_containers = is_container_mode_enabled() and _docker_available()
-
-    if use_containers:
-        container_workdir = container_mod._CONTAINER_WORKDIR
-        container_scratch = container_mod._CONTAINER_SCRATCH
-        child_prompt = prompt_gen.generate_qa_interactive_prompt(
-            data, state.pr_id,
-            workdir=container_workdir,
-            session_name=None,
-            worktree_mode=bool(wt_branch),
-            scratch_dir=container_scratch,
-        )
-    else:
-        child_prompt = prompt_gen.generate_qa_interactive_prompt(
-            data, state.pr_id,
-            workdir=str(wt_path),
-            session_name=session,
-            worktree_mode=bool(wt_branch),
-            scratch_dir=str(scratch_path),
-        )
+    # Scenario 0 always runs on the host (not in a container) so the user
+    # has full access to host tools, git credentials, and the TUI session.
+    child_prompt = prompt_gen.generate_qa_interactive_prompt(
+        data, state.pr_id,
+        workdir=str(wt_path),
+        session_name=session,
+        worktree_mode=bool(wt_branch),
+        scratch_dir=str(scratch_path),
+    )
 
     claude_cmd = build_claude_shell_cmd(prompt=child_prompt)
-
-    if use_containers:
-        cname = container_mod.qa_container_name(
-            state.pr_id, state.loop_id, 0,
-        )
-        try:
-            config = container_mod.load_container_config()
-            container_mod.create_qa_container(
-                name=cname,
-                config=config,
-                repo_root=repo_root or Path(workdir_path),
-                worktree_path=wt_path,
-                scratch_path=scratch_path,
-            )
-            scenario.container_name = cname
-        except Exception:
-            _log.warning("Failed to create container for Scenario 0")
-            return None
-        exec_cmd = container_mod.build_exec_cmd(cname, claude_cmd, cleanup=False)
-        final_cmd = exec_cmd
-        scenario_cwd = workdir_path
-    else:
-        if venv_path:
-            claude_cmd = f"VIRTUAL_ENV={venv_path} PATH={venv_path}/bin:$PATH {claude_cmd}"
-        final_cmd = claude_cmd
-        scenario_cwd = str(wt_path) if wt_branch else workdir_path
+    if venv_path:
+        claude_cmd = f"VIRTUAL_ENV={venv_path} PATH={venv_path}/bin:$PATH {claude_cmd}"
+    final_cmd = claude_cmd
+    scenario_cwd = str(wt_path) if wt_branch else workdir_path
 
     win_name = _scenario_window_name(pr_data, 0)
     try:

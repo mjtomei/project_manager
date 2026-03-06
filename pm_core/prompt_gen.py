@@ -827,12 +827,13 @@ def generate_qa_interactive_prompt(data: dict, pr_id: str,
 
     tui_block = tui_section(session_name) if session_name else ""
 
-    # Get instruction library summary for Scenario 0
+    # Get instruction library summary for Scenario 0 (instructions only, not regression)
     instruction_library_block = ""
     try:
         root = store.find_project_root()
         from pm_core import qa_instructions
-        library_summary = qa_instructions.instruction_summary_for_prompt(root)
+        library_summary = qa_instructions.instruction_summary_for_prompt(
+            root, include_regression=False)
         if library_summary and "No QA instructions" not in library_summary:
             instruction_library_block = f"""
 ## QA Instruction Library
@@ -857,7 +858,7 @@ understand what's being tested:
 {pr_notes_block}
 ## How QA Works
 
-You are Scenario 0 — an interactive session that runs alongside automated QA
+You are in Scenario 0 — an interactive session that runs alongside automated QA
 scenarios.  Here's how the overall QA process works:
 
 1. A **QA planner** analyzed the PR and generated test scenarios based on the
@@ -920,10 +921,18 @@ def generate_qa_child_prompt(data: dict, pr_id: str,
 
     instruction_block = ""
     if scenario.instruction_path:
+        # Translate absolute host path to be relative to the scenario workdir.
+        # Instruction files live under pm/qa/ in the repo; in containers the
+        # repo is mounted at /workspace so we need /workspace/pm/qa/...
+        instr_display = scenario.instruction_path
+        marker = "/pm/qa/"
+        idx = scenario.instruction_path.find(marker)
+        if idx >= 0:
+            instr_display = f"{workdir}/pm/qa/{scenario.instruction_path[idx + len(marker):]}"
         instruction_block = f"""
 ## Instruction Reference
 
-Read the full instruction at: `{scenario.instruction_path}`
+Read the full instruction at: `{instr_display}`
 Follow its **Setup** section to create a real test environment BEFORE running
 any test steps.  Do NOT skip setup and fall back to static code reading — your
 job is to verify runtime behavior, not review code.
@@ -974,9 +983,9 @@ job is to verify runtime behavior, not review code.
 - **Base branch**: {base_branch}
 {workdir_block}
 {pr_notes_block}
-## How This Works
+## How QA Works
 
-You are one of several QA scenarios running in parallel, each in its own
+You are in one of several QA scenarios running in parallel, each in its own
 isolated worktree.  An orchestrator is monitoring your tmux pane for your
 final verdict.
 
