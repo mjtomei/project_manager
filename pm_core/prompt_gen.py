@@ -756,6 +756,13 @@ instruction file at the paths shown below.
 
 {library_summary}
 
+## CRITICAL: Always assign an instruction
+
+Instructions tell scenario agents how to set up a test environment.  Without
+one, agents fall back to reading code and auto-passing.  Assign an instruction
+to every scenario — ``INSTRUCTION: "none"`` should be rare.  Multiple scenarios
+testing the same system should share the same instruction.
+
 ## Output Format
 
 Your output is machine-parsed.  Use ALL CAPS markers exactly as shown.
