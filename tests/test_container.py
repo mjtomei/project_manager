@@ -580,6 +580,13 @@ class TestBuildGitSetupScript:
         assert "password" not in script.lower()
         assert "credential" not in script.lower()
 
+    def test_shebang_at_start_of_wrapper(self):
+        """Wrapper script shebang must be at column 0 for kernel to recognise it."""
+        script = _build_git_setup_script(has_push_proxy=True)
+        # The heredoc content must have #!/bin/sh at column 0 (after the
+        # newline following the WRAPEOF marker)
+        assert "\n#!/bin/sh\n" in script
+
 
 class TestCreateContainerPushProxy:
     @patch("pm_core.container._has_remote", return_value=True)

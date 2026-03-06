@@ -42,7 +42,6 @@ import secrets
 import shlex
 import shutil
 import subprocess
-import textwrap
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -207,57 +206,51 @@ def _build_git_setup_script(
     # validates the target branch and runs the real push.
     if has_push_proxy:
         from pm_core.push_proxy import _CONTAINER_SOCKET_PATH
-        wrapper_script = textwrap.dedent(f"""\
-            #!/bin/sh
-            # pm: git wrapper — pushes go through the host-side push proxy
-            REAL_GIT=/usr/bin/git
-            SOCKET="{_CONTAINER_SOCKET_PATH}"
-            if [ "$1" = "push" ]; then
-                shift  # consume "push"
-                # Build JSON request with push args
-                args_json="["
-                first=1
-                for arg in "$@"; do
-                    if [ "$first" = "1" ]; then
-                        first=0
-                    else
-                        args_json="$args_json,"
-                    fi
-                    # Escape quotes in arg
-                    escaped=$(printf '%s' "$arg" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')
-                    args_json="$args_json\\"$escaped\\""
-                done
-                args_json="$args_json]"
-                request='{{"args": '"$args_json"'}}'
-                # Send to proxy and read response
-                if command -v python3 >/dev/null 2>&1; then
-                    response=$(python3 -c "
-import socket, sys, json
-s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-try:
-    s.connect('$SOCKET')
-except Exception as e:
-    print(json.dumps({{'exit_code': 1, 'stdout': '', 'stderr': f'push-proxy: cannot connect: {{e}}\\\\n'}}))
-    sys.exit(0)
-s.sendall((sys.argv[1] + '\\\\n').encode())
-data = b''
-while True:
-    chunk = s.recv(4096)
-    if not chunk:
-        break
-    data += chunk
-s.close()
-print(data.decode())
-" "$request" 2>&1)
-                else
-                    echo "pm: python3 required for push proxy client" >&2
-                    exit 1
-                fi
-                exit_code=$(printf '%s' "$response" | python3 -c "import sys,json; r=json.load(sys.stdin); sys.stdout.write(r.get('stdout','')); sys.stderr.write(r.get('stderr','')); sys.exit(r.get('exit_code',1))")
-                exit $?
-            fi
-            exec $REAL_GIT "$@"
-        """)
+        # NOTE: The inline Python block must start at column 0 inside the
+        # shell $(...) substitution, so we can't use textwrap.dedent here.
+        wrapper_script = (
+            "#!/bin/sh\n"
+            "# pm: git wrapper — pushes go through the host-side push proxy\n"
+            "REAL_GIT=/usr/bin/git\n"
+            f'SOCKET="{_CONTAINER_SOCKET_PATH}"\n'
+            'if [ "$1" = "push" ]; then\n'
+            '  shift\n'
+            '  args_json="["\n'
+            '  first=1\n'
+            '  for arg in "$@"; do\n'
+            '    if [ "$first" = "1" ]; then first=0; else args_json="$args_json,"; fi\n'
+            '    escaped=$(printf \'%s\' "$arg" | sed \'s/\\\\/\\\\\\\\/g; s/"/\\\\"/g\')\n'
+            '    args_json="$args_json\\"$escaped\\""\n'
+            '  done\n'
+            '  args_json="$args_json]"\n'
+            "  request='{\"args\": '\"$args_json\"'}'\n"
+            '  if ! command -v python3 >/dev/null 2>&1; then\n'
+            '    echo "pm: python3 required for push proxy client" >&2\n'
+            '    exit 1\n'
+            '  fi\n'
+            '  response=$(python3 -c "\n'
+            "import socket, sys, json\n"
+            "s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n"
+            "try:\n"
+            "    s.connect('$SOCKET')\n"
+            "except Exception as e:\n"
+            f"    print(json.dumps({{'exit_code': 1, 'stdout': '', 'stderr': f'push-proxy: cannot connect: {{e}}\\\\n'}}))\n"
+            "    sys.exit(0)\n"
+            "s.sendall((sys.argv[1] + '\\\\n').encode())\n"
+            "data = b''\n"
+            "while True:\n"
+            "    chunk = s.recv(4096)\n"
+            "    if not chunk:\n"
+            "        break\n"
+            "    data += chunk\n"
+            "s.close()\n"
+            "print(data.decode())\n"
+            '" "$request" 2>&1)\n'
+            '  printf \'%s\' "$response" | python3 -c "import sys,json; r=json.load(sys.stdin); sys.stdout.write(r.get(\'stdout\',\'\')); sys.stderr.write(r.get(\'stderr\',\'\')); sys.exit(r.get(\'exit_code\',1))"\n'
+            '  exit $?\n'
+            "fi\n"
+            'exec $REAL_GIT "$@"\n'
+        )
         wrapper_path = "/usr/local/bin/git"
         lines.append(f"cat > {wrapper_path} << 'WRAPEOF'\n{wrapper_script}WRAPEOF")
         lines.append(f"chmod 755 {wrapper_path}")

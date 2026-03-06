@@ -112,6 +112,30 @@ class TestPushProxyBranchValidation:
         assert resp["exit_code"] == 1
         assert "rejected" in resp["stderr"]
 
+    def test_rejects_all_flag(self, proxy, sock_path):
+        resp = _send_request(sock_path, {"args": ["--all"]})
+        assert resp["exit_code"] == 1
+        assert "rejected" in resp["stderr"]
+        assert "--all" in resp["stderr"]
+
+    def test_rejects_mirror_flag(self, proxy, sock_path):
+        resp = _send_request(sock_path, {"args": ["--mirror"]})
+        assert resp["exit_code"] == 1
+        assert "rejected" in resp["stderr"]
+
+    def test_rejects_tags_flag(self, proxy, sock_path):
+        resp = _send_request(sock_path, {"args": ["origin", "--tags"]})
+        assert resp["exit_code"] == 1
+        assert "rejected" in resp["stderr"]
+
+    @patch("subprocess.run")
+    def test_rejects_undetermined_branch(self, mock_run, proxy, sock_path):
+        """When target branch can't be determined, push is rejected (fail-closed)."""
+        mock_run.return_value = MagicMock(returncode=1, stdout="")
+        resp = _send_request(sock_path, {"args": []})
+        assert resp["exit_code"] == 1
+        assert "could not determine" in resp["stderr"]
+
     @patch("subprocess.run")
     def test_passes_flags_through(self, mock_run, proxy, sock_path):
         mock_run.return_value = MagicMock(

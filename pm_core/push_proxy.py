@@ -135,10 +135,25 @@ class PushProxy:
 
     def _execute_push(self, push_args: list[str]) -> dict:
         """Validate the branch and execute git push on the host."""
+        # Reject broad-push flags that bypass branch restrictions
+        broad_flags = {"--all", "--mirror", "--tags"}
+        for arg in push_args:
+            if arg in broad_flags:
+                msg = (f"push-proxy: rejected — '{arg}' is not allowed, "
+                       f"only single-branch push to '{self.allowed_branch}'\n")
+                _log.warning("Push rejected: broad flag %s", arg)
+                return {"exit_code": 1, "stdout": "", "stderr": msg}
+
         # Determine the target branch from the push args
         target_branch = self._extract_target_branch(push_args)
 
-        if target_branch and target_branch != self.allowed_branch:
+        if target_branch is None:
+            msg = ("push-proxy: rejected — could not determine target branch "
+                   f"(only '{self.allowed_branch}' is allowed)\n")
+            _log.warning("Push rejected: could not determine target branch")
+            return {"exit_code": 1, "stdout": "", "stderr": msg}
+
+        if target_branch != self.allowed_branch:
             msg = (f"push-proxy: rejected — pushing to '{target_branch}' "
                    f"is not allowed, only '{self.allowed_branch}'\n")
             _log.warning("Push rejected: target=%s allowed=%s",
@@ -179,9 +194,8 @@ class PushProxy:
                 continue
             if arg.startswith("-"):
                 # Flags that consume the next arg
-                if arg in ("-u", "--set-upstream", "--repo",
-                           "--push-option", "-o", "--receive-pack",
-                           "--exec"):
+                if arg in ("--repo", "--push-option", "-o",
+                           "--receive-pack", "--exec"):
                     skip_next = True
                 continue
             positional.append(arg)
