@@ -829,19 +829,6 @@ def run_qa_sync(
         if on_update:
             on_update(state)
 
-    # --- Scenario 0: Interactive session (launch early, before planner) ---
-    repo_root_early = Path(workdir_path) if workdir_path and Path(workdir_path).is_dir() else None
-    if not state.scenario_0:
-        state.scenario_0 = _launch_scenario_0(
-            state, data, pr_data, session, repo_root_early, workdir_path,
-        )
-        if state.scenario_0:
-            state.latest_output = "Scenario 0 (interactive) ready"
-            _notify()
-            # Write initial status with just Scenario 0
-            _write_status_file(status_path, state.pr_id, state.scenarios,
-                               state.scenario_verdicts, scenario_0=state.scenario_0)
-
     # --- Phase 1: Planning (if no scenarios pre-loaded) ---
     if state.planning_phase and not state.scenarios:
         _log.info("QA planning phase for %s", state.pr_id)
@@ -863,6 +850,22 @@ def run_qa_sync(
                 session, existing_win["id"],
             )
             _cleanup_stale_scenario_windows(session, pr_data)
+
+        # Launch Scenario 0 (interactive) right after stale cleanup so
+        # the user can start exploring while the planner runs.
+        repo_root_early = (Path(workdir_path)
+                           if workdir_path and Path(workdir_path).is_dir()
+                           else None)
+        if not state.scenario_0:
+            state.scenario_0 = _launch_scenario_0(
+                state, data, pr_data, session, repo_root_early, workdir_path,
+            )
+            if state.scenario_0:
+                state.latest_output = "Scenario 0 (interactive) ready"
+                _notify()
+                _write_status_file(status_path, state.pr_id, state.scenarios,
+                                   state.scenario_verdicts,
+                                   scenario_0=state.scenario_0)
 
         # Create QA window with planner pane (switch=False; we handle
         # session switching explicitly below to preserve focus)
@@ -1062,10 +1065,14 @@ def run_qa_sync(
     _merge_scenario_commits(state, repo_root, pr_data)
 
     # --- Worktree cleanup ---
-    # Clean up worktrees for numbered scenarios and Scenario 0.
-    # Windows are kept alive so users can still inspect output.
+    # Clean up worktrees for numbered scenarios.  Skip Scenario 0 when
+    # its container is still alive — the container mounts the worktree
+    # at /workspace and removing it would break the interactive session.
     all_cleanup = list(state.scenarios)
-    if state.scenario_0:
+    s0_container_alive = (state.scenario_0
+                          and state.scenario_0.container_name
+                          and use_containers)
+    if state.scenario_0 and not s0_container_alive:
         all_cleanup.append(state.scenario_0)
     if repo_root:
         for scenario in all_cleanup:
