@@ -3,11 +3,11 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-cf41efc
+  active_pr: pr-4585fd3
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
-  hide_merged: true
+  hide_merged: false
 plans:
 - id: plan-001
   name: Import from existing repo
@@ -3313,7 +3313,7 @@ prs:
   branch: pm/pr-76fa48d-auto-retry-claude-sessions-on-500-and-usage-limit
   status: pending
   depends_on: []
-  description: Detect when a Claude session hits a 500 server error or a usage/rate
+  description: 'Detect when a Claude session hits a 500 server error or a usage/rate
     limit error by monitoring the session output. For usage limit errors, parse the
     retry-after time from the error message and wait until that time before retrying
     the last message. For 500 errors, wait a configurable duration (set in pm settings,
@@ -3321,6 +3321,13 @@ prs:
     Claude sessions (workers, reviewers, QA, etc.) by hooking into the pane output
     monitoring. Include a retry count limit to avoid infinite loops on persistent
     failures. Log retries so the user can see what happened.
+
+    Additionally, detect stalled sessions where the Claude progress indicator (spinner)
+    is active but no tokens are being generated and no tools are being run. This manifests
+    as the session appearing busy but making no progress. When a stall is detected
+    (e.g. no new output for a configurable timeout while the spinner is still visible),
+    interrupt the session and redeliver the same message to unstick it. Apply the
+    same retry count limit to avoid infinite interrupt loops.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
@@ -3452,7 +3459,7 @@ prs:
   plan: plan-qa
   title: Add interactive Scenario 0 and fix QA scenario window bugs
   branch: pm/pr-cf41efc-add-interactive-scenario-0-and-fix-qa-scenario-win
-  status: in_review
+  status: merged
   depends_on:
   - pr-d568b98
   description: 'Add a \"Scenario 0\" interactive session that launches automatically
@@ -3481,11 +3488,20 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/123
   gh_pr_number: 123
   created_at: '2026-03-06T03:29:15.231662+00:00'
-  updated_at: '2026-03-06T13:46:55.471262+00:00'
+  updated_at: '2026-03-06T19:12:33.306058+00:00'
   started_at: '2026-03-06T03:32:30.448858+00:00'
   reviewed_at: '2026-03-06T13:17:11.981428+00:00'
-  merged_at: null
-  notes: []
+  merged_at: '2026-03-06T19:12:33.306058+00:00'
+  notes:
+  - id: note-c782e3d
+    text: 'QA PASS: Scenario 0 launches before planner completes: PASS; Scenario 0
+      persists through QA completion: PASS; Scenario windows remain open after verdict:
+      PASS; Switching to scenario windows from the scenarios pane: PASS; Progress
+      counter excludes Scenario 0: PASS; build_exec_cmd exit suffix prevents zombie
+      panes: PASS; Scenario 0 worktree and container setup: PASS; Stale cleanup does
+      not kill Scenario 0: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-cf41efc-e96db74b5b40a89f)'
+    created_at: '2026-03-06T15:33:46Z'
+    last_edited: '2026-03-06T15:33:46Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-cf41efc-add-interactive-scenario-0-and-fix-q-f6489c6f
 - id: pr-27ce8ab
   plan: bugs
@@ -3525,7 +3541,7 @@ prs:
   plan: plan-qa
   title: Enable git push from inside containers scoped to PR branch
   branch: pm/pr-5e96046-enable-git-push-from-inside-containers-scoped-to-p
-  status: in_progress
+  status: in_review
   depends_on:
   - pr-d568b98
   description: 'Containers currently have the repo mounted at /workspace but no credentials
@@ -3562,9 +3578,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/124
   gh_pr_number: 124
   created_at: '2026-03-06T13:58:48.301968+00:00'
-  updated_at: '2026-03-06T14:03:17.555901+00:00'
+  updated_at: '2026-03-06T14:29:39.806996+00:00'
   started_at: '2026-03-06T14:03:17.555901+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-03-06T14:29:39.806996+00:00'
   merged_at: null
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-5e96046-enable-git-push-from-inside-containe-f6489c6f
@@ -3623,6 +3639,153 @@ prs:
   gh_pr_number: null
   created_at: '2026-03-06T14:02:50.658436+00:00'
   updated_at: '2026-03-06T14:02:50.658436+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-8fdda09
+  plan: plan-qa
+  title: Add QA scenario verification step before final verdict
+  branch: pm/pr-8fdda09-add-qa-scenario-verification-step-before-final-ver
+  status: pending
+  depends_on:
+  - pr-ee1ff04
+  description: 'After all QA scenarios complete and verdicts are collected, add a
+    verification step before producing the final overall verdict. A Claude session
+    reviews the scenario results and checks:
+
+
+    1. **All scenarios were properly evaluated** — no scenarios that silently failed,
+    timed out, or produced empty/malformed verdicts
+
+    2. **Verdicts are consistent with scenario output** — a scenario claiming PASS
+    actually tested what it was supposed to test, not just exiting cleanly without
+    doing work
+
+    3. **No scenarios were skipped or lost** — the number of completed scenarios matches
+    the number planned
+
+
+    If issues are found:
+
+    - Attempt to restart failed/incomplete scenarios and re-collect their verdicts
+
+    - If a scenario consistently fails to produce a valid verdict after retry, mark
+    it as NEEDS_WORK with an explanation
+
+    - Only produce the final overall verdict after all scenarios have been genuinely
+    evaluated
+
+
+    This prevents false PASS results from scenarios that crashed, hit errors, or ran
+    but didn''t actually exercise the test cases they were supposed to.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-06T15:48:13.072900+00:00'
+  updated_at: '2026-03-06T15:48:13.072900+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-942aa21
+  plan: plan-qa
+  title: Add spec generation step between PR phases
+  branch: pm/pr-942aa21-add-spec-generation-step-between-pr-phases
+  status: pending
+  depends_on: []
+  description: "Add an optional \"spec\" step to the PR lifecycle that bridges the\
+    \ gap between the user's natural-language description and each subsequent phase\
+    \ (implementation, review, QA). The spec is produced by an agent that reads the\
+    \ PR description, the relevant codebase, and any prior phase outputs, then restates\
+    \ the requirements in terms grounded in the actual code.\n\nThe spec surfaces\
+    \ implicit requirements that the description assumes but doesn't state. For example,\
+    \ \"scenario windows should stay open after verdict\" implies the container, worktree,\
+    \ and process backing the window must also be preserved — but the description\
+    \ only mentions windows. The spec step would identify these dependencies and make\
+    \ them explicit.\n\nPer-phase specs:\n\nEach phase gets its own spec field on\
+    \ the PR yaml:\n\n- spec_impl — What to implement, stated in terms of specific\
+    \ code changes, functions to modify, invariants to maintain\n- spec_review — What\
+    \ to verify during review, grounded in the implementation that was produced and\
+    \ the original intent\n- spec_qa — What to test and how, grounded in the actual\
+    \ implementation and the system's runtime behavior\n\nEach phase's spec builds\
+    \ on the previous — the review spec references the implementation, the QA spec\
+    \ references both.\n\nSpec generation modes:\n\nA global setting controls how\
+    \ spec review works, with a per-PR override. Three modes:\n\n1. auto — Claude\
+    \ generates the spec and uses best judgment to resolve ambiguities. No user review.\
+    \ The phase proceeds immediately. This is effectively the current behavior — no\
+    \ change to workflow.\n2. review — Claude generates the spec and pauses for explicit\
+    \ user review and approval before the phase begins. The user can refine, correct,\
+    \ or expand.\n3. prompt (default) — The spec is generated and the phase proceeds\
+    \ without pausing, UNLESS:\n  - The user set review_spec: true on the PR at creation\
+    \ time, OR\n  - Claude determined during spec generation that it cannot confidently\
+    \ resolve an ambiguity and needs user input.\n\n  In either case, behavior matches\
+    \ review mode.\n\nWhat the spec should contain:\n\n- Restatement of requirements\
+    \ grounded in the codebase (referencing actual code paths, not abstract descriptions)\n\
+    - Implicit requirements inferred from stated ones — what must also be true for\
+    \ each requirement to hold\n- Ambiguities identified, with Claude's proposed resolution\
+    \ (in auto/prompt mode) or flagged for user input (in review mode)\n- Edge cases\
+    \ or interactions with existing behavior that the description doesn't address\n\
+    \nWhat the spec enables:\n\n- Downstream agents work from explicit specs rather\
+    \ than interpreting raw descriptions, reducing judgment calls and making weaker\
+    \ models viable for later phases\n- The user catches misunderstandings before\
+    \ code is written (or reviewed, or tested)\n- Ambiguities are resolved once per\
+    \ phase rather than rediscovered by each agent"
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-06T19:02:04.662125+00:00'
+  updated_at: '2026-03-06T19:02:04.662125+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-4585fd3
+  plan: improvements
+  title: Use resolved display IDs instead of raw PR IDs in all output
+  branch: pm/pr-4585fd3-use-resolved-display-ids-instead-of-raw-pr-ids-in-
+  status: pending
+  depends_on: []
+  description: 'Replace direct usage of raw PR IDs (pr-XXXX) in all output strings
+    with a resolver that provides appropriate formatting depending on context.
+
+
+    ## Two resolution modes
+
+
+    1. **User-facing** (`click.echo`, `app.log_message`, TUI display) — resolve to
+    the GitHub PR number if available (e.g. `#123`), otherwise fall back to the raw
+    ID. This is what `_pr_display_id` already does.
+
+
+    2. **Logging** (`_log.info`, `_log.warning`, etc.) — resolve to a string that
+    includes both IDs for debuggability (e.g. `#123 (pr-cf41efc)` or just `pr-cf41efc`
+    if no GitHub PR exists).
+
+
+    ## Implementation
+
+
+    - Add a resolver function that takes a `pr_id` string and project data (or a PR
+    dict) and returns the appropriate display string for each mode
+
+    - Provide a convenience variant that can look up the PR from just the ID + data
+    dict, so callers that only have `pr_id: str` don''t need to fetch the PR dict
+    themselves
+
+    - Replace all user-facing `pr_id` references in `click.echo` and `app.log_message`
+    calls across `cli/pr.py`, `tui/pr_view.py`, `tui/auto_start.py`, `tui/sync.py`,
+    `cli/qa.py`, `cli/plan.py`, etc.
+
+    - Replace all `_log.*` references that include PR IDs to use the dual-ID log format
+
+    - Keep the raw `pr_id` for internal logic (dict lookups, branch names, container
+    names, etc.) — only change how it''s displayed to users and logs'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-06T19:18:33.834241+00:00'
+  updated_at: '2026-03-06T19:18:33.834241+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
