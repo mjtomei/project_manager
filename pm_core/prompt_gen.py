@@ -827,6 +827,25 @@ def generate_qa_interactive_prompt(data: dict, pr_id: str,
 
     tui_block = tui_section(session_name) if session_name else ""
 
+    # Get instruction library summary for Scenario 0
+    instruction_library_block = ""
+    try:
+        root = store.find_project_root()
+        from pm_core import qa_instructions
+        library_summary = qa_instructions.instruction_summary_for_prompt(root)
+        if library_summary and "No QA instructions" not in library_summary:
+            instruction_library_block = f"""
+## QA Instruction Library
+
+The project has user-defined QA instructions and regression tests that the
+automated scenarios may be running.  You can read any of these files to
+understand what's being tested:
+
+{library_summary}
+"""
+    except (FileNotFoundError, Exception):
+        pass
+
     prompt = f"""You are an interactive QA session (Scenario 0) for PR {pr_id}: "{title}"
 
 ## Context
@@ -836,17 +855,35 @@ def generate_qa_interactive_prompt(data: dict, pr_id: str,
 - **Base branch**: {base_branch}
 {workdir_block}
 {pr_notes_block}
+## How QA Works
+
+You are Scenario 0 — an interactive session that runs alongside automated QA
+scenarios.  Here's how the overall QA process works:
+
+1. A **QA planner** analyzed the PR and generated test scenarios based on the
+   PR's changes and the project's QA instruction library
+2. Each scenario runs in its **own isolated worktree** (parallel sessions in
+   other tmux windows), with a specific focus area and test steps
+3. Automated scenarios produce a **verdict** (PASS / NEEDS_WORK / INPUT_REQUIRED)
+   when they finish — these are collected by the orchestrator
+4. If a scenario finds issues and fixes them, its commits are **cherry-picked
+   back** to the PR branch automatically
+5. The overall QA result is aggregated from all scenario verdicts
+
+You can see the other scenario windows in tmux (they're named qa-*-s1, qa-*-s2,
+etc.).
+{instruction_library_block}
 ## Your Role
 
 This is an interactive session — you work with the user to manually test and
-explore the PR's changes.  Automated scenarios are running in parallel in
-other windows.
+explore the PR's changes.
 
 Help the user with whatever they need:
 - Inspect code changes (`git diff {base_branch}...HEAD`)
 - Run tests, build the project, try out features
 - Debug issues found by automated scenarios
 - Write and run ad-hoc test scripts in the scratch dir
+- Read QA instruction files to understand what automated scenarios are testing
 
 You do NOT need to produce a verdict.  This session stays open until QA
 completes — take your time and be thorough.
@@ -937,6 +974,18 @@ job is to verify runtime behavior, not review code.
 - **Base branch**: {base_branch}
 {workdir_block}
 {pr_notes_block}
+## How This Works
+
+You are one of several QA scenarios running in parallel, each in its own
+isolated worktree.  An orchestrator is monitoring your tmux pane for your
+final verdict.
+
+- When you output a verdict (PASS / NEEDS_WORK / INPUT_REQUIRED), the
+  orchestrator records it and moves on
+- If you commit fixes (with `qa: ` prefix), they will be **cherry-picked
+  back** to the PR branch automatically after all scenarios complete
+- Your verdict determines whether the PR passes QA — be thorough but fair
+
 ## Scenario
 
 **Focus**: {scenario.focus}
