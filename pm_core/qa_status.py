@@ -121,8 +121,9 @@ def _render(status: dict | None, selected: int, rows: int, cols: int) -> str:
         color = _VERDICT_COLORS.get(overall, "")
         lines.append(f"  Overall: {color}{_BOLD}{overall}{_RESET}")
     else:
-        done = sum(1 for s in scenarios if s.get("verdict"))
-        total = len(scenarios)
+        done = sum(1 for s in scenarios
+                   if s.get("verdict") and s.get("verdict") != "interactive")
+        total = sum(1 for s in scenarios if s.get("verdict") != "interactive")
         lines.append(f"  {_DIM}Progress: {done}/{total} scenarios complete{_RESET}")
 
     lines.append("")

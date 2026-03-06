@@ -306,7 +306,7 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True) -> str:
     escaped = shlex.quote(shell_cmd)
     exec_part = f"docker exec -it -u {_CONTAINER_USER} {shlex.quote(name)} bash -c {escaped}"
     if cleanup:
-        return f"{exec_part}; docker rm -f {shlex.quote(name)} >/dev/null 2>&1"
+        return f"{exec_part}; docker rm -f {shlex.quote(name)} >/dev/null 2>&1; exit"
     return exec_part
 
 
