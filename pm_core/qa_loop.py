@@ -1064,20 +1064,12 @@ def run_qa_sync(
     _merge_scenario_commits(state, repo_root, pr_data)
 
     # --- Worktree cleanup ---
-    # When containers are in use, skip worktree cleanup — the containers
-    # mount the worktrees and removing them would break still-open
-    # scenario windows.  Worktrees are cleaned up at the start of the
-    # next QA run (alongside orphaned containers).
-    if not use_containers:
-        all_cleanup = list(state.scenarios)
-        if state.scenario_0:
-            all_cleanup.append(state.scenario_0)
-        if repo_root:
-            for scenario in all_cleanup:
-                if scenario.worktree_path:
-                    git_ops.remove_worktree(repo_root, Path(scenario.worktree_path))
-                if scenario.worktree_branch:
-                    git_ops.delete_branch(repo_root, scenario.worktree_branch)
+    # Skip worktree cleanup — scenario windows stay open so users can
+    # inspect results, and removing worktrees would break their cwd.
+    # Worktrees are cleaned up at the start of the next QA run by
+    # create_scenario_workdir (which prunes stale worktrees before
+    # re-creating) and _cleanup_stale_scenario_windows (which kills
+    # old windows).
 
     # --- Aggregate verdicts ---
     verdicts = list(state.scenario_verdicts.values())
