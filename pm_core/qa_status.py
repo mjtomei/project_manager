@@ -41,6 +41,7 @@ _VERDICT_COLORS = {
     "PASS": _GREEN,
     "NEEDS_WORK": _YELLOW,
     "INPUT_REQUIRED": _RED,
+    "interactive": _DIM,
 }
 
 _REFRESH_INTERVAL = 2.0  # seconds
@@ -136,11 +137,35 @@ def _render(status: dict | None, selected: int, rows: int, cols: int) -> str:
     return _CLEAR_SCREEN + "\n".join(padded)
 
 
-def _switch_to_window(session: str, window_name: str) -> None:
-    """Switch tmux to the given window."""
+def _current_or_base_session(base: str) -> str:
+    """Return the current pane's session if it shares the same base, else *base*.
+
+    Mirrors tmux.current_or_base_session logic so grouped sessions target
+    the caller's own session (not the base session).
+    """
     try:
+        result = subprocess.run(
+            ["tmux", "display-message", "-p", "#{session_name}"],
+            capture_output=True, text=True,
+        )
+        current = result.stdout.strip()
+        if current and (current == base or current.startswith(base + "~")):
+            return current
+    except Exception:
+        pass
+    return base
+
+
+def _switch_to_window(session: str, window_name: str) -> None:
+    """Switch tmux to the given window.
+
+    Uses the caller's grouped session (not the base session) so only the
+    current terminal switches windows.
+    """
+    try:
+        target = _current_or_base_session(session)
         subprocess.run(
-            ["tmux", "select-window", "-t", f"{session}:{window_name}"],
+            ["tmux", "select-window", "-t", f"{target}:{window_name}"],
             capture_output=True,
         )
     except Exception:

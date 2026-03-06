@@ -107,6 +107,8 @@ class QALoopState:
     made_changes: bool = False
     qa_workdir: str | None = None
     pre_qa_head: str | None = None
+    # Scenario 0 (interactive) — tracked separately, never polled for verdicts
+    scenario_0: QAScenario | None = None
     # Set by qa_loop_ui after the completion callback has run once
     _ui_complete_notified: bool = False
 
@@ -213,7 +215,7 @@ def _compute_qa_window_name(pr_data: dict) -> str:
 def _scenario_window_name(pr_data: dict, scenario_index: int) -> str:
     """Compute the tmux window name for a single scenario.
 
-    Returns e.g. ``qa-#116-s3``.
+    Returns e.g. ``qa-#116-s3`` (or ``qa-#116-s0`` for the interactive session).
     """
     from pm_core.cli.helpers import _pr_display_id
     display_id = _pr_display_id(pr_data)
@@ -259,19 +261,29 @@ def _cleanup_stale_scenario_windows(session: str, pr_data: dict,
 def _write_status_file(status_path: Path, pr_id: str,
                        scenarios: list[QAScenario],
                        scenario_verdicts: dict[int, str],
-                       overall: str = "") -> None:
+                       overall: str = "",
+                       scenario_0: QAScenario | None = None) -> None:
     """Atomically write the qa_status.json file."""
+    all_scenarios = []
+    if scenario_0 and scenario_0.window_name:
+        all_scenarios.append({
+            "index": 0,
+            "title": scenario_0.title,
+            "verdict": "interactive",
+            "window_name": scenario_0.window_name or "",
+        })
+    all_scenarios.extend([
+        {
+            "index": s.index,
+            "title": s.title,
+            "verdict": scenario_verdicts.get(s.index, ""),
+            "window_name": s.window_name or "",
+        }
+        for s in scenarios
+    ])
     data = {
         "pr_id": pr_id,
-        "scenarios": [
-            {
-                "index": s.index,
-                "title": s.title,
-                "verdict": scenario_verdicts.get(s.index, ""),
-                "window_name": s.window_name or "",
-            }
-            for s in scenarios
-        ],
+        "scenarios": all_scenarios,
         "overall": overall,
     }
     tmp_path = status_path.with_suffix(".tmp")
@@ -411,6 +423,113 @@ def _merge_scenario_commits(state: QALoopState, repo_root: Path | None,
             git_ops.run_git("push", "origin", branch,
                             cwd=repo_root, check=False)
             _log.info("Pushed merged QA commits to %s", branch)
+
+
+# ---------------------------------------------------------------------------
+# Scenario 0 — interactive session
+# ---------------------------------------------------------------------------
+
+def _launch_scenario_0(
+    state: QALoopState,
+    data: dict,
+    pr_data: dict,
+    session: str,
+    repo_root: Path | None,
+    workdir_path: str,
+) -> QAScenario | None:
+    """Launch Scenario 0: a persistent interactive Claude session.
+
+    Returns the QAScenario object (not added to state.scenarios — it is
+    tracked separately so it is never polled for verdicts).
+    """
+    from pm_core import tmux as tmux_mod, prompt_gen
+    from pm_core.claude_launcher import build_claude_shell_cmd
+    from pm_core.container import is_container_mode_enabled, _docker_available
+    from pm_core import container as container_mod
+
+    scenario = QAScenario(
+        index=0,
+        title="Interactive Session",
+        focus="Manual testing and exploration",
+    )
+
+    try:
+        wt_path, wt_branch, scratch_path, venv_path = create_scenario_workdir(
+            Path(state.qa_workdir), 0,
+            repo_root=repo_root,
+            pr_id=state.pr_id,
+            loop_id=state.loop_id,
+        )
+    except Exception:
+        _log.warning("Failed to create workdir for Scenario 0, skipping")
+        return None
+
+    scenario.worktree_path = str(wt_path)
+    scenario.worktree_branch = wt_branch
+
+    if wt_branch:
+        _setup_worktree_override(wt_path)
+
+    use_containers = is_container_mode_enabled() and _docker_available()
+
+    if use_containers:
+        container_workdir = container_mod._CONTAINER_WORKDIR
+        container_scratch = container_mod._CONTAINER_SCRATCH
+        child_prompt = prompt_gen.generate_qa_interactive_prompt(
+            data, state.pr_id,
+            workdir=container_workdir,
+            session_name=None,
+            worktree_mode=bool(wt_branch),
+            scratch_dir=container_scratch,
+        )
+    else:
+        child_prompt = prompt_gen.generate_qa_interactive_prompt(
+            data, state.pr_id,
+            workdir=str(wt_path),
+            session_name=session,
+            worktree_mode=bool(wt_branch),
+            scratch_dir=str(scratch_path),
+        )
+
+    claude_cmd = build_claude_shell_cmd(prompt=child_prompt)
+
+    if use_containers:
+        cname = container_mod.qa_container_name(
+            state.pr_id, state.loop_id, 0,
+        )
+        try:
+            config = container_mod.load_container_config()
+            container_mod.create_qa_container(
+                name=cname,
+                config=config,
+                repo_root=repo_root or Path(workdir_path),
+                worktree_path=wt_path,
+                scratch_path=scratch_path,
+            )
+            scenario.container_name = cname
+        except Exception:
+            _log.warning("Failed to create container for Scenario 0")
+            return None
+        exec_cmd = container_mod.build_exec_cmd(cname, claude_cmd, cleanup=False)
+        final_cmd = exec_cmd
+        scenario_cwd = workdir_path
+    else:
+        if venv_path:
+            claude_cmd = f"VIRTUAL_ENV={venv_path} PATH={venv_path}/bin:$PATH {claude_cmd}"
+        final_cmd = claude_cmd
+        scenario_cwd = str(wt_path) if wt_branch else workdir_path
+
+    win_name = _scenario_window_name(pr_data, 0)
+    try:
+        tmux_mod.new_window(session, win_name, final_cmd,
+                            cwd=scenario_cwd, switch=False)
+        scenario.window_name = win_name
+    except Exception:
+        _log.warning("Failed to create window for Scenario 0")
+        return None
+
+    _log.info("Launched Scenario 0 (interactive) in window %s", win_name)
+    return scenario
 
 
 # ---------------------------------------------------------------------------
@@ -602,7 +721,8 @@ def _poll_tmux_verdicts(
             has_failed_creation = True
     if has_failed_creation:
         _write_status_file(status_path, state.pr_id, state.scenarios,
-                           state.scenario_verdicts)
+                           state.scenario_verdicts,
+                           scenario_0=state.scenario_0)
 
     grace_start = time.monotonic()
 
@@ -652,7 +772,8 @@ def _poll_tmux_verdicts(
 
         if verdicts_changed:
             _write_status_file(status_path, state.pr_id, state.scenarios,
-                               state.scenario_verdicts)
+                               state.scenario_verdicts,
+                               scenario_0=state.scenario_0)
 
 
 
@@ -707,6 +828,19 @@ def run_qa_sync(
     def _notify():
         if on_update:
             on_update(state)
+
+    # --- Scenario 0: Interactive session (launch early, before planner) ---
+    repo_root_early = Path(workdir_path) if workdir_path and Path(workdir_path).is_dir() else None
+    if not state.scenario_0:
+        state.scenario_0 = _launch_scenario_0(
+            state, data, pr_data, session, repo_root_early, workdir_path,
+        )
+        if state.scenario_0:
+            state.latest_output = "Scenario 0 (interactive) ready"
+            _notify()
+            # Write initial status with just Scenario 0
+            _write_status_file(status_path, state.pr_id, state.scenarios,
+                               state.scenario_verdicts, scenario_0=state.scenario_0)
 
     # --- Phase 1: Planning (if no scenarios pre-loaded) ---
     if state.planning_phase and not state.scenarios:
@@ -900,7 +1034,8 @@ def run_qa_sync(
 
     # Write initial status file
     _write_status_file(status_path, state.pr_id, state.scenarios,
-                       state.scenario_verdicts)
+                       state.scenario_verdicts,
+                       scenario_0=state.scenario_0)
 
     state.latest_output = f"Running {len(state.scenarios)} scenario(s)..."
     _notify()
@@ -909,11 +1044,10 @@ def run_qa_sync(
     _poll_tmux_verdicts(state, session, status_path, _notify)
 
     # --- Cleanup ---
-    # Kill ALL windows matching the qa-{display_id}-s* pattern (not just
-    # known scenarios) to catch stale duplicates from previous runs.
-    # Keep the main QA window alive so its status pane can display the
-    # aggregated verdict and the user can focus it with 't'.
-    _cleanup_stale_scenario_windows(session, pr_data, include_main=False)
+    # Keep scenario windows alive so users can inspect results, review
+    # logs, and debug issues after the verdict.  Only containers are
+    # cleaned up (they run in the background; the tmux windows showing
+    # `docker exec` will exit naturally when the container stops).
     if use_containers:
         from pm_core import container as container_mod
         container_mod.cleanup_qa_containers(state.pr_id, state.loop_id)
@@ -922,8 +1056,13 @@ def run_qa_sync(
     _merge_scenario_commits(state, repo_root, pr_data)
 
     # --- Worktree cleanup ---
+    # Clean up worktrees for numbered scenarios and Scenario 0.
+    # Windows are kept alive so users can still inspect output.
+    all_cleanup = list(state.scenarios)
+    if state.scenario_0:
+        all_cleanup.append(state.scenario_0)
     if repo_root:
-        for scenario in state.scenarios:
+        for scenario in all_cleanup:
             if scenario.worktree_path:
                 git_ops.remove_worktree(repo_root, Path(scenario.worktree_path))
             if scenario.worktree_branch:
@@ -953,7 +1092,8 @@ def run_qa_sync(
 
     # Write final status file with overall verdict
     _write_status_file(status_path, state.pr_id, state.scenarios,
-                       state.scenario_verdicts, overall=state.latest_verdict)
+                       state.scenario_verdicts, overall=state.latest_verdict,
+                       scenario_0=state.scenario_0)
 
     state.running = False
     summary_parts = []
