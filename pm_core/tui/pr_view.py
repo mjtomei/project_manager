@@ -417,6 +417,8 @@ def handle_command_submitted(app, cmd: str) -> None:
                     app.log_message(f"PR not found: {qa_pr_id}")
             else:
                 app.log_message("No project root")
+        # QA is handled directly (not via run_command), so clear the guard
+        app._inflight_pr_action = None
         if app._plans_visible:
             app.query_one("#plans-pane", PlansPane).focus()
         else:
