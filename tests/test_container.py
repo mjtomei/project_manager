@@ -14,11 +14,14 @@ from pm_core.container import (
     create_container,
     create_qa_container,
     build_exec_cmd,
+    build_image,
+    image_exists,
     remove_container,
     cleanup_qa_containers,
     cleanup_all_containers,
     wrap_claude_cmd,
     _docker_available,
+    _get_dockerfile_path,
     _make_container_name,
     _resolve_claude_binary,
     DEFAULT_IMAGE,
@@ -30,6 +33,49 @@ from pm_core.container import (
     _CONTAINER_USER,
     _CONTAINER_HOME,
 )
+
+
+class TestDefaultImage:
+    def test_default_is_pm_dev(self):
+        assert DEFAULT_IMAGE == "pm-dev:latest"
+
+    def test_dockerfile_exists(self):
+        assert _get_dockerfile_path().exists()
+
+
+class TestBuildImage:
+    @patch("subprocess.run")
+    def test_builds_with_tag(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0)
+        build_image(tag="pm-dev:test", quiet=True)
+        args = mock_run.call_args[0][0]
+        assert args[0] == "docker"
+        assert args[1] == "build"
+        assert "-t" in args
+        assert "pm-dev:test" in args
+
+    @patch("subprocess.run")
+    def test_raises_on_failure(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=1, stderr="fail")
+        with pytest.raises(RuntimeError, match="Image build failed"):
+            build_image(quiet=True)
+
+
+class TestImageExists:
+    @patch("subprocess.run")
+    def test_exists(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0)
+        assert image_exists("pm-dev:latest") is True
+
+    @patch("subprocess.run")
+    def test_not_exists(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=1)
+        assert image_exists("pm-dev:latest") is False
+
+    @patch("subprocess.run")
+    def test_docker_not_installed(self, mock_run):
+        mock_run.side_effect = FileNotFoundError
+        assert image_exists("pm-dev:latest") is False
 
 
 class TestContainerConfig:
@@ -258,6 +304,48 @@ class TestCreateContainer:
 
         args_str = " ".join(mock_docker.call_args[0])
         assert f"{fake_bin}:/usr/local/bin/claude:ro" in args_str
+
+    @patch("pm_core.container.build_image")
+    @patch("pm_core.container.image_exists", return_value=False)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_docker")
+    def test_auto_builds_default_image(self, mock_docker, mock_rm, mock_exists, mock_build):
+        """Default image is auto-built if it doesn't exist locally."""
+        mock_docker.return_value = MagicMock(stdout="id\n")
+        config = ContainerConfig()  # uses DEFAULT_IMAGE
+
+        with patch.object(Path, "is_dir", return_value=False):
+            create_container(name="test", config=config, workdir=Path("/w"))
+
+        mock_build.assert_called_once_with(tag=DEFAULT_IMAGE, quiet=True)
+
+    @patch("pm_core.container.build_image")
+    @patch("pm_core.container.image_exists", return_value=True)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_docker")
+    def test_skips_build_if_image_exists(self, mock_docker, mock_rm, mock_exists, mock_build):
+        """Skips auto-build when the default image already exists."""
+        mock_docker.return_value = MagicMock(stdout="id\n")
+        config = ContainerConfig()
+
+        with patch.object(Path, "is_dir", return_value=False):
+            create_container(name="test", config=config, workdir=Path("/w"))
+
+        mock_build.assert_not_called()
+
+    @patch("pm_core.container.image_exists", return_value=True)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_docker")
+    def test_no_auto_build_for_custom_image(self, mock_docker, mock_rm, mock_exists):
+        """Custom images are not auto-built."""
+        mock_docker.return_value = MagicMock(stdout="id\n")
+        config = ContainerConfig(image="custom:v1")
+
+        with patch.object(Path, "is_dir", return_value=False):
+            create_container(name="test", config=config, workdir=Path("/w"))
+
+        # image_exists should not be called for non-default images
+        mock_exists.assert_not_called()
 
     @patch("pm_core.container._resolve_claude_binary", return_value=None)
     @patch("pm_core.container.remove_container")

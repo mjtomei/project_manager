@@ -1,0 +1,4 @@
+# Only send the Dockerfile itself as build context.
+# Nothing else is needed since we don't COPY any repo files.
+*
+!Dockerfile

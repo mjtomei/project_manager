@@ -80,6 +80,27 @@ def container_set(key: str, value: str):
     click.echo(f"Set {key} = {value}")
 
 
+@container_group.command("build-image")
+@click.option("--tag", default=None, help="Image tag (default: pm-dev:latest)")
+def container_build_image(tag: str | None):
+    """Build the pm developer base image with pre-installed tools.
+
+    The image includes git, python3, pip, node/npm, curl, jq, and
+    build-essential. Building it once avoids installing these tools on
+    every container start.
+    """
+    from pm_core.container import build_image, DEFAULT_IMAGE
+
+    tag = tag or DEFAULT_IMAGE
+    click.echo(f"Building image {tag}...")
+    try:
+        build_image(tag=tag)
+        click.echo(f"Image {tag} built successfully.")
+    except Exception as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1)
+
+
 @container_group.command("cleanup")
 @click.option("--pr", "pr_id", default=None, help="Filter by PR ID")
 def container_cleanup(pr_id: str | None):
