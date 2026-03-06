@@ -12,9 +12,9 @@ from pm_core.tui.tree_layout import compute_tree_layout, SORT_FIELDS, SORT_FIELD
 
 STATUS_ICONS = {
     "pending": "○",
-    "in_progress": "●",
-    "in_review": "◎",
-    "qa": "◉",
+    "in_progress": "◎",
+    "in_review": "◉",
+    "qa": "●",
     "merged": "✓",
     "closed": "✗",
     "blocked": "✗",
