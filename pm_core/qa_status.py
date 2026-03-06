@@ -138,25 +138,6 @@ def _render(status: dict | None, selected: int, rows: int, cols: int) -> str:
     return _CLEAR_SCREEN + "\n".join(padded)
 
 
-def _current_or_base_session(base: str) -> str:
-    """Return the current pane's session if it shares the same base, else *base*.
-
-    Mirrors tmux.current_or_base_session logic so grouped sessions target
-    the caller's own session (not the base session).
-    """
-    try:
-        result = subprocess.run(
-            ["tmux", "display-message", "-p", "#{session_name}"],
-            capture_output=True, text=True,
-        )
-        current = result.stdout.strip()
-        if current and (current == base or current.startswith(base + "~")):
-            return current
-    except Exception:
-        pass
-    return base
-
-
 def _switch_to_window(session: str, window_name: str) -> None:
     """Switch tmux to the given window.
 
@@ -164,7 +145,8 @@ def _switch_to_window(session: str, window_name: str) -> None:
     current terminal switches windows.
     """
     try:
-        target = _current_or_base_session(session)
+        from pm_core.tmux import current_or_base_session
+        target = current_or_base_session(session)
         subprocess.run(
             ["tmux", "select-window", "-t", f"{target}:{window_name}"],
             capture_output=True,
