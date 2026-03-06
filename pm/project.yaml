@@ -3,11 +3,11 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-d568b98
+  active_pr: pr-cf41efc
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
-  hide_merged: false
+  hide_merged: true
 plans:
 - id: plan-001
   name: Import from existing repo
@@ -2104,7 +2104,7 @@ prs:
   merged_at: null
   notes: []
   created_at: null
-  updated_at: null
+  updated_at: '2026-03-06T13:46:23.845994+00:00'
 - id: pr-8a60987
   plan: null
   title: Split notes.txt into committed and gitignored files with section–based editing
@@ -2473,11 +2473,22 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/113
   gh_pr_number: 113
   created_at: '2026-03-02T02:29:03.713168+00:00'
-  updated_at: '2026-03-02T02:56:54.736623+00:00'
+  updated_at: '2026-03-06T13:46:24.367448+00:00'
   started_at: '2026-03-02T02:34:58.036488+00:00'
   reviewed_at: '2026-03-02T02:56:54.736623+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-a1d6f57
+    text: 'Must cover the case where a Claude session dies without producing a verdict
+      (e.g. 500 error, usage limit, OOM, container cleanup). Current symptom: the
+      review loop poller sees the companion pane still alive but the Claude pane is
+      gone, so it polls forever with no verdict detected and the TUI stays stuck thinking
+      the review loop is running. The watchdog should detect when a review/QA/impl
+      Claude pane has disappeared while the loop state still shows running, and either
+      restart the session or mark it as KILLED so the loop can recover. Same applies
+      to QA scenario workers and implementation sessions.'
+    created_at: '2026-03-06T13:46:24Z'
+    last_edited: '2026-03-06T13:46:24Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-923f22b-add-tui-watchdog-for-dead-background-27e0a73b
 - id: pr-7f958f3
   plan: improvements
@@ -3181,11 +3192,47 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-606904d
+  plan: improvements
+  title: Pre-install developer tools in container base image
+  branch: pm/pr-606904d-pre-install-developer-tools-in-container-base-ima
+  status: merged
+  depends_on:
+  - pr-d568b98
+  description: The default ubuntu:22.04 container image used for Claude sessions is
+    bare — it lacks git, python, node, build-essential, and other tools that Claude
+    commonly needs during implementation, review, and QA. Either build and publish
+    a custom pm base image with these tools pre-installed (e.g. via a Dockerfile managed
+    in the repo), or add an entrypoint setup step that installs essential packages
+    on container start. The custom image approach is preferred for faster startup.
+    Make the image configurable via pm settings so users can swap in their own image
+    with project-specific tooling. Include at minimum git, python3, pip, node/npm,
+    curl, jq, and build-essential.
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/122
+  gh_pr_number: 122
+  created_at: '2026-03-05T22:42:04.146153+00:00'
+  updated_at: '2026-03-06T03:31:46.610627+00:00'
+  started_at: '2026-03-05T22:48:44.635835+00:00'
+  reviewed_at: '2026-03-05T22:53:30.306569+00:00'
+  merged_at: '2026-03-06T03:31:46.610627+00:00'
+  notes:
+  - id: note-26fee18
+    text: 'QA PASS: Dockerfile builds successfully and contains all required tools:
+      PASS; pm container build-image CLI command: PASS; Auto-build on first container
+      creation: PASS; Custom image configuration skips auto-build: PASS; .dockerignore
+      minimizes build context: PASS; Concurrent container creation thread safety:
+      PASS; Container status shows new default image: PASS; Unit tests pass: PASS;
+      Dockerfile not found error handling: PASS; End-to-end container session with
+      pre-installed tools: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-606904d-0935202dfb53f9ec)'
+    created_at: '2026-03-06T02:09:19Z'
+    last_edited: '2026-03-06T02:09:19Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-606904d-pre-install-developer-tools-in-conta-4bba2cbf
 - id: pr-d568b98
   plan: plan-qa
   title: Isolate QA scenario workers in containers
   branch: pm/pr-d568b98-isolate-qa-scenario-workers-in-containers
-  status: in_review
+  status: merged
   depends_on:
   - pr-ee1ff04
   description: Run QA scenario workers inside containers (e.g. Docker) instead of
@@ -3201,10 +3248,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/120
   gh_pr_number: 120
   created_at: '2026-03-05T16:15:56.346064+00:00'
-  updated_at: '2026-03-05T17:41:10.481774+00:00'
+  updated_at: '2026-03-05T22:20:57.526783+00:00'
   started_at: '2026-03-05T16:33:07.507872+00:00'
   reviewed_at: '2026-03-05T17:41:10.481774+00:00'
-  merged_at: null
+  merged_at: '2026-03-05T22:20:57.526783+00:00'
   notes:
   - id: note-51bf287
     text: 'QA NEEDS_WORK: Container CLI commands - enable, disable, status, set, cleanup:
@@ -3218,7 +3265,48 @@ prs:
       scenarios and cleanup: PASS [changes committed] (workdir: /home/matt/.pm/workdirs/qa/pr-d568b98-2f59e442b0e21087)'
     created_at: '2026-03-05T18:26:42Z'
     last_edited: '2026-03-05T18:26:42Z'
+  - id: note-2a52b84
+    text: 'QA NEEDS_WORK: Container CLI commands - enable, disable, status, set, cleanup:
+      PASS; QA scenarios launch in containers when container mode is enabled: PASS;
+      QA scenarios launch in tmux without containers when container mode is disabled:
+      PASS; Container wrapping for implementation sessions (pr start): NEEDS_WORK;
+      Container wrapping for review sessions: PASS; Graceful fallback when Docker
+      is unavailable: INPUT_REQUIRED; Container resource limits and configuration:
+      PASS; Container cleanup command with stale containers: PASS; Container user
+      UID mapping: PASS; Environment variable passthrough to containers: PASS; QA
+      container lifecycle - concurrent scenarios and cleanup: PASS; Container creation
+      failure for individual scenario: PASS [changes committed] (workdir: /home/matt/.pm/workdirs/qa/pr-d568b98-e839efc589bc5c56)'
+    created_at: '2026-03-05T22:21:04Z'
+    last_edited: '2026-03-05T22:21:04Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-d568b98-isolate-qa-scenario-workers-in-conta-03871242
+- id: pr-a9a71a4
+  plan: bugs
+  title: QA PASS should not auto-merge without auto-start enabled
+  branch: pm/pr-a9a71a4-qa-pass-should-not-auto-merge-without-auto-start
+  status: merged
+  depends_on:
+  - pr-ee1ff04
+  description: In qa_loop_ui.py _on_qa_complete, the legacy path (plain t one-shot
+    QA) unconditionally calls _trigger_auto_merge on PASS (line 315). This means a
+    single QA pass will auto-merge the PR even when auto-start is not running. Auto-merge
+    should only happen when auto-start is active or self-driving mode (zz t / zzz
+    t) is engaged. The legacy path should check whether auto-start is enabled before
+    triggering merge, and if not, just log that QA passed and leave the PR for the
+    user to merge manually.
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/121
+  gh_pr_number: 121
+  created_at: '2026-03-05T22:25:15.402342+00:00'
+  updated_at: '2026-03-06T03:29:27.674512+00:00'
+  started_at: '2026-03-05T22:27:19.121212+00:00'
+  reviewed_at: '2026-03-05T22:40:46.674424+00:00'
+  merged_at: '2026-03-06T03:29:27.674512+00:00'
+  notes:
+  - id: note-4789db3
+    text: 'QA INPUT_REQUIRED:  (workdir: /home/matt/.pm/workdirs/qa/pr-a9a71a4-139c93ea4716517a)'
+    created_at: '2026-03-06T02:04:48Z'
+    last_edited: '2026-03-06T02:04:48Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a9a71a4-qa-pass-should-not-auto-merge-withou-4bba2cbf
 - id: pr-76fa48d
   plan: improvements
   title: Auto-retry Claude sessions on 500 and usage limit errors
@@ -3356,6 +3444,185 @@ prs:
   gh_pr_number: null
   created_at: '2026-03-04T16:23:15.847530+00:00'
   updated_at: '2026-03-04T16:23:15.847530+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-cf41efc
+  plan: plan-qa
+  title: Add interactive Scenario 0 and fix QA scenario window bugs
+  branch: pm/pr-cf41efc-add-interactive-scenario-0-and-fix-qa-scenario-win
+  status: in_review
+  depends_on:
+  - pr-d568b98
+  description: 'Add a \"Scenario 0\" interactive session that launches automatically
+    alongside the QA planner. Unlike numbered scenarios which are generated by the
+    planner and run autonomously, Scenario 0 is a persistent interactive Claude session
+    in the protected container workdir where the user can immediately interact with
+    Claude and run their own manual test scenarios. It should appear as its own window
+    like the other scenario windows, be available from the moment QA starts (before
+    the planner even finishes), and persist until QA completes.
+
+
+    This PR should also fix two bugs with the current QA process:
+
+
+    1. **Scenario windows close when a verdict is reached** — Currently, when QA reaches
+    a verdict (PASS/NEEDS_WORK), the scenario windows are killed. They should remain
+    open so the user can inspect results, review logs, and debug issues after the
+    verdict.
+
+
+    2. **Switching to scenario windows from the scenarios pane is broken** — The TUI
+    scenarios pane lists active scenarios but selecting/switching to them does not
+    work correctly. Fix the window-switching logic so users can navigate to scenario
+    windows from the scenarios pane.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/123
+  gh_pr_number: 123
+  created_at: '2026-03-06T03:29:15.231662+00:00'
+  updated_at: '2026-03-06T13:46:55.471262+00:00'
+  started_at: '2026-03-06T03:32:30.448858+00:00'
+  reviewed_at: '2026-03-06T13:17:11.981428+00:00'
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-cf41efc-add-interactive-scenario-0-and-fix-q-f6489c6f
+- id: pr-27ce8ab
+  plan: bugs
+  title: 'Fix TUI crash recovery: add pane-died hook and capture stderr'
+  branch: pm/pr-27ce8ab-fix-tui-crash-recovery-add-pane-died-hook-and-capt
+  status: pending
+  depends_on: []
+  description: 'Two issues with TUI process crash recovery:
+
+
+    1. **TUI process death not detected by tmux hooks** — The current `after-kill-pane`
+    hook only fires when a pane is explicitly killed via tmux commands. When the TUI
+    process crashes or is killed by a signal (SIGKILL, OOM, etc.), the pane is destroyed
+    but the hook doesn''t fire, so auto-respawn never triggers. Fix: set `remain-on-exit
+    on` for the TUI pane and use a `pane-died` hook to auto-respawn via `respawn-pane`.
+    This provides belt-and-suspenders coverage alongside the watchdog (#113). Note:
+    per-pane `pane-died` hooks have known inconsistencies (tmux/tmux#2483, #2882),
+    so a window-level hook checking `#{pane_dead}` may be more reliable.
+
+
+    2. **TUI crash stderr is lost** — When the TUI process crashes, any traceback
+    or error output goes to the tmux pane which is immediately destroyed (remain-on-exit
+    is off). There''s no way to diagnose what happened. Fix: redirect stderr from
+    the TUI process to a log file (e.g. `~/.pm/debug/{session-tag}-tui-stderr.log`)
+    so crash tracebacks are preserved for debugging. The `pm _tui` launch command
+    should be wrapped to capture stderr.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-06T13:57:15.648457+00:00'
+  updated_at: '2026-03-06T13:57:15.648457+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-5e96046
+  plan: plan-qa
+  title: Enable git push from inside containers scoped to PR branch
+  branch: pm/pr-5e96046-enable-git-push-from-inside-containers-scoped-to-p
+  status: in_progress
+  depends_on:
+  - pr-d568b98
+  description: 'Containers currently have the repo mounted at /workspace but no credentials
+    to push to the remote. Review and implementation sessions inside containers need
+    to be able to push commits to their own PR branch on the origin.
+
+
+    ## Requirements
+
+    - Container sessions can `git push` to the origin, but only to the specific branch
+    that was programmatically created for their PR (e.g. `pm/pr-XXXX-...`)
+
+    - Must work across all three backends: GitHub, bare git, and local
+
+    - Should not grant broad push access — scope credentials/permissions to the single
+    PR branch where possible
+
+    - Git credential/SSH configuration should be injected at container creation time
+    based on what the host uses (HTTPS token, SSH key, etc.)
+
+    - If branch-scoped restrictions aren''t feasible for a backend, document the limitation
+
+
+    ## Testing
+
+    - QA should verify push access works for all three backends
+
+    - Verify that the container can push to its own branch
+
+    - Verify that push to other branches is restricted (or document if not possible)
+
+    - Test with both HTTPS and SSH remote URLs'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/124
+  gh_pr_number: 124
+  created_at: '2026-03-06T13:58:48.301968+00:00'
+  updated_at: '2026-03-06T14:03:17.555901+00:00'
+  started_at: '2026-03-06T14:03:17.555901+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-5e96046-enable-git-push-from-inside-containe-f6489c6f
+- id: pr-d3ae95e
+  plan: improvements
+  title: Add session permission visibility and risk dashboard
+  branch: pm/pr-d3ae95e-add-session-permission-visibility-and-risk-dashboa
+  status: pending
+  depends_on: []
+  description: 'Add a permission/risk visibility layer for Claude sessions. Currently
+    all sessions (implementation, review, QA, watcher, merge) run with the same broad
+    permissions (--dangerously-skip-permissions), and there''s no visibility into
+    what access each session actually has or needs.
+
+
+    ## Goals
+
+    - Provide visibility into the current risk level across all active sessions
+
+    - Allow fine-grained control over what each session type can access (GitHub API,
+    git push, file writes, shell commands, etc.)
+
+    - Reduce the number of sessions with wide-ranging access to limit the blast radius
+    of things going wrong
+
+    - Acknowledge that the user can''t approve every command — instead, provide a
+    risk dashboard so they can make informed decisions about which sessions to trust
+
+
+    ## Possible approach
+
+    - Define permission profiles per session type (e.g. review sessions don''t need
+    git push, QA scenarios don''t need GitHub API access, watcher only needs read
+    access)
+
+    - TUI dashboard showing active sessions with their permission level and a color-coded
+    risk indicator
+
+    - Ability to promote/demote session permissions on the fly (e.g. temporarily grant
+    a review session push access)
+
+    - Log and surface when sessions attempt actions outside their permission scope
+
+    - Integration with container isolation — containers provide a natural enforcement
+    boundary for restricting tool access
+
+
+    ## Non-goals
+
+    - This is not about replacing --dangerously-skip-permissions entirely — it''s
+    about adding visibility and optional restrictions on top of it
+
+    - Not about per-command approval — that defeats the purpose of autonomous operation'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-06T14:02:50.658436+00:00'
+  updated_at: '2026-03-06T14:02:50.658436+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
