@@ -404,6 +404,10 @@ def create_container(
                   name, allowed_push_branch)
 
     # --- Create pm user with matching uid/gid, configure git, then sleep ---
+    # A readiness sentinel file is written after setup completes so that
+    # callers can ``docker exec`` immediately after create_container returns
+    # without racing the setup script.
+    _READY_SENTINEL = "/tmp/.pm-ready"
     host_uid = os.getuid()
     host_gid = os.getgid()
     git_setup = _build_git_setup_script(has_push_proxy=has_push_proxy)
@@ -414,12 +418,25 @@ def create_container(
     ]
     if git_setup:
         setup_parts.append(git_setup)
+    setup_parts.append(f"touch {_READY_SENTINEL}")
     setup_parts.append("exec sleep infinity")
     setup = "; ".join(setup_parts)
     cmd.extend([config.image, "bash", "-c", setup])
 
     result = _run_docker(*cmd, timeout=60)
     container_id = result.stdout.strip()
+
+    # Wait for the setup script to finish (sentinel file appears).
+    import time
+    for _ in range(50):  # up to ~5 seconds
+        check = _run_docker(
+            "exec", name, "test", "-f", _READY_SENTINEL,
+            check=False, timeout=5,
+        )
+        if check.returncode == 0:
+            break
+        time.sleep(0.1)
+
     _log.info("Created container %s (id=%s)", name, container_id[:12])
     return container_id
 
