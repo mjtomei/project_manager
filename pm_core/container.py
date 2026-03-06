@@ -300,13 +300,13 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True) -> str:
     """Build a ``docker exec -it`` command string for use in a tmux window.
 
     When the exec'd process exits, the container is removed (unless
-    *cleanup* is False) and the tmux window exits too — same as the
-    non-container path.
+    *cleanup* is False).  The tmux pane stays open so the user can
+    inspect output.
     """
     escaped = shlex.quote(shell_cmd)
     exec_part = f"docker exec -it -u {_CONTAINER_USER} {shlex.quote(name)} bash -c {escaped}"
     if cleanup:
-        return f"{exec_part}; docker rm -f {shlex.quote(name)} >/dev/null 2>&1; exit"
+        return f"{exec_part}; docker rm -f {shlex.quote(name)} >/dev/null 2>&1"
     return exec_part
 
 
@@ -420,6 +420,57 @@ def cleanup_qa_containers(pr_id: str, loop_id: str,
 
     if count:
         _log.info("Cleaned up %d container(s) for %s/%s", count, pr_id, loop_id)
+    return count
+
+
+def cleanup_orphaned_qa_containers(session: str, pr_id: str) -> int:
+    """Remove QA containers whose tmux windows no longer exist.
+
+    Called at the start of a new QA run.  Scans all containers matching
+    the QA prefix for *pr_id* (any loop_id) and removes those whose
+    corresponding tmux scenario window is gone.
+
+    Returns the number of containers removed.
+    """
+    from pm_core import tmux as tmux_mod
+
+    prefix = f"{CONTAINER_PREFIX}qa-{pr_id}-"
+    result = _run_docker(
+        "ps", "-a", "--filter", f"name={prefix}",
+        "--format", "{{.Names}}",
+        check=False, timeout=30,
+    )
+    if result.returncode != 0:
+        return 0
+
+    # Build set of live window names for fast lookup
+    try:
+        live_windows = {w["name"] for w in tmux_mod.list_windows(session)}
+    except Exception:
+        return 0
+
+    count = 0
+    for line in result.stdout.strip().splitlines():
+        cname = line.strip()
+        if not cname:
+            continue
+        # Container name: pm-qa-{pr_id}-{loop_id}-s{N}
+        # Window name:    qa-{display_id}-s{N}
+        # Extract the -s{N} suffix to check against windows.
+        parts = cname.split("-s")
+        if len(parts) < 2:
+            continue
+        suffix = f"-s{parts[-1]}"
+        # Check if ANY window ending with this suffix exists
+        has_window = any(w.endswith(suffix) and w.startswith("qa-")
+                         for w in live_windows)
+        if not has_window:
+            remove_container(cname)
+            count += 1
+
+    if count:
+        _log.info("Cleaned up %d orphaned QA container(s) for %s",
+                  count, pr_id)
     return count
 
 
