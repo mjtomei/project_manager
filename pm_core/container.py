@@ -6,6 +6,8 @@ Each containerised session gets:
   - The host's claude binary bind-mounted at /usr/local/bin/claude
   - Claude config (~/.claude) mounted read-write for auth and session state
   - Configurable resource limits (memory, CPU)
+  - Git push credentials (SSH or HTTPS) injected from the host
+  - A branch-scoped git wrapper restricting pushes to the PR branch
 
 The user experience is transparent: tmux windows look the same, but the
 claude process runs inside a resource-limited container via
@@ -14,6 +16,23 @@ claude process runs inside a resource-limited container via
 Container lifecycle:
   create (detached, sleeping) -> tmux window runs ``docker exec -it``
   -> monitor via tmux pane capture (unchanged) -> cleanup: ``docker rm -f``
+
+Git push support:
+  At container creation, the host's git auth is detected (SSH keys or
+  HTTPS token via ``gh auth``).  Credentials are injected into the
+  container so ``git push`` works.  A root-owned git wrapper at
+  /usr/local/bin/git intercepts push commands and only allows pushing to
+  the designated PR branch — this prevents accidental pushes to other
+  branches by the Claude agent.
+
+  Limitation: The branch restriction is a best-effort guard, not a
+  security boundary.  A determined actor inside the container could
+  bypass it by invoking /usr/bin/git directly or using the injected
+  credentials with curl.  For hard enforcement, use server-side branch
+  protection rules (e.g. GitHub protected branches).  None of the three
+  backends (GitHub, bare git, local) support branch-scoped credentials,
+  so the injected credentials grant push access to any branch the
+  underlying token/key has access to.
 
 Requirements:
   - The default pm-dev:latest image includes git, python3, pip, node/npm,
