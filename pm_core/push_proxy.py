@@ -13,7 +13,7 @@ One proxy per container — no shared state, no routing.  The proxy starts
 when the container is created and is cleaned up when the container is removed.
 
 Protocol (newline-delimited JSON over Unix socket):
-  Request:  {"workdir": "/host/path", "args": ["origin", "branch"]}
+  Request:  {"args": ["origin", "branch"]}
   Response: {"exit_code": 0, "stdout": "...", "stderr": "..."}
 """
 
