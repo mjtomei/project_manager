@@ -1109,11 +1109,8 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
     )
     claude_cmd = build_claude_shell_cmd(prompt=merge_prompt,
                                          transcript=transcript, cwd=workdir)
-    # Optionally wrap in a container for isolation
-    branch = pr_entry.get("branch", "")
-    from pm_core.container import wrap_claude_cmd
-    claude_cmd, _cname = wrap_claude_cmd(claude_cmd, workdir, label=f"merge-{pr_id}",
-                                          allowed_push_branch=branch)
+    # Merge runs on the host — it needs to push to master and modify the
+    # main repo, which the branch-scoped push proxy would block.
     window_name = f"merge-{display_id}"
 
     # No-op if a merge window is already running for this PR
