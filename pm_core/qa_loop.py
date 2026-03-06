@@ -826,6 +826,18 @@ def run_qa_sync(
     # Status file path (inside QA workdir)
     status_path = Path(state.qa_workdir) / "qa_status.json"
 
+    # Determine execution mode (container vs tmux) early — needed by both
+    # the planning phase (orphan cleanup, Scenario 0) and execution phase.
+    from pm_core.container import is_container_mode_enabled, _docker_available
+    use_containers = is_container_mode_enabled()
+    if use_containers:
+        if _docker_available():
+            _log.info("Container mode enabled for QA execution")
+        else:
+            _log.warning("Container mode enabled but Docker unavailable "
+                         "— falling back to host execution")
+            use_containers = False
+
     def _notify():
         if on_update:
             on_update(state)
@@ -975,17 +987,6 @@ def run_qa_sync(
                 state.pre_qa_head = result.stdout.strip()
         except Exception:
             pass
-
-    # Determine execution mode (container vs tmux)
-    from pm_core.container import is_container_mode_enabled, _docker_available
-    use_containers = is_container_mode_enabled()
-    if use_containers:
-        if _docker_available():
-            _log.info("Container mode enabled for QA execution")
-        else:
-            _log.warning("Container mode enabled but Docker unavailable "
-                         "— falling back to host execution")
-            use_containers = False
 
     # Ensure the main QA window exists (has the planner pane)
     win = tmux_mod.find_window_by_name(session, window_name)
