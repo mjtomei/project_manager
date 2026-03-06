@@ -154,9 +154,6 @@ def _create_watcher_window(iteration: int, loop_id: str,
         transcript=transcript,
         cwd=repo_dir,
     )
-    # Optionally wrap in a container for isolation
-    from pm_core.container import wrap_claude_cmd
-    claude_cmd, _cname = wrap_claude_cmd(claude_cmd, repo_dir, label="watcher")
 
     # Kill existing watcher window and recreate (fresh each iteration).
     # Track which sessions were watching the old window so we can switch
