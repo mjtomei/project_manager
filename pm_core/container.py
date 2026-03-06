@@ -393,8 +393,12 @@ def create_qa_container(
     )
 
 
-def cleanup_qa_containers(pr_id: str, loop_id: str) -> int:
+def cleanup_qa_containers(pr_id: str, loop_id: str,
+                          exclude: set[str] | None = None) -> int:
     """Remove all containers for a given QA loop.
+
+    *exclude* is an optional set of container names to skip (e.g. the
+    interactive Scenario 0 container that should stay alive).
 
     Returns the number of containers removed.
     """
@@ -410,7 +414,7 @@ def cleanup_qa_containers(pr_id: str, loop_id: str) -> int:
     count = 0
     for line in result.stdout.strip().splitlines():
         cname = line.strip()
-        if cname:
+        if cname and cname not in (exclude or set()):
             remove_container(cname)
             count += 1
 

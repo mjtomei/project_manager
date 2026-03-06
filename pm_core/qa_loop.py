@@ -1050,7 +1050,13 @@ def run_qa_sync(
     # `docker exec` will exit naturally when the container stops).
     if use_containers:
         from pm_core import container as container_mod
-        container_mod.cleanup_qa_containers(state.pr_id, state.loop_id)
+        # Keep the Scenario 0 container alive so the user's interactive
+        # session is not terminated when numbered scenarios finish.
+        s0_exclude: set[str] = set()
+        if state.scenario_0 and state.scenario_0.container_name:
+            s0_exclude.add(state.scenario_0.container_name)
+        container_mod.cleanup_qa_containers(
+            state.pr_id, state.loop_id, exclude=s0_exclude)
 
     # --- Merge back scenario worktree commits ---
     _merge_scenario_commits(state, repo_root, pr_data)
