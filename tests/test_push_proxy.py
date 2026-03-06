@@ -76,6 +76,15 @@ class TestPushProxyBranchValidation:
         assert cmd == ["git", "push", "origin", "pm/pr-123-feature"]
 
     @patch("subprocess.run")
+    def test_allows_force_push_plus_prefix(self, mock_run, proxy, sock_path):
+        """'+branch' force-push syntax should be recognised as the correct branch."""
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="", stderr="")
+        resp = _send_request(sock_path,
+                             {"args": ["origin", "+pm/pr-123-feature"]})
+        assert resp["exit_code"] == 0
+
+    @patch("subprocess.run")
     def test_allows_correct_branch_with_refspec(self, mock_run, proxy, sock_path):
         mock_run.return_value = MagicMock(
             returncode=0, stdout="", stderr="")

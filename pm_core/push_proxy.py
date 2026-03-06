@@ -112,11 +112,17 @@ class PushProxy:
         """Handle a single push request."""
         conn.settimeout(30.0)
         data = b""
+        max_request_size = 64 * 1024  # 64 KiB — more than enough for push args
         while not data.endswith(b"\n"):
             chunk = conn.recv(4096)
             if not chunk:
                 break
             data += chunk
+            if len(data) > max_request_size:
+                response = {"exit_code": 1, "stdout": "",
+                            "stderr": "push-proxy: request too large\n"}
+                conn.sendall((json.dumps(response) + "\n").encode())
+                return
 
         if not data:
             return
@@ -212,6 +218,9 @@ class PushProxy:
                 dst = refspec.split(":", 1)[1]
             else:
                 dst = refspec
+            # Strip leading '+' (force-push marker)
+            if dst.startswith("+"):
+                dst = dst[1:]
             # Strip refs/heads/ prefix
             if dst.startswith("refs/heads/"):
                 dst = dst[len("refs/heads/"):]
