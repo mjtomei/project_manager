@@ -6,8 +6,7 @@ Each containerised session gets:
   - The host's claude binary bind-mounted at /usr/local/bin/claude
   - Claude config (~/.claude) mounted read-write for auth and session state
   - Configurable resource limits (memory, CPU)
-  - Git push credentials (SSH or HTTPS) injected from the host
-  - A branch-scoped git wrapper restricting pushes to the PR branch
+  - Git push via a host-side proxy (credentials never enter the container)
 
 The user experience is transparent: tmux windows look the same, but the
 claude process runs inside a resource-limited container via
@@ -18,21 +17,17 @@ Container lifecycle:
   -> monitor via tmux pane capture (unchanged) -> cleanup: ``docker rm -f``
 
 Git push support:
-  At container creation, the host's git auth is detected (SSH keys or
-  HTTPS token via ``gh auth``).  Credentials are injected into the
-  container so ``git push`` works.  A root-owned git wrapper at
-  /usr/local/bin/git intercepts push commands and only allows pushing to
-  the designated PR branch — this prevents accidental pushes to other
-  branches by the Claude agent.
+  Credentials (SSH keys, HTTPS tokens) stay on the host.  Each container
+  gets a dedicated push proxy — a daemon on the host listening on a Unix
+  socket that is mounted into the container.  A git wrapper inside the
+  container intercepts ``git push`` and forwards the request to the proxy,
+  which validates the target branch and executes the real push with host
+  credentials.  All other git operations (commit, diff, log, etc.) work
+  directly on the bind-mounted workdir with no proxy involvement.
 
-  Limitation: The branch restriction is a best-effort guard, not a
-  security boundary.  A determined actor inside the container could
-  bypass it by invoking /usr/bin/git directly or using the injected
-  credentials with curl.  For hard enforcement, use server-side branch
-  protection rules (e.g. GitHub protected branches).  None of the three
-  backends (GitHub, bare git, local) support branch-scoped credentials,
-  so the injected credentials grant push access to any branch the
-  underlying token/key has access to.
+  The branch restriction is enforced outside the container and cannot be
+  bypassed from within — the container has no credentials and no way to
+  push except through the proxy.
 
 Requirements:
   - The default pm-dev:latest image includes git, python3, pip, node/npm,
@@ -173,131 +168,32 @@ def _run_docker(*args: str, check: bool = True,
 
 
 # ---------------------------------------------------------------------------
-# Git credential detection and injection
+# Git push proxy integration
 # ---------------------------------------------------------------------------
 
-def _detect_git_auth(workdir: Path) -> dict:
-    """Detect host git authentication method from the workdir's remote URL.
-
-    Returns a dict with:
-      - "method": "ssh" | "https" | "local" | "unknown"
-      - "remote_url": the origin URL (if any)
-      - For SSH: "ssh_dir" if ~/.ssh exists
-      - For SSH: "ssh_auth_sock" if SSH_AUTH_SOCK is set
-      - For HTTPS: "credential_helper" from git config
-      - For HTTPS: "gh_token" if gh CLI is authenticated
-    """
-    info: dict = {"method": "unknown", "remote_url": ""}
-
+def _has_remote(workdir: Path) -> bool:
+    """Check if the workdir has a git remote (i.e. push makes sense)."""
     try:
         result = subprocess.run(
             ["git", "remote", "get-url", "origin"],
             cwd=workdir, capture_output=True, text=True, timeout=10,
         )
-        if result.returncode != 0:
-            info["method"] = "local"
-            return info
-        url = result.stdout.strip()
-        info["remote_url"] = url
+        return result.returncode == 0 and bool(result.stdout.strip())
     except (FileNotFoundError, subprocess.TimeoutExpired):
-        return info
-
-    if not url or (not url.startswith(("http://", "https://", "git://", "ssh://"))
-                   and not url.startswith("git@")):
-        info["method"] = "local"
-        return info
-
-    # SSH-style URL: git@host:... or ssh://...
-    if url.startswith("git@") or url.startswith("ssh://"):
-        info["method"] = "ssh"
-        ssh_dir = Path.home() / ".ssh"
-        if ssh_dir.is_dir():
-            info["ssh_dir"] = str(ssh_dir)
-        sock = os.environ.get("SSH_AUTH_SOCK")
-        if sock:
-            info["ssh_auth_sock"] = sock
-        return info
-
-    # HTTPS URL
-    info["method"] = "https"
-
-    # Check for git credential helper
-    try:
-        result = subprocess.run(
-            ["git", "config", "--get", "credential.helper"],
-            cwd=workdir, capture_output=True, text=True, timeout=10,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            info["credential_helper"] = result.stdout.strip()
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
-
-    # Try to get a token from gh CLI (GitHub HTTPS auth)
-    try:
-        result = subprocess.run(
-            ["gh", "auth", "token"],
-            capture_output=True, text=True, timeout=10,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            info["gh_token"] = result.stdout.strip()
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
-
-    return info
+        return False
 
 
-def _build_git_setup_script(auth_info: dict, allowed_branch: str | None = None) -> str:
+def _build_git_setup_script(
+    has_push_proxy: bool = False,
+) -> str:
     """Build a shell script snippet to configure git inside the container.
 
-    This script runs as root before the main command, configuring:
-      - Git credential helper for HTTPS (using a token from gh)
-      - SSH known_hosts and config
-      - A git wrapper that restricts pushes to the allowed branch
-        (installed as a higher-priority binary, cannot be bypassed with --no-verify)
+    This script runs as root at container start, configuring:
+      - safe.directory for /workspace
+      - A git wrapper that forwards ``git push`` to the host-side push proxy
+        (if has_push_proxy is True)
     """
     lines: list[str] = []
-    home = _CONTAINER_HOME
-    method = auth_info.get("method", "unknown")
-
-    if method == "ssh":
-        # SSH config: ensure known_hosts has common hosts
-        lines.append(f"mkdir -p {home}/.ssh")
-        lines.append(f"chmod 700 {home}/.ssh")
-        # Add GitHub/GitLab/etc to known_hosts so push doesn't prompt
-        lines.append(
-            f"ssh-keyscan -t ed25519,rsa github.com gitlab.com bitbucket.org "
-            f">> {home}/.ssh/known_hosts 2>/dev/null"
-        )
-        lines.append(f"chmod 644 {home}/.ssh/known_hosts")
-        # Fix ownership
-        lines.append(f"chown -R {_CONTAINER_USER}:{_CONTAINER_USER} {home}/.ssh")
-
-    elif method == "https":
-        token = auth_info.get("gh_token")
-        if token:
-            # Set up a git credential helper that returns the token
-            # This is scoped to the container's lifetime only.
-            cred_script = f"{home}/.git-credential-pm"
-            # The credential helper script echoes credentials for any request
-            lines.append(f"cat > {cred_script} << 'CREDEOF'\n"
-                         f"#!/bin/sh\n"
-                         f"echo \"username=x-access-token\"\n"
-                         f"echo \"password={token}\"\n"
-                         f"echo\n"
-                         f"CREDEOF")
-            lines.append(f"chmod 755 {cred_script}")
-            lines.append(f"chown {_CONTAINER_USER}:{_CONTAINER_USER} {cred_script}")
-            lines.append(
-                f"su - {_CONTAINER_USER} -c "
-                f"'git config --global credential.helper \"{cred_script}\"'"
-            )
-        else:
-            helper = auth_info.get("credential_helper")
-            if helper:
-                lines.append(
-                    f"su - {_CONTAINER_USER} -c "
-                    f"'git config --global credential.helper \"{helper}\"'"
-                )
 
     # Set safe directory for /workspace
     lines.append(
@@ -305,58 +201,66 @@ def _build_git_setup_script(auth_info: dict, allowed_branch: str | None = None) 
         f"'git config --global --add safe.directory {_CONTAINER_WORKDIR}'"
     )
 
-    # Install a git wrapper that restricts pushes to the allowed branch.
-    # This is placed in /usr/local/bin/git which takes precedence over
-    # /usr/bin/git in PATH.  Unlike a pre-push hook, this cannot be
-    # bypassed with --no-verify or by removing the hook file.
-    # The wrapper is owned by root and not writable by the container user.
-    if allowed_branch:
-        escaped_branch = allowed_branch.replace("'", "'\\''")
+    # Install a git wrapper that intercepts ``git push`` and forwards it
+    # to the host-side push proxy via the mounted Unix socket.
+    # No credentials exist inside the container — the proxy on the host
+    # validates the target branch and runs the real push.
+    if has_push_proxy:
+        from pm_core.push_proxy import _CONTAINER_SOCKET_PATH
         wrapper_script = textwrap.dedent(f"""\
             #!/bin/sh
-            # pm: git wrapper that restricts pushes to the PR branch
+            # pm: git wrapper — pushes go through the host-side push proxy
             REAL_GIT=/usr/bin/git
-            ALLOWED='{escaped_branch}'
+            SOCKET="{_CONTAINER_SOCKET_PATH}"
             if [ "$1" = "push" ]; then
-                # Parse the push args to find refspecs
                 shift  # consume "push"
-                remote=""
+                # Build JSON request with push args
+                args_json="["
+                first=1
                 for arg in "$@"; do
-                    case "$arg" in
-                        -*) ;;  # skip flags
-                        *)
-                            if [ -z "$remote" ]; then
-                                remote="$arg"
-                            else
-                                # This is a refspec — extract the destination branch
-                                dst="${{arg#*:}}"
-                                # Strip refs/heads/ prefix if present
-                                dst="${{dst#refs/heads/}}"
-                                if [ -n "$dst" ] && [ "$dst" != "$ALLOWED" ]; then
-                                    echo "pm: push rejected — only pushing to '$ALLOWED' is allowed from this container" >&2
-                                    exit 1
-                                fi
-                            fi
-                            ;;
-                    esac
-                done
-                # If no explicit refspec, git pushes the current branch.
-                # Check that the current branch matches the allowed branch.
-                if [ -z "$dst" ]; then
-                    current=$($REAL_GIT rev-parse --abbrev-ref HEAD 2>/dev/null)
-                    if [ -n "$current" ] && [ "$current" != "$ALLOWED" ]; then
-                        echo "pm: push rejected — only pushing to '$ALLOWED' is allowed from this container" >&2
-                        exit 1
+                    if [ "$first" = "1" ]; then
+                        first=0
+                    else
+                        args_json="$args_json,"
                     fi
+                    # Escape quotes in arg
+                    escaped=$(printf '%s' "$arg" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')
+                    args_json="$args_json\\"$escaped\\""
+                done
+                args_json="$args_json]"
+                request='{{"args": '"$args_json"'}}'
+                # Send to proxy and read response
+                if command -v python3 >/dev/null 2>&1; then
+                    response=$(python3 -c "
+import socket, sys, json
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+try:
+    s.connect('$SOCKET')
+except Exception as e:
+    print(json.dumps({{'exit_code': 1, 'stdout': '', 'stderr': f'push-proxy: cannot connect: {{e}}\\\\n'}}))
+    sys.exit(0)
+s.sendall((sys.argv[1] + '\\\\n').encode())
+data = b''
+while True:
+    chunk = s.recv(4096)
+    if not chunk:
+        break
+    data += chunk
+s.close()
+print(data.decode())
+" "$request" 2>&1)
+                else
+                    echo "pm: python3 required for push proxy client" >&2
+                    exit 1
                 fi
-                exec $REAL_GIT push "$@"
+                exit_code=$(printf '%s' "$response" | python3 -c "import sys,json; r=json.load(sys.stdin); sys.stdout.write(r.get('stdout','')); sys.stderr.write(r.get('stderr','')); sys.exit(r.get('exit_code',1))")
+                exit $?
             fi
             exec $REAL_GIT "$@"
         """)
         wrapper_path = "/usr/local/bin/git"
         lines.append(f"cat > {wrapper_path} << 'WRAPEOF'\n{wrapper_script}WRAPEOF")
         lines.append(f"chmod 755 {wrapper_path}")
-        # Root-owned, not writable by container user — cannot be tampered with
 
     return "; ".join(lines) if lines else ""
 
@@ -415,8 +319,7 @@ def create_container(
       - Mounts ~/.claude read-write (for auth and session state)
       - Passes through Claude-related env vars
       - Applies resource limits from config
-      - Detects host git auth (SSH/HTTPS) and injects credentials
-      - Installs a pre-push hook restricting pushes to *allowed_push_branch*
+      - Starts a host-side push proxy for branch-scoped git push access
 
     Args:
         name: Container name (must be unique).
@@ -493,23 +396,25 @@ def create_container(
     for mount in config.extra_mounts:
         cmd.extend(["-v", mount])
 
-    # --- Git auth: detect host method and mount credentials ---
-    auth_info = _detect_git_auth(workdir)
-    _log.info("Git auth for container %s: method=%s", name, auth_info.get("method"))
-
-    if auth_info.get("method") == "ssh":
-        ssh_dir = auth_info.get("ssh_dir")
-        if ssh_dir:
-            cmd.extend(["-v", f"{ssh_dir}:{_CONTAINER_HOME}/.ssh:ro"])
-        sock = auth_info.get("ssh_auth_sock")
-        if sock:
-            cmd.extend(["-e", f"SSH_AUTH_SOCK={sock}",
-                        "-v", f"{sock}:{sock}"])
+    # --- Git push proxy ---
+    # If an allowed push branch is set and the workdir has a remote,
+    # start a host-side push proxy.  The proxy socket is mounted into
+    # the container; credentials stay on the host.
+    has_push_proxy = False
+    if allowed_push_branch and _has_remote(workdir):
+        from pm_core.push_proxy import (
+            start_push_proxy, _CONTAINER_SOCKET_PATH,
+        )
+        sock_path = start_push_proxy(name, str(workdir), allowed_push_branch)
+        cmd.extend(["-v", f"{sock_path}:{_CONTAINER_SOCKET_PATH}"])
+        has_push_proxy = True
+        _log.info("Push proxy started for container %s (branch=%s)",
+                  name, allowed_push_branch)
 
     # --- Create pm user with matching uid/gid, configure git, then sleep ---
     host_uid = os.getuid()
     host_gid = os.getgid()
-    git_setup = _build_git_setup_script(auth_info, allowed_push_branch)
+    git_setup = _build_git_setup_script(has_push_proxy=has_push_proxy)
     setup_parts = [
         f"groupadd -g {host_gid} {_CONTAINER_USER} 2>/dev/null",
         f"useradd -u {host_uid} -g {host_gid} -m -s /bin/bash {_CONTAINER_USER} 2>/dev/null",
@@ -541,7 +446,9 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True) -> str:
 
 
 def remove_container(name: str) -> None:
-    """Force-remove a container (no-op if it doesn't exist)."""
+    """Force-remove a container and its push proxy (no-op if it doesn't exist)."""
+    from pm_core.push_proxy import stop_push_proxy
+    stop_push_proxy(name)
     _run_docker("rm", "-f", name, check=False, timeout=30)
 
 

@@ -21,7 +21,7 @@ from pm_core.container import (
     cleanup_all_containers,
     wrap_claude_cmd,
     _docker_available,
-    _detect_git_auth,
+    _has_remote,
     _build_git_setup_script,
     _get_dockerfile_path,
     _make_container_name,
@@ -540,135 +540,56 @@ class TestIntegration:
         assert callable(wrap_claude_cmd)
 
 
-class TestDetectGitAuth:
+class TestHasRemote:
     @patch("subprocess.run")
-    def test_ssh_remote(self, mock_run):
+    def test_has_remote(self, mock_run):
         mock_run.return_value = MagicMock(
-            returncode=0, stdout="git@github.com:user/repo.git\n")
-        with patch("pm_core.container.Path.home", return_value=Path("/home/user")), \
-             patch.object(Path, "is_dir", return_value=True):
-            info = _detect_git_auth(Path("/w"))
-        assert info["method"] == "ssh"
-        assert info["remote_url"] == "git@github.com:user/repo.git"
-        assert info["ssh_dir"] == "/home/user/.ssh"
-
-    @patch("subprocess.run")
-    def test_https_remote_with_gh_token(self, mock_run):
-        def side_effect(cmd, **kwargs):
-            if "get-url" in cmd:
-                return MagicMock(returncode=0, stdout="https://github.com/user/repo.git\n")
-            if "credential.helper" in cmd:
-                return MagicMock(returncode=1, stdout="")
-            if "auth" in cmd:
-                return MagicMock(returncode=0, stdout="ghp_testtoken123\n")
-            return MagicMock(returncode=1, stdout="")
-        mock_run.side_effect = side_effect
-
-        info = _detect_git_auth(Path("/w"))
-        assert info["method"] == "https"
-        assert info["gh_token"] == "ghp_testtoken123"
+            returncode=0, stdout="https://github.com/user/repo.git\n")
+        assert _has_remote(Path("/w")) is True
 
     @patch("subprocess.run")
     def test_no_remote(self, mock_run):
         mock_run.return_value = MagicMock(returncode=1, stdout="")
-        info = _detect_git_auth(Path("/w"))
-        assert info["method"] == "local"
+        assert _has_remote(Path("/w")) is False
 
     @patch("subprocess.run")
-    def test_local_path_remote(self, mock_run):
-        mock_run.return_value = MagicMock(
-            returncode=0, stdout="/path/to/bare/repo\n")
-        info = _detect_git_auth(Path("/w"))
-        assert info["method"] == "local"
-
-    @patch("subprocess.run")
-    def test_ssh_auth_sock(self, mock_run):
-        mock_run.return_value = MagicMock(
-            returncode=0, stdout="git@github.com:user/repo.git\n")
-        with patch.dict("os.environ", {"SSH_AUTH_SOCK": "/tmp/agent.sock"}), \
-             patch("pm_core.container.Path.home", return_value=Path("/home/user")), \
-             patch.object(Path, "is_dir", return_value=True):
-            info = _detect_git_auth(Path("/w"))
-        assert info["method"] == "ssh"
-        assert info["ssh_auth_sock"] == "/tmp/agent.sock"
+    def test_empty_remote(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="\n")
+        assert _has_remote(Path("/w")) is False
 
 
 class TestBuildGitSetupScript:
-    def test_ssh_setup(self):
-        auth = {"method": "ssh", "ssh_dir": "/home/user/.ssh"}
-        script = _build_git_setup_script(auth)
-        assert "ssh-keyscan" in script
+    def test_safe_directory_always_set(self):
+        script = _build_git_setup_script()
         assert "safe.directory" in script
 
-    def test_https_with_token(self):
-        auth = {"method": "https", "gh_token": "ghp_test123"}
-        script = _build_git_setup_script(auth)
-        assert "credential" in script
-        assert "ghp_test123" in script
-        assert "x-access-token" in script
-
-    def test_branch_restriction_wrapper(self):
-        auth = {"method": "https", "gh_token": "tok"}
-        script = _build_git_setup_script(auth, allowed_branch="pm/pr-123-my-feature")
+    def test_push_proxy_installs_wrapper(self):
+        script = _build_git_setup_script(has_push_proxy=True)
         assert "/usr/local/bin/git" in script
-        assert "pm/pr-123-my-feature" in script
-        assert "push rejected" in script
-        # The wrapper delegates to /usr/bin/git
+        assert "push-proxy" in script
         assert "REAL_GIT=/usr/bin/git" in script
 
-    def test_no_restriction_without_branch(self):
-        auth = {"method": "https", "gh_token": "tok"}
-        script = _build_git_setup_script(auth, allowed_branch=None)
+    def test_no_proxy_no_wrapper(self):
+        script = _build_git_setup_script(has_push_proxy=False)
         assert "/usr/local/bin/git" not in script
 
-    def test_local_only_safe_dir(self):
-        auth = {"method": "local"}
-        script = _build_git_setup_script(auth)
-        assert "safe.directory" in script
-        assert "credential" not in script
-        assert "ssh-keyscan" not in script
+    def test_no_credentials_in_script(self):
+        """Push proxy approach should never embed credentials."""
+        script = _build_git_setup_script(has_push_proxy=True)
+        assert "token" not in script.lower()
+        assert "password" not in script.lower()
+        assert "credential" not in script.lower()
 
 
-class TestCreateContainerGitAuth:
-    @patch("pm_core.container._detect_git_auth",
-           return_value={"method": "ssh", "ssh_dir": "/home/user/.ssh"})
+class TestCreateContainerPushProxy:
+    @patch("pm_core.container._has_remote", return_value=True)
+    @patch("pm_core.push_proxy.start_push_proxy",
+           return_value="/tmp/pm-push-proxy-test/push.sock")
     @patch("pm_core.container._resolve_claude_binary", return_value=None)
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_docker")
-    def test_mounts_ssh_dir(self, mock_docker, mock_rm, mock_bin, mock_auth):
-        mock_docker.return_value = MagicMock(stdout="id\n")
-        config = ContainerConfig()
-
-        with patch.object(Path, "is_dir", return_value=False):
-            create_container(name="test", config=config, workdir=Path("/w"))
-
-        args_str = " ".join(mock_docker.call_args[0])
-        assert f"/home/user/.ssh:{_CONTAINER_HOME}/.ssh:ro" in args_str
-
-    @patch("pm_core.container._detect_git_auth",
-           return_value={"method": "ssh", "ssh_dir": "/home/user/.ssh",
-                         "ssh_auth_sock": "/tmp/agent.sock"})
-    @patch("pm_core.container._resolve_claude_binary", return_value=None)
-    @patch("pm_core.container.remove_container")
-    @patch("pm_core.container._run_docker")
-    def test_passes_ssh_auth_sock(self, mock_docker, mock_rm, mock_bin, mock_auth):
-        mock_docker.return_value = MagicMock(stdout="id\n")
-        config = ContainerConfig()
-
-        with patch.object(Path, "is_dir", return_value=False):
-            create_container(name="test", config=config, workdir=Path("/w"))
-
-        args_str = " ".join(mock_docker.call_args[0])
-        assert "SSH_AUTH_SOCK=/tmp/agent.sock" in args_str
-        assert "/tmp/agent.sock:/tmp/agent.sock" in args_str
-
-    @patch("pm_core.container._detect_git_auth",
-           return_value={"method": "https", "gh_token": "ghp_test"})
-    @patch("pm_core.container._resolve_claude_binary", return_value=None)
-    @patch("pm_core.container.remove_container")
-    @patch("pm_core.container._run_docker")
-    def test_git_setup_in_entrypoint(self, mock_docker, mock_rm, mock_bin, mock_auth):
-        """HTTPS token setup is in the container entrypoint script."""
+    def test_starts_proxy_and_mounts_socket(self, mock_docker, mock_rm,
+                                             mock_bin, mock_proxy, mock_remote):
         mock_docker.return_value = MagicMock(stdout="id\n")
         config = ContainerConfig()
 
@@ -676,21 +597,71 @@ class TestCreateContainerGitAuth:
             create_container(name="test", config=config, workdir=Path("/w"),
                              allowed_push_branch="pm/pr-123")
 
-        # The entrypoint setup string includes git credential config and wrapper
-        args = mock_docker.call_args[0]
-        setup_script = args[-1]  # Last arg is the bash -c script
-        assert "credential" in setup_script
-        assert "/usr/local/bin/git" in setup_script
+        mock_proxy.assert_called_once_with("test", "/w", "pm/pr-123")
+        args_str = " ".join(mock_docker.call_args[0])
+        assert "/tmp/pm-push-proxy-test/push.sock:/run/pm-push-proxy.sock" in args_str
 
-    @patch("pm_core.container._detect_git_auth",
-           return_value={"method": "https", "gh_token": "ghp_test"})
+    @patch("pm_core.container._has_remote", return_value=False)
+    @patch("pm_core.container._resolve_claude_binary", return_value=None)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_docker")
+    def test_no_proxy_without_remote(self, mock_docker, mock_rm,
+                                      mock_bin, mock_remote):
+        """No push proxy started if workdir has no remote."""
+        mock_docker.return_value = MagicMock(stdout="id\n")
+        config = ContainerConfig()
+
+        with patch.object(Path, "is_dir", return_value=False):
+            create_container(name="test", config=config, workdir=Path("/w"),
+                             allowed_push_branch="pm/pr-123")
+
+        args_str = " ".join(mock_docker.call_args[0])
+        assert "push-proxy" not in args_str
+
+    @patch("pm_core.container._has_remote", return_value=True)
+    @patch("pm_core.container._resolve_claude_binary", return_value=None)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_docker")
+    def test_no_proxy_without_branch(self, mock_docker, mock_rm,
+                                      mock_bin, mock_remote):
+        """No push proxy started if no allowed_push_branch specified."""
+        mock_docker.return_value = MagicMock(stdout="id\n")
+        config = ContainerConfig()
+
+        with patch.object(Path, "is_dir", return_value=False):
+            create_container(name="test", config=config, workdir=Path("/w"))
+
+        args_str = " ".join(mock_docker.call_args[0])
+        assert "push-proxy" not in args_str
+
+    @patch("pm_core.container._has_remote", return_value=True)
+    @patch("pm_core.push_proxy.start_push_proxy",
+           return_value="/tmp/pm-push-proxy-test/push.sock")
+    @patch("pm_core.container._resolve_claude_binary", return_value=None)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_docker")
+    def test_entrypoint_has_wrapper(self, mock_docker, mock_rm,
+                                     mock_bin, mock_proxy, mock_remote):
+        """Container entrypoint installs the git push proxy wrapper."""
+        mock_docker.return_value = MagicMock(stdout="id\n")
+        config = ContainerConfig()
+
+        with patch.object(Path, "is_dir", return_value=False):
+            create_container(name="test", config=config, workdir=Path("/w"),
+                             allowed_push_branch="pm/pr-123")
+
+        args = mock_docker.call_args[0]
+        setup_script = args[-1]
+        assert "/usr/local/bin/git" in setup_script
+        assert "REAL_GIT=/usr/bin/git" in setup_script
+
     @patch("pm_core.container.build_exec_cmd", return_value="docker exec ...")
     @patch("pm_core.container.create_container", return_value="cid")
     @patch("pm_core.container.load_container_config",
            return_value=ContainerConfig())
     @patch("pm_core.container.is_container_mode_enabled", return_value=True)
     def test_wrap_passes_branch(self, mock_enabled, mock_config,
-                                 mock_create, mock_exec, mock_auth):
+                                 mock_create, mock_exec):
         wrap_claude_cmd("claude", "/w", label="impl",
                         allowed_push_branch="pm/pr-123")
         call_kwargs = mock_create.call_args[1]
