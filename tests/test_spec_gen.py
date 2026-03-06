@@ -62,9 +62,9 @@ class TestGetSetSpec:
 # ---------------------------------------------------------------------------
 
 class TestSpecMode:
-    @patch("pm_core.spec_gen.get_global_setting_value", return_value="prompt")
+    @patch("pm_core.spec_gen.get_global_setting_value", return_value="auto")
     def test_default_mode(self, mock_setting):
-        assert spec_gen.get_spec_mode() == "prompt"
+        assert spec_gen.get_spec_mode() == "auto"
 
     @patch("pm_core.spec_gen.get_global_setting_value", return_value="auto")
     def test_auto_mode(self, mock_setting):
@@ -75,8 +75,8 @@ class TestSpecMode:
         assert spec_gen.get_spec_mode() == "review"
 
     @patch("pm_core.spec_gen.get_global_setting_value", return_value="invalid")
-    def test_invalid_falls_back_to_prompt(self, mock_setting):
-        assert spec_gen.get_spec_mode() == "prompt"
+    def test_invalid_falls_back_to_auto(self, mock_setting):
+        assert spec_gen.get_spec_mode() == "auto"
 
     @patch("pm_core.spec_gen.get_spec_mode", return_value="prompt")
     def test_pr_review_spec_overrides(self, mock_mode):
@@ -263,3 +263,129 @@ class TestBuildSpecPrompt:
         pr = data["prs"][0]
         prompt = spec_gen._build_spec_prompt(data, pr, "impl")
         assert "AMBIGUITY_FLAG" in prompt
+
+
+# ---------------------------------------------------------------------------
+# has_pending_spec / get_pending_spec_phase
+# ---------------------------------------------------------------------------
+
+class TestPendingSpec:
+    def test_no_pending(self):
+        pr = {"id": "pr-1"}
+        assert not spec_gen.has_pending_spec(pr)
+        assert spec_gen.get_pending_spec_phase(pr) is None
+
+    def test_with_pending(self):
+        pr = {"id": "pr-1", "spec_pending": {"phase": "impl", "generated_at": "2025-01-01"}}
+        assert spec_gen.has_pending_spec(pr)
+        assert spec_gen.get_pending_spec_phase(pr) == "impl"
+
+    def test_invalid_pending_format(self):
+        pr = {"id": "pr-1", "spec_pending": "invalid"}
+        assert spec_gen.has_pending_spec(pr)  # truthy string
+        assert spec_gen.get_pending_spec_phase(pr) is None  # not a dict
+
+
+# ---------------------------------------------------------------------------
+# approve_spec
+# ---------------------------------------------------------------------------
+
+class TestApproveSpec:
+    def test_approve_clears_pending(self):
+        data = _make_data({
+            "spec_impl": "original spec",
+            "spec_pending": {"phase": "impl", "generated_at": "2025-01-01"},
+        })
+
+        phase = spec_gen.approve_spec(data, "pr-abc1234")
+        assert phase == "impl"
+        assert "spec_pending" not in data["prs"][0]
+
+    def test_approve_with_edits(self):
+        data = _make_data({
+            "spec_impl": "original spec",
+            "spec_pending": {"phase": "impl", "generated_at": "2025-01-01"},
+        })
+
+        phase = spec_gen.approve_spec(data, "pr-abc1234", edited_text="edited spec")
+        assert phase == "impl"
+        assert data["prs"][0]["spec_impl"] == "edited spec"
+        assert "spec_pending" not in data["prs"][0]
+
+    def test_approve_no_pending(self):
+        data = _make_data()
+        phase = spec_gen.approve_spec(data, "pr-abc1234")
+        assert phase is None
+
+    def test_approve_missing_pr(self):
+        data = _make_data()
+        phase = spec_gen.approve_spec(data, "pr-nonexistent")
+        assert phase is None
+
+
+# ---------------------------------------------------------------------------
+# oldest_pending_spec_pr
+# ---------------------------------------------------------------------------
+
+class TestOldestPendingSpecPr:
+    def test_no_pending(self):
+        data = _make_data()
+        assert spec_gen.oldest_pending_spec_pr(data) is None
+
+    def test_single_pending(self):
+        data = _make_data({
+            "spec_pending": {"phase": "impl", "generated_at": "2025-01-01T00:00:00"},
+        })
+        assert spec_gen.oldest_pending_spec_pr(data) == "pr-abc1234"
+
+    def test_multiple_pending_returns_oldest(self):
+        data = {
+            "project": {"name": "test", "repo": "test-repo", "base_branch": "master"},
+            "prs": [
+                {"id": "pr-1", "spec_pending": {"phase": "impl", "generated_at": "2025-01-02"}},
+                {"id": "pr-2", "spec_pending": {"phase": "review", "generated_at": "2025-01-01"}},
+                {"id": "pr-3"},  # no pending
+            ],
+        }
+        assert spec_gen.oldest_pending_spec_pr(data) == "pr-2"
+
+
+# ---------------------------------------------------------------------------
+# generate_spec sets spec_pending when review needed
+# ---------------------------------------------------------------------------
+
+class TestGenerateSpecPending:
+    @patch("pm_core.spec_gen.launch_claude_print")
+    @patch("pm_core.spec_gen.get_global_setting_value", return_value="review")
+    def test_review_mode_sets_pending(self, mock_setting, mock_claude):
+        mock_claude.return_value = "some spec"
+        data = _make_data()
+
+        spec_gen.generate_spec(data, "pr-abc1234", "impl")
+
+        pr = data["prs"][0]
+        assert "spec_pending" in pr
+        assert pr["spec_pending"]["phase"] == "impl"
+
+    @patch("pm_core.spec_gen.launch_claude_print")
+    @patch("pm_core.spec_gen.get_global_setting_value", return_value="prompt")
+    def test_no_pending_when_no_ambiguity(self, mock_setting, mock_claude):
+        mock_claude.return_value = "clean spec"
+        data = _make_data()
+
+        spec_gen.generate_spec(data, "pr-abc1234", "impl")
+
+        pr = data["prs"][0]
+        assert "spec_pending" not in pr
+
+    @patch("pm_core.spec_gen.launch_claude_print")
+    @patch("pm_core.spec_gen.get_global_setting_value", return_value="prompt")
+    def test_ambiguity_sets_pending(self, mock_setting, mock_claude):
+        mock_claude.return_value = "spec\nAMBIGUITY_FLAG\nQuestion?"
+        data = _make_data()
+
+        spec_gen.generate_spec(data, "pr-abc1234", "impl")
+
+        pr = data["prs"][0]
+        assert "spec_pending" in pr
+        assert pr["spec_pending"]["phase"] == "impl"

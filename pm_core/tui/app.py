@@ -145,6 +145,7 @@ class ProjectManagerApp(App):
         Binding("C", "show_connect", "Connect", show=False),
         Binding("A", "toggle_auto_start", "Auto-start", show=False),
         Binding("w", "focus_watcher", "Watcher", show=False),
+        Binding("V", "review_spec", "Review Spec", show=False),
     ]
 
     def on_key(self, event) -> None:
@@ -175,7 +176,8 @@ class ProjectManagerApp(App):
                        "launch_meta", "launch_claude", "launch_guide",
                        "view_log", "refresh", "rebalance", "show_help",
                        "toggle_plans", "toggle_qa", "start_qa_on_pr", "hide_plan", "move_to_plan", "toggle_merged",
-                       "cycle_filter", "cycle_sort", "toggle_auto_start", "focus_watcher"):
+                       "cycle_filter", "cycle_sort", "toggle_auto_start", "focus_watcher",
+                       "review_spec"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus:
                 _log.debug("check_action: blocked %s (command bar focused)", action)
@@ -712,6 +714,35 @@ class ProjectManagerApp(App):
                 self.set_timer(1, _check)
 
         self.set_timer(1, _check)
+
+    def action_review_spec(self) -> None:
+        """Open the oldest pending spec for review (V key)."""
+        from pm_core import spec_gen
+        _log.info("action: review_spec")
+
+        pr_id = spec_gen.oldest_pending_spec_pr(self._data)
+        if not pr_id:
+            self.log_message("No specs pending review")
+            return
+
+        pr = store.get_pr(self._data, pr_id)
+        if not pr:
+            self.log_message(f"PR {pr_id} not found")
+            return
+
+        phase = spec_gen.get_pending_spec_phase(pr)
+        if not phase:
+            self.log_message(f"No pending spec for {pr_id}")
+            return
+
+        # Select this PR in the tree
+        tree = self.query_one("#tech-tree", TechTree)
+        tree.select_pr(pr_id)
+
+        # Launch spec-approve in a pane
+        pane_ops.launch_pane(self, f"pm pr spec-approve {pr_id}",
+                             "spec-review", fresh=True)
+        self.log_message(f"Reviewing {phase} spec for {pr_id}")
 
     def action_quit(self) -> None:
         pane_ops.quit_app(self)

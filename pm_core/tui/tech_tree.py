@@ -523,6 +523,11 @@ class TechTree(Widget):
                         marker_offset = 2 + len(status_text) + 1
                         loop_style = "bold cyan"
                         status_text += f" {spinner}"
+            # Show spec-pending marker
+            if pr.get("spec_pending") and not loop_marker:
+                marker_offset = 2 + len(status_text) + 1
+                loop_style = "bold yellow"
+                status_text += " S"
             machine = pr.get("agent_machine")
             if machine:
                 avail = NODE_W - 4 - cell_len(status_text) - 1
