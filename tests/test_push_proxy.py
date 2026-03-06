@@ -164,6 +164,16 @@ class TestPushProxyBranchValidation:
 
 
 class TestPushProxyProtocol:
+    def test_rejects_non_string_args(self, proxy, sock_path):
+        resp = _send_request(sock_path, {"args": [123, None]})
+        assert resp["exit_code"] == 1
+        assert "list of strings" in resp["stderr"]
+
+    def test_rejects_non_list_args(self, proxy, sock_path):
+        resp = _send_request(sock_path, {"args": "not a list"})
+        assert resp["exit_code"] == 1
+        assert "list of strings" in resp["stderr"]
+
     def test_invalid_json(self, proxy, sock_path):
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         s.connect(sock_path)

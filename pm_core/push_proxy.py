@@ -136,6 +136,12 @@ class PushProxy:
             return
 
         push_args = request.get("args", [])
+        if (not isinstance(push_args, list)
+                or not all(isinstance(a, str) for a in push_args)):
+            response = {"exit_code": 1, "stdout": "",
+                        "stderr": "push-proxy: 'args' must be a list of strings\n"}
+            conn.sendall((json.dumps(response) + "\n").encode())
+            return
         response = self._execute_push(push_args)
         conn.sendall((json.dumps(response) + "\n").encode())
 
