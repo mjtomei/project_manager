@@ -14,7 +14,7 @@ from pm_core.tui._shell import _run_shell, _run_shell_async
 _log = configure_logger("pm.tui.pr_view")
 
 # PR command prefixes that require in-flight action guarding
-PR_ACTION_PREFIXES = ("pr start", "pr review", "pr merge")
+PR_ACTION_PREFIXES = ("pr start", "pr review", "pr qa", "pr merge")
 
 
 # ---------------------------------------------------------------------------
@@ -391,6 +391,36 @@ def handle_command_submitted(app, cmd: str) -> None:
         target_pr = cmd.split("target", 1)[1].strip()
         set_target(app, target_pr if target_pr else None)
         app.query_one("#tech-tree", TechTree).focus()
+        return
+
+    # Handle QA commands — route to qa_loop_ui instead of CLI
+    if len(parts) >= 2 and parts[0] == "pr" and parts[1] == "qa":
+        from pm_core.tui import qa_loop_ui
+        from pm_core import store as _store
+        if len(parts) >= 3:
+            qa_pr_id = parts[2]
+        else:
+            # Use the selected PR if no ID given
+            from pm_core.tui.tech_tree import TechTree
+            tree = app.query_one("#tech-tree", TechTree)
+            qa_pr_id = tree.selected_pr_id
+        if not qa_pr_id:
+            app.log_message("No PR specified for QA")
+        else:
+            # Resolve short ID to full ID
+            if app._root:
+                qa_data = _store.load(app._root)
+                qa_pr = _store.get_pr(qa_data, qa_pr_id)
+                if qa_pr:
+                    qa_loop_ui.focus_or_start_qa(app, qa_pr["id"])
+                else:
+                    app.log_message(f"PR not found: {qa_pr_id}")
+            else:
+                app.log_message("No project root")
+        if app._plans_visible:
+            app.query_one("#plans-pane", PlansPane).focus()
+        else:
+            app.query_one("#tech-tree", TechTree).focus()
         return
 
     # Commands that launch interactive Claude sessions need a tmux pane
