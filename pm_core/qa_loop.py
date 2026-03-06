@@ -842,6 +842,19 @@ def run_qa_sync(
         if on_update:
             on_update(state)
 
+    # --- Generate QA spec if needed ---
+    from pm_core import spec_gen
+    pr_entry = store.get_pr(data, state.pr_id)
+    if pr_entry and not spec_gen.get_spec(pr_entry, "qa"):
+        mode = spec_gen.get_spec_mode()
+        if mode != "auto" or spec_gen.pr_spec_mode(pr_entry) != "auto":
+            try:
+                _log.info("QA: generating qa spec for %s", state.pr_id)
+                spec_gen.generate_spec(data, state.pr_id, "qa", root=pm_root)
+            except Exception as e:
+                _log.warning("QA: spec generation failed for %s: %s",
+                             state.pr_id, e)
+
     # --- Phase 1: Planning (if no scenarios pre-loaded) ---
     if state.planning_phase and not state.scenarios:
         _log.info("QA planning phase for %s", state.pr_id)
