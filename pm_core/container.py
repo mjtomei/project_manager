@@ -252,8 +252,7 @@ def _build_git_setup_script(
             'exec $REAL_GIT "$@"\n'
         )
         wrapper_path = "/usr/local/bin/git"
-        lines.append(f"cat > {wrapper_path} << 'WRAPEOF'\n{wrapper_script}WRAPEOF")
-        lines.append(f"chmod 755 {wrapper_path}")
+        lines.append(f"cat > {wrapper_path} << 'WRAPEOF'\n{wrapper_script}WRAPEOF\nchmod 755 {wrapper_path}")
 
     return "; ".join(lines) if lines else ""
 
@@ -411,6 +410,7 @@ def create_container(
     setup_parts = [
         f"groupadd -g {host_gid} {_CONTAINER_USER} 2>/dev/null",
         f"useradd -u {host_uid} -g {host_gid} -m -s /bin/bash {_CONTAINER_USER} 2>/dev/null",
+        f"chown {host_uid}:{host_gid} {_CONTAINER_HOME}",
     ]
     if git_setup:
         setup_parts.append(git_setup)
