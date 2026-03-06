@@ -887,7 +887,9 @@ def generate_qa_child_prompt(data: dict, pr_id: str,
 ## Instruction Reference
 
 Read the full instruction at: `{scenario.instruction_path}`
-Follow its procedures as applicable to this scenario.
+Follow its **Setup** section to create a real test environment BEFORE running
+any test steps.  Do NOT skip setup and fall back to static code reading — your
+job is to verify runtime behavior, not review code.
 """
 
     # Include PR notes (prior QA results, addendums)
