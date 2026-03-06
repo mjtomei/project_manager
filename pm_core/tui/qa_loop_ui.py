@@ -310,9 +310,16 @@ def _on_qa_complete(app, state: QALoopState) -> None:
                           sd["pass_count"], required)
                 start_qa(app, pr_id)
         else:
-            # Legacy path
-            app.log_message(f"[green bold]QA PASS[/] for {pr_id} — ready to merge")
-            _trigger_auto_merge(app, pr_id)
+            # Legacy path — only auto-merge when auto-start is active
+            from pm_core.tui import auto_start as _auto_start
+            if _auto_start.is_enabled(app):
+                app.log_message(f"[green bold]QA PASS[/] for {pr_id} — ready to merge")
+                _trigger_auto_merge(app, pr_id)
+            else:
+                app.log_message(
+                    f"[green bold]QA PASS[/] for {pr_id} — "
+                    "merge manually or enable auto-start"
+                )
     elif verdict == VERDICT_NEEDS_WORK or state.made_changes:
         # Issues found or changes committed → back to review
         app.log_message(
