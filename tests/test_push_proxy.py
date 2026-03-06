@@ -101,6 +101,27 @@ class TestPushProxyBranchValidation:
         assert resp["exit_code"] == 0
 
     @patch("subprocess.run")
+    def test_allows_push_origin_HEAD(self, mock_run, proxy, sock_path):
+        """'git push origin HEAD' should resolve HEAD and allow if on correct branch."""
+        def side_effect(cmd, **kwargs):
+            if "rev-parse" in cmd:
+                return MagicMock(returncode=0, stdout="pm/pr-123-feature\n")
+            return MagicMock(returncode=0, stdout="ok\n", stderr="")
+        mock_run.side_effect = side_effect
+        resp = _send_request(sock_path,
+                             {"args": ["origin", "HEAD"]})
+        assert resp["exit_code"] == 0
+
+    @patch("subprocess.run")
+    def test_rejects_push_origin_HEAD_wrong_branch(self, mock_run, proxy, sock_path):
+        """'git push origin HEAD' should reject if HEAD is on wrong branch."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="main\n")
+        resp = _send_request(sock_path,
+                             {"args": ["origin", "HEAD"]})
+        assert resp["exit_code"] == 1
+        assert "rejected" in resp["stderr"]
+
+    @patch("subprocess.run")
     def test_no_refspec_checks_head(self, mock_run, proxy, sock_path):
         """Without explicit refspec, proxy checks current branch via HEAD."""
         # First call: git rev-parse --abbrev-ref HEAD

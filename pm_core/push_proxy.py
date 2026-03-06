@@ -230,6 +230,18 @@ class PushProxy:
             # Strip refs/heads/ prefix
             if dst.startswith("refs/heads/"):
                 dst = dst[len("refs/heads/"):]
+            # Resolve symbolic refs like HEAD to actual branch name
+            if dst == "HEAD":
+                try:
+                    result = subprocess.run(
+                        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                        cwd=self.workdir, capture_output=True, text=True,
+                        timeout=5,
+                    )
+                    if result.returncode == 0:
+                        dst = result.stdout.strip()
+                except (subprocess.TimeoutExpired, FileNotFoundError):
+                    return None
             return dst if dst else None
 
         # No explicit refspec — check what branch HEAD is on
