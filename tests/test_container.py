@@ -414,7 +414,7 @@ class TestBuildExecCmd:
     def test_includes_cleanup_by_default(self):
         cmd = build_exec_cmd("my-container", "claude 'hi'")
         assert "docker rm -f" in cmd
-        assert cmd.endswith(">/dev/null 2>&1")
+        assert cmd.endswith("; exit")
 
     def test_no_cleanup_when_disabled(self):
         cmd = build_exec_cmd("my-container", "claude 'hi'", cleanup=False)
