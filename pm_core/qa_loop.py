@@ -676,7 +676,8 @@ def _launch_scenarios_in_containers(
             continue
 
         # Build docker exec command and launch in a tmux window.
-        # cleanup=False: QA containers are batch-removed by cleanup_qa_containers
+        # cleanup=False: containers stay alive with their windows; orphans
+        # are cleaned up at the start of the next QA run.
         exec_cmd = container_mod.build_exec_cmd(cname, claude_cmd, cleanup=False)
         win_name = _scenario_window_name(pr_data, scenario.index)
         try:
@@ -850,6 +851,13 @@ def run_qa_sync(
                 session, existing_win["id"],
             )
             _cleanup_stale_scenario_windows(session, pr_data)
+
+        # Clean up orphaned containers from previous runs whose tmux
+        # windows no longer exist.
+        if use_containers:
+            from pm_core import container as container_mod
+            container_mod.cleanup_orphaned_qa_containers(
+                session, state.pr_id)
 
         # Launch Scenario 0 (interactive) right after stale cleanup so
         # the user can start exploring while the planner runs.
@@ -1047,39 +1055,29 @@ def run_qa_sync(
     _poll_tmux_verdicts(state, session, status_path, _notify)
 
     # --- Cleanup ---
-    # Keep scenario windows alive so users can inspect results, review
-    # logs, and debug issues after the verdict.  Only containers are
-    # cleaned up (they run in the background; the tmux windows showing
-    # `docker exec` will exit naturally when the container stops).
-    if use_containers:
-        from pm_core import container as container_mod
-        # Keep the Scenario 0 container alive so the user's interactive
-        # session is not terminated when numbered scenarios finish.
-        s0_exclude: set[str] = set()
-        if state.scenario_0 and state.scenario_0.container_name:
-            s0_exclude.add(state.scenario_0.container_name)
-        container_mod.cleanup_qa_containers(
-            state.pr_id, state.loop_id, exclude=s0_exclude)
+    # Keep scenario windows AND containers alive so users can inspect
+    # results, review logs, and debug issues after the verdict.
+    # Orphaned containers (whose windows have been closed) are cleaned
+    # up at the start of the next QA run instead.
 
     # --- Merge back scenario worktree commits ---
     _merge_scenario_commits(state, repo_root, pr_data)
 
     # --- Worktree cleanup ---
-    # Clean up worktrees for numbered scenarios.  Skip Scenario 0 when
-    # its container is still alive — the container mounts the worktree
-    # at /workspace and removing it would break the interactive session.
-    all_cleanup = list(state.scenarios)
-    s0_container_alive = (state.scenario_0
-                          and state.scenario_0.container_name
-                          and use_containers)
-    if state.scenario_0 and not s0_container_alive:
-        all_cleanup.append(state.scenario_0)
-    if repo_root:
-        for scenario in all_cleanup:
-            if scenario.worktree_path:
-                git_ops.remove_worktree(repo_root, Path(scenario.worktree_path))
-            if scenario.worktree_branch:
-                git_ops.delete_branch(repo_root, scenario.worktree_branch)
+    # When containers are in use, skip worktree cleanup — the containers
+    # mount the worktrees and removing them would break still-open
+    # scenario windows.  Worktrees are cleaned up at the start of the
+    # next QA run (alongside orphaned containers).
+    if not use_containers:
+        all_cleanup = list(state.scenarios)
+        if state.scenario_0:
+            all_cleanup.append(state.scenario_0)
+        if repo_root:
+            for scenario in all_cleanup:
+                if scenario.worktree_path:
+                    git_ops.remove_worktree(repo_root, Path(scenario.worktree_path))
+                if scenario.worktree_branch:
+                    git_ops.delete_branch(repo_root, scenario.worktree_branch)
 
     # --- Aggregate verdicts ---
     verdicts = list(state.scenario_verdicts.values())
