@@ -572,19 +572,79 @@ def pr_spec(pr_id: str, phase: str | None, regenerate: bool):
         click.echo("Spec generation returned empty output.", err=True)
 
 
+@pr.command("spec-approve")
+@click.argument("pr_id")
+def pr_spec_approve(pr_id: str):
+    """Approve a pending spec review for a PR.
+
+    Opens the spec in an editor for review. Saving and closing approves it.
+    """
+    root = state_root()
+    data = store.load(root)
+    pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
+
+    phase = spec_gen.get_pending_spec_phase(pr_entry)
+    if not phase:
+        click.echo(f"No pending spec review for {_pr_display_id(pr_entry)}.")
+        return
+
+    spec_text = spec_gen.get_spec(pr_entry, phase) or ""
+    if not spec_text:
+        click.echo(f"Spec content is empty — nothing to review.", err=True)
+        spec_gen.approve_spec(data, pr_id, root=root)
+        return
+
+    header = f"# Spec review: {phase} for {pr_id}\n# Edit as needed, then save and close to approve.\n# Delete all content to reject.\n\n"
+    edited = click.edit(header + spec_text)
+    if edited is not None:
+        # Strip header lines
+        lines = edited.split("\n")
+        content_lines = [l for l in lines if not l.startswith("# ")]
+        edited_content = "\n".join(content_lines).strip()
+        if not edited_content:
+            click.echo("Spec rejected (empty content). Clearing pending review.")
+            spec_gen.approve_spec(data, pr_id, root=root, edited_text="")
+            return
+        spec_gen.approve_spec(data, pr_id, root=root, edited_text=edited_content)
+        click.echo(f"Spec approved for {phase} phase.")
+    else:
+        # Editor returned None = no changes, approve as-is
+        spec_gen.approve_spec(data, pr_id, root=root)
+        click.echo(f"Spec approved (unchanged) for {phase} phase.")
+
+    trigger_tui_refresh()
+
+
 def _maybe_generate_spec(data: dict, pr_entry: dict, phase: str,
-                         root: Path) -> None:
+                         root: Path, background: bool = False) -> bool:
     """Generate a spec for *phase* if spec mode allows, and handle review.
 
     In ``auto`` mode the spec is generated silently and included in prompts.
-    In ``review`` mode the spec is printed and the user is prompted to approve.
+    In ``review`` mode the spec is generated and marked as pending review.
     In ``prompt`` mode the spec is generated and proceeds unless an ambiguity
     flag is detected or the PR has ``review_spec: true``.
+
+    Args:
+        background: If True, never prompt interactively — just mark
+            spec_pending and return False so the caller knows not to proceed.
+
+    Returns:
+        True if the phase can proceed (spec approved or no review needed),
+        False if the phase should wait (spec pending review).
     """
     mode = spec_gen.get_spec_mode()
     if mode == "auto" and not pr_entry.get("review_spec"):
         # Auto mode: skip spec generation entirely (current behavior)
-        return
+        return True
+
+    # If there's already a pending spec for this phase, don't regenerate
+    if spec_gen.has_pending_spec(pr_entry):
+        pending_phase = spec_gen.get_pending_spec_phase(pr_entry)
+        if pending_phase == phase:
+            click.echo(f"Spec for {phase} is pending review. "
+                       f"Use `pm pr spec-approve {pr_entry['id']}` or press V in the TUI.")
+            return False
 
     try:
         spec_text, needs_review = spec_gen.generate_spec(
@@ -594,30 +654,42 @@ def _maybe_generate_spec(data: dict, pr_entry: dict, phase: str,
         click.echo(f"Warning: spec generation failed: {e}", err=True)
         _log.warning("spec generation failed for %s/%s: %s",
                      pr_entry["id"], phase, e)
-        return
+        return True  # Don't block on failure
 
     if not spec_text:
-        return
+        return True
 
     if needs_review:
-        click.echo(f"\n{'='*60}")
-        click.echo(f"SPEC ({phase}) — requires review:")
-        click.echo(f"{'='*60}\n")
-        click.echo(spec_text)
-        click.echo(f"\n{'='*60}")
-        if click.confirm("Approve this spec and proceed?", default=True):
-            click.echo("Spec approved.")
+        if background:
+            # In background mode, don't prompt — spec_pending is already set
+            # by generate_spec. The TUI will show the marker.
+            click.echo(f"Spec for {phase} requires review — pausing {pr_entry['id']}.")
+            trigger_tui_refresh()
+            return False
         else:
-            # Allow editing
-            edited = click.edit(spec_text)
-            if edited and edited.strip():
-                spec_gen.set_spec(pr_entry, phase, edited.strip())
-                store.save(data, root)
-                click.echo("Spec updated.")
+            # Interactive mode: prompt directly
+            click.echo(f"\n{'='*60}")
+            click.echo(f"SPEC ({phase}) — requires review:")
+            click.echo(f"{'='*60}\n")
+            click.echo(spec_text)
+            click.echo(f"\n{'='*60}")
+            if click.confirm("Approve this spec and proceed?", default=True):
+                spec_gen.approve_spec(data, pr_entry["id"], root=root)
+                click.echo("Spec approved.")
+                return True
             else:
-                click.echo("Spec unchanged.")
+                edited = click.edit(spec_text)
+                if edited and edited.strip():
+                    spec_gen.approve_spec(data, pr_entry["id"], root=root,
+                                          edited_text=edited.strip())
+                    click.echo("Spec updated and approved.")
+                else:
+                    spec_gen.approve_spec(data, pr_entry["id"], root=root)
+                    click.echo("Spec approved (unchanged).")
+                return True
     else:
         click.echo(f"Generated {phase} spec ({len(spec_text)} chars)")
+        return True
 
 
 @pr.command("start")
@@ -823,7 +895,11 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     click.echo(f"Work directory: {work_path}")
 
     # Generate implementation spec if spec mode is not auto-disabled
-    _maybe_generate_spec(data, pr_entry, "impl", root)
+    can_proceed = _maybe_generate_spec(data, pr_entry, "impl", root,
+                                        background=background)
+    if not can_proceed:
+        # Spec needs review — don't launch Claude yet
+        return
 
     prompt = prompt_gen.generate_prompt(data, pr_id, session_name=pm_session)
 
@@ -979,7 +1055,10 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     # Generate review spec (only on first iteration of a review loop)
     if review_iteration <= 1:
         root = state_root()
-        _maybe_generate_spec(data, pr_entry, "review", root)
+        can_proceed = _maybe_generate_spec(data, pr_entry, "review", root,
+                                            background=background or review_loop)
+        if not can_proceed:
+            return
 
     # Generate review prompt and build Claude command
     review_prompt = prompt_gen.generate_review_prompt(data, pr_id, session_name=pm_session,

@@ -10,9 +10,17 @@ Spec generation modes (global setting ``spec-mode``):
   review — Generate spec, pause for user approval before proceeding.
   prompt — (default) Generate spec and proceed unless the PR has
            ``review_spec: true`` or Claude flags an unresolvable ambiguity.
+
+TUI integration:
+  When a spec needs review, ``spec_pending`` is set on the PR entry:
+    ``{"phase": "impl", "generated_at": "2025-01-01T00:00:00"}``
+  The TUI shows a 📋 marker and the ``V`` key jumps to the oldest
+  pending spec for review.  Approving clears ``spec_pending`` and
+  allows the phase to proceed.
 """
 
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 import click
@@ -34,11 +42,16 @@ _SPEC_FIELD = {
 
 
 def get_spec_mode() -> str:
-    """Return the global spec generation mode: auto, review, or prompt."""
-    val = get_global_setting_value("spec-mode", "prompt").lower()
+    """Return the global spec generation mode: auto, review, or prompt.
+
+    Defaults to ``auto`` (no spec generation) so existing behavior is
+    preserved until the user opts in with ``pm set spec-mode prompt``
+    or ``pm set spec-mode review``.
+    """
+    val = get_global_setting_value("spec-mode", "auto").lower()
     if val in ("auto", "review", "prompt"):
         return val
-    return "prompt"
+    return "auto"
 
 
 def pr_spec_mode(pr: dict) -> str:
@@ -250,7 +263,76 @@ def generate_spec(data: dict, pr_id: str, phase: str,
             _log.info("spec_gen: ambiguity detected in %s spec for %s, "
                       "pausing for review", phase, pr_id)
 
+    # Set spec_pending if review is needed
+    if needs_review:
+        pr["spec_pending"] = {
+            "phase": phase,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if root:
+            store.save(data, root)
+        _log.info("spec_gen: marked spec_pending for %s/%s", pr_id, phase)
+
     return spec_text, needs_review
+
+
+def has_pending_spec(pr: dict) -> bool:
+    """Check if a PR has a spec waiting for user review."""
+    return bool(pr.get("spec_pending"))
+
+
+def get_pending_spec_phase(pr: dict) -> str | None:
+    """Return the phase name of the pending spec, or None."""
+    pending = pr.get("spec_pending")
+    if pending and isinstance(pending, dict):
+        return pending.get("phase")
+    return None
+
+
+def approve_spec(data: dict, pr_id: str, root: Path | None = None,
+                 edited_text: str | None = None) -> str | None:
+    """Approve a pending spec, optionally with edits.
+
+    Clears ``spec_pending`` and saves.  If *edited_text* is provided,
+    updates the spec content.
+
+    Returns the phase that was approved, or None if no pending spec.
+    """
+    pr = store.get_pr(data, pr_id)
+    if not pr:
+        return None
+
+    pending = pr.get("spec_pending")
+    if not pending or not isinstance(pending, dict):
+        return None
+
+    phase = pending.get("phase")
+    if not phase:
+        return None
+
+    if edited_text is not None:
+        set_spec(pr, phase, edited_text.strip())
+
+    del pr["spec_pending"]
+    if root:
+        store.save(data, root)
+    _log.info("spec_gen: approved %s spec for %s", phase, pr_id)
+    return phase
+
+
+def oldest_pending_spec_pr(data: dict) -> str | None:
+    """Return the PR ID with the oldest pending spec review, or None."""
+    oldest_pr_id = None
+    oldest_time = None
+    for pr in data.get("prs") or []:
+        pending = pr.get("spec_pending")
+        if not pending or not isinstance(pending, dict):
+            continue
+        gen_at = pending.get("generated_at", "")
+        if oldest_time is None or gen_at < oldest_time:
+            oldest_time = gen_at
+            oldest_pr_id = pr["id"]
+    return oldest_pr_id
 
 
 def format_spec_for_prompt(pr: dict, phase: str) -> str:

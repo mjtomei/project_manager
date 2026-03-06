@@ -367,6 +367,11 @@ async def check_and_start(app) -> None:
             if allowed is not None and pr_id not in allowed:
                 continue
 
+            # Skip PRs with a pending spec review
+            if pr.get("spec_pending"):
+                _log.debug("auto_start: skipping %s (spec pending review)", pr_id)
+                continue
+
             _log.info("auto_start: starting ready PR %s", pr_id)
             app.log_message(f"Auto-start: starting {pr_id}")
 
@@ -427,6 +432,9 @@ def _auto_start_review_loops(app, target: str | None = None,
         # Skip if no workdir (shouldn't happen for in_review, but guard)
         if not pr.get("workdir"):
             continue
+        # Skip if spec pending review
+        if pr.get("spec_pending"):
+            continue
 
         _log.info("auto_start: starting review loop for %s", pr_id)
         app.log_message(f"Auto-start: review loop for {pr_id}")
@@ -471,6 +479,9 @@ def _auto_start_qa_loops(app, target: str | None = None,
             continue
         # Skip if no workdir
         if not pr.get("workdir"):
+            continue
+        # Skip if spec pending review
+        if pr.get("spec_pending"):
             continue
 
         _log.info("auto_start: starting QA loop for %s", pr_id)
