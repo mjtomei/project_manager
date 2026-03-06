@@ -542,6 +542,8 @@ def _launch_scenarios_in_containers(
         cname = container_mod.qa_container_name(
             state.pr_id, state.loop_id, scenario.index,
         )
+        # QA containers get push access scoped to the PR branch
+        pr_branch = pr_data.get("branch", "")
         try:
             container_mod.create_qa_container(
                 name=cname,
@@ -549,6 +551,7 @@ def _launch_scenarios_in_containers(
                 repo_root=repo_root or Path(workdir_path),
                 worktree_path=wt_path,
                 scratch_path=scratch_path,
+                allowed_push_branch=pr_branch,
             )
             scenario.container_name = cname
         except Exception:

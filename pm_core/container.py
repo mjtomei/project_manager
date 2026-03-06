@@ -28,6 +28,7 @@ import secrets
 import shlex
 import shutil
 import subprocess
+import textwrap
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -153,6 +154,195 @@ def _run_docker(*args: str, check: bool = True,
 
 
 # ---------------------------------------------------------------------------
+# Git credential detection and injection
+# ---------------------------------------------------------------------------
+
+def _detect_git_auth(workdir: Path) -> dict:
+    """Detect host git authentication method from the workdir's remote URL.
+
+    Returns a dict with:
+      - "method": "ssh" | "https" | "local" | "unknown"
+      - "remote_url": the origin URL (if any)
+      - For SSH: "ssh_dir" if ~/.ssh exists
+      - For SSH: "ssh_auth_sock" if SSH_AUTH_SOCK is set
+      - For HTTPS: "credential_helper" from git config
+      - For HTTPS: "gh_token" if gh CLI is authenticated
+    """
+    info: dict = {"method": "unknown", "remote_url": ""}
+
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=workdir, capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode != 0:
+            info["method"] = "local"
+            return info
+        url = result.stdout.strip()
+        info["remote_url"] = url
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return info
+
+    if not url or (not url.startswith(("http://", "https://", "git://", "ssh://"))
+                   and not url.startswith("git@")):
+        info["method"] = "local"
+        return info
+
+    # SSH-style URL: git@host:... or ssh://...
+    if url.startswith("git@") or url.startswith("ssh://"):
+        info["method"] = "ssh"
+        ssh_dir = Path.home() / ".ssh"
+        if ssh_dir.is_dir():
+            info["ssh_dir"] = str(ssh_dir)
+        sock = os.environ.get("SSH_AUTH_SOCK")
+        if sock:
+            info["ssh_auth_sock"] = sock
+        return info
+
+    # HTTPS URL
+    info["method"] = "https"
+
+    # Check for git credential helper
+    try:
+        result = subprocess.run(
+            ["git", "config", "--get", "credential.helper"],
+            cwd=workdir, capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            info["credential_helper"] = result.stdout.strip()
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+    # Try to get a token from gh CLI (GitHub HTTPS auth)
+    try:
+        result = subprocess.run(
+            ["gh", "auth", "token"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            info["gh_token"] = result.stdout.strip()
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+    return info
+
+
+def _build_git_setup_script(auth_info: dict, allowed_branch: str | None = None) -> str:
+    """Build a shell script snippet to configure git inside the container.
+
+    This script runs as root before the main command, configuring:
+      - Git credential helper for HTTPS (using a token from gh)
+      - SSH known_hosts and config
+      - A git wrapper that restricts pushes to the allowed branch
+        (installed as a higher-priority binary, cannot be bypassed with --no-verify)
+    """
+    lines: list[str] = []
+    home = _CONTAINER_HOME
+    method = auth_info.get("method", "unknown")
+
+    if method == "ssh":
+        # SSH config: ensure known_hosts has common hosts
+        lines.append(f"mkdir -p {home}/.ssh")
+        lines.append(f"chmod 700 {home}/.ssh")
+        # Add GitHub/GitLab/etc to known_hosts so push doesn't prompt
+        lines.append(
+            f"ssh-keyscan -t ed25519,rsa github.com gitlab.com bitbucket.org "
+            f">> {home}/.ssh/known_hosts 2>/dev/null"
+        )
+        lines.append(f"chmod 644 {home}/.ssh/known_hosts")
+        # Fix ownership
+        lines.append(f"chown -R {_CONTAINER_USER}:{_CONTAINER_USER} {home}/.ssh")
+
+    elif method == "https":
+        token = auth_info.get("gh_token")
+        if token:
+            # Set up a git credential helper that returns the token
+            # This is scoped to the container's lifetime only.
+            cred_script = f"{home}/.git-credential-pm"
+            # The credential helper script echoes credentials for any request
+            lines.append(f"cat > {cred_script} << 'CREDEOF'\n"
+                         f"#!/bin/sh\n"
+                         f"echo \"username=x-access-token\"\n"
+                         f"echo \"password={token}\"\n"
+                         f"echo\n"
+                         f"CREDEOF")
+            lines.append(f"chmod 755 {cred_script}")
+            lines.append(f"chown {_CONTAINER_USER}:{_CONTAINER_USER} {cred_script}")
+            lines.append(
+                f"su - {_CONTAINER_USER} -c "
+                f"'git config --global credential.helper \"{cred_script}\"'"
+            )
+        else:
+            helper = auth_info.get("credential_helper")
+            if helper:
+                lines.append(
+                    f"su - {_CONTAINER_USER} -c "
+                    f"'git config --global credential.helper \"{helper}\"'"
+                )
+
+    # Set safe directory for /workspace
+    lines.append(
+        f"su - {_CONTAINER_USER} -c "
+        f"'git config --global --add safe.directory {_CONTAINER_WORKDIR}'"
+    )
+
+    # Install a git wrapper that restricts pushes to the allowed branch.
+    # This is placed in /usr/local/bin/git which takes precedence over
+    # /usr/bin/git in PATH.  Unlike a pre-push hook, this cannot be
+    # bypassed with --no-verify or by removing the hook file.
+    # The wrapper is owned by root and not writable by the container user.
+    if allowed_branch:
+        escaped_branch = allowed_branch.replace("'", "'\\''")
+        wrapper_script = textwrap.dedent(f"""\
+            #!/bin/sh
+            # pm: git wrapper that restricts pushes to the PR branch
+            REAL_GIT=/usr/bin/git
+            ALLOWED='{escaped_branch}'
+            if [ "$1" = "push" ]; then
+                # Parse the push args to find refspecs
+                shift  # consume "push"
+                remote=""
+                for arg in "$@"; do
+                    case "$arg" in
+                        -*) ;;  # skip flags
+                        *)
+                            if [ -z "$remote" ]; then
+                                remote="$arg"
+                            else
+                                # This is a refspec — extract the destination branch
+                                dst="${{arg#*:}}"
+                                # Strip refs/heads/ prefix if present
+                                dst="${{dst#refs/heads/}}"
+                                if [ -n "$dst" ] && [ "$dst" != "$ALLOWED" ]; then
+                                    echo "pm: push rejected — only pushing to '$ALLOWED' is allowed from this container" >&2
+                                    exit 1
+                                fi
+                            fi
+                            ;;
+                    esac
+                done
+                # If no explicit refspec, git pushes the current branch.
+                # Check that the current branch matches the allowed branch.
+                if [ -z "$dst" ]; then
+                    current=$($REAL_GIT rev-parse --abbrev-ref HEAD 2>/dev/null)
+                    if [ -n "$current" ] && [ "$current" != "$ALLOWED" ]; then
+                        echo "pm: push rejected — only pushing to '$ALLOWED' is allowed from this container" >&2
+                        exit 1
+                    fi
+                fi
+                exec $REAL_GIT push "$@"
+            fi
+            exec $REAL_GIT "$@"
+        """)
+        wrapper_path = "/usr/local/bin/git"
+        lines.append(f"cat > {wrapper_path} << 'WRAPEOF'\n{wrapper_script}WRAPEOF")
+        lines.append(f"chmod 755 {wrapper_path}")
+        # Root-owned, not writable by container user — cannot be tampered with
+
+    return "; ".join(lines) if lines else ""
+
+
+# ---------------------------------------------------------------------------
 # Claude binary resolution
 # ---------------------------------------------------------------------------
 
@@ -194,6 +384,7 @@ def create_container(
     workdir: Path,
     extra_ro_mounts: dict[Path, str] | None = None,
     extra_rw_mounts: dict[Path, str] | None = None,
+    allowed_push_branch: str | None = None,
 ) -> str:
     """Create a detached container with the workdir and claude mounted.
 
@@ -205,6 +396,8 @@ def create_container(
       - Mounts ~/.claude read-write (for auth and session state)
       - Passes through Claude-related env vars
       - Applies resource limits from config
+      - Detects host git auth (SSH/HTTPS) and injects credentials
+      - Installs a pre-push hook restricting pushes to *allowed_push_branch*
 
     Args:
         name: Container name (must be unique).
@@ -212,6 +405,7 @@ def create_container(
         workdir: Host path to mount at /workspace (read-write).
         extra_ro_mounts: Additional read-only mounts {host_path: container_path}.
         extra_rw_mounts: Additional read-write mounts {host_path: container_path}.
+        allowed_push_branch: If set, restrict git push to this branch only.
 
     Returns:
         Container ID.
@@ -280,14 +474,31 @@ def create_container(
     for mount in config.extra_mounts:
         cmd.extend(["-v", mount])
 
-    # --- Create pm user with matching uid/gid, then sleep ---
+    # --- Git auth: detect host method and mount credentials ---
+    auth_info = _detect_git_auth(workdir)
+    _log.info("Git auth for container %s: method=%s", name, auth_info.get("method"))
+
+    if auth_info.get("method") == "ssh":
+        ssh_dir = auth_info.get("ssh_dir")
+        if ssh_dir:
+            cmd.extend(["-v", f"{ssh_dir}:{_CONTAINER_HOME}/.ssh:ro"])
+        sock = auth_info.get("ssh_auth_sock")
+        if sock:
+            cmd.extend(["-e", f"SSH_AUTH_SOCK={sock}",
+                        "-v", f"{sock}:{sock}"])
+
+    # --- Create pm user with matching uid/gid, configure git, then sleep ---
     host_uid = os.getuid()
     host_gid = os.getgid()
-    setup = (
-        f"groupadd -g {host_gid} {_CONTAINER_USER} 2>/dev/null; "
-        f"useradd -u {host_uid} -g {host_gid} -m -s /bin/bash {_CONTAINER_USER} 2>/dev/null; "
-        f"exec sleep infinity"
-    )
+    git_setup = _build_git_setup_script(auth_info, allowed_push_branch)
+    setup_parts = [
+        f"groupadd -g {host_gid} {_CONTAINER_USER} 2>/dev/null",
+        f"useradd -u {host_uid} -g {host_gid} -m -s /bin/bash {_CONTAINER_USER} 2>/dev/null",
+    ]
+    if git_setup:
+        setup_parts.append(git_setup)
+    setup_parts.append("exec sleep infinity")
+    setup = "; ".join(setup_parts)
     cmd.extend([config.image, "bash", "-c", setup])
 
     result = _run_docker(*cmd, timeout=60)
@@ -325,6 +536,7 @@ def wrap_claude_cmd(
     label: str = "session",
     extra_ro_mounts: dict[Path, str] | None = None,
     extra_rw_mounts: dict[Path, str] | None = None,
+    allowed_push_branch: str | None = None,
 ) -> tuple[str, str]:
     """Create a container and return a wrapped command for tmux.
 
@@ -338,6 +550,7 @@ def wrap_claude_cmd(
         label: Short label for the container name (e.g. "impl", "review", "qa-s1").
         extra_ro_mounts: Additional read-only mounts {host_path: container_path}.
         extra_rw_mounts: Additional read-write mounts {host_path: container_path}.
+        allowed_push_branch: If set, restrict git push to this branch inside the container.
 
     Returns:
         (wrapped_cmd, container_name).  container_name is "" if not containerised.
@@ -355,6 +568,7 @@ def wrap_claude_cmd(
             workdir=Path(workdir),
             extra_ro_mounts=extra_ro_mounts,
             extra_rw_mounts=extra_rw_mounts,
+            allowed_push_branch=allowed_push_branch,
         )
     except Exception:
         _log.warning("Failed to create container %s — falling back to host",
@@ -376,6 +590,7 @@ def create_qa_container(
     repo_root: Path,
     worktree_path: Path,
     scratch_path: Path,
+    allowed_push_branch: str | None = None,
 ) -> str:
     """Create a detached container for a QA scenario.
 
@@ -390,6 +605,7 @@ def create_qa_container(
         workdir=worktree_path,
         extra_ro_mounts={repo_root: "/repo"},
         extra_rw_mounts={scratch_path: _CONTAINER_SCRATCH},
+        allowed_push_branch=allowed_push_branch,
     )
 
 

@@ -718,7 +718,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                                          transcript=transcript, cwd=str(work_path))
             # Optionally wrap in a container for isolation
             from pm_core.container import wrap_claude_cmd
-            cmd, _cname = wrap_claude_cmd(cmd, str(work_path), label=f"impl-{pr_id}")
+            cmd, _cname = wrap_claude_cmd(cmd, str(work_path), label=f"impl-{pr_id}",
+                                          allowed_push_branch=branch)
             try:
                 if use_companion:
                     claude_pane = tmux_mod.new_window_get_pane(
@@ -835,8 +836,10 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     claude_cmd = build_claude_shell_cmd(prompt=review_prompt,
                                          transcript=transcript, cwd=workdir)
     # Optionally wrap in a container for isolation
+    branch = pr_entry.get("branch", "")
     from pm_core.container import wrap_claude_cmd
-    claude_cmd, _cname = wrap_claude_cmd(claude_cmd, workdir, label=f"review-{pr_id}")
+    claude_cmd, _cname = wrap_claude_cmd(claude_cmd, workdir, label=f"review-{pr_id}",
+                                          allowed_push_branch=branch)
 
     window_name = f"review-{display_id}"
 
@@ -1107,8 +1110,10 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
     claude_cmd = build_claude_shell_cmd(prompt=merge_prompt,
                                          transcript=transcript, cwd=workdir)
     # Optionally wrap in a container for isolation
+    branch = pr_entry.get("branch", "")
     from pm_core.container import wrap_claude_cmd
-    claude_cmd, _cname = wrap_claude_cmd(claude_cmd, workdir, label=f"merge-{pr_id}")
+    claude_cmd, _cname = wrap_claude_cmd(claude_cmd, workdir, label=f"merge-{pr_id}",
+                                          allowed_push_branch=branch)
     window_name = f"merge-{display_id}"
 
     # No-op if a merge window is already running for this PR

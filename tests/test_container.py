@@ -21,6 +21,8 @@ from pm_core.container import (
     cleanup_all_containers,
     wrap_claude_cmd,
     _docker_available,
+    _detect_git_auth,
+    _build_git_setup_script,
     _get_dockerfile_path,
     _make_container_name,
     _resolve_claude_binary,
@@ -399,6 +401,7 @@ class TestCreateQAContainer:
             workdir=Path("/worktrees/w1"),
             extra_ro_mounts={Path("/repo"): "/repo"},
             extra_rw_mounts={Path("/scratch/s1"): _CONTAINER_SCRATCH},
+            allowed_push_branch=None,
         )
 
 
@@ -535,3 +538,160 @@ class TestIntegration:
         """Verify wrap_claude_cmd is accessible where it's used."""
         from pm_core.container import wrap_claude_cmd
         assert callable(wrap_claude_cmd)
+
+
+class TestDetectGitAuth:
+    @patch("subprocess.run")
+    def test_ssh_remote(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="git@github.com:user/repo.git\n")
+        with patch("pm_core.container.Path.home", return_value=Path("/home/user")), \
+             patch.object(Path, "is_dir", return_value=True):
+            info = _detect_git_auth(Path("/w"))
+        assert info["method"] == "ssh"
+        assert info["remote_url"] == "git@github.com:user/repo.git"
+        assert info["ssh_dir"] == "/home/user/.ssh"
+
+    @patch("subprocess.run")
+    def test_https_remote_with_gh_token(self, mock_run):
+        def side_effect(cmd, **kwargs):
+            if "get-url" in cmd:
+                return MagicMock(returncode=0, stdout="https://github.com/user/repo.git\n")
+            if "credential.helper" in cmd:
+                return MagicMock(returncode=1, stdout="")
+            if "auth" in cmd:
+                return MagicMock(returncode=0, stdout="ghp_testtoken123\n")
+            return MagicMock(returncode=1, stdout="")
+        mock_run.side_effect = side_effect
+
+        info = _detect_git_auth(Path("/w"))
+        assert info["method"] == "https"
+        assert info["gh_token"] == "ghp_testtoken123"
+
+    @patch("subprocess.run")
+    def test_no_remote(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=1, stdout="")
+        info = _detect_git_auth(Path("/w"))
+        assert info["method"] == "local"
+
+    @patch("subprocess.run")
+    def test_local_path_remote(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="/path/to/bare/repo\n")
+        info = _detect_git_auth(Path("/w"))
+        assert info["method"] == "local"
+
+    @patch("subprocess.run")
+    def test_ssh_auth_sock(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="git@github.com:user/repo.git\n")
+        with patch.dict("os.environ", {"SSH_AUTH_SOCK": "/tmp/agent.sock"}), \
+             patch("pm_core.container.Path.home", return_value=Path("/home/user")), \
+             patch.object(Path, "is_dir", return_value=True):
+            info = _detect_git_auth(Path("/w"))
+        assert info["method"] == "ssh"
+        assert info["ssh_auth_sock"] == "/tmp/agent.sock"
+
+
+class TestBuildGitSetupScript:
+    def test_ssh_setup(self):
+        auth = {"method": "ssh", "ssh_dir": "/home/user/.ssh"}
+        script = _build_git_setup_script(auth)
+        assert "ssh-keyscan" in script
+        assert "safe.directory" in script
+
+    def test_https_with_token(self):
+        auth = {"method": "https", "gh_token": "ghp_test123"}
+        script = _build_git_setup_script(auth)
+        assert "credential" in script
+        assert "ghp_test123" in script
+        assert "x-access-token" in script
+
+    def test_branch_restriction_wrapper(self):
+        auth = {"method": "https", "gh_token": "tok"}
+        script = _build_git_setup_script(auth, allowed_branch="pm/pr-123-my-feature")
+        assert "/usr/local/bin/git" in script
+        assert "pm/pr-123-my-feature" in script
+        assert "push rejected" in script
+        # The wrapper delegates to /usr/bin/git
+        assert "REAL_GIT=/usr/bin/git" in script
+
+    def test_no_restriction_without_branch(self):
+        auth = {"method": "https", "gh_token": "tok"}
+        script = _build_git_setup_script(auth, allowed_branch=None)
+        assert "/usr/local/bin/git" not in script
+
+    def test_local_only_safe_dir(self):
+        auth = {"method": "local"}
+        script = _build_git_setup_script(auth)
+        assert "safe.directory" in script
+        assert "credential" not in script
+        assert "ssh-keyscan" not in script
+
+
+class TestCreateContainerGitAuth:
+    @patch("pm_core.container._detect_git_auth",
+           return_value={"method": "ssh", "ssh_dir": "/home/user/.ssh"})
+    @patch("pm_core.container._resolve_claude_binary", return_value=None)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_docker")
+    def test_mounts_ssh_dir(self, mock_docker, mock_rm, mock_bin, mock_auth):
+        mock_docker.return_value = MagicMock(stdout="id\n")
+        config = ContainerConfig()
+
+        with patch.object(Path, "is_dir", return_value=False):
+            create_container(name="test", config=config, workdir=Path("/w"))
+
+        args_str = " ".join(mock_docker.call_args[0])
+        assert f"/home/user/.ssh:{_CONTAINER_HOME}/.ssh:ro" in args_str
+
+    @patch("pm_core.container._detect_git_auth",
+           return_value={"method": "ssh", "ssh_dir": "/home/user/.ssh",
+                         "ssh_auth_sock": "/tmp/agent.sock"})
+    @patch("pm_core.container._resolve_claude_binary", return_value=None)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_docker")
+    def test_passes_ssh_auth_sock(self, mock_docker, mock_rm, mock_bin, mock_auth):
+        mock_docker.return_value = MagicMock(stdout="id\n")
+        config = ContainerConfig()
+
+        with patch.object(Path, "is_dir", return_value=False):
+            create_container(name="test", config=config, workdir=Path("/w"))
+
+        args_str = " ".join(mock_docker.call_args[0])
+        assert "SSH_AUTH_SOCK=/tmp/agent.sock" in args_str
+        assert "/tmp/agent.sock:/tmp/agent.sock" in args_str
+
+    @patch("pm_core.container._detect_git_auth",
+           return_value={"method": "https", "gh_token": "ghp_test"})
+    @patch("pm_core.container._resolve_claude_binary", return_value=None)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_docker")
+    def test_git_setup_in_entrypoint(self, mock_docker, mock_rm, mock_bin, mock_auth):
+        """HTTPS token setup is in the container entrypoint script."""
+        mock_docker.return_value = MagicMock(stdout="id\n")
+        config = ContainerConfig()
+
+        with patch.object(Path, "is_dir", return_value=False):
+            create_container(name="test", config=config, workdir=Path("/w"),
+                             allowed_push_branch="pm/pr-123")
+
+        # The entrypoint setup string includes git credential config and wrapper
+        args = mock_docker.call_args[0]
+        setup_script = args[-1]  # Last arg is the bash -c script
+        assert "credential" in setup_script
+        assert "/usr/local/bin/git" in setup_script
+
+    @patch("pm_core.container._detect_git_auth",
+           return_value={"method": "https", "gh_token": "ghp_test"})
+    @patch("pm_core.container.build_exec_cmd", return_value="docker exec ...")
+    @patch("pm_core.container.create_container", return_value="cid")
+    @patch("pm_core.container.load_container_config",
+           return_value=ContainerConfig())
+    @patch("pm_core.container.is_container_mode_enabled", return_value=True)
+    def test_wrap_passes_branch(self, mock_enabled, mock_config,
+                                 mock_create, mock_exec, mock_auth):
+        wrap_claude_cmd("claude", "/w", label="impl",
+                        allowed_push_branch="pm/pr-123")
+        call_kwargs = mock_create.call_args[1]
+        assert call_kwargs["allowed_push_branch"] == "pm/pr-123"
