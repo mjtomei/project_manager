@@ -52,8 +52,8 @@ _log = configure_logger("pm.container")
 
 # Default settings
 DEFAULT_IMAGE = "pm-dev:latest"
-DEFAULT_MEMORY_LIMIT = "4g"
-DEFAULT_CPU_LIMIT = "2.0"
+DEFAULT_MEMORY_LIMIT = "8g"
+DEFAULT_CPU_LIMIT = "4.0"
 CONTAINER_PREFIX = "pm-"
 _CONTAINER_WORKDIR = "/workspace"
 _CONTAINER_SCRATCH = "/scratch"
