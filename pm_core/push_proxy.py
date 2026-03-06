@@ -93,6 +93,12 @@ class PushProxy:
     def _serve_loop(self) -> None:
         """Accept connections and handle push requests."""
         while not self._stop.is_set():
+            # If the socket file was removed externally (e.g. container
+            # cleanup in tmux), exit the loop so the thread terminates.
+            if not os.path.exists(self.socket_path):
+                _log.info("Push proxy socket removed, exiting: %s",
+                          self.socket_path)
+                break
             try:
                 conn, _ = self._server_socket.accept()
             except socket.timeout:
@@ -314,6 +320,13 @@ def stop_all_proxies() -> None:
         names = list(_active_proxies.keys())
     for name in names:
         stop_push_proxy(name)
+
+
+def get_proxy_socket_path(container_name: str) -> str | None:
+    """Return the host socket path for a container's push proxy, or None."""
+    with _proxy_lock:
+        proxy = _active_proxies.get(container_name)
+    return proxy.socket_path if proxy else None
 
 
 def container_socket_path() -> str:

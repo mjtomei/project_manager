@@ -421,6 +421,18 @@ class TestBuildExecCmd:
         assert "docker rm -f" in cmd
         assert cmd.endswith(">/dev/null 2>&1")
 
+    def test_cleanup_removes_proxy_socket(self):
+        cmd = build_exec_cmd("my-container", "claude 'hi'",
+                             proxy_socket_path="/tmp/pm-push-proxy-x/push.sock")
+        assert "rm -f" in cmd
+        assert "/tmp/pm-push-proxy-x/push.sock" in cmd
+        assert "rmdir" in cmd
+        assert "/tmp/pm-push-proxy-x" in cmd
+        # Socket removal should come before docker rm
+        rm_pos = cmd.index("rm -f")
+        docker_pos = cmd.index("docker rm")
+        assert rm_pos < docker_pos
+
     def test_no_cleanup_when_disabled(self):
         cmd = build_exec_cmd("my-container", "claude 'hi'", cleanup=False)
         assert "docker rm -f" not in cmd
@@ -675,3 +687,18 @@ class TestCreateContainerPushProxy:
                         allowed_push_branch="pm/pr-123")
         call_kwargs = mock_create.call_args[1]
         assert call_kwargs["allowed_push_branch"] == "pm/pr-123"
+
+    @patch("pm_core.push_proxy.get_proxy_socket_path",
+           return_value="/tmp/pm-push-proxy-x/push.sock")
+    @patch("pm_core.container.build_exec_cmd", return_value="docker exec ...")
+    @patch("pm_core.container.create_container", return_value="cid")
+    @patch("pm_core.container.load_container_config",
+           return_value=ContainerConfig())
+    @patch("pm_core.container.is_container_mode_enabled", return_value=True)
+    def test_wrap_passes_proxy_socket_to_exec(self, mock_enabled, mock_config,
+                                               mock_create, mock_exec,
+                                               mock_sock):
+        wrap_claude_cmd("claude", "/w", label="impl",
+                        allowed_push_branch="pm/pr-123")
+        call_kwargs = mock_exec.call_args[1]
+        assert call_kwargs["proxy_socket_path"] == "/tmp/pm-push-proxy-x/push.sock"

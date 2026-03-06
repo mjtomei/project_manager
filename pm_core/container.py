@@ -441,21 +441,30 @@ def create_container(
     return container_id
 
 
-def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True) -> str:
+def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
+                   proxy_socket_path: str | None = None) -> str:
     """Build a ``docker exec -it`` command string for use in a tmux window.
 
     When the exec'd process exits, the container is removed (unless
     *cleanup* is False).  The tmux pane stays open so the user can
     inspect output.
 
-    Note: this uses raw ``docker rm`` rather than remove_container() since
-    it runs in a tmux shell, not in the pm process.  Push proxy threads are
-    daemon threads and will be cleaned up on pm exit or container reuse.
+    If *proxy_socket_path* is provided, the cleanup also removes the
+    push proxy socket file and its parent directory.  This triggers the
+    proxy daemon thread to self-terminate (it checks for socket existence).
     """
     escaped = shlex.quote(shell_cmd)
     exec_part = f"docker exec -it -u {_CONTAINER_USER} {shlex.quote(name)} bash -c {escaped}"
     if cleanup:
-        return f"{exec_part}; docker rm -f {shlex.quote(name)} >/dev/null 2>&1"
+        cleanup_parts = []
+        if proxy_socket_path:
+            cleanup_parts.append(f"rm -f {shlex.quote(proxy_socket_path)}")
+        cleanup_parts.append(
+            f"docker rm -f {shlex.quote(name)} >/dev/null 2>&1")
+        if proxy_socket_path:
+            sock_dir = str(Path(proxy_socket_path).parent)
+            cleanup_parts.append(f"rmdir {shlex.quote(sock_dir)} 2>/dev/null")
+        return f"{exec_part}; {'; '.join(cleanup_parts)}"
     return exec_part
 
 
@@ -515,7 +524,9 @@ def wrap_claude_cmd(
                      cname, exc_info=True)
         return claude_cmd, ""
 
-    exec_cmd = build_exec_cmd(cname, claude_cmd)
+    from pm_core.push_proxy import get_proxy_socket_path
+    proxy_sock = get_proxy_socket_path(cname)
+    exec_cmd = build_exec_cmd(cname, claude_cmd, proxy_socket_path=proxy_sock)
     _log.info("Wrapped claude command in container %s", cname)
     return exec_cmd, cname
 

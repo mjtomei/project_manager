@@ -14,6 +14,7 @@ from pm_core.push_proxy import (
     start_push_proxy,
     stop_push_proxy,
     stop_all_proxies,
+    get_proxy_socket_path,
     container_socket_path,
     _CONTAINER_SOCKET_PATH,
 )
@@ -234,6 +235,29 @@ class TestPushProxyLifecycle:
     def test_container_socket_path(self):
         assert container_socket_path() == _CONTAINER_SOCKET_PATH
         assert container_socket_path() == "/run/pm-push-proxy.sock"
+
+    def test_get_proxy_socket_path(self):
+        with patch("pm_core.push_proxy.PushProxy.start"), \
+             patch("pm_core.push_proxy.PushProxy.stop"):
+            sock = start_push_proxy("lookup-test", "/w", "pm/pr-123")
+            assert get_proxy_socket_path("lookup-test") == sock
+            stop_push_proxy("lookup-test")
+            assert get_proxy_socket_path("lookup-test") is None
+
+    def test_get_proxy_socket_path_nonexistent(self):
+        assert get_proxy_socket_path("no-such-container") is None
+
+    def test_thread_exits_when_socket_removed(self, sock_path):
+        """Proxy thread self-terminates when its socket file is deleted."""
+        proxy = PushProxy(sock_path, "/w", "branch")
+        proxy.start()
+        assert proxy._thread.is_alive()
+        # Remove the socket file — thread should exit within a few seconds
+        os.unlink(sock_path)
+        proxy._thread.join(timeout=5)
+        assert not proxy._thread.is_alive()
+        # Clean up (stop is safe to call even after thread exited)
+        proxy.stop()
 
     @patch("subprocess.run")
     def test_socket_is_world_writable(self, mock_run, sock_path):
