@@ -3,6 +3,7 @@
 from pm_core import store, notes
 from pm_core.backend import get_backend
 from pm_core.paths import get_global_setting
+from pm_core.spec_gen import format_spec_for_prompt
 
 
 def tui_section(session_name: str) -> str:
@@ -93,6 +94,9 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
     beginner_block = _beginner_addendum()
     cleanup_block = _auto_cleanup_addendum()
 
+    # Include implementation spec if available
+    impl_spec_block = format_spec_for_prompt(pr, "impl")
+
     prompt = f"""You're working on PR {pr_id}: "{title}"
 
 This session is managed by `pm`. Run `pm help` to see available commands.
@@ -103,7 +107,7 @@ This session is managed by `pm`. Run `pm help` to see available commands.
 
 ## Task
 {description}
-{pr_notes_block}
+{pr_notes_block}{impl_spec_block}
 ## Tips
 - This session may be resuming after a restart. Check `git status` and `git log` to see if previous work exists on this branch — if so, continue from there. The directory may contain uncommitted implementation work from a previous session.
 - Before referencing existing code (imports, function calls, class usage), read the source to verify the interface.
@@ -190,6 +194,9 @@ This PR is part of plan "{plan['name']}" ({plan['id']}). Other PRs in this plan:
     # Renumber steps based on whether pull step is present
     n = 2 if pull_step else 1
 
+    # Include review spec if available
+    review_spec_block = format_spec_for_prompt(pr, "review")
+
     prompt = f"""You are reviewing PR {pr_id}: "{title}"
 
 ## Task
@@ -197,7 +204,7 @@ Review the code changes in this PR for quality, correctness, and architectural f
 
 ## Description
 {description}
-{pr_notes_block}{plan_context}{tui_block}{general_notes_block}
+{pr_notes_block}{review_spec_block}{plan_context}{tui_block}{general_notes_block}
 ## Steps
 {pull_step}{n}. Run `{diff_cmd}` to see all changes
 {n+1}. **Generic checks** — things any codebase should get right:
@@ -752,6 +759,9 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
     # Include PR notes (prior QA results, addendums)
     pr_notes_block = _format_pr_notes(pr)
 
+    # Include QA spec if available
+    qa_spec_block = format_spec_for_prompt(pr, "qa")
+
     prompt = f"""You are a QA planner analyzing PR {pr_id}: "{title}"
 
 ## Task
@@ -768,7 +778,9 @@ to verify this PR works correctly.
 - **Base branch**: {base_branch}
 - **Workdir**: {workdir}
 
-{pr_notes_block}
+Inspect the diff yourself — run `git diff {base_branch}...HEAD` in the workdir
+to see what changed.  Read source files as needed to understand the context.
+{pr_notes_block}{qa_spec_block}
 ## QA Instruction Library
 
 These are available QA instructions.  Reference any that are relevant to

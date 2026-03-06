@@ -256,12 +256,15 @@ def set_cmd(setting, value):
       qa-verify-retries    Max verification retries before marking NEEDS_WORK (default 3)
 
       qa-verify-pass       Enable/disable PASS verdict verification (on/off, default on)
+
+      spec-mode            Spec generation mode: auto, review, or prompt (default: prompt)
     """
     from pm_core.paths import set_global_setting, set_global_setting_value
     boolean_settings = {"hide-assist", "hide-merged", "beginner-mode", "auto-cleanup",
                         "qa-verify-pass"}
     int_settings = {"min-pane-width", "qa-max-scenarios", "qa-verify-retries"}
-    known = boolean_settings | int_settings
+    enum_settings = {"spec-mode": {"auto", "review", "prompt"}}
+    known = boolean_settings | int_settings | set(enum_settings)
     if setting not in known:
         click.echo(f"Unknown setting: {setting}", err=True)
         click.echo(f"Available: {', '.join(sorted(known))}", err=True)
@@ -271,6 +274,12 @@ def set_cmd(setting, value):
             click.echo(f"Setting '{setting}' takes 'on' or 'off'", err=True)
             raise SystemExit(1)
         set_global_setting(setting, value == "on")
+    elif setting in enum_settings:
+        valid = enum_settings[setting]
+        if value not in valid:
+            click.echo(f"Setting '{setting}' takes one of: {', '.join(sorted(valid))}", err=True)
+            raise SystemExit(1)
+        set_global_setting_value(setting, value)
     elif setting in int_settings:
         try:
             int(value)
