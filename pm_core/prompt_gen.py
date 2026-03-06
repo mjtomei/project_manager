@@ -756,6 +756,13 @@ instruction file at the paths shown below.
 
 {library_summary}
 
+## CRITICAL: Always assign an instruction
+
+Instructions tell scenario agents how to set up a test environment.  Without
+one, agents fall back to reading code and auto-passing.  Assign an instruction
+to every scenario — ``INSTRUCTION: "none"`` should be rare.  Multiple scenarios
+testing the same system should share the same instruction.
+
 ## Output Format
 
 Your output is machine-parsed.  Use ALL CAPS markers exactly as shown.
@@ -784,6 +791,66 @@ Include as many scenarios as required to fully exercise the functionality
 of the PR.  Exercise the core functionality as well as any edge cases
 that may expose bugs.
 {general_notes_block}{qa_specific_block}"""
+    return prompt.strip()
+
+
+def generate_qa_interactive_prompt(data: dict, pr_id: str,
+                                   workdir: str,
+                                   session_name: str | None = None,
+                                   worktree_mode: bool = False,
+                                   scratch_dir: str | None = None) -> str:
+    """Generate a prompt for the interactive Scenario 0 session.
+
+    Scenario 0 is a persistent interactive Claude session where the user
+    can run manual tests alongside the automated QA scenarios.
+    """
+    pr = store.get_pr(data, pr_id)
+    if not pr:
+        raise ValueError(f"PR {pr_id} not found")
+
+    title = pr.get("title", "")
+    branch = pr.get("branch", f"pm/{pr_id}")
+    pr_workdir = pr.get("workdir", "")
+    base_branch = data.get("project", {}).get("base_branch", "master")
+
+    pr_notes_block = _format_pr_notes(pr)
+
+    scratch_line = f"\n- **Scratch dir** (throwaway test projects): {scratch_dir}" if scratch_dir else ""
+    if worktree_mode:
+        workdir_block = f"""\
+- **Your workdir** (isolated worktree): {workdir}{scratch_line}
+- **PR workdir** (canonical source): {pr_workdir}"""
+    else:
+        workdir_block = f"""\
+- **PR workdir** (source code): {pr_workdir}
+- **Your workdir** (throwaway test projects): {workdir}"""
+
+    tui_block = tui_section(session_name) if session_name else ""
+
+    prompt = f"""You are an interactive QA session (Scenario 0) for PR {pr_id}: "{title}"
+
+## Context
+
+- **PR**: {pr_id} — "{title}"
+- **Branch**: {branch}
+- **Base branch**: {base_branch}
+{workdir_block}
+{pr_notes_block}
+## Your Role
+
+This is an interactive session — you work with the user to manually test and
+explore the PR's changes.  Automated scenarios are running in parallel in
+other windows.
+
+Help the user with whatever they need:
+- Inspect code changes (`git diff {base_branch}...HEAD`)
+- Run tests, build the project, try out features
+- Debug issues found by automated scenarios
+- Write and run ad-hoc test scripts in the scratch dir
+
+You do NOT need to produce a verdict.  This session stays open until QA
+completes — take your time and be thorough.
+{tui_block}"""
     return prompt.strip()
 
 
@@ -820,7 +887,9 @@ def generate_qa_child_prompt(data: dict, pr_id: str,
 ## Instruction Reference
 
 Read the full instruction at: `{scenario.instruction_path}`
-Follow its procedures as applicable to this scenario.
+Follow its **Setup** section to create a real test environment BEFORE running
+any test steps.  Do NOT skip setup and fall back to static code reading — your
+job is to verify runtime behavior, not review code.
 """
 
     # Include PR notes (prior QA results, addendums)

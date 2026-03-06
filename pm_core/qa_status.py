@@ -41,6 +41,7 @@ _VERDICT_COLORS = {
     "PASS": _GREEN,
     "NEEDS_WORK": _YELLOW,
     "INPUT_REQUIRED": _RED,
+    "interactive": _DIM,
 }
 
 _REFRESH_INTERVAL = 2.0  # seconds
@@ -120,8 +121,9 @@ def _render(status: dict | None, selected: int, rows: int, cols: int) -> str:
         color = _VERDICT_COLORS.get(overall, "")
         lines.append(f"  Overall: {color}{_BOLD}{overall}{_RESET}")
     else:
-        done = sum(1 for s in scenarios if s.get("verdict"))
-        total = len(scenarios)
+        done = sum(1 for s in scenarios
+                   if s.get("verdict") and s.get("verdict") != "interactive")
+        total = sum(1 for s in scenarios if s.get("verdict") != "interactive")
         lines.append(f"  {_DIM}Progress: {done}/{total} scenarios complete{_RESET}")
 
     lines.append("")
@@ -137,10 +139,16 @@ def _render(status: dict | None, selected: int, rows: int, cols: int) -> str:
 
 
 def _switch_to_window(session: str, window_name: str) -> None:
-    """Switch tmux to the given window."""
+    """Switch tmux to the given window.
+
+    Uses the caller's grouped session (not the base session) so only the
+    current terminal switches windows.
+    """
     try:
+        from pm_core.tmux import current_or_base_session
+        target = current_or_base_session(session)
         subprocess.run(
-            ["tmux", "select-window", "-t", f"{session}:{window_name}"],
+            ["tmux", "select-window", "-t", f"{target}:{window_name}"],
             capture_output=True,
         )
     except Exception:
