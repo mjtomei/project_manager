@@ -14,7 +14,7 @@ STATUS_ICONS = {
     "pending": "○",
     "in_progress": "●",
     "in_review": "◎",
-    "qa": "🧪",
+    "qa": "◉",
     "merged": "✓",
     "closed": "✗",
     "blocked": "✗",
