@@ -170,17 +170,6 @@ def _run_docker(*args: str, check: bool = True,
 # Git push proxy integration
 # ---------------------------------------------------------------------------
 
-def _has_remote(workdir: Path) -> bool:
-    """Check if the workdir has a git remote (i.e. push makes sense)."""
-    try:
-        result = subprocess.run(
-            ["git", "remote", "get-url", "origin"],
-            cwd=workdir, capture_output=True, text=True, timeout=10,
-        )
-        return result.returncode == 0 and bool(result.stdout.strip())
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return False
-
 
 def _build_git_setup_script(
     has_push_proxy: bool = False,
@@ -396,11 +385,13 @@ def create_container(
         cmd.extend(["-v", mount])
 
     # --- Git push proxy ---
-    # If an allowed push branch is set and the workdir has a remote,
-    # start a host-side push proxy.  The proxy socket is mounted into
-    # the container; credentials stay on the host.
+    # If an allowed push branch is set, start a host-side push proxy.
+    # The proxy socket is mounted into the container; credentials stay
+    # on the host.  The proxy handles all origin types: real remotes
+    # (HTTP/SSH), local-path origins (from git clone --local), and
+    # repos with no remote (push fails cleanly).
     has_push_proxy = False
-    if allowed_push_branch and _has_remote(workdir):
+    if allowed_push_branch:
         from pm_core.push_proxy import (
             start_push_proxy, _CONTAINER_SOCKET_PATH,
         )

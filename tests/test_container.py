@@ -21,7 +21,6 @@ from pm_core.container import (
     cleanup_all_containers,
     wrap_claude_cmd,
     _docker_available,
-    _has_remote,
     _build_git_setup_script,
     _get_dockerfile_path,
     _make_container_name,
@@ -578,23 +577,6 @@ class TestIntegration:
         assert callable(wrap_claude_cmd)
 
 
-class TestHasRemote:
-    @patch("subprocess.run")
-    def test_has_remote(self, mock_run):
-        mock_run.return_value = MagicMock(
-            returncode=0, stdout="https://github.com/user/repo.git\n")
-        assert _has_remote(Path("/w")) is True
-
-    @patch("subprocess.run")
-    def test_no_remote(self, mock_run):
-        mock_run.return_value = MagicMock(returncode=1, stdout="")
-        assert _has_remote(Path("/w")) is False
-
-    @patch("subprocess.run")
-    def test_empty_remote(self, mock_run):
-        mock_run.return_value = MagicMock(returncode=0, stdout="\n")
-        assert _has_remote(Path("/w")) is False
-
 
 class TestBuildGitSetupScript:
     def test_safe_directory_always_set(self):
@@ -628,14 +610,13 @@ class TestBuildGitSetupScript:
 
 class TestCreateContainerPushProxy:
     @patch("pm_core.container.image_exists", return_value=True)
-    @patch("pm_core.container._has_remote", return_value=True)
     @patch("pm_core.push_proxy.start_push_proxy",
            return_value="/tmp/pm-push-proxy-test/push.sock")
     @patch("pm_core.container._resolve_claude_binary", return_value=None)
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_docker")
     def test_starts_proxy_and_mounts_socket(self, mock_docker, mock_rm,
-                                             mock_bin, mock_proxy, mock_remote,
+                                             mock_bin, mock_proxy,
                                              mock_exists):
         mock_docker.return_value = MagicMock(stdout="id\n")
         config = ContainerConfig()
@@ -649,30 +630,11 @@ class TestCreateContainerPushProxy:
         assert "/tmp/pm-push-proxy-test/push.sock:/run/pm-push-proxy.sock" in args_str
 
     @patch("pm_core.container.image_exists", return_value=True)
-    @patch("pm_core.container._has_remote", return_value=False)
-    @patch("pm_core.container._resolve_claude_binary", return_value=None)
-    @patch("pm_core.container.remove_container")
-    @patch("pm_core.container._run_docker")
-    def test_no_proxy_without_remote(self, mock_docker, mock_rm,
-                                      mock_bin, mock_remote, mock_exists):
-        """No push proxy started if workdir has no remote."""
-        mock_docker.return_value = MagicMock(stdout="id\n")
-        config = ContainerConfig()
-
-        with patch.object(Path, "is_dir", return_value=False):
-            create_container(name="test", config=config, workdir=Path("/w"),
-                             allowed_push_branch="pm/pr-123")
-
-        args_str = " ".join(mock_docker.call_args_list[0][0])
-        assert "push-proxy" not in args_str
-
-    @patch("pm_core.container.image_exists", return_value=True)
-    @patch("pm_core.container._has_remote", return_value=True)
     @patch("pm_core.container._resolve_claude_binary", return_value=None)
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_docker")
     def test_no_proxy_without_branch(self, mock_docker, mock_rm,
-                                      mock_bin, mock_remote, mock_exists):
+                                      mock_bin, mock_exists):
         """No push proxy started if no allowed_push_branch specified."""
         mock_docker.return_value = MagicMock(stdout="id\n")
         config = ContainerConfig()
@@ -684,14 +646,13 @@ class TestCreateContainerPushProxy:
         assert "push-proxy" not in args_str
 
     @patch("pm_core.container.image_exists", return_value=True)
-    @patch("pm_core.container._has_remote", return_value=True)
     @patch("pm_core.push_proxy.start_push_proxy",
            return_value="/tmp/pm-push-proxy-test/push.sock")
     @patch("pm_core.container._resolve_claude_binary", return_value=None)
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_docker")
     def test_entrypoint_has_wrapper(self, mock_docker, mock_rm,
-                                     mock_bin, mock_proxy, mock_remote,
+                                     mock_bin, mock_proxy,
                                      mock_exists):
         """Container entrypoint installs the git push proxy wrapper."""
         mock_docker.return_value = MagicMock(stdout="id\n")

@@ -301,8 +301,12 @@ class PushProxy:
              so the remote stays in sync
         """
         # Step 1: Update the local target repo's branch ref
+        # --update-head-ok is needed because the target repo typically has
+        # this branch checked out, and git refuses to fetch into a checked-out
+        # branch without it.
         refspec = f"refs/heads/{branch}:refs/heads/{branch}"
-        cmd = ["git", "-C", target_repo, "fetch", self.workdir, refspec]
+        cmd = ["git", "-C", target_repo, "fetch", "--update-head-ok",
+               self.workdir, refspec]
         _log.info("Push proxy local push (step 1 — update local): %s", cmd)
         try:
             result = subprocess.run(
