@@ -781,16 +781,14 @@ def _poll_tmux_verdicts(
                         scenario.index, retries + 1,
                         _SCENARIO_MAX_RETRIES, backoff)
                     time.sleep(backoff)
-                    retry_counts[scenario.index] = retries + 1
                     if _relaunch_scenario_window(
                         scenario, state, data, pr_data,
                         session, workdir_path,
                     ):
+                        retry_counts[scenario.index] = retries + 1
                         # Reset grace period for this retry
                         grace_start = time.monotonic()
                         continue
-                    # Relaunch failed — will retry on next poll cycle
-                    continue
                 _log.warning("Scenario %d window exited without verdict "
                              "(retries exhausted)",
                              scenario.index)

@@ -149,69 +149,6 @@ def checkout_branch(workdir: Path, branch: str, create: bool = False) -> None:
         run_git("checkout", branch, cwd=workdir)
 
 
-def create_worktree(repo_root: Path, branch_name: str,
-                    worktree_path: Path,
-                    start_point: str = "HEAD") -> Path:
-    """Create a git worktree at *worktree_path* on a new branch.
-
-    Runs ``git worktree add -b {branch_name} {worktree_path} {start_point}``.
-    Returns *worktree_path*.
-    """
-    run_git("worktree", "add", "-b", branch_name,
-            str(worktree_path), start_point, cwd=repo_root)
-    _log.info("Created worktree %s (branch %s) at %s",
-              worktree_path, branch_name, start_point)
-    return worktree_path
-
-
-def remove_worktree(repo_root: Path, worktree_path: Path) -> None:
-    """Remove a git worktree (best-effort, --force)."""
-    run_git("worktree", "remove", "--force", str(worktree_path),
-            cwd=repo_root, check=False)
-    _log.info("Removed worktree %s", worktree_path)
-
-
-def delete_branch(repo_root: Path, branch_name: str) -> None:
-    """Delete a local branch (best-effort, -D)."""
-    run_git("branch", "-D", branch_name, cwd=repo_root, check=False)
-    _log.info("Deleted branch %s", branch_name)
-
-
-def cherry_pick_range(repo_root: Path, source_branch: str,
-                      base_commit: str) -> dict:
-    """Cherry-pick commits from *base_commit*..*source_branch* one by one.
-
-    On conflict, aborts the cherry-pick and skips that commit.
-    Returns ``{"picked": int, "skipped": int}``.
-    """
-    # Get the list of commits to cherry-pick (oldest first)
-    result = run_git("rev-list", "--reverse",
-                     f"{base_commit}..{source_branch}",
-                     cwd=repo_root, check=False)
-    if result.returncode != 0 or not result.stdout.strip():
-        return {"picked": 0, "skipped": 0}
-
-    commits = result.stdout.strip().splitlines()
-    picked = 0
-    skipped = 0
-
-    for sha in commits:
-        cp = run_git("cherry-pick", sha, cwd=repo_root, check=False)
-        if cp.returncode != 0:
-            _log.warning("Cherry-pick of %s failed, aborting and skipping", sha[:8])
-            abort = run_git("cherry-pick", "--abort", cwd=repo_root, check=False)
-            if abort.returncode != 0:
-                # Abort failed — force-clean the working tree so
-                # subsequent cherry-picks don't cascade-fail.
-                run_git("reset", "--hard", "HEAD", cwd=repo_root, check=False)
-            skipped += 1
-        else:
-            picked += 1
-            _log.info("Cherry-picked %s", sha[:8])
-
-    return {"picked": picked, "skipped": skipped}
-
-
 def pull_rebase(workdir: Path) -> subprocess.CompletedProcess:
     """Pull with rebase."""
     return run_git("pull", "--rebase", cwd=workdir, check=False)
