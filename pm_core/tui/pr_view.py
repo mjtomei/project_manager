@@ -401,7 +401,6 @@ def handle_command_submitted(app, cmd: str) -> None:
             qa_pr_id = parts[2]
         else:
             # Use the selected PR if no ID given
-            from pm_core.tui.tech_tree import TechTree
             tree = app.query_one("#tech-tree", TechTree)
             qa_pr_id = tree.selected_pr_id
         if not qa_pr_id:
