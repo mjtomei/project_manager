@@ -3649,6 +3649,33 @@ prs:
       mount, worktree_branch.'
     created_at: '2026-03-07T03:12:00Z'
     last_edited: '2026-03-07T03:12:00Z'
+  - id: note-35399ab
+    text: 'QA INPUT_REQUIRED:  (workdir: /home/matt/.pm/workdirs/qa/pr-5e96046-872976ad3de9c37d)'
+    created_at: '2026-03-07T03:20:19Z'
+    last_edited: '2026-03-07T03:20:19Z'
+  - id: note-c115b16
+    text: 'QA NEEDS_WORK: Push proxy branch restriction enforcement: PASS; End-to-end
+      push from container to GitHub remote: PASS; End-to-end push from container with
+      bare git (SSH): PASS; No-remote workdir skips push proxy: PASS; Git wrapper
+      intercepts only push commands: PASS; Implementation and review sessions get
+      push access: PASS; Merge and watcher sessions excluded from: PASS; QA scenario
+      containers get push access: PASS; Push proxy cleanup on container removal: PASS;
+      Unit tests pass for push proxy and container: PASS; Push proxy protocol handles
+      malformed input safely: PASS; Scenario 0 interactive session behavior: PASS;
+      Clone-based isolation replaces worktrees: NEEDS_WORK (workdir: /home/matt/.pm/workdirs/qa/pr-5e96046-f657b3e63592b8d7)'
+    created_at: '2026-03-07T06:50:54Z'
+    last_edited: '2026-03-07T06:50:54Z'
+  - id: note-7db60aa
+    text: 'Push proxy upgraded to full git remote proxy: intercepts push/fetch/pull/ls-remote.
+      Local-path origins (from git clone --local) handled via fetch-from-target +
+      upstream forwarding. QA clones keep origin pointing to PR workdir so local copies
+      stay in sync. Fixed worktree_branch AttributeError in _relaunch_scenario_window.
+      Key test areas: (1) push from container with local-only repo (no upstream),
+      (2) push from container with GitHub/SSH remote (updates local + forwards upstream),
+      (3) git pull/fetch from inside container for conflict resolution, (4) git ls-remote
+      from inside container, (5) non-remote git commands still bypass proxy.'
+    created_at: '2026-03-07T07:22:00Z'
+    last_edited: '2026-03-07T07:22:00Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-5e96046-enable-git-push-from-inside-containe-f6489c6f
 - id: pr-d3ae95e
   plan: improvements
