@@ -105,6 +105,13 @@ def start_qa(app, pr_id: str) -> None:
             app.log_message(f"QA already running for {pr_id}")
             return
 
+    # Transition status to "qa" if currently in_review
+    if pr.get("status") == "in_review":
+        pr["status"] = "qa"
+        store.save(data, app._root)
+        app._load_state()
+        _log.info("start_qa: transitioned %s to qa status", pr_id)
+
     state = QALoopState(pr_id=pr_id)
 
     def on_update(s: QALoopState):

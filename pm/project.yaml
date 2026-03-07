@@ -3578,11 +3578,70 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/124
   gh_pr_number: 124
   created_at: '2026-03-06T13:58:48.301968+00:00'
-  updated_at: '2026-03-06T14:29:39.806996+00:00'
+  updated_at: '2026-03-06T21:27:42.707165+00:00'
   started_at: '2026-03-06T14:03:17.555901+00:00'
-  reviewed_at: '2026-03-06T14:29:39.806996+00:00'
+  reviewed_at: '2026-03-06T21:27:42.707165+00:00'
   merged_at: null
   notes:
+  - id: note-56cffae
+    text: 'QA NEEDS_WORK: Unit tests pass for push proxy and container changes: PASS;
+      Push proxy rejects pushes to unauthorized branches: PASS; Git wrapper script
+      intercepts only push commands: PASS; Container creation mounts push proxy socket
+      correctly: PASS; PR launch paths pass branch to container: PASS; Push proxy
+      protocol handles malformed input safely: PASS; End-to-end push from container
+      to GitHub remote: NEEDS_WORK; End-to-end push from container with bare git (SSH)
+      remote: NEEDS_WORK; Push proxy cleanup on container removal: PASS; Force-push
+      bypass prevention: PASS [changes committed] (workdir: /home/matt/.pm/workdirs/qa/pr-5e96046-680a9ab455ce5ed2)'
+    created_at: '2026-03-06T19:22:31Z'
+    last_edited: '2026-03-06T19:22:31Z'
+  - id: note-9fd62b3
+    text: 'QA NEEDS_WORK: End-to-end push from container to GitHub remote: PASS; End-to-end
+      push from container with bare git (SSH): PASS; Push proxy branch restriction
+      enforcement: NEEDS_WORK; Push proxy lifecycle and cleanup: PASS; QA scenario
+      containers get push access: NEEDS_WORK; No-remote workdir skips push proxy:
+      PASS; Git wrapper only intercepts push: PASS [changes committed] (workdir: /home/matt/.pm/workdirs/qa/pr-5e96046-04d08ed25bc9e5fb)'
+    created_at: '2026-03-06T21:20:30Z'
+    last_edited: '2026-03-06T21:20:30Z'
+  - id: note-d0d634b
+    text: 'QA PASS: Push proxy branch restriction enforcement: PASS; End-to-end push
+      from container to GitHub remote: PASS; Push proxy rejects unauthorized branch
+      from inside: PASS; Push proxy protocol handles malformed input: PASS; QA scenario
+      containers get push access: PASS; Push proxy cleanup on container removal: PASS;
+      No-remote workdir skips push proxy: PASS; Implementation and review sessions
+      get push access: PASS; Unit tests pass: PASS; Git wrapper intercepts only push
+      commands: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-5e96046-957b39c4945aadc3)'
+    created_at: '2026-03-06T21:34:18Z'
+    last_edited: '2026-03-06T21:34:18Z'
+  - id: note-8f83a78
+    text: 'QA INPUT_REQUIRED:  (workdir: /home/matt/.pm/workdirs/qa/pr-5e96046-df2926b3edc43295)'
+    created_at: '2026-03-06T22:20:09Z'
+    last_edited: '2026-03-06T22:20:09Z'
+  - id: note-fd332b8
+    text: 'QA INPUT_REQUIRED:  (workdir: /home/matt/.pm/workdirs/qa/pr-5e96046-7faea1d77db35a11)'
+    created_at: '2026-03-06T22:30:57Z'
+    last_edited: '2026-03-06T22:30:57Z'
+  - id: note-9654ddb
+    text: 'QA NEEDS_WORK: Push proxy branch restriction enforcement: PASS; End-to-end
+      push from container to GitHub remote: INPUT_REQUIRED; End-to-end push from container
+      with bare git (SSH) remote: PASS; Push proxy cleanup on container removal: PASS;
+      No-remote workdir skips push proxy: INPUT_REQUIRED; Implementation and review
+      sessions get push access: INPUT_REQUIRED; Git wrapper intercepts only push commands:
+      INPUT_REQUIRED; Push proxy protocol handles malformed input: INPUT_REQUIRED;
+      Unit tests pass: NEEDS_WORK; Merge and watcher sessions excluded from containerization:
+      INPUT_REQUIRED (workdir: /home/matt/.pm/workdirs/qa/pr-5e96046-fd9b35ff9c100f35)'
+    created_at: '2026-03-06T22:49:19Z'
+    last_edited: '2026-03-06T22:49:19Z'
+  - id: note-8dd33f2
+    text: 'QA NEEDS_WORK: Push proxy branch restriction enforcement: PASS; End-to-end
+      push from container to GitHub remote: PASS; End-to-end push from container with
+      bare git (SSH) remote: PASS; Push proxy cleanup on container removal: NEEDS_WORK;
+      Implementation and review sessions get push access: PASS; No-remote workdir
+      skips push proxy: PASS; Git wrapper intercepts only push commands: PASS; Unit
+      tests pass for push proxy and container changes: NEEDS_WORK; QA scenario containers
+      and Scenario 0 behavior: PASS; Merge and watcher sessions excluded from containerization:
+      PASS; Push proxy protocol handles malformed input safely: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-5e96046-7bab4540a50d7d4a)'
+    created_at: '2026-03-07T00:46:43Z'
+    last_edited: '2026-03-07T00:46:43Z'
   - id: note-c25239f
     text: 'QA finding: git worktrees broken inside Docker containers — .git files
       use absolute host paths. Fix: replaced worktrees with git clone --local + direct
@@ -3699,7 +3758,7 @@ prs:
   plan: plan-qa
   title: Add spec generation step between PR phases
   branch: pm/pr-942aa21-add-spec-generation-step-between-pr-phases
-  status: pending
+  status: in_progress
   depends_on: []
   description: "Add an optional \"spec\" step to the PR lifecycle that bridges the\
     \ gap between the user's natural-language description and each subsequent phase\
@@ -3738,15 +3797,16 @@ prs:
     \ models viable for later phases\n- The user catches misunderstandings before\
     \ code is written (or reviewed, or tested)\n- Ambiguities are resolved once per\
     \ phase rather than rediscovered by each agent"
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/125
+  gh_pr_number: 125
   created_at: '2026-03-06T19:02:04.662125+00:00'
-  updated_at: '2026-03-06T19:02:04.662125+00:00'
-  started_at: null
+  updated_at: '2026-03-06T21:13:20.894896+00:00'
+  started_at: '2026-03-06T21:13:20.894896+00:00'
   reviewed_at: null
   merged_at: null
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-942aa21-add-spec-generation-step-between-pr--e2dbb884
 - id: pr-4585fd3
   plan: improvements
   title: Use resolved display IDs instead of raw PR IDs in all output
@@ -3797,3 +3857,74 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-853126a
+  plan: bugs
+  title: 'Fix race condition: keystrokes after / interpreted as commands before input
+    has focus'
+  branch: pm/pr-853126a-fix-race-condition-keystrokes-after-interpreted-as
+  status: in_progress
+  depends_on: []
+  description: 'When typing / followed by characters quickly (e.g. /commit), the initial
+    characters after / can be interpreted as TUI keybindings before the command input
+    field has focus. For example, typing /commit fast enough could trigger the c keybinding
+    before the input appears, because the command palette/input doesn''t capture focus
+    synchronously with the / keypress.
+
+
+    Expected behavior: all keys typed between / and either Enter or Escape should
+    end up on the command line. No keystrokes in that window should be interpreted
+    as TUI keybindings.
+
+
+    Fix: buffer or suppress all keystrokes between the / press and the command input
+    gaining focus, then replay them into the input field. Alternatively, enter a modal
+    state on / that disables all other keybindings until the command input is dismissed.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/126
+  gh_pr_number: 126
+  created_at: '2026-03-06T21:23:57.479825+00:00'
+  updated_at: '2026-03-06T21:25:22.334321+00:00'
+  started_at: '2026-03-06T21:25:22.334321+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-853126a-fix-race-condition-keystrokes-after--9964ad22
+- id: pr-c2352be
+  plan: plan-qa
+  title: Add pm pr qa CLI command for full QA loop
+  branch: pm/pr-c2352be-add-pm-qa-start-cli-command-for-full-qa-loop
+  status: in_review
+  depends_on: []
+  description: 'Add a pm pr qa <pr_id> CLI command that starts the full QA loop (planner
+    + scenarios) for a PR. Follows the same pattern as pm pr start, pm pr review,
+    pm pr merge.
+
+
+    ## Behavior
+
+    - When run inside a pm tmux session (or from the TUI command bar via /pr qa <pr_id>):
+    starts the full QA process with planner, scenario windows, and status pane — same
+    as pressing t on a PR in the TUI
+
+    - When run outside a pm tmux session: prints a message telling the user to run
+    pm session first, since the QA process requires tmux for scenario windows
+
+
+    ## Motivation
+
+    - Allows triggering QA from the TUI command bar (/) instead of navigating to the
+    PR and pressing t
+
+    - Consistent with other pm commands that have both TUI keybindings and CLI equivalents
+
+    - The command bar is more discoverable than memorizing keybindings'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/127
+  gh_pr_number: 127
+  created_at: '2026-03-06T21:38:29.825212+00:00'
+  updated_at: '2026-03-06T22:14:19.750142+00:00'
+  started_at: '2026-03-06T21:40:10.494976+00:00'
+  reviewed_at: '2026-03-06T22:14:19.750142+00:00'
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-c2352be-add-pm-qa-start-cli-command-for-full-9964ad22

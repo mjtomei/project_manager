@@ -697,7 +697,8 @@ def generate_review_loop_prompt(data: dict, pr_id: str) -> str:
 # ---------------------------------------------------------------------------
 
 def generate_qa_planner_prompt(data: dict, pr_id: str,
-                               session_name: str | None = None) -> str:
+                               session_name: str | None = None,
+                               scenario_start: int = 1) -> str:
     """Generate a prompt for the QA planning session.
 
     The planner analyzes the PR and the instruction library to generate
@@ -771,12 +772,12 @@ directly at the start of a line.
 
 QA_PLAN_START
 
-SCENARIO 1: <descriptive title for this scenario>
+SCENARIO {scenario_start}: <descriptive title for this scenario>
 FOCUS: <what area or behavior to test>
 INSTRUCTION: <path/to/instruction.md or "none" if no existing instruction applies>
 STEPS: <concrete test steps to perform>
 
-SCENARIO 2: <descriptive title for next scenario>
+SCENARIO {scenario_start + 1}: <descriptive title for next scenario>
 FOCUS: <what area or behavior to test>
 INSTRUCTION: <path or "none">
 STEPS: <concrete test steps>
@@ -786,6 +787,8 @@ QA_PLAN_END
 IMPORTANT: Replace ALL angle-bracket placeholders above with real content.
 Do NOT copy the example format verbatim — fill in actual scenario titles,
 focus areas, and detailed test steps specific to THIS PR.
+
+Number scenarios starting from {scenario_start}.
 
 Include as many scenarios as required to fully exercise the functionality
 of the PR.  Exercise the core functionality as well as any edge cases
