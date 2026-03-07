@@ -206,9 +206,10 @@ class TestCreateContainer:
         assert "useradd" in args[-1]
         assert "sleep infinity" in args[-1]
 
+    @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_docker")
-    def test_extra_ro_mounts(self, mock_docker, mock_rm):
+    def test_extra_ro_mounts(self, mock_docker, mock_rm, mock_exists):
         mock_docker.return_value = MagicMock(stdout="id\n")
         config = ContainerConfig()
 
@@ -222,9 +223,10 @@ class TestCreateContainer:
         args_str = " ".join(mock_docker.call_args_list[0][0])
         assert "/repo:/repo:ro" in args_str
 
+    @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_docker")
-    def test_extra_rw_mounts(self, mock_docker, mock_rm):
+    def test_extra_rw_mounts(self, mock_docker, mock_rm, mock_exists):
         mock_docker.return_value = MagicMock(stdout="id\n")
         config = ContainerConfig()
 
@@ -240,9 +242,10 @@ class TestCreateContainer:
         # Should NOT have :ro suffix
         assert "/scratch:/scratch:ro" not in args_str
 
+    @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_docker")
-    def test_passes_env_vars(self, mock_docker, mock_rm):
+    def test_passes_env_vars(self, mock_docker, mock_rm, mock_exists):
         mock_docker.return_value = MagicMock(stdout="id123\n")
 
         config = ContainerConfig(env={"CUSTOM_VAR": "custom_val"})
@@ -257,10 +260,11 @@ class TestCreateContainer:
         assert "ANTHROPIC_API_KEY=sk-test" in args_str
         assert "CUSTOM_VAR=custom_val" in args_str
 
+    @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container._resolve_claude_binary", return_value=None)
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_docker")
-    def test_mounts_claude_config_rw(self, mock_docker, mock_rm, mock_bin):
+    def test_mounts_claude_config_rw(self, mock_docker, mock_rm, mock_bin, mock_exists):
         """~/.claude is mounted read-write so Claude can write session state."""
         mock_docker.return_value = MagicMock(stdout="id\n")
         config = ContainerConfig()
@@ -275,10 +279,11 @@ class TestCreateContainer:
         # Should NOT be read-only
         assert f"/home/user/.claude:{_CONTAINER_HOME}/.claude:ro" not in args_str
 
+    @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container._resolve_claude_binary", return_value=None)
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_docker")
-    def test_mounts_claude_json(self, mock_docker, mock_rm, mock_bin):
+    def test_mounts_claude_json(self, mock_docker, mock_rm, mock_bin, mock_exists):
         """~/.claude.json is mounted read-write for Claude config."""
         mock_docker.return_value = MagicMock(stdout="id\n")
         config = ContainerConfig()
@@ -291,10 +296,11 @@ class TestCreateContainer:
         args_str = " ".join(mock_docker.call_args_list[0][0])
         assert f"/home/user/.claude.json:{_CONTAINER_HOME}/.claude.json" in args_str
 
+    @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container._resolve_claude_binary")
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_docker")
-    def test_mounts_claude_binary(self, mock_docker, mock_rm, mock_resolve):
+    def test_mounts_claude_binary(self, mock_docker, mock_rm, mock_resolve, mock_exists):
         """Host claude binary is bind-mounted at /usr/local/bin/claude."""
         mock_docker.return_value = MagicMock(stdout="id\n")
         # Simulate a resolved binary that exists
@@ -351,10 +357,11 @@ class TestCreateContainer:
         # image_exists should not be called for non-default images
         mock_exists.assert_not_called()
 
+    @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container._resolve_claude_binary", return_value=None)
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_docker")
-    def test_no_binary_still_creates_container(self, mock_docker, mock_rm, mock_resolve):
+    def test_no_binary_still_creates_container(self, mock_docker, mock_rm, mock_resolve, mock_exists):
         """Container creation succeeds even if claude binary is not found."""
         mock_docker.return_value = MagicMock(stdout="id\n")
         config = ContainerConfig()
@@ -603,6 +610,7 @@ class TestBuildGitSetupScript:
 
 
 class TestCreateContainerPushProxy:
+    @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container._has_remote", return_value=True)
     @patch("pm_core.push_proxy.start_push_proxy",
            return_value="/tmp/pm-push-proxy-test/push.sock")
@@ -610,7 +618,8 @@ class TestCreateContainerPushProxy:
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_docker")
     def test_starts_proxy_and_mounts_socket(self, mock_docker, mock_rm,
-                                             mock_bin, mock_proxy, mock_remote):
+                                             mock_bin, mock_proxy, mock_remote,
+                                             mock_exists):
         mock_docker.return_value = MagicMock(stdout="id\n")
         config = ContainerConfig()
 
@@ -622,12 +631,13 @@ class TestCreateContainerPushProxy:
         args_str = " ".join(mock_docker.call_args_list[0][0])
         assert "/tmp/pm-push-proxy-test/push.sock:/run/pm-push-proxy.sock" in args_str
 
+    @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container._has_remote", return_value=False)
     @patch("pm_core.container._resolve_claude_binary", return_value=None)
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_docker")
     def test_no_proxy_without_remote(self, mock_docker, mock_rm,
-                                      mock_bin, mock_remote):
+                                      mock_bin, mock_remote, mock_exists):
         """No push proxy started if workdir has no remote."""
         mock_docker.return_value = MagicMock(stdout="id\n")
         config = ContainerConfig()
@@ -639,12 +649,13 @@ class TestCreateContainerPushProxy:
         args_str = " ".join(mock_docker.call_args_list[0][0])
         assert "push-proxy" not in args_str
 
+    @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container._has_remote", return_value=True)
     @patch("pm_core.container._resolve_claude_binary", return_value=None)
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_docker")
     def test_no_proxy_without_branch(self, mock_docker, mock_rm,
-                                      mock_bin, mock_remote):
+                                      mock_bin, mock_remote, mock_exists):
         """No push proxy started if no allowed_push_branch specified."""
         mock_docker.return_value = MagicMock(stdout="id\n")
         config = ContainerConfig()
@@ -655,6 +666,7 @@ class TestCreateContainerPushProxy:
         args_str = " ".join(mock_docker.call_args_list[0][0])
         assert "push-proxy" not in args_str
 
+    @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container._has_remote", return_value=True)
     @patch("pm_core.push_proxy.start_push_proxy",
            return_value="/tmp/pm-push-proxy-test/push.sock")
@@ -662,7 +674,8 @@ class TestCreateContainerPushProxy:
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_docker")
     def test_entrypoint_has_wrapper(self, mock_docker, mock_rm,
-                                     mock_bin, mock_proxy, mock_remote):
+                                     mock_bin, mock_proxy, mock_remote,
+                                     mock_exists):
         """Container entrypoint installs the git push proxy wrapper."""
         mock_docker.return_value = MagicMock(stdout="id\n")
         config = ContainerConfig()
