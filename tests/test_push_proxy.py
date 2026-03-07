@@ -188,6 +188,47 @@ class TestPushProxyBranchValidation:
         assert cmd == ["git", "push", "-u", "origin", "pm/pr-123-feature"]
 
 
+class TestDangerousFlags:
+    """Flags that could execute arbitrary programs must be blocked."""
+
+    def test_rejects_upload_pack_in_fetch(self, proxy, sock_path):
+        resp = _send_request(sock_path,
+                             {"cmd": "fetch", "args": ["--upload-pack=/workspace/evil.sh"]})
+        assert resp["exit_code"] == 1
+        assert "rejected" in resp["stderr"]
+        assert "--upload-pack" in resp["stderr"]
+
+    def test_rejects_upload_pack_in_pull(self, proxy, sock_path):
+        resp = _send_request(sock_path,
+                             {"cmd": "pull", "args": ["--upload-pack=/workspace/evil.sh"]})
+        assert resp["exit_code"] == 1
+        assert "--upload-pack" in resp["stderr"]
+
+    def test_rejects_receive_pack_in_push(self, proxy, sock_path):
+        resp = _send_request(sock_path,
+                             {"args": ["--receive-pack=/workspace/evil.sh",
+                                       "origin", "pm/pr-123-feature"]})
+        assert resp["exit_code"] == 1
+        assert "--receive-pack" in resp["stderr"]
+
+    def test_rejects_exec_in_push(self, proxy, sock_path):
+        resp = _send_request(sock_path,
+                             {"args": ["--exec=/workspace/evil.sh",
+                                       "origin", "pm/pr-123-feature"]})
+        assert resp["exit_code"] == 1
+        assert "--exec" in resp["stderr"]
+
+    def test_rejects_upload_pack_equals_syntax(self, proxy, sock_path):
+        resp = _send_request(sock_path,
+                             {"cmd": "fetch", "args": ["--upload-pack=cat /etc/passwd"]})
+        assert resp["exit_code"] == 1
+
+    def test_rejects_upload_pack_in_ls_remote(self, proxy, sock_path):
+        resp = _send_request(sock_path,
+                             {"cmd": "ls-remote", "args": ["--upload-pack=/evil"]})
+        assert resp["exit_code"] == 1
+
+
 class TestPushProxyProtocol:
     def test_rejects_non_string_args(self, proxy, sock_path):
         resp = _send_request(sock_path, {"args": [123, None]})

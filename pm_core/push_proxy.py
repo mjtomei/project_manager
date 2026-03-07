@@ -232,8 +232,36 @@ class PushProxy:
                         "stderr": f"git-proxy: unknown command '{cmd}'\n"}
         conn.sendall((json.dumps(response) + "\n").encode())
 
+    @staticmethod
+    def _check_dangerous_flags(args: list[str], cmd_name: str) -> dict | None:
+        """Reject flags that could execute arbitrary programs on the host.
+
+        ``--upload-pack``, ``--receive-pack``, and ``--exec`` tell git to
+        invoke a user-specified program.  A container could write a script
+        to /workspace (bind-mounted rw) and reference it here to escape
+        the container sandbox.  Block these unconditionally.
+
+        Returns an error response dict if a dangerous flag is found, or
+        None if args are safe.
+        """
+        for arg in args:
+            # Match both --flag=value and --flag (next arg is value)
+            stripped = arg.split("=", 1)[0] if "=" in arg else arg
+            if stripped in ("--upload-pack", "--receive-pack", "--exec"):
+                msg = (f"git-proxy: rejected — '{stripped}' is not allowed "
+                       f"in {cmd_name} (security restriction)\n")
+                _log.warning("Proxy rejected dangerous flag: %s in %s",
+                             stripped, cmd_name)
+                return {"exit_code": 1, "stdout": "", "stderr": msg}
+        return None
+
     def _execute_push(self, push_args: list[str]) -> dict:
         """Validate the branch and execute git push on the host."""
+        # Reject flags that could execute arbitrary programs on the host
+        danger = self._check_dangerous_flags(push_args, "push")
+        if danger:
+            return danger
+
         # Reject broad-push flags that bypass branch restrictions
         broad_flags = {"--all", "--mirror", "--tags"}
         for arg in push_args:
@@ -367,6 +395,11 @@ class PushProxy:
         These run directly from self.workdir with no branch restriction —
         containers have full read access to the remote.
         """
+        # Reject flags that could execute arbitrary programs on the host
+        danger = self._check_dangerous_flags(args, git_cmd)
+        if danger:
+            return danger
+
         cmd = ["git", git_cmd] + args
         _log.info("Git proxy executing read cmd: %s (in %s)", cmd, self.workdir)
         try:
