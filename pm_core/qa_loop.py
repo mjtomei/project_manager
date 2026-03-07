@@ -48,6 +48,8 @@ _VERDICT_GRACE_PERIOD = 30  # QA sessions take a while to run
 _PLANNER_TIMEOUT = 60 * 60  # seconds to wait for planner output
 _PLANNER_GRACE = 15  # seconds before accepting planner completion
 _DEFAULT_MAX_SCENARIOS = 0  # 0 = unlimited
+_SCENARIO_MAX_RETRIES = 10  # max times to relaunch a dead scenario
+_SCENARIO_RETRY_BASE = 5  # base seconds for exponential backoff
 
 
 def _get_max_scenarios() -> int:
@@ -122,6 +124,27 @@ def create_qa_workdir(pr_id: str, loop_id: str) -> Path:
     workdir = Path.home() / ".pm" / "workdirs" / "qa" / f"{pr_id}-{loop_id}"
     workdir.mkdir(parents=True, exist_ok=True)
     return workdir
+
+
+def _next_scenario_offset(pr_id: str, current_loop_id: str) -> int:
+    """Find the highest scenario index used in previous runs for this PR.
+
+    Scans ``~/.pm/workdirs/qa/{pr_id}-*/worktree-*`` dirs (excluding the
+    current run) to find the max index, so new scenarios continue numbering
+    from where previous runs left off.
+    """
+    qa_root = Path.home() / ".pm" / "workdirs" / "qa"
+    max_idx = 0
+    for d in qa_root.glob(f"{pr_id}-*/worktree-*"):
+        # Skip the current run
+        if current_loop_id and d.parent.name == f"{pr_id}-{current_loop_id}":
+            continue
+        try:
+            idx = int(d.name.split("-", 1)[1])
+            max_idx = max(max_idx, idx)
+        except (ValueError, IndexError):
+            pass
+    return max_idx
 
 
 def create_scenario_workdir(qa_workdir: Path, scenario_index: int,
@@ -697,12 +720,85 @@ def _launch_scenarios_in_containers(
 
 
 # ---------------------------------------------------------------------------
+# Scenario retry helpers
+# ---------------------------------------------------------------------------
+
+def _relaunch_scenario_window(
+    scenario: QAScenario,
+    state: QALoopState,
+    data: dict,
+    pr_data: dict,
+    session: str,
+    workdir_path: str,
+) -> bool:
+    """Re-create the tmux window for a scenario whose window died.
+
+    The worktree / container should still exist — we just need to launch
+    a new ``docker exec`` (container mode) or ``claude`` (host mode) in a
+    fresh tmux window.
+
+    Returns True if the window was recreated successfully.
+    """
+    from pm_core import tmux as tmux_mod, prompt_gen
+    from pm_core.claude_launcher import build_claude_shell_cmd
+    from pm_core.container import is_container_mode_enabled, _docker_available
+    from pm_core import container as container_mod
+
+    win_name = _scenario_window_name(pr_data, scenario.index)
+    use_containers = is_container_mode_enabled() and _docker_available()
+
+    try:
+        if use_containers and scenario.container_name:
+            # Container still running — just re-exec into it
+            container_workdir = container_mod._CONTAINER_WORKDIR
+            container_scratch = container_mod._CONTAINER_SCRATCH
+            child_prompt = prompt_gen.generate_qa_child_prompt(
+                data, state.pr_id, scenario,
+                workdir=container_workdir,
+                session_name=None,
+                worktree_mode=bool(scenario.worktree_branch),
+                scratch_dir=container_scratch,
+            )
+            claude_cmd = build_claude_shell_cmd(prompt=child_prompt)
+            exec_cmd = container_mod.build_exec_cmd(
+                scenario.container_name, claude_cmd, cleanup=False)
+            tmux_mod.new_window(session, win_name, exec_cmd,
+                                cwd=workdir_path, switch=False)
+        else:
+            # Host mode — worktree still exists
+            wt_path = scenario.worktree_path or workdir_path
+            child_prompt = prompt_gen.generate_qa_child_prompt(
+                data, state.pr_id, scenario,
+                workdir=str(wt_path),
+                session_name=session,
+                worktree_mode=bool(scenario.worktree_branch),
+                scratch_dir=str(Path(state.qa_workdir) / f"scratch-{scenario.index}"),
+            )
+            child_cmd = build_claude_shell_cmd(prompt=child_prompt)
+            venv_path = Path(state.qa_workdir) / f"venv-{scenario.index}"
+            if venv_path.is_dir():
+                child_cmd = f"VIRTUAL_ENV={venv_path} PATH={venv_path}/bin:$PATH {child_cmd}"
+            tmux_mod.new_window(session, win_name, child_cmd,
+                                cwd=str(wt_path), switch=False)
+
+        scenario.window_name = win_name
+        _log.info("Relaunched scenario %d in window %s", scenario.index, win_name)
+        return True
+    except Exception:
+        _log.warning("Failed to relaunch scenario %d", scenario.index, exc_info=True)
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Verdict polling helpers
 # ---------------------------------------------------------------------------
 
 def _poll_tmux_verdicts(
     state: QALoopState,
+    data: dict,
+    pr_data: dict,
     session: str,
+    workdir_path: str,
     status_path: Path,
     _notify,
 ) -> None:
@@ -711,6 +807,7 @@ def _poll_tmux_verdicts(
 
     tracker = VerdictStabilityTracker()
     pending = {s.index for s in state.scenarios if s.window_name}
+    retry_counts: dict[int, int] = {}  # scenario_index -> retries used
 
     # Scenarios that failed to create a window get INPUT_REQUIRED immediately
     has_failed_creation = False
@@ -739,7 +836,25 @@ def _poll_tmux_verdicts(
 
             pane_id = _get_scenario_pane(session, scenario.window_name)
             if pane_id is None:
-                _log.warning("Scenario %d window exited without verdict",
+                retries = retry_counts.get(scenario.index, 0)
+                if retries < _SCENARIO_MAX_RETRIES:
+                    backoff = _SCENARIO_RETRY_BASE * (2 ** retries)
+                    _log.warning(
+                        "Scenario %d window died — retry %d/%d "
+                        "(backoff %.0fs)",
+                        scenario.index, retries + 1,
+                        _SCENARIO_MAX_RETRIES, backoff)
+                    time.sleep(backoff)
+                    if _relaunch_scenario_window(
+                        scenario, state, data, pr_data,
+                        session, workdir_path,
+                    ):
+                        retry_counts[scenario.index] = retries + 1
+                        # Reset grace period for this retry
+                        grace_start = time.monotonic()
+                        continue
+                _log.warning("Scenario %d window exited without verdict "
+                             "(retries exhausted)",
                              scenario.index)
                 state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
                 pending.discard(scenario.index)
@@ -848,8 +963,10 @@ def run_qa_sync(
         state.latest_output = "Planning QA scenarios..."
         _notify()
 
+        scenario_start = _next_scenario_offset(state.pr_id, state.loop_id) + 1
         planner_prompt = prompt_gen.generate_qa_planner_prompt(
             data, state.pr_id, session,
+            scenario_start=scenario_start,
         )
         cmd = build_claude_shell_cmd(prompt=planner_prompt)
 
@@ -912,12 +1029,11 @@ def run_qa_sync(
             return state
 
         # Poll until the planner produces a QA Plan or exits.
-        # Same strategy as the review loop's verdict detection:
-        #   - Only scan the tail of the pane (last VERDICT_TAIL_LINES)
-        #   - Require QA_PLAN_END to be the entire line content
-        #   - Grace period: the prompt template also has QA_PLAN_END on
-        #     its own line, so we wait _PLANNER_GRACE seconds for Claude
-        #     to generate enough output to push the prompt out of the tail.
+        # Strategy: capture pane content, look for QA_PLAN_END, then
+        # try parsing.  The prompt template also contains QA_PLAN_END
+        # with placeholder scenarios, so we only accept when parsing
+        # yields real (non-placeholder) scenarios.  This avoids the
+        # false-positive from the prompt's own markers.
         plan_found = False
         deadline = time.monotonic() + _PLANNER_TIMEOUT
         poll_start = time.monotonic()
@@ -934,10 +1050,18 @@ def run_qa_sync(
             _log.info("planner poll: has_end=%s content_len=%d elapsed=%.0fs",
                       has_end, len(content), elapsed)
 
-            if elapsed >= _PLANNER_GRACE and has_end:
-                state.plan_output = content
-                plan_found = True
-                break
+            if has_end and elapsed >= _PLANNER_GRACE:
+                # Try parsing — only accept if we get real scenarios
+                trial = parse_qa_plan(content)
+                if trial:
+                    _log.info("planner poll: parsed %d scenario(s), accepting",
+                              len(trial))
+                    state.plan_output = content
+                    plan_found = True
+                    break
+                else:
+                    _log.info("planner poll: has_end but 0 scenarios, "
+                              "likely prompt template — continuing")
 
             time.sleep(5)
 
@@ -961,6 +1085,23 @@ def run_qa_sync(
             state.latest_output = "Planner produced no parseable scenarios — needs human review"
             _notify()
             return state
+
+        # Verify scenario numbering starts at scenario_start.
+        # The planner is told to start from scenario_start, but if it
+        # didn't follow instructions, renumber to be safe.
+        expected = scenario_start
+        needs_renumber = False
+        for sc in state.scenarios:
+            if sc.index != expected:
+                needs_renumber = True
+                break
+            expected += 1
+        if needs_renumber:
+            _log.info("Renumbering %d scenario(s) to start at %d "
+                      "(planner used wrong numbering)",
+                      len(state.scenarios), scenario_start)
+            for i, sc in enumerate(state.scenarios):
+                sc.index = scenario_start + i
 
         # Limit scenarios if a cap is configured
         cap = max_scenarios if max_scenarios is not None else _get_max_scenarios()
@@ -1053,7 +1194,8 @@ def run_qa_sync(
     _notify()
 
     # --- Poll for verdicts (always via tmux — containers also use tmux windows) ---
-    _poll_tmux_verdicts(state, session, status_path, _notify)
+    _poll_tmux_verdicts(state, data, pr_data, session, workdir_path,
+                        status_path, _notify)
 
     # --- Cleanup ---
     # Keep scenario windows AND containers alive so users can inspect
