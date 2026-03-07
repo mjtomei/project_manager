@@ -1,9 +1,5 @@
 """Container isolation CLI commands."""
 
-import glob
-import os
-from pathlib import Path
-
 import click
 
 from pm_core.cli.helpers import state_root, _get_pm_session
@@ -140,15 +136,11 @@ def container_build(tag: str | None, base: str | None):
     base_image = base or config.image
     image_tag = tag or f"pm-project-{project_name}:latest"
 
-    # Scan for dependency files
-    dep_files = _find_dependency_files(project_dir)
-
     prompt = _build_container_build_prompt(
         project_name=project_name,
         project_dir=str(project_dir),
         base_image=base_image,
         image_tag=image_tag,
-        dep_files=dep_files,
     )
 
     if not find_claude():
@@ -187,65 +179,13 @@ def container_build(tag: str | None, base: str | None):
                   pm_root=root)
 
 
-def _find_dependency_files(project_dir: Path) -> dict[str, str]:
-    """Scan project directory for common dependency files.
-
-    Returns a dict of {relative_path: file_contents}.
-    """
-    candidates = [
-        "requirements.txt", "requirements/*.txt", "setup.py", "setup.cfg",
-        "pyproject.toml", "Pipfile",
-        "package.json",
-        "Cargo.toml",
-        "go.mod",
-        "Gemfile",
-        "Makefile", "CMakeLists.txt",
-        "Dockerfile", "Dockerfile.*", ".dockerignore",
-        "docker-compose.yml", "docker-compose.yaml",
-        "compose.yml", "compose.yaml",
-    ]
-
-    found = {}
-    for pattern in candidates:
-        if "*" in pattern:
-            matches = glob.glob(str(project_dir / pattern))
-            for m in matches:
-                rel = os.path.relpath(m, project_dir)
-                try:
-                    content = Path(m).read_text(errors="replace")
-                    if len(content) < 50_000:  # skip huge lockfiles
-                        found[rel] = content
-                except OSError:
-                    pass
-        else:
-            path = project_dir / pattern
-            if path.is_file():
-                try:
-                    content = path.read_text(errors="replace")
-                    if len(content) < 50_000:
-                        found[pattern] = content
-                except OSError:
-                    pass
-
-    return found
-
-
 def _build_container_build_prompt(
     project_name: str,
     project_dir: str,
     base_image: str,
     image_tag: str,
-    dep_files: dict[str, str],
 ) -> str:
     """Build the prompt for the container build Claude session."""
-
-    dep_section = ""
-    if dep_files:
-        dep_section = "\n## Dependency files found\n\n"
-        for rel_path, content in sorted(dep_files.items()):
-            dep_section += f"### {rel_path}\n```\n{content}\n```\n\n"
-    else:
-        dep_section = "\n## No standard dependency files found\n\nInspect the project directory to identify dependencies manually.\n"
 
     return f"""\
 You are building a project-specific Docker image for "{project_name}".
@@ -267,10 +207,10 @@ image, build it, tag it, and update the pm container config to use it.
 
 {image_tag}
 
-{dep_section}
 ## Instructions
 
-1. Analyze the dependency files above (and any others you find in the project).
+1. Scan the project directory for dependency files (requirements.txt, pyproject.toml,
+   package.json, Cargo.toml, go.mod, Gemfile, etc.) and any existing Dockerfiles.
    Identify:
    - Language runtimes and versions needed
    - System packages (apt/yum) required for native extensions
