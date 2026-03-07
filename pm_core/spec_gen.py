@@ -1,25 +1,23 @@
 """Spec generation for PR phases.
 
-Generates phase-specific specs (impl, review, qa) that bridge the gap
-between the user's natural-language PR description and each downstream
-agent.  Each spec restates requirements in terms grounded in the actual
-codebase, surfaces implicit requirements, and resolves ambiguities.
+Generates phase-specific specs (impl, qa) that bridge the gap between
+the user's natural-language PR description and each downstream agent.
+Each spec restates requirements in terms grounded in the actual codebase,
+surfaces implicit requirements, and resolves ambiguities.
 
 Spec generation modes (global setting ``spec-mode``):
-  auto   — Generate spec, proceed immediately (no user review).
+  auto   — (default) Generate spec, use best judgement for ambiguities,
+           proceed immediately.  Resolved ambiguities are documented in
+           the spec for later review.
   review — Generate spec, pause for user approval before proceeding.
-  prompt — (default) Generate spec and proceed unless the PR has
+  prompt — Generate spec and proceed unless the PR has
            ``review_spec: true`` or Claude flags an unresolvable ambiguity.
 
-TUI integration:
-  When a spec needs review, ``spec_pending`` is set on the PR entry:
-    ``{"phase": "impl", "generated_at": "2025-01-01T00:00:00"}``
-  The TUI shows a 📋 marker and the ``V`` key jumps to the oldest
-  pending spec for review.  Approving clears ``spec_pending`` and
-  allows the phase to proceed.
+Specs are stored as markdown files under ``<pm-root>/specs/<pr-id>/``.
+The file path is recorded in project.yaml so specs survive across sessions
+and the naming scheme can evolve without breaking existing references.
 """
 
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -32,11 +30,10 @@ from pm_core.paths import configure_logger, get_global_setting_value
 _log = configure_logger("pm.spec_gen")
 
 # Phase names that have specs
-PHASES = ("impl", "review", "qa")
+PHASES = ("impl", "qa")
 
 _SPEC_FIELD = {
     "impl": "spec_impl",
-    "review": "spec_review",
     "qa": "spec_qa",
 }
 
@@ -44,9 +41,8 @@ _SPEC_FIELD = {
 def get_spec_mode() -> str:
     """Return the global spec generation mode: auto, review, or prompt.
 
-    Defaults to ``auto`` (no spec generation) so existing behavior is
-    preserved until the user opts in with ``pm set spec-mode prompt``
-    or ``pm set spec-mode review``.
+    Defaults to ``auto`` — generates spec with best-judgement ambiguity
+    resolution and proceeds immediately.
     """
     val = get_global_setting_value("spec-mode", "auto").lower()
     if val in ("auto", "review", "prompt"):
@@ -65,19 +61,63 @@ def pr_spec_mode(pr: dict) -> str:
     return mode
 
 
-def get_spec(pr: dict, phase: str) -> str | None:
-    """Get the spec for a phase from a PR entry, or None."""
+def spec_dir(root: Path, pr_id: str) -> Path:
+    """Return the spec directory for a PR: ``<pm-root>/specs/<pr-id>/``."""
+    d = root / "specs" / pr_id
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def spec_file_path(root: Path, pr_id: str, phase: str) -> Path:
+    """Return the canonical spec file path for a PR phase."""
+    return spec_dir(root, pr_id) / f"{phase}.md"
+
+
+def get_spec(pr: dict, phase: str, data: dict | None = None) -> str | None:
+    """Get the spec content for a phase, reading from the spec file.
+
+    Returns None if no spec exists.  The *data* arg is used to derive
+    the file path when it isn't stored in the PR entry.
+    """
     field = _SPEC_FIELD.get(phase)
     if not field:
         return None
-    return pr.get(field)
+
+    path_str = pr.get(field)
+    if path_str:
+        p = Path(path_str)
+        if p.exists():
+            content = p.read_text().strip()
+            return content if content else None
+    return None
 
 
-def set_spec(pr: dict, phase: str, spec: str) -> None:
-    """Set the spec for a phase on a PR entry."""
+def set_spec(pr: dict, phase: str, spec: str,
+             root: Path | None = None) -> Path | None:
+    """Write spec content to file and store the path in the PR entry.
+
+    *root* is the pm project directory containing project.yaml.
+    If not provided, tries to find it via ``store.find_project_root()``.
+
+    Returns the path written, or None for invalid phases.
+    """
     field = _SPEC_FIELD.get(phase)
-    if field:
-        pr[field] = spec
+    if not field:
+        return None
+
+    if root is None:
+        try:
+            root = store.find_project_root()
+        except FileNotFoundError:
+            _log.warning("spec_gen: cannot find project root for set_spec")
+            return None
+
+    path = spec_file_path(root, pr.get("id", "unknown"), phase)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(spec)
+    pr[field] = str(path)
+    _log.info("spec_gen: wrote %s spec to %s (%d chars)", phase, path, len(spec))
+    return path
 
 
 def _build_spec_prompt(data: dict, pr: dict, phase: str) -> str:
@@ -89,30 +129,13 @@ def _build_spec_prompt(data: dict, pr: dict, phase: str) -> str:
 
     # Gather prior specs for context
     prior_specs = ""
-    if phase == "review":
+    if phase == "qa":
         impl_spec = get_spec(pr, "impl")
-        if impl_spec:
-            prior_specs = f"""
-## Implementation Spec (spec_impl)
-
-The following spec was used to guide the implementation:
-
-{impl_spec}
-"""
-    elif phase == "qa":
-        impl_spec = get_spec(pr, "impl")
-        review_spec = get_spec(pr, "review")
         if impl_spec:
             prior_specs += f"""
 ## Implementation Spec (spec_impl)
 
 {impl_spec}
-"""
-        if review_spec:
-            prior_specs += f"""
-## Review Spec (spec_review)
-
-{review_spec}
 """
 
     # Phase-specific instructions
@@ -126,16 +149,6 @@ State what needs to be implemented in terms of specific code changes:
 - Implicit requirements that the description assumes but doesn't state
 - Edge cases and interactions with existing code""",
 
-        "review": """Generate a **review spec** (spec_review).
-
-State what to verify during code review, grounded in the implementation
-that was produced and the original intent:
-- What the implementation should have achieved (mapped to specific code)
-- Correctness criteria — what must be true for each requirement
-- Architectural fit — how changes should integrate with existing patterns
-- Edge cases and error handling to verify
-- What NOT to flag (intentional trade-offs, known limitations)""",
-
         "qa": """Generate a **QA spec** (spec_qa).
 
 State what to test and how, grounded in the actual implementation and
@@ -148,7 +161,7 @@ the system's runtime behavior:
     }
 
     diff_instruction = ""
-    if phase in ("review", "qa") and workdir:
+    if phase == "qa" and workdir:
         diff_instruction = f"""
 Run `git diff {base_branch}...HEAD` in the workdir to see what changed.
 Read source files as needed to understand the implementation.
@@ -209,7 +222,7 @@ def generate_spec(data: dict, pr_id: str, phase: str,
     Args:
         data: Project data dict.
         pr_id: PR identifier.
-        phase: One of "impl", "review", "qa".
+        phase: One of "impl", "qa".
         root: Project root (for saving).
         force: If True, regenerate even if spec already exists.
 
@@ -245,8 +258,8 @@ def generate_spec(data: dict, pr_id: str, phase: str,
         _log.warning("spec_gen: empty spec generated for %s/%s", pr_id, phase)
         return "", False
 
-    # Save spec to PR entry
-    set_spec(pr, phase, spec_text)
+    # Save spec to file and update PR entry
+    set_spec(pr, phase, spec_text, root=root)
     if root:
         store.save(data, root)
         _log.info("spec_gen: saved %s spec for %s (%d chars)",
@@ -311,7 +324,7 @@ def approve_spec(data: dict, pr_id: str, root: Path | None = None,
         return None
 
     if edited_text is not None:
-        set_spec(pr, phase, edited_text.strip())
+        set_spec(pr, phase, edited_text.strip(), root=root)
 
     del pr["spec_pending"]
     if root:
@@ -335,6 +348,94 @@ def oldest_pending_spec_pr(data: dict) -> str | None:
     return oldest_pr_id
 
 
+def spec_generation_preamble(pr: dict, phase: str,
+                             root: Path | None = None) -> str:
+    """Build a prompt preamble instructing Claude to generate a spec first.
+
+    Returns an empty string if a spec already exists for this phase.
+    Works in all modes (auto, prompt, review) with different ambiguity
+    handling instructions for each.
+
+    *root* is the pm project directory (containing project.yaml).
+    """
+    # If spec already exists, nothing to generate
+    if get_spec(pr, phase):
+        return ""
+
+    mode = pr_spec_mode(pr)
+    pr_id = pr.get("id", "???")
+    phase_labels = {"impl": "implementation", "qa": "QA"}
+    label = phase_labels.get(phase, phase)
+
+    # Derive the spec file path
+    if root is None:
+        try:
+            root = store.find_project_root()
+        except FileNotFoundError:
+            root = Path("pm")  # fallback
+    file_path = spec_file_path(root, pr_id, phase)
+
+    # Determine what kind of spec to generate
+    spec_instructions = {
+        "impl": """\
+Analyze the codebase to understand the relevant code, then write a spec covering:
+1. **Requirements** — Restate each requirement grounded in the codebase (specific files, functions, modules)
+2. **Implicit Requirements** — What must also be true for stated requirements to hold
+3. **Ambiguities & Resolutions** — Identified ambiguities with your proposed resolutions
+4. **Edge Cases** — Interactions with existing behavior not addressed in the description""",
+
+        "qa": """\
+Review the implementation (run `git diff` and read source files), then write a spec covering:
+1. **Requirements** — Key behaviors to exercise and expected outcomes
+2. **Setup** — Setup requirements for testing
+3. **Edge Cases** — Edge cases and failure modes to probe
+4. **Pass/Fail Criteria** — What constitutes a passing vs failing test
+5. **Ambiguities & Resolutions** — Any ambiguities you resolved and how""",
+    }
+
+    instructions = spec_instructions.get(phase, spec_instructions["impl"])
+
+    if mode == "review":
+        ambiguity_instruction = """\
+After writing the spec, present it to the user and **wait for their confirmation**
+before proceeding. Ask: "Does this spec look correct? Reply 'yes' to proceed or
+provide feedback to revise.\""""
+    elif mode == "prompt":
+        ambiguity_instruction = """\
+If you encounter ambiguities that you can confidently resolve using your understanding
+of the codebase, resolve them and document your reasoning in the spec. If you encounter
+an ambiguity that genuinely requires human input, present it to the user and wait for
+their answer before proceeding."""
+    else:
+        # auto mode — use best judgement, document everything
+        ambiguity_instruction = """\
+Use your best judgement to resolve any ambiguities based on your understanding of the
+codebase and common patterns. Document all resolved ambiguities and your reasoning in
+the spec's "Ambiguities & Resolutions" section so someone can review them later."""
+
+    save_instruction = f"""\
+Save the spec to `{file_path}` and then run:
+  `pm pr spec-save {pr_id} {phase}`
+
+Then proceed with the {label} work."""
+
+    return f"""
+## Step 0: Generate {label.title()} Spec
+
+Before starting {label} work, generate a structured spec that bridges the PR
+description above with the actual codebase. This grounds your work in reality
+and surfaces implicit requirements.
+
+{instructions}
+
+{ambiguity_instruction}
+
+{save_instruction}
+
+---
+"""
+
+
 def format_spec_for_prompt(pr: dict, phase: str) -> str:
     """Format a spec for inclusion in a Claude prompt.
 
@@ -346,7 +447,6 @@ def format_spec_for_prompt(pr: dict, phase: str) -> str:
 
     phase_labels = {
         "impl": "Implementation Spec",
-        "review": "Review Spec",
         "qa": "QA Spec",
     }
     label = phase_labels.get(phase, f"{phase} Spec")

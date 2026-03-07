@@ -28,8 +28,34 @@ def _make_data(pr_overrides=None):
     }
 
 
+def _make_spec_file(root, pr_id, phase, content):
+    """Create a spec file under root/specs/ and return its path string."""
+    d = root / "specs" / pr_id
+    d.mkdir(parents=True, exist_ok=True)
+    f = d / f"{phase}.md"
+    f.write_text(content)
+    return str(f)
+
+
 # ---------------------------------------------------------------------------
-# get_spec / set_spec
+# spec_file_path / spec_dir
+# ---------------------------------------------------------------------------
+
+class TestSpecFilePath:
+    def test_derives_path(self, tmp_path):
+        path = spec_gen.spec_file_path(tmp_path, "pr-123", "impl")
+        assert path.name == "impl.md"
+        assert "pr-123" in str(path)
+        assert "specs" in str(path)
+        assert str(tmp_path) in str(path)
+
+    def test_qa_phase(self, tmp_path):
+        path = spec_gen.spec_file_path(tmp_path, "pr-1", "qa")
+        assert path.name == "qa.md"
+
+
+# ---------------------------------------------------------------------------
+# get_spec / set_spec (file-based)
 # ---------------------------------------------------------------------------
 
 class TestGetSetSpec:
@@ -37,24 +63,48 @@ class TestGetSetSpec:
         pr = {"id": "pr-1"}
         assert spec_gen.get_spec(pr, "impl") is None
 
-    def test_set_and_get_spec(self):
+    def test_set_and_get_spec(self, tmp_path):
+        """set_spec writes to file, get_spec reads it back."""
         pr = {"id": "pr-1"}
-        spec_gen.set_spec(pr, "impl", "some spec content")
-        assert spec_gen.get_spec(pr, "impl") == "some spec content"
-        assert pr["spec_impl"] == "some spec content"
+        path = spec_gen.set_spec(pr, "impl", "some spec content", root=tmp_path)
 
-    def test_all_phases(self):
+        assert path is not None
+        assert path.exists()
+        assert path.read_text() == "some spec content"
+        assert spec_gen.get_spec(pr, "impl") == "some spec content"
+        # PR entry stores the file path, not the content
+        assert pr["spec_impl"] == str(path)
+
+    def test_all_phases(self, tmp_path):
         pr = {"id": "pr-1"}
         for phase in spec_gen.PHASES:
-            spec_gen.set_spec(pr, phase, f"spec for {phase}")
+            spec_gen.set_spec(pr, phase, f"spec for {phase}", root=tmp_path)
             assert spec_gen.get_spec(pr, phase) == f"spec for {phase}"
 
     def test_invalid_phase(self):
         pr = {"id": "pr-1"}
         assert spec_gen.get_spec(pr, "invalid") is None
-        # set_spec with invalid phase is a no-op
-        spec_gen.set_spec(pr, "invalid", "test")
+        assert spec_gen.set_spec(pr, "invalid", "test") is None
         assert "spec_invalid" not in pr
+
+    def test_get_spec_from_existing_file(self, tmp_path):
+        """get_spec reads from the file path stored in the PR entry."""
+        spec_file = tmp_path / "impl.md"
+        spec_file.write_text("file-based spec")
+        pr = {"id": "pr-1", "spec_impl": str(spec_file)}
+        assert spec_gen.get_spec(pr, "impl") == "file-based spec"
+
+    def test_get_spec_missing_file(self):
+        """get_spec returns None if the stored path doesn't exist."""
+        pr = {"id": "pr-1", "spec_impl": "/nonexistent/path/impl.md"}
+        assert spec_gen.get_spec(pr, "impl") is None
+
+    def test_spec_stored_in_project_dir(self, tmp_path):
+        """Specs are stored under the pm project directory, not ~/.pm."""
+        pr = {"id": "pr-1"}
+        path = spec_gen.set_spec(pr, "impl", "test content", root=tmp_path)
+        assert str(path).startswith(str(tmp_path))
+        assert "specs" in str(path)
 
 
 # ---------------------------------------------------------------------------
@@ -96,23 +146,25 @@ class TestSpecMode:
 class TestGenerateSpec:
     @patch("pm_core.spec_gen.launch_claude_print")
     @patch("pm_core.spec_gen.get_global_setting_value", return_value="prompt")
-    def test_basic_generation(self, mock_setting, mock_claude):
+    def test_basic_generation(self, mock_setting, mock_claude, tmp_path):
         mock_claude.return_value = "## Requirements\n- Add widget\n"
         data = _make_data()
 
-        spec, needs_review = spec_gen.generate_spec(data, "pr-abc1234", "impl")
+        spec, needs_review = spec_gen.generate_spec(data, "pr-abc1234", "impl",
+                                                     root=tmp_path)
 
         assert spec == "## Requirements\n- Add widget"
         assert not needs_review
         mock_claude.assert_called_once()
-        # Spec should be saved on PR
+        # Spec should be saved — PR entry has file path
         pr = data["prs"][0]
-        assert pr["spec_impl"] == "## Requirements\n- Add widget"
+        assert Path(pr["spec_impl"]).exists()
 
     @patch("pm_core.spec_gen.launch_claude_print")
     @patch("pm_core.spec_gen.get_global_setting_value", return_value="prompt")
-    def test_uses_existing_spec(self, mock_setting, mock_claude):
-        data = _make_data({"spec_impl": "existing spec"})
+    def test_uses_existing_spec(self, mock_setting, mock_claude, tmp_path):
+        spec_path = _make_spec_file(tmp_path, "pr-abc1234", "impl", "existing spec")
+        data = _make_data({"spec_impl": spec_path})
 
         spec, needs_review = spec_gen.generate_spec(data, "pr-abc1234", "impl")
 
@@ -122,12 +174,13 @@ class TestGenerateSpec:
 
     @patch("pm_core.spec_gen.launch_claude_print")
     @patch("pm_core.spec_gen.get_global_setting_value", return_value="prompt")
-    def test_force_regenerate(self, mock_setting, mock_claude):
+    def test_force_regenerate(self, mock_setting, mock_claude, tmp_path):
         mock_claude.return_value = "new spec"
-        data = _make_data({"spec_impl": "existing spec"})
+        spec_path = _make_spec_file(tmp_path, "pr-abc1234", "impl", "existing spec")
+        data = _make_data({"spec_impl": spec_path})
 
         spec, needs_review = spec_gen.generate_spec(
-            data, "pr-abc1234", "impl", force=True,
+            data, "pr-abc1234", "impl", root=tmp_path, force=True,
         )
 
         assert spec == "new spec"
@@ -135,32 +188,35 @@ class TestGenerateSpec:
 
     @patch("pm_core.spec_gen.launch_claude_print")
     @patch("pm_core.spec_gen.get_global_setting_value", return_value="review")
-    def test_review_mode_needs_review(self, mock_setting, mock_claude):
+    def test_review_mode_needs_review(self, mock_setting, mock_claude, tmp_path):
         mock_claude.return_value = "some spec"
         data = _make_data()
 
-        spec, needs_review = spec_gen.generate_spec(data, "pr-abc1234", "impl")
+        spec, needs_review = spec_gen.generate_spec(data, "pr-abc1234", "impl",
+                                                     root=tmp_path)
 
         assert needs_review
 
     @patch("pm_core.spec_gen.launch_claude_print")
     @patch("pm_core.spec_gen.get_global_setting_value", return_value="prompt")
-    def test_prompt_mode_ambiguity_flag(self, mock_setting, mock_claude):
+    def test_prompt_mode_ambiguity_flag(self, mock_setting, mock_claude, tmp_path):
         mock_claude.return_value = "spec\nAMBIGUITY_FLAG\nWhat should X be?"
         data = _make_data()
 
-        spec, needs_review = spec_gen.generate_spec(data, "pr-abc1234", "impl")
+        spec, needs_review = spec_gen.generate_spec(data, "pr-abc1234", "impl",
+                                                     root=tmp_path)
 
         assert needs_review
         assert "AMBIGUITY_FLAG" in spec
 
     @patch("pm_core.spec_gen.launch_claude_print")
     @patch("pm_core.spec_gen.get_global_setting_value", return_value="auto")
-    def test_auto_mode_no_review(self, mock_setting, mock_claude):
+    def test_auto_mode_no_review(self, mock_setting, mock_claude, tmp_path):
         mock_claude.return_value = "spec\nAMBIGUITY_FLAG\nQuestion?"
         data = _make_data()
 
-        spec, needs_review = spec_gen.generate_spec(data, "pr-abc1234", "impl")
+        spec, needs_review = spec_gen.generate_spec(data, "pr-abc1234", "impl",
+                                                     root=tmp_path)
 
         assert not needs_review
 
@@ -180,14 +236,17 @@ class TestGenerateSpec:
         mock_claude.return_value = "test spec"
         data = _make_data()
 
-        # Write initial project.yaml
         import yaml
         (tmp_path / "project.yaml").write_text(yaml.dump(data))
 
         spec_gen.generate_spec(data, "pr-abc1234", "impl", root=tmp_path)
 
-        # Verify save was called (data was modified in place)
-        assert data["prs"][0]["spec_impl"] == "test spec"
+        # Verify spec file was created in the project directory
+        pr = data["prs"][0]
+        spec_path = Path(pr["spec_impl"])
+        assert spec_path.exists()
+        assert spec_path.read_text() == "test spec"
+        assert str(tmp_path) in str(spec_path)
 
 
 # ---------------------------------------------------------------------------
@@ -199,20 +258,19 @@ class TestFormatSpecForPrompt:
         pr = {"id": "pr-1"}
         assert spec_gen.format_spec_for_prompt(pr, "impl") == ""
 
-    def test_with_spec(self):
-        pr = {"id": "pr-1", "spec_impl": "## Requirements\n- Do X"}
+    def test_with_spec(self, tmp_path):
+        spec_file = tmp_path / "impl.md"
+        spec_file.write_text("## Requirements\n- Do X")
+        pr = {"id": "pr-1", "spec_impl": str(spec_file)}
         result = spec_gen.format_spec_for_prompt(pr, "impl")
         assert "Implementation Spec" in result
         assert "## Requirements" in result
         assert "Do X" in result
 
-    def test_review_phase_label(self):
-        pr = {"id": "pr-1", "spec_review": "Check Y"}
-        result = spec_gen.format_spec_for_prompt(pr, "review")
-        assert "Review Spec" in result
-
-    def test_qa_phase_label(self):
-        pr = {"id": "pr-1", "spec_qa": "Test Z"}
+    def test_qa_phase_label(self, tmp_path):
+        spec_file = tmp_path / "qa.md"
+        spec_file.write_text("Test Z")
+        pr = {"id": "pr-1", "spec_qa": str(spec_file)}
         result = spec_gen.format_spec_for_prompt(pr, "qa")
         assert "QA Spec" in result
 
@@ -231,23 +289,13 @@ class TestBuildSpecPrompt:
         assert "implementation spec" in prompt
 
     @patch("pm_core.spec_gen.get_global_setting_value", return_value="prompt")
-    def test_review_prompt_includes_impl_spec(self, mock_setting):
-        data = _make_data({"spec_impl": "impl requirements here"})
-        pr = data["prs"][0]
-        prompt = spec_gen._build_spec_prompt(data, pr, "review")
-        assert "impl requirements here" in prompt
-        assert "review spec" in prompt
-
-    @patch("pm_core.spec_gen.get_global_setting_value", return_value="prompt")
-    def test_qa_prompt_includes_both_prior_specs(self, mock_setting):
-        data = _make_data({
-            "spec_impl": "impl spec",
-            "spec_review": "review spec",
-        })
+    def test_qa_prompt_includes_impl_spec(self, mock_setting, tmp_path):
+        spec_file = tmp_path / "impl.md"
+        spec_file.write_text("impl spec")
+        data = _make_data({"spec_impl": str(spec_file)})
         pr = data["prs"][0]
         prompt = spec_gen._build_spec_prompt(data, pr, "qa")
         assert "impl spec" in prompt
-        assert "review spec" in prompt
         assert "QA spec" in prompt
 
     @patch("pm_core.spec_gen.get_global_setting_value", return_value="review")
@@ -291,9 +339,11 @@ class TestPendingSpec:
 # ---------------------------------------------------------------------------
 
 class TestApproveSpec:
-    def test_approve_clears_pending(self):
+    def test_approve_clears_pending(self, tmp_path):
+        spec_file = tmp_path / "impl.md"
+        spec_file.write_text("original spec")
         data = _make_data({
-            "spec_impl": "original spec",
+            "spec_impl": str(spec_file),
             "spec_pending": {"phase": "impl", "generated_at": "2025-01-01"},
         })
 
@@ -301,16 +351,21 @@ class TestApproveSpec:
         assert phase == "impl"
         assert "spec_pending" not in data["prs"][0]
 
-    def test_approve_with_edits(self):
+    def test_approve_with_edits(self, tmp_path):
+        spec_file = tmp_path / "impl.md"
+        spec_file.write_text("original spec")
         data = _make_data({
-            "spec_impl": "original spec",
+            "spec_impl": str(spec_file),
             "spec_pending": {"phase": "impl", "generated_at": "2025-01-01"},
         })
 
-        phase = spec_gen.approve_spec(data, "pr-abc1234", edited_text="edited spec")
+        phase = spec_gen.approve_spec(data, "pr-abc1234", root=tmp_path,
+                                       edited_text="edited spec")
         assert phase == "impl"
-        assert data["prs"][0]["spec_impl"] == "edited spec"
-        assert "spec_pending" not in data["prs"][0]
+        # The file should be updated
+        pr = data["prs"][0]
+        assert Path(pr["spec_impl"]).read_text() == "edited spec"
+        assert "spec_pending" not in pr
 
     def test_approve_no_pending(self):
         data = _make_data()
@@ -343,7 +398,7 @@ class TestOldestPendingSpecPr:
             "project": {"name": "test", "repo": "test-repo", "base_branch": "master"},
             "prs": [
                 {"id": "pr-1", "spec_pending": {"phase": "impl", "generated_at": "2025-01-02"}},
-                {"id": "pr-2", "spec_pending": {"phase": "review", "generated_at": "2025-01-01"}},
+                {"id": "pr-2", "spec_pending": {"phase": "qa", "generated_at": "2025-01-01"}},
                 {"id": "pr-3"},  # no pending
             ],
         }
@@ -357,11 +412,11 @@ class TestOldestPendingSpecPr:
 class TestGenerateSpecPending:
     @patch("pm_core.spec_gen.launch_claude_print")
     @patch("pm_core.spec_gen.get_global_setting_value", return_value="review")
-    def test_review_mode_sets_pending(self, mock_setting, mock_claude):
+    def test_review_mode_sets_pending(self, mock_setting, mock_claude, tmp_path):
         mock_claude.return_value = "some spec"
         data = _make_data()
 
-        spec_gen.generate_spec(data, "pr-abc1234", "impl")
+        spec_gen.generate_spec(data, "pr-abc1234", "impl", root=tmp_path)
 
         pr = data["prs"][0]
         assert "spec_pending" in pr
@@ -369,23 +424,92 @@ class TestGenerateSpecPending:
 
     @patch("pm_core.spec_gen.launch_claude_print")
     @patch("pm_core.spec_gen.get_global_setting_value", return_value="prompt")
-    def test_no_pending_when_no_ambiguity(self, mock_setting, mock_claude):
+    def test_no_pending_when_no_ambiguity(self, mock_setting, mock_claude, tmp_path):
         mock_claude.return_value = "clean spec"
         data = _make_data()
 
-        spec_gen.generate_spec(data, "pr-abc1234", "impl")
+        spec_gen.generate_spec(data, "pr-abc1234", "impl", root=tmp_path)
 
         pr = data["prs"][0]
         assert "spec_pending" not in pr
 
     @patch("pm_core.spec_gen.launch_claude_print")
     @patch("pm_core.spec_gen.get_global_setting_value", return_value="prompt")
-    def test_ambiguity_sets_pending(self, mock_setting, mock_claude):
+    def test_ambiguity_sets_pending(self, mock_setting, mock_claude, tmp_path):
         mock_claude.return_value = "spec\nAMBIGUITY_FLAG\nQuestion?"
         data = _make_data()
 
-        spec_gen.generate_spec(data, "pr-abc1234", "impl")
+        spec_gen.generate_spec(data, "pr-abc1234", "impl", root=tmp_path)
 
         pr = data["prs"][0]
         assert "spec_pending" in pr
         assert pr["spec_pending"]["phase"] == "impl"
+
+
+# ---------------------------------------------------------------------------
+# spec_generation_preamble
+# ---------------------------------------------------------------------------
+
+class TestSpecGenerationPreamble:
+    @patch("pm_core.spec_gen.get_global_setting_value", return_value="auto")
+    def test_auto_mode_generates_preamble(self, mock_setting, tmp_path):
+        """Auto mode generates specs with best-judgement ambiguity resolution."""
+        pr = {"id": "pr-1"}
+        result = spec_gen.spec_generation_preamble(pr, "impl", root=tmp_path)
+        assert "Step 0" in result
+        assert "best judgement" in result
+        assert "spec-save" in result
+
+    @patch("pm_core.spec_gen.get_global_setting_value", return_value="prompt")
+    def test_prompt_mode_returns_preamble(self, mock_setting, tmp_path):
+        pr = {"id": "pr-1"}
+        result = spec_gen.spec_generation_preamble(pr, "impl", root=tmp_path)
+        assert "Step 0" in result
+        assert "spec-save" in result
+        assert "pr-1" in result
+
+    @patch("pm_core.spec_gen.get_global_setting_value", return_value="review")
+    def test_review_mode_asks_confirmation(self, mock_setting, tmp_path):
+        pr = {"id": "pr-1"}
+        result = spec_gen.spec_generation_preamble(pr, "impl", root=tmp_path)
+        assert "wait for their confirmation" in result
+
+    @patch("pm_core.spec_gen.get_global_setting_value", return_value="prompt")
+    def test_existing_spec_returns_empty(self, mock_setting, tmp_path):
+        spec_file = tmp_path / "impl.md"
+        spec_file.write_text("existing spec")
+        pr = {"id": "pr-1", "spec_impl": str(spec_file)}
+        result = spec_gen.spec_generation_preamble(pr, "impl", root=tmp_path)
+        assert result == ""
+
+    @patch("pm_core.spec_gen.get_global_setting_value", return_value="prompt")
+    def test_qa_preamble(self, mock_setting, tmp_path):
+        pr = {"id": "pr-1"}
+        result = spec_gen.spec_generation_preamble(pr, "qa", root=tmp_path)
+        assert "QA" in result
+        assert "spec-save" in result
+
+    @patch("pm_core.spec_gen.get_global_setting_value", return_value="auto")
+    def test_auto_mode_documents_ambiguities(self, mock_setting, tmp_path):
+        """Auto mode tells Claude to document resolved ambiguities."""
+        pr = {"id": "pr-1"}
+        result = spec_gen.spec_generation_preamble(pr, "impl", root=tmp_path)
+        assert "Ambiguities" in result
+
+    @patch("pm_core.spec_gen.get_global_setting_value", return_value="auto")
+    def test_preamble_includes_file_path(self, mock_setting, tmp_path):
+        """Preamble tells Claude the exact file path to write to."""
+        pr = {"id": "pr-1"}
+        result = spec_gen.spec_generation_preamble(pr, "impl", root=tmp_path)
+        assert "impl.md" in result
+        assert "specs" in result
+        # Path should be under the project root, not ~/.pm
+        assert str(tmp_path) in result
+
+    @patch("pm_core.spec_gen.get_global_setting_value", return_value="auto")
+    def test_preamble_path_in_project_dir(self, mock_setting, tmp_path):
+        """Spec path in preamble should be in the pm project directory."""
+        pr = {"id": "pr-xyz"}
+        result = spec_gen.spec_generation_preamble(pr, "impl", root=tmp_path)
+        expected_path = str(tmp_path / "specs" / "pr-xyz" / "impl.md")
+        assert expected_path in result
