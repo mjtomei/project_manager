@@ -150,8 +150,7 @@ def container_build(tag: str | None, base: str | None):
         dep_files=dep_files,
     )
 
-    claude = find_claude()
-    if not claude:
+    if not find_claude():
         click.echo("Claude CLI not found.", err=True)
         click.echo("\nPrompt:")
         click.echo("-" * 60)
@@ -205,10 +204,10 @@ def _find_dependency_files(project_dir: Path) -> dict[str, str]:
         "compose.yml", "compose.yaml",
     ]
 
+    import glob
     found = {}
     for pattern in candidates:
         if "*" in pattern:
-            import glob
             matches = glob.glob(str(project_dir / pattern))
             for m in matches:
                 rel = os.path.relpath(m, project_dir)
