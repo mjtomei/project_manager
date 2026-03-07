@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-4585fd3
+  active_pr: pr-5e96046
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -3582,7 +3582,14 @@ prs:
   started_at: '2026-03-06T14:03:17.555901+00:00'
   reviewed_at: '2026-03-06T14:29:39.806996+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-c25239f
+    text: 'QA finding: git worktrees broken inside Docker containers — .git files
+      use absolute host paths. Fix: replaced worktrees with git clone --local + direct
+      push via push proxy. Removed cherry-pick mechanism, made_changes field, /repo
+      mount, worktree_branch.'
+    created_at: '2026-03-07T03:12:00Z'
+    last_edited: '2026-03-07T03:12:00Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-5e96046-enable-git-push-from-inside-containe-f6489c6f
 - id: pr-d3ae95e
   plan: improvements
