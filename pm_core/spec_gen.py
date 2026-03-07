@@ -41,13 +41,13 @@ _SPEC_FIELD = {
 def get_spec_mode() -> str:
     """Return the global spec generation mode: auto, review, or prompt.
 
-    Defaults to ``auto`` — generates spec with best-judgement ambiguity
-    resolution and proceeds immediately.
+    Defaults to ``prompt`` — generates spec and proceeds unless the PR
+    has ``review_spec: true`` or Claude flags an unresolvable ambiguity.
     """
-    val = get_global_setting_value("spec-mode", "auto").lower()
+    val = get_global_setting_value("spec-mode", "prompt").lower()
     if val in ("auto", "review", "prompt"):
         return val
-    return "auto"
+    return "prompt"
 
 
 def pr_spec_mode(pr: dict) -> str:
