@@ -188,6 +188,11 @@ def create_scenario_workdir(qa_workdir: Path, scenario_index: int,
         clone_args.extend(["--branch", branch])
     git_ops.run_git(*clone_args)
 
+    # The clone's origin points to the PR workdir (repo_root).  The push
+    # proxy handles local-path origins: it fetches into the PR workdir
+    # (updating its branch ref) and then forwards to the real upstream.
+    # This keeps all local copies in sync.
+
     # Create a --system-site-packages venv so pip installs stay local
     venv_path = qa_workdir / f"venv-{scenario_index}"
     if not venv_path.exists():
@@ -687,7 +692,7 @@ def _relaunch_scenario_window(
                 data, state.pr_id, scenario,
                 workdir=container_workdir,
                 session_name=None,
-                worktree_mode=bool(scenario.worktree_branch),
+                worktree_mode=bool(scenario.worktree_path),
                 scratch_dir=container_scratch,
             )
             claude_cmd = build_claude_shell_cmd(prompt=child_prompt)
@@ -702,7 +707,7 @@ def _relaunch_scenario_window(
                 data, state.pr_id, scenario,
                 workdir=str(wt_path),
                 session_name=session,
-                worktree_mode=bool(scenario.worktree_branch),
+                worktree_mode=bool(scenario.worktree_path),
                 scratch_dir=str(Path(state.qa_workdir) / f"scratch-{scenario.index}"),
             )
             child_cmd = build_claude_shell_cmd(prompt=child_prompt)

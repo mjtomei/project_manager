@@ -200,41 +200,47 @@ def _build_git_setup_script(
         f"'git config --global --add safe.directory {_CONTAINER_WORKDIR}'"
     )
 
-    # Install a git wrapper that intercepts ``git push`` and forwards it
-    # to the host-side push proxy via the mounted Unix socket.
-    # No credentials exist inside the container — the proxy on the host
-    # validates the target branch and runs the real push.
+    # Install a git wrapper that intercepts remote-interacting commands
+    # (push, fetch, pull, ls-remote) and forwards them to the host-side
+    # proxy via the mounted Unix socket.  No credentials exist inside the
+    # container — the proxy on the host validates push targets and runs
+    # the real git commands.  All other git operations (commit, diff, log,
+    # etc.) run directly via /usr/bin/git.
     if has_push_proxy:
         from pm_core.push_proxy import _CONTAINER_SOCKET_PATH
         # NOTE: The inline Python block must start at column 0 inside the
         # shell $(...) substitution, so we can't use textwrap.dedent here.
         wrapper_script = (
             "#!/bin/sh\n"
-            "# pm: git wrapper — pushes go through the host-side push proxy\n"
+            "# pm: git wrapper — remote commands go through the host-side proxy\n"
             "REAL_GIT=/usr/bin/git\n"
             f'SOCKET="{_CONTAINER_SOCKET_PATH}"\n'
-            'if [ "$1" = "push" ]; then\n'
-            '  shift\n'
-            '  args_json="["\n'
-            '  first=1\n'
-            '  for arg in "$@"; do\n'
-            '    if [ "$first" = "1" ]; then first=0; else args_json="$args_json,"; fi\n'
-            '    escaped=$(printf \'%s\' "$arg" | sed \'s/\\\\/\\\\\\\\/g; s/"/\\\\"/g\')\n'
-            '    args_json="$args_json\\"$escaped\\""\n'
-            '  done\n'
-            '  args_json="$args_json]"\n'
-            "  request='{\"args\": '\"$args_json\"'}'\n"
-            '  if ! command -v python3 >/dev/null 2>&1; then\n'
-            '    echo "pm: python3 required for push proxy client" >&2\n'
-            '    exit 1\n'
-            '  fi\n'
-            '  response=$(python3 -c "\n'
+            '# Commands that interact with remotes and need proxy forwarding\n'
+            'case "$1" in\n'
+            '  push|fetch|pull|ls-remote)\n'
+            '    CMD="$1"\n'
+            '    shift\n'
+            '    args_json="["\n'
+            '    first=1\n'
+            '    for arg in "$@"; do\n'
+            '      if [ "$first" = "1" ]; then first=0; else args_json="$args_json,"; fi\n'
+            '      escaped=$(printf \'%s\' "$arg" | sed \'s/\\\\/\\\\\\\\/g; s/"/\\\\"/g\')\n'
+            '      args_json="$args_json\\"$escaped\\""\n'
+            '    done\n'
+            '    args_json="$args_json]"\n'
+            '    escaped_cmd=$(printf \'%s\' "$CMD" | sed \'s/"/\\\\"/g\')\n'
+            '    request=\'{"cmd": "\'$escaped_cmd\'", "args": \'$args_json\'}\'\n'
+            '    if ! command -v python3 >/dev/null 2>&1; then\n'
+            '      echo "pm: python3 required for git proxy client" >&2\n'
+            '      exit 1\n'
+            '    fi\n'
+            '    response=$(python3 -c "\n'
             "import socket, sys, json\n"
             "s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n"
             "try:\n"
             "    s.connect('$SOCKET')\n"
             "except Exception as e:\n"
-            f"    print(json.dumps({{'exit_code': 1, 'stdout': '', 'stderr': f'push-proxy: cannot connect: {{e}}\\\\n'}}))\n"
+            f"    print(json.dumps({{'exit_code': 1, 'stdout': '', 'stderr': f'git-proxy: cannot connect: {{e}}\\\\n'}}))\n"
             "    sys.exit(0)\n"
             "s.sendall((sys.argv[1] + '\\\\n').encode())\n"
             "data = b''\n"
@@ -246,9 +252,10 @@ def _build_git_setup_script(
             "s.close()\n"
             "print(data.decode())\n"
             '" "$request" 2>&1)\n'
-            '  printf \'%s\' "$response" | python3 -c "import sys,json; r=json.load(sys.stdin); sys.stdout.write(r.get(\'stdout\',\'\')); sys.stderr.write(r.get(\'stderr\',\'\')); sys.exit(r.get(\'exit_code\',1))"\n'
-            '  exit $?\n'
-            "fi\n"
+            '    printf \'%s\' "$response" | python3 -c "import sys,json; r=json.load(sys.stdin); sys.stdout.write(r.get(\'stdout\',\'\')); sys.stderr.write(r.get(\'stderr\',\'\')); sys.exit(r.get(\'exit_code\',1))"\n'
+            '    exit $?\n'
+            '    ;;\n'
+            'esac\n'
             'exec $REAL_GIT "$@"\n'
         )
         wrapper_path = "/usr/local/bin/git"
