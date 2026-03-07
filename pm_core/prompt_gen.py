@@ -830,6 +830,26 @@ def generate_qa_interactive_prompt(data: dict, pr_id: str,
 
     tui_block = tui_section(session_name) if session_name else ""
 
+    # Get instruction library summary for Scenario 0 (instructions only, not regression)
+    instruction_library_block = ""
+    try:
+        root = store.find_project_root()
+        from pm_core import qa_instructions
+        library_summary = qa_instructions.instruction_summary_for_prompt(
+            root, include_regression=False)
+        if library_summary and "No QA instructions" not in library_summary:
+            instruction_library_block = f"""
+## QA Instruction Library
+
+The project has user-defined QA instructions and regression tests that the
+automated scenarios may be running.  You can read any of these files to
+understand what's being tested:
+
+{library_summary}
+"""
+    except (FileNotFoundError, Exception):
+        pass
+
     prompt = f"""You are an interactive QA session (Scenario 0) for PR {pr_id}: "{title}"
 
 ## Context
@@ -839,17 +859,34 @@ def generate_qa_interactive_prompt(data: dict, pr_id: str,
 - **Base branch**: {base_branch}
 {workdir_block}
 {pr_notes_block}
+## How QA Works
+
+You are in Scenario 0 — an interactive session that runs alongside automated QA
+scenarios.  Here's how the overall QA process works:
+
+1. A **QA planner** analyzed the PR and generated test scenarios based on the
+   PR's changes and the project's QA instruction library
+2. Each scenario runs in its **own isolated clone** (parallel sessions in
+   other tmux windows), with a specific focus area and test steps
+3. Automated scenarios produce a **verdict** (PASS / NEEDS_WORK / INPUT_REQUIRED)
+   when they finish — these are collected by the orchestrator
+4. If a scenario finds issues and fixes them, it pushes directly to the PR branch
+5. The overall QA result is aggregated from all scenario verdicts
+
+You can see the other scenario windows in tmux (they're named qa-*-s1, qa-*-s2,
+etc.).
+{instruction_library_block}
 ## Your Role
 
 This is an interactive session — you work with the user to manually test and
-explore the PR's changes.  Automated scenarios are running in parallel in
-other windows.
+explore the PR's changes.
 
 Help the user with whatever they need:
 - Inspect code changes (`git diff {base_branch}...HEAD`)
 - Run tests, build the project, try out features
 - Debug issues found by automated scenarios
 - Write and run ad-hoc test scripts in the scratch dir
+- Read QA instruction files to understand what automated scenarios are testing
 
 You do NOT need to produce a verdict.  This session stays open until QA
 completes — take your time and be thorough.
@@ -871,8 +908,8 @@ def generate_qa_child_prompt(data: dict, pr_id: str,
         workdir: Child scenario's own workdir (worktree in worktree_mode,
             or a plain directory otherwise).
         session_name: tmux session name.
-        worktree_mode: When True, the child runs in a git worktree; commits
-            are cherry-picked back by the orchestrator.
+        worktree_mode: When True, the child runs in an isolated clone of the
+            repo and can commit/push fixes to the PR branch.
         scratch_dir: Path to a scratch directory for throwaway test projects.
     """
     pr = store.get_pr(data, pr_id)
@@ -886,10 +923,18 @@ def generate_qa_child_prompt(data: dict, pr_id: str,
 
     instruction_block = ""
     if scenario.instruction_path:
+        # Translate absolute host path to be relative to the scenario workdir.
+        # Instruction files live under pm/qa/ in the repo; in containers the
+        # repo is mounted at /workspace so we need /workspace/pm/qa/...
+        instr_display = scenario.instruction_path
+        marker = "/pm/qa/"
+        idx = scenario.instruction_path.find(marker)
+        if idx >= 0:
+            instr_display = f"{workdir}/pm/qa/{scenario.instruction_path[idx + len(marker):]}"
         instruction_block = f"""
 ## Instruction Reference
 
-Read the full instruction at: `{scenario.instruction_path}`
+Read the full instruction at: `{instr_display}`
 Follow its **Setup** section to create a real test environment BEFORE running
 any test steps.  Do NOT skip setup and fall back to static code reading — your
 job is to verify runtime behavior, not review code.
@@ -902,15 +947,17 @@ job is to verify runtime behavior, not review code.
     scratch_line = f"\n- **Scratch dir** (throwaway test projects): {scratch_dir}" if scratch_dir else ""
     if worktree_mode:
         workdir_block = f"""\
-- **Your workdir** (isolated worktree): {workdir}{scratch_line}
+- **Your workdir** (isolated clone): {workdir}{scratch_line}
 - **PR workdir** (canonical source): {pr_workdir}"""
         execution_block = f"""\
-1. Inspect and test the code in your workdir (an isolated worktree of the PR branch)
+1. Inspect and test the code in your workdir (an isolated clone of the PR branch)
 2. Execute the test steps described above
 3. If you find issues and can fix them:
    - Implement the fix in your workdir (your current directory)
    - Commit with message prefix `qa: `
-   - Do NOT push — commits are cherry-picked back automatically
+   - Push: `git push origin {branch}`
+   - If push fails (another scenario pushed first), pull and retry:
+     `git pull --rebase origin {branch} && git push origin {branch}`
 4. End with a verdict on its own line — one of:
    - **PASS** — Scenario passed, no issues found
    - **NEEDS_WORK** — Issues found (explain what and whether you fixed them)
@@ -940,6 +987,18 @@ job is to verify runtime behavior, not review code.
 - **Base branch**: {base_branch}
 {workdir_block}
 {pr_notes_block}
+## How QA Works
+
+You are in one of several QA scenarios running in parallel, each in its own
+isolated clone.  An orchestrator is monitoring your tmux pane for your
+final verdict.
+
+- When you output a verdict (PASS / NEEDS_WORK / INPUT_REQUIRED), the
+  orchestrator records it and moves on
+- If you commit fixes (with `qa: ` prefix), push them to the PR branch:
+  `git push origin {branch}`
+- Your verdict determines whether the PR passes QA — be thorough but fair
+
 ## Scenario
 
 **Focus**: {scenario.focus}

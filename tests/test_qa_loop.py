@@ -317,26 +317,28 @@ class TestQAWorkdirs:
         assert "pr-001-abc123" in str(wd)
 
     def test_create_scenario_workdir(self, tmp_path):
-        d, branch, scratch, venv = create_scenario_workdir(tmp_path, 1)
+        d, scratch, venv = create_scenario_workdir(tmp_path, 1)
         assert d.exists()
         assert d.name == "scenario-1"
-        assert branch == ""
         assert scratch.exists()
         assert venv is None
 
     def test_create_scenario_workdir_venv(self, tmp_path):
-        """Worktree mode creates a --system-site-packages venv."""
+        """Clone mode creates a --system-site-packages venv."""
         qa_workdir = tmp_path / "qa"
         qa_workdir.mkdir()
 
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
 
-        with patch("pm_core.git_ops.run_git", return_value=MagicMock(returncode=0)), \
-             patch("pm_core.git_ops.create_worktree"), \
-             patch("pm_core.git_ops.remove_worktree"), \
-             patch("pm_core.git_ops.delete_branch"):
-            _, _, _, venv_path = create_scenario_workdir(
+        def fake_run_git(*args):
+            # Simulate git clone --local by creating the directory
+            clone_path = qa_workdir / "worktree-1"
+            clone_path.mkdir(parents=True, exist_ok=True)
+            return MagicMock(returncode=0)
+
+        with patch("pm_core.git_ops.run_git", side_effect=fake_run_git):
+            _, _, venv_path = create_scenario_workdir(
                 qa_workdir, 1, repo_root=repo_root,
                 pr_id="pr-001", loop_id="abc",
             )
@@ -355,19 +357,21 @@ class TestQAWorkdirs:
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
 
-        with patch("pm_core.git_ops.run_git", return_value=MagicMock(returncode=0)), \
-             patch("pm_core.git_ops.create_worktree"), \
-             patch("pm_core.git_ops.remove_worktree"), \
-             patch("pm_core.git_ops.delete_branch"), \
+        def fake_run_git(*args):
+            clone_path = qa_workdir / "worktree-1"
+            clone_path.mkdir(parents=True, exist_ok=True)
+            return MagicMock(returncode=0)
+
+        with patch("pm_core.git_ops.run_git", side_effect=fake_run_git), \
              patch("pm_core.qa_loop.subprocess.run",
                    side_effect=OSError("venv failed")):
-            wt_path, branch, scratch, venv_path = create_scenario_workdir(
+            clone_path, scratch, venv_path = create_scenario_workdir(
                 qa_workdir, 1, repo_root=repo_root,
                 pr_id="pr-001", loop_id="abc",
             )
 
-        # Worktree and scratch still created, venv is None
-        assert wt_path is not None
+        # Clone and scratch still created, venv is None
+        assert clone_path is not None
         assert scratch.exists()
         assert venv_path is None
 
@@ -552,7 +556,7 @@ class TestVerdictEdgeCases:
 
         # Overall verdict aggregation (same as qa_loop.py)
         verdicts = list(state.scenario_verdicts.values())
-        if VERDICT_NEEDS_WORK in verdicts or state.made_changes:
+        if VERDICT_NEEDS_WORK in verdicts:
             overall = VERDICT_NEEDS_WORK
         elif VERDICT_INPUT_REQUIRED in verdicts:
             overall = VERDICT_INPUT_REQUIRED
@@ -567,7 +571,7 @@ class TestVerdictEdgeCases:
         state.scenario_verdicts = {1: VERDICT_PASS, 2: VERDICT_INPUT_REQUIRED}
 
         verdicts = list(state.scenario_verdicts.values())
-        if VERDICT_NEEDS_WORK in verdicts or state.made_changes:
+        if VERDICT_NEEDS_WORK in verdicts:
             overall = VERDICT_NEEDS_WORK
         elif VERDICT_INPUT_REQUIRED in verdicts:
             overall = VERDICT_INPUT_REQUIRED
@@ -585,7 +589,7 @@ class TestVerdictEdgeCases:
         }
 
         verdicts = list(state.scenario_verdicts.values())
-        if VERDICT_NEEDS_WORK in verdicts or state.made_changes:
+        if VERDICT_NEEDS_WORK in verdicts:
             overall = VERDICT_NEEDS_WORK
         elif VERDICT_INPUT_REQUIRED in verdicts:
             overall = VERDICT_INPUT_REQUIRED
@@ -647,23 +651,22 @@ class TestVerdictEdgeCases:
             calls.append(idx)
             if idx == 1:
                 raise OSError("corrupt repo")
-            return (Path("/tmp/wt"), "branch", Path("/tmp/scratch"), None)
+            return (Path("/tmp/clone"), Path("/tmp/scratch"), None)
 
         # Simulate the loop logic from run_qa_sync
         for scenario in scenarios:
             try:
-                wt_path, wt_branch, scratch_path, venv_path = fake_create(
+                clone_path, scratch_path, venv_path = fake_create(
                     Path("/tmp/qa"), scenario.index,
                 )
             except Exception:
                 continue
-            scenario.worktree_path = str(wt_path)
-            scenario.worktree_branch = wt_branch
+            scenario.worktree_path = str(clone_path)
             launched.append(scenario.index)
 
         assert len(calls) == 2, "Both scenarios attempted"
         assert launched == [2], "Only non-failing scenario launched"
-        assert s1.worktree_path is None, "Failed scenario has no worktree"
+        assert s1.worktree_path is None, "Failed scenario has no clone"
 
 
 # ---------------------------------------------------------------------------
@@ -703,7 +706,7 @@ class TestOnQAComplete:
         app = self._make_app(tmp_path)
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_PASS
-        state.made_changes = False
+
 
         with patch("pm_core.tui.qa_loop_ui._trigger_auto_merge") as mock_merge, \
              patch("pm_core.tui.qa_loop_ui._record_qa_note"):
@@ -719,7 +722,7 @@ class TestOnQAComplete:
         app._auto_start = False  # auto-start disabled
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_PASS
-        state.made_changes = False
+
 
         with patch("pm_core.tui.qa_loop_ui._trigger_auto_merge") as mock_merge, \
              patch("pm_core.tui.qa_loop_ui._record_qa_note"):
@@ -739,7 +742,7 @@ class TestOnQAComplete:
         app = self._make_app(tmp_path)
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_NEEDS_WORK
-        state.made_changes = False
+
 
         with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
              patch("pm_core.tui.auto_start.check_and_start"):
@@ -757,7 +760,7 @@ class TestOnQAComplete:
         app = self._make_app(tmp_path)
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_NEEDS_WORK
-        state.made_changes = False
+
 
         with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
              patch("pm_core.tui.auto_start.check_and_start"):
@@ -774,7 +777,7 @@ class TestOnQAComplete:
         app = self._make_app(tmp_path)
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_NEEDS_WORK
-        state.made_changes = False
+
 
         with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
              patch("pm_core.tui.auto_start.check_and_start") as mock_check:
@@ -782,24 +785,6 @@ class TestOnQAComplete:
 
         # check_and_start should be scheduled via run_worker
         app.run_worker.assert_called_once()
-
-    def test_made_changes_transitions_to_in_review(self, tmp_path):
-        """QA PASS with changes should transition PR back to in_review."""
-        from pm_core.tui.qa_loop_ui import _on_qa_complete
-        from pm_core import store
-
-        app = self._make_app(tmp_path)
-        state = QALoopState(pr_id="pr-001")
-        state.latest_verdict = VERDICT_PASS
-        state.made_changes = True  # Changes committed during QA
-
-        with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
-             patch("pm_core.tui.auto_start.check_and_start"):
-            _on_qa_complete(app, state)
-
-        data = store.load(app._root)
-        pr = store.get_pr(data, "pr-001")
-        assert pr["status"] == "in_review"
 
     def test_input_required_leaves_qa_status(self, tmp_path):
         """QA INPUT_REQUIRED should leave PR in qa status."""
@@ -809,7 +794,7 @@ class TestOnQAComplete:
         app = self._make_app(tmp_path)
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_INPUT_REQUIRED
-        state.made_changes = False
+
 
         with patch("pm_core.tui.qa_loop_ui._record_qa_note"):
             _on_qa_complete(app, state)
@@ -826,7 +811,7 @@ class TestOnQAComplete:
         app._auto_start = False  # Disabled
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_NEEDS_WORK
-        state.made_changes = False
+
 
         with patch("pm_core.tui.qa_loop_ui._record_qa_note"):
             _on_qa_complete(app, state)
@@ -844,7 +829,7 @@ class TestOnQAComplete:
         app._review_loops = {"pr-001": MagicMock(running=False)}
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_NEEDS_WORK
-        state.made_changes = False
+
 
         with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
              patch("pm_core.tui.auto_start.check_and_start"):
@@ -861,7 +846,7 @@ class TestOnQAComplete:
         app = self._make_app(tmp_path)
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_NEEDS_WORK
-        state.made_changes = False
+
         state.scenarios = [QAScenario(index=1, title="Login Flow",
                                        focus="auth")]
         state.scenario_verdicts = {1: VERDICT_NEEDS_WORK}
@@ -876,27 +861,6 @@ class TestOnQAComplete:
         assert "QA NEEDS_WORK:" in notes[0]["text"]
         assert "Login Flow: NEEDS_WORK" in notes[0]["text"]
 
-    def test_needs_work_with_changes_records_changes_committed(self, tmp_path):
-        """QA NEEDS_WORK with changes should record '[changes committed]' in note."""
-        from pm_core.tui.qa_loop_ui import _on_qa_complete
-        from pm_core import store
-
-        app = self._make_app(tmp_path)
-        state = QALoopState(pr_id="pr-001")
-        state.latest_verdict = VERDICT_NEEDS_WORK
-        state.made_changes = True
-        state.scenarios = [QAScenario(index=1, title="Test", focus="test")]
-        state.scenario_verdicts = {1: VERDICT_NEEDS_WORK}
-
-        with patch("pm_core.tui.auto_start.check_and_start"):
-            _on_qa_complete(app, state)
-
-        data = store.load(app._root)
-        pr = store.get_pr(data, "pr-001")
-        notes = pr.get("notes") or []
-        assert len(notes) == 1
-        assert "[changes committed]" in notes[0]["text"]
-
     def test_qa_note_includes_workdir_path(self, tmp_path):
         """QA note should include the workdir path for inspection/cleanup."""
         from pm_core.tui.qa_loop_ui import _on_qa_complete
@@ -905,7 +869,7 @@ class TestOnQAComplete:
         app = self._make_app(tmp_path)
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_NEEDS_WORK
-        state.made_changes = False
+
         state.qa_workdir = "/home/user/.pm/workdirs/qa/pr-001-a1b2"
         state.scenarios = [QAScenario(index=1, title="Test", focus="test")]
         state.scenario_verdicts = {1: VERDICT_NEEDS_WORK}
@@ -1276,7 +1240,7 @@ class TestSelfDrivingQALoop:
         app = self._make_app(tmp_path)
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_NEEDS_WORK
-        state.made_changes = False
+
         state.scenarios = [QAScenario(index=1, title="Test", focus="test")]
         state.scenario_verdicts = {1: VERDICT_NEEDS_WORK}
 
@@ -1297,7 +1261,7 @@ class TestSelfDrivingQALoop:
 
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_NEEDS_WORK
-        state.made_changes = False
+
         state.scenarios = [QAScenario(index=1, title="Test", focus="test")]
         state.scenario_verdicts = {1: VERDICT_NEEDS_WORK}
 
@@ -1316,7 +1280,7 @@ class TestSelfDrivingQALoop:
 
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_NEEDS_WORK
-        state.made_changes = False
+
         state.scenarios = [QAScenario(index=1, title="Test", focus="test")]
         state.scenario_verdicts = {1: VERDICT_NEEDS_WORK}
 
@@ -1335,7 +1299,7 @@ class TestSelfDrivingQALoop:
 
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_PASS
-        state.made_changes = False
+
         state.scenarios = [QAScenario(index=1, title="Test", focus="test")]
         state.scenario_verdicts = {1: VERDICT_PASS}
 
@@ -1357,7 +1321,7 @@ class TestSelfDrivingQALoop:
 
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_PASS
-        state.made_changes = False
+
         state.scenarios = [QAScenario(index=1, title="Test", focus="test")]
         state.scenario_verdicts = {1: VERDICT_PASS}
 
@@ -1368,27 +1332,3 @@ class TestSelfDrivingQALoop:
         mock_merge.assert_called_once_with(app, "pr-001")
         # Self-driving state should be removed after reaching required passes
         assert "pr-001" not in app._self_driving_qa
-
-    def test_made_changes_with_pass_verdict_still_returns_to_review(self, tmp_path):
-        """Self-driving QA: PASS with changes should return to review (not merge)."""
-        from pm_core.tui.qa_loop_ui import _on_qa_complete
-        from pm_core import store
-
-        app = self._make_app(tmp_path)
-        state = QALoopState(pr_id="pr-001")
-        state.latest_verdict = VERDICT_PASS
-        state.made_changes = True  # Changes committed → needs re-review
-        state.scenarios = [QAScenario(index=1, title="Test", focus="test")]
-        state.scenario_verdicts = {1: VERDICT_PASS}
-
-        with patch("pm_core.tui.qa_loop_ui._start_self_driving_review") as mock_review, \
-             patch("pm_core.tui.qa_loop_ui._record_qa_note"):
-            _on_qa_complete(app, state)
-
-        # PR should transition to in_review, not merge
-        data = store.load(app._root)
-        pr = store.get_pr(data, "pr-001")
-        assert pr["status"] == "in_review"
-        mock_review.assert_called_once()
-        # pass_count should be reset
-        assert app._self_driving_qa["pr-001"]["pass_count"] == 0

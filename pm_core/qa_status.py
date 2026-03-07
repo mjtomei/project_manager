@@ -148,12 +148,34 @@ def _render(status: dict | None, selected: int, rows: int, cols: int) -> str:
 
 
 def _find_attached_session(base: str) -> str:
-    """Find the attached grouped session for the base session.
+    """Find the correct grouped session for window switching.
 
-    Returns the first grouped session with attached clients, or the base
-    session as fallback.  This avoids importing pm_core (which may not be
-    on PYTHONPATH when this script runs standalone).
+    Mirrors the logic of pm_core.tmux.current_or_base_session:
+    1. Use $TMUX_PANE to identify which grouped session we're in
+    2. Fall back to first attached grouped session
+    3. Fall back to base session
     """
+    # Priority 1: use $TMUX_PANE to find our actual session
+    pane = os.environ.get("TMUX_PANE")
+    if pane:
+        try:
+            result = subprocess.run(
+                ["tmux", "display-message", "-p", "-t", pane, "#{session_name}"],
+                capture_output=True, text=True,
+            )
+            current = result.stdout.strip()
+            if current and (current == base or current.startswith(base + "~")):
+                # Verify it has attached clients
+                att = subprocess.run(
+                    ["tmux", "display-message", "-t", current, "-p", "#{session_attached}"],
+                    capture_output=True, text=True,
+                )
+                if att.returncode == 0 and att.stdout.strip() != "0":
+                    return current
+        except Exception:
+            pass
+
+    # Priority 2: first attached grouped session
     try:
         result = subprocess.run(
             ["tmux", "list-sessions", "-F", "#{session_name} #{session_attached}"],

@@ -311,8 +311,6 @@ they can use dedicated shortcuts rather than typing commands.
 The user will tell you what they need."""
 
     cmd = build_claude_shell_cmd(prompt=prompt)
-    from pm_core.container import wrap_claude_cmd
-    cmd, _cname = wrap_claude_cmd(cmd, os.getcwd(), label="claude")
     launch_pane(app, cmd, "claude", fresh=fresh)
 
 
