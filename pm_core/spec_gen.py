@@ -6,11 +6,11 @@ Each spec restates requirements in terms grounded in the actual codebase,
 surfaces implicit requirements, and resolves ambiguities.
 
 Spec generation modes (global setting ``spec-mode``):
-  auto   — (default) Generate spec, use best judgement for ambiguities,
+  auto   — Generate spec, use best judgement for ambiguities,
            proceed immediately.  Resolved ambiguities are documented in
            the spec for later review.
   review — Generate spec, pause for user approval before proceeding.
-  prompt — Generate spec and proceed unless the PR has
+  prompt — (default) Generate spec and proceed unless the PR has
            ``review_spec: true`` or Claude flags an unresolvable ambiguity.
 
 Specs are stored as markdown files under ``<pm-root>/specs/<pr-id>/``.
@@ -350,11 +350,11 @@ def oldest_pending_spec_pr(data: dict) -> str | None:
 
 def spec_generation_preamble(pr: dict, phase: str,
                              root: Path | None = None) -> str:
-    """Build a prompt preamble instructing Claude to generate a spec first.
+    """Build a prompt preamble for auto mode: spec generation + main work in one session.
 
-    Returns an empty string if a spec already exists for this phase.
-    Works in all modes (auto, prompt, review) with different ambiguity
-    handling instructions for each.
+    Returns an empty string if:
+    - A spec already exists for this phase, OR
+    - The mode is not ``auto`` (prompt/review use two separate sessions instead)
 
     *root* is the pm project directory (containing project.yaml).
     """
@@ -362,7 +362,14 @@ def spec_generation_preamble(pr: dict, phase: str,
     if get_spec(pr, phase):
         return ""
 
+    # Only auto mode uses the single-session preamble approach.
+    # prompt/review modes generate the spec in a separate session first
+    # (handled by ensure_spec), then the main session gets the spec
+    # via format_spec_for_prompt.
     mode = pr_spec_mode(pr)
+    if mode != "auto":
+        return ""
+
     pr_id = pr.get("id", "???")
     phase_labels = {"impl": "implementation", "qa": "QA"}
     label = phase_labels.get(phase, phase)
@@ -395,20 +402,7 @@ Review the implementation (run `git diff` and read source files), then write a s
 
     instructions = spec_instructions.get(phase, spec_instructions["impl"])
 
-    if mode == "review":
-        ambiguity_instruction = """\
-After writing the spec, present it to the user and **wait for their confirmation**
-before proceeding. Ask: "Does this spec look correct? Reply 'yes' to proceed or
-provide feedback to revise.\""""
-    elif mode == "prompt":
-        ambiguity_instruction = """\
-If you encounter ambiguities that you can confidently resolve using your understanding
-of the codebase, resolve them and document your reasoning in the spec. If you encounter
-an ambiguity that genuinely requires human input, present it to the user and wait for
-their answer before proceeding."""
-    else:
-        # auto mode — use best judgement, document everything
-        ambiguity_instruction = """\
+    ambiguity_instruction = """\
 Use your best judgement to resolve any ambiguities based on your understanding of the
 codebase and common patterns. Document all resolved ambiguities and your reasoning in
 the spec's "Ambiguities & Resolutions" section so someone can review them later."""
@@ -417,14 +411,22 @@ the spec's "Ambiguities & Resolutions" section so someone can review them later.
 Save the spec to `{file_path}` and then run:
   `pm pr spec-save {pr_id} {phase}`
 
-Then proceed with the {label} work."""
+Then proceed with the {label} work below."""
 
     return f"""
-## Step 0: Generate {label.title()} Spec
+## How This Session Works
 
-Before starting {label} work, generate a structured spec that bridges the PR
-description above with the actual codebase. This grounds your work in reality
-and surfaces implicit requirements.
+This session has two phases:
+
+1. **Spec generation** — First, you will analyze the PR description and the
+   codebase to produce a structured spec.  The spec grounds the requirements
+   in actual code paths and surfaces implicit requirements.
+2. **{label.title()}** — Then, working from the spec you generated, you will
+   carry out the {label} work described in the Task section above.
+
+Start with Step 0 below.  Once the spec is saved, proceed to the main task.
+
+## Step 0: Generate {label.title()} Spec
 
 {instructions}
 
@@ -434,6 +436,63 @@ and surfaces implicit requirements.
 
 ---
 """
+
+
+def ensure_spec(data: dict, pr_id: str, phase: str,
+                root: Path | None = None) -> str | None:
+    """Ensure a spec exists for prompt/review modes, generating if needed.
+
+    In prompt/review modes, this runs a separate ``claude -p`` session to
+    generate the spec before the main work session starts.  In auto mode
+    this is a no-op (the preamble handles it inline).
+
+    For review mode, the generated spec is printed and the user is asked
+    to confirm before proceeding.
+
+    Returns the spec text, or None if generation was skipped (auto mode
+    or spec already exists).
+    """
+    pr = store.get_pr(data, pr_id)
+    if not pr:
+        return None
+
+    # Already have a spec — nothing to do
+    existing = get_spec(pr, phase)
+    if existing:
+        return existing
+
+    mode = pr_spec_mode(pr)
+    if mode == "auto":
+        return None  # auto mode uses the single-session preamble
+
+    _log.info("ensure_spec: generating %s spec for %s (mode=%s)",
+              phase, pr_id, mode)
+
+    spec_text, needs_review = generate_spec(
+        data, pr_id, phase, root=root, force=False,
+    )
+
+    if not spec_text:
+        click.echo("Warning: spec generation returned empty output.", err=True)
+        return None
+
+    if needs_review:
+        click.echo(f"\n{'='*60}")
+        click.echo(f"Generated {phase} spec for review:")
+        click.echo(f"{'='*60}\n")
+        click.echo(spec_text)
+        click.echo(f"\n{'='*60}")
+        if not click.confirm("Approve this spec and proceed?"):
+            click.echo("Spec not approved. Edit with: "
+                       f"pm pr spec-approve {pr_id}")
+            raise SystemExit(1)
+        # Approved — clear pending
+        approve_spec(data, pr_id, root=root)
+        click.echo("Spec approved.")
+    else:
+        click.echo(f"Generated {phase} spec ({len(spec_text)} chars).")
+
+    return spec_text
 
 
 def format_spec_for_prompt(pr: dict, phase: str) -> str:
