@@ -344,12 +344,18 @@ def _maybe_start_qa(app, pr_id: str) -> None:
 
     # Transition PR status to "qa"
     if app._root:
-        data = store.load(app._root)
-        pr = store.get_pr(data, pr_id)
-        if pr and pr.get("status") == "in_review":
-            pr["status"] = "qa"
-            store.save(data, app._root)
-            app._load_state()
+        transitioned = False
+
+        def apply_qa(data):
+            nonlocal transitioned
+            p = store.get_pr(data, pr_id)
+            if p and p.get("status") == "in_review":
+                p["status"] = "qa"
+                transitioned = True
+
+        store.locked_update(app._root, apply_qa)
+        app._load_state()
+        if transitioned:
             _log.info("auto_qa: transitioned %s to qa status", pr_id)
             app.log_message(f"Auto-QA: {pr_id} review passed, starting QA")
 
@@ -357,8 +363,7 @@ def _maybe_start_qa(app, pr_id: str) -> None:
             from pm_core.tui import qa_loop_ui
             qa_loop_ui.start_qa(app, pr_id)
         else:
-            _log.debug("auto_qa: %s not in_review (status=%s), skipping",
-                       pr_id, pr.get("status") if pr else "missing")
+            _log.debug("auto_qa: %s not in_review, skipping", pr_id)
 
 
 # ---------------------------------------------------------------------------
