@@ -1,5 +1,6 @@
 """Container isolation CLI commands."""
 
+import glob
 import os
 from pathlib import Path
 
@@ -193,18 +194,17 @@ def _find_dependency_files(project_dir: Path) -> dict[str, str]:
     """
     candidates = [
         "requirements.txt", "requirements/*.txt", "setup.py", "setup.cfg",
-        "pyproject.toml", "Pipfile", "Pipfile.lock",
-        "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
-        "Cargo.toml", "Cargo.lock",
-        "go.mod", "go.sum",
-        "Gemfile", "Gemfile.lock",
+        "pyproject.toml", "Pipfile",
+        "package.json",
+        "Cargo.toml",
+        "go.mod",
+        "Gemfile",
         "Makefile", "CMakeLists.txt",
         "Dockerfile", "Dockerfile.*", ".dockerignore",
         "docker-compose.yml", "docker-compose.yaml",
         "compose.yml", "compose.yaml",
     ]
 
-    import glob
     found = {}
     for pattern in candidates:
         if "*" in pattern:
