@@ -463,8 +463,15 @@ def current_or_base_session(base: str) -> str:
     """
     if in_tmux():
         current = get_session_name()
-        if current == base or current.startswith(base + "~"):
-            return current
+        if current and (current == base or current.startswith(base + "~")):
+            # Only return current if it has attached clients — otherwise
+            # fall through to find an attached grouped session.
+            result = subprocess.run(
+                _tmux_cmd("display-message", "-t", current, "-p", "#{session_attached}"),
+                capture_output=True, text=True,
+            )
+            if result.returncode == 0 and result.stdout.strip() != "0":
+                return current
     # Current pane is in a different group (or not in tmux).
     # The base session may have no clients; prefer an attached grouped session.
     for name in list_grouped_sessions(base):

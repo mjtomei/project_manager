@@ -1,0 +1,573 @@
+"""Host-side git remote proxy for containerised sessions.
+
+Containers must not hold git credentials directly.  Each container gets a
+dedicated proxy — a daemon on the host listening on a Unix socket that is
+mounted into the container.  A git wrapper inside the container intercepts
+remote-interacting commands (``push``, ``fetch``, ``pull``, ``ls-remote``)
+and forwards them to the proxy.
+
+The proxy:
+  1. Validates push targets against the allowed branch for that container
+  2. Executes the real git command on the host (where credentials live)
+  3. For local-path origins (``git clone --local`` clones), handles push
+     via ``git fetch`` from the target side to avoid ``denyCurrentBranch``
+  4. Streams back exit code, stdout, and stderr transparently
+
+One proxy per container — no shared state, no routing.  The proxy starts
+when the container is created and is cleaned up when the container is removed.
+
+Protocol (newline-delimited JSON over Unix socket):
+  Request:  {"cmd": "push|fetch|pull|ls-remote", "args": ["origin", "branch"]}
+  Response: {"exit_code": 0, "stdout": "...", "stderr": "..."}
+
+Legacy requests without ``cmd`` are treated as push (backward compat).
+"""
+
+import json
+import logging
+import os
+import socket
+import subprocess
+import threading
+from pathlib import Path
+
+_log = logging.getLogger("pm.push_proxy")
+
+_SOCKET_DIR_PREFIX = "pm-push-proxy-"
+_CONTAINER_SOCKET_PATH = "/run/pm-push-proxy.sock"
+
+
+def _resolve_local_remote_url(workdir: str, remote: str = "origin") -> str | None:
+    """If *remote* in *workdir* points to a local directory, return its path.
+
+    Returns ``None`` if the remote is a real URL (http, ssh, git://, etc.)
+    or if the remote doesn't exist.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", remote],
+            cwd=workdir, capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode != 0:
+            return None
+        url = result.stdout.strip()
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return None
+
+    # Real remote URLs have a scheme or use scp-style syntax (user@host:path)
+    if "://" in url or ("@" in url and ":" in url.split("@", 1)[1]):
+        return None
+
+    # Resolve relative paths against workdir
+    p = Path(url) if Path(url).is_absolute() else Path(workdir) / url
+    try:
+        resolved = str(p.resolve())
+    except (OSError, ValueError):
+        return None
+    if Path(resolved).is_dir():
+        return resolved
+    return None
+
+
+def resolve_real_origin(repo_path: str, remote: str = "origin") -> str | None:
+    """Walk the remote chain to find the real (non-local) origin URL.
+
+    Starting from *repo_path*, if ``remote`` points to a local directory,
+    follow that directory's ``remote`` in turn, until we find a URL that
+    is a real remote (http, ssh, etc.) or we run out of chain.
+
+    Returns the real URL, or ``None`` if the chain ends at a local path
+    (i.e. the repo is truly local-only).
+    """
+    workdir = repo_path
+    seen: set[str] = set()
+    while workdir not in seen:
+        seen.add(workdir)
+        try:
+            result = subprocess.run(
+                ["git", "remote", "get-url", remote],
+                cwd=workdir, capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode != 0:
+                return None
+            url = result.stdout.strip()
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            return None
+
+        local = _resolve_local_remote_url(workdir, remote)
+        if local is None:
+            # This is a real remote URL
+            return url
+        # Follow the chain
+        workdir = local
+    return None
+
+
+class PushProxy:
+    """A single-client push proxy daemon for one container.
+
+    Args:
+        socket_path: Host path for the Unix socket.
+        workdir: Host path to the git working directory.
+        allowed_branch: The only branch pushes are allowed to target.
+    """
+
+    def __init__(self, socket_path: str, workdir: str,
+                 allowed_branch: str) -> None:
+        self.socket_path = socket_path
+        self.workdir = workdir
+        self.allowed_branch = allowed_branch
+        self._server_socket: socket.socket | None = None
+        self._thread: threading.Thread | None = None
+        self._stop = threading.Event()
+
+    def start(self) -> None:
+        """Start the proxy in a background daemon thread."""
+        # Ensure parent directory exists
+        Path(self.socket_path).parent.mkdir(parents=True, exist_ok=True)
+        # Clean up stale socket
+        try:
+            os.unlink(self.socket_path)
+        except FileNotFoundError:
+            pass
+
+        self._server_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self._server_socket.bind(self.socket_path)
+        # Make socket world-writable so the container user can connect
+        os.chmod(self.socket_path, 0o777)
+        self._server_socket.listen(1)
+        self._server_socket.settimeout(2.0)
+
+        self._thread = threading.Thread(
+            target=self._serve_loop, daemon=True,
+            name=f"push-proxy-{Path(self.socket_path).stem}",
+        )
+        self._thread.start()
+        _log.info("Push proxy started: socket=%s branch=%s",
+                  self.socket_path, self.allowed_branch)
+
+    def stop(self) -> None:
+        """Stop the proxy and clean up the socket."""
+        self._stop.set()
+        if self._server_socket:
+            try:
+                self._server_socket.close()
+            except OSError:
+                pass
+        if self._thread:
+            self._thread.join(timeout=5)
+        try:
+            os.unlink(self.socket_path)
+        except FileNotFoundError:
+            pass
+        _log.info("Push proxy stopped: %s", self.socket_path)
+
+    def _serve_loop(self) -> None:
+        """Accept connections and handle push requests."""
+        while not self._stop.is_set():
+            # If the socket file was removed externally (e.g. container
+            # cleanup in tmux), exit the loop so the thread terminates.
+            if not os.path.exists(self.socket_path):
+                _log.info("Push proxy socket removed, exiting: %s",
+                          self.socket_path)
+                break
+            try:
+                conn, _ = self._server_socket.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+
+            try:
+                self._handle_connection(conn)
+            except Exception:
+                _log.warning("Push proxy: error handling connection",
+                             exc_info=True)
+            finally:
+                conn.close()
+
+    def _handle_connection(self, conn: socket.socket) -> None:
+        """Handle a single proxy request (push, fetch, pull, ls-remote)."""
+        conn.settimeout(30.0)
+        data = b""
+        max_request_size = 64 * 1024  # 64 KiB — more than enough for args
+        while not data.endswith(b"\n"):
+            chunk = conn.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+            if len(data) > max_request_size:
+                response = {"exit_code": 1, "stdout": "",
+                            "stderr": "git-proxy: request too large\n"}
+                conn.sendall((json.dumps(response) + "\n").encode())
+                return
+
+        if not data:
+            return
+
+        try:
+            request = json.loads(data.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            response = {"exit_code": 1, "stdout": "",
+                        "stderr": "git-proxy: invalid request format\n"}
+            conn.sendall((json.dumps(response) + "\n").encode())
+            return
+
+        args = request.get("args", [])
+        if (not isinstance(args, list)
+                or not all(isinstance(a, str) for a in args)):
+            response = {"exit_code": 1, "stdout": "",
+                        "stderr": "git-proxy: 'args' must be a list of strings\n"}
+            conn.sendall((json.dumps(response) + "\n").encode())
+            return
+
+        # Dispatch based on cmd (default "push" for backward compat)
+        cmd = request.get("cmd", "push")
+        if cmd == "push":
+            response = self._execute_push(args)
+        elif cmd in ("fetch", "pull", "ls-remote"):
+            response = self._execute_read_cmd(cmd, args)
+        else:
+            response = {"exit_code": 1, "stdout": "",
+                        "stderr": f"git-proxy: unknown command '{cmd}'\n"}
+        conn.sendall((json.dumps(response) + "\n").encode())
+
+    @staticmethod
+    def _check_dangerous_flags(args: list[str], cmd_name: str) -> dict | None:
+        """Reject flags that could execute arbitrary programs on the host.
+
+        ``--upload-pack``, ``--receive-pack``, and ``--exec`` tell git to
+        invoke a user-specified program.  A container could write a script
+        to /workspace (bind-mounted rw) and reference it here to escape
+        the container sandbox.  Block these unconditionally.
+
+        Returns an error response dict if a dangerous flag is found, or
+        None if args are safe.
+        """
+        for arg in args:
+            # Match both --flag=value and --flag (next arg is value)
+            stripped = arg.split("=", 1)[0] if "=" in arg else arg
+            if stripped in ("--upload-pack", "--receive-pack", "--exec"):
+                msg = (f"git-proxy: rejected — '{stripped}' is not allowed "
+                       f"in {cmd_name} (security restriction)\n")
+                _log.warning("Proxy rejected dangerous flag: %s in %s",
+                             stripped, cmd_name)
+                return {"exit_code": 1, "stdout": "", "stderr": msg}
+        return None
+
+    def _execute_push(self, push_args: list[str]) -> dict:
+        """Validate the branch and execute git push on the host."""
+        # Reject flags that could execute arbitrary programs on the host
+        danger = self._check_dangerous_flags(push_args, "push")
+        if danger:
+            return danger
+
+        # Reject broad-push flags that bypass branch restrictions
+        broad_flags = {"--all", "--mirror", "--tags"}
+        for arg in push_args:
+            if arg in broad_flags:
+                msg = (f"push-proxy: rejected — '{arg}' is not allowed, "
+                       f"only single-branch push to '{self.allowed_branch}'\n")
+                _log.warning("Push rejected: broad flag %s", arg)
+                return {"exit_code": 1, "stdout": "", "stderr": msg}
+
+        # Determine the target branch from the push args
+        target_branch = self._extract_target_branch(push_args)
+
+        if target_branch is None:
+            msg = ("push-proxy: rejected — could not determine target branch "
+                   f"(only '{self.allowed_branch}' is allowed)\n")
+            _log.warning("Push rejected: could not determine target branch")
+            return {"exit_code": 1, "stdout": "", "stderr": msg}
+
+        if target_branch != self.allowed_branch:
+            msg = (f"push-proxy: rejected — pushing to '{target_branch}' "
+                   f"is not allowed, only '{self.allowed_branch}'\n")
+            _log.warning("Push rejected: target=%s allowed=%s",
+                         target_branch, self.allowed_branch)
+            return {"exit_code": 1, "stdout": "", "stderr": msg}
+
+        # Check if origin is a local path.  QA clones should have their
+        # origin set to the real remote at clone time, but local-only repos
+        # (no upstream) still have a local-path origin.  For those, we
+        # can't ``git push`` (fails with receive.denyCurrentBranch on
+        # non-bare repos), so we fetch from the clone into the target repo
+        # instead — the proxy can see both paths on the host.
+        remote = self._extract_remote_name(push_args)
+        local_target = _resolve_local_remote_url(self.workdir, remote)
+
+        if local_target is not None:
+            return self._local_push(local_target, target_branch)
+
+        cmd = ["git", "push"] + push_args
+        _log.info("Push proxy executing: %s (in %s)", cmd, self.workdir)
+        try:
+            result = subprocess.run(
+                cmd, cwd=self.workdir,
+                capture_output=True, text=True, timeout=120,
+            )
+            return {
+                "exit_code": result.returncode,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+            }
+        except subprocess.TimeoutExpired:
+            return {"exit_code": 1, "stdout": "",
+                    "stderr": "push-proxy: git push timed out after 120s\n"}
+        except Exception as exc:
+            return {"exit_code": 1, "stdout": "",
+                    "stderr": f"push-proxy: {exc}\n"}
+
+    def _local_push(self, target_repo: str, branch: str) -> dict:
+        """Push to a local repo, then forward to the real upstream if any.
+
+        ``git push`` to a non-bare repo with the branch checked out fails
+        with ``receive.denyCurrentBranch``.  Instead, we:
+          1. ``git fetch <clone> <branch>:<branch>`` from the target side
+             to update the local PR workdir's branch ref
+          2. Forward to the real upstream (if the target repo has one)
+             so the remote stays in sync
+        """
+        # Step 1: Update the local target repo's branch ref
+        # --update-head-ok is needed because the target repo typically has
+        # this branch checked out, and git refuses to fetch into a checked-out
+        # branch without it.
+        refspec = f"refs/heads/{branch}:refs/heads/{branch}"
+        cmd = ["git", "-C", target_repo, "fetch", "--update-head-ok",
+               self.workdir, refspec]
+        _log.info("Push proxy local push (step 1 — update local): %s", cmd)
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            return {"exit_code": 1, "stdout": "",
+                    "stderr": "git-proxy: local push timed out after 120s\n"}
+        except Exception as exc:
+            return {"exit_code": 1, "stdout": "",
+                    "stderr": f"git-proxy: local push failed: {exc}\n"}
+
+        if result.returncode != 0:
+            return {
+                "exit_code": result.returncode,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+            }
+        _log.info("Local push succeeded: %s → %s (%s)",
+                  self.workdir, target_repo, branch)
+
+        # Step 2: Forward to real upstream if the target repo has one
+        real_url = resolve_real_origin(target_repo)
+        if real_url:
+            fwd_cmd = ["git", "push", "origin", branch]
+            _log.info("Push proxy forwarding to upstream: %s (from %s)",
+                      fwd_cmd, target_repo)
+            try:
+                fwd = subprocess.run(
+                    fwd_cmd, cwd=target_repo,
+                    capture_output=True, text=True, timeout=120,
+                )
+                # Combine output from both steps
+                return {
+                    "exit_code": fwd.returncode,
+                    "stdout": result.stdout + fwd.stdout,
+                    "stderr": result.stderr + fwd.stderr,
+                }
+            except subprocess.TimeoutExpired:
+                return {"exit_code": 1, "stdout": result.stdout,
+                        "stderr": result.stderr +
+                        "git-proxy: upstream push timed out after 120s\n"}
+            except Exception as exc:
+                return {"exit_code": 1, "stdout": result.stdout,
+                        "stderr": result.stderr +
+                        f"git-proxy: upstream push failed: {exc}\n"}
+
+        # No real upstream — local-only repo, local update is sufficient
+        return {
+            "exit_code": 0,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
+
+    def _execute_read_cmd(self, git_cmd: str, args: list[str]) -> dict:
+        """Execute a read-only git remote command (fetch, pull, ls-remote).
+
+        These run directly from self.workdir with no branch restriction —
+        containers have full read access to the remote.
+        """
+        # Reject flags that could execute arbitrary programs on the host
+        danger = self._check_dangerous_flags(args, git_cmd)
+        if danger:
+            return danger
+
+        cmd = ["git", git_cmd] + args
+        _log.info("Git proxy executing read cmd: %s (in %s)", cmd, self.workdir)
+        try:
+            result = subprocess.run(
+                cmd, cwd=self.workdir,
+                capture_output=True, text=True, timeout=120,
+            )
+            return {
+                "exit_code": result.returncode,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+            }
+        except subprocess.TimeoutExpired:
+            return {"exit_code": 1, "stdout": "",
+                    "stderr": f"git-proxy: git {git_cmd} timed out after 120s\n"}
+        except Exception as exc:
+            return {"exit_code": 1, "stdout": "",
+                    "stderr": f"git-proxy: {exc}\n"}
+
+    @staticmethod
+    def _extract_remote_name(push_args: list[str]) -> str:
+        """Extract the remote name from git push arguments (default 'origin')."""
+        skip_next = False
+        for arg in push_args:
+            if skip_next:
+                skip_next = False
+                continue
+            if arg.startswith("-"):
+                if arg in ("--repo", "--push-option", "-o",
+                           "--receive-pack", "--exec"):
+                    skip_next = True
+                continue
+            # First positional arg is the remote name
+            return arg
+        return "origin"
+
+    def _extract_target_branch(self, push_args: list[str]) -> str | None:
+        """Extract the target branch from git push arguments.
+
+        Returns the branch name, or None if it can't be determined
+        (in which case we fall back to current branch check).
+        """
+        # Skip flags, first positional is remote, second is refspec
+        positional: list[str] = []
+        skip_next = False
+        for arg in push_args:
+            if skip_next:
+                skip_next = False
+                continue
+            if arg.startswith("-"):
+                # Flags that consume the next arg
+                if arg in ("--repo", "--push-option", "-o",
+                           "--receive-pack", "--exec"):
+                    skip_next = True
+                continue
+            positional.append(arg)
+
+        if len(positional) >= 2:
+            # Reject multiple refspecs — only single-branch push is allowed.
+            # git push origin branch1 branch2 would push both; we must not
+            # validate only the first and let the rest through.
+            if len(positional) > 2:
+                return None
+            refspec = positional[1]
+            # refspec can be "branch", "src:dst", "refs/heads/branch", etc.
+            if ":" in refspec:
+                dst = refspec.split(":", 1)[1]
+            else:
+                dst = refspec
+            # Strip leading '+' (force-push marker)
+            if dst.startswith("+"):
+                dst = dst[1:]
+            # Strip refs/heads/ prefix
+            if dst.startswith("refs/heads/"):
+                dst = dst[len("refs/heads/"):]
+            # Resolve symbolic refs like HEAD to actual branch name
+            if dst == "HEAD":
+                try:
+                    result = subprocess.run(
+                        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                        cwd=self.workdir, capture_output=True, text=True,
+                        timeout=5,
+                    )
+                    if result.returncode == 0:
+                        dst = result.stdout.strip()
+                except (subprocess.TimeoutExpired, FileNotFoundError):
+                    return None
+            return dst if dst else None
+
+        # No explicit refspec — check what branch HEAD is on
+        if not positional or len(positional) == 1:
+            try:
+                result = subprocess.run(
+                    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                    cwd=self.workdir, capture_output=True, text=True,
+                    timeout=5,
+                )
+                if result.returncode == 0:
+                    return result.stdout.strip()
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                pass
+
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Proxy lifecycle helpers (used by container.py)
+# ---------------------------------------------------------------------------
+
+# Track running proxies so they can be cleaned up
+_active_proxies: dict[str, PushProxy] = {}
+_proxy_lock = threading.Lock()
+
+
+def start_push_proxy(container_name: str, workdir: str,
+                     allowed_branch: str) -> str:
+    """Start a push proxy for a container.
+
+    Args:
+        container_name: Container name (used for socket naming).
+        workdir: Host path to the git working directory.
+        allowed_branch: Only allow pushes to this branch.
+
+    Returns:
+        Host path to the Unix socket (to be mounted into the container).
+    """
+    import tempfile
+    sock_dir = tempfile.mkdtemp(prefix=_SOCKET_DIR_PREFIX)
+    sock_path = os.path.join(sock_dir, "push.sock")
+
+    proxy = PushProxy(sock_path, workdir, allowed_branch)
+    proxy.start()
+
+    with _proxy_lock:
+        _active_proxies[container_name] = proxy
+
+    return sock_path
+
+
+def stop_push_proxy(container_name: str) -> None:
+    """Stop and clean up the push proxy for a container."""
+    with _proxy_lock:
+        proxy = _active_proxies.pop(container_name, None)
+    if proxy:
+        sock_dir = str(Path(proxy.socket_path).parent)
+        proxy.stop()
+        # Clean up the temp directory
+        try:
+            os.rmdir(sock_dir)
+        except OSError:
+            pass
+
+
+def stop_all_proxies() -> None:
+    """Stop all running push proxies."""
+    with _proxy_lock:
+        names = list(_active_proxies.keys())
+    for name in names:
+        stop_push_proxy(name)
+
+
+def get_proxy_socket_path(container_name: str) -> str | None:
+    """Return the host socket path for a container's push proxy, or None."""
+    with _proxy_lock:
+        proxy = _active_proxies.get(container_name)
+    return proxy.socket_path if proxy else None
+
+
+def container_socket_path() -> str:
+    """Return the fixed socket path inside the container."""
+    return _CONTAINER_SOCKET_PATH

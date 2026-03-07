@@ -141,8 +141,11 @@ def _launch_watcher_window(pm_root: str, iteration: int = 0,
     result = subprocess.run(cmd, cwd=pm_root, capture_output=True, text=True, timeout=30)
     if result.returncode != 0:
         stderr = result.stderr.strip() if result.stderr else ""
-        _log.error("watcher_loop: launch failed (rc=%d): %s", result.returncode, stderr[:500])
-        raise RuntimeError(f"Watcher window launch failed (rc={result.returncode}): {stderr[:200]}")
+        stdout = result.stdout.strip() if result.stdout else ""
+        _log.error("watcher_loop: launch failed (rc=%d) stderr=%s stdout=%s",
+                   result.returncode, stderr[:1000], stdout[:500])
+        detail = stderr[:500] or stdout[:500]
+        raise RuntimeError(f"Watcher window launch failed (rc={result.returncode}): {detail}")
 
 
 def _poll_for_verdict(pane_id: str, prompt_text: str = "",

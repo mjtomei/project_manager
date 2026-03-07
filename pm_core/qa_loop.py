@@ -48,6 +48,8 @@ _VERDICT_GRACE_PERIOD = 30  # QA sessions take a while to run
 _PLANNER_TIMEOUT = 60 * 60  # seconds to wait for planner output
 _PLANNER_GRACE = 15  # seconds before accepting planner completion
 _DEFAULT_MAX_SCENARIOS = 0  # 0 = unlimited
+_SCENARIO_MAX_RETRIES = 10  # max times to relaunch a dead scenario
+_SCENARIO_RETRY_BASE = 5  # base seconds for exponential backoff
 
 
 def _get_max_scenarios() -> int:
@@ -86,7 +88,6 @@ class QAScenario:
     steps: str = ""
     window_name: str | None = None
     worktree_path: str | None = None
-    worktree_branch: str | None = None
     container_name: str | None = None
 
 
@@ -104,9 +105,7 @@ class QALoopState:
     scenario_verdicts: dict[int, str] = field(default_factory=dict)
     latest_verdict: str = ""
     latest_output: str = ""
-    made_changes: bool = False
     qa_workdir: str | None = None
-    pre_qa_head: str | None = None
     # Scenario 0 (interactive) — tracked separately, never polled for verdicts
     scenario_0: QAScenario | None = None
     # Set by qa_loop_ui after the completion callback has run once
@@ -124,20 +123,45 @@ def create_qa_workdir(pr_id: str, loop_id: str) -> Path:
     return workdir
 
 
+def _next_scenario_offset(pr_id: str, current_loop_id: str) -> int:
+    """Find the highest scenario index used in previous runs for this PR.
+
+    Scans ``~/.pm/workdirs/qa/{pr_id}-*/worktree-*`` dirs (excluding the
+    current run) to find the max index, so new scenarios continue numbering
+    from where previous runs left off.
+    """
+    qa_root = Path.home() / ".pm" / "workdirs" / "qa"
+    max_idx = 0
+    for d in qa_root.glob(f"{pr_id}-*/worktree-*"):
+        # Skip the current run
+        if current_loop_id and d.parent.name == f"{pr_id}-{current_loop_id}":
+            continue
+        try:
+            idx = int(d.name.split("-", 1)[1])
+            max_idx = max(max_idx, idx)
+        except (ValueError, IndexError):
+            pass
+    return max_idx
+
+
 def create_scenario_workdir(qa_workdir: Path, scenario_index: int,
                             repo_root: Path | None = None,
                             pr_id: str = "",
-                            loop_id: str = "") -> tuple[Path, str, Path, Path | None]:
-    """Create a worktree + scratch dir + venv for one QA scenario.
+                            loop_id: str = "",
+                            branch: str = "") -> tuple[Path, Path, Path | None]:
+    """Create an isolated clone + scratch dir + venv for one QA scenario.
 
-    When *repo_root* is provided (worktree mode), creates:
-      - ``{qa_workdir}/worktree-{N}/``  — git worktree (isolated branch)
+    When *repo_root* is provided, creates:
+      - ``{qa_workdir}/worktree-{N}/``  — ``git clone --local`` of the repo
       - ``{qa_workdir}/scratch-{N}/``   — empty temp dir for throwaway tests
       - ``{qa_workdir}/venv-{N}/``      — ``--system-site-packages`` venv
 
+    The clone checks out *branch* (the PR branch) so the scenario can
+    commit and push fixes directly.
+
     Falls back to a plain empty directory when *repo_root* is None (legacy).
 
-    Returns ``(worktree_path, branch_name, scratch_path, venv_path)``.
+    Returns ``(clone_path, scratch_path, venv_path)``.
     ``venv_path`` is ``None`` in legacy mode.
     """
     from pm_core import git_ops
@@ -146,24 +170,28 @@ def create_scenario_workdir(qa_workdir: Path, scenario_index: int,
     scratch.mkdir(parents=True, exist_ok=True)
 
     if repo_root is None:
-        # Legacy: plain empty directory, no worktree
         d = qa_workdir / f"scenario-{scenario_index}"
         d.mkdir(parents=True, exist_ok=True)
-        return d, "", scratch, None
+        return d, scratch, None
 
-    branch_name = f"qa-tmp-{pr_id}-{loop_id}-s{scenario_index}"
-    wt_path = qa_workdir / f"worktree-{scenario_index}"
+    clone_path = qa_workdir / f"worktree-{scenario_index}"
 
-    # Clean up stale worktree/branch from a previous attempt.
-    # Always prune first — a previous run may have deleted the worktree
-    # directory without calling `git worktree remove`, leaving a stale
-    # entry that prevents branch deletion and re-creation.
-    git_ops.run_git("worktree", "prune", cwd=repo_root, check=False)
-    if wt_path.exists():
-        git_ops.remove_worktree(repo_root, wt_path)
-    git_ops.delete_branch(repo_root, branch_name)
+    # Clean up stale clone from a previous run
+    if clone_path.exists():
+        import shutil
+        shutil.rmtree(clone_path, ignore_errors=True)
 
-    git_ops.create_worktree(repo_root, branch_name, wt_path)
+    # Create a local clone — fast (hardlinks objects) and standalone
+    # (proper .git directory, no worktree pointer issues).
+    clone_args = ["clone", "--local", str(repo_root), str(clone_path)]
+    if branch:
+        clone_args.extend(["--branch", branch])
+    git_ops.run_git(*clone_args)
+
+    # The clone's origin points to the PR workdir (repo_root).  The push
+    # proxy handles local-path origins: it fetches into the PR workdir
+    # (updating its branch ref) and then forwards to the real upstream.
+    # This keeps all local copies in sync.
 
     # Create a --system-site-packages venv so pip installs stay local
     venv_path = qa_workdir / f"venv-{scenario_index}"
@@ -178,27 +206,27 @@ def create_scenario_workdir(qa_workdir: Path, scenario_index: int,
             _log.warning("Failed to create venv for scenario %d, continuing without",
                          scenario_index)
             venv_path = None
-    return wt_path, branch_name, scratch, venv_path
+    return clone_path, scratch, venv_path
 
 
-def _setup_worktree_override(worktree_path: Path) -> None:
-    """Configure the worktree so Claude sessions in it use the correct pm_core.
+def _setup_clone_override(clone_path: Path) -> None:
+    """Configure a clone so Claude sessions in it use the correct pm_core.
 
-    Computes the session tag for the worktree and sets the override path
+    Computes the session tag for the clone and sets the override path
     to point at the parent of the currently-running ``pm_core`` package.
     """
     import pm_core
     from pm_core.paths import get_session_tag, set_override_path
 
-    tag = get_session_tag(start_path=worktree_path)
+    tag = get_session_tag(start_path=clone_path)
     if not tag:
-        _log.warning("Could not get session tag for worktree %s", worktree_path)
+        _log.warning("Could not get session tag for clone %s", clone_path)
         return
 
     pm_core_parent = Path(pm_core.__file__).parent.parent
     set_override_path(tag, pm_core_parent)
-    _log.info("Set override for worktree %s (tag=%s) → %s",
-              worktree_path, tag, pm_core_parent)
+    _log.info("Set override for clone %s (tag=%s) → %s",
+              clone_path, tag, pm_core_parent)
 
 
 # ---------------------------------------------------------------------------
@@ -386,45 +414,6 @@ def parse_qa_plan(output: str) -> list[QAScenario]:
 
 
 # ---------------------------------------------------------------------------
-# Worktree merge-back
-# ---------------------------------------------------------------------------
-
-def _merge_scenario_commits(state: QALoopState, repo_root: Path | None,
-                            pr_data: dict) -> None:
-    """Cherry-pick scenario worktree commits back to the PR branch.
-
-    For each scenario with a worktree branch that has commits ahead of
-    ``state.pre_qa_head``, cherry-picks those commits onto the PR branch.
-    Pushes the PR branch once at the end if any commits were picked.
-    """
-    from pm_core import git_ops
-
-    if not repo_root or not state.pre_qa_head:
-        return
-
-    any_picked = False
-    for scenario in state.scenarios:
-        if not scenario.worktree_branch:
-            continue
-
-        result = git_ops.cherry_pick_range(
-            repo_root, scenario.worktree_branch, state.pre_qa_head,
-        )
-        if result["picked"] > 0:
-            any_picked = True
-            state.made_changes = True
-            _log.info("Merged %d commit(s) from scenario %d (%d skipped)",
-                      result["picked"], scenario.index, result["skipped"])
-
-    # Push once if any commits were cherry-picked
-    if any_picked:
-        branch = pr_data.get("branch", "")
-        if branch:
-            git_ops.run_git("push", "origin", branch,
-                            cwd=repo_root, check=False)
-            _log.info("Pushed merged QA commits to %s", branch)
-
-
 # ---------------------------------------------------------------------------
 # Scenario 0 — interactive session
 # ---------------------------------------------------------------------------
@@ -453,71 +442,39 @@ def _launch_scenario_0(
         focus="Manual testing and exploration",
     )
 
+    branch = pr_data.get("branch", "")
     try:
-        wt_path, wt_branch, scratch_path, venv_path = create_scenario_workdir(
+        clone_path, scratch_path, venv_path = create_scenario_workdir(
             Path(state.qa_workdir), 0,
             repo_root=repo_root,
             pr_id=state.pr_id,
             loop_id=state.loop_id,
+            branch=branch,
         )
     except Exception:
         _log.warning("Failed to create workdir for Scenario 0, skipping")
         return None
 
-    scenario.worktree_path = str(wt_path)
-    scenario.worktree_branch = wt_branch
+    scenario.worktree_path = str(clone_path)
 
-    if wt_branch:
-        _setup_worktree_override(wt_path)
+    if repo_root:
+        _setup_clone_override(clone_path)
 
-    use_containers = is_container_mode_enabled() and _docker_available()
-
-    if use_containers:
-        container_workdir = container_mod._CONTAINER_WORKDIR
-        container_scratch = container_mod._CONTAINER_SCRATCH
-        child_prompt = prompt_gen.generate_qa_interactive_prompt(
-            data, state.pr_id,
-            workdir=container_workdir,
-            session_name=None,
-            worktree_mode=bool(wt_branch),
-            scratch_dir=container_scratch,
-        )
-    else:
-        child_prompt = prompt_gen.generate_qa_interactive_prompt(
-            data, state.pr_id,
-            workdir=str(wt_path),
-            session_name=session,
-            worktree_mode=bool(wt_branch),
-            scratch_dir=str(scratch_path),
-        )
+    # Scenario 0 always runs on the host (not in a container) so the user
+    # has full access to host tools, git credentials, and the TUI session.
+    child_prompt = prompt_gen.generate_qa_interactive_prompt(
+        data, state.pr_id,
+        workdir=str(clone_path),
+        session_name=session,
+        worktree_mode=bool(repo_root),
+        scratch_dir=str(scratch_path),
+    )
 
     claude_cmd = build_claude_shell_cmd(prompt=child_prompt)
-
-    if use_containers:
-        cname = container_mod.qa_container_name(
-            state.pr_id, state.loop_id, 0,
-        )
-        try:
-            config = container_mod.load_container_config()
-            container_mod.create_qa_container(
-                name=cname,
-                config=config,
-                repo_root=repo_root or Path(workdir_path),
-                worktree_path=wt_path,
-                scratch_path=scratch_path,
-            )
-            scenario.container_name = cname
-        except Exception:
-            _log.warning("Failed to create container for Scenario 0")
-            return None
-        exec_cmd = container_mod.build_exec_cmd(cname, claude_cmd, cleanup=False)
-        final_cmd = exec_cmd
-        scenario_cwd = workdir_path
-    else:
-        if venv_path:
-            claude_cmd = f"VIRTUAL_ENV={venv_path} PATH={venv_path}/bin:$PATH {claude_cmd}"
-        final_cmd = claude_cmd
-        scenario_cwd = str(wt_path) if wt_branch else workdir_path
+    if venv_path:
+        claude_cmd = f"VIRTUAL_ENV={venv_path} PATH={venv_path}/bin:$PATH {claude_cmd}"
+    final_cmd = claude_cmd
+    scenario_cwd = str(clone_path) if repo_root else workdir_path
 
     win_name = _scenario_window_name(pr_data, 0)
     try:
@@ -548,33 +505,34 @@ def _launch_scenarios_in_tmux(
     from pm_core import tmux as tmux_mod, prompt_gen
     from pm_core.claude_launcher import build_claude_shell_cmd
 
+    branch = pr_data.get("branch", "")
+
     for scenario in state.scenarios:
         if state.stop_requested:
             break
 
         try:
-            wt_path, wt_branch, scratch_path, venv_path = create_scenario_workdir(
+            clone_path, scratch_path, venv_path = create_scenario_workdir(
                 Path(state.qa_workdir), scenario.index,
                 repo_root=repo_root,
                 pr_id=state.pr_id,
                 loop_id=state.loop_id,
+                branch=branch,
             )
         except Exception:
             _log.warning("Failed to create workdir for scenario %d, skipping",
                          scenario.index)
             continue
-        scenario.worktree_path = str(wt_path)
-        scenario.worktree_branch = wt_branch
+        scenario.worktree_path = str(clone_path)
 
-        # Set up override so Claude in the worktree uses the correct pm_core
-        if wt_branch:
-            _setup_worktree_override(wt_path)
+        if repo_root:
+            _setup_clone_override(clone_path)
 
         child_prompt = prompt_gen.generate_qa_child_prompt(
             data, state.pr_id, scenario,
-            workdir=str(wt_path),
+            workdir=str(clone_path),
             session_name=session,
-            worktree_mode=bool(wt_branch),
+            worktree_mode=bool(repo_root),
             scratch_dir=str(scratch_path),
         )
         child_cmd = build_claude_shell_cmd(prompt=child_prompt)
@@ -583,8 +541,7 @@ def _launch_scenarios_in_tmux(
         if venv_path:
             child_cmd = f"VIRTUAL_ENV={venv_path} PATH={venv_path}/bin:$PATH {child_cmd}"
 
-        # Launch window with cwd=worktree_path so Claude has the full codebase
-        scenario_cwd = str(wt_path) if wt_branch else workdir_path
+        scenario_cwd = str(clone_path) if repo_root else workdir_path
         win_name = _scenario_window_name(pr_data, scenario.index)
         try:
             tmux_mod.new_window(session, win_name, child_cmd,
@@ -594,12 +551,11 @@ def _launch_scenarios_in_tmux(
             _log.warning("Failed to create window for scenario %d",
                          scenario.index)
         if scenario.window_name:
-            _log.info("Launched scenario %d (%s) in window %s (worktree=%s)",
-                       scenario.index, scenario.title, win_name,
-                       bool(wt_branch))
+            _log.info("Launched scenario %d (%s) in window %s",
+                       scenario.index, scenario.title, win_name)
         else:
-            _log.warning("Scenario %d (%s) window creation failed (worktree=%s)",
-                          scenario.index, scenario.title, bool(wt_branch))
+            _log.warning("Scenario %d (%s) window creation failed",
+                          scenario.index, scenario.title)
 
 
 def _launch_scenarios_in_containers(
@@ -613,8 +569,10 @@ def _launch_scenarios_in_containers(
     """Launch each scenario in a Docker container, presented via a tmux window.
 
     Each scenario gets:
-      1. A detached container (``sleep infinity``) with the worktree mounted
-      2. A tmux window running ``docker exec -it <container> claude ...``
+      1. A local clone of the repo (standalone .git, no worktree pointers)
+      2. A detached container with the clone mounted at /workspace
+      3. A push proxy scoped to the PR branch
+      4. A tmux window running ``docker exec -it <container> claude ...``
 
     The user sees the same tmux windows as in non-container mode, but the
     claude process is isolated inside the container.  Polling and verdict
@@ -625,24 +583,25 @@ def _launch_scenarios_in_containers(
     from pm_core.claude_launcher import build_claude_shell_cmd
 
     config = container_mod.load_container_config()
+    branch = pr_data.get("branch", "")
 
     for scenario in state.scenarios:
         if state.stop_requested:
             break
 
         try:
-            wt_path, wt_branch, scratch_path, venv_path = create_scenario_workdir(
+            clone_path, scratch_path, venv_path = create_scenario_workdir(
                 Path(state.qa_workdir), scenario.index,
                 repo_root=repo_root,
                 pr_id=state.pr_id,
                 loop_id=state.loop_id,
+                branch=branch,
             )
         except Exception:
             _log.warning("Failed to create workdir for scenario %d, skipping",
                          scenario.index)
             continue
-        scenario.worktree_path = str(wt_path)
-        scenario.worktree_branch = wt_branch
+        scenario.worktree_path = str(clone_path)
 
         # In container mode, paths inside the container are fixed
         container_workdir = container_mod._CONTAINER_WORKDIR
@@ -652,12 +611,12 @@ def _launch_scenarios_in_containers(
             data, state.pr_id, scenario,
             workdir=container_workdir,
             session_name=None,  # No tmux session inside containers
-            worktree_mode=bool(wt_branch),
+            worktree_mode=bool(repo_root),
             scratch_dir=container_scratch,
         )
         claude_cmd = build_claude_shell_cmd(prompt=child_prompt)
 
-        # Create and start the detached container
+        # Create container with push proxy for the PR branch
         cname = container_mod.qa_container_name(
             state.pr_id, state.loop_id, scenario.index,
         )
@@ -665,9 +624,9 @@ def _launch_scenarios_in_containers(
             container_mod.create_qa_container(
                 name=cname,
                 config=config,
-                repo_root=repo_root or Path(workdir_path),
-                worktree_path=wt_path,
+                workdir=clone_path,
                 scratch_path=scratch_path,
+                allowed_push_branch=branch or None,
             )
             scenario.container_name = cname
         except Exception:
@@ -697,12 +656,85 @@ def _launch_scenarios_in_containers(
 
 
 # ---------------------------------------------------------------------------
+# Scenario retry helpers
+# ---------------------------------------------------------------------------
+
+def _relaunch_scenario_window(
+    scenario: QAScenario,
+    state: QALoopState,
+    data: dict,
+    pr_data: dict,
+    session: str,
+    workdir_path: str,
+) -> bool:
+    """Re-create the tmux window for a scenario whose window died.
+
+    The worktree / container should still exist — we just need to launch
+    a new ``docker exec`` (container mode) or ``claude`` (host mode) in a
+    fresh tmux window.
+
+    Returns True if the window was recreated successfully.
+    """
+    from pm_core import tmux as tmux_mod, prompt_gen
+    from pm_core.claude_launcher import build_claude_shell_cmd
+    from pm_core.container import is_container_mode_enabled, _docker_available
+    from pm_core import container as container_mod
+
+    win_name = _scenario_window_name(pr_data, scenario.index)
+    use_containers = is_container_mode_enabled() and _docker_available()
+
+    try:
+        if use_containers and scenario.container_name:
+            # Container still running — just re-exec into it
+            container_workdir = container_mod._CONTAINER_WORKDIR
+            container_scratch = container_mod._CONTAINER_SCRATCH
+            child_prompt = prompt_gen.generate_qa_child_prompt(
+                data, state.pr_id, scenario,
+                workdir=container_workdir,
+                session_name=None,
+                worktree_mode=bool(scenario.worktree_path),
+                scratch_dir=container_scratch,
+            )
+            claude_cmd = build_claude_shell_cmd(prompt=child_prompt)
+            exec_cmd = container_mod.build_exec_cmd(
+                scenario.container_name, claude_cmd, cleanup=False)
+            tmux_mod.new_window(session, win_name, exec_cmd,
+                                cwd=workdir_path, switch=False)
+        else:
+            # Host mode — worktree still exists
+            wt_path = scenario.worktree_path or workdir_path
+            child_prompt = prompt_gen.generate_qa_child_prompt(
+                data, state.pr_id, scenario,
+                workdir=str(wt_path),
+                session_name=session,
+                worktree_mode=bool(scenario.worktree_path),
+                scratch_dir=str(Path(state.qa_workdir) / f"scratch-{scenario.index}"),
+            )
+            child_cmd = build_claude_shell_cmd(prompt=child_prompt)
+            venv_path = Path(state.qa_workdir) / f"venv-{scenario.index}"
+            if venv_path.is_dir():
+                child_cmd = f"VIRTUAL_ENV={venv_path} PATH={venv_path}/bin:$PATH {child_cmd}"
+            tmux_mod.new_window(session, win_name, child_cmd,
+                                cwd=str(wt_path), switch=False)
+
+        scenario.window_name = win_name
+        _log.info("Relaunched scenario %d in window %s", scenario.index, win_name)
+        return True
+    except Exception:
+        _log.warning("Failed to relaunch scenario %d", scenario.index, exc_info=True)
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Verdict polling helpers
 # ---------------------------------------------------------------------------
 
 def _poll_tmux_verdicts(
     state: QALoopState,
+    data: dict,
+    pr_data: dict,
     session: str,
+    workdir_path: str,
     status_path: Path,
     _notify,
 ) -> None:
@@ -711,6 +743,7 @@ def _poll_tmux_verdicts(
 
     tracker = VerdictStabilityTracker()
     pending = {s.index for s in state.scenarios if s.window_name}
+    retry_counts: dict[int, int] = {}  # scenario_index -> retries used
 
     # Scenarios that failed to create a window get INPUT_REQUIRED immediately
     has_failed_creation = False
@@ -739,7 +772,25 @@ def _poll_tmux_verdicts(
 
             pane_id = _get_scenario_pane(session, scenario.window_name)
             if pane_id is None:
-                _log.warning("Scenario %d window exited without verdict",
+                retries = retry_counts.get(scenario.index, 0)
+                if retries < _SCENARIO_MAX_RETRIES:
+                    backoff = _SCENARIO_RETRY_BASE * (2 ** retries)
+                    _log.warning(
+                        "Scenario %d window died — retry %d/%d "
+                        "(backoff %.0fs)",
+                        scenario.index, retries + 1,
+                        _SCENARIO_MAX_RETRIES, backoff)
+                    time.sleep(backoff)
+                    if _relaunch_scenario_window(
+                        scenario, state, data, pr_data,
+                        session, workdir_path,
+                    ):
+                        retry_counts[scenario.index] = retries + 1
+                        # Reset grace period for this retry
+                        grace_start = time.monotonic()
+                        continue
+                _log.warning("Scenario %d window exited without verdict "
+                             "(retries exhausted)",
                              scenario.index)
                 state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
                 pending.discard(scenario.index)
@@ -848,8 +899,10 @@ def run_qa_sync(
         state.latest_output = "Planning QA scenarios..."
         _notify()
 
+        scenario_start = _next_scenario_offset(state.pr_id, state.loop_id) + 1
         planner_prompt = prompt_gen.generate_qa_planner_prompt(
             data, state.pr_id, session,
+            scenario_start=scenario_start,
         )
         cmd = build_claude_shell_cmd(prompt=planner_prompt)
 
@@ -912,12 +965,11 @@ def run_qa_sync(
             return state
 
         # Poll until the planner produces a QA Plan or exits.
-        # Same strategy as the review loop's verdict detection:
-        #   - Only scan the tail of the pane (last VERDICT_TAIL_LINES)
-        #   - Require QA_PLAN_END to be the entire line content
-        #   - Grace period: the prompt template also has QA_PLAN_END on
-        #     its own line, so we wait _PLANNER_GRACE seconds for Claude
-        #     to generate enough output to push the prompt out of the tail.
+        # Strategy: capture pane content, look for QA_PLAN_END, then
+        # try parsing.  The prompt template also contains QA_PLAN_END
+        # with placeholder scenarios, so we only accept when parsing
+        # yields real (non-placeholder) scenarios.  This avoids the
+        # false-positive from the prompt's own markers.
         plan_found = False
         deadline = time.monotonic() + _PLANNER_TIMEOUT
         poll_start = time.monotonic()
@@ -934,10 +986,18 @@ def run_qa_sync(
             _log.info("planner poll: has_end=%s content_len=%d elapsed=%.0fs",
                       has_end, len(content), elapsed)
 
-            if elapsed >= _PLANNER_GRACE and has_end:
-                state.plan_output = content
-                plan_found = True
-                break
+            if has_end and elapsed >= _PLANNER_GRACE:
+                # Try parsing — only accept if we get real scenarios
+                trial = parse_qa_plan(content)
+                if trial:
+                    _log.info("planner poll: parsed %d scenario(s), accepting",
+                              len(trial))
+                    state.plan_output = content
+                    plan_found = True
+                    break
+                else:
+                    _log.info("planner poll: has_end but 0 scenarios, "
+                              "likely prompt template — continuing")
 
             time.sleep(5)
 
@@ -962,6 +1022,23 @@ def run_qa_sync(
             _notify()
             return state
 
+        # Verify scenario numbering starts at scenario_start.
+        # The planner is told to start from scenario_start, but if it
+        # didn't follow instructions, renumber to be safe.
+        expected = scenario_start
+        needs_renumber = False
+        for sc in state.scenarios:
+            if sc.index != expected:
+                needs_renumber = True
+                break
+            expected += 1
+        if needs_renumber:
+            _log.info("Renumbering %d scenario(s) to start at %d "
+                      "(planner used wrong numbering)",
+                      len(state.scenarios), scenario_start)
+            for i, sc in enumerate(state.scenarios):
+                sc.index = scenario_start + i
+
         # Limit scenarios if a cap is configured
         cap = max_scenarios if max_scenarios is not None else _get_max_scenarios()
         if cap > 0 and len(state.scenarios) > cap:
@@ -975,18 +1052,7 @@ def run_qa_sync(
     _log.info("QA execution phase: %d scenarios for %s",
               len(state.scenarios), state.pr_id)
 
-    # Record HEAD sha before execution so we can detect new commits later
-    state.pre_qa_head = None
     repo_root = Path(workdir_path) if workdir_path and Path(workdir_path).is_dir() else None
-    if repo_root:
-        try:
-            result = git_ops.run_git(
-                "rev-parse", "HEAD", cwd=workdir_path, check=False,
-            )
-            if result.returncode == 0:
-                state.pre_qa_head = result.stdout.strip()
-        except Exception:
-            pass
 
     # Ensure the main QA window exists (has the planner pane)
     win = tmux_mod.find_window_by_name(session, window_name)
@@ -1053,7 +1119,8 @@ def run_qa_sync(
     _notify()
 
     # --- Poll for verdicts (always via tmux — containers also use tmux windows) ---
-    _poll_tmux_verdicts(state, session, status_path, _notify)
+    _poll_tmux_verdicts(state, data, pr_data, session, workdir_path,
+                        status_path, _notify)
 
     # --- Cleanup ---
     # Keep scenario windows AND containers alive so users can inspect
@@ -1061,33 +1128,11 @@ def run_qa_sync(
     # Orphaned containers (whose windows have been closed) are cleaned
     # up at the start of the next QA run instead.
 
-    # --- Merge back scenario worktree commits ---
-    _merge_scenario_commits(state, repo_root, pr_data)
-
-    # --- Worktree cleanup ---
-    # Skip worktree cleanup — scenario windows stay open so users can
-    # inspect results, and removing worktrees would break their cwd.
-    # Worktrees are cleaned up at the start of the next QA run by
-    # create_scenario_workdir (which prunes stale worktrees before
-    # re-creating) and _cleanup_stale_scenario_windows (which kills
-    # old windows).
-
     # --- Aggregate verdicts ---
     verdicts = list(state.scenario_verdicts.values())
 
-    # Check for uncommitted files in the main workdir
-    if repo_root:
-        try:
-            result = git_ops.run_git(
-                "status", "--porcelain", cwd=workdir_path, check=False,
-            )
-            if result.stdout.strip():
-                state.made_changes = True
-        except Exception:
-            pass
-
     # Determine overall verdict
-    if VERDICT_NEEDS_WORK in verdicts or state.made_changes:
+    if VERDICT_NEEDS_WORK in verdicts:
         state.latest_verdict = VERDICT_NEEDS_WORK
     elif VERDICT_INPUT_REQUIRED in verdicts:
         state.latest_verdict = VERDICT_INPUT_REQUIRED
@@ -1105,11 +1150,9 @@ def run_qa_sync(
         v = state.scenario_verdicts.get(s.index, "?")
         summary_parts.append(f"{s.title}: {v}")
     state.latest_output = f"QA complete: {state.latest_verdict} — " + "; ".join(summary_parts)
-    if state.made_changes:
-        state.latest_output += " [changes committed]"
 
-    _log.info("QA complete for %s: %s (changes=%s)",
-              state.pr_id, state.latest_verdict, state.made_changes)
+    _log.info("QA complete for %s: %s",
+              state.pr_id, state.latest_verdict)
     _notify()
     return state
 

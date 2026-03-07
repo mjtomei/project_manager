@@ -272,11 +272,17 @@ def _poll_loop_state(app) -> None:
     # Announce completed loops and auto-merge passing PRs
     for state in newly_done:
         verdict_icon = VERDICT_ICONS.get(state.latest_verdict, state.latest_verdict)
-        app.log_message(
+        msg = (
             f"Review loop done for {state.pr_id}: {verdict_icon} "
-            f"({state.iteration} iteration{'s' if state.iteration != 1 else ''})",
-            sticky=10,
+            f"({state.iteration} iteration{'s' if state.iteration != 1 else ''})"
         )
+        if state.latest_verdict == "ERROR" and state.latest_output:
+            # Truncate for display but show enough to be useful
+            err_text = state.latest_output[:300]
+            msg += f"\n  Error: {err_text}"
+            from pm_core.paths import command_log_file
+            msg += f"\n  See log: {command_log_file()}"
+        app.log_message(msg, sticky=10)
 
         # Auto-start next step: review pass → QA (then QA pass → merge)
         if state.latest_verdict in (VERDICT_PASS, VERDICT_PASS_WITH_SUGGESTIONS):
@@ -349,7 +355,7 @@ def _maybe_start_qa(app, pr_id: str) -> None:
         if pr and pr.get("status") == "in_review":
             pr["status"] = "qa"
             store.save(data, app._root)
-            app._data = store.load(app._root)
+            app._load_state()
             _log.info("auto_qa: transitioned %s to qa status", pr_id)
             app.log_message(f"Auto-QA: {pr_id} review passed, starting QA")
 

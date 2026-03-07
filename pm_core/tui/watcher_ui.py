@@ -282,8 +282,13 @@ def poll_watcher_state(app) -> None:
     elif not state._ui_notified_done:
         state._ui_notified_done = True
         verdict_icon = WATCHER_VERDICT_ICONS.get(state.latest_verdict, state.latest_verdict)
-        app.log_message(
+        msg = (
             f"Watcher stopped: {verdict_icon} "
-            f"({state.iteration} iteration{'s' if state.iteration != 1 else ''})",
-            sticky=10,
+            f"({state.iteration} iteration{'s' if state.iteration != 1 else ''})"
         )
+        if state.latest_verdict == "ERROR" and state.latest_summary:
+            err_text = state.latest_summary[:300]
+            msg += f"\n  Error: {err_text}"
+            from pm_core.paths import command_log_file
+            msg += f"\n  See log: {command_log_file()}"
+        app.log_message(msg, sticky=10)

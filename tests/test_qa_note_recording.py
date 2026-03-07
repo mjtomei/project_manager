@@ -2,7 +2,6 @@
 
 Verifies:
 - Note format: "QA {verdict}: {s1}: {v1}; {s2}: {v2} [changes committed] (workdir: {path})"
-- "[changes committed]" only when made_changes is true
 - Workdir path included when set
 - Note has id, created_at, last_edited fields
 - Running QA again appends (not replaces) notes
@@ -45,7 +44,7 @@ def _make_app(tmp_path, notes=None):
 
 
 def _make_state(pr_id="pr-001", scenarios=None, verdicts=None,
-                verdict="PASS", made_changes=False, qa_workdir=None):
+                verdict="PASS", qa_workdir=None):
     """Build a QALoopState with given parameters."""
     if scenarios is None:
         scenarios = [
@@ -56,7 +55,6 @@ def _make_state(pr_id="pr-001", scenarios=None, verdicts=None,
     state.scenarios = scenarios
     state.scenario_verdicts = verdicts or {1: "PASS", 2: "PASS"}
     state.latest_verdict = verdict
-    state.made_changes = made_changes
     state.qa_workdir = qa_workdir
     return state
 
@@ -109,38 +107,6 @@ class TestNoteFormat:
         assert "Dashboard: ?" in note["text"]
 
 
-class TestChangesCommitted:
-    def test_no_changes_no_marker(self, tmp_path):
-        app = _make_app(tmp_path)
-        state = _make_state(made_changes=False)
-        _record_qa_note(app, state)
-
-        data = store.load(tmp_path)
-        pr = store.get_pr(data, "pr-001")
-        assert "[changes committed]" not in pr["notes"][0]["text"]
-
-    def test_changes_committed_present(self, tmp_path):
-        app = _make_app(tmp_path)
-        state = _make_state(made_changes=True)
-        _record_qa_note(app, state)
-
-        data = store.load(tmp_path)
-        pr = store.get_pr(data, "pr-001")
-        assert "[changes committed]" in pr["notes"][0]["text"]
-
-    def test_changes_committed_before_workdir(self, tmp_path):
-        """[changes committed] should appear before (workdir: ...) in the text."""
-        app = _make_app(tmp_path)
-        state = _make_state(made_changes=True, qa_workdir="/tmp/qa-work")
-        _record_qa_note(app, state)
-
-        data = store.load(tmp_path)
-        pr = store.get_pr(data, "pr-001")
-        text = pr["notes"][0]["text"]
-        assert "[changes committed]" in text
-        assert "(workdir: /tmp/qa-work)" in text
-        # Order: committed before workdir
-        assert text.index("[changes committed]") < text.index("(workdir:")
 
 
 class TestWorkdirPath:
@@ -333,12 +299,11 @@ class TestEdgeCases:
         assert pr["notes"][0]["text"] == "QA PASS: Only Test: PASS"
 
     def test_full_format_with_all_parts(self, tmp_path):
-        """Complete note with verdict, scenarios, changes, and workdir."""
+        """Complete note with verdict, scenarios, and workdir."""
         app = _make_app(tmp_path)
         state = _make_state(
             verdict="NEEDS_WORK",
             verdicts={1: "PASS", 2: "NEEDS_WORK"},
-            made_changes=True,
             qa_workdir="/home/user/.pm/workdirs/qa/pr-001-deadbeef",
         )
         _record_qa_note(app, state)
@@ -348,7 +313,6 @@ class TestEdgeCases:
         text = pr["notes"][0]["text"]
         expected = (
             "QA NEEDS_WORK: Login Flow: PASS; Dashboard: NEEDS_WORK "
-            "[changes committed] "
             "(workdir: /home/user/.pm/workdirs/qa/pr-001-deadbeef)"
         )
         assert text == expected

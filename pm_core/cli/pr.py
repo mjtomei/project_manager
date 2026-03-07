@@ -861,7 +861,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                                          transcript=transcript, cwd=str(work_path))
             # Optionally wrap in a container for isolation
             from pm_core.container import wrap_claude_cmd
-            cmd, _cname = wrap_claude_cmd(cmd, str(work_path), label=f"impl-{pr_id}")
+            cmd, _cname = wrap_claude_cmd(cmd, str(work_path), label=f"impl-{pr_id}",
+                                          allowed_push_branch=branch)
             try:
                 if use_companion:
                     claude_pane = tmux_mod.new_window_get_pane(
@@ -978,8 +979,10 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     claude_cmd = build_claude_shell_cmd(prompt=review_prompt,
                                          transcript=transcript, cwd=workdir)
     # Optionally wrap in a container for isolation
+    branch = pr_entry.get("branch", "")
     from pm_core.container import wrap_claude_cmd
-    claude_cmd, _cname = wrap_claude_cmd(claude_cmd, workdir, label=f"review-{pr_id}")
+    claude_cmd, _cname = wrap_claude_cmd(claude_cmd, workdir, label=f"review-{pr_id}",
+                                          allowed_push_branch=branch)
 
     window_name = f"review-{display_id}"
 
@@ -1249,9 +1252,8 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
     )
     claude_cmd = build_claude_shell_cmd(prompt=merge_prompt,
                                          transcript=transcript, cwd=workdir)
-    # Optionally wrap in a container for isolation
-    from pm_core.container import wrap_claude_cmd
-    claude_cmd, _cname = wrap_claude_cmd(claude_cmd, workdir, label=f"merge-{pr_id}")
+    # Merge runs on the host — it needs to push to master and modify the
+    # main repo, which the branch-scoped push proxy would block.
     window_name = f"merge-{display_id}"
 
     # No-op if a merge window is already running for this PR
@@ -1448,6 +1450,58 @@ def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
     click.echo(f"Updated {base_branch} in repo.")
 
     return True
+
+
+@pr.command("qa")
+@click.argument("pr_id", default=None, required=False)
+def pr_qa(pr_id: str | None):
+    """Start the full QA loop for a PR (planner + scenarios).
+
+    This command must be run from within a pm tmux session (or via the
+    TUI command bar as ``/pr qa <pr_id>``).  The QA process requires the
+    TUI for managing scenario windows and tracking QA state.
+
+    If PR_ID is omitted, infers from cwd (if inside a workdir) or
+    auto-selects when there's exactly one in_review/qa PR.
+    """
+    root = state_root()
+    data = store.load(root)
+
+    if pr_id is None:
+        pr_id = _infer_pr_id(data, status_filter=("in_review", "qa"))
+        if pr_id is None:
+            prs = data.get("prs") or []
+            candidates = [p for p in prs if p.get("status") in ("in_review", "qa")]
+            if len(candidates) == 0:
+                click.echo("No PRs in in_review or qa status.", err=True)
+            else:
+                click.echo("Multiple PRs eligible for QA. Specify one:", err=True)
+                for p in candidates:
+                    click.echo(f"  {_pr_display_id(p)}: {p.get('title', '???')}", err=True)
+            raise SystemExit(1)
+        click.echo(f"Auto-selected {pr_id}")
+
+    pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
+
+    if pr_entry.get("status") not in ("in_progress", "in_review", "qa"):
+        click.echo(f"PR {pr_id} has status '{pr_entry.get('status')}' — QA requires in_progress, in_review, or qa.", err=True)
+        raise SystemExit(1)
+
+    # QA requires the TUI for managing scenario windows and state tracking.
+    # When run from the TUI command bar, the command is intercepted by
+    # handle_command_submitted and routed to qa_loop_ui directly.
+    # When run from CLI, tell the user to use the TUI.
+    pm_session = _get_pm_session()
+    if not pm_session:
+        click.echo("QA requires a pm tmux session for managing scenario windows.", err=True)
+        click.echo("Start a session first with: pm session", err=True)
+        click.echo(f"Then use the TUI command bar: /pr qa {_pr_display_id(pr_entry)}", err=True)
+        raise SystemExit(1)
+
+    click.echo(f"Use the TUI command bar to start QA: /pr qa {_pr_display_id(pr_entry)}", err=True)
+    click.echo("Or press 't' on the PR in the TUI.", err=True)
+    raise SystemExit(1)
 
 
 @pr.command("merge")

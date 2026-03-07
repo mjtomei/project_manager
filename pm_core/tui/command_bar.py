@@ -27,6 +27,16 @@ class CommandBar(Input):
     def on_focus(self) -> None:
         _log.debug("CommandBar: got focus, has_focus=%s", self.has_focus)
         self.placeholder = self.FOCUSED_PLACEHOLDER
+        # Replay any keystrokes buffered between / press and focus
+        app = self.app
+        if getattr(app, "_command_pending", False):
+            buffered = "".join(app._command_buffer)
+            app._command_pending = False
+            app._command_buffer.clear()
+            if buffered:
+                _log.debug("CommandBar: replaying buffered input: %r", buffered)
+                self.value = buffered
+                self.cursor_position = len(buffered)
 
     def on_blur(self) -> None:
         _log.debug("CommandBar: lost focus")

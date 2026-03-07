@@ -151,17 +151,24 @@ def get_instruction(pm_root: Path, instruction_id: str,
 # Prompt helper
 # ---------------------------------------------------------------------------
 
-def instruction_summary_for_prompt(pm_root: Path) -> str:
-    """Build a summary of all instructions for the QA planner prompt.
+def instruction_summary_for_prompt(pm_root: Path,
+                                   include_regression: bool = True) -> str:
+    """Build a summary of instructions for prompts.
+
+    Args:
+        pm_root: Project root path.
+        include_regression: If False, exclude regression tests from the summary.
 
     Returns titles + descriptions + file paths (the planner reads files
     itself when it needs the full content).
     """
     all_items = list_all(pm_root)
-    lines: list[str] = []
+    categories = [("instructions", "Instructions")]
+    if include_regression:
+        categories.append(("regression", "Regression Tests"))
 
-    for category, label in [("instructions", "Instructions"),
-                            ("regression", "Regression Tests")]:
+    lines: list[str] = []
+    for category, label in categories:
         items = all_items[category]
         if not items:
             continue
@@ -172,6 +179,6 @@ def instruction_summary_for_prompt(pm_root: Path) -> str:
         lines.append("")
 
     if not lines:
-        return "No QA instructions or regression tests found."
+        return "No QA instructions found."
 
     return "\n".join(lines)

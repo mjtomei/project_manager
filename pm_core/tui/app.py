@@ -149,9 +149,24 @@ class ProjectManagerApp(App):
     ]
 
     def on_key(self, event) -> None:
-        """Handle z modifier prefix key (supports z, zz, zzz)."""
+        """Handle z modifier prefix key (supports z, zz, zzz).
+
+        Also buffers keystrokes when / was pressed but the command bar
+        hasn't received focus yet (race condition fix).
+        """
         cmd_bar = self.query_one("#command-bar", CommandBar)
         if cmd_bar.has_focus:
+            return
+        # Buffer keystrokes between / press and command bar gaining focus
+        if self._command_pending:
+            if event.key == "escape":
+                # Cancel: discard buffer and abort command mode
+                self._command_pending = False
+                self._command_buffer.clear()
+            elif event.character and event.character.isprintable():
+                self._command_buffer.append(event.character)
+            event.prevent_default()
+            event.stop()
             return
         if event.key == "z":
             if self._z_count >= 3:
@@ -179,8 +194,8 @@ class ProjectManagerApp(App):
                        "cycle_filter", "cycle_sort", "toggle_auto_start", "focus_watcher",
                        "review_spec"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
-            if cmd_bar.has_focus:
-                _log.debug("check_action: blocked %s (command bar focused)", action)
+            if cmd_bar.has_focus or self._command_pending:
+                _log.debug("check_action: blocked %s (command bar focused/pending)", action)
                 return False
         # Block PR actions when in guide mode or plans view (can't see the PR tree)
         if action in ("start_pr", "start_pr_companion", "done_pr", "merge_pr", "merge_pr_companion", "launch_claude", "edit_plan", "view_plan", "hide_plan", "move_to_plan", "toggle_merged", "cycle_filter", "cycle_sort", "start_qa_on_pr"):
@@ -242,6 +257,9 @@ class ProjectManagerApp(App):
         self._qa_loops: dict = {}
         # Self-driving QA state (zz t / zzz t — tracks pass counts per PR)
         self._self_driving_qa: dict = {}
+        # Command-input race condition fix: buffer keystrokes between / and focus
+        self._command_pending: bool = False
+        self._command_buffer: list[str] = []
 
     def _consume_z(self) -> int:
         """Atomically read and clear the z modifier count.
@@ -791,10 +809,14 @@ class ProjectManagerApp(App):
 
     def action_focus_command(self) -> None:
         _log.debug("action: focus_command")
+        self._command_pending = True
+        self._command_buffer.clear()
         cmd_bar = self.query_one("#command-bar", CommandBar)
         cmd_bar.focus()
 
     def action_unfocus_command(self) -> None:
+        self._command_pending = False
+        self._command_buffer.clear()
         cmd_bar = self.query_one("#command-bar", CommandBar)
         if cmd_bar.has_focus:
             cmd_bar.value = ""

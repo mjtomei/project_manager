@@ -17,12 +17,21 @@ Invocation:
 """
 
 import json
+import logging
 import os
 import select
 import subprocess
 import sys
 import time
 from pathlib import Path
+
+logging.basicConfig(
+    filename="/tmp/qa_status_debug.log",
+    level=logging.DEBUG,
+    format="%(asctime)s %(levelname)s %(message)s",
+    datefmt="%H:%M:%S",
+)
+_log = logging.getLogger("pm.qa_status")
 
 
 # ANSI color codes
@@ -138,21 +147,67 @@ def _render(status: dict | None, selected: int, rows: int, cols: int) -> str:
     return _CLEAR_SCREEN + "\n".join(padded)
 
 
+def _find_attached_session(base: str) -> str:
+    """Find the correct grouped session for window switching.
+
+    Mirrors the logic of pm_core.tmux.current_or_base_session:
+    1. Use $TMUX_PANE to identify which grouped session we're in
+    2. Fall back to first attached grouped session
+    3. Fall back to base session
+    """
+    # Priority 1: use $TMUX_PANE to find our actual session
+    pane = os.environ.get("TMUX_PANE")
+    if pane:
+        try:
+            result = subprocess.run(
+                ["tmux", "display-message", "-p", "-t", pane, "#{session_name}"],
+                capture_output=True, text=True,
+            )
+            current = result.stdout.strip()
+            if current and (current == base or current.startswith(base + "~")):
+                # Verify it has attached clients
+                att = subprocess.run(
+                    ["tmux", "display-message", "-t", current, "-p", "#{session_attached}"],
+                    capture_output=True, text=True,
+                )
+                if att.returncode == 0 and att.stdout.strip() != "0":
+                    return current
+        except Exception:
+            pass
+
+    # Priority 2: first attached grouped session
+    try:
+        result = subprocess.run(
+            ["tmux", "list-sessions", "-F", "#{session_name} #{session_attached}"],
+            capture_output=True, text=True,
+        )
+        for line in result.stdout.strip().splitlines():
+            parts = line.rsplit(" ", 1)
+            if len(parts) == 2:
+                name, attached = parts
+                if (name == base or name.startswith(base + "~")) and attached != "0":
+                    return name
+    except Exception:
+        pass
+    return base
+
+
 def _switch_to_window(session: str, window_name: str) -> None:
     """Switch tmux to the given window.
 
-    Uses the caller's grouped session (not the base session) so only the
+    Uses the attached grouped session (not the base session) so only the
     current terminal switches windows.
     """
     try:
-        from pm_core.tmux import current_or_base_session
-        target = current_or_base_session(session)
-        subprocess.run(
+        target = _find_attached_session(session)
+        result = subprocess.run(
             ["tmux", "select-window", "-t", f"{target}:{window_name}"],
-            capture_output=True,
+            capture_output=True, text=True,
         )
+        if result.returncode != 0:
+            _log.warning("select-window failed: %s", result.stderr.strip())
     except Exception:
-        pass
+        _log.warning("switch_to_window error", exc_info=True)
 
 
 def _get_terminal_size() -> tuple[int, int]:
@@ -236,6 +291,8 @@ def _run_interactive(path: Path, session: str) -> None:
                 if status and num_scenarios > 0:
                     sc = status["scenarios"][selected]
                     wn = sc.get("window_name", "")
+                    _log.info("Enter pressed: selected=%d wn=%r session=%r",
+                              selected, wn, session)
                     if wn:
                         _switch_to_window(session, wn)
 

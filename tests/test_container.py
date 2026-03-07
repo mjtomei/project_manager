@@ -21,6 +21,7 @@ from pm_core.container import (
     cleanup_all_containers,
     wrap_claude_cmd,
     _docker_available,
+    _build_git_setup_script,
     _get_dockerfile_path,
     _make_container_name,
     _resolve_claude_binary,
@@ -192,7 +193,9 @@ class TestCreateContainer:
         assert cid == "abc123"
         mock_rm.assert_called_once_with("pm-test")
 
-        args = mock_docker.call_args[0]
+        # First call is `docker run`, subsequent calls are readiness checks
+        run_call = mock_docker.call_args_list[0]
+        args = run_call[0]
         assert args[0] == "run"
         assert "-d" in args
         assert f"/my/workdir:{_CONTAINER_WORKDIR}" in " ".join(args)
@@ -202,9 +205,10 @@ class TestCreateContainer:
         assert "useradd" in args[-1]
         assert "sleep infinity" in args[-1]
 
+    @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_docker")
-    def test_extra_ro_mounts(self, mock_docker, mock_rm):
+    def test_extra_ro_mounts(self, mock_docker, mock_rm, mock_exists):
         mock_docker.return_value = MagicMock(stdout="id\n")
         config = ContainerConfig()
 
@@ -215,12 +219,13 @@ class TestCreateContainer:
             extra_ro_mounts={Path("/repo"): "/repo"},
         )
 
-        args_str = " ".join(mock_docker.call_args[0])
+        args_str = " ".join(mock_docker.call_args_list[0][0])
         assert "/repo:/repo:ro" in args_str
 
+    @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_docker")
-    def test_extra_rw_mounts(self, mock_docker, mock_rm):
+    def test_extra_rw_mounts(self, mock_docker, mock_rm, mock_exists):
         mock_docker.return_value = MagicMock(stdout="id\n")
         config = ContainerConfig()
 
@@ -231,14 +236,15 @@ class TestCreateContainer:
             extra_rw_mounts={Path("/scratch"): "/scratch"},
         )
 
-        args_str = " ".join(mock_docker.call_args[0])
+        args_str = " ".join(mock_docker.call_args_list[0][0])
         assert "/scratch:/scratch" in args_str
         # Should NOT have :ro suffix
         assert "/scratch:/scratch:ro" not in args_str
 
+    @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_docker")
-    def test_passes_env_vars(self, mock_docker, mock_rm):
+    def test_passes_env_vars(self, mock_docker, mock_rm, mock_exists):
         mock_docker.return_value = MagicMock(stdout="id123\n")
 
         config = ContainerConfig(env={"CUSTOM_VAR": "custom_val"})
@@ -249,14 +255,15 @@ class TestCreateContainer:
                 workdir=Path("/w"),
             )
 
-        args_str = " ".join(mock_docker.call_args[0])
+        args_str = " ".join(mock_docker.call_args_list[0][0])
         assert "ANTHROPIC_API_KEY=sk-test" in args_str
         assert "CUSTOM_VAR=custom_val" in args_str
 
+    @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container._resolve_claude_binary", return_value=None)
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_docker")
-    def test_mounts_claude_config_rw(self, mock_docker, mock_rm, mock_bin):
+    def test_mounts_claude_config_rw(self, mock_docker, mock_rm, mock_bin, mock_exists):
         """~/.claude is mounted read-write so Claude can write session state."""
         mock_docker.return_value = MagicMock(stdout="id\n")
         config = ContainerConfig()
@@ -266,15 +273,16 @@ class TestCreateContainer:
              patch.object(Path, "exists", return_value=True):
             create_container(name="test", config=config, workdir=Path("/w"))
 
-        args_str = " ".join(mock_docker.call_args[0])
+        args_str = " ".join(mock_docker.call_args_list[0][0])
         assert f"/home/user/.claude:{_CONTAINER_HOME}/.claude" in args_str
         # Should NOT be read-only
         assert f"/home/user/.claude:{_CONTAINER_HOME}/.claude:ro" not in args_str
 
+    @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container._resolve_claude_binary", return_value=None)
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_docker")
-    def test_mounts_claude_json(self, mock_docker, mock_rm, mock_bin):
+    def test_mounts_claude_json(self, mock_docker, mock_rm, mock_bin, mock_exists):
         """~/.claude.json is mounted read-write for Claude config."""
         mock_docker.return_value = MagicMock(stdout="id\n")
         config = ContainerConfig()
@@ -284,13 +292,14 @@ class TestCreateContainer:
              patch.object(Path, "exists", return_value=True):
             create_container(name="test", config=config, workdir=Path("/w"))
 
-        args_str = " ".join(mock_docker.call_args[0])
+        args_str = " ".join(mock_docker.call_args_list[0][0])
         assert f"/home/user/.claude.json:{_CONTAINER_HOME}/.claude.json" in args_str
 
+    @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container._resolve_claude_binary")
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_docker")
-    def test_mounts_claude_binary(self, mock_docker, mock_rm, mock_resolve):
+    def test_mounts_claude_binary(self, mock_docker, mock_rm, mock_resolve, mock_exists):
         """Host claude binary is bind-mounted at /usr/local/bin/claude."""
         mock_docker.return_value = MagicMock(stdout="id\n")
         # Simulate a resolved binary that exists
@@ -302,7 +311,7 @@ class TestCreateContainer:
              patch.object(Path, "is_dir", return_value=False):
             create_container(name="test", config=config, workdir=Path("/w"))
 
-        args_str = " ".join(mock_docker.call_args[0])
+        args_str = " ".join(mock_docker.call_args_list[0][0])
         assert f"{fake_bin}:/usr/local/bin/claude:ro" in args_str
 
     @patch("pm_core.container.build_image")
@@ -347,10 +356,11 @@ class TestCreateContainer:
         # image_exists should not be called for non-default images
         mock_exists.assert_not_called()
 
+    @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container._resolve_claude_binary", return_value=None)
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_docker")
-    def test_no_binary_still_creates_container(self, mock_docker, mock_rm, mock_resolve):
+    def test_no_binary_still_creates_container(self, mock_docker, mock_rm, mock_resolve, mock_exists):
         """Container creation succeeds even if claude binary is not found."""
         mock_docker.return_value = MagicMock(stdout="id\n")
         config = ContainerConfig()
@@ -360,7 +370,7 @@ class TestCreateContainer:
 
         assert cid == "id"
         # Should not contain /usr/local/bin/claude mount
-        args_str = " ".join(mock_docker.call_args[0])
+        args_str = " ".join(mock_docker.call_args_list[0][0])
         assert "/usr/local/bin/claude" not in args_str
 
 
@@ -387,8 +397,7 @@ class TestCreateQAContainer:
         cid = create_qa_container(
             name="pm-qa-test-s1",
             config=config,
-            repo_root=Path("/repo"),
-            worktree_path=Path("/worktrees/w1"),
+            workdir=Path("/clones/c1"),
             scratch_path=Path("/scratch/s1"),
         )
 
@@ -396,9 +405,28 @@ class TestCreateQAContainer:
         mock_create.assert_called_once_with(
             name="pm-qa-test-s1",
             config=config,
-            workdir=Path("/worktrees/w1"),
-            extra_ro_mounts={Path("/repo"): "/repo"},
+            workdir=Path("/clones/c1"),
             extra_rw_mounts={Path("/scratch/s1"): _CONTAINER_SCRATCH},
+            allowed_push_branch=None,
+        )
+
+    @patch("pm_core.container.create_container")
+    def test_passes_push_branch(self, mock_create):
+        mock_create.return_value = "qa-id"
+        config = ContainerConfig()
+        create_qa_container(
+            name="pm-qa-test-s1",
+            config=config,
+            workdir=Path("/clones/c1"),
+            scratch_path=Path("/scratch/s1"),
+            allowed_push_branch="pm/pr-123-feature",
+        )
+        mock_create.assert_called_once_with(
+            name="pm-qa-test-s1",
+            config=config,
+            workdir=Path("/clones/c1"),
+            extra_rw_mounts={Path("/scratch/s1"): _CONTAINER_SCRATCH},
+            allowed_push_branch="pm/pr-123-feature",
         )
 
 
@@ -415,6 +443,18 @@ class TestBuildExecCmd:
         cmd = build_exec_cmd("my-container", "claude 'hi'")
         assert "docker rm -f" in cmd
         assert cmd.endswith(">/dev/null 2>&1")
+
+    def test_cleanup_removes_proxy_socket(self):
+        cmd = build_exec_cmd("my-container", "claude 'hi'",
+                             proxy_socket_path="/tmp/pm-push-proxy-x/push.sock")
+        assert "rm -f" in cmd
+        assert "/tmp/pm-push-proxy-x/push.sock" in cmd
+        assert "rmdir" in cmd
+        assert "/tmp/pm-push-proxy-x" in cmd
+        # Socket removal should come before docker rm
+        rm_pos = cmd.index("rm -f")
+        docker_pos = cmd.index("docker rm")
+        assert rm_pos < docker_pos
 
     def test_no_cleanup_when_disabled(self):
         cmd = build_exec_cmd("my-container", "claude 'hi'", cleanup=False)
@@ -535,3 +575,121 @@ class TestIntegration:
         """Verify wrap_claude_cmd is accessible where it's used."""
         from pm_core.container import wrap_claude_cmd
         assert callable(wrap_claude_cmd)
+
+
+
+class TestBuildGitSetupScript:
+    def test_safe_directory_always_set(self):
+        script = _build_git_setup_script()
+        assert "safe.directory" in script
+
+    def test_push_proxy_installs_wrapper(self):
+        script = _build_git_setup_script(has_push_proxy=True)
+        assert "/usr/local/bin/git" in script
+        assert "push-proxy" in script
+        assert "REAL_GIT=/usr/bin/git" in script
+
+    def test_no_proxy_no_wrapper(self):
+        script = _build_git_setup_script(has_push_proxy=False)
+        assert "/usr/local/bin/git" not in script
+
+    def test_no_credentials_in_script(self):
+        """Push proxy approach should never embed credentials."""
+        script = _build_git_setup_script(has_push_proxy=True)
+        assert "token" not in script.lower()
+        assert "password" not in script.lower()
+        assert "credential" not in script.lower()
+
+    def test_shebang_at_start_of_wrapper(self):
+        """Wrapper script shebang must be at column 0 for kernel to recognise it."""
+        script = _build_git_setup_script(has_push_proxy=True)
+        # The heredoc content must have #!/bin/sh at column 0 (after the
+        # newline following the WRAPEOF marker)
+        assert "\n#!/bin/sh\n" in script
+
+
+class TestCreateContainerPushProxy:
+    @patch("pm_core.container.image_exists", return_value=True)
+    @patch("pm_core.push_proxy.start_push_proxy",
+           return_value="/tmp/pm-push-proxy-test/push.sock")
+    @patch("pm_core.container._resolve_claude_binary", return_value=None)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_docker")
+    def test_starts_proxy_and_mounts_socket(self, mock_docker, mock_rm,
+                                             mock_bin, mock_proxy,
+                                             mock_exists):
+        mock_docker.return_value = MagicMock(stdout="id\n")
+        config = ContainerConfig()
+
+        with patch.object(Path, "is_dir", return_value=False):
+            create_container(name="test", config=config, workdir=Path("/w"),
+                             allowed_push_branch="pm/pr-123")
+
+        mock_proxy.assert_called_once_with("test", "/w", "pm/pr-123")
+        args_str = " ".join(mock_docker.call_args_list[0][0])
+        assert "/tmp/pm-push-proxy-test/push.sock:/run/pm-push-proxy.sock" in args_str
+
+    @patch("pm_core.container.image_exists", return_value=True)
+    @patch("pm_core.container._resolve_claude_binary", return_value=None)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_docker")
+    def test_no_proxy_without_branch(self, mock_docker, mock_rm,
+                                      mock_bin, mock_exists):
+        """No push proxy started if no allowed_push_branch specified."""
+        mock_docker.return_value = MagicMock(stdout="id\n")
+        config = ContainerConfig()
+
+        with patch.object(Path, "is_dir", return_value=False):
+            create_container(name="test", config=config, workdir=Path("/w"))
+
+        args_str = " ".join(mock_docker.call_args_list[0][0])
+        assert "push-proxy" not in args_str
+
+    @patch("pm_core.container.image_exists", return_value=True)
+    @patch("pm_core.push_proxy.start_push_proxy",
+           return_value="/tmp/pm-push-proxy-test/push.sock")
+    @patch("pm_core.container._resolve_claude_binary", return_value=None)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_docker")
+    def test_entrypoint_has_wrapper(self, mock_docker, mock_rm,
+                                     mock_bin, mock_proxy,
+                                     mock_exists):
+        """Container entrypoint installs the git push proxy wrapper."""
+        mock_docker.return_value = MagicMock(stdout="id\n")
+        config = ContainerConfig()
+
+        with patch.object(Path, "is_dir", return_value=False):
+            create_container(name="test", config=config, workdir=Path("/w"),
+                             allowed_push_branch="pm/pr-123")
+
+        args = mock_docker.call_args_list[0][0]
+        setup_script = args[-1]
+        assert "/usr/local/bin/git" in setup_script
+        assert "REAL_GIT=/usr/bin/git" in setup_script
+
+    @patch("pm_core.container.build_exec_cmd", return_value="docker exec ...")
+    @patch("pm_core.container.create_container", return_value="cid")
+    @patch("pm_core.container.load_container_config",
+           return_value=ContainerConfig())
+    @patch("pm_core.container.is_container_mode_enabled", return_value=True)
+    def test_wrap_passes_branch(self, mock_enabled, mock_config,
+                                 mock_create, mock_exec):
+        wrap_claude_cmd("claude", "/w", label="impl",
+                        allowed_push_branch="pm/pr-123")
+        call_kwargs = mock_create.call_args[1]
+        assert call_kwargs["allowed_push_branch"] == "pm/pr-123"
+
+    @patch("pm_core.push_proxy.get_proxy_socket_path",
+           return_value="/tmp/pm-push-proxy-x/push.sock")
+    @patch("pm_core.container.build_exec_cmd", return_value="docker exec ...")
+    @patch("pm_core.container.create_container", return_value="cid")
+    @patch("pm_core.container.load_container_config",
+           return_value=ContainerConfig())
+    @patch("pm_core.container.is_container_mode_enabled", return_value=True)
+    def test_wrap_passes_proxy_socket_to_exec(self, mock_enabled, mock_config,
+                                               mock_create, mock_exec,
+                                               mock_sock):
+        wrap_claude_cmd("claude", "/w", label="impl",
+                        allowed_push_branch="pm/pr-123")
+        call_kwargs = mock_exec.call_args[1]
+        assert call_kwargs["proxy_socket_path"] == "/tmp/pm-push-proxy-x/push.sock"
