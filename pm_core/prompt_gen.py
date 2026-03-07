@@ -744,7 +744,7 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
     qa_spec_block = format_spec_for_prompt(pr, "qa")
     qa_spec_preamble = spec_generation_preamble(pr, "qa", root=root)
 
-    prompt = f"""You are analyzing analyzing PR {pr_id}: "{title}" for creation of a QA plan
+    prompt = f"""You are a QA planner analyzing PR {pr_id}: "{title}"
 
 ## Task
 

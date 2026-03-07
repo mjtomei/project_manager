@@ -251,7 +251,7 @@ def set_cmd(setting, value):
 
       min-pane-width  Minimum characters per horizontal pane (default 100)
 
-      spec-mode       Spec generation mode: auto, review, or prompt (default: auto)
+      spec-mode       Spec generation mode: auto, review, or prompt (default: prompt)
     """
     from pm_core.paths import set_global_setting, set_global_setting_value
     boolean_settings = {"hide-assist", "hide-merged", "beginner-mode", "auto-cleanup"}
