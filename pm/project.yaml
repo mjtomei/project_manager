@@ -7,7 +7,7 @@ project:
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
-  hide_merged: false
+  hide_merged: true
 plans:
 - id: plan-001
   name: Import from existing repo
@@ -891,10 +891,17 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/109
   gh_pr_number: 109
   created_at: '2026-03-02T01:04:39.190560+00:00'
-  updated_at: '2026-03-02T01:27:28.059956+00:00'
+  updated_at: '2026-03-07T15:29:28.825403+00:00'
   started_at: '2026-03-02T01:04:39.190560+00:00'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-f38005f-add-file-locking-to-project-yaml-rea-6142872c
   reviewed_at: '2026-03-02T01:27:28.059956+00:00'
+  notes:
+  - id: note-181f05d
+    text: Review loop (review_loop_ui.py), QA loop (qa_loop_ui.py), and auto_start.py
+      also do store.load()/store.save() and modify app._data — these should be converted
+      to locked_update too, or they can still overwrite with stale data.
+    created_at: '2026-03-07T15:29:28Z'
+    last_edited: '2026-03-07T15:29:28Z'
 - id: pr-c11d04f
   plan: plan-003
   title: Add notes field to PRs for post-start addendums
@@ -3855,7 +3862,7 @@ prs:
   title: 'Fix race condition: keystrokes after / interpreted as commands before input
     has focus'
   branch: pm/pr-853126a-fix-race-condition-keystrokes-after-interpreted-as
-  status: in_progress
+  status: in_review
   depends_on: []
   description: 'When typing / followed by characters quickly (e.g. /commit), the initial
     characters after / can be interpreted as TUI keybindings before the command input
@@ -3876,9 +3883,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/126
   gh_pr_number: 126
   created_at: '2026-03-06T21:23:57.479825+00:00'
-  updated_at: '2026-03-06T21:25:22.334321+00:00'
+  updated_at: '2026-03-07T15:04:11.738637+00:00'
   started_at: '2026-03-06T21:25:22.334321+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-03-07T15:04:11.738637+00:00'
   merged_at: null
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-853126a-fix-race-condition-keystrokes-after--9964ad22
@@ -3912,6 +3919,7 @@ prs:
 
     - The command bar is more discoverable than memorizing keybindings'
   agent_machine: spark-424d
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-c2352be-add-pm-qa-start-cli-command-for-full-9964ad22
   gh_pr: https://github.com/mjtomei/project_manager/pull/127
   gh_pr_number: 127
   created_at: '2026-03-06T21:38:29.825212+00:00'
@@ -3924,10 +3932,10 @@ prs:
   plan: plan-qa
   title: Add pm container command to build project-specific Docker images
   branch: pm/pr-88cb7bf-add-pm-container-command-to-build-project-specific-do
-  status: pending
+  status: in_review
   depends_on: []
-  description: 'Add a pm container subcommand that launches an interactive Claude session
-    to create a Docker image with all project dependencies preinstalled.
+  description: 'Add a pm container subcommand that launches an interactive Claude
+    session to create a Docker image with all project dependencies preinstalled.
 
 
     ## Behavior
@@ -3937,8 +3945,8 @@ prs:
     etc.), the existing base Dockerfile/image, and generates a Dockerfile that installs
     all project dependencies on top of the base image
 
-    - The session builds and tags the image, then updates the container config to use
-    it
+    - The session builds and tags the image, then updates the container config to
+    use it
 
     - Supports iterating — if the build fails, Claude fixes the Dockerfile and retries
 
@@ -3947,9 +3955,37 @@ prs:
 
     - Currently the container image must be manually prepared with project dependencies
 
-    - Projects with complex dependency chains (native extensions, system packages) are
-    tedious to set up by hand
+    - Projects with complex dependency chains (native extensions, system packages)
+    are tedious to set up by hand
 
     - Having a dedicated command makes container setup a first-class workflow step'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-c2352be-add-pm-qa-start-cli-command-for-full-9964ad22
+  created_at: '2026-03-07T15:02:30.101810+00:00'
+  updated_at: '2026-03-07T15:11:17.140605+00:00'
+  gh_pr: https://github.com/mjtomei/project_manager/pull/128
+  gh_pr_number: 128
+  started_at: '2026-03-07T15:02:30.101810+00:00'
+  agent_machine: spark-424d
+  reviewed_at: '2026-03-07T15:11:17.140605+00:00'
+- id: pr-4258a32
+  plan: null
+  title: Add get_workdir helper that recovers missing workdir from filesystem
+  branch: pm/pr-4258a32-add-get-workdir-helper-that-recovers-missing-workd
+  status: pending
+  depends_on: []
+  description: Add a helper function (e.g. store.get_workdir or similar) that returns
+    a PR's workdir path. If the workdir field is present in the yaml and the path
+    exists, return it directly. If the field is missing or the path doesn't exist,
+    scan the workdirs directory for a matching branch slug and return that instead.
+    This avoids needing to scan all PRs on every load — the recovery only runs when
+    a specific PR's workdir is actually needed.
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-07T15:19:59.399251+00:00'
+  updated_at: '2026-03-07T15:19:59.399251+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
