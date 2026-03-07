@@ -520,6 +520,7 @@ COMMANDS
   pm container enable            Enable container isolation for Claude sessions
   pm container disable           Disable container isolation
   pm container set <key> <val>   Configure container image, memory, cpu
+  pm container build             Launch Claude to build project-specific image
   pm container cleanup           Remove stale pm containers
 
   pm bench models               List models on local inference backend
