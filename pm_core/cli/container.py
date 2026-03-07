@@ -119,7 +119,7 @@ def container_build(tag: str | None, base: str | None):
     """
     from pm_core import tmux as tmux_mod
     from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
-    from pm_core.container import load_container_config, DEFAULT_IMAGE
+    from pm_core.container import load_container_config
 
     root = state_root()
 
@@ -130,7 +130,6 @@ def container_build(tag: str | None, base: str | None):
     project_name = project.get("name", "project")
 
     # Resolve the repo working directory
-    repo_url = project.get("repo", "")
     if store.is_internal_pm_dir(root):
         project_dir = root.parent
     else:
