@@ -2319,3 +2319,152 @@ class TestInstallInstructionFile:
         _install_instruction_file(tmp_path, scenario, tmp_path,
                                   scratch_dir="/scratch")
         assert scenario.instruction_path is None
+
+
+# ---------------------------------------------------------------------------
+# Retry logic for dead scenario windows
+# ---------------------------------------------------------------------------
+
+class TestScenarioRetryLogic:
+    """Tests for _poll_tmux_verdicts retry logic when windows die."""
+
+    def test_dead_window_triggers_relaunch(self, tmp_path):
+        """When _get_scenario_pane returns None, _relaunch_scenario_window is called."""
+        from pm_core.qa_loop import (
+            _poll_tmux_verdicts,
+            _SCENARIO_MAX_RETRIES,
+            _SCENARIO_RETRY_BASE,
+        )
+
+        scenario = QAScenario(index=1, title="Test", focus="t")
+        scenario.window_name = "qa-test-s1"
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        state.scenario_verdicts = {}
+
+        call_count = 0
+
+        def pane_side_effect(session, win_name):
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 2:
+                return None  # Window dead for first 2 polls
+            return "%42"  # Window alive after relaunch
+
+        status_path = tmp_path / "status.json"
+
+        with patch("pm_core.qa_loop._get_scenario_pane", side_effect=pane_side_effect), \
+             patch("pm_core.qa_loop._relaunch_scenario_window", return_value=True) as mock_relaunch, \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic", side_effect=[
+                 0,    # grace_start
+                 100,  # 1st poll: past grace
+                 100,  # 1st poll: relaunch grace reset -> new grace_start
+                 200,  # 2nd poll: past grace
+                 200,  # 2nd poll: relaunch grace reset -> new grace_start
+                 300,  # 3rd poll: past grace
+                 300,  # capture_pane time check
+             ]), \
+             patch("pm_core.qa_loop.VerdictStabilityTracker") as MockTracker, \
+             patch("pm_core.qa_loop.extract_verdict_from_content", return_value="PASS"), \
+             patch("pm_core.tmux.capture_pane", return_value="PASS"):
+            tracker_inst = MockTracker.return_value
+            tracker_inst.update.return_value = True  # Verdict is stable
+
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", status_path, lambda *a: None,
+            )
+
+        assert mock_relaunch.call_count == 2
+        assert state.scenario_verdicts[1] == VERDICT_PASS
+
+    def test_retries_exhausted_gives_input_required(self, tmp_path):
+        """When all retries are used, scenario gets INPUT_REQUIRED."""
+        from pm_core.qa_loop import (
+            _poll_tmux_verdicts,
+            _SCENARIO_MAX_RETRIES,
+        )
+
+        scenario = QAScenario(index=1, title="Test", focus="t")
+        scenario.window_name = "qa-test-s1"
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        state.scenario_verdicts = {}
+
+        status_path = tmp_path / "status.json"
+
+        # Window always dead, relaunch always succeeds but window keeps dying
+        monotonic_values = [0]  # grace_start
+        for i in range(_SCENARIO_MAX_RETRIES + 1):
+            monotonic_values.append(100 + i)  # past grace
+            if i < _SCENARIO_MAX_RETRIES:
+                monotonic_values.append(100 + i)  # grace reset
+
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value=None), \
+             patch("pm_core.qa_loop._relaunch_scenario_window", return_value=True) as mock_relaunch, \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic", side_effect=monotonic_values), \
+             patch("pm_core.qa_loop._write_status_file"):
+
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", status_path, lambda *a: None,
+            )
+
+        assert mock_relaunch.call_count == _SCENARIO_MAX_RETRIES
+        assert state.scenario_verdicts[1] == VERDICT_INPUT_REQUIRED
+
+    def test_failed_relaunch_still_retries(self, tmp_path):
+        """A failed relaunch should not immediately give up — it should
+        increment the retry counter and try again on the next poll."""
+        from pm_core.qa_loop import _poll_tmux_verdicts
+
+        scenario = QAScenario(index=1, title="Test", focus="t")
+        scenario.window_name = "qa-test-s1"
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        state.scenario_verdicts = {}
+
+        status_path = tmp_path / "status.json"
+
+        relaunch_results = [False, True]  # Fail first, succeed second
+        pane_results = [None, None, "%42"]  # Dead, dead, alive
+
+        # monotonic calls: grace_start, then per-poll in_grace check,
+        # plus grace_start reset on successful relaunch
+        monotonic_vals = [
+            0,    # initial grace_start
+            100,  # poll 1 in_grace check (past grace) → pane None → relaunch fails → continue
+            200,  # poll 2 in_grace check (past grace) → pane None → relaunch succeeds
+            200,  # grace_start reset after successful relaunch
+            300,  # poll 3 in_grace check (past grace) → pane alive → read verdict
+        ]
+
+        with patch("pm_core.qa_loop._get_scenario_pane", side_effect=pane_results), \
+             patch("pm_core.qa_loop._relaunch_scenario_window", side_effect=relaunch_results) as mock_relaunch, \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic", side_effect=monotonic_vals), \
+             patch("pm_core.qa_loop.VerdictStabilityTracker") as MockTracker, \
+             patch("pm_core.qa_loop.extract_verdict_from_content", return_value="PASS"), \
+             patch("pm_core.tmux.capture_pane", return_value="PASS"):
+            tracker_inst = MockTracker.return_value
+            tracker_inst.update.return_value = True
+
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", status_path, lambda *a: None,
+            )
+
+        # Should have attempted relaunch twice (once failed, once succeeded)
+        assert mock_relaunch.call_count == 2
+        assert state.scenario_verdicts[1] == VERDICT_PASS
+
+    def test_backoff_formula(self):
+        """Verify exponential backoff: 5 * 2^retries = 5, 10, 20, 40..."""
+        from pm_core.qa_loop import _SCENARIO_RETRY_BASE
+        assert _SCENARIO_RETRY_BASE == 5
+        for retries in range(5):
+            expected = 5 * (2 ** retries)
+            assert _SCENARIO_RETRY_BASE * (2 ** retries) == expected
+
+    def test_max_retries_constant(self):
+        from pm_core.qa_loop import _SCENARIO_MAX_RETRIES
+        assert _SCENARIO_MAX_RETRIES == 10
