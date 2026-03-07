@@ -417,12 +417,25 @@ def create_container(
     _READY_SENTINEL = "/tmp/.pm-ready"
     host_uid = os.getuid()
     host_gid = os.getgid()
+    # Propagate host git identity so container commits use the right author
+    git_name = subprocess.run(
+        ["git", "config", "user.name"], capture_output=True, text=True,
+    ).stdout.strip()
+    git_email = subprocess.run(
+        ["git", "config", "user.email"], capture_output=True, text=True,
+    ).stdout.strip()
+
     git_setup = _build_git_setup_script(has_push_proxy=has_push_proxy)
     setup_parts = [
         f"groupadd -g {host_gid} {_CONTAINER_USER} 2>/dev/null",
         f"useradd -u {host_uid} -g {host_gid} -m -s /bin/bash {_CONTAINER_USER} 2>/dev/null",
         f"chown {host_uid}:{host_gid} {_CONTAINER_HOME}",
     ]
+    if git_name and git_email:
+        setup_parts.append(
+            f"su -c 'git config --global user.name \"{git_name}\" && "
+            f"git config --global user.email \"{git_email}\"' {_CONTAINER_USER}"
+        )
     if git_setup:
         setup_parts.append(git_setup)
     setup_parts.append(f"touch {_READY_SENTINEL}")
