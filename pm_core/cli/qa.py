@@ -198,8 +198,6 @@ def qa_run(instruction_id: str, pr_id: str | None):
 
     verdict = state.latest_verdict or "UNKNOWN"
     click.echo(f"\nResult: {verdict}")
-    if state.made_changes:
-        click.echo("  Changes were committed during QA.")
 
 
 @qa.command("standalone")

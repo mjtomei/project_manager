@@ -538,23 +538,24 @@ def wrap_claude_cmd(
 def create_qa_container(
     name: str,
     config: ContainerConfig,
-    repo_root: Path,
-    worktree_path: Path,
+    workdir: Path,
     scratch_path: Path,
     allowed_push_branch: str | None = None,
 ) -> str:
     """Create a detached container for a QA scenario.
 
     Convenience wrapper around create_container with QA-specific mounts:
-      - worktree at /workspace (rw)
+      - workdir at /workspace (rw) — a standalone clone, not a worktree
       - scratch at /scratch (rw)
-      - repo at /repo (ro)
+
+    The container has no access to the parent repo's git directory.
+    If *allowed_push_branch* is set, a push proxy is started so the
+    scenario can push fixes to the PR branch.
     """
     return create_container(
         name=name,
         config=config,
-        workdir=worktree_path,
-        extra_ro_mounts={repo_root: "/repo"},
+        workdir=workdir,
         extra_rw_mounts={scratch_path: _CONTAINER_SCRATCH},
         allowed_push_branch=allowed_push_branch,
     )

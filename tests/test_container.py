@@ -398,8 +398,7 @@ class TestCreateQAContainer:
         cid = create_qa_container(
             name="pm-qa-test-s1",
             config=config,
-            repo_root=Path("/repo"),
-            worktree_path=Path("/worktrees/w1"),
+            workdir=Path("/clones/c1"),
             scratch_path=Path("/scratch/s1"),
         )
 
@@ -407,10 +406,28 @@ class TestCreateQAContainer:
         mock_create.assert_called_once_with(
             name="pm-qa-test-s1",
             config=config,
-            workdir=Path("/worktrees/w1"),
-            extra_ro_mounts={Path("/repo"): "/repo"},
+            workdir=Path("/clones/c1"),
             extra_rw_mounts={Path("/scratch/s1"): _CONTAINER_SCRATCH},
             allowed_push_branch=None,
+        )
+
+    @patch("pm_core.container.create_container")
+    def test_passes_push_branch(self, mock_create):
+        mock_create.return_value = "qa-id"
+        config = ContainerConfig()
+        create_qa_container(
+            name="pm-qa-test-s1",
+            config=config,
+            workdir=Path("/clones/c1"),
+            scratch_path=Path("/scratch/s1"),
+            allowed_push_branch="pm/pr-123-feature",
+        )
+        mock_create.assert_called_once_with(
+            name="pm-qa-test-s1",
+            config=config,
+            workdir=Path("/clones/c1"),
+            extra_rw_mounts={Path("/scratch/s1"): _CONTAINER_SCRATCH},
+            allowed_push_branch="pm/pr-123-feature",
         )
 
 

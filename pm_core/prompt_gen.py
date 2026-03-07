@@ -863,12 +863,11 @@ scenarios.  Here's how the overall QA process works:
 
 1. A **QA planner** analyzed the PR and generated test scenarios based on the
    PR's changes and the project's QA instruction library
-2. Each scenario runs in its **own isolated worktree** (parallel sessions in
+2. Each scenario runs in its **own isolated clone** (parallel sessions in
    other tmux windows), with a specific focus area and test steps
 3. Automated scenarios produce a **verdict** (PASS / NEEDS_WORK / INPUT_REQUIRED)
    when they finish — these are collected by the orchestrator
-4. If a scenario finds issues and fixes them, its commits are **cherry-picked
-   back** to the PR branch automatically
+4. If a scenario finds issues and fixes them, it pushes directly to the PR branch
 5. The overall QA result is aggregated from all scenario verdicts
 
 You can see the other scenario windows in tmux (they're named qa-*-s1, qa-*-s2,
@@ -906,8 +905,8 @@ def generate_qa_child_prompt(data: dict, pr_id: str,
         workdir: Child scenario's own workdir (worktree in worktree_mode,
             or a plain directory otherwise).
         session_name: tmux session name.
-        worktree_mode: When True, the child runs in a git worktree; commits
-            are cherry-picked back by the orchestrator.
+        worktree_mode: When True, the child runs in an isolated clone of the
+            repo and can commit/push fixes to the PR branch.
         scratch_dir: Path to a scratch directory for throwaway test projects.
     """
     pr = store.get_pr(data, pr_id)
@@ -945,15 +944,17 @@ job is to verify runtime behavior, not review code.
     scratch_line = f"\n- **Scratch dir** (throwaway test projects): {scratch_dir}" if scratch_dir else ""
     if worktree_mode:
         workdir_block = f"""\
-- **Your workdir** (isolated worktree): {workdir}{scratch_line}
+- **Your workdir** (isolated clone): {workdir}{scratch_line}
 - **PR workdir** (canonical source): {pr_workdir}"""
         execution_block = f"""\
-1. Inspect and test the code in your workdir (an isolated worktree of the PR branch)
+1. Inspect and test the code in your workdir (an isolated clone of the PR branch)
 2. Execute the test steps described above
 3. If you find issues and can fix them:
    - Implement the fix in your workdir (your current directory)
    - Commit with message prefix `qa: `
-   - Do NOT push — commits are cherry-picked back automatically
+   - Push: `git push origin {branch}`
+   - If push fails (another scenario pushed first), pull and retry:
+     `git pull --rebase origin {branch} && git push origin {branch}`
 4. End with a verdict on its own line — one of:
    - **PASS** — Scenario passed, no issues found
    - **NEEDS_WORK** — Issues found (explain what and whether you fixed them)
@@ -986,13 +987,13 @@ job is to verify runtime behavior, not review code.
 ## How QA Works
 
 You are in one of several QA scenarios running in parallel, each in its own
-isolated worktree.  An orchestrator is monitoring your tmux pane for your
+isolated clone.  An orchestrator is monitoring your tmux pane for your
 final verdict.
 
 - When you output a verdict (PASS / NEEDS_WORK / INPUT_REQUIRED), the
   orchestrator records it and moves on
-- If you commit fixes (with `qa: ` prefix), they will be **cherry-picked
-  back** to the PR branch automatically after all scenarios complete
+- If you commit fixes (with `qa: ` prefix), push them to the PR branch:
+  `git push origin {branch}`
 - Your verdict determines whether the PR passes QA — be thorough but fair
 
 ## Scenario

@@ -146,7 +146,7 @@ class TestPassCountAndAutoMerge:
         }
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_PASS
-        state.made_changes = False
+
 
         with patch("pm_core.tui.qa_loop_ui._trigger_auto_merge") as mock_merge, \
              patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
@@ -168,7 +168,7 @@ class TestPassCountAndAutoMerge:
         }
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_PASS
-        state.made_changes = False
+
 
         with patch("pm_core.tui.qa_loop_ui._trigger_auto_merge") as mock_merge, \
              patch("pm_core.tui.qa_loop_ui._record_qa_note"):
@@ -188,7 +188,7 @@ class TestPassCountAndAutoMerge:
         }
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_PASS
-        state.made_changes = False
+
 
         with patch("pm_core.tui.qa_loop_ui._trigger_auto_merge"), \
              patch("pm_core.tui.qa_loop_ui._record_qa_note"):
@@ -207,7 +207,7 @@ class TestPassCountAndAutoMerge:
         }
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_PASS
-        state.made_changes = False
+
 
         with patch("pm_core.tui.qa_loop_ui._trigger_auto_merge") as mock_merge, \
              patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
@@ -237,7 +237,7 @@ class TestNeedsWorkStrict:
         }
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_NEEDS_WORK
-        state.made_changes = False
+
 
         with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
              patch("pm_core.tui.qa_loop_ui._start_self_driving_review"):
@@ -255,7 +255,7 @@ class TestNeedsWorkStrict:
         }
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_NEEDS_WORK
-        state.made_changes = False
+
 
         with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
              patch("pm_core.tui.qa_loop_ui._start_self_driving_review"):
@@ -275,7 +275,7 @@ class TestNeedsWorkStrict:
         }
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_NEEDS_WORK
-        state.made_changes = False
+
 
         with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
              patch("pm_core.tui.qa_loop_ui._start_self_driving_review") as mock_review:
@@ -293,7 +293,7 @@ class TestNeedsWorkStrict:
         }
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_NEEDS_WORK
-        state.made_changes = False
+
 
         with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
              patch("pm_core.tui.qa_loop_ui._start_self_driving_review") as mock_review:
@@ -535,7 +535,7 @@ class TestInputRequiredPause:
         }
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_INPUT_REQUIRED
-        state.made_changes = False
+
 
         with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
              patch("pm_core.tui.qa_loop_ui.start_qa") as mock_restart, \
@@ -559,7 +559,7 @@ class TestInputRequiredPause:
         }
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_INPUT_REQUIRED
-        state.made_changes = False
+
 
         with patch("pm_core.tui.qa_loop_ui._record_qa_note"):
             _on_qa_complete(app, state)
@@ -578,7 +578,7 @@ class TestInputRequiredPause:
         }
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_INPUT_REQUIRED
-        state.made_changes = False
+
 
         with patch("pm_core.tui.qa_loop_ui._record_qa_note"):
             _on_qa_complete(app, state)
@@ -598,7 +598,7 @@ class TestInputRequiredPause:
         # Phase 1: QA completes with INPUT_REQUIRED — loop pauses
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_INPUT_REQUIRED
-        state.made_changes = False
+
 
         with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
              patch("pm_core.tui.qa_loop_ui.start_qa"), \
@@ -632,7 +632,7 @@ class TestInputRequiredPause:
         # Phase 1: QA completes with INPUT_REQUIRED
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_INPUT_REQUIRED
-        state.made_changes = False
+
 
         with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
              patch("pm_core.tui.qa_loop_ui.start_qa"), \
@@ -791,30 +791,6 @@ class TestStartSelfDrivingReview:
 class TestEdgeCases:
     """Edge cases in self-driving QA behavior."""
 
-    def test_pass_with_changes_resets_and_reviews(self, tmp_path):
-        """PASS but with made_changes should reset pass_count and start review."""
-        from pm_core.tui.qa_loop_ui import _on_qa_complete
-
-        app = _make_app(tmp_path)
-        app._self_driving_qa["pr-001"] = {
-            "strict": True, "pass_count": 2, "required_passes": 3
-        }
-        state = QALoopState(pr_id="pr-001")
-        state.latest_verdict = VERDICT_PASS
-        state.made_changes = True  # Changes were committed
-
-        with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
-             patch("pm_core.tui.qa_loop_ui._start_self_driving_review") as mock_review:
-            _on_qa_complete(app, state)
-
-        # pass_count should be reset to 0
-        assert app._self_driving_qa["pr-001"]["pass_count"] == 0
-        # Should transition to in_review and start review
-        data = store.load(app._root)
-        pr = store.get_pr(data, "pr-001")
-        assert pr["status"] == "in_review"
-        mock_review.assert_called_once()
-
     def test_qa_pass_count_setting_default(self):
         """Default qa-pass-count should be 1."""
         from pm_core.tui.qa_loop_ui import _get_qa_pass_count
@@ -885,7 +861,7 @@ class TestEdgeCases:
         }
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_PASS
-        state.made_changes = False
+
 
         with patch("pm_core.tui.review_loop_ui._maybe_auto_merge") as mock_merge, \
              patch("pm_core.tui.qa_loop_ui._record_qa_note"):

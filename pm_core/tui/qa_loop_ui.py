@@ -283,10 +283,10 @@ def _on_qa_complete(app, state: QALoopState) -> None:
     verdict = state.latest_verdict
     sd = app._self_driving_qa.get(pr_id)
 
-    _log.info("QA complete for %s: verdict=%s changes=%s self_driving=%s",
-              pr_id, verdict, state.made_changes, bool(sd))
+    _log.info("QA complete for %s: verdict=%s self_driving=%s",
+              pr_id, verdict, bool(sd))
 
-    if verdict == VERDICT_PASS and not state.made_changes:
+    if verdict == VERDICT_PASS:
         # All scenarios passed with no changes
         if sd:
             sd["pass_count"] += 1
@@ -320,7 +320,7 @@ def _on_qa_complete(app, state: QALoopState) -> None:
                     f"[green bold]QA PASS[/] for {pr_id} — "
                     "merge manually or enable auto-start"
                 )
-    elif verdict == VERDICT_NEEDS_WORK or state.made_changes:
+    elif verdict == VERDICT_NEEDS_WORK:
         # Issues found or changes committed → back to review
         app.log_message(
             f"[yellow bold]QA NEEDS_WORK[/] for {pr_id} — returning to review"
@@ -433,8 +433,6 @@ def _record_qa_note(app, state: QALoopState) -> None:
             v = state.scenario_verdicts.get(s.index, "?")
             summary_parts.append(f"{s.title}: {v}")
         note_text = f"QA {state.latest_verdict}: " + "; ".join(summary_parts)
-        if state.made_changes:
-            note_text += " [changes committed]"
         if state.qa_workdir:
             note_text += f" (workdir: {state.qa_workdir})"
         notes = pr.get("notes") or []
