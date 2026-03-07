@@ -2021,6 +2021,19 @@ def run_qa_sync(
     # --- Phase 1: Planning (if no scenarios pre-loaded) ---
     if state.planning_phase and not state.scenarios:
         _log.info("QA planning phase for %s", state.pr_id)
+
+        # In prompt/review modes, generate the QA spec in a separate
+        # session before launching the planner.  In auto mode the
+        # planner prompt includes a preamble to generate it inline.
+        from pm_core.spec_gen import ensure_spec
+        try:
+            root = store.find_project_root()
+        except FileNotFoundError:
+            root = None
+        state.latest_output = "Generating QA spec..."
+        _notify()
+        ensure_spec(data, state.pr_id, "qa", root=root, interactive=False)
+
         state.latest_output = "Planning QA scenarios..."
         _notify()
 
