@@ -638,13 +638,22 @@ def pr_spec_approve(pr_id: str):
         spec_gen.approve_spec(data, pr_id, root=root)
         return
 
-    header = f"# Spec review: {phase} for {pr_id}\n# Edit as needed, then save and close to approve.\n# Delete all content to reject.\n\n"
+    header_lines = [
+        f"# Spec review: {phase} for {pr_id}",
+        "# Edit as needed, then save and close to approve.",
+        "# Delete all content to reject.",
+        "",
+    ]
+    header = "\n".join(header_lines) + "\n"
     edited = click.edit(header + spec_text)
     if edited is not None:
-        # Strip header lines
+        # Strip only the known header lines (not arbitrary # lines,
+        # which would destroy markdown H1 headings in the spec).
         lines = edited.split("\n")
-        content_lines = [l for l in lines if not l.startswith("# ")]
-        edited_content = "\n".join(content_lines).strip()
+        # Remove leading lines that match our header exactly
+        while lines and lines[0] in header_lines:
+            lines.pop(0)
+        edited_content = "\n".join(lines).strip()
         if not edited_content:
             click.echo("Spec rejected (empty content). Clearing pending review.")
             spec_gen.approve_spec(data, pr_id, root=root, edited_text="")
@@ -860,6 +869,10 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
 
     click.echo(f"\nPR {_pr_display_id(pr_entry)} is now in_progress on {platform.node()}")
     click.echo(f"Work directory: {work_path}")
+
+    # In prompt/review modes, generate the impl spec in a separate session
+    # before launching the main implementation session.
+    spec_gen.ensure_spec(data, pr_id, "impl", root=root)
 
     prompt = prompt_gen.generate_prompt(data, pr_id, session_name=pm_session)
 
