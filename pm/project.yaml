@@ -3920,4 +3920,36 @@ prs:
   reviewed_at: '2026-03-06T22:14:19.750142+00:00'
   merged_at: null
   notes: []
+- id: pr-88cb7bf
+  plan: plan-qa
+  title: Add pm container command to build project-specific Docker images
+  branch: pm/pr-88cb7bf-add-pm-container-command-to-build-project-specific-do
+  status: pending
+  depends_on: []
+  description: 'Add a pm container subcommand that launches an interactive Claude session
+    to create a Docker image with all project dependencies preinstalled.
+
+
+    ## Behavior
+
+    - pm container build (or similar): starts a Claude session with a prompt that
+    analyzes the project''s dependency files (requirements.txt, package.json, Cargo.toml,
+    etc.), the existing base Dockerfile/image, and generates a Dockerfile that installs
+    all project dependencies on top of the base image
+
+    - The session builds and tags the image, then updates the container config to use
+    it
+
+    - Supports iterating — if the build fails, Claude fixes the Dockerfile and retries
+
+
+    ## Motivation
+
+    - Currently the container image must be manually prepared with project dependencies
+
+    - Projects with complex dependency chains (native extensions, system packages) are
+    tedious to set up by hand
+
+    - Having a dedicated command makes container setup a first-class workflow step'
+  notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-c2352be-add-pm-qa-start-cli-command-for-full-9964ad22

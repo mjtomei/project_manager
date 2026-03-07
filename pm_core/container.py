@@ -283,9 +283,25 @@ def create_container(
     # --- Create pm user with matching uid/gid, then sleep ---
     host_uid = os.getuid()
     host_gid = os.getgid()
+
+    # Propagate host git identity so container commits use the right author
+    git_name = subprocess.run(
+        ["git", "config", "user.name"], capture_output=True, text=True,
+    ).stdout.strip()
+    git_email = subprocess.run(
+        ["git", "config", "user.email"], capture_output=True, text=True,
+    ).stdout.strip()
+    git_setup = ""
+    if git_name and git_email:
+        git_setup = (
+            f"su -c 'git config --global user.name \"{git_name}\" && "
+            f"git config --global user.email \"{git_email}\"' {_CONTAINER_USER}; "
+        )
+
     setup = (
         f"groupadd -g {host_gid} {_CONTAINER_USER} 2>/dev/null; "
         f"useradd -u {host_uid} -g {host_gid} -m -s /bin/bash {_CONTAINER_USER} 2>/dev/null; "
+        f"{git_setup}"
         f"exec sleep infinity"
     )
     cmd.extend([config.image, "bash", "-c", setup])
