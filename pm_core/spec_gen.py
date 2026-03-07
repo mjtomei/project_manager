@@ -439,7 +439,8 @@ Start with Step 0 below.  Once the spec is saved, proceed to the main task.
 
 
 def ensure_spec(data: dict, pr_id: str, phase: str,
-                root: Path | None = None) -> str | None:
+                root: Path | None = None,
+                interactive: bool = True) -> str | None:
     """Ensure a spec exists for prompt/review modes, generating if needed.
 
     In prompt/review modes, this runs a separate ``claude -p`` session to
@@ -447,7 +448,9 @@ def ensure_spec(data: dict, pr_id: str, phase: str,
     this is a no-op (the preamble handles it inline).
 
     For review mode, the generated spec is printed and the user is asked
-    to confirm before proceeding.
+    to confirm before proceeding (only when *interactive* is True).
+    When *interactive* is False (e.g. background threads), the spec is
+    generated and saved but review is deferred to the TUI's V key.
 
     Returns the spec text, or None if generation was skipped (auto mode
     or spec already exists).
@@ -477,18 +480,23 @@ def ensure_spec(data: dict, pr_id: str, phase: str,
         return None
 
     if needs_review:
-        click.echo(f"\n{'='*60}")
-        click.echo(f"Generated {phase} spec for review:")
-        click.echo(f"{'='*60}\n")
-        click.echo(spec_text)
-        click.echo(f"\n{'='*60}")
-        if not click.confirm("Approve this spec and proceed?"):
-            click.echo("Spec not approved. Edit with: "
-                       f"pm pr spec-approve {pr_id}")
-            raise SystemExit(1)
-        # Approved — clear pending
-        approve_spec(data, pr_id, root=root)
-        click.echo("Spec approved.")
+        if interactive:
+            click.echo(f"\n{'='*60}")
+            click.echo(f"Generated {phase} spec for review:")
+            click.echo(f"{'='*60}\n")
+            click.echo(spec_text)
+            click.echo(f"\n{'='*60}")
+            if not click.confirm("Approve this spec and proceed?"):
+                click.echo("Spec not approved. Edit with: "
+                           f"pm pr spec-approve {pr_id}")
+                raise SystemExit(1)
+            # Approved — clear pending
+            approve_spec(data, pr_id, root=root)
+            click.echo("Spec approved.")
+        else:
+            _log.info("ensure_spec: spec needs review for %s/%s but "
+                      "running non-interactively — deferring to TUI",
+                      pr_id, phase)
     else:
         click.echo(f"Generated {phase} spec ({len(spec_text)} chars).")
 
