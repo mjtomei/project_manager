@@ -3929,6 +3929,7 @@ prs:
     created_at: '2026-03-14T22:18:54Z'
     last_edited: '2026-03-14T22:18:54Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-942aa21-add-spec-generation-step-between-pr--e2dbb884
+  spec_qa: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-942aa21-add-spec-generation-step-between-pr--e2dbb884/pm/specs/pr-942aa21/qa.md
 - id: pr-4585fd3
   plan: tui-ux
   title: Use resolved display IDs instead of raw PR IDs in all output
