@@ -255,3 +255,4 @@ others.
 - Python 3.12+
 - click, pyyaml, textual (installed via `pip install -r requirements.txt`)
 - `gh` CLI only if using the github backend
+
