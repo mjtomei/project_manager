@@ -216,6 +216,7 @@ def setup_tmux_session() -> str:
         "after-resize-pane": "resize_pane",
         "after-select-window": "switch_window",
         "window-linked": "create_window",
+        "after-split-window": "split_pane",
     }
     for hook, step in hooks.items():
         subprocess.run(
@@ -433,7 +434,7 @@ Use the `cat` command to read it.
 
 6. **split_pane** — Split a pane
    - Teach: Ctrl+b then % for vertical split, Ctrl+b then " for horizontal split
-   - This will be detected by the create hook
+   - The after-split-window hook will detect this automatically
 
 ## Important Notes
 - This is running on a dedicated tmux socket, separate from any pm sessions
