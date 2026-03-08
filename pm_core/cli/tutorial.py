@@ -5,6 +5,7 @@ for tmux, TUI navigation, and git fundamentals.
 """
 
 import os
+import shlex
 import subprocess
 import shutil
 
@@ -240,7 +241,7 @@ def _run_tui_module(*, replace_process: bool = True):
 
     # Launch TUI in right pane
     if len(panes) >= 2:
-        tui_cmd = f"PM_PROJECT='{project_dir}' pm _tui"
+        tui_cmd = f"PM_PROJECT={shlex.quote(str(project_dir))} pm _tui"
         _send_keys(socket_path, panes[1], tui_cmd)
 
     click.echo("TUI tutorial session ready.")
@@ -274,7 +275,7 @@ def _run_git_module(*, replace_process: bool = True):
     # Welcome message in right pane
     if len(panes) >= 2:
         welcome = (
-            f"cd '{repo_dir}' && "
+            f"cd {shlex.quote(str(repo_dir))} && "
             "echo '=== Git Tutorial Practice Repo ==='; "
             "echo ''; "
             "echo 'Run git commands here.'; "
