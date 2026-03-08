@@ -82,6 +82,9 @@ def save_progress(progress: dict) -> None:
 
 def mark_step_complete(module: str, step: str) -> None:
     """Mark a tutorial step as complete."""
+    valid_steps = MODULE_STEPS.get(module, [])
+    if valid_steps and step not in valid_steps:
+        return  # Ignore invalid step names silently
     progress = load_progress()
     modules = progress.setdefault("modules", {})
     mod_data = modules.setdefault(module, {"completed_steps": [], "current_step": None})
@@ -430,7 +433,8 @@ Use the `cat` command to read it.
    - Teach: Press Ctrl+b then [ to enter copy mode, then use arrow keys or Page Up/Down
    - Press q to exit copy mode
    - For this step, have the user run `seq 1 100` first to create scrollable content
-   - Then mark it complete manually: they should type a command you provide
+   - This step has no hook — after they practice scrolling, have them mark it complete:
+     `python3 -c "from pm_core.tutorial import mark_step_complete; mark_step_complete('tmux', 'scroll_history')"`
 
 6. **split_pane** — Split a pane
    - Teach: Ctrl+b then % for vertical split, Ctrl+b then " for horizontal split
