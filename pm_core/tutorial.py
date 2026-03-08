@@ -139,11 +139,6 @@ def get_completion_summary() -> dict[str, tuple[int, int]]:
 # Hook script for tmux module — written to a temp file and executed by hooks
 # ---------------------------------------------------------------------------
 
-def _hook_script_path() -> Path:
-    """Path to the tmux hook helper script."""
-    return TUTORIAL_DIR / "hook_helper.sh"
-
-
 def write_hook_script() -> Path:
     """Write the hook helper script that tmux hooks call to update progress."""
     script = TUTORIAL_DIR / "hook_helper.sh"

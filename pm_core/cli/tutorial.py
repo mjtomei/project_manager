@@ -70,10 +70,19 @@ def _send_keys(socket_path: str, pane_id: str, keys: str):
     )
 
 
-def _attach_session(socket_path: str, session_name: str):
-    """Attach to a tutorial tmux session (replaces current process)."""
-    os.execvp("tmux", ["tmux", "-S", socket_path, "attach-session",
-                        "-t", session_name])
+def _attach_session(socket_path: str, session_name: str, *, replace_process: bool = True):
+    """Attach to a tutorial tmux session.
+
+    When *replace_process* is True (default), replaces the current process via
+    ``execvp`` — suitable when this is the last action.  When False, uses
+    ``subprocess.call`` so that control returns after the user detaches.
+    """
+    if replace_process:
+        os.execvp("tmux", ["tmux", "-S", socket_path, "attach-session",
+                            "-t", session_name])
+    else:
+        subprocess.call(["tmux", "-S", socket_path, "attach-session",
+                         "-t", session_name])
 
 
 def _print_progress():
@@ -134,20 +143,23 @@ def tutorial(module, reset, status):
     _check_prereqs()
 
     if module:
-        _run_module(module)
+        _run_module(module, replace_process=True)
     else:
-        # Run all modules in sequence
-        for mod in tutorial_mod.MODULES:
+        # Run all modules in sequence.  Use subprocess.call for attach so
+        # that control returns here after each module (os.execvp would
+        # replace the process and prevent advancing to the next module).
+        remaining = [m for m in tutorial_mod.MODULES
+                     if not tutorial_mod.is_module_complete(m)]
+        for mod in remaining:
+            _run_module(mod, replace_process=False)
             if not tutorial_mod.is_module_complete(mod):
-                _run_module(mod)
-                if not tutorial_mod.is_module_complete(mod):
-                    # User quit before completing — don't auto-advance
-                    break
+                # User quit before completing — don't auto-advance
+                break
         _print_progress()
         click.echo("Run 'pm tutorial --status' to check your progress anytime.")
 
 
-def _run_module(module: str):
+def _run_module(module: str, *, replace_process: bool = True):
     """Launch a specific tutorial module."""
     dispatch = {
         "tmux": _run_tmux_module,
@@ -156,10 +168,10 @@ def _run_module(module: str):
     }
     runner = dispatch.get(module)
     if runner:
-        runner()
+        runner(replace_process=replace_process)
 
 
-def _run_tmux_module():
+def _run_tmux_module(*, replace_process: bool = True):
     """Run the tmux basics tutorial module."""
     click.echo("Setting up tmux tutorial...")
 
@@ -202,10 +214,10 @@ def _run_tmux_module():
     click.echo("(Detach with Ctrl+b then d to exit)")
     click.echo()
 
-    _attach_session(socket_path, session_name)
+    _attach_session(socket_path, session_name, replace_process=replace_process)
 
 
-def _run_tui_module():
+def _run_tui_module(*, replace_process: bool = True):
     """Run the TUI navigation tutorial module."""
     click.echo("Setting up TUI tutorial...")
 
@@ -235,10 +247,10 @@ def _run_tui_module():
     click.echo("Attaching... (Detach with Ctrl+b then d)")
     click.echo()
 
-    _attach_session(socket_path, session_name)
+    _attach_session(socket_path, session_name, replace_process=replace_process)
 
 
-def _run_git_module():
+def _run_git_module(*, replace_process: bool = True):
     """Run the git fundamentals tutorial module."""
     click.echo("Setting up git tutorial...")
 
@@ -277,4 +289,4 @@ def _run_git_module():
     click.echo("Attaching... (Detach with Ctrl+b then d)")
     click.echo()
 
-    _attach_session(socket_path, session_name)
+    _attach_session(socket_path, session_name, replace_process=replace_process)
