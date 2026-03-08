@@ -9,6 +9,7 @@ Progress is tracked in ~/.pm/tutorial/progress.json and persists across sessions
 """
 
 import json
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -133,7 +134,8 @@ def get_completion_summary() -> dict[str, tuple[int, int]]:
     result = {}
     for mod, steps in MODULE_STEPS.items():
         mod_data = progress.get("modules", {}).get(mod, {})
-        completed = len(mod_data.get("completed_steps", []))
+        valid = set(steps)
+        completed = len(valid & set(mod_data.get("completed_steps", [])))
         result[mod] = (completed, len(steps))
     return result
 
@@ -224,7 +226,7 @@ def setup_tmux_session() -> str:
     for hook, step in hooks.items():
         subprocess.run(
             ["tmux", "-S", socket_path, "set-hook", "-t", session_name,
-             hook, f'run-shell "{hook_script} {step}"'],
+             hook, f"run-shell {shlex.quote(str(hook_script) + ' ' + step)}"],
             capture_output=True,
         )
 
