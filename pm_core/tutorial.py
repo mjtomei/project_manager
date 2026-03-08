@@ -9,9 +9,7 @@ Progress is tracked in ~/.pm/tutorial/progress.json and persists across sessions
 """
 
 import json
-import os
 import subprocess
-import tempfile
 from pathlib import Path
 
 from pm_core.paths import pm_home
@@ -150,15 +148,25 @@ def write_hook_script() -> Path:
     """Write the hook helper script that tmux hooks call to update progress."""
     script = TUTORIAL_DIR / "hook_helper.sh"
     _ensure_dir()
-    # This script is called by tmux hooks with the step name as $1
+    # This script is called by tmux hooks with the step name as $1.
+    # Validate the step name against a whitelist to avoid injection.
+    valid_steps = " ".join(TMUX_STEPS)
     script.write_text(f"""\
 #!/usr/bin/env bash
 # Called by tmux hooks to mark tutorial steps complete
 STEP="$1"
-python3 -c "
+VALID_STEPS="{valid_steps}"
+# Validate step name against whitelist
+for s in $VALID_STEPS; do
+    if [ "$STEP" = "$s" ]; then
+        python3 -c "
+import sys
 from pm_core.tutorial import mark_step_complete
-mark_step_complete('tmux', '$STEP')
-" 2>/dev/null
+mark_step_complete('tmux', sys.argv[1])
+" "$STEP" 2>/dev/null
+        exit 0
+    fi
+done
 """)
     script.chmod(0o755)
     return script
@@ -171,7 +179,7 @@ mark_step_complete('tmux', '$STEP')
 def setup_tmux_session() -> str:
     """Create a fresh tmux session for the tmux tutorial module.
 
-    Returns the session name. Uses a dedicated socket to avoid
+    Returns the socket path. Uses a dedicated socket to avoid
     interfering with existing pm sessions.
     """
     session_name = "pm-tutorial-tmux"
