@@ -865,7 +865,19 @@ def run_qa_sync(
         return state
 
     window_name = _compute_qa_window_name(pr_data)
-    workdir_path = pr_data.get("workdir") or str(pm_root)
+    workdir_path = pr_data.get("workdir")
+
+    # Ensure workdir exists on this machine
+    if not workdir_path or not Path(workdir_path).is_dir():
+        from pm_core.cli.helpers import _ensure_workdir
+        data_tmp = store.load(pm_root)
+        workdir_path = _ensure_workdir(data_tmp, pr_data, pm_root)
+        if not workdir_path:
+            _log.error("QA: could not set up workdir for %s", state.pr_id)
+            state.running = False
+            state.latest_verdict = "ERROR"
+            state.latest_output = "Could not set up workdir on this machine"
+            return state
 
     # Create QA workdir
     if not state.qa_workdir:
