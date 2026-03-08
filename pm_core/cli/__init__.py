@@ -526,6 +526,7 @@ COMMANDS
   pm bench exercises            List available benchmark exercises
   pm bench run <model>          Run benchmark with tournament selection
 
+  pm tutorial                    Interactive guided tutorial (tmux, TUI, git)
   pm guide                      Guided workflow (init → plan → PRs → start)
   pm notes                      Open session notes in editor
   pm prompt [pr-id]             Print Claude prompt for a PR
@@ -577,7 +578,7 @@ def getting_started_cmd():
 # Import submodules to register their commands on ``cli``.
 # This must be at the bottom of the file, after ``cli`` is defined.
 # ---------------------------------------------------------------------------
-from pm_core.cli import pr, plan, session, tui, guide, meta, cluster, bench, watcher, qa, container  # noqa: E402, F401
+from pm_core.cli import pr, plan, session, tui, guide, meta, cluster, bench, watcher, qa, container, tutorial  # noqa: E402, F401
 
 
 def main():
