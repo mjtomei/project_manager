@@ -410,6 +410,75 @@ def _workdirs_dir(data: dict) -> Path:
     return base / name
 
 
+def _ensure_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
+    """Ensure the PR's workdir exists on this machine, cloning if needed.
+
+    If the workdir already exists, returns it as-is.  If it doesn't (e.g.
+    the PR was started on another machine), clones the repo, checks out the
+    PR branch, and updates the pr_entry and state file.
+
+    Returns the workdir path string, or None on failure.
+    """
+    import shutil
+
+    workdir = pr_entry.get("workdir")
+    if workdir and Path(workdir).is_dir():
+        return workdir
+
+    # Need to clone — get repo info
+    repo_url = data["project"].get("repo")
+    if not repo_url:
+        _log.warning("_ensure_workdir: no repo URL in project config")
+        return None
+
+    base_branch = data["project"].get("base_branch", "master")
+    branch = pr_entry.get("branch") or f"pm/{pr_entry['id']}"
+    pr_id = pr_entry["id"]
+
+    project_dir = _workdirs_dir(data)
+    project_dir.mkdir(parents=True, exist_ok=True)
+    tmp_path = project_dir / f".tmp-{pr_id}"
+    if tmp_path.exists():
+        shutil.rmtree(tmp_path)
+
+    import click
+    click.echo(f"Workdir missing on this machine — cloning {repo_url}...")
+    try:
+        git_ops.clone(repo_url, tmp_path, branch=base_branch)
+    except Exception as e:
+        _log.warning("_ensure_workdir: clone failed: %s", e)
+        click.echo(f"Failed to clone repo: {e}", err=True)
+        return None
+
+    _resolve_repo_id(data, tmp_path, root)
+
+    base_hash = git_ops.run_git(
+        "rev-parse", "--short=8", "HEAD", cwd=tmp_path, check=False
+    ).stdout.strip()
+
+    branch_slug = store.slugify(branch.replace("/", "-"))
+    dir_name = f"{branch_slug}-{base_hash}" if base_hash else branch_slug
+    final_project_dir = _workdirs_dir(data)
+    final_project_dir.mkdir(parents=True, exist_ok=True)
+    work_path = final_project_dir / dir_name
+
+    if work_path.exists():
+        shutil.rmtree(tmp_path)
+    else:
+        shutil.move(str(tmp_path), str(work_path))
+
+    click.echo(f"Checking out branch {branch}...")
+    git_ops.checkout_branch(work_path, branch, create=True)
+
+    import platform
+    pr_entry["workdir"] = str(work_path)
+    pr_entry["agent_machine"] = platform.node()
+    save_and_push(data, root, f"pm: re-clone workdir for {pr_id}")
+
+    click.echo(f"Workdir ready: {work_path}")
+    return str(work_path)
+
+
 def _resolve_repo_id(data: dict, workdir: Path, root: Path) -> None:
     """Resolve and cache the target repo's root commit hash."""
     if data.get("project", {}).get("repo_id"):
