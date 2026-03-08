@@ -1,114 +1,85 @@
-"""Graph widget that renders PR nodes and edges in the TUI."""
+"""Graph widget that renders PR nodes and edges in the TUI.
+
+Compositional architecture: TechTree is a container that manages
+individually-positioned PRNode widgets and a cached EdgeCanvas layer.
+Spinner updates only refresh the 2-3 active nodes instead of
+repainting the entire tree.
+"""
 
 from textual.widget import Widget
 from textual.reactive import reactive
 from rich.text import Text
-from rich.cells import cell_len
 from rich.console import RenderableType
 
 from pm_core.tui import item_message
 from pm_core.tui.tree_layout import compute_tree_layout, SORT_FIELDS, SORT_FIELD_KEYS
-
-
-STATUS_ICONS = {
-    "pending": "○",
-    "in_progress": "◎",
-    "in_review": "◉",
-    "qa": "●",
-    "merged": "✓",
-    "closed": "✗",
-    "blocked": "✗",
-}
-
-VERDICT_MARKERS = {
-    "PASS": "✓",
-    "PASS_WITH_SUGGESTIONS": "~",
-    "NEEDS_WORK": "✗",
-    "KILLED": "☠",
-    "TIMEOUT": "⏱",
-    "ERROR": "!",
-    "INPUT_REQUIRED": "⏸",
-}
-
-VERDICT_STYLES = {
-    "PASS": "bold green",
-    "PASS_WITH_SUGGESTIONS": "bold yellow",
-    "NEEDS_WORK": "bold red",
-    "KILLED": "bold red",
-    "TIMEOUT": "bold red",
-    "ERROR": "bold red",
-    "INPUT_REQUIRED": "bold red",
-}
-
-SPINNER_FRAMES = "◐◓◑◒"
-
-STATUS_STYLES = {
-    "pending": "white",
-    "in_progress": "bold yellow",
-    "in_review": "bold cyan",
-    "qa": "bold magenta",
-    "merged": "bold green",
-    "closed": "dim red",
-    "blocked": "bold red",
-}
-
-# Subtle background tints for status
-STATUS_BG = {
-    "pending": "",                # no background
-    "in_progress": "on #333300",  # subtle yellow
-    "in_review": "on #003333",    # subtle cyan
-    "qa": "on #330033",           # subtle magenta
-    "merged": "on #003300",       # subtle green
-    "closed": "on #220000",       # dim red
-    "blocked": "on #330000",      # subtle red
-}
-
-# Status filter cycle order (None = show all)
-STATUS_FILTER_CYCLE = [None, "pending", "in_progress", "in_review", "qa", "merged", "closed"]
-
-# Node dimensions
-NODE_W = 24
-NODE_H = 5  # 5 lines: top border, id, title, status, bottom border
-H_GAP = 6
-V_GAP = 2
+from pm_core.tui.pr_node import (
+    PRNode,
+    STATUS_ICONS, STATUS_STYLES, STATUS_BG, STATUS_FILTER_CYCLE,
+    SPINNER_FRAMES, VERDICT_MARKERS, VERDICT_STYLES,
+    NODE_W, NODE_H, H_GAP, V_GAP,
+)
+from pm_core.tui.edge_canvas import EdgeCanvas
 
 
 PRSelected, _PRActivated = item_message("PR", "pr_id")
 
 
-class TechTree(Widget):
-    """Renders the PR dependency graph as a navigable tech tree."""
+class TechTree(Widget, can_focus=True):
+    """Renders the PR dependency graph as a navigable tech tree.
 
-    can_focus = True
+    Composes individual PRNode widgets (absolute-positioned) over a
+    cached EdgeCanvas background layer.  Animation ticks only refresh
+    the few nodes that have active spinners.
+    """
 
     selected_index: reactive[int] = reactive(0)
     prs: reactive[list] = reactive(list, init=False)
+
+    DEFAULT_CSS = """
+    TechTree {
+        height: auto;
+        width: auto;
+        padding: 1 2;
+    }
+    """
 
     def __init__(self, prs: list[dict] | None = None, **kwargs):
         super().__init__(**kwargs)
         self._prs = prs or []
         self._ordered_ids: list[str] = []
-        self._node_positions: dict[str, tuple[int, int]] = {}  # pr_id -> (x_char, row)
-        self._hidden_plans: set[str] = set()       # plan IDs to hide ("_standalone" for null-plan PRs)
-        self._plan_map: dict[str, dict] = {}       # plan_id -> plan dict (for name lookup)
-        self._plan_label_rows: dict[str, int] = {} # plan_id -> row number for label
-        self._hidden_plan_label_rows: dict[str, int] = {}  # hidden plan_id -> row for collapsed label
-        self._hidden_label_ids: list[str] = []              # ["_hidden:plan-001", ...] for navigation
-        self._plan_group_order: list[str] = []              # ordered plan_ids (visible groups)
-        self._jump_plan_scroll: bool = False                  # flag: scroll plan label to top
+        self._node_positions: dict[str, tuple[int, int]] = {}
+        self._hidden_plans: set[str] = set()
+        self._plan_map: dict[str, dict] = {}
+        self._plan_label_rows: dict[str, int] = {}
+        self._hidden_plan_label_rows: dict[str, int] = {}
+        self._hidden_label_ids: list[str] = []
+        self._plan_group_order: list[str] = []
+        self._jump_plan_scroll: bool = False
         from pm_core.paths import get_global_setting
-        self._hide_merged: bool = get_global_setting("hide-merged")  # toggle: hide merged PRs
-        self._hide_closed: bool = True                            # toggle: hide closed PRs
-        self._status_filter: str | None = None                    # filter to show only this status
-        self._sort_field: str | None = None                       # sort field (None = updated_at default)
-        self._anim_frame: int = 0                                  # animation frame counter
+        self._hide_merged: bool = get_global_setting("hide-merged")
+        self._hide_closed: bool = True
+        self._status_filter: str | None = None
+        self._sort_field: str | None = None
+        self._anim_frame: int = 0
+        # Widget references
+        self._node_widgets: dict[str, PRNode] = {}
+        self._edge_canvas: EdgeCanvas | None = None
+        # Layout cache
+        self._layout_cache_key: tuple | None = None
+        # Neighbor map for keyboard navigation
+        self._neighbors: dict[str, dict[str, str | None]] = {}
+
+    def compose(self):
+        yield EdgeCanvas(id="edge-canvas")
 
     def on_mount(self) -> None:
+        self._edge_canvas = self.query_one("#edge-canvas", EdgeCanvas)
+        self._edge_canvas.styles.position = "absolute"
         self.prs = self._prs
         self._recompute()
 
     def apply_project_settings(self, project: dict) -> None:
-        """Apply per-project display settings (overrides globals if present)."""
         if "hide_merged" in project:
             self._hide_merged = bool(project["hide_merged"])
 
@@ -116,26 +87,20 @@ class TechTree(Widget):
         self._prs = prs
         self.prs = prs
         self._recompute()
-        self.refresh(layout=True)
+        self._rebuild_widgets()
 
     def select_pr(self, pr_id: str) -> None:
-        """Move the cursor to the given PR if it exists in the tree."""
         if pr_id and pr_id in self._ordered_ids:
             idx = self._ordered_ids.index(pr_id)
             if idx != self.selected_index:
                 self.selected_index = idx
-                self.refresh()
+                self._update_selection()
             self.call_after_refresh(self._scroll_selected_into_view)
 
     def update_plans(self, plans: list[dict]) -> None:
-        """Store plan name mapping for label rendering."""
         self._plan_map = {p["id"]: p for p in plans if p.get("id")}
 
     def get_selected_plan(self) -> str | None:
-        """Returns plan ID (or '_standalone') of the currently selected node.
-
-        For hidden labels, extracts the plan_id from the virtual ID.
-        """
         if not self._ordered_ids:
             return None
         sel = self._ordered_ids[self.selected_index]
@@ -148,7 +113,6 @@ class TechTree(Widget):
         return pr.get("plan") or "_standalone"
 
     def get_plan_display_name(self, plan_id: str) -> str:
-        """Returns label text like 'plan-001: Import from existing repo' or 'Standalone'."""
         if plan_id == "_standalone":
             return "Standalone"
         plan = self._plan_map.get(plan_id)
@@ -156,8 +120,32 @@ class TechTree(Widget):
             return f"{plan_id}: {plan['name']}"
         return plan_id
 
+    @property
+    def selected_pr_id(self) -> str | None:
+        if not self._ordered_ids:
+            return None
+        sel = self._ordered_ids[self.selected_index]
+        if sel.startswith("_hidden:"):
+            return None
+        return sel
+
+    @property
+    def selected_is_hidden_label(self) -> bool:
+        if not self._ordered_ids:
+            return False
+        return self._ordered_ids[self.selected_index].startswith("_hidden:")
+
+    def advance_animation(self) -> None:
+        """Advance animation frame. Only refreshes nodes with active spinners."""
+        self._anim_frame = (self._anim_frame + 1) % len(SPINNER_FRAMES)
+        for node in self._node_widgets.values():
+            node.advance_animation()
+
+    # ------------------------------------------------------------------
+    # Layout computation (with caching)
+    # ------------------------------------------------------------------
+
     def _get_viewport_width(self) -> int | None:
-        """Return viewport width in characters, or None if unknown."""
         try:
             container = self.parent if self.parent else self
             vw = container.size.width if hasattr(container, "size") else 0
@@ -167,8 +155,29 @@ class TechTree(Widget):
             pass
         return None
 
+    def _make_cache_key(self) -> tuple:
+        """Build a hashable key from all inputs that affect layout."""
+        pr_tuples = tuple(
+            (pr["id"], pr.get("status"), pr.get("plan"),
+             tuple(sorted(pr.get("depends_on") or [])))
+            for pr in sorted(self._prs, key=lambda p: p["id"])
+        )
+        return (
+            pr_tuples,
+            frozenset(self._hidden_plans),
+            self._status_filter,
+            self._hide_merged,
+            self._hide_closed,
+            self._get_viewport_width(),
+            self._sort_field,
+        )
+
     def _recompute(self) -> None:
-        """Recompute layout positions using the tree_layout module."""
+        """Recompute layout positions, using cache when possible."""
+        cache_key = self._make_cache_key()
+        if cache_key == self._layout_cache_key:
+            return
+
         result = compute_tree_layout(
             self._prs,
             hidden_plans=self._hidden_plans,
@@ -184,60 +193,127 @@ class TechTree(Widget):
         self._hidden_plan_label_rows = result.hidden_plan_label_rows
         self._hidden_label_ids = result.hidden_label_ids
         self._plan_group_order = result.plan_group_order
+        self._layout_cache_key = cache_key
 
         if self.selected_index >= len(self._ordered_ids):
             self.selected_index = max(0, len(self._ordered_ids) - 1)
 
-    @property
-    def selected_pr_id(self) -> str | None:
-        if not self._ordered_ids:
-            return None
-        sel = self._ordered_ids[self.selected_index]
-        if sel.startswith("_hidden:"):
-            return None
-        return sel
+        self._build_neighbor_map()
 
-    @property
-    def selected_is_hidden_label(self) -> bool:
-        """True if current selection is a hidden plan label."""
-        if not self._ordered_ids:
-            return False
-        return self._ordered_ids[self.selected_index].startswith("_hidden:")
+    # ------------------------------------------------------------------
+    # Widget management
+    # ------------------------------------------------------------------
 
-    def advance_animation(self) -> None:
-        """Advance the animation frame counter (called by poll timer)."""
-        self._anim_frame = (self._anim_frame + 1) % len(SPINNER_FRAMES)
+    def _rebuild_widgets(self) -> None:
+        """Sync PRNode widgets to match current layout positions."""
+        if not self.is_mounted:
+            return
 
-    def _get_loop_marker(self, pr_id: str) -> tuple[str, str]:
-        """Return (marker_text, marker_style) for review loop or merge state.
+        pr_map = {pr["id"]: pr for pr in self._prs}
+        # Determine which PR IDs need visible node widgets
+        visible_pr_ids = {
+            pid for pid in self._node_positions
+            if not pid.startswith("_hidden:")
+        }
 
-        Returns a tuple of (text, style) for the marker. Empty strings if no loop
-        and no merge input required.
-        """
+        # Remove widgets for PRs no longer visible
+        to_remove = set(self._node_widgets.keys()) - visible_pr_ids
+        for pid in to_remove:
+            widget = self._node_widgets.pop(pid)
+            widget.remove()
+
+        # Add/update widgets for visible PRs
+        for pid in visible_pr_ids:
+            pr = pr_map.get(pid)
+            if not pr:
+                continue
+            x, row = self._node_positions[pid]
+            y = row * (NODE_H + V_GAP) + 1
+
+            if pid in self._node_widgets:
+                node = self._node_widgets[pid]
+                node.update_pr(pr)
+            else:
+                node = PRNode(pr, id=f"pr-{pid}")
+                node.styles.position = "absolute"
+                self._node_widgets[pid] = node
+                self.mount(node)
+
+            node.styles.offset = (x, y)
+
+        # Update selection state
+        self._update_selection()
+
+        # Update auto-start target
+        self._update_auto_target()
+
+        # Update edge canvas
+        self._update_edge_canvas()
+
+        # Refresh the whole tree for hidden labels (rendered in render())
+        self.refresh(layout=True)
+
+    def _update_selection(self) -> None:
+        """Update selection highlight across node widgets."""
+        selected_id = self._ordered_ids[self.selected_index] if self._ordered_ids else None
+        for pid, node in self._node_widgets.items():
+            node.set_selected(pid == selected_id)
+        # Hidden label selection is handled in render()
+        if selected_id and selected_id.startswith("_hidden:"):
+            self.refresh()
+
+    def _update_auto_target(self) -> None:
+        """Update auto-start target marker on nodes."""
         try:
-            loops = self.app._review_loops
-            state = loops.get(pr_id)
-            if state:
-                if state.running:
-                    spinner = SPINNER_FRAMES[self._anim_frame % len(SPINNER_FRAMES)]
-                    if state.input_required:
-                        return (f"⏸{state.iteration}{spinner}", "bold red")
-                    if state.stop_requested:
-                        return (f"⏹{state.iteration}{spinner}", "bold red")
-                    return (f"⟳{state.iteration}{spinner}", "bold cyan")
-                if state.latest_verdict:
-                    v = state.latest_verdict
-                    marker = VERDICT_MARKERS.get(v, v[:4])
-                    style = VERDICT_STYLES.get(v, "")
-                    return (f"⟳{state.iteration}{marker}", style)
-            # Check for merge INPUT_REQUIRED (no review loop, but merge needs help)
-            merge_input = getattr(self.app, '_merge_input_required_prs', set())
-            if pr_id in merge_input:
-                spinner = SPINNER_FRAMES[self._anim_frame % len(SPINNER_FRAMES)]
-                return (f"⏸M{spinner}", "bold red")
+            from pm_core.tui import auto_start as _auto_start
+            auto_start_enabled = _auto_start.is_enabled(self.app)
+            auto_start_target = _auto_start.get_target(self.app) if auto_start_enabled else None
         except Exception:
-            pass
-        return ("", "")
+            auto_start_target = None
+
+        for pid, node in self._node_widgets.items():
+            node.set_auto_target(pid == auto_start_target)
+
+    def _update_edge_canvas(self) -> None:
+        """Update the edge canvas with current edges and positions."""
+        if not self._edge_canvas:
+            return
+
+        # Collect edges
+        edges: list[tuple[str, str]] = []
+        for pr in self._prs:
+            for dep_id in pr.get("depends_on") or []:
+                if dep_id in self._node_positions and pr["id"] in self._node_positions:
+                    if not dep_id.startswith("_hidden:") and not pr["id"].startswith("_hidden:"):
+                        edges.append((dep_id, pr["id"]))
+
+        # Compute canvas dimensions
+        real_positions = {k: v for k, v in self._node_positions.items() if not k.startswith("_hidden:")}
+        if real_positions:
+            max_x = max(x for x, r in real_positions.values())
+            max_row = max(r for x, r in real_positions.values()) + 1
+            canvas_w = max_x + NODE_W + 10
+            canvas_h = max_row * (NODE_H + V_GAP) + 4 + NODE_H
+        else:
+            canvas_w = 40
+            canvas_h = 10
+
+        # Plan labels
+        plan_labels = {
+            plan_id: (label_row, self.get_plan_display_name(plan_id))
+            for plan_id, label_row in self._plan_label_rows.items()
+        }
+
+        # Size and position edge canvas
+        self._edge_canvas.styles.width = canvas_w
+        self._edge_canvas.styles.height = canvas_h
+        self._edge_canvas.styles.offset = (0, 0)
+
+        self._edge_canvas.update_edges(edges, self._node_positions, canvas_w, canvas_h, plan_labels)
+
+    # ------------------------------------------------------------------
+    # Content sizing (for scrolling)
+    # ------------------------------------------------------------------
 
     def get_content_width(self, container, viewport):
         if not self._node_positions:
@@ -245,383 +321,47 @@ class TechTree(Widget):
         real_positions = {k: v for k, v in self._node_positions.items() if not k.startswith("_hidden:")}
         if not real_positions:
             return 40
-        # node_positions stores (x_char, row) — find rightmost node edge
         max_x = max(x for x, r in real_positions.values())
         return max_x + NODE_W + 4
 
     def get_content_height(self, container, viewport, width):
         if not self._node_positions:
             return 10
-        # Only count real node rows for grid height
         real_ids = [nid for nid in self._node_positions if not nid.startswith("_hidden:")]
         if not real_ids:
-            # Only hidden labels — 1 line per label + padding
             return len(self._hidden_label_ids) + 4
         max_row = max(self._node_positions[nid][1] for nid in real_ids) + 1
-        # Extra padding (NODE_H) so bottom node can scroll clear of status/command bars
         height = max_row * (NODE_H + V_GAP) + 4 + NODE_H
-        # Add space for hidden labels (1 line each + gap)
         if self._hidden_label_ids:
             height += 2 + len(self._hidden_label_ids)
         return height
+
+    # ------------------------------------------------------------------
+    # Rendering (only for empty states and hidden labels)
+    # ------------------------------------------------------------------
 
     def render(self) -> RenderableType:
         if not self._prs:
             return Text("No PRs defined. Use 'pr add' to create PRs.", style="dim")
 
         if not self._ordered_ids and self._status_filter:
-            icon = STATUS_ICONS.get(self._status_filter, "?")
             return Text(f"No {self._status_filter} PRs. Press F to cycle filter.", style="dim")
 
         if not self._ordered_ids and self._hidden_plans:
             hidden_count = len(self._hidden_plans)
             return Text(f"All PRs hidden ({hidden_count} plan(s)). Press x to show all.", style="dim")
 
-        # If only hidden labels exist (no visible PR nodes), render just the labels
         visible_node_ids = [nid for nid in self._node_positions if not nid.startswith("_hidden:")]
         if not visible_node_ids and self._hidden_label_ids:
             return self._render_hidden_labels_only()
 
-        pr_map = {pr["id"]: pr for pr in self._prs}
-        lines: list[Text] = []
-
-        # Compute grid dimensions from real nodes only (not hidden labels)
-        real_positions = {k: v for k, v in self._node_positions.items() if not k.startswith("_hidden:")}
-        if not real_positions:
-            return self._render_hidden_labels_only()
-        # node_positions stores (x_char, row)
-        max_x = max(x for x, r in real_positions.values())
-        max_row = max(r for x, r in real_positions.values()) + 1
-
-        total_h = max_row * (NODE_H + V_GAP)
-        total_w = max_x + NODE_W
-
-        # Build a character grid.  Extra bottom padding (NODE_H) ensures the
-        # grid is tall enough to scroll the last row's nodes fully into view
-        # above the status/command bars overlaying the viewport bottom.
-        grid_h = total_h + 4 + NODE_H
-        grid = [[" "] * (total_w + 10) for _ in range(grid_h)]
-        style_grid = [[""] * (total_w + 10) for _ in range(grid_h)]
-
-        # Safe write helper to prevent out-of-bounds access
-        def safe_write(y: int, x: int, char: str, style: str = "") -> None:
-            if 0 <= y < len(grid) and 0 <= x < len(grid[0]):
-                grid[y][x] = char
-                style_grid[y][x] = style
-
-        # Compute pixel positions — x is stored directly, y from row
-        def node_pos(pr_id):
-            x, row = self._node_positions[pr_id]
-            y = row * (NODE_H + V_GAP) + 1
-            return x, y
-
-        # Collect all edges and sort by vertical distance (straight edges first)
-        edges = []
-        for pr in self._prs:
-            for dep_id in pr.get("depends_on") or []:
-                if dep_id in self._node_positions and pr["id"] in self._node_positions:
-                    edges.append((dep_id, pr["id"]))
-
-        # Sort edges: horizontal (same row) first, then by vertical distance
-        def edge_priority(edge):
-            src_col, src_row = self._node_positions[edge[0]]
-            dst_col, dst_row = self._node_positions[edge[1]]
-            return (abs(dst_row - src_row), src_col, src_row)
-
-        edges.sort(key=edge_priority)
-
-        # Pre-compute exit/entry y-offsets for each edge so that multiple
-        # connections on the same node fan out across its interior height
-        # instead of all sharing the center line.
-        # Interior rows within a node: 1, 2, 3 (NODE_H=5: border,id,title,status,border)
-        outgoing: dict[str, list[str]] = {}   # src_id -> [dst_ids] sorted by dst row
-        incoming: dict[str, list[str]] = {}   # dst_id -> [src_ids] sorted by src row
-        for dep_id, pr_id in edges:
-            outgoing.setdefault(dep_id, []).append(pr_id)
-            incoming.setdefault(pr_id, []).append(dep_id)
-        # Sort each list by the connected node's row position
-        for src_id, dst_ids in outgoing.items():
-            dst_ids.sort(key=lambda d: self._node_positions[d][1])
-        for dst_id, src_ids in incoming.items():
-            src_ids.sort(key=lambda s: self._node_positions[s][1])
-
-        def _spread_offsets(n: int) -> list[int]:
-            """Distribute n connection points across interior rows 1..3."""
-            if n == 1:
-                return [NODE_H // 2]  # center (row 2)
-            if n == 2:
-                return [1, NODE_H - 2]  # top and bottom interior
-            # n >= 3: spread evenly across rows 1..3
-            return [1 + round(i * (NODE_H - 3) / (n - 1)) for i in range(n)]
-
-        exit_offsets: dict[str, dict[str, int]] = {}   # src -> {dst -> y_offset}
-        entry_offsets: dict[str, dict[str, int]] = {}   # dst -> {src -> y_offset}
-        for src_id, dst_ids in outgoing.items():
-            offsets = _spread_offsets(len(dst_ids))
-            exit_offsets[src_id] = {dst: offsets[i] for i, dst in enumerate(dst_ids)}
-        for dst_id, src_ids in incoming.items():
-            # For same-row edges, match the entry offset to the exit offset
-            # so the line is perfectly straight.  Spread the remaining
-            # (non-same-row) sources across the leftover interior slots.
-            same_row: dict[str, int] = {}   # src -> matched offset
-            other_srcs: list[str] = []
-            dst_row = self._node_positions[dst_id][1]
-            for src in src_ids:
-                src_row = self._node_positions[src][1]
-                if src_row == dst_row and dst_id in exit_offsets.get(src, {}):
-                    same_row[src] = exit_offsets[src][dst_id]
-                else:
-                    other_srcs.append(src)
-            if not other_srcs:
-                # All sources are same-row; just use matched offsets
-                entry_offsets[dst_id] = dict(same_row)
-            else:
-                # Spread non-same-row sources across slots not taken by
-                # same-row edges
-                taken = set(same_row.values())
-                all_offsets = _spread_offsets(len(src_ids))
-                free_offsets = [o for o in all_offsets if o not in taken]
-                # If not enough free slots, fall back to full spread
-                if len(free_offsets) < len(other_srcs):
-                    free_offsets = _spread_offsets(len(other_srcs))
-                mapping = dict(same_row)
-                for i, src in enumerate(other_srcs):
-                    mapping[src] = free_offsets[i]
-                entry_offsets[dst_id] = mapping
-
-        # Track used vertical channel positions to avoid overlap
-        # Key: x position, Value: set of y ranges that are used
-        used_channels: dict[int, list[tuple[int, int]]] = {}
-
-        def channel_free(x: int, y1: int, y2: int) -> bool:
-            if x not in used_channels:
-                return True
-            min_y, max_y = min(y1, y2), max(y1, y2)
-            for (a, b) in used_channels[x]:
-                if not (max_y < a or min_y > b):  # ranges overlap
-                    return False
-            return True
-
-        def mark_channel(x: int, y1: int, y2: int) -> None:
-            if x not in used_channels:
-                used_channels[x] = []
-            used_channels[x].append((min(y1, y2), max(y1, y2)))
-
-        # Draw edges
-        for dep_id, pr_id in edges:
-            sx, sy = node_pos(dep_id)
-            ex, ey = node_pos(pr_id)
-            src_dy = exit_offsets.get(dep_id, {}).get(pr_id, NODE_H // 2)
-            dst_dy = entry_offsets.get(pr_id, {}).get(dep_id, NODE_H // 2)
-            src_y = sy + src_dy
-            dst_y = ey + dst_dy
-            arrow_start_x = sx + NODE_W
-            arrow_end_x = ex - 1
-
-            if arrow_end_x > arrow_start_x:
-                if src_y == dst_y:
-                    # Simple horizontal arrow
-                    for x in range(arrow_start_x, arrow_end_x + 1):
-                        safe_write(src_y, x, "─", "dim")
-                    safe_write(src_y, arrow_end_x, "▶", "dim")
-                else:
-                    # Find a free vertical channel in the gap.
-                    # Search from the destination side inward so that
-                    # nearer edges use outer channels and peel off
-                    # without crossing farther edges' verticals.
-                    gap_start = arrow_start_x + 1
-                    gap_end = arrow_end_x - 1
-                    mid_x = gap_end
-
-                    for test_x in range(gap_end, gap_start - 1, -1):
-                        if channel_free(test_x, src_y, dst_y):
-                            mid_x = test_x
-                            break
-
-                    mark_channel(mid_x, src_y, dst_y)
-
-                    # Horizontal from source to midpoint
-                    for x in range(arrow_start_x, mid_x + 1):
-                        safe_write(src_y, x, "─", "dim")
-                    # Vertical segment
-                    if dst_y > src_y:
-                        safe_write(src_y, mid_x, "┐", "dim")
-                        for y in range(src_y + 1, dst_y):
-                            safe_write(y, mid_x, "│", "dim")
-                        safe_write(dst_y, mid_x, "└", "dim")
-                    else:
-                        safe_write(src_y, mid_x, "┘", "dim")
-                        for y in range(dst_y + 1, src_y):
-                            safe_write(y, mid_x, "│", "dim")
-                        safe_write(dst_y, mid_x, "┌", "dim")
-                    # Horizontal from midpoint to target
-                    for x in range(mid_x + 1, arrow_end_x + 1):
-                        safe_write(dst_y, x, "─", "dim")
-                    safe_write(dst_y, arrow_end_x, "▶", "dim")
-
-        # Auto-start target detection (for ◎ marker)
-        from pm_core.tui import auto_start as _auto_start
-        auto_start_enabled = _auto_start.is_enabled(self.app)
-        auto_start_target = _auto_start.get_target(self.app) if auto_start_enabled else None
-
-        # Draw nodes (skip virtual hidden label IDs)
-        for pr_id, (col, row) in self._node_positions.items():
-            if pr_id.startswith("_hidden:"):
-                continue
-            pr = pr_map.get(pr_id)
-            if not pr:
-                continue
-
-            x, y = node_pos(pr_id)
-            status = pr.get("status", "pending")
-            icon = STATUS_ICONS.get(status, "?")
-            is_selected = (self._ordered_ids[self.selected_index] == pr_id if self._ordered_ids else False)
-            node_style = STATUS_STYLES.get(status, "white")
-            bg_style = STATUS_BG.get(status, "")
-
-            # Box characters - double-line for selected, single-line otherwise
-            border = "bold white" if is_selected else "dim"
-            if is_selected:
-                top = "╔" + "═" * (NODE_W - 2) + "╗"
-                bot = "╚" + "═" * (NODE_W - 2) + "╝"
-                side = "║"
-            else:
-                top = "┌" + "─" * (NODE_W - 2) + "┐"
-                bot = "└" + "─" * (NODE_W - 2) + "┘"
-                side = "│"
-
-            display_id = f"#{pr.get('gh_pr_number')}" if pr.get("gh_pr_number") else pr_id
-            # Mark the auto-start target PR
-            is_auto_target = (auto_start_enabled and auto_start_target == pr_id)
-            max_id_len = NODE_W - 4
-            if is_auto_target:
-                # Reserve 2 chars for " ◎"
-                truncated_id = display_id[:max_id_len - 2]
-                id_content = f"{truncated_id} ◎"
-            else:
-                id_content = display_id[:max_id_len]
-            id_line = f"{side} {id_content:<{max_id_len}} {side}"
-            title = pr.get("title", "???")
-            max_title_len = NODE_W - 4
-            if len(title) > max_title_len:
-                title = title[:max_title_len - 1] + "…"  # Unicode ellipsis
-            title_line = f"{side} {title:<{NODE_W - 4}} {side}"
-            status_text = f"{icon} {status}"
-            # Show review loop marker or verdict if a loop exists for this PR
-            loop_marker, loop_style = self._get_loop_marker(pr_id)
-            marker_offset = -1  # char offset within status_line where marker starts
-            if loop_marker:
-                marker_offset = 2 + len(status_text) + 1  # side + space + base text + space
-                status_text += f" {loop_marker}"
-            else:
-                # Show activity spinner for in_progress/in_review PRs
-                # (suppressed when the implementation pane is idle or untracked)
-                if status in ("in_progress", "in_review") and pr.get("workdir"):
-                    tracker = self.app._pane_idle_tracker
-                    if tracker.is_tracked(pr_id) and not tracker.is_idle(pr_id):
-                        spinner = SPINNER_FRAMES[self._anim_frame % len(SPINNER_FRAMES)]
-                        marker_offset = 2 + len(status_text) + 1
-                        loop_style = "bold cyan"
-                        status_text += f" {spinner}"
-            machine = pr.get("agent_machine")
-            if machine:
-                avail = NODE_W - 4 - cell_len(status_text) - 1
-                if avail > 3:
-                    status_text += f" {machine[:avail]}"
-            # Pad using visual width to handle wide chars (e.g. 🧪 emoji)
-            visual_w = cell_len(status_text)
-            pad = NODE_W - 4 - visual_w
-            status_line = f"{side} {status_text}{' ' * max(0, pad)} {side}"
-
-            box_lines = [top, id_line, title_line, status_line, bot]
-            for dy, bl in enumerate(box_lines):
-                grid_dx = 0
-                for char_idx, ch in enumerate(bl):
-                    is_border = (dy == 0 or dy == len(box_lines) - 1
-                                 or char_idx == 0 or char_idx == len(bl) - 1)
-                    if is_selected:
-                        if is_border:
-                            style = "bold cyan"
-                        else:
-                            # Interior of selected box: node style + background
-                            style = f"{node_style} {bg_style}".strip()
-                    elif is_border:
-                        style = border
-                    else:
-                        # Interior of unselected box: node style + background
-                        style = f"{node_style} {bg_style}".strip()
-                    safe_write(y + dy, x + grid_dx, ch, style)
-                    cw = cell_len(ch)
-                    # Mark continuation cells for wide characters (e.g. 🧪)
-                    for k in range(1, cw):
-                        if 0 <= (y + dy) < len(grid) and 0 <= (x + grid_dx + k) < len(grid[0]):
-                            grid[y + dy][x + grid_dx + k] = ""
-                            style_grid[y + dy][x + grid_dx + k] = style
-                    grid_dx += cw
-
-            # Apply colored style to auto-start target marker (◎) on id_line
-            if is_auto_target:
-                target_dx = 2 + len(truncated_id) + 1  # side + space + id + space
-                id_dy = 1  # id_line is 2nd row (index 1) in box_lines
-                if 0 <= (y + id_dy) < len(style_grid) and 0 <= (x + target_dx) < len(style_grid[0]):
-                    style_grid[y + id_dy][x + target_dx] = f"bold magenta {bg_style}".strip()
-
-            # Apply colored style to loop marker / spinner characters
-            if marker_offset >= 0 and loop_style:
-                status_dy = 3  # status_line is 4th row (index 3) in box_lines
-                marker_len = len(loop_marker) if loop_marker else 1
-                for dx in range(marker_offset, marker_offset + marker_len):
-                    if 0 <= (y + status_dy) < len(style_grid) and 0 <= (x + dx) < len(style_grid[0]):
-                        style_grid[y + status_dy][x + dx] = f"{loop_style} {bg_style}".strip()
-
-        # Draw plan labels
-        for plan_id, label_row in self._plan_label_rows.items():
-            label_y = label_row * (NODE_H + V_GAP) + 1 + NODE_H // 2
-            label_text = f" ── {self.get_plan_display_name(plan_id)} "
-            grid_w = len(grid[0]) if grid else 0
-            # Pad with ─ to fill width
-            if len(label_text) < grid_w - 2:
-                label_text += "─" * (grid_w - 2 - len(label_text))
-            for dx, ch in enumerate(label_text):
-                safe_write(label_y, dx, ch, "dim cyan")
-
-        # Convert grid to Rich Text
-        output = Text()
-        for row_idx, row in enumerate(grid):
-            line = Text()
-            i = 0
-            while i < len(row):
-                ch = row[i]
-                st = style_grid[row_idx][i]
-                # Batch same-style chars
-                j = i + 1
-                while j < len(row) and style_grid[row_idx][j] == st:
-                    j += 1
-                segment = "".join(row[i:j])
-                if st:
-                    line.append(segment, style=st)
-                else:
-                    line.append(segment)
-                i = j
-            output.append(line)
-            output.append("\n")
-
-        # Append hidden plan labels below the grid
+        # Render hidden plan labels below the grid (if any)
         if self._hidden_plan_label_rows:
-            output.append("\n")
-            for plan_id in sorted(self._hidden_plan_label_rows):
-                pr_count = sum(1 for pr in self._prs if (pr.get("plan") or "_standalone") == plan_id)
-                label_text = f" ── {self.get_plan_display_name(plan_id)} (hidden, {pr_count} PR{'s' if pr_count != 1 else ''}) ──"
-                virtual_id = f"_hidden:{plan_id}"
-                is_selected = (self._ordered_ids[self.selected_index] == virtual_id if self._ordered_ids else False)
-                style = "bold white" if is_selected else "dim"
-                output.append(label_text, style=style)
-                output.append("\n")
+            return self._render_hidden_labels_section()
 
-        return output
+        return Text("")
 
     def _render_hidden_labels_only(self) -> RenderableType:
-        """Render only hidden plan labels when no visible PR nodes exist."""
         output = Text()
         for plan_id, label_row in self._hidden_plan_label_rows.items():
             pr_count = sum(1 for pr in self._prs if (pr.get("plan") or "_standalone") == plan_id)
@@ -633,6 +373,105 @@ class TechTree(Widget):
             output.append("\n")
         return output
 
+    def _render_hidden_labels_section(self) -> RenderableType:
+        """Render hidden labels positioned below the visible grid.
+
+        Since PRNode widgets render on top via absolute positioning,
+        this render output is only visible in the area below the nodes
+        where hidden plan labels appear.
+        """
+        # Compute vertical offset (empty lines to push labels below the grid)
+        real_positions = {k: v for k, v in self._node_positions.items() if not k.startswith("_hidden:")}
+        if real_positions:
+            max_row = max(r for x, r in real_positions.values()) + 1
+            grid_h = max_row * (NODE_H + V_GAP) + 4 + NODE_H
+        else:
+            grid_h = 0
+
+        output = Text()
+        # Pad with newlines to position below the grid
+        output.append("\n" * grid_h)
+        output.append("\n")
+
+        for plan_id in sorted(self._hidden_plan_label_rows):
+            pr_count = sum(1 for pr in self._prs if (pr.get("plan") or "_standalone") == plan_id)
+            label_text = f" ── {self.get_plan_display_name(plan_id)} (hidden, {pr_count} PR{'s' if pr_count != 1 else ''}) ──"
+            virtual_id = f"_hidden:{plan_id}"
+            is_selected = (self._ordered_ids[self.selected_index] == virtual_id if self._ordered_ids else False)
+            style = "bold white" if is_selected else "dim"
+            output.append(label_text, style=style)
+            output.append("\n")
+
+        return output
+
+    # ------------------------------------------------------------------
+    # Keyboard navigation
+    # ------------------------------------------------------------------
+
+    def _build_neighbor_map(self) -> None:
+        """Build a neighbor map for O(1) keyboard navigation.
+
+        For each node, computes the best up/down/left/right neighbor
+        based on grid positions.
+        """
+        self._neighbors = {}
+        if not self._ordered_ids:
+            return
+
+        ids_with_pos = [
+            (i, pid, self._node_positions[pid])
+            for i, pid in enumerate(self._ordered_ids)
+            if pid in self._node_positions
+        ]
+
+        for idx, pid, (col, row) in ids_with_pos:
+            neighbors: dict[str, str | None] = {"up": None, "down": None, "left": None, "right": None}
+
+            best_up = None
+            best_down = None
+            best_left = None
+            best_right = None
+
+            for other_idx, other_pid, (other_col, other_row) in ids_with_pos:
+                if other_pid == pid:
+                    continue
+
+                # Up: row above, prefer same column, then closest
+                if other_row < row:
+                    score = (other_col == col, -abs(other_col - col), other_row)
+                    if best_up is None or score > best_up[0]:
+                        best_up = (score, other_pid)
+
+                # Down: row below, prefer same column, then closest
+                if other_row > row:
+                    score = (other_col == col, -abs(other_col - col), -other_row)
+                    if best_down is None or score > best_down[0]:
+                        best_down = (score, other_pid)
+
+                # Left: column to the left, prefer same row
+                if other_col < col:
+                    if other_row == row:
+                        score = (1, other_col)  # same row, rightmost
+                    else:
+                        score = (0, -abs(other_row - row), -(col - other_col))
+                    if best_left is None or score > best_left[0]:
+                        best_left = (score, other_pid)
+
+                # Right: column to the right, prefer same row
+                if other_col > col:
+                    if other_row == row:
+                        score = (1, -other_col)  # same row, leftmost
+                    else:
+                        score = (0, -abs(other_row - row), -(other_col - col))
+                    if best_right is None or score > best_right[0]:
+                        best_right = (score, other_pid)
+
+            neighbors["up"] = best_up[1] if best_up else None
+            neighbors["down"] = best_down[1] if best_down else None
+            neighbors["left"] = best_left[1] if best_left else None
+            neighbors["right"] = best_right[1] if best_right else None
+            self._neighbors[pid] = neighbors
+
     def on_key(self, event) -> None:
         if not self.has_focus:
             return
@@ -640,85 +479,34 @@ class TechTree(Widget):
             return
 
         current_id = self._ordered_ids[self.selected_index]
-        current_pos = self._node_positions.get(current_id, (0, 0))
-        cur_col, cur_row = current_pos
-
         new_index = None
 
-        if event.key in ("up", "k"):
-            # Move up: prefer same column, but allow other columns if none in same
-            candidates = [(i, pid) for i, pid in enumerate(self._ordered_ids)
-                          if self._node_positions[pid][1] < cur_row]
-            if candidates:
-                # Prioritize same column, then closest column, then closest row
-                new_index = max(candidates, key=lambda x: (
-                    self._node_positions[x[1]][0] == cur_col,  # same column first
-                    -abs(self._node_positions[x[1]][0] - cur_col),  # then closest column
-                    self._node_positions[x[1]][1]  # then highest row (closest to current)
-                ))[0]
+        direction_map = {
+            "up": "up", "k": "up",
+            "down": "down", "j": "down",
+            "left": "left", "h": "left",
+            "right": "right", "l": "right",
+        }
+
+        if event.key in direction_map:
+            direction = direction_map[event.key]
+            neighbor_id = self._neighbors.get(current_id, {}).get(direction)
+            if neighbor_id and neighbor_id in self._ordered_ids:
+                new_index = self._ordered_ids.index(neighbor_id)
             else:
-                # Already at top — scroll to reveal plan label header
-                self._scroll_to_edge("top")
-        elif event.key in ("down", "j"):
-            candidates = [(i, pid) for i, pid in enumerate(self._ordered_ids)
-                          if self._node_positions[pid][1] > cur_row]
-            if candidates:
-                # Prioritize same column, then closest column, then closest row
-                new_index = min(candidates, key=lambda x: (
-                    self._node_positions[x[1]][0] != cur_col,  # same column first (False < True)
-                    abs(self._node_positions[x[1]][0] - cur_col),  # then closest column
-                    self._node_positions[x[1]][1]  # then lowest row (closest to current)
-                ))[0]
-            else:
-                # Already at bottom — scroll to reveal bottom content
-                self._scroll_to_edge("bottom")
-        elif event.key in ("left", "h"):
-            # Move left: must be in a column to the left, prefer same row
-            candidates = [(i, pid) for i, pid in enumerate(self._ordered_ids)
-                          if self._node_positions[pid][0] < cur_col]
-            if candidates:
-                # Prefer same row, then closest row in closest column
-                same_row = [(i, pid) for i, pid in candidates
-                            if self._node_positions[pid][1] == cur_row]
-                if same_row:
-                    new_index = max(same_row, key=lambda x: self._node_positions[x[1]][0])[0]
-                else:
-                    new_index = min(candidates, key=lambda x: (cur_col - self._node_positions[x[1]][0],
-                                                               abs(self._node_positions[x[1]][1] - cur_row)))[0]
-            else:
-                # Already at leftmost column — scroll to left edge
-                self._scroll_to_edge("left")
-        elif event.key in ("right", "l"):
-            # Move right: must be in a column to the right, prefer same row
-            candidates = [(i, pid) for i, pid in enumerate(self._ordered_ids)
-                          if self._node_positions[pid][0] > cur_col]
-            if candidates:
-                # Prefer same row, then closest row in closest column
-                same_row = [(i, pid) for i, pid in candidates
-                            if self._node_positions[pid][1] == cur_row]
-                if same_row:
-                    new_index = min(same_row, key=lambda x: self._node_positions[x[1]][0])[0]
-                else:
-                    new_index = min(candidates, key=lambda x: (self._node_positions[x[1]][0] - cur_col,
-                                                               abs(self._node_positions[x[1]][1] - cur_row)))[0]
-            else:
-                # Already at rightmost column — scroll to right edge
-                self._scroll_to_edge("right")
+                # At edge — scroll to reveal content
+                edge_map = {"up": "top", "down": "bottom", "left": "left", "right": "right"}
+                self._scroll_to_edge(edge_map[direction])
         elif event.key == "J":
-            # Jump to first PR of next plan group, or last PR if on bottom plan
             new_index = self._jump_plan(1)
             if new_index is not None:
-                # Jumping to a different plan — scroll plan label to top
                 self._jump_plan_scroll = True
             else:
-                # Already on bottom plan — jump to last PR (normal scroll)
                 new_index = self._jump_plan_bottom()
         elif event.key == "K":
-            # Jump to top of current plan first, then to previous plan
             top_index = self._jump_plan_top()
             if top_index is not None and top_index != self.selected_index:
                 new_index = top_index
-                # Jumping to top of current plan — scroll plan label to top
                 self._jump_plan_scroll = True
             else:
                 new_index = self._jump_plan(-1)
@@ -727,7 +515,6 @@ class TechTree(Widget):
         elif event.key == "enter":
             if not current_id.startswith("_hidden:"):
                 self.post_message(PRSelected(current_id))
-                # Trigger edit action (same as 'e' key)
                 self.app.action_edit_plan()
             return
 
@@ -736,29 +523,23 @@ class TechTree(Widget):
             new_id = self._ordered_ids[new_index]
             if not new_id.startswith("_hidden:"):
                 self.post_message(PRSelected(new_id))
-            self.refresh()
-            # Scroll to keep selected node visible (defer to after layout
-            # refresh so container dimensions are up to date)
+            self._update_selection()
             self.call_after_refresh(self._scroll_selected_into_view)
 
-    def _scroll_to_edge(self, direction: str) -> None:
-        """Scroll to an edge of the content.
+    # ------------------------------------------------------------------
+    # Scrolling helpers
+    # ------------------------------------------------------------------
 
-        Supports top, bottom, left, and right.
-        For bottom: targets well past the last node so it clears the
-        status/command bars that overlay the bottom of the viewport.
-        """
+    def _scroll_to_edge(self, direction: str) -> None:
         from textual.geometry import Region
         container = self.parent if self.parent else self
         if direction == "top":
             region = Region(0, 0, 1, 1)
         elif direction == "left":
-            # Scroll to the left edge, keeping vertical position
             if hasattr(container, "scroll_x"):
                 container.scroll_x = 0
             return
         elif direction == "right":
-            # Scroll to the right edge, keeping vertical position
             real_positions = {k: v for k, v in self._node_positions.items() if not k.startswith("_hidden:")}
             if real_positions:
                 max_x = max(x for x, r in real_positions.values())
@@ -767,28 +548,86 @@ class TechTree(Widget):
                     container.scroll_x = max(0, right_x - container.size.width)
             return
         else:
-            # Target the very bottom of content with extra margin
             real_positions = {k: v for k, v in self._node_positions.items() if not k.startswith("_hidden:")}
-            if real_positions:
-                max_row = max(r for x, r in real_positions.values())
-            else:
-                max_row = 0
-            # Position well past the last node's bottom border
+            max_row = max(r for x, r in real_positions.values()) if real_positions else 0
             y = (max_row + 1) * (NODE_H + V_GAP) + NODE_H
             if self._hidden_label_ids:
                 y += 2 + len(self._hidden_label_ids)
             region = Region(0, y, 1, 1)
         container.scroll_to_region(region, animate=False, force=True)
 
-    def _jump_plan_top(self) -> int | None:
-        """Return the index of the first PR in the current plan group.
+    def _scroll_selected_into_view(self) -> None:
+        if not self._ordered_ids:
+            return
+        pr_id = self._ordered_ids[self.selected_index]
+        if pr_id not in self._node_positions:
+            return
 
-        Returns:
-            Index of the first PR in the current plan, or None if not applicable.
-        """
+        from textual.geometry import Region, Spacing
+
+        if self._jump_plan_scroll:
+            self._jump_plan_scroll = False
+            self._scroll_plan_label_to_top(pr_id)
+            return
+
+        if pr_id.startswith("_hidden:"):
+            real_positions = {k: v for k, v in self._node_positions.items() if not k.startswith("_hidden:")}
+            if real_positions:
+                max_row = max(r for x, r in real_positions.values()) + 1
+                grid_h = max_row * (NODE_H + V_GAP) + 4
+            else:
+                grid_h = 0
+            label_index = self._hidden_label_ids.index(pr_id) if pr_id in self._hidden_label_ids else 0
+            y = grid_h + 1 + label_index
+            node_region = Region(0, y, 60, 1)
+        else:
+            x, row = self._node_positions[pr_id]
+            y = row * (NODE_H + V_GAP) + 1
+            bottom_padding = 4
+            node_region = Region(x, y, NODE_W, NODE_H + V_GAP + bottom_padding)
+
+        container = self.parent if self.parent else self
+        container.scroll_to_region(
+            node_region, animate=False, force=True,
+            spacing=Spacing(top=1, bottom=2, left=0, right=0),
+        )
+
+        if not pr_id.startswith("_hidden:") and hasattr(container, "scroll_x"):
+            vw = container.size.width if hasattr(container, "size") else 0
+            if vw > 0:
+                x, _ = self._node_positions[pr_id]
+                node_right = x + NODE_W + 2
+                if x < container.scroll_x:
+                    container.scroll_x = max(0, x - 2)
+                elif node_right > container.scroll_x + vw:
+                    container.scroll_x = node_right - vw
+
+    def _scroll_plan_label_to_top(self, pr_id: str) -> None:
+        from textual.geometry import Region
+        pr_map = {pr["id"]: pr for pr in self._prs}
+        pr = pr_map.get(pr_id)
+        if not pr:
+            return
+        plan_id = pr.get("plan") or "_standalone"
+        label_row = self._plan_label_rows.get(plan_id)
+        if label_row is None:
+            self._jump_plan_scroll = False
+            self._scroll_selected_into_view()
+            return
+
+        label_y = label_row * (NODE_H + V_GAP) + NODE_H // 2
+        scroller = self.parent if self.parent else self
+        viewport_h = scroller.size.height if hasattr(scroller, 'size') else 40
+        region = Region(0, label_y, 1, viewport_h)
+        scroller.scroll_to_region(region, animate=False, force=True)
+
+    # ------------------------------------------------------------------
+    # Plan jump helpers
+    # ------------------------------------------------------------------
+
+    def _jump_plan_top(self) -> int | None:
         if not self._ordered_ids:
             return None
-
         current_id = self._ordered_ids[self.selected_index]
         if current_id.startswith("_hidden:"):
             current_plan = current_id[len("_hidden:"):]
@@ -797,7 +636,6 @@ class TechTree(Widget):
             pr = pr_map.get(current_id)
             current_plan = (pr.get("plan") or "_standalone") if pr else "_standalone"
 
-        # Find first PR in ordered_ids that belongs to current plan
         pr_map = {pr["id"]: pr for pr in self._prs}
         for i, pid in enumerate(self._ordered_ids):
             if pid.startswith("_hidden:"):
@@ -805,21 +643,11 @@ class TechTree(Widget):
             pr = pr_map.get(pid)
             if pr and (pr.get("plan") or "_standalone") == current_plan:
                 return i
-
         return None
 
     def _jump_plan_bottom(self) -> int | None:
-        """Return the index of the last root PR (no dependencies) in the current plan.
-
-        A root PR has no depends_on — it sits in the leftmost column.
-        Returns the last such root in ordering (bottom of the TUI).
-
-        Returns:
-            Index of the last root PR in the current plan, or None.
-        """
         if not self._ordered_ids:
             return None
-
         current_id = self._ordered_ids[self.selected_index]
         if current_id.startswith("_hidden:"):
             current_plan = current_id[len("_hidden:"):]
@@ -837,22 +665,12 @@ class TechTree(Widget):
             if pr and (pr.get("plan") or "_standalone") == current_plan:
                 if not pr.get("depends_on"):
                     last_root = i
-
         return last_root
 
     def _jump_plan(self, direction: int) -> int | None:
-        """Jump to the first PR of the next/previous plan group.
-
-        Args:
-            direction: 1 for next plan, -1 for previous plan
-
-        Returns:
-            New index in _ordered_ids, or None if no jump possible.
-        """
         if not self._plan_group_order or len(self._plan_group_order) < 2:
             return None
 
-        # Determine current plan
         current_id = self._ordered_ids[self.selected_index]
         if current_id.startswith("_hidden:"):
             current_plan = current_id[len("_hidden:"):]
@@ -861,20 +679,16 @@ class TechTree(Widget):
             pr = pr_map.get(current_id)
             current_plan = (pr.get("plan") or "_standalone") if pr else "_standalone"
 
-        # Find current plan's position in group order
         try:
             plan_idx = self._plan_group_order.index(current_plan)
         except ValueError:
             plan_idx = 0
 
-        # Compute target plan index
         target_idx = plan_idx + direction
         if target_idx < 0 or target_idx >= len(self._plan_group_order):
             return None
 
         target_plan = self._plan_group_order[target_idx]
-
-        # Find first PR in ordered_ids that belongs to target plan
         pr_map = {pr["id"]: pr for pr in self._prs}
         for i, pid in enumerate(self._ordered_ids):
             if pid.startswith("_hidden:"):
@@ -882,89 +696,4 @@ class TechTree(Widget):
             pr = pr_map.get(pid)
             if pr and (pr.get("plan") or "_standalone") == target_plan:
                 return i
-
         return None
-
-    def _scroll_selected_into_view(self) -> None:
-        """Scroll the parent container to keep the selected node visible."""
-        if not self._ordered_ids:
-            return
-        pr_id = self._ordered_ids[self.selected_index]
-        if pr_id not in self._node_positions:
-            return
-
-        from textual.geometry import Region
-
-        # When jumping between plans, scroll the plan label to the top
-        if self._jump_plan_scroll:
-            self._jump_plan_scroll = False
-            self._scroll_plan_label_to_top(pr_id)
-            return
-
-        if pr_id.startswith("_hidden:"):
-            # Hidden labels are appended after the grid as text lines.
-            # Calculate their y position: grid height + gap + label index
-            real_positions = {k: v for k, v in self._node_positions.items() if not k.startswith("_hidden:")}
-            if real_positions:
-                max_row = max(r for x, r in real_positions.values()) + 1
-                grid_h = max_row * (NODE_H + V_GAP) + 4
-            else:
-                grid_h = 0
-            label_index = self._hidden_label_ids.index(pr_id) if pr_id in self._hidden_label_ids else 0
-            y = grid_h + 1 + label_index
-            node_region = Region(0, y, 60, 1)
-        else:
-            x, row = self._node_positions[pr_id]
-            y = row * (NODE_H + V_GAP) + 1
-            # Include the full node height plus generous padding below so
-            # the node clears the status/command bars that overlay the
-            # bottom of the viewport (typically 3-4 lines).
-            bottom_padding = 4
-            node_region = Region(x, y, NODE_W, NODE_H + V_GAP + bottom_padding)
-
-        container = self.parent if self.parent else self
-        from textual.geometry import Spacing
-        # Use spacing to ensure the node is never flush against the
-        # viewport edges — the bottom padding prevents the command bar
-        # from obscuring the selected node.
-        container.scroll_to_region(
-            node_region, animate=False, force=True,
-            spacing=Spacing(top=1, bottom=2, left=0, right=0),
-        )
-
-        # Explicit horizontal scroll fallback — scroll_to_region may not
-        # adjust scroll_x when the content has no vertical overflow
-        # (Textual sometimes skips horizontal scrolling in that case).
-        if not pr_id.startswith("_hidden:") and hasattr(container, "scroll_x"):
-            vw = container.size.width if hasattr(container, "size") else 0
-            if vw > 0:
-                node_right = x + NODE_W + 2
-                if x < container.scroll_x:
-                    container.scroll_x = max(0, x - 2)
-                elif node_right > container.scroll_x + vw:
-                    container.scroll_x = node_right - vw
-
-    def _scroll_plan_label_to_top(self, pr_id: str) -> None:
-        """Scroll so the plan label header for the given PR is at the top of the viewport."""
-        from textual.geometry import Region
-        # Find the plan for this PR
-        pr_map = {pr["id"]: pr for pr in self._prs}
-        pr = pr_map.get(pr_id)
-        if not pr:
-            return
-        plan_id = pr.get("plan") or "_standalone"
-        label_row = self._plan_label_rows.get(plan_id)
-        if label_row is None:
-            # No plan label (single group) — just scroll to the PR
-            self._jump_plan_scroll = False
-            self._scroll_selected_into_view()
-            return
-
-        # Plan label is drawn at: label_row * (NODE_H + V_GAP) + 1 + NODE_H // 2
-        # Subtract 1 so the dashes above the label text are visible
-        label_y = label_row * (NODE_H + V_GAP) + NODE_H // 2
-        # Use a region as tall as the viewport to force label to top
-        scroller = self.parent if self.parent else self
-        viewport_h = scroller.size.height if hasattr(scroller, 'size') else 40
-        region = Region(0, label_y, 1, viewport_h)
-        scroller.scroll_to_region(region, animate=False, force=True)

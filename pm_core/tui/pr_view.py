@@ -157,7 +157,7 @@ def hide_plan(app) -> None:
         if plan_id:
             tree._hidden_plans.discard(plan_id)
             tree._recompute()
-            tree.refresh(layout=True)
+            tree._rebuild_widgets()
             app.log_message(f"Showing: {tree.get_plan_display_name(plan_id)}")
         return
 
@@ -166,18 +166,18 @@ def hide_plan(app) -> None:
         # No selection (all hidden) — unhide all
         tree._hidden_plans.clear()
         tree._recompute()
-        tree.refresh(layout=True)
+        tree._rebuild_widgets()
         app.log_message("All plans visible")
         return
     if plan_id in tree._hidden_plans:
         tree._hidden_plans.discard(plan_id)
         tree._recompute()
-        tree.refresh(layout=True)
+        tree._rebuild_widgets()
         app.log_message(f"Showing: {tree.get_plan_display_name(plan_id)}")
     else:
         tree._hidden_plans.add(plan_id)
         tree._recompute()
-        tree.refresh(layout=True)
+        tree._rebuild_widgets()
         app.log_message(f"Hidden: {tree.get_plan_display_name(plan_id)}")
 
 
@@ -191,7 +191,7 @@ def toggle_merged(app) -> None:
     app._data.setdefault("project", {})["hide_merged"] = tree._hide_merged
     store.save(app._data, app._root)
     tree._recompute()
-    tree.refresh(layout=True)
+    tree._rebuild_widgets()
     app._update_filter_status()
     if tree._hide_merged:
         app.log_message("Merged PRs hidden")
@@ -212,7 +212,7 @@ def cycle_sort(app) -> None:
     next_idx = (idx + 1) % len(SORT_FIELD_KEYS)
     tree._sort_field = SORT_FIELD_KEYS[next_idx]
     tree._recompute()
-    tree.refresh(layout=True)
+    tree._rebuild_widgets()
     app._update_filter_status()
     label = dict(SORT_FIELDS)[tree._sort_field]
     app.log_message(f"Sort: {label}")
@@ -231,7 +231,7 @@ def cycle_filter(app) -> None:
     next_idx = (idx + 1) % len(STATUS_FILTER_CYCLE)
     tree._status_filter = STATUS_FILTER_CYCLE[next_idx]
     tree._recompute()
-    tree.refresh(layout=True)
+    tree._rebuild_widgets()
     app._update_filter_status()
     if tree._status_filter:
         icon = STATUS_ICONS.get(tree._status_filter, "")

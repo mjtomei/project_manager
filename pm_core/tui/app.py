@@ -370,7 +370,7 @@ class ProjectManagerApp(App):
             tree = self.query_one("#tech-tree", TechTree)
             if tree._prs:
                 tree._recompute()
-                tree.refresh(layout=True)
+                tree._rebuild_widgets()
         except Exception:
             pass
 

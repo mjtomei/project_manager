@@ -303,12 +303,15 @@ def _poll_loop_state(app) -> None:
 
 
 def _refresh_tech_tree(app) -> None:
-    """Refresh the tech tree so ⟳N markers and spinners update on PR nodes."""
+    """Refresh the tech tree so ⟳N markers and spinners update on PR nodes.
+
+    Only the individual PRNode widgets with active spinners are refreshed,
+    not the entire tree.
+    """
     try:
         from pm_core.tui.tech_tree import TechTree
         tree = app.query_one("#tech-tree", TechTree)
         tree.advance_animation()
-        tree.refresh()
     except Exception:
         pass
 
