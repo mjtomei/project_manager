@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-f84cf3e
+  active_pr: pr-3032fb6
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -2959,10 +2959,17 @@ prs:
   branch: pm/pr-156a4d0-fix-merged-pr-branches-not-pushed-to-main-repo-ori
   status: in_progress
   depends_on: []
-  description: pm pr merge pushes base branch to origin but not the PR feature branch.
-    Downstream workdirs cannot access dependency code via git fetch origin.
+  description: 'After merging a PR, downstream workdirs that depend on it can''t access
+    the merged code because only the base branch is pushed/synced. The feature branch
+    commits stay trapped in the original workdir. Fix: also push/fetch the feature
+    branch so downstream workdirs can pull in dependency code.
+
+
+    For vanilla/GitHub backend: push the feature branch to origin after merge. For
+    local backend: fetch the feature branch ref from the workdir into the main repo
+    so new clones can see it.'
   created_at: '2026-03-02T17:02:40.155710+00:00'
-  updated_at: '2026-03-02T17:02:40.155710+00:00'
+  updated_at: '2026-03-09T15:30:47.746414+00:00'
   gh_pr: https://github.com/mjtomei/project_manager/pull/117
   gh_pr_number: 117
   started_at: '2026-03-02T17:02:40.155710+00:00'
@@ -3008,17 +3015,6 @@ prs:
     project.yaml from branch merges or always take master's version.
   created_at: null
   updated_at: null
-- id: pr-fd01c70
-  plan: watchers
-  title: Add periodic auto-start scan for state changes
-  branch: pm/pr-fd01c70-add-periodic-auto-start-scan-for-state-changes
-  status: pending
-  depends_on: []
-  description: Add a periodic scan (every 30-60 seconds) for newly-ready PRs, complementing
-    the existing event-based triggers. Handles manual resets, external state changes,
-    and crash recovery.
-  created_at: null
-  updated_at: '2026-03-08T22:04:45.153083+00:00'
 - id: pr-ad7bd98
   plan: bugs
   title: Fix arrow crossing in TUI tech tree when dependencies are vertically stacked
@@ -3333,42 +3329,6 @@ prs:
     created_at: '2026-03-06T02:04:48Z'
     last_edited: '2026-03-06T02:04:48Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a9a71a4-qa-pass-should-not-auto-merge-withou-4bba2cbf
-- id: pr-76fa48d
-  plan: watchers
-  title: Auto-retry Claude sessions on 500 and usage limit errors
-  branch: pm/pr-76fa48d-auto-retry-claude-sessions-on-500-and-usage-limit
-  status: pending
-  depends_on: []
-  description: 'Detect when a Claude session hits a 500 server error or a usage/rate
-    limit error by monitoring the session output. For usage limit errors, parse the
-    retry-after time from the error message and wait until that time before retrying
-    the last message. For 500 errors, wait a configurable duration (set in pm settings,
-    e.g. error_retry_delay_seconds) before retrying. This should work across all pm-managed
-    Claude sessions (workers, reviewers, QA, etc.) by hooking into the pane output
-    monitoring. Include a retry count limit to avoid infinite loops on persistent
-    failures. Log retries so the user can see what happened.
-
-    Additionally, detect stalled sessions where the Claude progress indicator (spinner)
-    is active but no tokens are being generated and no tools are being run. This manifests
-    as the session appearing busy but making no progress. When a stall is detected
-    (e.g. no new output for a configurable timeout while the spinner is still visible),
-    interrupt the session and redeliver the same message to unstick it. Apply the
-    same retry count limit to avoid infinite interrupt loops.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-03-05T04:16:36.023786+00:00'
-  updated_at: '2026-03-08T22:04:43.390756+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes:
-  - id: note-a3db642
-    text: Potentially subsumed by pr-3032fb6 (always-on watcher framework). The session
-      health watcher can detect 500/usage limit errors and restart sessions without
-      a bespoke retry mechanism.
-    created_at: '2026-03-08T21:50:47Z'
-    last_edited: '2026-03-08T21:50:47Z'
 - id: pr-9fc6e27
   plan: improvements
   title: Keep PR description and notes in sync during development
@@ -3464,35 +3424,6 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
-- id: pr-72f1278
-  plan: watchers
-  title: OOM-aware memory watchdog for session process management
-  branch: pm/pr-72f1278-oom-aware-memory-watchdog-for-session-process-mana
-  status: pending
-  depends_on: []
-  description: Add a background thread that monitors system memory utilization and
-    proactively kills the largest memory-consuming processes owned by our pm session
-    before the OS OOM killer intervenes and randomly kills the main pm process. The
-    watchdog should identify child Claude sessions spawned by pm (tmux panes), rank
-    them by RSS, and terminate the biggest consumers when memory pressure crosses
-    a configurable threshold. Maintain a persistent log of what was killed, when,
-    and how much memory it was using, so the user can see what happened and restart
-    work if needed.
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-03-04T16:23:15.847530+00:00'
-  updated_at: '2026-03-08T22:04:44.108628+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes:
-  - id: note-0bf75ee
-    text: Potentially subsumed by pr-3032fb6 (always-on watcher framework). The session
-      health watcher can monitor memory pressure and manage processes without a dedicated
-      OOM watchdog.
-    created_at: '2026-03-08T21:50:48Z'
-    last_edited: '2026-03-08T21:50:48Z'
 - id: pr-cf41efc
   plan: plan-qa
   title: Add interactive Scenario 0 and fix QA scenario window bugs
@@ -3789,7 +3720,7 @@ prs:
   plan: plan-qa
   title: Add spec generation step between PR phases
   branch: pm/pr-942aa21-add-spec-generation-step-between-pr-phases
-  status: in_review
+  status: qa
   depends_on: []
   description: "Add an optional \"spec\" step to the PR lifecycle that bridges the\
     \ gap between the user's natural-language description and each subsequent phase\
@@ -3963,7 +3894,7 @@ prs:
   plan: plan-qa
   title: Add pm container command to build project-specific Docker images
   branch: pm/pr-88cb7bf-add-pm-container-command-to-build-project-specific-do
-  status: qa
+  status: merged
   depends_on: []
   description: 'Add a pm container subcommand that launches an interactive Claude
     session to create a Docker image with all project dependencies preinstalled.
@@ -3993,12 +3924,13 @@ prs:
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-c2352be-add-pm-qa-start-cli-command-for-full-9964ad22
   created_at: '2026-03-07T15:02:30.101810+00:00'
-  updated_at: '2026-03-07T15:11:17.140605+00:00'
+  updated_at: '2026-03-09T17:29:00.448072+00:00'
   gh_pr: https://github.com/mjtomei/project_manager/pull/128
   gh_pr_number: 128
   started_at: '2026-03-07T15:02:30.101810+00:00'
   agent_machine: spark-424d
   reviewed_at: '2026-03-07T15:11:17.140605+00:00'
+  merged_at: '2026-03-09T17:29:00.448072+00:00'
 - id: pr-4258a32
   plan: improvements
   title: Add get_workdir helper that recovers missing workdir from filesystem
@@ -4080,7 +4012,7 @@ prs:
   plan: tui-ux
   title: 'Refactor TechTree: split PR nodes into individual Textual widgets'
   branch: pm/pr-4c41017-refactor-techtree-split-pr-nodes-into-individual-t
-  status: in_progress
+  status: in_review
   depends_on: []
   description: 'Refactor the TechTree from a monolithic single-widget renderer into
     a compositional Textual architecture:
@@ -4113,9 +4045,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/131
   gh_pr_number: 131
   created_at: '2026-03-07T15:58:50.876583+00:00'
-  updated_at: '2026-03-08T22:27:50.279825+00:00'
+  updated_at: '2026-03-09T17:23:26.156810+00:00'
   started_at: '2026-03-08T22:27:50.279825+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-03-09T17:23:26.156810+00:00'
   merged_at: null
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-4c41017-refactor-techtree-split-pr-nodes-int-8023bb22
@@ -4239,59 +4171,50 @@ prs:
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-fd54424-add-interactive-pm-tutorial-command--8023bb22
 - id: pr-3032fb6
   plan: watchers
-  title: Always-on watcher framework with pluggable intelligent watchers
+  title: 'Watcher core framework: BaseWatcher, WatcherManager, and auto-start refactor'
   branch: pm/pr-3032fb6-always-on-watcher-framework-with-pluggable-intelli
-  status: pending
+  status: in_progress
   depends_on: []
   description: "Refactor the watcher loop from an auto-start companion into a pluggable\
-    \ always-on framework with multiple specialized watchers that monitor different\
-    \ aspects of the project.\n\n## Core framework — shared base class\n- Abstract\
-    \ BaseWatcher class that ALL watchers inherit from, providing:\n  - Shared polling\
-    \ loop with configurable interval\n  - Unified user interaction mechanisms: INPUT_REQUIRED\
-    \ escalation, non-blocking recommendations in TUI log, sticky notifications\n\
-    \  - Base prompt template that all watcher Claude sessions share (project context,\
-    \ state file awareness, how to report findings)\n  - Common tmux pane management\
-    \ (creating/reusing watcher panes, capturing output)\n  - State persistence (what\
-    \ the watcher has seen, acted on, recommended)\n  - Shared verdict/action vocabulary\
-    \ so all watchers communicate the same way\n- Single WatcherManager orchestrates\
-    \ all registered watchers, handles scheduling, deduplicates user notifications,\
-    \ and provides the unified interaction layer\n- This ensures one place in the\
-    \ code implements the mechanisms for user interaction, prompt generation, and\
-    \ loop management — individual watchers only implement domain-specific logic (poll,\
-    \ assess, recommend/act)\n\n## Watcher lifecycle\n- Each watcher implements: poll()\
-    \ -> observations, assess(observations) -> actions, act(actions)\n- WatcherManager\
-    \ runs the shared loop, dispatches to each watcher, collects recommendations\n\
-    - Always-on mode: optional global setting to keep watchers running at all times,\
-    \ not just during auto-start\n- pm watcher start/stop commands, plus a TUI toggle\n\
-    - Each watcher can be enabled/disabled independently\n\n## Built-in watchers\n\
-    \n### Session health watcher\n- Detects stuck/dead Claude sessions (trust prompts,\
-    \ API errors, 500s, usage limits, OOM)\n- Restarts or nudges sessions as needed\n\
-    - Handles SSH disconnect garbage in terminals\n- Subsumes: pr-b53bfe2 (trust prompt\
-    \ blocking), pr-76fa48d (auto-retry on errors), pr-72f1278 (OOM watchdog), pr-757a140\
-    \ (SSH garbage)\n\n### Project state watcher\n- Monitors overall project health:\
-    \ PRs stuck in a state too long, dependency chains unblocked but not started\n\
-    - Watches for stale workdirs, orphaned tmux windows, diverged branches\n- Recommends\
-    \ next actions (e.g. 'pr-X deps are all merged, ready to start')\n\n### Review/QA\
-    \ oversight watcher\n- Monitors running review and QA loops for anomalies (loops\
-    \ stuck, repeated failures, unexpected verdicts)\n- Surfaces patterns like 'PR\
-    \ has failed review 3 times on the same issue'\n\n## Potentially deprecated PRs\n\
-    These pending PRs would be subsumed by the session health watcher since an intelligent\
-    \ watcher can handle all of these naturally without bespoke programmatic solutions:\n\
-    - pr-b53bfe2: Fix trust prompt blocking implementation sessions\n- pr-76fa48d:\
-    \ Auto-retry Claude sessions on 500 and usage limit errors\n- pr-72f1278: OOM-aware\
-    \ memory watchdog for session process management\n- pr-757a140: Prevent SSH disconnect\
-    \ from typing garbage into pm session terminal\n\nThe existing #113 (TUI watchdog\
+    \ always-on framework. This is the core infrastructure that all watchers build\
+    \ on.\n\n## BaseWatcher abstract class\n- ALL watchers inherit from this, providing:\n\
+    \  - Shared polling loop with configurable interval\n  - Configurable user interaction\
+    \ mechanisms: INPUT_REQUIRED escalation, non-blocking recommendations in TUI log,\
+    \ sticky notifications\n  - Base prompt template that all watcher Claude sessions\
+    \ share (project context, state file awareness, pm tui and framebuffer commands,\
+    \ tmux setup)\n  - Common tmux pane management (creating/reusing watcher panes,\
+    \ capturing output)\n  - State persistence (what the watcher has seen, acted on,\
+    \ recommended)\n  - Shared verdict/action vocabulary so all watchers communicate\
+    \ the same way\n- Each watcher implements: poll() -> observations, assess(observations)\
+    \ -> actions, act(actions)\n\n## WatcherManager\n- Single orchestrator that manages\
+    \ all registered watchers\n- Handles scheduling, deduplicates user notifications,\
+    \ provides the unified interaction layer\n- Dispatches polling to each watcher,\
+    \ collects recommendations\n- One place in the code implements the mechanisms\
+    \ for user interaction, prompt generation, and loop management — individual watchers\
+    \ only implement domain-specific logic\n\n## TUI integration\n- Watchers mapped\
+    \ to different keys with w as prefix, startable from TUI even when auto-start\
+    \ is off\n- New TUI pane accessible with ww that lists all running watchers, lets\
+    \ you select and jump to their windows, see which have requested input\n- Certain\
+    \ actions like moving PRs between steps gated by TUI interaction in this pane;\
+    \ recommended actions collected and presented here\n- TUI indicators similar to\
+    \ current auto-start watcher showing when any watcher is running or has requested\
+    \ input\n\n## Auto-start watcher refactor\n- Refactor the existing auto-start/watcher\
+    \ loop to use the new BaseWatcher pattern as proof of concept\n- pm watcher start/stop\
+    \ CLI commands to control watchers\n- Each watcher can be enabled/disabled independently\n\
+    \n## Deprecated PRs\nThese would be subsumed by built-in watchers using this framework:\n\
+    - pr-b53bfe2, pr-76fa48d, pr-72f1278, pr-757a140\n\nThe existing #113 (TUI watchdog\
     \ for dead threads) and #115 (watcher INPUT_REQUIRED refinement) remain relevant\
     \ as they improve the underlying mechanisms this framework builds on."
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/132
+  gh_pr_number: 132
   created_at: '2026-03-08T20:10:08.282332+00:00'
-  updated_at: '2026-03-08T22:04:41.872037+00:00'
-  started_at: null
+  updated_at: '2026-03-09T23:34:18.643679+00:00'
+  started_at: '2026-03-09T23:34:18.643679+00:00'
   reviewed_at: null
   merged_at: null
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-3032fb6-always-on-watcher-framework-with-plu-defc8a34
 - id: pr-0b827df
   plan: tui-ux
   title: Add running tasks pane to TUI with window switching and grouping
@@ -4627,7 +4550,8 @@ prs:
   title: Add high-effort watcher supervisors that monitor and coach lower-effort sessions
   branch: pm/pr-871dbf5-add-high-effort-watcher-supervisors-that-monitor-a
   status: pending
-  depends_on: []
+  depends_on:
+  - pr-3032fb6
   description: 'Add a new watcher type that runs at high effort (Opus-level) and monitors
     other running sessions (QA scenarios, implementation, review) that run at lower
     effort, providing real-time feedback at their message prompts.
@@ -4686,7 +4610,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-08T23:09:07.312432+00:00'
-  updated_at: '2026-03-08T23:09:07.312432+00:00'
+  updated_at: '2026-03-09T15:18:05.763457+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -4740,6 +4664,7 @@ prs:
   status: pending
   depends_on:
   - pr-3032fb6
+  - pr-18ac983
   description: 'Extend the Claude session spawning infrastructure to support multiple
     LLM providers including local models, and add a watcher that manages API availability
     and routing.
@@ -4803,7 +4728,340 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-09T00:04:00.121877+00:00'
-  updated_at: '2026-03-09T00:04:00.121877+00:00'
+  updated_at: '2026-03-09T15:18:03.840152+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-a94befb
+  plan: watchers
+  title: Replace guide flow with project-level watcher using prompt addendums
+  branch: pm/pr-a94befb-replace-guide-flow-with-project-level-watcher-usin
+  status: pending
+  depends_on:
+  - pr-3032fb6
+  - pr-945546e
+  description: "Replace the current guide/init flow with the project-level watcher\
+    \ from the watcher framework, so new users are introduced to watchers from the\
+    \ very start.\n\n## Current guide behavior\n- On first run with no project.yaml,\
+    \ a guide prompt walks the user through setup\n- The guide is a one-shot session\
+    \ that creates project.yaml and disappears\n- Beginner mode adds prompt addendums\
+    \ to subsequent sessions\n\n## New approach: watcher-driven onboarding\n- The\
+    \ project state watcher (from pr-3032fb6) detects when things are missing or incomplete\n\
+    - Instead of a separate guide flow, the watcher adds prompt addendums to active\
+    \ sessions when it detects gaps:\n  - No project.yaml → addendum instructs the\
+    \ session to help create one\n  - No plans defined → addendum suggests creating\
+    \ a plan\n  - Plans with no PRs → addendum suggests breaking down into PRs\n \
+    \ - PRs with no dependencies set → addendum suggests reviewing dependency structure\n\
+    \  - No container config → addendum suggests setting up containers if applicable\n\
+    \  - Beginner mode enabled → addendum with extra guidance and next-step recommendations\n\
+    - Addendums are dynamic: they appear when relevant and disappear once the gap\
+    \ is filled\n- The watcher polls project state and updates addendums automatically\n\
+    \n## General-purpose addendum generation\n- The same addendum mechanism extends\
+    \ beyond onboarding to any low-cost status check that may need attention:\n  -\
+    \ GitHub API rate limit approaching → addendum warns sessions to be conservative\
+    \ with API calls\n  - Disk space low → addendum advises against creating new workdirs\n\
+    \  - Claude API errors trending up → addendum notes instability, suggests saving\
+    \ work\n  - Branches diverged far from master → addendum suggests rebasing\n \
+    \ - PRs stuck in a state for too long → addendum nudges toward action\n  - Container\
+    \ image out of date → addendum suggests rebuilding\n  - tmux session count high\
+    \ → addendum suggests cleaning up finished sessions\n  - Upstream dependency updates\
+    \ available → addendum flags potential breakage\n- These checks should be cheap\
+    \ (file stats, cached API responses, project.yaml inspection) so they can run\
+    \ frequently without overhead\n- Each check produces a short addendum only when\
+    \ actionable — no noise when things are healthy\n\n## Benefits\n- Users learn\
+    \ the watcher pattern immediately — it becomes a natural part of the tool\n- No\
+    \ separate guide code to maintain — just watcher observations and addendums\n\
+    - More adaptive than a linear guide: responds to actual project state, not a fixed\
+    \ script\n- Works for experienced users too: if someone deletes their plans or\
+    \ creates an incomplete config, the watcher notices and helps\n- Beginner mode\
+    \ becomes just a flag that makes the watcher more verbose in its addendums\n-\
+    \ Service and infrastructure issues surface naturally in session prompts without\
+    \ requiring the user to check dashboards\n\n## Migration\n- Remove or deprecate\
+    \ the existing guide prompt and guide_deps_reviewed flag\n- Move guide logic into\
+    \ the project state watcher's observation rules\n- Keep backward compat: projects\
+    \ with guide_deps_reviewed=true skip the onboarding addendums"
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-09T05:02:09.490422+00:00'
+  updated_at: '2026-03-09T15:18:04.925996+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-18ac983
+  plan: watchers
+  title: 'Session health watcher: detect and recover stuck/dead Claude sessions'
+  branch: pm/pr-18ac983-session-health-watcher-detect-and-recover-stuck-de
+  status: pending
+  depends_on:
+  - pr-3032fb6
+  description: 'Built-in watcher using the BaseWatcher framework that monitors all
+    Claude sessions for health issues.
+
+
+    ## Detection
+
+    - Stuck/dead Claude sessions (API errors, 500s, usage limits, OOM)
+
+    - Sessions that have stopped producing output for too long
+
+
+    ## Recovery actions
+
+    - Restart or nudge sessions as needed
+
+    - Parse retry-after times for usage limit errors and wait before retrying
+
+    - Retry count limits to avoid infinite loops
+
+    - Log all recovery actions for user visibility
+
+
+    ## Subsumes
+
+    - pr-76fa48d: Auto-retry Claude sessions on 500 and usage limit errors
+
+    - pr-72f1278: OOM-aware memory watchdog for session process management
+
+
+    ## Not covered here (standalone fixes in bugs plan)
+
+    - pr-b53bfe2: Trust prompt blocking — simpler as a programmatic fix
+
+    - pr-757a140: SSH disconnect garbage — happens outside tmux, can''t be detected
+    by a watcher'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-09T15:17:01.313859+00:00'
+  updated_at: '2026-03-09T15:39:03.606882+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-945546e
+  plan: watchers
+  title: 'Project state watcher: monitor project health and recommend actions'
+  branch: pm/pr-945546e-project-state-watcher-monitor-project-health-and-r
+  status: pending
+  depends_on:
+  - pr-3032fb6
+  description: 'Built-in watcher using the BaseWatcher framework that monitors overall
+    project health and surfaces actionable recommendations.
+
+
+    ## Observations
+
+    - PRs stuck in a state too long
+
+    - Dependency chains unblocked but not started
+
+    - Stale workdirs, orphaned tmux windows, diverged branches
+
+    - Missing project configuration (no plans, no deps set, no container config)
+
+
+    ## Actions
+
+    - Recommends next actions (e.g. PR is ready for next step in flow)
+
+    - Raises recommendations in the watcher TUI pane for user confirmation
+
+    - Gated actions: moving PRs between steps requires user approval in the watcher
+    pane'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-09T15:17:16.291505+00:00'
+  updated_at: '2026-03-09T15:17:16.291505+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-c21e2ed
+  plan: watchers
+  title: 'Review/QA oversight watcher: monitor loops for anomalies and shortcuts'
+  branch: pm/pr-c21e2ed-review-qa-oversight-watcher-monitor-loops-for-anom
+  status: pending
+  depends_on:
+  - pr-3032fb6
+  description: 'Built-in watcher using the BaseWatcher framework that monitors running
+    review and QA loops for issues.
+
+
+    ## Detection
+
+    - Loops stuck or not making progress
+
+    - Repeated failures on the same issue (e.g. PR has failed review 3 times on the
+    same problem)
+
+    - Unexpected or inconsistent verdicts
+
+    - Scenario workers taking shortcuts or not properly following instructions
+
+
+    ## Actions
+
+    - Surfaces patterns in the watcher TUI pane for user review
+
+    - Raises shortcut-taking scenarios for a check before they complete
+
+    - Recommends stopping loops that are clearly not converging'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-09T15:17:32.481210+00:00'
+  updated_at: '2026-03-09T15:17:32.481210+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-3b4a1b1
+  plan: watchers
+  title: Add user-defined watcher registration mechanism
+  branch: pm/pr-3b4a1b1-add-user-defined-watcher-registration-mechanism
+  status: pending
+  depends_on:
+  - pr-3032fb6
+  description: 'Allow users to define and register custom watchers that plug into
+    the BaseWatcher framework.
+
+
+    ## Registration
+
+    - Users create a watcher by subclassing BaseWatcher in a Python file
+
+    - pm watcher register <path_to_file> registers it with the WatcherManager
+
+    - Registered watchers stored in project config or ~/.pm/watchers/
+
+    - pm watcher list shows all registered watchers (built-in and custom) with enabled/disabled
+    status
+
+
+    ## Watcher definition
+
+    - Minimal interface: implement poll(), assess(), and optionally act()
+
+    - Access to all BaseWatcher facilities: prompt templates, TUI notifications, INPUT_REQUIRED,
+    tmux pane management
+
+    - Can define custom polling intervals, enable/disable conditions, and priority
+
+
+    ## Distribution
+
+    - Watchers can be shared as standalone .py files or pip-installable packages
+
+    - pm watcher install <url_or_package> to install from git or PyPI
+
+    - Entry point discovery: packages can register watchers via setuptools entry_points
+
+
+    ## Examples
+
+    - Ship a few example custom watchers (e.g. dependency update checker, CI status
+    monitor) as templates'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-09T15:17:49.989045+00:00'
+  updated_at: '2026-03-09T15:17:49.989045+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-6aa74c6
+  plan: tui-ux
+  title: Fuzzy select for pr and plan commands
+  branch: pm/pr-6aa74c6-fuzzy-select-for-pr-and-plan-commands
+  status: pending
+  depends_on: []
+  description: 'Add a ''plan select'' TUI command and intelligent fuzzy/partial matching
+    for both ''pr select'' and ''plan select''. Typing ''plan select watch'' navigates
+    to the first PR under the watchers plan. Typing ''pr select spec'' finds pr-942aa21
+    by title match.
+
+
+    Matching and ranking: fuzzy match against ID, title, description, and plan name.
+    Rank results with weighted scoring — exact ID match highest, then ID prefix, then
+    title substring, then description substring, then plan name. When multiple fields
+    match the same query, scores combine. Best match wins. If multiple results tie,
+    prefer the one closest to current cursor position.
+
+
+    Result cycling: after a fuzzy match, the full ranked result list is retained.
+    Dedicated TUI keys (e.g. n/N or similar) cycle forward/backward through the match
+    list, moving the cursor to each result in rank order. The result list and cycling
+    keys stay active until a new fuzzy match command is run, replacing the previous
+    list. Both ''pr select'' and ''plan select'' share the same cycling keys and result
+    list — running either command replaces whatever list was active.
+
+
+    For plan select, auto-expands collapsed plan groups and moves cursor to the first
+    PR in that plan. Works with display IDs (#125) and raw IDs (pr-942aa21) as before,
+    plus now also partial matches.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-09T16:23:27.180369+00:00'
+  updated_at: '2026-03-09T16:39:31.358948+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-98bf8df
+  plan: plan-qa
+  title: QA start responsiveness with progress feedback
+  branch: pm/pr-98bf8df-qa-start-responsiveness-with-progress-feedback
+  status: pending
+  depends_on: []
+  description: 'Make QA start feel more responsive by showing a TUI popup/overlay
+    with real-time progress while the QA session is being prepared. Currently there''s
+    an immediate status message but no window appears for a while with no indication
+    of what''s happening. The popup should show each step as it runs: loading project
+    state, generating prompts, creating workdir, launching tmux windows, starting
+    Claude sessions. Dismiss automatically when the QA window is ready, or let the
+    user dismiss early to continue working. If any step fails, show the error inline
+    in the popup rather than silently failing.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-09T16:31:15.225528+00:00'
+  updated_at: '2026-03-09T16:31:15.225528+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-4a89e52
+  plan: plan-qa
+  title: QA verdict collection survives TUI restart
+  branch: pm/pr-4a89e52-qa-verdict-collection-survives-tui-restart
+  status: pending
+  depends_on: []
+  description: 'Bug: QA scenario verdict polling runs in a daemon thread inside the
+    TUI process (via start_qa_background → run_qa_sync → _poll_tmux_verdicts). When
+    the TUI restarts, these threads die and app._qa_loops is lost. The tmux panes
+    with QA scenarios keep running to completion, but nobody collects their verdicts
+    or updates qa_status.json.
+
+
+    Fix: Move verdict polling into the qa_status.py process that already runs in the
+    QA status pane. It already loops reading qa_status.json — extend it to also poll
+    scenario tmux panes for verdicts and write updates back to qa_status.json. This
+    way verdict collection is tied to the QA status pane''s lifetime, not the TUI''s.
+    The TUI reads qa_status.json to detect completion and trigger lifecycle transitions
+    (merge, back-to-review, etc.). The initial scenario list and window names are
+    seeded into qa_status.json by the TUI at launch time, and qa_status.py takes over
+    monitoring from there.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-09T20:05:57.251516+00:00'
+  updated_at: '2026-03-09T20:07:21.553405+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

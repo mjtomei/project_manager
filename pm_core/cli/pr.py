@@ -630,8 +630,20 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
             tmp_path = project_dir / f".tmp-{pr_id}"
             if tmp_path.exists():
                 shutil.rmtree(tmp_path)
-            click.echo(f"Cloning {repo_url}...")
-            git_ops.clone(repo_url, tmp_path, branch=base_branch)
+            # Clone locally from the existing repo (fast) instead of
+            # from the remote URL (slow, subject to network issues).
+            local_source = str(root)
+            click.echo(f"Cloning locally from {local_source}...")
+            git_ops.clone(local_source, tmp_path, branch=base_branch)
+            # Configure push URLs: push to both the local repo (keeps
+            # it up to date, like the container push proxy does) and
+            # the remote (GitHub).  Fetch stays local for speed.
+            # PR branches aren't checked out in the main repo, so
+            # pushing to the local path succeeds without issues.
+            git_ops.run_git("remote", "set-url", "--push",
+                            "origin", local_source, cwd=tmp_path)
+            git_ops.run_git("remote", "set-url", "--add", "--push",
+                            "origin", repo_url, cwd=tmp_path)
 
             # Cache repo_id now that we have a clone
             _resolve_repo_id(data, tmp_path, root)
