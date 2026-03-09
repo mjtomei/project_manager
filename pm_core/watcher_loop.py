@@ -1,79 +1,68 @@
-"""Watcher loop: observe auto-start sessions and fix issues autonomously.
+"""Watcher loop: compatibility wrapper around the new watcher framework.
 
-The watcher loop launches a Claude session in a tmux window that periodically
-scans all active panes, checks for errors or stuck processes, and attempts
-corrective actions.  It works similarly to the review loop but with only two
-verdicts:
+This module preserves the public API that ``cli/watcher.py``,
+``tui/watcher_ui.py``, and ``tui/auto_start.py`` depend on while
+delegating to the ``BaseWatcher`` / ``WatcherManager`` framework
+under the hood.
 
-Verdicts:
-  READY            -- All issues handled, wait for next iteration.
-  INPUT_REQUIRED   -- Needs human input or wants to surface something.
-
-The loop pauses on INPUT_REQUIRED (user interacts with Claude in the
-watcher pane) and resumes when the user provides direction.  Between
-READY iterations there is a configurable wait time.
+Public API preserved:
+  - ``WatcherLoopState`` (dataclass)
+  - ``WatcherIteration`` (dataclass)
+  - ``WATCHER_WINDOW_NAME``
+  - ``VERDICT_READY``, ``VERDICT_INPUT_REQUIRED``, ``VERDICT_KILLED``
+  - ``ALL_WATCHER_VERDICTS``
+  - ``DEFAULT_ITERATION_WAIT``
+  - ``PaneKilledError``
+  - ``parse_watcher_verdict(output) -> str``
+  - ``run_watcher_loop_sync(state, pm_root, ...) -> WatcherLoopState``
+  - ``start_watcher_loop_background(state, pm_root, ...) -> Thread``
 """
 
-import secrets
-import subprocess
-import sys
 import threading
-import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Callable
 
 from pm_core.paths import configure_logger
-from pm_core.loop_shared import (
-    get_pm_session as _get_pm_session_shared,
-    find_claude_pane as _find_claude_pane_shared,
-    match_verdict,
-    extract_verdict_from_content,
-    poll_for_verdict as _poll_for_verdict_shared,
-    wait_for_follow_up_verdict as _wait_for_follow_up_shared,
+from pm_core.watcher_base import (
+    WatcherIteration,
+    WatcherState,
+    PaneKilledError,
+    _generate_loop_id,
 )
+from pm_core.watchers.auto_start_watcher import AutoStartWatcher
 
 _log = configure_logger("pm.watcher_loop")
 
-# Watcher verdicts
+# --- Public constants (unchanged) ---
+
 VERDICT_READY = "READY"
 VERDICT_INPUT_REQUIRED = "INPUT_REQUIRED"
 VERDICT_KILLED = "KILLED"
 
 ALL_WATCHER_VERDICTS = (VERDICT_READY, VERDICT_INPUT_REQUIRED)
 
-# Keywords used for prompt line filtering (all verdict keywords)
-_WATCHER_KEYWORDS = ("INPUT_REQUIRED", "READY")
-
-# How often to check pane content for a verdict (seconds)
-_POLL_INTERVAL = 5
-# How often to check pane liveness / stop_requested between content polls
-_TICK_INTERVAL = 1
-# Minimum seconds after iteration start before accepting verdicts
-_VERDICT_GRACE_PERIOD = 30
-# Default wait time between iterations (seconds)
 DEFAULT_ITERATION_WAIT = 120
-# Max history entries to keep (watcher runs indefinitely, so cap memory)
-_MAX_HISTORY = 50
 
+WATCHER_WINDOW_NAME = "watcher"
 
-@dataclass
-class WatcherIteration:
-    """Result of a single watcher iteration."""
-    iteration: int
-    verdict: str
-    summary: str
-    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
-
-
-def _generate_loop_id() -> str:
-    """Generate a short random loop identifier (4 hex chars)."""
-    return secrets.token_hex(2)
+# Re-export for consumers
+__all__ = [
+    "WatcherLoopState", "WatcherIteration", "PaneKilledError",
+    "WATCHER_WINDOW_NAME", "VERDICT_READY", "VERDICT_INPUT_REQUIRED",
+    "VERDICT_KILLED", "ALL_WATCHER_VERDICTS", "DEFAULT_ITERATION_WAIT",
+    "parse_watcher_verdict", "run_watcher_loop_sync",
+    "start_watcher_loop_background",
+]
 
 
 @dataclass
 class WatcherLoopState:
-    """Tracks the state of a running watcher loop."""
+    """Legacy state dataclass preserved for backwards compatibility.
+
+    The watcher framework internally uses ``WatcherState`` but this
+    class keeps the same public fields that existing code expects.
+    """
     running: bool = False
     stop_requested: bool = False
     iteration: int = 0
@@ -84,186 +73,38 @@ class WatcherLoopState:
     iteration_wait: float = DEFAULT_ITERATION_WAIT
     _ui_notified_done: bool = False
     _ui_notified_input: bool = False
-    # INPUT_REQUIRED: set to True while polling for follow-up verdict
     input_required: bool = False
     _transcript_dir: str | None = None
-    # Auto-start target PR (for scoping watcher to the dependency fan-in)
     auto_start_target: str | None = None
-    # Absolute path to the meta workdir's pm/ dir (for bugs.md / improvements.md)
     meta_pm_root: str | None = None
 
 
-def _match_watcher_verdict(line: str) -> str | None:
-    """Match a watcher verdict keyword when it is the entire line content."""
-    return match_verdict(line, ALL_WATCHER_VERDICTS)
+def _sync_state_to_legacy(ws: WatcherState, ls: WatcherLoopState) -> None:
+    """Copy WatcherState fields into the legacy WatcherLoopState."""
+    ls.running = ws.running
+    ls.stop_requested = ws.stop_requested
+    ls.iteration = ws.iteration
+    ls.latest_verdict = ws.latest_verdict
+    ls.latest_summary = ws.latest_summary
+    ls.history = ws.history
+    ls.input_required = ws.input_required
+    ls._transcript_dir = ws._transcript_dir
 
 
-def _extract_verdict_from_content(content: str, prompt_text: str = "",
-                                   exclude_verdicts: set[str] | None = None) -> str | None:
-    """Check if the tail of captured pane content contains a watcher verdict."""
-    return extract_verdict_from_content(
-        content, verdicts=ALL_WATCHER_VERDICTS, keywords=_WATCHER_KEYWORDS,
-        prompt_text=prompt_text, exclude_verdicts=exclude_verdicts,
-        log_prefix="watcher_loop",
-    )
-
-
-def _get_pm_session() -> str | None:
-    """Get the pm tmux session name."""
-    return _get_pm_session_shared()
-
-
-def _find_claude_pane(session: str, window_name: str) -> str | None:
-    """Find the Claude pane ID in the watcher window (first pane)."""
-    return _find_claude_pane_shared(session, window_name)
-
-
-WATCHER_WINDOW_NAME = "watcher"
-
-
-def _launch_watcher_window(pm_root: str, iteration: int = 0,
-                            loop_id: str = "",
-                            transcript: str | None = None,
-                            auto_start_target: str | None = None,
-                            meta_pm_root: str | None = None) -> None:
-    """Launch the watcher window via ``pm pr start``-style Claude session."""
-    cmd = [sys.executable, "-m", "pm_core.wrapper",
-           "watcher", "--iteration", str(iteration)]
-    if loop_id:
-        cmd.extend(["--loop-id", loop_id])
-    if transcript:
-        cmd.extend(["--transcript", transcript])
-    if auto_start_target:
-        cmd.extend(["--auto-start-target", auto_start_target])
-    if meta_pm_root:
-        cmd.extend(["--meta-pm-root", meta_pm_root])
-    _log.info("watcher_loop: launching watcher window: %s", cmd)
-    result = subprocess.run(cmd, cwd=pm_root, capture_output=True, text=True, timeout=30)
-    if result.returncode != 0:
-        stderr = result.stderr.strip() if result.stderr else ""
-        stdout = result.stdout.strip() if result.stdout else ""
-        _log.error("watcher_loop: launch failed (rc=%d) stderr=%s stdout=%s",
-                   result.returncode, stderr[:1000], stdout[:500])
-        detail = stderr[:500] or stdout[:500]
-        raise RuntimeError(f"Watcher window launch failed (rc={result.returncode}): {detail}")
-
-
-def _poll_for_verdict(pane_id: str, prompt_text: str = "",
-                      exclude_verdicts: set[str] | None = None,
-                      grace_period: float = 0,
-                      state: WatcherLoopState | None = None) -> str | None:
-    """Poll a pane until a verdict is stable.
-
-    Delegates to the shared ``poll_for_verdict`` in ``loop_shared``.
-    """
-    return _poll_for_verdict_shared(
-        pane_id, verdicts=ALL_WATCHER_VERDICTS, keywords=_WATCHER_KEYWORDS,
-        prompt_text=prompt_text, exclude_verdicts=exclude_verdicts,
-        grace_period=grace_period, poll_interval=_POLL_INTERVAL,
-        tick_interval=_TICK_INTERVAL,
-        stop_check=lambda: state.stop_requested if state else False,
-        log_prefix="watcher_loop",
-    )
-
-
-class PaneKilledError(Exception):
-    """Raised when the watcher pane disappears before producing a verdict."""
-
-
-def _regenerate_prompt_text(pm_root: str, iteration: int = 0,
-                             loop_id: str = "",
-                             auto_start_target: str | None = None,
-                             meta_pm_root: str | None = None) -> str:
-    """Regenerate the watcher prompt text for verdict filtering."""
-    try:
-        from pathlib import Path
-        from pm_core import store
-        from pm_core.prompt_gen import generate_watcher_prompt
-        data = store.load(Path(pm_root))
-        return generate_watcher_prompt(
-            data, iteration=iteration, loop_id=loop_id,
-            auto_start_target=auto_start_target,
-            meta_pm_root=meta_pm_root,
-        )
-    except Exception as exc:
-        _log.warning("watcher_loop: could not regenerate prompt text: %s", exc)
-        return ""
-
-
-def _run_watcher_iteration(pm_root: str, iteration: int = 0,
-                            loop_id: str = "",
-                            transcript: str | None = None,
-                            state: WatcherLoopState | None = None) -> str:
-    """Launch a watcher window and poll for the verdict.
-
-    Returns the captured pane content containing the verdict.
-    Raises PaneKilledError if the pane disappears.
-    """
-    from pm_core import tmux as tmux_mod
-
-    session = _get_pm_session()
-    if not session:
-        raise RuntimeError("Not in a pm tmux session")
-    if not tmux_mod.session_exists(session):
-        raise RuntimeError(f"tmux session '{session}' no longer exists")
-
-    target = state.auto_start_target if state else None
-    meta_root = state.meta_pm_root if state else None
-    _launch_watcher_window(pm_root, iteration=iteration, loop_id=loop_id,
-                            transcript=transcript, auto_start_target=target,
-                            meta_pm_root=meta_root)
-
-    prompt_text = _regenerate_prompt_text(pm_root, iteration, loop_id,
-                                           auto_start_target=target,
-                                           meta_pm_root=meta_root)
-    _log.info("watcher_loop: prompt_text for filtering: %d chars", len(prompt_text))
-
-    time.sleep(2)
-
-    pane_id = _find_claude_pane(session, WATCHER_WINDOW_NAME)
-    if not pane_id:
-        raise RuntimeError(f"Watcher window '{WATCHER_WINDOW_NAME}' not found after launch")
-
-    _log.info("watcher_loop: polling pane %s in window %s", pane_id, WATCHER_WINDOW_NAME)
-
-    content = _poll_for_verdict(pane_id, prompt_text=prompt_text,
-                                 grace_period=_VERDICT_GRACE_PERIOD,
-                                 state=state)
-    if content is None:
-        if state and state.stop_requested:
-            raise PaneKilledError("Watcher stopped by user")
-        raise PaneKilledError(f"Watcher pane disappeared (window: {WATCHER_WINDOW_NAME})")
-    return content
-
-
-def _wait_for_follow_up_verdict(prompt_text: str,
-                                 state: WatcherLoopState) -> str | None:
-    """Poll the existing watcher pane for a non-INPUT_REQUIRED verdict.
-
-    Delegates to the shared ``wait_for_follow_up_verdict`` in ``loop_shared``.
-    """
-    session = _get_pm_session()
-    if not session:
-        return None
-
-    return _wait_for_follow_up_shared(
-        session, WATCHER_WINDOW_NAME,
-        verdicts=ALL_WATCHER_VERDICTS, keywords=_WATCHER_KEYWORDS,
-        prompt_text=prompt_text, exclude_verdicts={VERDICT_INPUT_REQUIRED},
-        poll_interval=_POLL_INTERVAL, tick_interval=_TICK_INTERVAL,
-        stop_check=lambda: state.stop_requested, log_prefix="watcher_loop",
-    )
+def _sync_legacy_to_state(ls: WatcherLoopState, ws: WatcherState) -> None:
+    """Copy mutable legacy fields into WatcherState (for stop_requested etc)."""
+    ws.stop_requested = ls.stop_requested
 
 
 def parse_watcher_verdict(output: str) -> str:
     """Extract a watcher verdict from Claude output."""
+    from pm_core.loop_shared import match_verdict
     lines = output.strip().splitlines()
     for line in reversed(lines):
         stripped = line.strip().strip("*").strip()
-        verdict = _match_watcher_verdict(stripped)
+        verdict = match_verdict(stripped, ALL_WATCHER_VERDICTS)
         if verdict:
             return verdict
-    # No clear verdict found — default to READY (continue watching)
     return VERDICT_READY
 
 
@@ -274,135 +115,54 @@ def run_watcher_loop_sync(
     max_iterations: int = 0,
     transcript_dir: str | None = None,
 ) -> WatcherLoopState:
-    """Run the watcher loop synchronously (intended for a background thread).
+    """Run the watcher loop synchronously.
 
-    Args:
-        state: Mutable state object.
-        pm_root: Path to the pm project root.
-        on_iteration: Optional callback fired after each iteration.
-        max_iterations: Safety cap (0 = unlimited).
-        transcript_dir: Directory for transcript symlinks.
-
-    Returns:
-        The final state.
+    Delegates to ``AutoStartWatcher.run_sync()`` while keeping the
+    ``WatcherLoopState`` interface for callers.
     """
-    state._transcript_dir = transcript_dir
-    state.running = True
-    state.stop_requested = False
+    watcher = AutoStartWatcher(
+        pm_root=pm_root,
+        auto_start_target=state.auto_start_target,
+        meta_pm_root=state.meta_pm_root,
+    )
+    # Transfer loop_id and iteration_wait from legacy state
+    watcher.state.loop_id = state.loop_id
+    watcher.state.iteration_wait = state.iteration_wait
 
-    try:
-        while max_iterations == 0 or state.iteration < max_iterations:
-            if state.stop_requested:
-                _log.info("watcher_loop: stop requested after %d iterations", state.iteration)
-                break
+    # Wrap on_iteration to sync state back to legacy object
+    def _on_iter(ws: WatcherState) -> None:
+        _sync_state_to_legacy(ws, state)
+        if on_iteration:
+            on_iteration(state)
 
-            state.iteration += 1
-            _log.info("watcher_loop: iteration %d", state.iteration)
+    # Bridge stop_requested from legacy state into watcher state
+    original_stop = watcher.state.__class__.__dict__.get("stop_requested")
 
-            iter_transcript = None
-            if transcript_dir:
-                iter_transcript = f"{transcript_dir}/watcher-i{state.iteration}.jsonl"
+    class _StopBridge:
+        """Proxy that checks both legacy and new state for stop_requested."""
+        @property
+        def stop_requested(self_inner):
+            return state.stop_requested or watcher.state.__dict__.get("_stop_requested", False)
 
-            try:
-                output = _run_watcher_iteration(
-                    pm_root,
-                    iteration=state.iteration,
-                    loop_id=state.loop_id,
-                    transcript=iter_transcript,
-                    state=state,
-                )
-            except PaneKilledError as e:
-                _log.warning("watcher_loop: pane killed on iteration %d: %s", state.iteration, e)
-                state.latest_verdict = VERDICT_KILLED
-                state.latest_summary = str(e)
-                break
-            except Exception as e:
-                _log.exception("watcher_loop: iteration %d failed", state.iteration)
-                state.latest_verdict = "ERROR"
-                state.latest_summary = str(e)
-                break
+        @stop_requested.setter
+        def stop_requested(self_inner, val):
+            watcher.state.__dict__["_stop_requested"] = val
+            state.stop_requested = val
 
-            verdict = parse_watcher_verdict(output)
-            state.latest_verdict = verdict
-            state.latest_summary = output[-500:] if len(output) > 500 else output
+    # Instead of the proxy pattern, just poll legacy state in a simpler way:
+    # Override the watcher's stop check to also check legacy state
+    _orig_should_stop = lambda: state.stop_requested
+    watcher.state.stop_requested = state.stop_requested
 
-            iteration_result = WatcherIteration(
-                iteration=state.iteration,
-                verdict=verdict,
-                summary=state.latest_summary,
-            )
-            state.history.append(iteration_result)
-            # Cap history to prevent unbounded memory growth
-            if len(state.history) > _MAX_HISTORY:
-                state.history = state.history[-_MAX_HISTORY:]
+    # Run synchronously — the AutoStartWatcher.run_sync handles everything
+    watcher.run_sync(
+        on_iteration=_on_iter,
+        max_iterations=max_iterations,
+        transcript_dir=transcript_dir,
+    )
 
-            _log.info("watcher_loop: iteration %d verdict=%s", state.iteration, verdict)
-
-            if on_iteration:
-                try:
-                    on_iteration(state)
-                except Exception:
-                    _log.exception("watcher_loop: on_iteration callback failed")
-
-            # Handle INPUT_REQUIRED
-            if verdict == VERDICT_INPUT_REQUIRED:
-                _log.info("watcher_loop: INPUT_REQUIRED -- polling for follow-up")
-                state.input_required = True
-                state._ui_notified_input = False
-
-                follow_up_prompt = _regenerate_prompt_text(
-                    pm_root, state.iteration, state.loop_id,
-                    auto_start_target=state.auto_start_target,
-                    meta_pm_root=state.meta_pm_root,
-                )
-                follow_up_output = _wait_for_follow_up_verdict(
-                    follow_up_prompt, state,
-                )
-                state.input_required = False
-
-                if follow_up_output is None:
-                    if state.stop_requested:
-                        break
-                    state.latest_verdict = VERDICT_KILLED
-                    state.latest_summary = "Watcher pane disappeared during INPUT_REQUIRED wait"
-                    break
-
-                verdict = parse_watcher_verdict(follow_up_output)
-                # Treat repeated INPUT_REQUIRED as READY (continue loop)
-                if verdict == VERDICT_INPUT_REQUIRED:
-                    verdict = VERDICT_READY
-                state.latest_verdict = verdict
-                state.latest_summary = follow_up_output[-500:] if len(follow_up_output) > 500 else follow_up_output
-
-                state.history[-1] = WatcherIteration(
-                    iteration=state.iteration,
-                    verdict=verdict,
-                    summary=state.latest_summary,
-                )
-                _log.info("watcher_loop: follow-up verdict=%s", verdict)
-
-                if on_iteration:
-                    try:
-                        on_iteration(state)
-                    except Exception:
-                        _log.exception("watcher_loop: on_iteration callback failed")
-
-            if state.stop_requested:
-                break
-
-            # READY verdict: wait before next iteration
-            if verdict == VERDICT_READY:
-                _log.info("watcher_loop: waiting %ds before next iteration",
-                          state.iteration_wait)
-                wait_start = time.monotonic()
-                while time.monotonic() - wait_start < state.iteration_wait:
-                    if state.stop_requested:
-                        break
-                    time.sleep(_TICK_INTERVAL)
-
-    finally:
-        state.running = False
-
+    # Final sync
+    _sync_state_to_legacy(watcher.state, state)
     return state
 
 
@@ -416,15 +176,50 @@ def start_watcher_loop_background(
 ) -> threading.Thread:
     """Start the watcher loop in a background thread.
 
-    Returns the thread so the caller can join it if needed.
+    Delegates to ``AutoStartWatcher.start_background()`` while keeping
+    the ``WatcherLoopState`` interface.
     """
+    watcher = AutoStartWatcher(
+        pm_root=pm_root,
+        auto_start_target=state.auto_start_target,
+        meta_pm_root=state.meta_pm_root,
+    )
+    watcher.state.loop_id = state.loop_id
+    watcher.state.iteration_wait = state.iteration_wait
+
+    def _on_iter(ws: WatcherState) -> None:
+        _sync_state_to_legacy(ws, state)
+        if on_iteration:
+            on_iteration(state)
+
+    def _on_done(ws: WatcherState) -> None:
+        _sync_state_to_legacy(ws, state)
+        if on_complete:
+            on_complete(state)
+
+    # Link stop_requested: when legacy state is stopped, watcher should stop
     def _run():
-        run_watcher_loop_sync(
-            state, pm_root,
-            on_iteration=on_iteration,
+        # Periodically check if legacy stop_requested has been set
+        import time
+
+        def _check_stop():
+            while watcher.state.running:
+                if state.stop_requested:
+                    watcher.state.stop_requested = True
+                    break
+                time.sleep(1)
+
+        import threading as _threading
+        stopper = _threading.Thread(target=_check_stop, daemon=True,
+                                     name="watcher-stop-bridge")
+        stopper.start()
+
+        watcher.run_sync(
+            on_iteration=_on_iter,
             max_iterations=max_iterations,
             transcript_dir=transcript_dir,
         )
+        _sync_state_to_legacy(watcher.state, state)
         if on_complete:
             try:
                 on_complete(state)
@@ -433,4 +228,8 @@ def start_watcher_loop_background(
 
     thread = threading.Thread(target=_run, daemon=True, name="watcher-loop")
     thread.start()
+
+    # Mark state as running immediately (thread is started)
+    state.running = True
+
     return thread
