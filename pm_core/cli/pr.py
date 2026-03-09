@@ -283,7 +283,8 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
 @click.option("--description", "desc", default=None, help="New description")
 @click.option("--status", default=None, type=click.Choice(["pending", "in_progress", "in_review", "qa", "merged", "closed"]),
               help="New status (pending, in_progress, in_review, qa, merged, closed)")
-def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | None, status: str | None):
+@click.option("--plan", default=None, help="Associated plan ID")
+def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | None, status: str | None, plan: str | None):
     """Edit an existing PR's title, description, dependencies, or status."""
     root = state_root()
     data = store.load(root)
@@ -291,6 +292,9 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
     pr_id = pr_entry["id"]
 
     changes = []
+    if plan is not None:
+        pr_entry["plan"] = plan if plan else None
+        changes.append(f"plan={plan or 'none'}")
     if title is not None:
         pr_entry["title"] = title
         changes.append(f"title={title}")
@@ -626,8 +630,20 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
             tmp_path = project_dir / f".tmp-{pr_id}"
             if tmp_path.exists():
                 shutil.rmtree(tmp_path)
-            click.echo(f"Cloning {repo_url}...")
-            git_ops.clone(repo_url, tmp_path, branch=base_branch)
+            # Clone locally from the existing repo (fast) instead of
+            # from the remote URL (slow, subject to network issues).
+            local_source = str(root)
+            click.echo(f"Cloning locally from {local_source}...")
+            git_ops.clone(local_source, tmp_path, branch=base_branch)
+            # Configure push URLs: push to both the local repo (keeps
+            # it up to date, like the container push proxy does) and
+            # the remote (GitHub).  Fetch stays local for speed.
+            # PR branches aren't checked out in the main repo, so
+            # pushing to the local path succeeds without issues.
+            git_ops.run_git("remote", "set-url", "--push",
+                            "origin", local_source, cwd=tmp_path)
+            git_ops.run_git("remote", "set-url", "--add", "--push",
+                            "origin", repo_url, cwd=tmp_path)
 
             # Cache repo_id now that we have a clone
             _resolve_repo_id(data, tmp_path, root)
