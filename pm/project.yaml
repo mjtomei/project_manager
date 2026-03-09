@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-3032fb6
+  active_pr: pr-9bf8b0b
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -5062,6 +5062,45 @@ prs:
   gh_pr_number: null
   created_at: '2026-03-09T20:05:57.251516+00:00'
   updated_at: '2026-03-09T20:07:21.553405+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-9bf8b0b
+  plan: improvements
+  title: Unified log file with source prefixes and pm log CLI
+  branch: pm/pr-9bf8b0b-unified-log-file-with-source-prefixes-and-pm-log-c
+  status: pending
+  depends_on: []
+  description: 'Consolidate all pm logging into a single log file per session. Currently
+    different modules create loggers with different names but they already write to
+    the same file — formalize this by adding source prefixes (e.g. [tui.app], [qa_loop],
+    [review_loop], [watcher], [git], [cli.pr]) to every log line so you can easily
+    filter by subsystem.
+
+
+    Add a ''pm log'' CLI command with subcommands:
+
+    - pm log: tail the current session log (live follow mode by default)
+
+    - pm log show: print the full log or last N lines
+
+    - pm log grep <pattern>: search the log with regex, with optional --source filter
+
+    - pm log clear: truncate the log file
+
+    - pm log path: print the log file path (for piping to external tools)
+
+    - pm log sources: list all source prefixes seen in the log
+
+
+    The format should include timestamps, level, source prefix, and message. Should
+    work with the existing RotatingFileHandler setup.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-09T23:46:16.788511+00:00'
+  updated_at: '2026-03-09T23:46:16.788511+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
