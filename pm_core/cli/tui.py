@@ -22,9 +22,30 @@ from pm_core.cli.helpers import (
 @cli.command("_tui", hidden=True)
 def tui_cmd():
     """Launch the interactive TUI (internal command)."""
-    from pm_core.tui.app import ProjectManagerApp
-    app = ProjectManagerApp()
-    app.run()
+    import sys
+    import traceback
+    from pm_core.paths import configure_logger, command_log_file
+
+    # Redirect stderr to a file so crash output is preserved after the pane dies
+    stderr_path = debug_dir() / "tui-stderr.log"
+    stderr_file = open(stderr_path, "a")
+    sys.stderr = stderr_file
+
+    log = configure_logger("pm.tui.crash")
+
+    try:
+        from pm_core.tui.app import ProjectManagerApp
+        app = ProjectManagerApp()
+        app.run()
+    except Exception:
+        tb = traceback.format_exc()
+        log.error("TUI crashed with unhandled exception:\n%s", tb)
+        stderr_file.write(f"\n--- TUI CRASH ---\n{tb}\n")
+        stderr_file.flush()
+        raise
+    finally:
+        sys.stderr = sys.__stderr__
+        stderr_file.close()
 
 
 @cli.group()
