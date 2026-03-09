@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-9bf8b0b
+  active_pr: pr-e3ef28b
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -3924,13 +3924,13 @@ prs:
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-c2352be-add-pm-qa-start-cli-command-for-full-9964ad22
   created_at: '2026-03-07T15:02:30.101810+00:00'
-  updated_at: '2026-03-09T17:29:00.448072+00:00'
+  updated_at: '2026-03-09T19:56:50.315323+00:00'
   gh_pr: https://github.com/mjtomei/project_manager/pull/128
   gh_pr_number: 128
   started_at: '2026-03-07T15:02:30.101810+00:00'
   agent_machine: spark-424d
   reviewed_at: '2026-03-07T15:11:17.140605+00:00'
-  merged_at: '2026-03-09T17:29:00.448072+00:00'
+  merged_at: '2026-03-09T19:56:50.315323+00:00'
 - id: pr-4258a32
   plan: improvements
   title: Add get_workdir helper that recovers missing workdir from filesystem
@@ -4073,6 +4073,27 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-e3ef28b
+  plan: null
+  title: Auto-create workdir when missing on current machine
+  branch: pm/pr-e3ef28b-auto-create-workdir-when-missing-on-current-machin
+  status: in_progress
+  depends_on: []
+  description: 'When a PR was started on a different computer, the workdir path doesn''t
+    exist locally. Previously this caused review/merge/QA windows to fail silently
+    or launch in the wrong directory. Adds _ensure_workdir() helper that clones the
+    repo and checks out the PR branch when the recorded workdir is missing, called
+    from review, merge, and QA launch paths. Branch: pm/ensure-workdir-on-new-machine'
+  agent_machine: MacBook-Pro.local
+  gh_pr: https://github.com/mjtomei/project_manager/pull/133
+  gh_pr_number: 133
+  created_at: '2026-03-08T22:47:45.033304+00:00'
+  updated_at: '2026-03-09T23:43:54.978686+00:00'
+  started_at: '2026-03-09T23:43:54.978686+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  workdir: /Users/matthewtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-e3ef28b-auto-create-workdir-when-missing-on--38d4a7e5
 - id: pr-fd54424
   plan: onboarding
   title: Add interactive pm tutorial command with tmux, TUI, and git modules
