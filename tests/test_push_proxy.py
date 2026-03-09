@@ -76,9 +76,9 @@ class TestPushProxyBranchValidation:
         # First call: _resolve_local_remote_url checks origin URL
         # Second call: the actual git push
         push_call = [c for c in mock_run.call_args_list
-                     if c[0][0][0:2] == ["git", "push"]]
+                     if "push" in c[0][0]]
         assert len(push_call) == 1
-        assert push_call[0][0][0] == ["git", "push", "origin", "pm/pr-123-feature"]
+        assert push_call[0][0][0] == ["git", "-C", "/tmp/fake-workdir", "push", "origin", "pm/pr-123-feature"]
 
     @patch("subprocess.run")
     def test_allows_force_push_plus_prefix(self, mock_run, proxy, sock_path):
@@ -186,7 +186,7 @@ class TestPushProxyBranchValidation:
                              {"args": ["-u", "origin", "pm/pr-123-feature"]})
         assert resp["exit_code"] == 0
         cmd = mock_run.call_args[0][0]
-        assert cmd == ["git", "push", "-u", "origin", "pm/pr-123-feature"]
+        assert cmd == ["git", "-C", "/tmp/fake-workdir", "push", "-u", "origin", "pm/pr-123-feature"]
 
 
 class TestDangerousFlags:

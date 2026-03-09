@@ -301,12 +301,11 @@ class PushProxy:
         if local_target is not None:
             return self._local_push(local_target, target_branch)
 
-        cmd = ["git", "push"] + push_args
-        _log.info("Push proxy executing: %s (in %s)", cmd, self.workdir)
+        cmd = ["git", "-C", self.workdir, "push"] + push_args
+        _log.info("Push proxy executing: %s", cmd)
         try:
             result = subprocess.run(
-                cmd, cwd=self.workdir,
-                capture_output=True, text=True, timeout=120,
+                cmd, capture_output=True, text=True, timeout=120,
             )
             return {
                 "exit_code": result.returncode,
@@ -402,12 +401,11 @@ class PushProxy:
         if danger:
             return danger
 
-        cmd = ["git", git_cmd] + args
-        _log.info("Git proxy executing read cmd: %s (in %s)", cmd, self.workdir)
+        cmd = ["git", "-C", self.workdir, git_cmd] + args
+        _log.info("Git proxy executing read cmd: %s", cmd)
         try:
             result = subprocess.run(
-                cmd, cwd=self.workdir,
-                capture_output=True, text=True, timeout=120,
+                cmd, capture_output=True, text=True, timeout=120,
             )
             return {
                 "exit_code": result.returncode,
