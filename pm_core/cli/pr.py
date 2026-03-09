@@ -632,7 +632,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                 shutil.rmtree(tmp_path)
             # Clone locally from the existing repo (fast) instead of
             # from the remote URL (slow, subject to network issues).
-            local_source = str(root)
+            # When PM state lives in a pm/ subdir, the git repo is the parent.
+            local_source = str(root.parent) if store.is_internal_pm_dir(root) else str(root)
             click.echo(f"Cloning locally from {local_source}...")
             git_ops.clone(local_source, tmp_path, branch=base_branch)
             # Configure push URLs: push to both the local repo (keeps
