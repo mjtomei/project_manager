@@ -1563,13 +1563,31 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
         )
         if not pull_ok:
             return
+        # Also make the feature branch available so downstream workdirs can fetch it
+        if branch:
+            fb_result = git_ops.run_git(
+                "fetch", str(work_path), f"{branch}:{branch}",
+                cwd=repo_dir, check=False,
+            )
+            if fb_result.returncode != 0:
+                click.echo(f"Warning: could not update feature branch ref {branch} "
+                           f"in repo: {fb_result.stderr.strip()}", err=True)
         _finalize_merge(data, root, pr_entry, pr_id, transcript=transcript)
         repo = data.get("project", {}).get("repo", "")
         if "project_manager" in repo or "project-manager" in repo:
             trigger_tui_restart()
     else:
         if not propagation_only:
-            # Vanilla backend: push to remote origin (already done in step 1 or by Claude)
+            # Push feature branch so downstream workdirs can fetch it
+            if branch:
+                fb_push = git_ops.run_git("push", "origin", branch,
+                                          cwd=workdir, check=False)
+                if fb_push.returncode != 0:
+                    click.echo(f"Warning: could not push feature branch {branch} "
+                               f"to origin: {fb_push.stderr.strip()}", err=True)
+                else:
+                    click.echo(f"Pushed feature branch {branch} to origin.")
+            # Vanilla backend: push merged base branch to origin
             push_result = git_ops.run_git("push", "origin", base_branch,
                                           cwd=workdir, check=False)
             if push_result.returncode != 0:
