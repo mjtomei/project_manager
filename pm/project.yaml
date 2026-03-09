@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-942aa21
+  active_pr: pr-f84cf3e
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -41,6 +41,18 @@ plans:
   name: ''
   file: improvements.md
   status: active
+- id: watchers
+  name: Watcher framework and session health
+  file: plans/watchers.md
+  status: draft
+- id: tui-ux
+  name: TUI and UX improvements
+  file: plans/tui-ux.md
+  status: draft
+- id: onboarding
+  name: Onboarding and developer experience
+  file: plans/onboarding.md
+  status: draft
 prs:
 - id: pr-001
   plan: plan-001
@@ -1308,7 +1320,7 @@ prs:
   created_at: null
   updated_at: null
 - id: pr-7f01e33
-  plan: improvements
+  plan: tui-ux
   title: Auto-resize pane to fit Claude output when selected
   branch: pm/pr-7f01e33-auto-resize-pane-to-fit-claude-output-when-selecte
   status: in_review
@@ -1330,7 +1342,7 @@ prs:
     last_edited: '2026-03-02T00:35:07Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-7f01e33-auto-resize-pane-to-fit-claude-outpu-9cfc4712
   created_at: null
-  updated_at: '2026-03-02T00:35:07.784915+00:00'
+  updated_at: '2026-03-08T22:04:53.504103+00:00'
 - id: pr-97c1be3
   plan: null
   title: Add pm pr note subcommand for querying and editing PR notes
@@ -1780,7 +1792,7 @@ prs:
   created_at: '2026-02-26T15:32:02.274280+00:00'
   updated_at: '2026-02-26T18:44:20.992499+00:00'
 - id: pr-ff68ef5
-  plan: improvements
+  plan: tui-ux
   title: Single-window focus mode with pane pull/push prefix key
   branch: pm/pr-ff68ef5-single-window-focus-mode-with-pane-pull-push-prefi
   status: in_review
@@ -1837,7 +1849,7 @@ prs:
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ff68ef5-single-window-focus-mode-with-pane-p-b6481329
   created_at: '2026-02-26T15:41:30.621658+00:00'
-  updated_at: '2026-02-27T10:21:50.275823+00:00'
+  updated_at: '2026-03-08T22:04:54.458480+00:00'
 - id: pr-0f4baf1
   plan: null
   title: 'Fix local backend merge: pull from workdir instead of push'
@@ -1882,7 +1894,7 @@ prs:
   created_at: '2026-02-27T03:23:37.480179+00:00'
   updated_at: '2026-02-27T10:52:26.716549+00:00'
 - id: pr-b764a0c
-  plan: improvements
+  plan: tui-ux
   title: 'Add plan worker pane: generic Claude session with project context'
   branch: pm/pr-b764a0c-add-plan-worker-pane-generic-claude-session-with-p
   status: in_review
@@ -1917,7 +1929,7 @@ prs:
     last_edited: '2026-03-02T00:32:58Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-b764a0c-add-plan-worker-pane-generic-claude--2b310716
   created_at: '2026-02-27T10:12:26.609316+00:00'
-  updated_at: '2026-03-02T00:32:58.363142+00:00'
+  updated_at: '2026-03-08T22:04:58.901796+00:00'
 - id: pr-0a7d9ee
   plan: null
   title: Add companion workdir pane for implementation and merge windows
@@ -2092,7 +2104,7 @@ prs:
   updated_at: '2026-03-02T00:28:13.443852+00:00'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-30888b1-fold-plan-breakdown-into-plan-add-st-c82777eb
 - id: pr-3116896
-  plan: improvements
+  plan: tui-ux
   title: Move Claude panes from current window into their own window
   branch: pm/pr-3116896-move-claude-panes-from-current-window-into-their-o
   status: pending
@@ -2111,7 +2123,7 @@ prs:
   merged_at: null
   notes: []
   created_at: null
-  updated_at: '2026-03-06T13:46:23.845994+00:00'
+  updated_at: '2026-03-08T22:40:41.800452+00:00'
 - id: pr-8a60987
   plan: null
   title: Split notes.txt into committed and gitignored files with section–based editing
@@ -2263,7 +2275,7 @@ prs:
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0e03c9b-add-set-shared-window-size-call-to-w-6142872c
 - id: pr-92301fc
-  plan: improvements
+  plan: tui-ux
   title: Defer PR re-sort until TUI is idle for configurable timeout
   branch: pm/pr-92301fc-defer-pr-re-sort-until-tui-is-idle-for-configurabl
   status: in_review
@@ -2278,7 +2290,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/105
   gh_pr_number: 105
   created_at: '2026-03-02T00:29:21.099342+00:00'
-  updated_at: '2026-03-02T01:00:23.796516+00:00'
+  updated_at: '2026-03-08T22:04:55.524473+00:00'
   started_at: '2026-03-02T00:29:39.194707+00:00'
   reviewed_at: '2026-03-02T00:43:40.296320+00:00'
   merged_at: null
@@ -2498,7 +2510,7 @@ prs:
     last_edited: '2026-03-06T13:46:24Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-923f22b-add-tui-watchdog-for-dead-background-27e0a73b
 - id: pr-7f958f3
-  plan: improvements
+  plan: tui-ux
   title: Change TUI restart from Ctrl+R to a typed character sequence
   branch: pm/pr-7f958f3-change-tui-restart-from-ctrl-r-to-a-typed-characte
   status: in_review
@@ -2525,7 +2537,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/114
   gh_pr_number: 114
   created_at: '2026-03-02T02:56:06.968805+00:00'
-  updated_at: '2026-03-02T03:38:04.475565+00:00'
+  updated_at: '2026-03-08T22:04:56.600870+00:00'
   started_at: '2026-03-02T02:56:46.721498+00:00'
   reviewed_at: '2026-03-02T03:08:03.583632+00:00'
   merged_at: null
@@ -2558,7 +2570,7 @@ prs:
     last_edited: '2026-03-02T03:38:04Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-7f958f3-change-tui-restart-from-ctrl-r-to-a--48107183
 - id: pr-7122c11
-  plan: improvements
+  plan: watchers
   title: Refine watcher INPUT_REQUIRED to distinguish project-wide vs branch-specific
     issues
   branch: pm/pr-7122c11-refine-watcher-input-required-to-distinguish-proje
@@ -2602,7 +2614,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/115
   gh_pr_number: 115
   created_at: '2026-03-02T03:07:32.581497+00:00'
-  updated_at: '2026-03-02T03:08:34.327716+00:00'
+  updated_at: '2026-03-08T22:04:42.734471+00:00'
   started_at: '2026-03-02T03:08:34.327716+00:00'
   reviewed_at: null
   merged_at: null
@@ -2966,7 +2978,14 @@ prs:
     The existing --dangerously-skip-permissions flag is too broad. Need targeted auto-accept
     via settings or TUI detection.
   created_at: null
-  updated_at: null
+  updated_at: '2026-03-08T21:50:08.519655+00:00'
+  notes:
+  - id: note-52d2c3e
+    text: Potentially subsumed by pr-3032fb6 (always-on watcher framework). The session
+      health watcher can detect and dismiss trust prompts naturally without a bespoke
+      programmatic fix.
+    created_at: '2026-03-08T21:50:08Z'
+    last_edited: '2026-03-08T21:50:08Z'
 - id: pr-f821a63
   plan: bugs
   title: Fix auto-start not re-scanning after manual status changes
@@ -2990,7 +3009,7 @@ prs:
   created_at: null
   updated_at: null
 - id: pr-fd01c70
-  plan: improvements
+  plan: watchers
   title: Add periodic auto-start scan for state changes
   branch: pm/pr-fd01c70-add-periodic-auto-start-scan-for-state-changes
   status: pending
@@ -2999,7 +3018,7 @@ prs:
     the existing event-based triggers. Handles manual resets, external state changes,
     and crash recovery.
   created_at: null
-  updated_at: null
+  updated_at: '2026-03-08T22:04:45.153083+00:00'
 - id: pr-ad7bd98
   plan: bugs
   title: Fix arrow crossing in TUI tech tree when dependencies are vertically stacked
@@ -3180,7 +3199,7 @@ prs:
   merged_at: null
   notes: []
 - id: pr-4fd59d4
-  plan: improvements
+  plan: tui-ux
   title: Separate fresh and looping review onto different prefix keys
   branch: pm/pr-4fd59d4-separate-fresh-and-looping-review-onto-different-p
   status: pending
@@ -3194,7 +3213,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-03T17:53:04.828595+00:00'
-  updated_at: '2026-03-03T17:53:04.828595+00:00'
+  updated_at: '2026-03-08T22:04:57.450516+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -3315,7 +3334,7 @@ prs:
     last_edited: '2026-03-06T02:04:48Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a9a71a4-qa-pass-should-not-auto-merge-withou-4bba2cbf
 - id: pr-76fa48d
-  plan: improvements
+  plan: watchers
   title: Auto-retry Claude sessions on 500 and usage limit errors
   branch: pm/pr-76fa48d-auto-retry-claude-sessions-on-500-and-usage-limit
   status: pending
@@ -3339,11 +3358,17 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-05T04:16:36.023786+00:00'
-  updated_at: '2026-03-05T04:16:36.023786+00:00'
+  updated_at: '2026-03-08T22:04:43.390756+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-a3db642
+    text: Potentially subsumed by pr-3032fb6 (always-on watcher framework). The session
+      health watcher can detect 500/usage limit errors and restart sessions without
+      a bespoke retry mechanism.
+    created_at: '2026-03-08T21:50:47Z'
+    last_edited: '2026-03-08T21:50:47Z'
 - id: pr-9fc6e27
   plan: improvements
   title: Keep PR description and notes in sync during development
@@ -3371,7 +3396,7 @@ prs:
   merged_at: null
   notes: []
 - id: pr-7f38bd9
-  plan: improvements
+  plan: plan-002
   title: Review loop mode for scenario-based unit test generation
   branch: pm/pr-7f38bd9-review-loop-mode-for-scenario-based-unit-test-gen
   status: pending
@@ -3389,13 +3414,13 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T19:42:37.749200+00:00'
-  updated_at: '2026-03-04T19:42:37.749200+00:00'
+  updated_at: '2026-03-08T22:06:41.680293+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
   notes: []
 - id: pr-d71ef39
-  plan: improvements
+  plan: onboarding
   title: Pre-init onboarding flow for dependencies and setup
   branch: pm/pr-d71ef39-pre-init-onboarding-flow-for-dependencies-and-set
   status: pending
@@ -3411,13 +3436,13 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:32:31.704195+00:00'
-  updated_at: '2026-03-04T16:32:31.704195+00:00'
+  updated_at: '2026-03-08T22:05:46.750926+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
   notes: []
 - id: pr-073910f
-  plan: improvements
+  plan: tui-ux
   title: Per-session tmux server isolation
   branch: pm/pr-073910f-per-session-tmux-server-isolation
   status: pending
@@ -3434,13 +3459,13 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-03-04T16:29:30.649058+00:00'
+  updated_at: '2026-03-08T22:40:41.080175+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
   notes: []
 - id: pr-72f1278
-  plan: improvements
+  plan: watchers
   title: OOM-aware memory watchdog for session process management
   branch: pm/pr-72f1278-oom-aware-memory-watchdog-for-session-process-mana
   status: pending
@@ -3457,11 +3482,17 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:23:15.847530+00:00'
-  updated_at: '2026-03-04T16:23:15.847530+00:00'
+  updated_at: '2026-03-08T22:04:44.108628+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-0bf75ee
+    text: Potentially subsumed by pr-3032fb6 (always-on watcher framework). The session
+      health watcher can monitor memory pressure and manage processes without a dedicated
+      OOM watchdog.
+    created_at: '2026-03-08T21:50:48Z'
+    last_edited: '2026-03-08T21:50:48Z'
 - id: pr-cf41efc
   plan: plan-qa
   title: Add interactive Scenario 0 and fix QA scenario window bugs
@@ -3651,7 +3682,7 @@ prs:
     last_edited: '2026-03-07T00:46:43Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-5e96046-enable-git-push-from-inside-containe-f6489c6f
 - id: pr-d3ae95e
-  plan: improvements
+  plan: tui-ux
   title: Add session permission visibility and risk dashboard
   branch: pm/pr-d3ae95e-add-session-permission-visibility-and-risk-dashboa
   status: pending
@@ -3704,7 +3735,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-06T14:02:50.658436+00:00'
-  updated_at: '2026-03-06T14:02:50.658436+00:00'
+  updated_at: '2026-03-08T22:40:42.482901+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -3808,7 +3839,7 @@ prs:
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-942aa21-add-spec-generation-step-between-pr--e2dbb884
 - id: pr-4585fd3
-  plan: improvements
+  plan: tui-ux
   title: Use resolved display IDs instead of raw PR IDs in all output
   branch: pm/pr-4585fd3-use-resolved-display-ids-instead-of-raw-pr-ids-in-
   status: pending
@@ -3852,7 +3883,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-06T19:18:33.834241+00:00'
-  updated_at: '2026-03-06T19:18:33.834241+00:00'
+  updated_at: '2026-03-08T22:04:58.104995+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -3932,7 +3963,7 @@ prs:
   plan: plan-qa
   title: Add pm container command to build project-specific Docker images
   branch: pm/pr-88cb7bf-add-pm-container-command-to-build-project-specific-do
-  status: in_review
+  status: qa
   depends_on: []
   description: 'Add a pm container subcommand that launches an interactive Claude
     session to create a Docker image with all project dependencies preinstalled.
@@ -4046,10 +4077,10 @@ prs:
   merged_at: null
   notes: []
 - id: pr-4c41017
-  plan: improvements
+  plan: tui-ux
   title: 'Refactor TechTree: split PR nodes into individual Textual widgets'
   branch: pm/pr-4c41017-refactor-techtree-split-pr-nodes-into-individual-t
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'Refactor the TechTree from a monolithic single-widget renderer into
     a compositional Textual architecture:
@@ -4078,15 +4109,16 @@ prs:
 
     5. **Keyboard navigation simplification**: Each node widget knows its grid neighbors,
     replacing the current on_key candidate-finding loops.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/131
+  gh_pr_number: 131
   created_at: '2026-03-07T15:58:50.876583+00:00'
-  updated_at: '2026-03-07T16:03:58.151061+00:00'
-  started_at: null
+  updated_at: '2026-03-08T22:27:50.279825+00:00'
+  started_at: '2026-03-08T22:27:50.279825+00:00'
   reviewed_at: null
   merged_at: null
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-4c41017-refactor-techtree-split-pr-nodes-int-8023bb22
 - id: pr-e9d4b24
   plan: bugs
   title: 'Fix: keystrokes typed after / are discarded instead of appearing in command
@@ -4105,6 +4137,673 @@ prs:
   gh_pr_number: null
   created_at: '2026-03-07T16:13:31.638067+00:00'
   updated_at: '2026-03-07T16:13:31.638067+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-fd54424
+  plan: onboarding
+  title: Add interactive pm tutorial command with tmux, TUI, and git modules
+  branch: pm/pr-fd54424-add-interactive-pm-tutorial-command-with-tmux-tui-
+  status: in_review
+  depends_on: []
+  description: 'Add a ''pm tutorial'' CLI command that launches a guided interactive
+    tutorial in three modules, each runnable independently via --module flag:
+
+
+    ## Module 1: tmux basics
+
+    - Starts a fresh tmux session on a temp server socket
+
+    - Enables mouse mode programmatically if not already set
+
+    - Uses tmux hooks (after-select-pane, after-select-window, etc.) to detect when
+    the user completes actions like switching panes, resizing, scrolling, creating
+    windows
+
+    - Progress tracked in a state file (~/.pm/tutorial/progress.json)
+
+    - A Claude pane monitors the state file and provides guidance, answers questions,
+    and congratulates on completed steps
+
+
+    ## Module 2: TUI navigation
+
+    - Sets up an example project with PRs in various states (pending, in_progress,
+    in_review, qa, merged, closed) with dependencies between them
+
+    - Walks through navigating the tech tree, using keybindings, viewing PR details,
+    using the command bar, filtering/sorting
+
+    - Claude session watches the state file and describes what everything means as
+    the user explores
+
+    - State file updated as user completes each exploration task
+
+
+    ## Module 3: git fundamentals
+
+    - Two-pane layout: Claude guidance pane + command line pane
+
+    - Covers version control concepts, commits, branches, remotes vs local, push/pull/fetch,
+    merge conflicts
+
+    - Hands-on exercises in a disposable practice repo
+
+    - Claude walks through each concept and verifies understanding via the state file
+
+
+    ## Shared infrastructure
+
+    - Progress state file tracks completion across all modules, persists between sessions
+
+    - pm tutorial --module tmux|tui|git to run individual modules
+
+    - pm tutorial (no flag) runs all three in sequence
+
+    - Claude session prompt instructs watching for state file changes and guiding
+    the user through steps'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/129
+  gh_pr_number: 129
+  created_at: '2026-03-08T01:38:37.869518+00:00'
+  updated_at: '2026-03-08T22:05:46.124362+00:00'
+  started_at: '2026-03-08T01:41:11.161062+00:00'
+  reviewed_at: '2026-03-08T02:10:07.745342+00:00'
+  merged_at: null
+  notes:
+  - id: note-1b56d31
+    text: 'QA NEEDS_WORK: CLI command registration and help text: PASS; Progress state
+      management — persistence and reset: PASS; Invalid step name rejection: PASS;
+      Tmux module session setup and hooks: PASS; Tmux hook script triggers step completion:
+      NEEDS_WORK; Tmux module skip when already complete: PASS; TUI module project
+      setup with example PRs: PASS; Git module practice repo setup: PASS; Sequential
+      module execution with early exit: PASS; Prerequisite checks — missing tmux or
+      Claude: PASS; Claude prompt content correctness: PASS; Socket path quoting and
+      shell safety: NEEDS_WORK (workdir: /home/matt/.pm/workdirs/qa/pr-fd54424-b8baf7bc9876b0d3)'
+    created_at: '2026-03-08T03:46:04Z'
+    last_edited: '2026-03-08T03:46:04Z'
+  - id: note-131d1c8
+    text: 'QA NEEDS_WORK: CLI command registration and help text: PASS; Progress state
+      management — persistence, reset, and status display: PASS; Invalid step name
+      rejection: NEEDS_WORK; Tmux module session setup and hooks: PASS; Tmux hook
+      script triggers step completion correctly: PASS; Tmux module skip when already
+      complete: PASS; TUI module project setup with example PRs: PASS; Git module
+      practice repo setup: PASS; Sequential module execution with early exit: PASS;
+      Prerequisite checks — missing tmux or Claude: PASS; Claude prompt content correctness:
+      PASS; Socket path quoting and shell safety: PASS; Progress file concurrent access
+      and corruption recovery: PASS; Module completion flow end-to-end: PASS (workdir:
+      /home/matt/.pm/workdirs/qa/pr-fd54424-438336bf7dacd96b)'
+    created_at: '2026-03-08T20:16:53Z'
+    last_edited: '2026-03-08T20:16:53Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-fd54424-add-interactive-pm-tutorial-command--8023bb22
+- id: pr-3032fb6
+  plan: watchers
+  title: Always-on watcher framework with pluggable intelligent watchers
+  branch: pm/pr-3032fb6-always-on-watcher-framework-with-pluggable-intelli
+  status: pending
+  depends_on: []
+  description: "Refactor the watcher loop from an auto-start companion into a pluggable\
+    \ always-on framework with multiple specialized watchers that monitor different\
+    \ aspects of the project.\n\n## Core framework — shared base class\n- Abstract\
+    \ BaseWatcher class that ALL watchers inherit from, providing:\n  - Shared polling\
+    \ loop with configurable interval\n  - Unified user interaction mechanisms: INPUT_REQUIRED\
+    \ escalation, non-blocking recommendations in TUI log, sticky notifications\n\
+    \  - Base prompt template that all watcher Claude sessions share (project context,\
+    \ state file awareness, how to report findings)\n  - Common tmux pane management\
+    \ (creating/reusing watcher panes, capturing output)\n  - State persistence (what\
+    \ the watcher has seen, acted on, recommended)\n  - Shared verdict/action vocabulary\
+    \ so all watchers communicate the same way\n- Single WatcherManager orchestrates\
+    \ all registered watchers, handles scheduling, deduplicates user notifications,\
+    \ and provides the unified interaction layer\n- This ensures one place in the\
+    \ code implements the mechanisms for user interaction, prompt generation, and\
+    \ loop management — individual watchers only implement domain-specific logic (poll,\
+    \ assess, recommend/act)\n\n## Watcher lifecycle\n- Each watcher implements: poll()\
+    \ -> observations, assess(observations) -> actions, act(actions)\n- WatcherManager\
+    \ runs the shared loop, dispatches to each watcher, collects recommendations\n\
+    - Always-on mode: optional global setting to keep watchers running at all times,\
+    \ not just during auto-start\n- pm watcher start/stop commands, plus a TUI toggle\n\
+    - Each watcher can be enabled/disabled independently\n\n## Built-in watchers\n\
+    \n### Session health watcher\n- Detects stuck/dead Claude sessions (trust prompts,\
+    \ API errors, 500s, usage limits, OOM)\n- Restarts or nudges sessions as needed\n\
+    - Handles SSH disconnect garbage in terminals\n- Subsumes: pr-b53bfe2 (trust prompt\
+    \ blocking), pr-76fa48d (auto-retry on errors), pr-72f1278 (OOM watchdog), pr-757a140\
+    \ (SSH garbage)\n\n### Project state watcher\n- Monitors overall project health:\
+    \ PRs stuck in a state too long, dependency chains unblocked but not started\n\
+    - Watches for stale workdirs, orphaned tmux windows, diverged branches\n- Recommends\
+    \ next actions (e.g. 'pr-X deps are all merged, ready to start')\n\n### Review/QA\
+    \ oversight watcher\n- Monitors running review and QA loops for anomalies (loops\
+    \ stuck, repeated failures, unexpected verdicts)\n- Surfaces patterns like 'PR\
+    \ has failed review 3 times on the same issue'\n\n## Potentially deprecated PRs\n\
+    These pending PRs would be subsumed by the session health watcher since an intelligent\
+    \ watcher can handle all of these naturally without bespoke programmatic solutions:\n\
+    - pr-b53bfe2: Fix trust prompt blocking implementation sessions\n- pr-76fa48d:\
+    \ Auto-retry Claude sessions on 500 and usage limit errors\n- pr-72f1278: OOM-aware\
+    \ memory watchdog for session process management\n- pr-757a140: Prevent SSH disconnect\
+    \ from typing garbage into pm session terminal\n\nThe existing #113 (TUI watchdog\
+    \ for dead threads) and #115 (watcher INPUT_REQUIRED refinement) remain relevant\
+    \ as they improve the underlying mechanisms this framework builds on."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-08T20:10:08.282332+00:00'
+  updated_at: '2026-03-08T22:04:41.872037+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-0b827df
+  plan: tui-ux
+  title: Add running tasks pane to TUI with window switching and grouping
+  branch: pm/pr-0b827df-add-running-tasks-pane-to-tui-with-window-switchin
+  status: pending
+  depends_on: []
+  description: 'Add a new pane to the TUI that shows all active tasks running in the
+    current tmux session and lets you switch to their windows.
+
+
+    ## Display
+
+    - Lists all running tasks detected from tmux windows (implementation sessions,
+    review loops, QA runs, watcher, plan worker, etc.)
+
+    - Tasks grouped by type: Implementation, Review, QA, Watcher, Other
+
+    - Each entry shows the PR ID/title, window name, and status indicators (spinner
+    for active, verdict for completed)
+
+    - Multi-window tasks (like QA with scenario windows) collapsed to a single entry
+    by default showing the main window
+
+    - Expandable: toggle to reveal individual scenario/sub-windows under the collapsed
+    entry
+
+
+    ## Navigation
+
+    - Up/Down (j/k) to move between tasks within a group
+
+    - J/K to jump between task type groups
+
+    - Enter on a collapsed multi-window task switches to its main window
+
+    - Enter on an expanded sub-window switches to that specific window
+
+    - Toggle expand/collapse on multi-window tasks (e.g. with space or right/left
+    arrow)
+
+
+    ## PR actions from the tasks pane
+
+    - All the same commands available in the main TUI tech tree should work on PRs
+    selected in the tasks pane
+
+    - Start review loops, QA, merge, stop loops, view details, etc. — the full keybinding
+    set
+
+    - This lets you manage PRs through their entire flow without switching back to
+    the tech tree
+
+    - The tasks pane becomes an alternative workflow-oriented view focused on what
+    is actively running
+
+
+    ## Mobile mode integration
+
+    - Transitioning to mobile mode (small terminal) should automatically switch the
+    TUI to the tasks pane as the default view, since it is compact and action-oriented
+
+    - Coming out of mobile mode should restore the TUI to whatever pane was open before
+    entering mobile mode
+
+    - The tasks pane is the natural mobile-first view: it shows what matters (running
+    work) and lets you act on it without needing the full tech tree layout
+
+
+    ## Window switching
+
+    - Selecting a task switches the tmux client to that window
+
+    - Works with grouped sessions (resolves attached session before switching)
+
+
+    ## Implementation
+
+    - New widget in the TUI sidebar or as a toggleable pane
+
+    - Polls tmux window list periodically to detect new/removed tasks
+
+    - Matches windows to PRs via naming convention (e.g. review-#128, qa-#124-s71)
+
+    - Reuses existing tmux session resolution logic (current_or_base_session)'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-08T21:45:42.636585+00:00'
+  updated_at: '2026-03-08T22:18:13.112961+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-341100c
+  plan: tui-ux
+  title: Add per-plan standalone PM sessions within the same project
+  branch: pm/pr-341100c-add-per-plan-standalone-pm-sessions-within-the-sam
+  status: pending
+  depends_on: []
+  description: 'Allow users to run separate independent PM sessions focused on different
+    plans within the same project.
+
+
+    ## Behavior
+
+    - pm session --plan <plan_id> starts a TUI session scoped to a specific plan
+
+    - The TUI filters to show only PRs in that plan (and their cross-plan dependencies)
+
+    - Auto-start, watcher, and review loops only operate on PRs in the active plan
+
+    - Multiple plan sessions can run concurrently in separate tmux sessions
+
+    - Each session has its own tmux session name (e.g. pm-project-plan-qa)
+
+    - The default pm session (no --plan flag) shows everything as today
+
+
+    ## Use cases
+
+    - Focus on one plan without noise from 100+ other PRs
+
+    - Different team members work on different plans simultaneously
+
+    - Run auto-start on a specific plan without affecting others
+
+    - Reduce TUI rendering cost by only showing relevant PRs
+
+
+    ## Shared state
+
+    - All sessions share the same project.yaml — file locking (PR #109) ensures safe
+    concurrent writes
+
+    - PR status changes in one session are visible in others on next poll/refresh'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-08T22:07:07.976580+00:00'
+  updated_at: '2026-03-08T22:07:07.976580+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-0b2a0f5
+  plan: tui-ux
+  title: Add top-level orchestrator session with plan session overview and Claude
+    advisor
+  branch: pm/pr-0b2a0f5-add-top-level-orchestrator-session-with-plan-sessi
+  status: pending
+  depends_on:
+  - pr-341100c
+  description: 'Add a top-level PM session that sits above the per-plan sessions and
+    provides a unified overview and control layer.
+
+
+    ## Overview dashboard
+
+    - Shows all active plan sessions with summary status: how many PRs running/reviewing/in
+    QA, active loops, recent verdicts
+
+    - Status updates live as sub-sessions make progress
+
+    - Visual layout similar to the TUI tech tree but at the plan level — each plan
+    is a node showing aggregate state
+
+
+    ## Claude advisor session
+
+    - A Claude pane in the top-level session with full project context
+
+    - Can discuss strategy across plans without directly interacting with sub-sessions
+
+    - Prompt includes awareness of all plan session states, recent activity, and cross-plan
+    dependencies
+
+    - Can recommend which plans to focus on, flag cross-plan blockers, suggest PR
+    ordering
+
+
+    ## Sub-session navigation
+
+    - Enter on a plan switches into that plan''s TUI session (tmux switch-client or
+    attach to grouped session)
+
+    - A key binding to return to the top-level session from any sub-session (e.g.
+    prefix + Escape)
+
+    - Can start/stop plan sessions from the top level
+
+    - Can start/stop auto-start for individual plan sessions
+
+
+    ## Implementation
+
+    - Runs as a special TUI mode or separate Textual app
+
+    - Polls sub-session state via shared project.yaml and tmux window inspection
+
+    - Sub-sessions are regular per-plan sessions (pr-341100c) launched as tmux sessions'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-08T22:13:54.374747+00:00'
+  updated_at: '2026-03-08T22:13:54.374747+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-5e116f0
+  plan: tui-ux
+  title: Add list view mode for the main TUI tech tree pane
+  branch: pm/pr-5e116f0-add-list-view-mode-for-the-main-tui-tech-tree-pane
+  status: pending
+  depends_on: []
+  description: 'Add an alternative list view mode for the main TUI pane that shows
+    PRs as a compact top-down list instead of the graph layout.
+
+
+    ## Display
+
+    - Each PR is a single row: status icon, PR ID, title, current state indicators
+    (loop markers, spinners, verdicts), dependency list at the end
+
+    - Compact enough to show 40+ PRs on screen at once vs ~8 in graph mode
+
+    - Plan group headers as separator rows, same as graph mode
+
+    - Toggle between graph and list mode with a keybinding (e.g. v for view toggle)
+
+
+    ## All existing commands work identically
+
+    - Same keybindings for starting review, QA, merge, stop, edit, etc.
+
+    - Same navigation: j/k for up/down, J/K to jump between plan groups
+
+    - Same filtering (F to cycle status filter), sorting, hide merged/closed toggles
+
+    - Selected PR highlights the row, detail panel updates the same way
+
+
+    ## Sorting and dependency clustering
+
+    - Same sort fields work (updated_at, created_at, status, etc.)
+
+    - Dependent PRs are clustered together: a PR and its dependency chain appear as
+    a contiguous block
+
+    - Within a cluster, dependencies appear before dependents (topological order)
+
+    - Indentation or a subtle connector character can show depth in the dependency
+    chain
+
+
+    ## Layout
+
+    - Dependencies shown inline at end of row, e.g. ''depends: #108, #109''
+
+    - Columns: status icon | PR ID | title (truncated to fit) | loop/verdict marker
+    | depends
+
+    - Column widths adapt to terminal width
+
+    - No horizontal scrolling needed — the list is always single-screen width
+
+
+    ## Motivation
+
+    - Graph mode is great for understanding structure but expensive to render and
+    hard to scan quickly
+
+    - List mode is better for daily workflow: quickly see what needs attention, act
+    on it
+
+    - Works much better on narrow terminals and mobile'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-08T22:21:40.084340+00:00'
+  updated_at: '2026-03-08T22:21:40.084340+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-96bfc68
+  plan: tui-ux
+  title: Add pm pr import-single command to import an existing GitHub PR into the
+    project
+  branch: pm/pr-96bfc68-add-pm-pr-import-single-command-to-import-an-exist
+  status: pending
+  depends_on: []
+  description: 'Add a subcommand that imports a single existing GitHub PR (by number
+    or URL) that is not already tracked in project.yaml into the project.
+
+
+    ## Behavior
+
+    - pm pr import-single <pr_number_or_url> [--plan <plan_id>]
+
+    - Fetches PR metadata from GitHub (title, description, branch, status, author)
+
+    - Creates a project.yaml entry with the correct fields populated
+
+    - Detects if any existing tracked PRs depend on or are depended on by this PR
+    (by branch inspection) and sets up dependency links
+
+    - Maps GitHub PR state (open/closed/merged) to pm status
+
+    - Optionally assigns to a plan
+
+    - Warns if the PR is already tracked
+
+
+    ## Differences from existing import-github
+
+    - import-github is a bulk operation that scans all open PRs
+
+    - import-single targets one specific PR, including closed/merged ones
+
+    - Useful for pulling in a PR someone else created, or a historical PR for tracking'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-08T23:04:31.077154+00:00'
+  updated_at: '2026-03-08T23:04:31.077154+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-871dbf5
+  plan: watchers
+  title: Add high-effort watcher supervisors that monitor and coach lower-effort sessions
+  branch: pm/pr-871dbf5-add-high-effort-watcher-supervisors-that-monitor-a
+  status: pending
+  depends_on: []
+  description: 'Add a new watcher type that runs at high effort (Opus-level) and monitors
+    other running sessions (QA scenarios, implementation, review) that run at lower
+    effort, providing real-time feedback at their message prompts.
+
+
+    ## Behavior
+
+    - Supervisor watchers observe other Claude sessions by capturing their tmux pane
+    output
+
+    - When they spot issues, suboptimal approaches, or opportunities, they inject
+    feedback at the target session''s message prompt
+
+    - Each supervisor targets a configurable subset of tasks (e.g. ''all QA scenarios
+    for pr-X'', ''all implementation sessions'', ''sessions in plan-qa'')
+
+    - Multiple supervisors can run concurrently, each covering different task subsets
+
+    - pm watcher supervisor start [--target <filter>] [--count N] to launch N supervisors
+    covering the filtered tasks
+
+
+    ## Feedback logging
+
+    - Every piece of feedback a supervisor gives is logged to a persistent file (~/.pm/logs/supervisor/<session-id>.jsonl)
+
+    - Log entries include: timestamp, target session, what was observed, what feedback
+    was given, whether the target session acted on it
+
+    - pm watcher supervisor log [--target <filter>] to review feedback history
+
+    - Enables post-hoc review of whether supervisors are adding value or just adding
+    noise
+
+
+    ## Scaling
+
+    - Coded so that the number of supervisors and their target assignments are configurable
+    at runtime
+
+    - Supervisors rebalance when sessions start/stop
+
+    - Should use the shared BaseWatcher pattern from pr-3032fb6
+
+
+    ## Motivation
+
+    - QA scenarios running at lower effort sometimes miss things or go down wrong
+    paths
+
+    - A high-effort supervisor watching multiple sessions can catch issues early and
+    course-correct
+
+    - The feedback log lets us evaluate ROI and tune the approach'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-08T23:09:07.312432+00:00'
+  updated_at: '2026-03-08T23:09:07.312432+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-b7ada6a
+  plan: tui-ux
+  title: Add offline mode with dynamic sync for GitHub-backed projects
+  branch: pm/pr-b7ada6a-add-offline-mode-with-dynamic-sync-for-github-back
+  status: pending
+  depends_on: []
+  description: "Allow projects using the GitHub backend to work fully offline and\
+    \ sync back when connectivity is restored.\n\n## Offline mode\n- Automatically\
+    \ detected when GitHub API calls fail, or manually toggled with pm offline / pm\
+    \ online\n- While offline, the project behaves like the local git backend: local\
+    \ merges, local branch operations, no GitHub API calls\n- All PR status transitions,\
+    \ reviews, QA, and merges work locally\n- TUI shows an offline indicator so the\
+    \ user knows GitHub sync is paused\n\n## Dynamic sync on reconnect\n- pm sync\
+    \ or automatic detection of connectivity triggers sync\n- Sync does NOT rely on\
+    \ any history or log of what happened offline — it dynamically computes the delta\
+    \ at sync time by comparing:\n  - Local branch states vs remote branch states\n\
+    \  - Local project.yaml PR statuses vs GitHub PR statuses\n  - Local commits not\
+    \ pushed vs remote commits not pulled\n  - GitHub PRs that were merged/closed\
+    \ externally while offline\n- For each PR, determines the correct action: push\
+    \ local changes, pull remote changes, update status, create/update GitHub PR,\
+    \ resolve conflicts\n- Presents a sync plan to the user for confirmation before\
+    \ executing\n\n## Conflict resolution\n- When local and remote have diverged (e.g.\
+    \ PR was merged locally but also updated on GitHub), sync identifies the conflict\
+    \ and proposes resolution\n- Same dynamic diff approach works for fixing out-of-sync\
+    \ states caused by bugs or user error — not just offline mode\n- pm sync --dry-run\
+    \ to preview what would happen without executing\n\n## Reuse for general sync\
+    \ repair\n- The sync mechanism should be general enough to fix any inconsistency\
+    \ between local state and GitHub\n- pm sync --repair mode that checks everything\
+    \ and fixes discrepancies regardless of whether offline mode was used\n- This\
+    \ replaces ad-hoc fixes for sync bugs with a single robust reconciliation tool\n\
+    \n## Motivation\n- Working on planes, trains, or in areas with spotty connectivity\n\
+    - Recovering from bugs that push project.yaml out of sync with GitHub\n- User\
+    \ errors (manual yaml edits, force pushes) that create inconsistencies"
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-08T23:58:26.306762+00:00'
+  updated_at: '2026-03-08T23:58:26.306762+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-f84cf3e
+  plan: watchers
+  title: Add multi-provider LLM support with local models and API failover watcher
+  branch: pm/pr-f84cf3e-add-multi-provider-llm-support-with-local-models-a
+  status: pending
+  depends_on:
+  - pr-3032fb6
+  description: 'Extend the Claude session spawning infrastructure to support multiple
+    LLM providers including local models, and add a watcher that manages API availability
+    and routing.
+
+
+    ## build_claude_shell_cmd extension
+
+    - Add provider configuration to build_claude_shell_cmd and related session launch
+    functions
+
+    - Support pointing any session at a local model (e.g. Ollama, llama.cpp, vLLM)
+    via OpenAI-compatible API endpoint
+
+    - Provider config per session type: e.g. use Opus for reviews, local model for
+    implementation, Sonnet for QA scenarios
+
+    - Project-level defaults in project.yaml with per-PR and per-session overrides
+
+    - Environment variable and CLI flag support: --provider local|claude|openai etc.
+
+
+    ## LLM API health watcher
+
+    - New watcher (using BaseWatcher from pr-3032fb6) that monitors all LLM API endpoints
+
+    - Tracks: response times, error rates, rate limits, usage quotas, availability
+
+    - When a provider goes down or hits limits, automatically routes new sessions
+    to an available alternative
+
+    - Can failover mid-project: if Claude API starts returning 500s, switch pending
+    session launches to a backup provider
+
+    - Graceful degradation: fall back from high-capability to lower-capability models
+    rather than stopping entirely (e.g. Opus -> Sonnet -> local)
+
+    - Logs all routing decisions and provider health events for review
+
+
+    ## Configuration
+
+    - ~/.pm/providers.yaml or project-level config defining available providers, endpoints,
+    API keys, and priority order
+
+    - Per-provider capability tags so the watcher knows which providers can handle
+    which session types
+
+    - Cost awareness: prefer cheaper providers for high-volume low-stakes work (QA
+    scenarios) and expensive providers for critical work (reviews)
+
+
+    ## Motivation
+
+    - Resilience: API outages or rate limits don''t stop the whole project
+
+    - Cost optimization: use local models for bulk work, premium APIs for critical
+    decisions
+
+    - Flexibility: teams with different API access can all use the tool'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-09T00:04:00.121877+00:00'
+  updated_at: '2026-03-09T00:04:00.121877+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

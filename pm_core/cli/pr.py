@@ -283,7 +283,8 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
 @click.option("--description", "desc", default=None, help="New description")
 @click.option("--status", default=None, type=click.Choice(["pending", "in_progress", "in_review", "qa", "merged", "closed"]),
               help="New status (pending, in_progress, in_review, qa, merged, closed)")
-def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | None, status: str | None):
+@click.option("--plan", default=None, help="Associated plan ID")
+def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | None, status: str | None, plan: str | None):
     """Edit an existing PR's title, description, dependencies, or status."""
     root = state_root()
     data = store.load(root)
@@ -291,6 +292,9 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
     pr_id = pr_entry["id"]
 
     changes = []
+    if plan is not None:
+        pr_entry["plan"] = plan if plan else None
+        changes.append(f"plan={plan or 'none'}")
     if title is not None:
         pr_entry["title"] = title
         changes.append(f"title={title}")
