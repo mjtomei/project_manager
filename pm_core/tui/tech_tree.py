@@ -79,7 +79,7 @@ class TechTree(Widget, can_focus=True):
         self.prs = self._prs
         self._recompute()
         if self._prs:
-            self._rebuild_widgets()
+            self.call_after_refresh(self._rebuild_widgets)
 
     def apply_project_settings(self, project: dict) -> None:
         if "hide_merged" in project:
