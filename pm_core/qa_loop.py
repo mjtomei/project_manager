@@ -929,8 +929,9 @@ def run_qa_sync(
         # windows no longer exist.
         if use_containers:
             from pm_core import container as container_mod
+            _stag = session.removeprefix("pm-") if session else None
             container_mod.cleanup_orphaned_qa_containers(
-                session, state.pr_id)
+                session, state.pr_id, session_tag=_stag)
 
         # Launch Scenario 0 (interactive) right after stale cleanup so
         # the user can start exploring while the planner runs.
