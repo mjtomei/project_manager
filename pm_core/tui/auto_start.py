@@ -92,9 +92,23 @@ def save_breadcrumb(app) -> None:
     if review_loops:
         data["review_loops"] = review_loops
 
-    # Persist watcher loop state if it's running
+    # Persist watcher state (manager or legacy)
     from pm_core.tui import watcher_ui
-    if watcher_ui.is_running(app):
+    manager = getattr(app, '_watcher_manager', None)
+    if manager and manager.is_any_running():
+        watchers_data = []
+        for info in manager.list_watchers():
+            if info["running"]:
+                watcher = manager.get_watcher(info["id"])
+                entry = {"type": info["type"]}
+                if hasattr(watcher, 'meta_pm_root'):
+                    entry["meta_pm_root"] = watcher.meta_pm_root
+                if hasattr(watcher, 'auto_start_target'):
+                    entry["auto_start_target"] = watcher.auto_start_target
+                watchers_data.append(entry)
+        if watchers_data:
+            data["watchers"] = watchers_data
+    elif watcher_ui.is_running(app):
         state = app._watcher_state
         data["watcher"] = {
             "meta_pm_root": state.meta_pm_root,
@@ -198,9 +212,21 @@ async def consume_breadcrumb(app) -> None:
                         f"Review loop resumed for {pr_id} at iteration {rstate.iteration}"
                     )
 
-    # Resume watcher loop if it was running
-    watcher_data = data.get("watcher")
-    if watcher_data:
+    # Resume watchers (new format: list of watchers, or legacy single watcher)
+    watchers_data = data.get("watchers", [])
+    watcher_data = data.get("watcher")  # legacy single-watcher format
+    if watchers_data:
+        from pm_core.tui import watcher_ui
+        tdir = get_transcript_dir(app)
+        for wd in watchers_data:
+            watcher_ui.start_watcher(
+                app,
+                transcript_dir=str(tdir) if tdir else None,
+                meta_pm_root=wd.get("meta_pm_root"),
+                watcher_type=wd.get("type", "auto-start"),
+            )
+        _log.info("consume_breadcrumb: resumed %d watcher(s)", len(watchers_data))
+    elif watcher_data:
         from pm_core.tui import watcher_ui
         tdir = get_transcript_dir(app)
         watcher_ui.start_watcher(
@@ -208,7 +234,7 @@ async def consume_breadcrumb(app) -> None:
             transcript_dir=str(tdir) if tdir else None,
             meta_pm_root=watcher_data.get("meta_pm_root"),
         )
-        _log.info("consume_breadcrumb: resumed watcher loop")
+        _log.info("consume_breadcrumb: resumed watcher loop (legacy)")
 
 
 def _finalize_all_transcripts(app) -> None:

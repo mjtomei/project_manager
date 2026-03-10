@@ -144,11 +144,14 @@ class ProjectManagerApp(App):
         Binding("H", "launch_guide", "Guide", show=True),
         Binding("C", "show_connect", "Connect", show=False),
         Binding("A", "toggle_auto_start", "Auto-start", show=False),
-        Binding("w", "focus_watcher", "Watcher", show=False),
+        # w is handled as a prefix key in on_key (wf=focus, ww=list, ws=start/stop)
     ]
 
     def on_key(self, event) -> None:
-        """Handle z modifier prefix key (supports z, zz, zzz).
+        """Handle z and w modifier prefix keys.
+
+        z supports z, zz, zzz modifiers for review/QA loop control.
+        w is a prefix key for watcher commands: wf=focus, ww=list, ws=start/stop.
 
         Also buffers keystrokes when / was pressed but the command bar
         hasn't received focus yet (race condition fix).
@@ -167,6 +170,33 @@ class ProjectManagerApp(App):
             event.prevent_default()
             event.stop()
             return
+        # Handle w prefix mode: dispatch second key
+        if self._w_mode:
+            self._w_mode = False
+            self._clear_log_message()
+            key = event.character or event.key
+            if key == "w":
+                self._action_watcher_list()
+            elif key == "f":
+                self._action_focus_watcher()
+            elif key == "s":
+                self._action_watcher_toggle()
+            else:
+                self.log_message("[dim]w cancelled[/]")
+            event.prevent_default()
+            event.stop()
+            return
+        if event.key == "w" or event.character == "w":
+            # Enter w prefix mode (check_action guard for command bar etc)
+            if not self.check_action("focus_watcher", ()):
+                return
+            self._w_mode = True
+            self.log_message("[bold]w …[/] [dim](w=list f=focus s=start/stop)[/]")
+            # Auto-cancel after 2 seconds
+            self._w_cancel_timer = self.set_timer(2.0, self._cancel_w_mode)
+            event.prevent_default()
+            event.stop()
+            return
         if event.key == "z":
             if self._z_count >= 3:
                 # zzz → cancel (toggle off)
@@ -181,6 +211,9 @@ class ProjectManagerApp(App):
             self._z_count = 0
             self._clear_log_message()
             # Don't prevent — let escape also do its normal thing
+        elif event.key == "escape" and self._w_mode:
+            self._w_mode = False
+            self._clear_log_message()
 
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """Disable single-key shortcuts when command bar is focused or in guide mode."""
@@ -190,7 +223,7 @@ class ProjectManagerApp(App):
                        "launch_meta", "launch_claude", "launch_guide",
                        "view_log", "refresh", "rebalance", "show_help",
                        "toggle_plans", "toggle_qa", "start_qa_on_pr", "hide_plan", "move_to_plan", "toggle_merged",
-                       "cycle_filter", "cycle_sort", "toggle_auto_start", "focus_watcher"):
+                       "cycle_filter", "cycle_sort", "toggle_auto_start"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus or self._command_pending:
                 _log.debug("check_action: blocked %s (command bar focused/pending)", action)
@@ -250,7 +283,13 @@ class ProjectManagerApp(App):
         self._auto_start_target: str | None = None
         self._auto_start_run_id: str | None = None
         # Watcher loop state (purely in-memory, lost on TUI restart)
-        self._watcher_state = None  # WatcherLoopState | None
+        self._watcher_state = None  # WatcherLoopState | None (legacy compat)
+        # Watcher framework manager (new pluggable system)
+        from pm_core.watcher_manager import WatcherManager
+        self._watcher_manager = WatcherManager()
+        # w prefix key state
+        self._w_mode: bool = False
+        self._w_cancel_timer = None
         # QA loop state (purely in-memory)
         self._qa_loops: dict = {}
         # Self-driving QA state (zz t / zzz t — tracks pass counts per PR)
@@ -502,7 +541,10 @@ class ProjectManagerApp(App):
             sort_text = dict(SORT_FIELDS).get(tree._sort_field, tree._sort_field)
         status_bar = self.query_one("#status-bar", StatusBar)
         watcher_status = ""
-        if self._watcher_state and self._watcher_state.running:
+        # Check manager first, fall back to legacy state
+        if self._watcher_manager.is_any_running():
+            watcher_status = "input_required" if self._watcher_manager.any_input_required() else "running"
+        elif self._watcher_state and self._watcher_state.running:
             watcher_status = "input_required" if self._watcher_state.input_required else "running"
         status_bar.update_status(
             project.get("name", "???"),
@@ -676,33 +718,98 @@ class ProjectManagerApp(App):
         tree = self.query_one("#tech-tree", TechTree)
         self.run_worker(toggle(self, selected_pr_id=tree.selected_pr_id))
 
-    def action_focus_watcher(self) -> None:
-        """Focus the watcher window (w key)."""
-        _log.info("action: focus_watcher")
-        from pm_core.tui import auto_start, watcher_ui
-        from pm_core.watcher_loop import WATCHER_WINDOW_NAME
+    def _cancel_w_mode(self) -> None:
+        """Auto-cancel w prefix mode after timeout."""
+        if self._w_mode:
+            self._w_mode = False
+            self._clear_log_message()
 
-        if not auto_start.is_enabled(self):
-            self.log_message("Auto-start must be running to use watcher (press A)")
-            return
+    def _action_focus_watcher(self) -> None:
+        """Focus the watcher window (wf key chord)."""
+        _log.info("action: focus_watcher")
+        from pm_core.tui import watcher_ui
 
         session = self._session_name
         if not session:
             self.log_message("No tmux session found")
             return
 
-        existing = tmux_mod.find_window_by_name(session, WATCHER_WINDOW_NAME)
-        if existing:
-            tmux_mod.select_window(session, WATCHER_WINDOW_NAME)
-            return
+        # Try to find and focus any running watcher's window
+        watchers = self._watcher_manager.list_watchers()
+        for w in watchers:
+            win = tmux_mod.find_window_by_name(session, w["window_name"])
+            if win:
+                tmux_mod.select_window(session, w["window_name"])
+                return
 
-        # No window — check if the watcher loop is running (between iterations)
+        # Check legacy watcher state
         if self._watcher_state and self._watcher_state.running:
+            from pm_core.watcher_loop import WATCHER_WINDOW_NAME
+            existing = tmux_mod.find_window_by_name(session, WATCHER_WINDOW_NAME)
+            if existing:
+                tmux_mod.select_window(session, WATCHER_WINDOW_NAME)
+                return
             self.log_message("Watcher is between iterations — window will appear shortly")
             self._poll_for_watcher_window(attempts=10)
             return
 
-        # Watcher not running — create plans and start it
+        # No watcher running — start one
+        self._action_watcher_toggle()
+
+    def _action_watcher_list(self) -> None:
+        """Show list of all watchers and their status (ww key chord)."""
+        _log.info("action: watcher_list")
+        watchers = self._watcher_manager.list_watchers()
+
+        # Also include legacy watcher state if not in manager
+        if self._watcher_state and self._watcher_state.running:
+            has_legacy = any(w["type"] == "auto-start" for w in watchers)
+            if not has_legacy:
+                watchers.append({
+                    "id": "legacy",
+                    "type": "auto-start",
+                    "display_name": "Auto-Start Watcher",
+                    "running": True,
+                    "verdict": self._watcher_state.latest_verdict,
+                    "iteration": self._watcher_state.iteration,
+                    "input_required": self._watcher_state.input_required,
+                    "window_name": "watcher",
+                })
+
+        if not watchers:
+            self.log_message("[dim]No watchers registered. Press ws to start one.[/]")
+            return
+
+        lines = []
+        for w in watchers:
+            status = "[green]running[/]" if w["running"] else "[dim]stopped[/]"
+            if w.get("input_required"):
+                status = "[red bold]INPUT_REQUIRED[/]"
+            verdict = w.get("verdict", "")
+            iter_info = f"i{w['iteration']}" if w["iteration"] else ""
+            lines.append(
+                f"  {w['display_name']}: {status}"
+                + (f" {verdict}" if verdict else "")
+                + (f" ({iter_info})" if iter_info else "")
+            )
+        msg = "[bold]Watchers:[/]\n" + "\n".join(lines)
+        self.log_message(msg, sticky=5)
+
+    def _action_watcher_toggle(self) -> None:
+        """Start or stop the auto-start watcher (ws key chord)."""
+        _log.info("action: watcher_toggle")
+        from pm_core.tui import watcher_ui
+
+        # Check if auto-start watcher is running (via manager or legacy)
+        manager_watcher = self._watcher_manager.find_by_type("auto-start")
+        legacy_running = self._watcher_state and self._watcher_state.running
+
+        if (manager_watcher and manager_watcher.state.running) or legacy_running:
+            watcher_ui.stop_watcher(self)
+            return
+
+        # Start watcher
+        from pm_core.tui import auto_start
         meta_root = watcher_ui.ensure_watcher_plans(self)
         tdir = auto_start.get_transcript_dir(self)
         watcher_ui.start_watcher(
@@ -710,7 +817,6 @@ class ProjectManagerApp(App):
             transcript_dir=str(tdir) if tdir else None,
             meta_pm_root=str(meta_root) if meta_root else None,
         )
-        self._poll_for_watcher_window(attempts=15)
 
     def _poll_for_watcher_window(self, attempts: int = 10) -> None:
         """Poll for the watcher window to appear and focus it."""
