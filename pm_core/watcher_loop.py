@@ -91,10 +91,6 @@ def _sync_state_to_legacy(ws: WatcherState, ls: WatcherLoopState) -> None:
     ls._transcript_dir = ws._transcript_dir
 
 
-def _sync_legacy_to_state(ls: WatcherLoopState, ws: WatcherState) -> None:
-    """Copy mutable legacy fields into WatcherState (for stop_requested etc)."""
-    ws.stop_requested = ls.stop_requested
-
 
 def parse_watcher_verdict(output: str) -> str:
     """Extract a watcher verdict from Claude output."""
