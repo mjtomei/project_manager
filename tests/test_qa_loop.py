@@ -459,8 +459,6 @@ class TestVerdictEdgeCases:
 
     def test_dead_window_gets_input_required(self):
         """A window killed without verdict should be marked INPUT_REQUIRED."""
-        import pm_core.qa_loop as qa_loop_mod
-
         scenario = QAScenario(index=1, title="Test", focus="t")
         scenario.window_name = "qa-#42-s1"
         state = QALoopState(pr_id="pr-001")
@@ -468,8 +466,8 @@ class TestVerdictEdgeCases:
         state.scenario_verdicts = {}
 
         # Simulate: window is dead (find_window_by_name returns None)
-        with patch("pm_core.qa_loop._get_scenario_pane", return_value=None):
-            pane_id = qa_loop_mod._get_scenario_pane("sess", scenario.window_name)
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value=None) as mock_pane:
+            pane_id = mock_pane("sess", scenario.window_name)
             assert pane_id is None
             # This is what the polling loop does:
             state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
