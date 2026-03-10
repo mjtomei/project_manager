@@ -462,18 +462,24 @@ class TestSpecGenerationPreamble:
         assert "spec-save" in result
 
     @patch("pm_core.spec_gen.get_global_setting_value", return_value="prompt")
-    def test_prompt_mode_returns_empty(self, mock_setting, tmp_path):
-        """Prompt mode uses two-session flow — preamble is empty."""
+    def test_prompt_mode_generates_preamble(self, mock_setting, tmp_path):
+        """Prompt mode generates preamble with unresolved-ambiguity guidance."""
         pr = {"id": "pr-1"}
         result = spec_gen.spec_generation_preamble(pr, "impl", root=tmp_path)
-        assert result == ""
+        assert "How This Session Works" in result
+        assert "Step 0" in result
+        assert "UNRESOLVED" in result
+        assert "spec-save" in result
 
     @patch("pm_core.spec_gen.get_global_setting_value", return_value="review")
-    def test_review_mode_returns_empty(self, mock_setting, tmp_path):
-        """Review mode uses two-session flow — preamble is empty."""
+    def test_review_mode_generates_preamble(self, mock_setting, tmp_path):
+        """Review mode generates preamble with user-approval guidance."""
         pr = {"id": "pr-1"}
         result = spec_gen.spec_generation_preamble(pr, "impl", root=tmp_path)
-        assert result == ""
+        assert "How This Session Works" in result
+        assert "Step 0" in result
+        assert "approve" in result
+        assert "spec-save" in result
 
     @patch("pm_core.spec_gen.get_global_setting_value", return_value="auto")
     def test_existing_spec_returns_empty(self, mock_setting, tmp_path):

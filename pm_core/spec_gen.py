@@ -350,11 +350,17 @@ def oldest_pending_spec_pr(data: dict) -> str | None:
 
 def spec_generation_preamble(pr: dict, phase: str,
                              root: Path | None = None) -> str:
-    """Build a prompt preamble for auto mode: spec generation + main work in one session.
+    """Build a prompt preamble for inline spec generation in the main session.
 
-    Returns an empty string if:
-    - A spec already exists for this phase, OR
-    - The mode is not ``auto`` (prompt/review use two separate sessions instead)
+    Returns an empty string if a spec already exists for this phase.
+    Otherwise returns a "Step 0" block that tells Claude to generate the
+    spec, write it to a file, and register it — all within the same session.
+
+    The guidance varies by mode:
+      auto   — resolve ambiguities, save, proceed immediately.
+      prompt — resolve ambiguities, save, proceed unless genuinely
+               unresolvable (present flagged questions to user first).
+      review — save, present spec summary to user, wait for approval.
 
     *root* is the pm project directory (containing project.yaml).
     """
@@ -362,14 +368,7 @@ def spec_generation_preamble(pr: dict, phase: str,
     if get_spec(pr, phase):
         return ""
 
-    # Only auto mode uses the single-session preamble approach.
-    # prompt/review modes generate the spec in a separate session first
-    # (handled by ensure_spec), then the main session gets the spec
-    # via format_spec_for_prompt.
     mode = pr_spec_mode(pr)
-    if mode != "auto":
-        return ""
-
     pr_id = pr.get("id", "???")
     phase_labels = {"impl": "implementation", "qa": "QA"}
     label = phase_labels.get(phase, phase)
@@ -388,7 +387,7 @@ def spec_generation_preamble(pr: dict, phase: str,
 Analyze the codebase to understand the relevant code, then write a spec covering:
 1. **Requirements** — Restate each requirement grounded in the codebase (specific files, functions, modules)
 2. **Implicit Requirements** — What must also be true for stated requirements to hold
-3. **Ambiguities & Resolutions** — Identified ambiguities with your proposed resolutions
+3. **Ambiguities** — Identified ambiguities with your proposed resolutions
 4. **Edge Cases** — Interactions with existing behavior not addressed in the description""",
 
         "qa": """\
@@ -397,21 +396,49 @@ Review the implementation (run `git diff` and read source files), then write a s
 2. **Setup** — Setup requirements for testing
 3. **Edge Cases** — Edge cases and failure modes to probe
 4. **Pass/Fail Criteria** — What constitutes a passing vs failing test
-5. **Ambiguities & Resolutions** — Any ambiguities you resolved and how""",
+5. **Ambiguities** — Any ambiguities you resolved and how""",
     }
 
     instructions = spec_instructions.get(phase, spec_instructions["impl"])
 
-    ambiguity_instruction = """\
-Use your best judgement to resolve any ambiguities based on your understanding of the
-codebase and common patterns. Document all resolved ambiguities and your reasoning in
-the spec's "Ambiguities & Resolutions" section so someone can review them later."""
+    # Mode-specific guidance for ambiguity handling and what to do after saving
+    if mode == "auto":
+        post_save = f"""\
+Use your best judgement to resolve any ambiguities based on your understanding
+of the codebase and common patterns.  Document all resolved ambiguities and
+your reasoning in the spec's "Ambiguities" section.
 
-    save_instruction = f"""\
 Save the spec to `{file_path}` and then run:
   `pm pr spec-save {pr_id} {phase}`
 
 Then proceed with the {label} work below."""
+
+    elif mode == "prompt":
+        post_save = f"""\
+Use your best judgement to resolve ambiguities where you can confidently do so.
+If you encounter a genuinely unresolvable ambiguity — multiple valid
+interpretations with materially different outcomes — include it in the spec's
+"Ambiguities" section marked **[UNRESOLVED]** with a clear question.
+
+Save the spec to `{file_path}` and then run:
+  `pm pr spec-save {pr_id} {phase}`
+
+If the spec contains any **[UNRESOLVED]** ambiguities, present them to the
+user and wait for their response before proceeding.  Update the spec with
+their answers, re-save, then continue.  If there are no unresolved
+ambiguities, proceed with the {label} work below."""
+
+    else:  # review
+        post_save = f"""\
+Identify all ambiguities and present your proposed resolution for each in the
+spec's "Ambiguities" section.
+
+Save the spec to `{file_path}` and then run:
+  `pm pr spec-save {pr_id} {phase}`
+
+Then present a brief summary of the spec to the user and ask whether they
+approve or want changes.  If they request changes, update the spec file,
+re-save, and ask again.  Once approved, proceed with the {label} work below."""
 
     return f"""
 ## How This Session Works
@@ -430,9 +457,7 @@ Start with Step 0 below.  Once the spec is saved, proceed to the main task.
 
 {instructions}
 
-{ambiguity_instruction}
-
-{save_instruction}
+{post_save}
 
 ---
 """
@@ -441,66 +466,17 @@ Start with Step 0 below.  Once the spec is saved, proceed to the main task.
 def ensure_spec(data: dict, pr_id: str, phase: str,
                 root: Path | None = None,
                 interactive: bool = True) -> str | None:
-    """Ensure a spec exists for prompt/review modes, generating if needed.
+    """Return the existing spec for a PR phase, or None.
 
-    In prompt/review modes, this runs a separate ``claude -p`` session to
-    generate the spec before the main work session starts.  In auto mode
-    this is a no-op (the preamble handles it inline).
-
-    For review mode, the generated spec is printed and the user is asked
-    to confirm before proceeding (only when *interactive* is True).
-    When *interactive* is False (e.g. background threads), the spec is
-    generated and saved but review is deferred to the TUI's V key.
-
-    Returns the spec text, or None if generation was skipped (auto mode
-    or spec already exists).
+    Spec generation now happens inline in the main Claude session via
+    ``spec_generation_preamble()``.  This function is kept for the CLI
+    ``pm pr spec`` command and any callers that need to check whether a
+    spec already exists.
     """
     pr = store.get_pr(data, pr_id)
     if not pr:
         return None
-
-    # Already have a spec — nothing to do
-    existing = get_spec(pr, phase)
-    if existing:
-        return existing
-
-    mode = pr_spec_mode(pr)
-    if mode == "auto":
-        return None  # auto mode uses the single-session preamble
-
-    _log.info("ensure_spec: generating %s spec for %s (mode=%s)",
-              phase, pr_id, mode)
-
-    spec_text, needs_review = generate_spec(
-        data, pr_id, phase, root=root, force=False,
-    )
-
-    if not spec_text:
-        click.echo("Warning: spec generation returned empty output.", err=True)
-        return None
-
-    if needs_review:
-        if interactive:
-            click.echo(f"\n{'='*60}")
-            click.echo(f"Generated {phase} spec for review:")
-            click.echo(f"{'='*60}\n")
-            click.echo(spec_text)
-            click.echo(f"\n{'='*60}")
-            if not click.confirm("Approve this spec and proceed?"):
-                click.echo("Spec not approved. Edit with: "
-                           f"pm pr spec-approve {pr_id}")
-                raise SystemExit(1)
-            # Approved — clear pending
-            approve_spec(data, pr_id, root=root)
-            click.echo("Spec approved.")
-        else:
-            _log.info("ensure_spec: spec needs review for %s/%s but "
-                      "running non-interactively — deferring to TUI",
-                      pr_id, phase)
-    else:
-        click.echo(f"Generated {phase} spec ({len(spec_text)} chars).")
-
-    return spec_text
+    return get_spec(pr, phase)
 
 
 def format_spec_for_prompt(pr: dict, phase: str) -> str:

@@ -97,9 +97,23 @@ def _render(status: dict | None, selected: int, rows: int, cols: int) -> str:
     pr_id = status.get("pr_id", "?")
     scenarios = status.get("scenarios", [])
     overall = status.get("overall", "")
+    error = status.get("error", "")
 
     lines.append(f"{_BOLD}QA Status: {pr_id}{_RESET}")
     lines.append("")
+
+    # Show error block if present (spec missing, no scenarios, etc.)
+    if error:
+        lines.append(f"  {_RED}{_BOLD}ERROR{_RESET}")
+        lines.append("")
+        for err_line in error.split("\n"):
+            lines.append(f"  {_RED}{err_line}{_RESET}")
+        lines.append("")
+        lines.append(f"{_DIM}  q: quit{_RESET}")
+        padded = [_pad_line(l, cols) for l in lines]
+        while len(padded) < rows:
+            padded.append(" " * cols)
+        return _CLEAR_SCREEN + "\n".join(padded)
 
     # Fixed columns: prefix(2) + idx(3) + gap(2) + gap(2) + verdict(14) = 23
     title_width = max(cols - 28, 10)
