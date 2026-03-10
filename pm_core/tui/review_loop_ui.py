@@ -235,6 +235,23 @@ def ensure_animation_timer(app) -> None:
 
 def _poll_loop_state(app) -> None:
     """Periodic timer callback to update TUI from loop state."""
+    try:
+        _poll_loop_state_inner(app)
+    except SystemExit as e:
+        import traceback
+        from pm_core.paths import configure_logger
+        _log = configure_logger("pm.tui.poll")
+        _log.error("_poll_loop_state raised SystemExit(%s):\n%s", e.code, traceback.format_exc())
+    except BaseException as e:
+        import traceback
+        from pm_core.paths import configure_logger
+        _log = configure_logger("pm.tui.poll")
+        _log.error("_poll_loop_state raised %s:\n%s", type(e).__name__, traceback.format_exc())
+        raise
+
+
+def _poll_loop_state_inner(app) -> None:
+    """Inner implementation of poll loop state."""
     any_running = False
     newly_done = []
 

@@ -50,6 +50,11 @@ from pm_core.paths import configure_logger
 
 _log = configure_logger("pm.container")
 
+
+class ContainerError(RuntimeError):
+    """Raised when container creation fails and container mode is enabled."""
+    pass
+
 # Default settings
 DEFAULT_IMAGE = "pm-dev:latest"
 DEFAULT_MEMORY_LIMIT = "8g"
@@ -531,9 +536,13 @@ def wrap_claude_cmd(
             allowed_push_branch=allowed_push_branch,
         )
     except Exception:
-        _log.warning("Failed to create container %s — falling back to host",
-                     cname, exc_info=True)
-        return claude_cmd, ""
+        _log.error("Failed to create container %s — aborting (container mode is enabled)",
+                   cname, exc_info=True)
+        raise ContainerError(
+            f"Failed to create container '{cname}'. "
+            f"Is Docker running? Disable container mode with 'pm container disable' "
+            f"to run without containers."
+        )
 
     from pm_core.push_proxy import get_proxy_socket_path
     proxy_sock = get_proxy_socket_path(cname)
