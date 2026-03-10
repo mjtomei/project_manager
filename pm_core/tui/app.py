@@ -173,6 +173,9 @@ class ProjectManagerApp(App):
         # Handle w prefix mode: dispatch second key
         if self._w_mode:
             self._w_mode = False
+            if self._w_cancel_timer is not None:
+                self._w_cancel_timer.stop()
+                self._w_cancel_timer = None
             self._clear_log_message()
             key = event.character or event.key
             if key == "w":
@@ -181,7 +184,7 @@ class ProjectManagerApp(App):
                 self._action_focus_watcher()
             elif key == "s":
                 self._action_watcher_toggle()
-            else:
+            elif key != "escape":
                 self.log_message("[dim]w cancelled[/]")
             event.prevent_default()
             event.stop()
@@ -211,9 +214,6 @@ class ProjectManagerApp(App):
             self._z_count = 0
             self._clear_log_message()
             # Don't prevent — let escape also do its normal thing
-        elif event.key == "escape" and self._w_mode:
-            self._w_mode = False
-            self._clear_log_message()
 
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """Disable single-key shortcuts when command bar is focused or in guide mode."""
@@ -223,7 +223,7 @@ class ProjectManagerApp(App):
                        "launch_meta", "launch_claude", "launch_guide",
                        "view_log", "refresh", "rebalance", "show_help",
                        "toggle_plans", "toggle_qa", "start_qa_on_pr", "hide_plan", "move_to_plan", "toggle_merged",
-                       "cycle_filter", "cycle_sort", "toggle_auto_start"):
+                       "cycle_filter", "cycle_sort", "toggle_auto_start", "focus_watcher"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus or self._command_pending:
                 _log.debug("check_action: blocked %s (command bar focused/pending)", action)
