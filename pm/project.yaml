@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-e3ef28b
+  active_pr: pr-3032fb6
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -3720,7 +3720,7 @@ prs:
   plan: plan-qa
   title: Add spec generation step between PR phases
   branch: pm/pr-942aa21-add-spec-generation-step-between-pr-phases
-  status: qa
+  status: in_review
   depends_on: []
   description: "Add an optional \"spec\" step to the PR lifecycle that bridges the\
     \ gap between the user's natural-language description and each subsequent phase\
@@ -3763,11 +3763,25 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/125
   gh_pr_number: 125
   created_at: '2026-03-06T19:02:04.662125+00:00'
-  updated_at: '2026-03-07T16:04:22.814353+00:00'
+  updated_at: '2026-03-10T01:19:18.930124+00:00'
   started_at: '2026-03-06T21:13:20.894896+00:00'
-  reviewed_at: '2026-03-07T16:04:22.814353+00:00'
+  reviewed_at: '2026-03-10T01:19:18.930124+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-fa1e58a
+    text: 'QA PASS: Spec generation via CLI for impl phase: PASS; Spec mode settings
+      and per-PR override: PASS; Spec approve workflow via CLI: PASS; Spec save command
+      for Claude sessions: PASS; Spec integration in implementation prompt: PASS;
+      QA spec generation before planner: PASS; Spec review via TUI V key: PASS; QA
+      scenario isolation via local clones (not: PASS; Push proxy for containerised
+      QA scenarios: PASS; QA scenario push and pull between parallel: PASS; QA scenario
+      numbering offset across runs: PASS; QA scenario retry on window death: PASS;
+      PR QA command and TUI routing: PASS; Impl and review container push proxy integration:
+      PASS; Command bar keystroke buffering fix: PASS; Spec content included in review
+      prompt: PASS; Scenario 0 interactive session changes: PASS; QA planner false-positive
+      plan detection fix: PASS; PR edit --plan option: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-942aa21-071f72afba6bdc28)'
+    created_at: '2026-03-10T02:17:23Z'
+    last_edited: '2026-03-10T02:17:23Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-942aa21-add-spec-generation-step-between-pr--e2dbb884
 - id: pr-4585fd3
   plan: tui-ux
@@ -4049,7 +4063,18 @@ prs:
   started_at: '2026-03-08T22:27:50.279825+00:00'
   reviewed_at: '2026-03-09T17:23:26.156810+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-529f5a7
+    text: 'QA NEEDS_WORK: Tech tree visual rendering with compositional widgets: NEEDS_WORK;
+      Keyboard navigation with neighbor map: PASS; PR node selection and status indicators:
+      PASS; Status filter cycling and merged toggle with widget rebuild: PASS; Plan
+      group hide/show with widget lifecycle: PASS; Edge canvas caching and dirty tracking:
+      PASS; Layout cache invalidation: PASS; PR interaction and actions after refactor:
+      PASS; Widget rebuild on PR list update: PASS; Animation performance - selective
+      refresh: PASS; Sort field cycling with widget rebuild: NEEDS_WORK; Window resize
+      rebalance with compositional widgets: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-4c41017-e092217d921b6b35)'
+    created_at: '2026-03-10T03:25:27Z'
+    last_edited: '2026-03-10T03:25:27Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-4c41017-refactor-techtree-split-pr-nodes-int-8023bb22
 - id: pr-e9d4b24
   plan: bugs
@@ -4194,7 +4219,7 @@ prs:
   plan: watchers
   title: 'Watcher core framework: BaseWatcher, WatcherManager, and auto-start refactor'
   branch: pm/pr-3032fb6-always-on-watcher-framework-with-pluggable-intelli
-  status: in_progress
+  status: qa
   depends_on: []
   description: "Refactor the watcher loop from an auto-start companion into a pluggable\
     \ always-on framework. This is the core infrastructure that all watchers build\
@@ -4230,9 +4255,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/132
   gh_pr_number: 132
   created_at: '2026-03-08T20:10:08.282332+00:00'
-  updated_at: '2026-03-09T23:34:18.643679+00:00'
+  updated_at: '2026-03-10T14:27:13.697046+00:00'
   started_at: '2026-03-09T23:34:18.643679+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-03-10T14:27:13.697046+00:00'
   merged_at: null
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-3032fb6-always-on-watcher-framework-with-plu-defc8a34
@@ -5091,7 +5116,7 @@ prs:
   plan: improvements
   title: Unified log file with source prefixes and pm log CLI
   branch: pm/pr-9bf8b0b-unified-log-file-with-source-prefixes-and-pm-log-c
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'Consolidate all pm logging into a single log file per session. Currently
     different modules create loggers with different names but they already write to
@@ -5117,11 +5142,113 @@ prs:
 
     The format should include timestamps, level, source prefix, and message. Should
     work with the existing RotatingFileHandler setup.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/134
+  gh_pr_number: 134
+  created_at: '2026-03-09T23:46:16.788511+00:00'
+  updated_at: '2026-03-09T23:50:43.896649+00:00'
+  started_at: '2026-03-09T23:50:43.896649+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9bf8b0b-unified-log-file-with-source-prefixe-743c06d3
+- id: pr-6836fad
+  plan: plan-qa
+  title: Embed session tag in container names and consolidate push proxies
+  branch: pm/pr-6836fad-embed-session-tag-in-container-names-and-consolida
+  status: in_review
+  depends_on: []
+  description: 'Two related improvements to container and push proxy management:
+
+
+    1. **Session tag in container names**: Embed the TUI session tag (e.g. c5a1006b)
+    into container names so containers are tied to their session. Changes naming from
+    pm-{label}-{suffix} to pm-{session_tag}-{label}-{suffix}. Enables listing all
+    containers for a session with ''docker ps --filter name=pm-c5a1006b-'' and proper
+    cleanup when a session ends.
+
+
+    2. **One push proxy per (session, branch) pair**: Instead of spawning one push
+    proxy per container (leading to dozens of identical proxies for QA scenarios on
+    the same branch), run one proxy per unique (session_tag, pr_id) combination. Multiple
+    containers on the same branch share the same proxy. Socket path becomes deterministic:
+    /tmp/pm-push-proxy-{session_tag}-{pr_id}/push.sock. This dramatically reduces
+    the number of proxy processes (from O(containers) to O(branches)) and makes cleanup
+    trivial — given a session tag you can find and clean up all its proxies.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/135
+  gh_pr_number: 135
+  created_at: '2026-03-10T00:30:49.386415+00:00'
+  updated_at: '2026-03-10T01:07:09.750495+00:00'
+  started_at: '2026-03-10T00:33:09.795104+00:00'
+  reviewed_at: '2026-03-10T01:07:09.750495+00:00'
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-6836fad-embed-session-tag-in-container-names-743c06d3
+- id: pr-ac12b47
+  plan: plan-qa
+  title: Session cleanup for stale containers and push proxies
+  branch: pm/pr-ac12b47-session-cleanup-for-stale-containers-and-push-prox
+  status: pending
+  depends_on:
+  - pr-6836fad
+  description: 'Add a cleanup function that removes stale containers and push proxies
+    for a given session. A container or proxy is stale when the tmux window it was
+    launched from no longer exists.
+
+
+    Cleanup runs:
+
+    - On TUI startup (clean up leftovers from a previous session crash)
+
+    - On session close via tmux session-closed hook (tmux supports hooks like session-closed,
+    window-closed etc. via ''set-hook -g session-closed'' or ''set-hook -g client-session-changed'')
+
+    - Available as a CLI command: pm session cleanup
+
+
+    The cleanup logic:
+
+    1. List all containers matching the session tag prefix (pm-{session_tag}-*)
+
+    2. For each container, derive the expected tmux window name from the container
+    name
+
+    3. Check if that window exists in the session
+
+    4. If not, remove the container and its associated push proxy socket
+
+    5. Also scan /tmp/pm-push-proxy-{session_tag}-* directories and remove any whose
+    proxy process is dead (check PID file or socket liveness)
+
+
+    Depends on pr-6836fad (session tag in container names) since cleanup relies on
+    the session tag prefix to find containers belonging to a session.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
-  created_at: '2026-03-09T23:46:16.788511+00:00'
-  updated_at: '2026-03-09T23:46:16.788511+00:00'
+  created_at: '2026-03-10T00:41:37.907137+00:00'
+  updated_at: '2026-03-10T00:41:37.907137+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-53e47a1
+  plan: tui-ux
+  title: Shift+key reverses cycle direction for TUI keybindings
+  branch: pm/pr-53e47a1-shift-key-reverses-cycle-direction-for-tui-keybind
+  status: pending
+  depends_on: []
+  description: TUI keybindings that cycle through values (like the filter cycle, sort
+    cycle, etc.) should support Shift+key to cycle backwards. Currently pressing the
+    key only cycles forward, requiring you to go all the way around to get back to
+    the previous value. Shift+key should reverse direction for all cycling keybindings
+    consistently.
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-10T02:08:09.129753+00:00'
+  updated_at: '2026-03-10T02:08:09.129753+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

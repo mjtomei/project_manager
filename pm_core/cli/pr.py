@@ -842,6 +842,25 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
 
     pr_id = pr_entry["id"]
     display_id = _pr_display_id(pr_entry)
+    window_name = f"review-{display_id}"
+
+    # Fast path: if review window already exists and we don't need fresh,
+    # just switch to it — skip expensive prompt generation and container setup.
+    existing = tmux_mod.find_window_by_name(pm_session, window_name)
+    sessions_on_review: list[str] = []
+    if existing:
+        if fresh:
+            if review_loop:
+                sessions_on_review = tmux_mod.sessions_on_window(
+                    pm_session, existing["id"],
+                )
+            tmux_mod.kill_window(pm_session, existing["id"])
+            click.echo(f"Killed existing review window '{window_name}'")
+        else:
+            tmux_mod.select_window(pm_session, existing["id"])
+            click.echo(f"Switched to existing review window '{window_name}'")
+            return
+
     title = pr_entry.get("title", "")
     base_branch = data.get("project", {}).get("base_branch", "master")
 
@@ -857,27 +876,6 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     from pm_core.container import wrap_claude_cmd
     claude_cmd, _cname = wrap_claude_cmd(claude_cmd, workdir, label=f"review-{pr_id}",
                                           allowed_push_branch=branch)
-
-    window_name = f"review-{display_id}"
-
-    # If review window already exists, kill it if fresh, otherwise switch to it
-    existing = tmux_mod.find_window_by_name(pm_session, window_name)
-    # Remember which grouped sessions were watching the review window —
-    # after we kill and recreate it, those sessions should follow to the
-    # new window.  Check ALL sessions in the group, not just the current one.
-    sessions_on_review: list[str] = []
-    if existing:
-        if fresh:
-            if review_loop:
-                sessions_on_review = tmux_mod.sessions_on_window(
-                    pm_session, existing["id"],
-                )
-            tmux_mod.kill_window(pm_session, existing["id"])
-            click.echo(f"Killed existing review window '{window_name}'")
-        else:
-            tmux_mod.select_window(pm_session, existing["id"])
-            click.echo(f"Switched to existing review window '{window_name}'")
-            return
 
     # In review loop mode or background mode, create the window without
     # switching focus.  For review loops the explicit per-session switching
