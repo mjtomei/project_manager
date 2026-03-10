@@ -734,9 +734,13 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
             cmd = build_claude_shell_cmd(prompt=prompt,
                                          transcript=transcript, cwd=str(work_path))
             # Optionally wrap in a container for isolation
-            from pm_core.container import wrap_claude_cmd
-            cmd, _cname = wrap_claude_cmd(cmd, str(work_path), label=f"impl-{pr_id}",
-                                          allowed_push_branch=branch)
+            from pm_core.container import wrap_claude_cmd, ContainerError
+            try:
+                cmd, _cname = wrap_claude_cmd(cmd, str(work_path), label=f"impl-{pr_id}",
+                                              allowed_push_branch=branch)
+            except ContainerError as e:
+                click.echo(str(e), err=True)
+                raise SystemExit(1)
             try:
                 if use_companion:
                     claude_pane = tmux_mod.new_window_get_pane(
@@ -873,9 +877,13 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                                          transcript=transcript, cwd=workdir)
     # Optionally wrap in a container for isolation
     branch = pr_entry.get("branch", "")
-    from pm_core.container import wrap_claude_cmd
-    claude_cmd, _cname = wrap_claude_cmd(claude_cmd, workdir, label=f"review-{pr_id}",
-                                          allowed_push_branch=branch)
+    from pm_core.container import wrap_claude_cmd, ContainerError
+    try:
+        claude_cmd, _cname = wrap_claude_cmd(claude_cmd, workdir, label=f"review-{pr_id}",
+                                              allowed_push_branch=branch)
+    except ContainerError as e:
+        click.echo(str(e), err=True)
+        raise SystemExit(1)
 
     # In review loop mode or background mode, create the window without
     # switching focus.  For review loops the explicit per-session switching

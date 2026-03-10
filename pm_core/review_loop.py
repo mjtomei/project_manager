@@ -163,7 +163,7 @@ def _launch_review_window(pr_id: str, pm_root: str, iteration: int = 0,
         cmd.extend(["--transcript", transcript])
     cmd.append(pr_id)
     _log.info("review_loop: launching review window: %s", cmd)
-    result = subprocess.run(cmd, cwd=pm_root, capture_output=True, text=True, timeout=30)
+    result = subprocess.run(cmd, cwd=pm_root, capture_output=True, text=True, timeout=120)
     if result.returncode != 0:
         stderr = result.stderr.strip() if result.stderr else ""
         stdout = result.stdout.strip() if result.stdout else ""

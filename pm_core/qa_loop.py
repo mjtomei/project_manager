@@ -630,8 +630,8 @@ def _launch_scenarios_in_containers(
             )
             scenario.container_name = cname
         except Exception:
-            _log.warning("Failed to create container for scenario %d",
-                         scenario.index)
+            _log.error("Failed to create container for scenario %d — aborting scenario",
+                       scenario.index, exc_info=True)
             continue
 
         # Build docker exec command and launch in a tmux window.
