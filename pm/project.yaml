@@ -4102,7 +4102,7 @@ prs:
   plan: null
   title: Auto-create workdir when missing on current machine
   branch: pm/pr-e3ef28b-auto-create-workdir-when-missing-on-current-machin
-  status: in_progress
+  status: merged
   depends_on: []
   description: 'When a PR was started on a different computer, the workdir path doesn''t
     exist locally. Previously this caused review/merge/QA windows to fail silently
@@ -4113,10 +4113,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/133
   gh_pr_number: 133
   created_at: '2026-03-08T22:47:45.033304+00:00'
-  updated_at: '2026-03-09T23:43:54.978686+00:00'
+  updated_at: '2026-03-10T21:46:37.340109+00:00'
   started_at: '2026-03-09T23:43:54.978686+00:00'
-  reviewed_at: null
-  merged_at: null
+  reviewed_at: '2026-03-10T21:23:42.888831+00:00'
+  merged_at: '2026-03-10T21:46:37.340109+00:00'
   notes:
   - id: note-eb54cab
     text: 'QA INPUT_REQUIRED:  (workdir: /Users/matthewtomei/.pm/workdirs/qa/pr-e3ef28b-a94bdf2a1fc5bee7)'
@@ -5237,6 +5237,27 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-3ea00df
+  plan: bugs
+  title: Fix push proxy socket mount failing on macOS Docker Desktop
+  branch: pm/pr-3ea00df-fix-push-proxy-socket-mount-failing-on-macos-docke
+  status: pending
+  depends_on: []
+  description: 'The push proxy creates a Unix domain socket in /var/folders (macOS
+    temp directory) and mounts it into the Docker container. This fails on Docker
+    Desktop for Mac because socket files cannot be shared across the Linux VM boundary.
+    Error: error while creating mount source path push.sock: mkdir push.sock: operation
+    not supported. Options: use TCP instead of Unix socket on macOS, place socket
+    in a Docker-mountable location, or use socat to bridge. Works fine on native Linux.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-10T02:24:23.880078+00:00'
+  updated_at: '2026-03-10T02:24:23.880078+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
 - id: pr-53e47a1
   plan: tui-ux
   title: Shift+key reverses cycle direction for TUI keybindings
@@ -5253,6 +5274,27 @@ prs:
   gh_pr_number: null
   created_at: '2026-03-10T02:08:09.129753+00:00'
   updated_at: '2026-03-10T02:08:09.129753+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-6bccf70
+  plan: bugs
+  title: Show Docker stderr in container error messages and include log path
+  branch: pm/pr-6bccf70-show-docker-stderr-in-container-error-messages-and
+  status: pending
+  depends_on: []
+  description: When docker run fails with a non-zero exit code, the ContainerError
+    message only says the container failed to create. It should include Docker stderr
+    (the actual error message) and the path to the debug log file so users can diagnose
+    the issue. Currently _run_docker logs stderr to the debug log but the error surfaced
+    to the TUI status bar is generic. The CalledProcessError contains stderr but it
+    is lost when ContainerError is raised in wrap_claude_cmd.
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-10T02:24:45.142842+00:00'
+  updated_at: '2026-03-10T02:24:45.142842+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

@@ -165,10 +165,19 @@ def _run_docker(*args: str, check: bool = True,
     """Run a docker command."""
     cmd = ["docker", *args]
     _log.debug("docker: %s", " ".join(cmd))
-    return subprocess.run(
+    result = subprocess.run(
         cmd, capture_output=True, text=True,
-        check=check, timeout=timeout,
+        check=False, timeout=timeout,
     )
+    if result.returncode != 0:
+        _log.error("docker failed (rc=%d): %s\nstderr: %s\nstdout: %s",
+                   result.returncode, " ".join(cmd),
+                   result.stderr.strip()[:500], result.stdout.strip()[:200])
+        if check:
+            raise subprocess.CalledProcessError(
+                result.returncode, cmd,
+                output=result.stdout, stderr=result.stderr)
+    return result
 
 
 # ---------------------------------------------------------------------------
