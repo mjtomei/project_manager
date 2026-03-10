@@ -189,34 +189,25 @@ def _find_attached_session(base: str) -> str:
     2. Fall back to first attached grouped session
     3. Fall back to base session
     """
-    _log.debug("_find_attached_session: base=%r", base)
-
     # Priority 1: use $TMUX_PANE to find our actual session
     pane = os.environ.get("TMUX_PANE")
     if pane:
-        _log.debug("Priority 1: TMUX_PANE=%r", pane)
         try:
             result = subprocess.run(
                 ["tmux", "display-message", "-p", "-t", pane, "#{session_name}"],
                 capture_output=True, text=True,
             )
             current = result.stdout.strip()
-            _log.debug("Priority 1: pane %s -> session %r", pane, current)
             if current and (current == base or current.startswith(base + "~")):
                 # Verify it has attached clients
                 att = subprocess.run(
                     ["tmux", "display-message", "-t", current, "-p", "#{session_attached}"],
                     capture_output=True, text=True,
                 )
-                attached = att.stdout.strip()
-                _log.debug("Priority 1: session %r attached=%s", current, attached)
-                if att.returncode == 0 and attached != "0":
-                    _log.debug("Priority 1: returning %r (from TMUX_PANE)", current)
+                if att.returncode == 0 and att.stdout.strip() != "0":
                     return current
         except Exception:
-            _log.debug("Priority 1: exception looking up TMUX_PANE", exc_info=True)
-    else:
-        _log.debug("Priority 1: TMUX_PANE not set, skipping")
+            pass
 
     # Priority 2: first attached grouped session
     try:
@@ -224,17 +215,14 @@ def _find_attached_session(base: str) -> str:
             ["tmux", "list-sessions", "-F", "#{session_name} #{session_attached}"],
             capture_output=True, text=True,
         )
-        _log.debug("Priority 2: list-sessions output: %r", result.stdout.strip())
         for line in result.stdout.strip().splitlines():
             parts = line.rsplit(" ", 1)
             if len(parts) == 2:
                 name, attached = parts
                 if (name == base or name.startswith(base + "~")) and attached != "0":
-                    _log.debug("Priority 2: returning %r (first attached grouped)", name)
                     return name
     except Exception:
-        _log.debug("Priority 2: exception listing sessions", exc_info=True)
-    _log.debug("Priority 3: returning base %r (fallback)", base)
+        pass
     return base
 
 

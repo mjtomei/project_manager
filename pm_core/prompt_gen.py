@@ -879,7 +879,7 @@ understand what's being tested:
     except (FileNotFoundError, Exception):
         pass
 
-    prompt = f"""You are in interactive QA session (Scenario 0) for PR {pr_id}: "{title}"
+    prompt = f"""You are in an interactive QA session (Scenario 0) for PR {pr_id}: "{title}"
 
 ## Context
 

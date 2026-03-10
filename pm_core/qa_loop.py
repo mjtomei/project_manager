@@ -2032,7 +2032,11 @@ def run_qa_sync(
             root = None
         state.latest_output = "Generating QA spec..."
         _notify()
-        ensure_spec(data, state.pr_id, "qa", root=root, interactive=False)
+        try:
+            ensure_spec(data, state.pr_id, "qa", root=root, interactive=False)
+        except Exception:
+            _log.warning("QA spec generation failed for %s, continuing without spec",
+                         state.pr_id, exc_info=True)
 
         state.latest_output = "Planning QA scenarios..."
         _notify()
