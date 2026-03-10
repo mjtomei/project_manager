@@ -808,3 +808,20 @@ class TestCreateContainerPushProxy:
                         allowed_push_branch="pm/pr-123")
         call_kwargs = mock_exec.call_args[1]
         assert call_kwargs["proxy_socket_path"] == "/tmp/pm-push-proxy-x/push.sock"
+
+    @patch("pm_core.push_proxy.get_proxy_socket_path",
+           return_value="/tmp/pm-push-proxy-repo-abc-pr-1/push.sock")
+    @patch("pm_core.container.build_exec_cmd", return_value="docker exec ...")
+    @patch("pm_core.container.create_container", return_value="cid")
+    @patch("pm_core.container.load_container_config",
+           return_value=ContainerConfig())
+    @patch("pm_core.container.is_container_mode_enabled", return_value=True)
+    def test_shared_proxy_not_cleaned_inline(self, mock_enabled, mock_config,
+                                              mock_create, mock_exec,
+                                              mock_sock, _mock_running):
+        """Shared proxies should NOT have their socket deleted by inline cleanup."""
+        wrap_claude_cmd("claude", "/w", label="impl",
+                        allowed_push_branch="pm/pr-123",
+                        session_tag="repo-abc", pr_id="pr-1")
+        call_kwargs = mock_exec.call_args[1]
+        assert call_kwargs["proxy_socket_path"] is None

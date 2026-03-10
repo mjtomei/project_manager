@@ -596,7 +596,14 @@ def wrap_claude_cmd(
 
     from pm_core.push_proxy import get_proxy_socket_path
     proxy_sock = get_proxy_socket_path(cname)
-    exec_cmd = build_exec_cmd(cname, claude_cmd, proxy_socket_path=proxy_sock)
+    # For shared proxies (session_tag + pr_id), don't embed socket cleanup
+    # in the exec command — the socket is shared across containers and its
+    # lifetime is managed via reference counting in stop_push_proxy().
+    shared_proxy = session_tag is not None and pr_id is not None
+    exec_cmd = build_exec_cmd(
+        cname, claude_cmd,
+        proxy_socket_path=None if shared_proxy else proxy_sock,
+    )
     _log.info("Wrapped claude command in container %s", cname)
     return exec_cmd, cname
 
