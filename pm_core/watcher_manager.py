@@ -71,8 +71,6 @@ class WatcherManager:
             def _on_complete_wrapper(state: WatcherState) -> None:
                 if on_complete:
                     on_complete(state)
-                # Finalize transcripts
-                self._finalize_transcripts(state)
 
             thread = watcher.start_background(
                 on_iteration=on_iteration,
@@ -160,15 +158,3 @@ class WatcherManager:
                 for w in self._watchers.values()
             )
 
-    def _finalize_transcripts(self, state: WatcherState) -> None:
-        """Finalize transcript symlinks for a completed watcher."""
-        tdir = state._transcript_dir
-        if not tdir:
-            return
-        from pathlib import Path
-        from pm_core.claude_launcher import finalize_transcript
-        tdir_path = Path(tdir)
-        if tdir_path.is_dir():
-            for p in tdir_path.iterdir():
-                if p.is_symlink() and p.suffix == ".jsonl":
-                    finalize_transcript(p)

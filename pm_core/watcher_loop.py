@@ -176,11 +176,6 @@ def start_watcher_loop_background(
         if on_iteration:
             on_iteration(state)
 
-    def _on_done(ws: WatcherState) -> None:
-        _sync_state_to_legacy(ws, state)
-        if on_complete:
-            on_complete(state)
-
     # Link stop_requested: when legacy state is stopped, watcher should stop
     def _run():
         # Periodically check if legacy stop_requested has been set
