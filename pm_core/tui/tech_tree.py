@@ -208,7 +208,7 @@ class TechTree(Widget, can_focus=True):
 
     def _rebuild_widgets(self) -> None:
         """Sync PRNode widgets to match current layout positions."""
-        if not self.is_mounted:
+        if self._edge_canvas is None:
             return
 
         pr_map = {pr["id"]: pr for pr in self._prs}
