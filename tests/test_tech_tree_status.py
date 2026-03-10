@@ -13,12 +13,12 @@ class TestStatusIcons:
         assert STATUS_ICONS["pending"] == "○"
 
     def test_in_progress_icon(self):
-        """In-progress status has filled circle icon."""
-        assert STATUS_ICONS["in_progress"] == "●"
+        """In-progress status has bullseye circle icon."""
+        assert STATUS_ICONS["in_progress"] == "◎"
 
     def test_in_review_icon(self):
-        """In-review status has target circle icon."""
-        assert STATUS_ICONS["in_review"] == "◎"
+        """In-review status has fisheye circle icon."""
+        assert STATUS_ICONS["in_review"] == "◉"
 
     def test_merged_icon(self):
         """Merged status has checkmark icon."""
