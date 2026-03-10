@@ -735,8 +735,10 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                                          transcript=transcript, cwd=str(work_path))
             # Optionally wrap in a container for isolation
             from pm_core.container import wrap_claude_cmd
+            _stag = pm_session.removeprefix("pm-") if pm_session else None
             cmd, _cname = wrap_claude_cmd(cmd, str(work_path), label=f"impl-{pr_id}",
-                                          allowed_push_branch=branch)
+                                          allowed_push_branch=branch,
+                                          session_tag=_stag, pr_id=pr_id)
             try:
                 if use_companion:
                     claude_pane = tmux_mod.new_window_get_pane(
@@ -855,8 +857,10 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     # Optionally wrap in a container for isolation
     branch = pr_entry.get("branch", "")
     from pm_core.container import wrap_claude_cmd
+    _stag = pm_session.removeprefix("pm-") if pm_session else None
     claude_cmd, _cname = wrap_claude_cmd(claude_cmd, workdir, label=f"review-{pr_id}",
-                                          allowed_push_branch=branch)
+                                          allowed_push_branch=branch,
+                                          session_tag=_stag, pr_id=pr_id)
 
     window_name = f"review-{display_id}"
 

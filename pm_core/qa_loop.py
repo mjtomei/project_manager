@@ -585,6 +585,10 @@ def _launch_scenarios_in_containers(
     config = container_mod.load_container_config()
     branch = pr_data.get("branch", "")
 
+    # Derive session tag from tmux session name for container naming and
+    # shared push proxies.
+    _session_tag = session.removeprefix("pm-") if session else None
+
     for scenario in state.scenarios:
         if state.stop_requested:
             break
@@ -616,9 +620,11 @@ def _launch_scenarios_in_containers(
         )
         claude_cmd = build_claude_shell_cmd(prompt=child_prompt)
 
-        # Create container with push proxy for the PR branch
+        # Create container with push proxy for the PR branch.
+        # All QA scenarios for the same PR share a single push proxy.
         cname = container_mod.qa_container_name(
             state.pr_id, state.loop_id, scenario.index,
+            session_tag=_session_tag,
         )
         try:
             container_mod.create_qa_container(
@@ -627,6 +633,8 @@ def _launch_scenarios_in_containers(
                 workdir=clone_path,
                 scratch_path=scratch_path,
                 allowed_push_branch=branch or None,
+                session_tag=_session_tag,
+                pr_id=state.pr_id,
             )
             scenario.container_name = cname
         except Exception:
