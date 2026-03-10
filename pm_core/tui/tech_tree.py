@@ -78,6 +78,8 @@ class TechTree(Widget, can_focus=True):
         self._edge_canvas.styles.position = "absolute"
         self.prs = self._prs
         self._recompute()
+        if self._prs:
+            self._rebuild_widgets()
 
     def apply_project_settings(self, project: dict) -> None:
         if "hide_merged" in project:
