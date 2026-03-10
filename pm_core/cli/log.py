@@ -28,7 +28,6 @@ def log_group(ctx):
 def log_tail(lines: int, source: str | None):
     """Follow the session log in real time (tail -f)."""
     import subprocess
-    import signal
 
     log_path = command_log_file()
     if not log_path.exists():
@@ -182,7 +181,7 @@ def log_sources():
         click.echo(f"No log file yet: {log_path}", err=True)
         raise SystemExit(1)
 
-    bracket_re = re.compile(r"\[([^\]]+)\]")
+    bracket_re = re.compile(r"^\d{2}:\d{2}:\d{2}\s+\w+\s+\[([^\]]+)\]")
     sources: set[str] = set()
     try:
         for line in log_path.read_text().splitlines():
