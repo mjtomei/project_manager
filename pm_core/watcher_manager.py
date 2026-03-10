@@ -72,6 +72,9 @@ class WatcherManager:
                 if on_complete:
                     on_complete(state)
 
+            # Set running eagerly so rapid toggle doesn't create duplicates
+            watcher.state.running = True
+
             thread = watcher.start_background(
                 on_iteration=on_iteration,
                 on_complete=_on_complete_wrapper,

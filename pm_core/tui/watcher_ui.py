@@ -190,6 +190,10 @@ def start_watcher(app, transcript_dir: str | None = None,
             app.log_message(f"Watcher '{watcher_type}' is already running.")
             return
 
+        # Remove old stopped watcher before creating a new one
+        if existing and not existing.state.running:
+            manager.unregister(existing.state.watcher_id)
+
         # Create and register a new watcher instance
         from pm_core.watchers import get_watcher_class
         cls = get_watcher_class(watcher_type)
