@@ -18,6 +18,7 @@ from pm_core import pr_sync as pr_sync_mod
 from pm_core import tmux as tmux_mod
 from pm_core import pane_layout
 from pm_core import pane_registry
+from pm_core import spec_gen
 from pm_core.backend import get_backend
 from pm_core.claude_launcher import find_claude, build_claude_shell_cmd, clear_session, launch_claude, finalize_transcript
 
@@ -515,6 +516,157 @@ def pr_ready():
         click.echo(f"  ⏳ {_pr_display_id(p)}: {p.get('title', '???')}")
 
 
+@pr.command("spec")
+@click.argument("pr_id")
+@click.argument("phase", default=None, required=False)
+@click.option("--regenerate", is_flag=True, default=False, help="Regenerate even if spec exists")
+def pr_spec(pr_id: str, phase: str | None, regenerate: bool):
+    """View or generate specs for a PR.
+
+    Without PHASE, shows all existing specs.
+    With PHASE (impl, qa), shows or generates that spec.
+    """
+    root = state_root()
+    data = store.load(root)
+    pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
+
+    if phase is None:
+        # Show all existing specs
+        found = False
+        for p in spec_gen.PHASES:
+            spec_text = spec_gen.get_spec(pr_entry, p)
+            if spec_text:
+                found = True
+                click.echo(f"\n{'='*60}")
+                click.echo(f"spec_{p}:")
+                click.echo(f"{'='*60}\n")
+                click.echo(spec_text)
+        if not found:
+            click.echo(f"No specs generated yet for {_pr_display_id(pr_entry)}.")
+            click.echo("Run `pm pr spec <pr-id> <phase>` to generate one.")
+        return
+
+    if phase not in spec_gen.PHASES:
+        click.echo(f"Invalid phase: {phase}. Must be one of: {', '.join(spec_gen.PHASES)}", err=True)
+        raise SystemExit(1)
+
+    existing = spec_gen.get_spec(pr_entry, phase)
+    if existing and not regenerate:
+        click.echo(f"\nspec_{phase}:\n")
+        click.echo(existing)
+        click.echo(f"\nUse --regenerate to regenerate this spec.")
+        return
+
+    spec_text, needs_review = spec_gen.generate_spec(
+        data, pr_id, phase, root=root, force=regenerate,
+    )
+    if spec_text:
+        click.echo(f"\nspec_{phase}:\n")
+        click.echo(spec_text)
+        if needs_review:
+            click.echo(f"\n{'='*40}")
+            click.echo("This spec has been flagged for review.")
+    else:
+        click.echo("Spec generation returned empty output.", err=True)
+
+
+@pr.command("spec-save")
+@click.argument("pr_id")
+@click.argument("phase")
+def pr_spec_save(pr_id: str, phase: str):
+    """Register a spec file for a PR phase (used by Claude sessions).
+
+    Reads spec content from the canonical path
+    (<pm-root>/specs/<pr-id>/<phase>.md) and records it in project.yaml.
+    The Claude session writes the file first, then runs this command.
+    """
+    root = state_root()
+    data = store.load(root)
+    pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
+
+    if phase not in spec_gen.PHASES:
+        click.echo(f"Invalid phase: {phase}. Must be one of: {', '.join(spec_gen.PHASES)}", err=True)
+        raise SystemExit(1)
+
+    # Use stored path if available, otherwise derive canonical path
+    field = spec_gen._SPEC_FIELD.get(phase)
+    stored_path = pr_entry.get(field)
+    if stored_path and Path(stored_path).exists():
+        spec_path = Path(stored_path)
+    else:
+        spec_path = spec_gen.spec_file_path(root, pr_id, phase)
+
+    if not spec_path.exists():
+        click.echo(f"Spec file not found: {spec_path}", err=True)
+        click.echo(f"Write the spec to this path first, then run this command.")
+        raise SystemExit(1)
+
+    content = spec_path.read_text().strip()
+    if not content:
+        click.echo(f"Spec file is empty: {spec_path}", err=True)
+        raise SystemExit(1)
+
+    # Record the path in the PR entry
+    pr_entry[field] = str(spec_path)
+    store.save(data, root)
+    click.echo(f"Saved {phase} spec for {_pr_display_id(pr_entry)} ({len(content)} chars).")
+
+
+@pr.command("spec-approve")
+@click.argument("pr_id")
+def pr_spec_approve(pr_id: str):
+    """Approve a pending spec review for a PR.
+
+    Opens the spec in an editor for review. Saving and closing approves it.
+    """
+    root = state_root()
+    data = store.load(root)
+    pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
+
+    phase = spec_gen.get_pending_spec_phase(pr_entry)
+    if not phase:
+        click.echo(f"No pending spec review for {_pr_display_id(pr_entry)}.")
+        return
+
+    spec_text = spec_gen.get_spec(pr_entry, phase) or ""
+    if not spec_text:
+        click.echo(f"Spec content is empty — nothing to review.", err=True)
+        spec_gen.approve_spec(data, pr_id, root=root)
+        return
+
+    header_lines = [
+        f"# Spec review: {phase} for {pr_id}",
+        "# Edit as needed, then save and close to approve.",
+        "# Delete all content to reject.",
+        "",
+    ]
+    header = "\n".join(header_lines) + "\n"
+    edited = click.edit(header + spec_text)
+    if edited is not None:
+        # Strip only the known header lines (not arbitrary # lines,
+        # which would destroy markdown H1 headings in the spec).
+        lines = edited.split("\n")
+        # Remove leading lines that match our header exactly
+        while lines and lines[0] in header_lines:
+            lines.pop(0)
+        edited_content = "\n".join(lines).strip()
+        if not edited_content:
+            click.echo("Spec rejected (empty content). Clearing pending review.")
+            spec_gen.approve_spec(data, pr_id, root=root, edited_text="")
+            return
+        spec_gen.approve_spec(data, pr_id, root=root, edited_text=edited_content)
+        click.echo(f"Spec approved for {phase} phase.")
+    else:
+        # Editor returned None = no changes, approve as-is
+        spec_gen.approve_spec(data, pr_id, root=root)
+        click.echo(f"Spec approved (unchanged) for {phase} phase.")
+
+    trigger_tui_refresh()
+
+
 @pr.command("start")
 @click.argument("pr_id", default=None, required=False)
 @click.option("--workdir", default=None, help="Custom work directory")
@@ -716,6 +868,10 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
 
     click.echo(f"\nPR {_pr_display_id(pr_entry)} is now in_progress on {platform.node()}")
     click.echo(f"Work directory: {work_path}")
+
+    # In prompt/review modes, generate the impl spec in a separate session
+    # before launching the main implementation session.
+    spec_gen.ensure_spec(data, pr_id, "impl", root=root)
 
     prompt = prompt_gen.generate_prompt(data, pr_id, session_name=pm_session)
 

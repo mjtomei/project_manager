@@ -3763,12 +3763,56 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/125
   gh_pr_number: 125
   created_at: '2026-03-06T19:02:04.662125+00:00'
-  updated_at: '2026-03-07T16:04:22.814353+00:00'
+  updated_at: '2026-03-07T17:22:53.841773+00:00'
   started_at: '2026-03-06T21:13:20.894896+00:00'
   reviewed_at: '2026-03-07T16:04:22.814353+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-235f2a8
+    text: 'QA NEEDS_WORK: Unit tests pass for spec_gen, push_proxy, container, and
+      qa_loop: PASS; Spec CLI commands — generate, view, save, and approve: PASS;
+      Spec mode resolution and per-PR override: PASS; Spec preamble injection into
+      prompts: PASS; Push proxy branch restriction and protocol handling: PASS; Container
+      creation with push proxy integration: PASS; QA loop uses clones instead of worktrees
+      and supports direct push: PASS; Scenario retry on window death: NEEDS_WORK;
+      TUI integration — V key, /pr qa command, command bar race fix: PASS; Planner
+      false-positive prevention and scenario numbering: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-942aa21-bce6d76fa50851c6)'
+    created_at: '2026-03-07T17:18:12Z'
+    last_edited: '2026-03-07T17:18:12Z'
+  - id: note-c0590f2
+    text: 'Spec mode changes: (1) Default changed from ''auto'' to ''prompt''. (2)
+      spec_generation_preamble() now only returns content for auto mode — prompt/review
+      modes return empty since they use two separate sessions. (3) New ensure_spec()
+      function runs a separate claude -p session to generate the spec before the main
+      session launches; in review mode or prompt mode with ambiguity, prints the spec
+      and asks for user confirmation. (4) cli/pr.py pr_start calls ensure_spec() before
+      launching impl session. (5) qa_loop.py run_qa_sync calls ensure_spec() before
+      the planner phase. (6) Auto mode preamble reworded with ''How This Session Works''
+      framing explaining both phases upfront.'
+    created_at: '2026-03-07T17:22:53Z'
+    last_edited: '2026-03-07T17:22:53Z'
+  - id: note-57bf59e
+    text: 'QA ERROR:  (workdir: /home/matt/.pm/workdirs/qa/pr-942aa21-597ef7dc1a71e560)'
+    created_at: '2026-03-07T17:38:53Z'
+    last_edited: '2026-03-07T17:38:53Z'
+  - id: note-e85c785
+    text: 'QA ERROR:  (workdir: /home/matt/.pm/workdirs/qa/pr-942aa21-1ca3679f2582d215)'
+    created_at: '2026-03-07T19:02:48Z'
+    last_edited: '2026-03-07T19:02:48Z'
+  - id: note-c5e7255
+    text: 'QA ERROR:  (workdir: /home/matt/.pm/workdirs/qa/pr-942aa21-293025bf3861b47e)'
+    created_at: '2026-03-07T19:03:05Z'
+    last_edited: '2026-03-07T19:03:05Z'
+  - id: note-66c99c1
+    text: 'QA ERROR:  (workdir: /home/matt/.pm/workdirs/qa/pr-942aa21-a9d652e91fb570b7)'
+    created_at: '2026-03-07T19:03:31Z'
+    last_edited: '2026-03-07T19:03:31Z'
+  - id: note-036b557
+    text: 'QA ERROR:  (workdir: /home/matt/.pm/workdirs/qa/pr-942aa21-5370d80200b656dc)'
+    created_at: '2026-03-07T19:03:42Z'
+    last_edited: '2026-03-07T19:03:42Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-942aa21-add-spec-generation-step-between-pr--e2dbb884
+  spec_qa: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-942aa21-add-spec-generation-step-between-pr--e2dbb884/pm/specs/pr-942aa21/qa.md
 - id: pr-4585fd3
   plan: tui-ux
   title: Use resolved display IDs instead of raw PR IDs in all output

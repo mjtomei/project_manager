@@ -250,11 +250,14 @@ def set_cmd(setting, value):
     Value settings:
 
       min-pane-width  Minimum characters per horizontal pane (default 100)
+
+      spec-mode       Spec generation mode: auto, review, or prompt (default: prompt)
     """
     from pm_core.paths import set_global_setting, set_global_setting_value
     boolean_settings = {"hide-assist", "hide-merged", "beginner-mode", "auto-cleanup"}
     int_settings = {"min-pane-width"}
-    known = boolean_settings | int_settings
+    enum_settings = {"spec-mode": {"auto", "review", "prompt"}}
+    known = boolean_settings | int_settings | set(enum_settings)
     if setting not in known:
         click.echo(f"Unknown setting: {setting}", err=True)
         click.echo(f"Available: {', '.join(sorted(known))}", err=True)
@@ -264,6 +267,12 @@ def set_cmd(setting, value):
             click.echo(f"Setting '{setting}' takes 'on' or 'off'", err=True)
             raise SystemExit(1)
         set_global_setting(setting, value == "on")
+    elif setting in enum_settings:
+        valid = enum_settings[setting]
+        if value not in valid:
+            click.echo(f"Setting '{setting}' takes one of: {', '.join(sorted(valid))}", err=True)
+            raise SystemExit(1)
+        set_global_setting_value(setting, value)
     elif setting in int_settings:
         try:
             int(value)

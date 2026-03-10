@@ -781,14 +781,16 @@ def _poll_tmux_verdicts(
                         scenario.index, retries + 1,
                         _SCENARIO_MAX_RETRIES, backoff)
                     time.sleep(backoff)
+                    retry_counts[scenario.index] = retries + 1
                     if _relaunch_scenario_window(
                         scenario, state, data, pr_data,
                         session, workdir_path,
                     ):
-                        retry_counts[scenario.index] = retries + 1
                         # Reset grace period for this retry
                         grace_start = time.monotonic()
                         continue
+                    # Relaunch failed — will retry on next poll iteration
+                    continue
                 _log.warning("Scenario %d window exited without verdict "
                              "(retries exhausted)",
                              scenario.index)
@@ -896,6 +898,23 @@ def run_qa_sync(
     # --- Phase 1: Planning (if no scenarios pre-loaded) ---
     if state.planning_phase and not state.scenarios:
         _log.info("QA planning phase for %s", state.pr_id)
+
+        # In prompt/review modes, generate the QA spec in a separate
+        # session before launching the planner.  In auto mode the
+        # planner prompt includes a preamble to generate it inline.
+        from pm_core.spec_gen import ensure_spec
+        try:
+            root = store.find_project_root()
+        except FileNotFoundError:
+            root = None
+        state.latest_output = "Generating QA spec..."
+        _notify()
+        try:
+            ensure_spec(data, state.pr_id, "qa", root=root, interactive=False)
+        except Exception:
+            _log.warning("QA spec generation failed for %s, continuing without spec",
+                         state.pr_id, exc_info=True)
+
         state.latest_output = "Planning QA scenarios..."
         _notify()
 
