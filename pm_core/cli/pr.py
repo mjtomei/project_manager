@@ -870,10 +870,6 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     click.echo(f"\nPR {_pr_display_id(pr_entry)} is now in_progress on {platform.node()}")
     click.echo(f"Work directory: {work_path}")
 
-    # In prompt/review modes, generate the impl spec in a separate session
-    # before launching the main implementation session.
-    spec_gen.ensure_spec(data, pr_id, "impl", root=root)
-
     prompt = prompt_gen.generate_prompt(data, pr_id, session_name=pm_session)
 
     # Resolve model/provider for this implementation session

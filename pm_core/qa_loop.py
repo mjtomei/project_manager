@@ -375,6 +375,7 @@ def _write_status_file(status_path: Path, pr_id: str,
         "pr_id": pr_id,
         "scenarios": all_scenarios,
         "overall": overall,
+        "error": error,
     }
     tmp_path = status_path.with_suffix(".tmp")
     tmp_path.write_text(json.dumps(data, indent=2))
@@ -2022,22 +2023,6 @@ def run_qa_sync(
     if state.planning_phase and not state.scenarios:
         _log.info("QA planning phase for %s", state.pr_id)
 
-        # In prompt/review modes, generate the QA spec in a separate
-        # session before launching the planner.  In auto mode the
-        # planner prompt includes a preamble to generate it inline.
-        from pm_core.spec_gen import ensure_spec
-        try:
-            root = store.find_project_root()
-        except FileNotFoundError:
-            root = None
-        state.latest_output = "Generating QA spec..."
-        _notify()
-        try:
-            ensure_spec(data, state.pr_id, "qa", root=root, interactive=False)
-        except Exception:
-            _log.warning("QA spec generation failed for %s, continuing without spec",
-                         state.pr_id, exc_info=True)
-
         state.latest_output = "Planning QA scenarios..."
         _notify()
 
@@ -2161,11 +2146,15 @@ def run_qa_sync(
 
         if not state.scenarios:
             _log.warning("Planner produced no scenarios for %s", state.pr_id)
-            state.running = False
             state.latest_verdict = VERDICT_INPUT_REQUIRED
             state.latest_output = "Planner produced no parseable scenarios — needs human review"
+            state._error = (
+                "No parseable scenarios found in planner output.\n\n"
+                "The QA planner session did not produce a valid test plan.\n"
+                "Check the planner pane (left) for errors.\n\n"
+                "To retry: restart QA from the TUI."
+            )
             _notify()
-            return state
 
         # Verify scenario numbering starts at scenario_start.
         # The planner is told to start from scenario_start, but if it
@@ -2186,6 +2175,28 @@ def run_qa_sync(
 
         state.planning_phase = False
         state.latest_output = f"Plan: {len(state.scenarios)} scenario(s)"
+        _notify()
+
+    # --- Spec gate: verify the planner generated a QA spec ---
+    from pm_core.spec_gen import get_spec
+    pr_entry = store.get_pr(data, state.pr_id) if data else None
+    if pr_entry and not get_spec(pr_entry, "qa") and not getattr(state, '_error', None):
+        _log.warning("QA spec missing for %s after planning — "
+                     "planner did not generate spec in Step 0", state.pr_id)
+        state.latest_verdict = VERDICT_INPUT_REQUIRED
+        state.latest_output = (
+            "QA spec was not generated during planning. "
+            "Run `pm pr spec %s qa` to generate it, then restart QA."
+            % state.pr_id
+        )
+        state._error = (
+            "QA spec was not generated during planning.\n\n"
+            "The planner session should have generated a spec in Step 0,\n"
+            "but no spec file was found.\n\n"
+            "To fix:\n"
+            f"  pm pr spec {state.pr_id} qa\n\n"
+            "Then restart QA from the TUI."
+        )
         _notify()
 
     # --- Phase 2: Execution ---

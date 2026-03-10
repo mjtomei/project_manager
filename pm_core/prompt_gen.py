@@ -196,8 +196,23 @@ This PR is part of plan "{plan['name']}" ({plan['id']}). Other PRs in this plan:
     # Renumber steps based on whether pull step is present
     n = 2 if pull_step else 1
 
-    # Include implementation spec in review prompt for context
+    # Include implementation spec in review prompt for context.
+    # If no spec exists, warn the reviewer — the implementation session
+    # should have generated one in Step 0.
     impl_spec_block = format_spec_for_prompt(pr, "impl")
+    if not impl_spec_block:
+        impl_spec_block = """
+## Implementation Spec — MISSING
+
+No implementation spec was generated for this PR.  The implementation session
+should have produced one as Step 0.  Without a spec, the reviewer cannot
+verify that the implementation matches an agreed-upon set of requirements.
+
+**Action**: If the implementation is otherwise sound, generate the spec now
+with `pm pr spec {pr_id} impl` so it is available for QA.  If the
+implementation has significant gaps, consider requesting re-implementation
+with spec generation enabled.
+""".replace("{pr_id}", pr_id)
 
     prompt = f"""You are reviewing PR {pr_id}: "{title}"
 
