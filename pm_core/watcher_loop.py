@@ -135,23 +135,7 @@ def run_watcher_loop_sync(
         if on_iteration:
             on_iteration(state)
 
-    # Bridge stop_requested from legacy state into watcher state
-    original_stop = watcher.state.__class__.__dict__.get("stop_requested")
-
-    class _StopBridge:
-        """Proxy that checks both legacy and new state for stop_requested."""
-        @property
-        def stop_requested(self_inner):
-            return state.stop_requested or watcher.state.__dict__.get("_stop_requested", False)
-
-        @stop_requested.setter
-        def stop_requested(self_inner, val):
-            watcher.state.__dict__["_stop_requested"] = val
-            state.stop_requested = val
-
-    # Instead of the proxy pattern, just poll legacy state in a simpler way:
-    # Override the watcher's stop check to also check legacy state
-    _orig_should_stop = lambda: state.stop_requested
+    # Forward legacy stop_requested into watcher state
     watcher.state.stop_requested = state.stop_requested
 
     # Run synchronously — the AutoStartWatcher.run_sync handles everything

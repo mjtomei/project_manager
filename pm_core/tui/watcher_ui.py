@@ -324,8 +324,7 @@ def _on_complete_from_thread(app, state) -> None:
         tdir_path = Path(tdir)
         if tdir_path.is_dir():
             for p in tdir_path.iterdir():
-                if (p.is_symlink() and p.suffix == ".jsonl"
-                        and p.name.startswith("watcher-")):
+                if p.is_symlink() and p.suffix == ".jsonl":
                     finalize_transcript(p)
 
 
