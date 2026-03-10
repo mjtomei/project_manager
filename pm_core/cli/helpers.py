@@ -410,6 +410,94 @@ def _workdirs_dir(data: dict) -> Path:
     return base / name
 
 
+def _ensure_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
+    """Ensure the PR's workdir exists locally, cloning if necessary.
+
+    When a PR was started on a different machine the recorded workdir path
+    won't exist.  This helper recreates it by cloning the repo and checking
+    out the PR branch, mirroring the logic in ``pr_start``.
+
+    Returns the workdir path (str) on success, or *None* on failure.
+    Updates *pr_entry["workdir"]* and persists the change when a new
+    clone is created.
+    """
+    import shutil
+
+    workdir = pr_entry.get("workdir")
+    if workdir and Path(workdir).exists():
+        return workdir
+
+    branch = pr_entry.get("branch")
+    if not branch:
+        _log.warning("Cannot ensure workdir: PR %s has no branch", pr_entry.get("id"))
+        return None
+
+    repo_url = data.get("project", {}).get("repo", "")
+    base_branch = data.get("project", {}).get("base_branch", "master")
+    pr_id = pr_entry["id"]
+
+    project_dir = _workdirs_dir(data)
+    project_dir.mkdir(parents=True, exist_ok=True)
+
+    # Determine clone source: prefer a local repo dir for speed.
+    repo_dir = _resolve_repo_dir(root, data)
+    if repo_dir and repo_dir.is_dir() and git_ops.is_git_repo(repo_dir):
+        clone_source = str(repo_dir)
+    elif repo_url:
+        clone_source = repo_url
+    else:
+        _log.warning("Cannot ensure workdir: no repo source for PR %s", pr_id)
+        return None
+
+    tmp_path = project_dir / f".tmp-{pr_id}"
+    if tmp_path.exists():
+        shutil.rmtree(tmp_path)
+
+    click.echo(f"Workdir missing — cloning for {pr_id}...")
+    try:
+        git_ops.clone(clone_source, tmp_path, branch=base_branch)
+    except Exception as exc:
+        _log.warning("Failed to clone for PR %s: %s", pr_id, exc)
+        click.echo(f"Failed to clone: {exc}", err=True)
+        if tmp_path.exists():
+            shutil.rmtree(tmp_path, ignore_errors=True)
+        return None
+
+    # Set up dual push URLs when cloned from a local repo
+    if clone_source == str(repo_dir) and repo_url:
+        git_ops.run_git("remote", "set-url", "--push",
+                        "origin", clone_source, cwd=tmp_path)
+        git_ops.run_git("remote", "set-url", "--add", "--push",
+                        "origin", repo_url, cwd=tmp_path)
+
+    # Resolve repo_id if not cached yet
+    _resolve_repo_id(data, tmp_path, root)
+
+    # Compute final directory name (same convention as pr_start)
+    base_hash = git_ops.run_git(
+        "rev-parse", "--short=8", "HEAD", cwd=tmp_path, check=False
+    ).stdout.strip()
+    branch_slug = store.slugify(branch.replace("/", "-"))
+    dir_name = f"{branch_slug}-{base_hash}" if base_hash else branch_slug
+    final_project_dir = _workdirs_dir(data)
+    final_project_dir.mkdir(parents=True, exist_ok=True)
+    work_path = final_project_dir / dir_name
+
+    if work_path.exists():
+        shutil.rmtree(tmp_path)
+    else:
+        shutil.move(str(tmp_path), str(work_path))
+
+    # Checkout the PR branch
+    git_ops.checkout_branch(work_path, branch, create=True)
+
+    # Update and persist the new workdir path
+    pr_entry["workdir"] = str(work_path)
+    save_and_push(data, root, f"pm: ensure workdir for {pr_id}")
+    click.echo(f"Workdir created at {work_path}")
+    return str(work_path)
+
+
 def _resolve_repo_id(data: dict, workdir: Path, root: Path) -> None:
     """Resolve and cache the target repo's root commit hash."""
     if data.get("project", {}).get("repo_id"):

@@ -286,3 +286,80 @@ class TestRecordStatusTimestampNoStatus:
         assert "started_at" not in entry
         assert "reviewed_at" not in entry
         assert "merged_at" not in entry
+
+
+# ---------------------------------------------------------------------------
+# _ensure_workdir
+# ---------------------------------------------------------------------------
+
+from pm_core.cli.helpers import _ensure_workdir
+
+
+class TestEnsureWorkdir:
+    """Tests for _ensure_workdir — auto-create workdir when missing."""
+
+    def test_returns_existing_workdir(self, tmp_path):
+        """When workdir exists on disk, returns it unchanged."""
+        workdir = tmp_path / "existing"
+        workdir.mkdir()
+        pr_entry = {"id": "pr-001", "workdir": str(workdir), "branch": "pm/pr-001"}
+        data = {"project": {"name": "test", "repo": "/tmp/repo"}}
+        result = _ensure_workdir(data, pr_entry, tmp_path)
+        assert result == str(workdir)
+
+    def test_returns_none_when_no_branch(self, tmp_path):
+        """When PR has no branch, returns None."""
+        pr_entry = {"id": "pr-001", "workdir": "/nonexistent"}
+        data = {"project": {"name": "test"}}
+        result = _ensure_workdir(data, pr_entry, tmp_path)
+        assert result is None
+
+    def test_returns_none_when_no_repo_source(self, tmp_path):
+        """When there's no repo source, returns None."""
+        pr_entry = {"id": "pr-001", "workdir": "/nonexistent", "branch": "pm/pr-001"}
+        data = {"project": {"name": "test"}}
+        with patch("pm_core.cli.helpers._resolve_repo_dir", return_value=tmp_path / "nope"):
+            result = _ensure_workdir(data, pr_entry, tmp_path)
+        assert result is None
+
+    def test_clones_and_returns_new_workdir(self, tmp_path):
+        """When workdir is missing, clones repo and returns new path."""
+        pm_root = tmp_path / "pm"
+        pm_root.mkdir()
+        pr_entry = {"id": "pr-001", "workdir": "/nonexistent", "branch": "pm/pr-001"}
+        data = {"project": {"name": "test", "repo_id": "abc12345def", "repo": "https://example.com/repo.git"}}
+
+        fake_workdir = tmp_path / "workdirs" / "test-abc12345"
+        calls = {}
+
+        def fake_clone(src, dest, branch=None):
+            dest.mkdir(parents=True, exist_ok=True)
+            calls["clone"] = (src, dest, branch)
+
+        def fake_checkout(wd, branch, create=False):
+            calls["checkout"] = (wd, branch, create)
+
+        def fake_run_git(*args, cwd=None, check=True, **kw):
+            from types import SimpleNamespace
+            return SimpleNamespace(stdout="abcd1234", returncode=0, stderr="")
+
+        with patch("pm_core.cli.helpers._resolve_repo_dir", return_value=tmp_path / "nope"), \
+             patch("pm_core.cli.helpers.git_ops.clone", side_effect=fake_clone), \
+             patch("pm_core.cli.helpers.git_ops.checkout_branch", side_effect=fake_checkout), \
+             patch("pm_core.cli.helpers.git_ops.run_git", side_effect=fake_run_git), \
+             patch("pm_core.cli.helpers.git_ops.is_git_repo", return_value=False), \
+             patch("pm_core.cli.helpers._resolve_repo_id"), \
+             patch("pm_core.cli.helpers.save_and_push"):
+            result = _ensure_workdir(data, pr_entry, pm_root)
+
+        assert result is not None
+        assert pr_entry["workdir"] == result
+        assert "clone" in calls
+        assert "checkout" in calls
+
+    def test_returns_none_when_no_workdir_set(self, tmp_path):
+        """When workdir is None/empty, returns None (no branch to clone)."""
+        pr_entry = {"id": "pr-001", "workdir": None}
+        data = {"project": {"name": "test"}}
+        result = _ensure_workdir(data, pr_entry, tmp_path)
+        assert result is None

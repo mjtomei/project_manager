@@ -23,6 +23,7 @@ from pm_core.claude_launcher import find_claude, build_claude_shell_cmd, clear_s
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
+    _ensure_workdir,
     _get_pm_session,
     _gh_state_to_status,
     _infer_pr_id,
@@ -831,9 +832,12 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         return
 
     workdir = pr_entry.get("workdir")
-    if not workdir:
-        click.echo(f"Review window: no workdir for {pr_entry['id']}. Start the PR first.")
-        return
+    if not workdir or not Path(workdir).exists():
+        root = state_root()
+        workdir = _ensure_workdir(data, pr_entry, root)
+        if not workdir:
+            click.echo(f"Review window: no workdir for {pr_entry['id']}. Start the PR first.")
+            return
 
     # Review loop always forces a fresh window
     if review_loop:
@@ -1021,6 +1025,8 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
     backend_name = data["project"].get("backend", "vanilla")
     gh_pr_number = pr_entry.get("gh_pr_number")
     workdir = pr_entry.get("workdir")
+    if workdir and not Path(workdir).exists():
+        workdir = _ensure_workdir(data, pr_entry, root)
 
     if backend_name == "github" and gh_pr_number and workdir:
         from pm_core import gh_ops
@@ -1111,6 +1117,12 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
     if not workdir:
         click.echo(f"Merge window: no workdir for {pr_entry['id']}.")
         return
+    if not Path(workdir).exists():
+        root = state_root()
+        workdir = _ensure_workdir(data, pr_entry, root)
+        if not workdir:
+            click.echo(f"Merge window: no workdir for {pr_entry['id']}.")
+            return
 
     from pm_core.paths import get_global_setting
     use_companion = companion or get_global_setting("companion-pane")
@@ -1425,6 +1437,8 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
     if backend_name == "github":
         gh_pr_number = pr_entry.get("gh_pr_number")
         workdir = pr_entry.get("workdir")
+        if workdir and not Path(workdir).exists():
+            workdir = _ensure_workdir(data, pr_entry, root)
         if gh_pr_number and workdir and Path(workdir).exists() and shutil.which("gh"):
             gh_merged = False
 
@@ -1492,8 +1506,10 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
     # For local/vanilla: merge in the PR's workdir (branch always exists there)
     workdir = pr_entry.get("workdir")
     if not workdir or not Path(workdir).exists():
-        click.echo(f"PR {pr_id} workdir not found. Cannot merge without the branch.", err=True)
-        raise SystemExit(1)
+        workdir = _ensure_workdir(data, pr_entry, root)
+        if not workdir:
+            click.echo(f"PR {pr_id} workdir not found. Cannot merge without the branch.", err=True)
+            raise SystemExit(1)
 
     work_path = Path(workdir)
 

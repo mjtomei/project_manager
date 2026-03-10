@@ -865,14 +865,18 @@ def run_qa_sync(
         return state
 
     window_name = _compute_qa_window_name(pr_data)
-    workdir_path = pr_data.get("workdir") or str(pm_root)
+    data = store.load(pm_root)
+
+    workdir_path = pr_data.get("workdir")
+    if workdir_path and not Path(workdir_path).is_dir():
+        from pm_core.cli.helpers import _ensure_workdir
+        workdir_path = _ensure_workdir(data, pr_data, pm_root)
+    workdir_path = workdir_path or str(pm_root)
 
     # Create QA workdir
     if not state.qa_workdir:
         qa_wd = create_qa_workdir(state.pr_id, state.loop_id)
         state.qa_workdir = str(qa_wd)
-
-    data = store.load(pm_root)
 
     # Status file path (inside QA workdir)
     status_path = Path(state.qa_workdir) / "qa_status.json"
