@@ -636,8 +636,8 @@ def _launch_scenarios_in_containers(
             scratch_dir=container_scratch,
         )
         claude_cmd = build_claude_shell_cmd(
-        prompt=child_prompt,
-        model=_qa_resolution.model, provider=_qa_resolution.provider)
+            prompt=child_prompt,
+            model=_qa_resolution.model, provider=_qa_resolution.provider)
 
         # Create container with push proxy for the PR branch
         cname = container_mod.qa_container_name(
@@ -720,8 +720,8 @@ def _relaunch_scenario_window(
                 scratch_dir=container_scratch,
             )
             claude_cmd = build_claude_shell_cmd(
-        prompt=child_prompt,
-        model=_qa_resolution.model, provider=_qa_resolution.provider)
+                prompt=child_prompt,
+                model=_qa_resolution.model, provider=_qa_resolution.provider)
             exec_cmd = container_mod.build_exec_cmd(
                 scenario.container_name, claude_cmd, cleanup=False)
             tmux_mod.new_window(session, win_name, exec_cmd,
@@ -737,8 +737,8 @@ def _relaunch_scenario_window(
                 scratch_dir=str(Path(state.qa_workdir) / f"scratch-{scenario.index}"),
             )
             child_cmd = build_claude_shell_cmd(
-            prompt=child_prompt,
-            model=_qa_resolution.model, provider=_qa_resolution.provider)
+                prompt=child_prompt,
+                model=_qa_resolution.model, provider=_qa_resolution.provider)
             venv_path = Path(state.qa_workdir) / f"venv-{scenario.index}"
             if venv_path.is_dir():
                 child_cmd = f"VIRTUAL_ENV={venv_path} PATH={venv_path}/bin:$PATH {child_cmd}"
