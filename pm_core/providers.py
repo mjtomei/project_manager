@@ -255,13 +255,14 @@ class RecommendedModel:
 # Sources:
 #   - https://docs.ollama.com/integrations/claude-code
 #   - https://unsloth.ai/docs/basics/claude-code
+#   - https://github.com/Alorse/cc-compatible-models
 RECOMMENDED_MODELS: list[RecommendedModel] = [
     RecommendedModel(
         name="GLM 4.7 Flash",
         ollama_tag="glm-4.7-flash",
         param_billions=10,
         ram_gb_required=7,
-        notes="128k context, tool calling, fast inference",
+        notes="128k context, tool calling, fast — best for limited hardware",
     ),
     RecommendedModel(
         name="Qwen 3 Coder",
@@ -285,11 +286,11 @@ RECOMMENDED_MODELS: list[RecommendedModel] = [
         notes="Very capable, recommended by Ollama for Claude Code",
     ),
     RecommendedModel(
-        name="GLM 5",
-        ollama_tag="glm-5",
-        param_billions=100,
-        ram_gb_required=64,
-        notes="Largest recommended model, excellent quality",
+        name="Qwen 3 Coder Next (MoE)",
+        ollama_tag="qwen3-coder-next",
+        param_billions=80,
+        ram_gb_required=48,
+        notes="256k context, specialized for agentic coding workflows",
     ),
 ]
 
