@@ -706,6 +706,54 @@ class TestCheckProvider:
         assert not result.ok
         assert any("Context window too small" in w for w in result.warnings)
 
+    @patch("urllib.request.urlopen")
+    def test_local_provider_fallback_to_openai_on_404(self, mock_urlopen):
+        """Local provider falls back to OpenAI API when /v1/messages returns 404."""
+        import json
+        import urllib.error
+        # 1. /api/tags — connectivity OK
+        tags_resp = MagicMock()
+        tags_resp.status = 200
+        tags_resp.__enter__ = MagicMock(return_value=tags_resp)
+        tags_resp.__exit__ = MagicMock(return_value=False)
+
+        # 2. /api/show — context window
+        show_body = json.dumps({
+            "model_info": {"some_prefix.context_length": 131072},
+        }).encode()
+        show_resp = MagicMock()
+        show_resp.read.return_value = show_body
+        show_resp.__enter__ = MagicMock(return_value=show_resp)
+        show_resp.__exit__ = MagicMock(return_value=False)
+
+        # 3. /v1/messages — 404 (Ollama doesn't support Anthropic API)
+        msg_404 = urllib.error.HTTPError(
+            url="http://localhost:11434/v1/messages",
+            code=404, msg="Not Found", hdrs=None, fp=MagicMock())
+
+        # 4. /v1/chat/completions — OpenAI fallback succeeds with tool call
+        chat_body = json.dumps({
+            "choices": [{
+                "message": {"tool_calls": [{"function": {"name": "calculator"}}]},
+                "finish_reason": "tool_calls",
+            }]
+        }).encode()
+        chat_resp = MagicMock()
+        chat_resp.read.return_value = chat_body
+        chat_resp.__enter__ = MagicMock(return_value=chat_resp)
+        chat_resp.__exit__ = MagicMock(return_value=False)
+
+        mock_urlopen.side_effect = [tags_resp, show_resp, msg_404, chat_resp]
+
+        p = ProviderConfig(name="ollama", type="local",
+                          api_base="http://localhost:11434",
+                          model="qwen3:30b")
+        result = check_provider(p)
+        assert result.reachable
+        assert result.tool_use is True
+        assert result.inference_ok is True
+        assert result.context_window == 131072
+
 
 # ---------------------------------------------------------------------------
 # _config_to_provider defaults

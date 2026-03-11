@@ -534,6 +534,21 @@ def check_provider(provider: ProviderConfig, check_tools: bool = True) -> Provid
 
     if provider.type == "local":
         result = _check_tools_anthropic(api_base, api_key, provider.model, result)
+        # If Anthropic API returned 404, the server doesn't support /v1/messages.
+        # Fall back to OpenAI chat completions (common for Ollama without a proxy).
+        if (result.tool_use is False
+                and "HTTP 404" in (result.tool_use_detail or "")):
+            result.tool_use = None
+            result.tool_use_detail = ""
+            result.inference_ok = None
+            result.inference_detail = ""
+            # Local providers typically use base URL without /v1 suffix,
+            # but the OpenAI chat completions endpoint needs /v1.
+            openai_base = api_base.rstrip("/")
+            if not openai_base.endswith("/v1"):
+                openai_base += "/v1"
+            result = _check_tools_openai(
+                openai_base, api_key, provider.model, result)
     elif provider.type == "openai":
         result = _check_tools_openai(api_base, api_key, provider.model, result)
 
