@@ -576,7 +576,7 @@ class TechTree(Widget, can_focus=True):
             real_positions = {k: v for k, v in self._node_positions.items() if not k.startswith("_hidden:")}
             if real_positions:
                 max_row = max(r for x, r in real_positions.values()) + 1
-                grid_h = max_row * (NODE_H + V_GAP) + 4
+                grid_h = max_row * (NODE_H + V_GAP) + 4 + NODE_H
             else:
                 grid_h = 0
             label_index = self._hidden_label_ids.index(pr_id) if pr_id in self._hidden_label_ids else 0
