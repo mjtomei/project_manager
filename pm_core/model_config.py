@@ -156,20 +156,20 @@ def resolve_model_and_provider(
     # 1. PM_MODEL env var
     if (env_model := os.environ.get("PM_MODEL")):
         resolution = _resolve_value(env_model)
-    # 3. PR-level override
+    # 2. PR-level override
     elif pr_model:
         resolution = _resolve_value(pr_model)
-    # 4. Project-level config
+    # 3. Project-level config
     elif project_data and session_type in (
         project_data.get("project", {}).get("model_config", {}).get("session_models", {})
     ):
         resolution = _resolve_value(
             project_data["project"]["model_config"]["session_models"][session_type]
         )
-    # 5. Global setting (~/.pm/settings/model-<type>)
+    # 4. Global setting (~/.pm/settings/model-<type>)
     elif (global_val := get_global_setting_value(f"model-{session_type}")):
         resolution = _resolve_value(global_val)
-    # 6. Built-in default tier -> concrete model
+    # 5. Built-in default tier -> concrete model
     else:
         tier = DEFAULT_SESSION_MODELS.get(session_type)
         if tier:
@@ -183,15 +183,15 @@ def resolve_model_and_provider(
     if (env_effort := os.environ.get("PM_EFFORT")):
         resolution.effort = env_effort
     else:
-        # 3. Project-level effort config
+        # 2. Project-level effort config
         effort = None
         if project_data:
             mc = project_data.get("project", {}).get("model_config", {})
             effort = mc.get("session_effort", {}).get(session_type)
-        # 4. Global setting (~/.pm/settings/effort-<type>)
+        # 3. Global setting (~/.pm/settings/effort-<type>)
         if not effort:
             effort = get_global_setting_value(f"effort-{session_type}") or None
-        # 5. Built-in default
+        # 4. Built-in default
         if not effort:
             effort = DEFAULT_SESSION_EFFORT.get(session_type)
         resolution.effort = effort

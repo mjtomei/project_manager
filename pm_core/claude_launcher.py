@@ -342,7 +342,7 @@ def build_claude_shell_cmd(
         cmd += f" --model {shlex.quote(effective_model)}"
 
     if effort:
-        cmd += f" --effort {effort}"
+        cmd += f" --effort {shlex.quote(effort)}"
 
     if session_id:
         if resume:
