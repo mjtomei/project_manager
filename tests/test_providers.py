@@ -329,6 +329,46 @@ class TestProviderTestResult:
         assert "Recommended models" in warning
         assert "qwen3.5" in warning
 
+    def test_anthropic_api_warning_for_openai_providers(self):
+        r = ProviderTestResult(
+            reachable=True, tool_use=True,
+            anthropic_api=True,
+            anthropic_api_detail="Consider using type=local",
+        )
+        assert any("type=local" in w for w in r.warnings)
+
+    def test_no_anthropic_api_warning_when_false(self):
+        r = ProviderTestResult(
+            reachable=True, tool_use=True,
+            anthropic_api=False,
+            anthropic_api_detail="not available",
+        )
+        # anthropic_api=False should not add a warning
+        assert r.warnings == []
+
+    def test_capabilities_summary(self):
+        r = ProviderTestResult(
+            reachable=True, tool_use=True,
+            context_window=131072,
+            anthropic_api=False,
+            inference_ok=True,
+        )
+        summary = r.capabilities_summary()
+        assert summary["reachable"] is True
+        assert summary["tool_use"] is True
+        assert summary["context_window"] == 131072
+        assert summary["anthropic_api"] is False
+        assert summary["inference"] is True
+
+    def test_inference_derived_from_tool_check(self):
+        """inference_ok should be set when tool_use has been tested."""
+        r = ProviderTestResult(
+            reachable=True, tool_use=True,
+            inference_ok=True, inference_detail="model produced output",
+        )
+        assert r.ok
+        assert r.capabilities_summary()["inference"] is True
+
 
 # ---------------------------------------------------------------------------
 # check_provider
@@ -369,13 +409,18 @@ class TestCheckProvider:
     @patch("urllib.request.urlopen")
     def test_tool_use_success(self, mock_urlopen):
         import json
+        import urllib.error
         # First call: /models (connectivity)
         models_resp = MagicMock()
         models_resp.status = 200
         models_resp.__enter__ = MagicMock(return_value=models_resp)
         models_resp.__exit__ = MagicMock(return_value=False)
 
-        # Second call: /chat/completions (tool use)
+        # Second call: /v1/messages (Anthropic API probe — 404)
+        msg_404 = urllib.error.HTTPError(
+            url="", code=404, msg="Not Found", hdrs=None, fp=MagicMock())
+
+        # Third call: /chat/completions (tool use)
         chat_body = json.dumps({
             "choices": [{
                 "message": {"tool_calls": [{"function": {"name": "calculator"}}]},
@@ -387,7 +432,7 @@ class TestCheckProvider:
         chat_resp.__enter__ = MagicMock(return_value=chat_resp)
         chat_resp.__exit__ = MagicMock(return_value=False)
 
-        mock_urlopen.side_effect = [models_resp, chat_resp]
+        mock_urlopen.side_effect = [models_resp, msg_404, chat_resp]
 
         p = ProviderConfig(name="test", type="openai",
                           api_base="http://localhost:11434/v1",
@@ -399,10 +444,15 @@ class TestCheckProvider:
     @patch("urllib.request.urlopen")
     def test_tool_use_failure(self, mock_urlopen):
         import json
+        import urllib.error
         models_resp = MagicMock()
         models_resp.status = 200
         models_resp.__enter__ = MagicMock(return_value=models_resp)
         models_resp.__exit__ = MagicMock(return_value=False)
+
+        # Anthropic API probe — 404
+        msg_404 = urllib.error.HTTPError(
+            url="", code=404, msg="Not Found", hdrs=None, fp=MagicMock())
 
         chat_body = json.dumps({
             "choices": [{
@@ -415,7 +465,7 @@ class TestCheckProvider:
         chat_resp.__enter__ = MagicMock(return_value=chat_resp)
         chat_resp.__exit__ = MagicMock(return_value=False)
 
-        mock_urlopen.side_effect = [models_resp, chat_resp]
+        mock_urlopen.side_effect = [models_resp, msg_404, chat_resp]
 
         p = ProviderConfig(name="test", type="openai",
                           api_base="http://localhost:11434/v1",
@@ -464,6 +514,90 @@ class TestCheckProvider:
         assert result.reachable
         assert result.tool_use is True
         assert result.context_window == 131072
+
+    @patch("urllib.request.urlopen")
+    def test_openai_provider_anthropic_api_detected(self, mock_urlopen):
+        """OpenAI providers probe /v1/messages for Anthropic API support."""
+        import json
+        # First call: /models (connectivity)
+        models_resp = MagicMock()
+        models_resp.status = 200
+        models_resp.__enter__ = MagicMock(return_value=models_resp)
+        models_resp.__exit__ = MagicMock(return_value=False)
+
+        # Second call: /v1/messages (Anthropic API probe — success)
+        msg_body = json.dumps({
+            "content": [{"type": "text", "text": "hi"}],
+            "stop_reason": "end_turn",
+        }).encode()
+        msg_resp = MagicMock()
+        msg_resp.read.return_value = msg_body
+        msg_resp.__enter__ = MagicMock(return_value=msg_resp)
+        msg_resp.__exit__ = MagicMock(return_value=False)
+
+        # Third call: /chat/completions (tool use check)
+        chat_body = json.dumps({
+            "choices": [{
+                "message": {"tool_calls": [{"function": {"name": "calculator"}}]},
+                "finish_reason": "tool_calls",
+            }]
+        }).encode()
+        chat_resp = MagicMock()
+        chat_resp.read.return_value = chat_body
+        chat_resp.__enter__ = MagicMock(return_value=chat_resp)
+        chat_resp.__exit__ = MagicMock(return_value=False)
+
+        mock_urlopen.side_effect = [models_resp, msg_resp, chat_resp]
+
+        p = ProviderConfig(name="test", type="openai",
+                          api_base="http://localhost:11434/v1",
+                          model="qwen3.5")
+        result = check_provider(p)
+        assert result.reachable
+        assert result.anthropic_api is True
+        assert "type=local" in result.anthropic_api_detail
+        assert result.tool_use is True
+        assert result.inference_ok is True
+
+    @patch("urllib.request.urlopen")
+    def test_openai_provider_anthropic_api_not_found(self, mock_urlopen):
+        """OpenAI provider where /v1/messages returns 404."""
+        import json
+        import urllib.error
+        # First call: /models (connectivity)
+        models_resp = MagicMock()
+        models_resp.status = 200
+        models_resp.__enter__ = MagicMock(return_value=models_resp)
+        models_resp.__exit__ = MagicMock(return_value=False)
+
+        # Second call: /v1/messages returns 404
+        msg_error = urllib.error.HTTPError(
+            url="http://localhost:8000/v1/messages",
+            code=404, msg="Not Found",
+            hdrs=None, fp=MagicMock(),
+        )
+
+        # Third call: /chat/completions (tool use)
+        chat_body = json.dumps({
+            "choices": [{
+                "message": {"tool_calls": [{"function": {"name": "calculator"}}]},
+                "finish_reason": "tool_calls",
+            }]
+        }).encode()
+        chat_resp = MagicMock()
+        chat_resp.read.return_value = chat_body
+        chat_resp.__enter__ = MagicMock(return_value=chat_resp)
+        chat_resp.__exit__ = MagicMock(return_value=False)
+
+        mock_urlopen.side_effect = [models_resp, msg_error, chat_resp]
+
+        p = ProviderConfig(name="test", type="openai",
+                          api_base="http://localhost:8000/v1",
+                          model="codellama")
+        result = check_provider(p)
+        assert result.reachable
+        assert result.anthropic_api is False
+        assert result.tool_use is True
 
     @patch("urllib.request.urlopen")
     def test_local_provider_context_too_small(self, mock_urlopen):

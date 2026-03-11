@@ -1,10 +1,14 @@
 """Tests for provider integration in claude_launcher functions."""
 
 import os
+import urllib.request
+import urllib.error
 from unittest.mock import patch, MagicMock
 
+import pytest
+
 from pm_core.claude_launcher import build_claude_shell_cmd
-from pm_core.providers import ProviderConfig
+from pm_core.providers import ProviderConfig, check_provider
 
 
 class TestBuildClaudeShellCmdProvider:
@@ -113,3 +117,75 @@ class TestBuildClaudeShellCmdProvider:
         result = build_claude_shell_cmd(prompt="test", provider="vllm")
         assert "--model" not in result
         assert "OPENAI_BASE_URL=" in result
+
+
+# ---------------------------------------------------------------------------
+# Real endpoint integration tests (skipped when Ollama is not running)
+# ---------------------------------------------------------------------------
+
+def _ollama_available() -> bool:
+    """Check if a local Ollama instance is reachable."""
+    try:
+        req = urllib.request.Request("http://localhost:11434/api/tags")
+        with urllib.request.urlopen(req, timeout=2):
+            return True
+    except Exception:
+        return False
+
+
+def _ollama_has_model() -> str | None:
+    """Return the first available Ollama model name, or None."""
+    import json
+    try:
+        req = urllib.request.Request("http://localhost:11434/api/tags")
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            body = json.loads(resp.read())
+            models = body.get("models", [])
+            if models:
+                return models[0].get("name")
+    except Exception:
+        pass
+    return None
+
+
+skip_no_ollama = pytest.mark.skipif(
+    not _ollama_available(),
+    reason="Ollama not running on localhost:11434",
+)
+
+
+class TestRealOllamaIntegration:
+    """Integration tests that exercise a real local Ollama endpoint.
+
+    These tests are skipped in CI or environments without Ollama.
+    """
+
+    @skip_no_ollama
+    def test_connectivity_check(self):
+        """check_provider confirms Ollama is reachable."""
+        p = ProviderConfig(
+            name="ollama-test", type="local",
+            api_base="http://localhost:11434",
+        )
+        result = check_provider(p, check_tools=False)
+        assert result.reachable
+        assert "HTTP 200" in result.reachable_detail
+
+    @skip_no_ollama
+    def test_tool_use_with_real_model(self):
+        """check_provider tests tool use against a real model."""
+        model = _ollama_has_model()
+        if not model:
+            pytest.skip("No models pulled in Ollama")
+
+        p = ProviderConfig(
+            name="ollama-test", type="local",
+            api_base="http://localhost:11434",
+            model=model,
+        )
+        result = check_provider(p, check_tools=True)
+        assert result.reachable
+        # Tool use may or may not work depending on the model,
+        # but we should get a definitive True/False (not None)
+        assert result.tool_use is not None
+        assert result.inference_ok is True

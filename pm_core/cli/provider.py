@@ -51,10 +51,20 @@ def _display_test_result(result) -> None:
                 err=True,
             )
 
+    if result.anthropic_api is True:
+        click.echo(f"  Anthropic API: SUPPORTED ({result.anthropic_api_detail})")
+    elif result.anthropic_api is False:
+        click.echo(f"  Anthropic API: not available")
+
     if result.tool_use is True:
         click.echo(f"  Tool use: OK ({result.tool_use_detail})")
     elif result.tool_use is False:
         click.echo(f"  Tool use: FAILED ({result.tool_use_detail})", err=True)
+
+    if result.inference_ok is True:
+        click.echo(f"  Inference: OK ({result.inference_detail})")
+    elif result.inference_ok is False:
+        click.echo(f"  Inference: FAILED ({result.inference_detail})", err=True)
 
 
 @provider_group.command("add")
