@@ -298,7 +298,13 @@ MIN_CONTEXT_TOKENS = 64_000
 
 
 def _get_system_memory_gb() -> float | None:
-    """Detect total system RAM in GB. Returns None if detection fails."""
+    """Detect total system RAM in GB. Returns None if detection fails.
+
+    Works on Linux (/proc/meminfo) and macOS (sysctl hw.memsize).
+    On unified memory systems (Apple Silicon, NVIDIA Spark), system RAM
+    is the pool available for both CPU and GPU workloads.
+    """
+    # Linux
     try:
         with open("/proc/meminfo") as f:
             for line in f:
@@ -307,6 +313,19 @@ def _get_system_memory_gb() -> float | None:
                     return kb / (1024 * 1024)
     except (OSError, ValueError, IndexError):
         pass
+
+    # macOS (Apple Silicon has unified memory — this is the full pool)
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["sysctl", "-n", "hw.memsize"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return int(result.stdout.strip()) / (1024 ** 3)
+    except (FileNotFoundError, subprocess.TimeoutExpired, ValueError):
+        pass
+
     return None
 
 
@@ -363,7 +382,12 @@ def format_model_recommendations() -> str:
 
     lines = ["  Recommended models for Claude Code (require 64k+ context):"]
     if available is not None:
-        mem_source = "VRAM" if (vram or 0) >= (ram or 0) else "RAM"
+        if vram and ram and vram > ram:
+            mem_source = "GPU VRAM"
+        elif vram and ram and abs(vram - ram) < 2:
+            mem_source = "unified memory"
+        else:
+            mem_source = "system RAM"
         lines.append(f"  (detected {available:.0f} GB {mem_source})")
     lines.append("")
 

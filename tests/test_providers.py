@@ -450,7 +450,7 @@ class TestRecommendedModels:
             text = format_model_recommendations()
             assert "glm-4.7-flash" in text
             assert "Recommended models" in text
-            assert "16 GB RAM" in text
+            assert "16 GB" in text
 
     def test_format_marks_unfitting_models(self):
         with patch("pm_core.providers._get_system_memory_gb", return_value=6.0), \
