@@ -525,8 +525,10 @@ def pr_ready():
               help="Path to save Claude transcript symlink (used by auto-start)")
 @click.option("--companion", is_flag=True, default=False,
               help="Open a companion shell pane in the PR workdir")
-@click.option("--model", default=None, help="Override model for this session (e.g. high, standard, economy, or model ID)")
-def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, transcript: str | None, companion: bool, model: str | None):
+@click.option("--model", default=None, help="Override model (e.g. high, sonnet, haiku, or model ID)")
+@click.option("--effort", default=None, type=click.Choice(["low", "medium", "high"]),
+              help="Override effort level for this session")
+def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, transcript: str | None, companion: bool, model: str | None, effort: str | None):
     """Start working on a PR: clone, branch, print prompt.
 
     If PR_ID is omitted, uses the active PR if it's pending/ready, or
@@ -725,6 +727,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     _resolution = resolve_model_and_provider(
         "impl",
         cli_model=model,
+        cli_effort=effort,
         pr_model=get_pr_model_override(pr_entry),
         project_data=data,
     )
@@ -746,7 +749,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
             cmd = build_claude_shell_cmd(prompt=prompt,
                                          transcript=transcript, cwd=str(work_path),
                                          model=resolved_model,
-                                         provider=resolved_provider)
+                                         provider=resolved_provider,
+                                         effort=_resolution.effort)
             # Optionally wrap in a container for isolation
             from pm_core.container import wrap_claude_cmd, ContainerError
             try:
@@ -898,7 +902,8 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     claude_cmd = build_claude_shell_cmd(prompt=review_prompt,
                                          transcript=transcript, cwd=workdir,
                                          model=_resolution.model,
-                                         provider=_resolution.provider)
+                                         provider=_resolution.provider,
+                                         effort=_resolution.effort)
     # Optionally wrap in a container for isolation
     branch = pr_entry.get("branch", "")
     from pm_core.container import wrap_claude_cmd, ContainerError
@@ -1165,7 +1170,8 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
     claude_cmd = build_claude_shell_cmd(prompt=merge_prompt,
                                          transcript=transcript, cwd=workdir,
                                          model=_resolution.model,
-                                         provider=_resolution.provider)
+                                         provider=_resolution.provider,
+                                         effort=_resolution.effort)
     # Merge runs on the host — it needs to push to master and modify the
     # main repo, which the branch-scoped push proxy would block.
     window_name = f"merge-{display_id}"

@@ -487,7 +487,7 @@ def _launch_scenario_0(
 
     claude_cmd = build_claude_shell_cmd(
         prompt=child_prompt,
-        model=_qa_resolution.model, provider=_qa_resolution.provider)
+        model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort)
     if venv_path:
         claude_cmd = f"VIRTUAL_ENV={venv_path} PATH={venv_path}/bin:$PATH {claude_cmd}"
     final_cmd = claude_cmd
@@ -555,7 +555,7 @@ def _launch_scenarios_in_tmux(
         )
         child_cmd = build_claude_shell_cmd(
             prompt=child_prompt,
-            model=_qa_resolution.model, provider=_qa_resolution.provider)
+            model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort)
 
         # Activate the scenario venv so pip installs stay local
         if venv_path:
@@ -637,7 +637,7 @@ def _launch_scenarios_in_containers(
         )
         claude_cmd = build_claude_shell_cmd(
             prompt=child_prompt,
-            model=_qa_resolution.model, provider=_qa_resolution.provider)
+            model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort)
 
         # Create container with push proxy for the PR branch
         cname = container_mod.qa_container_name(
@@ -721,7 +721,7 @@ def _relaunch_scenario_window(
             )
             claude_cmd = build_claude_shell_cmd(
                 prompt=child_prompt,
-                model=_qa_resolution.model, provider=_qa_resolution.provider)
+                model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort)
             exec_cmd = container_mod.build_exec_cmd(
                 scenario.container_name, claude_cmd, cleanup=False)
             tmux_mod.new_window(session, win_name, exec_cmd,
@@ -738,7 +738,7 @@ def _relaunch_scenario_window(
             )
             child_cmd = build_claude_shell_cmd(
                 prompt=child_prompt,
-                model=_qa_resolution.model, provider=_qa_resolution.provider)
+                model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort)
             venv_path = Path(state.qa_workdir) / f"venv-{scenario.index}"
             if venv_path.is_dir():
                 child_cmd = f"VIRTUAL_ENV={venv_path} PATH={venv_path}/bin:$PATH {child_cmd}"
@@ -935,7 +935,7 @@ def run_qa_sync(
         )
         cmd = build_claude_shell_cmd(
             prompt=planner_prompt,
-            model=_qa_resolution.model, provider=_qa_resolution.provider)
+            model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort)
 
         # If the main QA window already exists, remember which sessions
         # were watching it so we can switch them to the replacement window

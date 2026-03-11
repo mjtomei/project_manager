@@ -159,6 +159,7 @@ def _create_watcher_window(iteration: int, loop_id: str,
         cwd=repo_dir,
         model=_resolution.model,
         provider=_resolution.provider,
+        effort=_resolution.effort,
     )
 
     # Kill existing watcher window and recreate (fresh each iteration).

@@ -17,22 +17,35 @@ def model_show():
     from pm_core import store
     from pm_core.model_config import (
         SESSION_TYPES, QUALITY_TIERS, DEFAULT_SESSION_MODELS,
-        get_model_config_summary,
+        DEFAULT_SESSION_EFFORT, get_model_config_summary,
+        resolve_model_and_provider,
     )
 
     root = state_root()
     data = store.load(root)
 
     click.echo("Quality tiers:")
-    for tier, model_id in QUALITY_TIERS.items():
-        click.echo(f"  {tier:10s} -> {model_id}")
+    for tier in ("high", "medium", "low"):
+        click.echo(f"  {tier:10s} -> {QUALITY_TIERS[tier]}")
+    click.echo()
+    click.echo("Model shortcuts:")
+    for name in ("opus", "sonnet", "haiku"):
+        click.echo(f"  {name:10s} -> {QUALITY_TIERS[name]}")
     click.echo()
 
-    click.echo("Effective models per session type:")
-    summary = get_model_config_summary(data)
+    click.echo("Effective config per session type:")
+    click.echo(f"  {'type':10s}   {'model':40s} {'effort':8s}")
+    click.echo(f"  {'─'*10}   {'─'*40} {'─'*8}")
     for st in SESSION_TYPES:
-        default_tier = DEFAULT_SESSION_MODELS.get(st, "?")
-        click.echo(f"  {st:10s} -> {summary[st]}  (default tier: {default_tier})")
+        res = resolve_model_and_provider(st, project_data=data)
+        if res.provider:
+            model_str = f"provider:{res.provider}"
+        elif res.model:
+            model_str = res.model
+        else:
+            model_str = "(default)"
+        effort_str = res.effort or "(default)"
+        click.echo(f"  {st:10s}   {model_str:40s} {effort_str:8s}")
     click.echo()
 
     # Show project-level overrides if any
@@ -57,8 +70,9 @@ def model_show():
 def model_set(session_type: str, model_value: str):
     """Set the global default model for a session type.
 
-    MODEL_VALUE can be a quality tier (high, standard, economy), a model ID,
-    or provider:NAME to use a configured provider (see ``pm provider``).
+    MODEL_VALUE can be a quality tier (high, medium, low), a model name
+    (opus, sonnet, haiku), a full model ID, or provider:NAME to use a
+    configured provider (see ``pm provider``).
     """
     from pm_core.paths import set_global_setting_value
     set_global_setting_value(f"model-{session_type}", model_value)

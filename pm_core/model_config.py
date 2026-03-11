@@ -9,8 +9,14 @@ configuration hierarchy:
 Quality tiers map human-friendly labels to concrete model identifiers:
 
     high      -> claude-opus-4-20250514   (reviews, critical decisions)
-    standard  -> claude-sonnet-4-20250514 (implementation, QA)
-    economy   -> claude-haiku-4-5-20251001 (watchers, high-volume tasks)
+    medium    -> claude-sonnet-4-20250514 (implementation, QA)
+    low       -> claude-haiku-4-5-20251001 (watchers, high-volume tasks)
+
+Model name shortcuts are also supported:
+
+    opus      -> claude-opus-4-20250514
+    sonnet    -> claude-sonnet-4-20250514
+    haiku     -> claude-haiku-4-5-20251001
 
 For external/local model servers, configure a provider via ``pm provider``
 (see providers.py) and reference it in model_config:
@@ -20,8 +26,8 @@ For external/local model servers, configure a provider via ``pm provider``
         model_config:
           session_models:
             watcher: provider:ollama    # use the "ollama" provider
-            qa: economy                 # use a quality tier
-            review: claude-opus-4-20250514  # use a specific model ID
+            qa: low                     # use a quality tier
+            review: opus               # use a model name shortcut
 
 Values prefixed with ``provider:`` are resolved via the provider system
 and return a provider name instead of a model identifier.
@@ -39,8 +45,12 @@ _log = configure_logger("pm.model_config")
 
 QUALITY_TIERS: dict[str, str] = {
     "high": "claude-opus-4-20250514",
-    "standard": "claude-sonnet-4-20250514",
-    "economy": "claude-haiku-4-5-20251001",
+    "medium": "claude-sonnet-4-20250514",
+    "low": "claude-haiku-4-5-20251001",
+    # Model name shortcuts
+    "opus": "claude-opus-4-20250514",
+    "sonnet": "claude-sonnet-4-20250514",
+    "haiku": "claude-haiku-4-5-20251001",
 }
 
 # ── Session types and their default quality tier ─────────────────────
@@ -49,13 +59,24 @@ SESSION_TYPES = ("impl", "review", "qa", "watcher", "merge")
 
 DEFAULT_SESSION_MODELS: dict[str, str] = {
     "review": "high",
-    "impl": "standard",
-    "qa": "standard",
-    "merge": "standard",
-    "watcher": "economy",
+    "impl": "medium",
+    "qa": "medium",
+    "merge": "medium",
+    "watcher": "low",
 }
 
 _PROVIDER_PREFIX = "provider:"
+
+# Valid effort levels for the Claude CLI --effort flag
+EFFORT_LEVELS = ("low", "medium", "high")
+
+DEFAULT_SESSION_EFFORT: dict[str, str] = {
+    "review": "high",
+    "impl": "high",
+    "qa": "medium",
+    "merge": "high",
+    "watcher": "low",
+}
 
 
 @dataclass
@@ -65,15 +86,18 @@ class ModelResolution:
     Either ``model`` or ``provider`` will be set, not both.
     - model: a concrete model identifier to pass via --model
     - provider: a provider name to pass via the provider system
+    - effort: effort level to pass via --effort (low, medium, high)
     """
     model: str | None = None
     provider: str | None = None
+    effort: str | None = None
 
 
 def resolve_model(
     session_type: str,
     *,
     cli_model: str | None = None,
+    cli_effort: str | None = None,
     pr_model: str | None = None,
     project_data: dict | None = None,
 ) -> str | None:
@@ -106,16 +130,16 @@ def resolve_model_and_provider(
     session_type: str,
     *,
     cli_model: str | None = None,
+    cli_effort: str | None = None,
     pr_model: str | None = None,
     project_data: dict | None = None,
 ) -> ModelResolution:
     """Resolve model and/or provider for a session type.
 
-    Returns a ModelResolution with either a model ID or a provider name.
-    Values prefixed with ``provider:`` (e.g. ``provider:ollama``) are
-    resolved as provider names and returned in ``resolution.provider``.
-    All other values are expanded through quality tiers and returned in
-    ``resolution.model``.
+    Returns a ModelResolution with either a model ID or a provider name,
+    plus an effort level.  Values prefixed with ``provider:`` (e.g.
+    ``provider:ollama``) are resolved as provider names.  All other
+    values are expanded through quality tiers.
     """
     # Build effective tier map (project custom tiers override built-in)
     tiers = dict(QUALITY_TIERS)
@@ -128,34 +152,51 @@ def resolve_model_and_provider(
             return ModelResolution(provider=value[len(_PROVIDER_PREFIX):])
         return ModelResolution(model=tiers.get(value, value))
 
+    # --- Model / provider resolution ---
     # 1. CLI override
     if cli_model:
-        return _resolve_value(cli_model)
-
+        resolution = _resolve_value(cli_model)
     # 2. PR-level override
-    if pr_model:
-        return _resolve_value(pr_model)
-
+    elif pr_model:
+        resolution = _resolve_value(pr_model)
     # 3. Project-level config
-    if project_data:
-        mc = project_data.get("project", {}).get("model_config", {})
-        session_models = mc.get("session_models", {})
-        if session_type in session_models:
-            return _resolve_value(session_models[session_type])
-
+    elif project_data and session_type in (
+        project_data.get("project", {}).get("model_config", {}).get("session_models", {})
+    ):
+        resolution = _resolve_value(
+            project_data["project"]["model_config"]["session_models"][session_type]
+        )
     # 4. Global setting
-    global_val = get_global_setting_value(f"model-{session_type}")
-    if global_val:
-        return _resolve_value(global_val)
-
+    elif (global_val := get_global_setting_value(f"model-{session_type}")):
+        resolution = _resolve_value(global_val)
     # 5. Built-in default tier -> concrete model
-    tier = DEFAULT_SESSION_MODELS.get(session_type)
-    if tier:
-        model_id = tiers.get(tier)
-        if model_id:
-            return ModelResolution(model=model_id)
+    else:
+        tier = DEFAULT_SESSION_MODELS.get(session_type)
+        if tier:
+            model_id = tiers.get(tier)
+            resolution = ModelResolution(model=model_id) if model_id else ModelResolution()
+        else:
+            resolution = ModelResolution()
 
-    return ModelResolution()
+    # --- Effort resolution (independent of model) ---
+    # 1. CLI --effort override
+    if cli_effort:
+        resolution.effort = cli_effort
+    else:
+        # 2. Project-level effort config
+        effort = None
+        if project_data:
+            mc = project_data.get("project", {}).get("model_config", {})
+            effort = mc.get("session_effort", {}).get(session_type)
+        # 3. Global setting
+        if not effort:
+            effort = get_global_setting_value(f"effort-{session_type}") or None
+        # 4. Built-in default
+        if not effort:
+            effort = DEFAULT_SESSION_EFFORT.get(session_type)
+        resolution.effort = effort
+
+    return resolution
 
 
 def get_model_config_summary(project_data: dict | None = None) -> dict[str, str]:

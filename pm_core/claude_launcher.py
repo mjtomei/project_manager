@@ -277,6 +277,7 @@ def build_claude_shell_cmd(
     cwd: str | None = None,
     model: str | None = None,
     provider: str | None = None,
+    effort: str | None = None,
 ) -> str:
     """Build a claude shell command string with proper flags and logging.
 
@@ -302,6 +303,7 @@ def build_claude_shell_cmd(
             Resolves via providers.yaml config. When set, injects the
             appropriate environment variables and --model flag for the
             provider. None uses the default resolution order.
+        effort: Effort level to pass via ``--effort`` flag (low, medium, high).
     """
     # When transcript is requested, generate a UUID and create a symlink
     if transcript and cwd:
@@ -338,6 +340,9 @@ def build_claude_shell_cmd(
     effective_model = model or model_flag
     if effective_model:
         cmd += f" --model {shlex.quote(effective_model)}"
+
+    if effort:
+        cmd += f" --effort {effort}"
 
     if session_id:
         if resume:
