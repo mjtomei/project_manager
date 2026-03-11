@@ -1,9 +1,5 @@
 """Fuzzy matching and ranked selection for PRs and plans in the TUI."""
 
-import logging
-
-_log = logging.getLogger("pm.tui.fuzzy_select")
-
 
 def _fuzzy_contains(haystack: str, needle: str) -> bool:
     """Case-insensitive substring match."""

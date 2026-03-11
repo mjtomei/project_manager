@@ -1,11 +1,5 @@
 """Command handlers for 'pr select' and 'plan select' with fuzzy matching."""
 
-import logging
-
-from pm_core.paths import configure_logger
-
-_log = configure_logger("pm.tui.fuzzy_select_cmd")
-
 
 def handle_pr_select(app, query: str) -> None:
     """Handle 'pr select <query>' — fuzzy match against PRs and navigate."""
@@ -114,17 +108,19 @@ def cycle_fuzzy(app, direction: int = 1) -> None:
     pos = app._fuzzy_index + 1
     total = len(app._fuzzy_results)
 
+    from pm_core.tui.tech_tree import TechTree
+    from pm_core import store
+
+    # Switch to tree view if needed
+    if app._plans_visible or app._qa_visible:
+        app._show_normal_view()
+
+    tree = app.query_one("#tech-tree", TechTree)
+    tree.select_pr(target_id)
+
     if app._fuzzy_kind == "pr":
-        from pm_core.tui.tech_tree import TechTree
         from pm_core.cli.helpers import _pr_display_id
-        from pm_core import store
 
-        # Switch to tree view if needed
-        if app._plans_visible or app._qa_visible:
-            app._show_normal_view()
-
-        tree = app.query_one("#tech-tree", TechTree)
-        tree.select_pr(target_id)
         pr = store.get_pr(app._data, target_id)
         if pr:
             display = _pr_display_id(pr)
@@ -133,14 +129,6 @@ def cycle_fuzzy(app, direction: int = 1) -> None:
         else:
             app.log_message(f"Match {pos}/{total}: {target_id}")
     elif app._fuzzy_kind == "plan":
-        from pm_core.tui.tech_tree import TechTree
-        from pm_core import store
-
-        if app._plans_visible or app._qa_visible:
-            app._show_normal_view()
-
-        tree = app.query_one("#tech-tree", TechTree)
-        tree.select_pr(target_id)
         pr = store.get_pr(app._data, target_id)
         plan_id = pr.get("plan", "") if pr else ""
         plan = store.get_plan(app._data, plan_id) if plan_id else None
