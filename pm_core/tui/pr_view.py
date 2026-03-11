@@ -396,13 +396,8 @@ def handle_command_submitted(app, cmd: str) -> None:
             app.log_message("Usage: pr select <query>")
         else:
             fuzzy_select_cmd.handle_pr_select(app, query)
-        if app._plans_visible:
-            app.query_one("#plans-pane", PlansPane).focus()
-        elif app._qa_visible:
-            from pm_core.tui.qa_pane import QAPane
-            app.query_one("#qa-pane", QAPane).focus()
-        else:
-            app.query_one("#tech-tree", TechTree).focus()
+        # handle_pr_select switches to tree view, so always focus tree
+        app.query_one("#tech-tree", TechTree).focus()
         return
 
     if len(parts) >= 2 and parts[0] == "plan" and parts[1] == "select":
