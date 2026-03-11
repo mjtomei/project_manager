@@ -331,7 +331,7 @@ def build_claude_shell_cmd(
     cmd = f"{env_prefix}claude{skip}"
 
     if model_flag:
-        cmd += f" --model {model_flag}"
+        cmd += f" --model {shlex.quote(model_flag)}"
 
     if session_id:
         if resume:

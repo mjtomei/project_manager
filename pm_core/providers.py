@@ -31,7 +31,6 @@ Provider resolution order:
 
 import os
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 from pm_core.paths import configure_logger, pm_home, session_dir
@@ -65,7 +64,7 @@ class ProviderConfig:
             if self.api_base:
                 env["ANTHROPIC_BASE_URL"] = self.api_base
             if self.api_key:
-                env["ANTHROPIC_API_KEY"] = self.api_key
+                env["ANTHROPIC_API_KEY"] = _resolve_env_ref(self.api_key)
             if self.model:
                 env["ANTHROPIC_MODEL"] = self.model
             return env
@@ -104,7 +103,19 @@ def _resolve_env_ref(value: str) -> str:
     return value
 
 
-def _providers_path() -> Path:
+def _config_to_provider(name: str, entry: dict) -> ProviderConfig:
+    """Build a ProviderConfig from a providers.yaml entry."""
+    return ProviderConfig(
+        name=name,
+        type=entry.get("type", "openai"),
+        api_base=entry.get("api_base", ""),
+        api_key=entry.get("api_key", ""),
+        model=entry.get("model", ""),
+        capabilities=entry.get("capabilities", []),
+    )
+
+
+def _providers_path():
     """Return path to ~/.pm/providers.yaml."""
     return pm_home() / PROVIDERS_FILE
 
@@ -161,9 +172,11 @@ def get_provider(name: str | None = None) -> ProviderConfig:
                 except (OSError, IOError):
                     pass
 
+    # Load config once for steps 4-5 and provider lookup
+    config = load_providers()
+
     # 4. Default from config
     if not resolved:
-        config = load_providers()
         resolved = config.get("default")
 
     # 5. Built-in claude
@@ -171,21 +184,12 @@ def get_provider(name: str | None = None) -> ProviderConfig:
         return ProviderConfig(name=BUILTIN_CLAUDE)
 
     # Look up the named provider in config
-    config = load_providers()
     providers = config.get("providers", {})
     if resolved not in providers:
         _log.warning("Provider %r not found in config, falling back to claude", resolved)
         return ProviderConfig(name=BUILTIN_CLAUDE)
 
-    entry = providers[resolved]
-    return ProviderConfig(
-        name=resolved,
-        type=entry.get("type", "openai"),
-        api_base=entry.get("api_base", ""),
-        api_key=entry.get("api_key", ""),
-        model=entry.get("model", ""),
-        capabilities=entry.get("capabilities", []),
-    )
+    return _config_to_provider(resolved, providers[resolved])
 
 
 def list_providers() -> list[ProviderConfig]:
@@ -193,14 +197,7 @@ def list_providers() -> list[ProviderConfig]:
     result = [ProviderConfig(name=BUILTIN_CLAUDE)]
     config = load_providers()
     for name, entry in config.get("providers", {}).items():
-        result.append(ProviderConfig(
-            name=name,
-            type=entry.get("type", "openai"),
-            api_base=entry.get("api_base", ""),
-            api_key=entry.get("api_key", ""),
-            model=entry.get("model", ""),
-            capabilities=entry.get("capabilities", []),
-        ))
+        result.append(_config_to_provider(name, entry))
     return result
 
 
