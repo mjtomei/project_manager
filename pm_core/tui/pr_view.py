@@ -387,8 +387,36 @@ def handle_command_submitted(app, cmd: str) -> None:
             app._inflight_pr_action = action_key
             break
 
-    # Handle review loop commands
+    # Handle fuzzy pr select / plan select in-process (no subprocess needed)
     parts = shlex.split(cmd)
+    if len(parts) >= 2 and parts[0] == "pr" and parts[1] == "select":
+        from pm_core.tui import fuzzy_select_cmd
+        query = " ".join(parts[2:]) if len(parts) > 2 else ""
+        if not query:
+            app.log_message("Usage: pr select <query>")
+        else:
+            fuzzy_select_cmd.handle_pr_select(app, query)
+        if app._plans_visible:
+            app.query_one("#plans-pane", PlansPane).focus()
+        elif app._qa_visible:
+            from pm_core.tui.qa_pane import QAPane
+            app.query_one("#qa-pane", QAPane).focus()
+        else:
+            app.query_one("#tech-tree", TechTree).focus()
+        return
+
+    if len(parts) >= 2 and parts[0] == "plan" and parts[1] == "select":
+        from pm_core.tui import fuzzy_select_cmd
+        query = " ".join(parts[2:]) if len(parts) > 2 else ""
+        if not query:
+            app.log_message("Usage: plan select <query>")
+        else:
+            fuzzy_select_cmd.handle_plan_select(app, query)
+        # plan select always switches to tree view, so focus tree
+        app.query_one("#tech-tree", TechTree).focus()
+        return
+
+    # Handle review loop commands
     if cmd in ("review-loop", "review loop"):
         from pm_core.tui import review_loop_ui
         review_loop_ui.start_or_stop_loop(app, stop_on_suggestions=True)
