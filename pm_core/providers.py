@@ -702,7 +702,7 @@ def _check_tools_anthropic(
     messages_url = api_base.rstrip("/") + "/v1/messages"
     payload = json.dumps({
         "model": model,
-        "max_tokens": 100,
+        "max_tokens": 1024,
         "messages": [
             {"role": "user", "content": "What is 2+2? Use the calculator tool."}
         ],
@@ -798,7 +798,7 @@ def _check_tools_openai(
     chat_url = api_base.rstrip("/") + "/chat/completions"
     payload = json.dumps({
         "model": model,
-        "max_tokens": 100,
+        "max_tokens": 1024,
         "messages": [
             {"role": "user", "content": "What is 2+2? Use the calculator tool."}
         ],
