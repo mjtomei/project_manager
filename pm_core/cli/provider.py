@@ -33,6 +33,19 @@ def provider_list():
                 click.echo(f"    capabilities: {', '.join(p.capabilities)}")
 
 
+def _display_test_result(result) -> None:
+    """Print test result details to the terminal."""
+    if result.reachable:
+        click.echo(f"  Connectivity: OK ({result.reachable_detail})")
+    else:
+        click.echo(f"  Connectivity: FAILED ({result.reachable_detail})", err=True)
+
+    if result.tool_use is True:
+        click.echo(f"  Tool use: OK ({result.tool_use_detail})")
+    elif result.tool_use is False:
+        click.echo(f"  Tool use: FAILED ({result.tool_use_detail})", err=True)
+
+
 @provider_group.command("add")
 @click.argument("name")
 @click.option("--type", "ptype", default="openai", type=click.Choice(["openai", "claude"]),
@@ -41,32 +54,57 @@ def provider_list():
 @click.option("--api-key", default="", help="API key (or ${ENV_VAR} reference)")
 @click.option("--model", default="", help="Model name")
 @click.option("--capabilities", default="", help="Comma-separated capability tags")
+@click.option("--skip-check", is_flag=True, help="Skip connectivity and tool-use checks")
 def provider_add(name: str, ptype: str, api_base: str, api_key: str,
-                 model: str, capabilities: str):
+                 model: str, capabilities: str, skip_check: bool):
     """Add a new LLM provider.
+
+    Automatically tests connectivity and tool-use support before adding.
+    If issues are found, you'll be prompted to confirm.
 
     \b
     Examples:
       pm provider add ollama --api-base http://localhost:11434/v1 --model llama3.1:70b
       pm provider add vllm --api-base http://localhost:8000/v1 --api-key '${VLLM_KEY}' --model codellama
     """
-    from pm_core.providers import load_providers, save_providers
+    from pm_core.providers import (
+        ProviderConfig, load_providers, save_providers, check_provider,
+    )
+
+    # Build a temporary ProviderConfig to test before saving
+    caps = [c.strip() for c in capabilities.split(",")] if capabilities else []
+    provider = ProviderConfig(
+        name=name, type=ptype, api_base=api_base,
+        api_key=api_key, model=model, capabilities=caps,
+    )
+
+    if not skip_check:
+        click.echo(f"Checking provider '{name}'...")
+        result = check_provider(provider)
+        _display_test_result(result)
+
+        if result.warnings:
+            click.echo()
+            for warning in result.warnings:
+                click.echo(f"  Warning: {warning}", err=True)
+            click.echo()
+            if not click.confirm("Add this provider anyway?"):
+                click.echo("Aborted.")
+                raise SystemExit(1)
 
     config = load_providers()
     if "providers" not in config:
         config["providers"] = {}
 
-    config["providers"][name] = {
-        "type": ptype,
-        "api_base": api_base,
-    }
+    entry: dict = {"type": ptype, "api_base": api_base}
     if api_key:
-        config["providers"][name]["api_key"] = api_key
+        entry["api_key"] = api_key
     if model:
-        config["providers"][name]["model"] = model
-    if capabilities:
-        config["providers"][name]["capabilities"] = [c.strip() for c in capabilities.split(",")]
+        entry["model"] = model
+    if caps:
+        entry["capabilities"] = caps
 
+    config["providers"][name] = entry
     save_providers(config)
     click.echo(f"Added provider '{name}' ({ptype}: {api_base})")
 
@@ -75,7 +113,7 @@ def provider_add(name: str, ptype: str, api_base: str, api_key: str,
 @click.argument("name")
 def provider_remove(name: str):
     """Remove a configured provider."""
-    from pm_core.providers import load_providers, save_providers, get_default_provider
+    from pm_core.providers import load_providers, save_providers
 
     if name == "claude":
         click.echo("Cannot remove the built-in 'claude' provider.", err=True)
@@ -120,44 +158,33 @@ def provider_default(name: str):
 
 @provider_group.command("test")
 @click.argument("name", required=False)
-def provider_test(name: str | None):
-    """Test connectivity to a provider.
+@click.option("--quick", is_flag=True, help="Only test connectivity, skip tool-use check")
+def provider_test(name: str | None, quick: bool):
+    """Test connectivity and tool-use support for a provider.
 
+    Checks that the endpoint is reachable and that the model can handle
+    function calling (required for Claude Code's agentic workflows).
     If NAME is omitted, tests the default provider.
     """
-    from pm_core.providers import get_provider
+    from pm_core.providers import get_provider, check_provider
 
     provider = get_provider(name)
     click.echo(f"Testing provider '{provider.name}' (type={provider.type})...")
 
-    if provider.type == "claude":
-        if not provider.api_base:
-            click.echo("  Built-in Claude provider — no endpoint to test.")
-            click.echo("  Use 'claude --version' to verify the CLI is installed.")
-            return
+    if provider.type == "claude" and not provider.api_base:
+        click.echo("  Built-in Claude provider — no endpoint to test.")
+        click.echo("  Use 'claude --version' to verify the CLI is installed.")
+        return
 
-    env = provider.env_vars()
-    api_base = env.get("OPENAI_BASE_URL") or env.get("ANTHROPIC_BASE_URL") or provider.api_base
-    if not api_base:
-        click.echo("  No API base URL configured.", err=True)
+    result = check_provider(provider, check_tools=not quick)
+    _display_test_result(result)
+
+    if not result.reachable:
         raise SystemExit(1)
 
-    # Try to reach the endpoint
-    import urllib.request
-    import urllib.error
-    models_url = api_base.rstrip("/") + "/models"
-    try:
-        req = urllib.request.Request(models_url)
-        api_key = env.get("OPENAI_API_KEY") or env.get("ANTHROPIC_API_KEY")
-        if api_key:
-            req.add_header("Authorization", f"Bearer {api_key}")
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            click.echo(f"  Connected to {models_url} (HTTP {resp.status})")
-    except urllib.error.URLError as e:
-        click.echo(f"  Failed to connect to {models_url}: {e.reason}", err=True)
-        raise SystemExit(1)
-    except Exception as e:
-        click.echo(f"  Error: {e}", err=True)
-        raise SystemExit(1)
-
-    click.echo("  Provider is reachable.")
+    if result.tool_use is None and provider.type == "openai" and not provider.model:
+        click.echo("  Tool use: SKIPPED (no model configured)")
+    elif result.tool_use is False:
+        click.echo()
+        for warning in result.warnings:
+            click.echo(f"  {warning}", err=True)

@@ -8,6 +8,7 @@ import pytest
 
 from pm_core.providers import (
     ProviderConfig,
+    ProviderTestResult,
     get_provider,
     list_providers,
     load_providers,
@@ -15,6 +16,7 @@ from pm_core.providers import (
     set_session_provider,
     get_default_provider,
     set_default_provider,
+    check_provider,
     _resolve_env_ref,
     BUILTIN_CLAUDE,
 )
@@ -250,3 +252,127 @@ class TestSetSessionProvider:
         with patch("pm_core.providers.session_dir", return_value=sd):
             set_session_provider("ollama")
             assert (sd / "provider").read_text().strip() == "ollama"
+
+
+# ---------------------------------------------------------------------------
+# ProviderTestResult
+# ---------------------------------------------------------------------------
+
+class TestProviderTestResult:
+    def test_ok_when_reachable_and_tools_ok(self):
+        r = ProviderTestResult(reachable=True, tool_use=True)
+        assert r.ok
+        assert r.warnings == []
+
+    def test_ok_when_reachable_and_tools_not_tested(self):
+        r = ProviderTestResult(reachable=True, tool_use=None)
+        assert r.ok
+
+    def test_not_ok_when_unreachable(self):
+        r = ProviderTestResult(reachable=False, reachable_detail="connection refused")
+        assert not r.ok
+        assert len(r.warnings) == 1
+        assert "not reachable" in r.warnings[0]
+
+    def test_not_ok_when_tool_use_fails(self):
+        r = ProviderTestResult(reachable=True, tool_use=False,
+                               tool_use_detail="model did not use tool")
+        assert not r.ok
+        assert len(r.warnings) == 1
+        assert "function calling" in r.warnings[0]
+
+
+# ---------------------------------------------------------------------------
+# check_provider
+# ---------------------------------------------------------------------------
+
+class TestCheckProvider:
+    def test_no_api_base(self):
+        p = ProviderConfig(name="empty", type="openai")
+        result = check_provider(p)
+        assert not result.reachable
+        assert "no API base URL" in result.reachable_detail
+
+    @patch("urllib.request.urlopen")
+    def test_reachable(self, mock_urlopen):
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_resp
+
+        p = ProviderConfig(name="test", type="openai",
+                          api_base="http://localhost:11434/v1")
+        result = check_provider(p, check_tools=False)
+        assert result.reachable
+        assert "HTTP 200" in result.reachable_detail
+
+    @patch("urllib.request.urlopen")
+    def test_unreachable(self, mock_urlopen):
+        import urllib.error
+        mock_urlopen.side_effect = urllib.error.URLError("Connection refused")
+
+        p = ProviderConfig(name="test", type="openai",
+                          api_base="http://localhost:99999/v1")
+        result = check_provider(p)
+        assert not result.reachable
+        assert "Connection refused" in result.reachable_detail
+
+    @patch("urllib.request.urlopen")
+    def test_tool_use_success(self, mock_urlopen):
+        import json
+        # First call: /models (connectivity)
+        models_resp = MagicMock()
+        models_resp.status = 200
+        models_resp.__enter__ = MagicMock(return_value=models_resp)
+        models_resp.__exit__ = MagicMock(return_value=False)
+
+        # Second call: /chat/completions (tool use)
+        chat_body = json.dumps({
+            "choices": [{
+                "message": {"tool_calls": [{"function": {"name": "calculator"}}]},
+                "finish_reason": "tool_calls",
+            }]
+        }).encode()
+        chat_resp = MagicMock()
+        chat_resp.read.return_value = chat_body
+        chat_resp.__enter__ = MagicMock(return_value=chat_resp)
+        chat_resp.__exit__ = MagicMock(return_value=False)
+
+        mock_urlopen.side_effect = [models_resp, chat_resp]
+
+        p = ProviderConfig(name="test", type="openai",
+                          api_base="http://localhost:11434/v1",
+                          model="llama3.1")
+        result = check_provider(p)
+        assert result.reachable
+        assert result.tool_use is True
+
+    @patch("urllib.request.urlopen")
+    def test_tool_use_failure(self, mock_urlopen):
+        import json
+        models_resp = MagicMock()
+        models_resp.status = 200
+        models_resp.__enter__ = MagicMock(return_value=models_resp)
+        models_resp.__exit__ = MagicMock(return_value=False)
+
+        chat_body = json.dumps({
+            "choices": [{
+                "message": {"content": "The answer is 4"},
+                "finish_reason": "stop",
+            }]
+        }).encode()
+        chat_resp = MagicMock()
+        chat_resp.read.return_value = chat_body
+        chat_resp.__enter__ = MagicMock(return_value=chat_resp)
+        chat_resp.__exit__ = MagicMock(return_value=False)
+
+        mock_urlopen.side_effect = [models_resp, chat_resp]
+
+        p = ProviderConfig(name="test", type="openai",
+                          api_base="http://localhost:11434/v1",
+                          model="tiny-model")
+        result = check_provider(p)
+        assert result.reachable
+        assert result.tool_use is False
+        assert "did not use the tool" in result.tool_use_detail

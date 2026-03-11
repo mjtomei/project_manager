@@ -220,3 +220,162 @@ def set_default_provider(name: str) -> None:
     config = load_providers()
     config["default"] = name
     save_providers(config)
+
+
+# ---------------------------------------------------------------------------
+# Provider health checks
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ProviderTestResult:
+    """Result of testing a provider's connectivity and capabilities."""
+    reachable: bool = False
+    reachable_detail: str = ""
+    tool_use: bool | None = None  # None = not tested
+    tool_use_detail: str = ""
+
+    @property
+    def ok(self) -> bool:
+        return self.reachable and self.tool_use is not False
+
+    @property
+    def warnings(self) -> list[str]:
+        msgs = []
+        if not self.reachable:
+            msgs.append(f"Endpoint not reachable: {self.reachable_detail}")
+        if self.tool_use is False:
+            msgs.append(
+                f"Tool use not supported: {self.tool_use_detail}\n"
+                "  Claude Code relies on function calling for agentic workflows.\n"
+                "  This model may not work correctly. Consider using a model\n"
+                "  with strong tool-use support, or restrict this provider's\n"
+                "  capabilities to non-agentic tasks."
+            )
+        return msgs
+
+
+def check_provider(provider: ProviderConfig, check_tools: bool = True) -> ProviderTestResult:
+    """Test a provider's connectivity and tool-use support.
+
+    Args:
+        provider: The provider to test.
+        check_tools: If True and provider is openai-type with a model,
+            send a test chat completion with a tool definition.
+
+    Returns:
+        ProviderTestResult with reachable/tool_use status and details.
+    """
+    import json
+    import urllib.request
+    import urllib.error
+
+    result = ProviderTestResult()
+    env = provider.env_vars()
+    api_base = (
+        env.get("OPENAI_BASE_URL")
+        or env.get("ANTHROPIC_BASE_URL")
+        or provider.api_base
+    )
+    if not api_base:
+        result.reachable_detail = "no API base URL configured"
+        return result
+
+    api_key = env.get("OPENAI_API_KEY") or env.get("ANTHROPIC_API_KEY") or ""
+
+    # 1. Connectivity: GET /models
+    models_url = api_base.rstrip("/") + "/models"
+    try:
+        req = urllib.request.Request(models_url)
+        if api_key:
+            req.add_header("Authorization", f"Bearer {api_key}")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            result.reachable = True
+            result.reachable_detail = f"{models_url} (HTTP {resp.status})"
+    except urllib.error.URLError as e:
+        result.reachable_detail = f"{models_url}: {e.reason}"
+        return result
+    except Exception as e:
+        result.reachable_detail = str(e)
+        return result
+
+    # 2. Tool-use check
+    if not check_tools or provider.type != "openai" or not provider.model:
+        return result
+
+    chat_url = api_base.rstrip("/") + "/chat/completions"
+    payload = json.dumps({
+        "model": provider.model,
+        "max_tokens": 100,
+        "messages": [
+            {"role": "user", "content": "What is 2+2? Use the calculator tool."}
+        ],
+        "tools": [{
+            "type": "function",
+            "function": {
+                "name": "calculator",
+                "description": "Evaluate a math expression",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "expression": {
+                            "type": "string",
+                            "description": "The math expression to evaluate"
+                        }
+                    },
+                    "required": ["expression"]
+                }
+            }
+        }],
+        "tool_choice": "auto",
+    }).encode()
+
+    try:
+        req = urllib.request.Request(
+            chat_url, data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        if api_key:
+            req.add_header("Authorization", f"Bearer {api_key}")
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            body = json.loads(resp.read())
+
+        choices = body.get("choices", [])
+        if not choices:
+            result.tool_use = False
+            result.tool_use_detail = "empty response from model"
+            return result
+
+        message = choices[0].get("message", {})
+        tool_calls = message.get("tool_calls", [])
+        finish_reason = choices[0].get("finish_reason", "")
+
+        if tool_calls or finish_reason == "tool_calls":
+            result.tool_use = True
+            result.tool_use_detail = "model produced a tool call"
+        else:
+            result.tool_use = False
+            content = (message.get("content") or "")[:80]
+            result.tool_use_detail = f"model did not use the tool (response: {content})"
+
+    except urllib.error.HTTPError as e:
+        result.tool_use = False
+        error_body = ""
+        try:
+            error_body = e.read().decode()[:200]
+        except Exception:
+            pass
+        detail = f"HTTP {e.code}"
+        if e.code == 400:
+            detail += " — server may not support the 'tools' parameter"
+        if error_body:
+            detail += f" ({error_body})"
+        result.tool_use_detail = detail
+    except urllib.error.URLError as e:
+        result.tool_use = False
+        result.tool_use_detail = str(e.reason)
+    except Exception as e:
+        result.tool_use = False
+        result.tool_use_detail = str(e)
+
+    return result
