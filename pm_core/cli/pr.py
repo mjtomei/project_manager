@@ -781,7 +781,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     if fresh:
         clear_session(root, session_key)
     click.echo("Launching Claude...")
-    launch_claude(prompt, cwd=str(work_path), session_key=session_key, pm_root=root, resume=not fresh)
+    launch_claude(prompt, cwd=str(work_path), session_key=session_key, pm_root=root, resume=not fresh,
+                  provider=resolved_provider)
 
 
 def _add_companion_pane(pm_session: str, window_info: dict, workdir: str,

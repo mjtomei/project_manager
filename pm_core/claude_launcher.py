@@ -13,6 +13,20 @@ from pathlib import Path
 from pm_core.paths import configure_logger, log_shell_command
 _log = configure_logger("pm.claude_launcher")
 
+
+def _resolve_provider(provider: str | None = None):
+    """Resolve provider config and return (env_vars, model_flag, run_env).
+
+    Shared helper for launch_claude, launch_claude_print, and
+    launch_claude_print_background to avoid repeating the same pattern.
+    """
+    from pm_core.providers import get_provider
+    provider_cfg = get_provider(provider)
+    provider_env = provider_cfg.env_vars()
+    model_flag = provider_cfg.model_flag()
+    run_env = {**os.environ, **provider_env} if provider_env else None
+    return provider_env, model_flag, run_env
+
 SESSION_REGISTRY = ".pm-sessions.json"
 
 
@@ -129,11 +143,7 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
         raise FileNotFoundError("claude CLI not found. Install it first.")
 
     # Resolve provider for env vars and model flag
-    from pm_core.providers import get_provider
-    provider_cfg = get_provider(provider)
-    provider_env = provider_cfg.env_vars()
-    model_flag = provider_cfg.model_flag()
-    run_env = {**os.environ, **provider_env} if provider_env else None
+    _, model_flag, run_env = _resolve_provider(provider)
 
     # Try to resume existing session, or generate new session ID
     session_id = None
@@ -212,11 +222,7 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
         raise FileNotFoundError("claude CLI not found. Install it first.")
 
     # Resolve provider
-    from pm_core.providers import get_provider
-    provider_cfg = get_provider(provider)
-    provider_env = provider_cfg.env_vars()
-    model_flag = provider_cfg.model_flag()
-    run_env = {**os.environ, **provider_env} if provider_env else None
+    _, model_flag, run_env = _resolve_provider(provider)
 
     cmd = [claude]
     if _skip_permissions():
@@ -321,10 +327,7 @@ def build_claude_shell_cmd(
         _log.info("transcript: symlink %s -> %s", transcript_path, target)
 
     # Resolve provider configuration
-    from pm_core.providers import get_provider
-    provider_cfg = get_provider(provider)
-    provider_env = provider_cfg.env_vars()
-    model_flag = provider_cfg.model_flag()
+    provider_env, model_flag, _ = _resolve_provider(provider)
 
     # Build env prefix for non-claude providers
     env_prefix = ""
@@ -411,11 +414,7 @@ def launch_claude_print_background(prompt: str, cwd: str | None = None,
     import threading
 
     # Resolve provider outside the thread so config is read on the caller's thread
-    from pm_core.providers import get_provider
-    provider_cfg = get_provider(provider)
-    provider_env = provider_cfg.env_vars()
-    model_flag = provider_cfg.model_flag()
-    run_env = {**os.environ, **provider_env} if provider_env else None
+    _, model_flag, run_env = _resolve_provider(provider)
 
     def _run():
         claude = find_claude()
