@@ -425,6 +425,96 @@ class TestCheckProvider:
         assert result.tool_use is False
         assert "did not use the tool" in result.tool_use_detail
 
+    @patch("urllib.request.urlopen")
+    def test_local_provider_anthropic_tool_check(self, mock_urlopen):
+        """Local providers use Anthropic Messages API for tool checks."""
+        import json
+        # First call: /api/tags (connectivity for local type)
+        tags_resp = MagicMock()
+        tags_resp.status = 200
+        tags_resp.__enter__ = MagicMock(return_value=tags_resp)
+        tags_resp.__exit__ = MagicMock(return_value=False)
+
+        # Second call: /api/show (context window check)
+        show_body = json.dumps({
+            "model_info": {"context_length": 131072},
+        }).encode()
+        show_resp = MagicMock()
+        show_resp.read.return_value = show_body
+        show_resp.__enter__ = MagicMock(return_value=show_resp)
+        show_resp.__exit__ = MagicMock(return_value=False)
+
+        # Third call: /v1/messages (Anthropic tool use check)
+        msg_body = json.dumps({
+            "content": [{"type": "tool_use", "name": "calculator",
+                         "input": {"expression": "2+2"}}],
+            "stop_reason": "tool_use",
+        }).encode()
+        msg_resp = MagicMock()
+        msg_resp.read.return_value = msg_body
+        msg_resp.__enter__ = MagicMock(return_value=msg_resp)
+        msg_resp.__exit__ = MagicMock(return_value=False)
+
+        mock_urlopen.side_effect = [tags_resp, show_resp, msg_resp]
+
+        p = ProviderConfig(name="ollama", type="local",
+                          api_base="http://localhost:11434",
+                          model="qwen3.5")
+        result = check_provider(p)
+        assert result.reachable
+        assert result.tool_use is True
+        assert result.context_window == 131072
+
+    @patch("urllib.request.urlopen")
+    def test_local_provider_context_too_small(self, mock_urlopen):
+        """Local provider with small context window flags a warning."""
+        import json
+        tags_resp = MagicMock()
+        tags_resp.status = 200
+        tags_resp.__enter__ = MagicMock(return_value=tags_resp)
+        tags_resp.__exit__ = MagicMock(return_value=False)
+
+        show_body = json.dumps({
+            "model_info": {"some_prefix.context_length": 4096},
+        }).encode()
+        show_resp = MagicMock()
+        show_resp.read.return_value = show_body
+        show_resp.__enter__ = MagicMock(return_value=show_resp)
+        show_resp.__exit__ = MagicMock(return_value=False)
+
+        msg_body = json.dumps({
+            "content": [{"type": "tool_use", "name": "calculator",
+                         "input": {"expression": "2+2"}}],
+            "stop_reason": "tool_use",
+        }).encode()
+        msg_resp = MagicMock()
+        msg_resp.read.return_value = msg_body
+        msg_resp.__enter__ = MagicMock(return_value=msg_resp)
+        msg_resp.__exit__ = MagicMock(return_value=False)
+
+        mock_urlopen.side_effect = [tags_resp, show_resp, msg_resp]
+
+        p = ProviderConfig(name="ollama", type="local",
+                          api_base="http://localhost:11434",
+                          model="tiny")
+        result = check_provider(p)
+        assert result.reachable
+        assert result.context_window == 4096
+        assert not result.ok
+        assert any("Context window too small" in w for w in result.warnings)
+
+
+# ---------------------------------------------------------------------------
+# _config_to_provider defaults
+# ---------------------------------------------------------------------------
+
+class TestConfigToProvider:
+    def test_default_type_is_local(self):
+        """When type is omitted from YAML, default to 'local' (recommended)."""
+        from pm_core.providers import _config_to_provider
+        p = _config_to_provider("test", {"api_base": "http://localhost:11434"})
+        assert p.type == "local"
+
 
 # ---------------------------------------------------------------------------
 # Recommended models

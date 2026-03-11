@@ -119,7 +119,7 @@ def _config_to_provider(name: str, entry: dict) -> ProviderConfig:
     """Build a ProviderConfig from a providers.yaml entry."""
     return ProviderConfig(
         name=name,
-        type=entry.get("type", "openai"),
+        type=entry.get("type", "local"),
         api_base=entry.get("api_base", ""),
         api_key=entry.get("api_key", ""),
         model=entry.get("model", ""),
