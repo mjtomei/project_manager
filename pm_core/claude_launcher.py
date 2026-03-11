@@ -244,6 +244,7 @@ def build_claude_shell_cmd(
     session_tag: str | None = None,
     transcript: str | None = None,
     cwd: str | None = None,
+    model: str | None = None,
 ) -> str:
     """Build a claude shell command string with proper flags and logging.
 
@@ -262,6 +263,8 @@ def build_claude_shell_cmd(
             ``transcript`` to Claude's native .jsonl file.
         cwd: Working directory for computing Claude's project dir (required
             when ``transcript`` is set).
+        model: Model identifier to pass via ``--model`` flag.  When set,
+            overrides Claude CLI's default model selection.
     """
     # When transcript is requested, generate a UUID and create a symlink
     if transcript and cwd:
@@ -281,6 +284,9 @@ def build_claude_shell_cmd(
     from pm_core.paths import skip_permissions_enabled
     skip = " --dangerously-skip-permissions" if skip_permissions_enabled(session_tag) else ""
     cmd = f"claude{skip}"
+
+    if model:
+        cmd += f" --model {model}"
 
     if session_id:
         if resume:

@@ -525,7 +525,8 @@ def pr_ready():
               help="Path to save Claude transcript symlink (used by auto-start)")
 @click.option("--companion", is_flag=True, default=False,
               help="Open a companion shell pane in the PR workdir")
-def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, transcript: str | None, companion: bool):
+@click.option("--model", default=None, help="Override model for this session (e.g. high, standard, economy, or model ID)")
+def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, transcript: str | None, companion: bool, model: str | None):
     """Start working on a PR: clone, branch, print prompt.
 
     If PR_ID is omitted, uses the active PR if it's pending/ready, or
@@ -719,6 +720,15 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
 
     prompt = prompt_gen.generate_prompt(data, pr_id, session_name=pm_session)
 
+    # Resolve model for this implementation session
+    from pm_core.model_config import resolve_model, get_pr_model_override
+    resolved_model = resolve_model(
+        "impl",
+        cli_model=model,
+        pr_model=get_pr_model_override(pr_entry),
+        project_data=data,
+    )
+
     claude = find_claude()
     if not claude:
         click.echo(f"\n{'='*60}")
@@ -732,7 +742,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         if tmux_mod.session_exists(pm_session):
             window_name = _pr_display_id(pr_entry)
             cmd = build_claude_shell_cmd(prompt=prompt,
-                                         transcript=transcript, cwd=str(work_path))
+                                         transcript=transcript, cwd=str(work_path),
+                                         model=resolved_model)
             # Optionally wrap in a container for isolation
             from pm_core.container import wrap_claude_cmd, ContainerError
             try:
@@ -868,13 +879,22 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     title = pr_entry.get("title", "")
     base_branch = data.get("project", {}).get("base_branch", "master")
 
+    # Resolve model for review session
+    from pm_core.model_config import resolve_model, get_pr_model_override
+    resolved_model = resolve_model(
+        "review",
+        pr_model=get_pr_model_override(pr_entry),
+        project_data=data,
+    )
+
     # Generate review prompt and build Claude command
     review_prompt = prompt_gen.generate_review_prompt(data, pr_id, session_name=pm_session,
                                                       review_loop=review_loop,
                                                       review_iteration=review_iteration,
                                                       review_loop_id=review_loop_id)
     claude_cmd = build_claude_shell_cmd(prompt=review_prompt,
-                                         transcript=transcript, cwd=workdir)
+                                         transcript=transcript, cwd=workdir,
+                                         model=resolved_model)
     # Optionally wrap in a container for isolation
     branch = pr_entry.get("branch", "")
     from pm_core.container import wrap_claude_cmd, ContainerError
@@ -1125,13 +1145,22 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
     pr_id = pr_entry["id"]
     display_id = _pr_display_id(pr_entry)
 
+    # Resolve model for merge session
+    from pm_core.model_config import resolve_model, get_pr_model_override
+    resolved_model = resolve_model(
+        "merge",
+        pr_model=get_pr_model_override(pr_entry),
+        project_data=data,
+    )
+
     merge_prompt = prompt_gen.generate_merge_prompt(
         data, pr_id, error_output, session_name=pm_session,
         pull_from_workdir=pull_from_workdir,
         pull_from_origin=pull_from_origin,
     )
     claude_cmd = build_claude_shell_cmd(prompt=merge_prompt,
-                                         transcript=transcript, cwd=workdir)
+                                         transcript=transcript, cwd=workdir,
+                                         model=resolved_model)
     # Merge runs on the host — it needs to push to master and modify the
     # main repo, which the branch-scoped push proxy would block.
     window_name = f"merge-{display_id}"
