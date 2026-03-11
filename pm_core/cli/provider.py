@@ -40,6 +40,17 @@ def _display_test_result(result) -> None:
     else:
         click.echo(f"  Connectivity: FAILED ({result.reachable_detail})", err=True)
 
+    if result.context_window is not None:
+        from pm_core.providers import MIN_CONTEXT_TOKENS
+        if result.context_window >= MIN_CONTEXT_TOKENS:
+            click.echo(f"  Context window: OK ({result.context_window:,} tokens)")
+        else:
+            click.echo(
+                f"  Context window: TOO SMALL ({result.context_window:,} tokens, "
+                f"need {MIN_CONTEXT_TOKENS:,}+)",
+                err=True,
+            )
+
     if result.tool_use is True:
         click.echo(f"  Tool use: OK ({result.tool_use_detail})")
     elif result.tool_use is False:

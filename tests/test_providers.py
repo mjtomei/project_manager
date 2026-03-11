@@ -301,8 +301,26 @@ class TestProviderTestResult:
         r = ProviderTestResult(reachable=True, tool_use=False,
                                tool_use_detail="model did not use tool")
         assert not r.ok
-        assert len(r.warnings) == 1
-        assert "function calling" in r.warnings[0]
+        assert any("function calling" in w for w in r.warnings)
+
+    def test_not_ok_when_context_too_small(self):
+        r = ProviderTestResult(reachable=True, tool_use=True,
+                               context_window=4096,
+                               context_window_detail="increase num_ctx")
+        assert not r.ok
+        assert any("Context window too small" in w for w in r.warnings)
+        assert any("4,096" in w for w in r.warnings)
+
+    def test_ok_when_context_sufficient(self):
+        r = ProviderTestResult(reachable=True, tool_use=True,
+                               context_window=131072)
+        assert r.ok
+        assert r.warnings == []
+
+    def test_ok_when_context_unknown(self):
+        r = ProviderTestResult(reachable=True, tool_use=True,
+                               context_window=None)
+        assert r.ok
 
     def test_tool_use_warning_includes_recommendations(self):
         r = ProviderTestResult(reachable=True, tool_use=False,

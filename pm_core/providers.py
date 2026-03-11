@@ -415,16 +415,28 @@ class ProviderTestResult:
     reachable_detail: str = ""
     tool_use: bool | None = None  # None = not tested
     tool_use_detail: str = ""
+    context_window: int | None = None  # Detected context length, or None
+    context_window_detail: str = ""
 
     @property
     def ok(self) -> bool:
-        return self.reachable and self.tool_use is not False
+        ctx_ok = (
+            self.context_window is None
+            or self.context_window >= MIN_CONTEXT_TOKENS
+        )
+        return self.reachable and self.tool_use is not False and ctx_ok
 
     @property
     def warnings(self) -> list[str]:
         msgs = []
         if not self.reachable:
             msgs.append(f"Endpoint not reachable: {self.reachable_detail}")
+        if self.context_window is not None and self.context_window < MIN_CONTEXT_TOKENS:
+            msgs.append(
+                f"Context window too small: {self.context_window:,} tokens "
+                f"(Claude Code needs at least {MIN_CONTEXT_TOKENS:,})\n"
+                f"  {self.context_window_detail}"
+            )
         if self.tool_use is False:
             warning = (
                 f"Tool use not supported: {self.tool_use_detail}\n"
@@ -492,7 +504,11 @@ def check_provider(provider: ProviderConfig, check_tools: bool = True) -> Provid
         result.reachable_detail = f"{check_urls[-1]}: connection failed"
         return result
 
-    # 2. Tool-use check
+    # 2. Context window check (best-effort)
+    if provider.model:
+        _check_context_window(api_base, api_key, provider, result)
+
+    # 3. Tool-use check
     if not check_tools or not provider.model:
         return result
 
@@ -502,6 +518,65 @@ def check_provider(provider: ProviderConfig, check_tools: bool = True) -> Provid
         result = _check_tools_openai(api_base, api_key, provider.model, result)
 
     return result
+
+
+def _check_context_window(
+    api_base: str, api_key: str, provider: ProviderConfig,
+    result: ProviderTestResult,
+) -> None:
+    """Try to detect the model's context window size.
+
+    For Ollama: POST /api/show with model name to get model_info.
+    Falls back silently if the endpoint doesn't support this.
+    """
+    import json
+    import urllib.request
+    import urllib.error
+
+    if provider.type == "local":
+        # Try Ollama's /api/show endpoint
+        show_url = api_base.rstrip("/") + "/api/show"
+        try:
+            payload = json.dumps({"name": provider.model}).encode()
+            req = urllib.request.Request(
+                show_url, data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                body = json.loads(resp.read())
+
+            # Ollama returns model_info with context_length or
+            # parameters with num_ctx
+            model_info = body.get("model_info", {})
+            # Look through model_info keys for context_length
+            for key, value in model_info.items():
+                if "context_length" in key and isinstance(value, (int, float)):
+                    result.context_window = int(value)
+                    break
+
+            if result.context_window is None:
+                # Try parameters string
+                params = body.get("parameters", "")
+                for line in params.splitlines():
+                    if "num_ctx" in line:
+                        parts = line.strip().split()
+                        if len(parts) >= 2:
+                            result.context_window = int(parts[-1])
+                            break
+
+            if result.context_window is not None:
+                if result.context_window < MIN_CONTEXT_TOKENS:
+                    result.context_window_detail = (
+                        f"Increase with: ollama run {provider.model} "
+                        f"/set parameter num_ctx {MIN_CONTEXT_TOKENS}"
+                    )
+                else:
+                    result.context_window_detail = "OK"
+
+        except (urllib.error.URLError, urllib.error.HTTPError,
+                json.JSONDecodeError, ValueError, Exception):
+            pass  # Best-effort — don't fail if we can't detect
 
 
 def _check_tools_anthropic(
