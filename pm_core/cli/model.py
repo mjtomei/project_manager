@@ -44,7 +44,7 @@ def model_show():
             model_str = res.model
         else:
             model_str = "(default)"
-        effort_str = res.effort or "(default)"
+        effort_str = res.effort or "n/a"
         click.echo(f"  {st:10s}   {model_str:40s} {effort_str:8s}")
     click.echo()
 

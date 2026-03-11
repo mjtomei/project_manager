@@ -80,13 +80,38 @@ class TestEffortResolution:
     def test_defaults(self):
         result = resolve_model_and_provider("review")
         assert result.effort == "high"
-        result = resolve_model_and_provider("watcher")
-        assert result.effort == "low"
         result = resolve_model_and_provider("qa")
+        assert result.effort == "medium"
+        result = resolve_model_and_provider("impl")
+        assert result.effort == "high"
+
+    def test_watcher_no_effort_by_default(self):
+        """Watcher defaults to haiku which doesn't support effort."""
+        result = resolve_model_and_provider("watcher")
+        assert result.effort is None
+
+    def test_haiku_suppresses_effort(self):
+        """Even if effort is configured, it's suppressed for haiku."""
+        result = resolve_model_and_provider("watcher", cli_effort="high")
+        assert result.effort is None
+
+    def test_haiku_explicit_suppresses_effort(self):
+        """Setting model to haiku anywhere suppresses effort."""
+        result = resolve_model_and_provider("qa", cli_model="haiku", cli_effort="high")
+        assert result.effort is None
+
+    def test_sonnet_keeps_effort(self):
+        """Sonnet supports effort levels."""
+        result = resolve_model_and_provider("qa", cli_model="sonnet", cli_effort="low")
+        assert result.effort == "low"
+
+    def test_opus_keeps_effort(self):
+        """Opus supports effort levels."""
+        result = resolve_model_and_provider("review", cli_effort="medium")
         assert result.effort == "medium"
 
     def test_cli_effort_overrides(self):
-        result = resolve_model_and_provider("watcher", cli_effort="high")
+        result = resolve_model_and_provider("qa", cli_effort="high")
         assert result.effort == "high"
 
     def test_project_effort_config(self):
@@ -101,10 +126,43 @@ class TestEffortResolution:
 
     @patch("pm_core.model_config.get_global_setting_value")
     def test_global_effort_setting(self, mock_gsv):
-        # First call is for model-qa (returns ""), second for effort-qa
         mock_gsv.side_effect = lambda key: "low" if key == "effort-qa" else ""
         result = resolve_model_and_provider("qa")
         assert result.effort == "low"
+
+
+class TestEnvVarOverrides:
+    def test_pm_model_env_var(self):
+        with patch.dict("os.environ", {"PM_MODEL": "haiku"}):
+            result = resolve_model("qa")
+            assert result == QUALITY_TIERS["haiku"]
+
+    def test_pm_model_beats_project(self):
+        data = {"project": {"model_config": {"session_models": {"qa": "high"}}}}
+        with patch.dict("os.environ", {"PM_MODEL": "low"}):
+            result = resolve_model("qa", project_data=data)
+            assert result == QUALITY_TIERS["low"]
+
+    def test_cli_beats_pm_model(self):
+        with patch.dict("os.environ", {"PM_MODEL": "low"}):
+            result = resolve_model("qa", cli_model="high")
+            assert result == QUALITY_TIERS["high"]
+
+    def test_pm_effort_env_var(self):
+        with patch.dict("os.environ", {"PM_EFFORT": "low"}):
+            result = resolve_model_and_provider("review")
+            assert result.effort == "low"
+
+    def test_cli_effort_beats_pm_effort(self):
+        with patch.dict("os.environ", {"PM_EFFORT": "low"}):
+            result = resolve_model_and_provider("review", cli_effort="high")
+            assert result.effort == "high"
+
+    def test_pm_model_provider_prefix(self):
+        with patch.dict("os.environ", {"PM_MODEL": "provider:ollama"}):
+            result = resolve_model_and_provider("qa")
+            assert result.provider == "ollama"
+            assert result.model is None
 
 
 class TestGetModelConfigSummary:
