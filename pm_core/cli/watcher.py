@@ -149,15 +149,16 @@ def _create_watcher_window(iteration: int, loop_id: str,
     # Determine a working directory -- use the repo root (parent of pm/ dir)
     repo_dir = str(root.parent) if store.is_internal_pm_dir(root) else str(root)
 
-    # Resolve model for watcher session
-    from pm_core.model_config import resolve_model
-    resolved_model = resolve_model("watcher", project_data=data)
+    # Resolve model/provider for watcher session
+    from pm_core.model_config import resolve_model_and_provider
+    _resolution = resolve_model_and_provider("watcher", project_data=data)
 
     claude_cmd = build_claude_shell_cmd(
         prompt=watcher_prompt,
         transcript=transcript,
         cwd=repo_dir,
-        model=resolved_model,
+        model=_resolution.model,
+        provider=_resolution.provider,
     )
 
     # Kill existing watcher window and recreate (fresh each iteration).

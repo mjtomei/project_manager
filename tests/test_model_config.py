@@ -5,6 +5,8 @@ from unittest.mock import patch
 
 from pm_core.model_config import (
     resolve_model,
+    resolve_model_and_provider,
+    ModelResolution,
     _expand_tier,
     get_model_config_summary,
     get_pr_model_override,
@@ -127,3 +129,56 @@ class TestBuildClaudeShellCmdModel:
         from pm_core.claude_launcher import build_claude_shell_cmd
         cmd = build_claude_shell_cmd(prompt="test")
         assert "--model" not in cmd
+
+
+class TestProviderResolution:
+    """Test provider: prefix resolution via resolve_model_and_provider."""
+
+    def test_provider_prefix_returns_provider(self):
+        result = resolve_model_and_provider("watcher", cli_model="provider:ollama")
+        assert result.provider == "ollama"
+        assert result.model is None
+
+    def test_non_provider_returns_model(self):
+        result = resolve_model_and_provider("review")
+        assert result.model == QUALITY_TIERS["high"]
+        assert result.provider is None
+
+    def test_provider_in_project_config(self):
+        data = {
+            "project": {
+                "model_config": {
+                    "session_models": {
+                        "watcher": "provider:ollama",
+                    }
+                }
+            }
+        }
+        result = resolve_model_and_provider("watcher", project_data=data)
+        assert result.provider == "ollama"
+        assert result.model is None
+
+    def test_resolve_model_ignores_provider(self):
+        """resolve_model returns None for provider: values (no model)."""
+        result = resolve_model("watcher", cli_model="provider:ollama")
+        assert result is None
+
+    def test_summary_shows_provider(self):
+        data = {
+            "project": {
+                "model_config": {
+                    "session_models": {
+                        "watcher": "provider:ollama",
+                    }
+                }
+            }
+        }
+        summary = get_model_config_summary(data)
+        assert summary["watcher"] == "provider:ollama"
+        assert summary["review"] == QUALITY_TIERS["high"]
+
+    @patch("pm_core.model_config.get_global_setting_value", return_value="provider:vllm")
+    def test_global_setting_provider(self, mock_gsv):
+        result = resolve_model_and_provider("qa")
+        assert result.provider == "vllm"
+        assert result.model is None

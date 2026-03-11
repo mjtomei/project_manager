@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import shlex
 import shutil
 import subprocess
 import uuid
@@ -110,18 +111,29 @@ def find_editor() -> str:
 
 
 def launch_claude(prompt: str, session_key: str, pm_root: Path,
-                  cwd: str | None = None, resume: bool = True) -> int:
+                  cwd: str | None = None, resume: bool = True,
+                  provider: str | None = None) -> int:
     """Run claude interactively with a prompt. Returns exit code.
 
     Attempts to resume a previous session if one exists for session_key.
     If no session exists, generates a new UUID and passes it via --session-id
     so we can resume later.
+
+    Args:
+        provider: Name of the LLM provider to use. See providers.py.
     """
     import uuid
 
     claude = find_claude()
     if not claude:
         raise FileNotFoundError("claude CLI not found. Install it first.")
+
+    # Resolve provider for env vars and model flag
+    from pm_core.providers import get_provider
+    provider_cfg = get_provider(provider)
+    provider_env = provider_cfg.env_vars()
+    model_flag = provider_cfg.model_flag()
+    run_env = {**os.environ, **provider_env} if provider_env else None
 
     # Try to resume existing session, or generate new session ID
     session_id = None
@@ -141,6 +153,8 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
     cmd = [claude]
     if _skip_permissions():
         cmd.append("--dangerously-skip-permissions")
+    if model_flag:
+        cmd.extend(["--model", model_flag])
     if is_resuming:
         cmd.extend(["--resume", session_id])
         # Don't pass prompt when resuming - Claude already has the conversation
@@ -152,7 +166,7 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
               cmd[:6], cwd, session_key, session_id[:8] + "...")
 
     log_shell_command(cmd, prefix="claude")
-    result = subprocess.run(cmd, cwd=cwd)
+    result = subprocess.run(cmd, cwd=cwd, env=run_env)
     returncode = result.returncode
     if returncode != 0:
         log_shell_command(cmd, prefix="claude", returncode=returncode)
@@ -165,10 +179,12 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
         cmd = [claude]
         if _skip_permissions():
             cmd.append("--dangerously-skip-permissions")
+        if model_flag:
+            cmd.extend(["--model", model_flag])
         cmd.extend(["--session-id", session_id])
         cmd.append(prompt)
         log_shell_command(cmd, prefix="claude")
-        result = subprocess.run(cmd, cwd=cwd)
+        result = subprocess.run(cmd, cwd=cwd, env=run_env)
         returncode = result.returncode
         if returncode != 0:
             log_shell_command(cmd, prefix="claude", returncode=returncode)
@@ -177,10 +193,14 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
 
 
 def launch_claude_print(prompt: str, cwd: str | None = None,
-                        message: str = "Claude is working") -> str:
+                        message: str = "Claude is working",
+                        provider: str | None = None) -> str:
     """Run claude -p (non-interactive print mode). Returns stdout.
 
     Shows a spinner on stderr while waiting for Claude to finish.
+
+    Args:
+        provider: Name of the LLM provider to use. See providers.py.
     """
     import sys
     import threading
@@ -190,9 +210,19 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
     claude = find_claude()
     if not claude:
         raise FileNotFoundError("claude CLI not found. Install it first.")
+
+    # Resolve provider
+    from pm_core.providers import get_provider
+    provider_cfg = get_provider(provider)
+    provider_env = provider_cfg.env_vars()
+    model_flag = provider_cfg.model_flag()
+    run_env = {**os.environ, **provider_env} if provider_env else None
+
     cmd = [claude]
     if _skip_permissions():
         cmd.append("--dangerously-skip-permissions")
+    if model_flag:
+        cmd.extend(["--model", model_flag])
     cmd.extend(["-p", prompt])
 
     done = threading.Event()
@@ -217,6 +247,7 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
             cwd=cwd,
             capture_output=True,
             text=True,
+            env=run_env,
         )
         if result.returncode != 0:
             log_shell_command(cmd, prefix="claude-print", returncode=result.returncode)
@@ -245,6 +276,7 @@ def build_claude_shell_cmd(
     transcript: str | None = None,
     cwd: str | None = None,
     model: str | None = None,
+    provider: str | None = None,
 ) -> str:
     """Build a claude shell command string with proper flags and logging.
 
@@ -264,7 +296,12 @@ def build_claude_shell_cmd(
         cwd: Working directory for computing Claude's project dir (required
             when ``transcript`` is set).
         model: Model identifier to pass via ``--model`` flag.  When set,
-            overrides Claude CLI's default model selection.
+            overrides Claude CLI's default model selection and any
+            provider-resolved model.
+        provider: Name of the LLM provider to use (e.g. "ollama", "vllm").
+            Resolves via providers.yaml config. When set, injects the
+            appropriate environment variables and --model flag for the
+            provider. None uses the default resolution order.
     """
     # When transcript is requested, generate a UUID and create a symlink
     if transcript and cwd:
@@ -281,12 +318,26 @@ def build_claude_shell_cmd(
         transcript_path.symlink_to(target)
         _log.info("transcript: symlink %s -> %s", transcript_path, target)
 
+    # Resolve provider configuration
+    from pm_core.providers import get_provider
+    provider_cfg = get_provider(provider)
+    provider_env = provider_cfg.env_vars()
+    model_flag = provider_cfg.model_flag()
+
+    # Build env prefix for non-claude providers
+    env_prefix = ""
+    if provider_env:
+        parts = [f"{k}={shlex.quote(v)}" for k, v in provider_env.items()]
+        env_prefix = " ".join(parts) + " "
+
     from pm_core.paths import skip_permissions_enabled
     skip = " --dangerously-skip-permissions" if skip_permissions_enabled(session_tag) else ""
-    cmd = f"claude{skip}"
+    cmd = f"{env_prefix}claude{skip}"
 
-    if model:
-        cmd += f" --model {model}"
+    # Explicit model param overrides provider's model_flag
+    effective_model = model or model_flag
+    if effective_model:
+        cmd += f" --model {shlex.quote(effective_model)}"
 
     if session_id:
         if resume:
@@ -344,9 +395,22 @@ def launch_bridge_in_tmux(prompt: str | None, cwd: str, session_name: str) -> st
     return socket_path
 
 
-def launch_claude_print_background(prompt: str, cwd: str | None = None, callback=None) -> None:
-    """Run claude -p in a background thread. Calls callback(stdout, stderr, returncode) when done."""
+def launch_claude_print_background(prompt: str, cwd: str | None = None,
+                                    callback=None,
+                                    provider: str | None = None) -> None:
+    """Run claude -p in a background thread. Calls callback(stdout, stderr, returncode) when done.
+
+    Args:
+        provider: Name of the LLM provider to use. See providers.py.
+    """
     import threading
+
+    # Resolve provider outside the thread so config is read on the caller's thread
+    from pm_core.providers import get_provider
+    provider_cfg = get_provider(provider)
+    provider_env = provider_cfg.env_vars()
+    model_flag = provider_cfg.model_flag()
+    run_env = {**os.environ, **provider_env} if provider_env else None
 
     def _run():
         claude = find_claude()
@@ -357,6 +421,8 @@ def launch_claude_print_background(prompt: str, cwd: str | None = None, callback
         cmd = [claude]
         if _skip_permissions():
             cmd.append("--dangerously-skip-permissions")
+        if model_flag:
+            cmd.extend(["--model", model_flag])
         cmd.extend(["-p", prompt])
         log_shell_command(cmd, prefix="claude-print")
         result = subprocess.run(
@@ -364,6 +430,7 @@ def launch_claude_print_background(prompt: str, cwd: str | None = None, callback
             cwd=cwd,
             capture_output=True,
             text=True,
+            env=run_env,
         )
         if result.returncode != 0:
             log_shell_command(cmd, prefix="claude-print", returncode=result.returncode)

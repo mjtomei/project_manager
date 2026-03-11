@@ -57,7 +57,8 @@ def model_show():
 def model_set(session_type: str, model_value: str):
     """Set the global default model for a session type.
 
-    MODEL_VALUE can be a quality tier (high, standard, economy) or a model ID.
+    MODEL_VALUE can be a quality tier (high, standard, economy), a model ID,
+    or provider:NAME to use a configured provider (see ``pm provider``).
     """
     from pm_core.paths import set_global_setting_value
     set_global_setting_value(f"model-{session_type}", model_value)

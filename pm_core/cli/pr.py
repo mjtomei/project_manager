@@ -720,14 +720,16 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
 
     prompt = prompt_gen.generate_prompt(data, pr_id, session_name=pm_session)
 
-    # Resolve model for this implementation session
-    from pm_core.model_config import resolve_model, get_pr_model_override
-    resolved_model = resolve_model(
+    # Resolve model/provider for this implementation session
+    from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
+    _resolution = resolve_model_and_provider(
         "impl",
         cli_model=model,
         pr_model=get_pr_model_override(pr_entry),
         project_data=data,
     )
+    resolved_model = _resolution.model
+    resolved_provider = _resolution.provider
 
     claude = find_claude()
     if not claude:
@@ -743,7 +745,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
             window_name = _pr_display_id(pr_entry)
             cmd = build_claude_shell_cmd(prompt=prompt,
                                          transcript=transcript, cwd=str(work_path),
-                                         model=resolved_model)
+                                         model=resolved_model,
+                                         provider=resolved_provider)
             # Optionally wrap in a container for isolation
             from pm_core.container import wrap_claude_cmd, ContainerError
             try:
@@ -879,9 +882,9 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     title = pr_entry.get("title", "")
     base_branch = data.get("project", {}).get("base_branch", "master")
 
-    # Resolve model for review session
-    from pm_core.model_config import resolve_model, get_pr_model_override
-    resolved_model = resolve_model(
+    # Resolve model/provider for review session
+    from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
+    _resolution = resolve_model_and_provider(
         "review",
         pr_model=get_pr_model_override(pr_entry),
         project_data=data,
@@ -894,7 +897,8 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                                                       review_loop_id=review_loop_id)
     claude_cmd = build_claude_shell_cmd(prompt=review_prompt,
                                          transcript=transcript, cwd=workdir,
-                                         model=resolved_model)
+                                         model=_resolution.model,
+                                         provider=_resolution.provider)
     # Optionally wrap in a container for isolation
     branch = pr_entry.get("branch", "")
     from pm_core.container import wrap_claude_cmd, ContainerError
@@ -1145,9 +1149,9 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
     pr_id = pr_entry["id"]
     display_id = _pr_display_id(pr_entry)
 
-    # Resolve model for merge session
-    from pm_core.model_config import resolve_model, get_pr_model_override
-    resolved_model = resolve_model(
+    # Resolve model/provider for merge session
+    from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
+    _resolution = resolve_model_and_provider(
         "merge",
         pr_model=get_pr_model_override(pr_entry),
         project_data=data,
@@ -1160,7 +1164,8 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
     )
     claude_cmd = build_claude_shell_cmd(prompt=merge_prompt,
                                          transcript=transcript, cwd=workdir,
-                                         model=resolved_model)
+                                         model=_resolution.model,
+                                         provider=_resolution.provider)
     # Merge runs on the host — it needs to push to master and modify the
     # main repo, which the branch-scoped push proxy would block.
     window_name = f"merge-{display_id}"
