@@ -3720,7 +3720,7 @@ prs:
   plan: plan-qa
   title: Add spec generation step between PR phases
   branch: pm/pr-942aa21-add-spec-generation-step-between-pr-phases
-  status: in_review
+  status: qa
   depends_on: []
   description: "Add an optional \"spec\" step to the PR lifecycle that bridges the\
     \ gap between the user's natural-language description and each subsequent phase\
@@ -4026,7 +4026,7 @@ prs:
   plan: tui-ux
   title: 'Refactor TechTree: split PR nodes into individual Textual widgets'
   branch: pm/pr-4c41017-refactor-techtree-split-pr-nodes-into-individual-t
-  status: in_review
+  status: qa
   depends_on: []
   description: 'Refactor the TechTree from a monolithic single-widget renderer into
     a compositional Textual architecture:
@@ -4113,10 +4113,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/133
   gh_pr_number: 133
   created_at: '2026-03-08T22:47:45.033304+00:00'
-  updated_at: '2026-03-10T21:46:37.340109+00:00'
+  updated_at: '2026-03-10T21:47:00.866282+00:00'
   started_at: '2026-03-09T23:43:54.978686+00:00'
-  reviewed_at: '2026-03-10T21:23:42.888831+00:00'
-  merged_at: '2026-03-10T21:46:37.340109+00:00'
+  reviewed_at: null
+  merged_at: '2026-03-10T21:47:00.866282+00:00'
   notes:
   - id: note-eb54cab
     text: 'QA INPUT_REQUIRED:  (workdir: /Users/matthewtomei/.pm/workdirs/qa/pr-e3ef28b-a94bdf2a1fc5bee7)'
@@ -4269,7 +4269,7 @@ prs:
   plan: tui-ux
   title: Add running tasks pane to TUI with window switching and grouping
   branch: pm/pr-0b827df-add-running-tasks-pane-to-tui-with-window-switchin
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'Add a new pane to the TUI that shows all active tasks running in the
     current tmux session and lets you switch to their windows.
@@ -4349,15 +4349,16 @@ prs:
     - Matches windows to PRs via naming convention (e.g. review-#128, qa-#124-s71)
 
     - Reuses existing tmux session resolution logic (current_or_base_session)'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/137
+  gh_pr_number: 137
   created_at: '2026-03-08T21:45:42.636585+00:00'
-  updated_at: '2026-03-08T22:18:13.112961+00:00'
-  started_at: null
+  updated_at: '2026-03-10T22:57:13.695502+00:00'
+  started_at: '2026-03-10T21:38:57.198809+00:00'
   reviewed_at: null
   merged_at: null
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b827df-add-running-tasks-pane-to-tui-with-w-10e74920
 - id: pr-341100c
   plan: tui-ux
   title: Add per-plan standalone PM sessions within the same project
@@ -4552,8 +4553,8 @@ prs:
   notes: []
 - id: pr-96bfc68
   plan: tui-ux
-  title: Add pm pr import-single command to import an existing GitHub PR into the
-    project
+  title: Add flag to pm pr import–github command to import an single GitHub PR into
+    the project
   branch: pm/pr-96bfc68-add-pm-pr-import-single-command-to-import-an-exist
   status: pending
   depends_on: []
@@ -4561,36 +4562,22 @@ prs:
     or URL) that is not already tracked in project.yaml into the project.
 
 
-    ## Behavior
+    – pm pr import–github <pr_number_or_url> [—plan <plan_id>]
 
-    - pm pr import-single <pr_number_or_url> [--plan <plan_id>]
+    – Fetches PR metadata from GitHub (title, description, branch, status, author)
 
-    - Fetches PR metadata from GitHub (title, description, branch, status, author)
+    – Creates a project.yaml entry with the correct fields populated
 
-    - Creates a project.yaml entry with the correct fields populated
+    – Maps GitHub PR state (open/closed/merged) to pm status
 
-    - Detects if any existing tracked PRs depend on or are depended on by this PR
-    (by branch inspection) and sets up dependency links
+    – Optionally assigns to a plan
 
-    - Maps GitHub PR state (open/closed/merged) to pm status
-
-    - Optionally assigns to a plan
-
-    - Warns if the PR is already tracked
-
-
-    ## Differences from existing import-github
-
-    - import-github is a bulk operation that scans all open PRs
-
-    - import-single targets one specific PR, including closed/merged ones
-
-    - Useful for pulling in a PR someone else created, or a historical PR for tracking'
+    – Warns if the PR is already tracked'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-08T23:04:31.077154+00:00'
-  updated_at: '2026-03-08T23:04:31.077154+00:00'
+  updated_at: '2026-03-10T15:19:56.223593+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -4709,34 +4696,19 @@ prs:
   notes: []
 - id: pr-f84cf3e
   plan: watchers
-  title: Add multi-provider LLM support with local models and API failover watcher
+  title: LLM API health and failover watcher
   branch: pm/pr-f84cf3e-add-multi-provider-llm-support-with-local-models-a
   status: pending
   depends_on:
   - pr-3032fb6
-  - pr-18ac983
-  description: 'Extend the Claude session spawning infrastructure to support multiple
-    LLM providers including local models, and add a watcher that manages API availability
-    and routing.
-
-
-    ## build_claude_shell_cmd extension
-
-    - Add provider configuration to build_claude_shell_cmd and related session launch
-    functions
-
-    - Support pointing any session at a local model (e.g. Ollama, llama.cpp, vLLM)
-    via OpenAI-compatible API endpoint
-
-    - Provider config per session type: e.g. use Opus for reviews, local model for
-    implementation, Sonnet for QA scenarios
-
-    - Project-level defaults in project.yaml with per-PR and per-session overrides
-
-    - Environment variable and CLI flag support: --provider local|claude|openai etc.
+  - pr-dad0069
+  description: 'Watcher that monitors LLM API endpoints and automatically routes sessions
+    to available providers when issues arise. Depends on the watcher framework (pr-3032fb6)
+    and local LLM provider support (pr-dad0069).
 
 
     ## LLM API health watcher
+
 
     - New watcher (using BaseWatcher from pr-3032fb6) that monitors all LLM API endpoints
 
@@ -4754,31 +4726,17 @@ prs:
     - Logs all routing decisions and provider health events for review
 
 
-    ## Configuration
-
-    - ~/.pm/providers.yaml or project-level config defining available providers, endpoints,
-    API keys, and priority order
-
-    - Per-provider capability tags so the watcher knows which providers can handle
-    which session types
-
-    - Cost awareness: prefer cheaper providers for high-volume low-stakes work (QA
-    scenarios) and expensive providers for critical work (reviews)
-
-
     ## Motivation
+
 
     - Resilience: API outages or rate limits don''t stop the whole project
 
-    - Cost optimization: use local models for bulk work, premium APIs for critical
-    decisions
-
-    - Flexibility: teams with different API access can all use the tool'
+    - Automatic recovery without manual intervention'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-09T00:04:00.121877+00:00'
-  updated_at: '2026-03-09T15:18:03.840152+00:00'
+  updated_at: '2026-03-10T23:05:51.372844+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5028,7 +4986,7 @@ prs:
   plan: tui-ux
   title: Fuzzy select for pr and plan commands
   branch: pm/pr-6aa74c6-fuzzy-select-for-pr-and-plan-commands
-  status: pending
+  status: in_review
   depends_on: []
   description: 'Add a ''plan select'' TUI command and intelligent fuzzy/partial matching
     for both ''pr select'' and ''plan select''. Typing ''plan select watch'' navigates
@@ -5054,15 +5012,16 @@ prs:
     For plan select, auto-expands collapsed plan groups and moves cursor to the first
     PR in that plan. Works with display IDs (#125) and raw IDs (pr-942aa21) as before,
     plus now also partial matches.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/136
+  gh_pr_number: 136
   created_at: '2026-03-09T16:23:27.180369+00:00'
-  updated_at: '2026-03-09T16:39:31.358948+00:00'
-  started_at: null
-  reviewed_at: null
+  updated_at: '2026-03-11T00:23:28.233394+00:00'
+  started_at: '2026-03-10T15:18:02.866746+00:00'
+  reviewed_at: '2026-03-11T00:23:28.233394+00:00'
   merged_at: null
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-6aa74c6-fuzzy-select-for-pr-and-plan-command-10e74920
 - id: pr-98bf8df
   plan: plan-qa
   title: QA start responsiveness with progress feedback
@@ -5120,7 +5079,7 @@ prs:
   plan: improvements
   title: Unified log file with source prefixes and pm log CLI
   branch: pm/pr-9bf8b0b-unified-log-file-with-source-prefixes-and-pm-log-c
-  status: in_progress
+  status: in_review
   depends_on: []
   description: 'Consolidate all pm logging into a single log file per session. Currently
     different modules create loggers with different names but they already write to
@@ -5150,9 +5109,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/134
   gh_pr_number: 134
   created_at: '2026-03-09T23:46:16.788511+00:00'
-  updated_at: '2026-03-09T23:50:43.896649+00:00'
+  updated_at: '2026-03-10T15:13:07.181206+00:00'
   started_at: '2026-03-09T23:50:43.896649+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-03-10T15:13:07.181206+00:00'
   merged_at: null
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9bf8b0b-unified-log-file-with-source-prefixe-743c06d3
@@ -5160,7 +5119,7 @@ prs:
   plan: plan-qa
   title: Embed session tag in container names and consolidate push proxies
   branch: pm/pr-6836fad-embed-session-tag-in-container-names-and-consolida
-  status: in_review
+  status: qa
   depends_on: []
   description: 'Two related improvements to container and push proxy management:
 
@@ -5237,27 +5196,6 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
-- id: pr-3ea00df
-  plan: bugs
-  title: Fix push proxy socket mount failing on macOS Docker Desktop
-  branch: pm/pr-3ea00df-fix-push-proxy-socket-mount-failing-on-macos-docke
-  status: pending
-  depends_on: []
-  description: 'The push proxy creates a Unix domain socket in /var/folders (macOS
-    temp directory) and mounts it into the Docker container. This fails on Docker
-    Desktop for Mac because socket files cannot be shared across the Linux VM boundary.
-    Error: error while creating mount source path push.sock: mkdir push.sock: operation
-    not supported. Options: use TCP instead of Unix socket on macOS, place socket
-    in a Docker-mountable location, or use socat to bridge. Works fine on native Linux.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-03-10T02:24:23.880078+00:00'
-  updated_at: '2026-03-10T02:24:23.880078+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
 - id: pr-53e47a1
   plan: tui-ux
   title: Shift+key reverses cycle direction for TUI keybindings
@@ -5278,24 +5216,159 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
-- id: pr-6bccf70
-  plan: bugs
-  title: Show Docker stderr in container error messages and include log path
-  branch: pm/pr-6bccf70-show-docker-stderr-in-container-error-messages-and
+- id: pr-b0d1b3b
+  plan: tui-ux
+  title: Return to last-focused window when current window closes
+  branch: pm/pr-b0d1b3b-return-to-last-focused-window-when-current-window-
   status: pending
   depends_on: []
-  description: When docker run fails with a non-zero exit code, the ContainerError
-    message only says the container failed to create. It should include Docker stderr
-    (the actual error message) and the path to the debug log file so users can diagnose
-    the issue. Currently _run_docker logs stderr to the debug log but the error surfaced
-    to the TUI status bar is generic. The CalledProcessError contains stderr but it
-    is lost when ContainerError is raised in wrap_claude_cmd.
+  description: 'When a tmux window closes (e.g. finishing a review session, closing
+    an implementation pane), tmux picks the next window by index rather than returning
+    to the window you came from. This means closing a pane opened from the TUI dumps
+    you on a random window instead of back to the TUI.
+
+
+    Fix: Use tmux hooks (after-select-window to track focus history, window-unlinked
+    or pane-exited to trigger navigation) or tmux''s set-option to maintain a focus
+    stack per session. When a window closes, automatically switch to the previously
+    focused window.
+
+
+    The focus stack should:
+
+    - Record each window focus in order (deduplicated, most recent first)
+
+    - Pop the closed window from the stack and switch to the next entry
+
+    - Handle chains (close window A → go to B, close B → go to C)
+
+    - Be scoped to the pm session group (not affect other tmux sessions)
+
+    - Survive TUI restarts (store in a file or tmux environment variable)
+
+
+    This also improves the experience when navigating deep: TUI → impl window → review
+    window → close review → back to impl → close impl → back to TUI.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
-  created_at: '2026-03-10T02:24:45.142842+00:00'
-  updated_at: '2026-03-10T02:24:45.142842+00:00'
+  created_at: '2026-03-10T15:22:56.318775+00:00'
+  updated_at: '2026-03-10T15:22:56.318775+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-dad0069
+  plan: watchers
+  title: Add local LLM provider support via OpenAI-compatible API
+  branch: pm/pr-dad0069-add-local-llm-provider-support-via-openai-compatib
+  status: merged
+  depends_on: []
+  description: 'Extend the Claude session spawning infrastructure to support local
+    LLM providers as an alternative to the Claude API.
+
+
+    ## build_claude_shell_cmd extension
+
+
+    - Add provider configuration to build_claude_shell_cmd and related session launch
+    functions
+
+    - Support pointing any session at a local model (e.g. Ollama, llama.cpp, vLLM)
+    via OpenAI-compatible API endpoint
+
+    - Environment variable and CLI flag support: --provider local|claude|openai etc.
+
+
+    ## Configuration
+
+
+    - ~/.pm/providers.yaml or project-level config defining available providers, endpoints,
+    API keys, and priority order
+
+    - Per-provider capability tags so the system knows which providers can handle
+    which session types
+
+
+    ## Motivation
+
+
+    - Flexibility: teams with different API access can all use the tool
+
+    - Cost optimization: use local models for bulk work
+
+    - No dependency on the watcher framework - this is pure session launch infrastructure'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/138
+  gh_pr_number: 138
+  created_at: '2026-03-10T23:03:35.684890+00:00'
+  updated_at: '2026-03-11T02:44:59.793332+00:00'
+  started_at: '2026-03-10T23:09:13.582136+00:00'
+  reviewed_at: '2026-03-11T00:50:23.310467+00:00'
+  merged_at: '2026-03-11T02:44:59.793332+00:00'
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-dad0069-add-local-llm-provider-support-via-o-10e74920
+- id: pr-8463df9
+  plan: watchers
+  title: Per-session model and quality targeting for different session types
+  branch: pm/pr-8463df9-per-session-model-and-quality-targeting-for-differ
+  status: in_review
+  depends_on:
+  - pr-dad0069
+  description: 'Add configuration to assign different model quality levels per session
+    type, enabling cost and capability optimization.
+
+
+    ## Per-session-type model configuration
+
+
+    - Model config per session type: e.g. use Opus for reviews, Sonnet for QA scenarios,
+    Haiku for watchers
+
+    - Project-level defaults in project.yaml with per-PR and per-session overrides
+
+    - Quality tiers: high (Opus), standard (Sonnet), economy (Haiku) with configurable
+    mapping to session types
+
+
+    ## Default mappings
+
+
+    - Reviews: high quality (Opus) - critical decisions need the best model
+
+    - Implementation: standard (Sonnet/Opus) - configurable based on complexity
+
+    - QA scenarios: standard (Sonnet) - good enough for test execution at lower cost
+
+    - Watchers: economy (Haiku) - high-volume monitoring tasks
+
+
+    ## Configuration
+
+
+    - project.yaml model_config section with session_type -> model mappings
+
+    - Per-PR override: specify a different model for a specific PR''s sessions
+
+    - CLI override: --model flag to override for a single session launch
+
+
+    ## Motivation
+
+
+    - Cost optimization: use cheaper models for high-volume low-stakes work (QA scenarios)
+
+    - Capability matching: reserve expensive models for critical work (reviews)
+
+    - Immediate win: QA can use Sonnet instead of Opus, significantly reducing API
+    costs'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/139
+  gh_pr_number: 139
+  created_at: '2026-03-10T23:04:21.042810+00:00'
+  updated_at: '2026-03-11T01:43:23.344856+00:00'
+  started_at: '2026-03-10T23:09:41.508237+00:00'
+  reviewed_at: '2026-03-11T01:43:23.344856+00:00'
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8463df9-per-session-model-and-quality-target-10e74920
