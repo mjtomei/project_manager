@@ -223,6 +223,150 @@ def set_default_provider(name: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Recommended models for local tool-use
+# ---------------------------------------------------------------------------
+
+@dataclass
+class RecommendedModel:
+    """A model known to work well with Claude Code's tool-use patterns."""
+    name: str
+    ollama_tag: str
+    param_billions: float
+    ram_gb_required: float  # Approximate RAM/VRAM for Q4 quantization
+    notes: str
+
+
+# Models with strong function-calling / tool-use support, ordered by size.
+# RAM estimates assume Q4_K_M quantization via Ollama.
+RECOMMENDED_MODELS: list[RecommendedModel] = [
+    RecommendedModel(
+        name="Qwen 2.5 Coder 7B",
+        ollama_tag="qwen2.5-coder:7b",
+        param_billions=7,
+        ram_gb_required=5,
+        notes="Best small model for code + tool use",
+    ),
+    RecommendedModel(
+        name="Llama 3.1 8B",
+        ollama_tag="llama3.1:8b",
+        param_billions=8,
+        ram_gb_required=5,
+        notes="Strong general-purpose with tool use",
+    ),
+    RecommendedModel(
+        name="Mistral Nemo 12B",
+        ollama_tag="mistral-nemo:12b",
+        param_billions=12,
+        ram_gb_required=8,
+        notes="Good tool use, larger context window",
+    ),
+    RecommendedModel(
+        name="Qwen 2.5 Coder 14B",
+        ollama_tag="qwen2.5-coder:14b",
+        param_billions=14,
+        ram_gb_required=10,
+        notes="Strong code generation + tool use",
+    ),
+    RecommendedModel(
+        name="Qwen 2.5 Coder 32B",
+        ollama_tag="qwen2.5-coder:32b",
+        param_billions=32,
+        ram_gb_required=20,
+        notes="Excellent code + tool use, needs more RAM",
+    ),
+    RecommendedModel(
+        name="Llama 3.1 70B",
+        ollama_tag="llama3.1:70b",
+        param_billions=70,
+        ram_gb_required=42,
+        notes="Top-tier local model, requires significant RAM/VRAM",
+    ),
+]
+
+
+def _get_system_memory_gb() -> float | None:
+    """Detect total system RAM in GB. Returns None if detection fails."""
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    kb = int(line.split()[1])
+                    return kb / (1024 * 1024)
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+def _get_gpu_memory_gb() -> float | None:
+    """Detect total GPU VRAM in GB via nvidia-smi. Returns None if unavailable."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            # Sum all GPUs, nvidia-smi reports in MiB
+            total_mib = sum(int(line.strip()) for line in result.stdout.strip().splitlines())
+            return total_mib / 1024
+    except (FileNotFoundError, subprocess.TimeoutExpired, ValueError):
+        pass
+    return None
+
+
+def get_recommended_models() -> list[tuple[RecommendedModel, bool]]:
+    """Return recommended models with a flag indicating if they fit in memory.
+
+    Uses the larger of system RAM and GPU VRAM as the available memory,
+    since models can run on either (CPU via RAM or GPU via VRAM).
+
+    Returns:
+        List of (model, fits_in_memory) tuples, ordered by size.
+    """
+    ram = _get_system_memory_gb()
+    vram = _get_gpu_memory_gb()
+
+    # Use whichever is larger (user might run on CPU or GPU)
+    available = max(ram or 0, vram or 0) or None
+
+    result = []
+    for model in RECOMMENDED_MODELS:
+        if available is not None:
+            fits = available >= model.ram_gb_required
+        else:
+            fits = True  # Can't detect, assume it fits
+        result.append((model, fits))
+    return result
+
+
+def format_model_recommendations() -> str:
+    """Format recommended models as a human-readable string.
+
+    Includes memory detection and marks models that won't fit.
+    """
+    ram = _get_system_memory_gb()
+    vram = _get_gpu_memory_gb()
+    available = max(ram or 0, vram or 0) or None
+
+    lines = ["  Recommended models with tool-use support:"]
+    if available is not None:
+        mem_source = "VRAM" if (vram or 0) >= (ram or 0) else "RAM"
+        lines.append(f"  (detected {available:.0f} GB {mem_source})")
+    lines.append("")
+
+    models_with_fit = get_recommended_models()
+    for model, fits in models_with_fit:
+        marker = "  " if fits else "x "
+        fit_note = "" if fits else f" (needs {model.ram_gb_required:.0f} GB)"
+        lines.append(
+            f"    {marker}{model.ollama_tag:<25s} "
+            f"{model.ram_gb_required:>2.0f} GB  {model.notes}{fit_note}"
+        )
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Provider health checks
 # ---------------------------------------------------------------------------
 
@@ -244,13 +388,14 @@ class ProviderTestResult:
         if not self.reachable:
             msgs.append(f"Endpoint not reachable: {self.reachable_detail}")
         if self.tool_use is False:
-            msgs.append(
+            warning = (
                 f"Tool use not supported: {self.tool_use_detail}\n"
                 "  Claude Code relies on function calling for agentic workflows.\n"
-                "  This model may not work correctly. Consider using a model\n"
-                "  with strong tool-use support, or restrict this provider's\n"
-                "  capabilities to non-agentic tasks."
+                "  This model may not work correctly.\n"
+                "\n"
+                + format_model_recommendations()
             )
+            msgs.append(warning)
         return msgs
 
 

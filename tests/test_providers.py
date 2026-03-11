@@ -17,8 +17,12 @@ from pm_core.providers import (
     get_default_provider,
     set_default_provider,
     check_provider,
+    get_recommended_models,
+    format_model_recommendations,
     _resolve_env_ref,
+    _get_system_memory_gb,
     BUILTIN_CLAUDE,
+    RECOMMENDED_MODELS,
 )
 
 
@@ -281,6 +285,13 @@ class TestProviderTestResult:
         assert len(r.warnings) == 1
         assert "function calling" in r.warnings[0]
 
+    def test_tool_use_warning_includes_recommendations(self):
+        r = ProviderTestResult(reachable=True, tool_use=False,
+                               tool_use_detail="did not call tool")
+        warning = r.warnings[0]
+        assert "Recommended models" in warning
+        assert "qwen2.5-coder" in warning
+
 
 # ---------------------------------------------------------------------------
 # check_provider
@@ -376,3 +387,54 @@ class TestCheckProvider:
         assert result.reachable
         assert result.tool_use is False
         assert "did not use the tool" in result.tool_use_detail
+
+
+# ---------------------------------------------------------------------------
+# Recommended models
+# ---------------------------------------------------------------------------
+
+class TestRecommendedModels:
+    def test_models_list_not_empty(self):
+        assert len(RECOMMENDED_MODELS) > 0
+
+    def test_models_ordered_by_size(self):
+        sizes = [m.param_billions for m in RECOMMENDED_MODELS]
+        assert sizes == sorted(sizes)
+
+    def test_get_recommended_with_plenty_of_ram(self):
+        with patch("pm_core.providers._get_system_memory_gb", return_value=128.0), \
+             patch("pm_core.providers._get_gpu_memory_gb", return_value=None):
+            models = get_recommended_models()
+            assert all(fits for _, fits in models)
+
+    def test_get_recommended_with_limited_ram(self):
+        with patch("pm_core.providers._get_system_memory_gb", return_value=6.0), \
+             patch("pm_core.providers._get_gpu_memory_gb", return_value=None):
+            models = get_recommended_models()
+            # Some should fit, some shouldn't
+            fits_list = [fits for _, fits in models]
+            assert True in fits_list
+            assert False in fits_list
+
+    def test_get_recommended_uses_gpu_if_larger(self):
+        with patch("pm_core.providers._get_system_memory_gb", return_value=8.0), \
+             patch("pm_core.providers._get_gpu_memory_gb", return_value=24.0):
+            models = get_recommended_models()
+            # 24GB VRAM should fit 32B model (20GB required)
+            for model, fits in models:
+                if model.ram_gb_required <= 24:
+                    assert fits
+
+    def test_format_includes_model_tags(self):
+        with patch("pm_core.providers._get_system_memory_gb", return_value=16.0), \
+             patch("pm_core.providers._get_gpu_memory_gb", return_value=None):
+            text = format_model_recommendations()
+            assert "qwen2.5-coder:7b" in text
+            assert "Recommended models" in text
+            assert "16 GB RAM" in text
+
+    def test_format_marks_unfitting_models(self):
+        with patch("pm_core.providers._get_system_memory_gb", return_value=6.0), \
+             patch("pm_core.providers._get_gpu_memory_gb", return_value=None):
+            text = format_model_recommendations()
+            assert "needs" in text  # "needs X GB" for models that don't fit
