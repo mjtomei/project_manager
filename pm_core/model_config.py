@@ -3,12 +3,12 @@
 Resolves which model to use for a given session type based on a
 configuration hierarchy:
 
-    CLI --model flag  >  PM_MODEL env var  >  PR-level override
-    >  project.yaml model_config  >  global ~/.pm/settings  >  built-in defaults
+    PM_MODEL env var  >  PR-level override  >  project.yaml model_config
+    >  global ~/.pm/settings  >  built-in defaults
 
 Effort level resolution:
 
-    CLI --effort flag  >  PM_EFFORT env var  >  project.yaml session_effort
+    PM_EFFORT env var  >  project.yaml session_effort
     >  global ~/.pm/settings  >  built-in defaults
 
 Quality tiers map human-friendly labels to concrete model identifiers:
@@ -108,8 +108,6 @@ class ModelResolution:
 def resolve_model(
     session_type: str,
     *,
-    cli_model: str | None = None,
-    cli_effort: str | None = None,
     pr_model: str | None = None,
     project_data: dict | None = None,
 ) -> str | None:
@@ -121,17 +119,9 @@ def resolve_model(
     For provider-based resolution, use ``resolve_model_and_provider``
     instead — this function ignores ``provider:`` prefixed values and
     falls through to the next level.
-
-    Resolution order (first non-None wins):
-        1. cli_model        — explicit --model flag
-        2. pr_model         — per-PR override in project.yaml
-        3. project config   — model_config.session_models.<type> in project.yaml
-        4. global setting   — ~/.pm/settings/model-<type>
-        5. built-in default — DEFAULT_SESSION_MODELS -> QUALITY_TIERS
     """
     result = resolve_model_and_provider(
         session_type,
-        cli_model=cli_model,
         pr_model=pr_model,
         project_data=project_data,
     )
@@ -141,8 +131,6 @@ def resolve_model(
 def resolve_model_and_provider(
     session_type: str,
     *,
-    cli_model: str | None = None,
-    cli_effort: str | None = None,
     pr_model: str | None = None,
     project_data: dict | None = None,
 ) -> ModelResolution:
@@ -165,11 +153,8 @@ def resolve_model_and_provider(
         return ModelResolution(model=tiers.get(value, value))
 
     # --- Model / provider resolution ---
-    # 1. CLI --model override
-    if cli_model:
-        resolution = _resolve_value(cli_model)
-    # 2. PM_MODEL env var
-    elif (env_model := os.environ.get("PM_MODEL")):
+    # 1. PM_MODEL env var
+    if (env_model := os.environ.get("PM_MODEL")):
         resolution = _resolve_value(env_model)
     # 3. PR-level override
     elif pr_model:
@@ -194,11 +179,8 @@ def resolve_model_and_provider(
             resolution = ModelResolution()
 
     # --- Effort resolution (independent of model) ---
-    # 1. CLI --effort override
-    if cli_effort:
-        resolution.effort = cli_effort
-    # 2. PM_EFFORT env var
-    elif (env_effort := os.environ.get("PM_EFFORT")):
+    # 1. PM_EFFORT env var
+    if (env_effort := os.environ.get("PM_EFFORT")):
         resolution.effort = env_effort
     else:
         # 3. Project-level effort config

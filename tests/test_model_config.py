@@ -29,8 +29,9 @@ class TestQualityTiers:
 
     def test_passthrough_model_id(self):
         """Non-tier values are passed through as-is."""
-        result = resolve_model("review", cli_model="claude-custom-model")
-        assert result == "claude-custom-model"
+        with patch.dict("os.environ", {"PM_MODEL": "claude-custom-model"}):
+            result = resolve_model("review")
+            assert result == "claude-custom-model"
 
 
 class TestResolveModel:
@@ -41,18 +42,8 @@ class TestResolveModel:
         assert resolve_model("watcher") == QUALITY_TIERS["low"]
         assert resolve_model("merge") == QUALITY_TIERS["medium"]
 
-    def test_cli_override_takes_precedence(self):
-        assert resolve_model("review", cli_model="low") == QUALITY_TIERS["low"]
-
-    def test_cli_with_model_name(self):
-        assert resolve_model("review", cli_model="sonnet") == QUALITY_TIERS["sonnet"]
-        assert resolve_model("review", cli_model="haiku") == QUALITY_TIERS["haiku"]
-
     def test_pr_override(self):
         assert resolve_model("impl", pr_model="high") == QUALITY_TIERS["high"]
-
-    def test_cli_beats_pr(self):
-        assert resolve_model("impl", cli_model="low", pr_model="high") == QUALITY_TIERS["low"]
 
     def test_project_config(self):
         data = {"project": {"model_config": {"session_models": {"review": "medium"}}}}
@@ -92,37 +83,32 @@ class TestEffortResolution:
 
     def test_haiku_suppresses_effort(self):
         """Even if effort is configured, it's suppressed for haiku."""
-        result = resolve_model_and_provider("watcher", cli_effort="high")
-        assert result.effort is None
+        with patch.dict("os.environ", {"PM_EFFORT": "high"}):
+            result = resolve_model_and_provider("watcher")
+            assert result.effort is None
 
     def test_haiku_explicit_suppresses_effort(self):
-        """Setting model to haiku anywhere suppresses effort."""
-        result = resolve_model_and_provider("qa", cli_model="haiku", cli_effort="high")
-        assert result.effort is None
+        """Setting model to haiku via env var suppresses effort."""
+        with patch.dict("os.environ", {"PM_MODEL": "haiku", "PM_EFFORT": "high"}):
+            result = resolve_model_and_provider("qa")
+            assert result.effort is None
 
     def test_sonnet_keeps_effort(self):
         """Sonnet supports effort levels."""
-        result = resolve_model_and_provider("qa", cli_model="sonnet", cli_effort="low")
-        assert result.effort == "low"
+        with patch.dict("os.environ", {"PM_MODEL": "sonnet", "PM_EFFORT": "low"}):
+            result = resolve_model_and_provider("qa")
+            assert result.effort == "low"
 
     def test_opus_keeps_effort(self):
         """Opus supports effort levels."""
-        result = resolve_model_and_provider("review", cli_effort="medium")
-        assert result.effort == "medium"
-
-    def test_cli_effort_overrides(self):
-        result = resolve_model_and_provider("qa", cli_effort="high")
-        assert result.effort == "high"
+        with patch.dict("os.environ", {"PM_EFFORT": "medium"}):
+            result = resolve_model_and_provider("review")
+            assert result.effort == "medium"
 
     def test_project_effort_config(self):
         data = {"project": {"model_config": {"session_effort": {"qa": "low"}}}}
         result = resolve_model_and_provider("qa", project_data=data)
         assert result.effort == "low"
-
-    def test_cli_effort_beats_project(self):
-        data = {"project": {"model_config": {"session_effort": {"qa": "low"}}}}
-        result = resolve_model_and_provider("qa", cli_effort="high", project_data=data)
-        assert result.effort == "high"
 
     @patch("pm_core.model_config.get_global_setting_value")
     def test_global_effort_setting(self, mock_gsv):
@@ -137,25 +123,26 @@ class TestEnvVarOverrides:
             result = resolve_model("qa")
             assert result == QUALITY_TIERS["haiku"]
 
+    def test_pm_model_with_shortcut(self):
+        with patch.dict("os.environ", {"PM_MODEL": "sonnet"}):
+            result = resolve_model("review")
+            assert result == QUALITY_TIERS["sonnet"]
+
     def test_pm_model_beats_project(self):
         data = {"project": {"model_config": {"session_models": {"qa": "high"}}}}
         with patch.dict("os.environ", {"PM_MODEL": "low"}):
             result = resolve_model("qa", project_data=data)
             assert result == QUALITY_TIERS["low"]
 
-    def test_cli_beats_pm_model(self):
-        with patch.dict("os.environ", {"PM_MODEL": "low"}):
-            result = resolve_model("qa", cli_model="high")
-            assert result == QUALITY_TIERS["high"]
-
     def test_pm_effort_env_var(self):
         with patch.dict("os.environ", {"PM_EFFORT": "low"}):
             result = resolve_model_and_provider("review")
             assert result.effort == "low"
 
-    def test_cli_effort_beats_pm_effort(self):
-        with patch.dict("os.environ", {"PM_EFFORT": "low"}):
-            result = resolve_model_and_provider("review", cli_effort="high")
+    def test_pm_effort_beats_project(self):
+        data = {"project": {"model_config": {"session_effort": {"qa": "low"}}}}
+        with patch.dict("os.environ", {"PM_EFFORT": "high"}):
+            result = resolve_model_and_provider("qa", project_data=data)
             assert result.effort == "high"
 
     def test_pm_model_provider_prefix(self):
@@ -211,10 +198,11 @@ class TestBuildClaudeShellCmd:
 
 
 class TestProviderResolution:
-    def test_provider_prefix_returns_provider(self):
-        result = resolve_model_and_provider("watcher", cli_model="provider:ollama")
-        assert result.provider == "ollama"
-        assert result.model is None
+    def test_provider_prefix_via_env(self):
+        with patch.dict("os.environ", {"PM_MODEL": "provider:ollama"}):
+            result = resolve_model_and_provider("watcher")
+            assert result.provider == "ollama"
+            assert result.model is None
 
     def test_non_provider_returns_model(self):
         result = resolve_model_and_provider("review")
@@ -228,7 +216,8 @@ class TestProviderResolution:
         assert result.model is None
 
     def test_resolve_model_ignores_provider(self):
-        assert resolve_model("watcher", cli_model="provider:ollama") is None
+        with patch.dict("os.environ", {"PM_MODEL": "provider:ollama"}):
+            assert resolve_model("watcher") is None
 
     def test_summary_shows_provider(self):
         data = {"project": {"model_config": {"session_models": {"watcher": "provider:ollama"}}}}

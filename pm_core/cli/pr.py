@@ -525,10 +525,7 @@ def pr_ready():
               help="Path to save Claude transcript symlink (used by auto-start)")
 @click.option("--companion", is_flag=True, default=False,
               help="Open a companion shell pane in the PR workdir")
-@click.option("--model", default=None, help="Override model (e.g. high, sonnet, haiku, or model ID)")
-@click.option("--effort", default=None, type=click.Choice(["low", "medium", "high"]),
-              help="Override effort level for this session")
-def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, transcript: str | None, companion: bool, model: str | None, effort: str | None):
+def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, transcript: str | None, companion: bool):
     """Start working on a PR: clone, branch, print prompt.
 
     If PR_ID is omitted, uses the active PR if it's pending/ready, or
@@ -726,8 +723,6 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
     _resolution = resolve_model_and_provider(
         "impl",
-        cli_model=model,
-        cli_effort=effort,
         pr_model=get_pr_model_override(pr_entry),
         project_data=data,
     )
