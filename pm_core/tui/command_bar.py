@@ -41,6 +41,12 @@ class CommandBar(Input):
     def on_blur(self) -> None:
         _log.debug("CommandBar: lost focus")
         self.placeholder = self.UNFOCUSED_PLACEHOLDER
+        # Clear command pending state and buffer when losing focus
+        app = self.app
+        if getattr(app, "_command_pending", False):
+            _log.debug("CommandBar: clearing command pending state on blur")
+            app._command_pending = False
+            app._command_buffer.clear()
 
     def on_key(self, event) -> None:
         _log.debug("CommandBar on_key: key=%r char=%r value=%r",
