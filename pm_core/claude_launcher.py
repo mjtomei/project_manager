@@ -126,7 +126,9 @@ def find_editor() -> str:
 
 def launch_claude(prompt: str, session_key: str, pm_root: Path,
                   cwd: str | None = None, resume: bool = True,
-                  provider: str | None = None) -> int:
+                  provider: str | None = None,
+                  model: str | None = None,
+                  effort: str | None = None) -> int:
     """Run claude interactively with a prompt. Returns exit code.
 
     Attempts to resume a previous session if one exists for session_key.
@@ -135,6 +137,8 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
 
     Args:
         provider: Name of the LLM provider to use. See providers.py.
+        model: Explicit model ID to pass via --model (overrides provider model).
+        effort: Effort level to pass via --effort (low, medium, high).
     """
     import uuid
 
@@ -143,7 +147,9 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
         raise FileNotFoundError("claude CLI not found. Install it first.")
 
     # Resolve provider for env vars and model flag
-    _, model_flag, run_env = _resolve_provider(provider)
+    _, provider_model_flag, run_env = _resolve_provider(provider)
+    # Explicit model param overrides provider's model_flag
+    model_flag = model or provider_model_flag
 
     # Try to resume existing session, or generate new session ID
     session_id = None
@@ -165,6 +171,8 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
         cmd.append("--dangerously-skip-permissions")
     if model_flag:
         cmd.extend(["--model", model_flag])
+    if effort:
+        cmd.extend(["--effort", effort])
     if is_resuming:
         cmd.extend(["--resume", session_id])
         # Don't pass prompt when resuming - Claude already has the conversation
@@ -191,6 +199,8 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
             cmd.append("--dangerously-skip-permissions")
         if model_flag:
             cmd.extend(["--model", model_flag])
+        if effort:
+            cmd.extend(["--effort", effort])
         cmd.extend(["--session-id", session_id])
         cmd.append(prompt)
         log_shell_command(cmd, prefix="claude")
