@@ -515,6 +515,17 @@ def session_kill(start_dir):
     tmux_mod.kill_session(session_name, socket_path=socket_path)
     pane_layout.set_force_mobile(session_name, False)
 
+    # Clean up containers and push proxies belonging to this session
+    session_tag = session_name.removeprefix("pm-")
+    if session_tag:
+        from pm_core.container import cleanup_session_containers
+        from pm_core.push_proxy import stop_session_proxies
+        n_containers = cleanup_session_containers(session_tag)
+        n_proxies = stop_session_proxies(session_tag)
+        if n_containers or n_proxies:
+            _log.info("Session kill cleanup: %d container(s), %d proxy(ies)",
+                      n_containers, n_proxies)
+
     # Clean up shared socket file
     if socket_path:
         try:
