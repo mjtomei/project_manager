@@ -476,6 +476,70 @@ class TestCheckProvider:
         assert "did not use the tool" in result.tool_use_detail
 
     @patch("urllib.request.urlopen")
+    def test_tool_use_http_error_marks_inference_failed(self, mock_urlopen):
+        """HTTP error during tool check should set inference_ok=False."""
+        import urllib.error
+        models_resp = MagicMock()
+        models_resp.status = 200
+        models_resp.__enter__ = MagicMock(return_value=models_resp)
+        models_resp.__exit__ = MagicMock(return_value=False)
+
+        # Anthropic API probe — 404
+        msg_404 = urllib.error.HTTPError(
+            url="", code=404, msg="Not Found", hdrs=None, fp=MagicMock())
+
+        # Tool use check — HTTP 500
+        fp_500 = MagicMock()
+        fp_500.read.return_value = b"internal error"
+        chat_error = urllib.error.HTTPError(
+            url="", code=500, msg="Internal Server Error",
+            hdrs=None, fp=fp_500)
+
+        mock_urlopen.side_effect = [models_resp, msg_404, chat_error]
+
+        p = ProviderConfig(name="test", type="openai",
+                          api_base="http://localhost:11434/v1",
+                          model="broken-model")
+        result = check_provider(p)
+        assert result.reachable
+        assert result.tool_use is False
+        assert result.inference_ok is False
+        assert "HTTP 500" in result.inference_detail
+
+    @patch("urllib.request.urlopen")
+    def test_tool_use_failure_but_inference_ok(self, mock_urlopen):
+        """Model responds but doesn't use tool — inference still works."""
+        import json
+        import urllib.error
+        models_resp = MagicMock()
+        models_resp.status = 200
+        models_resp.__enter__ = MagicMock(return_value=models_resp)
+        models_resp.__exit__ = MagicMock(return_value=False)
+
+        msg_404 = urllib.error.HTTPError(
+            url="", code=404, msg="Not Found", hdrs=None, fp=MagicMock())
+
+        chat_body = json.dumps({
+            "choices": [{
+                "message": {"content": "The answer is 4"},
+                "finish_reason": "stop",
+            }]
+        }).encode()
+        chat_resp = MagicMock()
+        chat_resp.read.return_value = chat_body
+        chat_resp.__enter__ = MagicMock(return_value=chat_resp)
+        chat_resp.__exit__ = MagicMock(return_value=False)
+
+        mock_urlopen.side_effect = [models_resp, msg_404, chat_resp]
+
+        p = ProviderConfig(name="test", type="openai",
+                          api_base="http://localhost:11434/v1",
+                          model="no-tool-model")
+        result = check_provider(p)
+        assert result.tool_use is False
+        assert result.inference_ok is True
+
+    @patch("urllib.request.urlopen")
     def test_local_provider_anthropic_tool_check(self, mock_urlopen):
         """Local providers use Anthropic Messages API for tool checks."""
         import json

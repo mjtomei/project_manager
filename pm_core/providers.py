@@ -537,11 +537,6 @@ def check_provider(provider: ProviderConfig, check_tools: bool = True) -> Provid
     elif provider.type == "openai":
         result = _check_tools_openai(api_base, api_key, provider.model, result)
 
-    # Derive inference status from tool-use test (which sends a real prompt)
-    if result.tool_use is not None:
-        result.inference_ok = True  # Got a response = inference works
-        result.inference_detail = "model produced output"
-
     return result
 
 
@@ -716,6 +711,10 @@ def _check_tools_anthropic(
         )
         stop_reason = body.get("stop_reason", "")
 
+        # Model produced a response — inference works regardless of tool use
+        result.inference_ok = True
+        result.inference_detail = "model produced output"
+
         if has_tool_use or stop_reason == "tool_use":
             result.tool_use = True
             result.tool_use_detail = "model produced a tool call"
@@ -730,6 +729,8 @@ def _check_tools_anthropic(
 
     except urllib.error.HTTPError as e:
         result.tool_use = False
+        result.inference_ok = False
+        result.inference_detail = f"HTTP {e.code}"
         error_body = ""
         try:
             error_body = e.read().decode()[:200]
@@ -744,9 +745,13 @@ def _check_tools_anthropic(
     except urllib.error.URLError as e:
         result.tool_use = False
         result.tool_use_detail = str(e.reason)
+        result.inference_ok = False
+        result.inference_detail = str(e.reason)
     except Exception as e:
         result.tool_use = False
         result.tool_use_detail = str(e)
+        result.inference_ok = False
+        result.inference_detail = str(e)
 
     return result
 
@@ -807,6 +812,10 @@ def _check_tools_openai(
         tool_calls = message.get("tool_calls", [])
         finish_reason = choices[0].get("finish_reason", "")
 
+        # Model produced a response — inference works regardless of tool use
+        result.inference_ok = True
+        result.inference_detail = "model produced output"
+
         if tool_calls or finish_reason == "tool_calls":
             result.tool_use = True
             result.tool_use_detail = "model produced a tool call"
@@ -817,6 +826,7 @@ def _check_tools_openai(
 
     except urllib.error.HTTPError as e:
         result.tool_use = False
+        result.inference_ok = False
         error_body = ""
         try:
             error_body = e.read().decode()[:200]
@@ -828,11 +838,16 @@ def _check_tools_openai(
         if error_body:
             detail += f" ({error_body})"
         result.tool_use_detail = detail
+        result.inference_detail = detail
     except urllib.error.URLError as e:
         result.tool_use = False
         result.tool_use_detail = str(e.reason)
+        result.inference_ok = False
+        result.inference_detail = str(e.reason)
     except Exception as e:
         result.tool_use = False
         result.tool_use_detail = str(e)
+        result.inference_ok = False
+        result.inference_detail = str(e)
 
     return result
