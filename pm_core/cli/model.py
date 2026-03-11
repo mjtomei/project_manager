@@ -16,8 +16,7 @@ def model_show():
     """Show effective model for each session type."""
     from pm_core import store
     from pm_core.model_config import (
-        SESSION_TYPES, QUALITY_TIERS, DEFAULT_SESSION_MODELS,
-        DEFAULT_SESSION_EFFORT, get_model_config_summary,
+        SESSION_TYPES, QUALITY_TIERS,
         resolve_model_and_provider,
     )
 
