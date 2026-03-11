@@ -30,7 +30,6 @@ and return a provider name instead of a model identifier.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 from pm_core.paths import configure_logger, get_global_setting_value
 
@@ -157,11 +156,6 @@ def resolve_model_and_provider(
             return ModelResolution(model=model_id)
 
     return ModelResolution()
-
-
-def _expand_tier(value: str) -> str:
-    """If value is a tier name (high/standard/economy), expand to model ID."""
-    return QUALITY_TIERS.get(value, value)
 
 
 def get_model_config_summary(project_data: dict | None = None) -> dict[str, str]:

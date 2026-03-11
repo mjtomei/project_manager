@@ -7,24 +7,12 @@ from pm_core.model_config import (
     resolve_model,
     resolve_model_and_provider,
     ModelResolution,
-    _expand_tier,
     get_model_config_summary,
     get_pr_model_override,
     QUALITY_TIERS,
     DEFAULT_SESSION_MODELS,
     SESSION_TYPES,
 )
-
-
-class TestExpandTier:
-    def test_known_tiers(self):
-        assert _expand_tier("high") == "claude-opus-4-20250514"
-        assert _expand_tier("standard") == "claude-sonnet-4-20250514"
-        assert _expand_tier("economy") == "claude-haiku-4-5-20251001"
-
-    def test_passthrough_model_id(self):
-        assert _expand_tier("claude-custom-model") == "claude-custom-model"
-        assert _expand_tier("my-local-model") == "my-local-model"
 
 
 class TestResolveModel:

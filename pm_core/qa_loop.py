@@ -414,6 +414,20 @@ def parse_qa_plan(output: str) -> list[QAScenario]:
 
 
 # ---------------------------------------------------------------------------
+# Model resolution helper
+# ---------------------------------------------------------------------------
+
+def _resolve_qa_model(pr_data: dict, project_data: dict | None = None):
+    """Resolve model/provider for QA sessions (avoids repeating the call)."""
+    from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
+    return resolve_model_and_provider(
+        "qa",
+        pr_model=get_pr_model_override(pr_data),
+        project_data=project_data,
+    )
+
+
+# ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # Scenario 0 — interactive session
 # ---------------------------------------------------------------------------
@@ -435,13 +449,7 @@ def _launch_scenario_0(
     from pm_core.claude_launcher import build_claude_shell_cmd
     from pm_core.container import is_container_mode_enabled, _docker_available
     from pm_core import container as container_mod
-    from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
-
-    _qa_resolution = resolve_model_and_provider(
-        "qa",
-        pr_model=get_pr_model_override(pr_data),
-        project_data=data,
-    )
+    _qa_resolution = _resolve_qa_model(pr_data, data)
 
     scenario = QAScenario(
         index=0,
@@ -477,7 +485,9 @@ def _launch_scenario_0(
         scratch_dir=str(scratch_path),
     )
 
-    claude_cmd = build_claude_shell_cmd(prompt=child_prompt, model=_qa_resolution.model, provider=_qa_resolution.provider)
+    claude_cmd = build_claude_shell_cmd(
+        prompt=child_prompt,
+        model=_qa_resolution.model, provider=_qa_resolution.provider)
     if venv_path:
         claude_cmd = f"VIRTUAL_ENV={venv_path} PATH={venv_path}/bin:$PATH {claude_cmd}"
     final_cmd = claude_cmd
@@ -511,13 +521,7 @@ def _launch_scenarios_in_tmux(
     """Launch each scenario in its own tmux window (with worktree isolation)."""
     from pm_core import tmux as tmux_mod, prompt_gen
     from pm_core.claude_launcher import build_claude_shell_cmd
-    from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
-
-    _qa_resolution = resolve_model_and_provider(
-        "qa",
-        pr_model=get_pr_model_override(pr_data),
-        project_data=data,
-    )
+    _qa_resolution = _resolve_qa_model(pr_data, data)
 
     branch = pr_data.get("branch", "")
 
@@ -549,7 +553,9 @@ def _launch_scenarios_in_tmux(
             worktree_mode=bool(repo_root),
             scratch_dir=str(scratch_path),
         )
-        child_cmd = build_claude_shell_cmd(prompt=child_prompt, model=_qa_resolution.model, provider=_qa_resolution.provider)
+        child_cmd = build_claude_shell_cmd(
+            prompt=child_prompt,
+            model=_qa_resolution.model, provider=_qa_resolution.provider)
 
         # Activate the scenario venv so pip installs stay local
         if venv_path:
@@ -595,13 +601,7 @@ def _launch_scenarios_in_containers(
     from pm_core import tmux as tmux_mod, prompt_gen
     from pm_core import container as container_mod
     from pm_core.claude_launcher import build_claude_shell_cmd
-    from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
-
-    _qa_resolution = resolve_model_and_provider(
-        "qa",
-        pr_model=get_pr_model_override(pr_data),
-        project_data=data,
-    )
+    _qa_resolution = _resolve_qa_model(pr_data, data)
 
     config = container_mod.load_container_config()
     branch = pr_data.get("branch", "")
@@ -635,7 +635,9 @@ def _launch_scenarios_in_containers(
             worktree_mode=bool(repo_root),
             scratch_dir=container_scratch,
         )
-        claude_cmd = build_claude_shell_cmd(prompt=child_prompt, model=_qa_resolution.model, provider=_qa_resolution.provider)
+        claude_cmd = build_claude_shell_cmd(
+        prompt=child_prompt,
+        model=_qa_resolution.model, provider=_qa_resolution.provider)
 
         # Create container with push proxy for the PR branch
         cname = container_mod.qa_container_name(
@@ -700,13 +702,7 @@ def _relaunch_scenario_window(
     from pm_core.claude_launcher import build_claude_shell_cmd
     from pm_core.container import is_container_mode_enabled, _docker_available
     from pm_core import container as container_mod
-    from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
-
-    _qa_resolution = resolve_model_and_provider(
-        "qa",
-        pr_model=get_pr_model_override(pr_data),
-        project_data=data,
-    )
+    _qa_resolution = _resolve_qa_model(pr_data, data)
 
     win_name = _scenario_window_name(pr_data, scenario.index)
     use_containers = is_container_mode_enabled() and _docker_available()
@@ -723,7 +719,9 @@ def _relaunch_scenario_window(
                 worktree_mode=bool(scenario.worktree_path),
                 scratch_dir=container_scratch,
             )
-            claude_cmd = build_claude_shell_cmd(prompt=child_prompt, model=_qa_resolution.model, provider=_qa_resolution.provider)
+            claude_cmd = build_claude_shell_cmd(
+        prompt=child_prompt,
+        model=_qa_resolution.model, provider=_qa_resolution.provider)
             exec_cmd = container_mod.build_exec_cmd(
                 scenario.container_name, claude_cmd, cleanup=False)
             tmux_mod.new_window(session, win_name, exec_cmd,
@@ -738,7 +736,9 @@ def _relaunch_scenario_window(
                 worktree_mode=bool(scenario.worktree_path),
                 scratch_dir=str(Path(state.qa_workdir) / f"scratch-{scenario.index}"),
             )
-            child_cmd = build_claude_shell_cmd(prompt=child_prompt, model=_qa_resolution.model, provider=_qa_resolution.provider)
+            child_cmd = build_claude_shell_cmd(
+            prompt=child_prompt,
+            model=_qa_resolution.model, provider=_qa_resolution.provider)
             venv_path = Path(state.qa_workdir) / f"venv-{scenario.index}"
             if venv_path.is_dir():
                 child_cmd = f"VIRTUAL_ENV={venv_path} PATH={venv_path}/bin:$PATH {child_cmd}"
@@ -882,13 +882,7 @@ def run_qa_sync(
     from pm_core import tmux as tmux_mod, prompt_gen, git_ops, store
     from pm_core import pane_layout, pane_registry
     from pm_core.claude_launcher import build_claude_shell_cmd
-    from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
-
-    _qa_resolution = resolve_model_and_provider(
-        "qa",
-        pr_model=get_pr_model_override(pr_data),
-        project_data=store.load(pm_root),
-    )
+    _qa_resolution = _resolve_qa_model(pr_data, store.load(pm_root))
 
     state.running = True
     session = get_pm_session()
@@ -939,7 +933,9 @@ def run_qa_sync(
             data, state.pr_id, session,
             scenario_start=scenario_start,
         )
-        cmd = build_claude_shell_cmd(prompt=planner_prompt, model=_qa_resolution.model, provider=_qa_resolution.provider)
+        cmd = build_claude_shell_cmd(
+            prompt=planner_prompt,
+            model=_qa_resolution.model, provider=_qa_resolution.provider)
 
         # If the main QA window already exists, remember which sessions
         # were watching it so we can switch them to the replacement window
