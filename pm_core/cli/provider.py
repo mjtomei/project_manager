@@ -52,9 +52,9 @@ def _display_test_result(result) -> None:
             )
 
     if result.anthropic_api is True:
-        click.echo(f"  Anthropic API: SUPPORTED ({result.anthropic_api_detail})")
+        click.echo("  Anthropic API: SUPPORTED")
     elif result.anthropic_api is False:
-        click.echo(f"  Anthropic API: not available")
+        click.echo("  Anthropic API: not available")
 
     if result.tool_use is True:
         click.echo(f"  Tool use: OK ({result.tool_use_detail})")
@@ -72,7 +72,7 @@ def _display_test_result(result) -> None:
 @click.option("--type", "ptype", default="local", type=click.Choice(["local", "openai", "claude"]),
               help="Provider type: local (Ollama/llama.cpp, recommended), "
                    "openai (OpenAI-compatible), claude (Anthropic API)")
-@click.option("--api-base", required=True, help="API base URL (e.g. http://localhost:11434/v1)")
+@click.option("--api-base", required=True, help="API base URL (e.g. http://localhost:11434)")
 @click.option("--api-key", default="", help="API key (or ${ENV_VAR} reference)")
 @click.option("--model", default="", help="Model name")
 @click.option("--capabilities", default="", help="Comma-separated capability tags")
@@ -84,14 +84,15 @@ def provider_add(name: str, ptype: str, api_base: str, api_key: str,
     Automatically tests connectivity and tool-use support before adding.
     If issues are found, you'll be prompted to confirm.
 
-    The default type is 'local' which uses the Anthropic-compatible API
-    that Ollama 0.14+ and LM Studio 0.4.1+ support natively.
+    The default type is 'local' which works with any server (Ollama,
+    LM Studio, llama.cpp, vLLM).  The tool-use check auto-detects
+    whether the server speaks the Anthropic or OpenAI API.
 
     \b
     Examples:
       pm provider add ollama --api-base http://localhost:11434 --model qwen3.5
       pm provider add llama-cpp --api-base http://localhost:8001 --model glm-4.7-flash
-      pm provider add vllm --type openai --api-base http://localhost:8000/v1 --model codellama
+      pm provider add vllm --api-base http://localhost:8000/v1 --model codellama
     """
     from pm_core.providers import (
         ProviderConfig, load_providers, save_providers, check_provider,

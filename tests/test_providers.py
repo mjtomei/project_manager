@@ -416,11 +416,18 @@ class TestCheckProvider:
         models_resp.__enter__ = MagicMock(return_value=models_resp)
         models_resp.__exit__ = MagicMock(return_value=False)
 
-        # Second call: /v1/messages (Anthropic API probe — 404)
+        # Second call: /models (context window — no match)
+        ctx_body = json.dumps({"data": []}).encode()
+        ctx_resp = MagicMock()
+        ctx_resp.read.return_value = ctx_body
+        ctx_resp.__enter__ = MagicMock(return_value=ctx_resp)
+        ctx_resp.__exit__ = MagicMock(return_value=False)
+
+        # Third call: /v1/messages (Anthropic API probe — 404)
         msg_404 = urllib.error.HTTPError(
             url="", code=404, msg="Not Found", hdrs=None, fp=MagicMock())
 
-        # Third call: /chat/completions (tool use)
+        # Fourth call: /chat/completions (tool use)
         chat_body = json.dumps({
             "choices": [{
                 "message": {"tool_calls": [{"function": {"name": "calculator"}}]},
@@ -432,7 +439,7 @@ class TestCheckProvider:
         chat_resp.__enter__ = MagicMock(return_value=chat_resp)
         chat_resp.__exit__ = MagicMock(return_value=False)
 
-        mock_urlopen.side_effect = [models_resp, msg_404, chat_resp]
+        mock_urlopen.side_effect = [models_resp, ctx_resp, msg_404, chat_resp]
 
         p = ProviderConfig(name="test", type="openai",
                           api_base="http://localhost:11434/v1",
@@ -450,6 +457,13 @@ class TestCheckProvider:
         models_resp.__enter__ = MagicMock(return_value=models_resp)
         models_resp.__exit__ = MagicMock(return_value=False)
 
+        # Context window check — no match
+        ctx_body = json.dumps({"data": []}).encode()
+        ctx_resp = MagicMock()
+        ctx_resp.read.return_value = ctx_body
+        ctx_resp.__enter__ = MagicMock(return_value=ctx_resp)
+        ctx_resp.__exit__ = MagicMock(return_value=False)
+
         # Anthropic API probe — 404
         msg_404 = urllib.error.HTTPError(
             url="", code=404, msg="Not Found", hdrs=None, fp=MagicMock())
@@ -465,7 +479,7 @@ class TestCheckProvider:
         chat_resp.__enter__ = MagicMock(return_value=chat_resp)
         chat_resp.__exit__ = MagicMock(return_value=False)
 
-        mock_urlopen.side_effect = [models_resp, msg_404, chat_resp]
+        mock_urlopen.side_effect = [models_resp, ctx_resp, msg_404, chat_resp]
 
         p = ProviderConfig(name="test", type="openai",
                           api_base="http://localhost:11434/v1",
@@ -478,11 +492,19 @@ class TestCheckProvider:
     @patch("urllib.request.urlopen")
     def test_tool_use_http_error_marks_inference_failed(self, mock_urlopen):
         """HTTP error during tool check should set inference_ok=False."""
+        import json
         import urllib.error
         models_resp = MagicMock()
         models_resp.status = 200
         models_resp.__enter__ = MagicMock(return_value=models_resp)
         models_resp.__exit__ = MagicMock(return_value=False)
+
+        # Context window check — no match
+        ctx_body = json.dumps({"data": []}).encode()
+        ctx_resp = MagicMock()
+        ctx_resp.read.return_value = ctx_body
+        ctx_resp.__enter__ = MagicMock(return_value=ctx_resp)
+        ctx_resp.__exit__ = MagicMock(return_value=False)
 
         # Anthropic API probe — 404
         msg_404 = urllib.error.HTTPError(
@@ -495,7 +517,7 @@ class TestCheckProvider:
             url="", code=500, msg="Internal Server Error",
             hdrs=None, fp=fp_500)
 
-        mock_urlopen.side_effect = [models_resp, msg_404, chat_error]
+        mock_urlopen.side_effect = [models_resp, ctx_resp, msg_404, chat_error]
 
         p = ProviderConfig(name="test", type="openai",
                           api_base="http://localhost:11434/v1",
@@ -516,6 +538,13 @@ class TestCheckProvider:
         models_resp.__enter__ = MagicMock(return_value=models_resp)
         models_resp.__exit__ = MagicMock(return_value=False)
 
+        # Context window check — no match
+        ctx_body = json.dumps({"data": []}).encode()
+        ctx_resp = MagicMock()
+        ctx_resp.read.return_value = ctx_body
+        ctx_resp.__enter__ = MagicMock(return_value=ctx_resp)
+        ctx_resp.__exit__ = MagicMock(return_value=False)
+
         msg_404 = urllib.error.HTTPError(
             url="", code=404, msg="Not Found", hdrs=None, fp=MagicMock())
 
@@ -530,7 +559,7 @@ class TestCheckProvider:
         chat_resp.__enter__ = MagicMock(return_value=chat_resp)
         chat_resp.__exit__ = MagicMock(return_value=False)
 
-        mock_urlopen.side_effect = [models_resp, msg_404, chat_resp]
+        mock_urlopen.side_effect = [models_resp, ctx_resp, msg_404, chat_resp]
 
         p = ProviderConfig(name="test", type="openai",
                           api_base="http://localhost:11434/v1",
@@ -589,7 +618,14 @@ class TestCheckProvider:
         models_resp.__enter__ = MagicMock(return_value=models_resp)
         models_resp.__exit__ = MagicMock(return_value=False)
 
-        # Second call: /v1/messages (Anthropic API probe — success)
+        # Second call: /models (context window — no match)
+        ctx_body = json.dumps({"data": []}).encode()
+        ctx_resp = MagicMock()
+        ctx_resp.read.return_value = ctx_body
+        ctx_resp.__enter__ = MagicMock(return_value=ctx_resp)
+        ctx_resp.__exit__ = MagicMock(return_value=False)
+
+        # Third call: /v1/messages (Anthropic API probe — success)
         msg_body = json.dumps({
             "content": [{"type": "text", "text": "hi"}],
             "stop_reason": "end_turn",
@@ -599,7 +635,7 @@ class TestCheckProvider:
         msg_resp.__enter__ = MagicMock(return_value=msg_resp)
         msg_resp.__exit__ = MagicMock(return_value=False)
 
-        # Third call: /chat/completions (tool use check)
+        # Fourth call: /chat/completions (tool use check)
         chat_body = json.dumps({
             "choices": [{
                 "message": {"tool_calls": [{"function": {"name": "calculator"}}]},
@@ -611,7 +647,7 @@ class TestCheckProvider:
         chat_resp.__enter__ = MagicMock(return_value=chat_resp)
         chat_resp.__exit__ = MagicMock(return_value=False)
 
-        mock_urlopen.side_effect = [models_resp, msg_resp, chat_resp]
+        mock_urlopen.side_effect = [models_resp, ctx_resp, msg_resp, chat_resp]
 
         p = ProviderConfig(name="test", type="openai",
                           api_base="http://localhost:11434/v1",
@@ -624,7 +660,7 @@ class TestCheckProvider:
         assert result.inference_ok is True
 
         # Verify the Anthropic probe URL doesn't double the /v1 prefix
-        probe_call = mock_urlopen.call_args_list[1]
+        probe_call = mock_urlopen.call_args_list[2]
         probe_req = probe_call[0][0]
         assert probe_req.full_url == "http://localhost:11434/v1/messages"
 
@@ -639,14 +675,21 @@ class TestCheckProvider:
         models_resp.__enter__ = MagicMock(return_value=models_resp)
         models_resp.__exit__ = MagicMock(return_value=False)
 
-        # Second call: /v1/messages returns 404
+        # Second call: /models (context window — no match)
+        ctx_body = json.dumps({"data": []}).encode()
+        ctx_resp = MagicMock()
+        ctx_resp.read.return_value = ctx_body
+        ctx_resp.__enter__ = MagicMock(return_value=ctx_resp)
+        ctx_resp.__exit__ = MagicMock(return_value=False)
+
+        # Third call: /v1/messages returns 404
         msg_error = urllib.error.HTTPError(
             url="http://localhost:8000/v1/messages",
             code=404, msg="Not Found",
             hdrs=None, fp=MagicMock(),
         )
 
-        # Third call: /chat/completions (tool use)
+        # Fourth call: /chat/completions (tool use)
         chat_body = json.dumps({
             "choices": [{
                 "message": {"tool_calls": [{"function": {"name": "calculator"}}]},
@@ -658,7 +701,7 @@ class TestCheckProvider:
         chat_resp.__enter__ = MagicMock(return_value=chat_resp)
         chat_resp.__exit__ = MagicMock(return_value=False)
 
-        mock_urlopen.side_effect = [models_resp, msg_error, chat_resp]
+        mock_urlopen.side_effect = [models_resp, ctx_resp, msg_error, chat_resp]
 
         p = ProviderConfig(name="test", type="openai",
                           api_base="http://localhost:8000/v1",

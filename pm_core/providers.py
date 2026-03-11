@@ -2,10 +2,13 @@
 
 Supports multiple provider types:
   - claude: Default Anthropic Claude API (no extra config needed)
-  - local: Local model via Anthropic-compatible API (Ollama 0.14+,
-    LM Studio 0.4.1+, llama.cpp).  Recommended for local models.
+  - local: Local model via Ollama, LM Studio, llama.cpp, or any server
+    with an OpenAI-compatible or Anthropic-compatible API.
+    Recommended for all local models.  Uses ANTHROPIC_BASE_URL.
+    Tool-use check tries Anthropic API first, falls back to OpenAI API.
   - openai: OpenAI-compatible API endpoint (vLLM, etc.).
-    Use only if your server doesn't speak the Anthropic Messages API.
+    NOTE: Claude Code currently routes all requests through the Anthropic
+    API, so OPENAI_BASE_URL may not work as expected.  Prefer type=local.
 
 Configuration is stored in ~/.pm/providers.yaml:
 
@@ -51,12 +54,13 @@ class ProviderConfig:
 
     Provider types:
       - claude: Default Anthropic Claude API (no extra config needed)
-      - local: Local model via Anthropic-compatible API (Ollama 0.14+,
-        LM Studio 0.4.1+, llama.cpp).  Uses ANTHROPIC_BASE_URL.
-        This is the recommended approach for local models.
-      - openai: OpenAI-compatible API endpoint (vLLM, older Ollama, etc.).
-        Uses OPENAI_BASE_URL with --model openai:name prefix.  Use this
-        only if your server doesn't speak the Anthropic Messages API.
+      - local: Local model via Ollama, LM Studio, llama.cpp, or any
+        server.  Uses ANTHROPIC_BASE_URL.  Recommended for all local
+        models.  Tool-use check auto-detects API format.
+      - openai: OpenAI-compatible API endpoint (vLLM, etc.).
+        Uses OPENAI_BASE_URL with --model openai:name prefix.
+        NOTE: Claude Code may not route to OPENAI_BASE_URL correctly;
+        prefer type=local.
     """
     name: str
     type: str = "claude"  # "claude", "local", or "openai"
