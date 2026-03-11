@@ -87,12 +87,29 @@ class TestBuildClaudeShellCmdProvider:
     @patch("pm_core.claude_launcher.log_shell_command")
     @patch("pm_core.paths.skip_permissions_enabled", return_value=False)
     @patch("pm_core.providers.get_provider")
+    def test_local_provider_anthropic_env(self, mock_gp, mock_sp, mock_log):
+        """Local provider uses ANTHROPIC_BASE_URL and model directly."""
+        mock_gp.return_value = ProviderConfig(
+            name="ollama", type="local",
+            api_base="http://localhost:11434",
+            model="qwen3.5",
+        )
+        result = build_claude_shell_cmd(prompt="test", provider="ollama")
+        assert "ANTHROPIC_BASE_URL=" in result
+        assert "http://localhost:11434" in result
+        assert "--model qwen3.5" in result
+        # Should NOT have openai prefix
+        assert "openai:" not in result
+
+    @patch("pm_core.claude_launcher.log_shell_command")
+    @patch("pm_core.paths.skip_permissions_enabled", return_value=False)
+    @patch("pm_core.providers.get_provider")
     def test_provider_no_model_no_flag(self, mock_gp, mock_sp, mock_log):
         """Provider with no model doesn't add --model flag."""
         mock_gp.return_value = ProviderConfig(
-            name="local", type="openai",
+            name="vllm", type="openai",
             api_base="http://localhost:8000/v1",
         )
-        result = build_claude_shell_cmd(prompt="test", provider="local")
+        result = build_claude_shell_cmd(prompt="test", provider="vllm")
         assert "--model" not in result
         assert "OPENAI_BASE_URL=" in result

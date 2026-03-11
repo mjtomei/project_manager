@@ -50,15 +50,34 @@ class TestProviderConfig:
         assert env["ANTHROPIC_BASE_URL"] == "https://proxy.example.com/v1"
         assert env["ANTHROPIC_API_KEY"] == "sk-proxy-key"
 
-    def test_openai_provider(self):
-        p = ProviderConfig(name="ollama", type="openai",
-                          api_base="http://localhost:11434/v1",
-                          api_key="ollama",
-                          model="llama3.1:70b")
+    def test_local_provider(self):
+        p = ProviderConfig(name="ollama", type="local",
+                          api_base="http://localhost:11434",
+                          model="qwen3.5")
         env = p.env_vars()
-        assert env["OPENAI_BASE_URL"] == "http://localhost:11434/v1"
-        assert env["OPENAI_API_KEY"] == "ollama"
-        assert p.model_flag() == "openai:llama3.1:70b"
+        assert env["ANTHROPIC_BASE_URL"] == "http://localhost:11434"
+        assert env["ANTHROPIC_API_KEY"] == ""
+        assert env["ANTHROPIC_AUTH_TOKEN"] == "ollama"
+        assert p.model_flag() == "qwen3.5"
+
+    def test_local_provider_custom_key(self):
+        p = ProviderConfig(name="custom", type="local",
+                          api_base="http://localhost:8001",
+                          api_key="my-key",
+                          model="glm-4.7-flash")
+        env = p.env_vars()
+        assert env["ANTHROPIC_API_KEY"] == "my-key"
+        assert "ANTHROPIC_AUTH_TOKEN" not in env
+
+    def test_openai_provider(self):
+        p = ProviderConfig(name="vllm", type="openai",
+                          api_base="http://localhost:8000/v1",
+                          api_key="vllm-key",
+                          model="codellama")
+        env = p.env_vars()
+        assert env["OPENAI_BASE_URL"] == "http://localhost:8000/v1"
+        assert env["OPENAI_API_KEY"] == "vllm-key"
+        assert p.model_flag() == "openai:codellama"
 
     def test_openai_no_model(self):
         p = ProviderConfig(name="local", type="openai",
@@ -290,7 +309,7 @@ class TestProviderTestResult:
                                tool_use_detail="did not call tool")
         warning = r.warnings[0]
         assert "Recommended models" in warning
-        assert "qwen2.5-coder" in warning
+        assert "qwen3.5" in warning
 
 
 # ---------------------------------------------------------------------------
@@ -327,7 +346,7 @@ class TestCheckProvider:
                           api_base="http://localhost:99999/v1")
         result = check_provider(p)
         assert not result.reachable
-        assert "Connection refused" in result.reachable_detail
+        assert "connection failed" in result.reachable_detail
 
     @patch("urllib.request.urlopen")
     def test_tool_use_success(self, mock_urlopen):
@@ -408,10 +427,10 @@ class TestRecommendedModels:
             assert all(fits for _, fits in models)
 
     def test_get_recommended_with_limited_ram(self):
-        with patch("pm_core.providers._get_system_memory_gb", return_value=6.0), \
+        with patch("pm_core.providers._get_system_memory_gb", return_value=8.0), \
              patch("pm_core.providers._get_gpu_memory_gb", return_value=None):
             models = get_recommended_models()
-            # Some should fit, some shouldn't
+            # Some should fit (7GB model), some shouldn't (24GB+ models)
             fits_list = [fits for _, fits in models]
             assert True in fits_list
             assert False in fits_list
@@ -429,7 +448,7 @@ class TestRecommendedModels:
         with patch("pm_core.providers._get_system_memory_gb", return_value=16.0), \
              patch("pm_core.providers._get_gpu_memory_gb", return_value=None):
             text = format_model_recommendations()
-            assert "qwen2.5-coder:7b" in text
+            assert "glm-4.7-flash" in text
             assert "Recommended models" in text
             assert "16 GB RAM" in text
 

@@ -2,22 +2,24 @@
 
 Supports multiple provider types:
   - claude: Default Anthropic Claude API (no extra config needed)
-  - openai: OpenAI-compatible API endpoint (Ollama, llama.cpp, vLLM, etc.)
+  - local: Local model via Anthropic-compatible API (Ollama 0.14+,
+    LM Studio 0.4.1+, llama.cpp).  Recommended for local models.
+  - openai: OpenAI-compatible API endpoint (vLLM, etc.).
+    Use only if your server doesn't speak the Anthropic Messages API.
 
 Configuration is stored in ~/.pm/providers.yaml:
 
     providers:
       ollama:
-        type: openai
-        api_base: http://localhost:11434/v1
-        api_key: ollama
-        model: llama3.1:70b
+        type: local
+        api_base: http://localhost:11434
+        model: qwen3.5
         capabilities: [code, review]
 
       vllm:
         type: openai
         api_base: http://localhost:8000/v1
-        model: codellama/CodeLlama-34b
+        model: codellama
 
     default: claude
 
@@ -45,27 +47,37 @@ BUILTIN_CLAUDE = "claude"
 
 @dataclass
 class ProviderConfig:
-    """Configuration for an LLM provider."""
+    """Configuration for an LLM provider.
+
+    Provider types:
+      - claude: Default Anthropic Claude API (no extra config needed)
+      - local: Local model via Anthropic-compatible API (Ollama 0.14+,
+        LM Studio 0.4.1+, llama.cpp).  Uses ANTHROPIC_BASE_URL.
+        This is the recommended approach for local models.
+      - openai: OpenAI-compatible API endpoint (vLLM, older Ollama, etc.).
+        Uses OPENAI_BASE_URL with --model openai:name prefix.  Use this
+        only if your server doesn't speak the Anthropic Messages API.
+    """
     name: str
-    type: str = "claude"  # "claude" or "openai"
+    type: str = "claude"  # "claude", "local", or "openai"
     api_base: str = ""
     api_key: str = ""
     model: str = ""
     capabilities: list[str] = field(default_factory=list)
 
     def env_vars(self) -> dict[str, str]:
-        """Return environment variables needed to use this provider.
-
-        For openai-type providers, sets OPENAI_BASE_URL and OPENAI_API_KEY
-        so Claude Code can use them with --model openai:model-name.
-        """
-        if self.type == "claude":
+        """Return environment variables needed to use this provider."""
+        if self.type in ("claude", "local"):
             env: dict[str, str] = {}
             if self.api_base:
                 env["ANTHROPIC_BASE_URL"] = self.api_base
             if self.api_key:
                 env["ANTHROPIC_API_KEY"] = _resolve_env_ref(self.api_key)
-            if self.model:
+            elif self.type == "local":
+                # Local servers typically don't need a real key
+                env["ANTHROPIC_API_KEY"] = ""
+                env["ANTHROPIC_AUTH_TOKEN"] = "ollama"
+            if self.type == "claude" and self.model:
                 env["ANTHROPIC_MODEL"] = self.model
             return env
 
@@ -74,7 +86,6 @@ class ProviderConfig:
             if self.api_base:
                 env["OPENAI_BASE_URL"] = self.api_base
             if self.api_key:
-                # Resolve env var references like ${VLLM_API_KEY}
                 env["OPENAI_API_KEY"] = _resolve_env_ref(self.api_key)
             return env
 
@@ -84,7 +95,8 @@ class ProviderConfig:
         """Return the --model flag value for claude CLI, or None."""
         if self.type == "openai" and self.model:
             return f"openai:{self.model}"
-        if self.type == "claude" and self.model:
+        if self.model:
+            # local and claude types use model name directly
             return self.model
         return None
 
@@ -236,52 +248,53 @@ class RecommendedModel:
     notes: str
 
 
-# Models with strong function-calling / tool-use support, ordered by size.
-# RAM estimates assume Q4_K_M quantization via Ollama.
+# Models known to work well with Claude Code locally, ordered by size.
+# These support tool calling and have sufficient context windows (64k+).
+# RAM estimates assume quantized weights via Ollama.
+#
+# Sources:
+#   - https://docs.ollama.com/integrations/claude-code
+#   - https://unsloth.ai/docs/basics/claude-code
 RECOMMENDED_MODELS: list[RecommendedModel] = [
     RecommendedModel(
-        name="Qwen 2.5 Coder 7B",
-        ollama_tag="qwen2.5-coder:7b",
-        param_billions=7,
-        ram_gb_required=5,
-        notes="Best small model for code + tool use",
+        name="GLM 4.7 Flash",
+        ollama_tag="glm-4.7-flash",
+        param_billions=10,
+        ram_gb_required=7,
+        notes="128k context, tool calling, fast inference",
     ),
     RecommendedModel(
-        name="Llama 3.1 8B",
-        ollama_tag="llama3.1:8b",
-        param_billions=8,
-        ram_gb_required=5,
-        notes="Strong general-purpose with tool use",
-    ),
-    RecommendedModel(
-        name="Mistral Nemo 12B",
-        ollama_tag="mistral-nemo:12b",
-        param_billions=12,
-        ram_gb_required=8,
-        notes="Good tool use, larger context window",
-    ),
-    RecommendedModel(
-        name="Qwen 2.5 Coder 14B",
-        ollama_tag="qwen2.5-coder:14b",
-        param_billions=14,
+        name="Qwen 3 Coder",
+        ollama_tag="qwen3-coder",
+        param_billions=15,
         ram_gb_required=10,
-        notes="Strong code generation + tool use",
+        notes="Dedicated coding model, strong tool use",
     ),
     RecommendedModel(
-        name="Qwen 2.5 Coder 32B",
-        ollama_tag="qwen2.5-coder:32b",
-        param_billions=32,
-        ram_gb_required=20,
-        notes="Excellent code + tool use, needs more RAM",
+        name="Qwen 3.5 35B-A3B (MoE)",
+        ollama_tag="qwen3.5",
+        param_billions=35,
+        ram_gb_required=24,
+        notes="Top pick — strong agentic + coding, MoE so fast",
     ),
     RecommendedModel(
-        name="Llama 3.1 70B",
-        ollama_tag="llama3.1:70b",
-        param_billions=70,
-        ram_gb_required=42,
-        notes="Top-tier local model, requires significant RAM/VRAM",
+        name="Kimi K2.5",
+        ollama_tag="kimi-k2.5",
+        param_billions=72,
+        ram_gb_required=48,
+        notes="Very capable, recommended by Ollama for Claude Code",
+    ),
+    RecommendedModel(
+        name="GLM 5",
+        ollama_tag="glm-5",
+        param_billions=100,
+        ram_gb_required=64,
+        notes="Largest recommended model, excellent quality",
     ),
 ]
+
+# Minimum context window for Claude Code (per Ollama docs)
+MIN_CONTEXT_TOKENS = 64_000
 
 
 def _get_system_memory_gb() -> float | None:
@@ -348,7 +361,7 @@ def format_model_recommendations() -> str:
     vram = _get_gpu_memory_gb()
     available = max(ram or 0, vram or 0) or None
 
-    lines = ["  Recommended models with tool-use support:"]
+    lines = ["  Recommended models for Claude Code (require 64k+ context):"]
     if available is not None:
         mem_source = "VRAM" if (vram or 0) >= (ram or 0) else "RAM"
         lines.append(f"  (detected {available:.0f} GB {mem_source})")
@@ -402,10 +415,13 @@ class ProviderTestResult:
 def check_provider(provider: ProviderConfig, check_tools: bool = True) -> ProviderTestResult:
     """Test a provider's connectivity and tool-use support.
 
+    For 'local' type: tests Anthropic Messages API (/v1/messages)
+    For 'openai' type: tests OpenAI chat completions (/chat/completions)
+
     Args:
         provider: The provider to test.
-        check_tools: If True and provider is openai-type with a model,
-            send a test chat completion with a tool definition.
+        check_tools: If True and provider has a model configured,
+            send a test request with a tool definition.
 
     Returns:
         ProviderTestResult with reachable/tool_use status and details.
@@ -427,29 +443,139 @@ def check_provider(provider: ProviderConfig, check_tools: bool = True) -> Provid
 
     api_key = env.get("OPENAI_API_KEY") or env.get("ANTHROPIC_API_KEY") or ""
 
-    # 1. Connectivity: GET /models
-    models_url = api_base.rstrip("/") + "/models"
-    try:
-        req = urllib.request.Request(models_url)
-        if api_key:
-            req.add_header("Authorization", f"Bearer {api_key}")
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            result.reachable = True
-            result.reachable_detail = f"{models_url} (HTTP {resp.status})"
-    except urllib.error.URLError as e:
-        result.reachable_detail = f"{models_url}: {e.reason}"
-        return result
-    except Exception as e:
-        result.reachable_detail = str(e)
+    # 1. Connectivity check
+    # For local (Anthropic-compatible): try /api/tags (Ollama) then /models
+    # For openai: try /models
+    check_urls = []
+    if provider.type == "local":
+        check_urls.append(api_base.rstrip("/") + "/api/tags")
+    check_urls.append(api_base.rstrip("/") + "/models")
+
+    for check_url in check_urls:
+        try:
+            req = urllib.request.Request(check_url)
+            if api_key:
+                req.add_header("Authorization", f"Bearer {api_key}")
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                result.reachable = True
+                result.reachable_detail = f"{check_url} (HTTP {resp.status})"
+                break
+        except (urllib.error.URLError, Exception):
+            continue
+
+    if not result.reachable:
+        result.reachable_detail = f"{check_urls[-1]}: connection failed"
         return result
 
     # 2. Tool-use check
-    if not check_tools or provider.type != "openai" or not provider.model:
+    if not check_tools or not provider.model:
         return result
+
+    if provider.type == "local":
+        result = _check_tools_anthropic(api_base, api_key, provider.model, result)
+    elif provider.type == "openai":
+        result = _check_tools_openai(api_base, api_key, provider.model, result)
+
+    return result
+
+
+def _check_tools_anthropic(
+    api_base: str, api_key: str, model: str, result: ProviderTestResult,
+) -> ProviderTestResult:
+    """Test tool use via Anthropic Messages API (/v1/messages)."""
+    import json
+    import urllib.request
+    import urllib.error
+
+    messages_url = api_base.rstrip("/") + "/v1/messages"
+    payload = json.dumps({
+        "model": model,
+        "max_tokens": 100,
+        "messages": [
+            {"role": "user", "content": "What is 2+2? Use the calculator tool."}
+        ],
+        "tools": [{
+            "name": "calculator",
+            "description": "Evaluate a math expression",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "expression": {
+                        "type": "string",
+                        "description": "The math expression to evaluate"
+                    }
+                },
+                "required": ["expression"]
+            }
+        }],
+    }).encode()
+
+    try:
+        req = urllib.request.Request(
+            messages_url, data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": api_key or "no-key",
+                "anthropic-version": "2023-06-01",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            body = json.loads(resp.read())
+
+        # Anthropic format: content is a list of blocks
+        content_blocks = body.get("content", [])
+        has_tool_use = any(
+            block.get("type") == "tool_use" for block in content_blocks
+        )
+        stop_reason = body.get("stop_reason", "")
+
+        if has_tool_use or stop_reason == "tool_use":
+            result.tool_use = True
+            result.tool_use_detail = "model produced a tool call"
+        else:
+            result.tool_use = False
+            text = ""
+            for block in content_blocks:
+                if block.get("type") == "text":
+                    text = (block.get("text") or "")[:80]
+                    break
+            result.tool_use_detail = f"model did not use the tool (response: {text})"
+
+    except urllib.error.HTTPError as e:
+        result.tool_use = False
+        error_body = ""
+        try:
+            error_body = e.read().decode()[:200]
+        except Exception:
+            pass
+        detail = f"HTTP {e.code}"
+        if e.code == 400:
+            detail += " — server may not support the Anthropic Messages API tools format"
+        if error_body:
+            detail += f" ({error_body})"
+        result.tool_use_detail = detail
+    except urllib.error.URLError as e:
+        result.tool_use = False
+        result.tool_use_detail = str(e.reason)
+    except Exception as e:
+        result.tool_use = False
+        result.tool_use_detail = str(e)
+
+    return result
+
+
+def _check_tools_openai(
+    api_base: str, api_key: str, model: str, result: ProviderTestResult,
+) -> ProviderTestResult:
+    """Test tool use via OpenAI chat completions API."""
+    import json
+    import urllib.request
+    import urllib.error
 
     chat_url = api_base.rstrip("/") + "/chat/completions"
     payload = json.dumps({
-        "model": provider.model,
+        "model": model,
         "max_tokens": 100,
         "messages": [
             {"role": "user", "content": "What is 2+2? Use the calculator tool."}

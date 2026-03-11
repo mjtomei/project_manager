@@ -48,8 +48,9 @@ def _display_test_result(result) -> None:
 
 @provider_group.command("add")
 @click.argument("name")
-@click.option("--type", "ptype", default="openai", type=click.Choice(["openai", "claude"]),
-              help="Provider type (default: openai)")
+@click.option("--type", "ptype", default="local", type=click.Choice(["local", "openai", "claude"]),
+              help="Provider type: local (Ollama/llama.cpp, recommended), "
+                   "openai (OpenAI-compatible), claude (Anthropic API)")
 @click.option("--api-base", required=True, help="API base URL (e.g. http://localhost:11434/v1)")
 @click.option("--api-key", default="", help="API key (or ${ENV_VAR} reference)")
 @click.option("--model", default="", help="Model name")
@@ -62,10 +63,14 @@ def provider_add(name: str, ptype: str, api_base: str, api_key: str,
     Automatically tests connectivity and tool-use support before adding.
     If issues are found, you'll be prompted to confirm.
 
+    The default type is 'local' which uses the Anthropic-compatible API
+    that Ollama 0.14+ and LM Studio 0.4.1+ support natively.
+
     \b
     Examples:
-      pm provider add ollama --api-base http://localhost:11434/v1 --model llama3.1:70b
-      pm provider add vllm --api-base http://localhost:8000/v1 --api-key '${VLLM_KEY}' --model codellama
+      pm provider add ollama --api-base http://localhost:11434 --model qwen3.5
+      pm provider add llama-cpp --api-base http://localhost:8001 --model glm-4.7-flash
+      pm provider add vllm --type openai --api-base http://localhost:8000/v1 --model codellama
     """
     from pm_core.providers import (
         ProviderConfig, load_providers, save_providers, check_provider,

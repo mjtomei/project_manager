@@ -71,9 +71,9 @@ _CLAUDE_ENV_VARS = (
     "AWS_PROFILE", "AWS_REGION", "AWS_DEFAULT_REGION",
     "CLAUDE_CODE_USE_VERTEX", "CLOUD_ML_REGION",
     "ANTHROPIC_MODEL", "ANTHROPIC_SMALL_FAST_MODEL",
-    # OpenAI-compatible provider support (local LLMs via Ollama, vLLM, etc.)
+    # Local LLM provider support (Ollama, vLLM, llama.cpp, etc.)
     "OPENAI_API_KEY", "OPENAI_BASE_URL",
-    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN",
     # Provider selection
     "PM_PROVIDER",
 )
