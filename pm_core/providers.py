@@ -618,7 +618,11 @@ def _check_anthropic_api_support(
     import urllib.request
     import urllib.error
 
-    messages_url = api_base.rstrip("/") + "/v1/messages"
+    # Strip trailing /v1 since openai api_base typically includes it already
+    base = api_base.rstrip("/")
+    if base.endswith("/v1"):
+        base = base[:-3]
+    messages_url = base + "/v1/messages"
     # Send a minimal request to see if the endpoint exists
     payload = json.dumps({
         "model": model,

@@ -559,6 +559,11 @@ class TestCheckProvider:
         assert result.tool_use is True
         assert result.inference_ok is True
 
+        # Verify the Anthropic probe URL doesn't double the /v1 prefix
+        probe_call = mock_urlopen.call_args_list[1]
+        probe_req = probe_call[0][0]
+        assert probe_req.full_url == "http://localhost:11434/v1/messages"
+
     @patch("urllib.request.urlopen")
     def test_openai_provider_anthropic_api_not_found(self, mock_urlopen):
         """OpenAI provider where /v1/messages returns 404."""
