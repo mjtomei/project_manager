@@ -145,6 +145,8 @@ class ProjectManagerApp(App):
         Binding("C", "show_connect", "Connect", show=False),
         Binding("A", "toggle_auto_start", "Auto-start", show=False),
         Binding("w", "focus_watcher", "Watcher", show=False),
+        Binding("right_square_bracket", "fuzzy_next", "Next Match", show=False),
+        Binding("left_square_bracket", "fuzzy_prev", "Prev Match", show=False),
     ]
 
     def on_key(self, event) -> None:
@@ -190,7 +192,8 @@ class ProjectManagerApp(App):
                        "launch_meta", "launch_claude", "launch_guide",
                        "view_log", "refresh", "rebalance", "show_help",
                        "toggle_plans", "toggle_qa", "start_qa_on_pr", "hide_plan", "move_to_plan", "toggle_merged",
-                       "cycle_filter", "cycle_sort", "toggle_auto_start", "focus_watcher"):
+                       "cycle_filter", "cycle_sort", "toggle_auto_start", "focus_watcher",
+                       "fuzzy_next", "fuzzy_prev"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus or self._command_pending:
                 _log.debug("check_action: blocked %s (command bar focused/pending)", action)
@@ -258,6 +261,10 @@ class ProjectManagerApp(App):
         # Command-input race condition fix: buffer keystrokes between / and focus
         self._command_pending: bool = False
         self._command_buffer: list[str] = []
+        # Fuzzy select state: ranked result list and current index for n/N cycling
+        self._fuzzy_results: list[str] = []  # list of PR or plan IDs
+        self._fuzzy_index: int = 0
+        self._fuzzy_kind: str = ""  # "pr" or "plan"
 
     def _consume_z(self) -> int:
         """Atomically read and clear the z modifier count.
@@ -738,6 +745,16 @@ class ProjectManagerApp(App):
                 self.set_timer(1, _check)
 
         self.set_timer(1, _check)
+
+    def action_fuzzy_next(self) -> None:
+        """Cycle forward through fuzzy match results (] key)."""
+        from pm_core.tui import fuzzy_select_cmd
+        fuzzy_select_cmd.cycle_fuzzy(self, direction=1)
+
+    def action_fuzzy_prev(self) -> None:
+        """Cycle backward through fuzzy match results ([ key)."""
+        from pm_core.tui import fuzzy_select_cmd
+        fuzzy_select_cmd.cycle_fuzzy(self, direction=-1)
 
     def action_quit(self) -> None:
         pane_ops.quit_app(self)
