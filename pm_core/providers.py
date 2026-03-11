@@ -806,6 +806,8 @@ def _check_tools_openai(
         if not choices:
             result.tool_use = False
             result.tool_use_detail = "empty response from model"
+            result.inference_ok = False
+            result.inference_detail = "model returned empty choices"
             return result
 
         message = choices[0].get("message", {})
