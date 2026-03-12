@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-92301fc
+  active_pr: pr-4a89e52
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -5312,7 +5312,7 @@ prs:
   plan: watchers
   title: Per-session model and quality targeting for different session types
   branch: pm/pr-8463df9-per-session-model-and-quality-targeting-for-differ
-  status: in_review
+  status: merged
   depends_on:
   - pr-dad0069
   description: 'Add configuration to assign different model quality levels per session
@@ -5366,9 +5366,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/139
   gh_pr_number: 139
   created_at: '2026-03-10T23:04:21.042810+00:00'
-  updated_at: '2026-03-11T01:43:23.344856+00:00'
+  updated_at: '2026-03-11T03:29:14.150484+00:00'
   started_at: '2026-03-10T23:09:41.508237+00:00'
   reviewed_at: '2026-03-11T01:43:23.344856+00:00'
-  merged_at: null
+  merged_at: '2026-03-11T03:29:14.150484+00:00'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8463df9-per-session-model-and-quality-target-10e74920
