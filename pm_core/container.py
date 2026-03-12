@@ -74,8 +74,8 @@ _CLAUDE_ENV_VARS = (
     # Local LLM provider support (Ollama, vLLM, llama.cpp, etc.)
     "OPENAI_API_KEY", "OPENAI_BASE_URL",
     "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN",
-    # Provider selection
-    "PM_PROVIDER",
+    # Provider and model selection
+    "PM_PROVIDER", "PM_MODEL", "PM_EFFORT",
 )
 
 

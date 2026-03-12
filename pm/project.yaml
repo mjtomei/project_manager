@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-4a89e52
+  active_pr: pr-9a5b86e
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -5366,9 +5366,239 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/139
   gh_pr_number: 139
   created_at: '2026-03-10T23:04:21.042810+00:00'
-  updated_at: '2026-03-11T03:29:14.150484+00:00'
+  updated_at: '2026-03-11T03:31:17.795417+00:00'
   started_at: '2026-03-10T23:09:41.508237+00:00'
   reviewed_at: '2026-03-11T01:43:23.344856+00:00'
-  merged_at: '2026-03-11T03:29:14.150484+00:00'
+  merged_at: '2026-03-11T03:31:17.795417+00:00'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8463df9-per-session-model-and-quality-target-10e74920
+- id: pr-9a5b86e
+  plan: watchers
+  title: 'Harden local LLM integration: model selection, real QA testing, init setup,
+    and provider verification'
+  branch: pm/pr-9a5b86e-harden-local-llm-integration-model-selection-real-
+  status: qa
+  depends_on:
+  - pr-dad0069
+  description: "Follow-up to pr-dad0069 (local LLM provider support) addressing gaps\
+    \ found post-merge:\n\n1. **Always-visible local models in /models**: Make local\
+    \ LLM models appear in the Claude Code /models selection screen even when model\
+    \ override is not active, so users can always manually switch to a local model.\n\
+    \n2. **Real local model QA testing**: Ensure QA scenarios actually exercise a\
+    \ real local LLM endpoint rather than mocking it away. Add integration test scenarios\
+    \ that spin up a local model and validate end-to-end behavior.\n\n3. **Local model\
+    \ setup during pm init**: During pm init, detect available hardware and set up\
+    \ a small local model (e.g., a quantized model that can run on modest hardware)\
+    \ so there is always a local fallback available.\n\n4. **Expand pm provider verification**:\
+    \ Strengthen the pm provider command's model verification:\n   - Verify the v1/messages\
+    \ endpoint is supported (Anthropic-style API)\n   - If only the OpenAI-style /v1/chat/completions\
+    \ endpoint is available, ensure we have a translation/adapter layer\n   - Test\
+    \ actual inference capability, not just connectivity\n   - Report model capabilities\
+    \ and limitations clearly"
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/140
+  gh_pr_number: 140
+  created_at: '2026-03-11T17:38:30.495007+00:00'
+  updated_at: '2026-03-11T18:06:25.532968+00:00'
+  started_at: '2026-03-11T17:42:07.268473+00:00'
+  reviewed_at: '2026-03-11T18:06:25.532968+00:00'
+  merged_at: null
+  notes:
+  - id: note-ed2331e
+    text: 'QA PASS: Unit and integration tests pass: PASS; Provider add and full verification
+      with real Ollama: PASS; Model show displays local providers section: PASS; Init
+      detects Ollama and offers provider setup: PASS; Init skips Ollama prompt when
+      not running or not installed: PASS; Init skips prompt when provider already
+      configured: PASS; OpenAI-type provider with Anthropic API support detected:
+      PASS; Provider verification reports inference failure distinctly from tool use
+      failure: PASS; Double /v1 bug fix in Anthropic API probe URL: PASS; Init with
+      Ollama running but no models pulled: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-9a5b86e-83c4726d6d5a43e4)'
+    created_at: '2026-03-11T18:47:58Z'
+    last_edited: '2026-03-11T18:47:58Z'
+  - id: note-4020a44
+    text: 'QA INPUT_REQUIRED:  (workdir: /home/matt/.pm/workdirs/qa/pr-9a5b86e-a387c01606a8b945)'
+    created_at: '2026-03-12T00:10:06Z'
+    last_edited: '2026-03-12T00:10:06Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9a5b86e-harden-local-llm-integration-model-s-0a4ff8cc
+- id: pr-1f35c6d
+  plan: watchers
+  title: 'Local model lifecycle watcher: keep a local LLM running at all times'
+  branch: pm/pr-1f35c6d-local-model-lifecycle-watcher-keep-a-local-llm-run
+  status: pending
+  depends_on:
+  - pr-dad0069
+  - pr-3032fb6
+  description: 'Watcher (using BaseWatcher from pr-3032fb6) that ensures a local LLM
+    model process is always running and healthy.
+
+
+    - On watcher start, launch the configured local model server (e.g., llama.cpp,
+    ollama) if not already running
+
+    - Periodically health-check the local model endpoint (ping /v1/models or similar)
+
+    - If the local model process crashes or becomes unresponsive, automatically restart
+    it
+
+    - Respect hardware constraints: pick an appropriate model size for available VRAM/RAM
+
+    - Integrates with pm init setup from pr-9a5b86e (the model installed during init
+    is the one kept alive)
+
+    - Log all lifecycle events (start, restart, health check failures)
+
+    - Expose status in the TUI so users can see the local model is available
+
+    - This is distinct from pr-f84cf3e (health/failover watcher) which handles routing
+    decisions across providers — this watcher is specifically about keeping the local
+    model process alive'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-11T17:39:07.931884+00:00'
+  updated_at: '2026-03-11T17:39:07.931884+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-4bd08d7
+  plan: watchers
+  title: Add built-in Anthropic-to-OpenAI translation proxy for local LLM providers
+  branch: pm/pr-4bd08d7-add-built-in-anthropic-to-openai-translation-proxy
+  status: pending
+  depends_on:
+  - pr-9a5b86e
+  description: 'Claude Code only speaks the Anthropic Messages API (/v1/messages),
+    but many local LLM servers (vLLM, sglang, older Ollama) only support OpenAI-compatible
+    chat completions (/v1/chat/completions). Ollama 0.14+ added native Anthropic API
+    support, but other backends haven''t.
+
+
+    Add a lightweight, zero-dependency translation proxy in pm_core/anthropic_proxy.py
+    that:
+
+    - Translates Anthropic Messages API requests → OpenAI chat completions requests
+
+    - Translates OpenAI responses → Anthropic Messages API responses
+
+    - Handles streaming SSE translation (Anthropic event types ↔ OpenAI delta chunks)
+
+    - Supports tool use round-trips (tool_use blocks ↔ tool_calls, tool_result ↔ tool
+    role)
+
+    - Supports vision/images (Anthropic image blocks → OpenAI image_url)
+
+    - Strips extended thinking blocks (not supported by OpenAI API)
+
+    - System prompt translation: Anthropic top-level system field ↔ OpenAI system
+    message in messages array
+
+    - Stop reason mapping: end_turn→stop, tool_use→tool_calls, max_tokens→length
+
+    - Usage/token counting translation between the two API formats
+
+    - Error response translation: map OpenAI errors back to Anthropic-style error
+    responses
+
+    - Model name passthrough/mapping for arbitrary local model names
+
+    - max_tokens handling: Anthropic requires it explicitly, OpenAI defaults differ
+
+    - Cache-control header stripping: handle Anthropic prompt caching headers gracefully
+
+    - Health check endpoint (/health) so the lifecycle watcher (pr-1f35c6d) can monitor
+    the proxy
+
+    - stdlib only — no FastAPI/Flask/uvicorn dependencies
+
+
+    Integration with pm provider:
+
+    - Auto-start the proxy when a type=local provider backend doesn''t support /v1/messages
+
+    - pm provider add detects whether the proxy is needed during connectivity check
+
+    - pm provider test reports proxy status
+
+
+    This enables targeting sglang, vLLM, and any OpenAI-compatible server without
+    requiring users to install external tools like LiteLLM.
+
+
+    ## Thinking Model Support (Critical for Progress UI)
+
+
+    Problem: Models like qwen3 produce thinking tokens before content tokens. Claude
+    Code shows a "↓ N tokens" progress counter based on counting characters from text_delta
+    SSE events. During the thinking phase, no text deltas arrive, so the counter shows
+    nothing for 10-30+ seconds.
+
+
+    How Claude Code''s token counter works (from source analysis of cli.js v2.1.73):
+
+    - Characters from content_block_delta with type text_delta are accumulated
+
+    - Displayed token count = Math.round(accumulated_chars / 4)
+
+    - Counter only shows after 30 seconds of streaming (it9 = 30000) OR if thinking/extended
+    thinking is detected
+
+    - usage.output_tokens from message_delta is used for cost tracking only, NOT for
+    the progress spinner
+
+
+    Solution: Translate Ollama''s thinking field into Anthropic thinking content blocks:
+
+    1. When Ollama streams {"message": {"thinking": "token..."}}: - Emit content_block_start
+    with {"type": "thinking", "thinking": ""} - Emit content_block_delta with {"type":
+    "thinking_delta", "thinking": "token..."}
+
+    2. When Ollama streams {"message": {"content": "token..."}}: - Close the thinking
+    block (content_block_stop) - Start text block: content_block_start with {"type":
+    "text", "text": ""} - Emit content_block_delta with {"type": "text_delta", "text":
+    "token..."}
+
+    3. On done: true chunk from Ollama: - Extract prompt_eval_count -> input_tokens
+    - Extract eval_count -> output_tokens - Send both in message_delta.usage (Claude
+    Code requires BOTH fields)
+
+
+    Note: May require Claude Code beta header anthropic-beta: thinking-2025-04-15
+    or similar. The proxy should check what betas the client sends and only emit thinking
+    blocks if supported.
+
+
+    ## Token Counting
+
+
+    Ollama provides token counts but shims typically hardcode 0. The proxy must:
+
+    - Streaming: Read prompt_eval_count and eval_count from the final done: true chunk
+
+    - Non-streaming: Read same fields from response body
+
+    - Forward as message_delta.usage.input_tokens AND .output_tokens (both required)
+
+
+    ## Quirks Discovered During QA
+
+
+    1. Claude Code sends ?beta=true query param on /v1/messages — strip query strings
+
+    2. Claude Code probes /v1/models — forward to upstream
+
+    3. Ollama base URL has no /v1 — handle both /v1/chat/completions and /api/chat
+
+    4. Models need 32K+ context for Claude Code''s system prompt (~15-20K tokens)
+
+    5. type=openai with openai: model prefix does not work in Claude Code v2.1.73
+    — only ANTHROPIC_BASE_URL works, so translation proxy is required'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-11T20:40:49.721162+00:00'
+  updated_at: '2026-03-11T20:40:49.721162+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
