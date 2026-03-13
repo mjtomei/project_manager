@@ -546,7 +546,8 @@ def _check_context_window(
 ) -> None:
     """Try to detect the model's context window size.
 
-    For Ollama: POST /api/show with model name to get model_info.
+    For Ollama (local): POST /api/show with model name to get model_info.
+    For OpenAI-compatible (openai): parse max_model_len from /models response.
     Falls back silently if the endpoint doesn't support this.
     """
     import json
@@ -590,6 +591,36 @@ def _check_context_window(
                     result.context_window_detail = (
                         f"Increase with: ollama run {provider.model} "
                         f"/set parameter num_ctx {MIN_CONTEXT_TOKENS}"
+                    )
+                else:
+                    result.context_window_detail = "OK"
+
+        except (urllib.error.URLError, urllib.error.HTTPError,
+                json.JSONDecodeError, ValueError, Exception):
+            pass  # Best-effort — don't fail if we can't detect
+
+    elif provider.type == "openai":
+        # Try to read max_model_len from /models response (vLLM, SGLang, etc.)
+        models_url = api_base.rstrip("/") + "/models"
+        try:
+            req = urllib.request.Request(models_url)
+            if api_key:
+                req.add_header("Authorization", f"Bearer {api_key}")
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                body = json.loads(resp.read())
+
+            for model_entry in body.get("data", []):
+                if model_entry.get("id") == provider.model:
+                    max_len = model_entry.get("max_model_len")
+                    if max_len is not None:
+                        result.context_window = int(max_len)
+                    break
+
+            if result.context_window is not None:
+                if result.context_window < MIN_CONTEXT_TOKENS:
+                    result.context_window_detail = (
+                        f"Model context too small for Claude Code "
+                        f"(need {MIN_CONTEXT_TOKENS:,}+)"
                     )
                 else:
                     result.context_window_detail = "OK"
