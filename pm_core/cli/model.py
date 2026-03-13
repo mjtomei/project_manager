@@ -18,17 +18,12 @@ def model_show():
     """Show effective model for each session type."""
     from pm_core import store
     from pm_core.model_config import (
-        SESSION_TYPES, MODEL_SHORTCUTS,
+        SESSION_TYPES,
         resolve_model_and_provider,
     )
 
     root = state_root()
     data = store.load(root)
-
-    click.echo("Model shortcuts:")
-    for name in ("opus", "sonnet", "haiku"):
-        click.echo(f"  {name:10s} -> {MODEL_SHORTCUTS[name]}")
-    click.echo()
 
     click.echo("Effective config per session type:")
     click.echo(f"  {'type':14s}   {'model':40s} {'effort':8s}")
