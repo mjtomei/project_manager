@@ -10,8 +10,6 @@ from pm_core.model_config import (
     get_model_config_summary,
     get_pr_model_override,
     QUALITY_TIERS,
-    DEFAULT_SESSION_MODELS,
-    DEFAULT_SESSION_EFFORT,
     SESSION_TYPES,
 )
 
@@ -35,12 +33,13 @@ class TestQualityTiers:
 
 
 class TestResolveModel:
-    def test_defaults(self):
-        assert resolve_model("review") == QUALITY_TIERS["high"]
-        assert resolve_model("impl") == QUALITY_TIERS["medium"]
-        assert resolve_model("qa") == QUALITY_TIERS["medium"]
-        assert resolve_model("watcher") == QUALITY_TIERS["low"]
-        assert resolve_model("merge") == QUALITY_TIERS["medium"]
+    def test_no_defaults(self):
+        """Without any config, resolve_model returns None (use CLI default)."""
+        assert resolve_model("review") is None
+        assert resolve_model("impl") is None
+        assert resolve_model("qa") is None
+        assert resolve_model("watcher") is None
+        assert resolve_model("merge") is None
 
     def test_pr_override(self):
         assert resolve_model("impl", pr_model="high") == QUALITY_TIERS["high"]
@@ -68,22 +67,16 @@ class TestResolveModel:
 
 
 class TestEffortResolution:
-    def test_defaults(self):
+    def test_no_defaults(self):
+        """Without any config, effort is None (use CLI default)."""
         result = resolve_model_and_provider("review")
-        assert result.effort == "high"
+        assert result.effort is None
         result = resolve_model_and_provider("qa")
-        assert result.effort == "high"
-        result = resolve_model_and_provider("impl")
-        assert result.effort == "high"
-
-    def test_watcher_no_effort_by_default(self):
-        """Watcher defaults to haiku which doesn't support effort."""
-        result = resolve_model_and_provider("watcher")
         assert result.effort is None
 
     def test_haiku_suppresses_effort(self):
         """Even if effort is configured, it's suppressed for haiku."""
-        with patch.dict("os.environ", {"PM_EFFORT": "high"}):
+        with patch.dict("os.environ", {"PM_MODEL": "haiku", "PM_EFFORT": "high"}):
             result = resolve_model_and_provider("watcher")
             assert result.effort is None
 
@@ -153,10 +146,10 @@ class TestEnvVarOverrides:
 
 
 class TestGetModelConfigSummary:
-    def test_defaults(self):
+    def test_no_config_shows_default(self):
         summary = get_model_config_summary()
-        assert summary["review"] == QUALITY_TIERS["high"]
-        assert summary["watcher"] == QUALITY_TIERS["low"]
+        assert summary["review"] == "(default)"
+        assert summary["watcher"] == "(default)"
         assert len(summary) == len(SESSION_TYPES)
 
 
@@ -204,9 +197,10 @@ class TestProviderResolution:
             assert result.provider == "ollama"
             assert result.model is None
 
-    def test_non_provider_returns_model(self):
+    def test_non_provider_returns_none_without_config(self):
+        """Without any config, model is None (cli default)."""
         result = resolve_model_and_provider("review")
-        assert result.model == QUALITY_TIERS["high"]
+        assert result.model is None
         assert result.provider is None
 
     def test_provider_in_project_config(self):
@@ -223,7 +217,7 @@ class TestProviderResolution:
         data = {"project": {"model_config": {"session_models": {"watcher": "provider:ollama"}}}}
         summary = get_model_config_summary(data)
         assert summary["watcher"] == "provider:ollama"
-        assert summary["review"] == QUALITY_TIERS["high"]
+        assert summary["review"] == "(default)"
 
     @patch("pm_core.model_config.get_global_setting_value", return_value="provider:vllm")
     def test_global_setting_provider(self, mock_gsv):

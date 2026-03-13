@@ -42,8 +42,8 @@ def model_show():
         elif res.model:
             model_str = res.model
         else:
-            model_str = "(default)"
-        effort_str = res.effort or "n/a"
+            model_str = "(cli default)"
+        effort_str = res.effort or "(cli default)"
         click.echo(f"  {st:10s}   {model_str:40s} {effort_str:8s}")
     click.echo()
 
@@ -66,7 +66,9 @@ def model_show():
 @model.command("set")
 @click.argument("session_type", type=click.Choice(["impl", "review", "qa", "watcher", "merge"]))
 @click.argument("model_value")
-def model_set(session_type: str, model_value: str):
+@click.option("--effort", type=click.Choice(["low", "medium", "high"]),
+              help="Set effort level for this session type.")
+def model_set(session_type: str, model_value: str, effort: str | None):
     """Set the global default model for a session type.
 
     MODEL_VALUE can be a quality tier (high, medium, low), a model name
@@ -76,11 +78,15 @@ def model_set(session_type: str, model_value: str):
     from pm_core.paths import set_global_setting_value
     set_global_setting_value(f"model-{session_type}", model_value)
     click.echo(f"Set global model for '{session_type}' to '{model_value}'")
+    if effort:
+        set_global_setting_value(f"effort-{session_type}", effort)
+        click.echo(f"Set effort for '{session_type}' to '{effort}'")
 
 
 @model.command("unset")
 @click.argument("session_type", type=click.Choice(["impl", "review", "qa", "watcher", "merge"]))
-def model_unset(session_type: str):
+@click.option("--effort", is_flag=True, help="Also remove effort override.")
+def model_unset(session_type: str, effort: bool):
     """Remove the global default model override for a session type."""
     from pm_core.paths import pm_home
     f = pm_home() / "settings" / f"model-{session_type}"
@@ -89,6 +95,13 @@ def model_unset(session_type: str):
         click.echo(f"Removed global model override for '{session_type}'")
     else:
         click.echo(f"No global model override set for '{session_type}'")
+    if effort:
+        ef = pm_home() / "settings" / f"effort-{session_type}"
+        if ef.exists():
+            ef.unlink()
+            click.echo(f"Removed effort override for '{session_type}'")
+        else:
+            click.echo(f"No effort override set for '{session_type}'")
 
 
 # Register with the main CLI

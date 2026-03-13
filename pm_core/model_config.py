@@ -4,24 +4,23 @@ Resolves which model to use for a given session type based on a
 configuration hierarchy:
 
     PM_MODEL env var  >  PR-level override  >  project.yaml model_config
-    >  global ~/.pm/settings  >  built-in defaults
+    >  global ~/.pm/settings  >  (no default — use CLI setting)
 
 Effort level resolution:
 
     PM_EFFORT env var  >  project.yaml session_effort
-    >  global ~/.pm/settings  >  built-in defaults
+    >  global ~/.pm/settings  >  (no default — use CLI setting)
 
-Quality tiers map human-friendly labels to concrete model identifiers:
+When no override is configured at any level, no --model or --effort flag
+is passed to the Claude CLI, so it uses whatever model is configured in
+the user's CLI settings.
 
-    high      -> claude-opus-4-6-20250514   (reviews, critical decisions)
-    medium    -> claude-sonnet-4-6-20250514 (implementation, QA)
-    low       -> claude-haiku-4-5-20251001 (watchers, high-volume tasks)
+Quality tiers and model name shortcuts are available for use with
+``pm model set``:
 
-Model name shortcuts are also supported:
-
-    opus      -> claude-opus-4-6-20250514
-    sonnet    -> claude-sonnet-4-6-20250514
-    haiku     -> claude-haiku-4-5-20251001
+    high / opus    -> claude-opus-4-6-20250514
+    medium / sonnet -> claude-sonnet-4-6-20250514
+    low / haiku    -> claude-haiku-4-5-20251001
 
 For external/local model servers, configure a provider via ``pm provider``
 (see providers.py) and reference it in model_config:
@@ -59,17 +58,9 @@ QUALITY_TIERS: dict[str, str] = {
     "haiku": "claude-haiku-4-5-20251001",
 }
 
-# ── Session types and their default quality tier ─────────────────────
+# ── Session types ────────────────────────────────────────────────────
 
 SESSION_TYPES = ("impl", "review", "qa", "watcher", "merge")
-
-DEFAULT_SESSION_MODELS: dict[str, str] = {
-    "review": "high",
-    "impl": "medium",
-    "qa": "medium",
-    "merge": "medium",
-    "watcher": "low",
-}
 
 _PROVIDER_PREFIX = "provider:"
 
@@ -80,14 +71,6 @@ EFFORT_LEVELS = ("low", "medium", "high")
 # Models that do NOT support the --effort flag
 _NO_EFFORT_MODELS = {
     QUALITY_TIERS["haiku"],  # claude-haiku-4-5-20251001
-}
-
-DEFAULT_SESSION_EFFORT: dict[str, str] = {
-    "review": "high",
-    "impl": "high",
-    "qa": "high",
-    "merge": "high",
-    # watcher omitted — defaults to haiku which doesn't support effort
 }
 
 
@@ -169,14 +152,9 @@ def resolve_model_and_provider(
     # 4. Global setting (~/.pm/settings/model-<type>)
     elif (global_val := get_global_setting_value(f"model-{session_type}")):
         resolution = _resolve_value(global_val)
-    # 5. Built-in default tier -> concrete model
+    # 5. No default — let the Claude CLI use its own setting
     else:
-        tier = DEFAULT_SESSION_MODELS.get(session_type)
-        if tier:
-            model_id = tiers.get(tier)
-            resolution = ModelResolution(model=model_id) if model_id else ModelResolution()
-        else:
-            resolution = ModelResolution()
+        resolution = ModelResolution()
 
     # --- Effort resolution (independent of model) ---
     # 1. PM_EFFORT env var
@@ -191,9 +169,7 @@ def resolve_model_and_provider(
         # 3. Global setting (~/.pm/settings/effort-<type>)
         if not effort:
             effort = get_global_setting_value(f"effort-{session_type}") or None
-        # 4. Built-in default
-        if not effort:
-            effort = DEFAULT_SESSION_EFFORT.get(session_type)
+        # No built-in default — let the CLI use its own setting
         resolution.effort = effort
 
     # Suppress effort for models that don't support it (e.g. Haiku)
