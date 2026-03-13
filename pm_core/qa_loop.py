@@ -902,10 +902,21 @@ def run_qa_sync(
     window_name = _compute_qa_window_name(pr_data)
     data = store.load(pm_root)
 
-    workdir_path = pr_data.get("workdir")
+    # Find the PR entry inside the freshly loaded data so _ensure_workdir
+    # updates the same dict that gets saved.
+    pr_id = pr_data.get("id", state.pr_id)
+    live_pr = next((p for p in data.get("prs", []) if p.get("id") == pr_id), None)
+    if live_pr is None:
+        _log.error("QA aborted: PR %s not found in project data", pr_id)
+        state.running = False
+        state.latest_verdict = "ERROR"
+        state.latest_output = f"PR {pr_id} not found in project data"
+        return state
+
+    workdir_path = live_pr.get("workdir")
     if not workdir_path or not Path(workdir_path).is_dir():
         from pm_core.cli.helpers import _ensure_workdir
-        workdir_path = _ensure_workdir(data, pr_data, pm_root)
+        workdir_path = _ensure_workdir(data, live_pr, pm_root)
     if not workdir_path or not Path(workdir_path).is_dir():
         _log.error("QA aborted: workdir for %s does not exist and could not be created", state.pr_id)
         state.running = False
