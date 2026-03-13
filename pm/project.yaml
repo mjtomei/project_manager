@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-9a5b86e
+  active_pr: pr-273369a
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -3782,6 +3782,10 @@ prs:
       plan detection fix: PASS; PR edit --plan option: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-942aa21-071f72afba6bdc28)'
     created_at: '2026-03-10T02:17:23Z'
     last_edited: '2026-03-10T02:17:23Z'
+  - id: note-e9ebcac
+    text: 'QA INPUT_REQUIRED:  (workdir: /Users/matthewtomei/.pm/workdirs/qa/pr-942aa21-091e125d6a4c31f6)'
+    created_at: '2026-03-13T04:34:36Z'
+    last_edited: '2026-03-13T04:34:36Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-942aa21-add-spec-generation-step-between-pr--e2dbb884
 - id: pr-4585fd3
   plan: tui-ux
@@ -5399,7 +5403,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/140
   gh_pr_number: 140
   created_at: '2026-03-11T17:38:30.495007+00:00'
-  updated_at: '2026-03-11T18:06:25.532968+00:00'
+  updated_at: '2026-03-13T04:31:35.030249+00:00'
   started_at: '2026-03-11T17:42:07.268473+00:00'
   reviewed_at: '2026-03-11T18:06:25.532968+00:00'
   merged_at: null
@@ -5427,6 +5431,11 @@ prs:
       /Users/matthewtomei/.pm/workdirs/qa/pr-9a5b86e-66e915e6a58d34d0)'
     created_at: '2026-03-12T00:56:12Z'
     last_edited: '2026-03-12T00:56:12Z'
+  - id: note-394afe0
+    text: Local LLM available at spark-424d.lan:30002 (OpenAI-compatible API, serving
+      openai/gpt-oss-120b). Confirmed reachable from macbook.
+    created_at: '2026-03-13T04:31:35Z'
+    last_edited: '2026-03-13T04:31:35Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9a5b86e-harden-local-llm-integration-model-s-0a4ff8cc
 - id: pr-1f35c6d
   plan: watchers
@@ -5606,6 +5615,25 @@ prs:
   gh_pr_number: null
   created_at: '2026-03-11T20:40:49.721162+00:00'
   updated_at: '2026-03-11T20:40:49.721162+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-273369a
+  plan: null
+  title: Fix QA pane-killed showing INPUT_REQUIRED instead of KILLED status
+  branch: pm/pr-273369a-fix-qa-pane-killed-showing-input-required-instead-
+  status: pending
+  depends_on: []
+  description: When the QA pane is killed, the status message shows INPUT_REQUIRED
+    instead of indicating the pane was killed. Fix the status message to show that
+    the pane was killed. Also audit the INPUT_REQUIRED detection logic for correctness
+    — it may be triggering false positives.
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-13T04:37:37.703157+00:00'
+  updated_at: '2026-03-13T04:37:37.703157+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

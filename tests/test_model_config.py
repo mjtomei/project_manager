@@ -72,7 +72,7 @@ class TestEffortResolution:
         result = resolve_model_and_provider("review")
         assert result.effort == "high"
         result = resolve_model_and_provider("qa")
-        assert result.effort == "medium"
+        assert result.effort == "high"
         result = resolve_model_and_provider("impl")
         assert result.effort == "high"
 

@@ -13,14 +13,14 @@ Effort level resolution:
 
 Quality tiers map human-friendly labels to concrete model identifiers:
 
-    high      -> claude-opus-4-20250514   (reviews, critical decisions)
-    medium    -> claude-sonnet-4-20250514 (implementation, QA)
+    high      -> claude-opus-4-6-20250514   (reviews, critical decisions)
+    medium    -> claude-sonnet-4-6-20250514 (implementation, QA)
     low       -> claude-haiku-4-5-20251001 (watchers, high-volume tasks)
 
 Model name shortcuts are also supported:
 
-    opus      -> claude-opus-4-20250514
-    sonnet    -> claude-sonnet-4-20250514
+    opus      -> claude-opus-4-6-20250514
+    sonnet    -> claude-sonnet-4-6-20250514
     haiku     -> claude-haiku-4-5-20251001
 
 For external/local model servers, configure a provider via ``pm provider``
@@ -50,12 +50,12 @@ _log = configure_logger("pm.model_config")
 # ── Quality tiers ────────────────────────────────────────────────────
 
 QUALITY_TIERS: dict[str, str] = {
-    "high": "claude-opus-4-20250514",
-    "medium": "claude-sonnet-4-20250514",
+    "high": "claude-opus-4-6-20250514",
+    "medium": "claude-sonnet-4-6-20250514",
     "low": "claude-haiku-4-5-20251001",
     # Model name shortcuts
-    "opus": "claude-opus-4-20250514",
-    "sonnet": "claude-sonnet-4-20250514",
+    "opus": "claude-opus-4-6-20250514",
+    "sonnet": "claude-sonnet-4-6-20250514",
     "haiku": "claude-haiku-4-5-20251001",
 }
 
@@ -85,7 +85,7 @@ _NO_EFFORT_MODELS = {
 DEFAULT_SESSION_EFFORT: dict[str, str] = {
     "review": "high",
     "impl": "high",
-    "qa": "medium",
+    "qa": "high",
     "merge": "high",
     # watcher omitted — defaults to haiku which doesn't support effort
 }
