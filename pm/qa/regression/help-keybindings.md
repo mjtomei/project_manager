@@ -70,9 +70,7 @@ ctrl+b d to detach from the tmux session.
      * v - View plan file
      * M - Move to plan
      * A - Auto-start to selected PR / off
-     * wf - Focus watcher window
-     * ww - List watchers & status
-     * ws - Start/stop watcher
+     * w - Focus watcher window
    - Panes & Views section:
      * c - Launch Claude session
      * H - Launch guide (setup or assist)

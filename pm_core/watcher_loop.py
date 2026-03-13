@@ -178,16 +178,6 @@ def start_watcher_loop_background(
         import time
 
         def _check_stop():
-            # Wait for run_sync to set running=True before polling
-            for _ in range(30):
-                if watcher.state.running or state.stop_requested:
-                    break
-                time.sleep(0.1)
-            # Propagate early stop if set before running started
-            if state.stop_requested:
-                watcher.state.stop_requested = True
-                return
-            # Propagate legacy stop_requested while watcher is alive
             while watcher.state.running:
                 if state.stop_requested:
                     watcher.state.stop_requested = True
