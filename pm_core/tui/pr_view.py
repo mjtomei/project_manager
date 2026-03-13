@@ -204,7 +204,6 @@ def cycle_sort(app) -> None:
     from pm_core.tui.tech_tree import TechTree, SORT_FIELDS, SORT_FIELD_KEYS
 
     tree = app.query_one("#tech-tree", TechTree)
-    prev_id = tree.selected_pr_id
     current = tree._sort_field
     try:
         idx = SORT_FIELD_KEYS.index(current)
@@ -214,9 +213,6 @@ def cycle_sort(app) -> None:
     tree._sort_field = SORT_FIELD_KEYS[next_idx]
     tree._recompute()
     tree._rebuild_widgets()
-    if prev_id and prev_id in tree._ordered_ids:
-        tree.selected_index = tree._ordered_ids.index(prev_id)
-        tree._update_selection()
     app._update_filter_status()
     label = dict(SORT_FIELDS)[tree._sort_field]
     app.log_message(f"Sort: {label}")

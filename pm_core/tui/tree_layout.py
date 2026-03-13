@@ -151,16 +151,6 @@ def compute_tree_layout(
     if hidden_plans:
         prs = [p for p in prs if (p.get("plan") or "_standalone") not in hidden_plans]
         if not prs:
-            # All PRs hidden — still create hidden plan labels so user can
-            # navigate to them and selectively unhide individual plans.
-            hidden_row = 0
-            for plan_id in sorted(hidden_plans):
-                virtual_id = f"_hidden:{plan_id}"
-                layout.hidden_plan_label_rows[plan_id] = hidden_row
-                layout.node_positions[virtual_id] = (0, hidden_row)
-                layout.ordered_ids.append(virtual_id)
-                layout.hidden_label_ids.append(virtual_id)
-                hidden_row += 1
             return layout
 
     # Filter by status

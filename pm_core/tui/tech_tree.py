@@ -79,7 +79,7 @@ class TechTree(Widget, can_focus=True):
         self.prs = self._prs
         self._recompute()
         if self._prs:
-            self.call_after_refresh(self._rebuild_widgets)
+            self._rebuild_widgets()
 
     def apply_project_settings(self, project: dict) -> None:
         if "hide_merged" in project:
@@ -208,7 +208,7 @@ class TechTree(Widget, can_focus=True):
 
     def _rebuild_widgets(self) -> None:
         """Sync PRNode widgets to match current layout positions."""
-        if self._edge_canvas is None:
+        if not self.is_mounted:
             return
 
         pr_map = {pr["id"]: pr for pr in self._prs}
@@ -576,7 +576,7 @@ class TechTree(Widget, can_focus=True):
             real_positions = {k: v for k, v in self._node_positions.items() if not k.startswith("_hidden:")}
             if real_positions:
                 max_row = max(r for x, r in real_positions.values()) + 1
-                grid_h = max_row * (NODE_H + V_GAP) + 4 + NODE_H
+                grid_h = max_row * (NODE_H + V_GAP) + 4
             else:
                 grid_h = 0
             label_index = self._hidden_label_ids.index(pr_id) if pr_id in self._hidden_label_ids else 0
