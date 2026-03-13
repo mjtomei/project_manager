@@ -9,32 +9,29 @@ from pm_core.model_config import (
     ModelResolution,
     get_model_config_summary,
     get_pr_model_override,
-    QUALITY_TIERS,
+    MODEL_SHORTCUTS,
+    DEFAULT_SESSION_MODELS,
+    DEFAULT_SESSION_EFFORT,
     SESSION_TYPES,
 )
 
 
-class TestQualityTiers:
-    def test_low_medium_high(self):
-        assert "low" in QUALITY_TIERS
-        assert "medium" in QUALITY_TIERS
-        assert "high" in QUALITY_TIERS
-
-    def test_model_shortcuts(self):
-        assert QUALITY_TIERS["opus"] == QUALITY_TIERS["high"]
-        assert QUALITY_TIERS["sonnet"] == QUALITY_TIERS["medium"]
-        assert QUALITY_TIERS["haiku"] == QUALITY_TIERS["low"]
+class TestModelShortcuts:
+    def test_shortcuts_exist(self):
+        assert "opus" in MODEL_SHORTCUTS
+        assert "sonnet" in MODEL_SHORTCUTS
+        assert "haiku" in MODEL_SHORTCUTS
 
     def test_passthrough_model_id(self):
-        """Non-tier values are passed through as-is."""
+        """Non-shortcut values are passed through as-is."""
         with patch.dict("os.environ", {"PM_MODEL": "claude-custom-model"}):
             result = resolve_model("review")
             assert result == "claude-custom-model"
 
 
 class TestResolveModel:
-    def test_no_defaults(self):
-        """Without any config, resolve_model returns None (use CLI default)."""
+    def test_defaults_are_none(self):
+        """With no config, all session types return None (use CLI default)."""
         assert resolve_model("review") is None
         assert resolve_model("impl") is None
         assert resolve_model("qa") is None
@@ -42,36 +39,43 @@ class TestResolveModel:
         assert resolve_model("merge") is None
 
     def test_pr_override(self):
-        assert resolve_model("impl", pr_model="high") == QUALITY_TIERS["high"]
+        assert resolve_model("impl", pr_model="opus") == MODEL_SHORTCUTS["opus"]
 
     def test_project_config(self):
-        data = {"project": {"model_config": {"session_models": {"review": "medium"}}}}
-        assert resolve_model("review", project_data=data) == QUALITY_TIERS["medium"]
+        data = {"project": {"model_config": {"session_models": {"review": "sonnet"}}}}
+        assert resolve_model("review", project_data=data) == MODEL_SHORTCUTS["sonnet"]
 
     def test_pr_beats_project(self):
-        data = {"project": {"model_config": {"session_models": {"review": "low"}}}}
-        assert resolve_model("review", pr_model="medium", project_data=data) == QUALITY_TIERS["medium"]
+        data = {"project": {"model_config": {"session_models": {"review": "haiku"}}}}
+        assert resolve_model("review", pr_model="sonnet", project_data=data) == MODEL_SHORTCUTS["sonnet"]
 
-    @patch("pm_core.model_config.get_global_setting_value", return_value="high")
+    @patch("pm_core.model_config.get_global_setting_value", return_value="opus")
     def test_global_setting(self, mock_gsv):
         result = resolve_model("qa")
-        assert result == QUALITY_TIERS["high"]
+        assert result == MODEL_SHORTCUTS["opus"]
 
-    @patch("pm_core.model_config.get_global_setting_value", return_value="high")
+    @patch("pm_core.model_config.get_global_setting_value", return_value="opus")
     def test_project_beats_global(self, mock_gsv):
-        data = {"project": {"model_config": {"session_models": {"qa": "low"}}}}
-        assert resolve_model("qa", project_data=data) == QUALITY_TIERS["low"]
+        data = {"project": {"model_config": {"session_models": {"qa": "haiku"}}}}
+        assert resolve_model("qa", project_data=data) == MODEL_SHORTCUTS["haiku"]
 
     def test_unknown_session_type(self):
         assert resolve_model("unknown-type") is None
 
 
 class TestEffortResolution:
-    def test_no_defaults(self):
-        """Without any config, effort is None (use CLI default)."""
+    def test_defaults_are_none(self):
+        """With no config, effort is None (use CLI default)."""
         result = resolve_model_and_provider("review")
         assert result.effort is None
         result = resolve_model_and_provider("qa")
+        assert result.effort is None
+        result = resolve_model_and_provider("impl")
+        assert result.effort is None
+
+    def test_watcher_no_effort_by_default(self):
+        """Watcher has no default effort."""
+        result = resolve_model_and_provider("watcher")
         assert result.effort is None
 
     def test_haiku_suppresses_effort(self):
@@ -114,18 +118,18 @@ class TestEnvVarOverrides:
     def test_pm_model_env_var(self):
         with patch.dict("os.environ", {"PM_MODEL": "haiku"}):
             result = resolve_model("qa")
-            assert result == QUALITY_TIERS["haiku"]
+            assert result == MODEL_SHORTCUTS["haiku"]
 
     def test_pm_model_with_shortcut(self):
         with patch.dict("os.environ", {"PM_MODEL": "sonnet"}):
             result = resolve_model("review")
-            assert result == QUALITY_TIERS["sonnet"]
+            assert result == MODEL_SHORTCUTS["sonnet"]
 
     def test_pm_model_beats_project(self):
-        data = {"project": {"model_config": {"session_models": {"qa": "high"}}}}
-        with patch.dict("os.environ", {"PM_MODEL": "low"}):
+        data = {"project": {"model_config": {"session_models": {"qa": "opus"}}}}
+        with patch.dict("os.environ", {"PM_MODEL": "haiku"}):
             result = resolve_model("qa", project_data=data)
-            assert result == QUALITY_TIERS["low"]
+            assert result == MODEL_SHORTCUTS["haiku"]
 
     def test_pm_effort_env_var(self):
         with patch.dict("os.environ", {"PM_EFFORT": "low"}):
@@ -155,7 +159,7 @@ class TestGetModelConfigSummary:
 
 class TestGetPrModelOverride:
     def test_present(self):
-        assert get_pr_model_override({"model": "high"}) == "high"
+        assert get_pr_model_override({"model": "opus"}) == "opus"
 
     def test_absent(self):
         assert get_pr_model_override({}) is None
@@ -197,10 +201,10 @@ class TestProviderResolution:
             assert result.provider == "ollama"
             assert result.model is None
 
-    def test_non_provider_returns_none_without_config(self):
-        """Without any config, model is None (cli default)."""
-        result = resolve_model_and_provider("review")
-        assert result.model is None
+    def test_non_provider_returns_model(self):
+        """With explicit config, non-provider values resolve to model IDs."""
+        result = resolve_model_and_provider("review", pr_model="opus")
+        assert result.model == MODEL_SHORTCUTS["opus"]
         assert result.provider is None
 
     def test_provider_in_project_config(self):
@@ -224,3 +228,38 @@ class TestProviderResolution:
         result = resolve_model_and_provider("qa")
         assert result.provider == "vllm"
         assert result.model is None
+
+
+class TestQaSubtypeFallback:
+    def test_qa_planning_falls_back_to_qa(self):
+        data = {"project": {"model_config": {"session_models": {"qa": "sonnet"}}}}
+        result = resolve_model("qa_planning", project_data=data)
+        assert result == MODEL_SHORTCUTS["sonnet"]
+
+    def test_qa_scenario_falls_back_to_qa(self):
+        data = {"project": {"model_config": {"session_models": {"qa": "haiku"}}}}
+        result = resolve_model("qa_scenario", project_data=data)
+        assert result == MODEL_SHORTCUTS["haiku"]
+
+    def test_specific_beats_fallback(self):
+        data = {"project": {"model_config": {"session_models": {
+            "qa": "haiku",
+            "qa_planning": "opus",
+        }}}}
+        assert resolve_model("qa_planning", project_data=data) == MODEL_SHORTCUTS["opus"]
+        assert resolve_model("qa_scenario", project_data=data) == MODEL_SHORTCUTS["haiku"]
+
+    def test_effort_fallback(self):
+        data = {"project": {"model_config": {"session_effort": {"qa": "low"}}}}
+        result = resolve_model_and_provider("qa_planning", project_data=data)
+        assert result.effort == "low"
+
+    def test_effort_specific_beats_fallback(self):
+        data = {"project": {"model_config": {"session_effort": {
+            "qa": "low",
+            "qa_planning": "high",
+        }}}}
+        result = resolve_model_and_provider("qa_planning", project_data=data)
+        assert result.effort == "high"
+        result = resolve_model_and_provider("qa_scenario", project_data=data)
+        assert result.effort == "low"

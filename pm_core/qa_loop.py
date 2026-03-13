@@ -417,11 +417,17 @@ def parse_qa_plan(output: str) -> list[QAScenario]:
 # Model resolution helper
 # ---------------------------------------------------------------------------
 
-def _resolve_qa_model(pr_data: dict, project_data: dict | None = None):
-    """Resolve model/provider for QA sessions (avoids repeating the call)."""
+def _resolve_qa_model(pr_data: dict, project_data: dict | None = None,
+                      session_type: str = "qa"):
+    """Resolve model/provider for a QA session type.
+
+    session_type should be "qa_planning" for the planner or "qa_scenario"
+    for scenario workers.  Falls back to "qa" config if the specific type
+    is not configured.
+    """
     from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
     return resolve_model_and_provider(
-        "qa",
+        session_type,
         pr_model=get_pr_model_override(pr_data),
         project_data=project_data,
     )
@@ -449,7 +455,7 @@ def _launch_scenario_0(
     from pm_core.claude_launcher import build_claude_shell_cmd
     from pm_core.container import is_container_mode_enabled, _docker_available
     from pm_core import container as container_mod
-    _qa_resolution = _resolve_qa_model(pr_data, data)
+    _qa_resolution = _resolve_qa_model(pr_data, data, session_type="qa_scenario")
 
     scenario = QAScenario(
         index=0,
@@ -521,7 +527,7 @@ def _launch_scenarios_in_tmux(
     """Launch each scenario in its own tmux window (with worktree isolation)."""
     from pm_core import tmux as tmux_mod, prompt_gen
     from pm_core.claude_launcher import build_claude_shell_cmd
-    _qa_resolution = _resolve_qa_model(pr_data, data)
+    _qa_resolution = _resolve_qa_model(pr_data, data, session_type="qa_scenario")
 
     branch = pr_data.get("branch", "")
 
@@ -601,7 +607,7 @@ def _launch_scenarios_in_containers(
     from pm_core import tmux as tmux_mod, prompt_gen
     from pm_core import container as container_mod
     from pm_core.claude_launcher import build_claude_shell_cmd
-    _qa_resolution = _resolve_qa_model(pr_data, data)
+    _qa_resolution = _resolve_qa_model(pr_data, data, session_type="qa_scenario")
 
     config = container_mod.load_container_config()
     branch = pr_data.get("branch", "")
@@ -702,7 +708,7 @@ def _relaunch_scenario_window(
     from pm_core.claude_launcher import build_claude_shell_cmd
     from pm_core.container import is_container_mode_enabled, _docker_available
     from pm_core import container as container_mod
-    _qa_resolution = _resolve_qa_model(pr_data, data)
+    _qa_resolution = _resolve_qa_model(pr_data, data, session_type="qa_scenario")
 
     win_name = _scenario_window_name(pr_data, scenario.index)
     use_containers = is_container_mode_enabled() and _docker_available()
@@ -882,7 +888,7 @@ def run_qa_sync(
     from pm_core import tmux as tmux_mod, prompt_gen, git_ops, store
     from pm_core import pane_layout, pane_registry
     from pm_core.claude_launcher import build_claude_shell_cmd
-    _qa_resolution = _resolve_qa_model(pr_data, store.load(pm_root))
+    _qa_planning_resolution = _resolve_qa_model(pr_data, store.load(pm_root), session_type="qa_planning")
 
     state.running = True
     session = get_pm_session()
@@ -944,7 +950,7 @@ def run_qa_sync(
         )
         cmd = build_claude_shell_cmd(
             prompt=planner_prompt,
-            model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort)
+            model=_qa_planning_resolution.model, provider=_qa_planning_resolution.provider, effort=_qa_planning_resolution.effort)
 
         # If the main QA window already exists, remember which sessions
         # were watching it so we can switch them to the replacement window
