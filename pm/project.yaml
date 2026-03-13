@@ -5419,6 +5419,14 @@ prs:
     text: 'QA INPUT_REQUIRED:  (workdir: /home/matt/.pm/workdirs/qa/pr-9a5b86e-a387c01606a8b945)'
     created_at: '2026-03-12T00:10:06Z'
     last_edited: '2026-03-12T00:10:06Z'
+  - id: note-1ac58da
+    text: 'QA ERROR: Local Models Always Visible in Model Selection: NEEDS_WORK; Real
+      Local LLM Integration Testing: ?; Init Hardware Detection and Local Model Setup:
+      ?; Enhanced Provider Verification and API Support: ?; Model Selection Persistence
+      and Provider Integration: ?; Provider Error Handling and Edge Cases: ? (workdir:
+      /Users/matthewtomei/.pm/workdirs/qa/pr-9a5b86e-66e915e6a58d34d0)'
+    created_at: '2026-03-12T00:56:12Z'
+    last_edited: '2026-03-12T00:56:12Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9a5b86e-harden-local-llm-integration-model-s-0a4ff8cc
 - id: pr-1f35c6d
   plan: watchers

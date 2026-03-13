@@ -897,10 +897,15 @@ def run_qa_sync(
     data = store.load(pm_root)
 
     workdir_path = pr_data.get("workdir")
-    if workdir_path and not Path(workdir_path).is_dir():
+    if not workdir_path or not Path(workdir_path).is_dir():
         from pm_core.cli.helpers import _ensure_workdir
         workdir_path = _ensure_workdir(data, pr_data, pm_root)
-    workdir_path = workdir_path or str(pm_root)
+    if not workdir_path or not Path(workdir_path).is_dir():
+        _log.error("QA aborted: workdir for %s does not exist and could not be created", state.pr_id)
+        state.running = False
+        state.latest_verdict = "ERROR"
+        state.latest_output = f"Workdir for {state.pr_id} does not exist on this machine and could not be created"
+        return state
 
     # Create QA workdir
     if not state.qa_workdir:
