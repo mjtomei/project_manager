@@ -14,6 +14,7 @@ from pm_core.push_proxy import (
     start_push_proxy,
     stop_push_proxy,
     stop_all_proxies,
+    stop_session_proxies,
     get_proxy_socket_path,
     container_socket_path,
     _CONTAINER_SOCKET_PATH,
@@ -312,3 +313,66 @@ class TestPushProxyLifecycle:
             assert mode & 0o777 == 0o777
         finally:
             proxy.stop()
+
+
+class TestSharedProxy:
+    """Tests for (session_tag, pr_id) shared proxy behaviour."""
+
+    def test_shared_proxy_reuse(self):
+        """Multiple containers on the same branch reuse one proxy."""
+        with patch("pm_core.push_proxy.PushProxy.start"), \
+             patch("pm_core.push_proxy.PushProxy.stop"):
+            sock1 = start_push_proxy("c1", "/w", "pm/pr-1",
+                                     session_tag="repo-abc", pr_id="pr-1")
+            sock2 = start_push_proxy("c2", "/w", "pm/pr-1",
+                                     session_tag="repo-abc", pr_id="pr-1")
+            # Same socket path
+            assert sock1 == sock2
+            # Both containers can look up the socket
+            assert get_proxy_socket_path("c1") == sock1
+            assert get_proxy_socket_path("c2") == sock1
+
+            # Stopping c1 should NOT stop the proxy (c2 still using it)
+            stop_push_proxy("c1")
+            assert get_proxy_socket_path("c2") == sock1
+
+            # Stopping c2 should stop the proxy
+            stop_push_proxy("c2")
+            assert get_proxy_socket_path("c2") is None
+
+    def test_shared_proxy_deterministic_path(self):
+        """Shared proxy socket is at a deterministic path."""
+        with patch("pm_core.push_proxy.PushProxy.start"), \
+             patch("pm_core.push_proxy.PushProxy.stop"):
+            sock = start_push_proxy("c1", "/w", "pm/pr-1",
+                                    session_tag="repo-abc", pr_id="pr-1")
+            assert sock == "/tmp/pm-push-proxy-repo-abc-pr-1/push.sock"
+            stop_push_proxy("c1")
+
+    def test_stop_session_proxies(self):
+        """stop_session_proxies cleans up all proxies for a session."""
+        with patch("pm_core.push_proxy.PushProxy.start"), \
+             patch("pm_core.push_proxy.PushProxy.stop"):
+            start_push_proxy("c1", "/w", "b1",
+                             session_tag="repo-abc", pr_id="pr-1")
+            start_push_proxy("c2", "/w", "b2",
+                             session_tag="repo-abc", pr_id="pr-2")
+            assert get_proxy_socket_path("c1") is not None
+            assert get_proxy_socket_path("c2") is not None
+
+            count = stop_session_proxies("repo-abc")
+            assert count == 2
+            assert get_proxy_socket_path("c1") is None
+            assert get_proxy_socket_path("c2") is None
+
+    def test_different_sessions_different_proxies(self):
+        """Different sessions get separate proxies even for the same PR."""
+        with patch("pm_core.push_proxy.PushProxy.start"), \
+             patch("pm_core.push_proxy.PushProxy.stop"):
+            sock1 = start_push_proxy("c1", "/w", "b",
+                                     session_tag="repo-aaa", pr_id="pr-1")
+            sock2 = start_push_proxy("c2", "/w", "b",
+                                     session_tag="repo-bbb", pr_id="pr-1")
+            assert sock1 != sock2
+            stop_push_proxy("c1")
+            stop_push_proxy("c2")
