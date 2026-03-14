@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-8463df9
+  active_pr: pr-ebc8615
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -42,7 +42,7 @@ plans:
   file: improvements.md
   status: active
 - id: watchers
-  name: Watcher framework and session health
+  name: Watcher framework, session health, and decision points
   file: plans/watchers.md
   status: draft
 - id: tui-ux
@@ -3782,6 +3782,10 @@ prs:
       plan detection fix: PASS; PR edit --plan option: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-942aa21-071f72afba6bdc28)'
     created_at: '2026-03-10T02:17:23Z'
     last_edited: '2026-03-10T02:17:23Z'
+  - id: note-e9ebcac
+    text: 'QA INPUT_REQUIRED:  (workdir: /Users/matthewtomei/.pm/workdirs/qa/pr-942aa21-091e125d6a4c31f6)'
+    created_at: '2026-03-13T04:34:36Z'
+    last_edited: '2026-03-13T04:34:36Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-942aa21-add-spec-generation-step-between-pr--e2dbb884
 - id: pr-4585fd3
   plan: tui-ux
@@ -5312,7 +5316,7 @@ prs:
   plan: watchers
   title: Per-session model and quality targeting for different session types
   branch: pm/pr-8463df9-per-session-model-and-quality-targeting-for-differ
-  status: in_review
+  status: merged
   depends_on:
   - pr-dad0069
   description: 'Add configuration to assign different model quality levels per session
@@ -5366,9 +5370,638 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/139
   gh_pr_number: 139
   created_at: '2026-03-10T23:04:21.042810+00:00'
-  updated_at: '2026-03-11T01:43:23.344856+00:00'
+  updated_at: '2026-03-11T03:31:17.795417+00:00'
   started_at: '2026-03-10T23:09:41.508237+00:00'
   reviewed_at: '2026-03-11T01:43:23.344856+00:00'
-  merged_at: null
+  merged_at: '2026-03-11T03:31:17.795417+00:00'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8463df9-per-session-model-and-quality-target-10e74920
+- id: pr-9a5b86e
+  plan: watchers
+  title: 'Harden local LLM integration: model selection, real QA testing, init setup,
+    and provider verification'
+  branch: pm/pr-9a5b86e-harden-local-llm-integration-model-selection-real-
+  status: qa
+  depends_on:
+  - pr-dad0069
+  description: "Follow-up to pr-dad0069 (local LLM provider support) addressing gaps\
+    \ found post-merge:\n\n1. **Always-visible local models in /models**: Make local\
+    \ LLM models appear in the Claude Code /models selection screen even when model\
+    \ override is not active, so users can always manually switch to a local model.\n\
+    \n2. **Real local model QA testing**: Ensure QA scenarios actually exercise a\
+    \ real local LLM endpoint rather than mocking it away. Add integration test scenarios\
+    \ that spin up a local model and validate end-to-end behavior.\n\n3. **Local model\
+    \ setup during pm init**: During pm init, detect available hardware and set up\
+    \ a small local model (e.g., a quantized model that can run on modest hardware)\
+    \ so there is always a local fallback available.\n\n4. **Expand pm provider verification**:\
+    \ Strengthen the pm provider command's model verification:\n   - Verify the v1/messages\
+    \ endpoint is supported (Anthropic-style API)\n   - If only the OpenAI-style /v1/chat/completions\
+    \ endpoint is available, ensure we have a translation/adapter layer\n   - Test\
+    \ actual inference capability, not just connectivity\n   - Report model capabilities\
+    \ and limitations clearly"
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/140
+  gh_pr_number: 140
+  created_at: '2026-03-11T17:38:30.495007+00:00'
+  updated_at: '2026-03-13T04:31:35.030249+00:00'
+  started_at: '2026-03-11T17:42:07.268473+00:00'
+  reviewed_at: '2026-03-11T18:06:25.532968+00:00'
+  merged_at: null
+  notes:
+  - id: note-ed2331e
+    text: 'QA PASS: Unit and integration tests pass: PASS; Provider add and full verification
+      with real Ollama: PASS; Model show displays local providers section: PASS; Init
+      detects Ollama and offers provider setup: PASS; Init skips Ollama prompt when
+      not running or not installed: PASS; Init skips prompt when provider already
+      configured: PASS; OpenAI-type provider with Anthropic API support detected:
+      PASS; Provider verification reports inference failure distinctly from tool use
+      failure: PASS; Double /v1 bug fix in Anthropic API probe URL: PASS; Init with
+      Ollama running but no models pulled: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-9a5b86e-83c4726d6d5a43e4)'
+    created_at: '2026-03-11T18:47:58Z'
+    last_edited: '2026-03-11T18:47:58Z'
+  - id: note-4020a44
+    text: 'QA INPUT_REQUIRED:  (workdir: /home/matt/.pm/workdirs/qa/pr-9a5b86e-a387c01606a8b945)'
+    created_at: '2026-03-12T00:10:06Z'
+    last_edited: '2026-03-12T00:10:06Z'
+  - id: note-1ac58da
+    text: 'QA ERROR: Local Models Always Visible in Model Selection: NEEDS_WORK; Real
+      Local LLM Integration Testing: ?; Init Hardware Detection and Local Model Setup:
+      ?; Enhanced Provider Verification and API Support: ?; Model Selection Persistence
+      and Provider Integration: ?; Provider Error Handling and Edge Cases: ? (workdir:
+      /Users/matthewtomei/.pm/workdirs/qa/pr-9a5b86e-66e915e6a58d34d0)'
+    created_at: '2026-03-12T00:56:12Z'
+    last_edited: '2026-03-12T00:56:12Z'
+  - id: note-394afe0
+    text: Local LLM available at spark-424d.lan:30002 (OpenAI-compatible API, serving
+      openai/gpt-oss-120b). Confirmed reachable from macbook.
+    created_at: '2026-03-13T04:31:35Z'
+    last_edited: '2026-03-13T04:31:35Z'
+  - id: note-8deb478
+    text: 'QA PASS: Provider Add and Full Verification with Real LLM Endpoint: PASS;
+      Model Show Displays Local Providers Section: PASS; Model Targeting with Provider
+      Assignment: PASS; OpenAI Provider Anthropic API Detection: PASS; Inference vs
+      Tool Use Distinction in Provider Verification: PASS; Init Detects Ollama and
+      Offers Provider Setup: PASS; Init with Ollama Running but No Models Pulled:
+      PASS; Unit and Integration Test Suite Passes: PASS; Provider Add with Unreachable
+      Endpoint: PASS; Double /v1 Bug Fix in Anthropic API Probe URL: PASS (workdir:
+      /Users/matthewtomei/.pm/workdirs/qa/pr-9a5b86e-323bc787bee6cb28)'
+    created_at: '2026-03-13T05:23:57Z'
+    last_edited: '2026-03-13T05:23:57Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9a5b86e-harden-local-llm-integration-model-s-0a4ff8cc
+- id: pr-1f35c6d
+  plan: watchers
+  title: 'Local model lifecycle watcher: keep a local LLM running at all times'
+  branch: pm/pr-1f35c6d-local-model-lifecycle-watcher-keep-a-local-llm-run
+  status: pending
+  depends_on:
+  - pr-dad0069
+  - pr-3032fb6
+  description: 'Watcher (using BaseWatcher from pr-3032fb6) that ensures a local LLM
+    model process is always running and healthy.
+
+
+    - On watcher start, launch the configured local model server (e.g., llama.cpp,
+    ollama) if not already running
+
+    - Periodically health-check the local model endpoint (ping /v1/models or similar)
+
+    - If the local model process crashes or becomes unresponsive, automatically restart
+    it
+
+    - Respect hardware constraints: pick an appropriate model size for available VRAM/RAM
+
+    - Integrates with pm init setup from pr-9a5b86e (the model installed during init
+    is the one kept alive)
+
+    - Log all lifecycle events (start, restart, health check failures)
+
+    - Expose status in the TUI so users can see the local model is available
+
+    - This is distinct from pr-f84cf3e (health/failover watcher) which handles routing
+    decisions across providers — this watcher is specifically about keeping the local
+    model process alive'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-11T17:39:07.931884+00:00'
+  updated_at: '2026-03-11T17:39:07.931884+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-4bd08d7
+  plan: watchers
+  title: Add built-in Anthropic-to-OpenAI translation proxy for local LLM providers
+  branch: pm/pr-4bd08d7-add-built-in-anthropic-to-openai-translation-proxy
+  status: pending
+  depends_on:
+  - pr-9a5b86e
+  description: 'Claude Code only speaks the Anthropic Messages API (/v1/messages),
+    but many local LLM servers (vLLM, sglang, older Ollama) only support OpenAI-compatible
+    chat completions (/v1/chat/completions). Ollama 0.14+ added native Anthropic API
+    support, but other backends haven''t.
+
+
+    Add a lightweight, zero-dependency translation proxy in pm_core/anthropic_proxy.py
+    that:
+
+    - Translates Anthropic Messages API requests → OpenAI chat completions requests
+
+    - Translates OpenAI responses → Anthropic Messages API responses
+
+    - Handles streaming SSE translation (Anthropic event types ↔ OpenAI delta chunks)
+
+    - Supports tool use round-trips (tool_use blocks ↔ tool_calls, tool_result ↔ tool
+    role)
+
+    - Supports vision/images (Anthropic image blocks → OpenAI image_url)
+
+    - Strips extended thinking blocks (not supported by OpenAI API)
+
+    - System prompt translation: Anthropic top-level system field ↔ OpenAI system
+    message in messages array
+
+    - Stop reason mapping: end_turn→stop, tool_use→tool_calls, max_tokens→length
+
+    - Usage/token counting translation between the two API formats
+
+    - Error response translation: map OpenAI errors back to Anthropic-style error
+    responses
+
+    - Model name passthrough/mapping for arbitrary local model names
+
+    - max_tokens handling: Anthropic requires it explicitly, OpenAI defaults differ
+
+    - Cache-control header stripping: handle Anthropic prompt caching headers gracefully
+
+    - Health check endpoint (/health) so the lifecycle watcher (pr-1f35c6d) can monitor
+    the proxy
+
+    - stdlib only — no FastAPI/Flask/uvicorn dependencies
+
+
+    Integration with pm provider:
+
+    - Auto-start the proxy when a type=local provider backend doesn''t support /v1/messages
+
+    - pm provider add detects whether the proxy is needed during connectivity check
+
+    - pm provider test reports proxy status
+
+
+    This enables targeting sglang, vLLM, and any OpenAI-compatible server without
+    requiring users to install external tools like LiteLLM.
+
+
+    ## Thinking Model Support (Critical for Progress UI)
+
+
+    Problem: Models like qwen3 produce thinking tokens before content tokens. Claude
+    Code shows a "↓ N tokens" progress counter based on counting characters from text_delta
+    SSE events. During the thinking phase, no text deltas arrive, so the counter shows
+    nothing for 10-30+ seconds.
+
+
+    How Claude Code''s token counter works (from source analysis of cli.js v2.1.73):
+
+    - Characters from content_block_delta with type text_delta are accumulated
+
+    - Displayed token count = Math.round(accumulated_chars / 4)
+
+    - Counter only shows after 30 seconds of streaming (it9 = 30000) OR if thinking/extended
+    thinking is detected
+
+    - usage.output_tokens from message_delta is used for cost tracking only, NOT for
+    the progress spinner
+
+
+    Solution: Translate Ollama''s thinking field into Anthropic thinking content blocks:
+
+    1. When Ollama streams {"message": {"thinking": "token..."}}: - Emit content_block_start
+    with {"type": "thinking", "thinking": ""} - Emit content_block_delta with {"type":
+    "thinking_delta", "thinking": "token..."}
+
+    2. When Ollama streams {"message": {"content": "token..."}}: - Close the thinking
+    block (content_block_stop) - Start text block: content_block_start with {"type":
+    "text", "text": ""} - Emit content_block_delta with {"type": "text_delta", "text":
+    "token..."}
+
+    3. On done: true chunk from Ollama: - Extract prompt_eval_count -> input_tokens
+    - Extract eval_count -> output_tokens - Send both in message_delta.usage (Claude
+    Code requires BOTH fields)
+
+
+    Note: May require Claude Code beta header anthropic-beta: thinking-2025-04-15
+    or similar. The proxy should check what betas the client sends and only emit thinking
+    blocks if supported.
+
+
+    ## Token Counting
+
+
+    Ollama provides token counts but shims typically hardcode 0. The proxy must:
+
+    - Streaming: Read prompt_eval_count and eval_count from the final done: true chunk
+
+    - Non-streaming: Read same fields from response body
+
+    - Forward as message_delta.usage.input_tokens AND .output_tokens (both required)
+
+
+    ## Quirks Discovered During QA
+
+
+    1. Claude Code sends ?beta=true query param on /v1/messages — strip query strings
+
+    2. Claude Code probes /v1/models — forward to upstream
+
+    3. Ollama base URL has no /v1 — handle both /v1/chat/completions and /api/chat
+
+    4. Models need 32K+ context for Claude Code''s system prompt (~15-20K tokens)
+
+    5. type=openai with openai: model prefix does not work in Claude Code v2.1.73
+    — only ANTHROPIC_BASE_URL works, so translation proxy is required'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-11T20:40:49.721162+00:00'
+  updated_at: '2026-03-11T20:40:49.721162+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-273369a
+  plan: null
+  title: Fix QA pane-killed showing INPUT_REQUIRED instead of KILLED status
+  branch: pm/pr-273369a-fix-qa-pane-killed-showing-input-required-instead-
+  status: pending
+  depends_on: []
+  description: When the QA pane is killed, the status message shows INPUT_REQUIRED
+    instead of indicating the pane was killed. Fix the status message to show that
+    the pane was killed. Also audit the INPUT_REQUIRED detection logic for correctness
+    — it may be triggering false positives.
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-13T04:37:37.703157+00:00'
+  updated_at: '2026-03-13T04:37:37.703157+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-094939c
+  plan: null
+  title: Automated local model setup with optimal tool-call and performance settings
+  branch: pm/pr-094939c-automated-local-model-setup-with-optimal-tool-call
+  status: pending
+  depends_on:
+  - pr-9a5b86e
+  description: Add an interactive prompt (during pm init or pm provider add) that
+    automates local model configuration for best performance. When a local LLM server
+    is detected (Ollama, vLLM, SGLang, etc.), guide the user through setup and automatically
+    apply optimal settings for tool calling, context length, sampling parameters,
+    and other provider-specific knobs. The goal is to make local model setup as close
+    to one-command as possible, rather than requiring users to manually discover and
+    configure the many settings needed for reliable tool use and high-quality output.
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-13T05:52:07.222845+00:00'
+  updated_at: '2026-03-13T05:52:07.222845+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-848ba9b
+  plan: watchers
+  title: Add decision point entity with CLI commands and workdir management
+  branch: pm/pr-848ba9b-add-decision-point-entity-with-cli-commands-and-wo
+  status: pending
+  depends_on: []
+  description: 'Decision points as a first-class entity for speculative parallel exploration.
+    Writing code is speculative execution — you don''t know the ideal version until
+    you''ve explored. Machines can pursue many paths in parallel instead of committing
+    to one and backtracking.
+
+
+    ## Data model
+
+
+    Decision points stored in project.yaml:
+
+    - id, description, status (open/resolved), resolution, parent (PR or spec)
+
+    - branches: list of named variants, each with its own sub-tree of PRs and workdirs
+
+    - At the plan/PR level: the tech tree forks into variant subtrees with different
+    PR structures
+
+    - At the spec level: multiple candidate specs branch from a base (title + short
+    description)
+
+
+    ## CLI commands
+
+
+    - `pm decision add [--parent-pr <id>] [--description "..."]` — create a decision
+    point, optionally attached to a PR or spec
+
+    - `pm decision branch <decision-id> [--title "..."]` — add a branch to explore
+
+    - `pm decision resolve <decision-id> <branch>` — pick a winner, archive losers
+
+    - `pm decision list` / `pm decision show <id>` — list-style output for both humans
+    and LLMs
+
+    - `pm decision remove <decision-id>` — clean up a decision point and its branches
+
+
+    ## Workdir management
+
+
+    - Creating a branch auto-creates workdirs for its PRs
+
+    - Resolving a decision auto-cleans loser branch workdirs
+
+    - Each branch can have its own sub-tree of PRs with independent depends_on chains
+
+
+    ## Design principles
+
+
+    - Not tied to any prompt — a human can manage decision points entirely through
+    CLI
+
+    - Prompts will be made aware separately (different PR)
+
+    - List-style commands optimized for LLM consumption, same commands work for humans
+
+    - Either human or machine can resolve decisions — the interface must make large
+    decision trees digestible
+
+
+    ## Manual testing needed
+
+
+    - CLI command lifecycle: add → branch → resolve → remove
+
+    - Workdir creation/cleanup on branch/resolve operations
+
+    - project.yaml serialization of decision point state'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-13T17:53:16.805117+00:00'
+  updated_at: '2026-03-13T17:53:16.805117+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-d925d69
+  plan: watchers
+  title: TUI decision tree explorer for decision point branches
+  branch: pm/pr-d925d69-tui-decision-tree-explorer-for-decision-point-bran
+  status: pending
+  depends_on:
+  - pr-848ba9b
+  description: 'Visual representation of decision trees integrated into the TUI tech
+    tree view, making large decision trees digestible and explorable by humans.
+
+
+    ## TUI integration
+
+
+    - Decision points shown as fork nodes in the tech tree with branches fanning out
+
+    - Navigate into a branch to see its variant subtree of PRs
+
+    - Compare branches side-by-side: diff summaries, PR status, test results, resource
+    usage
+
+    - Collapse/expand branches to manage visual complexity
+
+    - Filter to show only open (unresolved) decisions
+
+    - Pick winner from TUI with confirmation dialog
+
+
+    ## Scaling to large trees
+
+
+    - Progressive disclosure: collapsed by default, expand on demand
+
+    - Search/filter within decision trees
+
+    - Breadcrumb navigation showing current position in the tree
+
+    - Summary view: one line per decision showing branch count, status, age
+
+
+    ## Manual testing needed
+
+
+    - TUI keyboard navigation through decision tree forks
+
+    - Visual layout with multiple concurrent decision points
+
+    - Side-by-side branch comparison view
+
+    - Progressive disclosure behavior with deeply nested decisions'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-13T17:53:24.226295+00:00'
+  updated_at: '2026-03-13T17:53:24.226295+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-3f7815c
+  plan: watchers
+  title: Spec tree branching with multiple candidate specs per PR
+  branch: pm/pr-3f7815c-spec-tree-branching-with-multiple-candidate-specs-
+  status: pending
+  depends_on:
+  - pr-942aa21
+  - pr-848ba9b
+  description: 'Extend spec generation to support multiple candidate specs branching
+    from a base, enabling speculative exploration at the spec level.
+
+
+    ## Spec branching
+
+
+    - A base spec starts as just a title and short description (the "what", not the
+    "how")
+
+    - `pm decision add --spec <pr-id>` creates a spec-level decision point
+
+    - Spec generation produces multiple candidate specs as branches of the decision
+    point
+
+    - Each spec branch is a complete spec with its own approach, tradeoffs, and implementation
+    plan
+
+    - Each spec branch can have its own implementation workdir
+
+
+    ## Integration with spec generation (pr-942aa21)
+
+
+    - Spec generation prompt updated to produce multiple candidates when it detects
+    design uncertainty
+
+    - Candidates are automatically registered as branches of a decision point
+
+    - Each candidate spec is self-contained — includes its own test plan, acceptance
+    criteria, and implementation notes
+
+    - Comparison metadata: each branch notes its tradeoffs relative to the others
+
+
+    ## Workflow
+
+
+    1. PR exists with title and short description
+
+    2. User or prompt triggers spec generation
+
+    3. Generator identifies significant design choices and creates a decision point
+
+    4. Multiple spec variants are generated as branches
+
+    5. Each branch can be independently implemented
+
+    6. Human or machine resolves the decision, winner''s spec becomes the canonical
+    one
+
+
+    ## Visibility
+
+
+    - Spec variants visible in TUI within the PR detail view
+
+    - `pm decision show` lists spec branches with summaries
+
+    - Resolved specs show which branch won and why'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-13T17:53:34.809944+00:00'
+  updated_at: '2026-03-13T17:53:34.809944+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-df6cd9f
+  plan: watchers
+  title: Add decision point awareness to planning and spec prompts
+  branch: pm/pr-df6cd9f-add-decision-point-awareness-to-planning-and-spec-
+  status: pending
+  depends_on:
+  - pr-848ba9b
+  description: 'Make planning, spec generation, and implementation prompts aware of
+    decision points so they can suggest creating them when they detect uncertainty.
+    This is additive guidance only — no prompt requires decision points to function.
+
+
+    ## Prompt updates
+
+
+    - **Planning prompts** (plan breakdown, plan review): when the planner identifies
+    genuine uncertainty about approach, it suggests creating a decision point rather
+    than committing to one path. Examples: "should this be a watcher or a cron job?",
+    "monolith vs. microservice for this component?"
+
+    - **Spec generation prompts**: when the spec generator encounters significant
+    design forks, it suggests (or automatically creates, if spec tree branching is
+    available) a decision point with candidate specs
+
+    - **Implementation prompts**: sessions know which decision branch they''re working
+    on and what alternatives exist. If an implementation discovers that its branch''s
+    approach is fundamentally flawed, it can flag this
+
+    - **Review prompts**: reviewers can flag when a branch looks clearly better or
+    worse than siblings, recommending resolution
+
+
+    ## Design principles
+
+
+    - Awareness is purely additive — all prompts work exactly as before if no decision
+    points exist
+
+    - No prompt is forced to create decision points — they suggest when appropriate
+
+    - Decision point suggestions include rationale (what is uncertain and why it matters)
+
+    - LLM-facing output (from `pm decision list/show`) is included in prompt context
+    when relevant decision points exist'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-13T17:53:46.060213+00:00'
+  updated_at: '2026-03-13T17:53:46.060213+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-ebc8615
+  plan: watchers
+  title: 'Decision point watcher: monitor and surface parallel explorations'
+  branch: pm/pr-ebc8615-decision-point-watcher-monitor-and-surface-paralle
+  status: pending
+  depends_on:
+  - pr-3032fb6
+  - pr-848ba9b
+  description: 'Watcher (using BaseWatcher from pr-3032fb6) that monitors open decision
+    points across the project and helps manage the complexity of parallel exploration.
+
+
+    ## Observations
+
+
+    - Tracks all open decision points and their branches
+
+    - Monitors when branches have diverged enough to be meaningfully comparable
+
+    - Detects stale branches (no activity for a configurable period)
+
+    - Tracks resource usage per branch: API costs, time spent, workdir disk usage
+
+    - Monitors total workdir count — alerts when growing large due to many open decisions
+
+
+    ## Actions
+
+
+    - Surfaces comparison summaries in the watcher TUI pane for human review
+
+    - Recommends pruning stale or clearly-losing branches
+
+    - Recommends resolving decisions where one branch is clearly ahead
+
+    - Presents decision summaries formatted for human digestion (not just raw data)
+
+    - Can recommend creating decision points when it observes repeated backtracking
+    on a PR
+
+
+    ## Integration
+
+
+    - Uses the decision point CLI (pr-848ba9b) for all queries — no separate data
+    access
+
+    - Decision status included in the watcher''s periodic project health summary
+
+    - Interacts with the project state watcher (pr-945546e) to avoid duplicate notifications'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-13T17:53:58.045907+00:00'
+  updated_at: '2026-03-13T17:53:58.045907+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []

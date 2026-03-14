@@ -9,81 +9,77 @@ from pm_core.model_config import (
     ModelResolution,
     get_model_config_summary,
     get_pr_model_override,
-    QUALITY_TIERS,
-    DEFAULT_SESSION_MODELS,
-    DEFAULT_SESSION_EFFORT,
     SESSION_TYPES,
 )
 
 
-class TestQualityTiers:
-    def test_low_medium_high(self):
-        assert "low" in QUALITY_TIERS
-        assert "medium" in QUALITY_TIERS
-        assert "high" in QUALITY_TIERS
+class TestPassthrough:
+    def test_bare_names_passed_through(self):
+        """Bare model names like sonnet, opus are passed through as-is."""
+        with patch.dict("os.environ", {"PM_MODEL": "sonnet"}):
+            assert resolve_model("review") == "sonnet"
+        with patch.dict("os.environ", {"PM_MODEL": "opus"}):
+            assert resolve_model("review") == "opus"
 
-    def test_model_shortcuts(self):
-        assert QUALITY_TIERS["opus"] == QUALITY_TIERS["high"]
-        assert QUALITY_TIERS["sonnet"] == QUALITY_TIERS["medium"]
-        assert QUALITY_TIERS["haiku"] == QUALITY_TIERS["low"]
-
-    def test_passthrough_model_id(self):
-        """Non-tier values are passed through as-is."""
+    def test_full_model_id_passed_through(self):
+        """Full model IDs are passed through as-is."""
         with patch.dict("os.environ", {"PM_MODEL": "claude-custom-model"}):
             result = resolve_model("review")
             assert result == "claude-custom-model"
 
 
 class TestResolveModel:
-    def test_defaults(self):
-        assert resolve_model("review") == QUALITY_TIERS["high"]
-        assert resolve_model("impl") == QUALITY_TIERS["medium"]
-        assert resolve_model("qa") == QUALITY_TIERS["medium"]
-        assert resolve_model("watcher") == QUALITY_TIERS["low"]
-        assert resolve_model("merge") == QUALITY_TIERS["medium"]
+    def test_defaults_are_none(self):
+        """With no config, all session types return None (use CLI default)."""
+        assert resolve_model("review") is None
+        assert resolve_model("impl") is None
+        assert resolve_model("qa") is None
+        assert resolve_model("watcher") is None
+        assert resolve_model("merge") is None
 
     def test_pr_override(self):
-        assert resolve_model("impl", pr_model="high") == QUALITY_TIERS["high"]
+        assert resolve_model("impl", pr_model="opus") == "opus"
 
     def test_project_config(self):
-        data = {"project": {"model_config": {"session_models": {"review": "medium"}}}}
-        assert resolve_model("review", project_data=data) == QUALITY_TIERS["medium"]
+        data = {"project": {"model_config": {"session_models": {"review": "sonnet"}}}}
+        assert resolve_model("review", project_data=data) == "sonnet"
 
     def test_pr_beats_project(self):
-        data = {"project": {"model_config": {"session_models": {"review": "low"}}}}
-        assert resolve_model("review", pr_model="medium", project_data=data) == QUALITY_TIERS["medium"]
+        data = {"project": {"model_config": {"session_models": {"review": "haiku"}}}}
+        assert resolve_model("review", pr_model="sonnet", project_data=data) == "sonnet"
 
-    @patch("pm_core.model_config.get_global_setting_value", return_value="high")
+    @patch("pm_core.model_config.get_global_setting_value", return_value="opus")
     def test_global_setting(self, mock_gsv):
         result = resolve_model("qa")
-        assert result == QUALITY_TIERS["high"]
+        assert result == "opus"
 
-    @patch("pm_core.model_config.get_global_setting_value", return_value="high")
+    @patch("pm_core.model_config.get_global_setting_value", return_value="opus")
     def test_project_beats_global(self, mock_gsv):
-        data = {"project": {"model_config": {"session_models": {"qa": "low"}}}}
-        assert resolve_model("qa", project_data=data) == QUALITY_TIERS["low"]
+        data = {"project": {"model_config": {"session_models": {"qa": "haiku"}}}}
+        assert resolve_model("qa", project_data=data) == "haiku"
 
     def test_unknown_session_type(self):
         assert resolve_model("unknown-type") is None
 
 
 class TestEffortResolution:
-    def test_defaults(self):
+    def test_defaults_are_none(self):
+        """With no config, effort is None (use CLI default)."""
         result = resolve_model_and_provider("review")
-        assert result.effort == "high"
+        assert result.effort is None
         result = resolve_model_and_provider("qa")
-        assert result.effort == "medium"
+        assert result.effort is None
         result = resolve_model_and_provider("impl")
-        assert result.effort == "high"
+        assert result.effort is None
 
     def test_watcher_no_effort_by_default(self):
-        """Watcher defaults to haiku which doesn't support effort."""
+        """Watcher has no default effort."""
         result = resolve_model_and_provider("watcher")
         assert result.effort is None
 
     def test_haiku_suppresses_effort(self):
         """Even if effort is configured, it's suppressed for haiku."""
-        with patch.dict("os.environ", {"PM_EFFORT": "high"}):
+        with patch.dict("os.environ", {"PM_MODEL": "haiku", "PM_EFFORT": "high"}):
             result = resolve_model_and_provider("watcher")
             assert result.effort is None
 
@@ -121,18 +117,18 @@ class TestEnvVarOverrides:
     def test_pm_model_env_var(self):
         with patch.dict("os.environ", {"PM_MODEL": "haiku"}):
             result = resolve_model("qa")
-            assert result == QUALITY_TIERS["haiku"]
+            assert result == "haiku"
 
     def test_pm_model_with_shortcut(self):
         with patch.dict("os.environ", {"PM_MODEL": "sonnet"}):
             result = resolve_model("review")
-            assert result == QUALITY_TIERS["sonnet"]
+            assert result == "sonnet"
 
     def test_pm_model_beats_project(self):
-        data = {"project": {"model_config": {"session_models": {"qa": "high"}}}}
-        with patch.dict("os.environ", {"PM_MODEL": "low"}):
+        data = {"project": {"model_config": {"session_models": {"qa": "opus"}}}}
+        with patch.dict("os.environ", {"PM_MODEL": "haiku"}):
             result = resolve_model("qa", project_data=data)
-            assert result == QUALITY_TIERS["low"]
+            assert result == "haiku"
 
     def test_pm_effort_env_var(self):
         with patch.dict("os.environ", {"PM_EFFORT": "low"}):
@@ -153,16 +149,16 @@ class TestEnvVarOverrides:
 
 
 class TestGetModelConfigSummary:
-    def test_defaults(self):
+    def test_no_config_shows_default(self):
         summary = get_model_config_summary()
-        assert summary["review"] == QUALITY_TIERS["high"]
-        assert summary["watcher"] == QUALITY_TIERS["low"]
+        assert summary["review"] == "(default)"
+        assert summary["watcher"] == "(default)"
         assert len(summary) == len(SESSION_TYPES)
 
 
 class TestGetPrModelOverride:
     def test_present(self):
-        assert get_pr_model_override({"model": "high"}) == "high"
+        assert get_pr_model_override({"model": "opus"}) == "opus"
 
     def test_absent(self):
         assert get_pr_model_override({}) is None
@@ -171,9 +167,9 @@ class TestGetPrModelOverride:
 class TestBuildClaudeShellCmd:
     def test_model_flag_included(self):
         from pm_core.claude_launcher import build_claude_shell_cmd
-        cmd = build_claude_shell_cmd(prompt="test", model="claude-sonnet-4-20250514")
+        cmd = build_claude_shell_cmd(prompt="test", model="sonnet")
         assert "--model" in cmd
-        assert "claude-sonnet-4-20250514" in cmd
+        assert "sonnet" in cmd
 
     def test_no_model_flag_when_none(self):
         from pm_core.claude_launcher import build_claude_shell_cmd
@@ -192,7 +188,7 @@ class TestBuildClaudeShellCmd:
 
     def test_model_and_effort_together(self):
         from pm_core.claude_launcher import build_claude_shell_cmd
-        cmd = build_claude_shell_cmd(prompt="test", model="claude-sonnet-4-20250514", effort="medium")
+        cmd = build_claude_shell_cmd(prompt="test", model="sonnet", effort="medium")
         assert "--model" in cmd
         assert "--effort medium" in cmd
 
@@ -205,8 +201,9 @@ class TestProviderResolution:
             assert result.model is None
 
     def test_non_provider_returns_model(self):
-        result = resolve_model_and_provider("review")
-        assert result.model == QUALITY_TIERS["high"]
+        """With explicit config, non-provider values resolve to model string."""
+        result = resolve_model_and_provider("review", pr_model="opus")
+        assert result.model == "opus"
         assert result.provider is None
 
     def test_provider_in_project_config(self):
@@ -223,10 +220,45 @@ class TestProviderResolution:
         data = {"project": {"model_config": {"session_models": {"watcher": "provider:ollama"}}}}
         summary = get_model_config_summary(data)
         assert summary["watcher"] == "provider:ollama"
-        assert summary["review"] == QUALITY_TIERS["high"]
+        assert summary["review"] == "(default)"
 
     @patch("pm_core.model_config.get_global_setting_value", return_value="provider:vllm")
     def test_global_setting_provider(self, mock_gsv):
         result = resolve_model_and_provider("qa")
         assert result.provider == "vllm"
         assert result.model is None
+
+
+class TestQaSubtypeFallback:
+    def test_qa_planning_falls_back_to_qa(self):
+        data = {"project": {"model_config": {"session_models": {"qa": "sonnet"}}}}
+        result = resolve_model("qa_planning", project_data=data)
+        assert result == "sonnet"
+
+    def test_qa_scenario_falls_back_to_qa(self):
+        data = {"project": {"model_config": {"session_models": {"qa": "haiku"}}}}
+        result = resolve_model("qa_scenario", project_data=data)
+        assert result == "haiku"
+
+    def test_specific_beats_fallback(self):
+        data = {"project": {"model_config": {"session_models": {
+            "qa": "haiku",
+            "qa_planning": "opus",
+        }}}}
+        assert resolve_model("qa_planning", project_data=data) == "opus"
+        assert resolve_model("qa_scenario", project_data=data) == "haiku"
+
+    def test_effort_fallback(self):
+        data = {"project": {"model_config": {"session_effort": {"qa": "low"}}}}
+        result = resolve_model_and_provider("qa_planning", project_data=data)
+        assert result.effort == "low"
+
+    def test_effort_specific_beats_fallback(self):
+        data = {"project": {"model_config": {"session_effort": {
+            "qa": "low",
+            "qa_planning": "high",
+        }}}}
+        result = resolve_model_and_provider("qa_planning", project_data=data)
+        assert result.effort == "high"
+        result = resolve_model_and_provider("qa_scenario", project_data=data)
+        assert result.effort == "low"

@@ -4,24 +4,16 @@ Resolves which model to use for a given session type based on a
 configuration hierarchy:
 
     PM_MODEL env var  >  PR-level override  >  project.yaml model_config
-    >  global ~/.pm/settings  >  built-in defaults
+    >  global ~/.pm/settings  >  (no default — use CLI setting)
 
 Effort level resolution:
 
     PM_EFFORT env var  >  project.yaml session_effort
-    >  global ~/.pm/settings  >  built-in defaults
+    >  global ~/.pm/settings  >  (no default — use CLI setting)
 
-Quality tiers map human-friendly labels to concrete model identifiers:
-
-    high      -> claude-opus-4-20250514   (reviews, critical decisions)
-    medium    -> claude-sonnet-4-20250514 (implementation, QA)
-    low       -> claude-haiku-4-5-20251001 (watchers, high-volume tasks)
-
-Model name shortcuts are also supported:
-
-    opus      -> claude-opus-4-20250514
-    sonnet    -> claude-sonnet-4-20250514
-    haiku     -> claude-haiku-4-5-20251001
+Model values like ``sonnet``, ``opus``, ``haiku`` are passed directly to
+the Claude CLI's ``--model`` flag, which resolves them to the latest
+version automatically.
 
 For external/local model servers, configure a provider via ``pm provider``
 (see providers.py) and reference it in model_config:
@@ -31,7 +23,6 @@ For external/local model servers, configure a provider via ``pm provider``
         model_config:
           session_models:
             watcher: provider:ollama    # use the "ollama" provider
-            qa: low                     # use a quality tier
             review: opus               # use a model name shortcut
 
 Values prefixed with ``provider:`` are resolved via the provider system
@@ -47,31 +38,30 @@ from pm_core.paths import configure_logger, get_global_setting_value
 
 _log = configure_logger("pm.model_config")
 
-# ── Quality tiers ────────────────────────────────────────────────────
+# ── Known model names (for display and haiku effort suppression) ─────
 
-QUALITY_TIERS: dict[str, str] = {
-    "high": "claude-opus-4-20250514",
-    "medium": "claude-sonnet-4-20250514",
-    "low": "claude-haiku-4-5-20251001",
-    # Model name shortcuts
-    "opus": "claude-opus-4-20250514",
-    "sonnet": "claude-sonnet-4-20250514",
-    "haiku": "claude-haiku-4-5-20251001",
-}
+# Bare names like "sonnet", "opus", "haiku" are passed directly to the
+# Claude CLI which resolves them to the latest version automatically.
+# We only need to know about haiku to suppress the --effort flag.
+_HAIKU_PATTERNS = ("haiku",)
 
-# ── Session types and their default quality tier ─────────────────────
+# ── Session types ────────────────────────────────────────────────────
 
-SESSION_TYPES = ("impl", "review", "qa", "watcher", "merge")
+SESSION_TYPES = ("impl", "review", "qa", "qa_planning", "qa_scenario", "watcher", "merge")
 
 DEFAULT_SESSION_MODELS: dict[str, str] = {
-    "review": "high",
-    "impl": "medium",
-    "qa": "medium",
-    "merge": "medium",
-    "watcher": "low",
+    # Empty — use Claude CLI defaults unless explicitly configured via
+    # project.yaml, global settings, or PM_MODEL env var.
 }
 
+
 _PROVIDER_PREFIX = "provider:"
+
+# Sub-types that fall back to a parent type when not explicitly configured.
+_FALLBACK_TYPES: dict[str, str] = {
+    "qa_planning": "qa",
+    "qa_scenario": "qa",
+}
 
 # Valid effort levels for the Claude CLI --effort flag.
 # Only Sonnet and Opus support effort; Haiku does not.
@@ -79,16 +69,15 @@ EFFORT_LEVELS = ("low", "medium", "high")
 
 # Models that do NOT support the --effort flag
 _NO_EFFORT_MODELS = {
-    QUALITY_TIERS["haiku"],  # claude-haiku-4-5-20251001
+    "haiku",
+    "claude-haiku-4-5-20251001",
 }
 
 DEFAULT_SESSION_EFFORT: dict[str, str] = {
-    "review": "high",
-    "impl": "high",
-    "qa": "medium",
-    "merge": "high",
-    # watcher omitted — defaults to haiku which doesn't support effort
+    # Empty — use Claude CLI defaults unless explicitly configured via
+    # project.yaml, global settings, or PM_EFFORT env var.
 }
+
 
 
 @dataclass
@@ -139,18 +128,17 @@ def resolve_model_and_provider(
     Returns a ModelResolution with either a model ID or a provider name,
     plus an effort level.  Values prefixed with ``provider:`` (e.g.
     ``provider:ollama``) are resolved as provider names.  All other
-    values are expanded through quality tiers.
+    values are passed through as-is to the Claude CLI's --model flag
+    (bare names like ``sonnet`` are resolved by the CLI itself).
     """
-    # Build effective tier map (project custom tiers override built-in)
-    tiers = dict(QUALITY_TIERS)
-    if project_data:
-        custom = project_data.get("project", {}).get("model_config", {}).get("quality_tiers", {})
-        tiers.update(custom)
-
     def _resolve_value(value: str) -> ModelResolution:
         if value.startswith(_PROVIDER_PREFIX):
             return ModelResolution(provider=value[len(_PROVIDER_PREFIX):])
-        return ModelResolution(model=tiers.get(value, value))
+        return ModelResolution(model=value)
+
+    # Types to try: the requested type, then its fallback (e.g. qa_planning -> qa)
+    fallback = _FALLBACK_TYPES.get(session_type)
+    type_chain = (session_type, fallback) if fallback else (session_type,)
 
     # --- Model / provider resolution ---
     # 1. PM_MODEL env var
@@ -159,23 +147,32 @@ def resolve_model_and_provider(
     # 2. PR-level override
     elif pr_model:
         resolution = _resolve_value(pr_model)
-    # 3. Project-level config
-    elif project_data and session_type in (
-        project_data.get("project", {}).get("model_config", {}).get("session_models", {})
-    ):
-        resolution = _resolve_value(
-            project_data["project"]["model_config"]["session_models"][session_type]
-        )
-    # 4. Global setting (~/.pm/settings/model-<type>)
-    elif (global_val := get_global_setting_value(f"model-{session_type}")):
-        resolution = _resolve_value(global_val)
-    # 5. Built-in default tier -> concrete model
+    # 3. Project-level config (try specific type, then fallback)
     else:
-        tier = DEFAULT_SESSION_MODELS.get(session_type)
-        if tier:
-            model_id = tiers.get(tier)
-            resolution = ModelResolution(model=model_id) if model_id else ModelResolution()
-        else:
+        resolution = None
+        session_models = (
+            project_data.get("project", {}).get("model_config", {}).get("session_models", {})
+            if project_data else {}
+        )
+        for st in type_chain:
+            if st in session_models:
+                resolution = _resolve_value(session_models[st])
+                break
+        # 4. Global setting (~/.pm/settings/model-<type>)
+        if resolution is None:
+            for st in type_chain:
+                if (global_val := get_global_setting_value(f"model-{st}")):
+                    resolution = _resolve_value(global_val)
+                    break
+        # 5. Built-in default tier -> concrete model
+        if resolution is None:
+            for st in type_chain:
+                tier = DEFAULT_SESSION_MODELS.get(st)
+                if tier:
+                    model_id = tiers.get(tier)
+                    resolution = ModelResolution(model=model_id) if model_id else ModelResolution()
+                    break
+        if resolution is None:
             resolution = ModelResolution()
 
     # --- Effort resolution (independent of model) ---
@@ -183,17 +180,27 @@ def resolve_model_and_provider(
     if (env_effort := os.environ.get("PM_EFFORT")):
         resolution.effort = env_effort
     else:
-        # 2. Project-level effort config
+        # 2. Project-level effort config (try specific type, then fallback)
         effort = None
         if project_data:
             mc = project_data.get("project", {}).get("model_config", {})
-            effort = mc.get("session_effort", {}).get(session_type)
+            effort_map = mc.get("session_effort", {})
+            for st in type_chain:
+                if st in effort_map:
+                    effort = effort_map[st]
+                    break
         # 3. Global setting (~/.pm/settings/effort-<type>)
         if not effort:
-            effort = get_global_setting_value(f"effort-{session_type}") or None
+            for st in type_chain:
+                effort = get_global_setting_value(f"effort-{st}") or None
+                if effort:
+                    break
         # 4. Built-in default
         if not effort:
-            effort = DEFAULT_SESSION_EFFORT.get(session_type)
+            for st in type_chain:
+                effort = DEFAULT_SESSION_EFFORT.get(st)
+                if effort:
+                    break
         resolution.effort = effort
 
     # Suppress effort for models that don't support it (e.g. Haiku)
