@@ -243,3 +243,94 @@ class TestGroupOrder:
     def test_implementation_first(self):
         assert GROUP_ORDER.index("Implementation") < GROUP_ORDER.index("Review")
         assert GROUP_ORDER.index("Implementation") < GROUP_ORDER.index("QA")
+
+
+class TestExpandCollapse:
+    """Tests for expand/collapse and flat item structure."""
+
+    def _make_qa_pane(self):
+        pane = TasksPane()
+        windows = [
+            {"id": "@1", "index": "0", "name": "main"},
+            {"id": "@2", "index": "1", "name": "qa-#128"},
+            {"id": "@3", "index": "2", "name": "qa-#128-s1"},
+            {"id": "@4", "index": "3", "name": "qa-#128-s2"},
+        ]
+        prs = [{"id": "pr-001", "gh_pr_number": 128, "title": "Fix", "status": "qa"}]
+        pane.update_tasks(windows, prs, {}, {})
+        return pane
+
+    def test_collapsed_hides_sub_windows(self):
+        pane = self._make_qa_pane()
+        # When collapsed, flat items should not include sub-entries
+        sub_items = [i for i in pane._flat_items if "_sub" in i]
+        assert len(sub_items) == 0
+
+    def test_expanded_shows_sub_windows(self):
+        pane = self._make_qa_pane()
+        qa = [e for e in pane._entries if e.group == "QA"][0]
+        qa.expanded = True
+        pane._build_flat_items()
+        sub_items = [i for i in pane._flat_items if "_sub" in i]
+        assert len(sub_items) == 2
+
+    def test_expanded_sub_window_names(self):
+        pane = self._make_qa_pane()
+        qa = [e for e in pane._entries if e.group == "QA"][0]
+        qa.expanded = True
+        pane._build_flat_items()
+        sub_items = [i for i in pane._flat_items if "_sub" in i]
+        sub_names = [i["_name"] for i in sub_items]
+        assert "qa-#128-s1" in sub_names
+        assert "qa-#128-s2" in sub_names
+
+    def test_selected_window_on_sub(self):
+        pane = self._make_qa_pane()
+        qa = [e for e in pane._entries if e.group == "QA"][0]
+        qa.expanded = True
+        pane._build_flat_items()
+        # Find first sub-window index
+        for i, item in enumerate(pane._flat_items):
+            if "_sub" in item:
+                pane.selected_index = i
+                break
+        assert pane.selected_window_name == "qa-#128-s1"
+
+
+class TestReviewLoopMarkers:
+    """Tests for review/QA loop status markers on task entries."""
+
+    def test_review_loop_running_marker(self):
+        pane = TasksPane()
+        windows = [
+            {"id": "@1", "index": "0", "name": "main"},
+            {"id": "@2", "index": "1", "name": "#128"},
+        ]
+        prs = [{"id": "pr-001", "gh_pr_number": 128, "title": "Fix", "status": "in_review"}]
+
+        class FakeLoop:
+            running = True
+            iteration = 3
+            latest_verdict = "FAIL"
+
+        pane.update_tasks(windows, prs, {"pr-001": FakeLoop()}, {})
+        entry = pane._entries[0]
+        assert "3" in entry.review_loop_marker
+        assert "FAIL" in entry.review_loop_marker
+
+    def test_review_loop_finished_marker(self):
+        pane = TasksPane()
+        windows = [
+            {"id": "@1", "index": "0", "name": "main"},
+            {"id": "@2", "index": "1", "name": "#128"},
+        ]
+        prs = [{"id": "pr-001", "gh_pr_number": 128, "title": "Fix", "status": "in_review"}]
+
+        class FakeLoop:
+            running = False
+            iteration = 5
+            latest_verdict = "PASS"
+
+        pane.update_tasks(windows, prs, {"pr-001": FakeLoop()}, {})
+        entry = pane._entries[0]
+        assert entry.review_loop_marker == "PASS"

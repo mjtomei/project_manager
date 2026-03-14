@@ -28,6 +28,87 @@ class TaskAction(Message):
         super().__init__()
 
 
+class TaskWindowSwitch(Message):
+    """Fired when the user wants to switch to a task's tmux window."""
+    def __init__(self, window_name: str) -> None:
+        self.window_name = window_name
+        super().__init__()
+
+
+# Task type grouping
+GROUP_ORDER = ["Implementation", "Review", "QA", "Watcher", "Other"]
+
+# Spinner frames for active tasks
+_SPINNER = "◐◓◑◒"
+
+# Window name patterns → (group, pr_display_id_extractor)
+# Order matters: more specific patterns first
+_WINDOW_PATTERNS = [
+    # QA scenario windows: qa-#128-s1, qa-pr-001-s2
+    (re.compile(r"^qa-(#\d+|pr-[a-z0-9]+)-s(\d+)$"), "QA", "sub"),
+    # QA main windows: qa-#128, qa-pr-001
+    (re.compile(r"^qa-(#\d+|pr-[a-z0-9]+)$"), "QA", "main"),
+    # Review windows: review-#128, review-pr-001
+    (re.compile(r"^review-(#\d+|pr-[a-z0-9]+)$"), "Review", "main"),
+    # Merge windows: merge-#128, merge-pr-001
+    (re.compile(r"^merge-(#\d+|pr-[a-z0-9]+)$"), "Review", "main"),
+    # Watcher window
+    (re.compile(r"^watcher$"), "Watcher", "main"),
+    # Implementation windows: #128, pr-001
+    (re.compile(r"^(#\d+|pr-[a-z0-9]+)$"), "Implementation", "main"),
+]
+
+
+def _classify_window(name: str) -> tuple[str, str, str, str | None]:
+    """Classify a tmux window by name.
+
+    Returns (group, pr_display_id, role, sub_id) where:
+    - group: one of GROUP_ORDER
+    - pr_display_id: e.g. "#128" or "pr-001" or "" for non-PR windows
+    - role: "main" or "sub"
+    - sub_id: scenario number for QA sub-windows, else None
+    """
+    for pattern, group, role in _WINDOW_PATTERNS:
+        m = pattern.match(name)
+        if m:
+            pr_id = m.group(1) if m.lastindex and m.lastindex >= 1 else ""
+            sub_id = m.group(2) if role == "sub" and m.lastindex and m.lastindex >= 2 else None
+            # Watcher has no PR ID
+            if group == "Watcher":
+                pr_id = ""
+            return group, pr_id, role, sub_id
+    return "Other", "", "main", None
+
+
+class TaskEntry:
+    """Represents a task in the tasks pane."""
+
+    def __init__(self, group: str, pr_display_id: str, main_window: str,
+                 window_index: str):
+        self.group = group
+        self.pr_display_id = pr_display_id
+        self.main_window = main_window
+        self.window_index = window_index
+        self.sub_windows: list[tuple[str, str, str]] = []  # (name, index, sub_id)
+        self.expanded = False
+        # PR data (populated by refresh)
+        self.pr_title: str = ""
+        self.pr_id: str = ""
+        self.pr_status: str = ""
+        # Loop state markers
+        self.review_loop_marker: str = ""
+        self.qa_loop_marker: str = ""
+
+
+class TasksPane(Widget):
+    """Scrollable list of running tasks grouped by type."""
+
+    can_focus = True
+
+    selected_index: reactive[int] = reactive(0)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
         self._entries: list[TaskEntry] = []
         self._group_headers: dict[int, str] = {}  # flat_index -> group name
         self._flat_items: list[dict] = []  # flattened for rendering
@@ -227,7 +308,6 @@ class TaskAction(Message):
                 # Sub-window entry (indented)
                 sub_name = item["_name"]
                 sub_id = item.get("_sub_id", "")
-                prefix = "    "
                 if is_selected:
                     output.append("  \u25b6 ", style="bold cyan")
                 else:
@@ -330,6 +410,28 @@ class TaskAction(Message):
             return
         container.scroll_to(y=new_y, animate=False, force=True)
 
+    def _group_boundaries(self) -> list[int]:
+        """Return flat indices of the first selectable item in each group."""
+        boundaries = []
+        seen_groups = set()
+        selectable = set(self._selectable_indices())
+        for i, item in enumerate(self._flat_items):
+            if "_header" in item:
+                group = item["_header"]
+                if group not in seen_groups:
+                    seen_groups.add(group)
+                    # Find the first selectable item after this header
+                    for j in range(i + 1, len(self._flat_items)):
+                        if j in selectable:
+                            boundaries.append(j)
+                            break
+        return boundaries
+
+    def on_key(self, event) -> None:
+        if not self.has_focus:
+            return
+
+        selectable = self._selectable_indices()
         if not selectable:
             return
 
