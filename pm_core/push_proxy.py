@@ -735,14 +735,15 @@ def cleanup_stale_proxy_dirs(session_tag: str) -> int:
         # Check if the proxy is alive by probing the socket
         alive = False
         if os.path.exists(sock_path):
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             try:
-                s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
                 s.settimeout(1.0)
                 s.connect(sock_path)
-                s.close()
                 alive = True
             except (ConnectionRefusedError, FileNotFoundError, OSError):
                 pass
+            finally:
+                s.close()
 
         if not alive:
             # Remove socket file and directory
