@@ -6,9 +6,15 @@ Provides ``pm watcher`` as a command group with subcommands:
 - ``pm watcher start [TYPE]`` — start a watcher by type
 - ``pm watcher stop [TYPE]`` — stop a running watcher
 - ``pm watcher list`` — list all registered watcher types and status
+- ``pm watcher supervisor start`` — launch supervisor watcher(s)
+- ``pm watcher supervisor stop`` — stop supervisor watcher(s)
+- ``pm watcher supervisor log`` — view supervisor feedback history
 
 Internal mode (``pm watcher --iteration N``) creates a single tmux
 window for the given iteration (called by the watcher loop engine).
+
+Internal mode (``pm watcher supervisor-iter``) creates a single
+supervisor tmux window for one iteration.
 """
 
 import secrets
@@ -214,6 +220,213 @@ def watcher_list():
         click.echo(f"  {'':20} window: {t['window_name']}, "
                    f"interval: {t['default_interval']}s")
         click.echo()
+
+
+# ---------------------------------------------------------------------------
+# Supervisor subcommands
+# ---------------------------------------------------------------------------
+
+@watcher_cmd.group("supervisor", invoke_without_command=True)
+@click.pass_context
+def supervisor_cmd(ctx):
+    """Manage supervisor watchers.
+
+    Supervisor watchers run at high effort and monitor other running
+    sessions, providing real-time coaching feedback.
+
+    \b
+    Subcommands:
+      start   Launch supervisor watcher(s)
+      stop    Stop running supervisors
+      log     View supervisor feedback history
+    """
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+
+
+@supervisor_cmd.command("start")
+@click.option("--target", default=None,
+              help="Filter target sessions by window name substring")
+@click.option("--count", default=1, type=int,
+              help="Number of supervisor instances to launch")
+@click.option("--wait", default=None, type=int,
+              help="Seconds between iterations (overrides default)")
+def supervisor_start(target: str | None, count: int, wait: int | None):
+    """Launch supervisor watcher(s).
+
+    \b
+    Examples:
+      pm watcher supervisor start                    # one supervisor, all targets
+      pm watcher supervisor start --target pr-abc    # filter to specific PR
+      pm watcher supervisor start --count 3          # launch 3 supervisors
+    """
+    from pm_core.watchers.supervisor_watcher import SupervisorWatcher
+
+    if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
+        click.echo("Supervisor requires tmux.", err=True)
+        raise SystemExit(1)
+
+    root = state_root()
+    pm_root = str(root)
+
+    for i in range(count):
+        watcher = SupervisorWatcher(pm_root=pm_root, target_filter=target)
+        if wait is not None:
+            watcher.state.iteration_wait = wait
+
+        tdir = root / "transcripts" / f"supervisor-{secrets.token_hex(4)}"
+        tdir.mkdir(parents=True, exist_ok=True)
+
+        label = f"#{i+1}" if count > 1 else ""
+        click.echo(f"Starting Supervisor{label} (target={target or 'all'}) ...")
+        click.echo(f"Transcripts: {tdir}")
+
+        if count == 1:
+            # Single supervisor: run blocking
+            click.echo("Press Ctrl+C to stop.\n")
+
+            def _on_iter(s):
+                ts = datetime.now().strftime("%H:%M:%S")
+                click.echo(f"[{ts}] Iteration {s.iteration}: {s.latest_verdict}")
+
+            try:
+                watcher.run_sync(
+                    on_iteration=_on_iter,
+                    transcript_dir=str(tdir),
+                )
+            except KeyboardInterrupt:
+                watcher.state.stop_requested = True
+                click.echo("\nStopping supervisor...")
+
+            click.echo(
+                f"\nSupervisor finished: {watcher.state.iteration} iteration(s), "
+                f"last verdict: {watcher.state.latest_verdict}"
+            )
+        else:
+            # Multiple supervisors: run in background threads
+            watcher.start_background(transcript_dir=str(tdir))
+            click.echo(f"  Supervisor{label} started in background "
+                       f"(id={watcher.state.watcher_id})")
+
+    if count > 1:
+        click.echo(f"\n{count} supervisors running. Use 'pm watcher supervisor stop' to stop.")
+
+
+@supervisor_cmd.command("stop")
+def supervisor_stop():
+    """Stop all running supervisor watchers."""
+    click.echo(
+        "To stop supervisors running in the TUI, press 'ws' in the TUI.\n"
+        "For CLI-started supervisors, use Ctrl+C in the terminal."
+    )
+
+
+@supervisor_cmd.command("log")
+@click.option("--target", default=None,
+              help="Filter by target window name")
+@click.option("--limit", default=50, type=int,
+              help="Max entries to show")
+def supervisor_log(target: str | None, limit: int):
+    """View supervisor feedback history.
+
+    \b
+    Examples:
+      pm watcher supervisor log                      # all feedback
+      pm watcher supervisor log --target pr-abc      # filter by target
+      pm watcher supervisor log --limit 10           # last 10 entries
+    """
+    from pm_core.supervisor_feedback import read_feedback_log, format_feedback_log
+
+    entries = read_feedback_log(target_filter=target, limit=limit)
+    click.echo(format_feedback_log(entries))
+
+
+# ---------------------------------------------------------------------------
+# Internal: supervisor-iter (creates tmux window for one supervisor iteration)
+# ---------------------------------------------------------------------------
+
+@watcher_cmd.command("supervisor-iter", hidden=True)
+@click.option("--iteration", required=True, type=int)
+@click.option("--loop-id", default="")
+@click.option("--transcript", default=None)
+@click.option("--target", default=None)
+def supervisor_iter_cmd(iteration: int, loop_id: str,
+                        transcript: str | None, target: str | None):
+    """Internal: create a supervisor tmux window for one iteration."""
+    _create_supervisor_window(iteration, loop_id, transcript, target_filter=target)
+
+
+def _create_supervisor_window(iteration: int, loop_id: str,
+                              transcript: str | None,
+                              target_filter: str | None = None) -> None:
+    """Create the supervisor tmux window for one iteration."""
+    from pm_core.watchers.supervisor_watcher import SupervisorWatcher
+
+    root = state_root()
+    data = store.load(root)
+
+    if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
+        click.echo("Supervisor window requires tmux.", err=True)
+        raise SystemExit(1)
+
+    pm_session = _get_pm_session()
+    if not pm_session or not tmux_mod.session_exists(pm_session):
+        click.echo(f"Supervisor: tmux session '{pm_session}' not found.", err=True)
+        raise SystemExit(1)
+
+    # Create a temporary supervisor instance to generate the prompt
+    watcher = SupervisorWatcher(pm_root=str(root), target_filter=target_filter)
+    supervisor_prompt = watcher.generate_prompt(iteration)
+
+    # Determine working directory
+    repo_dir = str(root.parent) if store.is_internal_pm_dir(root) else str(root)
+
+    # Resolve model/provider — supervisor uses "supervisor" session type,
+    # falling back to "watcher" if not configured.  Default to high effort.
+    from pm_core.model_config import resolve_model_and_provider
+    _resolution = resolve_model_and_provider("supervisor", project_data=data)
+
+    # Supervisor should default to high effort unless explicitly overridden
+    if not _resolution.effort:
+        _resolution.effort = "high"
+
+    claude_cmd = build_claude_shell_cmd(
+        prompt=supervisor_prompt,
+        transcript=transcript,
+        cwd=repo_dir,
+        model=_resolution.model,
+        provider=_resolution.provider,
+        effort=_resolution.effort,
+    )
+
+    window_name = SupervisorWatcher.WINDOW_NAME
+
+    # Kill existing supervisor window and recreate
+    sessions_watching: list[str] = []
+    existing = tmux_mod.find_window_by_name(pm_session, window_name)
+    _log.info("_create_supervisor_window: iteration=%d existing=%s",
+              iteration, existing)
+    if existing:
+        sessions_watching = tmux_mod.sessions_on_window(
+            pm_session, existing["id"])
+        tmux_mod.kill_window(pm_session, existing["id"])
+
+    try:
+        tmux_mod.new_window_get_pane(
+            pm_session, window_name, claude_cmd, repo_dir,
+            switch=False,
+        )
+        new_win = tmux_mod.find_window_by_name(pm_session, window_name)
+        if new_win:
+            tmux_mod.set_shared_window_size(pm_session, new_win["id"])
+        click.echo(f"Supervisor window launched (iteration {iteration})")
+    except Exception as e:
+        click.echo(f"Supervisor: failed to create tmux window: {e}", err=True)
+        raise SystemExit(1)
+
+    if sessions_watching:
+        tmux_mod.switch_sessions_to_window(
+            sessions_watching, pm_session, window_name)
 
 
 def _create_watcher_window(iteration: int, loop_id: str,

@@ -151,6 +151,9 @@ def load_watcher_plan_prs(app) -> int:
 # Icons for watcher verdicts (used in log line)
 WATCHER_VERDICT_ICONS = {
     "READY": "[green bold]OK READY[/]",
+    "CONTINUE": "[green bold]OK CONTINUE[/]",
+    "FEEDBACK_SENT": "[cyan bold]>> FEEDBACK_SENT[/]",
+    "NO_ISSUES": "[green bold]OK NO_ISSUES[/]",
     "INPUT_REQUIRED": "[red bold]!! INPUT_REQUIRED[/]",
     "KILLED": "[red bold]X KILLED[/]",
     "ERROR": "[red bold]! ERROR[/]",
@@ -190,6 +193,8 @@ def start_watcher(app, transcript_dir: str | None = None,
     if watcher_type == "auto-start":
         kwargs["auto_start_target"] = getattr(app, '_auto_start_target', None)
         kwargs["meta_pm_root"] = meta_pm_root
+    elif watcher_type == "supervisor":
+        kwargs["target_filter"] = getattr(app, '_supervisor_target', None)
     watcher = cls(pm_root=pm_root, **kwargs)
     manager.register(watcher)
 
