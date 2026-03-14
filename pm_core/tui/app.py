@@ -393,6 +393,17 @@ class ProjectManagerApp(App):
         except Exception:
             pass
         pane_ops.heal_registry(self._session_name)
+        # Clean up stale containers/proxies from a previous crash
+        try:
+            if self._session_name:
+                session_tag = self._session_name.removeprefix("pm-")
+                if session_tag:
+                    from pm_core.container import cleanup_stale_containers
+                    from pm_core.push_proxy import cleanup_stale_proxy_dirs
+                    cleanup_stale_containers(self._session_name, session_tag)
+                    cleanup_stale_proxy_dirs(session_tag)
+        except Exception:
+            _log.debug("Stale cleanup on startup failed", exc_info=True)
         try:
             if self._session_name:
                 from pm_core.cli.session import _register_tmux_bindings
