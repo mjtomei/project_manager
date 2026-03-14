@@ -53,6 +53,21 @@ def model_show():
     else:
         click.echo("No project-level model_config in project.yaml (using defaults).")
 
+    # Show configured local/external providers
+    from pm_core.providers import list_providers
+    providers = [p for p in list_providers() if p.type != "claude" or p.api_base]
+    if providers:
+        click.echo()
+        click.echo("Available local/external providers:")
+        click.echo(f"  {'name':15s} {'type':8s} {'model':25s} {'api_base'}")
+        click.echo(f"  {'─'*15} {'─'*8} {'─'*25} {'─'*30}")
+        for p in providers:
+            model_str = p.model or "(none)"
+            click.echo(f"  {p.name:15s} {p.type:8s} {model_str:25s} {p.api_base}")
+        click.echo()
+        click.echo("  Use with: pm model set <type> provider:<name>")
+        click.echo("  Example:  pm model set watcher provider:ollama")
+
 
 @model.command("set")
 @click.argument("session_type", type=click.Choice(_SESSION_TYPES))
