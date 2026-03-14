@@ -24,14 +24,15 @@ Legacy requests without ``cmd`` are treated as push (backward compat).
 """
 
 import json
-import logging
 import os
 import socket
 import subprocess
 import threading
 from pathlib import Path
 
-_log = logging.getLogger("pm.push_proxy")
+from pm_core.paths import configure_logger
+
+_log = configure_logger("pm.push_proxy")
 
 _SOCKET_DIR_PREFIX = "pm-push-proxy-"
 _CONTAINER_SOCKET_PATH = "/run/pm-push-proxy.sock"

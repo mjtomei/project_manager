@@ -7,11 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-import logging
-
 from pm_core.paths import log_shell_command
-
-_log = logging.getLogger("pm.git_ops")
 
 
 def get_git_root(start_path: Path | None = None) -> Path | None:
