@@ -240,6 +240,7 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]X[/]  Toggle merged PRs", classes="help-row")
                 yield Label("  [bold]f[/]  Cycle status filter", classes="help-row")
                 yield Label("  [bold]F[/]  Cycle sort field", classes="help-row")
+                yield Label("  [bold]][/] / [bold][[/]  Cycle fuzzy match results", classes="help-row")
                 yield Label("PR Actions", classes="help-section")
                 yield Label("  [bold]s[/]  Start selected PR", classes="help-row")
                 yield Label("  [bold]d[/]  Review (zz d: loop, zzz d: strict)", classes="help-row")
