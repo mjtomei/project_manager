@@ -463,7 +463,6 @@ Start with Step 0 below.  Once the spec is saved, proceed to the main task.
 """
 
 
-
 def format_spec_for_prompt(pr: dict, phase: str) -> str:
     """Format a spec for inclusion in a Claude prompt.
 
