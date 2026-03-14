@@ -611,7 +611,7 @@ def start_push_proxy(container_name: str, workdir: str,
         time.sleep(0.1)
 
     with _proxy_lock:
-        _active_proxies[container_name] = proxy
+        _active_proxies[container_name] = proc
         _container_to_proxy_key[container_name] = container_name
 
     return sock_path
