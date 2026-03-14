@@ -23,6 +23,7 @@ from pm_core.claude_launcher import find_claude, build_claude_shell_cmd, clear_s
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
+    _ensure_workdir,
     _get_pm_session,
     _gh_state_to_status,
     _infer_pr_id,
@@ -630,8 +631,21 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
             tmp_path = project_dir / f".tmp-{pr_id}"
             if tmp_path.exists():
                 shutil.rmtree(tmp_path)
-            click.echo(f"Cloning {repo_url}...")
-            git_ops.clone(repo_url, tmp_path, branch=base_branch)
+            # Clone locally from the existing repo (fast) instead of
+            # from the remote URL (slow, subject to network issues).
+            # When PM state lives in a pm/ subdir, the git repo is the parent.
+            local_source = str(root.parent) if store.is_internal_pm_dir(root) else str(root)
+            click.echo(f"Cloning locally from {local_source}...")
+            git_ops.clone(local_source, tmp_path, branch=base_branch)
+            # Configure push URLs: push to both the local repo (keeps
+            # it up to date, like the container push proxy does) and
+            # the remote (GitHub).  Fetch stays local for speed.
+            # PR branches aren't checked out in the main repo, so
+            # pushing to the local path succeeds without issues.
+            git_ops.run_git("remote", "set-url", "--push",
+                            "origin", local_source, cwd=tmp_path)
+            git_ops.run_git("remote", "set-url", "--add", "--push",
+                            "origin", repo_url, cwd=tmp_path)
 
             # Cache repo_id now that we have a clone
             _resolve_repo_id(data, tmp_path, root)
@@ -706,6 +720,16 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
 
     prompt = prompt_gen.generate_prompt(data, pr_id, session_name=pm_session)
 
+    # Resolve model/provider for this implementation session
+    from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
+    _resolution = resolve_model_and_provider(
+        "impl",
+        pr_model=get_pr_model_override(pr_entry),
+        project_data=data,
+    )
+    resolved_model = _resolution.model
+    resolved_provider = _resolution.provider
+
     claude = find_claude()
     if not claude:
         click.echo(f"\n{'='*60}")
@@ -719,11 +743,20 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         if tmux_mod.session_exists(pm_session):
             window_name = _pr_display_id(pr_entry)
             cmd = build_claude_shell_cmd(prompt=prompt,
-                                         transcript=transcript, cwd=str(work_path))
+                                         transcript=transcript, cwd=str(work_path),
+                                         model=resolved_model,
+                                         provider=resolved_provider,
+                                         effort=_resolution.effort)
             # Optionally wrap in a container for isolation
-            from pm_core.container import wrap_claude_cmd
-            cmd, _cname = wrap_claude_cmd(cmd, str(work_path), label=f"impl-{pr_id}",
-                                          allowed_push_branch=branch)
+            from pm_core.container import wrap_claude_cmd, ContainerError
+            _stag = pm_session.removeprefix("pm-") if pm_session else None
+            try:
+                cmd, _cname = wrap_claude_cmd(cmd, str(work_path), label=f"impl-{pr_id}",
+                                              allowed_push_branch=branch,
+                                              session_tag=_stag, pr_id=pr_id)
+            except ContainerError as e:
+                click.echo(str(e), err=True)
+                raise SystemExit(1)
             try:
                 if use_companion:
                     claude_pane = tmux_mod.new_window_get_pane(
@@ -751,7 +784,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     if fresh:
         clear_session(root, session_key)
     click.echo("Launching Claude...")
-    launch_claude(prompt, cwd=str(work_path), session_key=session_key, pm_root=root, resume=not fresh)
+    launch_claude(prompt, cwd=str(work_path), session_key=session_key, pm_root=root, resume=not fresh,
+                  provider=resolved_provider, model=resolved_model, effort=_resolution.effort)
 
 
 def _add_companion_pane(pm_session: str, window_info: dict, workdir: str,
@@ -819,9 +853,12 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         return
 
     workdir = pr_entry.get("workdir")
-    if not workdir:
-        click.echo(f"Review window: no workdir for {pr_entry['id']}. Start the PR first.")
-        return
+    if not workdir or not Path(workdir).exists():
+        root = state_root()
+        workdir = _ensure_workdir(data, pr_entry, root)
+        if not workdir:
+            click.echo(f"Review window: no workdir for {pr_entry['id']}. Start the PR first.")
+            return
 
     # Review loop always forces a fresh window
     if review_loop:
@@ -842,16 +879,16 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     # Optionally wrap in a container for isolation
     branch = pr_entry.get("branch", "")
     from pm_core.container import wrap_claude_cmd
+    _stag = pm_session.removeprefix("pm-") if pm_session else None
     claude_cmd, _cname = wrap_claude_cmd(claude_cmd, workdir, label=f"review-{pr_id}",
-                                          allowed_push_branch=branch)
+                                          allowed_push_branch=branch,
+                                          session_tag=_stag, pr_id=pr_id)
 
     window_name = f"review-{display_id}"
 
-    # If review window already exists, kill it if fresh, otherwise switch to it
+    # Fast path: if review window already exists and we don't need fresh,
+    # just switch to it — skip expensive prompt generation and container setup.
     existing = tmux_mod.find_window_by_name(pm_session, window_name)
-    # Remember which grouped sessions were watching the review window —
-    # after we kill and recreate it, those sessions should follow to the
-    # new window.  Check ALL sessions in the group, not just the current one.
     sessions_on_review: list[str] = []
     if existing:
         if fresh:
@@ -865,6 +902,37 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
             tmux_mod.select_window(pm_session, existing["id"])
             click.echo(f"Switched to existing review window '{window_name}'")
             return
+
+    title = pr_entry.get("title", "")
+    base_branch = data.get("project", {}).get("base_branch", "master")
+
+    # Resolve model/provider for review session
+    from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
+    _resolution = resolve_model_and_provider(
+        "review",
+        pr_model=get_pr_model_override(pr_entry),
+        project_data=data,
+    )
+
+    # Generate review prompt and build Claude command
+    review_prompt = prompt_gen.generate_review_prompt(data, pr_id, session_name=pm_session,
+                                                      review_loop=review_loop,
+                                                      review_iteration=review_iteration,
+                                                      review_loop_id=review_loop_id)
+    claude_cmd = build_claude_shell_cmd(prompt=review_prompt,
+                                         transcript=transcript, cwd=workdir,
+                                         model=_resolution.model,
+                                         provider=_resolution.provider,
+                                         effort=_resolution.effort)
+    # Optionally wrap in a container for isolation
+    branch = pr_entry.get("branch", "")
+    from pm_core.container import wrap_claude_cmd, ContainerError
+    try:
+        claude_cmd, _cname = wrap_claude_cmd(claude_cmd, workdir, label=f"review-{pr_id}",
+                                              allowed_push_branch=branch)
+    except ContainerError as e:
+        click.echo(str(e), err=True)
+        raise SystemExit(1)
 
     # In review loop mode or background mode, create the window without
     # switching focus.  For review loops the explicit per-session switching
@@ -1009,6 +1077,8 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
     backend_name = data["project"].get("backend", "vanilla")
     gh_pr_number = pr_entry.get("gh_pr_number")
     workdir = pr_entry.get("workdir")
+    if workdir and not Path(workdir).exists():
+        workdir = _ensure_workdir(data, pr_entry, root)
 
     if backend_name == "github" and gh_pr_number and workdir:
         from pm_core import gh_ops
@@ -1099,6 +1169,12 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
     if not workdir:
         click.echo(f"Merge window: no workdir for {pr_entry['id']}.")
         return
+    if not Path(workdir).exists():
+        root = state_root()
+        workdir = _ensure_workdir(data, pr_entry, root)
+        if not workdir:
+            click.echo(f"Merge window: no workdir for {pr_entry['id']}.")
+            return
 
     from pm_core.paths import get_global_setting
     use_companion = companion or get_global_setting("companion-pane")
@@ -1106,13 +1182,24 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
     pr_id = pr_entry["id"]
     display_id = _pr_display_id(pr_entry)
 
+    # Resolve model/provider for merge session
+    from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
+    _resolution = resolve_model_and_provider(
+        "merge",
+        pr_model=get_pr_model_override(pr_entry),
+        project_data=data,
+    )
+
     merge_prompt = prompt_gen.generate_merge_prompt(
         data, pr_id, error_output, session_name=pm_session,
         pull_from_workdir=pull_from_workdir,
         pull_from_origin=pull_from_origin,
     )
     claude_cmd = build_claude_shell_cmd(prompt=merge_prompt,
-                                         transcript=transcript, cwd=workdir)
+                                         transcript=transcript, cwd=workdir,
+                                         model=_resolution.model,
+                                         provider=_resolution.provider,
+                                         effort=_resolution.effort)
     # Merge runs on the host — it needs to push to master and modify the
     # main repo, which the branch-scoped push proxy would block.
     window_name = f"merge-{display_id}"
@@ -1413,6 +1500,8 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
     if backend_name == "github":
         gh_pr_number = pr_entry.get("gh_pr_number")
         workdir = pr_entry.get("workdir")
+        if workdir and not Path(workdir).exists():
+            workdir = _ensure_workdir(data, pr_entry, root)
         if gh_pr_number and workdir and Path(workdir).exists() and shutil.which("gh"):
             gh_merged = False
 
@@ -1480,8 +1569,10 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
     # For local/vanilla: merge in the PR's workdir (branch always exists there)
     workdir = pr_entry.get("workdir")
     if not workdir or not Path(workdir).exists():
-        click.echo(f"PR {pr_id} workdir not found. Cannot merge without the branch.", err=True)
-        raise SystemExit(1)
+        workdir = _ensure_workdir(data, pr_entry, root)
+        if not workdir:
+            click.echo(f"PR {pr_id} workdir not found. Cannot merge without the branch.", err=True)
+            raise SystemExit(1)
 
     work_path = Path(workdir)
 

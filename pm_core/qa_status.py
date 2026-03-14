@@ -28,7 +28,7 @@ from pathlib import Path
 logging.basicConfig(
     filename="/tmp/qa_status_debug.log",
     level=logging.DEBUG,
-    format="%(asctime)s %(levelname)s %(message)s",
+    format="%(asctime)s %(levelname)-5s [qa_status] %(message)s",
     datefmt="%H:%M:%S",
 )
 _log = logging.getLogger("pm.qa_status")

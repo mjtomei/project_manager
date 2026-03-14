@@ -22,9 +22,49 @@ from pm_core.cli.helpers import (
 @cli.command("_tui", hidden=True)
 def tui_cmd():
     """Launch the interactive TUI (internal command)."""
-    from pm_core.tui.app import ProjectManagerApp
-    app = ProjectManagerApp()
-    app.run()
+    import sys
+    import traceback
+    from pm_core.paths import configure_logger, command_log_file
+
+    # Redirect stderr to a file so crash output is preserved after the pane dies
+    stderr_path = debug_dir() / "tui-stderr.log"
+    stderr_file = open(stderr_path, "a")
+    sys.stderr = stderr_file
+
+    log = configure_logger("pm.tui.crash")
+
+    # Catch SystemExit raised in threads (e.g. run_in_executor callbacks)
+    import threading
+    _orig_excepthook = threading.excepthook
+    def _thread_excepthook(args):
+        if args.exc_type is SystemExit:
+            tb = "".join(traceback.format_exception(args.exc_type, args.exc_value, args.exc_value.__traceback__))
+            log.error("Thread %s raised SystemExit(%s):\n%s", args.thread, args.exc_value.code, tb)
+            stderr_file.write(f"\n--- Thread SystemExit ---\n{tb}\n")
+            stderr_file.flush()
+        elif _orig_excepthook:
+            _orig_excepthook(args)
+    threading.excepthook = _thread_excepthook
+
+    try:
+        from pm_core.tui.app import ProjectManagerApp
+        app = ProjectManagerApp()
+        app.run()
+    except SystemExit as e:
+        tb = traceback.format_exc()
+        log.error("TUI exited with SystemExit(%s):\n%s", e.code, tb)
+        stderr_file.write(f"\n--- TUI SystemExit({e.code}) ---\n{tb}\n")
+        stderr_file.flush()
+        raise
+    except Exception:
+        tb = traceback.format_exc()
+        log.error("TUI crashed with unhandled exception:\n%s", tb)
+        stderr_file.write(f"\n--- TUI CRASH ---\n{tb}\n")
+        stderr_file.flush()
+        raise
+    finally:
+        sys.stderr = sys.__stderr__
+        stderr_file.close()
 
 
 @cli.group()

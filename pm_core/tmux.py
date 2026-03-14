@@ -263,13 +263,12 @@ def get_window_size(session: str, window: str = "0") -> tuple[int, int]:
 
 def apply_layout(session: str, window: str, layout_string: str) -> bool:
     """Apply a custom layout string via tmux select-layout. Returns True on success."""
-    import logging
     result = subprocess.run(
         _tmux_cmd("select-layout", "-t", f"{session}:{window}", layout_string),
         capture_output=True, text=True,
     )
     if result.returncode != 0:
-        logging.getLogger("pm.pane_layout").warning(
+        _log.warning(
             "tmux select-layout failed: %s", result.stderr.strip())
     return result.returncode == 0
 

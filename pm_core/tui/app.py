@@ -619,7 +619,15 @@ class ProjectManagerApp(App):
     # --- Sync delegates (see tui/sync.py) ---
 
     async def _background_sync(self) -> None:
-        await sync_mod.background_sync(self)
+        try:
+            await sync_mod.background_sync(self)
+        except SystemExit as e:
+            import traceback
+            _log.error("_background_sync raised SystemExit(%s):\n%s", e.code, traceback.format_exc())
+        except BaseException as e:
+            import traceback
+            _log.error("_background_sync raised %s:\n%s", type(e).__name__, traceback.format_exc())
+            raise
 
     async def _do_normal_sync(self, is_manual: bool = False) -> None:
         await sync_mod.do_normal_sync(self, is_manual=is_manual)

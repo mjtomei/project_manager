@@ -83,6 +83,24 @@ def start_pr(app, companion: bool = False) -> None:
                 app.log_error("Blocked", f"{pr_id} has unmerged deps: {', '.join(unmerged)}")
                 return
 
+    # Fast path: if implementation window already exists and not fresh,
+    # just switch to it without spawning a subprocess.
+    if not fresh:
+        from pm_core.loop_shared import get_pm_session
+        from pm_core import tmux as tmux_mod
+        session = get_pm_session()
+        if session and app._root:
+            data = store.load(app._root)
+            pr_entry = store.get_pr(data, pr_id)
+            if pr_entry:
+                from pm_core.cli.pr import _pr_display_id
+                display_id = _pr_display_id(pr_entry)
+                existing = tmux_mod.find_window_by_name(session, display_id)
+                if existing:
+                    tmux_mod.select_window(session, existing["id"])
+                    app.log_message(f"Switched to window '{display_id}'")
+                    return
+
     suffix = ""
     if fresh:
         suffix += " (fresh)"
@@ -112,6 +130,26 @@ def done_pr(app, fresh: bool = False) -> None:
     if not pr_id:
         app.log_message("No PR selected")
         return
+
+    # Fast path: if review window already exists and not fresh, just
+    # switch to it without spawning a subprocess.
+    if not fresh:
+        from pm_core.loop_shared import get_pm_session
+        from pm_core import tmux as tmux_mod, store
+        session = get_pm_session()
+        if session and app._root:
+            data = store.load(app._root)
+            pr_entry = store.get_pr(data, pr_id)
+            if pr_entry:
+                from pm_core.cli.pr import _pr_display_id
+                display_id = _pr_display_id(pr_entry)
+                window_name = f"review-{display_id}"
+                existing = tmux_mod.find_window_by_name(session, window_name)
+                if existing:
+                    tmux_mod.select_window(session, existing["id"])
+                    app.log_message(f"Switched to review window '{window_name}'")
+                    return
+
     action_key = f"Reviewing {pr_id}" + (" (fresh)" if fresh else "")
     if not guard_pr_action(app, action_key):
         return

@@ -24,14 +24,15 @@ Legacy requests without ``cmd`` are treated as push (backward compat).
 """
 
 import json
-import logging
 import os
 import socket
 import subprocess
 import threading
 from pathlib import Path
 
-_log = logging.getLogger("pm.push_proxy")
+from pm_core.paths import configure_logger
+
+_log = configure_logger("pm.push_proxy")
 
 _SOCKET_DIR_PREFIX = "pm-push-proxy-"
 _CONTAINER_SOCKET_PATH = "/run/pm-push-proxy.sock"
@@ -509,44 +510,137 @@ class PushProxy:
 # Proxy lifecycle helpers (used by container.py)
 # ---------------------------------------------------------------------------
 
-# Track running proxies so they can be cleaned up
+# Track running proxies so they can be cleaned up.
+#
+# Two keying schemes coexist:
+#   1. Per-container (legacy): key = container_name
+#   2. Shared per (session, branch): key = "{session_tag}\0{pr_id}"
+#      Multiple containers reference the same proxy via _proxy_refs.
 _active_proxies: dict[str, PushProxy] = {}
 _proxy_lock = threading.Lock()
 
+# For shared proxies: which containers reference each proxy key
+_proxy_refs: dict[str, set[str]] = {}
+# Reverse lookup: container_name -> proxy key
+_container_to_proxy_key: dict[str, str] = {}
+
+
+def _shared_proxy_key(session_tag: str, pr_id: str) -> str:
+    """Build the dict key for a shared proxy."""
+    return f"{session_tag}\0{pr_id}"
+
 
 def start_push_proxy(container_name: str, workdir: str,
-                     allowed_branch: str) -> str:
+                     allowed_branch: str,
+                     session_tag: str | None = None,
+                     pr_id: str | None = None) -> str:
     """Start a push proxy for a container.
 
+    When *session_tag* and *pr_id* are both provided the proxy is shared:
+    only one proxy runs per unique ``(session_tag, pr_id)`` pair and its
+    socket lives at a deterministic path
+    ``/tmp/pm-push-proxy-{session_tag}-{pr_id}/push.sock``.  Additional
+    containers on the same branch reuse the existing proxy.
+
+    Without *session_tag*/*pr_id* a per-container proxy with a random
+    temp directory is created (legacy behaviour).
+
     Args:
-        container_name: Container name (used for socket naming).
+        container_name: Container name (used for reference tracking).
         workdir: Host path to the git working directory.
         allowed_branch: Only allow pushes to this branch.
+        session_tag: Session tag for proxy sharing.
+        pr_id: PR identifier for proxy sharing.
 
     Returns:
         Host path to the Unix socket (to be mounted into the container).
     """
+    shared = session_tag is not None and pr_id is not None
+
+    if shared:
+        key = _shared_proxy_key(session_tag, pr_id)
+        with _proxy_lock:
+            if key in _active_proxies:
+                _proxy_refs[key].add(container_name)
+                _container_to_proxy_key[container_name] = key
+                proxy = _active_proxies[key]
+                _log.info("Reusing shared push proxy for %s (container %s)",
+                          key, container_name)
+                return proxy.socket_path
+
+        # Deterministic socket directory
+        sock_dir = f"/tmp/{_SOCKET_DIR_PREFIX}{session_tag}-{pr_id}"
+        os.makedirs(sock_dir, exist_ok=True)
+        sock_path = os.path.join(sock_dir, "push.sock")
+
+        proxy = PushProxy(sock_path, workdir, allowed_branch)
+        proxy.start()
+
+        with _proxy_lock:
+            _active_proxies[key] = proxy
+            _proxy_refs[key] = {container_name}
+            _container_to_proxy_key[container_name] = key
+
+        return sock_path
+
+    # Legacy per-container proxy
     import tempfile
-    sock_dir = tempfile.mkdtemp(prefix=_SOCKET_DIR_PREFIX)
+    # Use a deterministic path based on the container name so the
+    # socket can be found after a TUI restart without a registry.
+    sock_dir = os.path.join(tempfile.gettempdir(),
+                            f"{_SOCKET_DIR_PREFIX}{container_name}")
+    os.makedirs(sock_dir, exist_ok=True)
     sock_path = os.path.join(sock_dir, "push.sock")
 
-    proxy = PushProxy(sock_path, workdir, allowed_branch)
-    proxy.start()
+    # Spawn the proxy as an independent subprocess so it outlives the
+    # calling process.  Uses this module's __main__ entry point.
+    import sys
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "pm_core.push_proxy",
+         sock_path, workdir, allowed_branch],
+        start_new_session=True,  # detach from parent process group
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    # Wait briefly for the socket to appear
+    for _ in range(20):
+        if os.path.exists(sock_path):
+            break
+        import time
+        time.sleep(0.1)
 
     with _proxy_lock:
         _active_proxies[container_name] = proxy
+        _container_to_proxy_key[container_name] = container_name
 
     return sock_path
 
 
 def stop_push_proxy(container_name: str) -> None:
-    """Stop and clean up the push proxy for a container."""
+    """Stop and clean up the push proxy for a container.
+
+    For shared proxies the proxy is only stopped when the last container
+    referencing it is removed.
+    """
     with _proxy_lock:
-        proxy = _active_proxies.pop(container_name, None)
+        key = _container_to_proxy_key.pop(container_name, None)
+        if key is None:
+            return
+
+        # Shared proxy path — decrement refcount
+        if key in _proxy_refs:
+            refs = _proxy_refs[key]
+            refs.discard(container_name)
+            if refs:
+                return  # Other containers still using this proxy
+            del _proxy_refs[key]
+
+        proxy = _active_proxies.pop(key, None)
+
     if proxy:
         sock_dir = str(Path(proxy.socket_path).parent)
         proxy.stop()
-        # Clean up the temp directory
         try:
             os.rmdir(sock_dir)
         except OSError:
@@ -556,18 +650,96 @@ def stop_push_proxy(container_name: str) -> None:
 def stop_all_proxies() -> None:
     """Stop all running push proxies."""
     with _proxy_lock:
-        names = list(_active_proxies.keys())
-    for name in names:
-        stop_push_proxy(name)
+        keys = list(_active_proxies.keys())
+        proxies = {k: _active_proxies.pop(k) for k in keys}
+        _proxy_refs.clear()
+        _container_to_proxy_key.clear()
+
+    for proxy in proxies.values():
+        sock_dir = str(Path(proxy.socket_path).parent)
+        proxy.stop()
+        try:
+            os.rmdir(sock_dir)
+        except OSError:
+            pass
+
+
+def stop_session_proxies(session_tag: str) -> int:
+    """Stop all push proxies belonging to a session.
+
+    Returns the number of proxies stopped.
+    """
+    prefix = f"{session_tag}\0"
+    with _proxy_lock:
+        keys_to_remove = [k for k in _active_proxies if k.startswith(prefix)]
+        proxies = {k: _active_proxies.pop(k) for k in keys_to_remove}
+        for k in keys_to_remove:
+            for cname in _proxy_refs.pop(k, set()):
+                _container_to_proxy_key.pop(cname, None)
+
+    for proxy in proxies.values():
+        sock_dir = str(Path(proxy.socket_path).parent)
+        proxy.stop()
+        try:
+            os.rmdir(sock_dir)
+        except OSError:
+            pass
+
+    if proxies:
+        _log.info("Stopped %d session proxy(ies) for %s",
+                  len(proxies), session_tag)
+    return len(proxies)
 
 
 def get_proxy_socket_path(container_name: str) -> str | None:
-    """Return the host socket path for a container's push proxy, or None."""
+    """Return the host socket path for a container's push proxy, or None.
+
+    Uses the deterministic path convention so this works even after a
+    TUI restart (no in-memory state needed).
+    """
+    import tempfile
+    sock_path = os.path.join(tempfile.gettempdir(),
+                             f"{_SOCKET_DIR_PREFIX}{container_name}",
+                             "push.sock")
+    if os.path.exists(sock_path):
+        return sock_path
+    # Fall back to in-memory registry
     with _proxy_lock:
-        proxy = _active_proxies.get(container_name)
+        key = _container_to_proxy_key.get(container_name)
+        if key is None:
+            return None
+        proxy = _active_proxies.get(key)
     return proxy.socket_path if proxy else None
 
 
 def container_socket_path() -> str:
     """Return the fixed socket path inside the container."""
     return _CONTAINER_SOCKET_PATH
+
+
+# ---------------------------------------------------------------------------
+# Standalone entry point: python -m pm_core.push_proxy <sock> <workdir> <branch>
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    import sys as _sys
+
+    if len(_sys.argv) != 4:
+        print(f"Usage: {_sys.argv[0]} <socket_path> <workdir> <allowed_branch>",
+              file=_sys.stderr)
+        _sys.exit(1)
+
+    _sock, _workdir, _branch = _sys.argv[1], _sys.argv[2], _sys.argv[3]
+    proxy = PushProxy(_sock, _workdir, _branch)
+    proxy.start()
+
+    # Block until the socket is removed or we get a signal
+    import signal as _signal
+    _stop = threading.Event()
+    _signal.signal(_signal.SIGTERM, lambda *_: _stop.set())
+    _signal.signal(_signal.SIGINT, lambda *_: _stop.set())
+    while not _stop.is_set():
+        if not os.path.exists(_sock):
+            break
+        _stop.wait(2.0)
+    proxy.stop()

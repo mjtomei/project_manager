@@ -190,7 +190,8 @@ class TestMergeWindowCompanion:
         pr_entry = {"id": "pr-001", "workdir": "/work/dir"}
 
         with patch.object(pr_mod, "_get_pm_session", return_value="pm-sess"), \
-             patch("pm_core.paths.get_global_setting", return_value=False):
+             patch("pm_core.paths.get_global_setting", return_value=False), \
+             patch.object(pr_mod, "_ensure_workdir", return_value="/work/dir"):
             pr_mod._launch_merge_window(data, pr_entry, "conflict error",
                                          companion=True)
 
@@ -213,7 +214,8 @@ class TestMergeWindowCompanion:
         pr_entry = {"id": "pr-001", "workdir": "/work/dir"}
 
         with patch.object(pr_mod, "_get_pm_session", return_value="pm-sess"), \
-             patch("pm_core.paths.get_global_setting", return_value=False):
+             patch("pm_core.paths.get_global_setting", return_value=False), \
+             patch.object(pr_mod, "_ensure_workdir", return_value="/work/dir"):
             pr_mod._launch_merge_window(data, pr_entry, "conflict error")
 
         mock_tmux.new_window.assert_called_once()

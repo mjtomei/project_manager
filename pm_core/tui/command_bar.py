@@ -1,11 +1,12 @@
 """Bottom command input widget for the TUI."""
 
-import logging
 from textual.widget import Widget
 from textual.widgets import Input
 from textual.message import Message
 
-_log = logging.getLogger("pm.tui")
+from pm_core.paths import configure_logger
+
+_log = configure_logger("pm.tui.command_bar")
 
 
 class CommandSubmitted(Message):
