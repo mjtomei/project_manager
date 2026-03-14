@@ -15,9 +15,11 @@ from pm_core.push_proxy import (
     stop_push_proxy,
     stop_all_proxies,
     stop_session_proxies,
+    cleanup_stale_proxy_dirs,
     get_proxy_socket_path,
     container_socket_path,
     _CONTAINER_SOCKET_PATH,
+    _SOCKET_DIR_PREFIX,
 )
 
 
@@ -376,3 +378,67 @@ class TestSharedProxy:
             assert sock1 != sock2
             stop_push_proxy("c1")
             stop_push_proxy("c2")
+
+
+class TestCleanupStaleProxyDirs:
+    """Tests for cleanup_stale_proxy_dirs."""
+
+    def test_removes_dir_with_dead_socket(self, tmp_path):
+        """Dirs with no live socket should be removed."""
+        sock_dir = tmp_path / f"{_SOCKET_DIR_PREFIX}repo-abc-pr-1"
+        sock_dir.mkdir()
+        sock_file = sock_dir / "push.sock"
+        sock_file.touch()  # Regular file, not a real socket
+
+        with patch("tempfile.gettempdir", return_value=str(tmp_path)):
+            count = cleanup_stale_proxy_dirs("repo-abc")
+
+        assert count == 1
+        assert not sock_dir.exists()
+
+    def test_removes_dir_with_no_socket(self, tmp_path):
+        """Dirs with missing socket file should be removed."""
+        sock_dir = tmp_path / f"{_SOCKET_DIR_PREFIX}repo-abc-pr-2"
+        sock_dir.mkdir()
+
+        with patch("tempfile.gettempdir", return_value=str(tmp_path)):
+            count = cleanup_stale_proxy_dirs("repo-abc")
+
+        assert count == 1
+        assert not sock_dir.exists()
+
+    def test_keeps_dir_with_live_socket(self, tmp_path):
+        """Dirs with a live socket server should be kept."""
+        sock_dir = tmp_path / f"{_SOCKET_DIR_PREFIX}repo-abc-pr-3"
+        sock_dir.mkdir()
+        sock_path = str(sock_dir / "push.sock")
+
+        # Start a real socket server
+        srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        srv.bind(sock_path)
+        srv.listen(1)
+        try:
+            with patch("tempfile.gettempdir", return_value=str(tmp_path)):
+                count = cleanup_stale_proxy_dirs("repo-abc")
+            assert count == 0
+            assert sock_dir.exists()
+        finally:
+            srv.close()
+
+    def test_no_matching_dirs(self, tmp_path):
+        with patch("tempfile.gettempdir", return_value=str(tmp_path)):
+            count = cleanup_stale_proxy_dirs("repo-xyz")
+        assert count == 0
+
+    def test_removes_extra_files_in_dir(self, tmp_path):
+        """Should clean up extra files (e.g. lock files) before rmdir."""
+        sock_dir = tmp_path / f"{_SOCKET_DIR_PREFIX}repo-abc-pr-4"
+        sock_dir.mkdir()
+        (sock_dir / "push.sock").touch()
+        (sock_dir / "lock").touch()
+
+        with patch("tempfile.gettempdir", return_value=str(tmp_path)):
+            count = cleanup_stale_proxy_dirs("repo-abc")
+
+        assert count == 1
+        assert not sock_dir.exists()
