@@ -108,6 +108,7 @@ This session is managed by `pm`. Run `pm help` to see available commands.
 - This session may be resuming after a restart. Check `git status` and `git log` to see if previous work exists on this branch — if so, continue from there. The directory may contain uncommitted implementation work from a previous session.
 - Before referencing existing code (imports, function calls, class usage), read the source to verify the interface.
 - This workdir is a clone managed by pm. The base pm state (project.yaml, PR status) lives in a separate directory and is not automatically synced with this clone. Commands like `pm pr start` and `pm pr review` should be run from the base directory, not here — your session for {pr_id} is already running.
+{_remote_sync_tip(data, branch)}
 
 ## Workflow
 {instructions}
@@ -173,12 +174,21 @@ This PR is part of plan "{plan['name']}" ({plan['id']}). Other PRs in this plan:
     # Include PR notes (addendums)
     pr_notes_block = _format_pr_notes(pr)
 
-    # Backend-appropriate diff command
+    # Backend-appropriate diff and sync commands
     backend_name = data.get("project", {}).get("backend", "vanilla")
+    branch = pr.get("branch", f"pm/{pr_id}")
     if backend_name == "local":
         diff_cmd = f"git diff {base_branch}...HEAD"
+        pull_step = ""
     else:
         diff_cmd = f"git diff origin/{base_branch}...HEAD"
+        pull_step = (
+            f"1. Pull the latest changes from remote: `git pull origin {branch}`. "
+            f"Resolve any merge conflicts before continuing.\n"
+        )
+
+    # Renumber steps based on whether pull step is present
+    n = 2 if pull_step else 1
 
     prompt = f"""You are reviewing PR {pr_id}: "{title}"
 
@@ -189,19 +199,19 @@ Review the code changes in this PR for quality, correctness, and architectural f
 {description}
 {pr_notes_block}{plan_context}{tui_block}{general_notes_block}
 ## Steps
-1. Run `{diff_cmd}` to see all changes
-2. **Generic checks** — things any codebase should get right:
+{pull_step}{n}. Run `{diff_cmd}` to see all changes
+{n+1}. **Generic checks** — things any codebase should get right:
    - Excessive file/function length, duplicated code, dead or unnecessary code, potential bugs, security issues, confusing code that lacks comments, sufficient test coverage
-3. **Project-specific checks** — does the change fit this codebase?
+{n+2}. **Project-specific checks** — does the change fit this codebase?
    - Convention consistency, architectural patterns
    - Search for similar code elsewhere in the repo — flag opportunities for shared helpers or reuse
-4. **Architectural review** — does the implementation approach make sense?
+{n+3}. **Architectural review** — does the implementation approach make sense?
    - Were the PR's goals achieved in a reasonable way, or is there a simpler/better design?
    - If plan context is listed above, check whether choices in this PR make any of those sibling PRs harder to implement. Are there data models, interfaces, or patterns introduced here that will need awkward workarounds later?
    - Run `pm pr list` to see all PRs and plans for the repo. If any other plans or standalone PRs touch related areas, consider whether this PR's approach conflicts with or complicates them.
    - Consider likely future changes beyond the current PR list — does this PR paint the codebase into a corner or leave good extension points?
-5. Output per-file notes: **filename** — GOOD / FIX / RETHINK
-6. End with an overall verdict on its own line — one of:
+{n+4}. Output per-file notes: **filename** — GOOD / FIX / RETHINK
+{n+5}. End with an overall verdict on its own line — one of:
    - **PASS** — No changes needed. The code is ready to merge as-is.
    - **PASS_WITH_SUGGESTIONS** — Only non-blocking suggestions remain (style nits, minor refactors, optional improvements). The PR could merge now, but would benefit from small tweaks. List suggestions clearly.
    - **NEEDS_WORK** — Blocking issues found (bugs, missing error handling, architectural problems, test gaps). Separate code-quality fixes from architectural concerns.
@@ -270,6 +280,18 @@ The user has beginner mode enabled. Please:
 - Avoid jargon without explanation
 - When committing, explain what a commit is and why we push
 """
+
+
+def _remote_sync_tip(data: dict, branch: str) -> str:
+    """Return a tip about pulling from remote, or empty string for local backend."""
+    backend_name = data.get("project", {}).get("backend", "vanilla")
+    if backend_name == "local":
+        return ""
+    return (
+        f"- Pull from remote before starting work to pick up changes from "
+        f"other sessions or machines: `git pull origin {branch}`. "
+        f"If there are merge conflicts, resolve them before continuing."
+    )
 
 
 def _auto_cleanup_addendum() -> str:
@@ -944,21 +966,29 @@ job is to verify runtime behavior, not review code.
     pr_notes_block = _format_pr_notes(pr)
 
     # Workdir description and execution instructions differ by mode
+    backend_name = data.get("project", {}).get("backend", "vanilla")
+    has_remote = backend_name != "local"
+    pull_step = (
+        f"1. Pull the latest changes from remote: `git pull origin {branch}`. "
+        f"Resolve any merge conflicts before continuing.\n"
+    ) if has_remote else ""
+    n = 2 if has_remote else 1  # first step number after optional pull
+
     scratch_line = f"\n- **Scratch dir** (throwaway test projects): {scratch_dir}" if scratch_dir else ""
     if worktree_mode:
         workdir_block = f"""\
 - **Your workdir** (isolated clone): {workdir}{scratch_line}
 - **PR workdir** (canonical source): {pr_workdir}"""
         execution_block = f"""\
-1. Inspect and test the code in your workdir (an isolated clone of the PR branch)
-2. Execute the test steps described above
-3. If you find issues and can fix them:
+{pull_step}{n}. Inspect and test the code in your workdir (an isolated clone of the PR branch)
+{n+1}. Execute the test steps described above
+{n+2}. If you find issues and can fix them:
    - Implement the fix in your workdir (your current directory)
    - Commit with message prefix `qa: `
    - Push: `git push origin {branch}`
    - If push fails (another scenario pushed first), pull and retry:
      `git pull --rebase origin {branch} && git push origin {branch}`
-4. End with a verdict on its own line — one of:
+{n+3}. End with a verdict on its own line — one of:
    - **PASS** — Scenario passed, no issues found
    - **NEEDS_WORK** — Issues found (explain what and whether you fixed them)
    - **INPUT_REQUIRED** — Genuine ambiguity requiring human judgment"""
@@ -967,13 +997,13 @@ job is to verify runtime behavior, not review code.
 - **PR workdir** (source code): {pr_workdir}
 - **Your workdir** (throwaway test projects): {workdir}"""
         execution_block = f"""\
-1. Inspect the PR's code in the PR workdir
-2. Execute the test steps described above
-3. If you find issues and can fix them:
+{pull_step}{n}. Inspect the PR's code in the PR workdir
+{n+1}. Execute the test steps described above
+{n+2}. If you find issues and can fix them:
    - Implement the fix in the PR workdir
    - Commit with message prefix `qa: `
    - Push: `git push origin {branch}`
-4. End with a verdict on its own line — one of:
+{n+3}. End with a verdict on its own line — one of:
    - **PASS** — Scenario passed, no issues found
    - **NEEDS_WORK** — Issues found (explain what and whether you fixed them)
    - **INPUT_REQUIRED** — Genuine ambiguity requiring human judgment"""
