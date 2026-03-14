@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-d925d69
+  active_pr: pr-ac12b47
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -3720,7 +3720,7 @@ prs:
   plan: plan-qa
   title: Add spec generation step between PR phases
   branch: pm/pr-942aa21-add-spec-generation-step-between-pr-phases
-  status: qa
+  status: in_review
   depends_on: []
   description: "Add an optional \"spec\" step to the PR lifecycle that bridges the\
     \ gap between the user's natural-language description and each subsequent phase\
@@ -3763,9 +3763,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/125
   gh_pr_number: 125
   created_at: '2026-03-06T19:02:04.662125+00:00'
-  updated_at: '2026-03-10T01:19:18.930124+00:00'
+  updated_at: '2026-03-14T17:20:18.844142+00:00'
   started_at: '2026-03-06T21:13:20.894896+00:00'
-  reviewed_at: '2026-03-10T01:19:18.930124+00:00'
+  reviewed_at: '2026-03-14T17:20:18.844142+00:00'
   merged_at: null
   notes:
   - id: note-fa1e58a
@@ -3786,7 +3786,7 @@ prs:
     text: 'QA INPUT_REQUIRED:  (workdir: /Users/matthewtomei/.pm/workdirs/qa/pr-942aa21-091e125d6a4c31f6)'
     created_at: '2026-03-13T04:34:36Z'
     last_edited: '2026-03-13T04:34:36Z'
-  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-942aa21-add-spec-generation-step-between-pr--e2dbb884
+  workdir: /Users/matthewtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-942aa21-add-spec-generation-step-between-pr--e322fdb1
 - id: pr-4585fd3
   plan: tui-ux
   title: Use resolved display IDs instead of raw PR IDs in all output
@@ -4353,16 +4353,16 @@ prs:
     - Matches windows to PRs via naming convention (e.g. review-#128, qa-#124-s71)
 
     - Reuses existing tmux session resolution logic (current_or_base_session)'
-  agent_machine: spark-424d
+  agent_machine: MacBook-Pro.local
   gh_pr: https://github.com/mjtomei/project_manager/pull/137
   gh_pr_number: 137
   created_at: '2026-03-08T21:45:42.636585+00:00'
-  updated_at: '2026-03-10T22:57:13.695502+00:00'
+  updated_at: '2026-03-14T17:22:56.994026+00:00'
   started_at: '2026-03-10T21:38:57.198809+00:00'
   reviewed_at: null
   merged_at: null
   notes: []
-  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b827df-add-running-tasks-pane-to-tui-with-w-10e74920
+  workdir: /Users/matthewtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b827df-add-running-tasks-pane-to-tui-with-w-e322fdb1
 - id: pr-341100c
   plan: tui-ux
   title: Add per-plan standalone PM sessions within the same project
@@ -4590,7 +4590,7 @@ prs:
   plan: watchers
   title: Add high-effort watcher supervisors that monitor and coach lower-effort sessions
   branch: pm/pr-871dbf5-add-high-effort-watcher-supervisors-that-monitor-a
-  status: pending
+  status: in_progress
   depends_on:
   - pr-3032fb6
   description: 'Add a new watcher type that runs at high effort (Opus-level) and monitors
@@ -4647,15 +4647,16 @@ prs:
     course-correct
 
     - The feedback log lets us evaluate ROI and tune the approach'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: MacBook-Pro.local
+  gh_pr: https://github.com/mjtomei/project_manager/pull/144
+  gh_pr_number: 144
   created_at: '2026-03-08T23:09:07.312432+00:00'
-  updated_at: '2026-03-09T15:18:05.763457+00:00'
-  started_at: null
+  updated_at: '2026-03-14T17:21:14.310809+00:00'
+  started_at: '2026-03-14T17:21:14.310809+00:00'
   reviewed_at: null
   merged_at: null
   notes: []
+  workdir: /Users/matthewtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-871dbf5-add-high-effort-watcher-supervisors--e322fdb1
 - id: pr-b7ada6a
   plan: tui-ux
   title: Add offline mode with dynamic sync for GitHub-backed projects
@@ -5156,7 +5157,7 @@ prs:
   plan: plan-qa
   title: Session cleanup for stale containers and push proxies
   branch: pm/pr-ac12b47-session-cleanup-for-stale-containers-and-push-prox
-  status: in_progress
+  status: qa
   depends_on:
   - pr-6836fad
   description: 'Add a cleanup function that removes stale containers and push proxies
@@ -5195,9 +5196,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/143
   gh_pr_number: 143
   created_at: '2026-03-10T00:41:37.907137+00:00'
-  updated_at: '2026-03-14T04:37:49.204416+00:00'
+  updated_at: '2026-03-14T17:19:27.700394+00:00'
   started_at: '2026-03-14T04:37:49.204416+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-03-14T17:19:27.700394+00:00'
   merged_at: null
   notes: []
   workdir: /Users/matthewtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-ac12b47-session-cleanup-for-stale-containers-11fb825b
