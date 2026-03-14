@@ -214,13 +214,17 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
 
 def launch_claude_print(prompt: str, cwd: str | None = None,
                         message: str = "Claude is working",
-                        provider: str | None = None) -> str:
+                        provider: str | None = None,
+                        model: str | None = None,
+                        effort: str | None = None) -> str:
     """Run claude -p (non-interactive print mode). Returns stdout.
 
     Shows a spinner on stderr while waiting for Claude to finish.
 
     Args:
         provider: Name of the LLM provider to use. See providers.py.
+        model: Explicit model ID (overrides provider model_flag).
+        effort: Effort level for the Claude CLI --effort flag.
     """
     import sys
     import threading
@@ -237,8 +241,12 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
     cmd = [claude]
     if _skip_permissions():
         cmd.append("--dangerously-skip-permissions")
-    if model_flag:
-        cmd.extend(["--model", model_flag])
+    # Explicit model takes precedence over provider model_flag
+    effective_model = model or model_flag
+    if effective_model:
+        cmd.extend(["--model", effective_model])
+    if effort:
+        cmd.extend(["--effort", effort])
     cmd.extend(["-p", prompt])
 
     done = threading.Event()

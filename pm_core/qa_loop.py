@@ -290,8 +290,10 @@ def _write_status_file(status_path: Path, pr_id: str,
                        scenarios: list[QAScenario],
                        scenario_verdicts: dict[int, str],
                        overall: str = "",
-                       scenario_0: QAScenario | None = None) -> None:
+                       scenario_0: QAScenario | None = None,
+                       verifying_scenarios: set[int] | None = None) -> None:
     """Atomically write the qa_status.json file."""
+    _verifying = verifying_scenarios or set()
     all_scenarios = []
     if scenario_0 and scenario_0.window_name:
         all_scenarios.append({
@@ -300,15 +302,16 @@ def _write_status_file(status_path: Path, pr_id: str,
             "verdict": "interactive",
             "window_name": scenario_0.window_name or "",
         })
-    all_scenarios.extend([
-        {
+    for s in scenarios:
+        verdict = scenario_verdicts.get(s.index, "")
+        if s.index in _verifying:
+            verdict = f"{verdict} (verifying)" if verdict else "verifying"
+        all_scenarios.append({
             "index": s.index,
             "title": s.title,
-            "verdict": scenario_verdicts.get(s.index, ""),
+            "verdict": verdict,
             "window_name": s.window_name or "",
-        }
-        for s in scenarios
-    ])
+        })
     data = {
         "pr_id": pr_id,
         "scenarios": all_scenarios,
@@ -780,12 +783,25 @@ def _poll_tmux_verdicts(
     status_path: Path,
     _notify,
 ) -> None:
-    """Poll tmux scenario windows for verdicts."""
+    """Poll tmux scenario windows for verdicts.
+
+    When a verdict is accepted, inline verification runs via ``claude -p``
+    to check that the scenario genuinely exercised its test cases.  If
+    verification flags a scenario, a follow-up message is sent to the
+    scenario's pane and the scenario goes back to pending.
+    """
     from pm_core import tmux as tmux_mod
 
     tracker = VerdictStabilityTracker()
     pending = {s.index for s in state.scenarios if s.window_name}
     retry_counts: dict[int, int] = {}  # scenario_index -> retries used
+    # Track how many verification failures each scenario has had
+    verification_failures: dict[int, int] = {}
+    # Scenarios currently being verified (in a background thread)
+    verifying: set[int] = set()
+    # Results from background verification threads
+    verification_results: dict[int, tuple[bool, str]] = {}
+    verification_lock = threading.Lock()
 
     # Scenarios that failed to create a window get INPUT_REQUIRED immediately
     has_failed_creation = False
@@ -802,11 +818,91 @@ def _poll_tmux_verdicts(
 
     grace_start = time.monotonic()
 
-    while pending and not state.stop_requested:
+    def _run_verification(scenario: QAScenario, verdict: str, content: str):
+        """Background thread: run claude -p verification for one scenario."""
+        try:
+            passed, reason = _verify_single_scenario(
+                scenario, verdict, content, pr_data, data,
+            )
+        except Exception:
+            _log.warning("Verification thread crashed for scenario %d",
+                         scenario.index, exc_info=True)
+            passed, reason = True, ""  # trust original on failure
+        with verification_lock:
+            verification_results[scenario.index] = (passed, reason)
+            verifying.discard(scenario.index)
+
+    while (pending or verifying) and not state.stop_requested:
         time.sleep(_POLL_INTERVAL)
 
         in_grace = (time.monotonic() - grace_start) < _VERDICT_GRACE_PERIOD
         verdicts_changed = False
+
+        # Check for completed verifications
+        with verification_lock:
+            completed_verifications = dict(verification_results)
+            verification_results.clear()
+
+        for scenario_idx, (passed, reason) in completed_verifications.items():
+            scenario = next(s for s in state.scenarios if s.index == scenario_idx)
+            if passed:
+                _log.info("Verification passed for scenario %d (%s)",
+                          scenario_idx, scenario.title)
+                # Verdict already set; mark as genuinely complete
+                state.latest_output = (
+                    f"Scenario {scenario_idx} ({scenario.title}): "
+                    f"{state.scenario_verdicts[scenario_idx]} (verified)"
+                )
+                _notify()
+            else:
+                fails = verification_failures.get(scenario_idx, 0) + 1
+                verification_failures[scenario_idx] = fails
+                _log.info("Verification FLAGGED scenario %d (%s), attempt %d: %s",
+                          scenario_idx, scenario.title, fails, reason)
+
+                if fails >= _VERIFICATION_MAX_RETRIES:
+                    # Too many verification failures — mark NEEDS_WORK
+                    _log.warning("Scenario %d failed verification %d times — "
+                                 "marking NEEDS_WORK", scenario_idx, fails)
+                    state.scenario_verdicts[scenario_idx] = VERDICT_NEEDS_WORK
+                    state.latest_output = (
+                        f"Scenario {scenario_idx} ({scenario.title}): "
+                        f"NEEDS_WORK (failed verification)"
+                    )
+                    verdicts_changed = True
+                    _notify()
+                else:
+                    # Send the scenario a follow-up message and put back in pending
+                    pane_id = _get_scenario_pane(session, scenario.window_name)
+                    if pane_id:
+                        followup_msg = (
+                            f"Your verdict was reviewed and flagged: {reason}\n\n"
+                            f"Please re-evaluate this scenario. Make sure you "
+                            f"actually execute the test steps (run commands, "
+                            f"create test files, verify runtime behavior). "
+                            f"Do not just read code. "
+                            f"End with a new verdict on its own line "
+                            f"(PASS / NEEDS_WORK / INPUT_REQUIRED)."
+                        )
+                        tmux_mod.send_keys(pane_id, followup_msg)
+                        _log.info("Sent follow-up message to scenario %d pane",
+                                  scenario_idx)
+                        # Clear verdict and put back in pending
+                        state.scenario_verdicts.pop(scenario_idx, None)
+                        tracker.reset(f"qa-{state.pr_id}-{scenario_idx}")
+                        pending.add(scenario_idx)
+                        state.latest_output = (
+                            f"Scenario {scenario_idx} ({scenario.title}): "
+                            f"re-evaluating after verification"
+                        )
+                        verdicts_changed = True
+                        _notify()
+                    else:
+                        _log.warning("Cannot send follow-up to scenario %d — "
+                                     "window gone, marking NEEDS_WORK",
+                                     scenario_idx)
+                        state.scenario_verdicts[scenario_idx] = VERDICT_NEEDS_WORK
+                        verdicts_changed = True
 
         for scenario in state.scenarios:
             if scenario.index not in pending or not scenario.window_name:
@@ -860,15 +956,152 @@ def _poll_tmux_verdicts(
                 _log.info("Scenario %d (%s) verdict: %s",
                           scenario.index, scenario.title, verdict)
                 state.latest_output = (
-                    f"Scenario {scenario.index} ({scenario.title}): {verdict}"
+                    f"Scenario {scenario.index} ({scenario.title}): "
+                    f"{verdict} — verifying..."
                 )
                 _notify()
 
-        if verdicts_changed:
+                # Trigger background verification
+                verifying.add(scenario.index)
+                t = threading.Thread(
+                    target=_run_verification,
+                    args=(scenario, verdict, content),
+                    daemon=True,
+                    name=f"qa-verify-{state.pr_id}-{scenario.index}",
+                )
+                t.start()
+
+        if verdicts_changed or completed_verifications:
             _write_status_file(status_path, state.pr_id, state.scenarios,
                                state.scenario_verdicts,
-                               scenario_0=state.scenario_0)
+                               scenario_0=state.scenario_0,
+                               verifying_scenarios=verifying)
 
+
+# ---------------------------------------------------------------------------
+# Verdict verification
+# ---------------------------------------------------------------------------
+
+# Maximum pane output lines to include in the verification prompt.
+# Large outputs are truncated to keep the prompt manageable.
+_VERIFICATION_MAX_PANE_LINES = 500
+
+# Maximum number of times a scenario can fail verification before being
+# marked NEEDS_WORK.  After this many failures the scenario is not sent
+# another follow-up message.
+_VERIFICATION_MAX_RETRIES = 1
+
+
+def _build_verification_prompt(scenario: QAScenario, verdict: str,
+                                pane_output: str) -> str:
+    """Build a prompt for Claude to verify a single scenario's verdict.
+
+    The prompt asks Claude to determine whether the scenario genuinely
+    exercised its test cases or just exited without doing real work.
+    """
+    # Truncate pane output if too long
+    lines = pane_output.splitlines()
+    if len(lines) > _VERIFICATION_MAX_PANE_LINES:
+        truncated = lines[:_VERIFICATION_MAX_PANE_LINES]
+        pane_output = "\n".join(truncated) + f"\n\n[... truncated {len(lines) - _VERIFICATION_MAX_PANE_LINES} more lines ...]"
+
+    return f"""You are verifying the output of QA scenario {scenario.index}: "{scenario.title}"
+
+## Scenario Definition
+
+**Focus**: {scenario.focus}
+
+**Steps**:
+{scenario.steps}
+
+## Scenario Output
+
+The scenario produced the verdict: **{verdict}**
+
+Here is the full output from the scenario session:
+
+<scenario_output>
+{pane_output}
+</scenario_output>
+
+## Your Task
+
+Review the scenario output and determine whether the scenario genuinely exercised its test cases.
+
+Check for these problems:
+1. **Did the scenario actually execute the test steps?** Look for evidence of commands being run, test files being created, tests being executed, and runtime behavior being verified. A scenario that only read code or declared PASS without running anything is NOT a genuine evaluation.
+2. **Is the verdict consistent with what the scenario actually did?** If the verdict is PASS, the output should show the test steps being executed and passing. If the output shows errors, failures, or incomplete work, the verdict should not be PASS.
+3. **Did the scenario complete its work?** Look for signs that the scenario crashed, timed out, or was interrupted before finishing.
+
+## Response Format
+
+Respond with EXACTLY one of these on its own line:
+
+VERIFIED — The scenario genuinely exercised its test cases and the verdict is consistent with the output.
+FLAGGED — The scenario did NOT properly exercise its test cases, or the verdict is inconsistent with the output.
+
+If FLAGGED, include a brief explanation (1-2 sentences) of what went wrong BEFORE the FLAGGED verdict."""
+
+
+def _verify_single_scenario(
+    scenario: QAScenario,
+    verdict: str,
+    pane_output: str,
+    pr_data: dict,
+    project_data: dict | None = None,
+) -> tuple[bool, str]:
+    """Verify a single scenario's verdict using Claude -p.
+
+    Returns (passed, reason) where passed is True if the scenario was
+    verified, and reason is the explanation if it was flagged.
+    """
+    from pm_core.claude_launcher import launch_claude_print
+
+    resolution = _resolve_qa_model(pr_data, project_data,
+                                   session_type="qa_verification")
+
+    prompt = _build_verification_prompt(scenario, verdict, pane_output)
+
+    _log.info("Verification: running claude -p for scenario %d (%s)",
+              scenario.index, scenario.title)
+    try:
+        output = launch_claude_print(
+            prompt,
+            message=f"Verifying scenario {scenario.index}",
+            model=resolution.model,
+            provider=resolution.provider,
+            effort=resolution.effort,
+        )
+    except Exception:
+        _log.warning("Verification: claude -p failed for scenario %d",
+                     scenario.index, exc_info=True)
+        # If verification itself fails, trust the original verdict
+        return True, ""
+
+    # Parse the verification output for VERIFIED or FLAGGED
+    for line in reversed(output.strip().splitlines()):
+        cleaned = re.sub(r'[*`]', '', line).strip()
+        if cleaned == "VERIFIED":
+            _log.info("Verification: scenario %d VERIFIED", scenario.index)
+            return True, ""
+        if cleaned == "FLAGGED":
+            # Get the explanation from lines before the FLAGGED verdict
+            reason_lines = []
+            for prev_line in output.strip().splitlines():
+                prev_cleaned = re.sub(r'[*`]', '', prev_line).strip()
+                if prev_cleaned == "FLAGGED":
+                    break
+                if prev_cleaned:
+                    reason_lines.append(prev_cleaned)
+            reason = " ".join(reason_lines[-3:]) if reason_lines else "Scenario did not properly exercise test cases"
+            _log.info("Verification: scenario %d FLAGGED: %s",
+                      scenario.index, reason)
+            return False, reason
+
+    # No clear verdict from verification — trust the original
+    _log.warning("Verification: no clear verdict from claude -p for scenario %d, "
+                 "trusting original", scenario.index)
+    return True, ""
 
 
 # ---------------------------------------------------------------------------

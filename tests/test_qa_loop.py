@@ -14,9 +14,13 @@ from pm_core.qa_loop import (
     VERDICT_PASS,
     VERDICT_NEEDS_WORK,
     VERDICT_INPUT_REQUIRED,
+    ALL_VERDICTS,
     _scenario_window_name,
     _cleanup_stale_scenario_windows,
     _tail_has_marker_on_own_line,
+    _build_verification_prompt,
+    _verify_single_scenario,
+    _VERIFICATION_MAX_PANE_LINES,
 )
 
 
@@ -1333,3 +1337,76 @@ class TestSelfDrivingQALoop:
         mock_merge.assert_called_once_with(app, "pr-001")
         # Self-driving state should be removed after reaching required passes
         assert "pr-001" not in app._self_driving_qa
+
+
+# ---------------------------------------------------------------------------
+# Verdict verification tests
+# ---------------------------------------------------------------------------
+
+class TestBuildVerificationPrompt:
+    """Tests for _build_verification_prompt."""
+
+    def test_includes_scenario_details(self):
+        scenario = QAScenario(index=1, title="Login Flow", focus="auth",
+                              steps="1. Test login\n2. Test logout")
+        prompt = _build_verification_prompt(scenario, "PASS", "Some output here")
+        assert "Login Flow" in prompt
+        assert "auth" in prompt
+        assert "Test login" in prompt
+        assert "PASS" in prompt
+        assert "Some output here" in prompt
+
+    def test_truncates_long_output(self):
+        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
+        long_output = "\n".join([f"line {i}" for i in range(_VERIFICATION_MAX_PANE_LINES + 100)])
+        prompt = _build_verification_prompt(scenario, "PASS", long_output)
+        assert "truncated" in prompt.lower()
+
+    def test_includes_verification_instructions(self):
+        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
+        prompt = _build_verification_prompt(scenario, "PASS", "output")
+        assert "VERIFIED" in prompt
+        assert "FLAGGED" in prompt
+
+
+class TestVerifySingleScenario:
+    """Tests for _verify_single_scenario."""
+
+    def test_verified_result(self):
+        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
+        with patch("pm_core.claude_launcher.launch_claude_print", return_value="The scenario looks good.\n\nVERIFIED"):
+            passed, reason = _verify_single_scenario(
+                scenario, "PASS", "lots of output", {}, {},
+            )
+        assert passed is True
+        assert reason == ""
+
+    def test_flagged_result(self):
+        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
+        with patch("pm_core.claude_launcher.launch_claude_print",
+                   return_value="The scenario did not run any tests.\n\nFLAGGED"):
+            passed, reason = _verify_single_scenario(
+                scenario, "PASS", "minimal output", {}, {},
+            )
+        assert passed is False
+        assert "did not run" in reason.lower()
+
+    def test_claude_failure_trusts_original(self):
+        """If claude -p fails, trust the original verdict."""
+        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
+        with patch("pm_core.claude_launcher.launch_claude_print",
+                   side_effect=FileNotFoundError("claude not found")):
+            passed, reason = _verify_single_scenario(
+                scenario, "PASS", "output", {}, {},
+            )
+        assert passed is True
+
+    def test_no_clear_verdict_trusts_original(self):
+        """If claude -p returns no VERIFIED/FLAGGED, trust original."""
+        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
+        with patch("pm_core.claude_launcher.launch_claude_print",
+                   return_value="I'm not sure about this scenario."):
+            passed, reason = _verify_single_scenario(
+                scenario, "PASS", "output", {}, {},
+            )
+        assert passed is True
