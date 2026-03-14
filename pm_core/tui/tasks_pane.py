@@ -120,7 +120,7 @@ class TasksPane(Widget):
 
     def update_tasks(self, windows: list[dict], prs: list[dict],
                      review_loops: dict, qa_loops: dict,
-                     watcher_state=None) -> None:
+                     watcher_infos: list[dict] | None = None) -> None:
         """Update the task list from tmux windows and PR data.
 
         Args:
@@ -128,7 +128,7 @@ class TasksPane(Widget):
             prs: list of PR dicts from project data
             review_loops: dict of pr_id -> ReviewLoopState
             qa_loops: dict of pr_id -> QALoopState
-            watcher_state: WatcherLoopState or None
+            watcher_infos: list of dicts from WatcherManager.list_watchers()
         """
         # Build PR lookup by display ID
         from pm_core.cli.helpers import _pr_display_id
@@ -196,12 +196,15 @@ class TasksPane(Widget):
                 elif qa and qa.latest_verdict:
                     entry.qa_loop_marker = qa.latest_verdict
 
-            if entry.group == "Watcher" and watcher_state:
-                if watcher_state.running:
-                    icon = _SPINNER[self._animation_frame]
-                    entry.review_loop_marker = f"{icon} active"
-                    if watcher_state.input_required:
-                        entry.review_loop_marker = "INPUT_REQ"
+            if entry.group == "Watcher" and watcher_infos:
+                for wi in watcher_infos:
+                    if wi.get("window_name") == entry.main_window:
+                        if wi.get("running"):
+                            icon = _SPINNER[self._animation_frame]
+                            entry.review_loop_marker = f"{icon} active"
+                            if wi.get("input_required"):
+                                entry.review_loop_marker = "INPUT_REQ"
+                        break
 
         # Sort and flatten
         self._entries = sorted(tasks_by_key.values(),

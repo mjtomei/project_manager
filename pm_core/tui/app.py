@@ -1121,6 +1121,7 @@ class ProjectManagerApp(App):
             windows, prs,
             self._review_loops,
             self._qa_loops,
+            watcher_infos=self._watcher_manager.list_watchers(),
         )
 
     def _poll_tasks(self) -> None:
