@@ -10,8 +10,7 @@ def score_pr(pr: dict, query: str, plan_map: dict) -> float:
     """Score a PR against a query string.
 
     Scoring weights (higher = better match):
-      - Exact ID match:     1000
-      - Display ID match:   900  (e.g. #125)
+      - Exact ID match:     1000  (raw ID or display ID e.g. #125)
       - ID prefix match:    500
       - Title substring:    200
       - Description substr: 100
