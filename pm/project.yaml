@@ -5639,3 +5639,748 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-094939c
+  plan: watchers
+  title: Automated local model setup with optimal tool-call and performance settings
+  branch: pm/pr-094939c-automated-local-model-setup-with-optimal-tool-call
+  status: pending
+  depends_on:
+  - pr-9a5b86e
+  description: Add an interactive prompt (during pm init or pm provider add) that
+    automates local model configuration for best performance. When a local LLM server
+    is detected (Ollama, vLLM, SGLang, etc.), guide the user through setup and automatically
+    apply optimal settings for tool calling, context length, sampling parameters,
+    and other provider-specific knobs. The goal is to make local model setup as close
+    to one-command as possible, rather than requiring users to manually discover and
+    configure the many settings needed for reliable tool use and high-quality output.
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-13T05:52:07.222845+00:00'
+  updated_at: '2026-03-14T03:49:53.078497+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-848ba9b
+  plan: watchers
+  title: Add decision point entity with CLI commands and workdir management
+  branch: pm/pr-848ba9b-add-decision-point-entity-with-cli-commands-and-wo
+  status: pending
+  depends_on: []
+  description: 'Decision points as a first-class entity for speculative parallel exploration.
+    Writing code is speculative execution — you don''t know the ideal version until
+    you''ve explored. Machines can pursue many paths in parallel instead of committing
+    to one and backtracking.
+
+
+    ## Data model
+
+
+    Decision points stored in project.yaml:
+
+    - id, description, status (open/resolved), resolution, parent (PR or spec)
+
+    - branches: list of named variants, each with its own sub-tree of PRs and workdirs
+
+    - At the plan/PR level: the tech tree forks into variant subtrees with different
+    PR structures
+
+    - At the spec level: multiple candidate specs branch from a base (title + short
+    description)
+
+
+    ## Branching mechanism
+
+
+    Decision branches are implemented as git branches with corresponding workdirs
+    — the same mechanism PRs already use, extended to represent alternatives:
+
+    - Each branch of a decision point creates one or more git branches (one per PR
+    in that variant''s sub-tree)
+
+    - Each git branch gets its own workdir, as PRs do today
+
+    - A decision point can be created from any workdir (base repo or a PR''s workdir),
+    but the new branch always creates a separate workdir — never multiple levels of
+    branching within a single directory
+
+    - The parent-child relationship between workdirs is tracked in the data model
+    so state can be collected by following these links across workdirs
+
+
+    ## CLI commands
+
+
+    - `pm decision add [--parent-pr <id>] [--description "..."]` — create a decision
+    point, optionally attached to a PR or spec
+
+    - `pm decision branch <decision-id> [--title "..."]` — add a branch to explore
+
+    - `pm decision resolve <decision-id> <branch>` — pick a winner, archive losers
+
+    - `pm decision list` / `pm decision show <id>` — list-style output for both humans
+    and LLMs
+
+    - `pm decision remove <decision-id>` — clean up a decision point and its branches
+
+    - Commands must work correctly regardless of which workdir the user is currently
+    in — they resolve the project context by following workdir parent links, not by
+    assuming they''re in the base repo
+
+
+    ## Branch-aware PR commands
+
+
+    Existing PR commands (start, review, edit, show, etc.) must work across branches
+    without requiring the user to manually check out a branch first.
+
+
+    - **--branch flag**: all PR interaction commands gain an optional `--branch <name>`
+    flag to target a specific decision branch
+
+    - **Default targeting**: when no --branch is specified, commands target the most
+    recent branch that worked on that PR (most recent start/activity timestamp across
+    all branches)
+
+    - **Branch resolution**: `pm pr show <id>` displays which branch it''s resolving
+    to and what alternatives exist
+
+    - **Write operations**: `pm pr start`, `pm pr edit`, `pm pr note` operate on the
+    targeted branch''s workdir and project.yaml, not master
+
+    - **Read operations**: `pm pr list`, `pm pr show`, `pm pr ready` aggregate across
+    branches by default, with --branch to filter
+
+
+    This means the tool works the same as today for projects with no decision points
+    (one branch = master, default targeting picks it). When decision points exist,
+    the default behavior naturally follows where the work is happening.
+
+
+    ## Workdir management
+
+
+    - Creating a branch auto-creates a new workdir (always a separate directory, never
+    nested within the source workdir)
+
+    - Resolving a decision auto-cleans loser branch workdirs
+
+    - Each branch can have its own sub-tree of PRs with independent depends_on chains
+
+    - Workdir parent-child links tracked in project state so the full tree of workdirs
+    can be traversed
+
+
+    ## Design principles
+
+
+    - Not tied to any prompt — a human can manage decision points entirely through
+    CLI
+
+    - Prompts will be made aware separately (different PR)
+
+    - List-style commands optimized for LLM consumption, same commands work for humans
+
+    - Either human or machine can resolve decisions — the interface must make large
+    decision trees digestible
+
+
+    ## Manual testing needed
+
+
+    - CLI command lifecycle: add → branch → resolve → remove
+
+    - Workdir creation/cleanup on branch/resolve operations
+
+    - Decision point created from within a PR workdir (not base repo)
+
+    - Commands run from a branch workdir correctly resolve project context
+
+    - project.yaml serialization of decision point state
+
+    - PR commands with --branch flag targeting correct workdir
+
+    - Default branch resolution picking most recent activity
+
+    - Backward compatibility: no decision points = identical to current behavior'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-13T17:53:16.805117+00:00'
+  updated_at: '2026-03-13T21:14:01.286758+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-d925d69
+  plan: watchers
+  title: TUI decision tree explorer for decision point branches
+  branch: pm/pr-d925d69-tui-decision-tree-explorer-for-decision-point-bran
+  status: pending
+  depends_on:
+  - pr-848ba9b
+  description: 'Upgrade the main TUI tech tree to understand that project state lives
+    on branches, not just master. Making decision points first class means the TUI
+    reads and aggregates state from multiple branches, which also solves the existing
+    problem of the TUI showing stale/forked project state.
+
+
+    ## View modes
+
+
+    The TUI supports two aggregation modes for project state, switchable via keybinding:
+
+
+    - **Aggregate (default)**: Collects project.yaml state from all workdirs on this
+    machine by following parent-child workdir links. For each PR, shows the most advanced
+    status across all local branches. This is the "what''s actually happening" view
+    — it reflects all the work in flight.
+
+    - **Single branch**: Shows project.yaml from one specific branch''s workdir (including
+    master). Useful for focusing on a particular decision branch or seeing the canonical
+    master state.
+
+
+    A status bar indicator shows which mode is active. Keybinding toggles between
+    aggregate and single-branch; in single-branch mode a selector picks which branch
+    (defaulting to master).
+
+
+    ## Workdir state collection
+
+
+    Each workdir is a separate directory with its own project.yaml. Workdirs have
+    parent-child links tracked in project state (a decision branch created from a
+    PR workdir records that relationship). Aggregate mode:
+
+    - Enumerates all known workdirs on this machine
+
+    - Follows parent-child workdir links to understand the branching structure
+
+    - Reads project.yaml from each workdir
+
+    - Merges all collected state using most-recent-activity-wins per PR
+
+    - Handles orphaned or missing workdirs gracefully
+
+
+    ## Default view: aggregate
+
+
+    - For each PR, display the status from the most recent branch that started/touched
+    it on this machine
+
+    - The tech tree looks like one tree by default — no visual clutter from branching
+    unless the user wants it
+
+    - PR nodes indicate when multiple branches exist (e.g. a subtle marker or count)
+
+    - TUI actions (start, review, done) target the most-recent branch by default,
+    same as the CLI --branch default
+
+
+    ## Decision tree visualization
+
+
+    - Expand a PR node to see its decision branches when multiple exist
+
+    - Decision points shown as fork nodes in the tech tree with branches fanning out
+
+    - Navigate into a branch to see its variant subtree of PRs
+
+    - Compare branches side-by-side: diff summaries, PR status, test results, resource
+    usage
+
+    - Collapse/expand branches to manage visual complexity
+
+    - Filter to show only open (unresolved) decisions
+
+    - Pick winner from TUI with confirmation dialog
+
+
+    ## TUI command targeting
+
+
+    - TUI actions inherit the branch-aware targeting from pr-848ba9b
+
+    - When pressing start/review/done on a PR, the action targets the most-recent
+    branch by default
+
+    - A keybinding to switch which branch a PR node is showing/targeting
+
+    - Visual indicator of which branch is currently targeted for each PR
+
+
+    ## Scaling to large trees
+
+
+    - Progressive disclosure: collapsed by default, expand on demand
+
+    - Search/filter within decision trees
+
+    - Breadcrumb navigation showing current position in the tree
+
+    - Summary view: one line per decision showing branch count, status, age
+
+
+    ## Manual testing needed
+
+
+    - Aggregate mode collecting state from workdirs via parent-child links
+
+    - Single-branch mode isolating one branch''s state (including master)
+
+    - Mode switching keybinding and status bar indicator
+
+    - TUI actions targeting the correct branch in each mode
+
+    - Branch switching keybinding within aggregate mode
+
+    - Decision branches created from a PR workdir displaying correctly
+
+    - Conflict visualization when branches diverge on the same PR
+
+    - Side-by-side branch comparison view'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-13T17:53:24.226295+00:00'
+  updated_at: '2026-03-13T21:14:12.358656+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-3f7815c
+  plan: watchers
+  title: Spec tree branching with multiple candidate specs per PR
+  branch: pm/pr-3f7815c-spec-tree-branching-with-multiple-candidate-specs-
+  status: pending
+  depends_on:
+  - pr-942aa21
+  - pr-848ba9b
+  description: 'Extend spec generation to support multiple candidate specs branching
+    from a base, enabling speculative exploration at the spec level.
+
+
+    ## Spec branching
+
+
+    - A base spec starts as just a title and short description (the "what", not the
+    "how")
+
+    - `pm decision add --spec <pr-id>` creates a spec-level decision point
+
+    - Spec generation produces multiple candidate specs as branches of the decision
+    point
+
+    - Each spec branch is a complete spec with its own approach, tradeoffs, and implementation
+    plan
+
+    - Each spec branch can have its own implementation workdir
+
+
+    ## Integration with spec generation (pr-942aa21)
+
+
+    - Spec generation prompt updated to produce multiple candidates when it detects
+    design uncertainty
+
+    - Candidates are automatically registered as branches of a decision point
+
+    - Each candidate spec is self-contained — includes its own test plan, acceptance
+    criteria, and implementation notes
+
+    - Comparison metadata: each branch notes its tradeoffs relative to the others
+
+
+    ## Workflow
+
+
+    1. PR exists with title and short description
+
+    2. User or prompt triggers spec generation
+
+    3. Generator identifies significant design choices and creates a decision point
+
+    4. Multiple spec variants are generated as branches
+
+    5. Each branch can be independently implemented
+
+    6. Human or machine resolves the decision, winner''s spec becomes the canonical
+    one
+
+
+    ## Visibility
+
+
+    - Spec variants visible in TUI within the PR detail view
+
+    - `pm decision show` lists spec branches with summaries
+
+    - Resolved specs show which branch won and why'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-13T17:53:34.809944+00:00'
+  updated_at: '2026-03-13T17:53:34.809944+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-df6cd9f
+  plan: watchers
+  title: Add decision point awareness to planning and spec prompts
+  branch: pm/pr-df6cd9f-add-decision-point-awareness-to-planning-and-spec-
+  status: pending
+  depends_on:
+  - pr-848ba9b
+  description: 'Make planning, spec generation, and implementation prompts aware of
+    decision points so they can suggest creating them when they detect uncertainty.
+    This is additive guidance only — no prompt requires decision points to function.
+
+
+    ## Prompt updates
+
+
+    - **Planning prompts** (plan breakdown, plan review): when the planner identifies
+    genuine uncertainty about approach, it suggests creating a decision point rather
+    than committing to one path. Examples: "should this be a watcher or a cron job?",
+    "monolith vs. microservice for this component?"
+
+    - **Spec generation prompts**: when the spec generator encounters significant
+    design forks, it suggests (or automatically creates, if spec tree branching is
+    available) a decision point with candidate specs
+
+    - **Implementation prompts**: sessions know which decision branch they''re working
+    on and what alternatives exist. If an implementation discovers that its branch''s
+    approach is fundamentally flawed, it can flag this
+
+    - **Review prompts**: reviewers can flag when a branch looks clearly better or
+    worse than siblings, recommending resolution
+
+
+    ## Design principles
+
+
+    - Awareness is purely additive — all prompts work exactly as before if no decision
+    points exist
+
+    - No prompt is forced to create decision points — they suggest when appropriate
+
+    - Decision point suggestions include rationale (what is uncertain and why it matters)
+
+    - LLM-facing output (from `pm decision list/show`) is included in prompt context
+    when relevant decision points exist'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-13T17:53:46.060213+00:00'
+  updated_at: '2026-03-13T17:53:46.060213+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-ebc8615
+  plan: watchers
+  title: 'Decision point watcher: monitor and surface parallel explorations'
+  branch: pm/pr-ebc8615-decision-point-watcher-monitor-and-surface-paralle
+  status: pending
+  depends_on:
+  - pr-3032fb6
+  - pr-848ba9b
+  description: 'Watcher (using BaseWatcher from pr-3032fb6) that monitors open decision
+    points across the project and helps manage the complexity of parallel exploration.
+
+
+    ## Observations
+
+
+    - Tracks all open decision points and their branches
+
+    - Monitors when branches have diverged enough to be meaningfully comparable
+
+    - Detects stale branches (no activity for a configurable period)
+
+    - Tracks resource usage per branch: API costs, time spent, workdir disk usage
+
+    - Monitors total workdir count — alerts when growing large due to many open decisions
+
+
+    ## Actions
+
+
+    - Surfaces comparison summaries in the watcher TUI pane for human review
+
+    - Recommends pruning stale or clearly-losing branches
+
+    - Recommends resolving decisions where one branch is clearly ahead
+
+    - Presents decision summaries formatted for human digestion (not just raw data)
+
+    - Can recommend creating decision points when it observes repeated backtracking
+    on a PR
+
+
+    ## Integration
+
+
+    - Uses the decision point CLI (pr-848ba9b) for all queries — no separate data
+    access
+
+    - Decision status included in the watcher''s periodic project health summary
+
+    - Interacts with the project state watcher (pr-945546e) to avoid duplicate notifications'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-13T17:53:58.045907+00:00'
+  updated_at: '2026-03-13T17:53:58.045907+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-8aa9411
+  plan: plan-qa
+  title: Review and QA regression benchmark suite with real-world bug test cases
+  branch: pm/pr-8aa9411-review-and-qa-regression-benchmark-suite-with-real
+  status: pending
+  depends_on:
+  - pr-ee1ff04
+  description: 'Build a benchmark suite for testing changes to review and QA prompts,
+    flows, and watcher configurations against known bugs.
+
+
+    Sources of test cases:
+
+    1. **Our own post-merge bugs** — the 20+ QA system fixes, 3 _ensure_workdir fixes,
+    container push proxy saga (16+ corrective actions), race conditions, shell quoting
+    bugs, dead code/unused imports that slipped through review. Each becomes a regression
+    test: given the pre-fix code, does the review/QA system catch the bug?
+
+
+    2. **Open source AI project bugs** — PRs from repos like LangChain, vLLM, llama.cpp,
+    Transformers where bugs were merged and later fixed. These test whether our review
+    catches issues in AI-specific code (model loading, tokenization, inference pipelines,
+    prompt handling).
+
+
+    3. **Open source non-AI project bugs** — PRs from repos like PostgreSQL, Redis,
+    CPython, Node.js where subtle bugs were merged. These test general code review
+    quality (race conditions, memory issues, edge cases, security vulnerabilities).
+
+
+    The benchmark runner:
+
+    - Takes a before/after commit pair (buggy code + fix)
+
+    - Presents only the buggy code to the review/QA system
+
+    - Scores whether the system identified the actual bug vs false positives
+
+    - Tracks precision (are identified issues real?) and recall (are real bugs found?)
+
+    - Supports A/B testing different prompts, models, effort levels, and watcher configs
+
+
+    Enables data-driven iteration on review prompts and QA scenarios rather than guessing.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-14T03:46:00.421065+00:00'
+  updated_at: '2026-03-14T03:58:23.715875+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-6ff369e
+    text: Use this benchmark to measure the impact of pr-4eb96ff (adversarial voting),
+      pr-c21e2ed (oversight watcher), pr-871dbf5 (supervisor watchers), and prompt
+      changes. The corpus from pr-24f2958 provides the test cases.
+    created_at: '2026-03-14T03:46:29Z'
+    last_edited: '2026-03-14T03:46:29Z'
+  - id: note-04c1fcb
+    text: 'Post-merge bug inventory for regression test cases:
+
+
+      1. _ensure_workdir saga (3 fixes): clone used pm/ subdir not repo root, fetch
+      URL not set to GitHub so PR branches not found, stale pr_data dict not updated
+      in yaml
+
+      2. QA workdir fallback: silently ran in pm_root when workdir missing, causing
+      rogue agents
+
+      3. Container push proxy (16+ fixes): force-push bypass, multi-refspec bypass,
+      exec flags, push proxy not resolving HEAD, local-path compat, cleanup on exit
+
+      4. Container isolation (9+ fixes): container leak, blank pane (setcbreak vs
+      setraw), Docker unavailable fallback, UID/GID collision, heredoc termination,
+      race between create and exec
+
+      5. QA system itself (20+ fixes): split-pane crash, standalone command crash,
+      auto-start race, self-driving QA transition, kill_pr_windows missing QA, merge
+      losing force=True, status pane detection, relaunch retry logic (fixed twice)
+
+      6. Race conditions: keystroke buffering between / and command bar, watcher accumulation,
+      stopper bridge race
+
+      7. Review loop timeout: 30s too short when gh pr ready takes 25s+
+
+      8. TUI SystemExit crashes: timer callbacks raising SystemExit through asyncio
+
+
+      Common patterns to test for: dead code/unused imports, shell quoting (missing
+      shlex.quote), stale dict references, race conditions, wrong function signatures,
+      security bypasses'
+    created_at: '2026-03-14T03:58:23Z'
+    last_edited: '2026-03-14T03:58:23Z'
+- id: pr-4eb96ff
+  plan: plan-qa
+  title: Adversarial review with voting step to balance false positives
+  branch: pm/pr-4eb96ff-adversarial-review-with-voting-step-to-balance-fal
+  status: pending
+  depends_on:
+  - pr-ee1ff04
+  - pr-8aa9411
+  description: 'Add a two-phase review flow that balances thoroughness with accuracy:
+
+
+    Phase 1 — Adversarial pass: Review with an explicitly adversarial prompt that
+    assumes the code has bugs and tries hard to find them. This catches the subtle
+    issues that a standard review misses (race conditions, shell injection, stale
+    references, edge cases).
+
+
+    Phase 2 — Voting/validation pass: A second review evaluates the Phase 1 findings,
+    filtering out false positives and issues without proper reasoning. Each flagged
+    issue must have: (a) a concrete explanation of why it''s wrong, (b) a specific
+    scenario where it fails, (c) a proposed fix or test.
+
+
+    The voting step prevents the over-correction problem where adversarial reviewers
+    flag style issues, hypothetical problems, or ''improvements'' that aren''t bugs.
+    Only issues that survive both passes become NEEDS_WORK items.
+
+
+    Configuration: adjustable adversarial intensity, configurable number of voters
+    (1-3), threshold for consensus, option to include the oversight watcher (pr-c21e2ed)
+    as an additional voter.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-14T03:46:11.848316+00:00'
+  updated_at: '2026-03-14T03:49:02.220661+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-24f2958
+  plan: plan-qa
+  title: Open source bug corpus for review/QA benchmarking
+  branch: pm/pr-24f2958-open-source-bug-corpus-for-review-qa-benchmarking
+  status: pending
+  depends_on:
+  - pr-8aa9411
+  description: 'Curate a corpus of real bugs from open source repos for benchmarking
+    review and QA quality. Each entry is a before/after pair with metadata about what
+    broke and how it was caught.
+
+
+    AI repos to mine:
+
+    - LangChain: chain composition bugs, prompt injection issues, retrieval failures
+
+    - vLLM: inference correctness, memory management, batching edge cases
+
+    - llama.cpp: quantization bugs, sampling issues, context handling
+
+    - Transformers (HuggingFace): model loading, tokenizer bugs, generation config
+    issues
+
+    - SGLang: scheduling bugs, cache invalidation
+
+
+    Non-AI repos to mine:
+
+    - CPython: interpreter edge cases, C extension bugs, stdlib issues
+
+    - PostgreSQL: query planner bugs, transaction isolation, index corruption
+
+    - Redis: data structure bugs, replication edge cases, persistence issues
+
+    - Node.js: event loop bugs, stream handling, crypto issues
+
+    - curl: protocol handling, certificate validation, encoding bugs
+
+
+    Selection criteria for each bug:
+
+    - Must have been merged to main before being caught
+
+    - Fix commit clearly identifiable
+
+    - Bug is in application logic (not build/CI/docs)
+
+    - Reviewable in isolation (doesn''t require deep domain context)
+
+
+    Target: 50-100 test cases across categories (race conditions, security, logic
+    errors, resource leaks, API misuse, edge cases).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-14T03:46:23.198794+00:00'
+  updated_at: '2026-03-14T03:46:23.198794+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-ac10f03
+  plan: improvements
+  title: Merge abort verdict when master changes are too large for auto-merge
+  branch: pm/pr-ac10f03-merge-abort-verdict-when-master-changes-are-too-la
+  status: pending
+  depends_on: []
+  description: 'Add an ABORT_MERGE verdict to the merge/conflict resolution flow.
+    When the merge prompt detects that changes on master since the PR branched are
+    too significant for a safe auto-merge, the agent should return ABORT_MERGE instead
+    of attempting to resolve conflicts it doesn''t fully understand.
+
+
+    Current behavior: the merge agent always tries to complete the merge, even when
+    master has diverged substantially. This leads to subtle integration bugs where
+    conflicts are ''resolved'' by picking one side without understanding the implications.
+
+
+    Desired behavior: the merge prompt evaluates the scope of changes (number of files,
+    lines changed, semantic overlap with the PR''s changes) and returns ABORT_MERGE
+    with an explanation when:
+
+    - Master changes touch the same subsystems as the PR in non-trivial ways
+
+    - Conflict resolution requires understanding architectural decisions made on master
+
+    - The combined diff is large enough that the merge result should go through review/QA
+    again
+
+
+    When ABORT_MERGE is returned:
+
+    - The merge loop stops cleanly (like PASS stops the review loop)
+
+    - The PR status is set back to in_review or a new ''merge_blocked'' status
+
+    - A note is added to the PR explaining what changed on master and why auto-merge
+    was unsafe
+
+    - The TUI shows the blocked state so the user can decide next steps (rebase manually,
+    re-review, etc.)'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-14T04:20:26.981480+00:00'
+  updated_at: '2026-03-14T04:21:40.677685+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
