@@ -43,7 +43,8 @@ def _make_app(
     app._review_loops = review_loops or {}
     app._root = root or Path("/tmp/pm-test")
     app._data = {"prs": prs or []}
-    app._watcher_state = None
+    from pm_core.watcher_manager import WatcherManager
+    app._watcher_manager = WatcherManager()
     app._review_loop_timer = None
     return app
 

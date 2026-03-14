@@ -1109,7 +1109,8 @@ class TestPollTriggersQA:
         app._review_loops = {}
         app._qa_loops = {}
         app._self_driving_qa = {}
-        app._watcher_state = None
+        from pm_core.watcher_manager import WatcherManager
+        app._watcher_manager = WatcherManager()
         app._impl_poll_counter = 0
         return app
 

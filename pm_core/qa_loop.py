@@ -612,6 +612,10 @@ def _launch_scenarios_in_containers(
     config = container_mod.load_container_config()
     branch = pr_data.get("branch", "")
 
+    # Derive session tag from tmux session name for container naming and
+    # shared push proxies.
+    _session_tag = session.removeprefix("pm-") if session else None
+
     for scenario in state.scenarios:
         if state.stop_requested:
             break
@@ -645,9 +649,11 @@ def _launch_scenarios_in_containers(
             prompt=child_prompt,
             model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort)
 
-        # Create container with push proxy for the PR branch
+        # Create container with push proxy for the PR branch.
+        # All QA scenarios for the same PR share a single push proxy.
         cname = container_mod.qa_container_name(
             state.pr_id, state.loop_id, scenario.index,
+            session_tag=_session_tag,
         )
         try:
             container_mod.create_qa_container(
@@ -656,6 +662,8 @@ def _launch_scenarios_in_containers(
                 workdir=clone_path,
                 scratch_path=scratch_path,
                 allowed_push_branch=branch or None,
+                session_tag=_session_tag,
+                pr_id=state.pr_id,
             )
             scenario.container_name = cname
         except Exception:
@@ -902,10 +910,21 @@ def run_qa_sync(
     window_name = _compute_qa_window_name(pr_data)
     data = store.load(pm_root)
 
-    workdir_path = pr_data.get("workdir")
+    # Find the PR entry inside the freshly loaded data so _ensure_workdir
+    # updates the same dict that gets saved.
+    pr_id = pr_data.get("id", state.pr_id)
+    live_pr = next((p for p in data.get("prs", []) if p.get("id") == pr_id), None)
+    if live_pr is None:
+        _log.error("QA aborted: PR %s not found in project data", pr_id)
+        state.running = False
+        state.latest_verdict = "ERROR"
+        state.latest_output = f"PR {pr_id} not found in project data"
+        return state
+
+    workdir_path = live_pr.get("workdir")
     if not workdir_path or not Path(workdir_path).is_dir():
         from pm_core.cli.helpers import _ensure_workdir
-        workdir_path = _ensure_workdir(data, pr_data, pm_root)
+        workdir_path = _ensure_workdir(data, live_pr, pm_root)
     if not workdir_path or not Path(workdir_path).is_dir():
         _log.error("QA aborted: workdir for %s does not exist and could not be created", state.pr_id)
         state.running = False
@@ -967,8 +986,9 @@ def run_qa_sync(
         # windows no longer exist.
         if use_containers:
             from pm_core import container as container_mod
+            _stag = session.removeprefix("pm-") if session else None
             container_mod.cleanup_orphaned_qa_containers(
-                session, state.pr_id)
+                session, state.pr_id, session_tag=_stag)
 
         # Launch Scenario 0 (interactive) right after stale cleanup so
         # the user can start exploring while the planner runs.

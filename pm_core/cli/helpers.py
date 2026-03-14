@@ -463,8 +463,11 @@ def _ensure_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
             shutil.rmtree(tmp_path, ignore_errors=True)
         return None
 
-    # Set up dual push URLs when cloned from a local repo
+    # Set up remote URLs when cloned from a local repo:
+    # - fetch from GitHub (so we can find PR branches from other machines)
+    # - push to both local and GitHub
     if clone_source == str(repo_dir) and repo_url:
+        git_ops.run_git("remote", "set-url", "origin", repo_url, cwd=tmp_path)
         git_ops.run_git("remote", "set-url", "--push",
                         "origin", clone_source, cwd=tmp_path)
         git_ops.run_git("remote", "set-url", "--add", "--push",

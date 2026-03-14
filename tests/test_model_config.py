@@ -9,21 +9,20 @@ from pm_core.model_config import (
     ModelResolution,
     get_model_config_summary,
     get_pr_model_override,
-    MODEL_SHORTCUTS,
-    DEFAULT_SESSION_MODELS,
-    DEFAULT_SESSION_EFFORT,
     SESSION_TYPES,
 )
 
 
-class TestModelShortcuts:
-    def test_shortcuts_exist(self):
-        assert "opus" in MODEL_SHORTCUTS
-        assert "sonnet" in MODEL_SHORTCUTS
-        assert "haiku" in MODEL_SHORTCUTS
+class TestPassthrough:
+    def test_bare_names_passed_through(self):
+        """Bare model names like sonnet, opus are passed through as-is."""
+        with patch.dict("os.environ", {"PM_MODEL": "sonnet"}):
+            assert resolve_model("review") == "sonnet"
+        with patch.dict("os.environ", {"PM_MODEL": "opus"}):
+            assert resolve_model("review") == "opus"
 
-    def test_passthrough_model_id(self):
-        """Non-shortcut values are passed through as-is."""
+    def test_full_model_id_passed_through(self):
+        """Full model IDs are passed through as-is."""
         with patch.dict("os.environ", {"PM_MODEL": "claude-custom-model"}):
             result = resolve_model("review")
             assert result == "claude-custom-model"
@@ -39,25 +38,25 @@ class TestResolveModel:
         assert resolve_model("merge") is None
 
     def test_pr_override(self):
-        assert resolve_model("impl", pr_model="opus") == MODEL_SHORTCUTS["opus"]
+        assert resolve_model("impl", pr_model="opus") == "opus"
 
     def test_project_config(self):
         data = {"project": {"model_config": {"session_models": {"review": "sonnet"}}}}
-        assert resolve_model("review", project_data=data) == MODEL_SHORTCUTS["sonnet"]
+        assert resolve_model("review", project_data=data) == "sonnet"
 
     def test_pr_beats_project(self):
         data = {"project": {"model_config": {"session_models": {"review": "haiku"}}}}
-        assert resolve_model("review", pr_model="sonnet", project_data=data) == MODEL_SHORTCUTS["sonnet"]
+        assert resolve_model("review", pr_model="sonnet", project_data=data) == "sonnet"
 
     @patch("pm_core.model_config.get_global_setting_value", return_value="opus")
     def test_global_setting(self, mock_gsv):
         result = resolve_model("qa")
-        assert result == MODEL_SHORTCUTS["opus"]
+        assert result == "opus"
 
     @patch("pm_core.model_config.get_global_setting_value", return_value="opus")
     def test_project_beats_global(self, mock_gsv):
         data = {"project": {"model_config": {"session_models": {"qa": "haiku"}}}}
-        assert resolve_model("qa", project_data=data) == MODEL_SHORTCUTS["haiku"]
+        assert resolve_model("qa", project_data=data) == "haiku"
 
     def test_unknown_session_type(self):
         assert resolve_model("unknown-type") is None
@@ -118,18 +117,18 @@ class TestEnvVarOverrides:
     def test_pm_model_env_var(self):
         with patch.dict("os.environ", {"PM_MODEL": "haiku"}):
             result = resolve_model("qa")
-            assert result == MODEL_SHORTCUTS["haiku"]
+            assert result == "haiku"
 
     def test_pm_model_with_shortcut(self):
         with patch.dict("os.environ", {"PM_MODEL": "sonnet"}):
             result = resolve_model("review")
-            assert result == MODEL_SHORTCUTS["sonnet"]
+            assert result == "sonnet"
 
     def test_pm_model_beats_project(self):
         data = {"project": {"model_config": {"session_models": {"qa": "opus"}}}}
         with patch.dict("os.environ", {"PM_MODEL": "haiku"}):
             result = resolve_model("qa", project_data=data)
-            assert result == MODEL_SHORTCUTS["haiku"]
+            assert result == "haiku"
 
     def test_pm_effort_env_var(self):
         with patch.dict("os.environ", {"PM_EFFORT": "low"}):
@@ -168,9 +167,9 @@ class TestGetPrModelOverride:
 class TestBuildClaudeShellCmd:
     def test_model_flag_included(self):
         from pm_core.claude_launcher import build_claude_shell_cmd
-        cmd = build_claude_shell_cmd(prompt="test", model="claude-sonnet-4-20250514")
+        cmd = build_claude_shell_cmd(prompt="test", model="sonnet")
         assert "--model" in cmd
-        assert "claude-sonnet-4-20250514" in cmd
+        assert "sonnet" in cmd
 
     def test_no_model_flag_when_none(self):
         from pm_core.claude_launcher import build_claude_shell_cmd
@@ -189,7 +188,7 @@ class TestBuildClaudeShellCmd:
 
     def test_model_and_effort_together(self):
         from pm_core.claude_launcher import build_claude_shell_cmd
-        cmd = build_claude_shell_cmd(prompt="test", model="claude-sonnet-4-20250514", effort="medium")
+        cmd = build_claude_shell_cmd(prompt="test", model="sonnet", effort="medium")
         assert "--model" in cmd
         assert "--effort medium" in cmd
 
@@ -202,9 +201,9 @@ class TestProviderResolution:
             assert result.model is None
 
     def test_non_provider_returns_model(self):
-        """With explicit config, non-provider values resolve to model IDs."""
+        """With explicit config, non-provider values resolve to model string."""
         result = resolve_model_and_provider("review", pr_model="opus")
-        assert result.model == MODEL_SHORTCUTS["opus"]
+        assert result.model == "opus"
         assert result.provider is None
 
     def test_provider_in_project_config(self):
@@ -234,20 +233,20 @@ class TestQaSubtypeFallback:
     def test_qa_planning_falls_back_to_qa(self):
         data = {"project": {"model_config": {"session_models": {"qa": "sonnet"}}}}
         result = resolve_model("qa_planning", project_data=data)
-        assert result == MODEL_SHORTCUTS["sonnet"]
+        assert result == "sonnet"
 
     def test_qa_scenario_falls_back_to_qa(self):
         data = {"project": {"model_config": {"session_models": {"qa": "haiku"}}}}
         result = resolve_model("qa_scenario", project_data=data)
-        assert result == MODEL_SHORTCUTS["haiku"]
+        assert result == "haiku"
 
     def test_specific_beats_fallback(self):
         data = {"project": {"model_config": {"session_models": {
             "qa": "haiku",
             "qa_planning": "opus",
         }}}}
-        assert resolve_model("qa_planning", project_data=data) == MODEL_SHORTCUTS["opus"]
-        assert resolve_model("qa_scenario", project_data=data) == MODEL_SHORTCUTS["haiku"]
+        assert resolve_model("qa_planning", project_data=data) == "opus"
+        assert resolve_model("qa_scenario", project_data=data) == "haiku"
 
     def test_effort_fallback(self):
         data = {"project": {"model_config": {"session_effort": {"qa": "low"}}}}

@@ -11,11 +11,9 @@ Effort level resolution:
     PM_EFFORT env var  >  project.yaml session_effort
     >  global ~/.pm/settings  >  (no default — use CLI setting)
 
-Model name shortcuts:
-
-    opus      -> claude-opus-4-6-20250514
-    sonnet    -> claude-sonnet-4-6-20250514
-    haiku     -> claude-haiku-4-5-20251001
+Model values like ``sonnet``, ``opus``, ``haiku`` are passed directly to
+the Claude CLI's ``--model`` flag, which resolves them to the latest
+version automatically.
 
 For external/local model servers, configure a provider via ``pm provider``
 (see providers.py) and reference it in model_config:
@@ -40,13 +38,12 @@ from pm_core.paths import configure_logger, get_global_setting_value
 
 _log = configure_logger("pm.model_config")
 
-# ── Model name shortcuts ──────────────────────────────────────────────
+# ── Known model names (for display and haiku effort suppression) ─────
 
-MODEL_SHORTCUTS: dict[str, str] = {
-    "opus": "claude-opus-4-6-20250514",
-    "sonnet": "claude-sonnet-4-6-20250514",
-    "haiku": "claude-haiku-4-5-20251001",
-}
+# Bare names like "sonnet", "opus", "haiku" are passed directly to the
+# Claude CLI which resolves them to the latest version automatically.
+# We only need to know about haiku to suppress the --effort flag.
+_HAIKU_PATTERNS = ("haiku",)
 
 # ── Session types ────────────────────────────────────────────────────
 
@@ -72,7 +69,8 @@ EFFORT_LEVELS = ("low", "medium", "high")
 
 # Models that do NOT support the --effort flag
 _NO_EFFORT_MODELS = {
-    MODEL_SHORTCUTS["haiku"],  # claude-haiku-4-5-20251001
+    "haiku",
+    "claude-haiku-4-5-20251001",
 }
 
 DEFAULT_SESSION_EFFORT: dict[str, str] = {
@@ -130,18 +128,13 @@ def resolve_model_and_provider(
     Returns a ModelResolution with either a model ID or a provider name,
     plus an effort level.  Values prefixed with ``provider:`` (e.g.
     ``provider:ollama``) are resolved as provider names.  All other
-    values are expanded through quality tiers.
+    values are passed through as-is to the Claude CLI's --model flag
+    (bare names like ``sonnet`` are resolved by the CLI itself).
     """
-    # Build effective tier map (project custom tiers override built-in)
-    tiers = dict(MODEL_SHORTCUTS)
-    if project_data:
-        custom = project_data.get("project", {}).get("model_config", {}).get("quality_tiers", {})
-        tiers.update(custom)
-
     def _resolve_value(value: str) -> ModelResolution:
         if value.startswith(_PROVIDER_PREFIX):
             return ModelResolution(provider=value[len(_PROVIDER_PREFIX):])
-        return ModelResolution(model=tiers.get(value, value))
+        return ModelResolution(model=value)
 
     # Types to try: the requested type, then its fallback (e.g. qa_planning -> qa)
     fallback = _FALLBACK_TYPES.get(session_type)

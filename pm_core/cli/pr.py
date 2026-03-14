@@ -749,9 +749,11 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                                          effort=_resolution.effort)
             # Optionally wrap in a container for isolation
             from pm_core.container import wrap_claude_cmd, ContainerError
+            _stag = pm_session.removeprefix("pm-") if pm_session else None
             try:
                 cmd, _cname = wrap_claude_cmd(cmd, str(work_path), label=f"impl-{pr_id}",
-                                              allowed_push_branch=branch)
+                                              allowed_push_branch=branch,
+                                              session_tag=_stag, pr_id=pr_id)
             except ContainerError as e:
                 click.echo(str(e), err=True)
                 raise SystemExit(1)
@@ -864,6 +866,24 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
 
     pr_id = pr_entry["id"]
     display_id = _pr_display_id(pr_entry)
+    title = pr_entry.get("title", "")
+    base_branch = data.get("project", {}).get("base_branch", "master")
+
+    # Generate review prompt and build Claude command
+    review_prompt = prompt_gen.generate_review_prompt(data, pr_id, session_name=pm_session,
+                                                      review_loop=review_loop,
+                                                      review_iteration=review_iteration,
+                                                      review_loop_id=review_loop_id)
+    claude_cmd = build_claude_shell_cmd(prompt=review_prompt,
+                                         transcript=transcript, cwd=workdir)
+    # Optionally wrap in a container for isolation
+    branch = pr_entry.get("branch", "")
+    from pm_core.container import wrap_claude_cmd
+    _stag = pm_session.removeprefix("pm-") if pm_session else None
+    claude_cmd, _cname = wrap_claude_cmd(claude_cmd, workdir, label=f"review-{pr_id}",
+                                          allowed_push_branch=branch,
+                                          session_tag=_stag, pr_id=pr_id)
+
     window_name = f"review-{display_id}"
 
     # Fast path: if review window already exists and we don't need fresh,
