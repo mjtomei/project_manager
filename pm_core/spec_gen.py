@@ -463,21 +463,6 @@ Start with Step 0 below.  Once the spec is saved, proceed to the main task.
 """
 
 
-def ensure_spec(data: dict, pr_id: str, phase: str,
-                root: Path | None = None,
-                interactive: bool = True) -> str | None:
-    """Return the existing spec for a PR phase, or None.
-
-    Spec generation now happens inline in the main Claude session via
-    ``spec_generation_preamble()``.  This function is kept for the CLI
-    ``pm pr spec`` command and any callers that need to check whether a
-    spec already exists.
-    """
-    pr = store.get_pr(data, pr_id)
-    if not pr:
-        return None
-    return get_spec(pr, phase)
-
 
 def format_spec_for_prompt(pr: dict, phase: str) -> str:
     """Format a spec for inclusion in a Claude prompt.
