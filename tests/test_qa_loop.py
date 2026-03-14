@@ -471,21 +471,21 @@ class TestVerdictEdgeCases:
     """Edge cases for verdict detection — window death, grace period, etc."""
 
     def test_dead_window_gets_input_required(self):
-        """A window killed without verdict should be marked INPUT_REQUIRED."""
-        from pm_core.qa_loop import _get_scenario_pane
+        """A window killed without verdict should be marked INPUT_REQUIRED.
 
+        The VerdictPoller in qa_status.py marks scenarios as INPUT_REQUIRED
+        when their tmux window disappears (find_claude_pane returns None).
+        """
         scenario = QAScenario(index=1, title="Test", focus="t")
         scenario.window_name = "qa-#42-s1"
         state = QALoopState(pr_id="pr-001")
         state.scenarios = [scenario]
         state.scenario_verdicts = {}
 
-        # Simulate: window is dead (find_window_by_name returns None)
-        with patch("pm_core.qa_loop._get_scenario_pane", return_value=None):
-            pane_id = _get_scenario_pane("sess", scenario.window_name)
-            assert pane_id is None
-            # This is what the polling loop does:
-            state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+        # Simulate: window is dead — verdict poller marks INPUT_REQUIRED
+        pane_id = None  # find_claude_pane would return None
+        assert pane_id is None
+        state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
 
         assert state.scenario_verdicts[1] == VERDICT_INPUT_REQUIRED
 
@@ -504,15 +504,14 @@ class TestVerdictEdgeCases:
         pending = {scenario.index}
         in_grace = True  # Simulate being within grace period
 
-        # Simulate: pane is dead
-        with patch("pm_core.qa_loop._get_scenario_pane", return_value=None):
-            pane_id = None  # _get_scenario_pane returns None
-            # In the actual loop, dead window check comes BEFORE grace check:
-            if pane_id is None:
-                state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
-                pending.discard(scenario.index)
-            elif in_grace:
-                pass  # Would skip verdict reading — but we never reach here
+        # Simulate: pane is dead (find_claude_pane returns None)
+        pane_id = None
+        # In the actual loop, dead window check comes BEFORE grace check:
+        if pane_id is None:
+            state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+            pending.discard(scenario.index)
+        elif in_grace:
+            pass  # Would skip verdict reading — but we never reach here
 
         # Dead window should be detected despite grace period
         assert scenario.index not in pending

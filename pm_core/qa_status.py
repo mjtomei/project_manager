@@ -458,11 +458,8 @@ def _run_interactive(path: Path, session: str) -> None:
         while True:
             status = _load_status(path)
 
-            # Poll for verdicts on each refresh
+            # Poll for verdicts on each refresh (mutates status in-place)
             poller.poll(status)
-            # Re-read in case poller updated the file
-            if status and not status.get("overall"):
-                status = _load_status(path)
 
             rows, cols = _get_terminal_size()
             num_scenarios = len(status.get("scenarios", [])) if status else 0
@@ -513,11 +510,8 @@ def _run_passive(path: Path, session: str) -> None:
     while True:
         status = _load_status(path)
 
-        # Poll for verdicts on each refresh
+        # Poll for verdicts on each refresh (mutates status in-place)
         poller.poll(status)
-        # Re-read in case poller updated the file
-        if status and not status.get("overall"):
-            status = _load_status(path)
 
         rows, cols = _get_terminal_size()
 
