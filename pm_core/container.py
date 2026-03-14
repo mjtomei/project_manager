@@ -816,7 +816,9 @@ def cleanup_stale_containers(session_name: str, session_tag: str) -> int:
         return 0
 
     # Build pr_id → display_id map from the store so we can map container
-    # names back to tmux window names.
+    # names back to tmux window names.  If the store can't be loaded we
+    # must bail out — an empty map would cause every container to be
+    # treated as stale and removed.
     pr_display_map: dict[str, str] = {}
     try:
         from pm_core.cli.helpers import state_root
@@ -828,7 +830,7 @@ def cleanup_stale_containers(session_name: str, session_tag: str) -> int:
             gh = pr.get("gh_pr_number")
             pr_display_map[pr_id] = f"#{gh}" if gh else pr_id
     except Exception:
-        pass
+        return 0
 
     count = 0
     for line in result.stdout.strip().splitlines():
