@@ -860,7 +860,7 @@ def _poll_tmux_verdicts(
                 _log.info("Verification FLAGGED scenario %d (%s), attempt %d: %s",
                           scenario_idx, scenario.title, fails, reason)
 
-                if fails >= _VERIFICATION_MAX_RETRIES:
+                if fails > _VERIFICATION_MAX_RETRIES:
                     # Too many verification failures — mark NEEDS_WORK
                     _log.warning("Scenario %d failed verification %d times — "
                                  "marking NEEDS_WORK", scenario_idx, fails)
@@ -972,10 +972,12 @@ def _poll_tmux_verdicts(
                 t.start()
 
         if verdicts_changed or completed_verifications:
+            with verification_lock:
+                verifying_snapshot = set(verifying)
             _write_status_file(status_path, state.pr_id, state.scenarios,
                                state.scenario_verdicts,
                                scenario_0=state.scenario_0,
-                               verifying_scenarios=verifying)
+                               verifying_scenarios=verifying_snapshot)
 
 
 # ---------------------------------------------------------------------------
