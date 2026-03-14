@@ -3,11 +3,11 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-4fd59d4
+  active_pr: pr-18ac983
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
-  hide_merged: true
+  hide_merged: false
 plans:
 - id: plan-001
   name: Import from existing repo
@@ -3720,7 +3720,7 @@ prs:
   plan: plan-qa
   title: Add spec generation step between PR phases
   branch: pm/pr-942aa21-add-spec-generation-step-between-pr-phases
-  status: qa
+  status: in_review
   depends_on: []
   description: "Add an optional \"spec\" step to the PR lifecycle that bridges the\
     \ gap between the user's natural-language description and each subsequent phase\
@@ -3763,9 +3763,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/125
   gh_pr_number: 125
   created_at: '2026-03-06T19:02:04.662125+00:00'
-  updated_at: '2026-03-10T01:19:18.930124+00:00'
+  updated_at: '2026-03-14T21:24:34.099941+00:00'
   started_at: '2026-03-06T21:13:20.894896+00:00'
-  reviewed_at: '2026-03-10T01:19:18.930124+00:00'
+  reviewed_at: '2026-03-14T21:24:34.099941+00:00'
   merged_at: null
   notes:
   - id: note-fa1e58a
@@ -4227,7 +4227,7 @@ prs:
   plan: watchers
   title: 'Watcher core framework: BaseWatcher, WatcherManager, and auto-start refactor'
   branch: pm/pr-3032fb6-always-on-watcher-framework-with-pluggable-intelli
-  status: qa
+  status: merged
   depends_on: []
   description: "Refactor the watcher loop from an auto-start companion into a pluggable\
     \ always-on framework. This is the core infrastructure that all watchers build\
@@ -4263,10 +4263,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/132
   gh_pr_number: 132
   created_at: '2026-03-08T20:10:08.282332+00:00'
-  updated_at: '2026-03-10T14:27:13.697046+00:00'
+  updated_at: '2026-03-14T21:01:19.644940+00:00'
   started_at: '2026-03-09T23:34:18.643679+00:00'
   reviewed_at: '2026-03-10T14:27:13.697046+00:00'
-  merged_at: null
+  merged_at: '2026-03-14T21:01:19.644940+00:00'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-3032fb6-always-on-watcher-framework-with-plu-defc8a34
 - id: pr-0b827df
@@ -4357,7 +4357,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/137
   gh_pr_number: 137
   created_at: '2026-03-08T21:45:42.636585+00:00'
-  updated_at: '2026-03-10T22:57:13.695502+00:00'
+  updated_at: '2026-03-14T21:25:03.662473+00:00'
   started_at: '2026-03-10T21:38:57.198809+00:00'
   reviewed_at: null
   merged_at: null
@@ -5083,7 +5083,7 @@ prs:
   plan: improvements
   title: Unified log file with source prefixes and pm log CLI
   branch: pm/pr-9bf8b0b-unified-log-file-with-source-prefixes-and-pm-log-c
-  status: in_review
+  status: merged
   depends_on: []
   description: 'Consolidate all pm logging into a single log file per session. Currently
     different modules create loggers with different names but they already write to
@@ -5113,17 +5113,17 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/134
   gh_pr_number: 134
   created_at: '2026-03-09T23:46:16.788511+00:00'
-  updated_at: '2026-03-10T15:13:07.181206+00:00'
+  updated_at: '2026-03-14T21:01:19.644952+00:00'
   started_at: '2026-03-09T23:50:43.896649+00:00'
   reviewed_at: '2026-03-10T15:13:07.181206+00:00'
-  merged_at: null
+  merged_at: '2026-03-14T21:01:19.644952+00:00'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9bf8b0b-unified-log-file-with-source-prefixe-743c06d3
 - id: pr-6836fad
   plan: plan-qa
   title: Embed session tag in container names and consolidate push proxies
   branch: pm/pr-6836fad-embed-session-tag-in-container-names-and-consolida
-  status: qa
+  status: merged
   depends_on: []
   description: 'Two related improvements to container and push proxy management:
 
@@ -5146,10 +5146,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/135
   gh_pr_number: 135
   created_at: '2026-03-10T00:30:49.386415+00:00'
-  updated_at: '2026-03-10T01:07:09.750495+00:00'
+  updated_at: '2026-03-14T21:01:19.644954+00:00'
   started_at: '2026-03-10T00:33:09.795104+00:00'
   reviewed_at: '2026-03-10T01:07:09.750495+00:00'
-  merged_at: null
+  merged_at: '2026-03-14T21:01:19.644954+00:00'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-6836fad-embed-session-tag-in-container-names-743c06d3
 - id: pr-ac12b47
