@@ -19,11 +19,7 @@ import click
 from pm_core import store, prompt_gen
 from pm_core import tmux as tmux_mod
 from pm_core.claude_launcher import build_claude_shell_cmd, finalize_transcript
-from pm_core.watcher_loop import (
-    WATCHER_WINDOW_NAME,
-    WatcherLoopState,
-    run_watcher_loop_sync,
-)
+from pm_core.watchers.auto_start_watcher import AutoStartWatcher
 
 from pm_core.paths import configure_logger
 from pm_core.cli import cli
@@ -45,13 +41,14 @@ def _run_user_watcher_loop(wait: int, max_iterations: int) -> None:
         click.echo(f"Watcher: tmux session '{pm_session}' not found.", err=True)
         raise SystemExit(1)
 
-    state = WatcherLoopState(iteration_wait=wait)
+    watcher = AutoStartWatcher(pm_root=str(root))
+    watcher.state.iteration_wait = wait
 
     # Create transcript directory
     tdir = root / "transcripts" / f"watcher-{secrets.token_hex(4)}"
     tdir.mkdir(parents=True, exist_ok=True)
 
-    def _on_iteration(s: WatcherLoopState) -> None:
+    def _on_iteration(s) -> None:
         ts = datetime.now().strftime("%H:%M:%S")
         click.echo(f"[{ts}] Iteration {s.iteration}: {s.latest_verdict}")
 
@@ -60,15 +57,13 @@ def _run_user_watcher_loop(wait: int, max_iterations: int) -> None:
     click.echo("Press Ctrl+C to stop.\n")
 
     try:
-        run_watcher_loop_sync(
-            state,
-            str(root),
+        watcher.run_sync(
             on_iteration=_on_iteration,
             max_iterations=max_iterations,
             transcript_dir=str(tdir),
         )
     except KeyboardInterrupt:
-        state.stop_requested = True
+        watcher.state.stop_requested = True
         click.echo("\nStopping watcher loop...")
 
     # Finalize transcript symlinks
@@ -78,8 +73,8 @@ def _run_user_watcher_loop(wait: int, max_iterations: int) -> None:
             finalize_transcript(p)
 
     click.echo(
-        f"\nWatcher finished: {state.iteration} iteration(s), "
-        f"last verdict: {state.latest_verdict}"
+        f"\nWatcher finished: {watcher.state.iteration} iteration(s), "
+        f"last verdict: {watcher.state.latest_verdict}"
     )
 
 
@@ -259,7 +254,7 @@ def _create_watcher_window(iteration: int, loop_id: str,
     # Track which sessions were watching the old window so we can switch
     # them to the new one (same pattern as review windows).
     sessions_watching: list[str] = []
-    existing = tmux_mod.find_window_by_name(pm_session, WATCHER_WINDOW_NAME)
+    existing = tmux_mod.find_window_by_name(pm_session, AutoStartWatcher.WINDOW_NAME)
     _log.info("_create_watcher_window: iteration=%d pm_session=%s existing=%s",
                iteration, pm_session, existing)
     if existing:
@@ -272,10 +267,10 @@ def _create_watcher_window(iteration: int, loop_id: str,
     # Create the watcher window without switching focus (background)
     try:
         tmux_mod.new_window_get_pane(
-            pm_session, WATCHER_WINDOW_NAME, claude_cmd, repo_dir,
+            pm_session, AutoStartWatcher.WINDOW_NAME, claude_cmd, repo_dir,
             switch=False,
         )
-        new_win = tmux_mod.find_window_by_name(pm_session, WATCHER_WINDOW_NAME)
+        new_win = tmux_mod.find_window_by_name(pm_session, AutoStartWatcher.WINDOW_NAME)
         _log.info("_create_watcher_window: new window created: %s", new_win)
         if new_win:
             tmux_mod.set_shared_window_size(pm_session, new_win["id"])
@@ -288,6 +283,6 @@ def _create_watcher_window(iteration: int, loop_id: str,
     if sessions_watching:
         _log.info("_create_watcher_window: switching %s to new watcher window", sessions_watching)
         tmux_mod.switch_sessions_to_window(
-            sessions_watching, pm_session, WATCHER_WINDOW_NAME)
+            sessions_watching, pm_session, AutoStartWatcher.WINDOW_NAME)
     else:
         _log.info("_create_watcher_window: no sessions_watching, skipping switch")

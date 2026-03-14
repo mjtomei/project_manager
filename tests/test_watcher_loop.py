@@ -1,25 +1,17 @@
-"""Tests for watcher framework: BaseWatcher, WatcherManager, and compat layer."""
+"""Tests for watcher framework: BaseWatcher, WatcherManager, and AutoStartWatcher."""
 
 from unittest.mock import patch, MagicMock
 
 import pytest
 
-from pm_core.watcher_loop import (
-    parse_watcher_verdict,
-    run_watcher_loop_sync,
-    start_watcher_loop_background,
-    PaneKilledError,
-    WatcherLoopState,
-    VERDICT_READY,
-    VERDICT_INPUT_REQUIRED,
-    VERDICT_KILLED,
-)
 from pm_core.watcher_base import (
     WatcherIteration,
     WatcherState,
     BaseWatcher,
+    PaneKilledError,
     _MAX_HISTORY,
 )
+from pm_core.watchers.auto_start_watcher import AutoStartWatcher
 from pm_core.loop_shared import (
     match_verdict,
     extract_verdict_from_content,
@@ -27,9 +19,20 @@ from pm_core.loop_shared import (
     is_prompt_line as _is_prompt_line,
 )
 
+VERDICT_READY = "READY"
+VERDICT_INPUT_REQUIRED = "INPUT_REQUIRED"
+VERDICT_KILLED = "KILLED"
+
 # Watcher-specific verdict functions using loop_shared directly
 ALL_WATCHER_VERDICTS = (VERDICT_READY, VERDICT_INPUT_REQUIRED)
 _WATCHER_KEYWORDS = ("INPUT_REQUIRED", "READY")
+
+# Use AutoStartWatcher for verdict parsing (same as the production code)
+_watcher = AutoStartWatcher(pm_root="")
+
+
+def _parse_watcher_verdict(output: str) -> str:
+    return _watcher.parse_verdict(output)
 
 
 def _match_watcher_verdict(line):
@@ -44,35 +47,35 @@ def _extract_verdict_from_content(content, prompt_text="", exclude_verdicts=None
     )
 
 
-# --- parse_watcher_verdict tests ---
+# --- _parse_watcher_verdict tests ---
 
 class TestParseWatcherVerdict:
     def test_ready(self):
-        assert parse_watcher_verdict("All clear.\n\n**READY**") == VERDICT_READY
+        assert _parse_watcher_verdict("All clear.\n\n**READY**") == VERDICT_READY
 
     def test_ready_plain(self):
-        assert parse_watcher_verdict("READY") == VERDICT_READY
+        assert _parse_watcher_verdict("READY") == VERDICT_READY
 
     def test_input_required(self):
         output = "Need human help.\n\n**INPUT_REQUIRED**\n\nPlease check auth"
-        assert parse_watcher_verdict(output) == VERDICT_INPUT_REQUIRED
+        assert _parse_watcher_verdict(output) == VERDICT_INPUT_REQUIRED
 
     def test_input_required_plain(self):
-        assert parse_watcher_verdict("INPUT_REQUIRED") == VERDICT_INPUT_REQUIRED
+        assert _parse_watcher_verdict("INPUT_REQUIRED") == VERDICT_INPUT_REQUIRED
 
     def test_input_required_bold(self):
-        assert parse_watcher_verdict("**INPUT_REQUIRED**") == VERDICT_INPUT_REQUIRED
+        assert _parse_watcher_verdict("**INPUT_REQUIRED**") == VERDICT_INPUT_REQUIRED
 
     def test_empty_output_is_ready(self):
         """No verdict found defaults to READY (continue watching)."""
-        assert parse_watcher_verdict("") == VERDICT_READY
+        assert _parse_watcher_verdict("") == VERDICT_READY
 
     def test_no_verdict_defaults_to_ready(self):
-        assert parse_watcher_verdict("Some watching output with no verdict") == VERDICT_READY
+        assert _parse_watcher_verdict("Some watching output with no verdict") == VERDICT_READY
 
     def test_verdict_on_own_line_wins(self):
         output = "Initial: INPUT_REQUIRED\n\nREADY"
-        assert parse_watcher_verdict(output) == VERDICT_READY
+        assert _parse_watcher_verdict(output) == VERDICT_READY
 
 
 # --- _match_watcher_verdict false positive rejection tests ---
@@ -217,28 +220,6 @@ class TestIsPromptLine:
     def test_standalone_input_required_not_prompt(self):
         prompt_lines = {"INPUT_REQUIRED -- You need human input."}
         assert _is_prompt_line("INPUT_REQUIRED", prompt_lines, _WATCHER_KEYWORDS) is False
-
-
-# --- WatcherLoopState tests ---
-
-class TestWatcherLoopState:
-    def test_defaults(self):
-        state = WatcherLoopState()
-        assert state.running is False
-        assert state.stop_requested is False
-        assert state.iteration == 0
-        assert state.latest_verdict == ""
-        assert state.latest_summary == ""
-        assert state.history == []
-        assert len(state.loop_id) == 4  # 2 bytes = 4 hex chars
-
-    def test_unique_loop_ids(self):
-        ids = {WatcherLoopState().loop_id for _ in range(10)}
-        assert len(ids) == 10
-
-    def test_input_required_defaults(self):
-        state = WatcherLoopState()
-        assert state.input_required is False
 
 
 # --- WatcherState tests ---
@@ -471,15 +452,15 @@ class TestAutoStartWatcher:
         assert w.parse_verdict("No verdict here") == "READY"
 
 
-# --- run_watcher_loop_sync compat tests ---
+# --- AutoStartWatcher run_sync tests ---
 
-class TestRunWatcherLoopSync:
+class TestAutoStartWatcherRunSync:
     @patch("pm_core.watcher_base.BaseWatcher._run_iteration")
     def test_stops_on_max_iterations(self, mock_iter):
         mock_iter.return_value = "All clear.\n\n**READY**"
-        state = WatcherLoopState()
-        state.iteration_wait = 0
-        result = run_watcher_loop_sync(state, "/tmp", max_iterations=2)
+        w = AutoStartWatcher("/tmp")
+        w.state.iteration_wait = 0
+        result = w.run_sync(max_iterations=2)
         assert result.iteration == 2
         assert result.latest_verdict == VERDICT_READY
         assert result.running is False
@@ -488,8 +469,8 @@ class TestRunWatcherLoopSync:
     @patch("pm_core.watcher_base.BaseWatcher._run_iteration")
     def test_pane_killed_stops_loop(self, mock_iter):
         mock_iter.side_effect = PaneKilledError("pane disappeared")
-        state = WatcherLoopState()
-        result = run_watcher_loop_sync(state, "/tmp")
+        w = AutoStartWatcher("/tmp")
+        result = w.run_sync()
         assert result.latest_verdict == VERDICT_KILLED
         assert result.running is False
         assert result.iteration == 1
@@ -497,8 +478,8 @@ class TestRunWatcherLoopSync:
     @patch("pm_core.watcher_base.BaseWatcher._run_iteration")
     def test_exception_stops_loop(self, mock_iter):
         mock_iter.side_effect = RuntimeError("setup failure")
-        state = WatcherLoopState()
-        result = run_watcher_loop_sync(state, "/tmp")
+        w = AutoStartWatcher("/tmp")
+        result = w.run_sync()
         assert result.latest_verdict == "ERROR"
         assert result.running is False
 
@@ -506,38 +487,35 @@ class TestRunWatcherLoopSync:
     def test_calls_on_iteration_callback(self, mock_iter):
         mock_iter.return_value = "**READY**"
         callback = MagicMock()
-        state = WatcherLoopState()
-        state.iteration_wait = 0
-        run_watcher_loop_sync(state, "/tmp", on_iteration=callback, max_iterations=1)
-        callback.assert_called_once_with(state)
+        w = AutoStartWatcher("/tmp")
+        w.state.iteration_wait = 0
+        w.run_sync(on_iteration=callback, max_iterations=1)
+        callback.assert_called_once()
 
     @patch("pm_core.watcher_base.BaseWatcher._run_iteration")
     def test_history_capped(self, mock_iter):
         """History doesn't grow beyond _MAX_HISTORY entries."""
         mock_iter.return_value = "**READY**"
-        state = WatcherLoopState()
-        state.iteration_wait = 0
-        run_watcher_loop_sync(state, "/tmp", max_iterations=_MAX_HISTORY + 10)
-        assert len(state.history) <= _MAX_HISTORY
+        w = AutoStartWatcher("/tmp")
+        w.state.iteration_wait = 0
+        result = w.run_sync(max_iterations=_MAX_HISTORY + 10)
+        assert len(result.history) <= _MAX_HISTORY
 
-
-class TestStartWatcherLoopBackground:
     @patch("pm_core.watcher_base.BaseWatcher._run_iteration")
     def test_runs_in_background_thread(self, mock_iter):
         mock_iter.return_value = "**READY**"
-        state = WatcherLoopState()
-        state.iteration_wait = 0
+        w = AutoStartWatcher("/tmp")
+        w.state.iteration_wait = 0
         complete_callback = MagicMock()
-        thread = start_watcher_loop_background(
-            state, "/tmp",
+        thread = w.start_background(
             on_complete=complete_callback,
             max_iterations=1,
         )
         thread.join(timeout=10)
         assert not thread.is_alive()
-        assert state.latest_verdict == VERDICT_READY
-        assert state.running is False
-        complete_callback.assert_called_once_with(state)
+        assert w.state.latest_verdict == VERDICT_READY
+        assert w.state.running is False
+        complete_callback.assert_called_once()
 
 
 # --- generate_watcher_prompt tests ---

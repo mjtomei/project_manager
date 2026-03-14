@@ -287,9 +287,7 @@ class ProjectManagerApp(App):
         self._auto_start: bool = False
         self._auto_start_target: str | None = None
         self._auto_start_run_id: str | None = None
-        # Watcher loop state (purely in-memory, lost on TUI restart)
-        self._watcher_state = None  # WatcherLoopState | None (legacy compat)
-        # Watcher framework manager (new pluggable system)
+        # Watcher framework manager (purely in-memory, lost on TUI restart)
         from pm_core.watcher_manager import WatcherManager
         self._watcher_manager = WatcherManager()
         # w prefix key state
@@ -546,11 +544,8 @@ class ProjectManagerApp(App):
             sort_text = dict(SORT_FIELDS).get(tree._sort_field, tree._sort_field)
         status_bar = self.query_one("#status-bar", StatusBar)
         watcher_status = ""
-        # Check manager first, fall back to legacy state
         if self._watcher_manager.is_any_running():
             watcher_status = "input_required" if self._watcher_manager.any_input_required() else "running"
-        elif self._watcher_state and self._watcher_state.running:
-            watcher_status = "input_required" if self._watcher_state.input_required else "running"
         status_bar.update_status(
             project.get("name", "???"),
             project.get("repo", "???"),
@@ -747,15 +742,9 @@ class ProjectManagerApp(App):
                 tmux_mod.select_window(session, w["window_name"])
                 return
 
-        # Check legacy watcher state
-        if self._watcher_state and self._watcher_state.running:
-            from pm_core.watcher_loop import WATCHER_WINDOW_NAME
-            existing = tmux_mod.find_window_by_name(session, WATCHER_WINDOW_NAME)
-            if existing:
-                tmux_mod.select_window(session, WATCHER_WINDOW_NAME)
-                return
+        # Check if a watcher is running but between iterations
+        if self._watcher_manager.is_any_running():
             self.log_message("Watcher is between iterations — window will appear shortly")
-            self._poll_for_watcher_window(attempts=10)
             return
 
         # No watcher running — start one
@@ -765,21 +754,6 @@ class ProjectManagerApp(App):
         """Show list of all watchers and their status (ww key chord)."""
         _log.info("action: watcher_list")
         watchers = self._watcher_manager.list_watchers()
-
-        # Also include legacy watcher state if not in manager
-        if self._watcher_state and self._watcher_state.running:
-            has_legacy = any(w["type"] == "auto-start" for w in watchers)
-            if not has_legacy:
-                watchers.append({
-                    "id": "legacy",
-                    "type": "auto-start",
-                    "display_name": "Auto-Start Watcher",
-                    "running": True,
-                    "verdict": self._watcher_state.latest_verdict,
-                    "iteration": self._watcher_state.iteration,
-                    "input_required": self._watcher_state.input_required,
-                    "window_name": "watcher",
-                })
 
         if not watchers:
             self.log_message("[dim]No watchers registered. Press ws to start one.[/]")
@@ -805,11 +779,10 @@ class ProjectManagerApp(App):
         _log.info("action: watcher_toggle")
         from pm_core.tui import watcher_ui
 
-        # Check if auto-start watcher is running (via manager or legacy)
+        # Check if auto-start watcher is running
         manager_watcher = self._watcher_manager.find_by_type("auto-start")
-        legacy_running = self._watcher_state and self._watcher_state.running
 
-        if (manager_watcher and manager_watcher.state.running) or legacy_running:
+        if manager_watcher and manager_watcher.state.running:
             watcher_ui.stop_watcher(self)
             return
 
@@ -822,25 +795,6 @@ class ProjectManagerApp(App):
             transcript_dir=str(tdir) if tdir else None,
             meta_pm_root=str(meta_root) if meta_root else None,
         )
-
-    def _poll_for_watcher_window(self, attempts: int = 10) -> None:
-        """Poll for the watcher window to appear and focus it."""
-        from pm_core.watcher_loop import WATCHER_WINDOW_NAME
-
-        session = self._session_name
-        if not session:
-            return
-
-        def _check() -> None:
-            nonlocal attempts
-            attempts -= 1
-            win = tmux_mod.find_window_by_name(session, WATCHER_WINDOW_NAME)
-            if win:
-                tmux_mod.select_window(session, WATCHER_WINDOW_NAME)
-            elif attempts > 0:
-                self.set_timer(1, _check)
-
-        self.set_timer(1, _check)
 
     def action_quit(self) -> None:
         pane_ops.quit_app(self)

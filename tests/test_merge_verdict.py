@@ -195,7 +195,8 @@ def _make_app(prs=None, pending_merges=None, session_name="test-session"):
     app._review_loops = {}
     app._impl_poll_counter = 4  # Will be 5 on next increment → triggers poll
     app._review_loop_timer = MagicMock()
-    app._watcher_state = None
+    from pm_core.watcher_manager import WatcherManager
+    app._watcher_manager = WatcherManager()
 
     # PaneIdleTracker mock
     tracker = MagicMock()

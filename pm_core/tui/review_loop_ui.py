@@ -295,7 +295,7 @@ def _poll_loop_state(app) -> None:
         for pr in (app._data.get("prs") or [])
     )
     qa_running = any(s.running for s in app._qa_loops.values())
-    watcher_running = app._watcher_state and app._watcher_state.running
+    watcher_running = app._watcher_manager.is_any_running()
     if not any_running and not has_active_prs and not watcher_running and not qa_running:
         if app._review_loop_timer:
             app._review_loop_timer.stop()
