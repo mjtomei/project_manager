@@ -20,6 +20,7 @@ from pm_core.tui.command_bar import CommandBar, CommandSubmitted
 from pm_core.tui.guide_progress import GuideProgress
 from pm_core.tui.plans_pane import PlansPane, PlanSelected, PlanActivated, PlanAction
 from pm_core.tui.qa_pane import QAPane, QAItemSelected, QAItemActivated, QAAction
+from pm_core.tui.tasks_pane import TasksPane, TaskSelected, TaskActivated, TaskAction
 from pm_core.plan_parser import extract_plan_intro
 
 from pm_core.tui.widgets import TreeScroll, StatusBar, LogLine
@@ -111,6 +112,17 @@ class ProjectManagerApp(App):
         width: 1fr;
         padding: 1 2;
     }
+    #tasks-container {
+        width: 100%;
+        height: 100%;
+        display: none;
+        overflow: auto auto;
+    }
+    TasksPane {
+        height: auto;
+        width: 1fr;
+        padding: 1 2;
+    }
     """
 
     BINDINGS = [
@@ -144,6 +156,7 @@ class ProjectManagerApp(App):
         Binding("H", "launch_guide", "Guide", show=True),
         Binding("C", "show_connect", "Connect", show=False),
         Binding("A", "toggle_auto_start", "Auto-start", show=False),
+        Binding("W", "toggle_tasks", "Tasks", show=True),
         # w is handled as a prefix key in on_key (wf=focus, ww=list, ws=start/stop)
     ]
 
@@ -227,7 +240,7 @@ class ProjectManagerApp(App):
                        "edit_plan", "view_plan", "launch_notes",
                        "launch_meta", "launch_claude", "launch_guide",
                        "view_log", "refresh", "rebalance", "show_help",
-                       "toggle_plans", "toggle_qa", "start_qa_on_pr", "hide_plan", "move_to_plan", "toggle_merged",
+                       "toggle_plans", "toggle_qa", "toggle_tasks", "start_qa_on_pr", "hide_plan", "move_to_plan", "toggle_merged",
                        "cycle_filter", "cycle_sort", "toggle_auto_start", "focus_watcher"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus or self._command_pending:
@@ -245,6 +258,9 @@ class ProjectManagerApp(App):
             if self._qa_visible:
                 _log.debug("check_action: blocked %s (in QA view)", action)
                 return False
+            if self._tasks_visible:
+                _log.debug("check_action: blocked %s (in tasks view)", action)
+                return False
         return True
 
     def __init__(self):
@@ -256,6 +272,9 @@ class ProjectManagerApp(App):
         self._guide_auto_launched = False
         self._plans_visible = False
         self._qa_visible = False
+        self._tasks_visible = False
+        self._tasks_poll_timer: Timer | None = None
+        self._pre_mobile_view: str | None = None  # view before mobile auto-switch
         # Frame capture state (always enabled)
         self._frame_rate: int = DEFAULT_FRAME_RATE
         self._frame_buffer_size: int = DEFAULT_FRAME_BUFFER_SIZE
@@ -337,6 +356,8 @@ class ProjectManagerApp(App):
                 yield PlansPane(id="plans-pane")
             with Vertical(id="qa-container"):
                 yield QAPane(id="qa-pane")
+            with Vertical(id="tasks-container"):
+                yield TasksPane(id="tasks-pane")
         yield LogLine(id="log-line")
         yield CommandBar(id="command-bar")
 
@@ -405,6 +426,8 @@ class ProjectManagerApp(App):
         self._update_orientation()
         # Defer recompute so container sizes have settled after the resize
         self.set_timer(0.1, self._recompute_tree_layout)
+        # Check mobile mode transition (deferred to let sizes settle)
+        self.set_timer(0.2, self._check_mobile_transition)
 
     def _recompute_tree_layout(self) -> None:
         """Recompute TechTree layout after a resize."""
@@ -450,7 +473,9 @@ class ProjectManagerApp(App):
 
         # Decide which view to show based on whether PRs exist
         prs = self._data.get("prs") or []
-        if self._plans_visible:
+        if self._tasks_visible:
+            self._show_tasks_view()
+        elif self._plans_visible:
             self._show_plans_view()
         elif self._qa_visible:
             self._show_qa_view()
@@ -465,20 +490,23 @@ class ProjectManagerApp(App):
         self._current_guide_step = state
         self._plans_visible = False
         self._qa_visible = False
+        self._tasks_visible = False
 
         # Update guide progress widget
         guide_widget = self.query_one("#guide-progress", GuideProgress)
         guide_widget.update_step(state)
 
-        # Show guide progress, hide tech tree, plans, and QA
+        # Show guide progress, hide all other views
         tree_container = self.query_one("#tree-container")
         guide_container = self.query_one("#guide-progress-container")
         plans_container = self.query_one("#plans-container")
         qa_container = self.query_one("#qa-container")
+        tasks_container = self.query_one("#tasks-container")
         tree_container.styles.display = "none"
         guide_container.styles.display = "block"
         plans_container.styles.display = "none"
         qa_container.styles.display = "none"
+        tasks_container.styles.display = "none"
 
         # Update status bar for guide mode
         status_bar = self.query_one("#status-bar", StatusBar)
@@ -502,13 +530,17 @@ class ProjectManagerApp(App):
         guide_container = self.query_one("#guide-progress-container")
         plans_container = self.query_one("#plans-container")
         qa_container = self.query_one("#qa-container")
+        tasks_container = self.query_one("#tasks-container")
         tree_container.styles.display = "block"
         guide_container.styles.display = "none"
         plans_container.styles.display = "none"
         qa_container.styles.display = "none"
+        tasks_container.styles.display = "none"
         self._current_guide_step = None
         self._plans_visible = False
         self._qa_visible = False
+        self._tasks_visible = False
+        self._stop_tasks_poll()
         # Restore status bar to normal view
         self._update_status_bar()
         self.query_one("#tech-tree", TechTree).focus()
@@ -862,7 +894,9 @@ class ProjectManagerApp(App):
         cmd_bar = self.query_one("#command-bar", CommandBar)
         if cmd_bar.has_focus:
             cmd_bar.value = ""
-            if self._plans_visible:
+            if self._tasks_visible:
+                self.query_one("#tasks-pane", TasksPane).focus()
+            elif self._plans_visible:
                 self.query_one("#plans-pane", PlansPane).focus()
             elif self._qa_visible:
                 self.query_one("#qa-pane", QAPane).focus()
@@ -871,7 +905,11 @@ class ProjectManagerApp(App):
 
     def action_show_help(self) -> None:
         _log.debug("action: show_help")
-        self.push_screen(HelpScreen(in_plans=self._plans_visible, in_qa=self._qa_visible))
+        self.push_screen(HelpScreen(
+            in_plans=self._plans_visible,
+            in_qa=self._qa_visible,
+            in_tasks=self._tasks_visible,
+        ))
 
     # --- Plans view ---
 
@@ -881,13 +919,17 @@ class ProjectManagerApp(App):
         guide_container = self.query_one("#guide-progress-container")
         plans_container = self.query_one("#plans-container")
         qa_container = self.query_one("#qa-container")
+        tasks_container = self.query_one("#tasks-container")
         tree_container.styles.display = "none"
         guide_container.styles.display = "none"
         plans_container.styles.display = "block"
         qa_container.styles.display = "none"
+        tasks_container.styles.display = "none"
         self._plans_visible = True
         self._qa_visible = False
+        self._tasks_visible = False
         self._current_guide_step = None
+        self._stop_tasks_poll()
         self._refresh_plans_pane()
         plans_pane = self.query_one("#plans-pane", PlansPane)
         plans_pane.focus()
@@ -966,13 +1008,17 @@ class ProjectManagerApp(App):
         guide_container = self.query_one("#guide-progress-container")
         plans_container = self.query_one("#plans-container")
         qa_container = self.query_one("#qa-container")
+        tasks_container = self.query_one("#tasks-container")
         tree_container.styles.display = "none"
         guide_container.styles.display = "none"
         plans_container.styles.display = "none"
         qa_container.styles.display = "block"
+        tasks_container.styles.display = "none"
         self._qa_visible = True
         self._plans_visible = False
+        self._tasks_visible = False
         self._current_guide_step = None
+        self._stop_tasks_poll()
         self._refresh_qa_pane()
         qa_pane = self.query_one("#qa-pane", QAPane)
         qa_pane.focus()
@@ -1053,4 +1099,169 @@ class ProjectManagerApp(App):
                     )
             else:
                 self.log_message("No QA item selected")
+
+    # --- Tasks view ---
+
+    def _show_tasks_view(self) -> None:
+        """Show the running tasks view."""
+        tree_container = self.query_one("#tree-container")
+        guide_container = self.query_one("#guide-progress-container")
+        plans_container = self.query_one("#plans-container")
+        qa_container = self.query_one("#qa-container")
+        tasks_container = self.query_one("#tasks-container")
+        tree_container.styles.display = "none"
+        guide_container.styles.display = "none"
+        plans_container.styles.display = "none"
+        qa_container.styles.display = "none"
+        tasks_container.styles.display = "block"
+        self._tasks_visible = True
+        self._plans_visible = False
+        self._qa_visible = False
+        self._current_guide_step = None
+        self._refresh_tasks_pane()
+        tasks_pane = self.query_one("#tasks-pane", TasksPane)
+        tasks_pane.focus()
+        # Start polling tmux windows
+        self._start_tasks_poll()
+        # Update status bar
+        status_bar = self.query_one("#status-bar", StatusBar)
+        status_bar.update(" [bold]Tasks[/bold]    [dim]Enter=switch  Space=expand  W=back[/dim]")
+        self.call_after_refresh(self._capture_frame, "show_tasks_view")
+
+    def _refresh_tasks_pane(self) -> None:
+        """Poll tmux windows and update the tasks pane."""
+        if not self._session_name:
+            return
+        import asyncio
+        windows = tmux_mod.list_windows(self._session_name)
+        prs = self._data.get("prs") or []
+        tasks_pane = self.query_one("#tasks-pane", TasksPane)
+        tasks_pane.update_tasks(
+            windows, prs, self._session_name,
+            review_loops=self._review_loops,
+            qa_loops=self._qa_loops,
+        )
+
+    def _start_tasks_poll(self) -> None:
+        """Start periodic polling of tmux windows for the tasks pane."""
+        self._stop_tasks_poll()
+        self._tasks_poll_timer = self.set_interval(3, self._poll_tasks)
+
+    def _stop_tasks_poll(self) -> None:
+        """Stop the tasks pane polling timer."""
+        if self._tasks_poll_timer:
+            self._tasks_poll_timer.stop()
+            self._tasks_poll_timer = None
+
+    def _poll_tasks(self) -> None:
+        """Periodic callback to refresh the tasks pane."""
+        if self._tasks_visible:
+            self._refresh_tasks_pane()
+            # Advance spinner animation
+            tasks_pane = self.query_one("#tasks-pane", TasksPane)
+            tasks_pane.advance_frame()
+
+    def action_toggle_tasks(self) -> None:
+        """Toggle between tasks view and the previous view."""
+        _log.info("action: toggle_tasks visible=%s", self._tasks_visible)
+        if self._tasks_visible:
+            self._show_normal_view()
+        else:
+            self._show_tasks_view()
+
+    def on_task_selected(self, message: TaskSelected) -> None:
+        _log.debug("task selected: pr=%s window=%s", message.pr_id, message.window_name)
+        if message.pr_id:
+            # Sync selection with tech tree so PR actions work correctly
+            tree = self.query_one("#tech-tree", TechTree)
+            tree.select_pr(message.pr_id)
+
+    def on_task_activated(self, message: TaskActivated) -> None:
+        """Switch to the tmux window when a task is activated."""
+        _log.info("task activated: window=%s pr=%s", message.window_name, message.pr_id)
+        if not self._session_name:
+            self.log_message("No tmux session")
+            return
+        ok = tmux_mod.select_window(self._session_name, message.window_index)
+        if ok:
+            self.log_message(f"Switched to {message.window_name}")
+        else:
+            self.log_message(f"Window {message.window_name} not found")
+
+    def on_task_action(self, message: TaskAction) -> None:
+        """Handle PR action shortcuts from the tasks pane."""
+        message.stop()
+        pr_id = message.pr_id
+        _log.info("task action: %s (pr=%s)", message.action, pr_id)
+        if not pr_id:
+            self.log_message("No PR selected")
+            return
+
+        # Select the PR in the tree so the standard action handlers work
+        tree = self.query_one("#tech-tree", TechTree)
+        tree.select_pr(pr_id)
+        pr_view.handle_pr_selected(self, pr_id)
+
+        # Dispatch action
+        if message.action == "start":
+            pr_view.start_pr(self)
+        elif message.action == "review":
+            z = self._consume_z()
+            if z == 0:
+                pr_view.done_pr(self)
+            elif z == 1:
+                review_loop_ui.stop_loop_or_fresh_done(self)
+            elif z == 2:
+                review_loop_ui.start_or_stop_loop(self, stop_on_suggestions=True)
+            else:
+                review_loop_ui.start_or_stop_loop(self, stop_on_suggestions=False)
+        elif message.action == "merge":
+            pr_view.merge_pr(self)
+        elif message.action == "qa":
+            from pm_core.tui import qa_loop_ui
+            z = self._consume_z()
+            if z == 0:
+                qa_loop_ui.focus_or_start_qa(self, pr_id)
+            elif z == 1:
+                qa_loop_ui.fresh_start_qa(self, pr_id)
+            elif z == 2:
+                qa_loop_ui.start_or_stop_qa_loop(self, pr_id, strict=False)
+            else:
+                qa_loop_ui.start_or_stop_qa_loop(self, pr_id, strict=True)
+        elif message.action == "edit":
+            pane_ops.edit_plan(self)
+        elif message.action == "view_plan":
+            pane_ops.view_plan(self)
+
+    # --- Mobile mode integration ---
+
+    def _check_mobile_transition(self) -> None:
+        """Check if we should auto-switch to/from tasks pane for mobile mode."""
+        if not self._session_name:
+            return
+        from pm_core import pane_layout
+        try:
+            is_mobile = pane_layout.is_mobile(self._session_name)
+        except Exception:
+            return
+
+        if is_mobile and not self._tasks_visible:
+            # Entering mobile mode — remember current view and switch to tasks
+            if self._plans_visible:
+                self._pre_mobile_view = "plans"
+            elif self._qa_visible:
+                self._pre_mobile_view = "qa"
+            else:
+                self._pre_mobile_view = "tree"
+            self._show_tasks_view()
+        elif not is_mobile and self._tasks_visible and self._pre_mobile_view:
+            # Leaving mobile mode — restore previous view
+            view = self._pre_mobile_view
+            self._pre_mobile_view = None
+            if view == "plans":
+                self._show_plans_view()
+            elif view == "qa":
+                self._show_qa_view()
+            else:
+                self._show_normal_view()
 
