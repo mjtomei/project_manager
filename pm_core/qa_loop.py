@@ -27,9 +27,7 @@ from pm_core.paths import configure_logger
 from pm_core.loop_shared import (
     find_claude_pane,
     get_pm_session,
-    extract_verdict_from_content,
     VERDICT_TAIL_LINES,
-    VerdictStabilityTracker,
 )
 
 _log = configure_logger("pm.qa_loop")
@@ -706,14 +704,12 @@ def _wait_for_verdicts_via_status_file(
             continue
 
         # Update scenario verdicts from the status file
-        changed = False
         for sc in data.get("scenarios", []):
             idx = sc.get("index")
             verdict = sc.get("verdict", "")
             if verdict and verdict in ALL_VERDICTS:
                 if state.scenario_verdicts.get(idx) != verdict:
                     state.scenario_verdicts[idx] = verdict
-                    changed = True
                     # Find matching scenario for the log
                     title = sc.get("title", f"scenario-{idx}")
                     state.latest_output = (
