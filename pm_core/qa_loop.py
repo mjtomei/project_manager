@@ -137,6 +137,8 @@ class QALoopState:
     qa_workdir: str | None = None
     # Scenario 0 (interactive) — tracked separately, never polled for verdicts
     scenario_0: QAScenario | None = None
+    # Error message for status display (e.g. missing spec, no scenarios)
+    _error: str = ""
     # Set by qa_loop_ui after the completion callback has run once
     _ui_complete_notified: bool = False
 
@@ -2180,7 +2182,7 @@ def run_qa_sync(
     # --- Spec gate: verify the planner generated a QA spec ---
     from pm_core.spec_gen import get_spec
     pr_entry = store.get_pr(data, state.pr_id) if data else None
-    if pr_entry and not get_spec(pr_entry, "qa") and not getattr(state, '_error', None):
+    if pr_entry and not get_spec(pr_entry, "qa") and not state._error:
         _log.warning("QA spec missing for %s after planning — "
                      "planner did not generate spec in Step 0", state.pr_id)
         state.latest_verdict = VERDICT_INPUT_REQUIRED
