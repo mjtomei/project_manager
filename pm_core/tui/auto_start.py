@@ -100,6 +100,8 @@ def save_breadcrumb(app) -> None:
         for info in manager.list_watchers():
             if info["running"]:
                 watcher = manager.get_watcher(info["id"])
+                if not watcher:
+                    continue
                 entry = {"type": info["type"]}
                 if hasattr(watcher, 'meta_pm_root'):
                     entry["meta_pm_root"] = watcher.meta_pm_root

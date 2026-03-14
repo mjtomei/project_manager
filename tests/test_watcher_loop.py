@@ -286,6 +286,91 @@ class TestBaseWatcher:
         assert w.generate_prompt(1) == "Test prompt iteration 1"
         assert w.parse_verdict("anything") == "READY"
 
+    @patch("pm_core.watcher_base.BaseWatcher._wait_for_follow_up")
+    @patch("pm_core.watcher_base.BaseWatcher._run_iteration")
+    def test_input_required_polls_for_follow_up(self, mock_iter, mock_follow_up):
+        """INPUT_REQUIRED triggers follow-up polling and resumes on READY."""
+        class FW(BaseWatcher):
+            WATCHER_TYPE = "test"
+            DISPLAY_NAME = "Test"
+            WINDOW_NAME = "test"
+            def generate_prompt(self, iteration): return ""
+            def build_launch_cmd(self, iteration, transcript=None): return ["echo"]
+            def parse_verdict(self, output):
+                from pm_core.loop_shared import match_verdict
+                for line in reversed(output.strip().splitlines()):
+                    v = match_verdict(line.strip().strip("*").strip(), self.VERDICTS)
+                    if v:
+                        return v
+                return "READY"
+
+        mock_iter.return_value = "Need help.\n\n**INPUT_REQUIRED**\n\nCheck auth"
+        mock_follow_up.return_value = "OK resolved.\n\n**READY**"
+
+        w = FW("/tmp")
+        w.state.iteration_wait = 0
+        result = w.run_sync(max_iterations=1)
+
+        assert result.latest_verdict == VERDICT_READY
+        assert result.iteration == 1
+        assert result.input_required is False
+        mock_follow_up.assert_called_once()
+
+    @patch("pm_core.watcher_base.BaseWatcher._wait_for_follow_up")
+    @patch("pm_core.watcher_base.BaseWatcher._run_iteration")
+    def test_input_required_repeated_becomes_ready(self, mock_iter, mock_follow_up):
+        """Repeated INPUT_REQUIRED in follow-up is converted to READY."""
+        class FW(BaseWatcher):
+            WATCHER_TYPE = "test"
+            DISPLAY_NAME = "Test"
+            WINDOW_NAME = "test"
+            def generate_prompt(self, iteration): return ""
+            def build_launch_cmd(self, iteration, transcript=None): return ["echo"]
+            def parse_verdict(self, output):
+                from pm_core.loop_shared import match_verdict
+                for line in reversed(output.strip().splitlines()):
+                    v = match_verdict(line.strip().strip("*").strip(), self.VERDICTS)
+                    if v:
+                        return v
+                return "READY"
+
+        mock_iter.return_value = "**INPUT_REQUIRED**"
+        mock_follow_up.return_value = "Still need help.\n\n**INPUT_REQUIRED**"
+
+        w = FW("/tmp")
+        w.state.iteration_wait = 0
+        result = w.run_sync(max_iterations=1)
+
+        assert result.latest_verdict == VERDICT_READY
+
+    @patch("pm_core.watcher_base.BaseWatcher._wait_for_follow_up")
+    @patch("pm_core.watcher_base.BaseWatcher._run_iteration")
+    def test_input_required_pane_died(self, mock_iter, mock_follow_up):
+        """Pane disappearing during INPUT_REQUIRED sets KILLED verdict."""
+        class FW(BaseWatcher):
+            WATCHER_TYPE = "test"
+            DISPLAY_NAME = "Test"
+            WINDOW_NAME = "test"
+            def generate_prompt(self, iteration): return ""
+            def build_launch_cmd(self, iteration, transcript=None): return ["echo"]
+            def parse_verdict(self, output):
+                from pm_core.loop_shared import match_verdict
+                for line in reversed(output.strip().splitlines()):
+                    v = match_verdict(line.strip().strip("*").strip(), self.VERDICTS)
+                    if v:
+                        return v
+                return "READY"
+
+        mock_iter.return_value = "**INPUT_REQUIRED**"
+        mock_follow_up.return_value = None  # pane disappeared
+
+        w = FW("/tmp")
+        result = w.run_sync()
+
+        assert result.latest_verdict == VERDICT_KILLED
+        assert result.input_required is False
+        assert result.running is False
+
 
 # --- WatcherManager tests ---
 
