@@ -66,6 +66,9 @@ class WatcherManager:
                 _log.info("watcher_manager: %s already running", watcher_id)
                 return False
 
+            # Set running eagerly so rapid toggle doesn't create duplicates
+            watcher.state.running = True
+
             def _on_complete_wrapper(state: WatcherState) -> None:
                 if on_complete:
                     on_complete(state)

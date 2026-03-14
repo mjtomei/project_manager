@@ -20,7 +20,6 @@ Public API preserved:
 
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Callable
 
 from pm_core.paths import configure_logger
@@ -89,7 +88,6 @@ def _sync_state_to_legacy(ws: WatcherState, ls: WatcherLoopState) -> None:
     ls.history = list(ws.history)
     ls.input_required = ws.input_required
     ls._transcript_dir = ws._transcript_dir
-
 
 
 def parse_watcher_verdict(output: str) -> str:
@@ -175,6 +173,14 @@ def start_watcher_loop_background(
         import time
 
         def _check_stop():
+            # Wait for run_sync to set running=True before polling
+            for _ in range(30):  # up to 3 seconds
+                if watcher.state.running or state.stop_requested:
+                    break
+                time.sleep(0.1)
+            if state.stop_requested:
+                watcher.state.stop_requested = True
+                return
             while watcher.state.running:
                 if state.stop_requested:
                     watcher.state.stop_requested = True
