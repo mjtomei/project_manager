@@ -10,6 +10,9 @@ Keybinding variants (set up by app.action_start_qa_on_pr):
   zzz t  — start/stop QA loop (strict: only clean PASS)
 """
 
+import json
+from pathlib import Path
+
 from pm_core.paths import configure_logger, get_global_setting_value
 from pm_core import store
 from pm_core.qa_loop import (
@@ -19,6 +22,7 @@ from pm_core.qa_loop import (
     VERDICT_INPUT_REQUIRED,
     start_qa_background,
     _compute_qa_window_name,
+    ALL_VERDICTS,
 )
 from pm_core.loop_shared import get_pm_session
 
@@ -248,7 +252,14 @@ def stop_qa(app, pr_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 def poll_qa_state(app) -> None:
-    """Called from the shared poll timer to update QA state in the TUI."""
+    """Called from the shared poll timer to update QA state in the TUI.
+
+    Two responsibilities:
+    1. Check in-memory ``app._qa_loops`` for completed runs (normal flow).
+    2. Scan ``~/.pm/workdirs/qa/*/qa_status.json`` for completed runs that
+       aren't tracked in ``app._qa_loops`` (restart recovery).
+    """
+    # --- Normal flow: check in-memory state ---
     for pr_id, state in list(app._qa_loops.items()):
         if not state.running and state.latest_verdict:
             _on_qa_complete(app, state)
@@ -257,6 +268,87 @@ def poll_qa_state(app) -> None:
                 del app._qa_loops[pr_id]
             else:
                 state._ui_complete_notified = True
+
+    # --- Restart recovery: scan for orphaned completions ---
+    _recover_completed_qa_from_disk(app)
+
+
+def _recover_completed_qa_from_disk(app) -> None:
+    """Scan qa_status.json files for completed QA runs not tracked in memory.
+
+    After a TUI restart, ``app._qa_loops`` is empty but qa_status.py may
+    have already collected all verdicts and written an ``overall`` verdict
+    to qa_status.json.  This function finds those orphaned completions and
+    feeds them through the normal ``_on_qa_complete`` path.
+    """
+    qa_root = Path.home() / ".pm" / "workdirs" / "qa"
+    if not qa_root.is_dir():
+        return
+
+    # Track which PR IDs we've already recovered to avoid re-processing
+    if not hasattr(app, "_recovered_qa_pr_ids"):
+        app._recovered_qa_pr_ids: set[str] = set()
+
+    for status_file in qa_root.glob("*/qa_status.json"):
+        try:
+            data = json.loads(status_file.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+
+        overall = data.get("overall", "")
+        if not overall:
+            continue  # not yet complete
+
+        pr_id = data.get("pr_id", "")
+        if not pr_id:
+            continue
+
+        # Skip if already tracked in memory or already recovered
+        if pr_id in app._qa_loops:
+            continue
+        if pr_id in app._recovered_qa_pr_ids:
+            continue
+
+        # Skip if the PR is not in QA status (already transitioned)
+        if app._root:
+            pr_data = store.load(app._root)
+            pr = store.get_pr(pr_data, pr_id)
+            if not pr or pr.get("status") != "qa":
+                app._recovered_qa_pr_ids.add(pr_id)
+                continue
+
+        # Build a synthetic QALoopState from the status file
+        from pm_core.qa_loop import QAScenario, QALoopState
+        scenarios = []
+        scenario_verdicts = {}
+        for sc in data.get("scenarios", []):
+            idx = sc.get("index")
+            verdict = sc.get("verdict", "")
+            if verdict == "interactive":
+                continue  # skip scenario 0
+            scenarios.append(QAScenario(
+                index=idx,
+                title=sc.get("title", f"scenario-{idx}"),
+                focus="",
+                window_name=sc.get("window_name", ""),
+            ))
+            if verdict and verdict in ALL_VERDICTS:
+                scenario_verdicts[idx] = verdict
+
+        state = QALoopState(pr_id=pr_id)
+        state.running = False
+        state.scenarios = scenarios
+        state.scenario_verdicts = scenario_verdicts
+        state.latest_verdict = overall
+        state.qa_workdir = str(status_file.parent)
+
+        _log.info("Recovered completed QA from disk: %s → %s", pr_id, overall)
+        app._recovered_qa_pr_ids.add(pr_id)
+
+        # Feed through normal completion path
+        _on_qa_complete(app, state)
+        # Mark as notified so it doesn't re-trigger
+        state._ui_complete_notified = True
 
 
 # ---------------------------------------------------------------------------

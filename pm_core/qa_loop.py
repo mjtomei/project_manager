@@ -871,6 +871,48 @@ def _poll_tmux_verdicts(
 
 
 
+def _wait_for_verdicts_via_status_file(
+    state: QALoopState,
+    status_path: Path,
+    _notify,
+) -> None:
+    """Wait for qa_status.py to collect all verdicts via qa_status.json.
+
+    Polls qa_status.json until an ``overall`` verdict appears (set by the
+    verdict poller in qa_status.py).  Reads scenario verdicts from the
+    status file and populates ``state.scenario_verdicts`` and
+    ``state.latest_verdict``.
+    """
+    while not state.stop_requested:
+        time.sleep(_POLL_INTERVAL)
+        try:
+            data = json.loads(status_path.read_text())
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            continue
+
+        # Update scenario verdicts from the status file
+        changed = False
+        for sc in data.get("scenarios", []):
+            idx = sc.get("index")
+            verdict = sc.get("verdict", "")
+            if verdict and verdict in ALL_VERDICTS:
+                if state.scenario_verdicts.get(idx) != verdict:
+                    state.scenario_verdicts[idx] = verdict
+                    changed = True
+                    # Find matching scenario for the log
+                    title = sc.get("title", f"scenario-{idx}")
+                    state.latest_output = (
+                        f"Scenario {idx} ({title}): {verdict}"
+                    )
+                    _notify()
+
+        overall = data.get("overall", "")
+        if overall:
+            state.latest_verdict = overall
+            _log.info("qa_status.json reports overall verdict: %s", overall)
+            break
+
+
 # ---------------------------------------------------------------------------
 # Core orchestration
 # ---------------------------------------------------------------------------
@@ -1184,31 +1226,18 @@ def run_qa_sync(
     state.latest_output = f"Running {len(state.scenarios)} scenario(s)..."
     _notify()
 
-    # --- Poll for verdicts (always via tmux — containers also use tmux windows) ---
-    _poll_tmux_verdicts(state, data, pr_data, session, workdir_path,
-                        status_path, _notify)
+    # --- Wait for verdicts ---
+    # Verdict collection is handled by qa_status.py running in the status
+    # pane.  We poll qa_status.json for the overall verdict instead of
+    # polling tmux panes directly.  This decouples verdict collection from
+    # the TUI process so it survives TUI restarts.
+    _wait_for_verdicts_via_status_file(state, status_path, _notify)
 
     # --- Cleanup ---
     # Keep scenario windows AND containers alive so users can inspect
     # results, review logs, and debug issues after the verdict.
     # Orphaned containers (whose windows have been closed) are cleaned
     # up at the start of the next QA run instead.
-
-    # --- Aggregate verdicts ---
-    verdicts = list(state.scenario_verdicts.values())
-
-    # Determine overall verdict
-    if VERDICT_NEEDS_WORK in verdicts:
-        state.latest_verdict = VERDICT_NEEDS_WORK
-    elif VERDICT_INPUT_REQUIRED in verdicts:
-        state.latest_verdict = VERDICT_INPUT_REQUIRED
-    else:
-        state.latest_verdict = VERDICT_PASS
-
-    # Write final status file with overall verdict
-    _write_status_file(status_path, state.pr_id, state.scenarios,
-                       state.scenario_verdicts, overall=state.latest_verdict,
-                       scenario_0=state.scenario_0)
 
     state.running = False
     summary_parts = []
