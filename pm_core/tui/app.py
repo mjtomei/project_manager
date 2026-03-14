@@ -1170,7 +1170,6 @@ class ProjectManagerApp(App):
         """Auto-switch to tasks pane in mobile mode, restore on exit."""
         from pm_core.pane_layout import MOBILE_WIDTH_THRESHOLD
         is_mobile = self.size.width < MOBILE_WIDTH_THRESHOLD
-        was_in_tasks = self._tasks_visible
 
         if is_mobile and not self._tasks_visible and self._pre_mobile_view is None:
             # Entering mobile mode — save current view and switch to tasks
