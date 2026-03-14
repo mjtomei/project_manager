@@ -25,8 +25,6 @@ class WatcherManager:
         self._lock = threading.Lock()
         self._watchers: dict[str, BaseWatcher] = {}
         self._threads: dict[str, threading.Thread] = {}
-        self._on_iteration_callbacks: dict[str, Callable] = {}
-        self._on_complete_callbacks: dict[str, Callable] = {}
 
     def register(self, watcher: BaseWatcher) -> None:
         """Register a watcher instance."""

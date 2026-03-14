@@ -39,7 +39,7 @@ _log = configure_logger("pm.watcher_base")
 _MAX_HISTORY = 50
 
 
-def _generate_loop_id() -> str:
+def generate_loop_id() -> str:
     """Generate a short random loop identifier (4 hex chars)."""
     return secrets.token_hex(2)
 
@@ -70,7 +70,7 @@ class WatcherState:
     latest_verdict: str = ""
     latest_summary: str = ""
     history: list[WatcherIteration] = field(default_factory=list)
-    loop_id: str = field(default_factory=_generate_loop_id)
+    loop_id: str = field(default_factory=generate_loop_id)
     iteration_wait: float = 120.0
     input_required: bool = False
     _ui_notified_done: bool = False
@@ -108,7 +108,7 @@ class BaseWatcher(ABC):
         self.pm_root = pm_root
         if state is None:
             state = WatcherState(
-                watcher_id=f"{self.WATCHER_TYPE}-{_generate_loop_id()}",
+                watcher_id=f"{self.WATCHER_TYPE}-{generate_loop_id()}",
                 watcher_type=self.WATCHER_TYPE,
                 display_name=self.DISPLAY_NAME,
                 iteration_wait=self.DEFAULT_INTERVAL,

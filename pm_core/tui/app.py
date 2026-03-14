@@ -173,6 +173,9 @@ class ProjectManagerApp(App):
         # Handle w prefix mode: dispatch second key
         if self._w_mode:
             self._w_mode = False
+            if self._w_cancel_timer:
+                self._w_cancel_timer.stop()
+                self._w_cancel_timer = None
             self._clear_log_message()
             key = event.character or event.key
             if key == "w":
@@ -207,13 +210,15 @@ class ProjectManagerApp(App):
                 self.log_message(f"[bold]{'z' * self._z_count} …[/]")
             event.prevent_default()
             event.stop()
-        elif event.key == "escape" and self._z_count > 0:
+        elif event.key == "escape" and (self._z_count > 0 or self._w_mode):
             self._z_count = 0
+            if self._w_mode:
+                self._w_mode = False
+                if self._w_cancel_timer:
+                    self._w_cancel_timer.stop()
+                    self._w_cancel_timer = None
             self._clear_log_message()
             # Don't prevent — let escape also do its normal thing
-        elif event.key == "escape" and self._w_mode:
-            self._w_mode = False
-            self._clear_log_message()
 
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """Disable single-key shortcuts when command bar is focused or in guide mode."""

@@ -28,7 +28,7 @@ from pm_core.watcher_base import (
     WatcherIteration,
     WatcherState,
     PaneKilledError,
-    _generate_loop_id,
+    generate_loop_id,
 )
 from pm_core.watchers.auto_start_watcher import AutoStartWatcher
 
@@ -69,7 +69,7 @@ class WatcherLoopState:
     latest_verdict: str = ""
     latest_summary: str = ""
     history: list[WatcherIteration] = field(default_factory=list)
-    loop_id: str = field(default_factory=_generate_loop_id)
+    loop_id: str = field(default_factory=generate_loop_id)
     iteration_wait: float = DEFAULT_ITERATION_WAIT
     _ui_notified_done: bool = False
     _ui_notified_input: bool = False
@@ -86,22 +86,19 @@ def _sync_state_to_legacy(ws: WatcherState, ls: WatcherLoopState) -> None:
     ls.iteration = ws.iteration
     ls.latest_verdict = ws.latest_verdict
     ls.latest_summary = ws.latest_summary
-    ls.history = ws.history
+    ls.history = list(ws.history)
     ls.input_required = ws.input_required
     ls._transcript_dir = ws._transcript_dir
 
 
 
 def parse_watcher_verdict(output: str) -> str:
-    """Extract a watcher verdict from Claude output."""
-    from pm_core.loop_shared import match_verdict
-    lines = output.strip().splitlines()
-    for line in reversed(lines):
-        stripped = line.strip().strip("*").strip()
-        verdict = match_verdict(stripped, ALL_WATCHER_VERDICTS)
-        if verdict:
-            return verdict
-    return VERDICT_READY
+    """Extract a watcher verdict from Claude output.
+
+    Delegates to AutoStartWatcher.parse_verdict for a single implementation.
+    """
+    # Use a throwaway instance for parsing — no pm_root needed for verdict extraction
+    return AutoStartWatcher(pm_root="").parse_verdict(output)
 
 
 def run_watcher_loop_sync(
