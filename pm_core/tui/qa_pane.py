@@ -185,3 +185,6 @@ class QAPane(Widget):
         elif event.key == "e":
             self.post_message(QAAction("edit", self.selected_item_id))
             event.stop()
+        elif event.key == "R":
+            self.post_message(QAAction("run_regression"))
+            event.stop()
