@@ -1564,6 +1564,22 @@ class TestExtractFlaggedReason:
         reason = _extract_flagged_reason(content)
         assert reason == "Scenario did not properly exercise test cases"
 
+    def test_skips_prompt_template_markers(self):
+        """Extracts reason from verifier output, not prompt template."""
+        content = (
+            "FLAGGED_START\n"
+            "<explanation of what went wrong>\n"
+            "FLAGGED_END\n"
+            "\n"
+            "Checklist analysis...\n"
+            "\n"
+            "FLAGGED_START\n"
+            "The scenario never ran the actual CLI tool\n"
+            "FLAGGED_END\n"
+        )
+        reason = _extract_flagged_reason(content)
+        assert reason == "The scenario never ran the actual CLI tool"
+
 
 class TestVerificationMaxRetries:
     """Tests for _get_verification_max_retries global setting."""

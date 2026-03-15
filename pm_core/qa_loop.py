@@ -52,7 +52,7 @@ _PLANNER_GRACE = 15  # seconds before accepting planner completion
 _DEFAULT_MAX_SCENARIOS = 0  # 0 = unlimited
 _SCENARIO_MAX_RETRIES = 10  # max times to relaunch a dead scenario
 _SCENARIO_RETRY_BASE = 5  # base seconds for exponential backoff
-_DEFAULT_VERIFICATION_MAX_RETRIES = 1
+_DEFAULT_VERIFICATION_MAX_RETRIES = 3
 
 
 def _get_max_scenarios() -> int:
@@ -65,7 +65,7 @@ def _get_max_scenarios() -> int:
         return _DEFAULT_MAX_SCENARIOS
 
 def _get_verification_max_retries() -> int:
-    """Read qa-verify-retries from global settings (default: 1)."""
+    """Read qa-verify-retries from global settings (default: 3)."""
     from pm_core.paths import get_global_setting_value
     val = get_global_setting_value("qa-verify-retries", "")
     try:
@@ -113,6 +113,7 @@ class QAScenario:
     instruction_path: str | None = None
     steps: str = ""
     window_name: str | None = None
+    pane_id: str | None = None
     worktree_path: str | None = None
     container_name: str | None = None
     transcript_path: str | None = None
@@ -546,9 +547,10 @@ def _launch_scenario_0(
 
     win_name = _scenario_window_name(pr_data, 0)
     try:
-        tmux_mod.new_window(session, win_name, final_cmd,
-                            cwd=scenario_cwd, switch=False)
+        pane_id = tmux_mod.new_window_get_pane(session, win_name, final_cmd,
+                                               cwd=scenario_cwd, switch=False)
         scenario.window_name = win_name
+        scenario.pane_id = pane_id
     except Exception:
         _log.warning("Failed to create window for Scenario 0")
         return None
@@ -650,9 +652,10 @@ def _launch_scenarios_in_tmux(
 
         win_name = _scenario_window_name(pr_data, scenario.index)
         try:
-            tmux_mod.new_window(session, win_name, child_cmd,
-                                cwd=scenario_cwd, switch=False)
+            pane_id = tmux_mod.new_window_get_pane(session, win_name, child_cmd,
+                                                   cwd=scenario_cwd, switch=False)
             scenario.window_name = win_name
+            scenario.pane_id = pane_id
             scenario.transcript_path = transcript
         except Exception:
             _log.warning("Failed to create window for scenario %d",
@@ -769,9 +772,10 @@ def _launch_scenarios_in_containers(
         exec_cmd = container_mod.build_exec_cmd(cname, claude_cmd, cleanup=False)
         win_name = _scenario_window_name(pr_data, scenario.index)
         try:
-            tmux_mod.new_window(session, win_name, exec_cmd,
-                                cwd=workdir_path, switch=False)
+            pane_id = tmux_mod.new_window_get_pane(session, win_name, exec_cmd,
+                                                   cwd=workdir_path, switch=False)
             scenario.window_name = win_name
+            scenario.pane_id = pane_id
             scenario.transcript_path = transcript
         except Exception:
             _log.warning("Failed to create window for scenario %d",
@@ -835,8 +839,8 @@ def _relaunch_scenario_window(
                 transcript=transcript, cwd=container_workdir)
             exec_cmd = container_mod.build_exec_cmd(
                 scenario.container_name, claude_cmd, cleanup=False)
-            tmux_mod.new_window(session, win_name, exec_cmd,
-                                cwd=workdir_path, switch=False)
+            pane_id = tmux_mod.new_window_get_pane(session, win_name, exec_cmd,
+                                                   cwd=workdir_path, switch=False)
         else:
             # Host mode — worktree still exists
             wt_path = scenario.worktree_path or workdir_path
@@ -851,10 +855,11 @@ def _relaunch_scenario_window(
                 prompt=child_prompt,
                 model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort,
                 transcript=transcript, cwd=str(wt_path))
-            tmux_mod.new_window(session, win_name, child_cmd,
-                                cwd=str(wt_path), switch=False)
+            pane_id = tmux_mod.new_window_get_pane(session, win_name, child_cmd,
+                                                   cwd=str(wt_path), switch=False)
 
         scenario.window_name = win_name
+        scenario.pane_id = pane_id
         scenario.transcript_path = transcript
         _log.info("Relaunched scenario %d in window %s", scenario.index, win_name)
         return True
@@ -978,8 +983,10 @@ def _poll_tmux_verdicts(
                     verdicts_changed = True
                     _notify()
                 else:
-                    # Send the scenario a follow-up message and put back in pending
-                    pane_id = _get_scenario_pane(session, scenario.window_name)
+                    # Send the scenario a follow-up message and put back in pending.
+                    # Use the stored pane_id to target the original scenario
+                    # pane, not the verification pane that may now be pane 0.
+                    pane_id = scenario.pane_id or _get_scenario_pane(session, scenario.window_name)
                     if pane_id:
                         followup_msg = (
                             f"Your verdict was reviewed and flagged: {reason} — "
@@ -1019,7 +1026,10 @@ def _poll_tmux_verdicts(
             if scenario.index not in pending or not scenario.window_name:
                 continue
 
-            pane_id = _get_scenario_pane(session, scenario.window_name)
+            pane_id = scenario.pane_id or _get_scenario_pane(session, scenario.window_name)
+            if pane_id and not tmux_mod.pane_exists(pane_id):
+                pane_id = None
+                scenario.pane_id = None
             if pane_id is None:
                 retries = retry_counts.get(scenario.index, 0)
                 if retries < _SCENARIO_MAX_RETRIES:
@@ -1212,22 +1222,31 @@ _VERIFICATION_KEYWORDS = ("VERIFIED", "FLAGGED_START", "FLAGGED_END")
 
 
 def _extract_flagged_reason(content: str) -> str:
-    """Extract the reason text between FLAGGED_START and FLAGGED_END markers."""
+    """Extract the reason text between FLAGGED_START and FLAGGED_END markers.
+
+    Uses the *last* FLAGGED_START/FLAGGED_END pair in the content so that
+    the prompt template's example markers are skipped in favour of the
+    verifier's actual output.
+    """
     lines = content.strip().splitlines()
-    in_flagged = False
-    reason_lines: list[str] = []
-    for line in lines:
+    # Find the last FLAGGED_START and FLAGGED_END positions
+    last_start = -1
+    last_end = -1
+    for i, line in enumerate(lines):
         cleaned = re.sub(r'[*`]', '', line).strip()
         if cleaned == "FLAGGED_START":
-            in_flagged = True
-            continue
-        if cleaned == "FLAGGED_END":
-            break
-        if in_flagged:
-            reason_lines.append(line.strip())
-    return "\n".join(reason_lines).strip() or (
-        "Scenario did not properly exercise test cases"
-    )
+            last_start = i
+        elif cleaned == "FLAGGED_END":
+            last_end = i
+    if last_start >= 0:
+        end = last_end if last_end > last_start else len(lines)
+        reason_lines = [
+            line.strip() for line in lines[last_start + 1:end]
+        ]
+        reason = "\n".join(reason_lines).strip()
+        if reason:
+            return reason
+    return "Scenario did not properly exercise test cases"
 
 
 def _verify_single_scenario(
@@ -1280,8 +1299,10 @@ def _verify_single_scenario(
         pane_output=pane_output if not transcript_path else None,
     )
 
-    # Find the scenario's pane to split
-    scenario_pane = _get_scenario_pane(session, scenario.window_name) if session else None
+    # Find the scenario's pane to split — prefer stored pane_id
+    scenario_pane = scenario.pane_id or (
+        _get_scenario_pane(session, scenario.window_name) if session else None
+    )
     if not scenario_pane:
         _log.warning("Verification: cannot find scenario %d pane, "
                      "trusting original verdict", scenario.index)
