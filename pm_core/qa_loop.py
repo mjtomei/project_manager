@@ -909,11 +909,13 @@ def _poll_tmux_verdicts(
     # Results from background verification threads
     verification_results: dict[int, tuple[bool, str]] = {}
     verification_lock = threading.Lock()
-    # Track the tail content when a verdict was last accepted, so we
-    # can distinguish a stale verdict from a genuinely new one after a
-    # follow-up message is sent.  Using tail content rather than line
-    # count because tmux scrollback buffers can evict old lines.
-    verdict_tail_snapshot: dict[int, str] = {}
+    # Track the lines immediately before the verdict when it was last
+    # accepted, so we can distinguish a stale verdict from a genuinely
+    # new one after a verification follow-up.  The context before the
+    # verdict won't change for a stale verdict but will be completely
+    # different when the scenario re-evaluates.
+    _VERDICT_CONTEXT_LINES = 5
+    verdict_context: dict[int, str] = {}
 
     # Scenarios that failed to create a window get INPUT_REQUIRED immediately
     has_failed_creation = False
@@ -1004,6 +1006,11 @@ def _poll_tmux_verdicts(
                             f"(PASS / NEEDS_WORK / INPUT_REQUIRED)."
                         )
                         tmux_mod.send_keys(pane_id, followup_msg)
+                        # Send extra Enters to ensure the message is
+                        # submitted — sometimes newlines don't trigger.
+                        for _ in range(2):
+                            time.sleep(1)
+                            tmux_mod.send_keys(pane_id, "")
                         _log.info("Sent follow-up message to scenario %d pane",
                                   scenario_idx)
                         # Clear verdict and put back in pending
@@ -1068,16 +1075,6 @@ def _poll_tmux_verdicts(
             content = tmux_mod.capture_pane(
                 pane_id, full_scrollback=True,
             )
-
-            # Skip verdict detection if the tail content hasn't changed
-            # since the last accepted verdict — avoids re-triggering on
-            # a stale verdict after a verification follow-up.
-            lines = content.strip().splitlines()
-            tail = "\n".join(lines[-VERDICT_TAIL_LINES:]) if len(lines) > VERDICT_TAIL_LINES else "\n".join(lines)
-            prev_tail = verdict_tail_snapshot.get(scenario.index)
-            if prev_tail is not None and tail == prev_tail:
-                continue
-
             verdict = extract_verdict_from_content(
                 content,
                 verdicts=ALL_VERDICTS,
@@ -1085,9 +1082,32 @@ def _poll_tmux_verdicts(
                 log_prefix=f"qa-{scenario.index}",
             )
 
+            # Check if this is the same stale verdict we already
+            # accepted by comparing the lines immediately before the
+            # verdict keyword.  New output means a genuine re-verdict.
+            if verdict:
+                all_lines = content.strip().splitlines()
+                # Find the verdict line (searching from bottom)
+                verdict_line_idx = None
+                for i in range(len(all_lines) - 1, -1, -1):
+                    cleaned = re.sub(r'[*`]', '', all_lines[i]).strip()
+                    if cleaned == verdict:
+                        verdict_line_idx = i
+                        break
+                if verdict_line_idx is not None:
+                    ctx_start = max(0, verdict_line_idx - _VERDICT_CONTEXT_LINES)
+                    ctx = "\n".join(all_lines[ctx_start:verdict_line_idx])
+                else:
+                    ctx = ""
+                prev_ctx = verdict_context.get(scenario.index)
+                if prev_ctx is not None and ctx == prev_ctx:
+                    # Same context before the verdict — stale, skip
+                    continue
+
             key = f"qa-{state.pr_id}-{scenario.index}"
             if tracker.update(key, verdict):
-                verdict_tail_snapshot[scenario.index] = tail
+                if verdict:
+                    verdict_context[scenario.index] = ctx
                 state.scenario_verdicts[scenario.index] = verdict
                 pending.discard(scenario.index)
                 verdicts_changed = True
