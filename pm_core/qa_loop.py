@@ -924,7 +924,12 @@ def _poll_tmux_verdicts(
                                      "window gone, marking NEEDS_WORK",
                                      scenario_idx)
                         state.scenario_verdicts[scenario_idx] = VERDICT_NEEDS_WORK
+                        state.latest_output = (
+                            f"Scenario {scenario_idx} ({scenario.title}): "
+                            f"NEEDS_WORK (window gone during verification)"
+                        )
                         verdicts_changed = True
+                        _notify()
 
         for scenario in state.scenarios:
             if scenario.index not in pending or not scenario.window_name:
