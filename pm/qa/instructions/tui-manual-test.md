@@ -28,5 +28,3 @@ For inspecting a running session from another terminal:
 - `tmux capture-pane -p -t <session>:<window>.<pane> -S -` — full scrollback
 - `tmux send-keys -t <session>:<window>.<pane> "key" ""` — simulate input
 - Don't run pm commands directly — run them inside a new pane inside the test tmux session (not your own session)
-
-MAKE SURE YOU ARE TESTING ON A PROJECT IN /tmp AND NOT THE MAIN SESSION WE ARE WORKING IN.
