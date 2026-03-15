@@ -873,7 +873,10 @@ def _poll_tmux_verdicts(
             passed, reason = True, ""  # trust original on failure
         with verification_lock:
             verification_results[scenario.index] = (passed, reason)
-            verifying.discard(scenario.index)
+            # NOTE: do NOT discard from ``verifying`` here — the main
+            # loop must process the result first.  If we discard now
+            # and ``pending`` is also empty the loop exits before it
+            # sees the result (race condition).
 
     while (pending or verifying) and not state.stop_requested:
         time.sleep(_POLL_INTERVAL)
@@ -887,6 +890,7 @@ def _poll_tmux_verdicts(
             verification_results.clear()
 
         for scenario_idx, (passed, reason) in completed_verifications.items():
+            verifying.discard(scenario_idx)
             scenario = next(s for s in state.scenarios if s.index == scenario_idx)
             if passed:
                 _log.info("Verification passed for scenario %d (%s)",
