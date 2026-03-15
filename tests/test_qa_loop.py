@@ -1346,25 +1346,37 @@ class TestSelfDrivingQALoop:
 class TestBuildVerificationPrompt:
     """Tests for _build_verification_prompt."""
 
-    def test_includes_scenario_details(self):
+    def test_includes_scenario_details_inline(self):
         scenario = QAScenario(index=1, title="Login Flow", focus="auth",
                               steps="1. Test login\n2. Test logout")
-        prompt = _build_verification_prompt(scenario, "PASS", "Some output here")
+        prompt = _build_verification_prompt(scenario, "PASS",
+                                            pane_output="Some output here")
         assert "Login Flow" in prompt
         assert "auth" in prompt
         assert "Test login" in prompt
         assert "PASS" in prompt
         assert "Some output here" in prompt
 
-    def test_truncates_long_output(self):
+    def test_truncates_long_inline_output(self):
         scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
         long_output = "\n".join([f"line {i}" for i in range(_VERIFICATION_MAX_PANE_LINES + 100)])
-        prompt = _build_verification_prompt(scenario, "PASS", long_output)
+        prompt = _build_verification_prompt(scenario, "PASS",
+                                            pane_output=long_output)
         assert "truncated" in prompt.lower()
+
+    def test_file_path_mode(self):
+        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
+        prompt = _build_verification_prompt(scenario, "PASS",
+                                            pane_output_path="/tmp/qa_verify.txt")
+        assert "/tmp/qa_verify.txt" in prompt
+        assert "Read that file" in prompt
+        # Should NOT contain inline output tags
+        assert "<scenario_output>" not in prompt
 
     def test_includes_verification_instructions(self):
         scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
-        prompt = _build_verification_prompt(scenario, "PASS", "output")
+        prompt = _build_verification_prompt(scenario, "PASS",
+                                            pane_output="output")
         assert "VERIFIED" in prompt
         assert "FLAGGED" in prompt
 
@@ -1410,3 +1422,15 @@ class TestVerifySingleScenario:
                 scenario, "PASS", "output", {}, {},
             )
         assert passed is True
+
+    def test_temp_file_cleaned_up(self):
+        """Temp file with pane output is removed after verification."""
+        import glob
+        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
+        before = set(glob.glob("/tmp/qa_verify_s1_*"))
+        with patch("pm_core.claude_launcher.launch_claude_print",
+                   return_value="VERIFIED"):
+            _verify_single_scenario(scenario, "PASS", "output", {}, {})
+        after = set(glob.glob("/tmp/qa_verify_s1_*"))
+        # No new temp files should remain
+        assert after == before

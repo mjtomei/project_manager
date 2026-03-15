@@ -13,6 +13,7 @@ Verdicts (shared with review):
 """
 
 import json
+import os
 import re
 import secrets
 import subprocess
@@ -995,17 +996,38 @@ _VERIFICATION_MAX_RETRIES = 1
 
 
 def _build_verification_prompt(scenario: QAScenario, verdict: str,
-                                pane_output: str) -> str:
+                                pane_output: str | None = None,
+                                pane_output_path: str | None = None) -> str:
     """Build a prompt for Claude to verify a single scenario's verdict.
 
     The prompt asks Claude to determine whether the scenario genuinely
     exercised its test cases or just exited without doing real work.
+
+    If *pane_output_path* is provided the prompt tells the verifier to
+    read the file (keeps the prompt small).  Otherwise *pane_output* is
+    inlined (truncated to ``_VERIFICATION_MAX_PANE_LINES``).
     """
-    # Truncate pane output if too long
-    lines = pane_output.splitlines()
-    if len(lines) > _VERIFICATION_MAX_PANE_LINES:
-        truncated = lines[:_VERIFICATION_MAX_PANE_LINES]
-        pane_output = "\n".join(truncated) + f"\n\n[... truncated {len(lines) - _VERIFICATION_MAX_PANE_LINES} more lines ...]"
+    if pane_output_path:
+        output_section = (
+            f"The scenario produced the verdict: **{verdict}**\n\n"
+            f"The full session output has been saved to:\n"
+            f"  {pane_output_path}\n\n"
+            f"Read that file to review the scenario output."
+        )
+    else:
+        text = pane_output or ""
+        lines = text.splitlines()
+        if len(lines) > _VERIFICATION_MAX_PANE_LINES:
+            truncated = lines[:_VERIFICATION_MAX_PANE_LINES]
+            text = "\n".join(truncated) + (
+                f"\n\n[... truncated {len(lines) - _VERIFICATION_MAX_PANE_LINES}"
+                f" more lines ...]"
+            )
+        output_section = (
+            f"The scenario produced the verdict: **{verdict}**\n\n"
+            f"Here is the full output from the scenario session:\n\n"
+            f"<scenario_output>\n{text}\n</scenario_output>"
+        )
 
     return f"""You are verifying the output of QA scenario {scenario.index}: "{scenario.title}"
 
@@ -1018,13 +1040,7 @@ def _build_verification_prompt(scenario: QAScenario, verdict: str,
 
 ## Scenario Output
 
-The scenario produced the verdict: **{verdict}**
-
-Here is the full output from the scenario session:
-
-<scenario_output>
-{pane_output}
-</scenario_output>
+{output_section}
 
 ## Your Task
 
@@ -1056,54 +1072,86 @@ def _verify_single_scenario(
 
     Returns (passed, reason) where passed is True if the scenario was
     verified, and reason is the explanation if it was flagged.
+
+    The full pane output is written to a temporary file so the
+    verification prompt stays small while giving the verifier access to
+    the complete session transcript.
     """
+    import tempfile
+
     from pm_core.claude_launcher import launch_claude_print
 
     resolution = _resolve_qa_model(pr_data, project_data,
                                    session_type="qa_verification")
 
-    prompt = _build_verification_prompt(scenario, verdict, pane_output)
-
-    _log.info("Verification: running claude -p for scenario %d (%s)",
-              scenario.index, scenario.title)
+    # Write full output to a temp file for the verifier to read
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w", prefix=f"qa_verify_s{scenario.index}_",
+        suffix=".txt", delete=False,
+    )
     try:
-        output = launch_claude_print(
-            prompt,
-            message=f"Verifying scenario {scenario.index}",
-            model=resolution.model,
-            provider=resolution.provider,
-            effort=resolution.effort,
-        )
+        tmp.write(pane_output)
+        tmp.close()
+        output_path = tmp.name
     except Exception:
-        _log.warning("Verification: claude -p failed for scenario %d",
-                     scenario.index, exc_info=True)
-        # If verification itself fails, trust the original verdict
-        return True, ""
+        tmp.close()
+        os.unlink(tmp.name)
+        output_path = None
 
-    # Parse the verification output for VERIFIED or FLAGGED
-    for line in reversed(output.strip().splitlines()):
-        cleaned = re.sub(r'[*`]', '', line).strip()
-        if cleaned == "VERIFIED":
-            _log.info("Verification: scenario %d VERIFIED", scenario.index)
+    try:
+        prompt = _build_verification_prompt(
+            scenario, verdict,
+            pane_output_path=output_path,
+            pane_output=pane_output if not output_path else None,
+        )
+
+        _log.info("Verification: running claude -p for scenario %d (%s)",
+                  scenario.index, scenario.title)
+        try:
+            output = launch_claude_print(
+                prompt,
+                message=f"Verifying scenario {scenario.index}",
+                model=resolution.model,
+                provider=resolution.provider,
+                effort=resolution.effort,
+                allowed_tools=["Read"] if output_path else None,
+            )
+        except Exception:
+            _log.warning("Verification: claude -p failed for scenario %d",
+                         scenario.index, exc_info=True)
+            # If verification itself fails, trust the original verdict
             return True, ""
-        if cleaned == "FLAGGED":
-            # Get the explanation from lines before the FLAGGED verdict
-            reason_lines = []
-            for prev_line in output.strip().splitlines():
-                prev_cleaned = re.sub(r'[*`]', '', prev_line).strip()
-                if prev_cleaned == "FLAGGED":
-                    break
-                if prev_cleaned:
-                    reason_lines.append(prev_cleaned)
-            reason = " ".join(reason_lines[-3:]) if reason_lines else "Scenario did not properly exercise test cases"
-            _log.info("Verification: scenario %d FLAGGED: %s",
-                      scenario.index, reason)
-            return False, reason
 
-    # No clear verdict from verification — trust the original
-    _log.warning("Verification: no clear verdict from claude -p for scenario %d, "
-                 "trusting original", scenario.index)
-    return True, ""
+        # Parse the verification output for VERIFIED or FLAGGED
+        for line in reversed(output.strip().splitlines()):
+            cleaned = re.sub(r'[*`]', '', line).strip()
+            if cleaned == "VERIFIED":
+                _log.info("Verification: scenario %d VERIFIED", scenario.index)
+                return True, ""
+            if cleaned == "FLAGGED":
+                # Get the explanation from lines before the FLAGGED verdict
+                reason_lines = []
+                for prev_line in output.strip().splitlines():
+                    prev_cleaned = re.sub(r'[*`]', '', prev_line).strip()
+                    if prev_cleaned == "FLAGGED":
+                        break
+                    if prev_cleaned:
+                        reason_lines.append(prev_cleaned)
+                reason = " ".join(reason_lines[-3:]) if reason_lines else "Scenario did not properly exercise test cases"
+                _log.info("Verification: scenario %d FLAGGED: %s",
+                          scenario.index, reason)
+                return False, reason
+
+        # No clear verdict from verification — trust the original
+        _log.warning("Verification: no clear verdict from claude -p for "
+                     "scenario %d, trusting original", scenario.index)
+        return True, ""
+    finally:
+        if output_path:
+            try:
+                os.unlink(output_path)
+            except OSError:
+                pass
 
 
 # ---------------------------------------------------------------------------
