@@ -15,7 +15,6 @@ Verdicts (shared with review):
 import json
 import re
 import secrets
-import subprocess
 import sys
 import threading
 import time
@@ -1741,13 +1740,7 @@ def run_qa_sync(
             # Register both panes and rebalance the main window only
             qa_win = tmux_mod.find_window_by_name(session, window_name)
             if qa_win:
-                qa_win_id = None
-                wid_result = subprocess.run(
-                    tmux_mod._tmux_cmd("display", "-t", planner_pane,
-                                       "-p", "#{window_id}"),
-                    capture_output=True, text=True,
-                )
-                qa_win_id = wid_result.stdout.strip() or None
+                qa_win_id = tmux_mod.pane_window_id(planner_pane)
                 if qa_win_id:
                     pane_registry.register_pane(
                         session, qa_win_id, planner_pane,
