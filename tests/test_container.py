@@ -742,7 +742,7 @@ class TestCreateContainerPushProxy:
             session_tag=None, pr_id=None,
         )
         args_str = " ".join(mock_docker.call_args_list[0][0])
-        assert "/tmp/pm-push-proxy-test/push.sock:/run/pm-push-proxy.sock" in args_str
+        assert "/tmp/pm-push-proxy-test:/run/pm-push-proxy" in args_str
 
     @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container._resolve_claude_binary", return_value=None)

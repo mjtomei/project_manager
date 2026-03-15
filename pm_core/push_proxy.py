@@ -35,7 +35,8 @@ from pm_core.paths import configure_logger
 _log = configure_logger("pm.push_proxy")
 
 _SOCKET_DIR_PREFIX = "pm-push-proxy-"
-_CONTAINER_SOCKET_PATH = "/run/pm-push-proxy.sock"
+_CONTAINER_SOCKET_DIR = "/run/pm-push-proxy"
+_CONTAINER_SOCKET_PATH = f"{_CONTAINER_SOCKET_DIR}/push.sock"
 
 
 def _resolve_local_remote_url(workdir: str, remote: str = "origin") -> str | None:
