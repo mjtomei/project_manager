@@ -1,6 +1,7 @@
 ---
 title: Sync Refresh
 description: Test r key sync, log line updates, and PR status changes
+tags: [tui, github]
 ---
 You are testing the sync/refresh functionality in the pm TUI. Your goal is
 to verify that pressing 'r' triggers a sync operation, the log line updates

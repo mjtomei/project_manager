@@ -1,6 +1,7 @@
 ---
 title: Mobile Mode
 description: Test mobile mode auto-zoom, force flag, pane switching, and status command
+tags: [tui, local, vanilla, github, containerized, uncontainerized]
 ---
 You are testing the mobile mode feature for the pm TUI. Mobile mode auto-zooms
 the active pane when the terminal is narrow (< 120 columns) or when force-enabled,

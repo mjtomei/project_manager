@@ -1,6 +1,7 @@
 ---
 title: Tech Tree Visual Review
 description: Review tech tree appearance for visual issues and improvements
+tags: [tui, local, vanilla, github, containerized, uncontainerized]
 ---
 You are reviewing the visual appearance of the pm TUI's tech tree (PR dependency graph).
 Your goal is to identify any visual issues and suggest improvements to make the TUI

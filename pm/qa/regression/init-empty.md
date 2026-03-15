@@ -1,6 +1,7 @@
 ---
 title: "Init: Empty Repo"
 description: "Test pm init with an empty repo (no commits) -- verifies backend, commands, TUI"
+tags: [core, local]
 ---
 
 ## Prerequisite Setup

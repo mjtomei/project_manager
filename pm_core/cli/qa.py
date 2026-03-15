@@ -200,6 +200,82 @@ def qa_run(instruction_id: str, pr_id: str | None):
     click.echo(f"\nResult: {verdict}")
 
 
+@qa.command("regression")
+@click.option("--max-parallel", "-p", default=4, show_default=True,
+              help="Max scenarios running concurrently.")
+@click.option("--timeout", "-t", default=1800, show_default=True,
+              help="Per-scenario timeout in seconds.")
+@click.option("--filter", "filter_tags", multiple=True,
+              help="Only run scenarios with these tags (repeatable).")
+def qa_regression(max_parallel: int, timeout: int, filter_tags: tuple):
+    """Run all regression tests with parallel execution and verdict collection.
+
+    Launches each regression test as a Claude session in its own tmux window,
+    polls for verdicts (PASS/NEEDS_WORK/INPUT_REQUIRED), and produces a
+    summary report.  Windows stay open after completion for inspection.
+
+    Examples:
+        pm qa regression
+        pm qa regression --max-parallel 2 --filter tui
+        pm qa regression --timeout 600
+    """
+    from pm_core import regression, tmux as tmux_mod
+
+    root = state_root()
+
+    # Determine tmux session
+    session = None
+    if tmux_mod.in_tmux():
+        session = tmux_mod.get_session_name()
+    if not session:
+        session = os.environ.get("PM_SESSION")
+    if not session:
+        click.echo("Not in a tmux session. Run from inside pm session or set PM_SESSION.",
+                    err=True)
+        raise SystemExit(1)
+
+    tags = list(filter_tags) if filter_tags else None
+    scenarios = regression.load_regression_scenarios(root, tags)
+    if not scenarios:
+        click.echo("No regression tests found"
+                    + (f" matching tags: {', '.join(filter_tags)}" if tags else "")
+                    + ".")
+        return
+
+    click.echo(f"Running {len(scenarios)} regression tests (max {max_parallel} parallel)")
+    for s in scenarios:
+        click.echo(f"  - {s.id}: {s.title}")
+    click.echo()
+
+    def on_update(state):
+        done = len(state.results)
+        total = len(state.scenarios)
+        active = len(state.active)
+        pending = len(state.pending)
+        if done > 0:
+            latest = state.results[-1]
+            click.echo(f"  [{done}/{total}] {latest.scenario_id}: {latest.verdict}"
+                       f" ({latest.duration_secs:.0f}s)"
+                       f"  [active={active} pending={pending}]")
+
+    state = regression.run_regression(
+        pm_root=root,
+        session=session,
+        max_parallel=max_parallel,
+        timeout=timeout,
+        filter_tags=tags,
+        on_update=on_update,
+        session_name=session,
+    )
+
+    click.echo()
+    click.echo(regression.format_summary(state))
+
+    # Print report location
+    report_dir = os.path.expanduser(f"~/.pm/workdirs/regression/{state.run_id}")
+    click.echo(f"\nReport: {report_dir}/report.txt")
+
+
 @qa.command("standalone")
 @click.argument("instruction_id")
 def qa_standalone(instruction_id: str):

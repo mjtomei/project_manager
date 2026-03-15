@@ -1,6 +1,7 @@
 ---
 title: Multi-Window Registry
 description: Test multi-window pane registry, review window isolation, and heal on restart
+tags: [tui, local, vanilla, github, containerized, uncontainerized]
 ---
 You are testing the multi-window pane registry. Your goal is to verify that
 the registry correctly tracks panes across multiple tmux windows (main TUI

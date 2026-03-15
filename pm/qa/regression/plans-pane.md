@@ -1,6 +1,7 @@
 ---
 title: Plans Pane
 description: Test plans view toggle, navigation, actions, and refresh persistence
+tags: [tui, local, vanilla, github, containerized, uncontainerized]
 ---
 You are testing the Plans Pane feature in the pm TUI. Your goal is to verify
 that pressing p toggles a plans view, that navigation works, and that

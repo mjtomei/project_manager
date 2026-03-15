@@ -1,6 +1,7 @@
 ---
 title: "Init: GitHub Repo"
 description: "Test pm init with a GitHub remote -- verifies backend, commands, TUI"
+tags: [core, github]
 ---
 
 ## Prerequisite Setup

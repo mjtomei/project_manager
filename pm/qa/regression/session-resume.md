@@ -1,6 +1,7 @@
 ---
 title: Cluster Session Resume
 description: Test that cluster explore sessions are saved and resumed correctly
+tags: [core, local, vanilla, github, containerized, uncontainerized]
 ---
 You are testing the pm cluster explore session resume functionality. Your goal is
 to verify that Claude sessions are properly saved and resumed when restarting

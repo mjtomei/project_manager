@@ -1,6 +1,7 @@
 ---
 title: TUI Log Viewer
 description: Test L key opens log pane, verify content and pane lifecycle
+tags: [tui, local, vanilla, github, containerized, uncontainerized]
 ---
 You are testing the TUI log viewer feature in the pm TUI. Your goal is to
 verify that pressing 'L' opens a log pane, the log shows recent TUI activity,

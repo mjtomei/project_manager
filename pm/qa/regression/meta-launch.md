@@ -1,6 +1,7 @@
 ---
 title: Meta Session Launch
 description: Test m key launches meta pane with correct role and context
+tags: [tui, local, vanilla, github, containerized, uncontainerized]
 ---
 You are testing the meta session launch feature in the pm TUI. Your goal is
 to verify that pressing 'm' launches a meta-development session for working
