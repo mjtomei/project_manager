@@ -318,10 +318,18 @@ class TestPushProxyLifecycle:
 class TestSharedProxy:
     """Tests for (session_tag, pr_id) shared proxy behaviour."""
 
+    def _mock_start(self):
+        """Patch _start_proxy_subprocess to create a dummy socket file."""
+        def fake_start(sock_path, workdir, branch):
+            os.makedirs(os.path.dirname(sock_path), exist_ok=True)
+            Path(sock_path).touch()
+        return patch("pm_core.push_proxy._start_proxy_subprocess",
+                     side_effect=fake_start)
+
     def test_shared_proxy_reuse(self):
         """Multiple containers on the same branch reuse one proxy."""
-        with patch("pm_core.push_proxy.PushProxy.start"), \
-             patch("pm_core.push_proxy.PushProxy.stop"):
+        with self._mock_start(), \
+             patch("pm_core.push_proxy.proxy_is_alive", return_value=True):
             sock1 = start_push_proxy("c1", "/w", "pm/pr-1",
                                      session_tag="repo-abc", pr_id="pr-1")
             sock2 = start_push_proxy("c2", "/w", "pm/pr-1",
@@ -342,8 +350,7 @@ class TestSharedProxy:
 
     def test_shared_proxy_deterministic_path(self):
         """Shared proxy socket is at a deterministic path."""
-        with patch("pm_core.push_proxy.PushProxy.start"), \
-             patch("pm_core.push_proxy.PushProxy.stop"):
+        with self._mock_start():
             sock = start_push_proxy("c1", "/w", "pm/pr-1",
                                     session_tag="repo-abc", pr_id="pr-1")
             assert sock == "/tmp/pm-push-proxy-repo-abc-pr-1/push.sock"
@@ -351,8 +358,7 @@ class TestSharedProxy:
 
     def test_stop_session_proxies(self):
         """stop_session_proxies cleans up all proxies for a session."""
-        with patch("pm_core.push_proxy.PushProxy.start"), \
-             patch("pm_core.push_proxy.PushProxy.stop"):
+        with self._mock_start():
             start_push_proxy("c1", "/w", "b1",
                              session_tag="repo-abc", pr_id="pr-1")
             start_push_proxy("c2", "/w", "b2",
@@ -367,8 +373,7 @@ class TestSharedProxy:
 
     def test_different_sessions_different_proxies(self):
         """Different sessions get separate proxies even for the same PR."""
-        with patch("pm_core.push_proxy.PushProxy.start"), \
-             patch("pm_core.push_proxy.PushProxy.stop"):
+        with self._mock_start():
             sock1 = start_push_proxy("c1", "/w", "b",
                                      session_tag="repo-aaa", pr_id="pr-1")
             sock2 = start_push_proxy("c2", "/w", "b",

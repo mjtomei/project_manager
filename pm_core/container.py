@@ -367,25 +367,52 @@ def create_container(
     Returns:
         Container ID.
     """
-    # If a running container with this name already exists, reuse it.
+    # If a running container with this name already exists, reuse it —
+    # unless its push proxy socket is dead.  A dead proxy means the bind-
+    # mounted socket inode inside the container is stale (e.g. after a TUI
+    # crash).  Restarting the proxy on the host creates a new inode that the
+    # container's bind mount doesn't see, so we must recreate the container.
     if container_is_running(name):
-        result = _run_docker(
-            "inspect", "-f", "{{.Id}}", name,
-            check=False, timeout=10,
-        )
-        container_id = result.stdout.strip()
-        _log.info("Reusing existing container %s (id=%s)", name, container_id[:12])
-        # Ensure the push proxy is running (it may have been stopped)
         if allowed_push_branch:
             from pm_core.push_proxy import (
-                start_push_proxy, get_proxy_socket_path,
+                start_push_proxy, get_proxy_socket_path, proxy_is_alive,
             )
-            if not get_proxy_socket_path(name):
-                start_push_proxy(
-                    name, str(workdir), allowed_push_branch,
-                    session_tag=session_tag, pr_id=pr_id,
+            sock = get_proxy_socket_path(name, session_tag=session_tag,
+                                         pr_id=pr_id)
+            if sock and not proxy_is_alive(sock):
+                _log.warning(
+                    "Push proxy socket %s is dead for container %s — "
+                    "removing container so it can be recreated with a "
+                    "fresh socket mount", sock, name)
+                remove_container(name)
+                # Fall through to create a new container below
+            elif not sock:
+                # No socket at all — start proxy, but container bind mount
+                # won't have it.  Must recreate.
+                _log.warning(
+                    "No push proxy socket found for container %s — "
+                    "removing container to recreate with proxy mount", name)
+                remove_container(name)
+            else:
+                # Proxy is alive and container is good — reuse
+                result = _run_docker(
+                    "inspect", "-f", "{{.Id}}", name,
+                    check=False, timeout=10,
                 )
-        return container_id
+                container_id = result.stdout.strip()
+                _log.info("Reusing existing container %s (id=%s)",
+                          name, container_id[:12])
+                return container_id
+        else:
+            # No push proxy needed — safe to reuse
+            result = _run_docker(
+                "inspect", "-f", "{{.Id}}", name,
+                check=False, timeout=10,
+            )
+            container_id = result.stdout.strip()
+            _log.info("Reusing existing container %s (id=%s)",
+                      name, container_id[:12])
+            return container_id
 
     remove_container(name)
 
