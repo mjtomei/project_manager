@@ -1053,4 +1053,14 @@ class ProjectManagerApp(App):
                     )
             else:
                 self.log_message("No QA item selected")
+        elif message.action == "debug":
+            if message.item_id:
+                parts = message.item_id.split(":", 1)
+                if len(parts) == 2:
+                    _category, qa_id = parts
+                    pane_ops.launch_pane(
+                        self, f"pm qa debug {qa_id}", "qa-debug"
+                    )
+            else:
+                self.log_message("No QA item selected")
 

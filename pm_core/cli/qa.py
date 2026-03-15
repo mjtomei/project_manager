@@ -206,6 +206,156 @@ def qa_run(instruction_id: str, pr_id: str | None):
     click.echo(f"\nResult: {verdict}")
 
 
+@qa.command("debug")
+@click.argument("instruction_id")
+def qa_debug(instruction_id: str):
+    """Launch an interactive session to verify a QA instruction works.
+
+    Creates an environment identical to what QA scenario workers get
+    (container if container mode is enabled, host otherwise) and drops
+    you into a Claude session with the instruction loaded.  Use this to
+    check that setup steps, commands, and expected outputs are correct
+    before running real QA.
+    """
+    import secrets
+    from pm_core import qa_instructions, store
+    from pm_core import tmux as tmux_mod
+    from pm_core.container import is_container_mode_enabled, _docker_available
+    from pm_core.claude_launcher import build_claude_shell_cmd
+    from pm_core.loop_shared import get_pm_session
+
+    root = state_root()
+
+    # Find the instruction
+    item = qa_instructions.get_instruction(root, instruction_id, "instructions")
+    if item is None:
+        item = qa_instructions.get_instruction(root, instruction_id, "regression")
+    if item is None:
+        click.echo(f"Instruction not found: {instruction_id}", err=True)
+        raise SystemExit(1)
+
+    data = store.load(root)
+    session = get_pm_session()
+    if not session:
+        click.echo("No pm session found. Run inside a pm tmux session.", err=True)
+        raise SystemExit(1)
+
+    # Create a workdir keyed to session + instruction (not PR)
+    debug_id = secrets.token_hex(4)
+    base_dir = Path(os.path.expanduser("~/.pm/workdirs/qa"))
+    qa_workdir = base_dir / f"debug-{instruction_id}-{debug_id}"
+    qa_workdir.mkdir(parents=True, exist_ok=True)
+
+    # Build scenario workdir (clone + scratch)
+    from pm_core.qa_loop import create_scenario_workdir
+    from pm_core import git_ops
+
+    repo_root = git_ops.find_repo_root()
+    base_branch = data.get("project", {}).get("base_branch", "master")
+    clone_path, scratch_path = create_scenario_workdir(
+        qa_workdir, scenario_index=0,
+        repo_root=repo_root,
+        pr_id=f"debug-{instruction_id}",
+        loop_id=debug_id,
+        branch=base_branch,
+    )
+
+    # Install instruction file into scratch
+    filename = Path(item["path"]).name
+    dest_dir = scratch_path / "qa-instructions"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    import shutil
+    shutil.copy2(item["path"], dest_dir / filename)
+
+    use_containers = is_container_mode_enabled() and _docker_available()
+
+    if use_containers:
+        from pm_core import container as container_mod
+        container_scratch = container_mod._CONTAINER_SCRATCH
+        instr_path = f"{container_scratch}/qa-instructions/{filename}"
+    else:
+        instr_path = str(dest_dir / filename)
+
+    prompt = f"""You are debugging a QA instruction to verify it works correctly.
+
+## Task
+
+Read the instruction file at: `{instr_path}`
+
+Follow its Setup and Test Steps exactly as a QA scenario worker would.
+Your goal is to verify that every step in the instruction is executable
+in this environment and produces the expected results.
+
+## Environment
+
+You are in the same environment that QA scenario workers use.
+- **Workdir**: {str(clone_path) if not use_containers else container_mod._CONTAINER_WORKDIR}
+- **Scratch dir**: {str(scratch_path) if not use_containers else container_scratch}
+
+## What to report
+
+As you work through each step, note:
+- Steps that work as described
+- Steps that fail or need adjustment (missing tools, wrong paths, etc.)
+- Steps that are ambiguous or impossible to execute
+- Whether expected outputs match what actually happens
+
+End with a summary of which steps work and which don't, then one of:
+- **PASS** — All steps are executable and produce expected results
+- **NEEDS_WORK** — Some steps need fixes (explain what)
+- **INPUT_REQUIRED** — Cannot proceed without human guidance"""
+
+    window_name = f"qa-debug-{instruction_id[:20]}"
+
+    if use_containers:
+        from pm_core import container as container_mod
+        from pm_core.qa_loop import _setup_clone_override
+
+        _setup_clone_override(clone_path)
+
+        config = container_mod.load_container_config()
+        session_tag = session.removeprefix("pm-") if session else None
+        cname = f"{container_mod.CONTAINER_PREFIX}qa-debug-{instruction_id}-{debug_id}"
+
+        container_mod.create_qa_container(
+            name=cname,
+            config=config,
+            workdir=clone_path,
+            scratch_path=scratch_path,
+            session_tag=session_tag,
+        )
+
+        claude_cmd = build_claude_shell_cmd(
+            prompt=prompt,
+            cwd=container_mod._CONTAINER_WORKDIR,
+        )
+        exec_cmd = container_mod.build_exec_cmd(cname, claude_cmd, cleanup=True)
+
+        pane_id = tmux_mod.new_window_get_pane(
+            session, window_name, exec_cmd,
+            cwd=str(qa_workdir), switch=False,
+        )
+        click.echo(f"Launched debug session in container {cname}")
+    else:
+        from pm_core.qa_loop import _setup_clone_override
+        _setup_clone_override(clone_path)
+
+        claude_cmd = build_claude_shell_cmd(
+            prompt=prompt,
+            cwd=str(clone_path),
+        )
+
+        pane_id = tmux_mod.new_window_get_pane(
+            session, window_name, claude_cmd,
+            cwd=str(clone_path), switch=False,
+        )
+        click.echo(f"Launched debug session on host")
+
+    click.echo(f"  Instruction: {item['title']}")
+    click.echo(f"  Workdir: {qa_workdir}")
+    click.echo(f"  Window: {window_name}")
+
+
 @qa.command("standalone")
 @click.argument("instruction_id")
 def qa_standalone(instruction_id: str):
