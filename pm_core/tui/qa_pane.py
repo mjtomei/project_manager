@@ -89,6 +89,14 @@ class QAPane(Widget):
         output = Text()
         content_width = (self.size.width - 4) if self.size.width > 8 else 60
 
+        # Key hints
+        output.append("  a", style="bold")
+        output.append(":add  ", style="dim")
+        output.append("e", style="bold")
+        output.append(":edit  ", style="dim")
+        output.append("d", style="bold")
+        output.append(":debug\n", style="dim")
+
         if not self._items:
             output.append("No QA items available.\n", style="dim")
         else:

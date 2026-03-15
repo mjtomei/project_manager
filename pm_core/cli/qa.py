@@ -248,9 +248,9 @@ def qa_debug(instruction_id: str):
 
     # Build scenario workdir (clone + scratch)
     from pm_core.qa_loop import create_scenario_workdir
-    from pm_core import git_ops
 
-    repo_root = git_ops.find_repo_root()
+    # The repo root is the parent of the pm/ state directory
+    repo_root = root.parent
     base_branch = data.get("project", {}).get("base_branch", "master")
     clone_path, scratch_path = create_scenario_workdir(
         qa_workdir, scenario_index=0,
