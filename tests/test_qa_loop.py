@@ -1397,10 +1397,15 @@ class TestVerifySingleScenario:
     def _mock_verify(self, scenario, verdict, pane_output, poll_content,
                      pr_data=None, project_data=None):
         """Helper: run _verify_single_scenario with mocked tmux ops."""
+        mock_wid = MagicMock()
+        mock_wid.stdout = "@1"
         with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
              patch("pm_core.tmux.split_pane_at", return_value="%2"), \
              patch("pm_core.qa_loop.poll_for_verdict", return_value=poll_content), \
-             patch("pm_core.claude_launcher.build_claude_shell_cmd", return_value="claude ..."):
+             patch("pm_core.claude_launcher.build_claude_shell_cmd", return_value="claude ..."), \
+             patch("subprocess.run", return_value=mock_wid), \
+             patch("pm_core.pane_registry.register_pane"), \
+             patch("pm_core.pane_layout.rebalance"):
             return _verify_single_scenario(
                 scenario, verdict, pane_output,
                 pr_data or {}, project_data or {},

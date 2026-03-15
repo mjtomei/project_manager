@@ -1193,7 +1193,10 @@ def _verify_single_scenario(
         effort=resolution.effort,
     )
 
-    # Split the scenario window vertically to show the verification pane
+    # Split the scenario window using the standard pane management system
+    # so it works with mobile mode and portrait monitors.
+    from pm_core import pane_layout, pane_registry
+
     _log.info("Verification: splitting pane for scenario %d (%s) "
               "[source=%s]",
               scenario.index, scenario.title,
@@ -1202,6 +1205,20 @@ def _verify_single_scenario(
         verify_pane = tmux_mod.split_pane_at(
             scenario_pane, "v", verify_cmd, background=True,
         )
+
+        # Register the pane and rebalance using standard layout management
+        wid_result = subprocess.run(
+            tmux_mod._tmux_cmd("display", "-t", scenario_pane,
+                               "-p", "#{window_id}"),
+            capture_output=True, text=True,
+        )
+        win_id = wid_result.stdout.strip() or None
+        if win_id:
+            pane_registry.register_pane(
+                session, win_id, verify_pane,
+                f"qa-verify-s{scenario.index}", verify_cmd,
+            )
+            pane_layout.rebalance(session, win_id)
     except Exception:
         _log.warning("Verification: failed to split pane for scenario %d, "
                      "trusting original verdict",
