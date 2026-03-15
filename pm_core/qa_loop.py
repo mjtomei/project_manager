@@ -336,9 +336,11 @@ def _write_status_file(status_path: Path, pr_id: str,
                        scenario_verdicts: dict[int, str],
                        overall: str = "",
                        scenario_0: QAScenario | None = None,
-                       verifying_scenarios: set[int] | None = None) -> None:
+                       verifying_scenarios: set[int] | None = None,
+                       queued_scenarios: set[int] | None = None) -> None:
     """Atomically write the qa_status.json file."""
     _verifying = verifying_scenarios or set()
+    _queued = queued_scenarios or set()
     all_scenarios = []
     if scenario_0 and scenario_0.window_name:
         all_scenarios.append({
@@ -351,6 +353,8 @@ def _write_status_file(status_path: Path, pr_id: str,
         verdict = scenario_verdicts.get(s.index, "")
         if s.index in _verifying:
             verdict = f"{verdict} (verifying)" if verdict else "verifying"
+        elif s.index in _queued:
+            verdict = "queued"
         all_scenarios.append({
             "index": s.index,
             "title": s.title,
@@ -902,6 +906,11 @@ def _poll_tmux_verdicts(
     workdir_path: str,
     status_path: Path,
     _notify,
+    queued_scenarios: list[QAScenario] | None = None,
+    concurrency_cap: int = 0,
+    use_containers: bool = False,
+    repo_root: Path | None = None,
+    pm_root: Path | None = None,
 ) -> None:
     """Poll tmux scenario windows for verdicts.
 
@@ -909,6 +918,9 @@ def _poll_tmux_verdicts(
     to check that the scenario genuinely exercised its test cases.  If
     verification flags a scenario, a follow-up message is sent to the
     scenario's pane and the scenario goes back to pending.
+
+    If *queued_scenarios* is provided, queued scenarios are launched as
+    running scenarios complete, respecting *concurrency_cap*.
     """
     from pm_core import tmux as tmux_mod
 
@@ -919,6 +931,10 @@ def _poll_tmux_verdicts(
                   verify_max_retries)
     else:
         _log.info("PASS verdict verification is disabled (qa-verify-pass)")
+
+    # Queue of scenarios waiting to be launched
+    _launch_queue: list[QAScenario] = list(queued_scenarios or [])
+    _queued_indices: set[int] = {s.index for s in _launch_queue}
 
     tracker = VerdictStabilityTracker()
     pending = {s.index for s in state.scenarios if s.window_name}
@@ -935,9 +951,10 @@ def _poll_tmux_verdicts(
     verdict_context: dict[int, str] = {}
 
     # Scenarios that failed to create a window get INPUT_REQUIRED immediately
+    # (but skip queued scenarios — they don't have windows yet by design)
     has_failed_creation = False
     for scenario in state.scenarios:
-        if not scenario.window_name:
+        if not scenario.window_name and scenario.index not in _queued_indices:
             _log.warning("Scenario %d has no window — marking INPUT_REQUIRED",
                          scenario.index)
             state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
@@ -945,12 +962,17 @@ def _poll_tmux_verdicts(
     if has_failed_creation:
         _write_status_file(status_path, state.pr_id, state.scenarios,
                            state.scenario_verdicts,
-                           scenario_0=state.scenario_0)
+                           scenario_0=state.scenario_0,
+                           queued_scenarios=_queued_indices)
 
     grace_start = time.monotonic()
 
     def _run_verification(scenario: QAScenario, verdict: str, content: str):
         """Background thread: run verification in a visible pane."""
+        _log.info("Verification thread started for scenario %d (%s), "
+                  "scenario.pane_id=%s, scenario.window_name=%s",
+                  scenario.index, scenario.title,
+                  scenario.pane_id, scenario.window_name)
         try:
             passed, reason, _vpane = _verify_single_scenario(
                 scenario, verdict, content, pr_data, data,
@@ -967,7 +989,36 @@ def _poll_tmux_verdicts(
             # and ``pending`` is also empty the loop exits before it
             # sees the result (race condition).
 
-    while (pending or verifying) and not state.stop_requested:
+    def _launch_next_queued():
+        """Launch the next queued scenario if concurrency allows."""
+        if not _launch_queue:
+            return
+        # Count currently active (pending + verifying)
+        active = len(pending) + len(verifying)
+        if concurrency_cap > 0 and active >= concurrency_cap:
+            return
+        scenario = _launch_queue.pop(0)
+        _queued_indices.discard(scenario.index)
+        _log.info("Launching queued scenario %d (%s), %d remain in queue",
+                  scenario.index, scenario.title, len(_launch_queue))
+        # Launch this single scenario by temporarily swapping state.scenarios
+        orig = state.scenarios
+        state.scenarios = [scenario]
+        if use_containers:
+            _launch_scenarios_in_containers(
+                state, data, pr_data, session, repo_root, workdir_path,
+                pm_root=pm_root,
+            )
+        else:
+            _launch_scenarios_in_tmux(
+                state, data, pr_data, session, repo_root, workdir_path,
+                pm_root=pm_root,
+            )
+        state.scenarios = orig
+        if scenario.window_name:
+            pending.add(scenario.index)
+
+    while (pending or verifying or _launch_queue) and not state.stop_requested:
         time.sleep(_POLL_INTERVAL)
 
         in_grace = (time.monotonic() - grace_start) < _VERDICT_GRACE_PERIOD
@@ -1084,6 +1135,7 @@ def _poll_tmux_verdicts(
                 state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
                 pending.discard(scenario.index)
                 verdicts_changed = True
+                _launch_next_queued()
                 continue
 
             if in_grace:
@@ -1142,6 +1194,12 @@ def _poll_tmux_verdicts(
                         f"{verdict}"
                     )
                     _notify()
+                    # Scenario fully done — launch next queued if available
+                    _launch_next_queued()
+
+        # Launch queued scenarios after verified completions too
+        if completed_verifications:
+            _launch_next_queued()
 
         if verdicts_changed or completed_verifications:
             with verification_lock:
@@ -1149,7 +1207,8 @@ def _poll_tmux_verdicts(
             _write_status_file(status_path, state.pr_id, state.scenarios,
                                state.scenario_verdicts,
                                scenario_0=state.scenario_0,
-                               verifying_scenarios=verifying_snapshot)
+                               verifying_scenarios=verifying_snapshot,
+                               queued_scenarios=_queued_indices)
 
 
 # ---------------------------------------------------------------------------
@@ -1260,7 +1319,9 @@ VERIFIED
 If the PASS is not justified, wrap your explanation in markers:
 FLAGGED_START
 <explanation of what went wrong — can be multiple lines>
-FLAGGED_END"""
+FLAGGED_END
+
+IMPORTANT: Your response must end with either VERIFIED or the FLAGGED_START...FLAGGED_END block. Do not include any text after your final verdict marker."""
 
 
 _VERIFICATION_VERDICTS = ("VERIFIED", "FLAGGED_END")
@@ -1366,9 +1427,9 @@ def _verify_single_scenario(
     # so it works with mobile mode and portrait monitors.
     from pm_core import pane_layout, pane_registry
 
-    _log.info("Verification: splitting pane for scenario %d (%s) "
+    _log.info("Verification: splitting pane %s for scenario %d (%s) "
               "[source=%s]",
-              scenario.index, scenario.title,
+              scenario_pane, scenario.index, scenario.title,
               "transcript" if transcript_path else "pane")
     try:
         verify_pane = tmux_mod.split_pane_at(
@@ -1379,6 +1440,9 @@ def _verify_single_scenario(
                      "trusting original verdict",
                      scenario.index, exc_info=True)
         return True, "", None
+    _log.info("Verification: created verify_pane=%s for scenario %d "
+              "(split from scenario_pane=%s)",
+              verify_pane, scenario.index, scenario_pane)
 
     # Register the pane and rebalance using the same pattern as the
     # review window: register panes, reset user_modified, then rebalance.
@@ -1406,6 +1470,9 @@ def _verify_single_scenario(
     # Poll the verification pane for VERIFIED or FLAGGED.
     # Pass prompt_text so the prompt's example FLAGGED_END marker
     # is filtered out — only the verifier's actual output counts.
+    _log.info("Verification: polling verify_pane=%s for scenario %d "
+              "(prompt_text=%d chars)",
+              verify_pane, scenario.index, len(prompt))
     try:
         content = poll_for_verdict(
             verify_pane,
@@ -1428,6 +1495,8 @@ def _verify_single_scenario(
     # Parse the result
     passed, reason = True, ""
     if content:
+        _log.info("Verification: got %d chars of content from verify_pane=%s "
+                  "for scenario %d", len(content), verify_pane, scenario.index)
         v = extract_verdict_from_content(
             content,
             verdicts=_VERIFICATION_VERDICTS,
@@ -1444,11 +1513,13 @@ def _verify_single_scenario(
                       scenario.index, reason)
             passed = False
         else:
-            _log.warning("Verification: unexpected verdict %r for scenario %d, "
-                         "trusting original", v, scenario.index)
+            _log.warning("Verification: unexpected verdict %r for scenario %d "
+                         "(verify_pane=%s), trusting original",
+                         v, scenario.index, verify_pane)
     else:
         _log.warning("Verification: pane disappeared or timed out for "
-                     "scenario %d, trusting original", scenario.index)
+                     "scenario %d (verify_pane=%s), trusting original",
+                     scenario.index, verify_pane)
 
     return passed, reason, verify_pane
 
@@ -1687,18 +1758,23 @@ def run_qa_sync(
             for i, sc in enumerate(state.scenarios):
                 sc.index = scenario_start + i
 
-        # Limit scenarios if a cap is configured
-        cap = max_scenarios if max_scenarios is not None else _get_max_scenarios()
-        if cap > 0 and len(state.scenarios) > cap:
-            state.scenarios = state.scenarios[:cap]
-
         state.planning_phase = False
         state.latest_output = f"Plan: {len(state.scenarios)} scenario(s)"
         _notify()
 
     # --- Phase 2: Execution ---
-    _log.info("QA execution phase: %d scenarios for %s",
-              len(state.scenarios), state.pr_id)
+    # Determine concurrency cap (0 = launch all at once)
+    concurrency_cap = max_scenarios if max_scenarios is not None else _get_max_scenarios()
+    if concurrency_cap > 0:
+        launch_scenarios = state.scenarios[:concurrency_cap]
+        queued_scenarios = state.scenarios[concurrency_cap:]
+    else:
+        launch_scenarios = state.scenarios
+        queued_scenarios = []
+
+    _log.info("QA execution phase: %d scenarios for %s (%d to launch, %d queued)",
+              len(state.scenarios), state.pr_id,
+              len(launch_scenarios), len(queued_scenarios))
 
     repo_root = Path(workdir_path) if workdir_path and Path(workdir_path).is_dir() else None
 
@@ -1714,6 +1790,10 @@ def run_qa_sync(
         panes = tmux_mod.get_pane_indices(session, win["index"])
         planner_pane = panes[0][0] if panes else None
 
+    # Only launch the initial batch — queued scenarios are launched later
+    # as running scenarios complete (handled by _poll_tmux_verdicts).
+    all_scenarios = state.scenarios
+    state.scenarios = launch_scenarios
     if use_containers:
         _launch_scenarios_in_containers(
             state, data, pr_data, session, repo_root, workdir_path,
@@ -1724,6 +1804,7 @@ def run_qa_sync(
             state, data, pr_data, session, repo_root, workdir_path,
             pm_root=pm_root,
         )
+    state.scenarios = all_scenarios
 
     # Add status pane to the main QA window (split planner pane horizontally)
     if planner_pane:
@@ -1754,17 +1835,26 @@ def run_qa_sync(
         except Exception:
             _log.exception("Failed to create status pane")
 
+    # Mark queued scenarios in the status file
+    queued_indices = {s.index for s in queued_scenarios}
+
     # Write initial status file
     _write_status_file(status_path, state.pr_id, state.scenarios,
                        state.scenario_verdicts,
-                       scenario_0=state.scenario_0)
+                       scenario_0=state.scenario_0,
+                       queued_scenarios=queued_indices)
 
     state.latest_output = f"Running {len(state.scenarios)} scenario(s)..."
     _notify()
 
     # --- Poll for verdicts (always via tmux — containers also use tmux windows) ---
     _poll_tmux_verdicts(state, data, pr_data, session, workdir_path,
-                        status_path, _notify)
+                        status_path, _notify,
+                        queued_scenarios=queued_scenarios,
+                        concurrency_cap=concurrency_cap,
+                        use_containers=use_containers,
+                        repo_root=repo_root,
+                        pm_root=pm_root)
 
     # --- Cleanup ---
     # Keep scenario windows AND containers alive so users can inspect

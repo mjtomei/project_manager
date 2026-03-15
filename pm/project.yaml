@@ -3711,9 +3711,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/146
   gh_pr_number: 146
   created_at: '2026-03-06T15:48:13.072900+00:00'
-  updated_at: '2026-03-15T18:04:25.499448+00:00'
+  updated_at: '2026-03-15T22:38:19.074434+00:00'
   started_at: '2026-03-14T22:24:34.604076+00:00'
-  reviewed_at: '2026-03-15T18:04:25.499448+00:00'
+  reviewed_at: '2026-03-15T22:38:19.074434+00:00'
   merged_at: null
   notes:
   - id: note-52ce835
@@ -3765,6 +3765,20 @@ prs:
       set on scenario launch and relaunch: INPUT_REQUIRED (workdir: /home/matt/.pm/workdirs/qa/pr-8fdda09-3fb95d7b70f076af)'
     created_at: '2026-03-15T17:50:35Z'
     last_edited: '2026-03-15T17:50:35Z'
+  - id: note-f4fbb2b
+    text: 'QA ERROR: Verification triggers on PASS verdict only: ?; Verification VERIFIED
+      accepts the PASS verdict: PASS; Verification FLAGGED triggers re-evaluation:
+      ?; Verification failure exhaustion marks NEEDS_WORK: PASS; qa-verify-pass setting
+      disables verification: ?; Verification pane lifecycle and layout management:
+      PASS; Transcript file preferred over pane output for verification: PASS; Status
+      dashboard renders verification state correctly: PASS; qa_verification session
+      type and model resolution: ?; Verification handles missing/dead scenario pane
+      gracefully: ?; Unit tests pass for new verification functions: PASS; Concurrent
+      verification threads do not race with the polling loop: ?; Transcript path is
+      set on scenario launch and relaunch: ?; Stale verdict detection after verification
+      follow-up: ?; Instruction file installation for scenarios: ? (workdir: /home/matt/.pm/workdirs/qa/pr-8fdda09-e545f5810ab8e896)'
+    created_at: '2026-03-15T18:17:36Z'
+    last_edited: '2026-03-15T18:17:36Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8fdda09-add-qa-scenario-verification-step-be-3e33a282
 - id: pr-942aa21
   plan: plan-qa

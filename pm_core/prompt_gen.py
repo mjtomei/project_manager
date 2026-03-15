@@ -815,6 +815,38 @@ Number scenarios starting from {scenario_start}.
 Include as many scenarios as required to fully exercise the functionality
 of the PR.  Exercise the core functionality as well as any edge cases
 that may expose bugs.
+
+## Writing effective STEPS
+
+The STEPS field is critical — it is the only guidance the scenario agent receives
+about what to do (beyond the instruction file's generic setup).  Write steps that
+are specific enough that the agent can execute them without guessing.
+
+Scenarios should exercise the actual feature or workflow end-to-end, NOT run
+the project's unit/integration test suite.  The goal is to verify that the
+changed behavior works correctly in practice.
+
+Include:
+- **Exact commands or interactions** to exercise the feature — this could be CLI
+  commands (e.g. `pm qa start pr-001`), API calls, TUI interactions
+  (e.g. "open the TUI with `pm tui`, navigate to the PR list, press `s` to start"),
+  or any other way the user would actually use the feature
+- **Specific files or functions** that changed and where they live
+- **Expected behavior**: what output, side effects, or state changes to look for
+  (e.g. "should print 'OK: 3 scenarios queued'", "the status pane should show
+  'queued' for scenarios not yet launched", "pressing `j` should highlight the
+  next row")
+- **Failure conditions**: what would indicate the feature is broken
+  (e.g. "if the list is truncated to 1 item instead of showing all 3, the bug
+  is not fixed")
+
+Steps can involve any combination of shell commands, file inspection, tmux pane
+capture, GUI/TUI interaction, or process orchestration — whatever it takes to
+verify the feature works as a real user would experience it.
+
+The agent running the scenario has the full codebase but has NOT read the PR diff.
+Your steps must bridge that gap — tell it exactly which behavior changed and how
+to exercise it.
 {general_notes_block}{qa_specific_block}"""
     return prompt.strip()
 

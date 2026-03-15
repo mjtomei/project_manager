@@ -51,6 +51,7 @@ _VERDICT_COLORS = {
     "NEEDS_WORK": _YELLOW,
     "INPUT_REQUIRED": _RED,
     "interactive": _DIM,
+    "queued": _DIM,
 }
 
 _REFRESH_INTERVAL = 1.0  # seconds
@@ -143,9 +144,14 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
         lines.append(f"  Overall: {color}{_BOLD}{overall}{_RESET}")
     else:
         done = sum(1 for s in scenarios
-                   if s.get("verdict") and s.get("verdict") != "interactive")
+                   if s.get("verdict") and s.get("verdict") not in ("interactive", "queued"))
         total = sum(1 for s in scenarios if s.get("verdict") != "interactive")
-        lines.append(f"  {_DIM}Progress: {done}/{total} scenarios complete{_RESET}")
+        queued = sum(1 for s in scenarios if s.get("verdict") == "queued")
+        progress = f"  {_DIM}Progress: {done}/{total} scenarios complete"
+        if queued:
+            progress += f" ({queued} queued)"
+        progress += f"{_RESET}"
+        lines.append(progress)
 
     lines.append("")
     lines.append(f"{_DIM}  j/k: navigate  Enter: go to window  q: quit{_RESET}")
