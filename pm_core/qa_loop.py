@@ -13,7 +13,6 @@ Verdicts (shared with review):
 """
 
 import json
-import os
 import re
 import secrets
 import subprocess
@@ -90,6 +89,7 @@ class QAScenario:
     window_name: str | None = None
     worktree_path: str | None = None
     container_name: str | None = None
+    transcript_path: str | None = None
 
 
 @dataclass
@@ -122,6 +122,11 @@ def create_qa_workdir(pr_id: str, loop_id: str) -> Path:
     workdir = Path.home() / ".pm" / "workdirs" / "qa" / f"{pr_id}-{loop_id}"
     workdir.mkdir(parents=True, exist_ok=True)
     return workdir
+
+
+def _scenario_transcript_path(qa_workdir: str | Path, scenario_index: int) -> str:
+    """Return the path where a scenario's transcript symlink should live."""
+    return str(Path(qa_workdir) / f"transcript-s{scenario_index}.jsonl")
 
 
 def _next_scenario_offset(pr_id: str, current_loop_id: str) -> int:
@@ -556,6 +561,9 @@ def _launch_scenarios_in_tmux(
         if repo_root:
             _setup_clone_override(clone_path)
 
+        scenario_cwd = str(clone_path) if repo_root else workdir_path
+        transcript = _scenario_transcript_path(state.qa_workdir, scenario.index)
+
         child_prompt = prompt_gen.generate_qa_child_prompt(
             data, state.pr_id, scenario,
             workdir=str(clone_path),
@@ -565,18 +573,19 @@ def _launch_scenarios_in_tmux(
         )
         child_cmd = build_claude_shell_cmd(
             prompt=child_prompt,
-            model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort)
+            model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort,
+            transcript=transcript, cwd=scenario_cwd)
 
         # Activate the scenario venv so pip installs stay local
         if venv_path:
             child_cmd = f"VIRTUAL_ENV={venv_path} PATH={venv_path}/bin:$PATH {child_cmd}"
 
-        scenario_cwd = str(clone_path) if repo_root else workdir_path
         win_name = _scenario_window_name(pr_data, scenario.index)
         try:
             tmux_mod.new_window(session, win_name, child_cmd,
                                 cwd=scenario_cwd, switch=False)
             scenario.window_name = win_name
+            scenario.transcript_path = transcript
         except Exception:
             _log.warning("Failed to create window for scenario %d",
                          scenario.index)
@@ -642,6 +651,10 @@ def _launch_scenarios_in_containers(
         container_workdir = container_mod._CONTAINER_WORKDIR
         container_scratch = container_mod._CONTAINER_SCRATCH
 
+        # Transcript symlink lives on the host; cwd must match what Claude
+        # sees inside the container so the mangled project dir is correct.
+        transcript = _scenario_transcript_path(state.qa_workdir, scenario.index)
+
         child_prompt = prompt_gen.generate_qa_child_prompt(
             data, state.pr_id, scenario,
             workdir=container_workdir,
@@ -651,7 +664,8 @@ def _launch_scenarios_in_containers(
         )
         claude_cmd = build_claude_shell_cmd(
             prompt=child_prompt,
-            model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort)
+            model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort,
+            transcript=transcript, cwd=container_workdir)
 
         # Create container with push proxy for the PR branch.
         # All QA scenarios for the same PR share a single push proxy.
@@ -684,6 +698,7 @@ def _launch_scenarios_in_containers(
             tmux_mod.new_window(session, win_name, exec_cmd,
                                 cwd=workdir_path, switch=False)
             scenario.window_name = win_name
+            scenario.transcript_path = transcript
         except Exception:
             _log.warning("Failed to create window for scenario %d",
                          scenario.index)
@@ -725,6 +740,9 @@ def _relaunch_scenario_window(
     win_name = _scenario_window_name(pr_data, scenario.index)
     use_containers = is_container_mode_enabled() and _docker_available()
 
+    # New transcript for the relaunched session (old one is stale)
+    transcript = _scenario_transcript_path(state.qa_workdir, scenario.index)
+
     try:
         if use_containers and scenario.container_name:
             # Container still running — just re-exec into it
@@ -739,7 +757,8 @@ def _relaunch_scenario_window(
             )
             claude_cmd = build_claude_shell_cmd(
                 prompt=child_prompt,
-                model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort)
+                model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort,
+                transcript=transcript, cwd=container_workdir)
             exec_cmd = container_mod.build_exec_cmd(
                 scenario.container_name, claude_cmd, cleanup=False)
             tmux_mod.new_window(session, win_name, exec_cmd,
@@ -756,7 +775,8 @@ def _relaunch_scenario_window(
             )
             child_cmd = build_claude_shell_cmd(
                 prompt=child_prompt,
-                model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort)
+                model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort,
+                transcript=transcript, cwd=str(wt_path))
             venv_path = Path(state.qa_workdir) / f"venv-{scenario.index}"
             if venv_path.is_dir():
                 child_cmd = f"VIRTUAL_ENV={venv_path} PATH={venv_path}/bin:$PATH {child_cmd}"
@@ -764,6 +784,7 @@ def _relaunch_scenario_window(
                                 cwd=str(wt_path), switch=False)
 
         scenario.window_name = win_name
+        scenario.transcript_path = transcript
         _log.info("Relaunched scenario %d in window %s", scenario.index, win_name)
         return True
     except Exception:
@@ -1008,11 +1029,18 @@ def _build_verification_prompt(scenario: QAScenario, verdict: str,
     inlined (truncated to ``_VERIFICATION_MAX_PANE_LINES``).
     """
     if pane_output_path:
+        is_jsonl = pane_output_path.endswith(".jsonl")
+        format_hint = (
+            " The file is in JSON Lines format (one JSON object per line) "
+            "— each line represents a conversation turn with role, content, "
+            "and tool use/result fields."
+            if is_jsonl else ""
+        )
         output_section = (
             f"The scenario produced the verdict: **{verdict}**\n\n"
-            f"The full session output has been saved to:\n"
+            f"The full session transcript has been saved to:\n"
             f"  {pane_output_path}\n\n"
-            f"Read that file to review the scenario output."
+            f"Read that file to review the scenario output.{format_hint}"
         )
     else:
         text = pane_output or ""
@@ -1073,85 +1101,80 @@ def _verify_single_scenario(
     Returns (passed, reason) where passed is True if the scenario was
     verified, and reason is the explanation if it was flagged.
 
-    The full pane output is written to a temporary file so the
-    verification prompt stays small while giving the verifier access to
-    the complete session transcript.
+    If the scenario has a transcript file (`.jsonl` written by Claude
+    CLI), the verifier is pointed at that file so it can read the full
+    structured session.  Otherwise the pane output is inlined with
+    truncation as a fallback.
     """
-    import tempfile
-
-    from pm_core.claude_launcher import launch_claude_print
+    from pm_core.claude_launcher import launch_claude_print, finalize_transcript
 
     resolution = _resolve_qa_model(pr_data, project_data,
                                    session_type="qa_verification")
 
-    # Write full output to a temp file for the verifier to read
-    tmp = tempfile.NamedTemporaryFile(
-        mode="w", prefix=f"qa_verify_s{scenario.index}_",
-        suffix=".txt", delete=False,
-    )
-    try:
-        tmp.write(pane_output)
-        tmp.close()
-        output_path = tmp.name
-    except Exception:
-        tmp.close()
-        os.unlink(tmp.name)
-        output_path = None
-
-    try:
-        prompt = _build_verification_prompt(
-            scenario, verdict,
-            pane_output_path=output_path,
-            pane_output=pane_output if not output_path else None,
-        )
-
-        _log.info("Verification: running claude -p for scenario %d (%s)",
-                  scenario.index, scenario.title)
+    # Prefer the transcript file if it exists (finalize first so the
+    # symlink is replaced with a real copy that survives pruning).
+    transcript_path = scenario.transcript_path
+    if transcript_path:
         try:
-            output = launch_claude_print(
-                prompt,
-                message=f"Verifying scenario {scenario.index}",
-                model=resolution.model,
-                provider=resolution.provider,
-                effort=resolution.effort,
-                allowed_tools=["Read"] if output_path else None,
-            )
+            finalize_transcript(Path(transcript_path))
         except Exception:
-            _log.warning("Verification: claude -p failed for scenario %d",
-                         scenario.index, exc_info=True)
-            # If verification itself fails, trust the original verdict
-            return True, ""
+            _log.debug("Could not finalize transcript for scenario %d",
+                       scenario.index, exc_info=True)
+        if not Path(transcript_path).exists():
+            _log.warning("Transcript for scenario %d not found at %s, "
+                         "falling back to pane output",
+                         scenario.index, transcript_path)
+            transcript_path = None
 
-        # Parse the verification output for VERIFIED or FLAGGED
-        for line in reversed(output.strip().splitlines()):
-            cleaned = re.sub(r'[*`]', '', line).strip()
-            if cleaned == "VERIFIED":
-                _log.info("Verification: scenario %d VERIFIED", scenario.index)
-                return True, ""
-            if cleaned == "FLAGGED":
-                # Get the explanation from lines before the FLAGGED verdict
-                reason_lines = []
-                for prev_line in output.strip().splitlines():
-                    prev_cleaned = re.sub(r'[*`]', '', prev_line).strip()
-                    if prev_cleaned == "FLAGGED":
-                        break
-                    if prev_cleaned:
-                        reason_lines.append(prev_cleaned)
-                reason = " ".join(reason_lines[-3:]) if reason_lines else "Scenario did not properly exercise test cases"
-                _log.info("Verification: scenario %d FLAGGED: %s",
-                          scenario.index, reason)
-                return False, reason
+    prompt = _build_verification_prompt(
+        scenario, verdict,
+        pane_output_path=transcript_path,
+        pane_output=pane_output if not transcript_path else None,
+    )
 
-        # No clear verdict from verification — trust the original
-        _log.warning("Verification: no clear verdict from claude -p for "
-                     "scenario %d, trusting original", scenario.index)
+    _log.info("Verification: running claude -p for scenario %d (%s) "
+              "[source=%s]",
+              scenario.index, scenario.title,
+              "transcript" if transcript_path else "pane")
+    try:
+        output = launch_claude_print(
+            prompt,
+            message=f"Verifying scenario {scenario.index}",
+            model=resolution.model,
+            provider=resolution.provider,
+            effort=resolution.effort,
+            allowed_tools=["Read"] if transcript_path else None,
+        )
+    except Exception:
+        _log.warning("Verification: claude -p failed for scenario %d",
+                     scenario.index, exc_info=True)
+        # If verification itself fails, trust the original verdict
         return True, ""
-    finally:
-        if output_path:
-            try:
-                os.unlink(output_path)
-            except OSError:
-                pass
+
+    # Parse the verification output for VERIFIED or FLAGGED
+    for line in reversed(output.strip().splitlines()):
+        cleaned = re.sub(r'[*`]', '', line).strip()
+        if cleaned == "VERIFIED":
+            _log.info("Verification: scenario %d VERIFIED", scenario.index)
+            return True, ""
+        if cleaned == "FLAGGED":
+            # Get the explanation from lines before the FLAGGED verdict
+            reason_lines = []
+            for prev_line in output.strip().splitlines():
+                prev_cleaned = re.sub(r'[*`]', '', prev_line).strip()
+                if prev_cleaned == "FLAGGED":
+                    break
+                if prev_cleaned:
+                    reason_lines.append(prev_cleaned)
+            reason = " ".join(reason_lines[-3:]) if reason_lines else "Scenario did not properly exercise test cases"
+            _log.info("Verification: scenario %d FLAGGED: %s",
+                      scenario.index, reason)
+            return False, reason
+
+    # No clear verdict from verification — trust the original
+    _log.warning("Verification: no clear verdict from claude -p for "
+                 "scenario %d, trusting original", scenario.index)
+    return True, ""
 
 
 # ---------------------------------------------------------------------------

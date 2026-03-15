@@ -1364,14 +1364,23 @@ class TestBuildVerificationPrompt:
                                             pane_output=long_output)
         assert "truncated" in prompt.lower()
 
-    def test_file_path_mode(self):
+    def test_file_path_mode_plain(self):
         scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
         prompt = _build_verification_prompt(scenario, "PASS",
                                             pane_output_path="/tmp/qa_verify.txt")
         assert "/tmp/qa_verify.txt" in prompt
         assert "Read that file" in prompt
-        # Should NOT contain inline output tags
         assert "<scenario_output>" not in prompt
+        # Plain text file — no JSONL hint
+        assert "JSON Lines" not in prompt
+
+    def test_file_path_mode_jsonl(self):
+        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
+        prompt = _build_verification_prompt(
+            scenario, "PASS",
+            pane_output_path="/tmp/transcript-s1.jsonl")
+        assert "transcript-s1.jsonl" in prompt
+        assert "JSON Lines" in prompt
 
     def test_includes_verification_instructions(self):
         scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
@@ -1423,14 +1432,27 @@ class TestVerifySingleScenario:
             )
         assert passed is True
 
-    def test_temp_file_cleaned_up(self):
-        """Temp file with pane output is removed after verification."""
-        import glob
-        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
-        before = set(glob.glob("/tmp/qa_verify_s1_*"))
+    def test_uses_transcript_when_available(self, tmp_path):
+        """When scenario has a transcript, prompt references the file."""
+        transcript = tmp_path / "transcript-s1.jsonl"
+        transcript.write_text('{"role":"assistant","content":"done"}\n')
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", transcript_path=str(transcript))
         with patch("pm_core.claude_launcher.launch_claude_print",
-                   return_value="VERIFIED"):
-            _verify_single_scenario(scenario, "PASS", "output", {}, {})
-        after = set(glob.glob("/tmp/qa_verify_s1_*"))
-        # No new temp files should remain
-        assert after == before
+                   return_value="VERIFIED") as mock_print:
+            passed, _ = _verify_single_scenario(
+                scenario, "PASS", "pane output", {}, {})
+        assert passed is True
+        # The prompt should reference the transcript, not inline pane output
+        prompt_arg = mock_print.call_args[0][0]
+        assert str(transcript) in prompt_arg
+        assert "pane output" not in prompt_arg
+
+    def test_falls_back_to_pane_when_no_transcript(self):
+        """Without a transcript, pane output is inlined."""
+        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
+        with patch("pm_core.claude_launcher.launch_claude_print",
+                   return_value="VERIFIED") as mock_print:
+            _verify_single_scenario(scenario, "PASS", "pane output", {}, {})
+        prompt_arg = mock_print.call_args[0][0]
+        assert "pane output" in prompt_arg
