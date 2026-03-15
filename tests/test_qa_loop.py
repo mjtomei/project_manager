@@ -21,7 +21,10 @@ from pm_core.qa_loop import (
     _build_verification_prompt,
     _verify_single_scenario,
     _is_verification_enabled,
+    _extract_flagged_reason,
+    _get_verification_max_retries,
     _VERIFICATION_MAX_PANE_LINES,
+    _DEFAULT_VERIFICATION_MAX_RETRIES,
 )
 
 
@@ -1388,7 +1391,8 @@ class TestBuildVerificationPrompt:
         prompt = _build_verification_prompt(scenario, "PASS",
                                             pane_output="output")
         assert "VERIFIED" in prompt
-        assert "FLAGGED" in prompt
+        assert "FLAGGED_START" in prompt
+        assert "FLAGGED_END" in prompt
 
 
 class TestVerifySingleScenario:
@@ -1429,7 +1433,7 @@ class TestVerifySingleScenario:
     def test_flagged_result(self):
         scenario = QAScenario(index=1, title="Test", focus="test",
                               steps="steps", window_name="qa-s1")
-        content = "The scenario did not run any tests.\n\nFLAGGED"
+        content = "FLAGGED_START\nThe scenario did not run any tests.\nFLAGGED_END"
         passed, reason = self._mock_verify(scenario, "PASS", "output", content)
         assert passed is False
         assert "did not run" in reason.lower()
@@ -1539,3 +1543,70 @@ class TestVerificationSetting:
         for val in ("1", "true", "yes", "on"):
             with patch("pm_core.paths.get_global_setting_value", return_value=val):
                 assert _is_verification_enabled() is True, f"Expected enabled for {val!r}"
+
+
+class TestExtractFlaggedReason:
+    """Tests for _extract_flagged_reason."""
+
+    def test_basic_extraction(self):
+        content = "Some preamble\nFLAGGED_START\nThe test was not run.\nFLAGGED_END"
+        assert _extract_flagged_reason(content) == "The test was not run."
+
+    def test_multiline_reason(self):
+        content = (
+            "FLAGGED_START\n"
+            "Step 2 was skipped entirely.\n"
+            "Step 4 used code reading instead of execution.\n"
+            "The scenario substituted unit tests for runtime testing.\n"
+            "FLAGGED_END"
+        )
+        reason = _extract_flagged_reason(content)
+        assert "Step 2" in reason
+        assert "Step 4" in reason
+        assert "substituted" in reason
+        assert "\n" in reason  # multiline preserved
+
+    def test_missing_end_marker(self):
+        content = "FLAGGED_START\nPartial reason without end"
+        reason = _extract_flagged_reason(content)
+        assert "Partial reason" in reason
+
+    def test_no_markers_returns_default(self):
+        content = "Some random output with no markers"
+        reason = _extract_flagged_reason(content)
+        assert reason == "Scenario did not properly exercise test cases"
+
+    def test_strips_markdown_formatting(self):
+        content = "FLAGGED_START\n**Bold** and `code` formatting\nFLAGGED_END"
+        reason = _extract_flagged_reason(content)
+        assert "Bold" in reason
+        assert "code" in reason
+
+    def test_empty_between_markers(self):
+        content = "FLAGGED_START\nFLAGGED_END"
+        reason = _extract_flagged_reason(content)
+        assert reason == "Scenario did not properly exercise test cases"
+
+
+class TestVerificationMaxRetries:
+    """Tests for _get_verification_max_retries global setting."""
+
+    def test_default_value(self):
+        with patch("pm_core.paths.get_global_setting_value", return_value=""):
+            assert _get_verification_max_retries() == _DEFAULT_VERIFICATION_MAX_RETRIES
+
+    def test_custom_value(self):
+        with patch("pm_core.paths.get_global_setting_value", return_value="3"):
+            assert _get_verification_max_retries() == 3
+
+    def test_zero_value(self):
+        with patch("pm_core.paths.get_global_setting_value", return_value="0"):
+            assert _get_verification_max_retries() == 0
+
+    def test_invalid_value_returns_default(self):
+        with patch("pm_core.paths.get_global_setting_value", return_value="abc"):
+            assert _get_verification_max_retries() == _DEFAULT_VERIFICATION_MAX_RETRIES
+
+    def test_negative_clamped_to_zero(self):
+        with patch("pm_core.paths.get_global_setting_value", return_value="-1"):
+            assert _get_verification_max_retries() == 0

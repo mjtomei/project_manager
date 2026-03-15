@@ -62,6 +62,16 @@ def _get_max_scenarios() -> int:
     except ValueError:
         return _DEFAULT_MAX_SCENARIOS
 
+def _get_verification_max_retries() -> int:
+    """Read qa-verify-retries from global settings (default: 1)."""
+    from pm_core.paths import get_global_setting_value
+    val = get_global_setting_value("qa-verify-retries", "")
+    try:
+        return max(0, int(val))
+    except ValueError:
+        return _DEFAULT_VERIFICATION_MAX_RETRIES
+
+
 def _is_verification_enabled() -> bool:
     """Check if PASS verdict verification is enabled (default: True).
 
@@ -829,8 +839,10 @@ def _poll_tmux_verdicts(
     from pm_core import tmux as tmux_mod
 
     verify_enabled = _is_verification_enabled()
+    verify_max_retries = _get_verification_max_retries()
     if verify_enabled:
-        _log.info("PASS verdict verification is enabled")
+        _log.info("PASS verdict verification is enabled (max retries: %d)",
+                  verify_max_retries)
     else:
         _log.info("PASS verdict verification is disabled (qa-verify-pass)")
 
@@ -907,14 +919,14 @@ def _poll_tmux_verdicts(
                 _log.info("Verification FLAGGED scenario %d (%s), attempt %d: %s",
                           scenario_idx, scenario.title, fails, reason)
 
-                if fails > _VERIFICATION_MAX_RETRIES:
-                    # Too many verification failures — mark NEEDS_WORK
+                if fails > verify_max_retries:
+                    # Too many verification failures — mark INPUT_REQUIRED
                     _log.warning("Scenario %d failed verification %d times — "
-                                 "marking NEEDS_WORK", scenario_idx, fails)
-                    state.scenario_verdicts[scenario_idx] = VERDICT_NEEDS_WORK
+                                 "marking INPUT_REQUIRED", scenario_idx, fails)
+                    state.scenario_verdicts[scenario_idx] = VERDICT_INPUT_REQUIRED
                     state.latest_output = (
                         f"Scenario {scenario_idx} ({scenario.title}): "
-                        f"NEEDS_WORK (failed verification)"
+                        f"INPUT_REQUIRED (failed verification)"
                     )
                     verdicts_changed = True
                     _notify()
@@ -946,12 +958,12 @@ def _poll_tmux_verdicts(
                         _notify()
                     else:
                         _log.warning("Cannot send follow-up to scenario %d — "
-                                     "window gone, marking NEEDS_WORK",
+                                     "window gone, marking INPUT_REQUIRED",
                                      scenario_idx)
-                        state.scenario_verdicts[scenario_idx] = VERDICT_NEEDS_WORK
+                        state.scenario_verdicts[scenario_idx] = VERDICT_INPUT_REQUIRED
                         state.latest_output = (
                             f"Scenario {scenario_idx} ({scenario.title}): "
-                            f"NEEDS_WORK (window gone during verification)"
+                            f"INPUT_REQUIRED (window gone during verification)"
                         )
                         verdicts_changed = True
                         _notify()
@@ -1052,7 +1064,7 @@ _VERIFICATION_MAX_PANE_LINES = 500
 # Maximum number of times a scenario can fail verification before being
 # marked NEEDS_WORK.  After this many failures the scenario is not sent
 # another follow-up message.
-_VERIFICATION_MAX_RETRIES = 1
+_DEFAULT_VERIFICATION_MAX_RETRIES = 1
 
 
 def _build_verification_prompt(scenario: QAScenario, verdict: str,
@@ -1142,15 +1154,38 @@ Mark each step as:
 
 ## Response Format
 
-Present your step-by-step checklist with the DONE/SKIPPED/SUBSTITUTED/FAILED annotations, then respond with EXACTLY one of these on its own line:
+Present your step-by-step checklist with the DONE/SKIPPED/SUBSTITUTED/FAILED annotations, then respond with EXACTLY one of:
 
-VERIFIED — The PASS is genuine: the scenario executed its test steps and they succeeded.
-FLAGGED — The PASS is not justified: the scenario did not properly exercise its test cases, or the output contradicts a PASS.
+If the PASS is genuine:
+VERIFIED
 
-If FLAGGED, include a brief explanation (1-2 sentences) of what went wrong BEFORE the FLAGGED verdict."""
+If the PASS is not justified, wrap your explanation in markers:
+FLAGGED_START
+<explanation of what went wrong — can be multiple lines>
+FLAGGED_END"""
 
 
-_VERIFICATION_VERDICTS = ("VERIFIED", "FLAGGED")
+_VERIFICATION_VERDICTS = ("VERIFIED", "FLAGGED_END")
+_VERIFICATION_KEYWORDS = ("VERIFIED", "FLAGGED_START", "FLAGGED_END")
+
+
+def _extract_flagged_reason(content: str) -> str:
+    """Extract the reason text between FLAGGED_START and FLAGGED_END markers."""
+    lines = content.strip().splitlines()
+    in_flagged = False
+    reason_lines: list[str] = []
+    for line in lines:
+        cleaned = re.sub(r'[*`]', '', line).strip()
+        if cleaned == "FLAGGED_START":
+            in_flagged = True
+            continue
+        if cleaned == "FLAGGED_END":
+            break
+        if in_flagged:
+            reason_lines.append(line.strip())
+    return "\n".join(reason_lines).strip() or (
+        "Scenario did not properly exercise test cases"
+    )
 
 
 def _verify_single_scenario(
@@ -1269,7 +1304,7 @@ def _verify_single_scenario(
         content = poll_for_verdict(
             verify_pane,
             verdicts=_VERIFICATION_VERDICTS,
-            keywords=_VERIFICATION_VERDICTS,
+            keywords=_VERIFICATION_KEYWORDS,
             grace_period=_VERDICT_GRACE_PERIOD,
             poll_interval=_POLL_INTERVAL,
             tick_interval=_TICK_INTERVAL,
@@ -1289,23 +1324,14 @@ def _verify_single_scenario(
         v = extract_verdict_from_content(
             content,
             verdicts=_VERIFICATION_VERDICTS,
-            keywords=_VERIFICATION_VERDICTS,
+            keywords=_VERIFICATION_KEYWORDS,
             log_prefix=f"qa-verify-{scenario.index}",
         )
         if v == "VERIFIED":
             _log.info("Verification: scenario %d VERIFIED", scenario.index)
-        elif v == "FLAGGED":
-            # Extract reason from content — look for lines before FLAGGED
-            reason_lines = []
-            for line in content.strip().splitlines():
-                cleaned = re.sub(r'[*`]', '', line).strip()
-                if cleaned == "FLAGGED":
-                    break
-                if cleaned and cleaned not in _VERIFICATION_VERDICTS:
-                    reason_lines.append(cleaned)
-            reason = " ".join(reason_lines[-3:]) if reason_lines else (
-                "Scenario did not properly exercise test cases"
-            )
+        elif v == "FLAGGED_END":
+            # Extract reason between FLAGGED_START and FLAGGED_END markers
+            reason = _extract_flagged_reason(content)
             _log.info("Verification: scenario %d FLAGGED: %s",
                       scenario.index, reason)
             passed = False
