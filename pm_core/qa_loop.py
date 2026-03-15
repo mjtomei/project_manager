@@ -1192,10 +1192,14 @@ def _build_verification_prompt(scenario: QAScenario, verdict: str,
         text = pane_output or ""
         lines = text.splitlines()
         if len(lines) > _VERIFICATION_MAX_PANE_LINES:
-            truncated = lines[:_VERIFICATION_MAX_PANE_LINES]
-            text = "\n".join(truncated) + (
-                f"\n\n[... truncated {len(lines) - _VERIFICATION_MAX_PANE_LINES}"
-                f" more lines ...]"
+            # Keep both head and tail so the verifier sees setup AND verdict
+            head_lines = _VERIFICATION_MAX_PANE_LINES // 4
+            tail_lines = _VERIFICATION_MAX_PANE_LINES - head_lines
+            omitted = len(lines) - head_lines - tail_lines
+            text = (
+                "\n".join(lines[:head_lines])
+                + f"\n\n[... {omitted} lines omitted ...]\n\n"
+                + "\n".join(lines[-tail_lines:])
             )
         output_section = (
             f"The scenario produced the verdict: **{verdict}**\n\n"
@@ -1381,12 +1385,7 @@ def _verify_single_scenario(
     # review window: register panes, reset user_modified, then rebalance.
     win_id = None
     try:
-        wid_result = subprocess.run(
-            tmux_mod._tmux_cmd("display", "-t", scenario_pane,
-                               "-p", "#{window_id}"),
-            capture_output=True, text=True,
-        )
-        win_id = wid_result.stdout.strip() or None
+        win_id = tmux_mod.pane_window_id(scenario_pane)
         if win_id:
             tmux_mod.set_shared_window_size(session, win_id)
             pane_registry.register_pane(

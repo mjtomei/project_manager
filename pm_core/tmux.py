@@ -562,6 +562,15 @@ def pane_exists(pane_id: str) -> bool:
     return result.returncode == 0
 
 
+def pane_window_id(pane_id: str) -> str | None:
+    """Return the window ID (e.g. ``@1``) that contains *pane_id*, or ``None``."""
+    result = subprocess.run(
+        _tmux_cmd("display", "-t", pane_id, "-p", "#{window_id}"),
+        capture_output=True, text=True,
+    )
+    return result.stdout.strip() or None
+
+
 def sessions_on_window(base: str, window_id: str) -> list[str]:
     """Return all sessions in the group (base + grouped) whose active window matches *window_id*.
 

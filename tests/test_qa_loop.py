@@ -1341,10 +1341,15 @@ class TestBuildVerificationPrompt:
 
     def test_truncates_long_inline_output(self):
         scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
-        long_output = "\n".join([f"line {i}" for i in range(_VERIFICATION_MAX_PANE_LINES + 100)])
+        total = _VERIFICATION_MAX_PANE_LINES + 100
+        long_output = "\n".join([f"line {i}" for i in range(total)])
         prompt = _build_verification_prompt(scenario, "PASS",
                                             pane_output=long_output)
-        assert "truncated" in prompt.lower()
+        assert "omitted" in prompt.lower()
+        # Head lines should be present
+        assert "line 0" in prompt
+        # Tail lines (including the last line) should be present
+        assert f"line {total - 1}" in prompt
 
     def test_file_path_mode_plain(self):
         scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
