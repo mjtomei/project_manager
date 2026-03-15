@@ -1125,7 +1125,6 @@ If FLAGGED, include a brief explanation (1-2 sentences) of what went wrong BEFOR
 
 
 _VERIFICATION_VERDICTS = ("VERIFIED", "FLAGGED")
-_VERIFICATION_KEYWORDS = ("VERIFIED", "FLAGGED")
 
 
 def _verify_single_scenario(
@@ -1230,7 +1229,7 @@ def _verify_single_scenario(
         content = poll_for_verdict(
             verify_pane,
             verdicts=_VERIFICATION_VERDICTS,
-            keywords=_VERIFICATION_KEYWORDS,
+            keywords=_VERIFICATION_VERDICTS,
             grace_period=_VERDICT_GRACE_PERIOD,
             poll_interval=_POLL_INTERVAL,
             tick_interval=_TICK_INTERVAL,
@@ -1241,13 +1240,22 @@ def _verify_single_scenario(
                      scenario.index, exc_info=True)
         content = None
 
+    # Clean up the verification pane now that polling is done
+    try:
+        pane_registry.kill_and_unregister(session, verify_pane)
+        if win_id:
+            pane_layout.rebalance(session, win_id)
+    except Exception:
+        _log.debug("Verification: cleanup failed for scenario %d pane",
+                   scenario.index, exc_info=True)
+
     # Parse the result
     passed, reason = True, ""
     if content:
         v = extract_verdict_from_content(
             content,
             verdicts=_VERIFICATION_VERDICTS,
-            keywords=_VERIFICATION_KEYWORDS,
+            keywords=_VERIFICATION_VERDICTS,
             log_prefix=f"qa-verify-{scenario.index}",
         )
         if v == "VERIFIED":
@@ -1259,7 +1267,7 @@ def _verify_single_scenario(
                 cleaned = re.sub(r'[*`]', '', line).strip()
                 if cleaned == "FLAGGED":
                     break
-                if cleaned and cleaned not in _VERIFICATION_KEYWORDS:
+                if cleaned and cleaned not in _VERIFICATION_VERDICTS:
                     reason_lines.append(cleaned)
             reason = " ".join(reason_lines[-3:]) if reason_lines else (
                 "Scenario did not properly exercise test cases"
