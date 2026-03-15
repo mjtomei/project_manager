@@ -1,6 +1,7 @@
 ---
 title: "Status Filter & Merged Toggle"
 description: Test F key status filter cycling and X key merged PR toggle
+tags: [tui, local, vanilla, github, containerized, uncontainerized]
 ---
 You are testing the status filter and merged toggle features in the pm TUI.
 Your goal is to verify that the F key cycles through status filters and the

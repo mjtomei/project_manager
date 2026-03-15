@@ -1,6 +1,7 @@
 ---
 title: Guide Progress Widget
 description: Test that guide progress widget displays correct step indicators
+tags: [tui, local, vanilla, github, containerized, uncontainerized]
 ---
 You are testing the GuideProgress widget in the pm TUI. Your goal is to verify
 that the widget correctly displays step progress indicators as the user moves

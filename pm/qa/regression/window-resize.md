@@ -1,6 +1,7 @@
 ---
 title: Window Resize Rebalance
 description: Test that layout auto-rebalances on window resize (portrait vs landscape)
+tags: [tui, local, vanilla, github, containerized, uncontainerized]
 ---
 You are testing that pane layout automatically rebalances when the terminal
 window is resized -- the core behavior of the window-size=smallest grouped-session

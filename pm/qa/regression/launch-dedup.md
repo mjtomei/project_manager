@@ -1,6 +1,7 @@
 ---
 title: Pane Launch Deduplication
 description: Test that pane launch keys (g, n) don't create duplicates
+tags: [tui, local, vanilla, github, containerized, uncontainerized]
 ---
 You are testing that the TUI pane launch commands don't create duplicate panes.
 Your goal is to verify that pressing 'g' (guide), 'n' (notes), or other pane

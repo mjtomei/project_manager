@@ -1,6 +1,7 @@
 ---
 title: PR Interaction
 description: Test PR navigation, selection, status changes, and actions
+tags: [tui, local, vanilla, github, containerized, uncontainerized]
 ---
 You are testing the PR interaction functionality in the pm TUI. Your goal is to verify
 that users can navigate, select, and manage PRs through the tech tree interface.

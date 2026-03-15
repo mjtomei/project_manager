@@ -1,6 +1,7 @@
 ---
 title: Help Screen & Keybindings
 description: Open help screen with ? and verify all documented keybindings work
+tags: [tui, local, vanilla, github, containerized, uncontainerized]
 ---
 You are testing the pm TUI help screen and verifying that every keybinding
 documented in the help screen actually works. Your goal is to open the help

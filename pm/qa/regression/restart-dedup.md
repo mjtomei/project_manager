@@ -1,6 +1,7 @@
 ---
 title: TUI Restart Pane Deduplication
 description: Test that restarting TUI doesn't create duplicate panes
+tags: [tui, local, vanilla, github, containerized, uncontainerized]
 ---
 You are testing that restarting the TUI does not create duplicate panes. Your goal
 is to verify that when the TUI restarts (e.g., via 'R' key or crash recovery), it

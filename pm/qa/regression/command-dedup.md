@@ -1,6 +1,7 @@
 ---
 title: Command Deduplication
 description: Test that PR actions block concurrent/duplicate execution
+tags: [tui, local, vanilla, github, containerized, uncontainerized]
 ---
 You are testing the pm TUI command deduplication behavior. Your goal is to verify
 that PR action commands cannot be triggered concurrently, preventing race conditions.

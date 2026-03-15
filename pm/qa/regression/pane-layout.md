@@ -1,6 +1,7 @@
 ---
 title: Pane Layout Refresh
 description: Test that pane kill/relaunch properly refreshes layout
+tags: [tui, local, vanilla, github, containerized, uncontainerized]
 ---
 You are testing the pm TUI pane layout refresh behavior. Your goal is to verify
 that when panes are killed and relaunched, the layout is properly refreshed.

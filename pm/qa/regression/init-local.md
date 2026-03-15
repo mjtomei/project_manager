@@ -1,6 +1,7 @@
 ---
 title: "Init: Local Repo"
 description: "Test pm init with a local repo (no remote) -- verifies backend, commands, TUI"
+tags: [core, local]
 ---
 
 ## Prerequisite Setup

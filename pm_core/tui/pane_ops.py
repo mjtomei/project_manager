@@ -427,6 +427,13 @@ To interact with this session, use commands like:
     launch_pane(app, cmd, "qa-item")
 
 
+def launch_regression_suite(app) -> None:
+    """Launch the full regression test suite in a pane."""
+    cmd = "pm qa regression"
+    app.log_message("Launching regression test suite...")
+    launch_pane(app, cmd, "regression")
+
+
 # ---------------------------------------------------------------------------
 # Plan and test pane actions
 # ---------------------------------------------------------------------------
