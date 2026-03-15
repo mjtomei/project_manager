@@ -28,6 +28,7 @@ from pm_core.loop_shared import (
     find_claude_pane,
     get_pm_session,
     extract_verdict_from_content,
+    poll_for_verdict,
     VERDICT_TAIL_LINES,
     VerdictStabilityTracker,
 )
@@ -860,10 +861,11 @@ def _poll_tmux_verdicts(
     grace_start = time.monotonic()
 
     def _run_verification(scenario: QAScenario, verdict: str, content: str):
-        """Background thread: run claude -p verification for one scenario."""
+        """Background thread: run verification in a visible pane."""
         try:
             passed, reason = _verify_single_scenario(
                 scenario, verdict, content, pr_data, data,
+                session=session,
             )
         except Exception:
             _log.warning("Verification thread crashed for scenario %d",
@@ -1122,24 +1124,35 @@ FLAGGED — The PASS is not justified: the scenario did not properly exercise it
 If FLAGGED, include a brief explanation (1-2 sentences) of what went wrong BEFORE the FLAGGED verdict."""
 
 
+_VERIFICATION_VERDICTS = ("VERIFIED", "FLAGGED")
+_VERIFICATION_KEYWORDS = ("VERIFIED", "FLAGGED")
+
+
 def _verify_single_scenario(
     scenario: QAScenario,
     verdict: str,
     pane_output: str,
     pr_data: dict,
     project_data: dict | None = None,
+    session: str | None = None,
 ) -> tuple[bool, str]:
-    """Verify a single scenario's verdict using Claude -p.
+    """Verify a single scenario's verdict in a visible tmux pane.
+
+    Splits the scenario's tmux window to create a verification pane
+    running an interactive Claude session.  The user can see the
+    verification happening live.  Polls the pane for VERIFIED/FLAGGED,
+    then closes it.
 
     Returns (passed, reason) where passed is True if the scenario was
     verified, and reason is the explanation if it was flagged.
 
-    If the scenario has a transcript file (`.jsonl` written by Claude
+    If the scenario has a transcript file (``.jsonl`` written by Claude
     CLI), the verifier is pointed at that file so it can read the full
     structured session.  Otherwise the pane output is inlined with
     truncation as a fallback.
     """
-    from pm_core.claude_launcher import launch_claude_print, finalize_transcript
+    from pm_core import tmux as tmux_mod
+    from pm_core.claude_launcher import build_claude_shell_cmd, finalize_transcript
 
     resolution = _resolve_qa_model(pr_data, project_data,
                                    session_type="qa_verification")
@@ -1165,49 +1178,86 @@ def _verify_single_scenario(
         pane_output=pane_output if not transcript_path else None,
     )
 
-    _log.info("Verification: running claude -p for scenario %d (%s) "
+    # Find the scenario's pane to split
+    scenario_pane = _get_scenario_pane(session, scenario.window_name) if session else None
+    if not scenario_pane:
+        _log.warning("Verification: cannot find scenario %d pane, "
+                     "trusting original verdict", scenario.index)
+        return True, ""
+
+    # Build the verification claude command
+    verify_cmd = build_claude_shell_cmd(
+        prompt=prompt,
+        model=resolution.model,
+        provider=resolution.provider,
+        effort=resolution.effort,
+    )
+
+    # Split the scenario window vertically to show the verification pane
+    _log.info("Verification: splitting pane for scenario %d (%s) "
               "[source=%s]",
               scenario.index, scenario.title,
               "transcript" if transcript_path else "pane")
     try:
-        output = launch_claude_print(
-            prompt,
-            message=f"Verifying scenario {scenario.index}",
-            model=resolution.model,
-            provider=resolution.provider,
-            effort=resolution.effort,
-            allowed_tools=["Read"] if transcript_path else None,
+        verify_pane = tmux_mod.split_pane_at(
+            scenario_pane, "v", verify_cmd, background=True,
         )
     except Exception:
-        _log.warning("Verification: claude -p failed for scenario %d",
+        _log.warning("Verification: failed to split pane for scenario %d, "
+                     "trusting original verdict",
                      scenario.index, exc_info=True)
-        # If verification itself fails, trust the original verdict
         return True, ""
 
-    # Parse the verification output for VERIFIED or FLAGGED
-    for line in reversed(output.strip().splitlines()):
-        cleaned = re.sub(r'[*`]', '', line).strip()
-        if cleaned == "VERIFIED":
+    # Poll the verification pane for VERIFIED or FLAGGED
+    try:
+        content = poll_for_verdict(
+            verify_pane,
+            verdicts=_VERIFICATION_VERDICTS,
+            keywords=_VERIFICATION_KEYWORDS,
+            grace_period=_VERDICT_GRACE_PERIOD,
+            poll_interval=_POLL_INTERVAL,
+            tick_interval=_TICK_INTERVAL,
+            log_prefix=f"qa-verify-{scenario.index}",
+        )
+    except Exception:
+        _log.warning("Verification: polling failed for scenario %d",
+                     scenario.index, exc_info=True)
+        content = None
+
+    # Parse the result
+    passed, reason = True, ""
+    if content:
+        v = extract_verdict_from_content(
+            content,
+            verdicts=_VERIFICATION_VERDICTS,
+            keywords=_VERIFICATION_KEYWORDS,
+            log_prefix=f"qa-verify-{scenario.index}",
+        )
+        if v == "VERIFIED":
             _log.info("Verification: scenario %d VERIFIED", scenario.index)
-            return True, ""
-        if cleaned == "FLAGGED":
-            # Get the explanation from lines before the FLAGGED verdict
+        elif v == "FLAGGED":
+            # Extract reason from content — look for lines before FLAGGED
             reason_lines = []
-            for prev_line in output.strip().splitlines():
-                prev_cleaned = re.sub(r'[*`]', '', prev_line).strip()
-                if prev_cleaned == "FLAGGED":
+            for line in content.strip().splitlines():
+                cleaned = re.sub(r'[*`]', '', line).strip()
+                if cleaned == "FLAGGED":
                     break
-                if prev_cleaned:
-                    reason_lines.append(prev_cleaned)
-            reason = " ".join(reason_lines[-3:]) if reason_lines else "Scenario did not properly exercise test cases"
+                if cleaned and cleaned not in _VERIFICATION_KEYWORDS:
+                    reason_lines.append(cleaned)
+            reason = " ".join(reason_lines[-3:]) if reason_lines else (
+                "Scenario did not properly exercise test cases"
+            )
             _log.info("Verification: scenario %d FLAGGED: %s",
                       scenario.index, reason)
-            return False, reason
+            passed = False
+        else:
+            _log.warning("Verification: unexpected verdict %r for scenario %d, "
+                         "trusting original", v, scenario.index)
+    else:
+        _log.warning("Verification: pane disappeared or timed out for "
+                     "scenario %d, trusting original", scenario.index)
 
-    # No clear verdict from verification — trust the original
-    _log.warning("Verification: no clear verdict from claude -p for "
-                 "scenario %d, trusting original", scenario.index)
-    return True, ""
+    return passed, reason
 
 
 # ---------------------------------------------------------------------------

@@ -1394,43 +1394,64 @@ class TestBuildVerificationPrompt:
 class TestVerifySingleScenario:
     """Tests for _verify_single_scenario."""
 
-    def test_verified_result(self):
-        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
-        with patch("pm_core.claude_launcher.launch_claude_print", return_value="The scenario looks good.\n\nVERIFIED"):
-            passed, reason = _verify_single_scenario(
-                scenario, "PASS", "lots of output", {}, {},
+    def _mock_verify(self, scenario, verdict, pane_output, poll_content,
+                     pr_data=None, project_data=None):
+        """Helper: run _verify_single_scenario with mocked tmux ops."""
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+             patch("pm_core.tmux.split_pane_at", return_value="%2"), \
+             patch("pm_core.qa_loop.poll_for_verdict", return_value=poll_content), \
+             patch("pm_core.claude_launcher.build_claude_shell_cmd", return_value="claude ..."):
+            return _verify_single_scenario(
+                scenario, verdict, pane_output,
+                pr_data or {}, project_data or {},
+                session="pm-session",
             )
+
+    def test_verified_result(self):
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1")
+        content = "The scenario looks good.\n\nVERIFIED"
+        passed, reason = self._mock_verify(scenario, "PASS", "output", content)
         assert passed is True
         assert reason == ""
 
     def test_flagged_result(self):
-        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
-        with patch("pm_core.claude_launcher.launch_claude_print",
-                   return_value="The scenario did not run any tests.\n\nFLAGGED"):
-            passed, reason = _verify_single_scenario(
-                scenario, "PASS", "minimal output", {}, {},
-            )
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1")
+        content = "The scenario did not run any tests.\n\nFLAGGED"
+        passed, reason = self._mock_verify(scenario, "PASS", "output", content)
         assert passed is False
         assert "did not run" in reason.lower()
 
-    def test_claude_failure_trusts_original(self):
-        """If claude -p fails, trust the original verdict."""
-        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
-        with patch("pm_core.claude_launcher.launch_claude_print",
-                   side_effect=FileNotFoundError("claude not found")):
+    def test_pane_split_failure_trusts_original(self):
+        """If we can't split a pane, trust the original verdict."""
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1")
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+             patch("pm_core.tmux.split_pane_at", side_effect=Exception("split failed")), \
+             patch("pm_core.claude_launcher.build_claude_shell_cmd", return_value="claude ..."):
             passed, reason = _verify_single_scenario(
                 scenario, "PASS", "output", {}, {},
+                session="pm-session",
             )
         assert passed is True
 
-    def test_no_clear_verdict_trusts_original(self):
-        """If claude -p returns no VERIFIED/FLAGGED, trust original."""
-        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
-        with patch("pm_core.claude_launcher.launch_claude_print",
-                   return_value="I'm not sure about this scenario."):
+    def test_no_pane_trusts_original(self):
+        """If scenario pane is gone, trust the original verdict."""
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1")
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value=None):
             passed, reason = _verify_single_scenario(
                 scenario, "PASS", "output", {}, {},
+                session="pm-session",
             )
+        assert passed is True
+
+    def test_poll_returns_none_trusts_original(self):
+        """If polling returns None (pane died), trust original."""
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1")
+        passed, reason = self._mock_verify(scenario, "PASS", "output", None)
         assert passed is True
 
     def test_uses_transcript_when_available(self, tmp_path):
@@ -1438,25 +1459,37 @@ class TestVerifySingleScenario:
         transcript = tmp_path / "transcript-s1.jsonl"
         transcript.write_text('{"role":"assistant","content":"done"}\n')
         scenario = QAScenario(index=1, title="Test", focus="test",
-                              steps="steps", transcript_path=str(transcript))
-        with patch("pm_core.claude_launcher.launch_claude_print",
-                   return_value="VERIFIED") as mock_print:
+                              steps="steps", window_name="qa-s1",
+                              transcript_path=str(transcript))
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+             patch("pm_core.tmux.split_pane_at", return_value="%2"), \
+             patch("pm_core.qa_loop.poll_for_verdict", return_value="VERIFIED"), \
+             patch("pm_core.claude_launcher.build_claude_shell_cmd",
+                   return_value="claude ...") as mock_cmd:
             passed, _ = _verify_single_scenario(
-                scenario, "PASS", "pane output", {}, {})
+                scenario, "PASS", "pane output", {}, {},
+                session="pm-session")
         assert passed is True
-        # The prompt should reference the transcript, not inline pane output
-        prompt_arg = mock_print.call_args[0][0]
-        assert str(transcript) in prompt_arg
-        assert "pane output" not in prompt_arg
+        # The prompt passed to build_claude_shell_cmd should reference transcript
+        prompt_arg = mock_cmd.call_args[1].get("prompt") or mock_cmd.call_args[0][0] if mock_cmd.call_args[0] else ""
+        # build_claude_shell_cmd gets prompt= kwarg
+        call_kwargs = mock_cmd.call_args
+        assert str(transcript) in (call_kwargs.kwargs.get("prompt", "") or "")
 
     def test_falls_back_to_pane_when_no_transcript(self):
-        """Without a transcript, pane output is inlined."""
-        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
-        with patch("pm_core.claude_launcher.launch_claude_print",
-                   return_value="VERIFIED") as mock_print:
-            _verify_single_scenario(scenario, "PASS", "pane output", {}, {})
-        prompt_arg = mock_print.call_args[0][0]
-        assert "pane output" in prompt_arg
+        """Without a transcript, pane output is inlined in the prompt."""
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1")
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+             patch("pm_core.tmux.split_pane_at", return_value="%2"), \
+             patch("pm_core.qa_loop.poll_for_verdict", return_value="VERIFIED"), \
+             patch("pm_core.claude_launcher.build_claude_shell_cmd",
+                   return_value="claude ...") as mock_cmd:
+            _verify_single_scenario(
+                scenario, "PASS", "pane output", {}, {},
+                session="pm-session")
+        call_kwargs = mock_cmd.call_args
+        assert "pane output" in (call_kwargs.kwargs.get("prompt", "") or "")
 
 
 class TestVerificationSetting:
