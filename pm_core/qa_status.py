@@ -53,7 +53,7 @@ _VERDICT_COLORS = {
     "interactive": _DIM,
 }
 
-_REFRESH_INTERVAL = 2.0  # seconds
+_REFRESH_INTERVAL = 1.0  # seconds
 _SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
 
 

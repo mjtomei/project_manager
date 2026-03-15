@@ -600,9 +600,14 @@ def start_push_proxy(container_name: str, workdir: str,
 
         # Socket missing or dead — spawn a new subprocess proxy
         os.makedirs(sock_dir, exist_ok=True)
-        # Remove stale socket before spawning
+        # Remove stale socket before spawning.  Docker creates a
+        # *directory* when bind-mounting a non-existent socket path, so
+        # handle both files and directories left over from old runs.
         try:
             os.unlink(sock_path)
+        except IsADirectoryError:
+            import shutil
+            shutil.rmtree(sock_path, ignore_errors=True)
         except FileNotFoundError:
             pass
 
@@ -622,9 +627,13 @@ def start_push_proxy(container_name: str, workdir: str,
                             f"{_SOCKET_DIR_PREFIX}{container_name}")
     os.makedirs(sock_dir, exist_ok=True)
     sock_path = os.path.join(sock_dir, "push.sock")
-    # Remove stale socket before spawning
+    # Remove stale socket before spawning (see above for why we handle
+    # IsADirectoryError).
     try:
         os.unlink(sock_path)
+    except IsADirectoryError:
+        import shutil
+        shutil.rmtree(sock_path, ignore_errors=True)
     except FileNotFoundError:
         pass
 

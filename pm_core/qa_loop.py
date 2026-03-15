@@ -1214,8 +1214,8 @@ def _verify_single_scenario(
                      scenario.index, exc_info=True)
         return True, ""
 
-    # Register the pane and rebalance using standard layout management.
-    # Failures here are non-fatal — we still poll and clean up the pane.
+    # Register the pane and rebalance using the same pattern as the
+    # review window: register panes, reset user_modified, then rebalance.
     win_id = None
     try:
         wid_result = subprocess.run(
@@ -1225,10 +1225,17 @@ def _verify_single_scenario(
         )
         win_id = wid_result.stdout.strip() or None
         if win_id:
+            tmux_mod.set_shared_window_size(session, win_id)
             pane_registry.register_pane(
                 session, win_id, verify_pane,
                 f"qa-verify-s{scenario.index}", verify_cmd,
             )
+            # Reset user_modified so rebalance works correctly (the
+            # after-split-window hook sets it before panes are registered).
+            reg = pane_registry.load_registry(session)
+            wdata = pane_registry.get_window_data(reg, win_id)
+            wdata["user_modified"] = False
+            pane_registry.save_registry(session, reg)
             pane_layout.rebalance(session, win_id)
     except Exception:
         _log.debug("Verification: registration/rebalance failed for "
@@ -1251,14 +1258,8 @@ def _verify_single_scenario(
                      scenario.index, exc_info=True)
         content = None
 
-    # Clean up the verification pane now that polling is done
-    try:
-        pane_registry.kill_and_unregister(session, verify_pane)
-        if win_id:
-            pane_layout.rebalance(session, win_id)
-    except Exception:
-        _log.debug("Verification: cleanup failed for scenario %d pane",
-                   scenario.index, exc_info=True)
+    # Leave the verification pane open so the user can review it.
+    # It will be cleaned up when the scenario window is killed.
 
     # Parse the result
     passed, reason = True, ""

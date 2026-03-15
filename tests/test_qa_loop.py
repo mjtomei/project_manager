@@ -1399,13 +1399,18 @@ class TestVerifySingleScenario:
         """Helper: run _verify_single_scenario with mocked tmux ops."""
         mock_wid = MagicMock()
         mock_wid.stdout = "@1"
+        mock_reg = {"windows": {}}
+        mock_wdata = {"user_modified": True}
         with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
              patch("pm_core.tmux.split_pane_at", return_value="%2"), \
              patch("pm_core.qa_loop.poll_for_verdict", return_value=poll_content), \
              patch("pm_core.claude_launcher.build_claude_shell_cmd", return_value="claude ..."), \
              patch("subprocess.run", return_value=mock_wid), \
+             patch("pm_core.tmux.set_shared_window_size"), \
              patch("pm_core.pane_registry.register_pane"), \
-             patch("pm_core.pane_registry.kill_and_unregister"), \
+             patch("pm_core.pane_registry.load_registry", return_value=mock_reg), \
+             patch("pm_core.pane_registry.get_window_data", return_value=mock_wdata), \
+             patch("pm_core.pane_registry.save_registry"), \
              patch("pm_core.pane_layout.rebalance"):
             return _verify_single_scenario(
                 scenario, verdict, pane_output,
@@ -1469,14 +1474,19 @@ class TestVerifySingleScenario:
                               transcript_path=str(transcript))
         mock_wid = MagicMock()
         mock_wid.stdout = "@1"
+        mock_reg = {"windows": {}}
+        mock_wdata = {"user_modified": True}
         with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
              patch("pm_core.tmux.split_pane_at", return_value="%2"), \
              patch("pm_core.qa_loop.poll_for_verdict", return_value="VERIFIED"), \
              patch("pm_core.claude_launcher.build_claude_shell_cmd",
                    return_value="claude ...") as mock_cmd, \
              patch("subprocess.run", return_value=mock_wid), \
+             patch("pm_core.tmux.set_shared_window_size"), \
              patch("pm_core.pane_registry.register_pane"), \
-             patch("pm_core.pane_registry.kill_and_unregister"), \
+             patch("pm_core.pane_registry.load_registry", return_value=mock_reg), \
+             patch("pm_core.pane_registry.get_window_data", return_value=mock_wdata), \
+             patch("pm_core.pane_registry.save_registry"), \
              patch("pm_core.pane_layout.rebalance"):
             passed, _ = _verify_single_scenario(
                 scenario, "PASS", "pane output", {}, {},
@@ -1492,14 +1502,19 @@ class TestVerifySingleScenario:
                               steps="steps", window_name="qa-s1")
         mock_wid = MagicMock()
         mock_wid.stdout = "@1"
+        mock_reg = {"windows": {}}
+        mock_wdata = {"user_modified": True}
         with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
              patch("pm_core.tmux.split_pane_at", return_value="%2"), \
              patch("pm_core.qa_loop.poll_for_verdict", return_value="VERIFIED"), \
              patch("pm_core.claude_launcher.build_claude_shell_cmd",
                    return_value="claude ...") as mock_cmd, \
              patch("subprocess.run", return_value=mock_wid), \
+             patch("pm_core.tmux.set_shared_window_size"), \
              patch("pm_core.pane_registry.register_pane"), \
-             patch("pm_core.pane_registry.kill_and_unregister"), \
+             patch("pm_core.pane_registry.load_registry", return_value=mock_reg), \
+             patch("pm_core.pane_registry.get_window_data", return_value=mock_wdata), \
+             patch("pm_core.pane_registry.save_registry"), \
              patch("pm_core.pane_layout.rebalance"):
             _verify_single_scenario(
                 scenario, "PASS", "pane output", {}, {},
