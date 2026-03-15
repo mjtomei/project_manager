@@ -1405,6 +1405,7 @@ class TestVerifySingleScenario:
              patch("pm_core.claude_launcher.build_claude_shell_cmd", return_value="claude ..."), \
              patch("subprocess.run", return_value=mock_wid), \
              patch("pm_core.pane_registry.register_pane"), \
+             patch("pm_core.pane_registry.kill_and_unregister"), \
              patch("pm_core.pane_layout.rebalance"):
             return _verify_single_scenario(
                 scenario, verdict, pane_output,
