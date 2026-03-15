@@ -821,7 +821,7 @@ def _poll_tmux_verdicts(
 ) -> None:
     """Poll tmux scenario windows for verdicts.
 
-    When a verdict is accepted, inline verification runs via ``claude -p``
+    When a PASS verdict is accepted, verification runs in a split pane
     to check that the scenario genuinely exercised its test cases.  If
     verification flags a scenario, a follow-up message is sent to the
     scenario's pane and the scenario goes back to pending.

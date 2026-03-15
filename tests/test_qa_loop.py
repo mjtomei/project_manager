@@ -1466,18 +1466,22 @@ class TestVerifySingleScenario:
         scenario = QAScenario(index=1, title="Test", focus="test",
                               steps="steps", window_name="qa-s1",
                               transcript_path=str(transcript))
+        mock_wid = MagicMock()
+        mock_wid.stdout = "@1"
         with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
              patch("pm_core.tmux.split_pane_at", return_value="%2"), \
              patch("pm_core.qa_loop.poll_for_verdict", return_value="VERIFIED"), \
              patch("pm_core.claude_launcher.build_claude_shell_cmd",
-                   return_value="claude ...") as mock_cmd:
+                   return_value="claude ...") as mock_cmd, \
+             patch("subprocess.run", return_value=mock_wid), \
+             patch("pm_core.pane_registry.register_pane"), \
+             patch("pm_core.pane_registry.kill_and_unregister"), \
+             patch("pm_core.pane_layout.rebalance"):
             passed, _ = _verify_single_scenario(
                 scenario, "PASS", "pane output", {}, {},
                 session="pm-session")
         assert passed is True
         # The prompt passed to build_claude_shell_cmd should reference transcript
-        prompt_arg = mock_cmd.call_args[1].get("prompt") or mock_cmd.call_args[0][0] if mock_cmd.call_args[0] else ""
-        # build_claude_shell_cmd gets prompt= kwarg
         call_kwargs = mock_cmd.call_args
         assert str(transcript) in (call_kwargs.kwargs.get("prompt", "") or "")
 
@@ -1485,11 +1489,17 @@ class TestVerifySingleScenario:
         """Without a transcript, pane output is inlined in the prompt."""
         scenario = QAScenario(index=1, title="Test", focus="test",
                               steps="steps", window_name="qa-s1")
+        mock_wid = MagicMock()
+        mock_wid.stdout = "@1"
         with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
              patch("pm_core.tmux.split_pane_at", return_value="%2"), \
              patch("pm_core.qa_loop.poll_for_verdict", return_value="VERIFIED"), \
              patch("pm_core.claude_launcher.build_claude_shell_cmd",
-                   return_value="claude ...") as mock_cmd:
+                   return_value="claude ...") as mock_cmd, \
+             patch("subprocess.run", return_value=mock_wid), \
+             patch("pm_core.pane_registry.register_pane"), \
+             patch("pm_core.pane_registry.kill_and_unregister"), \
+             patch("pm_core.pane_layout.rebalance"):
             _verify_single_scenario(
                 scenario, "PASS", "pane output", {}, {},
                 session="pm-session")
