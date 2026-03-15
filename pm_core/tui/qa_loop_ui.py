@@ -289,6 +289,9 @@ def _recover_completed_qa_from_disk(app) -> None:
     if not hasattr(app, "_recovered_qa_pr_ids"):
         app._recovered_qa_pr_ids: set[str] = set()
 
+    # Load project data once (outside the loop) to avoid repeated I/O
+    project_data = store.load(app._root) if app._root else None
+
     for status_file in qa_root.glob("*/qa_status.json"):
         try:
             data = json.loads(status_file.read_text())
@@ -310,9 +313,8 @@ def _recover_completed_qa_from_disk(app) -> None:
             continue
 
         # Skip if the PR is not in QA status (already transitioned)
-        if app._root:
-            pr_data = store.load(app._root)
-            pr = store.get_pr(pr_data, pr_id)
+        if project_data:
+            pr = store.get_pr(project_data, pr_id)
             if not pr or pr.get("status") != "qa":
                 app._recovered_qa_pr_ids.add(pr_id)
                 continue
