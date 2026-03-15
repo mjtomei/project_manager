@@ -208,7 +208,9 @@ def qa_run(instruction_id: str, pr_id: str | None):
 
 @qa.command("debug")
 @click.argument("instruction_id")
-def qa_debug(instruction_id: str):
+@click.option("--foreground", "-f", is_flag=True, default=False,
+              help="Run in the current pane instead of a new window")
+def qa_debug(instruction_id: str, foreground: bool):
     """Launch an interactive session to verify a QA instruction works.
 
     Creates an environment identical to what QA scenario workers get
@@ -305,13 +307,13 @@ End with a summary of which steps work and which don't, then one of:
 - **NEEDS_WORK** — Some steps need fixes (explain what)
 - **INPUT_REQUIRED** — Cannot proceed without human guidance"""
 
+    from pm_core.qa_loop import _setup_clone_override
+    _setup_clone_override(clone_path)
+
     window_name = f"qa-debug-{instruction_id[:20]}"
 
     if use_containers:
         from pm_core import container as container_mod
-        from pm_core.qa_loop import _setup_clone_override
-
-        _setup_clone_override(clone_path)
 
         config = container_mod.load_container_config()
         session_tag = session.removeprefix("pm-") if session else None
@@ -329,31 +331,29 @@ End with a summary of which steps work and which don't, then one of:
             prompt=prompt,
             cwd=container_mod._CONTAINER_WORKDIR,
         )
-        exec_cmd = container_mod.build_exec_cmd(cname, claude_cmd, cleanup=True)
-
-        pane_id = tmux_mod.new_window_get_pane(
-            session, window_name, exec_cmd,
-            cwd=str(qa_workdir), switch=False,
-        )
-        click.echo(f"Launched debug session in container {cname}")
+        shell_cmd = container_mod.build_exec_cmd(cname, claude_cmd, cleanup=True)
+        run_cwd = str(qa_workdir)
     else:
-        from pm_core.qa_loop import _setup_clone_override
-        _setup_clone_override(clone_path)
-
-        claude_cmd = build_claude_shell_cmd(
+        shell_cmd = build_claude_shell_cmd(
             prompt=prompt,
             cwd=str(clone_path),
         )
+        run_cwd = str(clone_path)
 
-        pane_id = tmux_mod.new_window_get_pane(
-            session, window_name, claude_cmd,
-            cwd=str(clone_path), switch=False,
+    if foreground:
+        click.echo(f"Debug: {item['title']}")
+        click.echo(f"  Workdir: {qa_workdir}")
+        os.chdir(run_cwd)
+        os.execvp("bash", ["bash", "-c", shell_cmd])
+    else:
+        tmux_mod.new_window_get_pane(
+            session, window_name, shell_cmd,
+            cwd=run_cwd, switch=False,
         )
-        click.echo(f"Launched debug session on host")
-
-    click.echo(f"  Instruction: {item['title']}")
-    click.echo(f"  Workdir: {qa_workdir}")
-    click.echo(f"  Window: {window_name}")
+        click.echo(f"Launched debug session")
+        click.echo(f"  Instruction: {item['title']}")
+        click.echo(f"  Workdir: {qa_workdir}")
+        click.echo(f"  Window: {window_name}")
 
 
 @qa.command("standalone")

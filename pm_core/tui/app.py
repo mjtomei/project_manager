@@ -1059,7 +1059,7 @@ class ProjectManagerApp(App):
                 if len(parts) == 2:
                     _category, qa_id = parts
                     pane_ops.launch_pane(
-                        self, f"pm qa debug {qa_id}", "qa-debug"
+                        self, f"pm qa debug --foreground {qa_id}", "qa-debug"
                     )
             else:
                 self.log_message("No QA item selected")
