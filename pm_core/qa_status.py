@@ -1,7 +1,12 @@
-"""QA status dashboard — runs inside a tmux status pane.
+"""QA status dashboard + verdict collector — runs inside a tmux status pane.
 
 Reads qa_status.json and displays a live ANSI-rendered table showing
 each scenario's index, title, and verdict with color coding.
+
+Verdict collection: polls scenario tmux panes for verdict keywords
+(PASS, NEEDS_WORK, INPUT_REQUIRED) and writes updates back to
+qa_status.json.  This decouples verdict collection from the TUI
+process, so it survives TUI restarts.
 
 Navigation (raw terminal input via termios):
   j / Down   — highlight next scenario
@@ -19,6 +24,7 @@ Invocation:
 import json
 import logging
 import os
+import re
 import select
 import subprocess
 import sys
@@ -55,6 +61,197 @@ _VERDICT_COLORS = {
 
 _REFRESH_INTERVAL = 2.0  # seconds
 
+# Verdict polling constants
+_VERDICT_TAIL_LINES = 30
+_STABILITY_POLLS = 2
+_QA_VERDICTS = ("PASS", "NEEDS_WORK", "INPUT_REQUIRED")
+_VERDICT_GRACE_PERIOD = 30  # seconds before accepting verdicts
+
+
+# ---------------------------------------------------------------------------
+# Verdict polling helpers (inlined from loop_shared to avoid PYTHONPATH issues)
+# ---------------------------------------------------------------------------
+
+def _find_claude_pane(session: str, window_name: str) -> str | None:
+    """Find the first pane ID in a tmux window."""
+    try:
+        # Find the window
+        result = subprocess.run(
+            ["tmux", "list-windows", "-t", session, "-F",
+             "#{window_name} #{window_id} #{window_index}"],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            return None
+        win_index = None
+        for line in result.stdout.strip().splitlines():
+            parts = line.split(" ", 2)
+            if len(parts) >= 3 and parts[0] == window_name:
+                win_index = parts[2]
+                break
+        if win_index is None:
+            return None
+        # Get panes in the window
+        result = subprocess.run(
+            ["tmux", "list-panes", "-t", f"{session}:{win_index}",
+             "-F", "#{pane_id}"],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            return None
+        panes = result.stdout.strip().splitlines()
+        return panes[0] if panes else None
+    except Exception:
+        return None
+
+
+def _capture_pane(pane_id: str) -> str:
+    """Capture full scrollback of a tmux pane."""
+    try:
+        result = subprocess.run(
+            ["tmux", "capture-pane", "-t", pane_id, "-p", "-S", "-"],
+            capture_output=True, text=True,
+        )
+        return result.stdout if result.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
+def _match_verdict(line: str) -> str | None:
+    """Match a verdict keyword when it is the entire line content."""
+    cleaned = re.sub(r'[*`]', '', line).strip()
+    for verdict in _QA_VERDICTS:
+        if cleaned == verdict:
+            return verdict
+    return None
+
+
+def _extract_verdict(content: str) -> str | None:
+    """Check if the tail of captured pane content contains a verdict keyword."""
+    lines = content.strip().splitlines()
+    tail = lines[-_VERDICT_TAIL_LINES:] if len(lines) > _VERDICT_TAIL_LINES else lines
+    for line in reversed(tail):
+        stripped = line.strip().strip("*").strip()
+        verdict = _match_verdict(stripped)
+        if verdict:
+            return verdict
+    return None
+
+
+class _VerdictStabilityTracker:
+    """Track verdict stability — require STABILITY_POLLS consecutive matches."""
+
+    def __init__(self) -> None:
+        self._counts: dict[str, tuple[str, int]] = {}
+
+    def update(self, key: str, verdict: str | None) -> bool:
+        if verdict is None:
+            self._counts.pop(key, None)
+            return False
+        prev_verdict, prev_count = self._counts.get(key, (None, 0))
+        count = prev_count + 1 if verdict == prev_verdict else 1
+        self._counts[key] = (verdict, count)
+        return count >= _STABILITY_POLLS
+
+
+class VerdictPoller:
+    """Polls scenario tmux panes for verdicts and updates qa_status.json."""
+
+    def __init__(self, status_path: Path, session: str) -> None:
+        self._path = status_path
+        self._session = session
+        self._tracker = _VerdictStabilityTracker()
+        self._start_time = time.monotonic()
+        self._completed_scenarios: set[int] = set()
+
+    def poll(self, status: dict | None) -> None:
+        """Run one poll cycle — check pending scenarios for verdicts."""
+        if status is None or status.get("overall"):
+            return  # nothing to do
+
+        scenarios = status.get("scenarios", [])
+        if not scenarios:
+            return
+
+        in_grace = (time.monotonic() - self._start_time) < _VERDICT_GRACE_PERIOD
+        verdicts_changed = False
+
+        for sc in scenarios:
+            idx = sc.get("index")
+            verdict = sc.get("verdict", "")
+            window_name = sc.get("window_name", "")
+
+            # Skip interactive, already-completed, or no-window scenarios
+            if verdict == "interactive" or not window_name:
+                continue
+            if idx in self._completed_scenarios:
+                continue
+            if verdict and verdict in _QA_VERDICTS:
+                # Already has a verdict (from a previous poll or from TUI)
+                self._completed_scenarios.add(idx)
+                continue
+
+            # Find the pane
+            pane_id = _find_claude_pane(self._session, window_name)
+            if pane_id is None:
+                # Window is gone — mark as INPUT_REQUIRED
+                _log.warning("Scenario %s window %s gone — marking INPUT_REQUIRED",
+                             idx, window_name)
+                sc["verdict"] = "INPUT_REQUIRED"
+                self._completed_scenarios.add(idx)
+                verdicts_changed = True
+                continue
+
+            if in_grace:
+                continue
+
+            # Capture and check for verdict
+            content = _capture_pane(pane_id)
+            detected = _extract_verdict(content)
+            key = f"qa-{status.get('pr_id', '?')}-{idx}"
+            if self._tracker.update(key, detected):
+                _log.info("Scenario %s (%s) verdict: %s",
+                          idx, sc.get("title", ""), detected)
+                sc["verdict"] = detected
+                self._completed_scenarios.add(idx)
+                verdicts_changed = True
+
+        # Check if all scenarios are done → compute overall
+        pending = [
+            sc for sc in scenarios
+            if sc.get("verdict") not in ("interactive", *_QA_VERDICTS)
+            and sc.get("window_name")
+        ]
+        if not pending and verdicts_changed:
+            # All done — compute overall
+            all_verdicts = [
+                sc["verdict"] for sc in scenarios
+                if sc.get("verdict") in _QA_VERDICTS
+            ]
+            if "NEEDS_WORK" in all_verdicts:
+                status["overall"] = "NEEDS_WORK"
+            elif "INPUT_REQUIRED" in all_verdicts:
+                status["overall"] = "INPUT_REQUIRED"
+            else:
+                status["overall"] = "PASS"
+            _log.info("All scenarios complete — overall: %s", status["overall"])
+
+        if verdicts_changed:
+            self._write_status(status)
+
+    def _write_status(self, status: dict) -> None:
+        """Atomically write updated status back to qa_status.json."""
+        tmp_path = self._path.with_suffix(".tmp")
+        try:
+            tmp_path.write_text(json.dumps(status, indent=2))
+            tmp_path.rename(self._path)
+        except OSError:
+            _log.exception("Failed to write qa_status.json")
+
+
+# ---------------------------------------------------------------------------
+# Status loading / rendering
+# ---------------------------------------------------------------------------
 
 def _load_status(path: Path) -> dict | None:
     """Load qa_status.json, returning None if missing or invalid."""
@@ -78,8 +275,7 @@ def _pad_line(text: str, cols: int) -> str:
     length calculation) so the padding clears any leftover content from
     a previous render cycle.
     """
-    import re as _re
-    visible_len = len(_re.sub(r'\033\[[0-9;]*m', '', text))
+    visible_len = len(re.sub(r'\033\[[0-9;]*m', '', text))
     if visible_len < cols:
         return text + " " * (cols - visible_len)
     return text
@@ -249,6 +445,7 @@ def _run_interactive(path: Path, session: str) -> None:
     import termios
     import tty
 
+    poller = VerdictPoller(path, session)
     selected = 0
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
@@ -260,6 +457,10 @@ def _run_interactive(path: Path, session: str) -> None:
 
         while True:
             status = _load_status(path)
+
+            # Poll for verdicts on each refresh (mutates status in-place)
+            poller.poll(status)
+
             rows, cols = _get_terminal_size()
             num_scenarios = len(status.get("scenarios", [])) if status else 0
 
@@ -302,10 +503,16 @@ def _run_interactive(path: Path, session: str) -> None:
         sys.stdout.flush()
 
 
-def _run_passive(path: Path) -> None:
+def _run_passive(path: Path, session: str) -> None:
     """Passive mode: just refresh the display, no keyboard input."""
+    poller = VerdictPoller(path, session)
+
     while True:
         status = _load_status(path)
+
+        # Poll for verdicts on each refresh (mutates status in-place)
+        poller.poll(status)
+
         rows, cols = _get_terminal_size()
 
         sys.stdout.write(_render(status, -1, rows, cols))
@@ -326,7 +533,7 @@ def main(status_path: str, session: str) -> None:
     if sys.stdin.isatty():
         _run_interactive(path, session)
     else:
-        _run_passive(path)
+        _run_passive(path, session)
 
 
 if __name__ == "__main__":

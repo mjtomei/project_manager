@@ -23,6 +23,7 @@ Protocol (newline-delimited JSON over Unix socket):
 Legacy requests without ``cmd`` are treated as push (backward compat).
 """
 
+import hashlib
 import json
 import os
 import socket
@@ -526,6 +527,24 @@ _proxy_refs: dict[str, set[str]] = {}
 _container_to_proxy_key: dict[str, str] = {}
 
 
+_UNIX_SOCK_MAX = 107  # Linux AF_UNIX path limit (108 including null)
+
+
+def _safe_sock_dir(label: str) -> str:
+    """Return a /tmp socket directory path that fits the AF_UNIX limit.
+
+    The full path including ``/push.sock`` must be ≤ 107 bytes.  If the
+    natural path is too long, the label is replaced with its SHA-256
+    prefix (short enough to always fit).
+    """
+    candidate = f"/tmp/{_SOCKET_DIR_PREFIX}{label}"
+    full = f"{candidate}/push.sock"
+    if len(full.encode()) <= _UNIX_SOCK_MAX:
+        return candidate
+    short = hashlib.sha256(label.encode()).hexdigest()[:16]
+    return f"/tmp/{_SOCKET_DIR_PREFIX}{short}"
+
+
 def _shared_proxy_key(session_tag: str, pr_id: str) -> str:
     """Build the dict key for a shared proxy."""
     return f"{session_tag}\0{pr_id}"
@@ -533,26 +552,58 @@ def _shared_proxy_key(session_tag: str, pr_id: str) -> str:
 
 def _start_proxy_subprocess(sock_path: str, workdir: str,
                             allowed_branch: str) -> None:
-    """Spawn a push proxy as an independent subprocess that outlives the caller."""
+    """Spawn a push proxy as an independent subprocess that outlives the caller.
+
+    Raises ``RuntimeError`` if the subprocess exits early or the socket
+    never becomes connectable within the startup timeout.
+    """
     import sys
     import time
+
+    # Validate socket path length before spawning
+    path_bytes = len(sock_path.encode())
+    if path_bytes > _UNIX_SOCK_MAX:
+        raise RuntimeError(
+            f"Push proxy socket path too long ({path_bytes} bytes, "
+            f"limit {_UNIX_SOCK_MAX}): {sock_path}"
+        )
 
     proc = subprocess.Popen(
         [sys.executable, "-m", "pm_core.push_proxy",
          sock_path, workdir, allowed_branch],
         start_new_session=True,  # detach from parent process group
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
     )
 
     # Wait briefly for the socket to appear and become connectable
     for _ in range(30):
+        # Check if the subprocess already exited (crashed)
+        ret = proc.poll()
+        if ret is not None:
+            stderr = proc.stderr.read().decode(errors="replace").strip()
+            raise RuntimeError(
+                f"Push proxy subprocess (pid={proc.pid}) exited "
+                f"immediately with code {ret}: {stderr}"
+            )
         if os.path.exists(sock_path) and proxy_is_alive(sock_path):
             break
         time.sleep(0.1)
     else:
+        # One final check — maybe it crashed right at the end
+        ret = proc.poll()
+        if ret is not None:
+            stderr = proc.stderr.read().decode(errors="replace").strip()
+            raise RuntimeError(
+                f"Push proxy subprocess (pid={proc.pid}) exited with "
+                f"code {ret} before socket became ready: {stderr}"
+            )
         _log.warning("Push proxy subprocess (pid=%d) did not become ready "
                      "at %s within 3s", proc.pid, sock_path)
+
+    # Detach stdio so the subprocess can outlive the caller
+    proc.stdout.close()
+    proc.stderr.close()
     _log.info("Push proxy subprocess started: pid=%d socket=%s branch=%s",
               proc.pid, sock_path, allowed_branch)
 
@@ -565,8 +616,8 @@ def start_push_proxy(container_name: str, workdir: str,
 
     When *session_tag* and *pr_id* are both provided the proxy is shared:
     only one proxy runs per unique ``(session_tag, pr_id)`` pair and its
-    socket lives at a deterministic path
-    ``/tmp/pm-push-proxy-{session_tag}-{pr_id}/push.sock``.  Additional
+    socket lives at a deterministic path derived from the tag and ID
+    (hashed if the path would exceed the AF_UNIX limit).  Additional
     containers on the same branch reuse the existing proxy.
 
     Without *session_tag*/*pr_id* a per-container proxy with a random
@@ -586,7 +637,7 @@ def start_push_proxy(container_name: str, workdir: str,
 
     if shared:
         key = _shared_proxy_key(session_tag, pr_id)
-        sock_dir = f"/tmp/{_SOCKET_DIR_PREFIX}{session_tag}-{pr_id}"
+        sock_dir = _safe_sock_dir(f"{session_tag}-{pr_id}")
         sock_path = os.path.join(sock_dir, "push.sock")
 
         # Reuse if an existing proxy is alive on this socket
@@ -615,11 +666,9 @@ def start_push_proxy(container_name: str, workdir: str,
         return sock_path
 
     # Legacy per-container proxy
-    import tempfile
     # Use a deterministic path based on the container name so the
     # socket can be found after a TUI restart without a registry.
-    sock_dir = os.path.join(tempfile.gettempdir(),
-                            f"{_SOCKET_DIR_PREFIX}{container_name}")
+    sock_dir = _safe_sock_dir(container_name)
     os.makedirs(sock_dir, exist_ok=True)
     sock_path = os.path.join(sock_dir, "push.sock")
     # Remove stale socket before spawning
@@ -676,13 +725,11 @@ def stop_push_proxy(container_name: str) -> None:
     if "\0" in key:
         # Shared proxy key: "session_tag\0pr_id"
         stag, pid = key.split("\0", 1)
-        sock_path = os.path.join(f"/tmp/{_SOCKET_DIR_PREFIX}{stag}-{pid}",
+        sock_path = os.path.join(_safe_sock_dir(f"{stag}-{pid}"),
                                  "push.sock")
     else:
         # Legacy key = container_name
-        import tempfile
-        sock_path = os.path.join(tempfile.gettempdir(),
-                                 f"{_SOCKET_DIR_PREFIX}{key}",
+        sock_path = os.path.join(_safe_sock_dir(key),
                                  "push.sock")
     _kill_proxy_socket(sock_path)
 
@@ -714,11 +761,24 @@ def stop_session_proxies(session_tag: str) -> int:
             for cname in _proxy_refs.pop(k, set()):
                 _container_to_proxy_key.pop(cname, None)
 
-    # Kill sockets matching the session tag
+    # Kill sockets matching the session tag.  Check both natural and
+    # hashed directory names (long tags get hashed by _safe_sock_dir).
     count = 0
+    seen: set[str] = set()
     for sock in _glob.glob(f"/tmp/{_SOCKET_DIR_PREFIX}{session_tag}-*/push.sock"):
+        seen.add(sock)
         _kill_proxy_socket(sock)
         count += 1
+    # Also kill hashed-path proxies that were derived from in-memory keys
+    for k in keys_to_remove:
+        if "\0" in k:
+            stag, pid = k.split("\0", 1)
+            sock = os.path.join(_safe_sock_dir(f"{stag}-{pid}"), "push.sock")
+        else:
+            sock = os.path.join(_safe_sock_dir(k), "push.sock")
+        if sock not in seen and os.path.exists(sock):
+            _kill_proxy_socket(sock)
+            count += 1
 
     if count:
         _log.info("Stopped %d session proxy(ies) for %s", count, session_tag)
@@ -749,15 +809,13 @@ def get_proxy_socket_path(container_name: str,
 
     # Try shared proxy path first (session_tag + pr_id)
     if session_tag and pr_id:
-        shared_path = os.path.join(tempfile.gettempdir(),
-                                   f"{_SOCKET_DIR_PREFIX}{session_tag}-{pr_id}",
+        shared_path = os.path.join(_safe_sock_dir(f"{session_tag}-{pr_id}"),
                                    "push.sock")
         if os.path.exists(shared_path):
             return shared_path
 
     # Try legacy per-container path
-    sock_path = os.path.join(tempfile.gettempdir(),
-                             f"{_SOCKET_DIR_PREFIX}{container_name}",
+    sock_path = os.path.join(_safe_sock_dir(container_name),
                              "push.sock")
     if os.path.exists(sock_path):
         return sock_path
@@ -769,8 +827,7 @@ def get_proxy_socket_path(container_name: str,
     if "\0" in key:
         # Shared proxy key: "session_tag\0pr_id"
         stag, pid = key.split("\0", 1)
-        derived = os.path.join(tempfile.gettempdir(),
-                               f"{_SOCKET_DIR_PREFIX}{stag}-{pid}",
+        derived = os.path.join(_safe_sock_dir(f"{stag}-{pid}"),
                                "push.sock")
         if os.path.exists(derived):
             return derived

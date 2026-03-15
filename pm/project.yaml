@@ -4059,7 +4059,7 @@ prs:
   plan: tui-ux
   title: 'Refactor TechTree: split PR nodes into individual Textual widgets'
   branch: pm/pr-4c41017-refactor-techtree-split-pr-nodes-into-individual-t
-  status: qa
+  status: in_review
   depends_on: []
   description: 'Refactor the TechTree from a monolithic single-widget renderer into
     a compositional Textual architecture:
@@ -4108,6 +4108,17 @@ prs:
       rebalance with compositional widgets: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-4c41017-e092217d921b6b35)'
     created_at: '2026-03-10T03:25:27Z'
     last_edited: '2026-03-10T03:25:27Z'
+  - id: note-529f5a7b
+    text: 'QA NEEDS_WORK: Tech tree visual rendering with compositional widgets: NEEDS_WORK;
+      Keyboard navigation with neighbor map: PASS; PR node selection and status indicators:
+      PASS; Status filter cycling and merged toggle with widget rebuild: PASS; Plan
+      group hide/show with widget lifecycle: PASS; Edge canvas caching and dirty tracking:
+      PASS; Layout cache invalidation: PASS; PR interaction and actions after refactor:
+      PASS; Widget rebuild on PR list update: PASS; Animation performance - selective
+      refresh: PASS; Sort field cycling with widget rebuild: NEEDS_WORK; Window resize
+      rebalance with compositional widgets: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-4c41017-e092217d921b6b35)'
+    created_at: '2026-03-15T12:50:51Z'
+    last_edited: '2026-03-15T12:50:51Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-4c41017-refactor-techtree-split-pr-nodes-int-8023bb22
 - id: pr-e9d4b24
   plan: bugs
@@ -4302,7 +4313,7 @@ prs:
   plan: tui-ux
   title: Add running tasks pane to TUI with window switching and grouping
   branch: pm/pr-0b827df-add-running-tasks-pane-to-tui-with-window-switchin
-  status: qa
+  status: in_review
   depends_on: []
   description: 'Add a new pane to the TUI that shows all active tasks running in the
     current tmux session and lets you switch to their windows.
@@ -4386,9 +4397,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/137
   gh_pr_number: 137
   created_at: '2026-03-08T21:45:42.636585+00:00'
-  updated_at: '2026-03-14T21:40:16.204625+00:00'
+  updated_at: '2026-03-15T12:51:26.401278+00:00'
   started_at: '2026-03-10T21:38:57.198809+00:00'
-  reviewed_at: '2026-03-14T21:40:16.204625+00:00'
+  reviewed_at: '2026-03-15T12:51:26.401278+00:00'
   merged_at: null
   notes:
   - id: note-834855f
@@ -4690,9 +4701,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/144
   gh_pr_number: 144
   created_at: '2026-03-08T23:09:07.312432+00:00'
-  updated_at: '2026-03-14T21:54:58.823224+00:00'
+  updated_at: '2026-03-15T12:51:26.401290+00:00'
   started_at: '2026-03-14T17:21:14.310809+00:00'
-  reviewed_at: '2026-03-14T21:54:58.823224+00:00'
+  reviewed_at: '2026-03-15T12:51:26.401290+00:00'
   merged_at: null
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-871dbf5-add-high-effort-watcher-supervisors--eff07b6c
@@ -5492,6 +5503,28 @@ prs:
       openai/gpt-oss-120b). Confirmed reachable from macbook.
     created_at: '2026-03-13T04:31:35Z'
     last_edited: '2026-03-13T04:31:35Z'
+  - id: note-ed2331e9
+    text: 'QA PASS: Unit and integration tests pass: PASS; Provider add and full verification
+      with real Ollama: PASS; Model show displays local providers section: PASS; Init
+      detects Ollama and offers provider setup: PASS; Init skips Ollama prompt when
+      not running or not installed: PASS; Init skips prompt when provider already
+      configured: PASS; OpenAI-type provider with Anthropic API support detected:
+      PASS; Provider verification reports inference failure distinctly from tool use
+      failure: PASS; Double /v1 bug fix in Anthropic API probe URL: PASS; Init with
+      Ollama running but no models pulled: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-9a5b86e-83c4726d6d5a43e4)'
+    created_at: '2026-03-15T12:50:49Z'
+    last_edited: '2026-03-15T12:50:49Z'
+  - id: note-ed2331e91
+    text: 'QA PASS: Unit and integration tests pass: PASS; Provider add and full verification
+      with real Ollama: PASS; Model show displays local providers section: PASS; Init
+      detects Ollama and offers provider setup: PASS; Init skips Ollama prompt when
+      not running or not installed: PASS; Init skips prompt when provider already
+      configured: PASS; OpenAI-type provider with Anthropic API support detected:
+      PASS; Provider verification reports inference failure distinctly from tool use
+      failure: PASS; Double /v1 bug fix in Anthropic API probe URL: PASS; Init with
+      Ollama running but no models pulled: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-9a5b86e-83c4726d6d5a43e4)'
+    created_at: '2026-03-15T12:52:38Z'
+    last_edited: '2026-03-15T12:52:38Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9a5b86e-harden-local-llm-integration-model-s-0a4ff8cc
 - id: pr-1f35c6d
   plan: watchers
