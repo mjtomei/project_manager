@@ -368,6 +368,8 @@ def create_container(
         Container ID.
     """
     # If a running container with this name already exists, reuse it.
+    # The proxy socket directory is bind-mounted (not the socket file),
+    # so a restarted proxy is visible to the container immediately.
     if container_is_running(name):
         result = _run_docker(
             "inspect", "-f", "{{.Id}}", name,
@@ -375,12 +377,16 @@ def create_container(
         )
         container_id = result.stdout.strip()
         _log.info("Reusing existing container %s (id=%s)", name, container_id[:12])
-        # Ensure the push proxy is running (it may have been stopped)
+        # Ensure the push proxy is running (it may have died in a crash)
         if allowed_push_branch:
             from pm_core.push_proxy import (
-                start_push_proxy, get_proxy_socket_path,
+                start_push_proxy, get_proxy_socket_path, proxy_is_alive,
             )
-            if not get_proxy_socket_path(name):
+            sock = get_proxy_socket_path(name, session_tag=session_tag,
+                                         pr_id=pr_id)
+            if not sock or not proxy_is_alive(sock):
+                _log.warning("Push proxy dead/missing for container %s — "
+                             "restarting proxy", name)
                 start_push_proxy(
                     name, str(workdir), allowed_push_branch,
                     session_tag=session_tag, pr_id=pr_id,
@@ -460,13 +466,18 @@ def create_container(
     has_push_proxy = False
     if allowed_push_branch:
         from pm_core.push_proxy import (
-            start_push_proxy, _CONTAINER_SOCKET_PATH,
+            start_push_proxy, _CONTAINER_SOCKET_DIR, _CONTAINER_SOCKET_PATH,
         )
         sock_path = start_push_proxy(
             name, str(workdir), allowed_push_branch,
             session_tag=session_tag, pr_id=pr_id,
         )
-        cmd.extend(["-v", f"{sock_path}:{_CONTAINER_SOCKET_PATH}"])
+        # Mount the socket's parent *directory* rather than the socket
+        # file itself.  This way, if the proxy restarts and recreates
+        # the socket (new inode), the container sees the new one
+        # through the directory mount.
+        sock_dir = str(Path(sock_path).parent)
+        cmd.extend(["-v", f"{sock_dir}:{_CONTAINER_SOCKET_DIR}"])
         has_push_proxy = True
         _log.info("Push proxy started for container %s (branch=%s)",
                   name, allowed_push_branch)
