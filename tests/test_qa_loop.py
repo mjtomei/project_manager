@@ -14,9 +14,18 @@ from pm_core.qa_loop import (
     VERDICT_PASS,
     VERDICT_NEEDS_WORK,
     VERDICT_INPUT_REQUIRED,
+    ALL_VERDICTS,
     _scenario_window_name,
     _cleanup_stale_scenario_windows,
     _tail_has_marker_on_own_line,
+    _build_verification_prompt,
+    _verify_single_scenario,
+    _is_verification_enabled,
+    _extract_flagged_reason,
+    _get_verification_max_retries,
+    _install_instruction_file,
+    _VERIFICATION_MAX_PANE_LINES,
+    _DEFAULT_VERIFICATION_MAX_RETRIES,
 )
 
 
@@ -317,14 +326,16 @@ class TestQAWorkdirs:
         assert "pr-001-abc123" in str(wd)
 
     def test_create_scenario_workdir(self, tmp_path):
-        d, scratch, venv = create_scenario_workdir(tmp_path, 1)
+        d, scratch = create_scenario_workdir(tmp_path, 1)
         assert d.exists()
-        assert d.name == "scenario-1"
+        assert d.name == "repo"
+        assert d.parent.name == "s-1"
         assert scratch.exists()
-        assert venv is None
+        assert scratch.name == "scratch"
+        assert scratch.parent.name == "s-1"
 
-    def test_create_scenario_workdir_venv(self, tmp_path):
-        """Clone mode creates a --system-site-packages venv."""
+    def test_create_scenario_workdir_with_clone(self, tmp_path):
+        """Clone mode creates repo + scratch under s-N/."""
         qa_workdir = tmp_path / "qa"
         qa_workdir.mkdir()
 
@@ -332,48 +343,22 @@ class TestQAWorkdirs:
         repo_root.mkdir()
 
         def fake_run_git(*args):
-            # Simulate git clone --local by creating the directory
-            clone_path = qa_workdir / "worktree-1"
+            clone_path = qa_workdir / "s-1" / "repo"
             clone_path.mkdir(parents=True, exist_ok=True)
             return MagicMock(returncode=0)
 
         with patch("pm_core.git_ops.run_git", side_effect=fake_run_git):
-            _, _, venv_path = create_scenario_workdir(
+            clone_path, scratch = create_scenario_workdir(
                 qa_workdir, 1, repo_root=repo_root,
                 pr_id="pr-001", loop_id="abc",
             )
 
-        assert venv_path is not None
-        assert venv_path.name == "venv-1"
-        assert venv_path.exists()
-        # Verify the venv has the expected bin directory
-        assert (venv_path / "bin" / "python").exists() or (venv_path / "bin" / "python3").exists()
-
-    def test_create_scenario_workdir_venv_failure_nonfatal(self, tmp_path):
-        """Venv creation failure is non-fatal — returns venv_path=None."""
-        qa_workdir = tmp_path / "qa"
-        qa_workdir.mkdir()
-
-        repo_root = tmp_path / "repo"
-        repo_root.mkdir()
-
-        def fake_run_git(*args):
-            clone_path = qa_workdir / "worktree-1"
-            clone_path.mkdir(parents=True, exist_ok=True)
-            return MagicMock(returncode=0)
-
-        with patch("pm_core.git_ops.run_git", side_effect=fake_run_git), \
-             patch("pm_core.qa_loop.subprocess.run",
-                   side_effect=OSError("venv failed")):
-            clone_path, scratch, venv_path = create_scenario_workdir(
-                qa_workdir, 1, repo_root=repo_root,
-                pr_id="pr-001", loop_id="abc",
-            )
-
-        # Clone and scratch still created, venv is None
-        assert clone_path is not None
+        assert clone_path.exists()
+        assert clone_path.name == "repo"
+        assert clone_path.parent.name == "s-1"
         assert scratch.exists()
-        assert venv_path is None
+        assert scratch.name == "scratch"
+        assert scratch.parent.name == "s-1"
 
 
 class TestQALoopState:
@@ -472,7 +457,7 @@ class TestVerdictEdgeCases:
 
     def test_dead_window_gets_input_required(self):
         """A window killed without verdict should be marked INPUT_REQUIRED."""
-        from pm_core.qa_loop import _get_scenario_pane
+        import pm_core.qa_loop as qa_loop_mod
 
         scenario = QAScenario(index=1, title="Test", focus="t")
         scenario.window_name = "qa-#42-s1"
@@ -482,7 +467,7 @@ class TestVerdictEdgeCases:
 
         # Simulate: window is dead (find_window_by_name returns None)
         with patch("pm_core.qa_loop._get_scenario_pane", return_value=None):
-            pane_id = _get_scenario_pane("sess", scenario.window_name)
+            pane_id = qa_loop_mod._get_scenario_pane("sess", scenario.window_name)
             assert pane_id is None
             # This is what the polling loop does:
             state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
@@ -651,12 +636,12 @@ class TestVerdictEdgeCases:
             calls.append(idx)
             if idx == 1:
                 raise OSError("corrupt repo")
-            return (Path("/tmp/clone"), Path("/tmp/scratch"), None)
+            return (Path("/tmp/clone"), Path("/tmp/scratch"))
 
         # Simulate the loop logic from run_qa_sync
         for scenario in scenarios:
             try:
-                clone_path, scratch_path, venv_path = fake_create(
+                clone_path, scratch_path = fake_create(
                     Path("/tmp/qa"), scenario.index,
                 )
             except Exception:
@@ -1333,3 +1318,308 @@ class TestSelfDrivingQALoop:
         mock_merge.assert_called_once_with(app, "pr-001")
         # Self-driving state should be removed after reaching required passes
         assert "pr-001" not in app._self_driving_qa
+
+
+# ---------------------------------------------------------------------------
+# Verdict verification tests
+# ---------------------------------------------------------------------------
+
+class TestBuildVerificationPrompt:
+    """Tests for _build_verification_prompt."""
+
+    def test_includes_scenario_details_inline(self):
+        scenario = QAScenario(index=1, title="Login Flow", focus="auth",
+                              steps="1. Test login\n2. Test logout")
+        prompt = _build_verification_prompt(scenario, "PASS",
+                                            pane_output="Some output here")
+        assert "Login Flow" in prompt
+        assert "auth" in prompt
+        assert "Test login" in prompt
+        assert "PASS" in prompt
+        assert "Some output here" in prompt
+
+    def test_truncates_long_inline_output(self):
+        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
+        long_output = "\n".join([f"line {i}" for i in range(_VERIFICATION_MAX_PANE_LINES + 100)])
+        prompt = _build_verification_prompt(scenario, "PASS",
+                                            pane_output=long_output)
+        assert "truncated" in prompt.lower()
+
+    def test_file_path_mode_plain(self):
+        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
+        prompt = _build_verification_prompt(scenario, "PASS",
+                                            pane_output_path="/tmp/qa_verify.txt")
+        assert "/tmp/qa_verify.txt" in prompt
+        assert "Read that file" in prompt
+        assert "<scenario_output>" not in prompt
+        # Plain text file — no JSONL hint
+        assert "JSON Lines" not in prompt
+
+    def test_file_path_mode_jsonl(self):
+        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
+        prompt = _build_verification_prompt(
+            scenario, "PASS",
+            pane_output_path="/tmp/transcript-s1.jsonl")
+        assert "transcript-s1.jsonl" in prompt
+        assert "JSON Lines" in prompt
+
+    def test_includes_verification_instructions(self):
+        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
+        prompt = _build_verification_prompt(scenario, "PASS",
+                                            pane_output="output")
+        assert "VERIFIED" in prompt
+        assert "FLAGGED_START" in prompt
+        assert "FLAGGED_END" in prompt
+
+
+class TestVerifySingleScenario:
+    """Tests for _verify_single_scenario."""
+
+    def _mock_verify(self, scenario, verdict, pane_output, poll_content,
+                     pr_data=None, project_data=None):
+        """Helper: run _verify_single_scenario with mocked tmux ops."""
+        mock_wid = MagicMock()
+        mock_wid.stdout = "@1"
+        mock_reg = {"windows": {}}
+        mock_wdata = {"user_modified": True}
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+             patch("pm_core.tmux.split_pane_at", return_value="%2"), \
+             patch("pm_core.qa_loop.poll_for_verdict", return_value=poll_content), \
+             patch("pm_core.claude_launcher.build_claude_shell_cmd", return_value="claude ..."), \
+             patch("subprocess.run", return_value=mock_wid), \
+             patch("pm_core.tmux.set_shared_window_size"), \
+             patch("pm_core.pane_registry.register_pane"), \
+             patch("pm_core.pane_registry.load_registry", return_value=mock_reg), \
+             patch("pm_core.pane_registry.get_window_data", return_value=mock_wdata), \
+             patch("pm_core.pane_registry.save_registry"), \
+             patch("pm_core.pane_layout.rebalance"):
+            return _verify_single_scenario(
+                scenario, verdict, pane_output,
+                pr_data or {}, project_data or {},
+                session="pm-session",
+            )
+
+    def test_verified_result(self):
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1")
+        content = "The scenario looks good.\n\nVERIFIED"
+        passed, reason = self._mock_verify(scenario, "PASS", "output", content)
+        assert passed is True
+        assert reason == ""
+
+    def test_flagged_result(self):
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1")
+        content = "FLAGGED_START\nThe scenario did not run any tests.\nFLAGGED_END"
+        passed, reason = self._mock_verify(scenario, "PASS", "output", content)
+        assert passed is False
+        assert "did not run" in reason.lower()
+
+    def test_pane_split_failure_trusts_original(self):
+        """If we can't split a pane, trust the original verdict."""
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1")
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+             patch("pm_core.tmux.split_pane_at", side_effect=Exception("split failed")), \
+             patch("pm_core.claude_launcher.build_claude_shell_cmd", return_value="claude ..."):
+            passed, reason = _verify_single_scenario(
+                scenario, "PASS", "output", {}, {},
+                session="pm-session",
+            )
+        assert passed is True
+
+    def test_no_pane_trusts_original(self):
+        """If scenario pane is gone, trust the original verdict."""
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1")
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value=None):
+            passed, reason = _verify_single_scenario(
+                scenario, "PASS", "output", {}, {},
+                session="pm-session",
+            )
+        assert passed is True
+
+    def test_poll_returns_none_trusts_original(self):
+        """If polling returns None (pane died), trust original."""
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1")
+        passed, reason = self._mock_verify(scenario, "PASS", "output", None)
+        assert passed is True
+
+    def test_uses_transcript_when_available(self, tmp_path):
+        """When scenario has a transcript, prompt references the file."""
+        transcript = tmp_path / "transcript-s1.jsonl"
+        transcript.write_text('{"role":"assistant","content":"done"}\n')
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1",
+                              transcript_path=str(transcript))
+        mock_wid = MagicMock()
+        mock_wid.stdout = "@1"
+        mock_reg = {"windows": {}}
+        mock_wdata = {"user_modified": True}
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+             patch("pm_core.tmux.split_pane_at", return_value="%2"), \
+             patch("pm_core.qa_loop.poll_for_verdict", return_value="VERIFIED"), \
+             patch("pm_core.claude_launcher.build_claude_shell_cmd",
+                   return_value="claude ...") as mock_cmd, \
+             patch("subprocess.run", return_value=mock_wid), \
+             patch("pm_core.tmux.set_shared_window_size"), \
+             patch("pm_core.pane_registry.register_pane"), \
+             patch("pm_core.pane_registry.load_registry", return_value=mock_reg), \
+             patch("pm_core.pane_registry.get_window_data", return_value=mock_wdata), \
+             patch("pm_core.pane_registry.save_registry"), \
+             patch("pm_core.pane_layout.rebalance"):
+            passed, _ = _verify_single_scenario(
+                scenario, "PASS", "pane output", {}, {},
+                session="pm-session")
+        assert passed is True
+        # The prompt passed to build_claude_shell_cmd should reference transcript
+        call_kwargs = mock_cmd.call_args
+        assert str(transcript) in (call_kwargs.kwargs.get("prompt", "") or "")
+
+    def test_falls_back_to_pane_when_no_transcript(self):
+        """Without a transcript, pane output is inlined in the prompt."""
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1")
+        mock_wid = MagicMock()
+        mock_wid.stdout = "@1"
+        mock_reg = {"windows": {}}
+        mock_wdata = {"user_modified": True}
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+             patch("pm_core.tmux.split_pane_at", return_value="%2"), \
+             patch("pm_core.qa_loop.poll_for_verdict", return_value="VERIFIED"), \
+             patch("pm_core.claude_launcher.build_claude_shell_cmd",
+                   return_value="claude ...") as mock_cmd, \
+             patch("subprocess.run", return_value=mock_wid), \
+             patch("pm_core.tmux.set_shared_window_size"), \
+             patch("pm_core.pane_registry.register_pane"), \
+             patch("pm_core.pane_registry.load_registry", return_value=mock_reg), \
+             patch("pm_core.pane_registry.get_window_data", return_value=mock_wdata), \
+             patch("pm_core.pane_registry.save_registry"), \
+             patch("pm_core.pane_layout.rebalance"):
+            _verify_single_scenario(
+                scenario, "PASS", "pane output", {}, {},
+                session="pm-session")
+        call_kwargs = mock_cmd.call_args
+        assert "pane output" in (call_kwargs.kwargs.get("prompt", "") or "")
+
+
+class TestVerificationSetting:
+    """Tests for _is_verification_enabled global setting."""
+
+    def test_default_is_enabled(self):
+        with patch("pm_core.paths.get_global_setting_value", return_value=""):
+            assert _is_verification_enabled() is True
+
+    def test_disabled_with_false(self):
+        for val in ("0", "false", "no", "off", "disabled", "False", "OFF"):
+            with patch("pm_core.paths.get_global_setting_value", return_value=val):
+                assert _is_verification_enabled() is False, f"Expected disabled for {val!r}"
+
+    def test_enabled_with_truthy(self):
+        for val in ("1", "true", "yes", "on"):
+            with patch("pm_core.paths.get_global_setting_value", return_value=val):
+                assert _is_verification_enabled() is True, f"Expected enabled for {val!r}"
+
+
+class TestExtractFlaggedReason:
+    """Tests for _extract_flagged_reason."""
+
+    def test_basic_extraction(self):
+        content = "Some preamble\nFLAGGED_START\nThe test was not run.\nFLAGGED_END"
+        assert _extract_flagged_reason(content) == "The test was not run."
+
+    def test_multiline_reason(self):
+        content = (
+            "FLAGGED_START\n"
+            "Step 2 was skipped entirely.\n"
+            "Step 4 used code reading instead of execution.\n"
+            "The scenario substituted unit tests for runtime testing.\n"
+            "FLAGGED_END"
+        )
+        reason = _extract_flagged_reason(content)
+        assert "Step 2" in reason
+        assert "Step 4" in reason
+        assert "substituted" in reason
+        assert "\n" in reason  # multiline preserved
+
+    def test_missing_end_marker(self):
+        content = "FLAGGED_START\nPartial reason without end"
+        reason = _extract_flagged_reason(content)
+        assert "Partial reason" in reason
+
+    def test_no_markers_returns_default(self):
+        content = "Some random output with no markers"
+        reason = _extract_flagged_reason(content)
+        assert reason == "Scenario did not properly exercise test cases"
+
+    def test_strips_markdown_formatting(self):
+        content = "FLAGGED_START\n**Bold** and `code` formatting\nFLAGGED_END"
+        reason = _extract_flagged_reason(content)
+        assert "Bold" in reason
+        assert "code" in reason
+
+    def test_empty_between_markers(self):
+        content = "FLAGGED_START\nFLAGGED_END"
+        reason = _extract_flagged_reason(content)
+        assert reason == "Scenario did not properly exercise test cases"
+
+
+class TestVerificationMaxRetries:
+    """Tests for _get_verification_max_retries global setting."""
+
+    def test_default_value(self):
+        with patch("pm_core.paths.get_global_setting_value", return_value=""):
+            assert _get_verification_max_retries() == _DEFAULT_VERIFICATION_MAX_RETRIES
+
+    def test_custom_value(self):
+        with patch("pm_core.paths.get_global_setting_value", return_value="3"):
+            assert _get_verification_max_retries() == 3
+
+    def test_zero_value(self):
+        with patch("pm_core.paths.get_global_setting_value", return_value="0"):
+            assert _get_verification_max_retries() == 0
+
+    def test_invalid_value_returns_default(self):
+        with patch("pm_core.paths.get_global_setting_value", return_value="abc"):
+            assert _get_verification_max_retries() == _DEFAULT_VERIFICATION_MAX_RETRIES
+
+    def test_negative_clamped_to_zero(self):
+        with patch("pm_core.paths.get_global_setting_value", return_value="-1"):
+            assert _get_verification_max_retries() == 0
+
+
+class TestInstallInstructionFile:
+    """Tests for _install_instruction_file."""
+
+    def test_copies_file_and_updates_path(self, tmp_path):
+        pm_root = tmp_path / "pm"
+        instr = pm_root / "qa" / "instructions"
+        instr.mkdir(parents=True)
+        (instr / "my-test.md").write_text("# Test\n")
+
+        scratch = tmp_path / "scratch"
+        scratch.mkdir()
+        scenario = QAScenario(index=1, title="T", focus="f", steps="s",
+                              instruction_path="instructions/my-test.md")
+        _install_instruction_file(pm_root, scenario, scratch,
+                                  scratch_dir="/scratch")
+        assert scenario.instruction_path == "/scratch/qa-instructions/my-test.md"
+        assert (scratch / "qa-instructions" / "my-test.md").exists()
+
+    def test_clears_path_when_file_missing(self, tmp_path):
+        pm_root = tmp_path / "pm"
+        (pm_root / "qa" / "instructions").mkdir(parents=True)
+        scratch = tmp_path / "scratch"
+        scratch.mkdir()
+        scenario = QAScenario(index=1, title="T", focus="f", steps="s",
+                              instruction_path="instructions/gone.md")
+        _install_instruction_file(pm_root, scenario, scratch,
+                                  scratch_dir="/scratch")
+        assert scenario.instruction_path is None
+
+    def test_noop_when_no_instruction(self, tmp_path):
+        scenario = QAScenario(index=1, title="T", focus="f", steps="s")
+        _install_instruction_file(tmp_path, scenario, tmp_path,
+                                  scratch_dir="/scratch")
+        assert scenario.instruction_path is None

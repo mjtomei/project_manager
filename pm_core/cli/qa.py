@@ -2,6 +2,7 @@
 
 import os
 import subprocess
+from pathlib import Path
 
 import click
 
@@ -145,9 +146,11 @@ def qa_run(instruction_id: str, pr_id: str | None):
     root = state_root()
 
     # Find the instruction
-    item = qa_instructions.get_instruction(root, instruction_id, "instructions")
+    category = "instructions"
+    item = qa_instructions.get_instruction(root, instruction_id, category)
     if item is None:
-        item = qa_instructions.get_instruction(root, instruction_id, "regression")
+        category = "regression"
+        item = qa_instructions.get_instruction(root, instruction_id, category)
     if item is None:
         click.echo(f"Instruction not found: {instruction_id}", err=True)
         raise SystemExit(1)
@@ -167,12 +170,15 @@ def qa_run(instruction_id: str, pr_id: str | None):
         raise SystemExit(1)
 
     # Build a boilerplate single-scenario plan
+    # instruction_path is relative to pm/qa/
+    filename = Path(item["path"]).name
+    instr_rel = f"{category}/{filename}"
     scenario = qa_loop.QAScenario(
         index=1,
         title=item["title"],
         focus=item["description"] or item["title"],
-        instruction_path=item["path"],
-        steps=f"Follow the instruction at {item['path']}",
+        instruction_path=instr_rel,
+        steps=f"Follow the instruction file {filename}",
     )
 
     loop_id = f"cli-{pr_id}"

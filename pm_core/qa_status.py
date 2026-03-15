@@ -53,7 +53,8 @@ _VERDICT_COLORS = {
     "interactive": _DIM,
 }
 
-_REFRESH_INTERVAL = 2.0  # seconds
+_REFRESH_INTERVAL = 1.0  # seconds
+_SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
 
 
 def _load_status(path: Path) -> dict | None:
@@ -85,7 +86,8 @@ def _pad_line(text: str, cols: int) -> str:
     return text
 
 
-def _render(status: dict | None, selected: int, rows: int, cols: int) -> str:
+def _render(status: dict | None, selected: int, rows: int, cols: int,
+            tick: int = 0) -> str:
     """Render the status dashboard as an ANSI string."""
     lines: list[str] = []
 
@@ -106,15 +108,25 @@ def _render(status: dict | None, selected: int, rows: int, cols: int) -> str:
     lines.append(f"  {'#':>3}  {'Scenario':<{title_width}}  {'Verdict'}")
     lines.append(f"  {'---':>3}  {'-' * title_width}  {'-' * 14}")
 
+    spinner = _SPINNER_FRAMES[tick % len(_SPINNER_FRAMES)]
+
     for i, sc in enumerate(scenarios):
         idx = sc.get("index", "?")
         title = _truncate(sc.get("title", ""), title_width)
         verdict = sc.get("verdict", "")
 
-        color = _VERDICT_COLORS.get(verdict, _DIM)
-        verdict_display = verdict if verdict else f"{_DIM}pending{_RESET}"
-        if verdict:
+        if "(verifying)" in verdict:
+            # Animated spinner for verdicts being verified
+            base_verdict = verdict.replace(" (verifying)", "").strip()
+            verdict_display = (
+                f"{_GREEN}{base_verdict}{_RESET} "
+                f"{_YELLOW}{spinner} verifying{_RESET}"
+            )
+        elif verdict:
+            color = _VERDICT_COLORS.get(verdict, _DIM)
             verdict_display = f"{color}{verdict}{_RESET}"
+        else:
+            verdict_display = f"{_DIM}pending{_RESET}"
 
         prefix = "  "
         suffix = ""
@@ -250,6 +262,7 @@ def _run_interactive(path: Path, session: str) -> None:
     import tty
 
     selected = 0
+    tick = 0
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
 
@@ -267,8 +280,9 @@ def _run_interactive(path: Path, session: str) -> None:
             if num_scenarios > 0:
                 selected = max(0, min(selected, num_scenarios - 1))
 
-            sys.stdout.write(_render(status, selected, rows, cols))
+            sys.stdout.write(_render(status, selected, rows, cols, tick=tick))
             sys.stdout.flush()
+            tick += 1
 
             # Wait for input or timeout
             ready, _, _ = select.select([fd], [], [], _REFRESH_INTERVAL)
@@ -304,12 +318,14 @@ def _run_interactive(path: Path, session: str) -> None:
 
 def _run_passive(path: Path) -> None:
     """Passive mode: just refresh the display, no keyboard input."""
+    tick = 0
     while True:
         status = _load_status(path)
         rows, cols = _get_terminal_size()
 
-        sys.stdout.write(_render(status, -1, rows, cols))
+        sys.stdout.write(_render(status, -1, rows, cols, tick=tick))
         sys.stdout.flush()
+        tick += 1
 
         # Exit when overall verdict is set (QA complete)
         if status and status.get("overall"):

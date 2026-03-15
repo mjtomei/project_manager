@@ -23,11 +23,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from pm_core import qa_instructions
 from pm_core.paths import configure_logger
 from pm_core.loop_shared import (
     find_claude_pane,
     get_pm_session,
     extract_verdict_from_content,
+    poll_for_verdict,
     VERDICT_TAIL_LINES,
     VerdictStabilityTracker,
 )
@@ -50,6 +52,7 @@ _PLANNER_GRACE = 15  # seconds before accepting planner completion
 _DEFAULT_MAX_SCENARIOS = 0  # 0 = unlimited
 _SCENARIO_MAX_RETRIES = 10  # max times to relaunch a dead scenario
 _SCENARIO_RETRY_BASE = 5  # base seconds for exponential backoff
+_DEFAULT_VERIFICATION_MAX_RETRIES = 1
 
 
 def _get_max_scenarios() -> int:
@@ -60,6 +63,29 @@ def _get_max_scenarios() -> int:
         return max(0, int(val))
     except ValueError:
         return _DEFAULT_MAX_SCENARIOS
+
+def _get_verification_max_retries() -> int:
+    """Read qa-verify-retries from global settings (default: 1)."""
+    from pm_core.paths import get_global_setting_value
+    val = get_global_setting_value("qa-verify-retries", "")
+    try:
+        return max(0, int(val))
+    except ValueError:
+        return _DEFAULT_VERIFICATION_MAX_RETRIES
+
+
+def _is_verification_enabled() -> bool:
+    """Check if PASS verdict verification is enabled (default: True).
+
+    Controlled by the ``qa-verify-pass`` global setting.  Set to ``0``
+    or ``false`` to disable.
+    """
+    from pm_core.paths import get_global_setting_value
+    val = get_global_setting_value("qa-verify-pass", "").strip().lower()
+    if val in ("0", "false", "no", "off", "disabled"):
+        return False
+    return True
+
 
 def _tail_has_marker_on_own_line(content: str, marker: str,
                                  tail_lines: int = VERDICT_TAIL_LINES) -> bool:
@@ -89,6 +115,7 @@ class QAScenario:
     window_name: str | None = None
     worktree_path: str | None = None
     container_name: str | None = None
+    transcript_path: str | None = None
 
 
 @dataclass
@@ -123,16 +150,21 @@ def create_qa_workdir(pr_id: str, loop_id: str) -> Path:
     return workdir
 
 
+def _scenario_transcript_path(qa_workdir: str | Path, scenario_index: int) -> str:
+    """Return the path where a scenario's transcript symlink should live."""
+    return str(Path(qa_workdir) / f"transcript-s{scenario_index}.jsonl")
+
+
 def _next_scenario_offset(pr_id: str, current_loop_id: str) -> int:
     """Find the highest scenario index used in previous runs for this PR.
 
-    Scans ``~/.pm/workdirs/qa/{pr_id}-*/worktree-*`` dirs (excluding the
+    Scans ``~/.pm/workdirs/qa/{pr_id}-*/s-*`` dirs (excluding the
     current run) to find the max index, so new scenarios continue numbering
     from where previous runs left off.
     """
     qa_root = Path.home() / ".pm" / "workdirs" / "qa"
     max_idx = 0
-    for d in qa_root.glob(f"{pr_id}-*/worktree-*"):
+    for d in qa_root.glob(f"{pr_id}-*/s-*"):
         # Skip the current run
         if current_loop_id and d.parent.name == f"{pr_id}-{current_loop_id}":
             continue
@@ -148,33 +180,36 @@ def create_scenario_workdir(qa_workdir: Path, scenario_index: int,
                             repo_root: Path | None = None,
                             pr_id: str = "",
                             loop_id: str = "",
-                            branch: str = "") -> tuple[Path, Path, Path | None]:
-    """Create an isolated clone + scratch dir + venv for one QA scenario.
+                            branch: str = "") -> tuple[Path, Path]:
+    """Create an isolated working area for one QA scenario.
 
-    When *repo_root* is provided, creates:
-      - ``{qa_workdir}/worktree-{N}/``  — ``git clone --local`` of the repo
-      - ``{qa_workdir}/scratch-{N}/``   — empty temp dir for throwaway tests
-      - ``{qa_workdir}/venv-{N}/``      — ``--system-site-packages`` venv
+    Everything for a single scenario lives under one directory::
+
+        {qa_workdir}/s-{N}/
+            repo/       — ``git clone --local`` of the target repo
+            scratch/    — empty dir for throwaway test projects
 
     The clone checks out *branch* (the PR branch) so the scenario can
     commit and push fixes directly.
 
     Falls back to a plain empty directory when *repo_root* is None (legacy).
 
-    Returns ``(clone_path, scratch_path, venv_path)``.
-    ``venv_path`` is ``None`` in legacy mode.
+    Returns ``(clone_path, scratch_path)``.
     """
     from pm_core import git_ops
 
-    scratch = qa_workdir / f"scratch-{scenario_index}"
+    scenario_dir = qa_workdir / f"s-{scenario_index}"
+    scenario_dir.mkdir(parents=True, exist_ok=True)
+
+    scratch = scenario_dir / "scratch"
     scratch.mkdir(parents=True, exist_ok=True)
 
     if repo_root is None:
-        d = qa_workdir / f"scenario-{scenario_index}"
-        d.mkdir(parents=True, exist_ok=True)
-        return d, scratch, None
+        repo_dir = scenario_dir / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        return repo_dir, scratch
 
-    clone_path = qa_workdir / f"worktree-{scenario_index}"
+    clone_path = scenario_dir / "repo"
 
     # Clean up stale clone from a previous run
     if clone_path.exists():
@@ -193,20 +228,7 @@ def create_scenario_workdir(qa_workdir: Path, scenario_index: int,
     # (updating its branch ref) and then forwards to the real upstream.
     # This keeps all local copies in sync.
 
-    # Create a --system-site-packages venv so pip installs stay local
-    venv_path = qa_workdir / f"venv-{scenario_index}"
-    if not venv_path.exists():
-        try:
-            subprocess.run(
-                [sys.executable, "-m", "venv", "--system-site-packages",
-                 str(venv_path)],
-                check=True, capture_output=True,
-            )
-        except Exception:
-            _log.warning("Failed to create venv for scenario %d, continuing without",
-                         scenario_index)
-            venv_path = None
-    return clone_path, scratch, venv_path
+    return clone_path, scratch
 
 
 def _setup_clone_override(clone_path: Path) -> None:
@@ -290,8 +312,10 @@ def _write_status_file(status_path: Path, pr_id: str,
                        scenarios: list[QAScenario],
                        scenario_verdicts: dict[int, str],
                        overall: str = "",
-                       scenario_0: QAScenario | None = None) -> None:
+                       scenario_0: QAScenario | None = None,
+                       verifying_scenarios: set[int] | None = None) -> None:
     """Atomically write the qa_status.json file."""
+    _verifying = verifying_scenarios or set()
     all_scenarios = []
     if scenario_0 and scenario_0.window_name:
         all_scenarios.append({
@@ -300,15 +324,16 @@ def _write_status_file(status_path: Path, pr_id: str,
             "verdict": "interactive",
             "window_name": scenario_0.window_name or "",
         })
-    all_scenarios.extend([
-        {
+    for s in scenarios:
+        verdict = scenario_verdicts.get(s.index, "")
+        if s.index in _verifying:
+            verdict = f"{verdict} (verifying)" if verdict else "verifying"
+        all_scenarios.append({
             "index": s.index,
             "title": s.title,
-            "verdict": scenario_verdicts.get(s.index, ""),
+            "verdict": verdict,
             "window_name": s.window_name or "",
-        }
-        for s in scenarios
-    ])
+        })
     data = {
         "pr_id": pr_id,
         "scenarios": all_scenarios,
@@ -323,7 +348,7 @@ def _write_status_file(status_path: Path, pr_id: str,
 # Plan parsing
 # ---------------------------------------------------------------------------
 
-def parse_qa_plan(output: str) -> list[QAScenario]:
+def parse_qa_plan(output: str, pm_root: Path | None = None) -> list[QAScenario]:
     """Parse planner output into a list of QAScenarios.
 
     Expected format (ALL CAPS markers, no markdown):
@@ -332,12 +357,16 @@ def parse_qa_plan(output: str) -> list[QAScenario]:
 
     SCENARIO 1: Scenario Title
     FOCUS: What to test
-    INSTRUCTION: path/to/file.md (optional)
+    INSTRUCTION: filename.md (optional)
     STEPS: Key test steps
 
     SCENARIO 2: ...
 
     QA_PLAN_END
+
+    When *pm_root* is provided, INSTRUCTION values are resolved against the
+    instruction library with fuzzy matching.  The stored ``instruction_path``
+    is a relative path like ``instructions/foo.md`` (relative to ``pm/qa/``).
     """
     scenarios: list[QAScenario] = []
     placeholder_titles = {"Scenario Title", "..."}
@@ -385,9 +414,28 @@ def parse_qa_plan(output: str) -> list[QAScenario]:
 
         instr_m = re.search(r'^[ \t]*INSTRUCTION:\s*(.+)', rest, re.MULTILINE)
         if instr_m:
-            path_str = instr_m.group(1).strip()
-            if path_str.lower() not in ("none", "n/a", "-"):
-                instruction_path = path_str
+            raw_ref = instr_m.group(1).strip()
+            if raw_ref.lower() not in ("none", "n/a", "-"):
+                if pm_root is not None:
+                    resolved = qa_instructions.resolve_instruction_ref(
+                        pm_root, raw_ref)
+                    if resolved:
+                        category, fname = resolved
+                        instruction_path = f"{category}/{fname}"
+                        if fname != Path(raw_ref).name:
+                            _log.info(
+                                "Scenario %d: fuzzy-matched instruction "
+                                "%r -> %s", index, raw_ref, instruction_path,
+                            )
+                    else:
+                        _log.warning(
+                            "Scenario %d references unknown instruction "
+                            "%r — ignoring INSTRUCTION field", index,
+                            raw_ref,
+                        )
+                else:
+                    # No pm_root for resolution — store raw value
+                    instruction_path = raw_ref
 
         # STEPS: capture everything until the next field or end of chunk
         steps_m = re.search(
@@ -465,7 +513,7 @@ def _launch_scenario_0(
 
     branch = pr_data.get("branch", "")
     try:
-        clone_path, scratch_path, venv_path = create_scenario_workdir(
+        clone_path, scratch_path = create_scenario_workdir(
             Path(state.qa_workdir), 0,
             repo_root=repo_root,
             pr_id=state.pr_id,
@@ -491,12 +539,9 @@ def _launch_scenario_0(
         scratch_dir=str(scratch_path),
     )
 
-    claude_cmd = build_claude_shell_cmd(
+    final_cmd = build_claude_shell_cmd(
         prompt=child_prompt,
         model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort)
-    if venv_path:
-        claude_cmd = f"VIRTUAL_ENV={venv_path} PATH={venv_path}/bin:$PATH {claude_cmd}"
-    final_cmd = claude_cmd
     scenario_cwd = str(clone_path) if repo_root else workdir_path
 
     win_name = _scenario_window_name(pr_data, 0)
@@ -516,6 +561,37 @@ def _launch_scenario_0(
 # Scenario launching helpers
 # ---------------------------------------------------------------------------
 
+def _install_instruction_file(pm_root: Path, scenario: QAScenario,
+                              scratch_path: Path,
+                              scratch_dir: str) -> None:
+    """Copy the instruction file into the scenario's scratch area.
+
+    The instruction library lives in the pm project, not in the target repo.
+    This copies the referenced file into ``{scratch_path}/qa-instructions/``
+    and rewrites ``scenario.instruction_path`` to the absolute path as seen
+    by the agent (``{scratch_dir}/qa-instructions/{filename}``).
+
+    *scratch_path* is the host-side path; *scratch_dir* is the path the
+    agent sees (same on host, ``/scratch`` in containers).
+    """
+    if not scenario.instruction_path:
+        return
+    # instruction_path is e.g. "instructions/tui-manual-test.md"
+    src = pm_root / "qa" / scenario.instruction_path
+    if not src.is_file():
+        _log.warning("Instruction file %s not found — clearing instruction_path",
+                      src)
+        scenario.instruction_path = None
+        return
+    dest_dir = scratch_path / "qa-instructions"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / src.name
+    import shutil
+    shutil.copy2(src, dest)
+    scenario.instruction_path = f"{scratch_dir}/qa-instructions/{src.name}"
+    _log.info("Copied instruction %s -> %s", src, dest)
+
+
 def _launch_scenarios_in_tmux(
     state: QALoopState,
     data: dict,
@@ -523,6 +599,7 @@ def _launch_scenarios_in_tmux(
     session: str,
     repo_root: Path | None,
     workdir_path: str,
+    pm_root: Path | None = None,
 ) -> None:
     """Launch each scenario in its own tmux window (with worktree isolation)."""
     from pm_core import tmux as tmux_mod, prompt_gen
@@ -536,7 +613,7 @@ def _launch_scenarios_in_tmux(
             break
 
         try:
-            clone_path, scratch_path, venv_path = create_scenario_workdir(
+            clone_path, scratch_path = create_scenario_workdir(
                 Path(state.qa_workdir), scenario.index,
                 repo_root=repo_root,
                 pr_id=state.pr_id,
@@ -552,6 +629,13 @@ def _launch_scenarios_in_tmux(
         if repo_root:
             _setup_clone_override(clone_path)
 
+        if pm_root:
+            _install_instruction_file(pm_root, scenario, scratch_path,
+                                      scratch_dir=str(scratch_path))
+
+        scenario_cwd = str(clone_path) if repo_root else workdir_path
+        transcript = _scenario_transcript_path(state.qa_workdir, scenario.index)
+
         child_prompt = prompt_gen.generate_qa_child_prompt(
             data, state.pr_id, scenario,
             workdir=str(clone_path),
@@ -561,18 +645,15 @@ def _launch_scenarios_in_tmux(
         )
         child_cmd = build_claude_shell_cmd(
             prompt=child_prompt,
-            model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort)
+            model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort,
+            transcript=transcript, cwd=scenario_cwd)
 
-        # Activate the scenario venv so pip installs stay local
-        if venv_path:
-            child_cmd = f"VIRTUAL_ENV={venv_path} PATH={venv_path}/bin:$PATH {child_cmd}"
-
-        scenario_cwd = str(clone_path) if repo_root else workdir_path
         win_name = _scenario_window_name(pr_data, scenario.index)
         try:
             tmux_mod.new_window(session, win_name, child_cmd,
                                 cwd=scenario_cwd, switch=False)
             scenario.window_name = win_name
+            scenario.transcript_path = transcript
         except Exception:
             _log.warning("Failed to create window for scenario %d",
                          scenario.index)
@@ -591,6 +672,7 @@ def _launch_scenarios_in_containers(
     session: str,
     repo_root: Path | None,
     workdir_path: str,
+    pm_root: Path | None = None,
 ) -> None:
     """Launch each scenario in a Docker container, presented via a tmux window.
 
@@ -621,7 +703,7 @@ def _launch_scenarios_in_containers(
             break
 
         try:
-            clone_path, scratch_path, venv_path = create_scenario_workdir(
+            clone_path, scratch_path = create_scenario_workdir(
                 Path(state.qa_workdir), scenario.index,
                 repo_root=repo_root,
                 pr_id=state.pr_id,
@@ -638,6 +720,15 @@ def _launch_scenarios_in_containers(
         container_workdir = container_mod._CONTAINER_WORKDIR
         container_scratch = container_mod._CONTAINER_SCRATCH
 
+        # Copy instruction file into scratch (mounted at /scratch in container)
+        if pm_root:
+            _install_instruction_file(pm_root, scenario, scratch_path,
+                                      scratch_dir=container_scratch)
+
+        # Transcript symlink lives on the host; cwd must match what Claude
+        # sees inside the container so the mangled project dir is correct.
+        transcript = _scenario_transcript_path(state.qa_workdir, scenario.index)
+
         child_prompt = prompt_gen.generate_qa_child_prompt(
             data, state.pr_id, scenario,
             workdir=container_workdir,
@@ -647,7 +738,8 @@ def _launch_scenarios_in_containers(
         )
         claude_cmd = build_claude_shell_cmd(
             prompt=child_prompt,
-            model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort)
+            model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort,
+            transcript=transcript, cwd=container_workdir)
 
         # Create container with push proxy for the PR branch.
         # All QA scenarios for the same PR share a single push proxy.
@@ -680,6 +772,7 @@ def _launch_scenarios_in_containers(
             tmux_mod.new_window(session, win_name, exec_cmd,
                                 cwd=workdir_path, switch=False)
             scenario.window_name = win_name
+            scenario.transcript_path = transcript
         except Exception:
             _log.warning("Failed to create window for scenario %d",
                          scenario.index)
@@ -721,6 +814,9 @@ def _relaunch_scenario_window(
     win_name = _scenario_window_name(pr_data, scenario.index)
     use_containers = is_container_mode_enabled() and _docker_available()
 
+    # New transcript for the relaunched session (old one is stale)
+    transcript = _scenario_transcript_path(state.qa_workdir, scenario.index)
+
     try:
         if use_containers and scenario.container_name:
             # Container still running — just re-exec into it
@@ -735,7 +831,8 @@ def _relaunch_scenario_window(
             )
             claude_cmd = build_claude_shell_cmd(
                 prompt=child_prompt,
-                model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort)
+                model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort,
+                transcript=transcript, cwd=container_workdir)
             exec_cmd = container_mod.build_exec_cmd(
                 scenario.container_name, claude_cmd, cleanup=False)
             tmux_mod.new_window(session, win_name, exec_cmd,
@@ -748,18 +845,17 @@ def _relaunch_scenario_window(
                 workdir=str(wt_path),
                 session_name=session,
                 worktree_mode=bool(scenario.worktree_path),
-                scratch_dir=str(Path(state.qa_workdir) / f"scratch-{scenario.index}"),
+                scratch_dir=str(Path(state.qa_workdir) / f"s-{scenario.index}" / "scratch"),
             )
             child_cmd = build_claude_shell_cmd(
                 prompt=child_prompt,
-                model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort)
-            venv_path = Path(state.qa_workdir) / f"venv-{scenario.index}"
-            if venv_path.is_dir():
-                child_cmd = f"VIRTUAL_ENV={venv_path} PATH={venv_path}/bin:$PATH {child_cmd}"
+                model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort,
+                transcript=transcript, cwd=str(wt_path))
             tmux_mod.new_window(session, win_name, child_cmd,
                                 cwd=str(wt_path), switch=False)
 
         scenario.window_name = win_name
+        scenario.transcript_path = transcript
         _log.info("Relaunched scenario %d in window %s", scenario.index, win_name)
         return True
     except Exception:
@@ -780,12 +876,33 @@ def _poll_tmux_verdicts(
     status_path: Path,
     _notify,
 ) -> None:
-    """Poll tmux scenario windows for verdicts."""
+    """Poll tmux scenario windows for verdicts.
+
+    When a PASS verdict is accepted, verification runs in a split pane
+    to check that the scenario genuinely exercised its test cases.  If
+    verification flags a scenario, a follow-up message is sent to the
+    scenario's pane and the scenario goes back to pending.
+    """
     from pm_core import tmux as tmux_mod
+
+    verify_enabled = _is_verification_enabled()
+    verify_max_retries = _get_verification_max_retries()
+    if verify_enabled:
+        _log.info("PASS verdict verification is enabled (max retries: %d)",
+                  verify_max_retries)
+    else:
+        _log.info("PASS verdict verification is disabled (qa-verify-pass)")
 
     tracker = VerdictStabilityTracker()
     pending = {s.index for s in state.scenarios if s.window_name}
     retry_counts: dict[int, int] = {}  # scenario_index -> retries used
+    # Track how many verification failures each scenario has had
+    verification_failures: dict[int, int] = {}
+    # Scenarios currently being verified (in a background thread)
+    verifying: set[int] = set()
+    # Results from background verification threads
+    verification_results: dict[int, tuple[bool, str]] = {}
+    verification_lock = threading.Lock()
 
     # Scenarios that failed to create a window get INPUT_REQUIRED immediately
     has_failed_creation = False
@@ -802,11 +919,101 @@ def _poll_tmux_verdicts(
 
     grace_start = time.monotonic()
 
-    while pending and not state.stop_requested:
+    def _run_verification(scenario: QAScenario, verdict: str, content: str):
+        """Background thread: run verification in a visible pane."""
+        try:
+            passed, reason = _verify_single_scenario(
+                scenario, verdict, content, pr_data, data,
+                session=session,
+            )
+        except Exception:
+            _log.warning("Verification thread crashed for scenario %d",
+                         scenario.index, exc_info=True)
+            passed, reason = True, ""  # trust original on failure
+        with verification_lock:
+            verification_results[scenario.index] = (passed, reason)
+            # NOTE: do NOT discard from ``verifying`` here — the main
+            # loop must process the result first.  If we discard now
+            # and ``pending`` is also empty the loop exits before it
+            # sees the result (race condition).
+
+    while (pending or verifying) and not state.stop_requested:
         time.sleep(_POLL_INTERVAL)
 
         in_grace = (time.monotonic() - grace_start) < _VERDICT_GRACE_PERIOD
         verdicts_changed = False
+
+        # Check for completed verifications
+        with verification_lock:
+            completed_verifications = dict(verification_results)
+            verification_results.clear()
+
+        for scenario_idx, (passed, reason) in completed_verifications.items():
+            verifying.discard(scenario_idx)
+            scenario = next(s for s in state.scenarios if s.index == scenario_idx)
+            if passed:
+                _log.info("Verification passed for scenario %d (%s)",
+                          scenario_idx, scenario.title)
+                # Verdict already set; mark as genuinely complete
+                state.latest_output = (
+                    f"Scenario {scenario_idx} ({scenario.title}): "
+                    f"{state.scenario_verdicts[scenario_idx]} (verified)"
+                )
+                _notify()
+            else:
+                fails = verification_failures.get(scenario_idx, 0) + 1
+                verification_failures[scenario_idx] = fails
+                _log.info("Verification FLAGGED scenario %d (%s), attempt %d: %s",
+                          scenario_idx, scenario.title, fails, reason)
+
+                if fails > verify_max_retries:
+                    # Too many verification failures — mark INPUT_REQUIRED
+                    _log.warning("Scenario %d failed verification %d times — "
+                                 "marking INPUT_REQUIRED", scenario_idx, fails)
+                    state.scenario_verdicts[scenario_idx] = VERDICT_INPUT_REQUIRED
+                    state.latest_output = (
+                        f"Scenario {scenario_idx} ({scenario.title}): "
+                        f"INPUT_REQUIRED (failed verification)"
+                    )
+                    verdicts_changed = True
+                    _notify()
+                else:
+                    # Send the scenario a follow-up message and put back in pending
+                    pane_id = _get_scenario_pane(session, scenario.window_name)
+                    if pane_id:
+                        followup_msg = (
+                            f"Your verdict was reviewed and flagged: {reason} — "
+                            f"Please re-evaluate this scenario. Make sure you "
+                            f"actually execute the test steps (run commands, "
+                            f"create test files, verify runtime behavior). "
+                            f"Do not just read code. "
+                            f"End with a new verdict on its own line "
+                            f"(PASS / NEEDS_WORK / INPUT_REQUIRED)."
+                        )
+                        tmux_mod.send_keys(pane_id, followup_msg)
+                        _log.info("Sent follow-up message to scenario %d pane",
+                                  scenario_idx)
+                        # Clear verdict and put back in pending
+                        state.scenario_verdicts.pop(scenario_idx, None)
+                        tracker.reset(f"qa-{state.pr_id}-{scenario_idx}")
+                        pending.add(scenario_idx)
+                        state.latest_output = (
+                            f"Scenario {scenario_idx} ({scenario.title}): "
+                            f"re-evaluating after verification"
+                        )
+                        verdicts_changed = True
+                        _notify()
+                    else:
+                        _log.warning("Cannot send follow-up to scenario %d — "
+                                     "window gone, marking INPUT_REQUIRED",
+                                     scenario_idx)
+                        state.scenario_verdicts[scenario_idx] = VERDICT_INPUT_REQUIRED
+                        state.latest_output = (
+                            f"Scenario {scenario_idx} ({scenario.title}): "
+                            f"INPUT_REQUIRED (window gone during verification)"
+                        )
+                        verdicts_changed = True
+                        _notify()
 
         for scenario in state.scenarios:
             if scenario.index not in pending or not scenario.window_name:
@@ -859,16 +1066,325 @@ def _poll_tmux_verdicts(
                 verdicts_changed = True
                 _log.info("Scenario %d (%s) verdict: %s",
                           scenario.index, scenario.title, verdict)
-                state.latest_output = (
-                    f"Scenario {scenario.index} ({scenario.title}): {verdict}"
-                )
-                _notify()
 
-        if verdicts_changed:
+                # Only PASS verdicts need verification — NEEDS_WORK and
+                # INPUT_REQUIRED already indicate problems were found.
+                if verdict == VERDICT_PASS and verify_enabled:
+                    state.latest_output = (
+                        f"Scenario {scenario.index} ({scenario.title}): "
+                        f"{verdict} — verifying..."
+                    )
+                    _notify()
+
+                    verifying.add(scenario.index)
+                    t = threading.Thread(
+                        target=_run_verification,
+                        args=(scenario, verdict, content),
+                        daemon=True,
+                        name=f"qa-verify-{state.pr_id}-{scenario.index}",
+                    )
+                    t.start()
+                else:
+                    state.latest_output = (
+                        f"Scenario {scenario.index} ({scenario.title}): "
+                        f"{verdict}"
+                    )
+                    _notify()
+
+        if verdicts_changed or completed_verifications:
+            with verification_lock:
+                verifying_snapshot = set(verifying)
             _write_status_file(status_path, state.pr_id, state.scenarios,
                                state.scenario_verdicts,
-                               scenario_0=state.scenario_0)
+                               scenario_0=state.scenario_0,
+                               verifying_scenarios=verifying_snapshot)
 
+
+# ---------------------------------------------------------------------------
+# Verdict verification
+# ---------------------------------------------------------------------------
+
+# Maximum pane output lines to include in the verification prompt.
+# Large outputs are truncated to keep the prompt manageable.
+_VERIFICATION_MAX_PANE_LINES = 500
+
+
+def _build_verification_prompt(scenario: QAScenario, verdict: str,
+                                pane_output: str | None = None,
+                                pane_output_path: str | None = None) -> str:
+    """Build a prompt for Claude to verify a single scenario's verdict.
+
+    The prompt asks Claude to determine whether the scenario genuinely
+    exercised its test cases or just exited without doing real work.
+
+    If *pane_output_path* is provided the prompt tells the verifier to
+    read the file (keeps the prompt small).  Otherwise *pane_output* is
+    inlined (truncated to ``_VERIFICATION_MAX_PANE_LINES``).
+    """
+    if pane_output_path:
+        is_jsonl = pane_output_path.endswith(".jsonl")
+        format_hint = (
+            " The file is in JSON Lines format (one JSON object per line) "
+            "— each line represents a conversation turn with role, content, "
+            "and tool use/result fields."
+            if is_jsonl else ""
+        )
+        output_section = (
+            f"The scenario produced the verdict: **{verdict}**\n\n"
+            f"The full session transcript has been saved to:\n"
+            f"  {pane_output_path}\n\n"
+            f"Read that file to review the scenario output.{format_hint}"
+        )
+    else:
+        text = pane_output or ""
+        lines = text.splitlines()
+        if len(lines) > _VERIFICATION_MAX_PANE_LINES:
+            truncated = lines[:_VERIFICATION_MAX_PANE_LINES]
+            text = "\n".join(truncated) + (
+                f"\n\n[... truncated {len(lines) - _VERIFICATION_MAX_PANE_LINES}"
+                f" more lines ...]"
+            )
+        output_section = (
+            f"The scenario produced the verdict: **{verdict}**\n\n"
+            f"Here is the full output from the scenario session:\n\n"
+            f"<scenario_output>\n{text}\n</scenario_output>"
+        )
+
+    return f"""You are verifying the output of QA scenario {scenario.index}: "{scenario.title}"
+
+## Scenario Definition
+
+**Focus**: {scenario.focus}
+
+**Steps**:
+{scenario.steps}
+
+## Scenario Output
+
+{output_section}
+
+## Your Task
+
+This scenario claimed **PASS**.  Your job is to verify that the PASS is genuine — that the scenario actually did the work it was supposed to do.
+
+### Step 1: Build a checklist
+
+Before looking at what the scenario did, enumerate each numbered step from the scenario definition above. For each step, write a one-line summary of what concrete action or observation it requires. This is your checklist.
+
+### Step 2: Match each step against the transcript
+
+Go through your checklist and, for each step, find **specific evidence** in the transcript that the step was actually executed. Evidence means tool calls (Bash commands, file writes) and their results — not just the scenario's commentary or assertions about what it did.
+
+Mark each step as:
+- **DONE** — clear evidence the step was executed and succeeded
+- **SKIPPED** — no evidence the step was attempted
+- **SUBSTITUTED** — the scenario did something different from what the step asked for (e.g., wrote a unit test instead of running the described end-to-end workflow, or read code instead of executing it)
+- **FAILED** — the step was attempted but produced errors or unexpected results
+
+### Step 3: Make your judgment
+
+- If ANY step is SKIPPED or SUBSTITUTED, the verdict is **FLAGGED**. A scenario that works around missing tools by substituting different methodology (e.g., unit tests instead of runtime testing, code review instead of execution) has not completed its steps — it should have reported INPUT_REQUIRED instead of PASS.
+- If all steps are DONE but some FAILED, the verdict is **FLAGGED**.
+- Only if all steps are DONE and succeeded is the verdict **VERIFIED**.
+
+### Common false-pass patterns to watch for
+
+- **Code reading as proof**: The scenario reads the source code, confirms the logic looks correct, and declares PASS — but never actually runs anything. Reading code is not testing.
+- **Substituted methodology**: The scenario can't run the prescribed steps (e.g., a CLI tool isn't available), so it writes its own unit tests or mocks instead. Even if those tests pass, the scenario did not follow its steps.
+- **Partial execution**: The scenario runs some steps but skips the hard ones (e.g., sets up a project but never starts the actual process under test).
+- **Tests pass but wrong tests**: The scenario runs a pre-existing test suite and reports PASS, but the existing tests don't cover the specific behavior the scenario steps describe.
+
+## Response Format
+
+Present your step-by-step checklist with the DONE/SKIPPED/SUBSTITUTED/FAILED annotations, then respond with EXACTLY one of:
+
+If the PASS is genuine:
+VERIFIED
+
+If the PASS is not justified, wrap your explanation in markers:
+FLAGGED_START
+<explanation of what went wrong — can be multiple lines>
+FLAGGED_END"""
+
+
+_VERIFICATION_VERDICTS = ("VERIFIED", "FLAGGED_END")
+_VERIFICATION_KEYWORDS = ("VERIFIED", "FLAGGED_START", "FLAGGED_END")
+
+
+def _extract_flagged_reason(content: str) -> str:
+    """Extract the reason text between FLAGGED_START and FLAGGED_END markers."""
+    lines = content.strip().splitlines()
+    in_flagged = False
+    reason_lines: list[str] = []
+    for line in lines:
+        cleaned = re.sub(r'[*`]', '', line).strip()
+        if cleaned == "FLAGGED_START":
+            in_flagged = True
+            continue
+        if cleaned == "FLAGGED_END":
+            break
+        if in_flagged:
+            reason_lines.append(line.strip())
+    return "\n".join(reason_lines).strip() or (
+        "Scenario did not properly exercise test cases"
+    )
+
+
+def _verify_single_scenario(
+    scenario: QAScenario,
+    verdict: str,
+    pane_output: str,
+    pr_data: dict,
+    project_data: dict | None = None,
+    session: str | None = None,
+) -> tuple[bool, str]:
+    """Verify a single scenario's verdict in a visible tmux pane.
+
+    Splits the scenario's tmux window to create a verification pane
+    running an interactive Claude session.  The user can see the
+    verification happening live.  Polls the pane for VERIFIED/FLAGGED,
+    then closes it.
+
+    Returns (passed, reason) where passed is True if the scenario was
+    verified, and reason is the explanation if it was flagged.
+
+    If the scenario has a transcript file (``.jsonl`` written by Claude
+    CLI), the verifier is pointed at that file so it can read the full
+    structured session.  Otherwise the pane output is inlined with
+    truncation as a fallback.
+    """
+    from pm_core import tmux as tmux_mod
+    from pm_core.claude_launcher import build_claude_shell_cmd, finalize_transcript
+
+    resolution = _resolve_qa_model(pr_data, project_data,
+                                   session_type="qa_verification")
+
+    # Prefer the transcript file if it exists (finalize first so the
+    # symlink is replaced with a real copy that survives pruning).
+    transcript_path = scenario.transcript_path
+    if transcript_path:
+        try:
+            finalize_transcript(Path(transcript_path))
+        except Exception:
+            _log.debug("Could not finalize transcript for scenario %d",
+                       scenario.index, exc_info=True)
+        if not Path(transcript_path).exists():
+            _log.warning("Transcript for scenario %d not found at %s, "
+                         "falling back to pane output",
+                         scenario.index, transcript_path)
+            transcript_path = None
+
+    prompt = _build_verification_prompt(
+        scenario, verdict,
+        pane_output_path=transcript_path,
+        pane_output=pane_output if not transcript_path else None,
+    )
+
+    # Find the scenario's pane to split
+    scenario_pane = _get_scenario_pane(session, scenario.window_name) if session else None
+    if not scenario_pane:
+        _log.warning("Verification: cannot find scenario %d pane, "
+                     "trusting original verdict", scenario.index)
+        return True, ""
+
+    # Build the verification claude command
+    verify_cmd = build_claude_shell_cmd(
+        prompt=prompt,
+        model=resolution.model,
+        provider=resolution.provider,
+        effort=resolution.effort,
+    )
+
+    # Split the scenario window using the standard pane management system
+    # so it works with mobile mode and portrait monitors.
+    from pm_core import pane_layout, pane_registry
+
+    _log.info("Verification: splitting pane for scenario %d (%s) "
+              "[source=%s]",
+              scenario.index, scenario.title,
+              "transcript" if transcript_path else "pane")
+    try:
+        verify_pane = tmux_mod.split_pane_at(
+            scenario_pane, "v", verify_cmd, background=True,
+        )
+    except Exception:
+        _log.warning("Verification: failed to split pane for scenario %d, "
+                     "trusting original verdict",
+                     scenario.index, exc_info=True)
+        return True, ""
+
+    # Register the pane and rebalance using the same pattern as the
+    # review window: register panes, reset user_modified, then rebalance.
+    win_id = None
+    try:
+        wid_result = subprocess.run(
+            tmux_mod._tmux_cmd("display", "-t", scenario_pane,
+                               "-p", "#{window_id}"),
+            capture_output=True, text=True,
+        )
+        win_id = wid_result.stdout.strip() or None
+        if win_id:
+            tmux_mod.set_shared_window_size(session, win_id)
+            pane_registry.register_pane(
+                session, win_id, verify_pane,
+                f"qa-verify-s{scenario.index}", verify_cmd,
+            )
+            # Reset user_modified so rebalance works correctly (the
+            # after-split-window hook sets it before panes are registered).
+            reg = pane_registry.load_registry(session)
+            wdata = pane_registry.get_window_data(reg, win_id)
+            wdata["user_modified"] = False
+            pane_registry.save_registry(session, reg)
+            pane_layout.rebalance(session, win_id)
+    except Exception:
+        _log.debug("Verification: registration/rebalance failed for "
+                   "scenario %d, continuing with polling",
+                   scenario.index, exc_info=True)
+
+    # Poll the verification pane for VERIFIED or FLAGGED
+    try:
+        content = poll_for_verdict(
+            verify_pane,
+            verdicts=_VERIFICATION_VERDICTS,
+            keywords=_VERIFICATION_KEYWORDS,
+            grace_period=_VERDICT_GRACE_PERIOD,
+            poll_interval=_POLL_INTERVAL,
+            tick_interval=_TICK_INTERVAL,
+            log_prefix=f"qa-verify-{scenario.index}",
+        )
+    except Exception:
+        _log.warning("Verification: polling failed for scenario %d",
+                     scenario.index, exc_info=True)
+        content = None
+
+    # Leave the verification pane open so the user can review it.
+    # It will be cleaned up when the scenario window is killed.
+
+    # Parse the result
+    passed, reason = True, ""
+    if content:
+        v = extract_verdict_from_content(
+            content,
+            verdicts=_VERIFICATION_VERDICTS,
+            keywords=_VERIFICATION_KEYWORDS,
+            log_prefix=f"qa-verify-{scenario.index}",
+        )
+        if v == "VERIFIED":
+            _log.info("Verification: scenario %d VERIFIED", scenario.index)
+        elif v == "FLAGGED_END":
+            # Extract reason between FLAGGED_START and FLAGGED_END markers
+            reason = _extract_flagged_reason(content)
+            _log.info("Verification: scenario %d FLAGGED: %s",
+                      scenario.index, reason)
+            passed = False
+        else:
+            _log.warning("Verification: unexpected verdict %r for scenario %d, "
+                         "trusting original", v, scenario.index)
+    else:
+        _log.warning("Verification: pane disappeared or timed out for "
+                     "scenario %d, trusting original", scenario.index)
+
+    return passed, reason
 
 
 # ---------------------------------------------------------------------------
@@ -1054,7 +1570,7 @@ def run_qa_sync(
 
             if has_end and elapsed >= _PLANNER_GRACE:
                 # Try parsing — only accept if we get real scenarios
-                trial = parse_qa_plan(content)
+                trial = parse_qa_plan(content, pm_root=pm_root)
                 if trial:
                     _log.info("planner poll: parsed %d scenario(s), accepting",
                               len(trial))
@@ -1076,7 +1592,7 @@ def run_qa_sync(
 
         # Parse the plan
         if state.plan_output:
-            state.scenarios = parse_qa_plan(state.plan_output)
+            state.scenarios = parse_qa_plan(state.plan_output, pm_root=pm_root)
             _log.info("QA plan parsed: %d scenario(s) for %s",
                       len(state.scenarios), state.pr_id)
 
@@ -1135,10 +1651,12 @@ def run_qa_sync(
     if use_containers:
         _launch_scenarios_in_containers(
             state, data, pr_data, session, repo_root, workdir_path,
+            pm_root=pm_root,
         )
     else:
         _launch_scenarios_in_tmux(
             state, data, pr_data, session, repo_root, workdir_path,
+            pm_root=pm_root,
         )
 
     # Add status pane to the main QA window (split planner pane horizontally)

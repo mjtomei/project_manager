@@ -796,12 +796,12 @@ QA_PLAN_START
 
 SCENARIO {scenario_start}: <descriptive title for this scenario>
 FOCUS: <what area or behavior to test>
-INSTRUCTION: <path/to/instruction.md or "none" if no existing instruction applies>
+INSTRUCTION: <filename from the library above, or "none" if no existing instruction applies>
 STEPS: <concrete test steps to perform>
 
 SCENARIO {scenario_start + 1}: <descriptive title for next scenario>
 FOCUS: <what area or behavior to test>
-INSTRUCTION: <path or "none">
+INSTRUCTION: <filename or "none">
 STEPS: <concrete test steps>
 
 QA_PLAN_END
@@ -945,14 +945,9 @@ def generate_qa_child_prompt(data: dict, pr_id: str,
 
     instruction_block = ""
     if scenario.instruction_path:
-        # Translate absolute host path to be relative to the scenario workdir.
-        # Instruction files live under pm/qa/ in the repo; in containers the
-        # repo is mounted at /workspace so we need /workspace/pm/qa/...
+        # instruction_path is an absolute path from the agent's perspective
+        # (set by _install_instruction_file during launch).
         instr_display = scenario.instruction_path
-        marker = "/pm/qa/"
-        idx = scenario.instruction_path.find(marker)
-        if idx >= 0:
-            instr_display = f"{workdir}/pm/qa/{scenario.instruction_path[idx + len(marker):]}"
         instruction_block = f"""
 ## Instruction Reference
 
@@ -1099,3 +1094,5 @@ This is not a PR review — you are testing the current state of the codebase.
 
 IMPORTANT: Always end your response with the verdict keyword on its own line."""
     return prompt.strip()
+
+

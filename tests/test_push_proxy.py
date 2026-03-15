@@ -279,7 +279,7 @@ class TestPushProxyLifecycle:
 
     def test_container_socket_path(self):
         assert container_socket_path() == _CONTAINER_SOCKET_PATH
-        assert container_socket_path() == "/run/pm-push-proxy.sock"
+        assert container_socket_path() == "/run/pm-push-proxy/push.sock"
 
     def test_get_proxy_socket_path(self):
         with patch("pm_core.push_proxy.PushProxy.start"), \
