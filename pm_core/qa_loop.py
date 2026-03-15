@@ -1081,10 +1081,13 @@ def _poll_tmux_verdicts(
                             tmux_mod.send_keys(pane_id, "")
                         _log.info("Sent follow-up message to scenario %d pane",
                                   scenario_idx)
-                        # Clear verdict and put back in pending
+                        # Clear verdict and put back in pending.
+                        # Keep verdict_context so the old stale PASS is
+                        # still recognised and skipped — only a genuinely
+                        # new verdict (with different surrounding lines)
+                        # will be accepted.
                         state.scenario_verdicts.pop(scenario_idx, None)
                         tracker.reset(f"qa-{state.pr_id}-{scenario_idx}")
-                        verdict_context.pop(scenario_idx, None)
                         pending.add(scenario_idx)
                         state.latest_output = (
                             f"Scenario {scenario_idx} ({scenario.title}): "
