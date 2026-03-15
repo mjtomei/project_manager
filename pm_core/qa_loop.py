@@ -1208,8 +1208,16 @@ def _verify_single_scenario(
         verify_pane = tmux_mod.split_pane_at(
             scenario_pane, "v", verify_cmd, background=True,
         )
+    except Exception:
+        _log.warning("Verification: failed to split pane for scenario %d, "
+                     "trusting original verdict",
+                     scenario.index, exc_info=True)
+        return True, ""
 
-        # Register the pane and rebalance using standard layout management
+    # Register the pane and rebalance using standard layout management.
+    # Failures here are non-fatal — we still poll and clean up the pane.
+    win_id = None
+    try:
         wid_result = subprocess.run(
             tmux_mod._tmux_cmd("display", "-t", scenario_pane,
                                "-p", "#{window_id}"),
@@ -1223,10 +1231,9 @@ def _verify_single_scenario(
             )
             pane_layout.rebalance(session, win_id)
     except Exception:
-        _log.warning("Verification: failed to split pane for scenario %d, "
-                     "trusting original verdict",
-                     scenario.index, exc_info=True)
-        return True, ""
+        _log.debug("Verification: registration/rebalance failed for "
+                   "scenario %d, continuing with polling",
+                   scenario.index, exc_info=True)
 
     # Poll the verification pane for VERIFIED or FLAGGED
     try:
