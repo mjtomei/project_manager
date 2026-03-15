@@ -20,6 +20,7 @@ from pm_core.qa_loop import (
     _tail_has_marker_on_own_line,
     _build_verification_prompt,
     _verify_single_scenario,
+    _is_verification_enabled,
     _VERIFICATION_MAX_PANE_LINES,
 )
 
@@ -1456,3 +1457,21 @@ class TestVerifySingleScenario:
             _verify_single_scenario(scenario, "PASS", "pane output", {}, {})
         prompt_arg = mock_print.call_args[0][0]
         assert "pane output" in prompt_arg
+
+
+class TestVerificationSetting:
+    """Tests for _is_verification_enabled global setting."""
+
+    def test_default_is_enabled(self):
+        with patch("pm_core.paths.get_global_setting_value", return_value=""):
+            assert _is_verification_enabled() is True
+
+    def test_disabled_with_false(self):
+        for val in ("0", "false", "no", "off", "disabled", "False", "OFF"):
+            with patch("pm_core.paths.get_global_setting_value", return_value=val):
+                assert _is_verification_enabled() is False, f"Expected disabled for {val!r}"
+
+    def test_enabled_with_truthy(self):
+        for val in ("1", "true", "yes", "on"):
+            with patch("pm_core.paths.get_global_setting_value", return_value=val):
+                assert _is_verification_enabled() is True, f"Expected enabled for {val!r}"

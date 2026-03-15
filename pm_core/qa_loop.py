@@ -61,6 +61,19 @@ def _get_max_scenarios() -> int:
     except ValueError:
         return _DEFAULT_MAX_SCENARIOS
 
+def _is_verification_enabled() -> bool:
+    """Check if PASS verdict verification is enabled (default: True).
+
+    Controlled by the ``qa-verify-pass`` global setting.  Set to ``0``
+    or ``false`` to disable.
+    """
+    from pm_core.paths import get_global_setting_value
+    val = get_global_setting_value("qa-verify-pass", "").strip().lower()
+    if val in ("0", "false", "no", "off", "disabled"):
+        return False
+    return True
+
+
 def _tail_has_marker_on_own_line(content: str, marker: str,
                                  tail_lines: int = VERDICT_TAIL_LINES) -> bool:
     """Check if *marker* appears as the entire content of a line in the tail.
@@ -814,6 +827,12 @@ def _poll_tmux_verdicts(
     """
     from pm_core import tmux as tmux_mod
 
+    verify_enabled = _is_verification_enabled()
+    if verify_enabled:
+        _log.info("PASS verdict verification is enabled")
+    else:
+        _log.info("PASS verdict verification is disabled (qa-verify-pass)")
+
     tracker = VerdictStabilityTracker()
     pending = {s.index for s in state.scenarios if s.window_name}
     retry_counts: dict[int, int] = {}  # scenario_index -> retries used
@@ -985,7 +1004,7 @@ def _poll_tmux_verdicts(
 
                 # Only PASS verdicts need verification — NEEDS_WORK and
                 # INPUT_REQUIRED already indicate problems were found.
-                if verdict == VERDICT_PASS:
+                if verdict == VERDICT_PASS and verify_enabled:
                     state.latest_output = (
                         f"Scenario {scenario.index} ({scenario.title}): "
                         f"{verdict} — verifying..."
