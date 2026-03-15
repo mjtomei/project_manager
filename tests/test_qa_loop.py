@@ -325,14 +325,16 @@ class TestQAWorkdirs:
         assert "pr-001-abc123" in str(wd)
 
     def test_create_scenario_workdir(self, tmp_path):
-        d, scratch, venv = create_scenario_workdir(tmp_path, 1)
+        d, scratch = create_scenario_workdir(tmp_path, 1)
         assert d.exists()
-        assert d.name == "scenario-1"
+        assert d.name == "repo"
+        assert d.parent.name == "s-1"
         assert scratch.exists()
-        assert venv is None
+        assert scratch.name == "scratch"
+        assert scratch.parent.name == "s-1"
 
-    def test_create_scenario_workdir_venv(self, tmp_path):
-        """Clone mode creates a --system-site-packages venv."""
+    def test_create_scenario_workdir_with_clone(self, tmp_path):
+        """Clone mode creates repo + scratch under s-N/."""
         qa_workdir = tmp_path / "qa"
         qa_workdir.mkdir()
 
@@ -340,48 +342,22 @@ class TestQAWorkdirs:
         repo_root.mkdir()
 
         def fake_run_git(*args):
-            # Simulate git clone --local by creating the directory
-            clone_path = qa_workdir / "worktree-1"
+            clone_path = qa_workdir / "s-1" / "repo"
             clone_path.mkdir(parents=True, exist_ok=True)
             return MagicMock(returncode=0)
 
         with patch("pm_core.git_ops.run_git", side_effect=fake_run_git):
-            _, _, venv_path = create_scenario_workdir(
+            clone_path, scratch = create_scenario_workdir(
                 qa_workdir, 1, repo_root=repo_root,
                 pr_id="pr-001", loop_id="abc",
             )
 
-        assert venv_path is not None
-        assert venv_path.name == "venv-1"
-        assert venv_path.exists()
-        # Verify the venv has the expected bin directory
-        assert (venv_path / "bin" / "python").exists() or (venv_path / "bin" / "python3").exists()
-
-    def test_create_scenario_workdir_venv_failure_nonfatal(self, tmp_path):
-        """Venv creation failure is non-fatal — returns venv_path=None."""
-        qa_workdir = tmp_path / "qa"
-        qa_workdir.mkdir()
-
-        repo_root = tmp_path / "repo"
-        repo_root.mkdir()
-
-        def fake_run_git(*args):
-            clone_path = qa_workdir / "worktree-1"
-            clone_path.mkdir(parents=True, exist_ok=True)
-            return MagicMock(returncode=0)
-
-        with patch("pm_core.git_ops.run_git", side_effect=fake_run_git), \
-             patch("pm_core.qa_loop.subprocess.run",
-                   side_effect=OSError("venv failed")):
-            clone_path, scratch, venv_path = create_scenario_workdir(
-                qa_workdir, 1, repo_root=repo_root,
-                pr_id="pr-001", loop_id="abc",
-            )
-
-        # Clone and scratch still created, venv is None
-        assert clone_path is not None
+        assert clone_path.exists()
+        assert clone_path.name == "repo"
+        assert clone_path.parent.name == "s-1"
         assert scratch.exists()
-        assert venv_path is None
+        assert scratch.name == "scratch"
+        assert scratch.parent.name == "s-1"
 
 
 class TestQALoopState:

@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from pm_core import qa_instructions
 from pm_core.paths import configure_logger
 from pm_core.loop_shared import (
     find_claude_pane,
@@ -156,13 +157,13 @@ def _scenario_transcript_path(qa_workdir: str | Path, scenario_index: int) -> st
 def _next_scenario_offset(pr_id: str, current_loop_id: str) -> int:
     """Find the highest scenario index used in previous runs for this PR.
 
-    Scans ``~/.pm/workdirs/qa/{pr_id}-*/worktree-*`` dirs (excluding the
+    Scans ``~/.pm/workdirs/qa/{pr_id}-*/s-*`` dirs (excluding the
     current run) to find the max index, so new scenarios continue numbering
     from where previous runs left off.
     """
     qa_root = Path.home() / ".pm" / "workdirs" / "qa"
     max_idx = 0
-    for d in qa_root.glob(f"{pr_id}-*/worktree-*"):
+    for d in qa_root.glob(f"{pr_id}-*/s-*"):
         # Skip the current run
         if current_loop_id and d.parent.name == f"{pr_id}-{current_loop_id}":
             continue
@@ -179,32 +180,35 @@ def create_scenario_workdir(qa_workdir: Path, scenario_index: int,
                             pr_id: str = "",
                             loop_id: str = "",
                             branch: str = "") -> tuple[Path, Path, Path | None]:
-    """Create an isolated clone + scratch dir + venv for one QA scenario.
+    """Create an isolated working area for one QA scenario.
 
-    When *repo_root* is provided, creates:
-      - ``{qa_workdir}/worktree-{N}/``  — ``git clone --local`` of the repo
-      - ``{qa_workdir}/scratch-{N}/``   — empty temp dir for throwaway tests
-      - ``{qa_workdir}/venv-{N}/``      — ``--system-site-packages`` venv
+    Everything for a single scenario lives under one directory::
+
+        {qa_workdir}/s-{N}/
+            repo/       — ``git clone --local`` of the target repo
+            scratch/    — empty dir for throwaway test projects
 
     The clone checks out *branch* (the PR branch) so the scenario can
     commit and push fixes directly.
 
     Falls back to a plain empty directory when *repo_root* is None (legacy).
 
-    Returns ``(clone_path, scratch_path, venv_path)``.
-    ``venv_path`` is ``None`` in legacy mode.
+    Returns ``(clone_path, scratch_path)``.
     """
     from pm_core import git_ops
 
-    scratch = qa_workdir / f"scratch-{scenario_index}"
+    scenario_dir = qa_workdir / f"s-{scenario_index}"
+    scenario_dir.mkdir(parents=True, exist_ok=True)
+
+    scratch = scenario_dir / "scratch"
     scratch.mkdir(parents=True, exist_ok=True)
 
     if repo_root is None:
-        d = qa_workdir / f"scenario-{scenario_index}"
-        d.mkdir(parents=True, exist_ok=True)
-        return d, scratch, None
+        repo_dir = scenario_dir / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        return repo_dir, scratch
 
-    clone_path = qa_workdir / f"worktree-{scenario_index}"
+    clone_path = scenario_dir / "repo"
 
     # Clean up stale clone from a previous run
     if clone_path.exists():
@@ -223,20 +227,7 @@ def create_scenario_workdir(qa_workdir: Path, scenario_index: int,
     # (updating its branch ref) and then forwards to the real upstream.
     # This keeps all local copies in sync.
 
-    # Create a --system-site-packages venv so pip installs stay local
-    venv_path = qa_workdir / f"venv-{scenario_index}"
-    if not venv_path.exists():
-        try:
-            subprocess.run(
-                [sys.executable, "-m", "venv", "--system-site-packages",
-                 str(venv_path)],
-                check=True, capture_output=True,
-            )
-        except Exception:
-            _log.warning("Failed to create venv for scenario %d, continuing without",
-                         scenario_index)
-            venv_path = None
-    return clone_path, scratch, venv_path
+    return clone_path, scratch
 
 
 def _setup_clone_override(clone_path: Path) -> None:
@@ -356,7 +347,7 @@ def _write_status_file(status_path: Path, pr_id: str,
 # Plan parsing
 # ---------------------------------------------------------------------------
 
-def parse_qa_plan(output: str) -> list[QAScenario]:
+def parse_qa_plan(output: str, pm_root: Path | None = None) -> list[QAScenario]:
     """Parse planner output into a list of QAScenarios.
 
     Expected format (ALL CAPS markers, no markdown):
@@ -365,12 +356,16 @@ def parse_qa_plan(output: str) -> list[QAScenario]:
 
     SCENARIO 1: Scenario Title
     FOCUS: What to test
-    INSTRUCTION: path/to/file.md (optional)
+    INSTRUCTION: filename.md (optional)
     STEPS: Key test steps
 
     SCENARIO 2: ...
 
     QA_PLAN_END
+
+    When *pm_root* is provided, INSTRUCTION values are resolved against the
+    instruction library with fuzzy matching.  The stored ``instruction_path``
+    is a relative path like ``instructions/foo.md`` (relative to ``pm/qa/``).
     """
     scenarios: list[QAScenario] = []
     placeholder_titles = {"Scenario Title", "..."}
@@ -418,9 +413,28 @@ def parse_qa_plan(output: str) -> list[QAScenario]:
 
         instr_m = re.search(r'^[ \t]*INSTRUCTION:\s*(.+)', rest, re.MULTILINE)
         if instr_m:
-            path_str = instr_m.group(1).strip()
-            if path_str.lower() not in ("none", "n/a", "-"):
-                instruction_path = path_str
+            raw_ref = instr_m.group(1).strip()
+            if raw_ref.lower() not in ("none", "n/a", "-"):
+                if pm_root is not None:
+                    resolved = qa_instructions.resolve_instruction_ref(
+                        pm_root, raw_ref)
+                    if resolved:
+                        category, fname = resolved
+                        instruction_path = f"{category}/{fname}"
+                        if fname != Path(raw_ref).name:
+                            _log.info(
+                                "Scenario %d: fuzzy-matched instruction "
+                                "%r -> %s", index, raw_ref, instruction_path,
+                            )
+                    else:
+                        _log.warning(
+                            "Scenario %d references unknown instruction "
+                            "%r — ignoring INSTRUCTION field", index,
+                            raw_ref,
+                        )
+                else:
+                    # No pm_root for resolution — store raw value
+                    instruction_path = raw_ref
 
         # STEPS: capture everything until the next field or end of chunk
         steps_m = re.search(
@@ -498,7 +512,7 @@ def _launch_scenario_0(
 
     branch = pr_data.get("branch", "")
     try:
-        clone_path, scratch_path, venv_path = create_scenario_workdir(
+        clone_path, scratch_path = create_scenario_workdir(
             Path(state.qa_workdir), 0,
             repo_root=repo_root,
             pr_id=state.pr_id,
@@ -524,12 +538,9 @@ def _launch_scenario_0(
         scratch_dir=str(scratch_path),
     )
 
-    claude_cmd = build_claude_shell_cmd(
+    final_cmd = build_claude_shell_cmd(
         prompt=child_prompt,
         model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort)
-    if venv_path:
-        claude_cmd = f"VIRTUAL_ENV={venv_path} PATH={venv_path}/bin:$PATH {claude_cmd}"
-    final_cmd = claude_cmd
     scenario_cwd = str(clone_path) if repo_root else workdir_path
 
     win_name = _scenario_window_name(pr_data, 0)
@@ -549,6 +560,36 @@ def _launch_scenario_0(
 # Scenario launching helpers
 # ---------------------------------------------------------------------------
 
+def _install_instruction_file(pm_root: Path, scenario: QAScenario,
+                              scratch_path: Path,
+                              scratch_dir: str) -> None:
+    """Copy the instruction file into the scenario's scratch area.
+
+    The instruction library lives in the pm project, not in the target repo.
+    This copies the referenced file into ``{scratch_path}/qa-instructions/``
+    and rewrites ``scenario.instruction_path`` to the absolute path as seen
+    by the agent (``{scratch_dir}/qa-instructions/{filename}``).
+
+    *scratch_path* is the host-side path; *scratch_dir* is the path the
+    agent sees (same on host, ``/scratch`` in containers).
+    """
+    if not scenario.instruction_path:
+        return
+    # instruction_path is e.g. "instructions/tui-manual-test.md"
+    src = pm_root / "qa" / scenario.instruction_path
+    if not src.is_file():
+        _log.warning("Instruction file %s not found — clearing instruction_path",
+                      src)
+        scenario.instruction_path = None
+        return
+    dest_dir = scratch_path / "qa-instructions"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / src.name
+    import shutil
+    shutil.copy2(src, dest)
+    scenario.instruction_path = f"{scratch_dir}/qa-instructions/{src.name}"
+    _log.info("Copied instruction %s -> %s", src, dest)
+
 def _launch_scenarios_in_tmux(
     state: QALoopState,
     data: dict,
@@ -556,6 +597,7 @@ def _launch_scenarios_in_tmux(
     session: str,
     repo_root: Path | None,
     workdir_path: str,
+    pm_root: Path | None = None,
 ) -> None:
     """Launch each scenario in its own tmux window (with worktree isolation)."""
     from pm_core import tmux as tmux_mod, prompt_gen
@@ -569,7 +611,7 @@ def _launch_scenarios_in_tmux(
             break
 
         try:
-            clone_path, scratch_path, venv_path = create_scenario_workdir(
+            clone_path, scratch_path = create_scenario_workdir(
                 Path(state.qa_workdir), scenario.index,
                 repo_root=repo_root,
                 pr_id=state.pr_id,
@@ -585,6 +627,10 @@ def _launch_scenarios_in_tmux(
         if repo_root:
             _setup_clone_override(clone_path)
 
+        if pm_root:
+            _install_instruction_file(pm_root, scenario, scratch_path,
+                                      scratch_dir=str(scratch_path))
+
         scenario_cwd = str(clone_path) if repo_root else workdir_path
         transcript = _scenario_transcript_path(state.qa_workdir, scenario.index)
 
@@ -599,10 +645,6 @@ def _launch_scenarios_in_tmux(
             prompt=child_prompt,
             model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort,
             transcript=transcript, cwd=scenario_cwd)
-
-        # Activate the scenario venv so pip installs stay local
-        if venv_path:
-            child_cmd = f"VIRTUAL_ENV={venv_path} PATH={venv_path}/bin:$PATH {child_cmd}"
 
         win_name = _scenario_window_name(pr_data, scenario.index)
         try:
@@ -628,6 +670,7 @@ def _launch_scenarios_in_containers(
     session: str,
     repo_root: Path | None,
     workdir_path: str,
+    pm_root: Path | None = None,
 ) -> None:
     """Launch each scenario in a Docker container, presented via a tmux window.
 
@@ -658,7 +701,7 @@ def _launch_scenarios_in_containers(
             break
 
         try:
-            clone_path, scratch_path, venv_path = create_scenario_workdir(
+            clone_path, scratch_path = create_scenario_workdir(
                 Path(state.qa_workdir), scenario.index,
                 repo_root=repo_root,
                 pr_id=state.pr_id,
@@ -674,6 +717,11 @@ def _launch_scenarios_in_containers(
         # In container mode, paths inside the container are fixed
         container_workdir = container_mod._CONTAINER_WORKDIR
         container_scratch = container_mod._CONTAINER_SCRATCH
+
+        # Copy instruction file into scratch (mounted at /scratch in container)
+        if pm_root:
+            _install_instruction_file(pm_root, scenario, scratch_path,
+                                      scratch_dir=container_scratch)
 
         # Transcript symlink lives on the host; cwd must match what Claude
         # sees inside the container so the mangled project dir is correct.
@@ -795,15 +843,12 @@ def _relaunch_scenario_window(
                 workdir=str(wt_path),
                 session_name=session,
                 worktree_mode=bool(scenario.worktree_path),
-                scratch_dir=str(Path(state.qa_workdir) / f"scratch-{scenario.index}"),
+                scratch_dir=str(Path(state.qa_workdir) / f"s-{scenario.index}" / "scratch"),
             )
             child_cmd = build_claude_shell_cmd(
                 prompt=child_prompt,
                 model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort,
                 transcript=transcript, cwd=str(wt_path))
-            venv_path = Path(state.qa_workdir) / f"venv-{scenario.index}"
-            if venv_path.is_dir():
-                child_cmd = f"VIRTUAL_ENV={venv_path} PATH={venv_path}/bin:$PATH {child_cmd}"
             tmux_mod.new_window(session, win_name, child_cmd,
                                 cwd=str(wt_path), switch=False)
 
@@ -1528,7 +1573,7 @@ def run_qa_sync(
 
             if has_end and elapsed >= _PLANNER_GRACE:
                 # Try parsing — only accept if we get real scenarios
-                trial = parse_qa_plan(content)
+                trial = parse_qa_plan(content, pm_root=pm_root)
                 if trial:
                     _log.info("planner poll: parsed %d scenario(s), accepting",
                               len(trial))
@@ -1550,7 +1595,7 @@ def run_qa_sync(
 
         # Parse the plan
         if state.plan_output:
-            state.scenarios = parse_qa_plan(state.plan_output)
+            state.scenarios = parse_qa_plan(state.plan_output, pm_root=pm_root)
             _log.info("QA plan parsed: %d scenario(s) for %s",
                       len(state.scenarios), state.pr_id)
 
@@ -1609,10 +1654,12 @@ def run_qa_sync(
     if use_containers:
         _launch_scenarios_in_containers(
             state, data, pr_data, session, repo_root, workdir_path,
+            pm_root=pm_root,
         )
     else:
         _launch_scenarios_in_tmux(
             state, data, pr_data, session, repo_root, workdir_path,
+            pm_root=pm_root,
         )
 
     # Add status pane to the main QA window (split planner pane horizontally)
