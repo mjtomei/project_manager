@@ -997,13 +997,13 @@ def _poll_tmux_verdicts(
                           scenario_idx, scenario.title, fails, reason)
 
                 if fails > verify_max_retries:
-                    # Too many verification failures — mark INPUT_REQUIRED
+                    # Too many verification failures — mark NEEDS_WORK
                     _log.warning("Scenario %d failed verification %d times — "
-                                 "marking INPUT_REQUIRED", scenario_idx, fails)
-                    state.scenario_verdicts[scenario_idx] = VERDICT_INPUT_REQUIRED
+                                 "marking NEEDS_WORK", scenario_idx, fails)
+                    state.scenario_verdicts[scenario_idx] = VERDICT_NEEDS_WORK
                     state.latest_output = (
                         f"Scenario {scenario_idx} ({scenario.title}): "
-                        f"INPUT_REQUIRED (failed verification)"
+                        f"NEEDS_WORK (failed verification: {reason})"
                     )
                     verdicts_changed = True
                     _notify()
