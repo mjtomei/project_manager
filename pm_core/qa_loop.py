@@ -1084,6 +1084,7 @@ def _poll_tmux_verdicts(
                         # Clear verdict and put back in pending
                         state.scenario_verdicts.pop(scenario_idx, None)
                         tracker.reset(f"qa-{state.pr_id}-{scenario_idx}")
+                        verdict_context.pop(scenario_idx, None)
                         pending.add(scenario_idx)
                         state.latest_output = (
                             f"Scenario {scenario_idx} ({scenario.title}): "
