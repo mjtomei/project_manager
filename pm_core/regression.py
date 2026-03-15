@@ -16,10 +16,7 @@ from pathlib import Path
 from typing import Callable
 
 from pm_core.paths import configure_logger
-from pm_core.loop_shared import (
-    extract_verdict_from_content,
-    VERDICT_TAIL_LINES,
-)
+from pm_core.loop_shared import extract_verdict_from_content
 
 _log = configure_logger("pm.regression")
 
@@ -159,7 +156,6 @@ def _launch_scenario(scenario: RegressionScenario,
 def _poll_scenario(pane_id: str, prompt_text: str) -> str | None:
     """Check a scenario pane for a verdict. Returns verdict or None."""
     from pm_core import tmux as tmux_mod
-    from pm_core.loop_shared import build_prompt_verdict_lines
 
     if not tmux_mod.pane_exists(pane_id):
         return "ERROR"  # pane died
@@ -168,10 +164,8 @@ def _poll_scenario(pane_id: str, prompt_text: str) -> str | None:
     if not content:
         return None
 
-    prompt_lines = build_prompt_verdict_lines(prompt_text, _KEYWORDS)
     verdict = extract_verdict_from_content(
-        content, ALL_VERDICTS, _KEYWORDS, prompt_lines,
-        tail_lines=VERDICT_TAIL_LINES,
+        content, ALL_VERDICTS, _KEYWORDS, prompt_text,
     )
     return verdict
 
