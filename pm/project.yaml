@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-5ef89e3
+  active_pr: pr-8fdda09
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -3711,22 +3711,44 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/146
   gh_pr_number: 146
   created_at: '2026-03-06T15:48:13.072900+00:00'
-  updated_at: '2026-03-15T03:26:29.346223+00:00'
+  updated_at: '2026-03-15T17:33:36.214185+00:00'
   started_at: '2026-03-14T22:24:34.604076+00:00'
-  reviewed_at: '2026-03-14T23:38:06.207189+00:00'
+  reviewed_at: '2026-03-15T17:33:36.214185+00:00'
   merged_at: null
   notes:
-  - id: note-1b76203
-    text: 'QA NEEDS_WORK: Verification triggers on PASS verdict only: PASS; Verification
-      FLAGGED triggers re-evaluation: NEEDS_WORK; Verification failure exhaustion
-      marks NEEDS_WORK: PASS; qa-verify-pass setting disables verification: PASS;
-      Verification pane lifecycle and layout management: PASS; Transcript file preferred
-      over pane output for verification: PASS; Status dashboard renders verification
-      state correctly: PASS; qa_verification session type and model resolution: PASS;
-      Verification handles missing/dead scenario pane gracefully: PASS; Unit tests
-      pass for new verification functions: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-8fdda09-1bd189c42f9836b4)'
-    created_at: '2026-03-15T02:42:49Z'
-    last_edited: '2026-03-15T02:42:49Z'
+  - id: note-52ce835
+    text: 'QA INPUT_REQUIRED: Verification triggers on PASS verdict only: INPUT_REQUIRED;
+      Verification VERIFIED accepts the PASS verdict: INPUT_REQUIRED; Verification
+      FLAGGED triggers re-evaluation: INPUT_REQUIRED; Verification failure exhaustion
+      marks NEEDS_WORK: INPUT_REQUIRED; qa-verify-pass setting disables verification:
+      INPUT_REQUIRED; Verification pane lifecycle and layout management: INPUT_REQUIRED;
+      Transcript file preferred over pane output for verification: INPUT_REQUIRED;
+      Status dashboard renders verification state correctly: INPUT_REQUIRED; qa_verification
+      session type and model resolution: INPUT_REQUIRED; Verification handles missing/dead
+      scenario pane gracefully: INPUT_REQUIRED; Unit tests pass for new verification
+      functions: INPUT_REQUIRED; Push proxy survives caller exit via subprocess mode:
+      INPUT_REQUIRED; Socket directory mount survives proxy restarts: INPUT_REQUIRED;
+      Concurrent verification threads do not race with the polling loop: INPUT_REQUIRED;
+      Transcript path is set on scenario launch and relaunch: INPUT_REQUIRED (workdir:
+      /home/matt/.pm/workdirs/qa/pr-8fdda09-4f2ffa15e1941bc9)'
+    created_at: '2026-03-15T04:16:14Z'
+    last_edited: '2026-03-15T04:16:14Z'
+  - id: note-72d035f
+    text: 'QA INPUT_REQUIRED: Verification triggers on PASS verdict only: INPUT_REQUIRED;
+      Verification VERIFIED accepts the PASS verdict: INPUT_REQUIRED; Verification
+      FLAGGED triggers re-evaluation: INPUT_REQUIRED; Verification failure exhaustion
+      marks INPUT_REQUIRED: INPUT_REQUIRED; qa-verify-pass setting disables verification:
+      INPUT_REQUIRED; Verification pane lifecycle and layout management: INPUT_REQUIRED;
+      Transcript file preferred over pane output for verification: INPUT_REQUIRED;
+      Status dashboard renders verification state correctly: INPUT_REQUIRED; qa_verification
+      session type and model resolution: INPUT_REQUIRED; Verification handles missing/dead
+      scenario pane gracefully: INPUT_REQUIRED; Unit tests pass for new verification
+      functions: PASS; Push proxy survives caller exit via subprocess mode: PASS;
+      Socket directory mount survives proxy restarts: INPUT_REQUIRED; Concurrent verification
+      threads do not race with the polling loop: INPUT_REQUIRED; Transcript path is
+      set on scenario launch and relaunch: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-8fdda09-9c10a30ccd5da4c6)'
+    created_at: '2026-03-15T16:04:04Z'
+    last_edited: '2026-03-15T16:04:04Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8fdda09-add-qa-scenario-verification-step-be-3e33a282
 - id: pr-942aa21
   plan: plan-qa
@@ -6435,313 +6457,6 @@ prs:
   gh_pr_number: null
   created_at: '2026-03-14T04:20:26.981480+00:00'
   updated_at: '2026-03-14T04:21:40.677685+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
-- id: pr-8c3c95b
-  plan: plan-qa
-  title: Set up Claude-based regression testing across backends and container modes
-  branch: pm/pr-8c3c95b-set-up-claude-based-regression-testing-across-back
-  status: in_progress
-  depends_on: []
-  description: "Build a comprehensive regression test suite that uses Claude-based\
-    \ QA scenarios to exercise pm's full feature set across all configurations. This\
-    \ is different from the existing unit tests (pytest) — these are end-to-end behavioral\
-    \ tests run by Claude agents in real environments.\n\n## Test matrix axes\n\n\
-    ### Git backends (3)\n- **local**: No remote, local-only git operations\n- **vanilla**:\
-    \ Non-GitHub remote (e.g. Gitea or bare repo)\n- **github**: Full GitHub integration\
-    \ with draft PRs, API sync, merge detection\n\n### Worker modes (2)\n- **containerized**:\
-    \ Docker-isolated sessions with push proxy\n- **uncontainerized**: Direct host\
-    \ execution\n\nThis gives a 3×2 matrix of configurations. Each test scenario should\
-    \ specify which configurations it applies to.\n\n## Feature areas to cover\n\n\
-    ### Core PR lifecycle\n- pr add, edit, select, list, graph, ready\n- pr start\
-    \ (workdir creation, branch setup, Claude session launch)\n- pr review (review\
-    \ loop, verdict detection, iteration tracking)\n- pr qa (planning, parallel scenario\
-    \ execution, verdict collection)\n- pr merge (status transitions, dependency updates)\n\
-    - pr sync and sync-github\n- pr close and cleanup\n- PR dependencies and topological\
-    \ ordering\n- PR notes (add, edit, list, delete)\n\n### Plans\n- plan add, list,\
-    \ breakdown, review\n- plan-to-PR relationship\n- plan deps and dependency resolution\n\
-    \n### Container isolation\n- Container creation and reuse\n- Push proxy lifecycle\
-    \ (start, connect, branch restriction, cleanup)\n- Push proxy survives caller\
-    \ exit (subprocess mode)\n- Dead proxy detection and container recreation\n- Git\
-    \ wrapper intercepts push/fetch/pull/ls-remote correctly\n- Resource limits applied\n\
-    - Container cleanup on session end\n\n### QA system\n- QA instruction library\
-    \ (list, show, add, edit)\n- QA planning phase (scenario generation from PR description)\n\
-    - Parallel scenario execution in tmux windows\n- Verdict collection (PASS, NEEDS_WORK,\
-    \ INPUT_REQUIRED)\n- QA in containers vs on host\n- QA status pane and dashboard\n\
-    - Self-driving QA loop\n\n### Review system\n- Review loop verdict detection (PASS,\
-    \ PASS_WITH_SUGGESTIONS, NEEDS_WORK)\n- Interactive INPUT_REQUIRED handling\n\
-    - Review iteration tracking\n- Review in containers vs on host\n\n### Watchers\n\
-    - Watcher start/stop/list\n- Auto-start watcher behavior\n- Pane health monitoring\n\
-    \n### TUI\n- Keybindings and navigation\n- Pane management (create, reuse, deduplicate)\n\
-    - Tech tree rendering\n- Status updates and frame capture\n- Plan view toggle\n\
-    \n### Session management\n- Tmux session setup and teardown\n- Multi-window management\n\
-    - Pane layout and rebalancing\n\n### Model & provider configuration\n- Per-session-type\
-    \ model targeting\n- Provider selection and verification\n- Local LLM integration\n\
-    \n### State management\n- project.yaml round-trip (read/write/merge)\n- Git-based\
-    \ state sync between machines\n- GitHub sync for merged status\n\n## Implementation\
-    \ approach\n\n1. Create a `pm/qa/regression/` directory structure organized by\
-    \ feature area\n2. Each test scenario is a QA instruction markdown file with:\n\
-    \   - Clear setup steps (init repo with specific backend, enable/disable containers)\n\
-    \   - Specific actions to perform\n   - Expected outcomes to verify\n   - Applicable\
-    \ backend/container configurations noted in tags\n3. Add a `pm regression` CLI\
-    \ command (or extend `pm qa`) that:\n   - Accepts a filter for backend type and\
-    \ container mode\n   - Sets up the appropriate test environment (temp repo with\
-    \ correct backend)\n   - Runs matching scenarios against that environment\n  \
-    \ - Collects and reports results across the matrix\n4. Consider a nightly/scheduled\
-    \ run mode for the full matrix"
-  agent_machine: spark-424d
-  gh_pr: https://github.com/mjtomei/project_manager/pull/147
-  gh_pr_number: 147
-  created_at: '2026-03-15T03:30:13.909448+00:00'
-  updated_at: '2026-03-15T03:30:18.007343+00:00'
-  started_at: '2026-03-15T03:30:18.007343+00:00'
-  reviewed_at: null
-  merged_at: null
-  notes: []
-  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8c3c95b-set-up-claude-based-regression-testi-82186476
-- id: pr-803ed16
-  plan: plan-qa
-  title: Multi-user and multi-machine regression scenarios
-  branch: pm/pr-803ed16-multi-user-and-multi-machine-regression-scenarios
-  status: pending
-  depends_on:
-  - pr-8c3c95b
-  description: 'Add regression test scenarios that exercise multi-user and multi-machine
-    workflows. These build on the regression testing infrastructure from pr-8c3c95b.
-
-
-    ## Scenarios
-
-
-    ### Cross-machine PR handoff
-
-    - Start a PR on machine A (create workdir, make commits, push)
-
-    - Switch to machine B (pm pr start on same PR, workdir creation, git pull)
-
-    - Verify state sync via project.yaml git commits
-
-    - Verify workdir picks up remote branch changes
-
-    - Test concurrent edits from both machines with conflict resolution
-
-
-    ### Multi-user GitHub collaboration
-
-    - User A creates PR with pm, pushes draft PR to GitHub
-
-    - User B clones repo, runs pm init, imports the PR via pm pr import-github
-
-    - User B adds review comments via GitHub
-
-    - User A''s review loop picks up external comments
-
-    - Test merged status detection when User B merges via GitHub UI
-
-
-    ### Shared project.yaml conflicts
-
-    - Two users/machines modify project.yaml concurrently
-
-    - Push/pull with merge conflicts on timestamps, status fields, notes
-
-    - Verify pm''s conflict resolution preserves both users'' changes
-
-    - Test the common pattern: one machine adds a PR while another edits a different
-    PR
-
-
-    ### Session tag isolation
-
-    - Multiple pm sessions running on the same machine (different tmux sessions)
-
-    - Verify container names don''t collide across sessions
-
-    - Verify push proxy sockets are scoped to session
-
-    - Verify cleanup only removes containers for the target session
-
-
-    ### Agent machine tracking
-
-    - PR started on machine A shows agent_machine field
-
-    - Machine B can see which machine owns the PR
-
-    - Handoff updates agent_machine correctly
-
-
-    ### GitHub backend multi-user specifics
-
-    - Draft PR created by User A, review requested from User B
-
-    - PR sync picks up status changes from either user
-
-    - Merge detection works regardless of who merged'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-03-15T03:36:49.119842+00:00'
-  updated_at: '2026-03-15T03:36:49.119842+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
-- id: pr-5ef89e3
-  plan: plan-qa
-  title: Fuzzer-style stress testing for CLI commands and workflows
-  branch: pm/pr-5ef89e3-fuzzer-style-stress-testing-for-cli-commands-and-w
-  status: pending
-  depends_on:
-  - pr-8c3c95b
-  description: 'Add adversarial/fuzzer-style tests that try to break pm commands and
-    workflows by exercising edge cases, race conditions, invalid inputs, and unexpected
-    state transitions. Builds on the regression testing infrastructure from pr-8c3c95b.
-
-
-    ## Approach
-
-
-    Use Claude-based QA scenarios that systematically try to break things rather than
-    verify happy paths. Each scenario is a targeted chaos test.
-
-
-    ## Test categories
-
-
-    ### CLI input fuzzing
-
-    - Run every pm command with no args, garbage args, extremely long args
-
-    - Unicode and special characters in PR titles, descriptions, plan names
-
-    - Newlines, quotes, backticks, and shell metacharacters in all text fields
-
-    - Empty strings vs missing args vs null-like values
-
-    - Numeric overflow in settings (e.g. qa-max-scenarios=999999)
-
-
-    ### State corruption scenarios
-
-    - Manually corrupt project.yaml (invalid YAML, missing required fields, circular
-    dependencies)
-
-    - Delete workdir mid-session while Claude is running
-
-    - Remove pm/ directory while TUI is running
-
-    - Truncate project.yaml mid-write (simulate crash during save)
-
-    - Duplicate PR IDs, duplicate plan IDs
-
-    - PR referencing nonexistent plan or dependency
-
-
-    ### Race conditions
-
-    - Start two pr start commands for the same PR simultaneously
-
-    - Run pm pr review while implementation session is still committing
-
-    - Kill TUI mid-QA-launch (between container creation and Claude exec)
-
-    - Two QA loops writing to the same qa_status.json
-
-    - Concurrent project.yaml writes from multiple pm commands
-
-
-    ### Container edge cases
-
-    - Docker daemon not running when container mode is enabled
-
-    - Docker daemon dies mid-session
-
-    - Container OOM killed during Claude session
-
-    - Pull base image while container is being created
-
-    - Fill container disk (workspace mount full)
-
-    - Container with no network access tries to push
-
-
-    ### Push proxy stress
-
-    - Rapid consecutive push attempts from container
-
-    - Push while proxy is restarting
-
-    - Multiple containers racing to push same branch
-
-    - Malformed JSON sent to proxy socket
-
-    - Binary data sent to proxy socket
-
-    - Proxy socket permissions changed mid-session
-
-
-    ### Workflow interruption
-
-    - Ctrl+C during every stage of pr start, pr review, pr qa
-
-    - Kill tmux window during review loop iteration
-
-    - Restart TUI during QA scenario execution
-
-    - Network loss during GitHub sync
-
-    - Git lock file present when pm tries to commit
-
-
-    ### Invalid state transitions
-
-    - Try to merge a PR that''s still pending (never started)
-
-    - Try to start a PR whose dependencies are not merged
-
-    - Try to review a PR that has no commits
-
-    - Mark a PR as merged then try to start it again
-
-    - Close a PR then try to add notes to it
-
-    - Run pr qa on a PR with no QA instructions matching
-
-
-    ### Git edge cases
-
-    - Detached HEAD state in workdir
-
-    - Workdir on wrong branch when session starts
-
-    - Remote branch deleted while session is running
-
-    - Force push to branch while review is running
-
-    - Merge conflict in workdir when pr start tries to pull
-
-    - Bare repository as workdir
-
-
-    ### Resource exhaustion
-
-    - Create 1000 PRs and verify TUI still renders
-
-    - Create deeply nested dependency chains (50+ levels)
-
-    - PR description with 100KB of text
-
-    - 100 concurrent QA scenarios
-
-    - project.yaml exceeding 10MB'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-03-15T03:37:10.290016+00:00'
-  updated_at: '2026-03-15T03:37:10.290016+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
