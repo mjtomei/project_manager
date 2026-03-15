@@ -4,7 +4,7 @@ import click
 
 from pm_core.cli.helpers import state_root
 
-_SESSION_TYPES = ["impl", "review", "qa", "qa_planning", "qa_scenario", "watcher", "merge"]
+_SESSION_TYPES = ["impl", "review", "qa", "qa_planning", "qa_scenario", "watcher", "merge", "regression"]
 
 
 @click.group("model")

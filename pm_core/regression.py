@@ -127,15 +127,23 @@ IMPORTANT: Always end your response with the verdict keyword on its own line."""
 def _launch_scenario(scenario: RegressionScenario,
                      session: str,
                      run_id: str,
-                     prompt: str) -> str | None:
+                     prompt: str,
+                     project_data: dict | None = None) -> str | None:
     """Launch a scenario in a tmux window. Returns pane_id or None."""
     from pm_core import tmux as tmux_mod
     from pm_core.claude_launcher import build_claude_shell_cmd
+    from pm_core.model_config import resolve_model_and_provider
 
     window_name = f"reg-{run_id[:6]}-{scenario.id[:20]}"
     scenario.window_name = window_name
 
-    cmd = build_claude_shell_cmd(prompt=prompt)
+    resolution = resolve_model_and_provider("regression", project_data=project_data)
+    cmd = build_claude_shell_cmd(
+        prompt=prompt,
+        model=resolution.model,
+        provider=resolution.provider,
+        effort=resolution.effort,
+    )
 
     # Use the repo root as cwd so Claude has access to the code
     cwd = os.getcwd()
@@ -172,6 +180,7 @@ def run_regression(
     on_update: Callable[[RegressionState], None] | None = None,
     session_name: str | None = None,
     scenarios: list[RegressionScenario] | None = None,
+    project_data: dict | None = None,
 ) -> RegressionState:
     """Run all regression tests, managing concurrency and polling.
 
@@ -224,6 +233,7 @@ def run_regression(
             prompt = _build_regression_prompt(scenario, session_name=session_name)
             pane_id = _launch_scenario(
                 scenario, session, state.run_id, prompt,
+                project_data=project_data,
             )
             if pane_id:
                 state.active.append(idx)

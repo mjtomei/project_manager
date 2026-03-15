@@ -219,7 +219,7 @@ def qa_regression(max_parallel: int, timeout: int, filter_tags: tuple):
         pm qa regression --max-parallel 2 --filter tui
         pm qa regression --timeout 600
     """
-    from pm_core import regression, tmux as tmux_mod
+    from pm_core import regression, store, tmux as tmux_mod
 
     root = state_root()
 
@@ -258,6 +258,7 @@ def qa_regression(max_parallel: int, timeout: int, filter_tags: tuple):
                        f" ({latest.duration_secs:.0f}s)"
                        f"  [active={active} pending={pending}]")
 
+    data = store.load(root)
     state = regression.run_regression(
         pm_root=root,
         session=session,
@@ -266,6 +267,7 @@ def qa_regression(max_parallel: int, timeout: int, filter_tags: tuple):
         on_update=on_update,
         session_name=session,
         scenarios=scenarios,
+        project_data=data,
     )
 
     click.echo()
