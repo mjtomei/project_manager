@@ -127,8 +127,7 @@ IMPORTANT: Always end your response with the verdict keyword on its own line."""
 def _launch_scenario(scenario: RegressionScenario,
                      session: str,
                      run_id: str,
-                     workdir_base: Path,
-                     session_name: str | None = None) -> str | None:
+                     prompt: str) -> str | None:
     """Launch a scenario in a tmux window. Returns pane_id or None."""
     from pm_core import tmux as tmux_mod
     from pm_core.claude_launcher import build_claude_shell_cmd
@@ -136,12 +135,6 @@ def _launch_scenario(scenario: RegressionScenario,
     window_name = f"reg-{run_id[:6]}-{scenario.id[:20]}"
     scenario.window_name = window_name
 
-    # Create a workdir for this scenario
-    workdir = workdir_base / scenario.id
-    workdir.mkdir(parents=True, exist_ok=True)
-    scenario.workdir = str(workdir)
-
-    prompt = _build_regression_prompt(scenario, session_name=session_name)
     cmd = build_claude_shell_cmd(prompt=prompt)
 
     # Use the repo root as cwd so Claude has access to the code
@@ -178,6 +171,7 @@ def run_regression(
     filter_tags: list[str] | None = None,
     on_update: Callable[[RegressionState], None] | None = None,
     session_name: str | None = None,
+    scenarios: list[RegressionScenario] | None = None,
 ) -> RegressionState:
     """Run all regression tests, managing concurrency and polling.
 
@@ -189,13 +183,15 @@ def run_regression(
         filter_tags: Only run scenarios with matching tags.
         on_update: Callback invoked on state changes.
         session_name: Base PM session name for TUI commands.
+        scenarios: Pre-loaded scenarios (skips load_regression_scenarios).
 
     Returns:
         Final RegressionState with all results.
     """
     from pm_core import tmux as tmux_mod
 
-    scenarios = load_regression_scenarios(pm_root, filter_tags)
+    if scenarios is None:
+        scenarios = load_regression_scenarios(pm_root, filter_tags)
     if not scenarios:
         _log.info("no regression scenarios found")
         state = RegressionState()
@@ -228,8 +224,7 @@ def run_regression(
             scenario = state.scenarios[idx]
             prompt = _build_regression_prompt(scenario, session_name=session_name)
             pane_id = _launch_scenario(
-                scenario, session, state.run_id, workdir_base,
-                session_name=session_name,
+                scenario, session, state.run_id, prompt,
             )
             if pane_id:
                 state.active.append(idx)

@@ -263,9 +263,9 @@ def qa_regression(max_parallel: int, timeout: int, filter_tags: tuple):
         session=session,
         max_parallel=max_parallel,
         timeout=timeout,
-        filter_tags=tags,
         on_update=on_update,
         session_name=session,
+        scenarios=scenarios,
     )
 
     click.echo()
