@@ -3675,7 +3675,7 @@ prs:
   plan: plan-qa
   title: Add QA scenario verification step before final verdict
   branch: pm/pr-8fdda09-add-qa-scenario-verification-step-before-final-ver
-  status: pending
+  status: in_review
   depends_on:
   - pr-ee1ff04
   description: 'After all QA scenarios complete and verdicts are collected, add a
@@ -3707,20 +3707,21 @@ prs:
 
     This prevents false PASS results from scenarios that crashed, hit errors, or ran
     but didn''t actually exercise the test cases they were supposed to.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/146
+  gh_pr_number: 146
   created_at: '2026-03-06T15:48:13.072900+00:00'
-  updated_at: '2026-03-06T15:48:13.072900+00:00'
-  started_at: null
-  reviewed_at: null
+  updated_at: '2026-03-14T23:38:06.207189+00:00'
+  started_at: '2026-03-14T22:24:34.604076+00:00'
+  reviewed_at: '2026-03-14T23:38:06.207189+00:00'
   merged_at: null
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8fdda09-add-qa-scenario-verification-step-be-3e33a282
 - id: pr-942aa21
   plan: plan-qa
   title: Add spec generation step between PR phases
   branch: pm/pr-942aa21-add-spec-generation-step-between-pr-phases
-  status: in_review
+  status: qa
   depends_on: []
   description: "Add an optional \"spec\" step to the PR lifecycle that bridges the\
     \ gap between the user's natural-language description and each subsequent phase\
@@ -3786,6 +3787,23 @@ prs:
     text: 'QA INPUT_REQUIRED:  (workdir: /Users/matthewtomei/.pm/workdirs/qa/pr-942aa21-091e125d6a4c31f6)'
     created_at: '2026-03-13T04:34:36Z'
     last_edited: '2026-03-13T04:34:36Z'
+  - id: note-b4f8ca6
+    text: 'QA PASS: Spec generation via CLI for impl phase: PASS; Spec generation
+      via CLI for QA phase: PASS; Spec mode settings (auto, review, prompt): PASS;
+      Per-PR review_spec override: PASS; Spec approve workflow via CLI: PASS; Spec
+      save command for Claude sessions: PASS; Spec preamble injection in implementation
+      prompt: PASS; Spec preamble in QA planner prompt: PASS; Spec content in review
+      prompt: PASS; Spec review via TUI V key: PASS; QA scenario isolation via local
+      clones: PASS; Push proxy for containerised QA scenarios: PASS; QA scenario push
+      and pull between parallel scenarios: PASS; QA scenario numbering offset across
+      runs: PASS; QA scenario retry on window death: PASS; PR QA command and TUI routing:
+      PASS; Impl and review container push proxy integration: PASS; Scenario 0 interactive
+      session runs on host: PASS; Command bar keystroke buffering fix: PASS; QA status
+      pane error display: PASS; QA status pane window switching: PASS; Spec mode interaction
+      with AMBIGUITY_FLAG: PASS; Merge window runs without container: PASS; PR edit
+      --plan option: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-942aa21-3d39a6937c956051)'
+    created_at: '2026-03-14T22:18:54Z'
+    last_edited: '2026-03-14T22:18:54Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-942aa21-add-spec-generation-step-between-pr--e2dbb884
 - id: pr-4585fd3
   plan: tui-ux
@@ -4273,7 +4291,7 @@ prs:
   plan: tui-ux
   title: Add running tasks pane to TUI with window switching and grouping
   branch: pm/pr-0b827df-add-running-tasks-pane-to-tui-with-window-switchin
-  status: in_progress
+  status: qa
   depends_on: []
   description: 'Add a new pane to the TUI that shows all active tasks running in the
     current tmux session and lets you switch to their windows.
@@ -4357,11 +4375,21 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/137
   gh_pr_number: 137
   created_at: '2026-03-08T21:45:42.636585+00:00'
-  updated_at: '2026-03-14T21:25:03.662473+00:00'
+  updated_at: '2026-03-14T21:40:16.204625+00:00'
   started_at: '2026-03-10T21:38:57.198809+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-03-14T21:40:16.204625+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-834855f
+    text: 'QA INPUT_REQUIRED: Tasks pane toggle and basic display: PASS; Tasks pane
+      navigation (j/k, J/K, group jumping): PASS; Multi-window expand/collapse (QA
+      scenario windows): PASS; Window switching via Enter key: PASS; PR actions from
+      the tasks pane: PASS; Mobile mode auto-transition to tasks pane: PASS; Help
+      screen shows tasks-specific keybindings: PASS; Tasks pane polling and live updates:
+      PASS; Watcher prefix key chord (w → wf/ww/ws): PASS; View exclusivity and state
+      consistency: INPUT_REQUIRED (workdir: /home/matt/.pm/workdirs/qa/pr-0b827df-67def9313b116f3c)'
+    created_at: '2026-03-14T23:51:37Z'
+    last_edited: '2026-03-14T23:51:37Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b827df-add-running-tasks-pane-to-tui-with-w-10e74920
 - id: pr-341100c
   plan: tui-ux
@@ -4590,7 +4618,7 @@ prs:
   plan: watchers
   title: Add high-effort watcher supervisors that monitor and coach lower-effort sessions
   branch: pm/pr-871dbf5-add-high-effort-watcher-supervisors-that-monitor-a
-  status: in_progress
+  status: in_review
   depends_on:
   - pr-3032fb6
   description: 'Add a new watcher type that runs at high effort (Opus-level) and monitors
@@ -4647,15 +4675,16 @@ prs:
     course-correct
 
     - The feedback log lets us evaluate ROI and tune the approach'
-  agent_machine: MacBook-Pro.local
+  agent_machine: spark-424d
   gh_pr: https://github.com/mjtomei/project_manager/pull/144
   gh_pr_number: 144
   created_at: '2026-03-08T23:09:07.312432+00:00'
-  updated_at: '2026-03-14T17:21:14.310809+00:00'
+  updated_at: '2026-03-14T21:54:58.823224+00:00'
   started_at: '2026-03-14T17:21:14.310809+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-03-14T21:54:58.823224+00:00'
   merged_at: null
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-871dbf5-add-high-effort-watcher-supervisors--eff07b6c
 - id: pr-b7ada6a
   plan: tui-ux
   title: Add offline mode with dynamic sync for GitHub-backed projects
@@ -5024,7 +5053,21 @@ prs:
   started_at: '2026-03-10T15:18:02.866746+00:00'
   reviewed_at: '2026-03-11T00:23:28.233394+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-061c95d
+    text: 'QA NEEDS_WORK: PR select with exact and partial ID matching: PASS; PR select
+      with title and description fuzzy matching: PASS; PR select with plan name matching:
+      PASS; Plan select basic functionality: PASS; Plan select with no PRs in matched
+      plan: PASS; Result cycling with bracket keys: PASS; Cycling with plan select
+      results: PASS; Fuzzy select replaces previous result list: PASS; Cycling with
+      no active results: PASS; Fuzzy select from plans or QA view switches to tree
+      view: PASS; Case insensitivity of fuzzy matching: PASS; Cursor proximity tiebreaker:
+      PASS; Command bar usage edge cases for pr select and plan select: PASS; Help
+      screen documents bracket cycling keys: NEEDS_WORK; Unit tests pass for fuzzy
+      select scoring: PASS; PR select does not interfere with existing pr select by
+      exact ID: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-6aa74c6-32ce8ddb3cb52310)'
+    created_at: '2026-03-14T22:07:31Z'
+    last_edited: '2026-03-14T22:07:31Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-6aa74c6-fuzzy-select-for-pr-and-plan-command-10e74920
 - id: pr-98bf8df
   plan: plan-qa
@@ -5053,7 +5096,7 @@ prs:
   plan: plan-qa
   title: QA verdict collection survives TUI restart
   branch: pm/pr-4a89e52-qa-verdict-collection-survives-tui-restart
-  status: pending
+  status: in_review
   depends_on: []
   description: 'Bug: QA scenario verdict polling runs in a daemon thread inside the
     TUI process (via start_qa_background → run_qa_sync → _poll_tmux_verdicts). When
@@ -5070,15 +5113,16 @@ prs:
     (merge, back-to-review, etc.). The initial scenario list and window names are
     seeded into qa_status.json by the TUI at launch time, and qa_status.py takes over
     monitoring from there.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/145
+  gh_pr_number: 145
   created_at: '2026-03-09T20:05:57.251516+00:00'
-  updated_at: '2026-03-09T20:07:21.553405+00:00'
-  started_at: null
-  reviewed_at: null
+  updated_at: '2026-03-14T22:12:44.106792+00:00'
+  started_at: '2026-03-14T21:52:27.806921+00:00'
+  reviewed_at: '2026-03-14T22:12:44.106792+00:00'
   merged_at: null
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-4a89e52-qa-verdict-collection-survives-tui-r-3e33a282
 - id: pr-9bf8b0b
   plan: improvements
   title: Unified log file with source prefixes and pm log CLI
@@ -5195,12 +5239,12 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/143
   gh_pr_number: 143
   created_at: '2026-03-10T00:41:37.907137+00:00'
-  updated_at: '2026-03-14T17:19:27.700394+00:00'
+  updated_at: '2026-03-14T21:45:10.236298+00:00'
   started_at: '2026-03-14T04:37:49.204416+00:00'
-  reviewed_at: '2026-03-14T17:19:27.700394+00:00'
+  reviewed_at: '2026-03-14T21:45:10.236298+00:00'
   merged_at: null
   notes: []
-  workdir: /Users/matthewtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-ac12b47-session-cleanup-for-stale-containers-11fb825b
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ac12b47-session-cleanup-for-stale-containers-3e33a282
 - id: pr-53e47a1
   plan: tui-ux
   title: Shift+key reverses cycle direction for TUI keybindings
@@ -5382,7 +5426,7 @@ prs:
   title: 'Harden local LLM integration: model selection, real QA testing, init setup,
     and provider verification'
   branch: pm/pr-9a5b86e-harden-local-llm-integration-model-selection-real-
-  status: qa
+  status: in_review
   depends_on:
   - pr-dad0069
   description: "Follow-up to pr-dad0069 (local LLM provider support) addressing gaps\
@@ -5404,9 +5448,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/140
   gh_pr_number: 140
   created_at: '2026-03-11T17:38:30.495007+00:00'
-  updated_at: '2026-03-13T04:31:35.030249+00:00'
+  updated_at: '2026-03-14T21:45:26.781038+00:00'
   started_at: '2026-03-11T17:42:07.268473+00:00'
-  reviewed_at: '2026-03-11T18:06:25.532968+00:00'
+  reviewed_at: '2026-03-14T21:45:26.781038+00:00'
   merged_at: null
   notes:
   - id: note-ed2331e
@@ -6384,3 +6428,4 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+es: []
