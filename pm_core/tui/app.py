@@ -984,7 +984,7 @@ class ProjectManagerApp(App):
         else:
             total = 0
         status_bar = self.query_one("#status-bar", StatusBar)
-        status_bar.update(f" [bold]QA[/bold]    {total} item(s)    [dim]Enter=run  e=edit  a=add  q=back[/dim]")
+        status_bar.update(f" [bold]QA[/bold]    {total} item(s)    [dim]Enter=run  e=edit  d=debug  a=add  q=back[/dim]")
         self.call_after_refresh(self._capture_frame, "show_qa_view")
 
     def _refresh_qa_pane(self) -> None:
