@@ -11,6 +11,7 @@ from pm_core.qa_instructions import (
     list_all,
     get_instruction,
     instruction_summary_for_prompt,
+    resolve_instruction_ref,
     qa_dir,
     instructions_dir,
     regression_dir,
@@ -157,3 +158,65 @@ class TestInstructionSummaryForPrompt:
         result = instruction_summary_for_prompt(tmp_path)
         assert "My Test" in result
         assert "Checks things" in result
+
+
+def _setup_library(tmp_path: Path) -> Path:
+    """Create a minimal instruction library under tmp_path/qa/."""
+    qa_root = tmp_path / "qa"
+    instr_dir = qa_root / "instructions"
+    instr_dir.mkdir(parents=True)
+    (instr_dir / "tui-manual-test.md").write_text("# TUI\n")
+    (instr_dir / "login-flow.md").write_text("# Login\n")
+
+    reg_dir = qa_root / "regression"
+    reg_dir.mkdir(parents=True)
+    (reg_dir / "crash-on-startup.md").write_text("# Crash\n")
+    return tmp_path
+
+
+class TestResolveInstructionRef:
+    def test_exact_filename(self, tmp_path):
+        pm = _setup_library(tmp_path)
+        assert resolve_instruction_ref(pm, "tui-manual-test.md") == (
+            "instructions", "tui-manual-test.md")
+
+    def test_bare_stem(self, tmp_path):
+        pm = _setup_library(tmp_path)
+        assert resolve_instruction_ref(pm, "tui-manual-test") == (
+            "instructions", "tui-manual-test.md")
+
+    def test_with_directory_prefix(self, tmp_path):
+        pm = _setup_library(tmp_path)
+        result = resolve_instruction_ref(pm, "instructions/tui-manual-test.md")
+        assert result == ("instructions", "tui-manual-test.md")
+
+    def test_regression_category(self, tmp_path):
+        pm = _setup_library(tmp_path)
+        assert resolve_instruction_ref(pm, "crash-on-startup.md") == (
+            "regression", "crash-on-startup.md")
+
+    def test_case_insensitive(self, tmp_path):
+        pm = _setup_library(tmp_path)
+        assert resolve_instruction_ref(pm, "TUI-MANUAL-TEST.MD") == (
+            "instructions", "tui-manual-test.md")
+
+    def test_fuzzy_match(self, tmp_path):
+        pm = _setup_library(tmp_path)
+        result = resolve_instruction_ref(pm, "tui-manual-tst.md")
+        assert result is not None
+        assert result[1] == "tui-manual-test.md"
+
+    def test_no_match(self, tmp_path):
+        pm = _setup_library(tmp_path)
+        assert resolve_instruction_ref(pm, "nonexistent-file.md") is None
+
+    def test_strips_quotes(self, tmp_path):
+        pm = _setup_library(tmp_path)
+        assert resolve_instruction_ref(pm, '"tui-manual-test.md"') == (
+            "instructions", "tui-manual-test.md")
+
+    def test_absolute_path(self, tmp_path):
+        pm = _setup_library(tmp_path)
+        result = resolve_instruction_ref(
+            pm, "/home/user/pm/qa/instructions/login-flow.md")
+        assert result == ("instructions", "login-flow.md")
