@@ -530,6 +530,32 @@ def _shared_proxy_key(session_tag: str, pr_id: str) -> str:
     return f"{session_tag}\0{pr_id}"
 
 
+def _start_proxy_subprocess(sock_path: str, workdir: str,
+                            allowed_branch: str) -> None:
+    """Spawn a push proxy as an independent subprocess that outlives the caller."""
+    import sys
+    import time
+
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "pm_core.push_proxy",
+         sock_path, workdir, allowed_branch],
+        start_new_session=True,  # detach from parent process group
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    # Wait briefly for the socket to appear and become connectable
+    for _ in range(30):
+        if os.path.exists(sock_path) and proxy_is_alive(sock_path):
+            break
+        time.sleep(0.1)
+    else:
+        _log.warning("Push proxy subprocess (pid=%d) did not become ready "
+                     "at %s within 3s", proc.pid, sock_path)
+    _log.info("Push proxy subprocess started: pid=%d socket=%s branch=%s",
+              proc.pid, sock_path, allowed_branch)
+
+
 def start_push_proxy(container_name: str, workdir: str,
                      allowed_branch: str,
                      session_tag: str | None = None,
@@ -559,25 +585,29 @@ def start_push_proxy(container_name: str, workdir: str,
 
     if shared:
         key = _shared_proxy_key(session_tag, pr_id)
-        with _proxy_lock:
-            if key in _active_proxies:
-                _proxy_refs[key].add(container_name)
-                _container_to_proxy_key[container_name] = key
-                proxy = _active_proxies[key]
-                _log.info("Reusing shared push proxy for %s (container %s)",
-                          key, container_name)
-                return proxy.socket_path
-
-        # Deterministic socket directory
         sock_dir = f"/tmp/{_SOCKET_DIR_PREFIX}{session_tag}-{pr_id}"
-        os.makedirs(sock_dir, exist_ok=True)
         sock_path = os.path.join(sock_dir, "push.sock")
 
-        proxy = PushProxy(sock_path, workdir, allowed_branch)
-        proxy.start()
+        # Reuse if an existing proxy is alive on this socket
+        if os.path.exists(sock_path) and proxy_is_alive(sock_path):
+            with _proxy_lock:
+                _proxy_refs.setdefault(key, set()).add(container_name)
+                _container_to_proxy_key[container_name] = key
+            _log.info("Reusing live shared push proxy for %s (container %s)",
+                      key, container_name)
+            return sock_path
+
+        # Socket missing or dead — spawn a new subprocess proxy
+        os.makedirs(sock_dir, exist_ok=True)
+        # Remove stale socket before spawning
+        try:
+            os.unlink(sock_path)
+        except FileNotFoundError:
+            pass
+
+        _start_proxy_subprocess(sock_path, workdir, allowed_branch)
 
         with _proxy_lock:
-            _active_proxies[key] = proxy
             _proxy_refs[key] = {container_name}
             _container_to_proxy_key[container_name] = key
 
@@ -591,30 +621,32 @@ def start_push_proxy(container_name: str, workdir: str,
                             f"{_SOCKET_DIR_PREFIX}{container_name}")
     os.makedirs(sock_dir, exist_ok=True)
     sock_path = os.path.join(sock_dir, "push.sock")
+    # Remove stale socket before spawning
+    try:
+        os.unlink(sock_path)
+    except FileNotFoundError:
+        pass
 
-    # Spawn the proxy as an independent subprocess so it outlives the
-    # calling process.  Uses this module's __main__ entry point.
-    import sys
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "pm_core.push_proxy",
-         sock_path, workdir, allowed_branch],
-        start_new_session=True,  # detach from parent process group
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-
-    # Wait briefly for the socket to appear
-    for _ in range(20):
-        if os.path.exists(sock_path):
-            break
-        import time
-        time.sleep(0.1)
+    _start_proxy_subprocess(sock_path, workdir, allowed_branch)
 
     with _proxy_lock:
-        _active_proxies[container_name] = proc
+        _active_proxies[container_name] = sock_path
         _container_to_proxy_key[container_name] = container_name
 
     return sock_path
+
+
+def _kill_proxy_socket(sock_path: str) -> None:
+    """Stop a subprocess proxy by removing its socket (triggers exit) and clean up."""
+    sock_dir = str(Path(sock_path).parent)
+    try:
+        os.unlink(sock_path)
+    except FileNotFoundError:
+        pass
+    try:
+        os.rmdir(sock_dir)
+    except OSError:
+        pass
 
 
 def stop_push_proxy(container_name: str) -> None:
@@ -636,32 +668,35 @@ def stop_push_proxy(container_name: str) -> None:
                 return  # Other containers still using this proxy
             del _proxy_refs[key]
 
-        proxy = _active_proxies.pop(key, None)
+        _active_proxies.pop(key, None)
 
-    if proxy:
-        sock_dir = str(Path(proxy.socket_path).parent)
-        proxy.stop()
-        try:
-            os.rmdir(sock_dir)
-        except OSError:
-            pass
+    # Derive the socket path from the key and remove it to stop the
+    # subprocess proxy (the __main__ loop exits when socket disappears).
+    if "\0" in key:
+        # Shared proxy key: "session_tag\0pr_id"
+        stag, pid = key.split("\0", 1)
+        sock_path = os.path.join(f"/tmp/{_SOCKET_DIR_PREFIX}{stag}-{pid}",
+                                 "push.sock")
+    else:
+        # Legacy key = container_name
+        import tempfile
+        sock_path = os.path.join(tempfile.gettempdir(),
+                                 f"{_SOCKET_DIR_PREFIX}{key}",
+                                 "push.sock")
+    _kill_proxy_socket(sock_path)
 
 
 def stop_all_proxies() -> None:
     """Stop all running push proxies."""
+    import glob as _glob
     with _proxy_lock:
-        keys = list(_active_proxies.keys())
-        proxies = {k: _active_proxies.pop(k) for k in keys}
+        _active_proxies.clear()
         _proxy_refs.clear()
         _container_to_proxy_key.clear()
 
-    for proxy in proxies.values():
-        sock_dir = str(Path(proxy.socket_path).parent)
-        proxy.stop()
-        try:
-            os.rmdir(sock_dir)
-        except OSError:
-            pass
+    # Kill all proxy sockets on disk
+    for sock in _glob.glob(f"/tmp/{_SOCKET_DIR_PREFIX}*/push.sock"):
+        _kill_proxy_socket(sock)
 
 
 def stop_session_proxies(session_tag: str) -> int:
@@ -669,47 +704,76 @@ def stop_session_proxies(session_tag: str) -> int:
 
     Returns the number of proxies stopped.
     """
+    import glob as _glob
     prefix = f"{session_tag}\0"
     with _proxy_lock:
         keys_to_remove = [k for k in _active_proxies if k.startswith(prefix)]
-        proxies = {k: _active_proxies.pop(k) for k in keys_to_remove}
         for k in keys_to_remove:
+            _active_proxies.pop(k, None)
             for cname in _proxy_refs.pop(k, set()):
                 _container_to_proxy_key.pop(cname, None)
 
-    for proxy in proxies.values():
-        sock_dir = str(Path(proxy.socket_path).parent)
-        proxy.stop()
-        try:
-            os.rmdir(sock_dir)
-        except OSError:
-            pass
+    # Kill sockets matching the session tag
+    count = 0
+    for sock in _glob.glob(f"/tmp/{_SOCKET_DIR_PREFIX}{session_tag}-*/push.sock"):
+        _kill_proxy_socket(sock)
+        count += 1
 
-    if proxies:
-        _log.info("Stopped %d session proxy(ies) for %s",
-                  len(proxies), session_tag)
-    return len(proxies)
+    if count:
+        _log.info("Stopped %d session proxy(ies) for %s", count, session_tag)
+    return count
 
 
-def get_proxy_socket_path(container_name: str) -> str | None:
+def proxy_is_alive(sock_path: str) -> bool:
+    """Test whether a push proxy socket is actually accepting connections."""
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(2.0)
+        s.connect(sock_path)
+        s.close()
+        return True
+    except (OSError, socket.timeout):
+        return False
+
+
+def get_proxy_socket_path(container_name: str,
+                          session_tag: str | None = None,
+                          pr_id: str | None = None) -> str | None:
     """Return the host socket path for a container's push proxy, or None.
 
     Uses the deterministic path convention so this works even after a
     TUI restart (no in-memory state needed).
     """
     import tempfile
+
+    # Try shared proxy path first (session_tag + pr_id)
+    if session_tag and pr_id:
+        shared_path = os.path.join(tempfile.gettempdir(),
+                                   f"{_SOCKET_DIR_PREFIX}{session_tag}-{pr_id}",
+                                   "push.sock")
+        if os.path.exists(shared_path):
+            return shared_path
+
+    # Try legacy per-container path
     sock_path = os.path.join(tempfile.gettempdir(),
                              f"{_SOCKET_DIR_PREFIX}{container_name}",
                              "push.sock")
     if os.path.exists(sock_path):
         return sock_path
-    # Fall back to in-memory registry
+    # Fall back to in-memory registry — derive path from the key
     with _proxy_lock:
         key = _container_to_proxy_key.get(container_name)
         if key is None:
             return None
-        proxy = _active_proxies.get(key)
-    return proxy.socket_path if proxy else None
+    if "\0" in key:
+        # Shared proxy key: "session_tag\0pr_id"
+        stag, pid = key.split("\0", 1)
+        derived = os.path.join(tempfile.gettempdir(),
+                               f"{_SOCKET_DIR_PREFIX}{stag}-{pid}",
+                               "push.sock")
+        if os.path.exists(derived):
+            return derived
+    return None
 
 
 def container_socket_path() -> str:
