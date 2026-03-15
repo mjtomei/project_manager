@@ -898,7 +898,7 @@ def _poll_tmux_verdicts(
                     pane_id = _get_scenario_pane(session, scenario.window_name)
                     if pane_id:
                         followup_msg = (
-                            f"Your verdict was reviewed and flagged: {reason}\n\n"
+                            f"Your verdict was reviewed and flagged: {reason} — "
                             f"Please re-evaluate this scenario. Make sure you "
                             f"actually execute the test steps (run commands, "
                             f"create test files, verify runtime behavior). "
