@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Callable
 
 from pm_core.paths import configure_logger
-from pm_core.loop_shared import extract_verdict_from_content
+from pm_core.loop_shared import extract_verdict_from_content, VerdictStabilityTracker
 
 _log = configure_logger("pm.regression")
 
@@ -214,8 +214,7 @@ def run_regression(
     active_panes: dict[int, str] = {}  # scenario index -> pane_id
     active_prompts: dict[int, str] = {}  # scenario index -> prompt text
     active_starts: dict[int, float] = {}  # scenario index -> start time
-    # Stability: require 2 consecutive polls with same verdict
-    stability: dict[int, tuple[str, int]] = {}  # index -> (verdict, count)
+    stability = VerdictStabilityTracker()
 
     def _launch_next():
         """Launch pending scenarios up to max_parallel."""
@@ -231,7 +230,6 @@ def run_regression(
                 active_panes[idx] = pane_id
                 active_prompts[idx] = prompt
                 active_starts[idx] = time.time()
-                stability[idx] = ("", 0)
             else:
                 state.results.append(ScenarioResult(
                     scenario_id=scenario.id,
@@ -265,13 +263,7 @@ def run_regression(
                 continue
 
             if verdict and verdict in ALL_VERDICTS:
-                prev_verdict, count = stability[idx]
-                if verdict == prev_verdict:
-                    count += 1
-                else:
-                    count = 1
-                stability[idx] = (verdict, count)
-                if count >= 2:
+                if stability.update(str(idx), verdict):
                     finished.append((idx, verdict, elapsed, ""))
                 continue
 
@@ -286,7 +278,7 @@ def run_regression(
             del active_panes[idx]
             del active_prompts[idx]
             del active_starts[idx]
-            del stability[idx]
+            stability.reset(str(idx))
             state.results.append(ScenarioResult(
                 scenario_id=scenario.id,
                 title=scenario.title,

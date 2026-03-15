@@ -95,6 +95,7 @@ from pm_core.loop_shared import VerdictStabilityTracker, STABILITY_POLLS
 tracker = VerdictStabilityTracker()
 
 # Simulate polling sequence: unstable, then stable
+# update() returns bool: True when stable, False otherwise
 key = 'review-test'
 results = []
 for i in range(STABILITY_POLLS + 1):
@@ -102,16 +103,16 @@ for i in range(STABILITY_POLLS + 1):
     results.append(result)
 
 print(f'Poll results: {results}')
-assert results[-1] == 'PASS', f'Should stabilize after {STABILITY_POLLS} polls'
-assert all(r is None for r in results[:STABILITY_POLLS-1]), 'Should be None before stable'
+assert results[-1] is True, f'Should stabilize after {STABILITY_POLLS} polls'
+assert all(r is False for r in results[:STABILITY_POLLS-1]), 'Should be False before stable'
 print(f'Stability tracking: OK (stabilizes after {STABILITY_POLLS} polls)')
 
 # Flip verdict resets stability
 tracker2 = VerdictStabilityTracker()
 tracker2.update('k', 'PASS')
-tracker2.update('k', 'NEEDS_WORK')  # flip
+tracker2.update('k', 'NEEDS_WORK')  # flip resets count to 1
 result = tracker2.update('k', 'NEEDS_WORK')  # 2nd consecutive NEEDS_WORK
-assert result == 'NEEDS_WORK', f'Should stabilize on new verdict, got {result}'
+assert result is True, f'Should stabilize on new verdict, got {result}'
 print('Verdict flip resets stability: OK')
 "
 ```

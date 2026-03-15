@@ -66,19 +66,21 @@ from pm_core.loop_shared import VerdictStabilityTracker, STABILITY_POLLS
 
 tracker = VerdictStabilityTracker()
 
+# update() returns bool: True when stable, False otherwise
+
 # First poll: not stable yet
 result = tracker.update('test-key', 'PASS')
-assert result is None, 'Should not be stable after 1 poll'
+assert result is False, 'Should not be stable after 1 poll'
 print(f'After 1 poll: not stable (need {STABILITY_POLLS})')
 
 # Second poll with same verdict: should be stable
 result = tracker.update('test-key', 'PASS')
-assert result == 'PASS', f'Should be stable after {STABILITY_POLLS} polls'
+assert result is True, f'Should be stable after {STABILITY_POLLS} polls'
 print(f'After {STABILITY_POLLS} polls: stable PASS')
 
 # Change verdict: resets
 result = tracker.update('test-key', 'NEEDS_WORK')
-assert result is None, 'Changing verdict should reset stability'
+assert result is False, 'Changing verdict should reset stability'
 print('Verdict change resets stability: OK')
 "
 ```
