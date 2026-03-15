@@ -1113,14 +1113,36 @@ def _build_verification_prompt(scenario: QAScenario, verdict: str,
 
 This scenario claimed **PASS**.  Your job is to verify that the PASS is genuine — that the scenario actually did the work it was supposed to do.
 
-Check for these problems:
-1. **Did the scenario actually execute the test steps?** Look for evidence of commands being run, test files being created, tests being executed, and runtime behavior being verified. A scenario that only read code or declared PASS without running anything is NOT a genuine pass.
-2. **Does the output support the PASS verdict?** The output should show the test steps being executed and succeeding. If the output shows errors, failures, incomplete work, or skipped steps, the PASS is not justified.
-3. **Did the scenario complete its work?** Look for signs that the scenario crashed, timed out, or was interrupted before finishing all test steps.
+### Step 1: Build a checklist
+
+Before looking at what the scenario did, enumerate each numbered step from the scenario definition above. For each step, write a one-line summary of what concrete action or observation it requires. This is your checklist.
+
+### Step 2: Match each step against the transcript
+
+Go through your checklist and, for each step, find **specific evidence** in the transcript that the step was actually executed. Evidence means tool calls (Bash commands, file writes) and their results — not just the scenario's commentary or assertions about what it did.
+
+Mark each step as:
+- **DONE** — clear evidence the step was executed and succeeded
+- **SKIPPED** — no evidence the step was attempted
+- **SUBSTITUTED** — the scenario did something different from what the step asked for (e.g., wrote a unit test instead of running the described end-to-end workflow, or read code instead of executing it)
+- **FAILED** — the step was attempted but produced errors or unexpected results
+
+### Step 3: Make your judgment
+
+- If ANY step is SKIPPED or SUBSTITUTED, the verdict is **FLAGGED**. A scenario that works around missing tools by substituting different methodology (e.g., unit tests instead of runtime testing, code review instead of execution) has not completed its steps — it should have reported INPUT_REQUIRED instead of PASS.
+- If all steps are DONE but some FAILED, the verdict is **FLAGGED**.
+- Only if all steps are DONE and succeeded is the verdict **VERIFIED**.
+
+### Common false-pass patterns to watch for
+
+- **Code reading as proof**: The scenario reads the source code, confirms the logic looks correct, and declares PASS — but never actually runs anything. Reading code is not testing.
+- **Substituted methodology**: The scenario can't run the prescribed steps (e.g., a CLI tool isn't available), so it writes its own unit tests or mocks instead. Even if those tests pass, the scenario did not follow its steps.
+- **Partial execution**: The scenario runs some steps but skips the hard ones (e.g., sets up a project but never starts the actual process under test).
+- **Tests pass but wrong tests**: The scenario runs a pre-existing test suite and reports PASS, but the existing tests don't cover the specific behavior the scenario steps describe.
 
 ## Response Format
 
-Respond with EXACTLY one of these on its own line:
+Present your step-by-step checklist with the DONE/SKIPPED/SUBSTITUTED/FAILED annotations, then respond with EXACTLY one of these on its own line:
 
 VERIFIED — The PASS is genuine: the scenario executed its test steps and they succeeded.
 FLAGGED — The PASS is not justified: the scenario did not properly exercise its test cases, or the output contradicts a PASS.
