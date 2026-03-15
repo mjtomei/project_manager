@@ -38,7 +38,7 @@ print('stop_all_proxies with no active proxies: OK')
 ```bash
 python3 -c "
 from pm_core.container import _build_git_setup_script
-script = _build_git_setup_script('/tmp/test-socket', 'test-branch')
+script = _build_git_setup_script(has_push_proxy=True)
 print('Git wrapper script generated:')
 print(script[:500])
 "

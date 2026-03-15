@@ -21,7 +21,7 @@ Everything looks good.
 
 PASS'''
 v = extract_verdict_from_content(content, ('PASS', 'NEEDS_WORK', 'INPUT_REQUIRED'),
-                                  ('PASS', 'NEEDS_WORK', 'INPUT_REQUIRED'), [])
+                                  ('PASS', 'NEEDS_WORK', 'INPUT_REQUIRED'))
 assert v == 'PASS', f'Expected PASS, got {v}'
 print('Clean PASS: OK')
 
@@ -30,7 +30,7 @@ content2 = '''Found some issues.
 
 **NEEDS_WORK**'''
 v2 = extract_verdict_from_content(content2, ('PASS', 'NEEDS_WORK', 'INPUT_REQUIRED'),
-                                   ('PASS', 'NEEDS_WORK', 'INPUT_REQUIRED'), [])
+                                   ('PASS', 'NEEDS_WORK', 'INPUT_REQUIRED'))
 assert v2 == 'NEEDS_WORK', f'Expected NEEDS_WORK, got {v2}'
 print('Markdown NEEDS_WORK: OK')
 "
@@ -89,20 +89,21 @@ python3 -c "
 from pm_core.loop_shared import extract_verdict_from_content
 
 # Empty content
-v = extract_verdict_from_content('', ('PASS',), ('PASS',), [])
+v = extract_verdict_from_content('', ('PASS',), ('PASS',))
 assert v is None, f'Empty content should return None, got {v}'
 print('Empty content: OK')
 
-# Verdict only in middle (not tail)
-lines = ['line'] * 50 + ['PASS'] + ['line'] * 50
+# Verdict only in middle (not tail) — function uses internal VERDICT_TAIL_LINES
+from pm_core.loop_shared import VERDICT_TAIL_LINES
+lines = ['line'] * 50 + ['PASS'] + ['line'] * (VERDICT_TAIL_LINES + 10)
 content = '\n'.join(lines)
-v = extract_verdict_from_content(content, ('PASS',), ('PASS',), [], tail_lines=30)
+v = extract_verdict_from_content(content, ('PASS',), ('PASS',))
 assert v is None, 'Verdict outside tail should not be found'
-print('Verdict outside tail: OK')
+print(f'Verdict outside tail (VERDICT_TAIL_LINES={VERDICT_TAIL_LINES}): OK')
 
 # Multiple verdicts — last one wins
 content = 'NEEDS_WORK\nsome text\nPASS'
-v = extract_verdict_from_content(content, ('PASS', 'NEEDS_WORK'), ('PASS', 'NEEDS_WORK'), [])
+v = extract_verdict_from_content(content, ('PASS', 'NEEDS_WORK'), ('PASS', 'NEEDS_WORK'))
 print(f'Multiple verdicts, last found: {v}')
 "
 ```

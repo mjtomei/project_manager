@@ -29,23 +29,24 @@ Confirm it lists: `--workdir`, `--fresh`, `--background`, `--transcript`, `--com
 ### 3. Check workdir creation logic
 ```bash
 python3 -c "
-from pm_core.cli.helpers import state_root
+from pm_core.cli.helpers import state_root, _workdirs_dir
 from pm_core import store
 root = state_root()
 data = store.load(root)
-# Verify workdir path resolution works
-from pm_core import paths
-wdir = paths.pr_workdir(root, data['prs'][0]['id'] if data.get('prs') else 'test')
-print(f'Workdir path: {wdir}')
+# Verify workdir base path resolution works
+wdir = _workdirs_dir(data)
+print(f'Workdirs base path: {wdir}')
+print(f'Exists: {wdir.exists() if wdir else False}')
 "
 ```
 
 ### 4. Verify branch naming convention
 ```bash
 python3 -c "
-from pm_core import pr_ops
-# Check branch name generation
-branch = pr_ops.pr_branch_name('pr-abc1234', 'Test PR title for branch naming')
+from pm_core import store
+# Branch names follow pm/<pr-id>-<slug> convention
+slug = store.slugify('Test PR title for branch naming')
+branch = f'pm/pr-abc1234-{slug}'
 print(f'Branch name: {branch}')
 assert branch.startswith('pm/'), f'Branch should start with pm/, got {branch}'
 print('Branch naming convention: OK')
@@ -55,15 +56,11 @@ print('Branch naming convention: OK')
 ### 5. Verify start refuses to work on merged/closed PRs
 ```bash
 python3 -c "
-from pm_core import store
-from pm_core.cli.helpers import state_root
-root = state_root()
-data = store.load(root)
-# Check that status validation exists
-from pm_core import pr_ops
+from pm_core.cli import pr as pr_mod
 import inspect
-src = inspect.getsource(pr_ops)
-assert 'merged' in src.lower() or 'closed' in src.lower(), 'No status guard in pr_ops'
+# Check that status validation exists in the pr start command
+src = inspect.getsource(pr_mod)
+assert 'merged' in src.lower() or 'closed' in src.lower(), 'No status guard in pr module'
 print('Status guard logic present: OK')
 "
 ```

@@ -49,7 +49,7 @@ test_cases = [
 ]
 
 for label, content, expected in test_cases:
-    v = extract_verdict_from_content(content, REVIEW_VERDICTS, REVIEW_KEYWORDS, [])
+    v = extract_verdict_from_content(content, REVIEW_VERDICTS, REVIEW_KEYWORDS)
     status = 'OK' if v == expected else f'FAIL (got {v})'
     print(f'{label}: {status}')
     assert v == expected, f'{label}: expected {expected}, got {v}'
@@ -75,13 +75,13 @@ print(f'Prompt verdict lines to filter: {len(prompt_lines)}')
 
 # Content that only has prompt instructions, no actual verdict
 content = prompt + '\n\nLet me review the code...'
-v = extract_verdict_from_content(content, keywords, keywords, prompt_lines)
+v = extract_verdict_from_content(content, keywords, keywords, prompt)
 assert v is None, f'Should not detect verdict from prompt instructions, got {v}'
 print('Prompt line filtering: OK')
 
 # But a real verdict after the review should be detected
 content2 = prompt + '\n\nCode reviewed.\n\nPASS'
-v2 = extract_verdict_from_content(content2, keywords, keywords, prompt_lines)
+v2 = extract_verdict_from_content(content2, keywords, keywords, prompt)
 assert v2 == 'PASS', f'Should detect real verdict, got {v2}'
 print('Real verdict after prompt: OK')
 "

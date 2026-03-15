@@ -35,7 +35,7 @@ for m in sorted(members)[:20]:
 ### 3. Test tech tree rendering
 ```bash
 python3 -c "
-from pm_core import store, tui
+from pm_core import store
 from pm_core.cli.helpers import state_root
 
 root = state_root()
@@ -43,10 +43,10 @@ data = store.load(root)
 prs = data.get('prs', [])
 print(f'PRs for tree rendering: {len(prs)}')
 
-# Verify dependency graph building works
-from pm_core import pr_ops
-graph = pr_ops.build_dependency_graph(data)
-print(f'Dependency graph nodes: {len(graph)}')
+# Verify dependency data is available
+for pr in prs[:5]:
+    deps = pr.get('depends_on', [])
+    print(f'  {pr[\"id\"]}: {len(deps)} deps')
 print('Tech tree data: OK')
 "
 ```
@@ -86,7 +86,7 @@ assert hasattr(tmux_mod, 'capture_pane'), 'Missing capture_pane'
 print('Pane management functions: OK')
 
 # Check deduplication support
-assert hasattr(tmux_mod, 'find_window') or hasattr(tmux_mod, 'list_windows'), \
+assert hasattr(tmux_mod, 'find_window_by_name') or hasattr(tmux_mod, 'list_windows'), \
     'Missing window lookup for dedup'
 print('Window deduplication support: OK')
 "
