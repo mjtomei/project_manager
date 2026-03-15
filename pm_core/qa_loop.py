@@ -277,6 +277,28 @@ def _scenario_window_name(pr_data: dict, scenario_index: int) -> str:
 # Alias for backward compat with tests; prefer find_claude_pane directly.
 _get_scenario_pane = find_claude_pane
 
+# Number of lines before the verdict to use as a fingerprint for
+# detecting stale re-detections of the same verdict.
+_VERDICT_CONTEXT_LINES = 5
+
+
+def _verdict_context_fingerprint(content: str, verdict: str) -> str:
+    """Return the lines immediately before *verdict* in *content*.
+
+    Searches from the bottom of *content* (matching the behaviour of
+    ``extract_verdict_from_content``) and returns the
+    ``_VERDICT_CONTEXT_LINES`` lines that precede the verdict keyword.
+    Two captures with the same fingerprint mean the verdict hasn't
+    changed — it's the same stale output.
+    """
+    lines = content.strip().splitlines()
+    for i in range(len(lines) - 1, -1, -1):
+        cleaned = re.sub(r'[*`]', '', lines[i]).strip()
+        if cleaned == verdict:
+            start = max(0, i - _VERDICT_CONTEXT_LINES)
+            return "\n".join(lines[start:i])
+    return ""
+
 
 def _cleanup_stale_scenario_windows(session: str, pr_data: dict,
                                     include_main: bool = True) -> None:
@@ -909,12 +931,8 @@ def _poll_tmux_verdicts(
     # Results from background verification threads
     verification_results: dict[int, tuple[bool, str]] = {}
     verification_lock = threading.Lock()
-    # Track the lines immediately before the verdict when it was last
-    # accepted, so we can distinguish a stale verdict from a genuinely
-    # new one after a verification follow-up.  The context before the
-    # verdict won't change for a stale verdict but will be completely
-    # different when the scenario re-evaluates.
-    _VERDICT_CONTEXT_LINES = 5
+    # Fingerprint of the lines before the verdict when it was last
+    # accepted — used to detect stale re-detections.
     verdict_context: dict[int, str] = {}
 
     # Scenarios that failed to create a window get INPUT_REQUIRED immediately
@@ -1086,19 +1104,7 @@ def _poll_tmux_verdicts(
             # accepted by comparing the lines immediately before the
             # verdict keyword.  New output means a genuine re-verdict.
             if verdict:
-                all_lines = content.strip().splitlines()
-                # Find the verdict line (searching from bottom)
-                verdict_line_idx = None
-                for i in range(len(all_lines) - 1, -1, -1):
-                    cleaned = re.sub(r'[*`]', '', all_lines[i]).strip()
-                    if cleaned == verdict:
-                        verdict_line_idx = i
-                        break
-                if verdict_line_idx is not None:
-                    ctx_start = max(0, verdict_line_idx - _VERDICT_CONTEXT_LINES)
-                    ctx = "\n".join(all_lines[ctx_start:verdict_line_idx])
-                else:
-                    ctx = ""
+                ctx = _verdict_context_fingerprint(content, verdict)
                 prev_ctx = verdict_context.get(scenario.index)
                 if prev_ctx is not None and ctx == prev_ctx:
                     # Same context before the verdict — stale, skip
@@ -1107,7 +1113,7 @@ def _poll_tmux_verdicts(
             key = f"qa-{state.pr_id}-{scenario.index}"
             if tracker.update(key, verdict):
                 if verdict:
-                    verdict_context[scenario.index] = ctx
+                    verdict_context[scenario.index] = _verdict_context_fingerprint(content, verdict)
                 state.scenario_verdicts[scenario.index] = verdict
                 pending.discard(scenario.index)
                 verdicts_changed = True
@@ -1399,12 +1405,15 @@ def _verify_single_scenario(
                    "scenario %d, continuing with polling",
                    scenario.index, exc_info=True)
 
-    # Poll the verification pane for VERIFIED or FLAGGED
+    # Poll the verification pane for VERIFIED or FLAGGED.
+    # Pass prompt_text so the prompt's example FLAGGED_END marker
+    # is filtered out — only the verifier's actual output counts.
     try:
         content = poll_for_verdict(
             verify_pane,
             verdicts=_VERIFICATION_VERDICTS,
             keywords=_VERIFICATION_KEYWORDS,
+            prompt_text=prompt,
             grace_period=_VERDICT_GRACE_PERIOD,
             poll_interval=_POLL_INTERVAL,
             tick_interval=_TICK_INTERVAL,
@@ -1425,6 +1434,7 @@ def _verify_single_scenario(
             content,
             verdicts=_VERIFICATION_VERDICTS,
             keywords=_VERIFICATION_KEYWORDS,
+            prompt_text=prompt,
             log_prefix=f"qa-verify-{scenario.index}",
         )
         if v == "VERIFIED":

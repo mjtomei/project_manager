@@ -24,6 +24,7 @@ from pm_core.qa_loop import (
     _extract_flagged_reason,
     _get_verification_max_retries,
     _install_instruction_file,
+    _verdict_context_fingerprint,
     _VERIFICATION_MAX_PANE_LINES,
     _DEFAULT_VERIFICATION_MAX_RETRIES,
 )
@@ -1579,6 +1580,69 @@ class TestExtractFlaggedReason:
         )
         reason = _extract_flagged_reason(content)
         assert reason == "The scenario never ran the actual CLI tool"
+
+
+class TestVerdictContextFingerprint:
+    """Tests for _verdict_context_fingerprint stale verdict detection."""
+
+    def test_returns_lines_before_verdict(self):
+        content = "line1\nline2\nline3\nPASS"
+        ctx = _verdict_context_fingerprint(content, "PASS")
+        assert ctx == "line1\nline2\nline3"
+
+    def test_limits_to_context_window(self):
+        lines = [f"line{i}" for i in range(20)]
+        lines.append("PASS")
+        content = "\n".join(lines)
+        ctx = _verdict_context_fingerprint(content, "PASS")
+        # Should only include last 5 lines before PASS
+        assert ctx == "line15\nline16\nline17\nline18\nline19"
+
+    def test_same_content_same_fingerprint(self):
+        content = "setup output\nrunning tests\nall tests passed\nPASS"
+        ctx1 = _verdict_context_fingerprint(content, "PASS")
+        ctx2 = _verdict_context_fingerprint(content, "PASS")
+        assert ctx1 == ctx2
+
+    def test_different_content_different_fingerprint(self):
+        content1 = "first run output\nall tests passed\nPASS"
+        content2 = "second run output\nre-evaluated scenario\nPASS"
+        ctx1 = _verdict_context_fingerprint(content1, "PASS")
+        ctx2 = _verdict_context_fingerprint(content2, "PASS")
+        assert ctx1 != ctx2
+
+    def test_stale_verdict_with_new_text_after(self):
+        """Extra text after the verdict doesn't change the fingerprint."""
+        original = "test output\nresults look good\nPASS"
+        with_followup = (
+            "test output\nresults look good\nPASS\n"
+            "Your verdict was reviewed and flagged..."
+        )
+        ctx1 = _verdict_context_fingerprint(original, "PASS")
+        ctx2 = _verdict_context_fingerprint(with_followup, "PASS")
+        assert ctx1 == ctx2
+
+    def test_strips_markdown_formatting(self):
+        content = "some output\n**PASS**"
+        ctx = _verdict_context_fingerprint(content, "PASS")
+        assert ctx == "some output"
+
+    def test_finds_last_occurrence(self):
+        """Should match bottom-up like extract_verdict_from_content."""
+        content = "PASS\nmore work\nnew evaluation\nPASS"
+        ctx = _verdict_context_fingerprint(content, "PASS")
+        # Context before the LAST PASS
+        assert "new evaluation" in ctx
+
+    def test_no_match_returns_empty(self):
+        content = "no verdict here"
+        ctx = _verdict_context_fingerprint(content, "PASS")
+        assert ctx == ""
+
+    def test_verdict_at_top_returns_empty_context(self):
+        content = "PASS\nsome trailing text"
+        ctx = _verdict_context_fingerprint(content, "PASS")
+        assert ctx == ""
 
 
 class TestVerificationMaxRetries:
