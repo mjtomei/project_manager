@@ -1403,7 +1403,7 @@ class TestVerifySingleScenario:
         scenario = QAScenario(index=1, title="Test", focus="test",
                               steps="steps", window_name="qa-s1")
         content = "The scenario looks good.\n\nVERIFIED"
-        passed, reason = self._mock_verify(scenario, "PASS", "output", content)
+        passed, reason, _ = self._mock_verify(scenario, "PASS", "output", content)
         assert passed is True
         assert reason == ""
 
@@ -1411,7 +1411,7 @@ class TestVerifySingleScenario:
         scenario = QAScenario(index=1, title="Test", focus="test",
                               steps="steps", window_name="qa-s1")
         content = "FLAGGED_START\nThe scenario did not run any tests.\nFLAGGED_END"
-        passed, reason = self._mock_verify(scenario, "PASS", "output", content)
+        passed, reason, _ = self._mock_verify(scenario, "PASS", "output", content)
         assert passed is False
         assert "did not run" in reason.lower()
 
@@ -1422,7 +1422,7 @@ class TestVerifySingleScenario:
         with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
              patch("pm_core.tmux.split_pane_at", side_effect=Exception("split failed")), \
              patch("pm_core.claude_launcher.build_claude_shell_cmd", return_value="claude ..."):
-            passed, reason = _verify_single_scenario(
+            passed, reason, _ = _verify_single_scenario(
                 scenario, "PASS", "output", {}, {},
                 session="pm-session",
             )
@@ -1433,7 +1433,7 @@ class TestVerifySingleScenario:
         scenario = QAScenario(index=1, title="Test", focus="test",
                               steps="steps", window_name="qa-s1")
         with patch("pm_core.qa_loop._get_scenario_pane", return_value=None):
-            passed, reason = _verify_single_scenario(
+            passed, reason, _ = _verify_single_scenario(
                 scenario, "PASS", "output", {}, {},
                 session="pm-session",
             )
@@ -1443,7 +1443,7 @@ class TestVerifySingleScenario:
         """If polling returns None (pane died), trust original."""
         scenario = QAScenario(index=1, title="Test", focus="test",
                               steps="steps", window_name="qa-s1")
-        passed, reason = self._mock_verify(scenario, "PASS", "output", None)
+        passed, reason, _ = self._mock_verify(scenario, "PASS", "output", None)
         assert passed is True
 
     def test_uses_transcript_when_available(self, tmp_path):
@@ -1469,7 +1469,7 @@ class TestVerifySingleScenario:
              patch("pm_core.pane_registry.get_window_data", return_value=mock_wdata), \
              patch("pm_core.pane_registry.save_registry"), \
              patch("pm_core.pane_layout.rebalance"):
-            passed, _ = _verify_single_scenario(
+            passed, _, _ = _verify_single_scenario(
                 scenario, "PASS", "pane output", {}, {},
                 session="pm-session")
         assert passed is True

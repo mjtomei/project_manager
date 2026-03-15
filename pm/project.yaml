@@ -3711,9 +3711,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/146
   gh_pr_number: 146
   created_at: '2026-03-06T15:48:13.072900+00:00'
-  updated_at: '2026-03-15T17:33:36.214185+00:00'
+  updated_at: '2026-03-15T17:59:11.479425+00:00'
   started_at: '2026-03-14T22:24:34.604076+00:00'
-  reviewed_at: '2026-03-15T17:33:36.214185+00:00'
+  reviewed_at: '2026-03-15T17:59:11.479425+00:00'
   merged_at: null
   notes:
   - id: note-52ce835
@@ -3749,6 +3749,22 @@ prs:
       set on scenario launch and relaunch: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-8fdda09-9c10a30ccd5da4c6)'
     created_at: '2026-03-15T16:04:04Z'
     last_edited: '2026-03-15T16:04:04Z'
+  - id: note-c2eb052
+    text: 'QA INPUT_REQUIRED: Verification triggers on PASS verdict only: INPUT_REQUIRED;
+      Verification VERIFIED accepts the PASS verdict: INPUT_REQUIRED; Verification
+      FLAGGED triggers re-evaluation: INPUT_REQUIRED; Verification failure exhaustion
+      marks INPUT_REQUIRED: INPUT_REQUIRED; qa-verify-pass setting disables verification:
+      INPUT_REQUIRED; Verification pane lifecycle and layout management: INPUT_REQUIRED;
+      Transcript file preferred over pane output for verification: INPUT_REQUIRED;
+      Status dashboard renders verification state correctly: INPUT_REQUIRED; qa_verification
+      session type and model resolution: INPUT_REQUIRED; Verification handles missing/dead
+      scenario pane gracefully: INPUT_REQUIRED; Unit tests pass for new verification
+      functions: PASS; Push proxy survives caller exit via subprocess mode: INPUT_REQUIRED;
+      Socket directory mount survives proxy restarts: INPUT_REQUIRED; Concurrent verification
+      threads do not race with the polling loop: INPUT_REQUIRED; Transcript path is
+      set on scenario launch and relaunch: INPUT_REQUIRED (workdir: /home/matt/.pm/workdirs/qa/pr-8fdda09-3fb95d7b70f076af)'
+    created_at: '2026-03-15T17:50:35Z'
+    last_edited: '2026-03-15T17:50:35Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8fdda09-add-qa-scenario-verification-step-be-3e33a282
 - id: pr-942aa21
   plan: plan-qa

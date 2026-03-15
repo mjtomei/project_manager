@@ -64,6 +64,7 @@ def _get_max_scenarios() -> int:
     except ValueError:
         return _DEFAULT_MAX_SCENARIOS
 
+
 def _get_verification_max_retries() -> int:
     """Read qa-verify-retries from global settings (default: 3)."""
     from pm_core.paths import get_global_setting_value
@@ -908,6 +909,11 @@ def _poll_tmux_verdicts(
     # Results from background verification threads
     verification_results: dict[int, tuple[bool, str]] = {}
     verification_lock = threading.Lock()
+    # Track the tail content when a verdict was last accepted, so we
+    # can distinguish a stale verdict from a genuinely new one after a
+    # follow-up message is sent.  Using tail content rather than line
+    # count because tmux scrollback buffers can evict old lines.
+    verdict_tail_snapshot: dict[int, str] = {}
 
     # Scenarios that failed to create a window get INPUT_REQUIRED immediately
     has_failed_creation = False
@@ -927,7 +933,7 @@ def _poll_tmux_verdicts(
     def _run_verification(scenario: QAScenario, verdict: str, content: str):
         """Background thread: run verification in a visible pane."""
         try:
-            passed, reason = _verify_single_scenario(
+            passed, reason, _vpane = _verify_single_scenario(
                 scenario, verdict, content, pr_data, data,
                 session=session,
             )
@@ -1062,6 +1068,16 @@ def _poll_tmux_verdicts(
             content = tmux_mod.capture_pane(
                 pane_id, full_scrollback=True,
             )
+
+            # Skip verdict detection if the tail content hasn't changed
+            # since the last accepted verdict — avoids re-triggering on
+            # a stale verdict after a verification follow-up.
+            lines = content.strip().splitlines()
+            tail = "\n".join(lines[-VERDICT_TAIL_LINES:]) if len(lines) > VERDICT_TAIL_LINES else "\n".join(lines)
+            prev_tail = verdict_tail_snapshot.get(scenario.index)
+            if prev_tail is not None and tail == prev_tail:
+                continue
+
             verdict = extract_verdict_from_content(
                 content,
                 verdicts=ALL_VERDICTS,
@@ -1071,6 +1087,7 @@ def _poll_tmux_verdicts(
 
             key = f"qa-{state.pr_id}-{scenario.index}"
             if tracker.update(key, verdict):
+                verdict_tail_snapshot[scenario.index] = tail
                 state.scenario_verdicts[scenario.index] = verdict
                 pending.discard(scenario.index)
                 verdicts_changed = True
@@ -1256,7 +1273,7 @@ def _verify_single_scenario(
     pr_data: dict,
     project_data: dict | None = None,
     session: str | None = None,
-) -> tuple[bool, str]:
+) -> tuple[bool, str, str | None]:
     """Verify a single scenario's verdict in a visible tmux pane.
 
     Splits the scenario's tmux window to create a verification pane
@@ -1264,7 +1281,7 @@ def _verify_single_scenario(
     verification happening live.  Polls the pane for VERIFIED/FLAGGED,
     then closes it.
 
-    Returns (passed, reason) where passed is True if the scenario was
+    Returns (passed, reason, verify_pane_id) where passed is True if the scenario was
     verified, and reason is the explanation if it was flagged.
 
     If the scenario has a transcript file (``.jsonl`` written by Claude
@@ -1306,7 +1323,7 @@ def _verify_single_scenario(
     if not scenario_pane:
         _log.warning("Verification: cannot find scenario %d pane, "
                      "trusting original verdict", scenario.index)
-        return True, ""
+        return True, "", None
 
     # Build the verification claude command
     verify_cmd = build_claude_shell_cmd(
@@ -1332,7 +1349,7 @@ def _verify_single_scenario(
         _log.warning("Verification: failed to split pane for scenario %d, "
                      "trusting original verdict",
                      scenario.index, exc_info=True)
-        return True, ""
+        return True, "", None
 
     # Register the pane and rebalance using the same pattern as the
     # review window: register panes, reset user_modified, then rebalance.
@@ -1405,7 +1422,7 @@ def _verify_single_scenario(
         _log.warning("Verification: pane disappeared or timed out for "
                      "scenario %d, trusting original", scenario.index)
 
-    return passed, reason
+    return passed, reason, verify_pane
 
 
 # ---------------------------------------------------------------------------
