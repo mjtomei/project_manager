@@ -982,21 +982,30 @@ def _poll_tmux_verdicts(
                 verdicts_changed = True
                 _log.info("Scenario %d (%s) verdict: %s",
                           scenario.index, scenario.title, verdict)
-                state.latest_output = (
-                    f"Scenario {scenario.index} ({scenario.title}): "
-                    f"{verdict} — verifying..."
-                )
-                _notify()
 
-                # Trigger background verification
-                verifying.add(scenario.index)
-                t = threading.Thread(
-                    target=_run_verification,
-                    args=(scenario, verdict, content),
-                    daemon=True,
-                    name=f"qa-verify-{state.pr_id}-{scenario.index}",
-                )
-                t.start()
+                # Only PASS verdicts need verification — NEEDS_WORK and
+                # INPUT_REQUIRED already indicate problems were found.
+                if verdict == VERDICT_PASS:
+                    state.latest_output = (
+                        f"Scenario {scenario.index} ({scenario.title}): "
+                        f"{verdict} — verifying..."
+                    )
+                    _notify()
+
+                    verifying.add(scenario.index)
+                    t = threading.Thread(
+                        target=_run_verification,
+                        args=(scenario, verdict, content),
+                        daemon=True,
+                        name=f"qa-verify-{state.pr_id}-{scenario.index}",
+                    )
+                    t.start()
+                else:
+                    state.latest_output = (
+                        f"Scenario {scenario.index} ({scenario.title}): "
+                        f"{verdict}"
+                    )
+                    _notify()
 
         if verdicts_changed or completed_verifications:
             with verification_lock:
@@ -1077,19 +1086,19 @@ def _build_verification_prompt(scenario: QAScenario, verdict: str,
 
 ## Your Task
 
-Review the scenario output and determine whether the scenario genuinely exercised its test cases.
+This scenario claimed **PASS**.  Your job is to verify that the PASS is genuine — that the scenario actually did the work it was supposed to do.
 
 Check for these problems:
-1. **Did the scenario actually execute the test steps?** Look for evidence of commands being run, test files being created, tests being executed, and runtime behavior being verified. A scenario that only read code or declared PASS without running anything is NOT a genuine evaluation.
-2. **Is the verdict consistent with what the scenario actually did?** If the verdict is PASS, the output should show the test steps being executed and passing. If the output shows errors, failures, or incomplete work, the verdict should not be PASS.
-3. **Did the scenario complete its work?** Look for signs that the scenario crashed, timed out, or was interrupted before finishing.
+1. **Did the scenario actually execute the test steps?** Look for evidence of commands being run, test files being created, tests being executed, and runtime behavior being verified. A scenario that only read code or declared PASS without running anything is NOT a genuine pass.
+2. **Does the output support the PASS verdict?** The output should show the test steps being executed and succeeding. If the output shows errors, failures, incomplete work, or skipped steps, the PASS is not justified.
+3. **Did the scenario complete its work?** Look for signs that the scenario crashed, timed out, or was interrupted before finishing all test steps.
 
 ## Response Format
 
 Respond with EXACTLY one of these on its own line:
 
-VERIFIED — The scenario genuinely exercised its test cases and the verdict is consistent with the output.
-FLAGGED — The scenario did NOT properly exercise its test cases, or the verdict is inconsistent with the output.
+VERIFIED — The PASS is genuine: the scenario executed its test steps and they succeeded.
+FLAGGED — The PASS is not justified: the scenario did not properly exercise its test cases, or the output contradicts a PASS.
 
 If FLAGGED, include a brief explanation (1-2 sentences) of what went wrong BEFORE the FLAGGED verdict."""
 
