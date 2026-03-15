@@ -636,12 +636,12 @@ class TestVerdictEdgeCases:
             calls.append(idx)
             if idx == 1:
                 raise OSError("corrupt repo")
-            return (Path("/tmp/clone"), Path("/tmp/scratch"), None)
+            return (Path("/tmp/clone"), Path("/tmp/scratch"))
 
         # Simulate the loop logic from run_qa_sync
         for scenario in scenarios:
             try:
-                clone_path, scratch_path, venv_path = fake_create(
+                clone_path, scratch_path = fake_create(
                     Path("/tmp/qa"), scenario.index,
                 )
             except Exception:

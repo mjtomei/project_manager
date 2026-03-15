@@ -52,6 +52,7 @@ _PLANNER_GRACE = 15  # seconds before accepting planner completion
 _DEFAULT_MAX_SCENARIOS = 0  # 0 = unlimited
 _SCENARIO_MAX_RETRIES = 10  # max times to relaunch a dead scenario
 _SCENARIO_RETRY_BASE = 5  # base seconds for exponential backoff
+_DEFAULT_VERIFICATION_MAX_RETRIES = 1
 
 
 def _get_max_scenarios() -> int:
@@ -179,7 +180,7 @@ def create_scenario_workdir(qa_workdir: Path, scenario_index: int,
                             repo_root: Path | None = None,
                             pr_id: str = "",
                             loop_id: str = "",
-                            branch: str = "") -> tuple[Path, Path, Path | None]:
+                            branch: str = "") -> tuple[Path, Path]:
     """Create an isolated working area for one QA scenario.
 
     Everything for a single scenario lives under one directory::
@@ -589,6 +590,7 @@ def _install_instruction_file(pm_root: Path, scenario: QAScenario,
     shutil.copy2(src, dest)
     scenario.instruction_path = f"{scratch_dir}/qa-instructions/{src.name}"
     _log.info("Copied instruction %s -> %s", src, dest)
+
 
 def _launch_scenarios_in_tmux(
     state: QALoopState,
@@ -1105,11 +1107,6 @@ def _poll_tmux_verdicts(
 # Maximum pane output lines to include in the verification prompt.
 # Large outputs are truncated to keep the prompt manageable.
 _VERIFICATION_MAX_PANE_LINES = 500
-
-# Maximum number of times a scenario can fail verification before being
-# marked NEEDS_WORK.  After this many failures the scenario is not sent
-# another follow-up message.
-_DEFAULT_VERIFICATION_MAX_RETRIES = 1
 
 
 def _build_verification_prompt(scenario: QAScenario, verdict: str,
