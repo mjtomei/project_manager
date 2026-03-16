@@ -517,7 +517,7 @@ class PushProxy:
 #   1. Per-container (legacy): key = container_name
 #   2. Shared per (session, branch): key = "{session_tag}\0{pr_id}"
 #      Multiple containers reference the same proxy via _proxy_refs.
-_active_proxies: dict[str, PushProxy] = {}
+_active_proxies: dict[str, str] = {}  # key -> socket path
 _proxy_lock = threading.Lock()
 
 # For shared proxies: which containers reference each proxy key
@@ -750,8 +750,8 @@ def stop_push_proxy(container_name: str) -> None:
     if "\0" in key:
         # Shared proxy key: "session_tag\0pr_id"
         stag, pid = key.split("\0", 1)
-        sock_path = os.path.join(f"/tmp/{_SOCKET_DIR_PREFIX}{stag}-{pid}",
-                                 "push.sock")
+        sock_dir = _shared_sock_dir_path(stag, pid)
+        sock_path = os.path.join(sock_dir, "push.sock")
     else:
         # Legacy key = container_name
         import tempfile
