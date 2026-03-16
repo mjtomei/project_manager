@@ -557,23 +557,14 @@ Then output on its own line:
 STEPS_VERIFIED"""
 
 
-def _concretize_scenario(
+def _build_concretize_cmd(
     scenario: QAScenario,
     pr_data: dict,
     project_data: dict,
-    session: str,
-    pane_id: str,
     cwd: str,
     container_name: str | None = None,
-) -> str | None:
-    """Run step concretization in a pane and return refined steps.
-
-    Launches a Claude session in *pane_id* that verifies the planned
-    steps against the actual code, then polls for the result.  Returns
-    the refined steps text, or None if concretization failed/timed out.
-    The pane is left open for user review.
-    """
-    from pm_core import tmux as tmux_mod
+) -> str:
+    """Build the shell command for the concretization step."""
     from pm_core.claude_launcher import build_claude_shell_cmd
 
     resolution = _resolve_qa_model(pr_data, project_data,
@@ -588,14 +579,31 @@ def _concretize_scenario(
         effort=resolution.effort, cwd=cwd,
     )
 
-    # Run in container or directly
     if container_name:
         from pm_core import container as container_mod
-        exec_cmd = container_mod.build_exec_cmd(
+        return container_mod.build_exec_cmd(
             container_name, claude_cmd, cleanup=False)
-        tmux_mod.send_keys(pane_id, exec_cmd)
-    else:
-        tmux_mod.send_keys(pane_id, claude_cmd)
+    return claude_cmd
+
+
+def _concretize_scenario(
+    scenario: QAScenario,
+    pr_data: dict,
+    project_data: dict,
+    pane_id: str,
+) -> str | None:
+    """Poll a concretization pane and return refined steps.
+
+    The concretizer command should already be running in *pane_id*.
+    Polls for the STEPS_VERIFIED verdict and extracts the refined steps.
+    Returns None if concretization failed/timed out.
+    The pane is left open for user review.
+    """
+    from pm_core import tmux as tmux_mod
+
+    base_branch = project_data.get("project", {}).get("base_branch", "master")
+    pr_branch = pr_data.get("branch", "")
+    prompt = _build_concretization_prompt(scenario, pr_branch, base_branch)
 
     _log.info("Concretization started for scenario %d in pane %s",
               scenario.index, pane_id)
@@ -790,20 +798,23 @@ def _launch_scenarios_in_tmux(
 
         win_name = _scenario_window_name(pr_data, scenario.index)
 
-        # Create window with a shell — concretizer runs here first
+        # Create window with concretizer command
+        concretize_cmd = _build_concretize_cmd(
+            scenario, pr_data, data, cwd=scenario_cwd)
         try:
             concretize_pane = tmux_mod.new_window_get_pane(
-                session, win_name, "echo 'Concretizing steps...'",
+                session, win_name, concretize_cmd,
                 cwd=scenario_cwd, switch=False)
         except Exception:
+            concretize_pane = None
+        if not concretize_pane:
             _log.warning("Failed to create window for scenario %d",
                          scenario.index)
             continue
 
-        # Run concretization to verify/refine planned steps
+        # Poll concretization for refined steps
         refined_steps = _concretize_scenario(
-            scenario, pr_data, data, session, concretize_pane,
-            cwd=scenario_cwd,
+            scenario, pr_data, data, concretize_pane,
         )
         if refined_steps:
             scenario.steps = refined_steps
@@ -926,21 +937,24 @@ def _launch_scenarios_in_containers(
 
         win_name = _scenario_window_name(pr_data, scenario.index)
 
-        # Create window with a shell — concretizer runs here first
+        # Create window with concretizer command (runs inside container)
+        concretize_cmd = _build_concretize_cmd(
+            scenario, pr_data, data, cwd=container_workdir,
+            container_name=cname)
         try:
             concretize_pane = tmux_mod.new_window_get_pane(
-                session, win_name, "echo 'Concretizing steps...'",
+                session, win_name, concretize_cmd,
                 cwd=workdir_path, switch=False)
         except Exception:
+            concretize_pane = None
+        if not concretize_pane:
             _log.warning("Failed to create window for scenario %d",
                          scenario.index)
             continue
 
-        # Run concretization inside the container
+        # Poll concretization for refined steps
         refined_steps = _concretize_scenario(
-            scenario, pr_data, data, session, concretize_pane,
-            cwd=container_workdir,
-            container_name=cname,
+            scenario, pr_data, data, concretize_pane,
         )
         if refined_steps:
             scenario.steps = refined_steps
