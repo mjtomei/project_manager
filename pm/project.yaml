@@ -3711,9 +3711,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/146
   gh_pr_number: 146
   created_at: '2026-03-06T15:48:13.072900+00:00'
-  updated_at: '2026-03-15T22:38:19.074434+00:00'
+  updated_at: '2026-03-16T00:07:38.122012+00:00'
   started_at: '2026-03-14T22:24:34.604076+00:00'
-  reviewed_at: '2026-03-15T22:38:19.074434+00:00'
+  reviewed_at: '2026-03-15T23:01:00.469188+00:00'
   merged_at: null
   notes:
   - id: note-52ce835
@@ -3779,6 +3779,17 @@ prs:
       follow-up: ?; Instruction file installation for scenarios: ? (workdir: /home/matt/.pm/workdirs/qa/pr-8fdda09-e545f5810ab8e896)'
     created_at: '2026-03-15T18:17:36Z'
     last_edited: '2026-03-15T18:17:36Z'
+  - id: note-1db55e3
+    text: 'QA scenarios for this PR should include at least one scenario that exercises
+      the new functionality end-to-end through the TUI using actual key presses (pm
+      tui send). This includes: navigating to the QA pane (p key), pressing d to launch
+      a debug session, verifying the debug pane opens with the correct environment,
+      and checking that the status bar shows the d=debug shortcut. The scenario for
+      queued status should also verify through the TUI status pane that queued scenarios
+      display correctly. Scenarios that only read code or run unit tests should be
+      flagged.'
+    created_at: '2026-03-16T00:07:38Z'
+    last_edited: '2026-03-16T00:07:38Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8fdda09-add-qa-scenario-verification-step-be-3e33a282
 - id: pr-942aa21
   plan: plan-qa
