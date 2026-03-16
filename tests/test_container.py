@@ -295,8 +295,8 @@ class TestCreateContainer:
     @patch("pm_core.container._resolve_claude_binary", return_value=None)
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_docker")
-    def test_mounts_claude_json(self, mock_docker, mock_rm, mock_bin, mock_exists, _mock_running):
-        """~/.claude.json is mounted read-write for Claude config."""
+    def test_copies_claude_json(self, mock_docker, mock_rm, mock_bin, mock_exists, _mock_running):
+        """.claude.json is copied (not bind-mounted) into the container."""
         mock_docker.return_value = MagicMock(stdout="id\n")
         config = ContainerConfig()
 
@@ -305,8 +305,13 @@ class TestCreateContainer:
              patch.object(Path, "exists", return_value=True):
             create_container(name="test", config=config, workdir=Path("/w"))
 
+        # .claude.json should NOT be in the docker run args (no bind mount)
         args_str = " ".join(mock_docker.call_args_list[0][0])
-        assert f"/home/user/.claude.json:{_CONTAINER_HOME}/.claude.json" in args_str
+        assert f"/home/user/.claude.json:{_CONTAINER_HOME}/.claude.json" not in args_str
+        # Instead it should be copied via docker cp (second call after run)
+        all_calls = mock_docker.call_args_list
+        cp_calls = [c for c in all_calls if len(c[0]) > 0 and c[0][0] == "cp"]
+        assert len(cp_calls) >= 1, "docker cp should be called for .claude.json"
 
     @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container._resolve_claude_binary")
