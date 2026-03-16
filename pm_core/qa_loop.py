@@ -1215,7 +1215,13 @@ def _poll_tmux_verdicts(
 
         for scenario_idx, (passed, reason) in completed_verifications.items():
             verifying.discard(scenario_idx)
-            scenario = next(s for s in state.scenarios if s.index == scenario_idx)
+            scenario = next(
+                (s for s in state.scenarios if s.index == scenario_idx), None
+            )
+            if scenario is None:
+                _log.warning("Verification result for unknown scenario %d — ignoring",
+                             scenario_idx)
+                continue
             if passed:
                 _log.info("Verification passed for scenario %d (%s)",
                           scenario_idx, scenario.title)
