@@ -431,9 +431,11 @@ def create_container(
     if claude_config.is_dir():
         cmd.extend(["-v", f"{claude_config}:{_CONTAINER_HOME}/.claude"])
 
-    claude_json = Path.home() / ".claude.json"
-    if claude_json.exists():
-        cmd.extend(["-v", f"{claude_json}:{_CONTAINER_HOME}/.claude.json"])
+    # NOTE: .claude.json is NOT bind-mounted.  Claude writes it atomically
+    # (write tmp + rename) which replaces the inode — a single-file bind
+    # mount keeps the old inode so the container sees stale content.
+    # Instead we copy it in after the container is created (see below).
+    _claude_json_src = Path.home() / ".claude.json"
 
     # --- Additional mounts ---
     if extra_ro_mounts:
@@ -528,6 +530,20 @@ def create_container(
         if check.returncode == 0:
             break
         time.sleep(0.1)
+
+    # Copy .claude.json into the container (not bind-mounted — see note above)
+    if _claude_json_src.exists():
+        try:
+            _run_docker("cp", str(_claude_json_src),
+                        f"{name}:{_CONTAINER_HOME}/.claude.json",
+                        timeout=10)
+            _run_docker("exec", name, "chown",
+                        f"{host_uid}:{host_gid}",
+                        f"{_CONTAINER_HOME}/.claude.json",
+                        timeout=5)
+        except Exception:
+            _log.warning("Failed to copy .claude.json into container %s",
+                         name, exc_info=True)
 
     _log.info("Created container %s (id=%s)", name, container_id[:12])
     return container_id
