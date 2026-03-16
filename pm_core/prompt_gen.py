@@ -744,7 +744,8 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
     qa_specific_block = ""
     try:
         root = store.find_project_root()
-        library_summary = qa_instructions.instruction_summary_for_prompt(root)
+        library_summary = qa_instructions.instruction_summary_for_prompt(
+            root, include_regression=False)
         general_notes_block, qa_specific_block = notes.notes_for_prompt(root, "qa")
     except FileNotFoundError:
         pass
@@ -771,9 +772,9 @@ to verify this PR works correctly.
 {pr_notes_block}
 ## QA Instruction Library
 
-These are available QA instructions and regression tests.  Reference any that
-are relevant to this PR's changes.  You can read the full content of any
-instruction file at the paths shown below.
+These are available QA instructions.  Reference any that are relevant to
+this PR's changes.  You can read the full content of any instruction file
+at the paths shown below.
 
 {library_summary}
 
