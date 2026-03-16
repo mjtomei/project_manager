@@ -505,9 +505,9 @@ def _resolve_qa_model(pr_data: dict, project_data: dict | None = None,
                       session_type: str = "qa"):
     """Resolve model/provider for a QA session type.
 
-    session_type should be "qa_planning" for the planner or "qa_scenario"
-    for scenario workers.  Falls back to "qa" config if the specific type
-    is not configured.
+    session_type should be "qa_planning" for the planner, "qa_scenario"
+    for scenario workers, or "qa_verification" for the verification step.
+    Falls back to "qa" config if the specific type is not configured.
     """
     from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
     return resolve_model_and_provider(

@@ -157,7 +157,9 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
         lines.append(f"  Overall: {color}{_BOLD}{overall}{_RESET}")
     else:
         done = sum(1 for s in scenarios
-                   if s.get("verdict") and s.get("verdict") not in ("interactive", "queued"))
+                   if s.get("verdict") and s.get("verdict") not in ("interactive", "queued")
+                   and "(retrying" not in s.get("verdict", "")
+                   and "(verifying" not in s.get("verdict", ""))
         total = sum(1 for s in scenarios if s.get("verdict") != "interactive")
         queued = sum(1 for s in scenarios if s.get("verdict") == "queued")
         progress = f"  {_DIM}Progress: {done}/{total} scenarios complete"
