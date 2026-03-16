@@ -276,6 +276,42 @@ def extract_verdict_from_content(
     return None
 
 
+def extract_between_markers(content: str, start_marker: str,
+                            end_marker: str,
+                            require_end: bool = True) -> str | None:
+    """Extract text between the last START/END marker pair in *content*.
+
+    Scans from the bottom so that prompt-template examples (which appear
+    earlier in the content) are skipped in favour of the real output.
+
+    When *require_end* is False and the end marker is missing, extracts
+    everything after the last start marker to the end of content.
+
+    Returns None if no valid start marker is found.
+    """
+    lines = content.strip().splitlines()
+    last_start = -1
+    last_end = -1
+    for i, line in enumerate(lines):
+        cleaned = re.sub(r'[*`]', '', line).strip()
+        if cleaned == start_marker:
+            last_start = i
+        elif cleaned == end_marker:
+            last_end = i
+    if last_start < 0:
+        return None
+    if last_end > last_start:
+        end = last_end
+    elif not require_end:
+        end = len(lines)
+    else:
+        return None
+    extracted = "\n".join(
+        line.strip() for line in lines[last_start + 1:end]
+    ).strip()
+    return extracted if extracted else None
+
+
 # ---------------------------------------------------------------------------
 # Polling helpers (shared by review_loop and watcher_loop)
 # ---------------------------------------------------------------------------

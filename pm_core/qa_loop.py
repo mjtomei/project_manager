@@ -625,13 +625,12 @@ def _concretize_scenario(
                      scenario.index)
         return None
 
-    # Parse refined steps from output
-    m = re.search(
-        r'REFINED_STEPS_START\s*\n(.*?)\nREFINED_STEPS_END',
-        content, re.DOTALL,
-    )
-    if m:
-        refined = m.group(1).strip()
+    # Parse refined steps — use extract_between_markers which finds the
+    # last START/END pair (skipping the prompt's example markers).
+    from pm_core.loop_shared import extract_between_markers
+    refined = extract_between_markers(
+        content, "REFINED_STEPS_START", "REFINED_STEPS_END")
+    if refined:
         _log.info("Concretization produced %d chars of refined steps "
                   "for scenario %d", len(refined), scenario.index)
         return refined
@@ -1521,29 +1520,13 @@ _VERIFICATION_KEYWORDS = ("VERIFIED", "FLAGGED_START", "FLAGGED_END")
 def _extract_flagged_reason(content: str) -> str:
     """Extract the reason text between FLAGGED_START and FLAGGED_END markers.
 
-    Uses the *last* FLAGGED_START/FLAGGED_END pair in the content so that
-    the prompt template's example markers are skipped in favour of the
-    verifier's actual output.
+    Uses extract_between_markers which finds the *last* pair, skipping
+    the prompt template's example markers.
     """
-    lines = content.strip().splitlines()
-    # Find the last FLAGGED_START and FLAGGED_END positions
-    last_start = -1
-    last_end = -1
-    for i, line in enumerate(lines):
-        cleaned = re.sub(r'[*`]', '', line).strip()
-        if cleaned == "FLAGGED_START":
-            last_start = i
-        elif cleaned == "FLAGGED_END":
-            last_end = i
-    if last_start >= 0:
-        end = last_end if last_end > last_start else len(lines)
-        reason_lines = [
-            line.strip() for line in lines[last_start + 1:end]
-        ]
-        reason = "\n".join(reason_lines).strip()
-        if reason:
-            return reason
-    return "Scenario did not properly exercise test cases"
+    from pm_core.loop_shared import extract_between_markers
+    reason = extract_between_markers(
+        content, "FLAGGED_START", "FLAGGED_END", require_end=False)
+    return reason or "Scenario did not properly exercise test cases"
 
 
 def _verify_single_scenario(
