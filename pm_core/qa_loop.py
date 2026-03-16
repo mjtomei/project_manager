@@ -1389,20 +1389,25 @@ def _verify_single_scenario(
     resolution = _resolve_qa_model(pr_data, project_data,
                                    session_type="qa_verification")
 
-    # Prefer the transcript file if it exists (finalize first so the
-    # symlink is replaced with a real copy that survives pruning).
+    # Prefer the transcript file if it exists.  Do NOT finalize (copy)
+    # the symlink — the scenario may still be running (e.g. after a
+    # verification follow-up) and the live symlink target has the latest
+    # content.  Resolve the symlink so the verifier reads the live file.
     transcript_path = scenario.transcript_path
     if transcript_path:
-        try:
-            finalize_transcript(Path(transcript_path))
-        except Exception:
-            _log.debug("Could not finalize transcript for scenario %d",
-                       scenario.index, exc_info=True)
-        if not Path(transcript_path).exists():
+        tp = Path(transcript_path)
+        if tp.is_symlink():
+            resolved = str(tp.resolve())
+            if Path(resolved).exists():
+                transcript_path = resolved
+            else:
+                transcript_path = None
+        elif not tp.exists():
+            transcript_path = None
+        if not transcript_path:
             _log.warning("Transcript for scenario %d not found at %s, "
                          "falling back to pane output",
-                         scenario.index, transcript_path)
-            transcript_path = None
+                         scenario.index, scenario.transcript_path)
 
     prompt = _build_verification_prompt(
         scenario, verdict,
