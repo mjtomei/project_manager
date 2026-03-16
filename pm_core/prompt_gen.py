@@ -744,8 +744,7 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
     qa_specific_block = ""
     try:
         root = store.find_project_root()
-        library_summary = qa_instructions.instruction_summary_for_prompt(
-            root, include_regression=False)
+        library_summary = qa_instructions.instruction_summary_for_prompt(root)
         general_notes_block, qa_specific_block = notes.notes_for_prompt(root, "qa")
     except FileNotFoundError:
         pass
@@ -850,8 +849,7 @@ def generate_qa_interactive_prompt(data: dict, pr_id: str,
     try:
         root = store.find_project_root()
         from pm_core import qa_instructions
-        library_summary = qa_instructions.instruction_summary_for_prompt(
-            root, include_regression=False)
+        library_summary = qa_instructions.instruction_summary_for_prompt(root)
         if library_summary and "No QA instructions" not in library_summary:
             instruction_library_block = f"""
 ## QA Instruction Library

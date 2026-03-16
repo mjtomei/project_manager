@@ -212,7 +212,7 @@ def get_instruction(pm_root: Path, instruction_id: str,
 # ---------------------------------------------------------------------------
 
 def instruction_summary_for_prompt(pm_root: Path,
-                                   include_regression: bool = True) -> str:
+                                   include_regression: bool = False) -> str:
     """Build a summary of instructions for prompts.
 
     Args:
