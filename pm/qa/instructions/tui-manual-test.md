@@ -16,7 +16,25 @@ tags: [tui, manual]
    mkdir -p "$TEST_DIR" && cd "$TEST_DIR"
    git init
    ```
-3. Create a `pm/` directory with a `project.yaml` — see `pm/project.yaml` in the main repo for field format. Use `backend: local` to avoid needing GitHub. Include a mix of PR statuses and dependencies.
+3. Initialize pm and add PRs using the CLI. Choose whatever titles and
+   dependency structure make sense for what you're testing — here's an
+   example with four PRs and a dependency chain:
+   ```
+   cd "$TEST_DIR"
+   pm init --backend local --no-import
+   pm pr add "Add login feature"
+   pm pr add "Fix database migration" --depends-on <id-from-first>
+   pm pr add "Refactor auth module" --depends-on <id-from-first>,<id-from-second>
+   pm pr add "Add unit tests"
+   ```
+   PR IDs are auto-generated hashes (e.g. `pr-a1b2c3d`) — note the ID
+   printed by each `pm pr add` and use it in subsequent `--depends-on`
+   flags. If you need a mix of PR statuses for the initial test fixture,
+   you can edit `pm/project.yaml` directly to set `status` on individual
+   PRs (e.g. `merged`, `in_review`). This is only for bootstrapping the
+   test project — once setup is complete, do not edit `project.yaml` by
+   hand. All subsequent changes should go through `pm` CLI or TUI
+   commands so you are actually exercising the functionality under test.
 4. Start the session from the test directory. The `pm session` command creates a tmux session and then tries to attach to it. Since Claude Code's Bash tool has no TTY, the attach will fail — but the session is still created and usable. Ignore the attach error:
    ```
    cd "$TEST_DIR" && pm session 2>/dev/null || true
