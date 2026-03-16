@@ -768,8 +768,6 @@ to verify this PR works correctly.
 - **Base branch**: {base_branch}
 - **Workdir**: {workdir}
 
-Inspect the diff yourself — run `git diff {base_branch}...HEAD` in the workdir
-to see what changed.  Read source files as needed to understand the context.
 {pr_notes_block}
 ## QA Instruction Library
 
@@ -779,12 +777,9 @@ instruction file at the paths shown below.
 
 {library_summary}
 
-## CRITICAL: Always assign an instruction
-
 Instructions tell scenario agents how to set up a test environment.  Without
-one, agents fall back to reading code and auto-passing.  Assign an instruction
-to every scenario — ``INSTRUCTION: "none"`` should be rare.  Multiple scenarios
-testing the same system should share the same instruction.
+one, agents fall back to reading code and auto-passing.  Try to assign an instruction
+to every scenario.
 
 ## Output Format
 
@@ -806,47 +801,12 @@ STEPS: <concrete test steps>
 
 QA_PLAN_END
 
-IMPORTANT: Replace ALL angle-bracket placeholders above with real content.
-Do NOT copy the example format verbatim — fill in actual scenario titles,
-focus areas, and detailed test steps specific to THIS PR.
-
 Number scenarios starting from {scenario_start}.
 
 Include as many scenarios as required to fully exercise the functionality
 of the PR.  Exercise the core functionality as well as any edge cases
 that may expose bugs.
 
-## Writing effective STEPS
-
-The STEPS field is critical — it is the only guidance the scenario agent receives
-about what to do (beyond the instruction file's generic setup).  Write steps that
-are specific enough that the agent can execute them without guessing.
-
-Scenarios should exercise the actual feature or workflow end-to-end, NOT run
-the project's unit/integration test suite.  The goal is to verify that the
-changed behavior works correctly in practice.
-
-Include:
-- **Exact commands or interactions** to exercise the feature — this could be CLI
-  commands (e.g. `pm qa start pr-001`), API calls, TUI interactions
-  (e.g. "open the TUI with `pm tui`, navigate to the PR list, press `s` to start"),
-  or any other way the user would actually use the feature
-- **Specific files or functions** that changed and where they live
-- **Expected behavior**: what output, side effects, or state changes to look for
-  (e.g. "should print 'OK: 3 scenarios queued'", "the status pane should show
-  'queued' for scenarios not yet launched", "pressing `j` should highlight the
-  next row")
-- **Failure conditions**: what would indicate the feature is broken
-  (e.g. "if the list is truncated to 1 item instead of showing all 3, the bug
-  is not fixed")
-
-Steps can involve any combination of shell commands, file inspection, tmux pane
-capture, GUI/TUI interaction, or process orchestration — whatever it takes to
-verify the feature works as a real user would experience it.
-
-The agent running the scenario has the full codebase but has NOT read the PR diff.
-Your steps must bridge that gap — tell it exactly which behavior changed and how
-to exercise it.
 {general_notes_block}{qa_specific_block}"""
     return prompt.strip()
 
@@ -983,15 +943,10 @@ def generate_qa_child_prompt(data: dict, pr_id: str,
         instruction_block = f"""
 ## Instruction Reference
 
-Read the full instruction at: `{instr_display}`
-Follow its **Setup** section to create a real test environment BEFORE running
-any test steps.  Do NOT skip setup and fall back to static code reading — your
-job is to verify runtime behavior, not review code.
+Test setup instructions are available at: `{instr_display}`
 
 If a setup step fails or a required tool is unavailable, report
-**INPUT_REQUIRED** with an explanation of what blocked you.  Do NOT
-substitute alternative methodology (e.g., writing unit tests, reading
-code) and claim PASS.
+**INPUT_REQUIRED** with an explanation of what blocked you. 
 """
 
     # Include PR notes (prior QA results, addendums)
@@ -1012,15 +967,14 @@ code) and claim PASS.
 - **Your workdir** (isolated clone): {workdir}{scratch_line}
 - **PR workdir** (canonical source): {pr_workdir}"""
         execution_block = f"""\
-{pull_step}{n}. Inspect and test the code in your workdir (an isolated clone of the PR branch)
-{n+1}. Execute the test steps described above
-{n+2}. If you find issues and can fix them:
+{pull_step}{n}. Execute the test steps described above
+{n+1}. If you find issues and can fix them:
    - Implement the fix in your workdir (your current directory)
    - Commit with message prefix `qa: `
    - Push: `git push origin {branch}`
    - If push fails (another scenario pushed first), pull and retry:
      `git pull --rebase origin {branch} && git push origin {branch}`
-{n+3}. End with a verdict on its own line — one of:
+{n+2}. End with a verdict on its own line — one of:
    - **PASS** — Scenario passed, no issues found
    - **NEEDS_WORK** — Issues found (explain what and whether you fixed them)
    - **INPUT_REQUIRED** — Genuine ambiguity requiring human judgment"""
@@ -1029,13 +983,12 @@ code) and claim PASS.
 - **PR workdir** (source code): {pr_workdir}
 - **Your workdir** (throwaway test projects): {workdir}"""
         execution_block = f"""\
-{pull_step}{n}. Inspect the PR's code in the PR workdir
-{n+1}. Execute the test steps described above
-{n+2}. If you find issues and can fix them:
+{pull_step}{n}. Execute the test steps described above
+{n+1}. If you find issues and can fix them:
    - Implement the fix in the PR workdir
    - Commit with message prefix `qa: `
    - Push: `git push origin {branch}`
-{n+3}. End with a verdict on its own line — one of:
+{n+2}. End with a verdict on its own line — one of:
    - **PASS** — Scenario passed, no issues found
    - **NEEDS_WORK** — Issues found (explain what and whether you fixed them)
    - **INPUT_REQUIRED** — Genuine ambiguity requiring human judgment"""
@@ -1055,12 +1008,6 @@ You are in one of several QA scenarios running in parallel, each in its own
 isolated clone.  An orchestrator is monitoring your tmux pane for your
 final verdict.
 
-- When you output a verdict (PASS / NEEDS_WORK / INPUT_REQUIRED), the
-  orchestrator records it and moves on
-- If you commit fixes (with `qa: ` prefix), push them to the PR branch:
-  `git push origin {branch}`
-- Your verdict determines whether the PR passes QA — be thorough but fair
-
 ## Important: When to use each verdict
 
 - **PASS** — You executed the test steps AND they succeeded.  A PASS is
@@ -1073,11 +1020,6 @@ final verdict.
   or ambiguity in the instructions.  **This is the correct verdict when
   your environment prevents you from testing** — do NOT substitute code
   reading or unit tests and claim PASS.  Explain what blocked you.
-
-Reading source code to confirm logic "looks correct" is NOT testing.
-Writing your own unit tests as a substitute for the prescribed steps is
-NOT testing.  If the steps say to run a command and observe output, you
-must actually run that command.  If you cannot, verdict is INPUT_REQUIRED.
 
 ## Scenario
 
@@ -1136,7 +1078,7 @@ Follow its procedures.
 - **Branch**: {base_branch}
 - **Instruction**: {instruction_id}
 
-This is not a PR review — you are testing the current state of the codebase.
+You are testing the current state of the codebase.
 {instruction_block}{tui_block}
 ## Execution
 
