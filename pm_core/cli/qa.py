@@ -255,7 +255,16 @@ def qa_debug(instruction_id: str, branch: str | None, foreground: bool):
 
     # The repo root is the parent of the pm/ state directory
     repo_root = root.parent
-    base_branch = branch or data.get("project", {}).get("base_branch", "master")
+    # Default to the current branch of the workdir (what the TUI session
+    # is operating on), not the project base branch.
+    if not branch:
+        import subprocess
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, cwd=str(repo_root),
+        )
+        branch = result.stdout.strip() if result.returncode == 0 else "master"
+    base_branch = branch
     clone_path, scratch_path = create_scenario_workdir(
         qa_workdir, scenario_index=0,
         repo_root=repo_root,
