@@ -208,9 +208,11 @@ def qa_run(instruction_id: str, pr_id: str | None):
 
 @qa.command("debug")
 @click.argument("instruction_id")
+@click.option("--branch", "-b", default=None,
+              help="Branch to clone (default: project base branch)")
 @click.option("--foreground", "-f", is_flag=True, default=False,
               help="Run in the current pane instead of a new window")
-def qa_debug(instruction_id: str, foreground: bool):
+def qa_debug(instruction_id: str, branch: str | None, foreground: bool):
     """Launch an interactive session to verify a QA instruction works.
 
     Creates an environment identical to what QA scenario workers get
@@ -253,7 +255,7 @@ def qa_debug(instruction_id: str, foreground: bool):
 
     # The repo root is the parent of the pm/ state directory
     repo_root = root.parent
-    base_branch = data.get("project", {}).get("base_branch", "master")
+    base_branch = branch or data.get("project", {}).get("base_branch", "master")
     clone_path, scratch_path = create_scenario_workdir(
         qa_workdir, scenario_index=0,
         repo_root=repo_root,
@@ -324,6 +326,7 @@ End with a summary of which steps work and which don't, then one of:
             config=config,
             workdir=clone_path,
             scratch_path=scratch_path,
+            allowed_push_branch=base_branch,
             session_tag=session_tag,
         )
 
