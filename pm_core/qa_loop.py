@@ -337,10 +337,12 @@ def _write_status_file(status_path: Path, pr_id: str,
                        overall: str = "",
                        scenario_0: QAScenario | None = None,
                        verifying_scenarios: set[int] | None = None,
-                       queued_scenarios: set[int] | None = None) -> None:
+                       queued_scenarios: set[int] | None = None,
+                       verification_failures: dict[int, int] | None = None) -> None:
     """Atomically write the qa_status.json file."""
     _verifying = verifying_scenarios or set()
     _queued = queued_scenarios or set()
+    _verify_fails = verification_failures or {}
     all_scenarios = []
     if scenario_0 and scenario_0.window_name:
         all_scenarios.append({
@@ -351,10 +353,17 @@ def _write_status_file(status_path: Path, pr_id: str,
         })
     for s in scenarios:
         verdict = scenario_verdicts.get(s.index, "")
+        fails = _verify_fails.get(s.index, 0)
         if s.index in _verifying:
-            verdict = f"{verdict} (verifying)" if verdict else "verifying"
+            if fails:
+                verdict = f"{verdict} (verifying:{fails})" if verdict else f"verifying:{fails}"
+            else:
+                verdict = f"{verdict} (verifying)" if verdict else "verifying"
         elif s.index in _queued:
             verdict = "queued"
+        elif not verdict and fails:
+            # Back to pending after verification flagged it — show retry count
+            verdict = f"(retrying:{fails})"
         all_scenarios.append({
             "index": s.index,
             "title": s.title,
@@ -1212,7 +1221,8 @@ def _poll_tmux_verdicts(
                                state.scenario_verdicts,
                                scenario_0=state.scenario_0,
                                verifying_scenarios=verifying_snapshot,
-                               queued_scenarios=_queued_indices)
+                               queued_scenarios=_queued_indices,
+                               verification_failures=verification_failures)
 
 
 # ---------------------------------------------------------------------------

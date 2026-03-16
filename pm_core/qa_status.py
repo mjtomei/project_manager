@@ -19,6 +19,7 @@ Invocation:
 import json
 import logging
 import os
+import re
 import select
 import subprocess
 import sys
@@ -116,12 +117,24 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
         title = _truncate(sc.get("title", ""), title_width)
         verdict = sc.get("verdict", "")
 
-        if "(verifying)" in verdict:
+        if "(verifying" in verdict:
             # Animated spinner for verdicts being verified
-            base_verdict = verdict.replace(" (verifying)", "").strip()
+            # Format: "PASS (verifying)" or "PASS (verifying:2)"
+            m = re.search(r'\(verifying(?::(\d+))?\)', verdict)
+            base_verdict = re.sub(r'\s*\(verifying(?::\d+)?\)', '', verdict).strip()
+            fails = int(m.group(1)) if m and m.group(1) else 0
+            fail_hint = f" {_RED}({fails}){_RESET}" if fails else ""
             verdict_display = (
                 f"{_GREEN}{base_verdict}{_RESET} "
-                f"{_YELLOW}{spinner} verifying{_RESET}"
+                f"{_YELLOW}{spinner} verifying{_RESET}{fail_hint}"
+            )
+        elif "(retrying" in verdict:
+            # Back to pending after verification flagged — show retry count
+            m = re.search(r'\(retrying:(\d+)\)', verdict)
+            fails = int(m.group(1)) if m else 0
+            verdict_display = (
+                f"{_DIM}pending{_RESET} "
+                f"{_RED}({fails}){_RESET}"
             )
         elif verdict:
             color = _VERDICT_COLORS.get(verdict, _DIM)
