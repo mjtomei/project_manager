@@ -3,22 +3,14 @@ title: TUI Manual Testing
 description: Test TUI changes against a throwaway project in the workdir
 tags: [tui, manual]
 ---
-## Environment
-
-You are running inside a Docker container with the full project_manager
-repository cloned at `/workspace`. The `pm` CLI and all of `pm_core` are
-available — you just need to install into a venv first. `tmux` is
-available for running sessions. You have everything needed to run the
-full pm workflow end-to-end.
-
 ## Setup
 
 1. Install pm into a virtual environment:
    ```
    python3 -m venv /tmp/pm-venv && source /tmp/pm-venv/bin/activate
-   pip install -e /workspace
+   pip install -e .   # run from the project_manager clone
    ```
-2. Create a throwaway test project in `/tmp`:
+2. Create a throwaway test project. Use your workdir if you have one, otherwise `/tmp`:
    ```
    TEST_DIR=/tmp/pm-test-$(date +%s)
    mkdir -p "$TEST_DIR" && cd "$TEST_DIR"
@@ -43,11 +35,8 @@ full pm workflow end-to-end.
    test project — once setup is complete, do not edit `project.yaml` by
    hand. All subsequent changes should go through `pm` CLI or TUI
    commands so you are actually exercising the functionality under test.
-4. Start a tmux server and launch the session. The `pm session` command
-   tries to attach to the tmux session it creates, which fails without a
-   TTY — but the session is still created and usable:
+4. Start the session from the test directory. The `pm session` command creates a tmux session and then tries to attach to it. Since Claude Code's Bash tool has no TTY, the attach will fail — but the session is still created and usable. Ignore the attach error:
    ```
-   tmux start-server
    cd "$TEST_DIR" && pm session 2>/dev/null || true
    ```
 
@@ -55,8 +44,8 @@ full pm workflow end-to-end.
 
 Use `pm --help` and `pm <command> --help` for CLI usage. Press `?` in the TUI for keybindings.
 
-For inspecting and interacting with the running session:
+For inspecting a running session from another terminal:
 - `pm tui view` — capture current TUI framebuffer
 - `tmux capture-pane -p -t <session>:<window>.<pane> -S -` — full scrollback
 - `tmux send-keys -t <session>:<window>.<pane> "key" ""` — simulate input
-- Run pm commands inside a pane in the test tmux session, not directly in your own session
+- Don't run pm commands directly — run them inside a new pane inside the test tmux session (not your own session)
