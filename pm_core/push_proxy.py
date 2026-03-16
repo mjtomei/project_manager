@@ -535,30 +535,41 @@ def _shared_proxy_key(session_tag: str, pr_id: str) -> str:
 # With prefix "/tmp/pm-push-proxy-" (19) + "/push.sock" (10) = 29 overhead,
 # the dir name portion must be ≤ 78 chars.  Long session tags easily
 # exceed this, so we hash when necessary.
-def _shared_sock_dir(session_tag: str, pr_id: str) -> str:
-    """Build a socket directory path that fits within Unix socket limits.
+def _shared_sock_dir_path(session_tag: str, pr_id: str) -> str:
+    """Compute the socket directory path without creating anything on disk.
 
-    Unix sockets have a 107-byte path limit.  When the human-readable
-    name ``{session_tag}-{pr_id}`` is too long, we use a short hashed
-    directory for the actual socket and create a long-named symlink
-    pointing to it so ``stop_session_proxies`` can still glob by
-    session tag for cleanup.
-
-    Returns the short path (safe for bind/connect).  The symlink is
-    created as a side effect if needed.
+    Returns the short (hashed) path when the readable name would exceed
+    the Unix socket 107-byte limit, or the readable path otherwise.
+    Pure computation — no filesystem side effects.
     """
     long_name = f"{session_tag}-{pr_id}"
     long_dir = f"/tmp/{_SOCKET_DIR_PREFIX}{long_name}"
     sock_in_long = f"{long_dir}/push.sock"
 
     if len(sock_in_long) <= 107:
-        # Fits — use the readable name directly
         return long_dir
 
-    # Too long — use a hash for the actual socket dir
     import hashlib
     dir_hash = hashlib.sha256(long_name.encode()).hexdigest()[:16]
-    short_dir = f"/tmp/{_SOCKET_DIR_PREFIX}{dir_hash}"
+    return f"/tmp/{_SOCKET_DIR_PREFIX}{dir_hash}"
+
+
+def _shared_sock_dir(session_tag: str, pr_id: str) -> str:
+    """Build a socket directory path and create it on disk.
+
+    Like :func:`_shared_sock_dir_path` but also creates the directory
+    and a long-named symlink for discoverability/cleanup.  Use this
+    when starting a proxy; use ``_shared_sock_dir_path`` for read-only
+    lookups.
+    """
+    long_name = f"{session_tag}-{pr_id}"
+    long_dir = f"/tmp/{_SOCKET_DIR_PREFIX}{long_name}"
+    short_dir = _shared_sock_dir_path(session_tag, pr_id)
+
+    if short_dir == long_dir:
+        # Fits — no hash needed, no symlink needed
+        return long_dir
+
     os.makedirs(short_dir, exist_ok=True)
 
     # Create long-named symlink for discoverability/cleanup
@@ -820,8 +831,8 @@ def get_proxy_socket_path(container_name: str,
 
     # Try shared proxy path first (session_tag + pr_id)
     if session_tag and pr_id:
-        # Check via _shared_sock_dir (short path)
-        shared_dir = _shared_sock_dir(session_tag, pr_id)
+        # Check via _shared_sock_dir_path (read-only, no side effects)
+        shared_dir = _shared_sock_dir_path(session_tag, pr_id)
         result = _resolve(os.path.join(shared_dir, "push.sock"))
         if result:
             return result
@@ -848,7 +859,7 @@ def get_proxy_socket_path(container_name: str,
             return None
     if "\0" in key:
         stag, pid = key.split("\0", 1)
-        derived_dir = _shared_sock_dir(stag, pid)
+        derived_dir = _shared_sock_dir_path(stag, pid)
         result = _resolve(os.path.join(derived_dir, "push.sock"))
         if result:
             return result
