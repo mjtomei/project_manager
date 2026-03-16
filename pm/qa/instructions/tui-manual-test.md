@@ -1,6 +1,6 @@
 ---
 title: TUI Manual Testing
-description: Test TUI changes against a throwaway project in /tmp
+description: Test TUI changes against a throwaway project in the workdir
 tags: [tui, manual]
 ---
 ## Setup
