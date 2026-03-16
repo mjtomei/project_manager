@@ -1026,6 +1026,13 @@ def _poll_tmux_verdicts(
         state.scenarios = orig
         if scenario.window_name:
             pending.add(scenario.index)
+        else:
+            # Window creation failed — mark INPUT_REQUIRED so this
+            # scenario isn't silently lost (which could cause a false
+            # overall PASS).
+            _log.warning("Queued scenario %d window creation failed — "
+                         "marking INPUT_REQUIRED", scenario.index)
+            state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
 
     while (pending or verifying or _launch_queue) and not state.stop_requested:
         time.sleep(_POLL_INTERVAL)
@@ -1394,7 +1401,7 @@ def _verify_single_scenario(
     truncation as a fallback.
     """
     from pm_core import tmux as tmux_mod
-    from pm_core.claude_launcher import build_claude_shell_cmd, finalize_transcript
+    from pm_core.claude_launcher import build_claude_shell_cmd
 
     resolution = _resolve_qa_model(pr_data, project_data,
                                    session_type="qa_verification")
