@@ -987,6 +987,11 @@ Read the full instruction at: `{instr_display}`
 Follow its **Setup** section to create a real test environment BEFORE running
 any test steps.  Do NOT skip setup and fall back to static code reading — your
 job is to verify runtime behavior, not review code.
+
+If a setup step fails or a required tool is unavailable, report
+**INPUT_REQUIRED** with an explanation of what blocked you.  Do NOT
+substitute alternative methodology (e.g., writing unit tests, reading
+code) and claim PASS.
 """
 
     # Include PR notes (prior QA results, addendums)
@@ -1055,6 +1060,24 @@ final verdict.
 - If you commit fixes (with `qa: ` prefix), push them to the PR branch:
   `git push origin {branch}`
 - Your verdict determines whether the PR passes QA — be thorough but fair
+
+## Important: When to use each verdict
+
+- **PASS** — You executed the test steps AND they succeeded.  A PASS is
+  only valid when you have **runtime evidence** (command output, observed
+  behavior, test results) that the feature works.
+- **NEEDS_WORK** — You executed the test steps and found concrete bugs or
+  issues.
+- **INPUT_REQUIRED** — You **could not execute** one or more test steps
+  because of missing tools, unavailable commands, environment limitations,
+  or ambiguity in the instructions.  **This is the correct verdict when
+  your environment prevents you from testing** — do NOT substitute code
+  reading or unit tests and claim PASS.  Explain what blocked you.
+
+Reading source code to confirm logic "looks correct" is NOT testing.
+Writing your own unit tests as a substitute for the prescribed steps is
+NOT testing.  If the steps say to run a command and observe output, you
+must actually run that command.  If you cannot, verdict is INPUT_REQUIRED.
 
 ## Scenario
 

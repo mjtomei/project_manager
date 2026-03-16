@@ -3675,7 +3675,7 @@ prs:
   plan: plan-qa
   title: Add QA scenario verification step before final verdict
   branch: pm/pr-8fdda09-add-qa-scenario-verification-step-before-final-ver
-  status: qa
+  status: in_review
   depends_on:
   - pr-ee1ff04
   description: 'After all QA scenarios complete and verdicts are collected, add a
@@ -3711,9 +3711,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/146
   gh_pr_number: 146
   created_at: '2026-03-06T15:48:13.072900+00:00'
-  updated_at: '2026-03-16T00:07:38.122012+00:00'
+  updated_at: '2026-03-16T11:35:13.071485+00:00'
   started_at: '2026-03-14T22:24:34.604076+00:00'
-  reviewed_at: '2026-03-15T23:01:00.469188+00:00'
+  reviewed_at: '2026-03-16T11:35:13.071485+00:00'
   merged_at: null
   notes:
   - id: note-52ce835
@@ -3790,6 +3790,25 @@ prs:
       flagged.'
     created_at: '2026-03-16T00:07:38Z'
     last_edited: '2026-03-16T00:07:38Z'
+  - id: note-bff384c
+    text: 'QA NEEDS_WORK: Verification triggers only on PASS verdict: INPUT_REQUIRED;
+      Verification VERIFIED accepts the PASS verdict: INPUT_REQUIRED; Verification
+      FLAGGED triggers re-evaluation: INPUT_REQUIRED; Verification failure exhaustion
+      marks NEEDS_WORK: NEEDS_WORK; qa-verify-pass setting disables verification:
+      NEEDS_WORK; Verification pane lifecycle and layout management: INPUT_REQUIRED;
+      Transcript file preferred over pane output for verification: INPUT_REQUIRED;
+      Status dashboard renders verification state correctly: INPUT_REQUIRED; qa_verification
+      session type and model resolution: NEEDS_WORK; Verification handles missing/dead
+      scenario pane gracefully: INPUT_REQUIRED; Unit tests pass for new verification
+      functions: PASS; Concurrent verification threads do not race with the polling
+      loop: INPUT_REQUIRED; Transcript path is set on scenario launch and relaunch:
+      INPUT_REQUIRED; Stale verdict detection after verification follow-up: PASS;
+      Instruction file installation for scenarios: PASS; Push proxy survives caller
+      exit via subprocess mode: PASS; Socket directory mount survives proxy restarts:
+      NEEDS_WORK; End-to-end verification through TUI with key presses: INPUT_REQUIRED
+      (workdir: /home/matt/.pm/workdirs/qa/pr-8fdda09-11067f67946c0882)'
+    created_at: '2026-03-16T00:57:53Z'
+    last_edited: '2026-03-16T00:57:53Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8fdda09-add-qa-scenario-verification-step-be-3e33a282
 - id: pr-942aa21
   plan: plan-qa
