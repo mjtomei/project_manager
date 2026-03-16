@@ -1202,6 +1202,13 @@ def _poll_tmux_verdicts(
                          "marking INPUT_REQUIRED", scenario.index)
             state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
 
+    # Fill any open slots that were freed by initial workdir failures.
+    # Scenarios that fail workdir creation are marked INPUT_REQUIRED without
+    # entering ``pending``, so their slots would otherwise stay empty until
+    # a later verdict triggers ``_launch_next_queued``.
+    for _ in range(len(_launch_queue)):
+        _launch_next_queued()  # returns immediately once cap is reached
+
     while (pending or verifying or _launch_queue) and not state.stop_requested:
         time.sleep(_POLL_INTERVAL)
 
