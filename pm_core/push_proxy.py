@@ -531,6 +531,51 @@ def _shared_proxy_key(session_tag: str, pr_id: str) -> str:
     return f"{session_tag}\0{pr_id}"
 
 
+# Unix sockets have a max path length of 107 bytes (+ null terminator).
+# With prefix "/tmp/pm-push-proxy-" (19) + "/push.sock" (10) = 29 overhead,
+# the dir name portion must be ≤ 78 chars.  Long session tags easily
+# exceed this, so we hash when necessary.
+def _shared_sock_dir(session_tag: str, pr_id: str) -> str:
+    """Build a socket directory path that fits within Unix socket limits.
+
+    Unix sockets have a 107-byte path limit.  When the human-readable
+    name ``{session_tag}-{pr_id}`` is too long, we use a short hashed
+    directory for the actual socket and create a long-named symlink
+    pointing to it so ``stop_session_proxies`` can still glob by
+    session tag for cleanup.
+
+    Returns the short path (safe for bind/connect).  The symlink is
+    created as a side effect if needed.
+    """
+    long_name = f"{session_tag}-{pr_id}"
+    long_dir = f"/tmp/{_SOCKET_DIR_PREFIX}{long_name}"
+    sock_in_long = f"{long_dir}/push.sock"
+
+    if len(sock_in_long) <= 107:
+        # Fits — use the readable name directly
+        return long_dir
+
+    # Too long — use a hash for the actual socket dir
+    import hashlib
+    dir_hash = hashlib.sha256(long_name.encode()).hexdigest()[:16]
+    short_dir = f"/tmp/{_SOCKET_DIR_PREFIX}{dir_hash}"
+    os.makedirs(short_dir, exist_ok=True)
+
+    # Create long-named symlink for discoverability/cleanup
+    try:
+        os.symlink(short_dir, long_dir)
+    except FileExistsError:
+        # If it's a stale real directory, replace with symlink
+        if os.path.isdir(long_dir) and not os.path.islink(long_dir):
+            import shutil
+            shutil.rmtree(long_dir, ignore_errors=True)
+            try:
+                os.symlink(short_dir, long_dir)
+            except FileExistsError:
+                pass  # race — another process created it
+    return short_dir
+
+
 def _start_proxy_subprocess(sock_path: str, workdir: str,
                             allowed_branch: str) -> None:
     """Spawn a push proxy as an independent subprocess that outlives the caller."""
@@ -586,7 +631,7 @@ def start_push_proxy(container_name: str, workdir: str,
 
     if shared:
         key = _shared_proxy_key(session_tag, pr_id)
-        sock_dir = f"/tmp/{_SOCKET_DIR_PREFIX}{session_tag}-{pr_id}"
+        sock_dir = _shared_sock_dir(session_tag, pr_id)
         sock_path = os.path.join(sock_dir, "push.sock")
 
         # Reuse if an existing proxy is alive on this socket
@@ -649,12 +694,21 @@ def start_push_proxy(container_name: str, workdir: str,
 def _kill_proxy_socket(sock_path: str) -> None:
     """Stop a subprocess proxy by removing its socket (triggers exit) and clean up."""
     sock_dir = str(Path(sock_path).parent)
+    # Resolve the real directory if sock_dir is a symlink
+    real_dir = os.path.realpath(sock_dir)
     try:
         os.unlink(sock_path)
     except FileNotFoundError:
         pass
+    # Clean up the symlink if sock_dir is one
+    if os.path.islink(sock_dir):
+        try:
+            os.unlink(sock_dir)
+        except OSError:
+            pass
+    # Clean up the real directory
     try:
-        os.rmdir(sock_dir)
+        os.rmdir(real_dir)
     except OSError:
         pass
 
@@ -752,37 +806,52 @@ def get_proxy_socket_path(container_name: str,
     """Return the host socket path for a container's push proxy, or None.
 
     Uses the deterministic path convention so this works even after a
-    TUI restart (no in-memory state needed).
+    TUI restart (no in-memory state needed).  Always returns the real
+    (resolved) path so callers can ``connect()`` without hitting the
+    Unix socket 107-byte path limit.
     """
     import tempfile
 
+    def _resolve(path: str) -> str | None:
+        """Return the realpath if the socket exists, else None."""
+        if os.path.exists(path):
+            return os.path.realpath(path)
+        return None
+
     # Try shared proxy path first (session_tag + pr_id)
     if session_tag and pr_id:
-        shared_path = os.path.join(tempfile.gettempdir(),
-                                   f"{_SOCKET_DIR_PREFIX}{session_tag}-{pr_id}",
-                                   "push.sock")
-        if os.path.exists(shared_path):
-            return shared_path
+        # Check via _shared_sock_dir (short path)
+        shared_dir = _shared_sock_dir(session_tag, pr_id)
+        result = _resolve(os.path.join(shared_dir, "push.sock"))
+        if result:
+            return result
+        # Also check the long-named symlink path
+        long_path = os.path.join(tempfile.gettempdir(),
+                                 f"{_SOCKET_DIR_PREFIX}{session_tag}-{pr_id}",
+                                 "push.sock")
+        result = _resolve(long_path)
+        if result:
+            return result
 
     # Try legacy per-container path
     sock_path = os.path.join(tempfile.gettempdir(),
                              f"{_SOCKET_DIR_PREFIX}{container_name}",
                              "push.sock")
-    if os.path.exists(sock_path):
-        return sock_path
+    result = _resolve(sock_path)
+    if result:
+        return result
+
     # Fall back to in-memory registry — derive path from the key
     with _proxy_lock:
         key = _container_to_proxy_key.get(container_name)
         if key is None:
             return None
     if "\0" in key:
-        # Shared proxy key: "session_tag\0pr_id"
         stag, pid = key.split("\0", 1)
-        derived = os.path.join(tempfile.gettempdir(),
-                               f"{_SOCKET_DIR_PREFIX}{stag}-{pid}",
-                               "push.sock")
-        if os.path.exists(derived):
-            return derived
+        derived_dir = _shared_sock_dir(stag, pid)
+        result = _resolve(os.path.join(derived_dir, "push.sock"))
+        if result:
+            return result
     return None
 
 
