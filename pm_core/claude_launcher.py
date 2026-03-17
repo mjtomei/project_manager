@@ -399,7 +399,10 @@ def build_claude_shell_cmd(
                     _fname = f"pm_prompt_{session_id or uuid.uuid4()}.txt"
                     (_host_dir / _fname).write_text(prompt)
                     _ref_dir = cwd if cwd else str(_host_dir)
-                    cmd += f' "$(cat {Path(_ref_dir) / _fname})"'
+                    _prompt_ref = Path(_ref_dir) / _fname
+                    # Delete the temp file after claude reads it via $(cat ...).
+                    # The semicolon ensures cleanup runs whether claude succeeds or fails.
+                    cmd += f' "$(cat {_prompt_ref})"; rm -f {shlex.quote(str(_prompt_ref))}'
                     _prompt_written = True
             except Exception:
                 pass

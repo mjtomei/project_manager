@@ -160,7 +160,10 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
                    and "(verifying" not in s.get("verdict", ""))
         total = sum(1 for s in scenarios if s.get("verdict") != "interactive")
         queued = sum(1 for s in scenarios if s.get("verdict") == "queued")
+        verifying = sum(1 for s in scenarios if "(verifying" in s.get("verdict", ""))
         progress = f"  {_DIM}Progress: {done}/{total} scenarios complete"
+        if verifying:
+            progress += f" ({verifying} verifying)"
         if queued:
             progress += f" ({queued} queued)"
         progress += f"{_RESET}"

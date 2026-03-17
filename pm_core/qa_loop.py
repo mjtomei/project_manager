@@ -778,6 +778,7 @@ def _launch_scenarios_in_tmux(
     repo_root: Path | None,
     workdir_path: str,
     pm_root: Path | None = None,
+    _status_scenarios: list | None = None,
 ) -> None:
     """Launch each scenario in its own tmux window (with worktree isolation).
 
@@ -859,7 +860,9 @@ def _launch_scenarios_in_tmux(
     if state.qa_workdir and pending:
         _write_status_file(
             Path(state.qa_workdir) / "qa_status.json",
-            state.pr_id, state.scenarios, state.scenario_verdicts,
+            state.pr_id,
+            _status_scenarios if _status_scenarios is not None else state.scenarios,
+            state.scenario_verdicts,
             scenario_0=state.scenario_0,
         )
 
@@ -932,6 +935,7 @@ def _launch_scenarios_in_containers(
     repo_root: Path | None,
     workdir_path: str,
     pm_root: Path | None = None,
+    _status_scenarios: list | None = None,
 ) -> None:
     """Launch each scenario in a Docker container, presented via a tmux window.
 
@@ -1046,7 +1050,9 @@ def _launch_scenarios_in_containers(
     if state.qa_workdir and pending:
         _write_status_file(
             Path(state.qa_workdir) / "qa_status.json",
-            state.pr_id, state.scenarios, state.scenario_verdicts,
+            state.pr_id,
+            _status_scenarios if _status_scenarios is not None else state.scenarios,
+            state.scenario_verdicts,
             scenario_0=state.scenario_0,
         )
 
@@ -1312,12 +1318,12 @@ def _poll_tmux_verdicts(
             if use_containers:
                 _launch_scenarios_in_containers(
                     state, data, pr_data, session, repo_root, workdir_path,
-                    pm_root=pm_root,
+                    pm_root=pm_root, _status_scenarios=orig,
                 )
             else:
                 _launch_scenarios_in_tmux(
                     state, data, pr_data, session, repo_root, workdir_path,
-                    pm_root=pm_root,
+                    pm_root=pm_root, _status_scenarios=orig,
                 )
         finally:
             state.scenarios = orig
