@@ -844,8 +844,20 @@ def _launch_scenarios_in_tmux(
                          scenario.index)
             continue
 
+        # Set window_name now so the status dashboard can navigate to
+        # the concretizer window during the concretization phase.
+        scenario.window_name = win_name
         pending.append((scenario, concretize_pane, scenario_cwd,
                         clone_path, scratch_path, transcript, win_name))
+
+    # Write status with window names so the dashboard is navigable
+    # while concretizers run (before the polling loop starts).
+    if state.qa_workdir and pending:
+        _write_status_file(
+            Path(state.qa_workdir) / "qa_status.json",
+            state.pr_id, state.scenarios, state.scenario_verdicts,
+            scenario_0=state.scenario_0,
+        )
 
     # --- Phase 2: poll concretizers in parallel, launch agent as each finishes ---
     def _concretize_and_launch(
@@ -1017,8 +1029,20 @@ def _launch_scenarios_in_containers(
                          scenario.index)
             continue
 
+        # Set window_name now so the status dashboard can navigate to
+        # the concretizer window during the concretization phase.
+        scenario.window_name = win_name
         pending.append((scenario, concretize_pane, win_name, cname, transcript,
                         clone_path))
+
+    # Write status with window names so the dashboard is navigable
+    # while concretizers run (before the polling loop starts).
+    if state.qa_workdir and pending:
+        _write_status_file(
+            Path(state.qa_workdir) / "qa_status.json",
+            state.pr_id, state.scenarios, state.scenario_verdicts,
+            scenario_0=state.scenario_0,
+        )
 
     # --- Phase 2: poll concretizers in parallel, launch agent as each finishes ---
     def _concretize_and_launch(
