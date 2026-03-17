@@ -520,3 +520,66 @@ class TestSpecGenerationPreamble:
         result = spec_gen.spec_generation_preamble(pr, "impl", root=tmp_path)
         expected_path = str(tmp_path / "specs" / "pr-xyz" / "impl.md")
         assert expected_path in result
+
+
+# ---------------------------------------------------------------------------
+# reject_spec
+# ---------------------------------------------------------------------------
+
+class TestRejectSpec:
+    @patch("pm_core.spec_gen.launch_claude_print")
+    @patch("pm_core.spec_gen.get_global_setting_value", return_value="review")
+    def test_reject_keeps_spec_pending(self, mock_setting, mock_claude, tmp_path):
+        """Rejecting a spec regenerates it and keeps spec_pending set."""
+        mock_claude.return_value = "regenerated spec content"
+        data = _make_data({
+            "spec_pending": {"phase": "impl", "generated_at": "2025-01-01"},
+        })
+
+        phase = spec_gen.reject_spec(data, "pr-abc1234", root=tmp_path)
+
+        assert phase == "impl"
+        pr = data["prs"][0]
+        # spec_pending should still be set (blocking gate stays active)
+        assert "spec_pending" in pr
+        assert pr["spec_pending"]["phase"] == "impl"
+
+    @patch("pm_core.spec_gen.launch_claude_print")
+    @patch("pm_core.spec_gen.get_global_setting_value", return_value="review")
+    def test_reject_with_feedback_temporarily_updates_description(
+        self, mock_setting, mock_claude, tmp_path
+    ):
+        """Feedback is appended to description during regen, then restored."""
+        captured_prompts = []
+
+        def capture_prompt(prompt, **kwargs):
+            captured_prompts.append(prompt)
+            return "regenerated spec"
+
+        mock_claude.side_effect = capture_prompt
+        data = _make_data({
+            "description": "Original description.",
+            "spec_pending": {"phase": "impl", "generated_at": "2025-01-01"},
+        })
+
+        spec_gen.reject_spec(
+            data, "pr-abc1234", feedback="Make it shorter", root=tmp_path
+        )
+
+        # After rejection, description should be restored
+        pr = data["prs"][0]
+        assert pr["description"] == "Original description."
+        # Feedback should have been present during prompt generation
+        assert any("Make it shorter" in p for p in captured_prompts)
+
+    def test_reject_no_pending_returns_none(self):
+        """reject_spec returns None when no spec is pending."""
+        data = _make_data()
+        result = spec_gen.reject_spec(data, "pr-abc1234")
+        assert result is None
+
+    def test_reject_nonexistent_pr_returns_none(self):
+        """reject_spec returns None for unknown PR IDs."""
+        data = _make_data()
+        result = spec_gen.reject_spec(data, "pr-nonexistent")
+        assert result is None

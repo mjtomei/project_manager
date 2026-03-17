@@ -337,6 +337,52 @@ def approve_spec(data: dict, pr_id: str, root: Path | None = None,
     return phase
 
 
+def reject_spec(data: dict, pr_id: str, feedback: str | None = None,
+                root: Path | None = None) -> str | None:
+    """Reject a pending spec and regenerate it, optionally incorporating feedback.
+
+    Keeps ``spec_pending`` set so the blocking gate remains active.
+    If *feedback* is provided, it is appended to the PR description for
+    context during regeneration, then removed afterward.
+
+    Returns the phase that was rejected, or None if no pending spec.
+    """
+    pr = store.get_pr(data, pr_id)
+    if not pr:
+        return None
+
+    pending = pr.get("spec_pending")
+    if not pending or not isinstance(pending, dict):
+        return None
+
+    phase = pending.get("phase")
+    if not phase:
+        return None
+
+    _log.info("spec_gen: rejecting %s spec for %s (feedback=%r)", phase, pr_id, feedback)
+
+    # Temporarily append feedback to description for regeneration context
+    original_desc = pr.get("description", "")
+    if feedback:
+        pr["description"] = (
+            original_desc.rstrip() + f"\n\n[Spec review feedback]: {feedback}"
+        )
+        if root:
+            store.save(data, root)
+
+    try:
+        generate_spec(data, pr_id, phase, root=root, force=True)
+    finally:
+        # Restore original description
+        if feedback:
+            pr["description"] = original_desc
+            if root:
+                store.save(data, root)
+
+    _log.info("spec_gen: regenerated %s spec for %s after rejection", phase, pr_id)
+    return phase
+
+
 def oldest_pending_spec_pr(data: dict) -> str | None:
     """Return the PR ID with the oldest pending spec review, or None."""
     oldest_pr_id = None

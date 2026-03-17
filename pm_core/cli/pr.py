@@ -655,8 +655,15 @@ def pr_spec_approve(pr_id: str):
             lines.pop(0)
         edited_content = "\n".join(lines).strip()
         if not edited_content:
-            click.echo("Spec rejected (empty content). Clearing pending review.")
-            spec_gen.approve_spec(data, pr_id, root=root, edited_text="")
+            feedback = click.prompt(
+                "Spec rejected. Describe what to change (leave blank to regenerate as-is)",
+                default="",
+            )
+            spec_gen.reject_spec(data, pr_id, feedback=feedback or None, root=root)
+            click.echo(
+                f"Spec regenerated. Review again with: pm pr spec-approve {pr_id}"
+            )
+            trigger_tui_refresh()
             return
         spec_gen.approve_spec(data, pr_id, root=root, edited_text=edited_content)
         click.echo(f"Spec approved for {phase} phase.")
@@ -716,6 +723,23 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
 
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
+
+    # Reload fresh data to catch any spec_pending written since load
+    data = store.load(root)
+    pr_entry = store.get_pr(data, pr_id) or pr_entry
+
+    # Block if spec is pending review — must approve before implementation starts
+    if spec_gen.has_pending_spec(pr_entry):
+        phase = spec_gen.get_pending_spec_phase(pr_entry)
+        click.echo(
+            f"Spec ({phase}) for {_pr_display_id(pr_entry)} is pending review.",
+            err=True,
+        )
+        click.echo(
+            f"  Review: pm pr spec-approve {pr_id}  (or press 'V' in TUI)",
+            err=True,
+        )
+        raise SystemExit(1)
 
     if pr_entry.get("status") == "in_progress":
         # If already in_progress, reuse existing workdir if available
