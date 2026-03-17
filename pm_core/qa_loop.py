@@ -24,6 +24,7 @@ from typing import Callable
 
 from pm_core import qa_instructions
 from pm_core.paths import configure_logger
+from pm_core.spec_gen import get_spec as _get_qa_spec
 from pm_core.loop_shared import (
     find_claude_pane,
     get_pm_session,
@@ -2180,9 +2181,8 @@ def run_qa_sync(
         _notify()
 
     # --- Spec gate: verify the planner generated a QA spec ---
-    from pm_core.spec_gen import get_spec
     pr_entry = store.get_pr(data, state.pr_id) if data else None
-    if pr_entry and not get_spec(pr_entry, "qa") and not state._error:
+    if pr_entry and not _get_qa_spec(pr_entry, "qa") and not state._error:
         _log.warning("QA spec missing for %s after planning — "
                      "planner did not generate spec in Step 0", state.pr_id)
         state.latest_verdict = VERDICT_INPUT_REQUIRED
