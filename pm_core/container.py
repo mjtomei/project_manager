@@ -644,6 +644,17 @@ def wrap_claude_cmd(
             f"to run without containers."
         )
 
+    # Rewrite any prompt-file reference that used the host workdir path.
+    # build_claude_shell_cmd writes the file to the host and embeds
+    # "$(cat <host_workdir>/pm_prompt_*.txt)" in the command.  Inside the
+    # container that host path doesn't exist — the workdir is mounted at
+    # _CONTAINER_WORKDIR — so replace the prefix now.
+    host_prefix = f"$(cat {workdir}/"
+    container_prefix = f"$(cat {_CONTAINER_WORKDIR}/"
+    if host_prefix in claude_cmd:
+        claude_cmd = claude_cmd.replace(host_prefix, container_prefix)
+        _log.debug("wrap_claude_cmd: rewrote prompt-file path to container path")
+
     from pm_core.push_proxy import get_proxy_socket_path
     proxy_sock = get_proxy_socket_path(cname)
     # For shared proxies (session_tag + pr_id), don't embed socket cleanup
