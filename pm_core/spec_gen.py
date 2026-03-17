@@ -480,8 +480,7 @@ def format_spec_for_prompt(pr: dict, phase: str) -> str:
     return f"""
 ## {label}
 
-The following spec was generated to guide this phase. Work from this spec
-rather than interpreting the raw PR description directly.
+The following spec was generated to guide this phase. Work from this spec rather than interpreting the raw PR description directly.
 
 {spec}
 """
