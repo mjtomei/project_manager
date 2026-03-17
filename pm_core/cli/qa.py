@@ -324,8 +324,6 @@ End with a summary of which steps work and which don't, then one of:
     window_name = f"qa-debug-{instruction_id[:20]}"
 
     if use_containers:
-        from pm_core import container as container_mod
-
         config = container_mod.load_container_config()
         session_tag = session.removeprefix("pm-") if session else None
         cname = f"{container_mod.CONTAINER_PREFIX}qa-debug-{instruction_id}-{debug_id}"
@@ -342,6 +340,7 @@ End with a summary of which steps work and which don't, then one of:
         claude_cmd = build_claude_shell_cmd(
             prompt=prompt,
             cwd=container_mod._CONTAINER_WORKDIR,
+            write_dir=str(clone_path),
         )
         shell_cmd = container_mod.build_exec_cmd(cname, claude_cmd, cleanup=True)
         run_cwd = str(qa_workdir)
