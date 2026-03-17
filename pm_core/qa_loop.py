@@ -52,6 +52,7 @@ _DEFAULT_MAX_SCENARIOS = 0  # 0 = unlimited
 _SCENARIO_MAX_RETRIES = 10  # max times to relaunch a dead scenario
 _SCENARIO_RETRY_BASE = 5  # base seconds for exponential backoff
 _DEFAULT_VERIFICATION_MAX_RETRIES = 3
+_VERIFICATION_TIMEOUT = 900  # seconds before a hung verification thread gives up
 
 
 def _get_max_scenarios() -> int:
@@ -606,6 +607,7 @@ def _concretize_scenario(
     pr_data: dict,
     project_data: dict,
     pane_id: str,
+    instruction_content: str | None = None,
 ) -> str | None:
     """Poll a concretization pane and return refined steps.
 
@@ -618,7 +620,8 @@ def _concretize_scenario(
 
     base_branch = project_data.get("project", {}).get("base_branch", "master")
     pr_branch = pr_data.get("branch", "")
-    prompt = _build_concretization_prompt(scenario, pr_branch, base_branch)
+    prompt = _build_concretization_prompt(scenario, pr_branch, base_branch,
+                                          instruction_content=instruction_content)
 
     _log.info("Concretization started for scenario %d in pane %s",
               scenario.index, pane_id)
@@ -848,7 +851,8 @@ def _launch_scenarios_in_tmux(
         # the concretizer window during the concretization phase.
         scenario.window_name = win_name
         pending.append((scenario, concretize_pane, scenario_cwd,
-                        clone_path, scratch_path, transcript, win_name))
+                        clone_path, scratch_path, transcript, win_name,
+                        instruction_content))
 
     # Write status with window names so the dashboard is navigable
     # while concretizers run (before the polling loop starts).
@@ -868,8 +872,10 @@ def _launch_scenarios_in_tmux(
             scratch_path: Path,
             transcript: str,
             win_name: str,
+            instruction_content: str | None = None,
     ) -> None:
-        refined_steps = _concretize_scenario(scenario, pr_data, data, concretize_pane)
+        refined_steps = _concretize_scenario(scenario, pr_data, data, concretize_pane,
+                                             instruction_content=instruction_content)
         if refined_steps:
             scenario.steps = refined_steps
 
@@ -1033,7 +1039,7 @@ def _launch_scenarios_in_containers(
         # the concretizer window during the concretization phase.
         scenario.window_name = win_name
         pending.append((scenario, concretize_pane, win_name, cname, transcript,
-                        clone_path))
+                        clone_path, instruction_content))
 
     # Write status with window names so the dashboard is navigable
     # while concretizers run (before the polling loop starts).
@@ -1052,8 +1058,10 @@ def _launch_scenarios_in_containers(
             cname: str,
             transcript: str,
             clone_path: Path,
+            instruction_content: str | None = None,
     ) -> None:
-        refined_steps = _concretize_scenario(scenario, pr_data, data, concretize_pane)
+        refined_steps = _concretize_scenario(scenario, pr_data, data, concretize_pane,
+                                             instruction_content=instruction_content)
         if refined_steps:
             scenario.steps = refined_steps
 
@@ -1264,10 +1272,15 @@ def _poll_tmux_verdicts(
                   "scenario.pane_id=%s, scenario.window_name=%s",
                   scenario.index, scenario.title,
                   scenario.pane_id, scenario.window_name)
+        deadline = time.monotonic() + _VERIFICATION_TIMEOUT
+
+        def _stop() -> bool:
+            return state.stop_requested or time.monotonic() > deadline
+
         try:
             passed, reason, _vpane = _verify_single_scenario(
                 scenario, verdict, content, pr_data, data,
-                session=session,
+                session=session, stop_check=_stop,
             )
         except Exception:
             _log.warning("Verification thread crashed for scenario %d",
@@ -1665,6 +1678,7 @@ def _verify_single_scenario(
     pr_data: dict,
     project_data: dict | None = None,
     session: str | None = None,
+    stop_check: Callable[[], bool] | None = None,
 ) -> tuple[bool, str, str | None]:
     """Verify a single scenario's verdict in a visible tmux pane.
 
@@ -1799,6 +1813,7 @@ def _verify_single_scenario(
             grace_period=_VERDICT_GRACE_PERIOD,
             poll_interval=_POLL_INTERVAL,
             tick_interval=_TICK_INTERVAL,
+            stop_check=stop_check,
             log_prefix=f"qa-verify-{scenario.index}",
         )
     except Exception:
