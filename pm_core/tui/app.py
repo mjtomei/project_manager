@@ -984,7 +984,7 @@ class ProjectManagerApp(App):
         else:
             total = 0
         status_bar = self.query_one("#status-bar", StatusBar)
-        status_bar.update(f" [bold]QA[/bold]    {total} item(s)    [dim]Enter=run  e=edit  a=add  q=back[/dim]")
+        status_bar.update(f" [bold]QA[/bold]    {total} item(s)    [dim]Enter=run  e=edit  d=debug  a=add  q=back[/dim]")
         self.call_after_refresh(self._capture_frame, "show_qa_view")
 
     def _refresh_qa_pane(self) -> None:
@@ -1050,6 +1050,16 @@ class ProjectManagerApp(App):
                     category, qa_id = parts
                     pane_ops.launch_pane(
                         self, f"pm qa edit {qa_id} --category {category}", "qa-edit"
+                    )
+            else:
+                self.log_message("No QA item selected")
+        elif message.action == "debug":
+            if message.item_id:
+                parts = message.item_id.split(":", 1)
+                if len(parts) == 2:
+                    _category, qa_id = parts
+                    pane_ops.launch_pane(
+                        self, f"pm qa debug --foreground {qa_id}", "qa-debug"
                     )
             else:
                 self.log_message("No QA item selected")

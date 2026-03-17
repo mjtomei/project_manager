@@ -768,23 +768,18 @@ to verify this PR works correctly.
 - **Base branch**: {base_branch}
 - **Workdir**: {workdir}
 
-Inspect the diff yourself — run `git diff {base_branch}...HEAD` in the workdir
-to see what changed.  Read source files as needed to understand the context.
 {pr_notes_block}
 ## QA Instruction Library
 
-These are available QA instructions and regression tests.  Reference any that
-are relevant to this PR's changes.  You can read the full content of any
-instruction file at the paths shown below.
+These are available QA instructions.  Reference any that are relevant to
+this PR's changes.  You can read the full content of any instruction file
+at the paths shown below.
 
 {library_summary}
 
-## CRITICAL: Always assign an instruction
-
 Instructions tell scenario agents how to set up a test environment.  Without
-one, agents fall back to reading code and auto-passing.  Assign an instruction
-to every scenario — ``INSTRUCTION: "none"`` should be rare.  Multiple scenarios
-testing the same system should share the same instruction.
+one, agents fall back to reading code and auto-passing.  Try to assign an instruction
+to every scenario.
 
 ## Output Format
 
@@ -796,25 +791,22 @@ QA_PLAN_START
 
 SCENARIO {scenario_start}: <descriptive title for this scenario>
 FOCUS: <what area or behavior to test>
-INSTRUCTION: <path/to/instruction.md or "none" if no existing instruction applies>
+INSTRUCTION: <filename from the library above, or "none" if no existing instruction applies>
 STEPS: <concrete test steps to perform>
 
 SCENARIO {scenario_start + 1}: <descriptive title for next scenario>
 FOCUS: <what area or behavior to test>
-INSTRUCTION: <path or "none">
+INSTRUCTION: <filename or "none">
 STEPS: <concrete test steps>
 
 QA_PLAN_END
-
-IMPORTANT: Replace ALL angle-bracket placeholders above with real content.
-Do NOT copy the example format verbatim — fill in actual scenario titles,
-focus areas, and detailed test steps specific to THIS PR.
 
 Number scenarios starting from {scenario_start}.
 
 Include as many scenarios as required to fully exercise the functionality
 of the PR.  Exercise the core functionality as well as any edge cases
 that may expose bugs.
+
 {general_notes_block}{qa_specific_block}"""
     return prompt.strip()
 
@@ -857,8 +849,7 @@ def generate_qa_interactive_prompt(data: dict, pr_id: str,
     try:
         root = store.find_project_root()
         from pm_core import qa_instructions
-        library_summary = qa_instructions.instruction_summary_for_prompt(
-            root, include_regression=False)
+        library_summary = qa_instructions.instruction_summary_for_prompt(root)
         if library_summary and "No QA instructions" not in library_summary:
             instruction_library_block = f"""
 ## QA Instruction Library
@@ -945,21 +936,16 @@ def generate_qa_child_prompt(data: dict, pr_id: str,
 
     instruction_block = ""
     if scenario.instruction_path:
-        # Translate absolute host path to be relative to the scenario workdir.
-        # Instruction files live under pm/qa/ in the repo; in containers the
-        # repo is mounted at /workspace so we need /workspace/pm/qa/...
+        # instruction_path is an absolute path from the agent's perspective
+        # (set by _install_instruction_file during launch).
         instr_display = scenario.instruction_path
-        marker = "/pm/qa/"
-        idx = scenario.instruction_path.find(marker)
-        if idx >= 0:
-            instr_display = f"{workdir}/pm/qa/{scenario.instruction_path[idx + len(marker):]}"
         instruction_block = f"""
 ## Instruction Reference
 
-Read the full instruction at: `{instr_display}`
-Follow its **Setup** section to create a real test environment BEFORE running
-any test steps.  Do NOT skip setup and fall back to static code reading — your
-job is to verify runtime behavior, not review code.
+Test setup instructions are available at: `{instr_display}`
+
+If a setup step fails or a required tool is unavailable, report
+**INPUT_REQUIRED** with an explanation of what blocked you. 
 """
 
     # Include PR notes (prior QA results, addendums)
@@ -980,15 +966,14 @@ job is to verify runtime behavior, not review code.
 - **Your workdir** (isolated clone): {workdir}{scratch_line}
 - **PR workdir** (canonical source): {pr_workdir}"""
         execution_block = f"""\
-{pull_step}{n}. Inspect and test the code in your workdir (an isolated clone of the PR branch)
-{n+1}. Execute the test steps described above
-{n+2}. If you find issues and can fix them:
+{pull_step}{n}. Execute the test steps described above
+{n+1}. If you find issues and can fix them:
    - Implement the fix in your workdir (your current directory)
    - Commit with message prefix `qa: `
    - Push: `git push origin {branch}`
    - If push fails (another scenario pushed first), pull and retry:
      `git pull --rebase origin {branch} && git push origin {branch}`
-{n+3}. End with a verdict on its own line — one of:
+{n+2}. End with a verdict on its own line — one of:
    - **PASS** — Scenario passed, no issues found
    - **NEEDS_WORK** — Issues found (explain what and whether you fixed them)
    - **INPUT_REQUIRED** — Genuine ambiguity requiring human judgment"""
@@ -997,13 +982,12 @@ job is to verify runtime behavior, not review code.
 - **PR workdir** (source code): {pr_workdir}
 - **Your workdir** (throwaway test projects): {workdir}"""
         execution_block = f"""\
-{pull_step}{n}. Inspect the PR's code in the PR workdir
-{n+1}. Execute the test steps described above
-{n+2}. If you find issues and can fix them:
+{pull_step}{n}. Execute the test steps described above
+{n+1}. If you find issues and can fix them:
    - Implement the fix in the PR workdir
    - Commit with message prefix `qa: `
    - Push: `git push origin {branch}`
-{n+3}. End with a verdict on its own line — one of:
+{n+2}. End with a verdict on its own line — one of:
    - **PASS** — Scenario passed, no issues found
    - **NEEDS_WORK** — Issues found (explain what and whether you fixed them)
    - **INPUT_REQUIRED** — Genuine ambiguity requiring human judgment"""
@@ -1023,11 +1007,18 @@ You are in one of several QA scenarios running in parallel, each in its own
 isolated clone.  An orchestrator is monitoring your tmux pane for your
 final verdict.
 
-- When you output a verdict (PASS / NEEDS_WORK / INPUT_REQUIRED), the
-  orchestrator records it and moves on
-- If you commit fixes (with `qa: ` prefix), push them to the PR branch:
-  `git push origin {branch}`
-- Your verdict determines whether the PR passes QA — be thorough but fair
+## Important: When to use each verdict
+
+- **PASS** — You executed the test steps AND they succeeded.  A PASS is
+  only valid when you have **runtime evidence** (command output, observed
+  behavior, test results) that the feature works.
+- **NEEDS_WORK** — You executed the test steps and found concrete bugs or
+  issues.
+- **INPUT_REQUIRED** — You **could not execute** one or more test steps
+  because of missing tools, unavailable commands, environment limitations,
+  or ambiguity in the instructions.  **This is the correct verdict when
+  your environment prevents you from testing** — do NOT substitute code
+  reading or unit tests and claim PASS.  Explain what blocked you.
 
 ## Scenario
 
@@ -1086,7 +1077,7 @@ Follow its procedures.
 - **Branch**: {base_branch}
 - **Instruction**: {instruction_id}
 
-This is not a PR review — you are testing the current state of the codebase.
+You are testing the current state of the codebase.
 {instruction_block}{tui_block}
 ## Execution
 
@@ -1099,3 +1090,4 @@ This is not a PR review — you are testing the current state of the codebase.
 
 IMPORTANT: Always end your response with the verdict keyword on its own line."""
     return prompt.strip()
+

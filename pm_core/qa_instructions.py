@@ -115,6 +115,66 @@ def list_all(pm_root: Path) -> dict:
     }
 
 
+def resolve_instruction_ref(pm_root: Path, ref: str) -> tuple[str, str] | None:
+    """Resolve a planner's instruction reference to (category, filename).
+
+    The planner is asked to output just a filename like ``tui-manual-test.md``,
+    but may produce variations: a bare stem (``tui-manual-test``), a relative
+    path (``instructions/tui-manual-test.md``), an absolute path, or a
+    slightly-wrong name.  This function tries progressively fuzzier matching
+    across both instruction and regression directories.
+
+    Returns ``("instructions", "tui-manual-test.md")`` on success, or
+    ``None`` if nothing matches.
+    """
+    import difflib
+
+    # Normalise: strip whitespace / quotes, extract basename
+    ref = ref.strip().strip("'\"`")
+    ref = Path(ref).name  # drop any directory components
+
+    all_items = list_all(pm_root)
+    # Build a flat lookup: filename -> category
+    known: dict[str, str] = {}
+    for category in ("instructions", "regression"):
+        for item in all_items[category]:
+            fname = Path(item["path"]).name
+            known[fname] = category
+
+    # Also build a stem -> filename lookup for bare-stem matching
+    stem_to_fname: dict[str, str] = {}
+    for fname in known:
+        stem_to_fname[Path(fname).stem] = fname
+
+    # Exact match on filename
+    if ref in known:
+        return (known[ref], ref)
+
+    # Bare stem match (e.g. "tui-manual-test" -> "tui-manual-test.md")
+    if ref in stem_to_fname:
+        fname = stem_to_fname[ref]
+        return (known[fname], fname)
+
+    # Case-insensitive match
+    ref_lower = ref.lower()
+    for fname, cat in known.items():
+        if fname.lower() == ref_lower:
+            return (cat, fname)
+    for stem, fname in stem_to_fname.items():
+        if stem.lower() == ref_lower:
+            return (known[fname], fname)
+
+    # Fuzzy match — try against both filenames and stems
+    candidates = list(known.keys()) + list(stem_to_fname.keys())
+    matches = difflib.get_close_matches(ref, candidates, n=1, cutoff=0.7)
+    if matches:
+        hit = matches[0]
+        fname = stem_to_fname.get(hit, hit)
+        return (known[fname], fname)
+
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Single-item access
 # ---------------------------------------------------------------------------
@@ -152,7 +212,7 @@ def get_instruction(pm_root: Path, instruction_id: str,
 # ---------------------------------------------------------------------------
 
 def instruction_summary_for_prompt(pm_root: Path,
-                                   include_regression: bool = True) -> str:
+                                   include_regression: bool = False) -> str:
     """Build a summary of instructions for prompts.
 
     Args:
@@ -175,7 +235,8 @@ def instruction_summary_for_prompt(pm_root: Path,
         lines.append(f"### {label}")
         for item in items:
             desc = f" — {item['description']}" if item["description"] else ""
-            lines.append(f"- **{item['title']}** (`{item['path']}`){desc}")
+            filename = Path(item['path']).name
+            lines.append(f"- **{item['title']}** (`{filename}`){desc}")
         lines.append("")
 
     if not lines:

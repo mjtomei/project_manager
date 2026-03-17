@@ -249,11 +249,18 @@ def set_cmd(setting, value):
 
     Value settings:
 
-      min-pane-width  Minimum characters per horizontal pane (default 100)
+      min-pane-width       Minimum characters per horizontal pane (default 100)
+
+      qa-max-scenarios     Max QA scenarios to run (0 = unlimited, default 0)
+
+      qa-verify-retries    Max verification retries before marking NEEDS_WORK (default 3)
+
+      qa-verify-pass       Enable/disable PASS verdict verification (on/off, default on)
     """
     from pm_core.paths import set_global_setting, set_global_setting_value
-    boolean_settings = {"hide-assist", "hide-merged", "beginner-mode", "auto-cleanup"}
-    int_settings = {"min-pane-width"}
+    boolean_settings = {"hide-assist", "hide-merged", "beginner-mode", "auto-cleanup",
+                        "qa-verify-pass"}
+    int_settings = {"min-pane-width", "qa-max-scenarios", "qa-verify-retries"}
     known = boolean_settings | int_settings
     if setting not in known:
         click.echo(f"Unknown setting: {setting}", err=True)

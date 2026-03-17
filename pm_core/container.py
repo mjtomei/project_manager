@@ -431,9 +431,11 @@ def create_container(
     if claude_config.is_dir():
         cmd.extend(["-v", f"{claude_config}:{_CONTAINER_HOME}/.claude"])
 
-    claude_json = Path.home() / ".claude.json"
-    if claude_json.exists():
-        cmd.extend(["-v", f"{claude_json}:{_CONTAINER_HOME}/.claude.json"])
+    # NOTE: .claude.json is NOT bind-mounted.  Claude writes it atomically
+    # (write tmp + rename) which replaces the inode — a single-file bind
+    # mount keeps the old inode so the container sees stale content.
+    # Instead we copy it in after the container is created (see below).
+    _claude_json_src = Path.home() / ".claude.json"
 
     # --- Additional mounts ---
     if extra_ro_mounts:
@@ -528,6 +530,20 @@ def create_container(
         if check.returncode == 0:
             break
         time.sleep(0.1)
+
+    # Copy .claude.json into the container (not bind-mounted — see note above)
+    if _claude_json_src.exists():
+        try:
+            _run_docker("cp", str(_claude_json_src),
+                        f"{name}:{_CONTAINER_HOME}/.claude.json",
+                        timeout=10)
+            _run_docker("exec", name, "chown",
+                        f"{host_uid}:{host_gid}",
+                        f"{_CONTAINER_HOME}/.claude.json",
+                        timeout=5)
+        except Exception:
+            _log.warning("Failed to copy .claude.json into container %s",
+                         name, exc_info=True)
 
     _log.info("Created container %s (id=%s)", name, container_id[:12])
     return container_id
@@ -627,6 +643,17 @@ def wrap_claude_cmd(
             f"Is Docker running? Disable container mode with 'pm container disable' "
             f"to run without containers."
         )
+
+    # Rewrite any prompt-file reference that used the host workdir path.
+    # build_claude_shell_cmd writes the file to the host and embeds
+    # "$(cat <host_workdir>/pm_prompt_*.txt)" in the command.  Inside the
+    # container that host path doesn't exist — the workdir is mounted at
+    # _CONTAINER_WORKDIR — so replace the prefix now.
+    host_prefix = f"$(cat {workdir}/"
+    container_prefix = f"$(cat {_CONTAINER_WORKDIR}/"
+    if host_prefix in claude_cmd:
+        claude_cmd = claude_cmd.replace(host_prefix, container_prefix)
+        _log.debug("wrap_claude_cmd: rewrote prompt-file path to container path")
 
     from pm_core.push_proxy import get_proxy_socket_path
     proxy_sock = get_proxy_socket_path(cname)

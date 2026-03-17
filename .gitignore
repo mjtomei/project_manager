@@ -8,3 +8,4 @@ __pycache__/
 pm.egg-info/
 .pane-registry.json
 Dockerfile.pm-project
+pm_prompt_*.txt

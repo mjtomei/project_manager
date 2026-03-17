@@ -14,9 +14,20 @@ from pm_core.qa_loop import (
     VERDICT_PASS,
     VERDICT_NEEDS_WORK,
     VERDICT_INPUT_REQUIRED,
+    ALL_VERDICTS,
     _scenario_window_name,
     _cleanup_stale_scenario_windows,
     _tail_has_marker_on_own_line,
+    _build_verification_prompt,
+    _verify_single_scenario,
+    _is_verification_enabled,
+    _extract_flagged_reason,
+    _get_verification_max_retries,
+    _install_instruction_file,
+    _verdict_context_fingerprint,
+    _VERIFICATION_MAX_PANE_LINES,
+    _DEFAULT_VERIFICATION_MAX_RETRIES,
+    _QA_KEYWORDS,
 )
 
 
@@ -317,14 +328,16 @@ class TestQAWorkdirs:
         assert "pr-001-abc123" in str(wd)
 
     def test_create_scenario_workdir(self, tmp_path):
-        d, scratch, venv = create_scenario_workdir(tmp_path, 1)
+        d, scratch = create_scenario_workdir(tmp_path, 1)
         assert d.exists()
-        assert d.name == "scenario-1"
+        assert d.name == "repo"
+        assert d.parent.name == "s-1"
         assert scratch.exists()
-        assert venv is None
+        assert scratch.name == "scratch"
+        assert scratch.parent.name == "s-1"
 
-    def test_create_scenario_workdir_venv(self, tmp_path):
-        """Clone mode creates a --system-site-packages venv."""
+    def test_create_scenario_workdir_with_clone(self, tmp_path):
+        """Clone mode creates repo + scratch under s-N/."""
         qa_workdir = tmp_path / "qa"
         qa_workdir.mkdir()
 
@@ -332,48 +345,22 @@ class TestQAWorkdirs:
         repo_root.mkdir()
 
         def fake_run_git(*args):
-            # Simulate git clone --local by creating the directory
-            clone_path = qa_workdir / "worktree-1"
+            clone_path = qa_workdir / "s-1" / "repo"
             clone_path.mkdir(parents=True, exist_ok=True)
             return MagicMock(returncode=0)
 
         with patch("pm_core.git_ops.run_git", side_effect=fake_run_git):
-            _, _, venv_path = create_scenario_workdir(
+            clone_path, scratch = create_scenario_workdir(
                 qa_workdir, 1, repo_root=repo_root,
                 pr_id="pr-001", loop_id="abc",
             )
 
-        assert venv_path is not None
-        assert venv_path.name == "venv-1"
-        assert venv_path.exists()
-        # Verify the venv has the expected bin directory
-        assert (venv_path / "bin" / "python").exists() or (venv_path / "bin" / "python3").exists()
-
-    def test_create_scenario_workdir_venv_failure_nonfatal(self, tmp_path):
-        """Venv creation failure is non-fatal — returns venv_path=None."""
-        qa_workdir = tmp_path / "qa"
-        qa_workdir.mkdir()
-
-        repo_root = tmp_path / "repo"
-        repo_root.mkdir()
-
-        def fake_run_git(*args):
-            clone_path = qa_workdir / "worktree-1"
-            clone_path.mkdir(parents=True, exist_ok=True)
-            return MagicMock(returncode=0)
-
-        with patch("pm_core.git_ops.run_git", side_effect=fake_run_git), \
-             patch("pm_core.qa_loop.subprocess.run",
-                   side_effect=OSError("venv failed")):
-            clone_path, scratch, venv_path = create_scenario_workdir(
-                qa_workdir, 1, repo_root=repo_root,
-                pr_id="pr-001", loop_id="abc",
-            )
-
-        # Clone and scratch still created, venv is None
-        assert clone_path is not None
+        assert clone_path.exists()
+        assert clone_path.name == "repo"
+        assert clone_path.parent.name == "s-1"
         assert scratch.exists()
-        assert venv_path is None
+        assert scratch.name == "scratch"
+        assert scratch.parent.name == "s-1"
 
 
 class TestQALoopState:
@@ -472,7 +459,7 @@ class TestVerdictEdgeCases:
 
     def test_dead_window_gets_input_required(self):
         """A window killed without verdict should be marked INPUT_REQUIRED."""
-        from pm_core.qa_loop import _get_scenario_pane
+        import pm_core.qa_loop as qa_loop_mod
 
         scenario = QAScenario(index=1, title="Test", focus="t")
         scenario.window_name = "qa-#42-s1"
@@ -482,7 +469,7 @@ class TestVerdictEdgeCases:
 
         # Simulate: window is dead (find_window_by_name returns None)
         with patch("pm_core.qa_loop._get_scenario_pane", return_value=None):
-            pane_id = _get_scenario_pane("sess", scenario.window_name)
+            pane_id = qa_loop_mod._get_scenario_pane("sess", scenario.window_name)
             assert pane_id is None
             # This is what the polling loop does:
             state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
@@ -651,12 +638,12 @@ class TestVerdictEdgeCases:
             calls.append(idx)
             if idx == 1:
                 raise OSError("corrupt repo")
-            return (Path("/tmp/clone"), Path("/tmp/scratch"), None)
+            return (Path("/tmp/clone"), Path("/tmp/scratch"))
 
         # Simulate the loop logic from run_qa_sync
         for scenario in scenarios:
             try:
-                clone_path, scratch_path, venv_path = fake_create(
+                clone_path, scratch_path = fake_create(
                     Path("/tmp/qa"), scenario.index,
                 )
             except Exception:
@@ -1333,3 +1320,1002 @@ class TestSelfDrivingQALoop:
         mock_merge.assert_called_once_with(app, "pr-001")
         # Self-driving state should be removed after reaching required passes
         assert "pr-001" not in app._self_driving_qa
+
+
+# ---------------------------------------------------------------------------
+# Verdict verification tests
+# ---------------------------------------------------------------------------
+
+class TestBuildVerificationPrompt:
+    """Tests for _build_verification_prompt."""
+
+    def test_includes_scenario_details_inline(self):
+        scenario = QAScenario(index=1, title="Login Flow", focus="auth",
+                              steps="1. Test login\n2. Test logout")
+        prompt = _build_verification_prompt(scenario, "PASS",
+                                            pane_output="Some output here")
+        assert "Login Flow" in prompt
+        assert "auth" in prompt
+        assert "Test login" in prompt
+        assert "PASS" in prompt
+        assert "Some output here" in prompt
+
+    def test_truncates_long_inline_output(self):
+        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
+        total = _VERIFICATION_MAX_PANE_LINES + 100
+        long_output = "\n".join([f"line {i}" for i in range(total)])
+        prompt = _build_verification_prompt(scenario, "PASS",
+                                            pane_output=long_output)
+        assert "omitted" in prompt.lower()
+        # Head lines should be present
+        assert "line 0" in prompt
+        # Tail lines (including the last line) should be present
+        assert f"line {total - 1}" in prompt
+
+    def test_file_path_mode_plain(self):
+        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
+        prompt = _build_verification_prompt(scenario, "PASS",
+                                            pane_output_path="/tmp/qa_verify.txt")
+        assert "/tmp/qa_verify.txt" in prompt
+        assert "Read that file" in prompt
+        assert "<scenario_output>" not in prompt
+        # Plain text file — no JSONL hint
+        assert "JSON Lines" not in prompt
+
+    def test_file_path_mode_jsonl(self):
+        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
+        prompt = _build_verification_prompt(
+            scenario, "PASS",
+            pane_output_path="/tmp/transcript-s1.jsonl")
+        assert "transcript-s1.jsonl" in prompt
+        assert "JSON Lines" in prompt
+
+    def test_includes_verification_instructions(self):
+        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
+        prompt = _build_verification_prompt(scenario, "PASS",
+                                            pane_output="output")
+        assert "VERIFIED" in prompt
+        assert "FLAGGED_START" in prompt
+        assert "FLAGGED_END" in prompt
+
+
+class TestVerifySingleScenario:
+    """Tests for _verify_single_scenario."""
+
+    def _mock_verify(self, scenario, verdict, pane_output, poll_content,
+                     pr_data=None, project_data=None):
+        """Helper: run _verify_single_scenario with mocked tmux ops."""
+        mock_wid = MagicMock()
+        mock_wid.stdout = "@1"
+        mock_reg = {"windows": {}}
+        mock_wdata = {"user_modified": True}
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+             patch("pm_core.tmux.split_pane_at", return_value="%2"), \
+             patch("pm_core.qa_loop.poll_for_verdict", return_value=poll_content), \
+             patch("pm_core.claude_launcher.build_claude_shell_cmd", return_value="claude ..."), \
+             patch("subprocess.run", return_value=mock_wid), \
+             patch("pm_core.tmux.set_shared_window_size"), \
+             patch("pm_core.pane_registry.register_pane"), \
+             patch("pm_core.pane_registry.load_registry", return_value=mock_reg), \
+             patch("pm_core.pane_registry.get_window_data", return_value=mock_wdata), \
+             patch("pm_core.pane_registry.save_registry"), \
+             patch("pm_core.pane_layout.rebalance"):
+            return _verify_single_scenario(
+                scenario, verdict, pane_output,
+                pr_data or {}, project_data or {},
+                session="pm-session",
+            )
+
+    def test_verified_result(self):
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1")
+        content = "The scenario looks good.\n\nVERIFIED"
+        passed, reason, _ = self._mock_verify(scenario, "PASS", "output", content)
+        assert passed is True
+        assert reason == ""
+
+    def test_flagged_result(self):
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1")
+        # Build realistic pane content: prompt + verifier output.
+        # The prompt itself contains example FLAGGED_END markers, so the
+        # content must include the prompt prefix for the filtering logic
+        # to correctly distinguish prompt examples from real output.
+        prompt = _build_verification_prompt(scenario, "PASS", pane_output="output")
+        content = (
+            prompt + "\n\n"
+            "FLAGGED_START\nThe scenario did not run any tests.\nFLAGGED_END"
+        )
+        passed, reason, _ = self._mock_verify(scenario, "PASS", "output", content)
+        assert passed is False
+        assert "did not run" in reason.lower()
+
+    def test_pane_split_failure_trusts_original(self):
+        """If we can't split a pane, trust the original verdict."""
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1")
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+             patch("pm_core.tmux.split_pane_at", side_effect=Exception("split failed")), \
+             patch("pm_core.claude_launcher.build_claude_shell_cmd", return_value="claude ..."):
+            passed, reason, _ = _verify_single_scenario(
+                scenario, "PASS", "output", {}, {},
+                session="pm-session",
+            )
+        assert passed is True
+
+    def test_no_pane_trusts_original(self):
+        """If scenario pane is gone, trust the original verdict."""
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1")
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value=None):
+            passed, reason, _ = _verify_single_scenario(
+                scenario, "PASS", "output", {}, {},
+                session="pm-session",
+            )
+        assert passed is True
+
+    def test_poll_returns_none_trusts_original(self):
+        """If polling returns None (pane died), trust original."""
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1")
+        passed, reason, _ = self._mock_verify(scenario, "PASS", "output", None)
+        assert passed is True
+
+    def test_uses_transcript_when_available(self, tmp_path):
+        """When scenario has a transcript, prompt references the file."""
+        transcript = tmp_path / "transcript-s1.jsonl"
+        transcript.write_text('{"role":"assistant","content":"done"}\n')
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1",
+                              transcript_path=str(transcript))
+        mock_wid = MagicMock()
+        mock_wid.stdout = "@1"
+        mock_reg = {"windows": {}}
+        mock_wdata = {"user_modified": True}
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+             patch("pm_core.tmux.split_pane_at", return_value="%2"), \
+             patch("pm_core.qa_loop.poll_for_verdict", return_value="VERIFIED"), \
+             patch("pm_core.claude_launcher.build_claude_shell_cmd",
+                   return_value="claude ...") as mock_cmd, \
+             patch("subprocess.run", return_value=mock_wid), \
+             patch("pm_core.tmux.set_shared_window_size"), \
+             patch("pm_core.pane_registry.register_pane"), \
+             patch("pm_core.pane_registry.load_registry", return_value=mock_reg), \
+             patch("pm_core.pane_registry.get_window_data", return_value=mock_wdata), \
+             patch("pm_core.pane_registry.save_registry"), \
+             patch("pm_core.pane_layout.rebalance"):
+            passed, _, _ = _verify_single_scenario(
+                scenario, "PASS", "pane output", {}, {},
+                session="pm-session")
+        assert passed is True
+        # The prompt passed to build_claude_shell_cmd should reference transcript
+        call_kwargs = mock_cmd.call_args
+        assert str(transcript) in (call_kwargs.kwargs.get("prompt", "") or "")
+
+    def test_falls_back_to_pane_when_no_transcript(self):
+        """Without a transcript, pane output is inlined in the prompt."""
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1")
+        mock_wid = MagicMock()
+        mock_wid.stdout = "@1"
+        mock_reg = {"windows": {}}
+        mock_wdata = {"user_modified": True}
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+             patch("pm_core.tmux.split_pane_at", return_value="%2"), \
+             patch("pm_core.qa_loop.poll_for_verdict", return_value="VERIFIED"), \
+             patch("pm_core.claude_launcher.build_claude_shell_cmd",
+                   return_value="claude ...") as mock_cmd, \
+             patch("subprocess.run", return_value=mock_wid), \
+             patch("pm_core.tmux.set_shared_window_size"), \
+             patch("pm_core.pane_registry.register_pane"), \
+             patch("pm_core.pane_registry.load_registry", return_value=mock_reg), \
+             patch("pm_core.pane_registry.get_window_data", return_value=mock_wdata), \
+             patch("pm_core.pane_registry.save_registry"), \
+             patch("pm_core.pane_layout.rebalance"):
+            _verify_single_scenario(
+                scenario, "PASS", "pane output", {}, {},
+                session="pm-session")
+        call_kwargs = mock_cmd.call_args
+        assert "pane output" in (call_kwargs.kwargs.get("prompt", "") or "")
+
+
+class TestVerificationPromptFiltering:
+    """Verify that verdict detection filters out the verification prompt's
+    example markers so they aren't mistaken for the verifier's actual output."""
+
+    def test_prompt_flagged_end_is_filtered(self):
+        """FLAGGED_END in the prompt template must not be detected as a verdict."""
+        from pm_core.loop_shared import extract_verdict_from_content
+        from pm_core.qa_loop import _VERIFICATION_VERDICTS, _VERIFICATION_KEYWORDS
+
+        # Build a real verification prompt
+        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
+        prompt = _build_verification_prompt(scenario, "PASS", pane_output="output")
+
+        # Simulate pane content that is JUST the prompt (verifier hasn't
+        # produced output yet) — verdict should be None, not FLAGGED_END.
+        v = extract_verdict_from_content(
+            prompt,
+            verdicts=_VERIFICATION_VERDICTS,
+            keywords=_VERIFICATION_KEYWORDS,
+            prompt_text=prompt,
+        )
+        assert v is None, (
+            f"Expected None but got {v!r} — the prompt's example "
+            f"FLAGGED_END was not filtered out"
+        )
+
+    def test_real_flagged_end_is_detected(self):
+        """FLAGGED_END from actual verifier output must still be detected."""
+        from pm_core.loop_shared import extract_verdict_from_content
+        from pm_core.qa_loop import _VERIFICATION_VERDICTS, _VERIFICATION_KEYWORDS
+
+        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
+        prompt = _build_verification_prompt(scenario, "PASS", pane_output="output")
+
+        # Simulate pane content: prompt + verifier output
+        pane_content = prompt + (
+            "\n\nChecklist:\n- Step 1: SKIPPED\n\n"
+            "FLAGGED_START\n"
+            "The scenario did not run anything.\n"
+            "FLAGGED_END"
+        )
+        v = extract_verdict_from_content(
+            pane_content,
+            verdicts=_VERIFICATION_VERDICTS,
+            keywords=_VERIFICATION_KEYWORDS,
+            prompt_text=prompt,
+        )
+        assert v == "FLAGGED_END"
+
+    def test_real_verified_is_detected(self):
+        """VERIFIED from actual verifier output must be detected."""
+        from pm_core.loop_shared import extract_verdict_from_content
+        from pm_core.qa_loop import _VERIFICATION_VERDICTS, _VERIFICATION_KEYWORDS
+
+        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
+        prompt = _build_verification_prompt(scenario, "PASS", pane_output="output")
+
+        pane_content = prompt + (
+            "\n\nChecklist:\n- Step 1: DONE\n\n"
+            "VERIFIED"
+        )
+        v = extract_verdict_from_content(
+            pane_content,
+            verdicts=_VERIFICATION_VERDICTS,
+            keywords=_VERIFICATION_KEYWORDS,
+            prompt_text=prompt,
+        )
+        assert v == "VERIFIED"
+
+    def test_prompt_verified_is_filtered(self):
+        """VERIFIED in the prompt template must not be detected as a verdict."""
+        from pm_core.loop_shared import extract_verdict_from_content
+        from pm_core.qa_loop import _VERIFICATION_VERDICTS, _VERIFICATION_KEYWORDS
+
+        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
+        prompt = _build_verification_prompt(scenario, "PASS", pane_output="output")
+
+        # Just the prompt, no verifier output
+        v = extract_verdict_from_content(
+            prompt,
+            verdicts=_VERIFICATION_VERDICTS,
+            keywords=_VERIFICATION_KEYWORDS,
+            prompt_text=prompt,
+        )
+        assert v is None
+
+
+class TestPromptFragmentFiltering:
+    """Verify that partial/truncated prompt text (e.g., from tmux scrollback
+    limits) still filters out verdict keywords correctly."""
+
+    def _make_scenario_prompt(self):
+        return (
+            'You are running QA scenario 1: "Test login"\n'
+            "\n"
+            "## Execution\n"
+            "\n"
+            "3. End with a verdict on its own line — one of:\n"
+            "   - **PASS** — Scenario passed, no issues found\n"
+            "   - **NEEDS_WORK** — Issues found (explain what and whether you fixed them)\n"
+            "   - **INPUT_REQUIRED** — Genuine ambiguity requiring human judgment\n"
+            "\n"
+            "IMPORTANT: Always end your response with the verdict keyword on its own line."
+        )
+
+    def _make_verification_prompt(self):
+        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
+        return _build_verification_prompt(scenario, "PASS", pane_output="output")
+
+    def test_scenario_prompt_tail_only_no_false_positive(self):
+        """Only the verdict-instruction portion of the prompt appears in pane
+        (simulating scrollback truncation) — should not detect a verdict."""
+        from pm_core.loop_shared import extract_verdict_from_content
+        from pm_core.qa_loop import _QA_KEYWORDS
+
+        full_prompt = self._make_scenario_prompt()
+        # Take just the last few lines — the part with PASS/NEEDS_WORK/INPUT_REQUIRED
+        tail_fragment = "\n".join(full_prompt.splitlines()[-6:])
+
+        v = extract_verdict_from_content(
+            tail_fragment,
+            verdicts=ALL_VERDICTS,
+            keywords=_QA_KEYWORDS,
+            prompt_text=full_prompt,
+        )
+        assert v is None, (
+            f"Expected None but got {v!r} — tail fragment of prompt "
+            f"should still be filtered"
+        )
+
+    def test_scenario_prompt_fragment_with_real_verdict(self):
+        """Truncated prompt followed by a real verdict should detect the verdict."""
+        from pm_core.loop_shared import extract_verdict_from_content
+        from pm_core.qa_loop import _QA_KEYWORDS
+
+        full_prompt = self._make_scenario_prompt()
+        tail_fragment = "\n".join(full_prompt.splitlines()[-6:])
+        pane_content = tail_fragment + "\n\nAll tests passed.\n\nPASS"
+
+        v = extract_verdict_from_content(
+            pane_content,
+            verdicts=ALL_VERDICTS,
+            keywords=_QA_KEYWORDS,
+            prompt_text=full_prompt,
+        )
+        assert v == "PASS"
+
+    def test_verification_prompt_tail_only_no_false_positive(self):
+        """Only the tail of the verification prompt in pane — should not
+        detect FLAGGED_END or VERIFIED from the examples."""
+        from pm_core.loop_shared import extract_verdict_from_content
+        from pm_core.qa_loop import _VERIFICATION_VERDICTS, _VERIFICATION_KEYWORDS
+
+        full_prompt = self._make_verification_prompt()
+        tail_fragment = "\n".join(full_prompt.splitlines()[-15:])
+
+        v = extract_verdict_from_content(
+            tail_fragment,
+            verdicts=_VERIFICATION_VERDICTS,
+            keywords=_VERIFICATION_KEYWORDS,
+            prompt_text=full_prompt,
+        )
+        assert v is None, (
+            f"Expected None but got {v!r} — tail fragment of verification "
+            f"prompt should still be filtered"
+        )
+
+    def test_verification_prompt_fragment_with_real_flagged(self):
+        """Truncated verification prompt + real FLAGGED_END should detect it."""
+        from pm_core.loop_shared import extract_verdict_from_content
+        from pm_core.qa_loop import _VERIFICATION_VERDICTS, _VERIFICATION_KEYWORDS
+
+        full_prompt = self._make_verification_prompt()
+        tail_fragment = "\n".join(full_prompt.splitlines()[-15:])
+        pane_content = tail_fragment + "\n\nChecklist:\n- SKIPPED\n\nFLAGGED_START\nBad\nFLAGGED_END"
+
+        v = extract_verdict_from_content(
+            pane_content,
+            verdicts=_VERIFICATION_VERDICTS,
+            keywords=_VERIFICATION_KEYWORDS,
+            prompt_text=full_prompt,
+        )
+        assert v == "FLAGGED_END"
+
+    def test_single_keyword_line_from_prompt_not_detected(self):
+        """A bare keyword line that exists in the prompt (e.g. 'PASS' in a
+        bullet) should be filtered even without surrounding context."""
+        from pm_core.loop_shared import extract_verdict_from_content
+        from pm_core.qa_loop import _QA_KEYWORDS
+
+        # Prompt that ends with a bare PASS example
+        prompt = (
+            "End with one of:\n"
+            "- PASS\n"
+            "- NEEDS_WORK\n"
+            "- INPUT_REQUIRED"
+        )
+        # Pane is just the prompt — the bare keywords should be filtered
+        v = extract_verdict_from_content(
+            prompt,
+            verdicts=ALL_VERDICTS,
+            keywords=_QA_KEYWORDS,
+            prompt_text=prompt,
+        )
+        assert v is None, (
+            f"Expected None but got {v!r} — bare keyword from prompt "
+            f"should be filtered by neighbor matching"
+        )
+
+    def test_real_verdict_not_blocked_when_top_lines_scroll_off(self):
+        """When lines above a real verdict have scrolled out of the tail
+        window, the verdict must not be falsely matched as a prompt line.
+
+        Only lines *after* the keyword are used for neighbor matching,
+        so losing lines above should never cause a false positive."""
+        from pm_core.loop_shared import extract_verdict_from_content
+        from pm_core.qa_loop import _VERIFICATION_VERDICTS, _VERIFICATION_KEYWORDS
+
+        full_prompt = self._make_verification_prompt()
+        # Simulate a long pane where the prompt has scrolled off and
+        # only the verifier's real output is in the tail.  The lines
+        # after FLAGGED_END are NOT from the prompt.
+        filler = "\n".join([f"verifier output line {i}" for i in range(40)])
+        pane_content = (
+            full_prompt + "\n\n" + filler + "\n"
+            "FLAGGED_START\n"
+            "The scenario substituted code review for runtime testing.\n"
+            "FLAGGED_END\n"
+            "Some trailing verifier commentary."
+        )
+        v = extract_verdict_from_content(
+            pane_content,
+            verdicts=_VERIFICATION_VERDICTS,
+            keywords=_VERIFICATION_KEYWORDS,
+            prompt_text=full_prompt,
+        )
+        assert v == "FLAGGED_END", (
+            f"Expected FLAGGED_END but got {v!r} — real verdict should "
+            f"not be blocked when prompt lines have scrolled off"
+        )
+
+
+class TestStaleVerdictRedetection:
+    """Tests that the same verdict from a scenario pane is not redetected
+    after it has already been accepted."""
+
+    def test_same_verdict_same_fingerprint_is_stale(self):
+        """Identical pane content produces the same fingerprint — stale."""
+        content = "running tests...\nall checks passed\nPASS"
+        fp1 = _verdict_context_fingerprint(content, "PASS")
+        fp2 = _verdict_context_fingerprint(content, "PASS")
+        assert fp1 == fp2
+        # Simulating the polling loop check:
+        verdict_context = {0: fp1}
+        ctx = _verdict_context_fingerprint(content, "PASS")
+        assert ctx == verdict_context[0], "Should be detected as stale"
+
+    def test_new_output_after_followup_is_not_stale(self):
+        """After a follow-up message and re-evaluation, the fingerprint changes."""
+        original = "running tests...\nall checks passed\nPASS"
+        fp_original = _verdict_context_fingerprint(original, "PASS")
+
+        reevaluated = (
+            "running tests...\nall checks passed\nPASS\n"
+            "Your verdict was flagged for re-evaluation.\n"
+            "Re-running the scenario...\n"
+            "additional checks performed\n"
+            "confirmed all tests pass\n"
+            "PASS"
+        )
+        fp_new = _verdict_context_fingerprint(reevaluated, "PASS")
+        assert fp_original != fp_new, "Re-evaluated verdict must have different fingerprint"
+
+    def test_different_verdict_is_not_stale(self):
+        """A change from PASS to NEEDS_WORK is a genuinely new verdict."""
+        content_pass = "tests ran\nall good\nPASS"
+        content_nw = "tests ran\nfound issue X\nNEEDS_WORK"
+        fp_pass = _verdict_context_fingerprint(content_pass, "PASS")
+        fp_nw = _verdict_context_fingerprint(content_nw, "NEEDS_WORK")
+        # Different verdicts can't be stale relative to each other
+        assert fp_pass != fp_nw
+
+    def test_verdict_with_trailing_noise_is_stale(self):
+        """Extra text after the verdict (e.g. tmux status line) doesn't
+        change the fingerprint, so the verdict is still stale."""
+        base = "checking code\nresults look fine\nPASS"
+        with_noise = base + "\n[tmux status] some noise"
+        fp1 = _verdict_context_fingerprint(base, "PASS")
+        fp2 = _verdict_context_fingerprint(with_noise, "PASS")
+        assert fp1 == fp2
+
+    def test_stale_detection_across_poll_cycles(self):
+        """Simulate multiple poll cycles: first detection is accepted,
+        subsequent detections of the same content are stale."""
+        from pm_core.loop_shared import extract_verdict_from_content
+
+        content = "line1\nline2\nline3\nPASS"
+        verdict = extract_verdict_from_content(
+            content, verdicts=ALL_VERDICTS, keywords=("INPUT_REQUIRED", "NEEDS_WORK", "PASS"),
+        )
+        assert verdict == "PASS"
+
+        # Store fingerprint after first acceptance
+        verdict_context = {}
+        verdict_context[0] = _verdict_context_fingerprint(content, verdict)
+
+        # Second poll — same content, should be stale
+        verdict2 = extract_verdict_from_content(
+            content, verdicts=ALL_VERDICTS, keywords=("INPUT_REQUIRED", "NEEDS_WORK", "PASS"),
+        )
+        assert verdict2 == "PASS"  # extract still finds it
+        ctx2 = _verdict_context_fingerprint(content, verdict2)
+        assert ctx2 == verdict_context[0], "Same content = stale, should be skipped by caller"
+
+
+class TestScenarioPromptNotDetectedAsVerdict:
+    """Verify that the QA scenario prompt text (which contains verdict keywords
+    like PASS, NEEDS_WORK, INPUT_REQUIRED as instructions) is not falsely
+    detected as a verdict when passed as prompt_text for filtering."""
+
+    def _make_scenario_prompt(self):
+        """Build a realistic QA child prompt containing verdict keywords."""
+        # This mirrors the structure of generate_qa_child_prompt
+        return (
+            'You are running QA scenario 1: "Test login"\n'
+            "\n"
+            "## Execution\n"
+            "\n"
+            "3. End with a verdict on its own line — one of:\n"
+            "   - **PASS** — Scenario passed, no issues found\n"
+            "   - **NEEDS_WORK** — Issues found (explain what and whether you fixed them)\n"
+            "   - **INPUT_REQUIRED** — Genuine ambiguity requiring human judgment\n"
+            "\n"
+            "IMPORTANT: Always end your response with the verdict keyword on its own line."
+        )
+
+    def test_scenario_prompt_alone_returns_no_verdict(self):
+        """When pane content is just the prompt, no verdict should be detected."""
+        from pm_core.loop_shared import extract_verdict_from_content
+        from pm_core.qa_loop import _QA_KEYWORDS
+
+        prompt = self._make_scenario_prompt()
+        v = extract_verdict_from_content(
+            prompt,
+            verdicts=ALL_VERDICTS,
+            keywords=_QA_KEYWORDS,
+            prompt_text=prompt,
+        )
+        assert v is None, (
+            f"Expected None but got {v!r} — the scenario prompt's "
+            f"instruction keywords should be filtered out"
+        )
+
+    def test_real_pass_after_prompt_is_detected(self):
+        """A real PASS verdict after the prompt text should be detected."""
+        from pm_core.loop_shared import extract_verdict_from_content
+        from pm_core.qa_loop import _QA_KEYWORDS
+
+        prompt = self._make_scenario_prompt()
+        pane_content = prompt + "\n\nRunning tests...\nAll checks passed.\n\nPASS"
+        v = extract_verdict_from_content(
+            pane_content,
+            verdicts=ALL_VERDICTS,
+            keywords=_QA_KEYWORDS,
+            prompt_text=prompt,
+        )
+        assert v == "PASS"
+
+    def test_real_needs_work_after_prompt_is_detected(self):
+        """A real NEEDS_WORK verdict after the prompt text should be detected."""
+        from pm_core.loop_shared import extract_verdict_from_content
+        from pm_core.qa_loop import _QA_KEYWORDS
+
+        prompt = self._make_scenario_prompt()
+        pane_content = prompt + "\n\nFound bug in auth module.\n\nNEEDS_WORK"
+        v = extract_verdict_from_content(
+            pane_content,
+            verdicts=ALL_VERDICTS,
+            keywords=_QA_KEYWORDS,
+            prompt_text=prompt,
+        )
+        assert v == "NEEDS_WORK"
+
+    def test_real_input_required_after_prompt_is_detected(self):
+        """A real INPUT_REQUIRED verdict after the prompt text should be detected."""
+        from pm_core.loop_shared import extract_verdict_from_content
+        from pm_core.qa_loop import _QA_KEYWORDS
+
+        prompt = self._make_scenario_prompt()
+        pane_content = prompt + "\n\nUnclear whether this is expected.\n\nINPUT_REQUIRED"
+        v = extract_verdict_from_content(
+            pane_content,
+            verdicts=ALL_VERDICTS,
+            keywords=_QA_KEYWORDS,
+            prompt_text=prompt,
+        )
+        assert v == "INPUT_REQUIRED"
+
+
+class TestPollingLoopStaleVerdictSkip:
+    """Simulate the polling loop's stale-verdict and prompt-filtering logic
+    using the same data structures and function calls as _poll_scenarios.
+
+    These are integration-level tests that exercise the *combined* behaviour
+    of extract_verdict_from_content, VerdictStabilityTracker,
+    _verdict_context_fingerprint, and the stale-skip guard — reproducing
+    the exact sequence of operations the real loop performs on each tick.
+    """
+
+    def _make_scenario_prompt(self):
+        """Realistic QA child prompt containing verdict keywords."""
+        return (
+            'You are running QA scenario 1: "Test login"\n'
+            "\n"
+            "## Execution\n"
+            "\n"
+            "3. End with a verdict on its own line — one of:\n"
+            "   - **PASS** — Scenario passed, no issues found\n"
+            "   - **NEEDS_WORK** — Issues found (explain what and whether you fixed them)\n"
+            "   - **INPUT_REQUIRED** — Genuine ambiguity requiring human judgment\n"
+            "\n"
+            "IMPORTANT: Always end your response with the verdict keyword on its own line."
+        )
+
+    def _poll_once(self, content, tracker, verdict_context, scenario_idx,
+                   pr_id="pr-test"):
+        """Reproduce the per-scenario polling logic from _poll_scenarios.
+
+        Returns (accepted_verdict, was_stale) to let tests inspect both the
+        extracted verdict and whether the stale guard triggered.
+        """
+        from pm_core.loop_shared import extract_verdict_from_content
+
+        verdict = extract_verdict_from_content(
+            content,
+            verdicts=ALL_VERDICTS,
+            keywords=_QA_KEYWORDS,
+            log_prefix=f"qa-{scenario_idx}",
+        )
+
+        # Stale check (mirrors lines 1105-1110)
+        if verdict:
+            ctx = _verdict_context_fingerprint(content, verdict)
+            prev_ctx = verdict_context.get(scenario_idx)
+            if prev_ctx is not None and ctx == prev_ctx:
+                return verdict, True  # stale — would be skipped
+
+        # Stability check (mirrors lines 1112-1115)
+        key = f"qa-{pr_id}-{scenario_idx}"
+        if tracker.update(key, verdict):
+            if verdict:
+                verdict_context[scenario_idx] = _verdict_context_fingerprint(
+                    content, verdict)
+            return verdict, False  # accepted
+        return verdict, False  # not yet stable
+
+    # ------------------------------------------------------------------
+    # Test 1: Stale verdict ignored after reset to pending
+    # ------------------------------------------------------------------
+
+    def test_stale_verdict_ignored_after_reset_to_pending(self):
+        """After a verdict is accepted, verification flags it, the scenario
+        is reset to pending, and the old verdict is still in the pane —
+        the polling loop must skip it as stale until new output appears."""
+        from pm_core.loop_shared import VerdictStabilityTracker
+
+        tracker = VerdictStabilityTracker()
+        verdict_context: dict[int, str] = {}
+        scenario_idx = 1
+
+        # --- Cycle 1+2: scenario emits PASS, becomes stable, accepted ---
+        pane_v1 = "Running tests...\nAll checks passed.\n\nPASS"
+        # First poll: not yet stable (needs STABILITY_POLLS=2)
+        v, stale = self._poll_once(pane_v1, tracker, verdict_context, scenario_idx)
+        assert v == "PASS"
+        assert not stale
+        assert scenario_idx not in verdict_context  # not stored yet
+
+        # Second poll: stable, accepted
+        v, stale = self._poll_once(pane_v1, tracker, verdict_context, scenario_idx)
+        assert v == "PASS"
+        assert not stale
+        assert scenario_idx in verdict_context  # fingerprint stored
+
+        # --- Verification flags it, scenario reset to pending ---
+        # (mirrors lines 1034-1036 in the loop)
+        tracker.reset(f"qa-pr-test-{scenario_idx}")
+        # NOTE: verdict_context is NOT cleared — this is how the loop works;
+        # the fingerprint stays so we can detect the stale verdict.
+
+        # --- Cycle 3: same pane content, should be stale ---
+        v, stale = self._poll_once(pane_v1, tracker, verdict_context, scenario_idx)
+        assert v == "PASS"
+        assert stale, "Same content after reset must be detected as stale"
+
+        # --- Cycle 4: scenario re-evaluates, new output + new PASS ---
+        pane_v2 = (
+            pane_v1 + "\n"
+            "Your verdict was flagged for re-evaluation.\n"
+            "Re-running checks...\n"
+            "All tests confirmed passing.\n\n"
+            "PASS"
+        )
+        v, stale = self._poll_once(pane_v2, tracker, verdict_context, scenario_idx)
+        assert v == "PASS"
+        assert not stale, "New content = new fingerprint, should not be stale"
+
+        # Second stable poll — accepted with new fingerprint
+        v, stale = self._poll_once(pane_v2, tracker, verdict_context, scenario_idx)
+        assert v == "PASS"
+        assert not stale
+
+    # ------------------------------------------------------------------
+    # Test 2: Prompt not detected as session continues working
+    # ------------------------------------------------------------------
+
+    def test_prompt_not_detected_as_session_works(self):
+        """As the scenario session works (prompt visible, then partial output,
+        then more output), the prompt keywords must never be detected as a
+        verdict — only a real verdict at the end should be accepted."""
+        from pm_core.loop_shared import VerdictStabilityTracker, extract_verdict_from_content
+
+        tracker = VerdictStabilityTracker()
+        verdict_context: dict[int, str] = {}
+        scenario_idx = 1
+        prompt = self._make_scenario_prompt()
+
+        # --- Phase 1: just the prompt, no output yet ---
+        pane_just_prompt = prompt
+        v = extract_verdict_from_content(
+            pane_just_prompt,
+            verdicts=ALL_VERDICTS,
+            keywords=_QA_KEYWORDS,
+            prompt_text=prompt,
+        )
+        assert v is None, f"Prompt alone must not produce a verdict, got {v!r}"
+
+        # --- Phase 2: prompt + session starts working (no verdict yet) ---
+        pane_working = prompt + (
+            "\n\nI'll start by examining the code...\n"
+            "Reading the login module...\n"
+            "Running the test suite..."
+        )
+        v = extract_verdict_from_content(
+            pane_working,
+            verdicts=ALL_VERDICTS,
+            keywords=_QA_KEYWORDS,
+            prompt_text=prompt,
+        )
+        assert v is None, f"Working output (no verdict) must return None, got {v!r}"
+
+        # --- Phase 3: more work, still no verdict ---
+        pane_more_work = pane_working + (
+            "\nAll 42 tests passed.\n"
+            "Checking edge cases...\n"
+            "Edge cases look good."
+        )
+        v = extract_verdict_from_content(
+            pane_more_work,
+            verdicts=ALL_VERDICTS,
+            keywords=_QA_KEYWORDS,
+            prompt_text=prompt,
+        )
+        assert v is None, f"More work (no verdict) must return None, got {v!r}"
+
+        # --- Phase 4: real verdict emitted ---
+        pane_with_verdict = pane_more_work + "\n\nPASS"
+        v, stale = self._poll_once(pane_with_verdict, tracker, verdict_context, scenario_idx)
+        assert v == "PASS"
+        assert not stale
+
+        # Stabilize
+        v, stale = self._poll_once(pane_with_verdict, tracker, verdict_context, scenario_idx)
+        assert v == "PASS"
+        assert not stale
+        assert scenario_idx in verdict_context
+
+    def test_prompt_not_detected_even_with_verdict_keywords_in_output(self):
+        """If Claude's working output mentions verdict keywords in passing
+        (e.g., 'The PASS rate was 95%'), they should not be detected because
+        match_verdict requires the keyword to be the entire line content."""
+        from pm_core.loop_shared import extract_verdict_from_content
+
+        prompt = self._make_scenario_prompt()
+        pane = prompt + (
+            "\n\nLooking at the test results:\n"
+            "The PASS rate was 95% across all modules.\n"
+            "Some NEEDS_WORK items were identified in the backlog.\n"
+            "No INPUT_REQUIRED flags were raised by the CI system."
+        )
+        v = extract_verdict_from_content(
+            pane,
+            verdicts=ALL_VERDICTS,
+            keywords=_QA_KEYWORDS,
+            prompt_text=prompt,
+        )
+        assert v is None, (
+            f"Incidental keyword mentions in output must not trigger "
+            f"verdict detection, got {v!r}"
+        )
+
+
+class TestVerificationSetting:
+    """Tests for _is_verification_enabled global setting."""
+
+    def test_default_is_enabled(self):
+        with patch("pm_core.paths.get_global_setting_value", return_value=""):
+            assert _is_verification_enabled() is True
+
+    def test_disabled_with_false(self):
+        for val in ("0", "false", "no", "off", "disabled", "False", "OFF"):
+            with patch("pm_core.paths.get_global_setting_value", return_value=val):
+                assert _is_verification_enabled() is False, f"Expected disabled for {val!r}"
+
+    def test_enabled_with_truthy(self):
+        for val in ("1", "true", "yes", "on"):
+            with patch("pm_core.paths.get_global_setting_value", return_value=val):
+                assert _is_verification_enabled() is True, f"Expected enabled for {val!r}"
+
+
+class TestExtractFlaggedReason:
+    """Tests for _extract_flagged_reason."""
+
+    def test_basic_extraction(self):
+        content = "Some preamble\nFLAGGED_START\nThe test was not run.\nFLAGGED_END"
+        assert _extract_flagged_reason(content) == "The test was not run."
+
+    def test_multiline_reason(self):
+        content = (
+            "FLAGGED_START\n"
+            "Step 2 was skipped entirely.\n"
+            "Step 4 used code reading instead of execution.\n"
+            "The scenario substituted unit tests for runtime testing.\n"
+            "FLAGGED_END"
+        )
+        reason = _extract_flagged_reason(content)
+        assert "Step 2" in reason
+        assert "Step 4" in reason
+        assert "substituted" in reason
+        assert "\n" in reason  # multiline preserved
+
+    def test_missing_end_marker(self):
+        content = "FLAGGED_START\nPartial reason without end"
+        reason = _extract_flagged_reason(content)
+        assert "Partial reason" in reason
+
+    def test_no_markers_returns_default(self):
+        content = "Some random output with no markers"
+        reason = _extract_flagged_reason(content)
+        assert reason == "Scenario did not properly exercise test cases"
+
+    def test_strips_markdown_formatting(self):
+        content = "FLAGGED_START\n**Bold** and `code` formatting\nFLAGGED_END"
+        reason = _extract_flagged_reason(content)
+        assert "Bold" in reason
+        assert "code" in reason
+
+    def test_empty_between_markers(self):
+        content = "FLAGGED_START\nFLAGGED_END"
+        reason = _extract_flagged_reason(content)
+        assert reason == "Scenario did not properly exercise test cases"
+
+    def test_skips_prompt_template_markers(self):
+        """Extracts reason from verifier output, not prompt template."""
+        content = (
+            "FLAGGED_START\n"
+            "<explanation of what went wrong>\n"
+            "FLAGGED_END\n"
+            "\n"
+            "Checklist analysis...\n"
+            "\n"
+            "FLAGGED_START\n"
+            "The scenario never ran the actual CLI tool\n"
+            "FLAGGED_END\n"
+        )
+        reason = _extract_flagged_reason(content)
+        assert reason == "The scenario never ran the actual CLI tool"
+
+
+class TestVerdictContextFingerprint:
+    """Tests for _verdict_context_fingerprint stale verdict detection."""
+
+    def test_returns_lines_before_verdict(self):
+        content = "line1\nline2\nline3\nPASS"
+        ctx = _verdict_context_fingerprint(content, "PASS")
+        assert ctx == "line1\nline2\nline3"
+
+    def test_limits_to_context_window(self):
+        lines = [f"line{i}" for i in range(20)]
+        lines.append("PASS")
+        content = "\n".join(lines)
+        ctx = _verdict_context_fingerprint(content, "PASS")
+        # Should only include last 5 lines before PASS
+        assert ctx == "line15\nline16\nline17\nline18\nline19"
+
+    def test_same_content_same_fingerprint(self):
+        content = "setup output\nrunning tests\nall tests passed\nPASS"
+        ctx1 = _verdict_context_fingerprint(content, "PASS")
+        ctx2 = _verdict_context_fingerprint(content, "PASS")
+        assert ctx1 == ctx2
+
+    def test_different_content_different_fingerprint(self):
+        content1 = "first run output\nall tests passed\nPASS"
+        content2 = "second run output\nre-evaluated scenario\nPASS"
+        ctx1 = _verdict_context_fingerprint(content1, "PASS")
+        ctx2 = _verdict_context_fingerprint(content2, "PASS")
+        assert ctx1 != ctx2
+
+    def test_stale_verdict_with_new_text_after(self):
+        """Extra text after the verdict doesn't change the fingerprint."""
+        original = "test output\nresults look good\nPASS"
+        with_followup = (
+            "test output\nresults look good\nPASS\n"
+            "Your verdict was reviewed and flagged..."
+        )
+        ctx1 = _verdict_context_fingerprint(original, "PASS")
+        ctx2 = _verdict_context_fingerprint(with_followup, "PASS")
+        assert ctx1 == ctx2
+
+    def test_strips_markdown_formatting(self):
+        content = "some output\n**PASS**"
+        ctx = _verdict_context_fingerprint(content, "PASS")
+        assert ctx == "some output"
+
+    def test_finds_last_occurrence(self):
+        """Should match bottom-up like extract_verdict_from_content."""
+        content = "PASS\nmore work\nnew evaluation\nPASS"
+        ctx = _verdict_context_fingerprint(content, "PASS")
+        # Context before the LAST PASS
+        assert "new evaluation" in ctx
+
+    def test_no_match_returns_empty(self):
+        content = "no verdict here"
+        ctx = _verdict_context_fingerprint(content, "PASS")
+        assert ctx == ""
+
+    def test_verdict_at_top_returns_empty_context(self):
+        content = "PASS\nsome trailing text"
+        ctx = _verdict_context_fingerprint(content, "PASS")
+        assert ctx == ""
+
+
+class TestVerificationMaxRetries:
+    """Tests for _get_verification_max_retries global setting."""
+
+    def test_default_value(self):
+        with patch("pm_core.paths.get_global_setting_value", return_value=""):
+            assert _get_verification_max_retries() == _DEFAULT_VERIFICATION_MAX_RETRIES
+
+    def test_custom_value(self):
+        with patch("pm_core.paths.get_global_setting_value", return_value="3"):
+            assert _get_verification_max_retries() == 3
+
+    def test_zero_value(self):
+        with patch("pm_core.paths.get_global_setting_value", return_value="0"):
+            assert _get_verification_max_retries() == 0
+
+    def test_invalid_value_returns_default(self):
+        with patch("pm_core.paths.get_global_setting_value", return_value="abc"):
+            assert _get_verification_max_retries() == _DEFAULT_VERIFICATION_MAX_RETRIES
+
+    def test_negative_clamped_to_zero(self):
+        with patch("pm_core.paths.get_global_setting_value", return_value="-1"):
+            assert _get_verification_max_retries() == 0
+
+
+class TestInstallInstructionFile:
+    """Tests for _install_instruction_file."""
+
+    def test_copies_file_and_updates_path(self, tmp_path):
+        pm_root = tmp_path / "pm"
+        instr = pm_root / "qa" / "instructions"
+        instr.mkdir(parents=True)
+        (instr / "my-test.md").write_text("# Test\n")
+
+        scratch = tmp_path / "scratch"
+        scratch.mkdir()
+        scenario = QAScenario(index=1, title="T", focus="f", steps="s",
+                              instruction_path="instructions/my-test.md")
+        _install_instruction_file(pm_root, scenario, scratch,
+                                  scratch_dir="/scratch")
+        assert scenario.instruction_path == "/scratch/qa-instructions/my-test.md"
+        assert (scratch / "qa-instructions" / "my-test.md").exists()
+
+    def test_clears_path_when_file_missing(self, tmp_path):
+        pm_root = tmp_path / "pm"
+        (pm_root / "qa" / "instructions").mkdir(parents=True)
+        scratch = tmp_path / "scratch"
+        scratch.mkdir()
+        scenario = QAScenario(index=1, title="T", focus="f", steps="s",
+                              instruction_path="instructions/gone.md")
+        _install_instruction_file(pm_root, scenario, scratch,
+                                  scratch_dir="/scratch")
+        assert scenario.instruction_path is None
+
+    def test_noop_when_no_instruction(self, tmp_path):
+        scenario = QAScenario(index=1, title="T", focus="f", steps="s")
+        _install_instruction_file(tmp_path, scenario, tmp_path,
+                                  scratch_dir="/scratch")
+        assert scenario.instruction_path is None

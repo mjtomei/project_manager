@@ -152,7 +152,8 @@ def is_prompt_line(stripped_line: str, prompt_verdict_lines: set[str],
     Strategy: extract the "context" around the verdict keyword (the
     non-keyword text).  If the context also appears in a prompt line,
     this line is from the prompt.  A standalone keyword like "PASS" or
-    "READY" has no context and is always treated as a real verdict.
+    "READY" has no context and is always treated as a real verdict
+    (use :func:`is_prompt_line_with_neighbors` for those).
 
     Args:
         stripped_line: The line to check (already stripped of outer whitespace).
@@ -170,6 +171,56 @@ def is_prompt_line(stripped_line: str, prompt_verdict_lines: set[str],
             if context in pvl or stripped_clean in pvl or pvl in stripped_clean:
                 return True
     return False
+
+
+# Number of lines after the keyword to include when checking whether a
+# standalone keyword came from the prompt.  We only look *after* (below)
+# the keyword so that lines scrolling off the top of the tail window
+# don't cause false negatives that let prompt keywords slip through.
+_NEIGHBOR_AFTER = 2
+
+
+def is_prompt_line_with_neighbors(
+    line_index: int,
+    tail: list[str],
+    prompt_text: str,
+) -> bool:
+    """Check if a standalone verdict keyword came from the prompt by
+    looking at the lines that follow it.
+
+    A bare keyword like ``FLAGGED_END`` on its own has no inline context
+    to match.  Instead we build a small multi-line snippet from the
+    keyword and the lines *after* it in *tail* and check whether that
+    snippet appears verbatim in *prompt_text*.  Only lines after are
+    used so that lines scrolling off the top of the tail window cannot
+    cause a real verdict to be mistakenly matched as a prompt line.
+    """
+    if not prompt_text:
+        return False
+
+    # Normalize the prompt for matching (strip markdown bold/backticks)
+    norm_prompt = prompt_text.replace("*", "").replace("`", "")
+
+    # Prefer lines *after* the keyword for context.  If the keyword is
+    # at the very end of the tail (no lines after), fall back to lines
+    # *before* it — this handles the case where the pane is just the
+    # prompt and the keyword is the prompt's last line.
+    end = min(len(tail), line_index + _NEIGHBOR_AFTER + 1)
+    if end > line_index + 1:
+        # Lines after available — use keyword + lines after
+        snippet_lines = [l.strip().replace("*", "").replace("`", "") for l in tail[line_index:end]]
+    else:
+        # Last line — use lines before + keyword
+        start = max(0, line_index - _NEIGHBOR_AFTER)
+        snippet_lines = [l.strip().replace("*", "").replace("`", "") for l in tail[start:line_index + 1]]
+
+    snippet = "\n".join(snippet_lines)
+    matched = snippet in norm_prompt
+    if not matched:
+        _log.info("is_prompt_line_with_neighbors: NO MATCH for keyword at "
+                  "tail[%d], snippet (%d chars): %r",
+                  line_index, len(snippet), snippet[:200])
+    return matched
 
 
 def extract_verdict_from_content(
@@ -201,8 +252,8 @@ def extract_verdict_from_content(
     _log.info("%s: extract_verdict: %d total lines, %d tail lines, %d prompt verdict lines, prompt_text=%d chars",
               log_prefix, len(lines), len(tail), len(prompt_verdict_lines), len(prompt_text))
 
-    for line in reversed(tail):
-        stripped = line.strip().strip("*").strip()
+    for idx in range(len(tail) - 1, -1, -1):
+        stripped = tail[idx].strip().strip("*").strip()
         verdict = match_verdict(stripped, verdicts)
 
         if verdict:
@@ -211,9 +262,54 @@ def extract_verdict_from_content(
             if prompt_verdict_lines and is_prompt_line(stripped, prompt_verdict_lines, keywords):
                 _log.info("%s: SKIPPED prompt verdict line: [%s] (verdict=%s)", log_prefix, stripped[:100], verdict)
                 continue
+            # For standalone keywords (bare "PASS", "FLAGGED_END", etc.)
+            # check whether the line and its neighbors appear in the
+            # prompt text.  This catches prompt examples that have no
+            # inline context but are surrounded by recognisable prompt
+            # lines.
+            if prompt_text and is_prompt_line_with_neighbors(idx, tail, prompt_text):
+                _log.info("%s: SKIPPED prompt keyword (neighbor match): [%s] (verdict=%s)",
+                          log_prefix, stripped[:100], verdict)
+                continue
             _log.info("%s: ACCEPTED verdict line: [%s] (verdict=%s)", log_prefix, stripped[:100], verdict)
             return verdict
     return None
+
+
+def extract_between_markers(content: str, start_marker: str,
+                            end_marker: str,
+                            require_end: bool = True) -> str | None:
+    """Extract text between the last START/END marker pair in *content*.
+
+    Scans from the bottom so that prompt-template examples (which appear
+    earlier in the content) are skipped in favour of the real output.
+
+    When *require_end* is False and the end marker is missing, extracts
+    everything after the last start marker to the end of content.
+
+    Returns None if no valid start marker is found.
+    """
+    lines = content.strip().splitlines()
+    last_start = -1
+    last_end = -1
+    for i, line in enumerate(lines):
+        cleaned = re.sub(r'[*`]', '', line).strip()
+        if cleaned == start_marker:
+            last_start = i
+        elif cleaned == end_marker:
+            last_end = i
+    if last_start < 0:
+        return None
+    if last_end > last_start:
+        end = last_end
+    elif not require_end:
+        end = len(lines)
+    else:
+        return None
+    extracted = "\n".join(
+        line.strip() for line in lines[last_start + 1:end]
+    ).strip()
+    return extracted if extracted else None
 
 
 # ---------------------------------------------------------------------------
@@ -251,6 +347,10 @@ def poll_for_verdict(
         log_prefix: Prefix for log messages.
     """
     from pm_core import tmux as tmux_mod
+
+    _log.info("%s: poll_for_verdict starting — pane_id=%s, verdicts=%s, "
+              "prompt_text=%d chars, grace=%.0fs",
+              log_prefix, pane_id, verdicts, len(prompt_text), grace_period)
 
     last_verdict = None
     stable_count = 0
