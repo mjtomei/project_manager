@@ -121,7 +121,6 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
             # Animated spinner for verdicts being verified
             # Format: "PASS (verifying)" or "PASS (verifying:2)"
             m = re.search(r'\(verifying(?::(\d+))?\)', verdict)
-            base_verdict = re.sub(r'\s*\(verifying(?::\d+)?\)', '', verdict).strip()
             fails = int(m.group(1)) if m and m.group(1) else 0
             fail_hint = f" {_RED}({fails}){_RESET}" if fails else ""
             verdict_display = (

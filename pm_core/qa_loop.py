@@ -2071,21 +2071,14 @@ def run_qa_sync(
         panes = tmux_mod.get_pane_indices(session, win["index"])
         planner_pane = panes[0][0] if panes else None
 
-    # Only launch the initial batch — queued scenarios are launched later
-    # as running scenarios complete (handled by _poll_tmux_verdicts).
-    all_scenarios = state.scenarios
-    state.scenarios = launch_scenarios
-    if use_containers:
-        _launch_scenarios_in_containers(
-            state, data, pr_data, session, repo_root, workdir_path,
-            pm_root=pm_root,
-        )
-    else:
-        _launch_scenarios_in_tmux(
-            state, data, pr_data, session, repo_root, workdir_path,
-            pm_root=pm_root,
-        )
-    state.scenarios = all_scenarios
+    # Write initial status file and add the status pane before launching
+    # scenarios — scenario launch blocks until all concretizers finish, so
+    # the status pane must be up first so users can see progress.
+    queued_indices = {s.index for s in queued_scenarios}
+    _write_status_file(status_path, state.pr_id, state.scenarios,
+                       state.scenario_verdicts,
+                       scenario_0=state.scenario_0,
+                       queued_scenarios=queued_indices)
 
     # Add status pane to the main QA window (split planner pane horizontally)
     if planner_pane:
@@ -2116,14 +2109,21 @@ def run_qa_sync(
         except Exception:
             _log.exception("Failed to create status pane")
 
-    # Mark queued scenarios in the status file
-    queued_indices = {s.index for s in queued_scenarios}
-
-    # Write initial status file
-    _write_status_file(status_path, state.pr_id, state.scenarios,
-                       state.scenario_verdicts,
-                       scenario_0=state.scenario_0,
-                       queued_scenarios=queued_indices)
+    # Only launch the initial batch — queued scenarios are launched later
+    # as running scenarios complete (handled by _poll_tmux_verdicts).
+    all_scenarios = state.scenarios
+    state.scenarios = launch_scenarios
+    if use_containers:
+        _launch_scenarios_in_containers(
+            state, data, pr_data, session, repo_root, workdir_path,
+            pm_root=pm_root,
+        )
+    else:
+        _launch_scenarios_in_tmux(
+            state, data, pr_data, session, repo_root, workdir_path,
+            pm_root=pm_root,
+        )
+    state.scenarios = all_scenarios
 
     state.latest_output = f"Running {len(state.scenarios)} scenario(s)..."
     _notify()
