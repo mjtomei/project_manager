@@ -125,7 +125,6 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
             fails = int(m.group(1)) if m and m.group(1) else 0
             fail_hint = f" {_RED}({fails}){_RESET}" if fails else ""
             verdict_display = (
-                f"{_GREEN}{base_verdict}{_RESET} "
                 f"{_YELLOW}{spinner} verifying{_RESET}{fail_hint}"
             )
         elif "(retrying" in verdict:

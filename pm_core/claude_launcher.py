@@ -184,6 +184,8 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
               cmd[:6], cwd, session_key, session_id[:8] + "...")
 
     log_shell_command(cmd, prefix="claude")
+    # Log the environment variables passed to the claude CLI (filtered for ANTHROPIC_/OPENAI_ prefixes)
+    _log.debug("Claude env vars: %s", {k: v for k, v in (run_env or {}).items() if k.startswith('ANTHROPIC_') or k.startswith('OPENAI_')})
     result = subprocess.run(cmd, cwd=cwd, env=run_env)
     returncode = result.returncode
     if returncode != 0:
@@ -309,6 +311,7 @@ def build_claude_shell_cmd(
     model: str | None = None,
     provider: str | None = None,
     effort: str | None = None,
+    write_dir: str | None = None,
 ) -> str:
     """Build a claude shell command string with proper flags and logging.
 
@@ -326,7 +329,8 @@ def build_claude_shell_cmd(
             Generates a UUID session ID and creates a symlink from
             ``transcript`` to Claude's native .jsonl file.
         cwd: Working directory for computing Claude's project dir (required
-            when ``transcript`` is set).
+            when ``transcript`` is set).  Also used as the reference path
+            for the prompt file in the generated command (see ``write_dir``).
         model: Model identifier to pass via ``--model`` flag.  When set,
             overrides Claude CLI's default model selection and any
             provider-resolved model.
@@ -335,6 +339,12 @@ def build_claude_shell_cmd(
             appropriate environment variables and --model flag for the
             provider. None uses the default resolution order.
         effort: Effort level to pass via ``--effort`` flag (low, medium, high).
+        write_dir: Host filesystem path where the prompt file should be
+            written.  Defaults to ``cwd``.  When ``cwd`` is a
+            container-internal path (e.g. ``/workspace``) that does not
+            exist on the host, pass the corresponding host path here so
+            the file can be written.  The command will still reference the
+            file via ``cwd`` (the path claude sees at runtime).
     """
     # When transcript is requested, generate a UUID and create a symlink
     if transcript and cwd:
@@ -379,8 +389,23 @@ def build_claude_shell_cmd(
             cmd += f" --session-id {session_id}"
 
     if prompt and not resume:
-        escaped = prompt.replace("'", "'\\''")
-        cmd += f" '{escaped}'"
+        # Write the prompt to a file and use "$(cat file)" to avoid tmux
+        # command-length limits (~16 KB) with large prompts.
+        _host_dir = Path(write_dir) if write_dir else (Path(cwd) if cwd else None)
+        _prompt_written = False
+        if _host_dir:
+            try:
+                if _host_dir.is_dir():
+                    _fname = f"pm_prompt_{session_id or uuid.uuid4()}.txt"
+                    (_host_dir / _fname).write_text(prompt)
+                    _ref_dir = cwd if cwd else str(_host_dir)
+                    cmd += f' "$(cat {Path(_ref_dir) / _fname})"'
+                    _prompt_written = True
+            except Exception:
+                pass
+        if not _prompt_written:
+            escaped = prompt.replace("'", "'\\''")
+            cmd += f" '{escaped}'"
 
     log_shell_command(cmd, prefix="claude")
     return cmd

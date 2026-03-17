@@ -10,9 +10,9 @@ tags: [tui, manual]
    python3 -m venv /tmp/pm-venv && source /tmp/pm-venv/bin/activate
    pip install -e .   # run from the project_manager clone
    ```
-2. Create a throwaway test project. Use your workdir if you have one, otherwise `/tmp`:
+2. Create a throwaway test project. Use your workdir if you have one, otherwise `/tmp`, for example:
    ```
-   TEST_DIR=/tmp/pm-test-$(date +%s)
+   TEST_DIR=<workdir>/pm-test-$(date +%s)
    mkdir -p "$TEST_DIR" && cd "$TEST_DIR"
    git init
    ```
