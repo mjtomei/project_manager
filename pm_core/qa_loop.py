@@ -1295,17 +1295,19 @@ def _poll_tmux_verdicts(
         # Launch this single scenario by temporarily swapping state.scenarios
         orig = state.scenarios
         state.scenarios = [scenario]
-        if use_containers:
-            _launch_scenarios_in_containers(
-                state, data, pr_data, session, repo_root, workdir_path,
-                pm_root=pm_root,
-            )
-        else:
-            _launch_scenarios_in_tmux(
-                state, data, pr_data, session, repo_root, workdir_path,
-                pm_root=pm_root,
-            )
-        state.scenarios = orig
+        try:
+            if use_containers:
+                _launch_scenarios_in_containers(
+                    state, data, pr_data, session, repo_root, workdir_path,
+                    pm_root=pm_root,
+                )
+            else:
+                _launch_scenarios_in_tmux(
+                    state, data, pr_data, session, repo_root, workdir_path,
+                    pm_root=pm_root,
+                )
+        finally:
+            state.scenarios = orig
         if scenario.window_name:
             pending.add(scenario.index)
         else:
