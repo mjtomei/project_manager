@@ -732,6 +732,19 @@ def _launch_scenario_0(
         return None
 
     _log.info("Launched Scenario 0 (interactive) in window %s", win_name)
+    try:
+        from pm_core import pane_layout, pane_registry
+        win_id = tmux_mod.pane_window_id(pane_id)
+        if win_id:
+            pane_registry.register_pane(session, win_id, pane_id,
+                                        "qa-scenario-s0", final_cmd)
+            reg = pane_registry.load_registry(session)
+            wdata = pane_registry.get_window_data(reg, win_id)
+            wdata["user_modified"] = False
+            pane_registry.save_registry(session, reg)
+            pane_layout.rebalance(session, win_id)
+    except Exception:
+        _log.debug("Registration/rebalance failed for Scenario 0", exc_info=True)
     return scenario
 
 
@@ -908,6 +921,26 @@ def _launch_scenarios_in_tmux(
         if scenario.window_name:
             _log.info("Launched scenario %d (%s) in window %s",
                       scenario.index, scenario.title, win_name)
+            try:
+                from pm_core import pane_layout, pane_registry
+                win_id = tmux_mod.pane_window_id(concretize_pane)
+                if win_id:
+                    pane_registry.register_pane(
+                        session, win_id, concretize_pane,
+                        f"qa-concretize-s{scenario.index}", "concretize",
+                    )
+                    pane_registry.register_pane(
+                        session, win_id, scenario_pane,
+                        f"qa-scenario-s{scenario.index}", child_cmd,
+                    )
+                    reg = pane_registry.load_registry(session)
+                    wdata = pane_registry.get_window_data(reg, win_id)
+                    wdata["user_modified"] = False
+                    pane_registry.save_registry(session, reg)
+                    pane_layout.rebalance(session, win_id)
+            except Exception:
+                _log.debug("Registration/rebalance failed for scenario %d",
+                           scenario.index, exc_info=True)
         else:
             _log.warning("Scenario %d (%s) window creation failed",
                          scenario.index, scenario.title)
@@ -1101,6 +1134,26 @@ def _launch_scenarios_in_containers(
         if scenario.window_name:
             _log.info("Launched scenario %d (%s) in container %s (window %s)",
                       scenario.index, scenario.title, cname, win_name)
+            try:
+                from pm_core import pane_layout, pane_registry
+                win_id = tmux_mod.pane_window_id(concretize_pane)
+                if win_id:
+                    pane_registry.register_pane(
+                        session, win_id, concretize_pane,
+                        f"qa-concretize-s{scenario.index}", "concretize",
+                    )
+                    pane_registry.register_pane(
+                        session, win_id, scenario_pane,
+                        f"qa-scenario-s{scenario.index}", exec_cmd,
+                    )
+                    reg = pane_registry.load_registry(session)
+                    wdata = pane_registry.get_window_data(reg, win_id)
+                    wdata["user_modified"] = False
+                    pane_registry.save_registry(session, reg)
+                    pane_layout.rebalance(session, win_id)
+            except Exception:
+                _log.debug("Registration/rebalance failed for scenario %d",
+                           scenario.index, exc_info=True)
         else:
             _log.warning("Scenario %d (%s) container/window creation failed",
                          scenario.index, scenario.title)
@@ -1193,6 +1246,22 @@ def _relaunch_scenario_window(
         scenario.pane_id = pane_id
         scenario.transcript_path = transcript
         _log.info("Relaunched scenario %d in window %s", scenario.index, win_name)
+        try:
+            from pm_core import pane_layout, pane_registry
+            win_id = tmux_mod.pane_window_id(pane_id)
+            if win_id:
+                pane_registry.register_pane(
+                    session, win_id, pane_id,
+                    f"qa-scenario-s{scenario.index}", "relaunch",
+                )
+                reg = pane_registry.load_registry(session)
+                wdata = pane_registry.get_window_data(reg, win_id)
+                wdata["user_modified"] = False
+                pane_registry.save_registry(session, reg)
+                pane_layout.rebalance(session, win_id)
+        except Exception:
+            _log.debug("Registration/rebalance failed for relaunched scenario %d",
+                       scenario.index, exc_info=True)
         return True
     except Exception:
         _log.warning("Failed to relaunch scenario %d", scenario.index, exc_info=True)
