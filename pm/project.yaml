@@ -3675,7 +3675,7 @@ prs:
   plan: plan-qa
   title: Add QA scenario verification step before final verdict
   branch: pm/pr-8fdda09-add-qa-scenario-verification-step-before-final-ver
-  status: in_review
+  status: merged
   depends_on:
   - pr-ee1ff04
   description: 'After all QA scenarios complete and verdicts are collected, add a
@@ -3711,11 +3711,34 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/146
   gh_pr_number: 146
   created_at: '2026-03-06T15:48:13.072900+00:00'
-  updated_at: '2026-03-17T00:57:31.749911+00:00'
+  updated_at: '2026-03-17T16:06:30.329654+00:00'
   started_at: '2026-03-14T22:24:34.604076+00:00'
-  reviewed_at: '2026-03-17T00:57:31.749911+00:00'
-  merged_at: null
+  reviewed_at: '2026-03-15T03:42:15.014661+00:00'
+  merged_at: '2026-03-17T16:06:30.329654+00:00'
   notes:
+  - id: note-1b76203
+    text: 'QA NEEDS_WORK: Verification triggers on PASS verdict only: PASS; Verification
+      FLAGGED triggers re-evaluation: NEEDS_WORK; Verification failure exhaustion
+      marks NEEDS_WORK: PASS; qa-verify-pass setting disables verification: PASS;
+      Verification pane lifecycle and layout management: PASS; Transcript file preferred
+      over pane output for verification: PASS; Status dashboard renders verification
+      state correctly: PASS; qa_verification session type and model resolution: PASS;
+      Verification handles missing/dead scenario pane gracefully: PASS; Unit tests
+      pass for new verification functions: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-8fdda09-1bd189c42f9836b4)'
+    created_at: '2026-03-15T02:42:49Z'
+    last_edited: '2026-03-15T02:42:49Z'
+  - id: note-99cc538
+    text: 'QA PASS: Verification triggers on PASS verdict only: PASS; Verification
+      FLAGGED triggers re-evaluation: PASS; Verification failure exhaustion marks
+      NEEDS_WORK: PASS; qa-verify-pass setting disables verification: PASS; Verification
+      pane lifecycle and layout management: PASS; Transcript file preferred over pane
+      output for verification: PASS; Status dashboard renders verification state correctly:
+      PASS; qa_verification session type and model resolution: PASS; Verification
+      handles missing/dead scenario pane gracefully: PASS; Unit tests pass for new
+      verification functions: PASS; Concurrent verification threads don''t race: PASS;
+      Build verification prompt content and truncation: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-8fdda09-b7bc16a0f3103d8d)'
+    created_at: '2026-03-15T03:45:17Z'
+    last_edited: '2026-03-15T03:45:17Z'
   - id: note-52ce835
     text: 'QA INPUT_REQUIRED: Verification triggers on PASS verdict only: INPUT_REQUIRED;
       Verification VERIFIED accepts the PASS verdict: INPUT_REQUIRED; Verification
