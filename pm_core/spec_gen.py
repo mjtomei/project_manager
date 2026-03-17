@@ -275,7 +275,7 @@ def generate_spec(data: dict, pr_id: str, phase: str,
             _log.info("spec_gen: ambiguity detected in %s spec for %s, "
                       "pausing for review", phase, pr_id)
 
-    # Set spec_pending if review is needed
+    # Set spec_pending if review is needed, clear it otherwise
     if needs_review:
         pr["spec_pending"] = {
             "phase": phase,
@@ -284,6 +284,11 @@ def generate_spec(data: dict, pr_id: str, phase: str,
         if root:
             store.save(data, root)
         _log.info("spec_gen: marked spec_pending for %s/%s", pr_id, phase)
+    else:
+        if pr.pop("spec_pending", None) is not None:
+            if root:
+                store.save(data, root)
+            _log.info("spec_gen: cleared spec_pending for %s/%s", pr_id, phase)
 
     return spec_text, needs_review
 
