@@ -854,7 +854,7 @@ def _launch_scenarios_in_tmux(
             scenario_cwd: str,
             clone_path: Path,
             scratch_path: Path,
-            transcript: Path,
+            transcript: str,
             win_name: str,
     ) -> None:
         refined_steps = _concretize_scenario(scenario, pr_data, data, concretize_pane)
@@ -1026,7 +1026,7 @@ def _launch_scenarios_in_containers(
             concretize_pane: str,
             win_name: str,
             cname: str,
-            transcript: Path,
+            transcript: str,
             clone_path: Path,
     ) -> None:
         refined_steps = _concretize_scenario(scenario, pr_data, data, concretize_pane)
@@ -1696,12 +1696,22 @@ def _verify_single_scenario(
                      "trusting original verdict", scenario.index)
         return True, "", None
 
-    # Build the verification claude command
+    # Build the verification claude command.
+    # Use the qa_workdir (parent of the transcript path) as cwd so the
+    # prompt can be written to a file — inlined pane output can be
+    # several KB and would hit tmux's ~16 KB command-length limit if
+    # shell-escaped instead.
+    _verify_cwd: str | None = None
+    if scenario.transcript_path:
+        _verify_cwd = str(Path(scenario.transcript_path).parent)
+    elif scenario.worktree_path:
+        _verify_cwd = str(Path(scenario.worktree_path).parent.parent)  # s-N/repo -> qa_workdir
     verify_cmd = build_claude_shell_cmd(
         prompt=prompt,
         model=resolution.model,
         provider=resolution.provider,
         effort=resolution.effort,
+        cwd=_verify_cwd,
     )
 
     # Split the scenario window using the standard pane management system
