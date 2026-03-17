@@ -73,11 +73,10 @@ def spec_file_path(root: Path, pr_id: str, phase: str) -> Path:
     return spec_dir(root, pr_id) / f"{phase}.md"
 
 
-def get_spec(pr: dict, phase: str, data: dict | None = None) -> str | None:
+def get_spec(pr: dict, phase: str) -> str | None:
     """Get the spec content for a phase, reading from the spec file.
 
-    Returns None if no spec exists.  The *data* arg is used to derive
-    the file path when it isn't stored in the PR entry.
+    Returns None if no spec exists or the file is empty.
     """
     field = _SPEC_FIELD.get(phase)
     if not field:
