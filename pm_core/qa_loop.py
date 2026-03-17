@@ -2181,6 +2181,10 @@ def run_qa_sync(
         _notify()
 
     # --- Spec gate: verify the planner generated a QA spec ---
+    # Reload data from disk — the planner may have run `pm pr spec-save`
+    # during execution, which writes to disk but doesn't update our copy.
+    if pm_root:
+        data = store.load(pm_root)
     pr_entry = store.get_pr(data, state.pr_id) if data else None
     if pr_entry and not _get_qa_spec(pr_entry, "qa") and not state._error:
         _log.warning("QA spec missing for %s after planning — "
