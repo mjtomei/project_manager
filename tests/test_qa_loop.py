@@ -2363,11 +2363,12 @@ class TestScenarioRetryLogic:
                  200,  # 2nd poll: past grace
                  200,  # 2nd poll: relaunch grace reset -> new grace_start
                  300,  # 3rd poll: past grace
-                 300,  # capture_pane time check
              ]), \
              patch("pm_core.qa_loop.VerdictStabilityTracker") as MockTracker, \
              patch("pm_core.qa_loop.extract_verdict_from_content", return_value="PASS"), \
-             patch("pm_core.tmux.capture_pane", return_value="PASS"):
+             patch("pm_core.tmux.capture_pane", return_value="PASS"), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.qa_loop._is_verification_enabled", return_value=False):
             tracker_inst = MockTracker.return_value
             tracker_inst.update.return_value = True  # Verdict is stable
 
@@ -2445,7 +2446,9 @@ class TestScenarioRetryLogic:
              patch("pm_core.qa_loop.time.monotonic", side_effect=monotonic_vals), \
              patch("pm_core.qa_loop.VerdictStabilityTracker") as MockTracker, \
              patch("pm_core.qa_loop.extract_verdict_from_content", return_value="PASS"), \
-             patch("pm_core.tmux.capture_pane", return_value="PASS"):
+             patch("pm_core.tmux.capture_pane", return_value="PASS"), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.qa_loop._is_verification_enabled", return_value=False):
             tracker_inst = MockTracker.return_value
             tracker_inst.update.return_value = True
 

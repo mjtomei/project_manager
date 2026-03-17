@@ -342,7 +342,8 @@ def _write_status_file(status_path: Path, pr_id: str,
                        scenario_0: QAScenario | None = None,
                        verifying_scenarios: set[int] | None = None,
                        queued_scenarios: set[int] | None = None,
-                       verification_failures: dict[int, int] | None = None) -> None:
+                       verification_failures: dict[int, int] | None = None,
+                       error: str = "") -> None:
     """Atomically write the qa_status.json file."""
     _verifying = verifying_scenarios or set()
     _queued = queued_scenarios or set()
