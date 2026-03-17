@@ -221,7 +221,7 @@ class TechTree(Widget):
         self._anim_frame = (self._anim_frame + 1) % len(SPINNER_FRAMES)
 
     def _get_loop_marker(self, pr_id: str) -> tuple[str, str]:
-        """Return (marker_text, marker_style) for review loop or merge state.
+        """Return (marker_text, marker_style) for review loop, QA loop, or merge state.
 
         Returns a tuple of (text, style) for the marker. Empty strings if no loop
         and no merge input required.
@@ -242,6 +242,20 @@ class TechTree(Widget):
                     marker = VERDICT_MARKERS.get(v, v[:4])
                     style = VERDICT_STYLES.get(v, "")
                     return (f"⟳{state.iteration}{marker}", style)
+            # Check QA loops — suppress spec-pending S marker when QA is running
+            qa_loops = getattr(self.app, '_qa_loops', {})
+            qa_state = qa_loops.get(pr_id)
+            if qa_state:
+                if qa_state.running:
+                    spinner = SPINNER_FRAMES[self._anim_frame % len(SPINNER_FRAMES)]
+                    if getattr(qa_state, 'stop_requested', False):
+                        return (f"⏹{qa_state.iteration}{spinner}", "bold red")
+                    return (f"⟳{qa_state.iteration}{spinner}", "bold cyan")
+                if qa_state.latest_verdict:
+                    v = qa_state.latest_verdict
+                    marker = VERDICT_MARKERS.get(v, v[:4])
+                    style = VERDICT_STYLES.get(v, "")
+                    return (f"⟳{qa_state.iteration}{marker}", style)
             # Check for merge INPUT_REQUIRED (no review loop, but merge needs help)
             merge_input = getattr(self.app, '_merge_input_required_prs', set())
             if pr_id in merge_input:
