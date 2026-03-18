@@ -2522,3 +2522,60 @@ class TestStateErrorWiring:
             result = VERDICT_PASS
 
         assert result == VERDICT_INPUT_REQUIRED
+
+
+# ---------------------------------------------------------------------------
+# Spec gate: state.running is set to False on early return
+# ---------------------------------------------------------------------------
+
+class TestSpecGateRunningFlag:
+    """The spec gate early-return must set state.running = False so that
+    the QA loop UI's _on_qa_complete callback fires."""
+
+    def test_spec_gate_sets_running_false(self, tmp_path):
+        """run_qa_sync must set state.running=False when spec gate fires."""
+        from pm_core.qa_loop import run_qa_sync, QALoopState
+        from pm_core import store
+
+        pr_id = "pr-specgate"
+        pm_dir = tmp_path / "pm"
+        pm_dir.mkdir()
+        workdir = tmp_path / "work"
+        workdir.mkdir()
+        (workdir / ".git").mkdir()
+
+        pr_entry = {
+            "id": pr_id,
+            "title": "Test PR",
+            "description": "Test",
+            "branch": "pm/test",
+            "status": "qa",
+            "workdir": str(workdir),
+        }
+        data = {
+            "project": {
+                "name": "test",
+                "repo": str(tmp_path),
+                "base_branch": "master",
+                "backend": "local",
+            },
+            "prs": [pr_entry],
+            "plans": [],
+        }
+        store.save(data, pm_dir)
+
+        state = QALoopState(pr_id=pr_id)
+        # planning_phase=False + pre-loaded scenarios skips Phase 1
+        state.planning_phase = False
+        state.scenarios = [QAScenario(index=1, title="T", focus="t")]
+
+        with patch("pm_core.qa_loop.get_pm_session", return_value="pm-session"), \
+             patch("pm_core.store.load", return_value=data), \
+             patch("pm_core.store.get_pr", return_value=pr_entry), \
+             patch("pm_core.qa_loop._get_qa_spec", return_value=None), \
+             patch("pm_core.cli.helpers._ensure_workdir", return_value=str(workdir)), \
+             patch("pm_core.qa_loop._resolve_qa_model", return_value=(None, None, None)):
+            run_qa_sync(state, pm_dir, pr_entry, lambda *a: None)
+
+        assert not state.running, "state.running must be False after spec gate fires"
+        assert state.latest_verdict == VERDICT_INPUT_REQUIRED
