@@ -3,7 +3,8 @@
 from pm_core import store, notes
 from pm_core.backend import get_backend
 from pm_core.paths import get_global_setting
-from pm_core.spec_gen import format_spec_for_prompt, spec_generation_preamble
+from pm_core.spec_gen import (format_spec_for_prompt, spec_generation_preamble,
+                               get_spec_mocks_section)
 
 
 def tui_section(session_name: str) -> str:
@@ -982,6 +983,9 @@ If a setup step fails or a required tool is unavailable, report
     # Include PR notes (prior QA results, addendums)
     pr_notes_block = _format_pr_notes(pr)
 
+    # Include mocks section from QA spec so every scenario uses the same strategy
+    mocks_block = get_spec_mocks_section(pr)
+
     # Workdir description and execution instructions differ by mode
     backend_name = data.get("project", {}).get("backend", "vanilla")
     has_remote = backend_name != "local"
@@ -1031,7 +1035,7 @@ If a setup step fails or a required tool is unavailable, report
 - **Branch**: {branch}
 - **Base branch**: {base_branch}
 {workdir_block}
-{pr_notes_block}
+{pr_notes_block}{mocks_block}
 ## How QA Works
 
 You are in one of several QA scenarios running in parallel, each in its own

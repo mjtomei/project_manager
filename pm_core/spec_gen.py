@@ -175,7 +175,12 @@ the system's runtime behavior:
 - Setup requirements for testing
 - Edge cases and failure modes to probe
 - Integration points with other system components
-- What constitutes a passing vs failing test""",
+- What constitutes a passing vs failing test
+- Mocks: what external dependencies need mocking (e.g. Claude sessions, git
+  operations, tmux), the contract for each mock (what it simulates), and
+  what scripted responses they should return — this prevents each scenario
+  agent from independently deciding how to mock, which leads to
+  inconsistency""",
     }
 
     diff_instruction = ""
@@ -184,6 +189,15 @@ the system's runtime behavior:
 Run `git diff {base_branch}...HEAD` in the workdir to see what changed.
 Read source files as needed to understand the implementation.
 """
+
+    # QA spec gets an extra section for mocks planning
+    mocks_section = ""
+    if phase == "qa":
+        mocks_section = """5. **Mocks** — For each external dependency that scenarios should mock \
+(e.g. Claude sessions, git operations, tmux): the contract (what it \
+simulates), the scripted responses it should return, and what remains \
+unmocked (uses the real implementation).  This section is included in \
+every scenario prompt so agents know exactly what is and isn't simulated.\n"""
 
     mode = pr_spec_mode(pr)
     ambiguity_instruction = ""
@@ -228,7 +242,7 @@ The spec should contain:
 2. **Implicit Requirements** — What must also be true for stated requirements to hold
 3. **Ambiguities** — Identified ambiguities with proposed resolutions
 4. **Edge Cases** — Interactions with existing behavior not addressed in the description
-"""
+{mocks_section}"""
     return prompt.strip()
 
 
@@ -465,7 +479,12 @@ Review the implementation (run `git diff` and read source files), then write a s
 2. **Setup** — Setup requirements for testing
 3. **Edge Cases** — Edge cases and failure modes to probe
 4. **Pass/Fail Criteria** — What constitutes a passing vs failing test
-5. **Ambiguities** — Any ambiguities you resolved and how""",
+5. **Ambiguities** — Any ambiguities you resolved and how
+6. **Mocks** — For each external dependency that scenarios should mock \
+(e.g. Claude sessions, git operations, tmux): the contract (what it simulates), \
+the scripted responses it should return, and what remains unmocked. \
+This section is included in every scenario prompt so all agents share the \
+same mocking strategy.""",
     }
 
     instructions = spec_instructions.get(phase, spec_instructions["impl"])
@@ -541,6 +560,49 @@ Start with Step 0 below.  Once the spec is saved, proceed to the main task.
 {post_save}
 
 ---
+"""
+
+
+def get_spec_mocks_section(pr: dict) -> str:
+    """Extract the Mocks section from the QA spec, if present.
+
+    Returns the mocks section as a formatted markdown block for inclusion
+    in QA scenario prompts, or empty string if the spec has no mocks section.
+    """
+    spec = get_spec(pr, "qa")
+    if not spec:
+        return ""
+
+    # Look for a ## Mocks heading (case-insensitive) and extract to next heading
+    lines = spec.splitlines()
+    in_mocks = False
+    mocks_lines: list[str] = []
+    for line in lines:
+        if not in_mocks:
+            if line.strip().lower().startswith("## mocks") or line.strip().lower().startswith("**mocks**"):
+                in_mocks = True
+                mocks_lines.append(line)
+        else:
+            # Stop at the next ## heading
+            if line.startswith("## ") and mocks_lines:
+                break
+            mocks_lines.append(line)
+
+    if not mocks_lines:
+        return ""
+
+    # Skip the heading line itself — we supply our own heading below
+    body_lines = mocks_lines[1:] if mocks_lines else []
+    content = "\n".join(body_lines).strip()
+    if not content:
+        return ""
+    return f"""
+## Mocks
+
+The QA spec defines the mocking strategy for this PR's test scenarios.
+Use the contracts and scripted responses below — do not devise your own.
+
+{content}
 """
 
 
