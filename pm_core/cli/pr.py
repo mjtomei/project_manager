@@ -613,6 +613,7 @@ def pr_spec_save(pr_id: str, phase: str):
     pr_entry[field] = str(spec_path)
     store.save(data, root)
     click.echo(f"Saved {phase} spec for {_pr_display_id(pr_entry)} ({len(content)} chars).")
+    trigger_tui_refresh()
 
 
 @pr.command("spec-approve")

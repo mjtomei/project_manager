@@ -2205,6 +2205,7 @@ def run_qa_sync(
             "Then restart QA from the TUI."
         )
         _notify()
+        return  # Do not launch scenarios without a QA spec
 
     # --- Phase 2: Execution ---
     # Determine concurrency cap (0 = launch all at once)
