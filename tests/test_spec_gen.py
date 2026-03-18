@@ -538,6 +538,82 @@ class TestSpecGenerationPreamble:
 # reject_spec
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# get_spec_mocks_section
+# ---------------------------------------------------------------------------
+
+class TestGetSpecMocksSection:
+    def _make_pr_with_qa_spec(self, tmp_path, spec_content):
+        """Create a PR dict with a QA spec file at the workdir path."""
+        spec_dir = tmp_path / "pm" / "specs" / "pr-1"
+        spec_dir.mkdir(parents=True)
+        (spec_dir / "qa.md").write_text(spec_content)
+        return {"id": "pr-1", "workdir": str(tmp_path)}
+
+    def test_no_qa_spec_returns_empty(self):
+        pr = {"id": "pr-1"}
+        assert spec_gen.get_spec_mocks_section(pr) == ""
+
+    def test_spec_without_mocks_section(self, tmp_path):
+        pr = self._make_pr_with_qa_spec(tmp_path, "## Requirements\n- Test X\n\n## Edge Cases\n- Timeout")
+        assert spec_gen.get_spec_mocks_section(pr) == ""
+
+    def test_mocks_section_extracted(self, tmp_path):
+        spec = (
+            "## Requirements\n- Test X\n\n"
+            "## Mocks\n"
+            "- Claude sessions: use FakeClaudeSession returning fixed output\n"
+            "- git operations: real (not mocked)\n\n"
+            "## Edge Cases\n- Timeout"
+        )
+        pr = self._make_pr_with_qa_spec(tmp_path, spec)
+        result = spec_gen.get_spec_mocks_section(pr)
+        assert "Mocks" in result
+        assert "FakeClaudeSession" in result
+        assert "git operations" in result
+        # The next section heading should not be included
+        assert "Edge Cases" not in result
+        # The wrapper text should be present
+        assert "do not devise your own" in result
+
+    def test_mocks_as_last_section(self, tmp_path):
+        """Mocks section at end of spec (no following ## heading)."""
+        spec = (
+            "## Requirements\n- Test X\n\n"
+            "## Mocks\n"
+            "- tmux: mock via FakeTmux\n"
+        )
+        pr = self._make_pr_with_qa_spec(tmp_path, spec)
+        result = spec_gen.get_spec_mocks_section(pr)
+        assert "FakeTmux" in result
+
+    def test_mocks_heading_case_insensitive(self, tmp_path):
+        spec = "## MOCKS\n- Claude: FakeClaudeSession\n"
+        pr = self._make_pr_with_qa_spec(tmp_path, spec)
+        result = spec_gen.get_spec_mocks_section(pr)
+        assert "FakeClaudeSession" in result
+
+    def test_mocks_heading_with_subtitle(self, tmp_path):
+        """## Mocks section with subtitle text still detected."""
+        spec = "## Mocks and Dependencies\n- git: real\n"
+        pr = self._make_pr_with_qa_spec(tmp_path, spec)
+        result = spec_gen.get_spec_mocks_section(pr)
+        assert "git: real" in result
+
+    def test_empty_mocks_section_returns_empty(self, tmp_path):
+        spec = "## Mocks\n\n## Edge Cases\n- Timeout"
+        pr = self._make_pr_with_qa_spec(tmp_path, spec)
+        assert spec_gen.get_spec_mocks_section(pr) == ""
+
+    def test_mocks_heading_not_included_in_output(self, tmp_path):
+        """The original heading line is stripped; wrapper provides its own."""
+        spec = "## Mocks\n- Claude: mock\n"
+        pr = self._make_pr_with_qa_spec(tmp_path, spec)
+        result = spec_gen.get_spec_mocks_section(pr)
+        # Should have exactly one ## Mocks heading (from the wrapper), not two
+        assert result.count("## Mocks") == 1
+
+
 class TestRejectSpec:
     @patch("pm_core.spec_gen.launch_claude_print")
     @patch("pm_core.spec_gen.get_global_setting_value", return_value="review")
