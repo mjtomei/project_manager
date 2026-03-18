@@ -77,17 +77,36 @@ def get_spec(pr: dict, phase: str) -> str | None:
     """Get the spec content for a phase, reading from the spec file.
 
     Returns None if no spec exists or the file is empty.
+
+    Lookup order:
+    1. The PR's workdir pm/specs/ — the impl session writes specs here and
+       it has the most up-to-date copy while the PR is being worked on.
+    2. The local pm/specs/ (cwd-resolved root) — where specs live after
+       the PR branch is merged back to the base repo.
     """
     field = _SPEC_FIELD.get(phase)
     if not field:
         return None
 
-    path_str = pr.get(field)
-    if path_str:
-        p = Path(path_str)
+    pr_id = pr.get("id", "")
+
+    # 1. Workdir — most up-to-date copy while the PR is in flight.
+    workdir = pr.get("workdir")
+    if workdir:
+        p = Path(workdir) / "pm" / "specs" / pr_id / f"{phase}.md"
         if p.exists():
             content = p.read_text().strip()
             return content if content else None
+
+    # 2. Local pm directory — spec lives here after the branch is merged.
+    try:
+        root = store.find_project_root()
+    except FileNotFoundError:
+        return None
+    canonical = spec_file_path(root, pr_id, phase)
+    if canonical.exists():
+        content = canonical.read_text().strip()
+        return content if content else None
     return None
 
 
@@ -451,6 +470,18 @@ Review the implementation (run `git diff` and read source files), then write a s
 
     instructions = spec_instructions.get(phase, spec_instructions["impl"])
 
+    # For the QA phase: after saving the spec, commit and push it so that
+    # scenario clones (created after the planner runs) have access to it.
+    # The QA planner is the first step that modifies the repo; before specs,
+    # it was read-only, so scenario clones were fine without a push.
+    branch = pr.get("branch", "")
+    commit_step = ""
+    if phase == "qa" and branch:
+        commit_step = f"""
+Then commit and push the spec so QA scenario clones can access it:
+  `git add pm/specs/{pr_id}/qa.md && git commit -m "pm: qa spec for {pr_id}" && git push origin {branch}`
+"""
+
     # Mode-specific guidance for ambiguity handling and what to do after saving
     if mode == "auto":
         post_save = f"""\
@@ -460,7 +491,7 @@ your reasoning in the spec's "Ambiguities" section.
 
 Save the spec to `{file_path}` and then run:
   `pm pr spec-save {pr_id} {phase}`
-
+{commit_step}
 Then proceed with the {label} work below."""
 
     elif mode == "prompt":
@@ -472,7 +503,7 @@ interpretations with materially different outcomes — include it in the spec's
 
 Save the spec to `{file_path}` and then run:
   `pm pr spec-save {pr_id} {phase}`
-
+{commit_step}
 If the spec contains any **[UNRESOLVED]** ambiguities, present them to the
 user and wait for their response before proceeding.  Update the spec with
 their answers, re-save, then continue.  If there are no unresolved
@@ -485,7 +516,7 @@ spec's "Ambiguities" section.
 
 Save the spec to `{file_path}` and then run:
   `pm pr spec-save {pr_id} {phase}`
-
+{commit_step}
 Then present a brief summary of the spec to the user and ask whether they
 approve or want changes.  If they request changes, update the spec file,
 re-save, and ask again.  Once approved, proceed with the {label} work below."""

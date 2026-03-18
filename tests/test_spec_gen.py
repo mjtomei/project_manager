@@ -64,21 +64,24 @@ class TestGetSetSpec:
         assert spec_gen.get_spec(pr, "impl") is None
 
     def test_set_and_get_spec(self, tmp_path):
-        """set_spec writes to file, get_spec reads it back."""
-        pr = {"id": "pr-1"}
-        path = spec_gen.set_spec(pr, "impl", "some spec content", root=tmp_path)
+        """set_spec writes to workdir/pm/specs/, get_spec reads it back."""
+        # root = workdir/pm/ so get_spec can find it via pr["workdir"]
+        workdir = tmp_path
+        root = workdir / "pm"
+        pr = {"id": "pr-1", "workdir": str(workdir)}
+        path = spec_gen.set_spec(pr, "impl", "some spec content", root=root)
 
         assert path is not None
         assert path.exists()
         assert path.read_text() == "some spec content"
         assert spec_gen.get_spec(pr, "impl") == "some spec content"
-        # PR entry stores the file path, not the content
-        assert pr["spec_impl"] == str(path)
 
     def test_all_phases(self, tmp_path):
-        pr = {"id": "pr-1"}
+        workdir = tmp_path
+        root = workdir / "pm"
+        pr = {"id": "pr-1", "workdir": str(workdir)}
         for phase in spec_gen.PHASES:
-            spec_gen.set_spec(pr, phase, f"spec for {phase}", root=tmp_path)
+            spec_gen.set_spec(pr, phase, f"spec for {phase}", root=root)
             assert spec_gen.get_spec(pr, phase) == f"spec for {phase}"
 
     def test_invalid_phase(self):
@@ -87,16 +90,18 @@ class TestGetSetSpec:
         assert spec_gen.set_spec(pr, "invalid", "test") is None
         assert "spec_invalid" not in pr
 
-    def test_get_spec_from_existing_file(self, tmp_path):
-        """get_spec reads from the file path stored in the PR entry."""
-        spec_file = tmp_path / "impl.md"
-        spec_file.write_text("file-based spec")
-        pr = {"id": "pr-1", "spec_impl": str(spec_file)}
-        assert spec_gen.get_spec(pr, "impl") == "file-based spec"
+    def test_get_spec_from_workdir(self, tmp_path):
+        """get_spec finds spec in the PR's workdir pm/specs/ directory."""
+        workdir = tmp_path
+        spec_dir = workdir / "pm" / "specs" / "pr-1"
+        spec_dir.mkdir(parents=True)
+        (spec_dir / "impl.md").write_text("workdir spec")
+        pr = {"id": "pr-1", "workdir": str(workdir)}
+        assert spec_gen.get_spec(pr, "impl") == "workdir spec"
 
     def test_get_spec_missing_file(self):
-        """get_spec returns None if the stored path doesn't exist."""
-        pr = {"id": "pr-1", "spec_impl": "/nonexistent/path/impl.md"}
+        """get_spec returns None when no spec exists in workdir or local pm."""
+        pr = {"id": "pr-1", "workdir": "/nonexistent/workdir"}
         assert spec_gen.get_spec(pr, "impl") is None
 
     def test_spec_stored_in_project_dir(self, tmp_path):
@@ -163,8 +168,11 @@ class TestGenerateSpec:
     @patch("pm_core.spec_gen.launch_claude_print")
     @patch("pm_core.spec_gen.get_global_setting_value", return_value="prompt")
     def test_uses_existing_spec(self, mock_setting, mock_claude, tmp_path):
-        spec_path = _make_spec_file(tmp_path, "pr-abc1234", "impl", "existing spec")
-        data = _make_data({"spec_impl": spec_path})
+        # Spec lives in workdir/pm/specs/ — get_spec finds it via pr["workdir"]
+        spec_dir = tmp_path / "pm" / "specs" / "pr-abc1234"
+        spec_dir.mkdir(parents=True)
+        (spec_dir / "impl.md").write_text("existing spec")
+        data = _make_data({"workdir": str(tmp_path)})
 
         spec, needs_review = spec_gen.generate_spec(data, "pr-abc1234", "impl")
 
@@ -259,18 +267,20 @@ class TestFormatSpecForPrompt:
         assert spec_gen.format_spec_for_prompt(pr, "impl") == ""
 
     def test_with_spec(self, tmp_path):
-        spec_file = tmp_path / "impl.md"
-        spec_file.write_text("## Requirements\n- Do X")
-        pr = {"id": "pr-1", "spec_impl": str(spec_file)}
+        spec_dir = tmp_path / "pm" / "specs" / "pr-1"
+        spec_dir.mkdir(parents=True)
+        (spec_dir / "impl.md").write_text("## Requirements\n- Do X")
+        pr = {"id": "pr-1", "workdir": str(tmp_path)}
         result = spec_gen.format_spec_for_prompt(pr, "impl")
         assert "Implementation Spec" in result
         assert "## Requirements" in result
         assert "Do X" in result
 
     def test_qa_phase_label(self, tmp_path):
-        spec_file = tmp_path / "qa.md"
-        spec_file.write_text("Test Z")
-        pr = {"id": "pr-1", "spec_qa": str(spec_file)}
+        spec_dir = tmp_path / "pm" / "specs" / "pr-1"
+        spec_dir.mkdir(parents=True)
+        (spec_dir / "qa.md").write_text("Test Z")
+        pr = {"id": "pr-1", "workdir": str(tmp_path)}
         result = spec_gen.format_spec_for_prompt(pr, "qa")
         assert "QA Spec" in result
 
@@ -290,9 +300,10 @@ class TestBuildSpecPrompt:
 
     @patch("pm_core.spec_gen.get_global_setting_value", return_value="prompt")
     def test_qa_prompt_includes_impl_spec(self, mock_setting, tmp_path):
-        spec_file = tmp_path / "impl.md"
-        spec_file.write_text("impl spec")
-        data = _make_data({"spec_impl": str(spec_file)})
+        spec_dir = tmp_path / "pm" / "specs" / "pr-abc1234"
+        spec_dir.mkdir(parents=True)
+        (spec_dir / "impl.md").write_text("impl spec")
+        data = _make_data({"workdir": str(tmp_path)})
         pr = data["prs"][0]
         prompt = spec_gen._build_spec_prompt(data, pr, "qa")
         assert "impl spec" in prompt
@@ -483,9 +494,10 @@ class TestSpecGenerationPreamble:
 
     @patch("pm_core.spec_gen.get_global_setting_value", return_value="auto")
     def test_existing_spec_returns_empty(self, mock_setting, tmp_path):
-        spec_file = tmp_path / "impl.md"
-        spec_file.write_text("existing spec")
-        pr = {"id": "pr-1", "spec_impl": str(spec_file)}
+        spec_dir = tmp_path / "pm" / "specs" / "pr-1"
+        spec_dir.mkdir(parents=True)
+        (spec_dir / "impl.md").write_text("existing spec")
+        pr = {"id": "pr-1", "workdir": str(tmp_path)}
         result = spec_gen.spec_generation_preamble(pr, "impl", root=tmp_path)
         assert result == ""
 
