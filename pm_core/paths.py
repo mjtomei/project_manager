@@ -59,6 +59,7 @@ def sessions_dir() -> Path:
     - {session-tag}/override  - Path to workdir for installation override
     - {session-tag}/debug     - If contains 'true', enable debug logging
     - {session-tag}/dangerously-skip-permissions - If contains 'true', skip Claude permissions
+    - {session-tag}/fake-claude - JSON config to replace Claude with bin/fake-claude
     """
     d = pm_home() / "sessions"
     d.mkdir(parents=True, exist_ok=True)
@@ -174,6 +175,56 @@ def set_skip_permissions(session_tag: str, enabled: bool = True) -> None:
             skip_file.write_text("true\n")
         elif skip_file.exists():
             skip_file.unlink()
+
+
+def fake_claude_config(session_tag: str | None = None) -> dict | None:
+    """Return fake-claude config dict for the current session, or None if not set.
+
+    Looks for ~/.pm/sessions/{session-tag}/fake-claude containing JSON such as::
+
+        {
+          "verdicts": {"PASS": 70, "NEEDS_WORK": 20, "INPUT_REQUIRED": 10},
+          "preamble": 3,
+          "delay": 0.0,
+          "body_lines": 0,
+          "body_delay": 0.0
+        }
+
+    When present, all Claude launches in the session are redirected to
+    ``bin/fake-claude`` and the verdict is drawn randomly from the weighted
+    ``verdicts`` map.  Parameters absent from the config use fake-claude
+    defaults.
+
+    An optional ``"binary"`` key overrides the fake-claude executable path.
+    """
+    import json
+    sd = session_dir(session_tag)
+    if not sd:
+        return None
+    f = sd / "fake-claude"
+    if not f.exists():
+        return None
+    try:
+        return json.loads(f.read_text())
+    except (OSError, IOError, json.JSONDecodeError):
+        return None
+
+
+def set_fake_claude_config(session_tag: str, config: dict) -> None:
+    """Write fake-claude config JSON to ~/.pm/sessions/{tag}/fake-claude."""
+    import json
+    sd = session_dir(session_tag)
+    if sd:
+        (sd / "fake-claude").write_text(json.dumps(config, indent=2) + "\n")
+
+
+def clear_fake_claude(session_tag: str) -> None:
+    """Remove the fake-claude config file for a session."""
+    sd = session_dir(session_tag)
+    if sd:
+        f = sd / "fake-claude"
+        if f.exists():
+            f.unlink()
 
 
 def configure_logger(name: str, log_file: str | None = None, max_bytes: int = 10_000_000) -> logging.Logger:

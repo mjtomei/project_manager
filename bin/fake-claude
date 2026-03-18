@@ -31,10 +31,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--verdict",
-        required=True,
+        required=False,
+        default="PASS",
         choices=ALL_VERDICTS,
         metavar="VERDICT",
-        help=f"Verdict to emit. One of: {', '.join(ALL_VERDICTS)}",
+        help=f"Verdict to emit (default: PASS). One of: {', '.join(ALL_VERDICTS)}",
     )
     p.add_argument(
         "--preamble",
@@ -101,7 +102,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
-    args = _build_parser().parse_args()
+    # parse_known_args so that Claude-specific flags (--resume, --session-id,
+    # --model, --dangerously-skip-permissions, -p, …) are silently ignored when
+    # fake-claude is invoked as a drop-in replacement via the session override.
+    args, _ = _build_parser().parse_known_args()
     run_fake_claude(
         verdict=args.verdict,
         preamble=args.preamble,

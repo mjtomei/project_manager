@@ -472,3 +472,173 @@ class TestAllVerdicts:
     def test_block_end_markers_in_all(self):
         for _, end in BLOCK_VERDICTS.values():
             assert end in ALL_VERDICTS, f"End marker {end!r} missing from ALL_VERDICTS"
+
+
+# ---------------------------------------------------------------------------
+# Session-file fake-claude override (paths.py)
+# ---------------------------------------------------------------------------
+
+class TestFakeClaudeConfig:
+    """Tests for fake_claude_config / set_fake_claude_config / clear_fake_claude."""
+
+    def test_returns_none_when_no_file(self, tmp_path, monkeypatch):
+        from pm_core.paths import fake_claude_config
+        monkeypatch.setattr("pm_core.paths.sessions_dir", lambda: tmp_path)
+        monkeypatch.setattr("pm_core.paths.get_session_tag", lambda **kw: "test-tag")
+        assert fake_claude_config("nonexistent-tag") is None
+
+    def test_round_trip(self, tmp_path, monkeypatch):
+        from pm_core.paths import fake_claude_config, set_fake_claude_config, session_dir
+        tag = "test-tag"
+        # Make session_dir return a subdir of tmp_path
+        monkeypatch.setattr("pm_core.paths.sessions_dir", lambda: tmp_path)
+        monkeypatch.setattr("pm_core.paths.get_session_tag", lambda **kw: tag)
+
+        config = {"verdicts": {"PASS": 70, "NEEDS_WORK": 30}, "preamble": 5, "delay": 1.0}
+        set_fake_claude_config(tag, config)
+        result = fake_claude_config(tag)
+        assert result == config
+
+    def test_clear_removes_file(self, tmp_path, monkeypatch):
+        from pm_core.paths import fake_claude_config, set_fake_claude_config, clear_fake_claude
+        tag = "test-tag"
+        monkeypatch.setattr("pm_core.paths.sessions_dir", lambda: tmp_path)
+        monkeypatch.setattr("pm_core.paths.get_session_tag", lambda **kw: tag)
+
+        set_fake_claude_config(tag, {"verdicts": {"PASS": 1}})
+        assert fake_claude_config(tag) is not None
+        clear_fake_claude(tag)
+        assert fake_claude_config(tag) is None
+
+    def test_invalid_json_returns_none(self, tmp_path, monkeypatch):
+        from pm_core.paths import fake_claude_config, session_dir
+        tag = "test-tag"
+        monkeypatch.setattr("pm_core.paths.sessions_dir", lambda: tmp_path)
+        monkeypatch.setattr("pm_core.paths.get_session_tag", lambda **kw: tag)
+
+        sd = tmp_path / tag
+        sd.mkdir(parents=True, exist_ok=True)
+        (sd / "fake-claude").write_text("not valid json")
+        assert fake_claude_config(tag) is None
+
+
+# ---------------------------------------------------------------------------
+# Launcher fake-claude integration (_pick_fake_verdict, _fake_claude_args,
+# find_claude, build_claude_shell_cmd)
+# ---------------------------------------------------------------------------
+
+class TestFakeClaudeLauncher:
+    def test_pick_fake_verdict_respects_weights(self):
+        from pm_core.claude_launcher import _pick_fake_verdict
+        # With only one option, always picks that option.
+        for _ in range(20):
+            assert _pick_fake_verdict({"NEEDS_WORK": 1}) == "NEEDS_WORK"
+
+    def test_pick_fake_verdict_samples_from_keys(self):
+        from pm_core.claude_launcher import _pick_fake_verdict
+        results = {_pick_fake_verdict({"PASS": 1, "NEEDS_WORK": 1}) for _ in range(100)}
+        assert "PASS" in results
+        assert "NEEDS_WORK" in results
+
+    def test_fake_claude_args_includes_verdict(self):
+        from pm_core.claude_launcher import _fake_claude_args
+        args = _fake_claude_args({"verdicts": {"PASS": 1}})
+        assert "--verdict" in args
+        assert "PASS" in args
+
+    def test_fake_claude_args_passes_preamble(self):
+        from pm_core.claude_launcher import _fake_claude_args
+        args = _fake_claude_args({"verdicts": {"PASS": 1}, "preamble": 7})
+        assert "--preamble" in args
+        idx = args.index("--preamble")
+        assert args[idx + 1] == "7"
+
+    def test_fake_claude_args_passes_delay(self):
+        from pm_core.claude_launcher import _fake_claude_args
+        args = _fake_claude_args({"verdicts": {"PASS": 1}, "delay": 2.5})
+        assert "--delay" in args
+        idx = args.index("--delay")
+        assert args[idx + 1] == "2.5"
+
+    def test_fake_claude_args_passes_body_lines(self):
+        from pm_core.claude_launcher import _fake_claude_args
+        args = _fake_claude_args({"verdicts": {"PASS": 1}, "body_lines": 10})
+        assert "--body-lines" in args
+
+    def test_find_claude_returns_fake_bin_when_config_set(self, monkeypatch):
+        from pm_core import claude_launcher
+        monkeypatch.setattr(claude_launcher, "_fake_claude_config",
+                            lambda: {"verdicts": {"PASS": 1}})
+        result = claude_launcher.find_claude()
+        assert result == claude_launcher._FAKE_CLAUDE_BIN
+
+    def test_find_claude_respects_binary_key(self, monkeypatch):
+        from pm_core import claude_launcher
+        monkeypatch.setattr(claude_launcher, "_fake_claude_config",
+                            lambda: {"binary": "/custom/fake", "verdicts": {"PASS": 1}})
+        assert claude_launcher.find_claude() == "/custom/fake"
+
+    def test_find_claude_normal_when_no_config(self, monkeypatch):
+        from pm_core import claude_launcher
+        monkeypatch.setattr(claude_launcher, "_fake_claude_config", lambda: None)
+        monkeypatch.setattr("shutil.which", lambda name: "/usr/local/bin/claude")
+        assert claude_launcher.find_claude() == "/usr/local/bin/claude"
+
+    def test_build_shell_cmd_uses_fake_binary(self, monkeypatch):
+        from pm_core import claude_launcher
+        fake_bin = str(BIN_FAKE_CLAUDE)
+        monkeypatch.setattr(claude_launcher, "_fake_claude_config",
+                            lambda: {"verdicts": {"PASS": 1}})
+        monkeypatch.setattr("pm_core.paths.fake_claude_config",
+                            lambda tag=None: {"verdicts": {"PASS": 1}})
+        cmd = claude_launcher.build_claude_shell_cmd(prompt="test prompt")
+        assert str(claude_launcher._FAKE_CLAUDE_BIN) in cmd
+        assert "--verdict" in cmd
+        assert "PASS" in cmd
+
+    def test_build_shell_cmd_no_fake_uses_claude(self, monkeypatch):
+        from pm_core import claude_launcher
+        monkeypatch.setattr("pm_core.paths.fake_claude_config", lambda tag=None: None)
+        monkeypatch.setattr("pm_core.paths.skip_permissions_enabled", lambda tag=None: False)
+        cmd = claude_launcher.build_claude_shell_cmd(prompt="hi")
+        assert cmd.startswith("claude") or cmd.startswith(" ") or "claude" in cmd
+        assert "--verdict" not in cmd
+
+
+# ---------------------------------------------------------------------------
+# bin/fake-claude: --verdict optional + parse_known_args
+# ---------------------------------------------------------------------------
+
+class TestBinFakeClaudeOptionalVerdict:
+    def test_no_verdict_defaults_to_pass(self):
+        result = subprocess.run(
+            [sys.executable, str(BIN_FAKE_CLAUDE), "--preamble", "0"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        assert "PASS" in result.stdout
+
+    def test_ignores_claude_flags(self):
+        """Claude-specific flags passed by the launcher must be silently ignored."""
+        result = subprocess.run(
+            [sys.executable, str(BIN_FAKE_CLAUDE),
+             "--verdict", "NEEDS_WORK",
+             "--preamble", "0",
+             "--dangerously-skip-permissions",
+             "--model", "claude-opus-4-5",
+             "--resume", "some-session-id",
+             "some prompt text"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        assert "NEEDS_WORK" in result.stdout
+
+    def test_print_flag_ignored(self):
+        result = subprocess.run(
+            [sys.executable, str(BIN_FAKE_CLAUDE),
+             "--verdict", "PASS", "--preamble", "0",
+             "-p", "some prompt"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        assert "PASS" in result.stdout

@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import random
 import shlex
 import shutil
 import subprocess
@@ -12,6 +13,44 @@ from pathlib import Path
 
 from pm_core.paths import configure_logger, log_shell_command
 _log = configure_logger("pm.claude_launcher")
+
+# Default path to the fake-claude executable bundled with pm.
+_FAKE_CLAUDE_BIN = str(Path(__file__).parent.parent / "bin" / "fake-claude")
+
+
+def _fake_claude_config() -> dict | None:
+    """Return the fake-claude config for the current session, or None."""
+    from pm_core.paths import fake_claude_config
+    return fake_claude_config()
+
+
+def _pick_fake_verdict(verdicts: dict) -> str:
+    """Pick a verdict at random using the given weight map."""
+    names = list(verdicts.keys())
+    weights = [float(verdicts[n]) for n in names]
+    return random.choices(names, weights=weights, k=1)[0]
+
+
+def _fake_claude_args(config: dict) -> list[str]:
+    """Build the fake-claude argv (excluding the binary) from a config dict.
+
+    Picks a verdict randomly from the weighted ``verdicts`` map and
+    translates recognised config keys into CLI flags.
+    """
+    verdicts = config.get("verdicts", {"PASS": 1})
+    verdict = _pick_fake_verdict(verdicts)
+    args = ["--verdict", verdict]
+    for cfg_key, flag in (
+        ("preamble", "--preamble"),
+        ("preamble_delay", "--preamble-delay"),
+        ("delay", "--delay"),
+        ("body_lines", "--body-lines"),
+        ("body_batch", "--body-batch"),
+        ("body_delay", "--body-delay"),
+    ):
+        if cfg_key in config:
+            args.extend([flag, str(config[cfg_key])])
+    return args
 
 
 def _resolve_provider(provider: str | None = None):
@@ -99,7 +138,10 @@ def _parse_session_id(stderr_text: str) -> str | None:
 
 
 def find_claude() -> str | None:
-    """Return path to claude CLI, or None if not found."""
+    """Return path to the claude CLI (or fake-claude override), or None if not found."""
+    config = _fake_claude_config()
+    if config is not None:
+        return config.get("binary", _FAKE_CLAUDE_BIN)
     return shutil.which("claude")
 
 
@@ -166,19 +208,23 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
         save_session(pm_root, session_key, session_id)
         _log.info("Generated new session_id=%s for key=%s", session_id, session_key)
 
+    fc_config = _fake_claude_config()
     cmd = [claude]
-    if _skip_permissions():
-        cmd.append("--dangerously-skip-permissions")
-    if model_flag:
-        cmd.extend(["--model", model_flag])
-    if effort:
-        cmd.extend(["--effort", effort])
-    if is_resuming:
-        cmd.extend(["--resume", session_id])
-        # Don't pass prompt when resuming - Claude already has the conversation
+    if fc_config is not None:
+        cmd.extend(_fake_claude_args(fc_config))
     else:
-        cmd.extend(["--session-id", session_id])
-        cmd.append(prompt)
+        if _skip_permissions():
+            cmd.append("--dangerously-skip-permissions")
+        if model_flag:
+            cmd.extend(["--model", model_flag])
+        if effort:
+            cmd.extend(["--effort", effort])
+        if is_resuming:
+            cmd.extend(["--resume", session_id])
+            # Don't pass prompt when resuming - Claude already has the conversation
+        else:
+            cmd.extend(["--session-id", session_id])
+            cmd.append(prompt)
 
     _log.info("launch_claude: cmd=%s (cwd=%s, session_key=%s, session_id=%s)",
               cmd[:6], cwd, session_key, session_id[:8] + "...")
@@ -192,7 +238,7 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
         log_shell_command(cmd, prefix="claude", returncode=returncode)
 
     # If session failed (possibly invalid/corrupted), try with fresh session
-    if returncode != 0 and resume:
+    if returncode != 0 and resume and fc_config is None:
         _log.warning("Session failed (rc=%d), retrying with fresh session", returncode)
         session_id = str(uuid.uuid4())
         save_session(pm_root, session_key, session_id)
@@ -244,19 +290,23 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
     # Resolve provider
     _, model_flag, run_env = _resolve_provider(provider)
 
+    fc_config = _fake_claude_config()
     cmd = [claude]
-    if _skip_permissions():
-        cmd.append("--dangerously-skip-permissions")
-    # Explicit model takes precedence over provider model_flag
-    effective_model = model or model_flag
-    if effective_model:
-        cmd.extend(["--model", effective_model])
-    if effort:
-        cmd.extend(["--effort", effort])
-    if allowed_tools:
-        for tool in allowed_tools:
-            cmd.extend(["--allowedTools", tool])
-    cmd.extend(["-p", prompt])
+    if fc_config is not None:
+        cmd.extend(_fake_claude_args(fc_config))
+    else:
+        if _skip_permissions():
+            cmd.append("--dangerously-skip-permissions")
+        # Explicit model takes precedence over provider model_flag
+        effective_model = model or model_flag
+        if effective_model:
+            cmd.extend(["--model", effective_model])
+        if effort:
+            cmd.extend(["--effort", effort])
+        if allowed_tools:
+            for tool in allowed_tools:
+                cmd.extend(["--allowedTools", tool])
+        cmd.extend(["-p", prompt])
 
     done = threading.Event()
 
@@ -370,9 +420,15 @@ def build_claude_shell_cmd(
         parts = [f"{k}={shlex.quote(v)}" for k, v in provider_env.items()]
         env_prefix = " ".join(parts) + " "
 
-    from pm_core.paths import skip_permissions_enabled
-    skip = " --dangerously-skip-permissions" if skip_permissions_enabled(session_tag) else ""
-    cmd = f"{env_prefix}claude{skip}"
+    from pm_core.paths import skip_permissions_enabled, fake_claude_config
+    fc_config = fake_claude_config(session_tag)
+    if fc_config is not None:
+        binary = fc_config.get("binary", _FAKE_CLAUDE_BIN)
+        fake_args = _fake_claude_args(fc_config)
+        cmd = env_prefix + shlex.quote(binary) + " " + " ".join(shlex.quote(a) for a in fake_args)
+    else:
+        skip = " --dangerously-skip-permissions" if skip_permissions_enabled(session_tag) else ""
+        cmd = f"{env_prefix}claude{skip}"
 
     # Explicit model param overrides provider's model_flag
     effective_model = model or model_flag
@@ -475,12 +531,16 @@ def launch_claude_print_background(prompt: str, cwd: str | None = None,
             if callback:
                 callback("", "claude CLI not found", 1)
             return
+        fc_config = _fake_claude_config()
         cmd = [claude]
-        if _skip_permissions():
-            cmd.append("--dangerously-skip-permissions")
-        if model_flag:
-            cmd.extend(["--model", model_flag])
-        cmd.extend(["-p", prompt])
+        if fc_config is not None:
+            cmd.extend(_fake_claude_args(fc_config))
+        else:
+            if _skip_permissions():
+                cmd.append("--dangerously-skip-permissions")
+            if model_flag:
+                cmd.extend(["--model", model_flag])
+            cmd.extend(["-p", prompt])
         log_shell_command(cmd, prefix="claude-print")
         result = subprocess.run(
             cmd,
