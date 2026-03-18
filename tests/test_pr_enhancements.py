@@ -1148,5 +1148,5 @@ class TestPrStartSpecGate:
             # Should not exit with error 1 (spec gate)
             result = runner.invoke(pr_mod.pr, ["start", "pr-001"])
 
-        # Should NOT fail with exit code 1 from spec gate
-        assert result.exit_code != 1 or "pending review" not in result.output
+        # Should NOT fail with the spec gate message
+        assert "pending review" not in result.output
