@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+"""Standalone fake-claude executable for integration tests.
+
+Accepts the same flags as ``pm fake-claude`` and can be placed on PATH
+so that any code calling ``find_claude()`` or ``shutil.which("claude")``
+can be redirected to this script.
+
+Usage:
+  fake-claude --verdict PASS
+  fake-claude --verdict NEEDS_WORK --preamble 5 --delay 2
+  fake-claude --verdict FLAGGED --body "Step 1: FAILED"
+  fake-claude --verdict QA_PLAN --preamble 0
+  fake-claude --verdict PASS --stream
+"""
+
+import argparse
+import sys
+
+# Allow running from the repo root without installing the package.
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from pm_core.fake_claude import ALL_VERDICTS, run_fake_claude
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        description="Emit a verdict for integration testing without real Claude API calls.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    p.add_argument(
+        "--verdict",
+        required=True,
+        choices=ALL_VERDICTS,
+        metavar="VERDICT",
+        help=f"Verdict to emit. One of: {', '.join(ALL_VERDICTS)}",
+    )
+    p.add_argument(
+        "--preamble",
+        type=int,
+        default=3,
+        metavar="N",
+        help="Number of filler prose lines before the verdict (default: 3).",
+    )
+    p.add_argument(
+        "--delay",
+        type=float,
+        default=0.0,
+        metavar="SECONDS",
+        help="Seconds to sleep before writing the verdict (default: 0).",
+    )
+    p.add_argument(
+        "--body",
+        default=None,
+        metavar="TEXT",
+        help="Custom text between START/END markers (block verdicts only).",
+    )
+    p.add_argument(
+        "--stream",
+        action="store_true",
+        default=False,
+        help="Write output character-by-character to simulate streaming.",
+    )
+    return p
+
+
+def main() -> None:
+    args = _build_parser().parse_args()
+    run_fake_claude(
+        verdict=args.verdict,
+        preamble=args.preamble,
+        delay=args.delay,
+        body=args.body,
+        stream=args.stream,
+    )
+
+
+if __name__ == "__main__":
+    main()
