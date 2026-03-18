@@ -4,7 +4,7 @@ import subprocess
 import sys
 from io import StringIO
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import pytest
 
@@ -136,7 +136,7 @@ class TestRunFakeClaudeBlockVerdicts:
 
 
 # ---------------------------------------------------------------------------
-# run_fake_claude — delay
+# run_fake_claude — delays
 # ---------------------------------------------------------------------------
 
 class TestRunFakeClaudeDelay:
@@ -151,6 +151,97 @@ class TestRunFakeClaudeDelay:
         with patch("sys.stdout", buf), patch("time.sleep") as mock_sleep:
             run_fake_claude(verdict="PASS", preamble=0, delay=1.5)
         mock_sleep.assert_called_once_with(1.5)
+
+    def test_preamble_delay_between_lines(self):
+        buf = StringIO()
+        with patch("sys.stdout", buf), patch("time.sleep") as mock_sleep:
+            run_fake_claude(verdict="PASS", preamble=3, preamble_delay=0.5)
+        # Should sleep between lines 0→1 and 1→2 (not after the last line)
+        preamble_sleeps = [c for c in mock_sleep.call_args_list if c == call(0.5)]
+        assert len(preamble_sleeps) == 2
+
+    def test_preamble_delay_zero_no_sleep(self):
+        buf = StringIO()
+        with patch("sys.stdout", buf), patch("time.sleep") as mock_sleep:
+            run_fake_claude(verdict="PASS", preamble=3, preamble_delay=0.0)
+        mock_sleep.assert_not_called()
+
+    def test_preamble_delay_single_line_no_sleep(self):
+        """With preamble=1 there are no inter-line gaps."""
+        buf = StringIO()
+        with patch("sys.stdout", buf), patch("time.sleep") as mock_sleep:
+            run_fake_claude(verdict="PASS", preamble=1, preamble_delay=1.0)
+        mock_sleep.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# run_fake_claude — body lines (generated, batched)
+# ---------------------------------------------------------------------------
+
+class TestRunFakeClaudeBodyLines:
+    def _capture(self, **kwargs) -> str:
+        buf = StringIO()
+        with patch("sys.stdout", buf), patch("time.sleep"):
+            run_fake_claude(**kwargs)
+        return buf.getvalue()
+
+    def test_body_lines_zero_no_extra_output(self):
+        out_with = self._capture(verdict="PASS", preamble=2, body_lines=0)
+        out_without = self._capture(verdict="PASS", preamble=2)
+        assert out_with == out_without
+
+    def test_body_lines_adds_output(self):
+        buf = StringIO()
+        with patch("sys.stdout", buf), patch("time.sleep"):
+            run_fake_claude(verdict="PASS", preamble=0, body_lines=5)
+        lines = [l for l in buf.getvalue().splitlines() if l.strip() and l.strip() != "PASS"]
+        assert len(lines) == 5
+
+    def test_body_lines_cycles_through_pool(self):
+        """More body_lines than pool size should not raise."""
+        buf = StringIO()
+        with patch("sys.stdout", buf), patch("time.sleep"):
+            run_fake_claude(verdict="PASS", preamble=0, body_lines=30)
+        lines = [l for l in buf.getvalue().splitlines() if l.strip() and l.strip() != "PASS"]
+        assert len(lines) == 30
+
+    def test_body_delay_between_batches(self):
+        with patch("sys.stdout", StringIO()), patch("time.sleep") as mock_sleep:
+            # 6 lines, batch=2 → 3 batches → 2 inter-batch sleeps (not after last)
+            run_fake_claude(verdict="PASS", preamble=0,
+                            body_lines=6, body_batch=2, body_delay=0.3)
+        body_sleeps = [c for c in mock_sleep.call_args_list if c == call(0.3)]
+        assert len(body_sleeps) == 2
+
+    def test_body_delay_batch1_one_sleep_per_line(self):
+        with patch("sys.stdout", StringIO()), patch("time.sleep") as mock_sleep:
+            # 4 lines, batch=1 → sleep after lines 1,2,3 (not line 4)
+            run_fake_claude(verdict="PASS", preamble=0,
+                            body_lines=4, body_batch=1, body_delay=0.2)
+        body_sleeps = [c for c in mock_sleep.call_args_list if c == call(0.2)]
+        assert len(body_sleeps) == 3
+
+    def test_body_delay_zero_no_sleep(self):
+        with patch("sys.stdout", StringIO()), patch("time.sleep") as mock_sleep:
+            run_fake_claude(verdict="PASS", preamble=0,
+                            body_lines=5, body_batch=1, body_delay=0.0)
+        mock_sleep.assert_not_called()
+
+    def test_body_lines_appear_before_verdict(self):
+        buf = StringIO()
+        with patch("sys.stdout", buf), patch("time.sleep"):
+            run_fake_claude(verdict="PASS", preamble=0, body_lines=3)
+        out = buf.getvalue()
+        # PASS must come after the body lines
+        body_line = "Examining the test harness configuration…"
+        assert out.index(body_line) < out.index("PASS")
+
+    def test_body_lines_and_preamble_combined(self):
+        buf = StringIO()
+        with patch("sys.stdout", buf), patch("time.sleep"):
+            run_fake_claude(verdict="PASS", preamble=2, body_lines=3)
+        lines = [l for l in buf.getvalue().splitlines() if l.strip() and l.strip() != "PASS"]
+        assert len(lines) == 5  # 2 preamble + 3 body
 
 
 # ---------------------------------------------------------------------------
@@ -178,6 +269,11 @@ class TestRunFakeClaudeStream:
             run_fake_claude(verdict="PASS", preamble=0, stream=True)
         # Should have slept at least once per character
         assert mock_sleep.call_count > 0
+
+    def test_custom_char_delay(self):
+        with patch("sys.stdout", StringIO()), patch("time.sleep") as mock_sleep:
+            run_fake_claude(verdict="PASS", preamble=0, stream=True, char_delay=0.05)
+        assert all(c == call(0.05) for c in mock_sleep.call_args_list)
 
 
 # ---------------------------------------------------------------------------
@@ -335,6 +431,16 @@ class TestBinFakeClaude:
         )
         assert result.returncode != 0
 
+    def test_body_lines_flag(self):
+        result = subprocess.run(
+            [sys.executable, str(BIN_FAKE_CLAUDE), "--verdict", "PASS",
+             "--preamble", "0", "--body-lines", "3"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        lines = [l for l in result.stdout.splitlines() if l.strip() and l.strip() != "PASS"]
+        assert len(lines) == 3
+
     def test_help_flag(self):
         result = subprocess.run(
             [sys.executable, str(BIN_FAKE_CLAUDE), "--help"],
@@ -342,6 +448,9 @@ class TestBinFakeClaude:
         )
         assert result.returncode == 0
         assert "verdict" in result.stdout.lower()
+        assert "body-lines" in result.stdout
+        assert "body-batch" in result.stdout
+        assert "preamble-delay" in result.stdout
 
 
 # ---------------------------------------------------------------------------

@@ -94,48 +94,96 @@ def _write(text: str, stream: bool = False, char_delay: float = 0.015) -> None:
         time.sleep(char_delay)
 
 
+# Lines used when auto-generating body content (--body-lines).
+_BODY_LINES = [
+    "Examining the test harness configuration…",
+    "The module boundaries look well-defined.",
+    "Tracing execution through the happy path.",
+    "Checking that error paths are covered.",
+    "Inspecting the fixture data for completeness.",
+    "Verifying the state machine transitions.",
+    "Reviewing the concurrency model for races.",
+    "Confirming the logging output is structured.",
+    "Checking the cleanup path after failures.",
+    "Validating the schema against the examples.",
+]
+
+
 def run_fake_claude(
     verdict: str,
     preamble: int = 3,
+    preamble_delay: float = 0.0,
     delay: float = 0.0,
     body: str | None = None,
+    body_lines: int = 0,
+    body_batch: int = 1,
+    body_delay: float = 0.0,
     stream: bool = False,
+    char_delay: float = 0.015,
 ) -> None:
     """Execute the fake Claude session.
 
+    Output sequence:
+      1. *preamble* filler lines, with *preamble_delay* between each.
+      2. *body_lines* generated lines, emitted *body_batch* at a time
+         with *body_delay* between batches.  Useful for testing that the
+         verdict poller does not prematurely accept keywords from earlier
+         output while new content is still arriving.
+      3. Sleep *delay* seconds (simulates overall session duration).
+      4. The verdict block.
+
     Args:
         verdict: Verdict keyword to emit (required).
-        preamble: Number of filler prose lines to write before the verdict.
-        delay: Seconds to sleep before writing the verdict block.
+        preamble: Number of filler prose lines before the generated body.
+        preamble_delay: Seconds to sleep between each preamble line.
+        delay: Seconds to sleep immediately before writing the verdict.
         body: Custom text between _START/_END markers (block verdicts only).
+        body_lines: Number of extra generated lines to emit before the verdict.
+        body_batch: Lines per emission batch; *body_delay* is applied after
+            each full batch.  Default 1 (one line, then pause).
+        body_delay: Seconds to sleep between each *body_batch* chunk.
         stream: Write output character-by-character to simulate streaming.
+        char_delay: Per-character sleep when *stream* is True (default 0.015 s).
     """
     upper = verdict.upper()
+    _w = lambda text: _write(text, stream=stream, char_delay=char_delay)
 
-    # Write preamble prose
+    # 1. Preamble lines
     for i in range(preamble):
         line = _PREAMBLE_LINES[i % len(_PREAMBLE_LINES)]
-        _write(line + "\n", stream=stream)
+        _w(line + "\n")
+        if preamble_delay > 0 and i < preamble - 1:
+            time.sleep(preamble_delay)
 
-    # Optional delay before verdict
+    # 2. Generated body lines (batched, with inter-batch delay)
+    if body_lines > 0:
+        batch_size = max(1, body_batch)
+        for i in range(body_lines):
+            line = _BODY_LINES[i % len(_BODY_LINES)]
+            _w(line + "\n")
+            # Sleep after each full batch (but not after the very last line)
+            if body_delay > 0 and ((i + 1) % batch_size == 0) and (i + 1) < body_lines:
+                time.sleep(body_delay)
+
+    # 3. Pre-verdict delay
     if delay > 0:
         time.sleep(delay)
 
-    # Determine whether this is a single-line or block verdict
+    # 4. Verdict block
     if upper in SINGLE_LINE_VERDICTS:
-        _write("\n" + upper + "\n", stream=stream)
+        _w("\n" + upper + "\n")
         return
 
     block_name = _resolve_block_name(upper)
     if block_name is None:
-        # Unknown verdict — emit it as-is on its own line (best-effort)
-        _write("\n" + upper + "\n", stream=stream)
+        # Unknown verdict — emit as-is (best-effort)
+        _w("\n" + upper + "\n")
         return
 
     start_marker, end_marker = BLOCK_VERDICTS[block_name]
     body_text = body if body is not None else _DEFAULT_BODIES.get(block_name, "")
 
-    _write("\n" + start_marker + "\n", stream=stream)
+    _w("\n" + start_marker + "\n")
     if body_text:
-        _write(body_text.rstrip("\n") + "\n", stream=stream)
-    _write(end_marker + "\n", stream=stream)
+        _w(body_text.rstrip("\n") + "\n")
+    _w(end_marker + "\n")

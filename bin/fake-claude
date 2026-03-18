@@ -41,14 +41,21 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=3,
         metavar="N",
-        help="Number of filler prose lines before the verdict (default: 3).",
+        help="Number of filler prose lines before the generated body (default: 3).",
+    )
+    p.add_argument(
+        "--preamble-delay",
+        type=float,
+        default=0.0,
+        metavar="SECONDS",
+        help="Seconds to sleep between each preamble line (default: 0).",
     )
     p.add_argument(
         "--delay",
         type=float,
         default=0.0,
         metavar="SECONDS",
-        help="Seconds to sleep before writing the verdict (default: 0).",
+        help="Seconds to sleep immediately before writing the verdict (default: 0).",
     )
     p.add_argument(
         "--body",
@@ -57,10 +64,38 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Custom text between START/END markers (block verdicts only).",
     )
     p.add_argument(
+        "--body-lines",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Number of extra generated lines to emit before the verdict (default: 0).",
+    )
+    p.add_argument(
+        "--body-batch",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Lines per emission batch, used with --body-delay (default: 1).",
+    )
+    p.add_argument(
+        "--body-delay",
+        type=float,
+        default=0.0,
+        metavar="SECONDS",
+        help="Seconds to sleep between each --body-batch chunk (default: 0).",
+    )
+    p.add_argument(
         "--stream",
         action="store_true",
         default=False,
         help="Write output character-by-character to simulate streaming.",
+    )
+    p.add_argument(
+        "--char-delay",
+        type=float,
+        default=0.015,
+        metavar="SECONDS",
+        help="Per-character sleep when --stream is active (default: 0.015).",
     )
     return p
 
@@ -70,9 +105,14 @@ def main() -> None:
     run_fake_claude(
         verdict=args.verdict,
         preamble=args.preamble,
+        preamble_delay=args.preamble_delay,
         delay=args.delay,
         body=args.body,
+        body_lines=args.body_lines,
+        body_batch=args.body_batch,
+        body_delay=args.body_delay,
         stream=args.stream,
+        char_delay=args.char_delay,
     )
 
 
