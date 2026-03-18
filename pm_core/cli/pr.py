@@ -746,7 +746,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                                          transcript=transcript, cwd=str(work_path),
                                          model=resolved_model,
                                          provider=resolved_provider,
-                                         effort=_resolution.effort)
+                                         effort=_resolution.effort,
+                                         session_type="impl")
             # Optionally wrap in a container for isolation
             from pm_core.container import wrap_claude_cmd, ContainerError
             _stag = pm_session.removeprefix("pm-") if pm_session else None
@@ -785,7 +786,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         clear_session(root, session_key)
     click.echo("Launching Claude...")
     launch_claude(prompt, cwd=str(work_path), session_key=session_key, pm_root=root, resume=not fresh,
-                  provider=resolved_provider, model=resolved_model, effort=_resolution.effort)
+                  provider=resolved_provider, model=resolved_model, effort=_resolution.effort,
+                  session_type="impl")
 
 
 def _add_companion_pane(pm_session: str, window_info: dict, workdir: str,
@@ -875,7 +877,8 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                                                       review_iteration=review_iteration,
                                                       review_loop_id=review_loop_id)
     claude_cmd = build_claude_shell_cmd(prompt=review_prompt,
-                                         transcript=transcript, cwd=workdir)
+                                         transcript=transcript, cwd=workdir,
+                                         session_type="review")
     # Optionally wrap in a container for isolation
     branch = pr_entry.get("branch", "")
     from pm_core.container import wrap_claude_cmd
@@ -923,7 +926,8 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                                          transcript=transcript, cwd=workdir,
                                          model=_resolution.model,
                                          provider=_resolution.provider,
-                                         effort=_resolution.effort)
+                                         effort=_resolution.effort,
+                                         session_type="review")
     # Optionally wrap in a container for isolation
     branch = pr_entry.get("branch", "")
     from pm_core.container import wrap_claude_cmd, ContainerError
@@ -1199,7 +1203,8 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
                                          transcript=transcript, cwd=workdir,
                                          model=_resolution.model,
                                          provider=_resolution.provider,
-                                         effort=_resolution.effort)
+                                         effort=_resolution.effort,
+                                         session_type="merge")
     # Merge runs on the host — it needs to push to master and modify the
     # main repo, which the branch-scoped push proxy would block.
     window_name = f"merge-{display_id}"

@@ -18,10 +18,10 @@ _log = configure_logger("pm.claude_launcher")
 _FAKE_CLAUDE_BIN = str(Path(__file__).parent.parent / "bin" / "fake-claude")
 
 
-def _fake_claude_config() -> dict | None:
-    """Return the fake-claude config for the current session, or None."""
-    from pm_core.paths import fake_claude_config
-    return fake_claude_config()
+def _fake_claude_config_for_type(session_type: str | None) -> dict | None:
+    """Return the merged fake-claude config for *session_type*, or None."""
+    from pm_core.paths import fake_claude_config_for_type
+    return fake_claude_config_for_type(session_type)
 
 
 def _pick_fake_verdict(verdicts: dict) -> str:
@@ -138,10 +138,11 @@ def _parse_session_id(stderr_text: str) -> str | None:
 
 
 def find_claude() -> str | None:
-    """Return path to the claude CLI (or fake-claude override), or None if not found."""
-    config = _fake_claude_config()
-    if config is not None:
-        return config.get("binary", _FAKE_CLAUDE_BIN)
+    """Return path to the claude CLI, or None if not found.
+
+    Does not apply the fake-claude override — session-type is required for
+    that.  Launch functions call ``_fake_claude_config_for_type`` directly.
+    """
     return shutil.which("claude")
 
 
@@ -170,7 +171,8 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
                   cwd: str | None = None, resume: bool = True,
                   provider: str | None = None,
                   model: str | None = None,
-                  effort: str | None = None) -> int:
+                  effort: str | None = None,
+                  session_type: str | None = None) -> int:
     """Run claude interactively with a prompt. Returns exit code.
 
     Attempts to resume a previous session if one exists for session_key.
@@ -208,7 +210,7 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
         save_session(pm_root, session_key, session_id)
         _log.info("Generated new session_id=%s for key=%s", session_id, session_key)
 
-    fc_config = _fake_claude_config()
+    fc_config = _fake_claude_config_for_type(session_type)
     cmd = [claude]
     if fc_config is not None:
         cmd.extend(_fake_claude_args(fc_config))
@@ -237,7 +239,8 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
     if returncode != 0:
         log_shell_command(cmd, prefix="claude", returncode=returncode)
 
-    # If session failed (possibly invalid/corrupted), try with fresh session
+    # If session failed (possibly invalid/corrupted), try with a fresh session.
+    # Skip the retry when using fake-claude — it always exits 0.
     if returncode != 0 and resume and fc_config is None:
         _log.warning("Session failed (rc=%d), retrying with fresh session", returncode)
         session_id = str(uuid.uuid4())
@@ -265,7 +268,8 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
                         provider: str | None = None,
                         model: str | None = None,
                         effort: str | None = None,
-                        allowed_tools: list[str] | None = None) -> str:
+                        allowed_tools: list[str] | None = None,
+                        session_type: str | None = None) -> str:
     """Run claude -p (non-interactive print mode). Returns stdout.
 
     Shows a spinner on stderr while waiting for Claude to finish.
@@ -290,7 +294,7 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
     # Resolve provider
     _, model_flag, run_env = _resolve_provider(provider)
 
-    fc_config = _fake_claude_config()
+    fc_config = _fake_claude_config_for_type(session_type)
     cmd = [claude]
     if fc_config is not None:
         cmd.extend(_fake_claude_args(fc_config))
@@ -362,6 +366,7 @@ def build_claude_shell_cmd(
     provider: str | None = None,
     effort: str | None = None,
     write_dir: str | None = None,
+    session_type: str | None = None,
 ) -> str:
     """Build a claude shell command string with proper flags and logging.
 
@@ -420,8 +425,8 @@ def build_claude_shell_cmd(
         parts = [f"{k}={shlex.quote(v)}" for k, v in provider_env.items()]
         env_prefix = " ".join(parts) + " "
 
-    from pm_core.paths import skip_permissions_enabled, fake_claude_config
-    fc_config = fake_claude_config(session_tag)
+    from pm_core.paths import skip_permissions_enabled, fake_claude_config_for_type
+    fc_config = fake_claude_config_for_type(session_type, session_tag)
     if fc_config is not None:
         binary = fc_config.get("binary", _FAKE_CLAUDE_BIN)
         fake_args = _fake_claude_args(fc_config)
@@ -514,16 +519,19 @@ def launch_bridge_in_tmux(prompt: str | None, cwd: str, session_name: str) -> st
 
 def launch_claude_print_background(prompt: str, cwd: str | None = None,
                                     callback=None,
-                                    provider: str | None = None) -> None:
+                                    provider: str | None = None,
+                                    session_type: str | None = None) -> None:
     """Run claude -p in a background thread. Calls callback(stdout, stderr, returncode) when done.
 
     Args:
         provider: Name of the LLM provider to use. See providers.py.
+        session_type: Session type for fake-claude override selection.
     """
     import threading
 
-    # Resolve provider outside the thread so config is read on the caller's thread
+    # Resolve provider and fake config outside the thread (caller's thread context)
     _, model_flag, run_env = _resolve_provider(provider)
+    fc_config = _fake_claude_config_for_type(session_type)
 
     def _run():
         claude = find_claude()
@@ -531,7 +539,6 @@ def launch_claude_print_background(prompt: str, cwd: str | None = None,
             if callback:
                 callback("", "claude CLI not found", 1)
             return
-        fc_config = _fake_claude_config()
         cmd = [claude]
         if fc_config is not None:
             cmd.extend(_fake_claude_args(fc_config))

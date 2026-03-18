@@ -37,6 +37,51 @@ ALL_VERDICTS = (
 )
 
 # ---------------------------------------------------------------------------
+# Per-session-type verdict constraints
+# ---------------------------------------------------------------------------
+
+# Maps each session type to the verdict names that are valid for it.
+# Empty tuple means the session type never emits a verdict (no fake needed).
+# Used to validate fake-claude configs and to pick sensible defaults.
+SESSION_TYPE_VERDICTS: dict[str, tuple[str, ...]] = {
+    "impl":            (),   # implementation: no verdict, interactive coding
+    "review":          ("PASS", "PASS_WITH_SUGGESTIONS", "NEEDS_WORK", "INPUT_REQUIRED"),
+    "qa":              ("PASS", "NEEDS_WORK", "INPUT_REQUIRED"),  # generic fallback
+    "qa_planning":     ("QA_PLAN",),
+    "qa_scenario":     ("PASS", "NEEDS_WORK", "INPUT_REQUIRED"),
+    "qa_verification": ("VERIFIED", "FLAGGED"),
+    "watcher":         (),   # background watcher: no verdict
+    "merge":           (),   # merge conflict: no verdict
+}
+
+
+def validate_session_verdicts(session_type: str, verdicts: dict) -> list[str]:
+    """Return a list of error strings for verdicts invalid for *session_type*.
+
+    An empty list means the config is valid.  Raises nothing — callers decide
+    whether to warn or hard-error.
+    """
+    if session_type not in SESSION_TYPE_VERDICTS:
+        return [f"Unknown session type {session_type!r}. "
+                f"Valid types: {sorted(SESSION_TYPE_VERDICTS)}"]
+    allowed = SESSION_TYPE_VERDICTS[session_type]
+    errors = []
+    if not allowed:
+        if verdicts:
+            errors.append(
+                f"Session type {session_type!r} never emits a verdict; "
+                f"'verdicts' should be omitted or empty."
+            )
+        return errors
+    for v in verdicts:
+        if v not in allowed:
+            errors.append(
+                f"Verdict {v!r} is not valid for session type {session_type!r}. "
+                f"Allowed: {sorted(allowed)}"
+            )
+    return errors
+
+# ---------------------------------------------------------------------------
 # Default placeholder bodies for block verdicts
 # ---------------------------------------------------------------------------
 

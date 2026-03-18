@@ -178,24 +178,27 @@ def set_skip_permissions(session_tag: str, enabled: bool = True) -> None:
 
 
 def fake_claude_config(session_tag: str | None = None) -> dict | None:
-    """Return fake-claude config dict for the current session, or None if not set.
+    """Return the raw fake-claude config dict for the current session, or None.
 
-    Looks for ~/.pm/sessions/{session-tag}/fake-claude containing JSON such as::
+    Looks for ``~/.pm/sessions/{session-tag}/fake-claude`` containing JSON in
+    the per-session-type format::
 
         {
-          "verdicts": {"PASS": 70, "NEEDS_WORK": 20, "INPUT_REQUIRED": 10},
-          "preamble": 3,
-          "delay": 0.0,
-          "body_lines": 0,
-          "body_delay": 0.0
+          "_defaults": {"preamble": 3, "delay": 0.5},
+          "review":          {"verdicts": {"PASS": 70, "NEEDS_WORK": 20, "INPUT_REQUIRED": 10}},
+          "qa_scenario":     {"verdicts": {"PASS": 80, "NEEDS_WORK": 15, "INPUT_REQUIRED": 5}},
+          "qa_verification": {"verdicts": {"VERIFIED": 80, "FLAGGED": 20}},
+          "qa_planning":     {"verdicts": {"QA_PLAN": 100}}
         }
 
-    When present, all Claude launches in the session are redirected to
-    ``bin/fake-claude`` and the verdict is drawn randomly from the weighted
-    ``verdicts`` map.  Parameters absent from the config use fake-claude
-    defaults.
+    Top-level keys are session types (``model_config.SESSION_TYPES``) plus the
+    special ``"_defaults"`` key for shared preamble/delay/body parameters.
+    Session types absent from the file are NOT faked — they use real Claude.
 
-    An optional ``"binary"`` key overrides the fake-claude executable path.
+    Returns the raw dict.  Use ``fake_claude_config_for_type()`` to get the
+    fully-merged config for a specific session type.
+
+    An optional top-level ``"binary"`` key overrides the fake-claude path.
     """
     import json
     sd = session_dir(session_tag)
@@ -210,9 +213,60 @@ def fake_claude_config(session_tag: str | None = None) -> dict | None:
         return None
 
 
+def fake_claude_config_for_type(
+    session_type: str | None,
+    session_tag: str | None = None,
+) -> dict | None:
+    """Return the merged fake-claude config for *session_type*, or None.
+
+    Merges ``_defaults`` with the per-type entry and returns a flat dict
+    suitable for ``_fake_claude_args()``.  Returns None when:
+
+    - no fake-claude config file exists, or
+    - *session_type* is None, or
+    - *session_type* is not listed in the config (intentionally unfaked).
+    """
+    if not session_type:
+        return None
+    raw = fake_claude_config(session_tag)
+    if raw is None:
+        return None
+    type_config = raw.get(session_type)
+    if type_config is None:
+        return None
+    defaults = raw.get("_defaults", {})
+    binary = raw.get("binary")
+    merged = {**defaults, **type_config}
+    if binary:
+        merged.setdefault("binary", binary)
+    return merged
+
+
 def set_fake_claude_config(session_tag: str, config: dict) -> None:
-    """Write fake-claude config JSON to ~/.pm/sessions/{tag}/fake-claude."""
+    """Write fake-claude config JSON to ``~/.pm/sessions/{tag}/fake-claude``.
+
+    Validates that every session-type entry only contains verdicts that are
+    valid for that session type.  Raises ``ValueError`` listing all problems
+    so callers can surface them before writing.
+    """
     import json
+    from pm_core.fake_claude import validate_session_verdicts
+
+    errors: list[str] = []
+    for key, value in config.items():
+        if key.startswith("_") or key == "binary":
+            continue  # _defaults, binary — not session-type entries
+        if not isinstance(value, dict):
+            errors.append(f"Config entry {key!r} must be a dict, got {type(value).__name__}")
+            continue
+        verdicts = value.get("verdicts", {})
+        errors.extend(validate_session_verdicts(key, verdicts))
+
+    if errors:
+        raise ValueError(
+            "Invalid fake-claude config:\n" + "\n".join(f"  \u2022 {e}" for e in errors)
+        )
+
     sd = session_dir(session_tag)
     if sd:
         (sd / "fake-claude").write_text(json.dumps(config, indent=2) + "\n")

@@ -12,7 +12,9 @@ from pm_core.fake_claude import (
     ALL_VERDICTS,
     SINGLE_LINE_VERDICTS,
     BLOCK_VERDICTS,
+    SESSION_TYPE_VERDICTS,
     run_fake_claude,
+    validate_session_verdicts,
     _resolve_block_name,
 )
 
@@ -475,51 +477,210 @@ class TestAllVerdicts:
 
 
 # ---------------------------------------------------------------------------
+# SESSION_TYPE_VERDICTS + validate_session_verdicts
+# ---------------------------------------------------------------------------
+
+class TestSessionTypeVerdicts:
+    def test_all_session_types_present(self):
+        from pm_core.model_config import SESSION_TYPES
+        for st in SESSION_TYPES:
+            assert st in SESSION_TYPE_VERDICTS, f"{st!r} missing from SESSION_TYPE_VERDICTS"
+
+    def test_review_verdicts(self):
+        allowed = SESSION_TYPE_VERDICTS["review"]
+        assert "PASS" in allowed
+        assert "PASS_WITH_SUGGESTIONS" in allowed
+        assert "NEEDS_WORK" in allowed
+        assert "INPUT_REQUIRED" in allowed
+        assert "VERIFIED" not in allowed
+        assert "FLAGGED" not in allowed
+
+    def test_qa_scenario_verdicts(self):
+        allowed = SESSION_TYPE_VERDICTS["qa_scenario"]
+        assert "PASS" in allowed
+        assert "NEEDS_WORK" in allowed
+        assert "INPUT_REQUIRED" in allowed
+        assert "QA_PLAN" not in allowed
+        assert "VERIFIED" not in allowed
+
+    def test_qa_verification_verdicts(self):
+        allowed = SESSION_TYPE_VERDICTS["qa_verification"]
+        assert "VERIFIED" in allowed
+        assert "FLAGGED" in allowed
+        assert "PASS" not in allowed
+
+    def test_qa_planning_verdicts(self):
+        allowed = SESSION_TYPE_VERDICTS["qa_planning"]
+        assert "QA_PLAN" in allowed
+        assert "PASS" not in allowed
+
+    def test_impl_has_no_verdicts(self):
+        assert SESSION_TYPE_VERDICTS["impl"] == ()
+
+    def test_watcher_has_no_verdicts(self):
+        assert SESSION_TYPE_VERDICTS["watcher"] == ()
+
+    def test_merge_has_no_verdicts(self):
+        assert SESSION_TYPE_VERDICTS["merge"] == ()
+
+    def test_validate_valid_config(self):
+        assert validate_session_verdicts("review", {"PASS": 70, "NEEDS_WORK": 30}) == []
+
+    def test_validate_invalid_verdict(self):
+        errors = validate_session_verdicts("review", {"VERIFIED": 100})
+        assert len(errors) == 1
+        assert "VERIFIED" in errors[0]
+        assert "review" in errors[0]
+
+    def test_validate_wrong_session_type_verdict(self):
+        # QA_PLAN makes no sense in a review session
+        errors = validate_session_verdicts("review", {"QA_PLAN": 1})
+        assert errors
+
+    def test_validate_unknown_session_type(self):
+        errors = validate_session_verdicts("nonexistent", {"PASS": 1})
+        assert errors
+        assert "nonexistent" in errors[0]
+
+    def test_validate_empty_verdicts_for_verdicted_type(self):
+        # Empty verdicts dict is fine (means "use defaults")
+        assert validate_session_verdicts("review", {}) == []
+
+    def test_validate_verdicts_for_no_verdict_type(self):
+        errors = validate_session_verdicts("impl", {"PASS": 1})
+        assert errors
+
+    def test_validate_empty_verdicts_for_no_verdict_type(self):
+        # impl with empty verdicts = fine (nothing to fake)
+        assert validate_session_verdicts("impl", {}) == []
+
+
+# ---------------------------------------------------------------------------
 # Session-file fake-claude override (paths.py)
 # ---------------------------------------------------------------------------
 
+_SAMPLE_CONFIG = {
+    "_defaults": {"preamble": 3, "delay": 0.0},
+    "review": {"verdicts": {"PASS": 70, "NEEDS_WORK": 20, "INPUT_REQUIRED": 10}},
+    "qa_scenario": {"verdicts": {"PASS": 80, "NEEDS_WORK": 15, "INPUT_REQUIRED": 5}},
+    "qa_verification": {"verdicts": {"VERIFIED": 80, "FLAGGED": 20}},
+    "qa_planning": {"verdicts": {"QA_PLAN": 100}},
+}
+
+
 class TestFakeClaudeConfig:
-    """Tests for fake_claude_config / set_fake_claude_config / clear_fake_claude."""
+    """Tests for fake_claude_config / fake_claude_config_for_type /
+    set_fake_claude_config / clear_fake_claude."""
+
+    def _setup(self, tmp_path, monkeypatch, tag="test-tag"):
+        monkeypatch.setattr("pm_core.paths.sessions_dir", lambda: tmp_path)
+        monkeypatch.setattr("pm_core.paths.get_session_tag", lambda **kw: tag)
+        return tag
 
     def test_returns_none_when_no_file(self, tmp_path, monkeypatch):
         from pm_core.paths import fake_claude_config
-        monkeypatch.setattr("pm_core.paths.sessions_dir", lambda: tmp_path)
-        monkeypatch.setattr("pm_core.paths.get_session_tag", lambda **kw: "test-tag")
+        self._setup(tmp_path, monkeypatch)
         assert fake_claude_config("nonexistent-tag") is None
 
     def test_round_trip(self, tmp_path, monkeypatch):
-        from pm_core.paths import fake_claude_config, set_fake_claude_config, session_dir
-        tag = "test-tag"
-        # Make session_dir return a subdir of tmp_path
-        monkeypatch.setattr("pm_core.paths.sessions_dir", lambda: tmp_path)
-        monkeypatch.setattr("pm_core.paths.get_session_tag", lambda **kw: tag)
-
-        config = {"verdicts": {"PASS": 70, "NEEDS_WORK": 30}, "preamble": 5, "delay": 1.0}
-        set_fake_claude_config(tag, config)
-        result = fake_claude_config(tag)
-        assert result == config
+        from pm_core.paths import fake_claude_config, set_fake_claude_config
+        tag = self._setup(tmp_path, monkeypatch)
+        set_fake_claude_config(tag, _SAMPLE_CONFIG)
+        assert fake_claude_config(tag) == _SAMPLE_CONFIG
 
     def test_clear_removes_file(self, tmp_path, monkeypatch):
         from pm_core.paths import fake_claude_config, set_fake_claude_config, clear_fake_claude
-        tag = "test-tag"
-        monkeypatch.setattr("pm_core.paths.sessions_dir", lambda: tmp_path)
-        monkeypatch.setattr("pm_core.paths.get_session_tag", lambda **kw: tag)
-
-        set_fake_claude_config(tag, {"verdicts": {"PASS": 1}})
+        tag = self._setup(tmp_path, monkeypatch)
+        set_fake_claude_config(tag, _SAMPLE_CONFIG)
         assert fake_claude_config(tag) is not None
         clear_fake_claude(tag)
         assert fake_claude_config(tag) is None
 
     def test_invalid_json_returns_none(self, tmp_path, monkeypatch):
-        from pm_core.paths import fake_claude_config, session_dir
-        tag = "test-tag"
-        monkeypatch.setattr("pm_core.paths.sessions_dir", lambda: tmp_path)
-        monkeypatch.setattr("pm_core.paths.get_session_tag", lambda **kw: tag)
-
+        from pm_core.paths import fake_claude_config
+        tag = self._setup(tmp_path, monkeypatch)
         sd = tmp_path / tag
         sd.mkdir(parents=True, exist_ok=True)
         (sd / "fake-claude").write_text("not valid json")
         assert fake_claude_config(tag) is None
+
+    def test_set_raises_on_invalid_verdict(self, tmp_path, monkeypatch):
+        from pm_core.paths import set_fake_claude_config
+        tag = self._setup(tmp_path, monkeypatch)
+        bad_config = {"review": {"verdicts": {"VERIFIED": 100}}}  # VERIFIED not valid for review
+        with pytest.raises(ValueError, match="VERIFIED"):
+            set_fake_claude_config(tag, bad_config)
+
+    def test_set_raises_on_unknown_session_type(self, tmp_path, monkeypatch):
+        from pm_core.paths import set_fake_claude_config
+        tag = self._setup(tmp_path, monkeypatch)
+        with pytest.raises(ValueError, match="nonexistent"):
+            set_fake_claude_config(tag, {"nonexistent": {"verdicts": {"PASS": 1}}})
+
+    def test_set_raises_on_verdict_in_no_verdict_type(self, tmp_path, monkeypatch):
+        from pm_core.paths import set_fake_claude_config
+        tag = self._setup(tmp_path, monkeypatch)
+        with pytest.raises(ValueError):
+            set_fake_claude_config(tag, {"impl": {"verdicts": {"PASS": 1}}})
+
+    def test_defaults_and_binary_keys_are_not_validated_as_session_types(self, tmp_path, monkeypatch):
+        from pm_core.paths import set_fake_claude_config
+        tag = self._setup(tmp_path, monkeypatch)
+        # Should not raise
+        set_fake_claude_config(tag, {
+            "_defaults": {"preamble": 3},
+            "binary": "/path/to/fake-claude",
+            "review": {"verdicts": {"PASS": 1}},
+        })
+
+    # fake_claude_config_for_type
+
+    def test_for_type_returns_none_without_session_type(self, tmp_path, monkeypatch):
+        from pm_core.paths import fake_claude_config_for_type, set_fake_claude_config
+        tag = self._setup(tmp_path, monkeypatch)
+        set_fake_claude_config(tag, _SAMPLE_CONFIG)
+        assert fake_claude_config_for_type(None, tag) is None
+
+    def test_for_type_returns_none_for_absent_type(self, tmp_path, monkeypatch):
+        from pm_core.paths import fake_claude_config_for_type, set_fake_claude_config
+        tag = self._setup(tmp_path, monkeypatch)
+        set_fake_claude_config(tag, _SAMPLE_CONFIG)
+        # "impl" not in _SAMPLE_CONFIG → don't fake
+        assert fake_claude_config_for_type("impl", tag) is None
+
+    def test_for_type_returns_merged_config(self, tmp_path, monkeypatch):
+        from pm_core.paths import fake_claude_config_for_type, set_fake_claude_config
+        tag = self._setup(tmp_path, monkeypatch)
+        set_fake_claude_config(tag, _SAMPLE_CONFIG)
+        result = fake_claude_config_for_type("review", tag)
+        assert result is not None
+        # verdicts from per-type config
+        assert result["verdicts"] == {"PASS": 70, "NEEDS_WORK": 20, "INPUT_REQUIRED": 10}
+        # preamble merged from _defaults
+        assert result["preamble"] == 3
+
+    def test_for_type_per_type_overrides_defaults(self, tmp_path, monkeypatch):
+        from pm_core.paths import fake_claude_config_for_type, set_fake_claude_config
+        tag = self._setup(tmp_path, monkeypatch)
+        config = {
+            "_defaults": {"preamble": 5, "delay": 1.0},
+            "review": {"verdicts": {"PASS": 1}, "preamble": 2},
+        }
+        set_fake_claude_config(tag, config)
+        result = fake_claude_config_for_type("review", tag)
+        assert result["preamble"] == 2   # per-type wins
+        assert result["delay"] == 1.0    # from defaults
+
+    def test_for_type_propagates_top_level_binary(self, tmp_path, monkeypatch):
+        from pm_core.paths import fake_claude_config_for_type, set_fake_claude_config
+        tag = self._setup(tmp_path, monkeypatch)
+        config = {
+            "binary": "/custom/fake",
+            "review": {"verdicts": {"PASS": 1}},
+        }
+        set_fake_claude_config(tag, config)
+        result = fake_claude_config_for_type("review", tag)
+        assert result["binary"] == "/custom/fake"
 
 
 # ---------------------------------------------------------------------------
@@ -565,43 +726,44 @@ class TestFakeClaudeLauncher:
         args = _fake_claude_args({"verdicts": {"PASS": 1}, "body_lines": 10})
         assert "--body-lines" in args
 
-    def test_find_claude_returns_fake_bin_when_config_set(self, monkeypatch):
+    def test_find_claude_always_uses_shutil_which(self, monkeypatch):
+        """find_claude no longer checks fake config — session_type is required."""
         from pm_core import claude_launcher
-        monkeypatch.setattr(claude_launcher, "_fake_claude_config",
-                            lambda: {"verdicts": {"PASS": 1}})
-        result = claude_launcher.find_claude()
-        assert result == claude_launcher._FAKE_CLAUDE_BIN
-
-    def test_find_claude_respects_binary_key(self, monkeypatch):
-        from pm_core import claude_launcher
-        monkeypatch.setattr(claude_launcher, "_fake_claude_config",
-                            lambda: {"binary": "/custom/fake", "verdicts": {"PASS": 1}})
-        assert claude_launcher.find_claude() == "/custom/fake"
-
-    def test_find_claude_normal_when_no_config(self, monkeypatch):
-        from pm_core import claude_launcher
-        monkeypatch.setattr(claude_launcher, "_fake_claude_config", lambda: None)
         monkeypatch.setattr("shutil.which", lambda name: "/usr/local/bin/claude")
         assert claude_launcher.find_claude() == "/usr/local/bin/claude"
 
-    def test_build_shell_cmd_uses_fake_binary(self, monkeypatch):
+    def test_fake_config_for_type_returns_none_without_type(self, monkeypatch):
         from pm_core import claude_launcher
-        fake_bin = str(BIN_FAKE_CLAUDE)
-        monkeypatch.setattr(claude_launcher, "_fake_claude_config",
-                            lambda: {"verdicts": {"PASS": 1}})
-        monkeypatch.setattr("pm_core.paths.fake_claude_config",
-                            lambda tag=None: {"verdicts": {"PASS": 1}})
-        cmd = claude_launcher.build_claude_shell_cmd(prompt="test prompt")
+        monkeypatch.setattr("pm_core.paths.fake_claude_config_for_type",
+                            lambda st, tag=None: None)
+        assert claude_launcher._fake_claude_config_for_type(None) is None
+
+    def test_build_shell_cmd_uses_fake_binary_with_session_type(self, monkeypatch):
+        from pm_core import claude_launcher
+        review_config = {"verdicts": {"PASS": 1}, "preamble": 3}
+        monkeypatch.setattr("pm_core.paths.fake_claude_config_for_type",
+                            lambda st, tag=None: review_config if st == "review" else None)
+        cmd = claude_launcher.build_claude_shell_cmd(
+            prompt="test prompt", session_type="review")
         assert str(claude_launcher._FAKE_CLAUDE_BIN) in cmd
         assert "--verdict" in cmd
         assert "PASS" in cmd
 
-    def test_build_shell_cmd_no_fake_uses_claude(self, monkeypatch):
+    def test_build_shell_cmd_no_fake_for_impl(self, monkeypatch):
+        """impl session type should not be faked even when config exists."""
         from pm_core import claude_launcher
-        monkeypatch.setattr("pm_core.paths.fake_claude_config", lambda tag=None: None)
+        monkeypatch.setattr("pm_core.paths.fake_claude_config_for_type",
+                            lambda st, tag=None: None)  # impl returns None
+        monkeypatch.setattr("pm_core.paths.skip_permissions_enabled", lambda tag=None: False)
+        cmd = claude_launcher.build_claude_shell_cmd(prompt="hi", session_type="impl")
+        assert "--verdict" not in cmd
+
+    def test_build_shell_cmd_no_session_type_uses_real_claude(self, monkeypatch):
+        from pm_core import claude_launcher
+        monkeypatch.setattr("pm_core.paths.fake_claude_config_for_type",
+                            lambda st, tag=None: None)
         monkeypatch.setattr("pm_core.paths.skip_permissions_enabled", lambda tag=None: False)
         cmd = claude_launcher.build_claude_shell_cmd(prompt="hi")
-        assert cmd.startswith("claude") or cmd.startswith(" ") or "claude" in cmd
         assert "--verdict" not in cmd
 
 
