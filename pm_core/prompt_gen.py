@@ -1006,8 +1006,8 @@ If a setup step fails or a required tool is unavailable, report
      `git pull --rebase origin {branch} && git push origin {branch}`
 {n+2}. End with a verdict on its own line — one of:
    - **PASS** — Scenario passed, no issues found
-   - **NEEDS_WORK** — Issues found (explain what and whether you fixed them)
-   - **INPUT_REQUIRED** — Genuine ambiguity requiring human judgment"""
+   - **NEEDS_WORK** — Issues found and fixed (the fix is committed and pushed)
+   - **INPUT_REQUIRED** — Issues found that you could not fix, or genuine ambiguity requiring human judgment"""
     else:
         workdir_block = f"""\
 - **PR workdir** (source code): {pr_workdir}
@@ -1020,8 +1020,8 @@ If a setup step fails or a required tool is unavailable, report
    - Push: `git push origin {branch}`
 {n+2}. End with a verdict on its own line — one of:
    - **PASS** — Scenario passed, no issues found
-   - **NEEDS_WORK** — Issues found (explain what and whether you fixed them)
-   - **INPUT_REQUIRED** — Genuine ambiguity requiring human judgment"""
+   - **NEEDS_WORK** — Issues found and fixed (the fix is committed and pushed)
+   - **INPUT_REQUIRED** — Issues found that you could not fix, or genuine ambiguity requiring human judgment"""
 
     prompt = f"""You are running QA scenario {scenario.index}: "{scenario.title}"
 

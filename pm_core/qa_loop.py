@@ -8,8 +8,8 @@ Two-phase process:
 
 Verdicts (shared with review):
   PASS           — Scenario passed, no issues found.
-  NEEDS_WORK     — Issues found (child may have committed fixes).
-  INPUT_REQUIRED — Genuine ambiguity requiring human judgment.
+  NEEDS_WORK     — Issues found and fixed (committed and pushed by the scenario).
+  INPUT_REQUIRED — Issues found but not fixed, or ambiguity requiring human judgment.
 """
 
 import json
