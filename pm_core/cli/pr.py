@@ -539,8 +539,9 @@ def pr_spec(pr_id: str, phase: str | None, regenerate: bool):
             spec_text = spec_gen.get_spec(pr_entry, p)
             if spec_text:
                 found = True
+                path = spec_gen.spec_file_path(root, pr_id, p)
                 click.echo(f"\n{'='*60}")
-                click.echo(f"spec_{p}:")
+                click.echo(f"spec_{p}  ({path})")
                 click.echo(f"{'='*60}\n")
                 click.echo(spec_text)
         if not found:
@@ -554,22 +555,42 @@ def pr_spec(pr_id: str, phase: str | None, regenerate: bool):
 
     existing = spec_gen.get_spec(pr_entry, phase)
     if existing and not regenerate:
-        click.echo(f"\nspec_{phase}:\n")
         click.echo(existing)
-        click.echo(f"\nUse --regenerate to regenerate this spec.")
         return
 
     spec_text, needs_review = spec_gen.generate_spec(
         data, pr_id, phase, root=root, force=regenerate,
     )
     if spec_text:
-        click.echo(f"\nspec_{phase}:\n")
         click.echo(spec_text)
         if needs_review:
-            click.echo(f"\n{'='*40}")
-            click.echo("This spec has been flagged for review.")
+            click.echo(f"\n[spec flagged for review — run `pm pr spec-approve {pr_id}`]", err=True)
     else:
         click.echo("Spec generation returned empty output.", err=True)
+
+
+@pr.command("spec-path")
+@click.argument("pr_id")
+@click.argument("phase")
+def pr_spec_path(pr_id: str, phase: str):
+    """Print the file path for a PR's spec.
+
+    Outputs just the path — suitable for use in shell pipelines:
+
+      cat $(pm pr spec-path pr-001 impl)
+      $EDITOR $(pm pr spec-path pr-001 qa)
+    """
+    root = state_root()
+    data = store.load(root)
+    pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
+
+    if phase not in spec_gen.PHASES:
+        click.echo(f"Invalid phase: {phase}. Must be one of: {', '.join(spec_gen.PHASES)}", err=True)
+        raise SystemExit(1)
+
+    path = spec_gen.spec_file_path(root, pr_id, phase)
+    click.echo(path)
 
 
 @pr.command("spec-save")
