@@ -661,9 +661,18 @@ def pr_spec_approve(pr_id: str):
                 default="",
             )
             spec_gen.reject_spec(data, pr_id, feedback=feedback or None, root=root)
-            click.echo(
-                f"Spec regenerated. Review again with: pm pr spec-approve {pr_id}"
-            )
+            # Reload to see whether spec_pending is still set after regen.
+            # In prompt mode without ambiguity flags, generate_spec clears it.
+            data = store.load(root)
+            pr_entry = store.get_pr(data, pr_id) or pr_entry
+            if spec_gen.has_pending_spec(pr_entry):
+                click.echo(
+                    f"Spec regenerated. Review again with: pm pr spec-approve {pr_id}"
+                )
+            else:
+                click.echo(
+                    "Spec regenerated and ready (no ambiguities flagged)."
+                )
             trigger_tui_refresh()
             return
         spec_gen.approve_spec(data, pr_id, root=root, edited_text=edited_content)
