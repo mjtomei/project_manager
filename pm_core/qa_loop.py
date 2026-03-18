@@ -2242,7 +2242,8 @@ def run_qa_sync(
     _write_status_file(status_path, state.pr_id, state.scenarios,
                        state.scenario_verdicts,
                        scenario_0=state.scenario_0,
-                       queued_scenarios=queued_indices)
+                       queued_scenarios=queued_indices,
+                       error=state._error)
 
     # Add status pane to the main QA window (split planner pane horizontally)
     if planner_pane:
@@ -2313,7 +2314,8 @@ def run_qa_sync(
     # Determine overall verdict
     if VERDICT_NEEDS_WORK in verdicts:
         state.latest_verdict = VERDICT_NEEDS_WORK
-    elif VERDICT_INPUT_REQUIRED in verdicts:
+    elif VERDICT_INPUT_REQUIRED in verdicts or state._error:
+        # Preserve INPUT_REQUIRED set before Phase 2 (e.g. no scenarios, spec gate)
         state.latest_verdict = VERDICT_INPUT_REQUIRED
     else:
         state.latest_verdict = VERDICT_PASS
@@ -2321,7 +2323,7 @@ def run_qa_sync(
     # Write final status file with overall verdict
     _write_status_file(status_path, state.pr_id, state.scenarios,
                        state.scenario_verdicts, overall=state.latest_verdict,
-                       scenario_0=state.scenario_0)
+                       scenario_0=state.scenario_0, error=state._error)
 
     state.running = False
     summary_parts = []

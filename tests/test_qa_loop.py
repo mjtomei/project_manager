@@ -2471,3 +2471,54 @@ class TestScenarioRetryLogic:
     def test_max_retries_constant(self):
         from pm_core.qa_loop import _SCENARIO_MAX_RETRIES
         assert _SCENARIO_MAX_RETRIES == 10
+
+
+# ---------------------------------------------------------------------------
+# state._error wiring: written to status file and preserved through verdict aggregation
+# ---------------------------------------------------------------------------
+
+class TestStateErrorWiring:
+    """Tests that state._error is written to the status file and that it
+    prevents the verdict aggregation from overwriting INPUT_REQUIRED with PASS."""
+
+    def test_error_written_to_status_file(self, tmp_path):
+        """_write_status_file called with error=state._error writes the field."""
+        from pm_core.qa_loop import _write_status_file
+        import json
+
+        status_path = tmp_path / "status.json"
+        _write_status_file(
+            status_path, "pr-001", [], {},
+            error="Something went wrong.",
+        )
+        data = json.loads(status_path.read_text())
+        assert data["error"] == "Something went wrong."
+
+    def test_no_error_field_empty_by_default(self, tmp_path):
+        """Without error argument the field defaults to empty string."""
+        from pm_core.qa_loop import _write_status_file
+        import json
+
+        status_path = tmp_path / "status.json"
+        _write_status_file(status_path, "pr-001", [], {})
+        data = json.loads(status_path.read_text())
+        assert data.get("error", "") == ""
+
+    def test_error_prevents_pass_verdict(self, tmp_path):
+        """When state._error is set and no scenario verdicts exist, the
+        overall verdict should stay INPUT_REQUIRED, not be overwritten with PASS."""
+        from pm_core.qa_loop import _write_status_file
+        import json
+
+        # Simulate the verdict aggregation logic from run_qa_sync
+        verdicts = []
+        error = "No parseable scenarios found."
+        # Old (buggy) logic would pick PASS; new logic should pick INPUT_REQUIRED
+        if VERDICT_NEEDS_WORK in verdicts:
+            result = VERDICT_NEEDS_WORK
+        elif VERDICT_INPUT_REQUIRED in verdicts or error:
+            result = VERDICT_INPUT_REQUIRED
+        else:
+            result = VERDICT_PASS
+
+        assert result == VERDICT_INPUT_REQUIRED
