@@ -766,6 +766,69 @@ class TestFakeClaudeLauncher:
         cmd = claude_launcher.build_claude_shell_cmd(prompt="hi")
         assert "--verdict" not in cmd
 
+    def test_launch_claude_uses_fake_binary(self, monkeypatch, tmp_path):
+        """launch_claude must invoke fake-claude binary, not the real claude."""
+        from pm_core import claude_launcher
+        fake_bin = "/custom/fake-claude"
+        fc_config = {"verdicts": {"PASS": 1}, "binary": fake_bin}
+        monkeypatch.setattr("pm_core.claude_launcher._fake_claude_config_for_type",
+                            lambda st: fc_config if st == "review" else None)
+        captured = []
+        monkeypatch.setattr("subprocess.run",
+                            lambda cmd, **kw: (captured.append(cmd), type("R", (), {"returncode": 0})())[-1])
+        claude_launcher.launch_claude(
+            "prompt", session_key="k", pm_root=tmp_path,
+            session_type="review")
+        assert captured, "subprocess.run was not called"
+        assert captured[0][0] == fake_bin
+        assert "--verdict" in captured[0]
+
+    def test_launch_claude_print_uses_fake_binary(self, monkeypatch):
+        """launch_claude_print must invoke fake-claude binary, not the real claude."""
+        from pm_core import claude_launcher
+        fake_bin = "/custom/fake-claude"
+        fc_config = {"verdicts": {"NEEDS_WORK": 1}, "binary": fake_bin}
+        monkeypatch.setattr("pm_core.claude_launcher._fake_claude_config_for_type",
+                            lambda st: fc_config if st == "review" else None)
+        captured = []
+
+        class _FakeResult:
+            returncode = 0
+            stdout = "NEEDS_WORK\n"
+
+        monkeypatch.setattr("subprocess.run",
+                            lambda cmd, **kw: (captured.append(cmd), _FakeResult())[-1])
+        claude_launcher.launch_claude_print("prompt", session_type="review")
+        assert captured, "subprocess.run was not called"
+        assert captured[0][0] == fake_bin
+        assert "--verdict" in captured[0]
+
+    def test_launch_claude_print_background_uses_fake_binary(self, monkeypatch):
+        """launch_claude_print_background must invoke fake-claude binary."""
+        import threading
+        from pm_core import claude_launcher
+        fake_bin = "/custom/fake-claude"
+        fc_config = {"verdicts": {"PASS": 1}, "binary": fake_bin}
+        monkeypatch.setattr("pm_core.claude_launcher._fake_claude_config_for_type",
+                            lambda st: fc_config if st == "review" else None)
+        captured = []
+
+        class _FakeResult:
+            returncode = 0
+            stdout = "PASS\n"
+            stderr = ""
+
+        monkeypatch.setattr("subprocess.run",
+                            lambda cmd, **kw: (captured.append(cmd), _FakeResult())[-1])
+        done = threading.Event()
+        claude_launcher.launch_claude_print_background(
+            "prompt", session_type="review",
+            callback=lambda *a: done.set())
+        done.wait(timeout=5)
+        assert captured, "subprocess.run was not called"
+        assert captured[0][0] == fake_bin
+        assert "--verdict" in captured[0]
+
 
 # ---------------------------------------------------------------------------
 # bin/fake-claude: --verdict optional + parse_known_args

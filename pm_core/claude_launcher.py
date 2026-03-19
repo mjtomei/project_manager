@@ -211,10 +211,11 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
         _log.info("Generated new session_id=%s for key=%s", session_id, session_key)
 
     fc_config = _fake_claude_config_for_type(session_type)
-    cmd = [claude]
     if fc_config is not None:
+        cmd = [fc_config.get("binary", _FAKE_CLAUDE_BIN)]
         cmd.extend(_fake_claude_args(fc_config))
     else:
+        cmd = [claude]
         if _skip_permissions():
             cmd.append("--dangerously-skip-permissions")
         if model_flag:
@@ -295,10 +296,11 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
     _, model_flag, run_env = _resolve_provider(provider)
 
     fc_config = _fake_claude_config_for_type(session_type)
-    cmd = [claude]
     if fc_config is not None:
+        cmd = [fc_config.get("binary", _FAKE_CLAUDE_BIN)]
         cmd.extend(_fake_claude_args(fc_config))
     else:
+        cmd = [claude]
         if _skip_permissions():
             cmd.append("--dangerously-skip-permissions")
         # Explicit model takes precedence over provider model_flag
@@ -534,15 +536,16 @@ def launch_claude_print_background(prompt: str, cwd: str | None = None,
     fc_config = _fake_claude_config_for_type(session_type)
 
     def _run():
-        claude = find_claude()
-        if not claude:
-            if callback:
-                callback("", "claude CLI not found", 1)
-            return
-        cmd = [claude]
         if fc_config is not None:
+            cmd = [fc_config.get("binary", _FAKE_CLAUDE_BIN)]
             cmd.extend(_fake_claude_args(fc_config))
         else:
+            claude = find_claude()
+            if not claude:
+                if callback:
+                    callback("", "claude CLI not found", 1)
+                return
+            cmd = [claude]
             if _skip_permissions():
                 cmd.append("--dangerously-skip-permissions")
             if model_flag:
