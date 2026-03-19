@@ -2206,7 +2206,7 @@ def run_qa_sync(
         )
         _notify()
         state.running = False
-        return  # Do not launch scenarios without a QA spec
+        return state  # Do not launch scenarios without a QA spec
 
     # --- Phase 2: Execution ---
     # Determine concurrency cap (0 = launch all at once)
