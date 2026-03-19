@@ -433,6 +433,8 @@ def build_claude_shell_cmd(
         binary = fc_config.get("binary", _FAKE_CLAUDE_BIN)
         fake_args = _fake_claude_args(fc_config)
         cmd = env_prefix + shlex.quote(binary) + " " + " ".join(shlex.quote(a) for a in fake_args)
+        log_shell_command(cmd, prefix="claude")
+        return cmd
     else:
         skip = " --dangerously-skip-permissions" if skip_permissions_enabled(session_tag) else ""
         cmd = f"{env_prefix}claude{skip}"

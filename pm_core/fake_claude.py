@@ -122,7 +122,7 @@ def _resolve_block_name(verdict: str) -> str | None:
         return upper
     # Accept "FLAGGED_END" as meaning "FLAGGED", etc.
     for name, (_, end) in BLOCK_VERDICTS.items():
-        if upper == end or upper == end.replace("_END", ""):
+        if upper == end:
             return name
     return None
 
