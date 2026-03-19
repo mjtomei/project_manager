@@ -532,6 +532,12 @@ COMMANDS
   pm qa run <id> --pr <pr-id>    Run a QA instruction against a PR
   pm qa standalone <id>          Run a QA instruction against master
 
+  pm qa mocks list               List shared mock definitions
+  pm qa mocks show <id>          Show a mock definition
+  pm qa mocks add <name>         Create a new mock definition
+  pm qa mocks edit <id>          Edit a mock definition
+  pm qa mocks prompt             Print the mocks block injected into scenario prompts
+
   pm container status            Show container isolation settings
   pm container enable            Enable container isolation for Claude sessions
   pm container disable           Disable container isolation

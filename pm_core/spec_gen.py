@@ -564,11 +564,28 @@ Start with Step 0 below.  Once the spec is saved, proceed to the main task.
 
 
 def get_spec_mocks_section(pr: dict) -> str:
-    """Extract the Mocks section from the QA spec, if present.
+    """Return the Mocks block for injection into QA scenario prompts.
 
-    Returns the mocks section as a formatted markdown block for inclusion
-    in QA scenario prompts, or empty string if the spec has no mocks section.
+    Reads shared mock definitions from pm/qa/mocks/ (the authoritative
+    library).  If the library is empty, falls back to extracting a Mocks
+    section from the QA spec (legacy behaviour for PRs that generated mocks
+    inline before the library existed).
+
+    Returns a formatted markdown block, or empty string if no mocks are found.
     """
+    from pm_core import qa_instructions
+
+    # Prefer the shared library in pm/qa/mocks/
+    try:
+        root = store.find_project_root()
+        library_block = qa_instructions.mocks_for_prompt(root)
+    except FileNotFoundError:
+        library_block = ""
+
+    if library_block:
+        return library_block
+
+    # Fallback: extract from the QA spec's embedded Mocks section
     spec = get_spec(pr, "qa")
     if not spec:
         return ""
@@ -579,7 +596,8 @@ def get_spec_mocks_section(pr: dict) -> str:
     mocks_lines: list[str] = []
     for line in lines:
         if not in_mocks:
-            if line.strip().lower().startswith("## mocks") or line.strip().lower().startswith("**mocks**"):
+            if (line.strip().lower().startswith("## mocks")
+                    or line.strip().lower().startswith("**mocks**")):
                 in_mocks = True
                 mocks_lines.append(line)
         else:

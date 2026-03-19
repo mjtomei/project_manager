@@ -613,6 +613,30 @@ class TestGetSpecMocksSection:
         # Should have exactly one ## Mocks heading (from the wrapper), not two
         assert result.count("## Mocks") == 1
 
+    @patch("pm_core.spec_gen.store.find_project_root")
+    def test_library_takes_precedence_over_spec(self, mock_root, tmp_path):
+        """pm/qa/mocks/ library is used instead of spec_qa when it has content."""
+        from pm_core import qa_instructions
+
+        pm_root = tmp_path / "pm"
+        pm_root.mkdir()
+        mock_root.return_value = pm_root
+
+        # Write a library mock
+        mocks_d = qa_instructions.mocks_dir(pm_root)
+        (mocks_d / "claude-session.md").write_text(
+            "---\ntitle: Claude Session Mock\ndescription:\ntags: []\n---\n"
+            "## Contract\nLibraryMockContent\n"
+        )
+
+        # Also create a spec_qa with its own mocks section
+        spec = "## Mocks\n- SpecMockContent\n"
+        pr = self._make_pr_with_qa_spec(tmp_path, spec)
+
+        result = spec_gen.get_spec_mocks_section(pr)
+        assert "LibraryMockContent" in result
+        assert "SpecMockContent" not in result
+
 
 class TestRejectSpec:
     @patch("pm_core.spec_gen.launch_claude_print")

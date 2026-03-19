@@ -1,8 +1,9 @@
 """QA instruction library management.
 
-Manages instruction files in pm/qa/instructions/ (reusable procedures) and
-pm/qa/regression/ (migrated TUI tests).  Files are markdown with YAML
-frontmatter.
+Manages instruction files in pm/qa/instructions/ (reusable procedures),
+pm/qa/regression/ (migrated TUI tests), and pm/qa/mocks/ (shared mock
+definitions injected into every QA scenario prompt).  Files are markdown
+with YAML frontmatter.
 """
 
 from pathlib import Path
@@ -31,6 +32,13 @@ def instructions_dir(pm_root: Path) -> Path:
 def regression_dir(pm_root: Path) -> Path:
     """Return pm/qa/regression/."""
     d = qa_dir(pm_root) / "regression"
+    d.mkdir(exist_ok=True)
+    return d
+
+
+def mocks_dir(pm_root: Path) -> Path:
+    """Return pm/qa/mocks/."""
+    d = qa_dir(pm_root) / "mocks"
     d.mkdir(exist_ok=True)
     return d
 
@@ -104,14 +112,20 @@ def list_regression_tests(pm_root: Path) -> list[dict]:
     return _list_dir(regression_dir(pm_root))
 
 
+def list_mocks(pm_root: Path) -> list[dict]:
+    """List mock definition files from pm/qa/mocks/."""
+    return _list_dir(mocks_dir(pm_root))
+
+
 def list_all(pm_root: Path) -> dict:
     """Return all QA items by category.
 
-    Returns {"instructions": [...], "regression": [...]}.
+    Returns {"instructions": [...], "regression": [...], "mocks": [...]}.
     """
     return {
         "instructions": list_instructions(pm_root),
         "regression": list_regression_tests(pm_root),
+        "mocks": list_mocks(pm_root),
     }
 
 
@@ -207,6 +221,28 @@ def get_instruction(pm_root: Path, instruction_id: str,
     }
 
 
+def get_mock(pm_root: Path, mock_id: str) -> dict | None:
+    """Load a single mock definition with full body content.
+
+    Returns dict with keys: id, title, description, tags, path, body.
+    Returns None if not found.
+    """
+    f = mocks_dir(pm_root) / f"{mock_id}.md"
+    if not f.exists():
+        return None
+
+    content = f.read_text()
+    meta, body = _parse_frontmatter(content)
+    return {
+        "id": mock_id,
+        "title": meta.get("title", mock_id.replace("-", " ").title()),
+        "description": meta.get("description", ""),
+        "tags": meta.get("tags", []),
+        "path": str(f),
+        "body": body,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Prompt helper
 # ---------------------------------------------------------------------------
@@ -243,3 +279,34 @@ def instruction_summary_for_prompt(pm_root: Path,
         return "No QA instructions found."
 
     return "\n".join(lines)
+
+
+def mocks_for_prompt(pm_root: Path) -> str:
+    """Build the Mocks section for QA scenario prompts from pm/qa/mocks/.
+
+    Returns a formatted markdown block ready for injection, or empty string
+    if no mocks are defined.
+    """
+    mocks = list_mocks(pm_root)
+    if not mocks:
+        return ""
+
+    lines: list[str] = [
+        "## Mocks",
+        "",
+        "The following mock contracts are defined for this project.  Use these "
+        "when writing or running QA scenarios — do not devise your own mocking "
+        "strategy for dependencies listed here.",
+        "",
+    ]
+    for mock in mocks:
+        f = Path(mock["path"])
+        content = f.read_text()
+        _, body = _parse_frontmatter(content)
+        desc = f" — {mock['description']}" if mock["description"] else ""
+        lines.append(f"### {mock['title']}{desc}")
+        lines.append("")
+        lines.append(body.strip())
+        lines.append("")
+
+    return "\n".join(lines) + "\n"
