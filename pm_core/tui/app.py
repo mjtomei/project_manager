@@ -387,6 +387,7 @@ class ProjectManagerApp(App):
         # sync) to after the first frame.
         self._load_state()
         self._update_orientation()
+        self._check_mobile_transition()
         # Background sync interval: 5 minutes for automatic PR sync
         self._sync_timer = self.set_interval(300, self._background_sync)
         # Run heavier startup tasks (heal_registry, tmux bindings) in a
