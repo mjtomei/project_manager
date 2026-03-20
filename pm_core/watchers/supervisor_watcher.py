@@ -300,11 +300,9 @@ Important: Be concise in your feedback. Each feedback message will be injected i
     def _extract_feedback(output: str) -> list[dict]:
         """Extract JSON feedback blocks from Claude's output."""
         feedback = []
-        # Match JSON blocks (either fenced or bare)
-        json_pattern = re.compile(
-            r'\{[^{}]*"target_window"[^{}]*"observation"[^{}]*"feedback"[^{}]*\}',
-            re.DOTALL,
-        )
+        # Match any bare JSON object (no nested braces).  Key-ordering is NOT
+        # enforced here — we rely on json.loads + the explicit key check below.
+        json_pattern = re.compile(r'\{[^{}]+\}', re.DOTALL)
 
         for match in json_pattern.finditer(output):
             try:

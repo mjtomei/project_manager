@@ -195,6 +195,18 @@ class TestFeedbackExtraction:
         feedback = SupervisorWatcher._extract_feedback(output)
         assert len(feedback) == 0
 
+    def test_extracts_out_of_order_keys(self):
+        # Regex must not enforce key ordering — Claude may output keys
+        # in any order while still producing a valid feedback object.
+        output = (
+            '{"observation": "bug", "feedback": "fix it", "target_window": "pr-abc"}\n'
+        )
+        feedback = SupervisorWatcher._extract_feedback(output)
+        assert len(feedback) == 1
+        assert feedback[0]["target_window"] == "pr-abc"
+        assert feedback[0]["observation"] == "bug"
+        assert feedback[0]["feedback"] == "fix it"
+
     def test_empty_output(self):
         feedback = SupervisorWatcher._extract_feedback("")
         assert feedback == []
