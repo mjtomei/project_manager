@@ -218,6 +218,25 @@ class TestVerdictPoller:
 
         assert status["overall"] == "NEEDS_WORK"
 
+    @patch("pm_core.qa_status._find_claude_pane", return_value=None)
+    def test_windowless_scenario_gets_input_required(self, mock_find, tmp_path):
+        """Scenario with no window_name (creation failed) → INPUT_REQUIRED."""
+        path = tmp_path / "qa_status.json"
+        path.write_text("{}")
+        poller = VerdictPoller(path, "sess")
+        status = self._make_status([
+            {"index": 1, "title": "Windowed", "verdict": "",
+             "window_name": "qa-s1"},
+            {"index": 2, "title": "Failed", "verdict": "",
+             "window_name": ""},  # never got a window
+        ])
+        poller.poll(status)
+        # Windowless scenario gets INPUT_REQUIRED immediately
+        assert status["scenarios"][1]["verdict"] == "INPUT_REQUIRED"
+        # Windowed scenario has dead window → also INPUT_REQUIRED, overall set
+        assert status["scenarios"][0]["verdict"] == "INPUT_REQUIRED"
+        assert status["overall"] == "INPUT_REQUIRED"
+
     def test_write_status_atomic(self, tmp_path):
         """_write_status uses tmp+rename for atomicity."""
         path = tmp_path / "qa_status.json"

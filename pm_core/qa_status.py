@@ -181,9 +181,18 @@ class VerdictPoller:
             verdict = sc.get("verdict", "")
             window_name = sc.get("window_name", "")
 
-            # Skip interactive, already-completed, or no-window scenarios
-            if verdict == "interactive" or not window_name:
+            # Skip interactive scenarios
+            if verdict == "interactive":
                 continue
+            # Scenarios that never got a window (creation failed) → INPUT_REQUIRED
+            if not window_name and not verdict:
+                _log.warning("Scenario %s has no window — marking INPUT_REQUIRED", idx)
+                sc["verdict"] = "INPUT_REQUIRED"
+                self._completed_scenarios.add(idx)
+                verdicts_changed = True
+                continue
+            if not window_name:
+                continue  # already has a verdict; nothing to poll
             if idx in self._completed_scenarios:
                 continue
             if verdict and verdict in _QA_VERDICTS:
