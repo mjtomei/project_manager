@@ -454,8 +454,6 @@ class ProviderTestResult:
                 + format_model_recommendations()
             )
             msgs.append(warning)
-        if self.anthropic_api is True and self.anthropic_api_detail:
-            msgs.append(self.anthropic_api_detail)
         return msgs
 
     def capabilities_summary(self) -> dict[str, Any]:
@@ -517,7 +515,7 @@ def check_provider(provider: ProviderConfig, check_tools: bool = True) -> Provid
                 result.reachable = True
                 result.reachable_detail = f"{check_url} (HTTP {resp.status})"
                 break
-        except (urllib.error.URLError, Exception):
+        except Exception:
             continue
 
     if not result.reachable:
@@ -705,7 +703,7 @@ def _check_anthropic_api_support(
                 "Consider using type=local instead of type=openai for "
                 "better Claude Code compatibility."
             )
-    except (urllib.error.URLError, Exception):
+    except Exception:
         result.anthropic_api = False
         result.anthropic_api_detail = "Anthropic Messages API not available"
 
@@ -718,7 +716,10 @@ def _check_tools_anthropic(
     import urllib.request
     import urllib.error
 
-    messages_url = api_base.rstrip("/") + "/v1/messages"
+    base = api_base.rstrip("/")
+    if base.endswith("/v1"):
+        base = base[:-3]
+    messages_url = base + "/v1/messages"
     payload = json.dumps({
         "model": model,
         "max_tokens": 1024,

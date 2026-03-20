@@ -329,13 +329,15 @@ class TestProviderTestResult:
         assert "Recommended models" in warning
         assert "qwen3.5" in warning
 
-    def test_anthropic_api_warning_for_openai_providers(self):
+    def test_anthropic_api_does_not_produce_warning(self):
+        # anthropic_api=True is informational (shown by CLI), not a warning
+        # that triggers "Add anyway?" confirmation in provider add
         r = ProviderTestResult(
             reachable=True, tool_use=True,
             anthropic_api=True,
             anthropic_api_detail="Consider using type=local",
         )
-        assert any("type=local" in w for w in r.warnings)
+        assert r.warnings == []
 
     def test_no_anthropic_api_warning_when_false(self):
         r = ProviderTestResult(
@@ -343,7 +345,6 @@ class TestProviderTestResult:
             anthropic_api=False,
             anthropic_api_detail="not available",
         )
-        # anthropic_api=False should not add a warning
         assert r.warnings == []
 
     def test_capabilities_summary(self):
@@ -607,6 +608,47 @@ class TestCheckProvider:
         assert result.reachable
         assert result.tool_use is True
         assert result.context_window == 131072
+
+        # Verify no double /v1 in the messages URL
+        msg_call = mock_urlopen.call_args_list[2]
+        msg_req = msg_call[0][0]
+        assert msg_req.full_url == "http://localhost:11434/v1/messages"
+
+    @patch("urllib.request.urlopen")
+    def test_local_provider_no_double_v1_in_tool_check(self, mock_urlopen):
+        """Local provider with /v1 in api_base doesn't produce /v1/v1/messages."""
+        import json
+        tags_resp = MagicMock()
+        tags_resp.status = 200
+        tags_resp.__enter__ = MagicMock(return_value=tags_resp)
+        tags_resp.__exit__ = MagicMock(return_value=False)
+
+        show_resp = MagicMock()
+        show_resp.read.return_value = json.dumps({"model_info": {}}).encode()
+        show_resp.__enter__ = MagicMock(return_value=show_resp)
+        show_resp.__exit__ = MagicMock(return_value=False)
+
+        msg_body = json.dumps({
+            "content": [{"type": "tool_use", "name": "calculator",
+                         "input": {"expression": "2+2"}}],
+            "stop_reason": "tool_use",
+        }).encode()
+        msg_resp = MagicMock()
+        msg_resp.read.return_value = msg_body
+        msg_resp.__enter__ = MagicMock(return_value=msg_resp)
+        msg_resp.__exit__ = MagicMock(return_value=False)
+
+        mock_urlopen.side_effect = [tags_resp, show_resp, msg_resp]
+
+        # api_base with /v1 suffix — should NOT produce /v1/v1/messages
+        p = ProviderConfig(name="local-with-v1", type="local",
+                          api_base="http://localhost:11434/v1",
+                          model="qwen3.5")
+        result = check_provider(p)
+        msg_call = mock_urlopen.call_args_list[2]
+        msg_req = msg_call[0][0]
+        assert "/v1/v1/" not in msg_req.full_url
+        assert msg_req.full_url == "http://localhost:11434/v1/messages"
 
     @patch("urllib.request.urlopen")
     def test_openai_provider_anthropic_api_detected(self, mock_urlopen):

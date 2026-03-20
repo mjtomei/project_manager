@@ -53,6 +53,8 @@ def _display_test_result(result) -> None:
 
     if result.anthropic_api is True:
         click.echo("  Anthropic API: SUPPORTED")
+        if result.anthropic_api_detail:
+            click.echo(f"    -> {result.anthropic_api_detail}")
     elif result.anthropic_api is False:
         click.echo("  Anthropic API: not available")
 
