@@ -1054,7 +1054,7 @@ class ProjectManagerApp(App):
         """
         from pm_core.tui import qa_loop_ui
         from pm_core.tui.tech_tree import TechTree
-        if self._tasks_visible is True:
+        if self._tasks_visible:
             tasks_pane = self.query_one("#tasks-pane", TasksPane)
             pr_id = tasks_pane.selected_pr_id
         else:
@@ -1077,7 +1077,7 @@ class ProjectManagerApp(App):
 
     def _get_active_pr_id(self) -> str | None:
         """Get the active PR ID from either the tech tree or tasks pane."""
-        if self._tasks_visible is True:
+        if self._tasks_visible:
             tasks_pane = self.query_one("#tasks-pane", TasksPane)
             return tasks_pane.selected_pr_id
         tree = self.query_one("#tech-tree", TechTree)
@@ -1222,6 +1222,4 @@ class ProjectManagerApp(App):
         if self._tasks_poll_timer:
             self._tasks_poll_timer.stop()
             self._tasks_poll_timer = None
-
-
 
