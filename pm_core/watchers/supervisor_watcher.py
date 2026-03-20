@@ -58,6 +58,9 @@ class SupervisorWatcher(BaseWatcher):
     ):
         super().__init__(pm_root, state=state)
         self.target_filter = target_filter
+        # Use a per-instance window name so multiple supervisors don't clobber
+        # each other.  The watcher_id is already unique (e.g. "supervisor-ab12").
+        self.WINDOW_NAME = self.state.watcher_id
         # Collected feedback from the latest iteration (parsed from output)
         self._pending_feedback: list[dict] = []
 
@@ -189,6 +192,7 @@ You may output 0 to {_MAX_FEEDBACK_PER_ITERATION} feedback blocks.
 After all feedback blocks (or if there are none), end your response with exactly one of:
 - FEEDBACK_SENT — if you provided feedback for any session
 - NO_ISSUES — if all sessions look fine
+- CONTINUE — if you want to keep observing without sending feedback yet
 - INPUT_REQUIRED — if you need human input to proceed
 
 Important: Be concise in your feedback. Each feedback message will be injected into the target session's prompt, so keep it brief and actionable (1-3 sentences).
@@ -201,6 +205,7 @@ Important: Be concise in your feedback. Each feedback message will be injected i
             sys.executable, "-m", "pm_core.wrapper",
             "watcher", "supervisor-iter",
             "--iteration", str(iteration),
+            "--window-name", self.WINDOW_NAME,
         ]
         if self.state.loop_id:
             cmd.extend(["--loop-id", self.state.loop_id])

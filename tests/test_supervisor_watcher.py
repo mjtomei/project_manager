@@ -220,15 +220,12 @@ class TestFeedbackLogging:
             log_path = log_feedback(entry)
             assert log_path.exists()
 
-            # Read back
+            # Read back and assert round-trip inside the patch context
             entries = read_feedback_log(supervisor_id="supervisor-abc")
-
-        # Can't read from patched dir after context, so check file directly
-        content = log_path.read_text()
-        data = json.loads(content.strip())
-        assert data["supervisor_id"] == "supervisor-abc"
-        assert data["target_window"] == "pr-xyz-impl"
-        assert data["injected"] is True
+            assert len(entries) == 1
+            assert entries[0].supervisor_id == "supervisor-abc"
+            assert entries[0].target_window == "pr-xyz-impl"
+            assert entries[0].injected is True
 
     def test_read_with_target_filter(self, tmp_path):
         log_dir = tmp_path / "logs" / "supervisor"
@@ -365,6 +362,12 @@ class TestBuildLaunchCmd:
         assert "--iteration" in cmd
         assert "1" in cmd
 
+    def test_includes_window_name(self):
+        w = SupervisorWatcher(pm_root="")
+        cmd = w.build_launch_cmd(1)
+        assert "--window-name" in cmd
+        assert w.WINDOW_NAME in cmd
+
     def test_with_target_filter(self):
         w = SupervisorWatcher(pm_root="", target_filter="pr-abc")
         cmd = w.build_launch_cmd(1)
@@ -376,6 +379,12 @@ class TestBuildLaunchCmd:
         cmd = w.build_launch_cmd(1, transcript="/tmp/test.jsonl")
         assert "--transcript" in cmd
         assert "/tmp/test.jsonl" in cmd
+
+    def test_multiple_instances_have_unique_window_names(self):
+        """Multiple supervisor instances must not share a window name."""
+        w1 = SupervisorWatcher(pm_root="")
+        w2 = SupervisorWatcher(pm_root="")
+        assert w1.WINDOW_NAME != w2.WINDOW_NAME
 
 
 # --- Watcher registry ---

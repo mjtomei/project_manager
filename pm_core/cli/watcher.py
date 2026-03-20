@@ -350,15 +350,22 @@ def supervisor_log(target: str | None, limit: int):
 @click.option("--loop-id", default="")
 @click.option("--transcript", default=None)
 @click.option("--target", default=None)
+@click.option("--window-name", default=None,
+              help="Tmux window name for this supervisor instance")
 def supervisor_iter_cmd(iteration: int, loop_id: str,
-                        transcript: str | None, target: str | None):
+                        transcript: str | None, target: str | None,
+                        window_name: str | None):
     """Internal: create a supervisor tmux window for one iteration."""
-    _create_supervisor_window(iteration, loop_id, transcript, target_filter=target)
+    _create_supervisor_window(
+        iteration, loop_id, transcript,
+        target_filter=target, window_name=window_name,
+    )
 
 
 def _create_supervisor_window(iteration: int, loop_id: str,
                               transcript: str | None,
-                              target_filter: str | None = None) -> None:
+                              target_filter: str | None = None,
+                              window_name: str | None = None) -> None:
     """Create the supervisor tmux window for one iteration."""
     from pm_core.watchers.supervisor_watcher import SupervisorWatcher
 
@@ -399,7 +406,9 @@ def _create_supervisor_window(iteration: int, loop_id: str,
         effort=_resolution.effort,
     )
 
-    window_name = SupervisorWatcher.WINDOW_NAME
+    # Use the caller-supplied window name (for per-instance uniqueness when
+    # multiple supervisors run concurrently) or fall back to the class default.
+    window_name = window_name or SupervisorWatcher.WINDOW_NAME
 
     # Kill existing supervisor window and recreate
     sessions_watching: list[str] = []
