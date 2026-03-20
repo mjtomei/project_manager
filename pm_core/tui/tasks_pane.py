@@ -131,7 +131,7 @@ class TasksPane(Widget):
         # Classify windows and group into tasks
         tasks_by_key: dict[str, TaskEntry] = {}  # key = "group:pr_display_id" or window name
 
-        # Skip the TUI window (index 0 / name "main") and plan-worker windows
+        # Skip the TUI window (index 0 / name "main")
         skip_names = {"main"}
 
         for win in windows:
