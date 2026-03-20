@@ -7,6 +7,8 @@ from unittest.mock import patch, MagicMock
 
 from pm_core.qa_loop import (
     parse_qa_plan,
+    parse_new_mocks_from_plan,
+    NewMockRequest,
     QAScenario,
     QALoopState,
     create_qa_workdir,
@@ -2579,3 +2581,87 @@ class TestSpecGateRunningFlag:
 
         assert not state.running, "state.running must be False after spec gate fires"
         assert state.latest_verdict == VERDICT_INPUT_REQUIRED
+
+
+class TestParseNewMocksFromPlan:
+    def _wrap(self, body: str) -> str:
+        return f"QA_PLAN_START\n{body}\nQA_PLAN_END"
+
+    def test_empty_output_returns_empty(self):
+        assert parse_new_mocks_from_plan("") == []
+
+    def test_no_new_mock_blocks(self):
+        output = self._wrap("SCENARIO 1: Test\nFOCUS: f\nSTEPS: s\n")
+        assert parse_new_mocks_from_plan(output) == []
+
+    def test_single_new_mock(self):
+        output = self._wrap(
+            "NEW_MOCK: claude-session\n"
+            "DEPENDENCY: Anthropic Claude API\n"
+            "REASON: Avoid real API calls in tests\n\n"
+            "SCENARIO 1: Test\nFOCUS: f\nSTEPS: s\n"
+        )
+        mocks = parse_new_mocks_from_plan(output)
+        assert len(mocks) == 1
+        assert mocks[0].mock_id == "claude-session"
+        assert "Anthropic" in mocks[0].dependency
+        assert "real API" in mocks[0].reason
+
+    def test_multiple_new_mocks(self):
+        output = self._wrap(
+            "NEW_MOCK: claude-session\n"
+            "DEPENDENCY: Claude API\n"
+            "REASON: Scripted responses\n\n"
+            "NEW_MOCK: git-ops\n"
+            "DEPENDENCY: Git operations\n"
+            "REASON: Avoid side effects\n\n"
+            "SCENARIO 1: Test\nFOCUS: f\nSTEPS: s\n"
+        )
+        mocks = parse_new_mocks_from_plan(output)
+        assert len(mocks) == 2
+        ids = {m.mock_id for m in mocks}
+        assert ids == {"claude-session", "git-ops"}
+
+    def test_mock_id_sanitised(self):
+        """Spaces and special chars in mock ID are normalised."""
+        output = self._wrap(
+            "NEW_MOCK: Claude Session Mock\n"
+            "DEPENDENCY: Claude API\n"
+            "REASON: x\n"
+        )
+        mocks = parse_new_mocks_from_plan(output)
+        assert mocks[0].mock_id == "claude-session-mock"
+
+    def test_placeholder_mock_id_skipped(self):
+        output = self._wrap("NEW_MOCK: <mock-id>\nDEPENDENCY: x\nREASON: y\n")
+        assert parse_new_mocks_from_plan(output) == []
+
+
+class TestParseQaPlanMocksField:
+    def test_mocks_parsed_per_scenario(self):
+        output = """QA_PLAN_START
+SCENARIO 1: Test spec generation
+FOCUS: spec impl
+INSTRUCTION: none
+MOCKS: claude-session, git-ops
+STEPS: run pm pr spec
+
+SCENARIO 2: Test without mocks
+FOCUS: cli
+INSTRUCTION: none
+MOCKS: none
+STEPS: run pm pr list
+QA_PLAN_END"""
+        scenarios = parse_qa_plan(output)
+        assert scenarios[0].mock_ids == ["claude-session", "git-ops"]
+        assert scenarios[1].mock_ids == []
+
+    def test_missing_mocks_field_defaults_to_empty(self):
+        output = """QA_PLAN_START
+SCENARIO 1: Legacy scenario
+FOCUS: something
+INSTRUCTION: none
+STEPS: do something
+QA_PLAN_END"""
+        scenarios = parse_qa_plan(output)
+        assert scenarios[0].mock_ids == []
