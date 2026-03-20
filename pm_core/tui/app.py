@@ -1117,6 +1117,7 @@ class ProjectManagerApp(App):
         windows = tmux_mod.list_windows(session)
         prs = self._data.get("prs") or []
         tasks_pane = self.query_one("#tasks-pane", TasksPane)
+        tasks_pane.advance_animation()
         tasks_pane.update_tasks(
             windows, prs,
             self._review_loops,
