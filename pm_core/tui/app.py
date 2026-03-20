@@ -21,7 +21,7 @@ from pm_core.tui.command_bar import CommandBar, CommandSubmitted
 from pm_core.tui.guide_progress import GuideProgress
 from pm_core.tui.plans_pane import PlansPane, PlanSelected, PlanActivated, PlanAction
 from pm_core.tui.qa_pane import QAPane, QAItemSelected, QAItemActivated, QAAction
-from pm_core.tui.tasks_pane import TasksPane, TaskAction, TaskWindowSwitch
+from pm_core.tui.tasks_pane import TasksPane, TaskWindowSwitch
 from pm_core.plan_parser import extract_plan_intro
 
 from pm_core.tui.widgets import TreeScroll, StatusBar, LogLine
@@ -1229,49 +1229,5 @@ class ProjectManagerApp(App):
             self._tasks_poll_timer.stop()
             self._tasks_poll_timer = None
 
-    def on_task_action(self, message: TaskAction) -> None:
-        """Handle PR action shortcuts from the tasks pane."""
-        message.stop()
-        pr_id = message.pr_id
-        _log.info("task action: %s (pr=%s)", message.action, pr_id)
-        if not pr_id:
-            self.log_message("No PR selected")
-            return
-
-        # Select the PR in the tree so the standard action handlers work
-        tree = self.query_one("#tech-tree", TechTree)
-        tree.select_pr(pr_id)
-        pr_view.handle_pr_selected(self, pr_id)
-
-        # Dispatch action
-        if message.action == "start":
-            pr_view.start_pr(self)
-        elif message.action == "review":
-            z = self._consume_z()
-            if z == 0:
-                pr_view.done_pr(self)
-            elif z == 1:
-                review_loop_ui.stop_loop_or_fresh_done(self)
-            elif z == 2:
-                review_loop_ui.start_or_stop_loop(self, stop_on_suggestions=True)
-            else:
-                review_loop_ui.start_or_stop_loop(self, stop_on_suggestions=False)
-        elif message.action == "merge":
-            pr_view.merge_pr(self)
-        elif message.action == "qa":
-            from pm_core.tui import qa_loop_ui
-            z = self._consume_z()
-            if z == 0:
-                qa_loop_ui.focus_or_start_qa(self, pr_id)
-            elif z == 1:
-                qa_loop_ui.fresh_start_qa(self, pr_id)
-            elif z == 2:
-                qa_loop_ui.start_or_stop_qa_loop(self, pr_id, strict=False)
-            else:
-                qa_loop_ui.start_or_stop_qa_loop(self, pr_id, strict=True)
-        elif message.action == "edit":
-            pane_ops.edit_plan(self)
-        elif message.action == "view_plan":
-            pane_ops.view_plan(self)
 
 

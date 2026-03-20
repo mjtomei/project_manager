@@ -20,14 +20,6 @@ from pm_core.paths import configure_logger
 _log = configure_logger("pm.tui.tasks_pane")
 
 
-class TaskAction(Message):
-    """Fired when a task action is requested."""
-    def __init__(self, action: str, pr_id: str | None = None) -> None:
-        self.action = action
-        self.pr_id = pr_id
-        super().__init__()
-
-
 class TaskWindowSwitch(Message):
     """Fired when the user wants to switch to a task's tmux window."""
     def __init__(self, window_name: str) -> None:

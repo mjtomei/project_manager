@@ -6,7 +6,6 @@ from pm_core.tui.tasks_pane import (
     TasksPane,
     TaskEntry,
     TaskWindowSwitch,
-    TaskAction,
     _classify_window,
     GROUP_ORDER,
 )
