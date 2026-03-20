@@ -258,7 +258,7 @@ def supervisor_start(target: str | None, count: int, wait: int | None):
     Examples:
       pm watcher supervisor start                    # one supervisor, all targets
       pm watcher supervisor start --target pr-abc    # filter to specific PR
-      pm watcher supervisor start --count 3          # launch 3 supervisors
+      pm watcher supervisor start --wait 120         # 2-minute iterations
     """
     from pm_core.watchers.supervisor_watcher import SupervisorWatcher
 
@@ -266,50 +266,52 @@ def supervisor_start(target: str | None, count: int, wait: int | None):
         click.echo("Supervisor requires tmux.", err=True)
         raise SystemExit(1)
 
+    # Multiple concurrent supervisors share the same tmux window name
+    # ("supervisor"), so running N > 1 would cause each supervisor's
+    # iteration to kill the previous supervisor's window.  Per-instance
+    # window naming requires CLI plumbing that is not yet implemented.
+    # TODO: implement unique WINDOW_NAME per supervisor instance so that
+    #       multiple supervisors can run concurrently without conflict.
+    if count > 1:
+        click.echo(
+            "Error: --count > 1 is not yet supported.  Multiple supervisors "
+            "would share the same tmux window and interfere with each other.\n"
+            "Run a single supervisor with a --target filter instead.",
+            err=True,
+        )
+        raise SystemExit(1)
+
     root = state_root()
     pm_root = str(root)
 
-    for i in range(count):
-        watcher = SupervisorWatcher(pm_root=pm_root, target_filter=target)
-        if wait is not None:
-            watcher.state.iteration_wait = wait
+    watcher = SupervisorWatcher(pm_root=pm_root, target_filter=target)
+    if wait is not None:
+        watcher.state.iteration_wait = wait
 
-        tdir = root / "transcripts" / f"supervisor-{secrets.token_hex(4)}"
-        tdir.mkdir(parents=True, exist_ok=True)
+    tdir = root / "transcripts" / f"supervisor-{secrets.token_hex(4)}"
+    tdir.mkdir(parents=True, exist_ok=True)
 
-        label = f"#{i+1}" if count > 1 else ""
-        click.echo(f"Starting Supervisor{label} (target={target or 'all'}) ...")
-        click.echo(f"Transcripts: {tdir}")
+    click.echo(f"Starting Supervisor (target={target or 'all'}) ...")
+    click.echo(f"Transcripts: {tdir}")
+    click.echo("Press Ctrl+C to stop.\n")
 
-        if count == 1:
-            # Single supervisor: run blocking
-            click.echo("Press Ctrl+C to stop.\n")
+    def _on_iter(s):
+        ts = datetime.now().strftime("%H:%M:%S")
+        click.echo(f"[{ts}] Iteration {s.iteration}: {s.latest_verdict}")
 
-            def _on_iter(s):
-                ts = datetime.now().strftime("%H:%M:%S")
-                click.echo(f"[{ts}] Iteration {s.iteration}: {s.latest_verdict}")
+    try:
+        watcher.run_sync(
+            on_iteration=_on_iter,
+            transcript_dir=str(tdir),
+        )
+    except KeyboardInterrupt:
+        watcher.state.stop_requested = True
+        click.echo("\nStopping supervisor...")
 
-            try:
-                watcher.run_sync(
-                    on_iteration=_on_iter,
-                    transcript_dir=str(tdir),
-                )
-            except KeyboardInterrupt:
-                watcher.state.stop_requested = True
-                click.echo("\nStopping supervisor...")
-
-            click.echo(
-                f"\nSupervisor finished: {watcher.state.iteration} iteration(s), "
-                f"last verdict: {watcher.state.latest_verdict}"
-            )
-        else:
-            # Multiple supervisors: run in background threads
-            watcher.start_background(transcript_dir=str(tdir))
-            click.echo(f"  Supervisor{label} started in background "
-                       f"(id={watcher.state.watcher_id})")
-
-    if count > 1:
-        click.echo(f"\n{count} supervisors running. Use 'pm watcher supervisor stop' to stop.")
+    click.echo(
+        f"\nSupervisor finished: {watcher.state.iteration} iteration(s), "
+        f"last verdict: {watcher.state.latest_verdict}"
+    )
 
 
 @supervisor_cmd.command("stop")
