@@ -612,13 +612,8 @@ def pr_spec_save(pr_id: str, phase: str):
         click.echo(f"Invalid phase: {phase}. Must be one of: {', '.join(spec_gen.PHASES)}", err=True)
         raise SystemExit(1)
 
-    # Use stored path if available, otherwise derive canonical path
-    field = spec_gen._SPEC_FIELD.get(phase)
-    stored_path = pr_entry.get(field)
-    if stored_path and Path(stored_path).exists():
-        spec_path = Path(stored_path)
-    else:
-        spec_path = spec_gen.spec_file_path(root, pr_id, phase)
+    spec_path = spec_gen.spec_file_path(root, pr_id, phase)
+    field = spec_gen._SPEC_FIELD[phase]
 
     if not spec_path.exists():
         click.echo(f"Spec file not found: {spec_path}", err=True)

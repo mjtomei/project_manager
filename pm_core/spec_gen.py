@@ -374,7 +374,11 @@ def reject_spec(data: dict, pr_id: str, feedback: str | None = None,
                 root: Path | None = None) -> str | None:
     """Reject a pending spec and regenerate it, optionally incorporating feedback.
 
-    Keeps ``spec_pending`` set so the blocking gate remains active.
+    After regeneration, ``spec_pending`` may or may not remain set:
+    in ``review`` mode it is always re-set; in ``prompt`` mode it is
+    cleared if the regenerated spec has no ambiguity flags (allowing the
+    phase to proceed automatically).
+
     If *feedback* is provided, it is appended to the PR description for
     context during regeneration, then removed afterward.
 
