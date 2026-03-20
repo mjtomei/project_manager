@@ -49,11 +49,7 @@ VERDICT_ICONS = {
 
 def _get_selected_pr(app) -> tuple[str | None, dict | None]:
     """Get the selected PR ID and entry."""
-    pr_id = app._get_active_pr_id() if hasattr(app, '_get_active_pr_id') else None
-    if pr_id is None:
-        from pm_core.tui.tech_tree import TechTree
-        tree = app.query_one("#tech-tree", TechTree)
-        pr_id = tree.selected_pr_id
+    pr_id = app._get_active_pr_id()
     if not pr_id:
         return None, None
     pr = store.get_pr(app._data, pr_id)
