@@ -266,16 +266,16 @@ def supervisor_start(target: str | None, count: int, wait: int | None):
         click.echo("Supervisor requires tmux.", err=True)
         raise SystemExit(1)
 
-    # Multiple concurrent supervisors share the same tmux window name
-    # ("supervisor"), so running N > 1 would cause each supervisor's
-    # iteration to kill the previous supervisor's window.  Per-instance
-    # window naming requires CLI plumbing that is not yet implemented.
-    # TODO: implement unique WINDOW_NAME per supervisor instance so that
-    #       multiple supervisors can run concurrently without conflict.
+    # Running N > 1 supervisors requires launching multiple blocking run_sync()
+    # loops concurrently (threads or subprocesses), which is not yet
+    # implemented.  Each supervisor already gets a unique window name via
+    # its watcher_id, so window conflicts are not the blocker.
+    # TODO: launch N supervisor threads/processes to support --count > 1.
     if count > 1:
         click.echo(
-            "Error: --count > 1 is not yet supported.  Multiple supervisors "
-            "would share the same tmux window and interfere with each other.\n"
+            "Error: --count > 1 is not yet supported.  Launching multiple "
+            "concurrent supervisors requires parallel execution (threads or "
+            "subprocesses) which is not yet implemented.\n"
             "Run a single supervisor with a --target filter instead.",
             err=True,
         )
