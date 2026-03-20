@@ -783,6 +783,23 @@ class TestFakeClaudeLauncher:
         assert captured[0][0] == fake_bin
         assert "--verdict" in captured[0]
 
+    def test_launch_claude_works_without_real_claude_on_path(self, monkeypatch, tmp_path):
+        """launch_claude must not require the real claude binary when fake is configured."""
+        from pm_core import claude_launcher
+        fake_bin = "/custom/fake-claude"
+        fc_config = {"verdicts": {"PASS": 1}, "binary": fake_bin}
+        monkeypatch.setattr("pm_core.claude_launcher._fake_claude_config_for_type",
+                            lambda st: fc_config if st == "review" else None)
+        monkeypatch.setattr("pm_core.claude_launcher.find_claude", lambda: None)
+        captured = []
+        monkeypatch.setattr("subprocess.run",
+                            lambda cmd, **kw: (captured.append(cmd), type("R", (), {"returncode": 0})())[-1])
+        # Must not raise FileNotFoundError even though find_claude() returns None
+        claude_launcher.launch_claude(
+            "prompt", session_key="k", pm_root=tmp_path,
+            session_type="review")
+        assert captured and captured[0][0] == fake_bin
+
     def test_launch_claude_print_uses_fake_binary(self, monkeypatch):
         """launch_claude_print must invoke fake-claude binary, not the real claude."""
         from pm_core import claude_launcher
@@ -802,6 +819,26 @@ class TestFakeClaudeLauncher:
         assert captured, "subprocess.run was not called"
         assert captured[0][0] == fake_bin
         assert "--verdict" in captured[0]
+
+    def test_launch_claude_print_works_without_real_claude_on_path(self, monkeypatch):
+        """launch_claude_print must not require real claude when fake is configured."""
+        from pm_core import claude_launcher
+        fake_bin = "/custom/fake-claude"
+        fc_config = {"verdicts": {"PASS": 1}, "binary": fake_bin}
+        monkeypatch.setattr("pm_core.claude_launcher._fake_claude_config_for_type",
+                            lambda st: fc_config if st == "review" else None)
+        monkeypatch.setattr("pm_core.claude_launcher.find_claude", lambda: None)
+        captured = []
+
+        class _FakeResult:
+            returncode = 0
+            stdout = "PASS\n"
+
+        monkeypatch.setattr("subprocess.run",
+                            lambda cmd, **kw: (captured.append(cmd), _FakeResult())[-1])
+        result = claude_launcher.launch_claude_print("prompt", session_type="review")
+        assert captured and captured[0][0] == fake_bin
+        assert "PASS" in result
 
     def test_launch_claude_print_background_uses_fake_binary(self, monkeypatch):
         """launch_claude_print_background must invoke fake-claude binary."""

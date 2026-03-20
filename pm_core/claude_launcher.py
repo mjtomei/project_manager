@@ -186,8 +186,11 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
     """
     import uuid
 
+    # Check fake-claude config before requiring real claude on PATH.
+    fc_config = _fake_claude_config_for_type(session_type)
+
     claude = find_claude()
-    if not claude:
+    if not claude and fc_config is None:
         raise FileNotFoundError("claude CLI not found. Install it first.")
 
     # Resolve provider for env vars and model flag
@@ -210,7 +213,6 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
         save_session(pm_root, session_key, session_id)
         _log.info("Generated new session_id=%s for key=%s", session_id, session_key)
 
-    fc_config = _fake_claude_config_for_type(session_type)
     if fc_config is not None:
         cmd = [fc_config.get("binary", _FAKE_CLAUDE_BIN)]
         cmd.extend(_fake_claude_args(fc_config))
@@ -288,14 +290,15 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
     import time
     import itertools
 
+    # Check fake-claude config before requiring real claude on PATH.
+    fc_config = _fake_claude_config_for_type(session_type)
+
     claude = find_claude()
-    if not claude:
+    if not claude and fc_config is None:
         raise FileNotFoundError("claude CLI not found. Install it first.")
 
     # Resolve provider
     _, model_flag, run_env = _resolve_provider(provider)
-
-    fc_config = _fake_claude_config_for_type(session_type)
     if fc_config is not None:
         cmd = [fc_config.get("binary", _FAKE_CLAUDE_BIN)]
         cmd.extend(_fake_claude_args(fc_config))
