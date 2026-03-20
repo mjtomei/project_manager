@@ -1,5 +1,6 @@
 """Textual TUI App for Project Manager."""
 
+import subprocess
 from pathlib import Path
 
 from pm_core.paths import configure_logger
@@ -1150,7 +1151,6 @@ class ProjectManagerApp(App):
         win = tmux_mod.find_window_by_name(session, window_name)
         if win:
             current = tmux_mod.current_or_base_session(session)
-            import subprocess
             subprocess.run(
                 tmux_mod._tmux_cmd("select-window", "-t", f"{current}:{win['index']}"),
                 capture_output=True,

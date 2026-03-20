@@ -110,7 +110,6 @@ class TasksPane(Widget):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._entries: list[TaskEntry] = []
-        self._group_headers: dict[int, str] = {}  # flat_index -> group name
         self._flat_items: list[dict] = []  # flattened for rendering
         self._animation_frame: int = 0
 
@@ -295,7 +294,6 @@ class TasksPane(Widget):
             output.append(".\n", style="dim")
             return output
 
-        selectable = self._selectable_indices()
         for i, item in enumerate(self._flat_items):
             if "_header" in item:
                 label = item["_header"]
