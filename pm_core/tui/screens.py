@@ -224,8 +224,10 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]T[/]  Back to tree view", classes="help-row")
                 yield Label("PR Actions (on selected task)", classes="help-section")
                 yield Label("  [bold]s[/]  Start PR", classes="help-row")
+                yield Label("  [bold]S[/]  Start PR with companion pane", classes="help-row")
                 yield Label("  [bold]d[/]  Review (zz d: loop, zzz d: strict)", classes="help-row")
                 yield Label("  [bold]g[/]  Merge PR", classes="help-row")
+                yield Label("  [bold]G[/]  Merge PR with companion pane", classes="help-row")
                 yield Label("  [bold]t[/]  Start QA on PR", classes="help-row")
                 yield Label("  [bold]c[/]  Launch Claude session", classes="help-row")
             elif self._in_qa:

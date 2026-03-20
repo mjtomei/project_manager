@@ -261,7 +261,7 @@ class ProjectManagerApp(App):
                 return False
             # In tasks view, only allow actions that work with the tasks pane
             if self._tasks_visible:
-                tasks_allowed = ("start_pr", "done_pr", "merge_pr", "start_qa_on_pr", "launch_claude")
+                tasks_allowed = ("start_pr", "start_pr_companion", "done_pr", "merge_pr", "merge_pr_companion", "start_qa_on_pr", "launch_claude")
                 if action not in tasks_allowed:
                     _log.debug("check_action: blocked %s (in tasks view, not supported)", action)
                     return False
@@ -1053,13 +1053,7 @@ class ProjectManagerApp(App):
           zzz t  — start/stop QA loop (strict)
         """
         from pm_core.tui import qa_loop_ui
-        from pm_core.tui.tech_tree import TechTree
-        if self._tasks_visible:
-            tasks_pane = self.query_one("#tasks-pane", TasksPane)
-            pr_id = tasks_pane.selected_pr_id
-        else:
-            tree = self.query_one("#tech-tree", TechTree)
-            pr_id = tree.selected_pr_id
+        pr_id = self._get_active_pr_id()
         if not pr_id:
             self.log_message("No PR selected")
             return
