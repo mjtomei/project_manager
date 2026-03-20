@@ -8,13 +8,17 @@ from pm_core.qa_instructions import (
     _list_dir,
     list_instructions,
     list_regression_tests,
+    list_mocks,
     list_all,
     get_instruction,
+    get_mock,
     instruction_summary_for_prompt,
+    mocks_for_prompt,
     resolve_instruction_ref,
     qa_dir,
     instructions_dir,
     regression_dir,
+    mocks_dir,
 )
 
 
@@ -220,3 +224,95 @@ class TestResolveInstructionRef:
         result = resolve_instruction_ref(
             pm, "/home/user/pm/qa/instructions/login-flow.md")
         assert result == ("instructions", "login-flow.md")
+
+
+# ---------------------------------------------------------------------------
+# Mocks library
+# ---------------------------------------------------------------------------
+
+def _write_mock(pm_root: Path, mock_id: str, title: str,
+                description: str = "", body: str = "") -> None:
+    d = mocks_dir(pm_root)
+    content = f"---\ntitle: {title}\ndescription: {description}\ntags: []\n---\n{body}"
+    (d / f"{mock_id}.md").write_text(content)
+
+
+class TestListMocks:
+    def test_empty_directory(self, tmp_path):
+        pm = tmp_path / "pm"
+        pm.mkdir()
+        assert list_mocks(pm) == []
+
+    def test_lists_mock_files(self, tmp_path):
+        pm = tmp_path / "pm"
+        pm.mkdir()
+        _write_mock(pm, "claude-session", "Claude Session Mock", "Mocks the Claude API")
+        _write_mock(pm, "git-ops", "Git Ops Mock", "Mocks git operations")
+        mocks = list_mocks(pm)
+        assert len(mocks) == 2
+        ids = {m["id"] for m in mocks}
+        assert ids == {"claude-session", "git-ops"}
+
+    def test_list_all_includes_mocks(self, tmp_path):
+        pm = tmp_path / "pm"
+        pm.mkdir()
+        _write_mock(pm, "tmux-mock", "Tmux Mock")
+        all_items = list_all(pm)
+        assert "mocks" in all_items
+        assert len(all_items["mocks"]) == 1
+
+
+class TestGetMock:
+    def test_returns_none_for_missing(self, tmp_path):
+        pm = tmp_path / "pm"
+        pm.mkdir()
+        assert get_mock(pm, "nonexistent") is None
+
+    def test_returns_mock_with_body(self, tmp_path):
+        pm = tmp_path / "pm"
+        pm.mkdir()
+        _write_mock(pm, "claude-session", "Claude Session Mock",
+                    "Mocks the Claude API",
+                    "## Contract\nSimulates Claude sessions.\n")
+        mock = get_mock(pm, "claude-session")
+        assert mock is not None
+        assert mock["id"] == "claude-session"
+        assert mock["title"] == "Claude Session Mock"
+        assert mock["description"] == "Mocks the Claude API"
+        assert "Contract" in mock["body"]
+        assert mock["path"].endswith("claude-session.md")
+
+
+class TestMocksForPrompt:
+    def test_empty_library_returns_empty_string(self, tmp_path):
+        pm = tmp_path / "pm"
+        pm.mkdir()
+        assert mocks_for_prompt(pm) == ""
+
+    def test_includes_all_mocks(self, tmp_path):
+        pm = tmp_path / "pm"
+        pm.mkdir()
+        _write_mock(pm, "claude-session", "Claude Session Mock",
+                    body="## Contract\nFakeClaudeSession\n")
+        _write_mock(pm, "git-ops", "Git Ops Mock",
+                    body="## Contract\nFakeGitOps\n")
+        result = mocks_for_prompt(pm)
+        assert "Claude Session Mock" in result
+        assert "Git Ops Mock" in result
+        assert "FakeClaudeSession" in result
+        assert "FakeGitOps" in result
+
+    def test_prompt_block_has_mocks_heading(self, tmp_path):
+        pm = tmp_path / "pm"
+        pm.mkdir()
+        _write_mock(pm, "tmux-mock", "Tmux Mock", body="## Contract\nFakeTmux\n")
+        result = mocks_for_prompt(pm)
+        assert result.startswith("## Mocks")
+        assert "do not devise your own" in result
+
+    def test_description_included_when_present(self, tmp_path):
+        pm = tmp_path / "pm"
+        pm.mkdir()
+        _write_mock(pm, "tmux-mock", "Tmux Mock", description="Simulates tmux panes")
+        result = mocks_for_prompt(pm)
+        assert "Simulates tmux panes" in result

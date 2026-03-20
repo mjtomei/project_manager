@@ -7,6 +7,8 @@ from unittest.mock import patch, MagicMock
 
 from pm_core.qa_loop import (
     parse_qa_plan,
+    parse_new_mocks_from_plan,
+    NewMockRequest,
     QAScenario,
     QALoopState,
     create_qa_workdir,
@@ -2319,3 +2321,347 @@ class TestInstallInstructionFile:
         _install_instruction_file(tmp_path, scenario, tmp_path,
                                   scratch_dir="/scratch")
         assert scenario.instruction_path is None
+
+
+# ---------------------------------------------------------------------------
+# Retry logic for dead scenario windows
+# ---------------------------------------------------------------------------
+
+class TestScenarioRetryLogic:
+    """Tests for _poll_tmux_verdicts retry logic when windows die."""
+
+    def test_dead_window_triggers_relaunch(self, tmp_path):
+        """When _get_scenario_pane returns None, _relaunch_scenario_window is called."""
+        from pm_core.qa_loop import (
+            _poll_tmux_verdicts,
+            _SCENARIO_MAX_RETRIES,
+            _SCENARIO_RETRY_BASE,
+        )
+
+        scenario = QAScenario(index=1, title="Test", focus="t")
+        scenario.window_name = "qa-test-s1"
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        state.scenario_verdicts = {}
+
+        call_count = 0
+
+        def pane_side_effect(session, win_name):
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 2:
+                return None  # Window dead for first 2 polls
+            return "%42"  # Window alive after relaunch
+
+        status_path = tmp_path / "status.json"
+
+        with patch("pm_core.qa_loop._get_scenario_pane", side_effect=pane_side_effect), \
+             patch("pm_core.qa_loop._relaunch_scenario_window", return_value=True) as mock_relaunch, \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic", side_effect=[
+                 0,    # grace_start
+                 100,  # 1st poll: past grace
+                 100,  # 1st poll: relaunch grace reset -> new grace_start
+                 200,  # 2nd poll: past grace
+                 200,  # 2nd poll: relaunch grace reset -> new grace_start
+                 300,  # 3rd poll: past grace
+             ]), \
+             patch("pm_core.qa_loop.VerdictStabilityTracker") as MockTracker, \
+             patch("pm_core.qa_loop.extract_verdict_from_content", return_value="PASS"), \
+             patch("pm_core.tmux.capture_pane", return_value="PASS"), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.qa_loop._is_verification_enabled", return_value=False):
+            tracker_inst = MockTracker.return_value
+            tracker_inst.update.return_value = True  # Verdict is stable
+
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", status_path, lambda *a: None,
+            )
+
+        assert mock_relaunch.call_count == 2
+        assert state.scenario_verdicts[1] == VERDICT_PASS
+
+    def test_retries_exhausted_gives_input_required(self, tmp_path):
+        """When all retries are used, scenario gets INPUT_REQUIRED."""
+        from pm_core.qa_loop import (
+            _poll_tmux_verdicts,
+            _SCENARIO_MAX_RETRIES,
+        )
+
+        scenario = QAScenario(index=1, title="Test", focus="t")
+        scenario.window_name = "qa-test-s1"
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        state.scenario_verdicts = {}
+
+        status_path = tmp_path / "status.json"
+
+        # Window always dead, relaunch always succeeds but window keeps dying
+        monotonic_values = [0]  # grace_start
+        for i in range(_SCENARIO_MAX_RETRIES + 1):
+            monotonic_values.append(100 + i)  # past grace
+            if i < _SCENARIO_MAX_RETRIES:
+                monotonic_values.append(100 + i)  # grace reset
+
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value=None), \
+             patch("pm_core.qa_loop._relaunch_scenario_window", return_value=True) as mock_relaunch, \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic", side_effect=monotonic_values), \
+             patch("pm_core.qa_loop._write_status_file"):
+
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", status_path, lambda *a: None,
+            )
+
+        assert mock_relaunch.call_count == _SCENARIO_MAX_RETRIES
+        assert state.scenario_verdicts[1] == VERDICT_INPUT_REQUIRED
+
+    def test_failed_relaunch_still_retries(self, tmp_path):
+        """A failed relaunch should not immediately give up — it should
+        increment the retry counter and try again on the next poll."""
+        from pm_core.qa_loop import _poll_tmux_verdicts
+
+        scenario = QAScenario(index=1, title="Test", focus="t")
+        scenario.window_name = "qa-test-s1"
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        state.scenario_verdicts = {}
+
+        status_path = tmp_path / "status.json"
+
+        relaunch_results = [False, True]  # Fail first, succeed second
+        pane_results = [None, None, "%42"]  # Dead, dead, alive
+
+        # monotonic calls: grace_start, then per-poll in_grace check,
+        # plus grace_start reset on successful relaunch
+        monotonic_vals = [
+            0,    # initial grace_start
+            100,  # poll 1 in_grace check (past grace) → pane None → relaunch fails → continue
+            200,  # poll 2 in_grace check (past grace) → pane None → relaunch succeeds
+            200,  # grace_start reset after successful relaunch
+            300,  # poll 3 in_grace check (past grace) → pane alive → read verdict
+        ]
+
+        with patch("pm_core.qa_loop._get_scenario_pane", side_effect=pane_results), \
+             patch("pm_core.qa_loop._relaunch_scenario_window", side_effect=relaunch_results) as mock_relaunch, \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic", side_effect=monotonic_vals), \
+             patch("pm_core.qa_loop.VerdictStabilityTracker") as MockTracker, \
+             patch("pm_core.qa_loop.extract_verdict_from_content", return_value="PASS"), \
+             patch("pm_core.tmux.capture_pane", return_value="PASS"), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.qa_loop._is_verification_enabled", return_value=False):
+            tracker_inst = MockTracker.return_value
+            tracker_inst.update.return_value = True
+
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", status_path, lambda *a: None,
+            )
+
+        # Should have attempted relaunch twice (once failed, once succeeded)
+        assert mock_relaunch.call_count == 2
+        assert state.scenario_verdicts[1] == VERDICT_PASS
+
+    def test_backoff_formula(self):
+        """Verify exponential backoff: 5 * 2^retries = 5, 10, 20, 40..."""
+        from pm_core.qa_loop import _SCENARIO_RETRY_BASE
+        assert _SCENARIO_RETRY_BASE == 5
+        for retries in range(5):
+            expected = 5 * (2 ** retries)
+            assert _SCENARIO_RETRY_BASE * (2 ** retries) == expected
+
+    def test_max_retries_constant(self):
+        from pm_core.qa_loop import _SCENARIO_MAX_RETRIES
+        assert _SCENARIO_MAX_RETRIES == 10
+
+
+# ---------------------------------------------------------------------------
+# state._error wiring: written to status file and preserved through verdict aggregation
+# ---------------------------------------------------------------------------
+
+class TestStateErrorWiring:
+    """Tests that state._error is written to the status file and that it
+    prevents the verdict aggregation from overwriting INPUT_REQUIRED with PASS."""
+
+    def test_error_written_to_status_file(self, tmp_path):
+        """_write_status_file called with error=state._error writes the field."""
+        from pm_core.qa_loop import _write_status_file
+        import json
+
+        status_path = tmp_path / "status.json"
+        _write_status_file(
+            status_path, "pr-001", [], {},
+            error="Something went wrong.",
+        )
+        data = json.loads(status_path.read_text())
+        assert data["error"] == "Something went wrong."
+
+    def test_no_error_field_empty_by_default(self, tmp_path):
+        """Without error argument the field defaults to empty string."""
+        from pm_core.qa_loop import _write_status_file
+        import json
+
+        status_path = tmp_path / "status.json"
+        _write_status_file(status_path, "pr-001", [], {})
+        data = json.loads(status_path.read_text())
+        assert data.get("error", "") == ""
+
+    def test_error_prevents_pass_verdict(self, tmp_path):
+        """When state._error is set and no scenario verdicts exist, the
+        overall verdict should stay INPUT_REQUIRED, not be overwritten with PASS."""
+        from pm_core.qa_loop import _write_status_file
+        import json
+
+        # Simulate the verdict aggregation logic from run_qa_sync
+        verdicts = []
+        error = "No parseable scenarios found."
+        # Old (buggy) logic would pick PASS; new logic should pick INPUT_REQUIRED
+        if VERDICT_NEEDS_WORK in verdicts:
+            result = VERDICT_NEEDS_WORK
+        elif VERDICT_INPUT_REQUIRED in verdicts or error:
+            result = VERDICT_INPUT_REQUIRED
+        else:
+            result = VERDICT_PASS
+
+        assert result == VERDICT_INPUT_REQUIRED
+
+
+# ---------------------------------------------------------------------------
+# Spec gate: state.running is set to False on early return
+# ---------------------------------------------------------------------------
+
+class TestSpecGateRunningFlag:
+    """The spec gate early-return must set state.running = False so that
+    the QA loop UI's _on_qa_complete callback fires."""
+
+    def test_spec_gate_sets_running_false(self, tmp_path):
+        """run_qa_sync must set state.running=False when spec gate fires."""
+        from pm_core.qa_loop import run_qa_sync, QALoopState
+        from pm_core import store
+
+        pr_id = "pr-specgate"
+        pm_dir = tmp_path / "pm"
+        pm_dir.mkdir()
+        workdir = tmp_path / "work"
+        workdir.mkdir()
+        (workdir / ".git").mkdir()
+
+        pr_entry = {
+            "id": pr_id,
+            "title": "Test PR",
+            "description": "Test",
+            "branch": "pm/test",
+            "status": "qa",
+            "workdir": str(workdir),
+        }
+        data = {
+            "project": {
+                "name": "test",
+                "repo": str(tmp_path),
+                "base_branch": "master",
+                "backend": "local",
+            },
+            "prs": [pr_entry],
+            "plans": [],
+        }
+        store.save(data, pm_dir)
+
+        state = QALoopState(pr_id=pr_id)
+        # planning_phase=False + pre-loaded scenarios skips Phase 1
+        state.planning_phase = False
+        state.scenarios = [QAScenario(index=1, title="T", focus="t")]
+
+        with patch("pm_core.qa_loop.get_pm_session", return_value="pm-session"), \
+             patch("pm_core.store.load", return_value=data), \
+             patch("pm_core.store.get_pr", return_value=pr_entry), \
+             patch("pm_core.qa_loop._get_qa_spec", return_value=None), \
+             patch("pm_core.cli.helpers._ensure_workdir", return_value=str(workdir)), \
+             patch("pm_core.qa_loop._resolve_qa_model", return_value=(None, None, None)):
+            run_qa_sync(state, pm_dir, pr_entry, lambda *a: None)
+
+        assert not state.running, "state.running must be False after spec gate fires"
+        assert state.latest_verdict == VERDICT_INPUT_REQUIRED
+
+
+class TestParseNewMocksFromPlan:
+    def _wrap(self, body: str) -> str:
+        return f"QA_PLAN_START\n{body}\nQA_PLAN_END"
+
+    def test_empty_output_returns_empty(self):
+        assert parse_new_mocks_from_plan("") == []
+
+    def test_no_new_mock_blocks(self):
+        output = self._wrap("SCENARIO 1: Test\nFOCUS: f\nSTEPS: s\n")
+        assert parse_new_mocks_from_plan(output) == []
+
+    def test_single_new_mock(self):
+        output = self._wrap(
+            "NEW_MOCK: claude-session\n"
+            "DEPENDENCY: Anthropic Claude API\n"
+            "REASON: Avoid real API calls in tests\n\n"
+            "SCENARIO 1: Test\nFOCUS: f\nSTEPS: s\n"
+        )
+        mocks = parse_new_mocks_from_plan(output)
+        assert len(mocks) == 1
+        assert mocks[0].mock_id == "claude-session"
+        assert "Anthropic" in mocks[0].dependency
+        assert "real API" in mocks[0].reason
+
+    def test_multiple_new_mocks(self):
+        output = self._wrap(
+            "NEW_MOCK: claude-session\n"
+            "DEPENDENCY: Claude API\n"
+            "REASON: Scripted responses\n\n"
+            "NEW_MOCK: git-ops\n"
+            "DEPENDENCY: Git operations\n"
+            "REASON: Avoid side effects\n\n"
+            "SCENARIO 1: Test\nFOCUS: f\nSTEPS: s\n"
+        )
+        mocks = parse_new_mocks_from_plan(output)
+        assert len(mocks) == 2
+        ids = {m.mock_id for m in mocks}
+        assert ids == {"claude-session", "git-ops"}
+
+    def test_mock_id_sanitised(self):
+        """Spaces and special chars in mock ID are normalised."""
+        output = self._wrap(
+            "NEW_MOCK: Claude Session Mock\n"
+            "DEPENDENCY: Claude API\n"
+            "REASON: x\n"
+        )
+        mocks = parse_new_mocks_from_plan(output)
+        assert mocks[0].mock_id == "claude-session-mock"
+
+    def test_placeholder_mock_id_skipped(self):
+        output = self._wrap("NEW_MOCK: <mock-id>\nDEPENDENCY: x\nREASON: y\n")
+        assert parse_new_mocks_from_plan(output) == []
+
+
+class TestParseQaPlanMocksField:
+    def test_mocks_parsed_per_scenario(self):
+        output = """QA_PLAN_START
+SCENARIO 1: Test spec generation
+FOCUS: spec impl
+INSTRUCTION: none
+MOCKS: claude-session, git-ops
+STEPS: run pm pr spec
+
+SCENARIO 2: Test without mocks
+FOCUS: cli
+INSTRUCTION: none
+MOCKS: none
+STEPS: run pm pr list
+QA_PLAN_END"""
+        scenarios = parse_qa_plan(output)
+        assert scenarios[0].mock_ids == ["claude-session", "git-ops"]
+        assert scenarios[1].mock_ids == []
+
+    def test_missing_mocks_field_defaults_to_empty(self):
+        output = """QA_PLAN_START
+SCENARIO 1: Legacy scenario
+FOCUS: something
+INSTRUCTION: none
+STEPS: do something
+QA_PLAN_END"""
+        scenarios = parse_qa_plan(output)
+        assert scenarios[0].mock_ids == []
