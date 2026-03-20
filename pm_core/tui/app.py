@@ -1132,7 +1132,6 @@ class ProjectManagerApp(App):
         """Poll tmux windows and update the tasks pane."""
         if not self._session_name:
             return
-        import asyncio
         windows = tmux_mod.list_windows(self._session_name)
         prs = self._data.get("prs") or []
         tasks_pane = self.query_one("#tasks-pane", TasksPane)
