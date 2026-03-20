@@ -1205,47 +1205,6 @@ class ProjectManagerApp(App):
             else:
                 self.log_message("No QA item selected")
 
-    # --- Tasks view ---
-
-    def _show_tasks_view(self) -> None:
-        """Show the running tasks view."""
-        tree_container = self.query_one("#tree-container")
-        guide_container = self.query_one("#guide-progress-container")
-        plans_container = self.query_one("#plans-container")
-        qa_container = self.query_one("#qa-container")
-        tasks_container = self.query_one("#tasks-container")
-        tree_container.styles.display = "none"
-        guide_container.styles.display = "none"
-        plans_container.styles.display = "none"
-        qa_container.styles.display = "none"
-        tasks_container.styles.display = "block"
-        self._tasks_visible = True
-        self._plans_visible = False
-        self._qa_visible = False
-        self._current_guide_step = None
-        self._refresh_tasks_pane()
-        tasks_pane = self.query_one("#tasks-pane", TasksPane)
-        tasks_pane.focus()
-        # Start polling tmux windows
-        self._start_tasks_poll()
-        # Update status bar
-        status_bar = self.query_one("#status-bar", StatusBar)
-        status_bar.update(" [bold]Tasks[/bold]    [dim]Enter=switch  Space=expand  W=back[/dim]")
-        self.call_after_refresh(self._capture_frame, "show_tasks_view")
-
-    def _refresh_tasks_pane(self) -> None:
-        """Poll tmux windows and update the tasks pane."""
-        if not self._session_name:
-            return
-        windows = tmux_mod.list_windows(self._session_name)
-        prs = self._data.get("prs") or []
-        tasks_pane = self.query_one("#tasks-pane", TasksPane)
-        tasks_pane.update_tasks(
-            windows, prs, self._session_name,
-            review_loops=self._review_loops,
-            qa_loops=self._qa_loops,
-        )
-
     def _start_tasks_poll(self) -> None:
         """Start periodic polling of tmux windows for the tasks pane."""
         self._stop_tasks_poll()
