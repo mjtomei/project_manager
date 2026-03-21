@@ -761,6 +761,7 @@ def _build_concretize_cmd(
         prompt=prompt,
         model=resolution.model, provider=resolution.provider,
         effort=resolution.effort, cwd=cwd, write_dir=write_dir,
+        session_type="qa_scenario",
     )
 
     if container_name:
@@ -886,7 +887,8 @@ def _launch_scenario_0(
 
     final_cmd = build_claude_shell_cmd(
         prompt=child_prompt,
-        model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort)
+        model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort,
+        session_type="qa_scenario")
     scenario_cwd = str(clone_path) if repo_root else workdir_path
 
     win_name = _scenario_window_name(pr_data, 0)
@@ -1074,7 +1076,8 @@ def _launch_scenarios_in_tmux(
             prompt=child_prompt,
             model=_qa_resolution.model, provider=_qa_resolution.provider,
             effort=_qa_resolution.effort,
-            transcript=transcript, cwd=scenario_cwd)
+            transcript=transcript, cwd=scenario_cwd,
+            session_type="qa_scenario")
 
         try:
             scenario_pane = tmux_mod.split_pane_at(
@@ -1284,7 +1287,8 @@ def _launch_scenarios_in_containers(
             model=_qa_resolution.model, provider=_qa_resolution.provider,
             effort=_qa_resolution.effort,
             transcript=transcript, cwd=container_workdir,
-            write_dir=str(clone_path))
+            write_dir=str(clone_path),
+            session_type="qa_scenario")
 
         # cleanup=False: containers stay alive with their windows; orphans
         # are cleaned up at the start of the next QA run.
@@ -1388,7 +1392,8 @@ def _relaunch_scenario_window(
             claude_cmd = build_claude_shell_cmd(
                 prompt=child_prompt,
                 model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort,
-                transcript=transcript, cwd=container_workdir, write_dir=workdir_path)
+                transcript=transcript, cwd=container_workdir, write_dir=workdir_path,
+                session_type="qa_scenario")
             exec_cmd = container_mod.build_exec_cmd(
                 scenario.container_name, claude_cmd, cleanup=False)
             pane_id = tmux_mod.new_window_get_pane(session, win_name, exec_cmd,
@@ -1406,7 +1411,8 @@ def _relaunch_scenario_window(
             child_cmd = build_claude_shell_cmd(
                 prompt=child_prompt,
                 model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort,
-                transcript=transcript, cwd=str(wt_path))
+                transcript=transcript, cwd=str(wt_path),
+                session_type="qa_scenario")
             pane_id = tmux_mod.new_window_get_pane(session, win_name, child_cmd,
                                                    cwd=str(wt_path), switch=False)
 
@@ -1997,6 +2003,7 @@ def _verify_single_scenario(
         provider=resolution.provider,
         effort=resolution.effort,
         cwd=_verify_cwd,
+        session_type="qa_verification",
     )
 
     # Split the scenario window using the standard pane management system
@@ -2200,7 +2207,8 @@ def run_qa_sync(
         )
         cmd = build_claude_shell_cmd(
             prompt=planner_prompt,
-            model=_qa_planning_resolution.model, provider=_qa_planning_resolution.provider, effort=_qa_planning_resolution.effort)
+            model=_qa_planning_resolution.model, provider=_qa_planning_resolution.provider, effort=_qa_planning_resolution.effort,
+            session_type="qa_planning")
 
         # If the main QA window already exists, remember which sessions
         # were watching it so we can switch them to the replacement window

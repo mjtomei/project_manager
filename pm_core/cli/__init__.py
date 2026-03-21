@@ -600,7 +600,7 @@ def getting_started_cmd():
 # Import submodules to register their commands on ``cli``.
 # This must be at the bottom of the file, after ``cli`` is defined.
 # ---------------------------------------------------------------------------
-from pm_core.cli import pr, plan, session, tui, guide, meta, cluster, bench, watcher, qa, container, model, provider, log  # noqa: E402, F401
+from pm_core.cli import pr, plan, session, tui, guide, meta, cluster, bench, watcher, qa, container, model, provider, log, fake_claude  # noqa: E402, F401
 
 
 def main():
