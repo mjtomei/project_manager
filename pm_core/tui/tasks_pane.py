@@ -197,12 +197,11 @@ class TasksPane(Widget):
 
             if entry.group == "Watcher" and watcher_infos:
                 for wi in watcher_infos:
-                    if wi.get("window_name") == entry.main_window:
-                        if wi.get("running"):
-                            icon = _SPINNER[self._animation_frame]
-                            entry.review_loop_marker = f"{icon} active"
-                            if wi.get("input_required"):
-                                entry.review_loop_marker = "INPUT_REQ"
+                    if wi.get("window_name") == entry.main_window and wi.get("running"):
+                        icon = _SPINNER[self._animation_frame]
+                        entry.review_loop_marker = f"{icon} active"
+                        if wi.get("input_required"):
+                            entry.review_loop_marker = "INPUT_REQ"
                         break
 
         # Sort and flatten
