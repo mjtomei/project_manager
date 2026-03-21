@@ -1148,18 +1148,20 @@ class ProjectManagerApp(App):
         else:
             self.log_message(f"Window '{window_name}' not found")
 
-    def on_resize(self) -> None:
+    def on_resize(self, event) -> None:
         """Update layout orientation and recompute tree when terminal is resized."""
         self._update_orientation()
         # Defer recompute so container sizes have settled after the resize
         self.set_timer(0.1, self._recompute_tree_layout)
-        # Mobile mode transition: auto-switch to tasks pane
-        self._check_mobile_transition()
+        # Mobile mode transition: auto-switch to tasks pane.
+        # Use event.size directly — self.size isn't updated until App._on_resize
+        # runs (which fires after this user handler in the MRO dispatch order).
+        self._check_mobile_transition(event.size.width)
 
-    def _check_mobile_transition(self) -> None:
+    def _check_mobile_transition(self, width: int | None = None) -> None:
         """Auto-switch to tasks pane in mobile mode, restore on exit."""
         from pm_core.pane_layout import MOBILE_WIDTH_THRESHOLD
-        is_mobile = self.size.width < MOBILE_WIDTH_THRESHOLD
+        is_mobile = (width if width is not None else self.size.width) < MOBILE_WIDTH_THRESHOLD
 
         if is_mobile and not self._tasks_visible and self._pre_mobile_view is None:
             # Entering mobile mode — save current view and switch to tasks
