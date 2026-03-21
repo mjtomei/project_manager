@@ -122,10 +122,10 @@ class TasksPane(Widget):
             watcher_infos: list of dicts from WatcherManager.list_watchers()
         """
         # Build PR lookup by display ID
-        from pm_core.cli.helpers import _pr_display_id
         pr_by_display: dict[str, dict] = {}
         for pr in prs:
-            did = _pr_display_id(pr)
+            gh = pr.get("gh_pr_number")
+            did = f"#{gh}" if gh else pr["id"]
             pr_by_display[did] = pr
 
         # Preserve expansion state from existing entries so polls don't collapse them
