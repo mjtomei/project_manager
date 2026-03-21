@@ -217,7 +217,7 @@ class TasksPane(Widget):
         if selectable and self.selected_index not in selectable:
             self.selected_index = selectable[0] if selectable else 0
 
-        self.refresh()
+        self.refresh(layout=True)
 
     def _build_flat_items(self) -> None:
         """Build flat item list for rendering (headers + entries + sub-entries)."""
@@ -400,6 +400,13 @@ class TasksPane(Widget):
         if "_header" in item:
             return 3  # blank + header + divider
         return 1  # each entry/sub is one line
+
+    def get_content_height(self, container, viewport, width) -> int:
+        """Return the total content height so Textual can size the widget correctly."""
+        if not self._flat_items:
+            return 4  # "No running tasks." message (~3 lines + padding)
+        # Sum all entry lines plus 2 for the footer (blank + footer text)
+        return sum(self._entry_lines(item) for item in self._flat_items) + 2
 
     def _scroll_selected_into_view(self) -> None:
         if not self._flat_items or not self.parent:
