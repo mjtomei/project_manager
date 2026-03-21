@@ -270,7 +270,9 @@ def apply_layout(session: str, window: str, layout_string: str) -> bool:
     if result.returncode != 0:
         _log.warning(
             "tmux select-layout failed: %s", result.stderr.strip())
-    return result.returncode == 0
+        return False
+    refresh_client(session, window)
+    return True
 
 
 def get_session_name() -> str:
@@ -389,6 +391,18 @@ def select_window(session: str, window: str) -> bool:
         capture_output=True,
     )
     return result.returncode == 0
+
+
+def refresh_client(session: str, window: str) -> None:
+    """Force tmux to repaint all panes in a window.
+
+    Fixes visual artifacts (ghost prompt bars, stale content at wrong
+    offsets) that appear after select-layout changes pane dimensions.
+    """
+    subprocess.run(
+        _tmux_cmd("refresh-client", "-t", f"{session}:{window}"),
+        check=False,
+    )
 
 
 def zoom_pane(pane_id: str) -> None:

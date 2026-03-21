@@ -4,3 +4,4 @@
 !Dockerfile
 !Dockerfile.pm-project
 !pyproject.toml
+!docker-entrypoint.sh

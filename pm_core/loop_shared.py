@@ -293,7 +293,10 @@ def extract_between_markers(content: str, start_marker: str,
     last_start = -1
     last_end = -1
     for i, line in enumerate(lines):
+        # Strip markdown formatting AND leading non-alphanumeric characters
+        # (e.g. the '●' bullet Claude Code sometimes prefixes to output lines).
         cleaned = re.sub(r'[*`]', '', line).strip()
+        cleaned = re.sub(r'^[^\w]+', '', cleaned).strip()
         if cleaned == start_marker:
             last_start = i
         elif cleaned == end_marker:

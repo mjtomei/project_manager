@@ -231,11 +231,46 @@ def which_cmd():
     click.echo(pm_core.__path__[0])
 
 
+_BOOLEAN_SETTINGS = {"hide-assist", "hide-merged", "beginner-mode", "auto-cleanup",
+                     "qa-verify-pass"}
+_INT_SETTINGS = {"min-pane-width", "qa-max-scenarios", "qa-verify-retries"}
+_ENUM_SETTINGS = {"spec-mode": {"auto", "review", "prompt"}}
+_SETTING_DEFAULTS = {
+    "hide-assist": "off",
+    "hide-merged": "off",
+    "beginner-mode": "off",
+    "auto-cleanup": "off",
+    "qa-verify-pass": "on",
+    "min-pane-width": "100",
+    "qa-max-scenarios": "(unset)",
+    "qa-verify-retries": "(unset)",
+    "spec-mode": "prompt",
+}
+_LIST_ALIASES = {"list", "ls", "l"}
+
+
+def _list_settings():
+    """Print all settings and their current values."""
+    from pm_core.paths import get_global_setting, get_global_setting_value
+    all_settings = sorted(_BOOLEAN_SETTINGS | _INT_SETTINGS | set(_ENUM_SETTINGS))
+    for name in all_settings:
+        if name in _BOOLEAN_SETTINGS:
+            val = "on" if get_global_setting(name) else "off"
+        else:
+            raw = get_global_setting_value(name, "")
+            val = raw if raw else _SETTING_DEFAULTS.get(name, "(unset)")
+        default = _SETTING_DEFAULTS.get(name, "")
+        marker = " (default)" if val == default else ""
+        click.echo(f"  {name:<22} {val}{marker}")
+
+
 @cli.command("set")
 @click.argument("setting")
-@click.argument("value")
+@click.argument("value", required=False, default=None)
 def set_cmd(setting, value):
     """Configure a global pm setting.
+
+    Run 'pm set list' to see all settings and their current values.
 
     Boolean settings (on/off):
 
@@ -259,28 +294,29 @@ def set_cmd(setting, value):
 
       spec-mode            Spec generation mode: auto, review, or prompt (default: prompt)
     """
+    if setting in _LIST_ALIASES:
+        _list_settings()
+        return
+    if value is None:
+        raise click.UsageError("Missing argument 'VALUE'.")
     from pm_core.paths import set_global_setting, set_global_setting_value
-    boolean_settings = {"hide-assist", "hide-merged", "beginner-mode", "auto-cleanup",
-                        "qa-verify-pass"}
-    int_settings = {"min-pane-width", "qa-max-scenarios", "qa-verify-retries"}
-    enum_settings = {"spec-mode": {"auto", "review", "prompt"}}
-    known = boolean_settings | int_settings | set(enum_settings)
+    known = _BOOLEAN_SETTINGS | _INT_SETTINGS | set(_ENUM_SETTINGS)
     if setting not in known:
         click.echo(f"Unknown setting: {setting}", err=True)
         click.echo(f"Available: {', '.join(sorted(known))}", err=True)
         raise SystemExit(1)
-    if setting in boolean_settings:
+    if setting in _BOOLEAN_SETTINGS:
         if value not in ("on", "off"):
             click.echo(f"Setting '{setting}' takes 'on' or 'off'", err=True)
             raise SystemExit(1)
         set_global_setting(setting, value == "on")
-    elif setting in enum_settings:
-        valid = enum_settings[setting]
+    elif setting in _ENUM_SETTINGS:
+        valid = _ENUM_SETTINGS[setting]
         if value not in valid:
             click.echo(f"Setting '{setting}' takes one of: {', '.join(sorted(valid))}", err=True)
             raise SystemExit(1)
         set_global_setting_value(setting, value)
-    elif setting in int_settings:
+    elif setting in _INT_SETTINGS:
         try:
             int(value)
         except ValueError:
@@ -292,7 +328,7 @@ def set_cmd(setting, value):
 
 @cli.command("setting")
 @click.argument("setting")
-@click.argument("value")
+@click.argument("value", required=False, default=None)
 @click.pass_context
 def setting_cmd(ctx, setting, value):
     """Alias for 'pm set'. Configure a global pm setting."""

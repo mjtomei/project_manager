@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-8fdda09
+  active_pr: pr-88fdba1
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -2779,6 +2779,48 @@ prs:
     created_at: '2026-03-05T19:05:48Z'
     last_edited: '2026-03-05T19:05:48Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ee1ff04-add-optional-quality-assurance-step--808818af
+- id: pr-5be51894
+  plan: plan-qa
+  title: Check NEEDS_WORK verdicts for unpushed changes and redirect to INPUT_REQUIRED
+  branch: pm/pr-5be51894-check-needs-work-verdicts-for-unpushed-changes-and
+  status: pending
+  depends_on:
+  - pr-8fdda09
+  description: 'When a QA scenario returns NEEDS_WORK, verify that the session actually
+    pushed commits to the PR branch. NEEDS_WORK implies the session found issues AND
+    committed fixes for the review loop to pick up on the next iteration. If the clone''s
+    HEAD commit is unchanged from when the scenario started (no push occurred), the
+    session found problems it couldn''t fix — it should have reported INPUT_REQUIRED
+    instead.
+
+
+    Implementation:
+
+    1. Add an ``initial_head_commit`` field to ``QAScenario`` and record the clone''s
+    HEAD at scenario launch (both tmux and container paths).
+
+    2. When NEEDS_WORK is detected in the polling loop, run ``git rev-parse HEAD``
+    on the scenario''s worktree clone and compare against the recorded initial commit.
+
+    3. If the HEAD is unchanged, send the scenario a follow-up message explaining
+    that NEEDS_WORK requires pushed fixes and asking it to switch to INPUT_REQUIRED,
+    then put the scenario back in pending to wait for the revised verdict.
+
+    4. If the HEAD has advanced (commits were pushed), accept the NEEDS_WORK verdict
+    as-is — the review loop will pick up the fixes.
+
+
+    Follow the same retry/limit pattern as the PASS verification follow-ups to avoid
+    infinite loops.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-18T00:00:00.000000+00:00'
+  updated_at: '2026-03-18T00:00:00.000000+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
 - id: pr-fe499f2
   plan: plan-qa
   title: Persist generated QA tests across iterations of the QA loop
@@ -3355,30 +3397,6 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
-- id: pr-7f38bd9
-  plan: plan-002
-  title: Review loop mode for scenario-based unit test generation
-  branch: pm/pr-7f38bd9-review-loop-mode-for-scenario-based-unit-test-gen
-  status: pending
-  depends_on: []
-  description: Add a mode to the review loop that uses the QA-style planner/scenario-worker
-    pattern (from PR 116) to generate unit tests. A planner session analyzes the PR
-    diff and existing test coverage, then creates test scenarios describing what needs
-    to be tested (edge cases, error paths, integration points, regressions). Scenario
-    worker panes are spawned in parallel, each taking a scenario and writing actual
-    unit tests for it. The generated tests are committed to the branch. This gives
-    the review loop the ability to not just review code but also strengthen test coverage
-    as part of the review cycle, using the same distributed worker architecture that
-    QA already uses.
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-03-04T19:42:37.749200+00:00'
-  updated_at: '2026-03-08T22:06:41.680293+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
 - id: pr-d71ef39
   plan: onboarding
   title: Pre-init onboarding flow for dependencies and setup
@@ -3675,7 +3693,7 @@ prs:
   plan: plan-qa
   title: Add QA scenario verification step before final verdict
   branch: pm/pr-8fdda09-add-qa-scenario-verification-step-before-final-ver
-  status: in_review
+  status: merged
   depends_on:
   - pr-ee1ff04
   description: 'After all QA scenarios complete and verdicts are collected, add a
@@ -3711,10 +3729,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/146
   gh_pr_number: 146
   created_at: '2026-03-06T15:48:13.072900+00:00'
-  updated_at: '2026-03-17T00:57:31.749911+00:00'
+  updated_at: '2026-03-17T16:23:50.509952+00:00'
   started_at: '2026-03-14T22:24:34.604076+00:00'
   reviewed_at: '2026-03-17T00:57:31.749911+00:00'
-  merged_at: null
+  merged_at: '2026-03-17T16:23:50.509952+00:00'
   notes:
   - id: note-52ce835
     text: 'QA INPUT_REQUIRED: Verification triggers on PASS verdict only: INPUT_REQUIRED;
@@ -3845,7 +3863,7 @@ prs:
   plan: plan-qa
   title: Add spec generation step between PR phases
   branch: pm/pr-942aa21-add-spec-generation-step-between-pr-phases
-  status: qa
+  status: merged
   depends_on: []
   description: "Add an optional \"spec\" step to the PR lifecycle that bridges the\
     \ gap between the user's natural-language description and each subsequent phase\
@@ -3884,14 +3902,14 @@ prs:
     \ models viable for later phases\n- The user catches misunderstandings before\
     \ code is written (or reviewed, or tested)\n- Ambiguities are resolved once per\
     \ phase rather than rediscovered by each agent"
-  agent_machine: spark-424d
+  agent_machine: arch-home
   gh_pr: https://github.com/mjtomei/project_manager/pull/125
   gh_pr_number: 125
   created_at: '2026-03-06T19:02:04.662125+00:00'
-  updated_at: '2026-03-14T21:24:34.099941+00:00'
+  updated_at: '2026-03-20T02:22:36.877662+00:00'
   started_at: '2026-03-06T21:13:20.894896+00:00'
-  reviewed_at: '2026-03-14T21:24:34.099941+00:00'
-  merged_at: null
+  reviewed_at: '2026-03-20T02:07:52.600287+00:00'
+  merged_at: '2026-03-20T02:22:36.877662+00:00'
   notes:
   - id: note-fa1e58a
     text: 'QA PASS: Spec generation via CLI for impl phase: PASS; Spec mode settings
@@ -3928,8 +3946,51 @@ prs:
       --plan option: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-942aa21-3d39a6937c956051)'
     created_at: '2026-03-14T22:18:54Z'
     last_edited: '2026-03-14T22:18:54Z'
-  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-942aa21-add-spec-generation-step-between-pr--e2dbb884
-  spec_qa: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-942aa21-add-spec-generation-step-between-pr--e2dbb884/pm/specs/pr-942aa21/qa.md
+  - id: note-2f3d958
+    text: 'QA ERROR: '
+    created_at: '2026-03-17T16:33:30Z'
+    last_edited: '2026-03-17T16:33:30Z'
+  - id: note-a1c6f30
+    text: spec_review and spec_qa should include a mocks section that explicitly plans
+      what external dependencies need mocking (Claude sessions, git ops, tmux), the
+      contract for each mock, and what scripted responses they should return. Without
+      this, agents independently decide whether and how to mock, leading to inconsistency
+      — either real Claude sessions where mocks would suffice (slow), or mocks at
+      the wrong abstraction level. The QA prompt should read the mocks section and
+      know what is and isn't being simulated in each scenario.
+    created_at: '2026-03-18T16:37:18Z'
+    last_edited: '2026-03-18T16:37:18Z'
+  - id: note-6c001c8
+    text: 'QA NEEDS_WORK: Spec generation for impl phase creates file and blocks pr
+      start in review mode: PASS; Spec reject-and-regenerate workflow incorporates
+      feedback: PASS; Spec mode auto — proceeds without setting spec_pending: PASS;
+      Spec mode prompt — proceeds unless AMBIGUITY_FLAG is in spec output: PASS; Per-PR
+      review_spec override forces review mode regardless of global setting: PASS;
+      spec-path command returns correct file path for shell pipelines: PASS; spec-save
+      command registers externally written spec file: PASS; Spec content injected
+      into implementation prompt as preamble (Step 0): PASS; Spec content injected
+      into QA planner prompt and mocks section propagated to scenario prompts: NEEDS_WORK;
+      Review spec content is included in review prompt: PASS; TUI V key opens spec-approve
+      for oldest pending spec: PASS; Spec force regeneration overwrites existing spec:
+      PASS; QA spec generation includes mocks section with correct external dependencies:
+      NEEDS_WORK; AMBIGUITY_FLAG interaction — prompt mode blocks; review mode does
+      not use flag: PASS; Spec lookup prefers workdir spec over local pm spec: PASS
+      (workdir: /home/mjtomei/.pm/workdirs/qa/pr-942aa21-2e6c77b5e5ed6d5a)'
+    created_at: '2026-03-18T21:53:41Z'
+    last_edited: '2026-03-18T21:53:41Z'
+  - id: note-e57b763
+    text: 'QA PASS: QA spec generation produces a mocks section listing correct external
+      dependencies: PASS; pm qa mocks CLI — list, add, show, edit commands work correctly:
+      PASS; pm qa mocks prompt — prints the mocks block that gets injected into scenario
+      prompts: PASS; Mocks library takes precedence over QA spec embedded mocks when
+      propagating to scenario prompts: PASS; Mocks section injected into QA planner
+      prompt when QA spec exists: PASS; QA spec mocks section propagated to individual
+      scenario prompts: PASS; QA spec generation for review and impl phases does not
+      include mocks section: PASS; pm qa mocks add creates file with correct YAML
+      frontmatter structure: PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-942aa21-434f29d41626ca06)'
+    created_at: '2026-03-20T02:22:38Z'
+    last_edited: '2026-03-20T02:22:38Z'
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-942aa21-add-spec-generation-step-between-pr--4c4031f8
 - id: pr-4585fd3
   plan: tui-ux
   title: Use resolved display IDs instead of raw PR IDs in all output
@@ -4416,7 +4477,7 @@ prs:
   plan: tui-ux
   title: Add running tasks pane to TUI with window switching and grouping
   branch: pm/pr-0b827df-add-running-tasks-pane-to-tui-with-window-switchin
-  status: qa
+  status: in_review
   depends_on: []
   description: 'Add a new pane to the TUI that shows all active tasks running in the
     current tmux session and lets you switch to their windows.
@@ -4500,9 +4561,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/137
   gh_pr_number: 137
   created_at: '2026-03-08T21:45:42.636585+00:00'
-  updated_at: '2026-03-14T21:40:16.204625+00:00'
+  updated_at: '2026-03-21T14:25:56.564858+00:00'
   started_at: '2026-03-10T21:38:57.198809+00:00'
-  reviewed_at: '2026-03-14T21:40:16.204625+00:00'
+  reviewed_at: '2026-03-21T14:25:56.564858+00:00'
   merged_at: null
   notes:
   - id: note-834855f
@@ -4515,7 +4576,18 @@ prs:
       consistency: INPUT_REQUIRED (workdir: /home/matt/.pm/workdirs/qa/pr-0b827df-67def9313b116f3c)'
     created_at: '2026-03-14T23:51:37Z'
     last_edited: '2026-03-14T23:51:37Z'
-  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b827df-add-running-tasks-pane-to-tui-with-w-10e74920
+  - id: note-0ce0bb4
+    text: 'QA NEEDS_WORK: Tasks pane toggle and basic display: NEEDS_WORK; Tasks pane
+      navigation with j/k and J/K: PASS; Multi-window QA entry expand/collapse: INPUT_REQUIRED;
+      Window switching via Enter key: PASS; PR actions from the tasks pane: NEEDS_WORK;
+      Mobile mode auto-transition to tasks pane: NEEDS_WORK; Polling and live updates:
+      NEEDS_WORK; Expansion state preserved across polls: NEEDS_WORK; View exclusivity
+      and state consistency: PASS; Watcher entry and status marker display: NEEDS_WORK;
+      Empty tasks pane state: PASS; Help screen shows tasks-pane-specific keybindings:
+      PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-0b827df-bbcfc8c8564443e6)'
+    created_at: '2026-03-21T15:26:22Z'
+    last_edited: '2026-03-21T15:26:22Z'
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b827df-add-running-tasks-pane-to-tui-with-w-cbe54f5e
 - id: pr-341100c
   plan: tui-ux
   title: Add per-plan standalone PM sessions within the same project
@@ -4809,7 +4881,7 @@ prs:
   reviewed_at: '2026-03-14T21:54:58.823224+00:00'
   merged_at: null
   notes: []
-  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-871dbf5-add-high-effort-watcher-supervisors--eff07b6c
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-871dbf5-add-high-effort-watcher-supervisors--cbe54f5e
 - id: pr-b7ada6a
   plan: tui-ux
   title: Add offline mode with dynamic sync for GitHub-backed projects
@@ -5247,7 +5319,7 @@ prs:
   reviewed_at: '2026-03-14T22:12:44.106792+00:00'
   merged_at: null
   notes: []
-  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-4a89e52-qa-verdict-collection-survives-tui-r-3e33a282
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-4a89e52-qa-verdict-collection-survives-tui-r-d0f78a09
 - id: pr-9bf8b0b
   plan: improvements
   title: Unified log file with source prefixes and pm log CLI
@@ -5606,7 +5678,7 @@ prs:
       openai/gpt-oss-120b). Confirmed reachable from macbook.
     created_at: '2026-03-13T04:31:35Z'
     last_edited: '2026-03-13T04:31:35Z'
-  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9a5b86e-harden-local-llm-integration-model-s-0a4ff8cc
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-9a5b86e-harden-local-llm-integration-model-s-cbe54f5e
 - id: pr-1f35c6d
   plan: watchers
   title: 'Local model lifecycle watcher: keep a local LLM running at all times'
@@ -6438,11 +6510,30 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-14T03:46:11.848316+00:00'
-  updated_at: '2026-03-14T03:49:02.220661+00:00'
+  updated_at: '2026-03-18T10:45:04.581821+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-6eb7258
+    text: 'Extend the adversarial+voting pattern to unit test generation, not just
+      code review. After the scenario workers (pr-7f38bd9) write standard tests, a
+      second adversarial pass runs with a prompt that explicitly assumes the code
+      has a bug and tries to write a test that exposes it. The voting step then filters
+      out tests that are overly strict or testing the wrong thing. This gives two
+      distinct adversarial surfaces: finding issues in the code (review) and finding
+      gaps in test coverage (test gen).'
+    created_at: '2026-03-18T10:42:18Z'
+    last_edited: '2026-03-18T10:42:18Z'
+  - id: note-232b6f3
+    text: 'Benchmark adversarial test gen effectiveness against the bug corpus from
+      pr-24f2958. For each before/after bug pair: run adversarial test gen on the
+      buggy version and check if the generated tests fail (recall), then run on the
+      fixed version and check they pass (precision). Iterate on adversarial prompt
+      intensity and voting thresholds using these metrics as signal. This is the prompt-loop
+      substitute for model-level adversarial training.'
+    created_at: '2026-03-18T10:42:22Z'
+    last_edited: '2026-03-18T10:42:22Z'
 - id: pr-24f2958
   plan: plan-qa
   title: Open source bug corpus for review/QA benchmarking
@@ -6499,11 +6590,50 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-14T03:46:23.198794+00:00'
-  updated_at: '2026-03-14T03:46:23.198794+00:00'
+  updated_at: '2026-03-21T14:42:07.323323+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-00ffe14
+    text: 'Pattern-deviation bug: the qa_loop status pane creation was missing the
+      user_modified=False reset before calling rebalance(). The code registered panes
+      and called rebalance() but didn''t reset the flag that the after-split-window
+      hook sets, making rebalance() silently a no-op. This passed review because:
+
+
+      1. The code looked structurally complete (register + rebalance), and the missing
+      step is only meaningful if you know the hook fires in between and that rebalance
+      checks the flag.
+
+
+      2. The correct pattern exists in 6+ other places but is not enforced — each
+      call site has to manually remember all three steps. The canonical implementation
+      (launch_pane in pane_ops.py) was never extracted into a shared helper, so there
+      was nothing to call incorrectly.
+
+
+      What this suggests for the review/QA process:
+
+      - Pattern consistency is hard for reviewers to catch when the pattern is spread
+      across files with no shared abstraction to enforce it. A reviewer reading only
+      the new code would see a plausible-looking register+rebalance pair and have
+      no signal that the reset was missing.
+
+      - The adversarial review process is well-suited to this class of bug: give the
+      adversarial reviewer a list of known cross-cutting hazard patterns (e.g. ''any
+      pane split must be followed by user_modified=False before rebalance'') and ask
+      it to explicitly audit each new pane creation site against those patterns. This
+      is distinct from normal correctness review — it''s pattern-compliance review.
+
+      - The fix (extracting register_and_rebalance into pane_layout.py) also illustrates
+      the right structural response: when a multi-step pattern must always be executed
+      together, encode it as a single function so omitting a step becomes a compile-time
+      or obvious omission rather than a subtle semantic error. The review prompt could
+      explicitly ask: ''are there multi-step patterns in this diff that could be collapsed
+      into a single helper to prevent partial application?'''
+    created_at: '2026-03-21T14:42:07Z'
+    last_edited: '2026-03-21T14:42:07Z'
 - id: pr-ac10f03
   plan: improvements
   title: Merge abort verdict when master changes are too large for auto-merge
@@ -6549,6 +6679,370 @@ prs:
   gh_pr_number: null
   created_at: '2026-03-14T04:20:26.981480+00:00'
   updated_at: '2026-03-14T04:21:40.677685+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-abcf70f
+  plan: plan-qa
+  title: 'FakeClaudeSession: scriptable Claude replacement for integration testing'
+  branch: pm/pr-abcf70f-fakeclaudesession-scriptable-claude-replacement-fo
+  status: in_review
+  depends_on: []
+  description: "Add a fake Claude executable that can be launched in place of real\
+    \ Claude for integration tests. The fake session writes realistic-looking output\
+    \ and emits a specified verdict, letting tests exercise verdict detection, review\
+    \ loop state machines, and QA loop transitions without real API calls.\n\nCLI\
+    \ interface:\n  pm fake-claude --verdict PASS [--preamble N] [--delay SECONDS]\
+    \ [--body TEXT]\n\nVerdict modes:\n1. Single-line verdicts (PASS, PASS_WITH_SUGGESTIONS,\
+    \ NEEDS_WORK, INPUT_REQUIRED): writes optional preamble prose, then emits the\
+    \ verdict keyword alone on its own line\n2. Block-style verdicts (FLAGGED_START/FLAGGED_END,\
+    \ REFINED_STEPS_START/REFINED_STEPS_END, QA_PLAN_START/QA_PLAN_END, VERIFIED):\
+    \ writes optional preamble, then the _START marker, a configurable body (defaulting\
+    \ to placeholder text), then the _END marker on its own line\n\nOptions:\n- --verdict:\
+    \ which verdict to emit (required); accepts any known keyword\n- --preamble N:\
+    \ write N lines of filler text before the verdict block to simulate realistic\
+    \ Claude output length (default: 3)\n- --body TEXT: custom content between _START\
+    \ and _END markers; defaults to a short placeholder\n- --delay SECONDS: sleep\
+    \ before writing the verdict to simulate session duration (default: 0)\n- --stream:\
+    \ write output character-by-character with small delays to simulate streaming\
+    \ (default: false)\n\nIntegration:\n- Installed as bin/fake-claude so tests can\
+    \ point the resolved claude binary at it\n- Usable anywhere launch_claude, launch_claude_print_background,\
+    \ or launch_claude_in_tmux is called by overriding the resolved claude binary\
+    \ path\n- Companion test fixtures in tests/fixtures/fake_claude/ for common verdict\
+    \ scenarios\n\nCovers the main slow-iteration cases: verdict detection polling,\
+    \ review loop iteration counting, QA loop scenario worker completion, verification\
+    \ pass/fail transitions."
+  agent_machine: arch-home
+  gh_pr: https://github.com/mjtomei/project_manager/pull/148
+  gh_pr_number: 148
+  created_at: '2026-03-18T16:31:56.522254+00:00'
+  updated_at: '2026-03-19T16:25:44.605020+00:00'
+  started_at: '2026-03-18T16:42:13.266300+00:00'
+  reviewed_at: '2026-03-19T16:25:44.605020+00:00'
+  merged_at: null
+  notes: []
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-abcf70f-fakeclaudesession-scriptable-claude--cbe54f5e
+- id: pr-a7927b6
+  plan: plan-qa
+  title: Implement review phase spec (spec_review) with mock planning
+  branch: pm/pr-a7927b6-implement-review-phase-spec-spec-review-with-mock-
+  status: pending
+  depends_on:
+  - pr-942aa21
+  description: 'Implement the spec_review phase introduced by pr-942aa21. The spec_review
+    is generated after implementation and before the review agent runs, grounding
+    the review in the actual code produced rather than the original PR description.
+
+
+    spec_review content:
+
+    - What to verify: specific functions, code paths, and invariants to check, referenced
+    by file and line where possible
+
+    - Implicit requirements: things that must be true for the stated requirements
+    to hold, surfaced from the implementation
+
+    - Edge cases and interaction risks not covered by the description
+
+    - Mocks section: for each external dependency touched by the implementation (Claude
+    sessions, git ops, tmux, subprocess, file I/O), state whether tests should mock
+    it, at what level, and what the mock contract should be (inputs, expected outputs,
+    scripted responses). This prevents agents from independently deciding mock strategy
+    and producing inconsistent test coverage.
+
+
+    prompt_gen integration:
+
+    - spec_review is injected into the review prompt between the PR description and
+    the review checklist, so the review agent works from explicit grounded requirements
+    rather than interpreting the raw description
+
+    - The mocks section is also surfaced in the QA prompt (spec_qa reads spec_review''s
+    mocks section as a baseline)
+
+
+    QA scenario workers for this PR should test progressively:
+
+    - Fast unit tests first: test spec_review parsing, prompt injection, and field
+    validation with no external dependencies
+
+    - Mid-tier tests using FakeClaudeSession (pr-abcf70f): verify that the review
+    agent receives the spec_review content and that the prompt is well-formed end-to-end,
+    without real API calls
+
+    - Full integration last and only if needed: a real review pass against a known
+    PR to confirm spec_review improves review quality
+
+
+    This pattern — unit → fake-claude integration → real integration — should be the
+    standard for any scenario worker that would otherwise spin up real Claude sessions.
+    The review loop tests are the primary case where slow iteration has been observed.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-18T16:37:48.944885+00:00'
+  updated_at: '2026-03-18T16:37:48.944885+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-3d38f05
+  plan: bugs
+  title: Fix review loop splitting Claude and diff panes across windows when existing
+    window has dead Claude pane
+  branch: pm/pr-3d38f05-fix-review-loop-splitting-claude-and-diff-panes-ac
+  status: pending
+  depends_on: []
+  description: 'When a review window exists with only the diff pane alive (Claude
+    pane dead), starting a fresh review loop incorrectly splits the new session across
+    two windows: it places the diff pane in the old window (matched by name) and creates
+    the new Claude session in a new window instead of keeping both panes together.
+
+
+    Root cause is likely in window existence checks and pane targeting: the loop finds
+    the old window by name, reuses it for the diff pane, but then fails to target
+    it correctly for the Claude session (possibly because the window was renamed or
+    pane IDs shifted), so it falls back to creating a new window.
+
+
+    Fix should:
+
+    1. When an existing review window is found but its Claude pane is dead, treat
+    it as fully stale and either reuse it entirely (creating both panes there) or
+    close it and start fresh — never split the two panes across different windows.
+
+    2. Audit window name matching and post-rename pane targeting to ensure both panes
+    always end up in the same window.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-21T14:23:53.659066+00:00'
+  updated_at: '2026-03-21T14:23:53.659066+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-2e81e51
+  plan: plan-qa
+  title: 'Pattern-extraction review pipeline: parallel similar-code analysis with
+    hazard aggregation before verdict'
+  branch: pm/pr-2e81e51-pattern-extraction-review-pipeline-parallel-simila
+  status: pending
+  depends_on:
+  - pr-ee1ff04
+  description: 'Add a multi-stage parallel analysis pipeline that runs before the
+    review verdict to catch hazards the reviewer would miss without deep cross-codebase
+    knowledge.
+
+
+    Pipeline stages:
+
+
+    1. Decomposition session (1): Reads the diff and breaks it into discrete tasks
+    — concrete operations the new code performs (e.g. "splits a tmux pane", "registers
+    pane in registry", "triggers layout rebalance"). Produces a structured list of
+    tasks.
+
+
+    2. Similar code identification (1 session per task): For each task, searches the
+    codebase for other code performing the same operation. Produces a list of similar
+    code locations per task.
+
+
+    3. Pattern extraction (1 session per similar code location): Reviews the existing
+    similar code — not to evaluate it, but to extract: (a) invariants — what this
+    code always does and in what order; (b) tricky bits — non-obvious things a developer
+    implementing the task from scratch would likely miss or get subtly wrong, and
+    why they matter. The session should read surrounding context, comments, hooks,
+    and related code to understand the mechanism behind each invariant, not just the
+    surface pattern.
+
+
+    4. Aggregation (1 session): Receives the task list, all extracted invariants and
+    tricky bits, and the new code. For each task, diffs the new code against the extracted
+    contracts. Produces structured HAZARD signals for deviations — e.g. "task X has
+    invariant A+B+C, new code only does A+C, missing B because <reason>".
+
+
+    Hazard signals feed into the existing review loop as blocking issues before the
+    verdict is issued. The pipeline runs in parallel where possible (all identification
+    sessions run together, all extraction sessions run together) with a synchronization
+    point before aggregation.
+
+
+    All sessions use the same model. Scope is fully open — no filtering of tasks or
+    similar code locations. The aggregation session is responsible for discounting
+    low-confidence findings.
+
+
+    The motivating example: a QA status pane creation was missing a user_modified=False
+    reset before calling rebalance(), making rebalance() silently a no-op. The code
+    looked correct in isolation. A reviewer would only catch it by finding the 6 other
+    pane creation sites, extracting the 3-step invariant, and noticing the new code
+    only had 2 steps — exactly what this pipeline does.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-21T15:02:18.735104+00:00'
+  updated_at: '2026-03-21T15:02:18.735104+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-900fb7d
+  plan: plan-qa
+  title: 'Pattern-extraction pipeline: similarity and difficulty scoring for model
+    routing'
+  branch: pm/pr-900fb7d-pattern-extraction-pipeline-similarity-and-difficu
+  status: pending
+  depends_on:
+  - pr-2e81e51
+  description: 'Extend the pattern-extraction review pipeline with similarity and
+    difficulty scoring to avoid using the strongest models on every session uniformly.
+
+
+    The identification session (stage 2) already reads similar code to find it. Extend
+    its output to also produce a per-location score with two dimensions:
+
+    - Similarity: how closely related is this code to the task in the new diff (same
+    function, same module, analogous pattern in different area, etc.)
+
+    - Complexity: how non-trivial is the pattern at this location (multi-step invariant
+    with non-obvious ordering, single obvious step, etc.)
+
+
+    These scores are used to select the model for the corresponding stage-3 extraction
+    session:
+
+    - High similarity + non-trivial: strongest model
+
+    - High similarity + simple: lighter model
+
+    - Low similarity: lighter model, and aggregation session weights findings from
+    this location lower
+
+
+    Scoring should be conservative: default toward stronger models when uncertain,
+    since the whole point of the pipeline is to catch things that look simple but
+    are not. The identification session should err toward flagging complexity rather
+    than assuming simplicity.
+
+
+    The aggregation session also receives the scores and uses them to weight hazard
+    confidence — a hazard sourced only from low-similarity locations is reported with
+    lower confidence than one corroborated by high-similarity code.
+
+
+    Also apply the existing QA concurrency cap pattern to stage-3 sessions to bound
+    parallelism when many similar locations are found.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-21T15:02:32.510682+00:00'
+  updated_at: '2026-03-21T15:02:32.510682+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-88fdba1
+  plan: bugs
+  title: Fix shared push proxy using first-scenario workdir for all push and fetch
+    operations
+  branch: pm/pr-88fdba1-fix-shared-push-proxy-using-first-scenario-workdir
+  status: qa
+  depends_on: []
+  description: 'When QA scenarios share a push proxy (introduced in PR #135), the
+    proxy is initialised with the workdir of the first scenario that starts it. All
+    subsequent push and fetch requests from other scenarios are executed from that
+    same workdir, not from the requesting scenario''\''''s clone.
+
+
+    Two broken operations:
+
+
+    1. Push: _local_push fetches from self.workdir (first scenario''\''''s clone)
+    into the PR workdir, then forwards to GitHub. Commits made in any other scenario''\''''s
+    clone are invisible to the proxy — it reports ''\''''Everything up-to-date''\''''
+    while the remote stays at the old HEAD.
+
+
+    2. Fetch/pull: _execute_read_cmd runs git fetch/pull from self.workdir, so fetched
+    changes land in the first scenario''\''''s clone only. Other scenarios that do
+    git pull before committing silently pull into the wrong clone and see a false
+    success.
+
+
+    ls-remote is unaffected (read-only, workdir does not matter).
+
+
+    The docstring at the top of push_proxy.py still says ''\''''One proxy per container
+    — no shared state, no routing''\'''' — it was never updated when sharing was added
+    in PR #135.
+
+
+    Fix: include the caller''\''''s workdir in the request JSON. The git wrapper script
+    running inside the container can include its working directory. The proxy maps
+    this to the host-side clone path (recorded when the container was registered)
+    and uses it as the source for push fetch and the target for pull/fetch, falling
+    back to self.workdir for backward compatibility with legacy per-container proxies.'
+  agent_machine: arch-home
+  gh_pr: https://github.com/mjtomei/project_manager/pull/149
+  gh_pr_number: 149
+  created_at: '2026-03-21T15:12:22.647477+00:00'
+  updated_at: '2026-03-21T19:40:38.345504+00:00'
+  started_at: '2026-03-21T15:12:32.453944+00:00'
+  reviewed_at: '2026-03-21T19:40:38.345504+00:00'
+  merged_at: null
+  notes: []
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-88fdba1-fix-shared-push-proxy-using-first-sc-d0f78a09
+- id: pr-291e891
+  plan: improvements
+  title: 'Track action source metadata for TUI operations: session, window, and task
+    context'
+  branch: pm/pr-291e891-track-action-source-metadata-for-tui-operations-se
+  status: pending
+  depends_on: []
+  description: 'Before TUI actions (status transitions, PR starts, merges, etc.) are
+    locked or serialised, we need a way to understand where they came from. Add source
+    metadata to TUI actions so that each operation records which Claude session initiated
+    it, which tmux window that session lives in, and which PR or task it was working
+    on.
+
+
+    This is a precursor to the file-locking PR (pr-109). Locking requires knowing
+    who holds the lock and what they are doing — without action attribution that information
+    is unavailable and lock contention is opaque.
+
+
+    Concretely:
+
+    - Define an action context structure: session tag, tmux window ID/name, PR ID
+    being worked on (if any), and a human-readable description of the task (e.g. ''\''''review-loop
+    iteration 3''\'''' or ''\''''qa-scenario-s2''\'''').
+
+    - Propagate this context through the code paths that mutate shared state: project.yaml
+    writes, status transitions, PR start/done/merge flows. The context can be passed
+    explicitly or inferred from environment variables set when a Claude session is
+    launched.
+
+    - Persist the most recent action context per session in a lightweight sidecar
+    (e.g. ~/.pm/sessions/{tag}/action-context.json) so it can be read by the TUI,
+    watchers, and the locking layer without requiring the original caller to still
+    be running.
+
+    - Surface this in pm pr list or a new pm session list command so a human or watcher
+    can see at a glance which session last touched each PR and what it was doing.
+
+
+    The locking PR can then use this as the basis for lock attribution, deadlock detection
+    (who is waiting on whom), and surfacing contention to the user in a meaningful
+    way rather than just a timeout.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-21T18:01:28.274120+00:00'
+  updated_at: '2026-03-21T18:01:28.274120+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
