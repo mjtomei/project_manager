@@ -259,7 +259,7 @@ def _build_git_setup_script(
             '    args_json="$args_json]"\n'
             '    escaped_cmd=$(printf \'%s\' "$CMD" | sed \'s/"/\\\\"/g\')\n'
             + ('    escaped_workdir=$(printf \'%s\' "$HOST_WORKDIR" | sed \'s/\\\\/\\\\\\\\/g; s/"/\\\\"/g\')\n'
-               '    request=\'{"cmd": "\'$escaped_cmd\'", "args": \'$args_json\'", "workdir": "\'$escaped_workdir\'"}\'\n'
+               '    request=\'{"cmd": "\'$escaped_cmd\'", "args": \'$args_json\', "workdir": "\'$escaped_workdir\'"}\'\n'
                if _escaped_host_workdir else
                '    request=\'{"cmd": "\'$escaped_cmd\'", "args": \'$args_json\'}\'\n')
             + '    if ! command -v python3 >/dev/null 2>&1; then\n'
