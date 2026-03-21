@@ -495,7 +495,7 @@ class TasksPane(Widget):
             if entry and entry.sub_windows:
                 entry.expanded = not entry.expanded
                 self._build_flat_items()
-                self.refresh()
+                self.refresh(layout=True)
             event.stop()
 
         elif event.key in ("left", "h"):
@@ -509,7 +509,7 @@ class TasksPane(Widget):
                     if "_entry" in item and item["_entry"] is entry:
                         self.selected_index = idx
                         break
-                self.refresh()
+                self.refresh(layout=True)
             event.stop()
 
         elif event.key == "enter":
