@@ -592,8 +592,23 @@ def start_push_proxy(container_name: str, workdir: str,
     os.makedirs(sock_dir, exist_ok=True)
     sock_path = os.path.join(sock_dir, "push.sock")
 
-    proxy = PushProxy(sock_path, workdir, allowed_branch)
-    proxy.start()
+    # Spawn the proxy as an independent subprocess so it outlives the
+    # calling process.  Uses this module's __main__ entry point.
+    import sys
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "pm_core.push_proxy",
+         sock_path, workdir, allowed_branch],
+        start_new_session=True,  # detach from parent process group
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    # Wait briefly for the socket to appear
+    for _ in range(20):
+        if os.path.exists(sock_path):
+            break
+        import time
+        time.sleep(0.1)
 
     with _proxy_lock:
         _active_proxies[container_name] = proxy
