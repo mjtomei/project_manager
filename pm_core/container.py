@@ -200,6 +200,7 @@ def container_is_running(name: str) -> bool:
 
 def _build_git_setup_script(
     has_push_proxy: bool = False,
+    host_workdir: str | None = None,
 ) -> str:
     """Build a shell script snippet to configure git inside the container.
 
@@ -224,6 +225,13 @@ def _build_git_setup_script(
     # etc.) run directly via /usr/bin/git.
     if has_push_proxy:
         from pm_core.push_proxy import _CONTAINER_SOCKET_PATH
+        # Escape the host workdir for safe embedding in a JSON string literal.
+        # Backslash must come first to avoid double-escaping.
+        _escaped_host_workdir = ""
+        if host_workdir:
+            _escaped_host_workdir = (
+                host_workdir.replace("\\", "\\\\").replace('"', '\\"')
+            )
         # NOTE: The inline Python block must start at column 0 inside the
         # shell $(...) substitution, so we can't use textwrap.dedent here.
         wrapper_script = (
@@ -231,7 +239,12 @@ def _build_git_setup_script(
             "# pm: git wrapper — remote commands go through the host-side proxy\n"
             "REAL_GIT=/usr/bin/git\n"
             f'SOCKET="{_CONTAINER_SOCKET_PATH}"\n'
-            '# Commands that interact with remotes and need proxy forwarding\n'
+            # HOST_WORKDIR is the host-side clone path for this container,
+            # baked in at creation time so the proxy can use the correct
+            # source/target when multiple scenario containers share a proxy.
+            + (f'HOST_WORKDIR="{_escaped_host_workdir}"\n'
+               if _escaped_host_workdir else "")
+            + '# Commands that interact with remotes and need proxy forwarding\n'
             'case "$1" in\n'
             '  push|fetch|pull|ls-remote)\n'
             '    CMD="$1"\n'
@@ -245,8 +258,11 @@ def _build_git_setup_script(
             '    done\n'
             '    args_json="$args_json]"\n'
             '    escaped_cmd=$(printf \'%s\' "$CMD" | sed \'s/"/\\\\"/g\')\n'
-            '    request=\'{"cmd": "\'$escaped_cmd\'", "args": \'$args_json\'}\'\n'
-            '    if ! command -v python3 >/dev/null 2>&1; then\n'
+            + ('    escaped_workdir=$(printf \'%s\' "$HOST_WORKDIR" | sed \'s/\\\\/\\\\\\\\/g; s/"/\\\\"/g\')\n'
+               '    request=\'{"cmd": "\'$escaped_cmd\'", "args": \'$args_json\'", "workdir": "\'$escaped_workdir\'"}\'\n'
+               if _escaped_host_workdir else
+               '    request=\'{"cmd": "\'$escaped_cmd\'", "args": \'$args_json\'}\'\n')
+            + '    if ! command -v python3 >/dev/null 2>&1; then\n'
             '      echo "pm: python3 required for git proxy client" >&2\n'
             '      exit 1\n'
             '    fi\n'
@@ -499,7 +515,8 @@ def create_container(
         ["git", "config", "user.email"], capture_output=True, text=True,
     ).stdout.strip()
 
-    git_setup = _build_git_setup_script(has_push_proxy=has_push_proxy)
+    git_setup = _build_git_setup_script(has_push_proxy=has_push_proxy,
+                                        host_workdir=str(workdir) if has_push_proxy else None)
     setup_parts = [
         f"groupadd -g {host_gid} {_CONTAINER_USER} 2>/dev/null",
         f"useradd -u {host_uid} -g {host_gid} -m -s /bin/bash {_CONTAINER_USER} 2>/dev/null",

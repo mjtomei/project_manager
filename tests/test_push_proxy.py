@@ -381,3 +381,107 @@ class TestSharedProxy:
             assert sock1 != sock2
             stop_push_proxy("c1")
             stop_push_proxy("c2")
+
+
+class TestCallerWorkdir:
+    """The 'workdir' request field routes push/fetch/pull to the correct clone."""
+
+    @pytest.fixture
+    def proxy(self, sock_path):
+        p = PushProxy(sock_path, "/proxy-default-workdir", "pm/pr-123-feature")
+        p.start()
+        yield p
+        p.stop()
+
+    @patch("subprocess.run")
+    @patch("pm_core.push_proxy._resolve_local_remote_url",
+           return_value="/some/pr-workdir")
+    def test_local_push_uses_caller_workdir(self, _mock_resolve, mock_run,
+                                            proxy, sock_path):
+        """_local_push fetches FROM the caller's clone, not self.workdir."""
+        def side_effect(cmd, **kwargs):
+            if cmd[:2] == ["git", "-C"]:
+                # The fetch step in _local_push
+                return MagicMock(returncode=0, stdout="", stderr="")
+            # resolve_real_origin follow-up (no real upstream)
+            return MagicMock(returncode=1, stdout="", stderr="")
+        mock_run.side_effect = side_effect
+
+        resp = _send_request(sock_path, {
+            "cmd": "push",
+            "args": ["origin", "pm/pr-123-feature"],
+            "workdir": "/caller-clone",
+        })
+        assert resp["exit_code"] == 0
+        # Find the fetch call: git -C <target> fetch --update-head-ok <source> <refspec>
+        fetch_calls = [c for c in mock_run.call_args_list
+                       if c[0][0][:2] == ["git", "-C"]]
+        assert len(fetch_calls) == 1
+        fetch_cmd = fetch_calls[0][0][0]
+        # Source must be the caller's clone, not the proxy default workdir
+        assert "/caller-clone" in fetch_cmd
+        assert "/proxy-default-workdir" not in fetch_cmd
+
+    @patch("subprocess.run")
+    def test_fetch_uses_caller_workdir(self, mock_run, proxy, sock_path):
+        """git fetch runs from the caller's workdir, not self.workdir."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="fetched\n", stderr="")
+        resp = _send_request(sock_path, {
+            "cmd": "fetch",
+            "args": ["origin"],
+            "workdir": "/caller-clone",
+        })
+        assert resp["exit_code"] == 0
+        fetch_call = mock_run.call_args
+        assert fetch_call[1]["cwd"] == "/caller-clone"
+
+    @patch("subprocess.run")
+    def test_pull_uses_caller_workdir(self, mock_run, proxy, sock_path):
+        """git pull runs from the caller's workdir, not self.workdir."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        resp = _send_request(sock_path, {
+            "cmd": "pull",
+            "args": ["origin"],
+            "workdir": "/caller-clone",
+        })
+        assert resp["exit_code"] == 0
+        assert mock_run.call_args[1]["cwd"] == "/caller-clone"
+
+    @patch("subprocess.run")
+    def test_no_workdir_field_falls_back_to_self_workdir(self, mock_run, proxy,
+                                                          sock_path):
+        """Legacy requests without 'workdir' fall back to self.workdir."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        resp = _send_request(sock_path, {
+            "cmd": "fetch",
+            "args": ["origin"],
+            # no "workdir" key
+        })
+        assert resp["exit_code"] == 0
+        assert mock_run.call_args[1]["cwd"] == "/proxy-default-workdir"
+
+    @patch("subprocess.run")
+    def test_empty_workdir_field_falls_back_to_self_workdir(self, mock_run, proxy,
+                                                             sock_path):
+        """An empty-string 'workdir' is treated the same as absent."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        resp = _send_request(sock_path, {
+            "cmd": "pull",
+            "args": [],
+            "workdir": "",
+        })
+        assert resp["exit_code"] == 0
+        assert mock_run.call_args[1]["cwd"] == "/proxy-default-workdir"
+
+    @patch("subprocess.run")
+    def test_ls_remote_ignores_workdir(self, mock_run, proxy, sock_path):
+        """ls-remote result is workdir-independent; caller workdir is accepted
+        without error (proxy just uses it as cwd, which is harmless)."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="abc HEAD\n", stderr="")
+        resp = _send_request(sock_path, {
+            "cmd": "ls-remote",
+            "args": ["origin"],
+            "workdir": "/caller-clone",
+        })
+        assert resp["exit_code"] == 0
+        assert resp["stdout"] == "abc HEAD\n"
