@@ -351,7 +351,22 @@ class PushProxy:
         # this branch checked out, and git refuses to fetch into a checked-out
         # branch without it.
         source = caller_workdir or self.workdir
-        refspec = f"refs/heads/{branch}:refs/heads/{branch}"
+
+        # Prefer the explicit branch ref; fall back to HEAD when the source
+        # clone doesn't have a local branch by that name (e.g. legacy requests
+        # where self.workdir is on a differently-named default branch).
+        src_ref = f"refs/heads/{branch}"
+        try:
+            _check = subprocess.run(
+                ["git", "rev-parse", "--verify", src_ref],
+                cwd=source, capture_output=True, timeout=5,
+            )
+            if _check.returncode != 0:
+                src_ref = "HEAD"
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            src_ref = "HEAD"
+
+        refspec = f"{src_ref}:refs/heads/{branch}"
         cmd = ["git", "-C", target_repo, "fetch", "--update-head-ok",
                source, refspec]
         _log.info("Push proxy local push (step 1 — update local): %s", cmd)
