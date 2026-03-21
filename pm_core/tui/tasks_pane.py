@@ -292,6 +292,13 @@ class TasksPane(Widget):
             output.append(" or launch a review with ", style="dim")
             output.append("d", style="bold")
             output.append(".\n", style="dim")
+            output.append("\n")
+            output.append("  Enter", style="bold")
+            output.append("=switch  ", style="dim")
+            output.append("Space", style="bold")
+            output.append("=expand  ", style="dim")
+            output.append("T", style="bold")
+            output.append("=back\n", style="dim")
             return output
 
         for i, item in enumerate(self._flat_items):
