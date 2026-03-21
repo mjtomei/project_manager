@@ -73,7 +73,7 @@ def stop_loop_or_fresh_done(app) -> None:
     else:
         # Original z d behaviour: fresh done
         from pm_core.tui import pr_view
-        pr_view.done_pr(app, fresh=True)
+        pr_view.done_pr(app, fresh=True, pr_id=pr_id)
 
 
 # ---------------------------------------------------------------------------
