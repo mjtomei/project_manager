@@ -156,7 +156,7 @@ class ProjectManagerApp(App):
         Binding("H", "launch_guide", "Guide", show=True),
         Binding("C", "show_connect", "Connect", show=False),
         Binding("A", "toggle_auto_start", "Auto-start", show=False),
-        Binding("w", "focus_watcher", "Watcher", show=False),
+        # w is handled as a prefix key in on_key (wf=focus, ww=list, ws=start/stop)
         Binding("T", "toggle_tasks", "Tasks", show=True),
     ]
 
