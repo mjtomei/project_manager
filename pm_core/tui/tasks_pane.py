@@ -128,6 +128,12 @@ class TasksPane(Widget):
             did = _pr_display_id(pr)
             pr_by_display[did] = pr
 
+        # Preserve expansion state from existing entries so polls don't collapse them
+        old_expanded: dict[str, bool] = {}
+        for e in self._entries:
+            old_key = f"{e.group}:{e.pr_display_id}" if e.pr_display_id else f"{e.group}:{e.main_window}"
+            old_expanded[old_key] = e.expanded
+
         # Classify windows and group into tasks
         tasks_by_key: dict[str, TaskEntry] = {}  # key = "group:pr_display_id" or window name
 
@@ -149,6 +155,8 @@ class TasksPane(Widget):
 
             if key not in tasks_by_key:
                 entry = TaskEntry(group, pr_did, name, win["index"])
+                # Restore expansion state from previous poll
+                entry.expanded = old_expanded.get(key, False)
                 # Look up PR data
                 if pr_did and pr_did in pr_by_display:
                     pr = pr_by_display[pr_did]

@@ -295,6 +295,29 @@ class TestExpandCollapse:
                 break
         assert pane.selected_window_name == "qa-#128-s1"
 
+    def test_expansion_preserved_across_poll(self):
+        """Expansion state must survive update_tasks calls (poll every 2 seconds)."""
+        pane = self._make_qa_pane()
+        qa = [e for e in pane._entries if e.group == "QA"][0]
+        qa.expanded = True
+        pane._build_flat_items()
+        assert len([i for i in pane._flat_items if "_sub" in i]) == 2
+
+        # Simulate another poll — same windows
+        windows = [
+            {"id": "@1", "index": "0", "name": "main"},
+            {"id": "@2", "index": "1", "name": "qa-#128"},
+            {"id": "@3", "index": "2", "name": "qa-#128-s1"},
+            {"id": "@4", "index": "3", "name": "qa-#128-s2"},
+        ]
+        prs = [{"id": "pr-001", "gh_pr_number": 128, "title": "Fix", "status": "qa"}]
+        pane.update_tasks(windows, prs, {}, {})
+
+        qa_after = [e for e in pane._entries if e.group == "QA"][0]
+        assert qa_after.expanded is True
+        sub_items = [i for i in pane._flat_items if "_sub" in i]
+        assert len(sub_items) == 2
+
 
 class TestReviewLoopMarkers:
     """Tests for review/QA loop status markers on task entries."""
