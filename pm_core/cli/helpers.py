@@ -34,7 +34,8 @@ def set_project_override(path: Path | None) -> None:
 
 
 class HelpGroup(click.Group):
-    """Click Group that treats 'help' as an alias for --help everywhere.
+    """Click Group that treats 'help' as an alias for --help everywhere,
+    and 'l'/'ls' as aliases for 'list' everywhere.
 
     Applied to the top-level group and auto-inherited by all child groups
     via ``group_class = type`` (Click uses ``type(self)`` as default cls).
@@ -53,6 +54,9 @@ class HelpGroup(click.Group):
                 return super().resolve_command(ctx, args)
             # Otherwise replace 'help' with '--help'
             args = ["--help"] + args[1:]
+        # Alias l/ls to list when the group has a list subcommand
+        if args and args[0] in ("l", "ls") and super().get_command(ctx, "list") is not None:
+            args = ["list"] + args[1:]
         cmd_name, cmd, remaining = super().resolve_command(ctx, args)
         # Also handle 'help' as first arg to a leaf command:
         # e.g. 'pm tui test help' → 'pm tui test --help'

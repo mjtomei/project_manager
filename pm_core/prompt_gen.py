@@ -3,6 +3,8 @@
 from pm_core import store, notes
 from pm_core.backend import get_backend
 from pm_core.paths import get_global_setting
+from pm_core.spec_gen import (format_spec_for_prompt, spec_generation_preamble,
+                               get_spec_mocks_section)
 
 
 def tui_section(session_name: str) -> str:
@@ -79,6 +81,7 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
     # Include session notes if available
     general_notes_block = ""
     impl_specific_block = ""
+    root = None
     try:
         root = store.find_project_root()
         general_notes_block, impl_specific_block = notes.notes_for_prompt(root, "impl")
@@ -93,6 +96,10 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
     beginner_block = _beginner_addendum()
     cleanup_block = _auto_cleanup_addendum()
 
+    # Include implementation spec if already generated, or preamble to generate one
+    impl_spec_block = format_spec_for_prompt(pr, "impl")
+    impl_spec_preamble = spec_generation_preamble(pr, "impl", root=root)
+
     prompt = f"""You're working on PR {pr_id}: "{title}"
 
 This session is managed by `pm`. Run `pm help` to see available commands.
@@ -103,11 +110,12 @@ This session is managed by `pm`. Run `pm help` to see available commands.
 
 ## Task
 {description}
-{pr_notes_block}
+{pr_notes_block}{impl_spec_block}{impl_spec_preamble}
 ## Tips
 - This session may be resuming after a restart. Check `git status` and `git log` to see if previous work exists on this branch — if so, continue from there. The directory may contain uncommitted implementation work from a previous session.
 - Before referencing existing code (imports, function calls, class usage), read the source to verify the interface.
 - This workdir is a clone managed by pm. The base pm state (project.yaml, PR status) lives in a separate directory and is not automatically synced with this clone. Commands like `pm pr start` and `pm pr review` should be run from the base directory, not here — your session for {pr_id} is already running.
+{_remote_sync_tip(data, branch)}
 
 ## Workflow
 {instructions}
@@ -173,12 +181,39 @@ This PR is part of plan "{plan['name']}" ({plan['id']}). Other PRs in this plan:
     # Include PR notes (addendums)
     pr_notes_block = _format_pr_notes(pr)
 
-    # Backend-appropriate diff command
+    # Backend-appropriate diff and sync commands
     backend_name = data.get("project", {}).get("backend", "vanilla")
+    branch = pr.get("branch", f"pm/{pr_id}")
     if backend_name == "local":
         diff_cmd = f"git diff {base_branch}...HEAD"
+        pull_step = ""
     else:
         diff_cmd = f"git diff origin/{base_branch}...HEAD"
+        pull_step = (
+            f"1. Pull the latest changes from remote: `git pull origin {branch}`. "
+            f"Resolve any merge conflicts before continuing.\n"
+        )
+
+    # Renumber steps based on whether pull step is present
+    n = 2 if pull_step else 1
+
+    # Include implementation spec in review prompt for context.
+    # If no spec exists, warn the reviewer — the implementation session
+    # should have generated one in Step 0.
+    impl_spec_block = format_spec_for_prompt(pr, "impl")
+    if not impl_spec_block:
+        impl_spec_block = """
+## Implementation Spec — MISSING
+
+No implementation spec was generated for this PR.  The implementation session
+should have produced one as Step 0.  Without a spec, the reviewer cannot
+verify that the implementation matches an agreed-upon set of requirements.
+
+**Action**: If the implementation is otherwise sound, generate the spec now
+with `pm pr spec {pr_id} impl` so it is available for QA.  If the
+implementation has significant gaps, consider requesting re-implementation
+with spec generation enabled.
+""".replace("{pr_id}", pr_id)
 
     prompt = f"""You are reviewing PR {pr_id}: "{title}"
 
@@ -187,21 +222,21 @@ Review the code changes in this PR for quality, correctness, and architectural f
 
 ## Description
 {description}
-{pr_notes_block}{plan_context}{tui_block}{general_notes_block}
+{pr_notes_block}{impl_spec_block}{plan_context}{tui_block}{general_notes_block}
 ## Steps
-1. Run `{diff_cmd}` to see all changes
-2. **Generic checks** — things any codebase should get right:
+{pull_step}{n}. Run `{diff_cmd}` to see all changes
+{n+1}. **Generic checks** — things any codebase should get right:
    - Excessive file/function length, duplicated code, dead or unnecessary code, potential bugs, security issues, confusing code that lacks comments, sufficient test coverage
-3. **Project-specific checks** — does the change fit this codebase?
+{n+2}. **Project-specific checks** — does the change fit this codebase?
    - Convention consistency, architectural patterns
    - Search for similar code elsewhere in the repo — flag opportunities for shared helpers or reuse
-4. **Architectural review** — does the implementation approach make sense?
+{n+3}. **Architectural review** — does the implementation approach make sense?
    - Were the PR's goals achieved in a reasonable way, or is there a simpler/better design?
    - If plan context is listed above, check whether choices in this PR make any of those sibling PRs harder to implement. Are there data models, interfaces, or patterns introduced here that will need awkward workarounds later?
    - Run `pm pr list` to see all PRs and plans for the repo. If any other plans or standalone PRs touch related areas, consider whether this PR's approach conflicts with or complicates them.
    - Consider likely future changes beyond the current PR list — does this PR paint the codebase into a corner or leave good extension points?
-5. Output per-file notes: **filename** — GOOD / FIX / RETHINK
-6. End with an overall verdict on its own line — one of:
+{n+4}. Output per-file notes: **filename** — GOOD / FIX / RETHINK
+{n+5}. End with an overall verdict on its own line — one of:
    - **PASS** — No changes needed. The code is ready to merge as-is.
    - **PASS_WITH_SUGGESTIONS** — Only non-blocking suggestions remain (style nits, minor refactors, optional improvements). The PR could merge now, but would benefit from small tweaks. List suggestions clearly.
    - **NEEDS_WORK** — Blocking issues found (bugs, missing error handling, architectural problems, test gaps). Separate code-quality fixes from architectural concerns.
@@ -270,6 +305,18 @@ The user has beginner mode enabled. Please:
 - Avoid jargon without explanation
 - When committing, explain what a commit is and why we push
 """
+
+
+def _remote_sync_tip(data: dict, branch: str) -> str:
+    """Return a tip about pulling from remote, or empty string for local backend."""
+    backend_name = data.get("project", {}).get("backend", "vanilla")
+    if backend_name == "local":
+        return ""
+    return (
+        f"- Pull from remote before starting work to pick up changes from "
+        f"other sessions or machines: `git pull origin {branch}`. "
+        f"If there are merge conflicts, resolve them before continuing."
+    )
 
 
 def _auto_cleanup_addendum() -> str:
@@ -716,19 +763,55 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
     workdir = pr.get("workdir", "")
     base_branch = data.get("project", {}).get("base_branch", "master")
 
-    # Get instruction library summary and notes
+    # Get instruction library summary, mocks library, and notes
     library_summary = "No instruction library found."
+    mocks_summary = ""
     general_notes_block = ""
     qa_specific_block = ""
+    root = None
     try:
         root = store.find_project_root()
         library_summary = qa_instructions.instruction_summary_for_prompt(root)
+        mocks_list = qa_instructions.list_mocks(root)
+        if mocks_list:
+            mocks_lines = []
+            for m in mocks_list:
+                desc = f" — {m['description']}" if m["description"] else ""
+                mocks_lines.append(f"- **{m['id']}**{desc}")
+            mocks_summary = "\n".join(mocks_lines)
         general_notes_block, qa_specific_block = notes.notes_for_prompt(root, "qa")
     except FileNotFoundError:
         pass
 
     # Include PR notes (prior QA results, addendums)
     pr_notes_block = _format_pr_notes(pr)
+
+    # Include QA spec if already generated, or preamble to generate one
+    qa_spec_block = format_spec_for_prompt(pr, "qa")
+    qa_spec_preamble = spec_generation_preamble(pr, "qa", root=root)
+
+    mocks_library_section = ""
+    if mocks_summary:
+        mocks_library_section = f"""
+## Mock Library
+
+These shared mock definitions are available.  Reference them by ID in each
+scenario's MOCKS field.  Each mock is injected into the scenario prompt so
+all agents share the same contracts.
+
+{mocks_summary}
+
+If a scenario needs to mock an external dependency that is NOT listed above,
+declare it as a NEW_MOCK before the scenarios so it can be generated first.
+"""
+    else:
+        mocks_library_section = """
+## Mock Library
+
+No shared mocks are defined yet.  If any scenarios need to mock external
+dependencies (Claude sessions, git operations, tmux, network calls, etc.),
+declare them as NEW_MOCK blocks before the scenarios.
+"""
 
     prompt = f"""You are a QA planner analyzing PR {pr_id}: "{title}"
 
@@ -748,51 +831,56 @@ to verify this PR works correctly.
 
 Inspect the diff yourself — run `git diff {base_branch}...HEAD` in the workdir
 to see what changed.  Read source files as needed to understand the context.
-{pr_notes_block}
+{pr_notes_block}{qa_spec_block}{qa_spec_preamble}
 ## QA Instruction Library
 
-These are available QA instructions and regression tests.  Reference any that
-are relevant to this PR's changes.  You can read the full content of any
-instruction file at the paths shown below.
+These are available QA instructions.  Reference any that are relevant to
+this PR's changes.  You can read the full content of any instruction file
+at the paths shown below.
 
 {library_summary}
 
-## CRITICAL: Always assign an instruction
-
 Instructions tell scenario agents how to set up a test environment.  Without
-one, agents fall back to reading code and auto-passing.  Assign an instruction
-to every scenario — ``INSTRUCTION: "none"`` should be rare.  Multiple scenarios
-testing the same system should share the same instruction.
-
+one, agents fall back to reading code and auto-passing.  Try to assign an instruction
+to every scenario.
+{mocks_library_section}
 ## Output Format
 
 Your output is machine-parsed.  Use ALL CAPS markers exactly as shown.
 Do NOT use markdown headings or code fences — output the plain-text markers
 directly at the start of a line.
 
+First declare any new mocks needed (omit this section if all needed mocks
+already exist in the Mock Library above):
+
+NEW_MOCK: <mock-id e.g. "claude-session">
+DEPENDENCY: <the external system being mocked e.g. "Anthropic Claude API">
+REASON: <why scenarios need this mocked rather than real>
+
+Then list the scenarios:
+
 QA_PLAN_START
 
 SCENARIO {scenario_start}: <descriptive title for this scenario>
 FOCUS: <what area or behavior to test>
-INSTRUCTION: <path/to/instruction.md or "none" if no existing instruction applies>
+INSTRUCTION: <filename from the library above, or "none" if no existing instruction applies>
+MOCKS: <comma-separated mock IDs this scenario uses, or "none">
 STEPS: <concrete test steps to perform>
 
 SCENARIO {scenario_start + 1}: <descriptive title for next scenario>
 FOCUS: <what area or behavior to test>
-INSTRUCTION: <path or "none">
+INSTRUCTION: <filename or "none">
+MOCKS: <mock IDs or "none">
 STEPS: <concrete test steps>
 
 QA_PLAN_END
-
-IMPORTANT: Replace ALL angle-bracket placeholders above with real content.
-Do NOT copy the example format verbatim — fill in actual scenario titles,
-focus areas, and detailed test steps specific to THIS PR.
 
 Number scenarios starting from {scenario_start}.
 
 Include as many scenarios as required to fully exercise the functionality
 of the PR.  Exercise the core functionality as well as any edge cases
 that may expose bugs.
+
 {general_notes_block}{qa_specific_block}"""
     return prompt.strip()
 
@@ -835,8 +923,7 @@ def generate_qa_interactive_prompt(data: dict, pr_id: str,
     try:
         root = store.find_project_root()
         from pm_core import qa_instructions
-        library_summary = qa_instructions.instruction_summary_for_prompt(
-            root, include_regression=False)
+        library_summary = qa_instructions.instruction_summary_for_prompt(root)
         if library_summary and "No QA instructions" not in library_summary:
             instruction_library_block = f"""
 ## QA Instruction Library
@@ -850,7 +937,7 @@ understand what's being tested:
     except (FileNotFoundError, Exception):
         pass
 
-    prompt = f"""You are an interactive QA session (Scenario 0) for PR {pr_id}: "{title}"
+    prompt = f"""You are in an interactive QA session (Scenario 0) for PR {pr_id}: "{title}"
 
 ## Context
 
@@ -923,60 +1010,64 @@ def generate_qa_child_prompt(data: dict, pr_id: str,
 
     instruction_block = ""
     if scenario.instruction_path:
-        # Translate absolute host path to be relative to the scenario workdir.
-        # Instruction files live under pm/qa/ in the repo; in containers the
-        # repo is mounted at /workspace so we need /workspace/pm/qa/...
+        # instruction_path is an absolute path from the agent's perspective
+        # (set by _install_instruction_file during launch).
         instr_display = scenario.instruction_path
-        marker = "/pm/qa/"
-        idx = scenario.instruction_path.find(marker)
-        if idx >= 0:
-            instr_display = f"{workdir}/pm/qa/{scenario.instruction_path[idx + len(marker):]}"
         instruction_block = f"""
 ## Instruction Reference
 
-Read the full instruction at: `{instr_display}`
-Follow its **Setup** section to create a real test environment BEFORE running
-any test steps.  Do NOT skip setup and fall back to static code reading — your
-job is to verify runtime behavior, not review code.
+Test setup instructions are available at: `{instr_display}`
+
+If a setup step fails or a required tool is unavailable, report
+**INPUT_REQUIRED** with an explanation of what blocked you. 
 """
 
     # Include PR notes (prior QA results, addendums)
     pr_notes_block = _format_pr_notes(pr)
 
+    # Include mocks section from QA spec so every scenario uses the same strategy
+    mocks_block = get_spec_mocks_section(pr)
+
     # Workdir description and execution instructions differ by mode
+    backend_name = data.get("project", {}).get("backend", "vanilla")
+    has_remote = backend_name != "local"
+    pull_step = (
+        f"1. Pull the latest changes from remote: `git pull origin {branch}`. "
+        f"Resolve any merge conflicts before continuing.\n"
+    ) if has_remote else ""
+    n = 2 if has_remote else 1  # first step number after optional pull
+
     scratch_line = f"\n- **Scratch dir** (throwaway test projects): {scratch_dir}" if scratch_dir else ""
     if worktree_mode:
         workdir_block = f"""\
 - **Your workdir** (isolated clone): {workdir}{scratch_line}
 - **PR workdir** (canonical source): {pr_workdir}"""
         execution_block = f"""\
-1. Inspect and test the code in your workdir (an isolated clone of the PR branch)
-2. Execute the test steps described above
-3. If you find issues and can fix them:
+{pull_step}{n}. Execute the test steps described above
+{n+1}. If you find issues and can fix them:
    - Implement the fix in your workdir (your current directory)
    - Commit with message prefix `qa: `
    - Push: `git push origin {branch}`
    - If push fails (another scenario pushed first), pull and retry:
      `git pull --rebase origin {branch} && git push origin {branch}`
-4. End with a verdict on its own line — one of:
+{n+2}. End with a verdict on its own line — one of:
    - **PASS** — Scenario passed, no issues found
-   - **NEEDS_WORK** — Issues found (explain what and whether you fixed them)
-   - **INPUT_REQUIRED** — Genuine ambiguity requiring human judgment"""
+   - **NEEDS_WORK** — Issues found and fixed (the fix is committed and pushed)
+   - **INPUT_REQUIRED** — Issues found that you could not fix, or genuine ambiguity requiring human judgment"""
     else:
         workdir_block = f"""\
 - **PR workdir** (source code): {pr_workdir}
 - **Your workdir** (throwaway test projects): {workdir}"""
         execution_block = f"""\
-1. Inspect the PR's code in the PR workdir
-2. Execute the test steps described above
-3. If you find issues and can fix them:
+{pull_step}{n}. Execute the test steps described above
+{n+1}. If you find issues and can fix them:
    - Implement the fix in the PR workdir
    - Commit with message prefix `qa: `
    - Push: `git push origin {branch}`
-4. End with a verdict on its own line — one of:
+{n+2}. End with a verdict on its own line — one of:
    - **PASS** — Scenario passed, no issues found
-   - **NEEDS_WORK** — Issues found (explain what and whether you fixed them)
-   - **INPUT_REQUIRED** — Genuine ambiguity requiring human judgment"""
+   - **NEEDS_WORK** — Issues found and fixed (the fix is committed and pushed)
+   - **INPUT_REQUIRED** — Issues found that you could not fix, or genuine ambiguity requiring human judgment"""
 
     prompt = f"""You are running QA scenario {scenario.index}: "{scenario.title}"
 
@@ -986,18 +1077,25 @@ job is to verify runtime behavior, not review code.
 - **Branch**: {branch}
 - **Base branch**: {base_branch}
 {workdir_block}
-{pr_notes_block}
+{pr_notes_block}{mocks_block}
 ## How QA Works
 
 You are in one of several QA scenarios running in parallel, each in its own
 isolated clone.  An orchestrator is monitoring your tmux pane for your
 final verdict.
 
-- When you output a verdict (PASS / NEEDS_WORK / INPUT_REQUIRED), the
-  orchestrator records it and moves on
-- If you commit fixes (with `qa: ` prefix), push them to the PR branch:
-  `git push origin {branch}`
-- Your verdict determines whether the PR passes QA — be thorough but fair
+## Important: When to use each verdict
+
+- **PASS** — You executed the test steps AND they succeeded.  A PASS is
+  only valid when you have **runtime evidence** (command output, observed
+  behavior, test results) that the feature works.
+- **NEEDS_WORK** — You executed the test steps and found concrete bugs or
+  issues.
+- **INPUT_REQUIRED** — You **could not execute** one or more test steps
+  because of missing tools, unavailable commands, environment limitations,
+  or ambiguity in the instructions.  **This is the correct verdict when
+  your environment prevents you from testing** — do NOT substitute code
+  reading or unit tests and claim PASS.  Explain what blocked you.
 
 ## Scenario
 
@@ -1056,7 +1154,7 @@ Follow its procedures.
 - **Branch**: {base_branch}
 - **Instruction**: {instruction_id}
 
-This is not a PR review — you are testing the current state of the codebase.
+You are testing the current state of the codebase.
 {instruction_block}{tui_block}
 ## Execution
 
@@ -1069,3 +1167,4 @@ This is not a PR review — you are testing the current state of the codebase.
 
 IMPORTANT: Always end your response with the verdict keyword on its own line."""
     return prompt.strip()
+

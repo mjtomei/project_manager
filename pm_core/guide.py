@@ -432,8 +432,8 @@ check on in-progress work, or understand what to tackle next.
 
 Before making any recommendations, check the project's current health:
 
-1. Run `pm pr list --workdirs` to see all PRs with their workdir paths and \
-git status (clean/dirty/missing)
+1. Run `pm pr list --workdirs -t` to see all PRs sorted by most recently \
+updated, with their workdir paths, git status, and timestamps.
 2. Run `pm plan list` to see existing plans
 
 Then assess:
@@ -446,5 +446,7 @@ Then assess:
 
 Based on what you find, give the user clear, simple recommendations for \
 what to do next. Suggest one or two concrete actions, not an overwhelming list. \
-Prefer finishing in-progress work over starting new work.
+Prefer finishing in-progress work over starting new work. Among PRs at the \
+same stage, prefer more recently updated ones — the timestamps in the list \
+show when each PR was last touched.
 {notes_block}"""

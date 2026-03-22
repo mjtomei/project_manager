@@ -4,7 +4,7 @@ import click
 
 from pm_core.cli.helpers import state_root
 
-_SESSION_TYPES = ["impl", "review", "qa", "qa_planning", "qa_scenario", "watcher", "merge"]
+_SESSION_TYPES = ["impl", "review", "qa", "qa_planning", "qa_scenario", "qa_verification", "watcher", "merge"]
 
 
 @click.group("model")
@@ -78,7 +78,7 @@ def model_set(session_type: str, model_value: str, effort: str, use_project: boo
         mc = data.setdefault("project", {}).setdefault("model_config", {})
         mc.setdefault("session_models", {})[session_type] = model_value
         mc.setdefault("session_effort", {})[session_type] = effort
-        store.save(root, data)
+        store.save(data, root)
         click.echo(f"Set project model for '{session_type}' to '{model_value}' (effort: {effort})")
     else:
         from pm_core.paths import set_global_setting_value
@@ -109,7 +109,7 @@ def model_unset(session_type: str, use_project: bool):
         if not mc and "model_config" in data.get("project", {}):
             del data["project"]["model_config"]
         if removed:
-            store.save(root, data)
+            store.save(data, root)
             click.echo(f"Removed project overrides for '{session_type}'")
         else:
             click.echo(f"No project overrides set for '{session_type}'")

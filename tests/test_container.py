@@ -295,8 +295,8 @@ class TestCreateContainer:
     @patch("pm_core.container._resolve_claude_binary", return_value=None)
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_docker")
-    def test_mounts_claude_json(self, mock_docker, mock_rm, mock_bin, mock_exists, _mock_running):
-        """~/.claude.json is mounted read-write for Claude config."""
+    def test_copies_claude_json(self, mock_docker, mock_rm, mock_bin, mock_exists, _mock_running):
+        """.claude.json is copied (not bind-mounted) into the container."""
         mock_docker.return_value = MagicMock(stdout="id\n")
         config = ContainerConfig()
 
@@ -305,8 +305,13 @@ class TestCreateContainer:
              patch.object(Path, "exists", return_value=True):
             create_container(name="test", config=config, workdir=Path("/w"))
 
+        # .claude.json should NOT be in the docker run args (no bind mount)
         args_str = " ".join(mock_docker.call_args_list[0][0])
-        assert f"/home/user/.claude.json:{_CONTAINER_HOME}/.claude.json" in args_str
+        assert f"/home/user/.claude.json:{_CONTAINER_HOME}/.claude.json" not in args_str
+        # Instead it should be copied via docker cp (second call after run)
+        all_calls = mock_docker.call_args_list
+        cp_calls = [c for c in all_calls if len(c[0]) > 0 and c[0][0] == "cp"]
+        assert len(cp_calls) >= 1, "docker cp should be called for .claude.json"
 
     @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container._resolve_claude_binary")
@@ -718,6 +723,37 @@ class TestBuildGitSetupScript:
         # newline following the WRAPEOF marker)
         assert "\n#!/bin/sh\n" in script
 
+    def test_host_workdir_baked_into_wrapper(self):
+        """host_workdir is baked as HOST_WORKDIR and included in request JSON."""
+        script = _build_git_setup_script(has_push_proxy=True,
+                                         host_workdir="/home/user/repo")
+        assert 'HOST_WORKDIR="/home/user/repo"' in script
+        assert '"workdir"' in script
+
+    def test_host_workdir_produces_valid_json_in_request(self):
+        """The request= line must assemble valid JSON — no stray quote after args_json.
+
+        The shell fragment looks like:
+            request='{"cmd": "'$escaped_cmd'", "args": '$args_json', "workdir": "...'
+        After $args_json (an array like ["origin"]), the next shell literal must
+        start with ', "workdir"' NOT '", "workdir"' — the latter would produce
+        ["origin"]", "workdir" which is invalid JSON.
+        """
+        script = _build_git_setup_script(has_push_proxy=True,
+                                         host_workdir="/some/clone")
+        # Bad pattern: stray " after $args_json (produces invalid JSON)
+        bad = "$args_json'\", \"workdir\""
+        # Good pattern: no stray " (produces valid JSON)
+        good = "$args_json', \"workdir\""
+        assert bad not in script, "Stray '\"' after $args_json produces invalid JSON"
+        assert good in script, "Expected '$args_json', \"workdir\"' pattern"
+
+    def test_no_host_workdir_omits_workdir_field(self):
+        """Without host_workdir, no HOST_WORKDIR or workdir field in request."""
+        script = _build_git_setup_script(has_push_proxy=True)
+        assert "HOST_WORKDIR" not in script
+        assert '"workdir"' not in script
+
 
 @patch("pm_core.container.container_is_running", return_value=False)
 class TestCreateContainerPushProxy:
@@ -742,7 +778,7 @@ class TestCreateContainerPushProxy:
             session_tag=None, pr_id=None,
         )
         args_str = " ".join(mock_docker.call_args_list[0][0])
-        assert "/tmp/pm-push-proxy-test/push.sock:/run/pm-push-proxy.sock" in args_str
+        assert "/tmp/pm-push-proxy-test:/run/pm-push-proxy" in args_str
 
     @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container._resolve_claude_binary", return_value=None)

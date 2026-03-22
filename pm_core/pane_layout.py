@@ -317,6 +317,33 @@ def compute_layout(n_panes: int, width: int, height: int) -> str:
     return f"{_checksum(body)},{body}"
 
 
+def register_and_rebalance(
+    session: str,
+    window: str,
+    panes: list[tuple[str, str, str]],
+) -> None:
+    """Register panes, reset user_modified, and rebalance.
+
+    This is the canonical way to register newly-created panes.  The
+    after-split-window hook fires handle_pane_opened which sets
+    user_modified=True before the pane is in the registry; this function
+    always resets that flag so rebalance() is not a no-op.
+
+    Args:
+        session: tmux session name.
+        window:  tmux window ID.
+        panes:   List of (pane_id, role, cmd) tuples to register.
+    """
+    from pm_core import pane_registry as _reg
+    for pane_id, role, cmd in panes:
+        _reg.register_pane(session, window, pane_id, role, cmd)
+    data = _reg.load_registry(session)
+    wdata = _reg.get_window_data(data, window)
+    wdata["user_modified"] = False
+    _reg.save_registry(session, data)
+    rebalance(session, window)
+
+
 def rebalance(session: str, window: str, query_session: str | None = None) -> bool:
     """Load registry, compute layout, apply via tmux select-layout.
 
