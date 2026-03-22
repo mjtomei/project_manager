@@ -504,6 +504,7 @@ class ProjectManagerApp(App):
         plans_container.styles.display = "none"
         qa_container.styles.display = "none"
         tasks_container.styles.display = "none"
+        self._stop_tasks_poll()
 
         # Update status bar for guide mode
         status_bar = self.query_one("#status-bar", StatusBar)
