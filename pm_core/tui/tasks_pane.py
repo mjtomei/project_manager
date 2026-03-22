@@ -422,15 +422,29 @@ class TasksPane(Widget):
         if not self._flat_items or not self.parent:
             return
         container = self.parent
-        y_top = sum(self._entry_lines(t) for t in self._flat_items[:self.selected_index])
+        # y_top is in content coordinates; add widget's top padding to convert to
+        # container scroll coordinates (where y=0 is the top of the widget including padding)
+        padding_top = self.styles.padding.top
+        y_top = sum(self._entry_lines(t) for t in self._flat_items[:self.selected_index]) + padding_top
         h = self._entry_lines(self._flat_items[self.selected_index])
         viewport_h = container.size.height
         scroll_y = round(container.scroll_y)
         y_bottom = y_top + h
-        if y_bottom > scroll_y + viewport_h:
-            new_y = min(y_top, y_bottom - viewport_h)
-        elif y_top < scroll_y:
-            new_y = y_top
+        # Include footer height (blank + footer text = 2 lines) so the footer
+        # stays visible when scrolling to the last item
+        footer_h = 2
+        y_bottom_padded = y_bottom + footer_h
+        # When the selected item is the first in its group, include the group
+        # header in the effective top so scrolling up reveals the header too
+        effective_y_top = y_top
+        if self.selected_index > 0:
+            prev_item = self._flat_items[self.selected_index - 1]
+            if "_header" in prev_item:
+                effective_y_top = y_top - self._entry_lines(prev_item)
+        if y_bottom_padded > scroll_y + viewport_h:
+            new_y = min(effective_y_top, y_bottom_padded - viewport_h)
+        elif effective_y_top < scroll_y:
+            new_y = effective_y_top
         else:
             return
         container.scroll_to(y=new_y, animate=False, force=True)
