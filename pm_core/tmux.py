@@ -394,14 +394,16 @@ def select_window(session: str, window: str) -> bool:
     return result.returncode == 0
 
 
-def refresh_client(session: str, window: str) -> None:
-    """Force tmux to repaint all panes in a window.
+def refresh_client(session: str, window: str = "") -> None:
+    """Force tmux to repaint all clients attached to a session.
 
     Fixes visual artifacts (ghost prompt bars, stale content at wrong
     offsets) that appear after select-layout changes pane dimensions.
+    The window parameter is unused — refresh-client targets a client
+    (TTY or session name), not a session:window pair.
     """
     _run(
-        _tmux_cmd("refresh-client", "-t", f"{session}:{window}"),
+        _tmux_cmd("refresh-client", "-t", session),
     )
 
 
