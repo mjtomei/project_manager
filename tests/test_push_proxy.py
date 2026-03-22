@@ -536,6 +536,51 @@ class TestCallerWorkdir:
         assert resp["exit_code"] == 0
         assert resp["stdout"] == "abc HEAD\n"
 
+    @patch("subprocess.run")
+    def test_no_refspec_head_resolved_from_caller_workdir(self, mock_run, sock_path):
+        """_extract_target_branch uses caller_workdir for HEAD resolution,
+        not self.workdir, when no explicit refspec is given."""
+        p = PushProxy(sock_path, "/proxy-workdir-main", "feature/x")
+        p.start()
+
+        def side_effect(cmd, **kwargs):
+            cwd = kwargs.get("cwd", "")
+            if "rev-parse" in cmd:
+                if cwd == "/caller-workdir-feature-x":
+                    return MagicMock(returncode=0, stdout="feature/x\n", stderr="")
+                # self.workdir would resolve to "main"
+                return MagicMock(returncode=0, stdout="main\n", stderr="")
+            if "remote" in cmd and "get-url" in cmd:
+                # Return non-zero so _resolve_local_remote_url returns None
+                # (no local target → fall through to git push path)
+                return MagicMock(returncode=1, stdout="", stderr="")
+            # Actual git push
+            return MagicMock(returncode=0, stdout="ok\n", stderr="")
+
+        mock_run.side_effect = side_effect
+
+        resp = _send_request(sock_path, {
+            "cmd": "push",
+            "args": ["origin"],  # no refspec — HEAD must be resolved
+            "workdir": "/caller-workdir-feature-x",
+        })
+
+        assert resp["exit_code"] == 0, (
+            "Expected push to be allowed; got: " + resp.get("stderr", "")
+        )
+
+        rev_parse_calls = [
+            c for c in mock_run.call_args_list
+            if "rev-parse" in c[0][0]
+        ]
+        assert len(rev_parse_calls) >= 1
+        assert all(
+            c[1].get("cwd") == "/caller-workdir-feature-x"
+            for c in rev_parse_calls
+        ), "rev-parse must run in caller's workdir, not self.workdir"
+
+        p.stop()
+
 
 class TestIntegrationFetchPull:
     """Integration tests: fetch/pull land in the requesting scenario's clone."""
