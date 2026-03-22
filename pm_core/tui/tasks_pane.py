@@ -349,9 +349,8 @@ class TasksPane(Widget):
             if entry.pr_display_id:
                 header = entry.pr_display_id
                 if entry.pr_title:
+                    # 4 chars prefix (cursor+expand, both always 2 chars each) + 1 space + 1 buffer = 6
                     title_space = content_width - len(header) - 6
-                    if entry.sub_windows:
-                        title_space -= 2  # for expand indicator
                     if title_space > 5:
                         title = self._truncate(entry.pr_title, title_space)
                         header += f" {title}"
@@ -403,7 +402,7 @@ class TasksPane(Widget):
     def get_content_height(self, container, viewport, width) -> int:
         """Return the total content height so Textual can size the widget correctly."""
         if not self._flat_items:
-            return 5  # empty state: message + blank + hint + blank + footer
+            return 4  # "No running tasks." message (~3 lines + padding)
         # Sum all entry lines plus 2 for the footer (blank + footer text)
         return sum(self._entry_lines(item) for item in self._flat_items) + 2
 
