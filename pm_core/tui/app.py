@@ -1185,7 +1185,9 @@ class ProjectManagerApp(App):
             self.log_message("No tmux session found")
             return
         window_name = message.window_name
-        if tmux_mod.select_window(session, window_name):
+        window = tmux_mod.find_window_by_name(session, window_name)
+        if window:
+            tmux_mod.select_window(session, window["id"])
             self.log_message(f"Switched to '{window_name}'")
         else:
             self.log_message(f"Window '{window_name}' not found")

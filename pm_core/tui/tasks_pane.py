@@ -82,6 +82,7 @@ class TaskEntry:
         self.main_window = main_window
         self.window_index = window_index
         self.sub_windows: list[tuple[str, str, str]] = []  # (name, index, sub_id)
+        self.has_main_window: bool = False  # True if a "main"-role window exists
         self.expanded = False
         # PR data (populated by refresh)
         self.pr_title: str = ""
@@ -163,6 +164,8 @@ class TasksPane(Widget):
                     entry.pr_title = pr.get("title", "")
                     entry.pr_id = pr.get("id", "")
                     entry.pr_status = pr.get("status", "")
+                if role == "main":
+                    entry.has_main_window = True
                 tasks_by_key[key] = entry
             else:
                 entry = tasks_by_key[key]
@@ -171,9 +174,11 @@ class TasksPane(Widget):
                 entry.sub_windows.append((name, win["index"], sub_id or ""))
                 # Sort sub-windows by sub_id
                 entry.sub_windows.sort(key=lambda x: int(x[2]) if x[2].isdigit() else 0)
-            elif role == "main" and entry.main_window != name:
-                # Multiple main windows for same group/PR — treat extras as sub
-                entry.sub_windows.append((name, win["index"], ""))
+            elif role == "main":
+                entry.has_main_window = True
+                if entry.main_window != name:
+                    # Multiple main windows for same group/PR — treat extras as sub
+                    entry.sub_windows.append((name, win["index"], ""))
 
         # Populate loop markers
         for key, entry in tasks_by_key.items():
@@ -204,11 +209,12 @@ class TasksPane(Widget):
                             entry.review_loop_marker = "INPUT_REQ"
                         break
 
-        # Sort and flatten
-        self._entries = sorted(tasks_by_key.values(),
-                               key=lambda e: (GROUP_ORDER.index(e.group)
-                                              if e.group in GROUP_ORDER else 99,
-                                              e.pr_display_id))
+        # Sort and flatten; exclude entries created only from sub-windows (orphans)
+        self._entries = sorted(
+            (e for e in tasks_by_key.values() if e.has_main_window),
+            key=lambda e: (GROUP_ORDER.index(e.group)
+                           if e.group in GROUP_ORDER else 99,
+                           e.pr_display_id))
         self._build_flat_items()
 
         # Clamp selection
