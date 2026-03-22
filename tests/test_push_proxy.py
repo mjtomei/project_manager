@@ -3,6 +3,7 @@
 import json
 import os
 import socket
+import subprocess
 import tempfile
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -474,6 +475,55 @@ class TestCallerWorkdir:
         assert mock_run.call_args[1]["cwd"] == "/proxy-default-workdir"
 
     @patch("subprocess.run")
+    @patch("pm_core.push_proxy._resolve_local_remote_url",
+           return_value="/some/pr-workdir")
+    def test_no_workdir_push_falls_back_to_self_workdir(
+            self, _mock_resolve, mock_run, proxy, sock_path):
+        """Legacy push without 'workdir' falls back to self.workdir as source."""
+        def side_effect(cmd, **kwargs):
+            if cmd[:2] == ["git", "-C"]:
+                return MagicMock(returncode=0, stdout="", stderr="")
+            return MagicMock(returncode=1, stdout="", stderr="")
+        mock_run.side_effect = side_effect
+
+        resp = _send_request(sock_path, {
+            "cmd": "push",
+            "args": ["origin", "pm/pr-123-feature"],
+            # no "workdir" key — legacy caller
+        })
+        assert resp["exit_code"] == 0
+        fetch_calls = [c for c in mock_run.call_args_list
+                       if c[0][0][:2] == ["git", "-C"]]
+        assert len(fetch_calls) == 1
+        fetch_cmd = fetch_calls[0][0][0]
+        # Source must be self.workdir, not some caller path
+        assert "/proxy-default-workdir" in fetch_cmd
+
+    @patch("subprocess.run")
+    @patch("pm_core.push_proxy._resolve_local_remote_url",
+           return_value="/some/pr-workdir")
+    def test_empty_workdir_push_falls_back_to_self_workdir(
+            self, _mock_resolve, mock_run, proxy, sock_path):
+        """An empty-string 'workdir' in a push request falls back to self.workdir."""
+        def side_effect(cmd, **kwargs):
+            if cmd[:2] == ["git", "-C"]:
+                return MagicMock(returncode=0, stdout="", stderr="")
+            return MagicMock(returncode=1, stdout="", stderr="")
+        mock_run.side_effect = side_effect
+
+        resp = _send_request(sock_path, {
+            "cmd": "push",
+            "args": ["origin", "pm/pr-123-feature"],
+            "workdir": "",   # empty string — behaves like absent
+        })
+        assert resp["exit_code"] == 0
+        fetch_calls = [c for c in mock_run.call_args_list
+                       if c[0][0][:2] == ["git", "-C"]]
+        assert len(fetch_calls) == 1
+        fetch_cmd = fetch_calls[0][0][0]
+        assert "/proxy-default-workdir" in fetch_cmd
+
+    @patch("subprocess.run")
     def test_ls_remote_ignores_workdir(self, mock_run, proxy, sock_path):
         """ls-remote result is workdir-independent; caller workdir is accepted
         without error (proxy just uses it as cwd, which is harmless)."""
@@ -485,3 +535,119 @@ class TestCallerWorkdir:
         })
         assert resp["exit_code"] == 0
         assert resp["stdout"] == "abc HEAD\n"
+
+
+class TestIntegrationFetchPull:
+    """Integration tests: fetch/pull land in the requesting scenario's clone."""
+
+    @pytest.fixture
+    def git_repos(self, tmp_path):
+        target_bare = tmp_path / "target_bare"
+        clone1      = tmp_path / "clone1"
+        clone2      = tmp_path / "clone2"
+        upstream    = tmp_path / "upstream"
+
+        def git(*args, cwd=None):
+            subprocess.run(
+                ["git", "-c", "user.email=t@t.com", "-c",
+                 "user.name=T"] + list(args),
+                cwd=cwd, check=True, capture_output=True,
+            )
+
+        # Bare target
+        git("init", "--bare", "-b", "master", str(target_bare))
+        # First working clone → push initial commit
+        git("clone", str(target_bare), str(clone1))
+        git("commit", "--allow-empty", "-m", "initial", cwd=str(clone1))
+        git("push", "origin", "master", cwd=str(clone1))
+        # Second clone — starts at the same initial commit
+        git("clone", str(target_bare), str(clone2))
+        # Upstream clone to inject new commits without going through the proxy
+        git("clone", str(target_bare), str(upstream))
+
+        return {"bare": target_bare, "clone1": clone1, "clone2": clone2,
+                "upstream": upstream, "git": git}
+
+    def test_fetch_pull_land_in_caller_clone(self, sock_path, git_repos, monkeypatch):
+        repos = git_repos
+
+        # In this test environment /usr/local/bin/git is a proxy wrapper that
+        # intercepts fetch/pull and routes them to the system proxy socket.
+        # The push proxy itself must use the real git binary so its subprocess
+        # calls don't get re-intercepted.  Prepend the real git's directory to
+        # PATH for the duration of this test.
+        real_git_dir = "/usr/bin"
+        current_path = os.environ.get("PATH", "")
+        if real_git_dir not in current_path.split(":")[0]:
+            monkeypatch.setenv("PATH", f"{real_git_dir}:{current_path}")
+
+        # Add a new commit to target_bare via the upstream working clone
+        repos["git"]("commit", "--allow-empty", "-m", "upstream-change",
+                     cwd=str(repos["upstream"]))
+        repos["git"]("push", "origin", "master", cwd=str(repos["upstream"]))
+
+        # Start the proxy with clone1 as the proxy's default workdir
+        proxy = PushProxy(sock_path, str(repos["clone1"]), "pm/pr-test")
+        proxy.start()
+
+        try:
+            def ref_sha(repo, ref):
+                return subprocess.check_output(
+                    ["git", "-C", str(repo), "rev-parse", ref]
+                ).strip()
+
+            pre_clone1 = ref_sha(repos["clone1"], "origin/master")
+            pre_clone2 = ref_sha(repos["clone2"], "origin/master")
+            assert pre_clone1 == pre_clone2, "both clones should start at the same stale commit"
+
+            # Send a fetch request specifying clone2 as the caller workdir
+            resp = _send_request(sock_path, {
+                "cmd": "fetch",
+                "args": ["origin"],
+                "workdir": str(repos["clone2"]),
+            })
+            assert resp["exit_code"] == 0, f"fetch failed: {resp['stderr']}"
+
+            # Assert that the fetch landed in clone2 and did NOT touch clone1
+            clone2_log = subprocess.check_output(
+                ["git", "-C", str(repos["clone2"]), "log", "--oneline",
+                 "origin/master"]
+            ).decode()
+            assert "upstream-change" in clone2_log, "clone2 should have fetched upstream-change"
+
+            clone1_log = subprocess.check_output(
+                ["git", "-C", str(repos["clone1"]), "log", "--oneline",
+                 "origin/master"]
+            ).decode()
+            assert "upstream-change" not in clone1_log, \
+                "clone1 must not be updated — old bug: fetch ran from self.workdir"
+
+            # Push a second upstream commit for pull test
+            repos["git"]("commit", "--allow-empty", "-m", "upstream-change-2",
+                         cwd=str(repos["upstream"]))
+            repos["git"]("push", "origin", "master", cwd=str(repos["upstream"]))
+
+            # Send a pull request specifying clone2 as the caller workdir
+            resp = _send_request(sock_path, {
+                "cmd": "pull",
+                "args": ["origin", "master"],
+                "workdir": str(repos["clone2"]),
+            })
+            assert resp["exit_code"] == 0, f"pull failed: {resp['stderr']}"
+
+            # Assert that pull also landed in clone2 only
+            clone2_log = subprocess.check_output(
+                ["git", "-C", str(repos["clone2"]), "log", "--oneline",
+                 "HEAD"]
+            ).decode()
+            assert "upstream-change-2" in clone2_log, "clone2 HEAD should include upstream-change-2"
+
+            clone1_log = subprocess.check_output(
+                ["git", "-C", str(repos["clone1"]), "log", "--oneline",
+                 "HEAD"]
+            ).decode()
+            assert "upstream-change-2" not in clone1_log, \
+                "clone1 HEAD must not change — old bug: pull ran from self.workdir"
+
+        finally:
+            proxy.stop()
