@@ -356,3 +356,59 @@ class TestReviewLoopMarkers:
         pane.update_tasks(windows, prs, {"pr-001": FakeLoop()}, {})
         entry = pane._entries[0]
         assert entry.review_loop_marker == "PASS"
+
+    def test_qa_loop_running_marker(self):
+        pane = TasksPane()
+        windows = [
+            {"id": "@1", "index": "0", "name": "main"},
+            {"id": "@2", "index": "1", "name": "qa-#128"},
+        ]
+        prs = [{"id": "pr-001", "gh_pr_number": 128, "title": "Fix", "status": "qa"}]
+
+        class FakeQALoop:
+            running = True
+            iteration = 2
+            latest_verdict = None
+
+        pane.update_tasks(windows, prs, {}, {"pr-001": FakeQALoop()})
+        entry = pane._entries[0]
+        assert "2" in entry.qa_loop_marker
+
+    def test_qa_loop_finished_marker(self):
+        pane = TasksPane()
+        windows = [
+            {"id": "@1", "index": "0", "name": "main"},
+            {"id": "@2", "index": "1", "name": "qa-#128"},
+        ]
+        prs = [{"id": "pr-001", "gh_pr_number": 128, "title": "Fix", "status": "qa"}]
+
+        class FakeQALoop:
+            running = False
+            iteration = 1
+            latest_verdict = "PASS"
+
+        pane.update_tasks(windows, prs, {}, {"pr-001": FakeQALoop()})
+        entry = pane._entries[0]
+        assert entry.qa_loop_marker == "PASS"
+
+    def test_watcher_running_marker(self):
+        pane = TasksPane()
+        windows = [
+            {"id": "@1", "index": "0", "name": "main"},
+            {"id": "@2", "index": "1", "name": "watcher"},
+        ]
+        watcher_infos = [{"window_name": "watcher", "running": True, "input_required": False}]
+        pane.update_tasks(windows, [], {}, {}, watcher_infos=watcher_infos)
+        entry = [e for e in pane._entries if e.group == "Watcher"][0]
+        assert "active" in entry.review_loop_marker
+
+    def test_watcher_input_required_marker(self):
+        pane = TasksPane()
+        windows = [
+            {"id": "@1", "index": "0", "name": "main"},
+            {"id": "@2", "index": "1", "name": "watcher"},
+        ]
+        watcher_infos = [{"window_name": "watcher", "running": True, "input_required": True}]
+        pane.update_tasks(windows, [], {}, {}, watcher_infos=watcher_infos)
+        entry = [e for e in pane._entries if e.group == "Watcher"][0]
+        assert entry.review_loop_marker == "INPUT_REQ"
