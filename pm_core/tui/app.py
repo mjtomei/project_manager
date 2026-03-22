@@ -541,6 +541,7 @@ class ProjectManagerApp(App):
         self._plans_visible = False
         self._qa_visible = False
         self._tasks_visible = False
+        self._pre_mobile_view = None
         self._stop_tasks_poll()
         # Restore status bar to normal view
         self._update_status_bar()
@@ -955,6 +956,7 @@ class ProjectManagerApp(App):
         self._qa_visible = False
         self._tasks_visible = False
         self._current_guide_step = None
+        self._pre_mobile_view = None
         self._stop_tasks_poll()
         self._refresh_plans_pane()
         plans_pane = self.query_one("#plans-pane", PlansPane)
@@ -1044,6 +1046,7 @@ class ProjectManagerApp(App):
         self._plans_visible = False
         self._tasks_visible = False
         self._current_guide_step = None
+        self._pre_mobile_view = None
         self._stop_tasks_poll()
         self._refresh_qa_pane()
         qa_pane = self.query_one("#qa-pane", QAPane)
@@ -1200,7 +1203,8 @@ class ProjectManagerApp(App):
     def _check_mobile_transition(self, width: int | None = None) -> None:
         """Auto-switch to tasks pane in mobile mode, restore on exit."""
         from pm_core.pane_layout import MOBILE_WIDTH_THRESHOLD
-        is_mobile = (width if width is not None else self.size.width) < MOBILE_WIDTH_THRESHOLD
+        w = width if width is not None else self.size.width
+        is_mobile = 0 < w < MOBILE_WIDTH_THRESHOLD
 
         if is_mobile and not self._tasks_visible and self._pre_mobile_view is None:
             # Entering mobile mode — save current view and switch to tasks
