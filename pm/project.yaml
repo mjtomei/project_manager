@@ -4561,9 +4561,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/137
   gh_pr_number: 137
   created_at: '2026-03-08T21:45:42.636585+00:00'
-  updated_at: '2026-03-22T18:45:01.222304+00:00'
+  updated_at: '2026-03-22T19:20:54.768396+00:00'
   started_at: '2026-03-10T21:38:57.198809+00:00'
-  reviewed_at: '2026-03-22T18:45:01.222304+00:00'
+  reviewed_at: '2026-03-22T19:04:10.021257+00:00'
   merged_at: null
   notes:
   - id: note-834855f
@@ -4591,6 +4591,10 @@ prs:
     text: 'QA ERROR:  (workdir: /home/mjtomei/.pm/workdirs/qa/pr-0b827df-7714a0bc4691fb5e)'
     created_at: '2026-03-22T18:20:31Z'
     last_edited: '2026-03-22T18:20:31Z'
+  - id: note-27c2daa
+    text: 'QA ERROR:  (workdir: /home/mjtomei/.pm/workdirs/qa/pr-0b827df-93218e8d27ec4b9b)'
+    created_at: '2026-03-22T18:52:30Z'
+    last_edited: '2026-03-22T18:52:30Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b827df-add-running-tasks-pane-to-tui-with-w-cbe54f5e
   spec_qa: /home/mjtomei/project_manager/pm/specs/pr-0b827df/qa.md
 - id: pr-341100c
@@ -7078,6 +7082,29 @@ prs:
   gh_pr_number: null
   created_at: '2026-03-21T18:01:28.274120+00:00'
   updated_at: '2026-03-21T18:01:28.274120+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-2c67d50
+  plan: plan-qa
+  title: Resume QA scenario polling after INPUT_REQUIRED with follow-up verdict loop
+  branch: pm/pr-2c67d50-resume-qa-scenario-polling-after-input-required-wi
+  status: pending
+  depends_on: []
+  description: When a QA scenario pane emits INPUT_REQUIRED, instead of finalizing
+    that verdict and dropping the scenario from pending, keep polling the scenario
+    pane for a follow-up verdict (excluding INPUT_REQUIRED) until the user responds
+    and Claude emits a new verdict. Mirrors the existing behavior in review_loop.py
+    where INPUT_REQUIRED triggers poll_for_follow_up_verdict on the same pane. The
+    QA loop polls multiple scenarios concurrently, so the follow-up polling needs
+    to work within that model — likely by moving the scenario to a waiting_for_input
+    set and continuing to poll it with INPUT_REQUIRED excluded from accepted verdicts.
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-22T19:31:05.710967+00:00'
+  updated_at: '2026-03-22T19:31:05.710967+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

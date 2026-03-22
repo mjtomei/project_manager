@@ -45,6 +45,9 @@ def load(root: Optional[Path] = None, validate: bool = True) -> dict:
     with open(path) as f:
         data = yaml.safe_load(f)
 
+    if data is None:
+        data = {}
+
     if validate:
         _validate_pr_statuses(data)
 
