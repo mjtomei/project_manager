@@ -1208,8 +1208,6 @@ class ProjectManagerApp(App):
                 self._pre_mobile_view = "plans"
             elif self._qa_visible:
                 self._pre_mobile_view = "qa"
-            elif self._current_guide_step is not None:
-                self._pre_mobile_view = "guide"
             else:
                 self._pre_mobile_view = "normal"
             self._show_tasks_view()
@@ -1221,9 +1219,6 @@ class ProjectManagerApp(App):
                 self._show_plans_view()
             elif prev == "qa":
                 self._show_qa_view()
-            elif prev == "guide":
-                state, _ = guide.detect_state(self._root)
-                self._show_guide_view(state)
             else:
                 self._show_normal_view()
 

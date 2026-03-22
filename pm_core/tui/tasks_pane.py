@@ -222,12 +222,14 @@ class TasksPane(Widget):
         """Build flat item list for rendering (headers + entries + sub-entries)."""
         flat: list[dict] = []
         current_group = None
+        group_counts: dict[str, int] = {}
+        for entry in self._entries:
+            group_counts[entry.group] = group_counts.get(entry.group, 0) + 1
 
         for entry in self._entries:
             if entry.group != current_group:
                 current_group = entry.group
-                flat.append({"_header": current_group, "_count": sum(
-                    1 for e in self._entries if e.group == current_group)})
+                flat.append({"_header": current_group, "_count": group_counts[current_group]})
 
             flat.append({"_entry": entry})
 
