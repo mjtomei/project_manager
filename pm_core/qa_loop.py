@@ -79,6 +79,22 @@ def _get_verification_max_retries() -> int:
         return _DEFAULT_VERIFICATION_MAX_RETRIES
 
 
+def _get_verdict_reminder_timeout() -> int | None:
+    """Read qa-verdict-reminder-timeout from global settings.
+
+    Returns the number of seconds of pane-output silence after which a
+    reminder about verdict formatting is sent to the scenario agent.
+    Returns ``None`` if the setting is absent or zero (disabled).
+    """
+    from pm_core.paths import get_global_setting_value
+    val = get_global_setting_value("qa-verdict-reminder-timeout", "").strip()
+    try:
+        secs = int(val)
+        return secs if secs > 0 else None
+    except ValueError:
+        return None
+
+
 def _is_verification_enabled() -> bool:
     """Check if PASS verdict verification is enabled (default: True).
 
@@ -884,10 +900,11 @@ def _launch_scenario_0(
         scratch_dir=str(scratch_path),
     )
 
+    scenario_cwd = str(clone_path) if repo_root else workdir_path
     final_cmd = build_claude_shell_cmd(
         prompt=child_prompt,
-        model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort)
-    scenario_cwd = str(clone_path) if repo_root else workdir_path
+        model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort,
+        cwd=scenario_cwd)
 
     win_name = _scenario_window_name(pr_data, 0)
     try:
@@ -901,16 +918,11 @@ def _launch_scenario_0(
 
     _log.info("Launched Scenario 0 (interactive) in window %s", win_name)
     try:
-        from pm_core import pane_layout, pane_registry
+        from pm_core import pane_layout
         win_id = tmux_mod.pane_window_id(pane_id)
         if win_id:
-            pane_registry.register_pane(session, win_id, pane_id,
-                                        "qa-scenario-s0", final_cmd)
-            reg = pane_registry.load_registry(session)
-            wdata = pane_registry.get_window_data(reg, win_id)
-            wdata["user_modified"] = False
-            pane_registry.save_registry(session, reg)
-            pane_layout.rebalance(session, win_id)
+            pane_layout.register_and_rebalance(
+                session, win_id, [(pane_id, "qa-scenario-s0", final_cmd)])
     except Exception:
         _log.debug("Registration/rebalance failed for Scenario 0", exc_info=True)
     return scenario
@@ -963,9 +975,9 @@ def _launch_scenarios_in_tmux(
 ) -> None:
     """Launch each scenario in its own tmux window (with worktree isolation).
 
-    Concretization runs in parallel: all concretizer windows are created
-    first, then each is polled in its own thread.  The scenario agent pane
-    is split as soon as its concretizer finishes.
+    Both phases run in parallel: workdir cloning, concretizer window creation,
+    and agent launch all happen concurrently across scenarios.  The scenario
+    agent pane is split as soon as its concretizer finishes.
     """
     from pm_core import tmux as tmux_mod, prompt_gen
     from pm_core.claude_launcher import build_claude_shell_cmd
@@ -973,12 +985,14 @@ def _launch_scenarios_in_tmux(
 
     branch = pr_data.get("branch", "")
 
-    # --- Phase 1: create all concretizer windows ---
+    # --- Phase 1: clone workdirs and create concretizer windows in parallel ---
     # Each entry: (scenario, concretize_pane, scenario_cwd, clone_path, scratch_path, transcript)
     pending: list[tuple] = []
-    for scenario in state.scenarios:
+    pending_lock = threading.Lock()
+
+    def _prepare_scenario(scenario: QAScenario) -> None:
         if state.stop_requested:
-            break
+            return
 
         try:
             clone_path, scratch_path = create_scenario_workdir(
@@ -991,7 +1005,7 @@ def _launch_scenarios_in_tmux(
         except Exception:
             _log.warning("Failed to create workdir for scenario %d, skipping",
                          scenario.index)
-            continue
+            return
         scenario.worktree_path = str(clone_path)
 
         if repo_root:
@@ -1027,14 +1041,25 @@ def _launch_scenarios_in_tmux(
         if not concretize_pane:
             _log.warning("Failed to create window for scenario %d",
                          scenario.index)
-            continue
+            return
 
         # Set window_name now so the status dashboard can navigate to
         # the concretizer window during the concretization phase.
         scenario.window_name = win_name
-        pending.append((scenario, concretize_pane, scenario_cwd,
-                        clone_path, scratch_path, transcript, win_name,
-                        instruction_content))
+        with pending_lock:
+            pending.append((scenario, concretize_pane, scenario_cwd,
+                            clone_path, scratch_path, transcript, win_name,
+                            instruction_content))
+
+    prep_threads = [
+        threading.Thread(target=_prepare_scenario, args=(sc,), daemon=True,
+                         name=f"prepare-s{sc.index}")
+        for sc in state.scenarios
+    ]
+    for t in prep_threads:
+        t.start()
+    for t in prep_threads:
+        t.join()
 
     # Write status with window names so the dashboard is navigable
     # while concretizers run (before the polling loop starts).
@@ -1090,22 +1115,13 @@ def _launch_scenarios_in_tmux(
             _log.info("Launched scenario %d (%s) in window %s",
                       scenario.index, scenario.title, win_name)
             try:
-                from pm_core import pane_layout, pane_registry
+                from pm_core import pane_layout
                 win_id = tmux_mod.pane_window_id(concretize_pane)
                 if win_id:
-                    pane_registry.register_pane(
-                        session, win_id, concretize_pane,
-                        f"qa-concretize-s{scenario.index}", "concretize",
-                    )
-                    pane_registry.register_pane(
-                        session, win_id, scenario_pane,
-                        f"qa-scenario-s{scenario.index}", child_cmd,
-                    )
-                    reg = pane_registry.load_registry(session)
-                    wdata = pane_registry.get_window_data(reg, win_id)
-                    wdata["user_modified"] = False
-                    pane_registry.save_registry(session, reg)
-                    pane_layout.rebalance(session, win_id)
+                    pane_layout.register_and_rebalance(session, win_id, [
+                        (concretize_pane, f"qa-concretize-s{scenario.index}", "concretize"),
+                        (scenario_pane, f"qa-scenario-s{scenario.index}", child_cmd),
+                    ])
             except Exception:
                 _log.debug("Registration/rebalance failed for scenario %d",
                            scenario.index, exc_info=True)
@@ -1166,12 +1182,14 @@ def _launch_scenarios_in_containers(
     container_workdir = container_mod._CONTAINER_WORKDIR
     container_scratch = container_mod._CONTAINER_SCRATCH
 
-    # --- Phase 1: create all containers and concretizer windows ---
-    # Each entry: (scenario, concretize_pane, cname, transcript)
+    # --- Phase 1: clone workdirs, create containers and windows in parallel ---
+    # Each entry: (scenario, concretize_pane, win_name, cname, transcript, clone_path, instruction_content)
     pending: list[tuple] = []
-    for scenario in state.scenarios:
+    pending_lock = threading.Lock()
+
+    def _prepare_scenario(scenario: QAScenario) -> None:
         if state.stop_requested:
-            break
+            return
 
         try:
             clone_path, scratch_path = create_scenario_workdir(
@@ -1184,7 +1202,7 @@ def _launch_scenarios_in_containers(
         except Exception:
             _log.warning("Failed to create workdir for scenario %d, skipping",
                          scenario.index)
-            continue
+            return
         scenario.worktree_path = str(clone_path)
 
         # Read instruction content from source before installing
@@ -1221,7 +1239,7 @@ def _launch_scenarios_in_containers(
         except Exception:
             _log.error("Failed to create container for scenario %d — aborting scenario",
                        scenario.index, exc_info=True)
-            continue
+            return
 
         win_name = _scenario_window_name(pr_data, scenario.index)
 
@@ -1238,13 +1256,24 @@ def _launch_scenarios_in_containers(
         if not concretize_pane:
             _log.warning("Failed to create window for scenario %d",
                          scenario.index)
-            continue
+            return
 
         # Set window_name now so the status dashboard can navigate to
         # the concretizer window during the concretization phase.
         scenario.window_name = win_name
-        pending.append((scenario, concretize_pane, win_name, cname, transcript,
-                        clone_path, instruction_content))
+        with pending_lock:
+            pending.append((scenario, concretize_pane, win_name, cname, transcript,
+                            clone_path, instruction_content))
+
+    prep_threads = [
+        threading.Thread(target=_prepare_scenario, args=(sc,), daemon=True,
+                         name=f"prepare-s{sc.index}")
+        for sc in state.scenarios
+    ]
+    for t in prep_threads:
+        t.start()
+    for t in prep_threads:
+        t.join()
 
     # Write status with window names so the dashboard is navigable
     # while concretizers run (before the polling loop starts).
@@ -1303,22 +1332,13 @@ def _launch_scenarios_in_containers(
             _log.info("Launched scenario %d (%s) in container %s (window %s)",
                       scenario.index, scenario.title, cname, win_name)
             try:
-                from pm_core import pane_layout, pane_registry
+                from pm_core import pane_layout
                 win_id = tmux_mod.pane_window_id(concretize_pane)
                 if win_id:
-                    pane_registry.register_pane(
-                        session, win_id, concretize_pane,
-                        f"qa-concretize-s{scenario.index}", "concretize",
-                    )
-                    pane_registry.register_pane(
-                        session, win_id, scenario_pane,
-                        f"qa-scenario-s{scenario.index}", exec_cmd,
-                    )
-                    reg = pane_registry.load_registry(session)
-                    wdata = pane_registry.get_window_data(reg, win_id)
-                    wdata["user_modified"] = False
-                    pane_registry.save_registry(session, reg)
-                    pane_layout.rebalance(session, win_id)
+                    pane_layout.register_and_rebalance(session, win_id, [
+                        (concretize_pane, f"qa-concretize-s{scenario.index}", "concretize"),
+                        (scenario_pane, f"qa-scenario-s{scenario.index}", exec_cmd),
+                    ])
             except Exception:
                 _log.debug("Registration/rebalance failed for scenario %d",
                            scenario.index, exc_info=True)
@@ -1415,18 +1435,12 @@ def _relaunch_scenario_window(
         scenario.transcript_path = transcript
         _log.info("Relaunched scenario %d in window %s", scenario.index, win_name)
         try:
-            from pm_core import pane_layout, pane_registry
+            from pm_core import pane_layout
             win_id = tmux_mod.pane_window_id(pane_id)
             if win_id:
-                pane_registry.register_pane(
-                    session, win_id, pane_id,
-                    f"qa-scenario-s{scenario.index}", "relaunch",
-                )
-                reg = pane_registry.load_registry(session)
-                wdata = pane_registry.get_window_data(reg, win_id)
-                wdata["user_modified"] = False
-                pane_registry.save_registry(session, reg)
-                pane_layout.rebalance(session, win_id)
+                pane_layout.register_and_rebalance(
+                    session, win_id,
+                    [(pane_id, f"qa-scenario-s{scenario.index}", "relaunch")])
         except Exception:
             _log.debug("Registration/rebalance failed for relaunched scenario %d",
                        scenario.index, exc_info=True)
@@ -1491,6 +1505,12 @@ def _poll_tmux_verdicts(
     # Fingerprint of the lines before the verdict when it was last
     # accepted — used to detect stale re-detections.
     verdict_context: dict[int, str] = {}
+    # Idle-reminder state: track last seen content hash and when it changed,
+    # plus when we last sent a reminder, keyed by scenario index.
+    _reminder_timeout = _get_verdict_reminder_timeout()
+    _last_content_hash: dict[int, str] = {}
+    _last_content_change: dict[int, float] = {}
+    _last_reminder_sent: dict[int, float] = {}
 
     # Scenarios that failed to create a window get INPUT_REQUIRED immediately
     # (but skip queued scenarios — they don't have windows yet by design)
@@ -1524,6 +1544,7 @@ def _poll_tmux_verdicts(
             passed, reason, _vpane = _verify_single_scenario(
                 scenario, verdict, content, pr_data, data,
                 session=session, stop_check=_stop,
+                qa_workdir=state.qa_workdir,
             )
         except Exception:
             _log.warning("Verification thread crashed for scenario %d",
@@ -1631,7 +1652,11 @@ def _poll_tmux_verdicts(
                     # Send the scenario a follow-up message and put back in pending.
                     # Use the stored pane_id to target the original scenario
                     # pane, not the verification pane that may now be pane 0.
-                    pane_id = scenario.pane_id or _get_scenario_pane(session, scenario.window_name)
+                    pane_id = scenario.pane_id
+                    if pane_id and not tmux_mod.pane_exists(pane_id):
+                        pane_id = None
+                    if pane_id is None:
+                        pane_id = _get_scenario_pane(session, scenario.window_name)
                     if pane_id:
                         followup_msg = (
                             f"Your verdict was reviewed and flagged: {reason} — "
@@ -1719,6 +1744,34 @@ def _poll_tmux_verdicts(
             content = tmux_mod.capture_pane(
                 pane_id, full_scrollback=True,
             )
+
+            # Track content changes for idle-reminder logic.
+            # Only active after the agent pane exists (pane_id is the agent,
+            # not the concretizer) to avoid noisy reminders during setup.
+            if _reminder_timeout is not None and scenario.pane_id:
+                content_hash = str(hash(content))
+                now = time.monotonic()
+                if _last_content_hash.get(scenario.index) != content_hash:
+                    _last_content_hash[scenario.index] = content_hash
+                    _last_content_change[scenario.index] = now
+                else:
+                    idle_secs = now - _last_content_change.get(scenario.index, now)
+                    last_reminded = _last_reminder_sent.get(scenario.index, 0.0)
+                    if (idle_secs >= _reminder_timeout
+                            and now - last_reminded >= _reminder_timeout):
+                        reminder = (
+                            "Reminder: your verdict must appear alone on its own "
+                            "line — the line must contain only PASS, NEEDS_WORK, "
+                            "or INPUT_REQUIRED with no other text. Please output "
+                            "your verdict now if you have reached a conclusion."
+                        )
+                        tmux_mod.send_keys(pane_id, reminder)
+                        _last_reminder_sent[scenario.index] = now
+                        _log.info(
+                            "Sent verdict-format reminder to scenario %d "
+                            "(idle %.0fs)", scenario.index, idle_secs,
+                        )
+
             verdict = extract_verdict_from_content(
                 content,
                 verdicts=ALL_VERDICTS,
@@ -1924,6 +1977,7 @@ def _verify_single_scenario(
     project_data: dict | None = None,
     session: str | None = None,
     stop_check: Callable[[], bool] | None = None,
+    qa_workdir: str | None = None,
 ) -> tuple[bool, str, str | None]:
     """Verify a single scenario's verdict in a visible tmux pane.
 
@@ -1991,6 +2045,8 @@ def _verify_single_scenario(
         _verify_cwd = str(Path(scenario.transcript_path).parent)
     elif scenario.worktree_path:
         _verify_cwd = str(Path(scenario.worktree_path).parent.parent)  # s-N/repo -> qa_workdir
+    elif qa_workdir:
+        _verify_cwd = qa_workdir
     verify_cmd = build_claude_shell_cmd(
         prompt=prompt,
         model=resolution.model,
@@ -2020,24 +2076,14 @@ def _verify_single_scenario(
               "(split from scenario_pane=%s)",
               verify_pane, scenario.index, scenario_pane)
 
-    # Register the pane and rebalance using the same pattern as the
-    # review window: register panes, reset user_modified, then rebalance.
     win_id = None
     try:
         win_id = tmux_mod.pane_window_id(scenario_pane)
         if win_id:
             tmux_mod.set_shared_window_size(session, win_id)
-            pane_registry.register_pane(
-                session, win_id, verify_pane,
-                f"qa-verify-s{scenario.index}", verify_cmd,
-            )
-            # Reset user_modified so rebalance works correctly (the
-            # after-split-window hook sets it before panes are registered).
-            reg = pane_registry.load_registry(session)
-            wdata = pane_registry.get_window_data(reg, win_id)
-            wdata["user_modified"] = False
-            pane_registry.save_registry(session, reg)
-            pane_layout.rebalance(session, win_id)
+            pane_layout.register_and_rebalance(
+                session, win_id,
+                [(verify_pane, f"qa-verify-s{scenario.index}", verify_cmd)])
     except Exception:
         _log.debug("Verification: registration/rebalance failed for "
                    "scenario %d, continuing with polling",
@@ -2200,7 +2246,8 @@ def run_qa_sync(
         )
         cmd = build_claude_shell_cmd(
             prompt=planner_prompt,
-            model=_qa_planning_resolution.model, provider=_qa_planning_resolution.provider, effort=_qa_planning_resolution.effort)
+            model=_qa_planning_resolution.model, provider=_qa_planning_resolution.provider, effort=_qa_planning_resolution.effort,
+            cwd=workdir_path)
 
         # If the main QA window already exists, remember which sessions
         # were watching it so we can switch them to the replacement window
@@ -2443,19 +2490,12 @@ def run_qa_sync(
             )
 
             # Register both panes and rebalance the main window only
-            qa_win = tmux_mod.find_window_by_name(session, window_name)
-            if qa_win:
-                qa_win_id = tmux_mod.pane_window_id(planner_pane)
-                if qa_win_id:
-                    pane_registry.register_pane(
-                        session, qa_win_id, planner_pane,
-                        "qa-planner", "planner",
-                    )
-                    pane_registry.register_pane(
-                        session, qa_win_id, status_pane,
-                        "qa-status", status_cmd,
-                    )
-                    pane_layout.rebalance(session, qa_win_id)
+            qa_win_id = tmux_mod.pane_window_id(planner_pane)
+            if qa_win_id:
+                pane_layout.register_and_rebalance(session, qa_win_id, [
+                    (planner_pane, "qa-planner", "planner"),
+                    (status_pane, "qa-status", status_cmd),
+                ])
         except Exception:
             _log.exception("Failed to create status pane")
 

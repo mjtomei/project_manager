@@ -233,7 +233,8 @@ def which_cmd():
 
 _BOOLEAN_SETTINGS = {"hide-assist", "hide-merged", "beginner-mode", "auto-cleanup",
                      "qa-verify-pass"}
-_INT_SETTINGS = {"min-pane-width", "qa-max-scenarios", "qa-verify-retries"}
+_INT_SETTINGS = {"min-pane-width", "qa-max-scenarios", "qa-verify-retries",
+                 "qa-verdict-reminder-timeout"}
 _ENUM_SETTINGS = {"spec-mode": {"auto", "review", "prompt"}}
 _SETTING_DEFAULTS = {
     "hide-assist": "off",
@@ -244,6 +245,7 @@ _SETTING_DEFAULTS = {
     "min-pane-width": "100",
     "qa-max-scenarios": "(unset)",
     "qa-verify-retries": "(unset)",
+    "qa-verdict-reminder-timeout": "(unset)",
     "spec-mode": "prompt",
 }
 _LIST_ALIASES = {"list", "ls", "l"}
@@ -289,6 +291,9 @@ def set_cmd(setting, value):
       qa-max-scenarios     Max QA scenarios to run (0 = unlimited, default 0)
 
       qa-verify-retries    Max verification retries before marking NEEDS_WORK (default 3)
+
+      qa-verdict-reminder-timeout  Seconds of pane silence before sending a verdict-format
+                                   reminder to a scenario agent (0 or unset = disabled)
 
       qa-verify-pass       Enable/disable PASS verdict verification (on/off, default on)
 

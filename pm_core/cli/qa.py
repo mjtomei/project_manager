@@ -407,7 +407,7 @@ def qa_standalone(instruction_id: str):
     click.echo(f"Running standalone QA: {item['title']}")
     click.echo(f"  Workdir: {workdir}")
 
-    cmd = build_claude_shell_cmd(prompt=prompt)
+    cmd = build_claude_shell_cmd(prompt=prompt, cwd=workdir)
     # Launch as tmux window if in a session, otherwise blocking
     session = tmux_mod.get_session_name() if tmux_mod.in_tmux() else None
     if session:

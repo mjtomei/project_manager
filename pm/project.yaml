@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-88fdba1
+  active_pr: pr-0b827df
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -4557,13 +4557,13 @@ prs:
     - Matches windows to PRs via naming convention (e.g. review-#128, qa-#124-s71)
 
     - Reuses existing tmux session resolution logic (current_or_base_session)'
-  agent_machine: spark-424d
+  agent_machine: arch-home
   gh_pr: https://github.com/mjtomei/project_manager/pull/137
   gh_pr_number: 137
   created_at: '2026-03-08T21:45:42.636585+00:00'
-  updated_at: '2026-03-21T14:25:56.564858+00:00'
+  updated_at: '2026-03-22T18:45:01.222304+00:00'
   started_at: '2026-03-10T21:38:57.198809+00:00'
-  reviewed_at: '2026-03-21T14:25:56.564858+00:00'
+  reviewed_at: '2026-03-22T18:45:01.222304+00:00'
   merged_at: null
   notes:
   - id: note-834855f
@@ -4587,7 +4587,12 @@ prs:
       PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-0b827df-bbcfc8c8564443e6)'
     created_at: '2026-03-21T15:26:22Z'
     last_edited: '2026-03-21T15:26:22Z'
+  - id: note-3749948
+    text: 'QA ERROR:  (workdir: /home/mjtomei/.pm/workdirs/qa/pr-0b827df-7714a0bc4691fb5e)'
+    created_at: '2026-03-22T18:20:31Z'
+    last_edited: '2026-03-22T18:20:31Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b827df-add-running-tasks-pane-to-tui-with-w-cbe54f5e
+  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-0b827df/qa.md
 - id: pr-341100c
   plan: tui-ux
   title: Add per-plan standalone PM sessions within the same project
@@ -6950,7 +6955,7 @@ prs:
   title: Fix shared push proxy using first-scenario workdir for all push and fetch
     operations
   branch: pm/pr-88fdba1-fix-shared-push-proxy-using-first-scenario-workdir
-  status: qa
+  status: merged
   depends_on: []
   description: 'When QA scenarios share a push proxy (introduced in PR #135), the
     proxy is initialised with the workdir of the first scenario that starts it. All
@@ -6990,12 +6995,42 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/149
   gh_pr_number: 149
   created_at: '2026-03-21T15:12:22.647477+00:00'
-  updated_at: '2026-03-21T19:40:38.345504+00:00'
+  updated_at: '2026-03-22T01:16:24.006832+00:00'
   started_at: '2026-03-21T15:12:32.453944+00:00'
   reviewed_at: '2026-03-21T19:40:38.345504+00:00'
-  merged_at: null
-  notes: []
+  merged_at: '2026-03-22T01:16:24.006832+00:00'
+  notes:
+  - id: note-b291388
+    text: 'QA NEEDS_WORK: Full unit test suite — existing and new tests all pass:
+      PASS; Integration — push from second scenario''s clone reaches the target repo:
+      PASS; Integration — fetch/pull lands in the requesting scenario''s clone: NEEDS_WORK;
+      _build_git_setup_script produces valid shell and correct JSON with special-char
+      paths: PASS; Backward compatibility — legacy push request without "workdir"
+      field uses self.workdir: NEEDS_WORK; HEAD resolution uses caller''s clone for
+      implicit-branch pushes: PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-88fdba1-de29a757585710fc)'
+    created_at: '2026-03-21T20:30:41Z'
+    last_edited: '2026-03-21T20:30:41Z'
+  - id: note-157591f
+    text: 'QA NEEDS_WORK: Full unit test suite — all existing and new tests: PASS;
+      Integration — push from second scenario''s clone: PASS; Integration — fetch/pull
+      lands in requesting: NEEDS_WORK; Backward compatibility — legacy push/fetch
+      request: NEEDS_WORK; _build_git_setup_script — special-char path produces: PASS;
+      HOST_WORKDIR absent from wrapper when host_workdir: PASS; HEAD resolved from
+      caller''s clone for: PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-88fdba1-1d7fcc38c605a2c2)'
+    created_at: '2026-03-22T00:35:06Z'
+    last_edited: '2026-03-22T00:35:06Z'
+  - id: note-b9d2950
+    text: 'QA PASS: Full unit test suite — all existing and new tests: PASS; Integration
+      — fetch/pull lands in the requesting: PASS; Backward compatibility — legacy
+      push request without: PASS; Backward compatibility — legacy fetch/pull request:
+      PASS; _build_git_setup_script with special-character path: PASS; HOST_WORKDIR
+      absent from wrapper when host_workdir: PASS; HEAD resolution uses caller''s
+      clone for: PASS; Integration — push from second scenario''s clone: PASS (workdir:
+      /home/mjtomei/.pm/workdirs/qa/pr-88fdba1-191081034d1f856f)'
+    created_at: '2026-03-22T01:15:43Z'
+    last_edited: '2026-03-22T01:15:43Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-88fdba1-fix-shared-push-proxy-using-first-sc-d0f78a09
+  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-88fdba1/qa.md
 - id: pr-291e891
   plan: improvements
   title: 'Track action source metadata for TUI operations: session, window, and task

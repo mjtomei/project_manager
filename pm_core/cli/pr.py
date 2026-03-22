@@ -449,7 +449,9 @@ def pr_cd(identifier: str):
 
 @pr.command("list")
 @click.option("--workdirs", is_flag=True, default=False, help="Show workdir paths and their git status")
-def pr_list(workdirs: bool):
+@click.option("-t", "sort_by_time", is_flag=True, default=False, help="Sort by updated_at timestamp (most recent first)")
+@click.option("--timestamps", is_flag=True, default=False, help="Show updated_at timestamp for each PR")
+def pr_list(workdirs: bool, sort_by_time: bool, timestamps: bool):
     """List all PRs with status."""
     root = state_root()
     data = store.load(root)
@@ -459,8 +461,12 @@ def pr_list(workdirs: bool):
         click.echo("No PRs.")
         return
 
-    # Sort newest first (by gh_pr_number descending, then pr id descending)
-    prs = sorted(prs, key=lambda p: (p.get("gh_pr_number") or _pr_id_sort_key(p["id"])[0], _pr_id_sort_key(p["id"])[1]), reverse=True)
+    if sort_by_time:
+        timestamps = True
+        prs = sorted(prs, key=lambda p: p.get("updated_at") or p.get("created_at") or "", reverse=True)
+    else:
+        # Sort newest first (by gh_pr_number descending, then pr id descending)
+        prs = sorted(prs, key=lambda p: (p.get("gh_pr_number") or _pr_id_sort_key(p["id"])[0], _pr_id_sort_key(p["id"])[1]), reverse=True)
 
     active_pr = data.get("project", {}).get("active_pr")
     status_icons = {
@@ -479,7 +485,16 @@ def pr_list(workdirs: bool):
         machine = p.get("agent_machine")
         machine_str = f" ({machine})" if machine else ""
         active_str = " *" if p["id"] == active_pr else ""
-        click.echo(f"  {icon} {_pr_display_id(p)}: {p.get('title', '???')} [{p.get('status', '?')}]{dep_str}{machine_str}{active_str}")
+        ts_str = ""
+        if timestamps:
+            ts = p.get("updated_at") or p.get("created_at") or ""
+            if ts:
+                try:
+                    dt = datetime.fromisoformat(ts).astimezone()
+                    ts_str = f" [{dt.strftime('%Y-%m-%d %H:%M')}]"
+                except ValueError:
+                    ts_str = f" [{ts}]"
+        click.echo(f"  {icon} {_pr_display_id(p)}: {p.get('title', '???')} [{p.get('status', '?')}]{dep_str}{machine_str}{active_str}{ts_str}")
         if workdirs:
             wd = p.get("workdir")
             if wd and Path(wd).exists():
@@ -1023,19 +1038,10 @@ def _add_companion_pane(pm_session: str, window_info: dict, workdir: str,
 
     # Register panes for layout management
     tmux_mod.set_shared_window_size(pm_session, win_id)
-    pane_registry.register_pane(pm_session, win_id, claude_pane,
-                                f"{role_prefix}-claude", "claude")
+    panes = [(claude_pane, f"{role_prefix}-claude", "claude")]
     if companion_pane:
-        pane_registry.register_pane(pm_session, win_id, companion_pane,
-                                    f"{role_prefix}-companion", "companion-shell")
-
-    # Reset user_modified so rebalance works correctly
-    reg = pane_registry.load_registry(pm_session)
-    wdata = pane_registry.get_window_data(reg, win_id)
-    wdata["user_modified"] = False
-    pane_registry.save_registry(pm_session, reg)
-
-    pane_layout.rebalance(pm_session, win_id)
+        panes.append((companion_pane, f"{role_prefix}-companion", "companion-shell"))
+    pane_layout.register_and_rebalance(pm_session, win_id, panes)
     click.echo("Added companion pane.")
 
 
@@ -1192,20 +1198,19 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         review_win_id = wid_result.stdout.strip()
         if review_win_id:
             tmux_mod.set_shared_window_size(pm_session, review_win_id)
-            pane_registry.register_pane(pm_session, review_win_id, claude_pane, "review-claude", claude_cmd)
+            panes = [(claude_pane, "review-claude", claude_cmd)]
             if diff_pane:
-                pane_registry.register_pane(pm_session, review_win_id, diff_pane, "review-diff", "diff-shell")
-
-        # Reset user_modified so the registry is clean before rebalance.
-        # This mirrors the same pattern used in pane_ops.launch_pane()
-        # and pane_layout._respawn_tui() — any code path that creates
-        # panes must reset user_modified (the after-split-window hook
-        # sets it before panes are registered) and then rebalance.
-        if review_win_id:
-            reg = pane_registry.load_registry(pm_session)
-            wdata = pane_registry.get_window_data(reg, review_win_id)
+                panes.append((diff_pane, "review-diff", "diff-shell"))
+            # Register and reset user_modified, but defer rebalance until
+            # after session switches so get_reliable_window_size() sees the
+            # correct dimensions.
+            from pm_core import pane_registry as _reg
+            for pane_id, role, cmd in panes:
+                _reg.register_pane(pm_session, review_win_id, pane_id, role, cmd)
+            reg = _reg.load_registry(pm_session)
+            wdata = _reg.get_window_data(reg, review_win_id)
             wdata["user_modified"] = False
-            pane_registry.save_registry(pm_session, reg)
+            _reg.save_registry(pm_session, reg)
 
         # Switch ALL grouped sessions that were watching the old review
         # window to the new one.
