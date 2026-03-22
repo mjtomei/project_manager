@@ -254,6 +254,9 @@ def extract_verdict_from_content(
 
     for idx in range(len(tail) - 1, -1, -1):
         stripped = tail[idx].strip().strip("*").strip()
+        # Strip leading non-alphanumeric characters (e.g. '●' bullet that
+        # Claude Code prefixes to output lines) so "● PASS" matches "PASS".
+        stripped = re.sub(r'^[^\w]+', '', stripped).strip()
         verdict = match_verdict(stripped, verdicts)
 
         if verdict:
