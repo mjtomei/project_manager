@@ -1132,7 +1132,13 @@ class ProjectManagerApp(App):
         """Toggle between tasks view and tech tree view."""
         _log.info("action: toggle_tasks visible=%s", self._tasks_visible)
         if self._tasks_visible:
-            self._show_normal_view()
+            # When toggling off during setup, restore guide view
+            prs = self._data.get("prs") or []
+            if not prs:
+                state, _ = guide.detect_state(self._root)
+                self._show_guide_view(state)
+            else:
+                self._show_normal_view()
         else:
             self._show_tasks_view()
 
