@@ -82,7 +82,6 @@ class TaskEntry:
         self.main_window = main_window
         self.window_index = window_index
         self.sub_windows: list[tuple[str, str, str]] = []  # (name, index, sub_id)
-        self.has_main_window: bool = False  # True if a "main"-role window exists
         self.expanded = False
         # PR data (populated by refresh)
         self.pr_title: str = ""
@@ -164,8 +163,6 @@ class TasksPane(Widget):
                     entry.pr_title = pr.get("title", "")
                     entry.pr_id = pr.get("id", "")
                     entry.pr_status = pr.get("status", "")
-                if role == "main":
-                    entry.has_main_window = True
                 tasks_by_key[key] = entry
             else:
                 entry = tasks_by_key[key]
@@ -174,11 +171,9 @@ class TasksPane(Widget):
                 entry.sub_windows.append((name, win["index"], sub_id or ""))
                 # Sort sub-windows by sub_id
                 entry.sub_windows.sort(key=lambda x: int(x[2]) if x[2].isdigit() else 0)
-            elif role == "main":
-                entry.has_main_window = True
-                if entry.main_window != name:
-                    # Multiple main windows for same group/PR — treat extras as sub
-                    entry.sub_windows.append((name, win["index"], ""))
+            elif role == "main" and entry.main_window != name:
+                # Multiple main windows for same group/PR — treat extras as sub
+                entry.sub_windows.append((name, win["index"], ""))
 
         # Populate loop markers
         for key, entry in tasks_by_key.items():
@@ -209,12 +204,11 @@ class TasksPane(Widget):
                             entry.review_loop_marker = "INPUT_REQ"
                         break
 
-        # Sort and flatten; exclude entries created only from sub-windows (orphans)
-        self._entries = sorted(
-            (e for e in tasks_by_key.values() if e.has_main_window),
-            key=lambda e: (GROUP_ORDER.index(e.group)
-                           if e.group in GROUP_ORDER else 99,
-                           e.pr_display_id))
+        # Sort and flatten
+        self._entries = sorted(tasks_by_key.values(),
+                               key=lambda e: (GROUP_ORDER.index(e.group)
+                                              if e.group in GROUP_ORDER else 99,
+                                              e.pr_display_id))
         self._build_flat_items()
 
         # Clamp selection
@@ -410,11 +404,7 @@ class TasksPane(Widget):
     def get_content_height(self, container, viewport, width) -> int:
         """Return the total content height so Textual can size the widget correctly."""
         if not self._flat_items:
-            # "No running tasks." + blank + instruction (may wrap) + blank + hint
-            content_width = (width - 4) if width > 8 else 60
-            instruction = "  Start a PR with s or launch a review with d."
-            instr_lines = max(1, (len(instruction) + content_width - 1) // content_width) if content_width > 0 else 1
-            return 4 + instr_lines
+            return 5  # "No running tasks." + blank + instruction + blank + footer
         # Sum all entry lines plus 2 for the footer (blank + footer text)
         return sum(self._entry_lines(item) for item in self._flat_items) + 2
 
@@ -422,29 +412,15 @@ class TasksPane(Widget):
         if not self._flat_items or not self.parent:
             return
         container = self.parent
-        # y_top is in content coordinates; add widget's top padding to convert to
-        # container scroll coordinates (where y=0 is the top of the widget including padding)
-        padding_top = self.styles.padding.top
-        y_top = sum(self._entry_lines(t) for t in self._flat_items[:self.selected_index]) + padding_top
+        y_top = sum(self._entry_lines(t) for t in self._flat_items[:self.selected_index])
         h = self._entry_lines(self._flat_items[self.selected_index])
         viewport_h = container.size.height
         scroll_y = round(container.scroll_y)
         y_bottom = y_top + h
-        # Include footer height (blank + footer text = 2 lines) so the footer
-        # stays visible when scrolling to the last item
-        footer_h = 2
-        y_bottom_padded = y_bottom + footer_h
-        # When the selected item is the first in its group, include the group
-        # header in the effective top so scrolling up reveals the header too
-        effective_y_top = y_top
-        if self.selected_index > 0:
-            prev_item = self._flat_items[self.selected_index - 1]
-            if "_header" in prev_item:
-                effective_y_top = y_top - self._entry_lines(prev_item)
-        if y_bottom_padded > scroll_y + viewport_h:
-            new_y = min(effective_y_top, y_bottom_padded - viewport_h)
-        elif effective_y_top < scroll_y:
-            new_y = effective_y_top
+        if y_bottom > scroll_y + viewport_h:
+            new_y = min(y_top, y_bottom - viewport_h)
+        elif y_top < scroll_y:
+            new_y = y_top
         else:
             return
         container.scroll_to(y=new_y, animate=False, force=True)

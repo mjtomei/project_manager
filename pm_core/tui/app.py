@@ -262,7 +262,7 @@ class ProjectManagerApp(App):
             if self._qa_visible and action != "toggle_plans":
                 _log.debug("check_action: blocked %s (in QA view)", action)
                 return False
-            # In tasks view, only allow actions that work with the tasks pane
+            # In tasks view, only allow actions that work with the tasks pane.
             # View-switching actions (toggle_plans, toggle_qa) are also allowed
             # so the user can navigate away without going through normal view first.
             if self._tasks_visible:
@@ -283,8 +283,6 @@ class ProjectManagerApp(App):
         self._qa_visible = False
         self._tasks_visible = False
         self._pre_mobile_view: str | None = None  # view before mobile mode switch
-        self._tmux_window_id: str | None = None  # tmux window id for mobile check
-        self._view_initialized = False  # True after on_mount/_load_state completes
         self._tasks_poll_timer = None
         # Frame capture state (always enabled)
         self._frame_rate: int = DEFAULT_FRAME_RATE
@@ -374,18 +372,14 @@ class ProjectManagerApp(App):
 
     def on_mount(self) -> None:
         _log.info("TUI mounted (cwd=%s)", Path.cwd())
-        # Get session name and window ID for frame capture and mobile detection
+        # Get session name for frame capture file naming
         if tmux_mod.in_tmux():
             try:
                 result = _run_shell(
-                    tmux_mod._tmux_cmd("display-message", "-p",
-                                       "#{session_name}\t#{window_id}"),
+                    tmux_mod._tmux_cmd("display-message", "-p", "#{session_name}"),
                     capture_output=True, text=True, timeout=5
                 )
-                parts = result.stdout.strip().split("\t")
-                self._session_name = parts[0].split("~")[0]
-                if len(parts) > 1:
-                    self._tmux_window_id = parts[1]
+                self._session_name = result.stdout.strip().split("~")[0]
             except Exception:
                 pass
         # Load any existing capture config
@@ -396,15 +390,7 @@ class ProjectManagerApp(App):
         # Load state and render immediately so the TUI shows content fast.
         # Defer heavier operations (heal_registry, tmux bindings, GitHub
         # sync) to after the first frame.
-        # Reset _tasks_visible before loading state: pre-mount resize events
-        # (e.g. from tmux zoom_pane) can fire on_resize before on_mount and
-        # incorrectly set _tasks_visible=True before the initial view is decided.
-        self._tasks_visible = False
-        self._plans_visible = False
-        self._qa_visible = False
-        self._pre_mobile_view = None
         self._load_state()
-        self._view_initialized = True
         self._update_orientation()
         self._check_mobile_transition()
         # Background sync interval: 5 minutes for automatic PR sync
@@ -1201,9 +1187,7 @@ class ProjectManagerApp(App):
             self.log_message("No tmux session found")
             return
         window_name = message.window_name
-        window = tmux_mod.find_window_by_name(session, window_name)
-        if window:
-            tmux_mod.select_window(session, window["id"])
+        if tmux_mod.select_window(session, window_name):
             self.log_message(f"Switched to '{window_name}'")
         else:
             self.log_message(f"Window '{window_name}' not found")
@@ -1214,36 +1198,14 @@ class ProjectManagerApp(App):
         # Defer recompute so container sizes have settled after the resize
         self.set_timer(0.1, self._recompute_tree_layout)
         # Mobile mode transition: auto-switch to tasks pane.
-        # _check_mobile_transition queries the tmux window width directly, so
-        # no need to pass event.size.width (which is the pane width, not the
-        # full window width).
-        self._check_mobile_transition()
+        # Use event.size directly — self.size isn't updated until App._on_resize
+        # runs (which fires after this user handler in the MRO dispatch order).
+        self._check_mobile_transition(event.size.width)
 
     def _check_mobile_transition(self, width: int | None = None) -> None:
-        """Auto-switch to tasks pane in mobile mode, restore on exit.
-
-        Uses the tmux window width (not the Textual pane width) so that the
-        threshold correctly reflects the full terminal size even when the TUI
-        pane is a fraction of the window (e.g. split side-by-side with notes).
-        """
-        if not self._view_initialized:
-            return
-        from pm_core.pane_layout import MOBILE_WIDTH_THRESHOLD, get_reliable_window_size
-        # Prefer the tmux window width so split-pane layouts don't
-        # permanently lock the TUI into mobile mode.
-        if self._session_name and self._tmux_window_id:
-            try:
-                tmux_w, _ = get_reliable_window_size(
-                    self._session_name, self._tmux_window_id
-                )
-                if tmux_w > 0:
-                    w = tmux_w
-                else:
-                    w = width if width is not None else self.size.width
-            except Exception:
-                w = width if width is not None else self.size.width
-        else:
-            w = width if width is not None else self.size.width
+        """Auto-switch to tasks pane in mobile mode, restore on exit."""
+        from pm_core.pane_layout import MOBILE_WIDTH_THRESHOLD
+        w = width if width is not None else self.size.width
         is_mobile = 0 < w < MOBILE_WIDTH_THRESHOLD
 
         if is_mobile and not self._tasks_visible and self._pre_mobile_view is None:
@@ -1251,16 +1213,14 @@ class ProjectManagerApp(App):
             # Skip auto-switch when in guide mode: guide view is for new users
             # doing setup, tasks pane is empty and unhelpful during that flow.
             if self._current_guide_step is not None:
-                pass
-            elif self._plans_visible:
+                return
+            if self._plans_visible:
                 self._pre_mobile_view = "plans"
-                self._show_tasks_view()
             elif self._qa_visible:
                 self._pre_mobile_view = "qa"
-                self._show_tasks_view()
             else:
                 self._pre_mobile_view = "normal"
-                self._show_tasks_view()
+            self._show_tasks_view()
         elif not is_mobile and self._pre_mobile_view is not None:
             # Leaving mobile mode — restore previous view
             prev = self._pre_mobile_view
@@ -1269,9 +1229,6 @@ class ProjectManagerApp(App):
                 self._show_plans_view()
             elif prev == "qa":
                 self._show_qa_view()
-            elif prev == "guide":
-                state, _ = guide.detect_state(self._root)
-                self._show_guide_view(state)
             else:
                 self._show_normal_view()
 
