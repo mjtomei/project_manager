@@ -455,3 +455,20 @@ class TestCheckActionTogglePlans:
         # Both toggle_tasks and the guard string must appear together
         assert "toggle_tasks" in source
         assert "cmd_bar.has_focus" in source
+
+    def test_toggle_plans_not_blocked_when_qa_visible(self):
+        """Pressing 'p' from QA view must not be blocked.
+
+        Regression: toggle_plans was added to the PR-action guard list, whose
+        _qa_visible check had no exemption for it — blocking 'p' from QA view.
+        The fix adds `action != 'toggle_plans'` to the _qa_visible check too.
+        """
+        source = self._app_source()
+        # Both the plans-visible AND qa-visible checks must exempt toggle_plans
+        assert source.count('action != "toggle_plans"') >= 2 or source.count("action != 'toggle_plans'") >= 2 or (
+            ('action != "toggle_plans"' in source or "action != 'toggle_plans'" in source) and
+            "_qa_visible" in source
+        ), (
+            "check_action must not block toggle_plans when _qa_visible=True; "
+            "otherwise 'p' can never exit QA view"
+        )

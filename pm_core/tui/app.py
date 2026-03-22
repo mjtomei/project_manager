@@ -259,7 +259,7 @@ class ProjectManagerApp(App):
             if self._plans_visible and action != "toggle_plans":
                 _log.debug("check_action: blocked %s (in plans view)", action)
                 return False
-            if self._qa_visible:
+            if self._qa_visible and action != "toggle_plans":
                 _log.debug("check_action: blocked %s (in QA view)", action)
                 return False
             # In tasks view, only allow actions that work with the tasks pane
