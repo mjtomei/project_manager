@@ -283,6 +283,7 @@ class ProjectManagerApp(App):
         self._qa_visible = False
         self._tasks_visible = False
         self._pre_mobile_view: str | None = None  # view before mobile mode switch
+        self._tmux_window_id: str | None = None  # tmux window id for mobile check
         self._tasks_poll_timer = None
         # Frame capture state (always enabled)
         self._frame_rate: int = DEFAULT_FRAME_RATE
@@ -372,14 +373,18 @@ class ProjectManagerApp(App):
 
     def on_mount(self) -> None:
         _log.info("TUI mounted (cwd=%s)", Path.cwd())
-        # Get session name for frame capture file naming
+        # Get session name and window ID for frame capture and mobile detection
         if tmux_mod.in_tmux():
             try:
                 result = _run_shell(
-                    tmux_mod._tmux_cmd("display-message", "-p", "#{session_name}"),
+                    tmux_mod._tmux_cmd("display-message", "-p",
+                                       "#{session_name}\t#{window_id}"),
                     capture_output=True, text=True, timeout=5
                 )
-                self._session_name = result.stdout.strip().split("~")[0]
+                parts = result.stdout.strip().split("\t")
+                self._session_name = parts[0].split("~")[0]
+                if len(parts) > 1:
+                    self._tmux_window_id = parts[1]
             except Exception:
                 pass
         # Load any existing capture config
@@ -1200,14 +1205,34 @@ class ProjectManagerApp(App):
         # Defer recompute so container sizes have settled after the resize
         self.set_timer(0.1, self._recompute_tree_layout)
         # Mobile mode transition: auto-switch to tasks pane.
-        # Use event.size directly — self.size isn't updated until App._on_resize
-        # runs (which fires after this user handler in the MRO dispatch order).
-        self._check_mobile_transition(event.size.width)
+        # _check_mobile_transition queries the tmux window width directly, so
+        # no need to pass event.size.width (which is the pane width, not the
+        # full window width).
+        self._check_mobile_transition()
 
     def _check_mobile_transition(self, width: int | None = None) -> None:
-        """Auto-switch to tasks pane in mobile mode, restore on exit."""
-        from pm_core.pane_layout import MOBILE_WIDTH_THRESHOLD
-        w = width if width is not None else self.size.width
+        """Auto-switch to tasks pane in mobile mode, restore on exit.
+
+        Uses the tmux window width (not the Textual pane width) so that the
+        threshold correctly reflects the full terminal size even when the TUI
+        pane is a fraction of the window (e.g. split side-by-side with notes).
+        """
+        from pm_core.pane_layout import MOBILE_WIDTH_THRESHOLD, get_reliable_window_size
+        # Prefer the tmux window width so split-pane layouts don't
+        # permanently lock the TUI into mobile mode.
+        if self._session_name and self._tmux_window_id:
+            try:
+                tmux_w, _ = get_reliable_window_size(
+                    self._session_name, self._tmux_window_id
+                )
+                if tmux_w > 0:
+                    w = tmux_w
+                else:
+                    w = width if width is not None else self.size.width
+            except Exception:
+                w = width if width is not None else self.size.width
+        else:
+            w = width if width is not None else self.size.width
         is_mobile = 0 < w < MOBILE_WIDTH_THRESHOLD
 
         if is_mobile and not self._tasks_visible and self._pre_mobile_view is None:

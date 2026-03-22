@@ -94,15 +94,21 @@ def _register_tmux_bindings(session_name: str) -> None:
             check=False)
     # Auto-rebalance when window resizes (triggered by clients connecting/
     # disconnecting with window-size=smallest, or moving terminal to a different monitor).
-    # Uses "window-resized" (fires on any window size change) not
-    # "after-resize-window" (only fires after the resize-window command).
+    # Prefer "window-resized" (tmux 3.3+, fires on any window size change including
+    # client connect/disconnect) over "after-resize-window" (tmux 3.0+, only fires
+    # after an explicit resize-window command).
     # Note: window-resized is a window hook, so use -gw not -g.
-    subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gw", "window-resized",
-             "run-shell 'pm _window-resized \"#{session_name}\" \"#{window_id}\"'"),
-            check=False)
-    # Clean up stale hook from earlier versions that used the wrong name
-    subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gu", "after-resize-window"),
-            check=False)
+    _hook_cmd = "run-shell 'pm _window-resized \"#{session_name}\" \"#{window_id}\"'"
+    result = subprocess.run(
+        tmux_mod._tmux_cmd("set-hook", "-gw", "window-resized", _hook_cmd),
+        check=False, capture_output=True,
+    )
+    if result.returncode != 0:
+        # Fallback for tmux < 3.3 which lacks window-resized
+        subprocess.run(
+            tmux_mod._tmux_cmd("set-hook", "-gw", "after-resize-window", _hook_cmd),
+            check=False, capture_output=True,
+        )
 
 
 def _schedule_rebalance(session_name: str) -> None:
@@ -389,13 +395,17 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
         _log.info("guide will not auto-launch, creating notes pane")
         notes.ensure_notes_file(root)
         notes_pane = tmux_mod.split_pane(session_name, "h", _wrap(f"pm notes {notes_path}"))
-        pane_registry.register_pane(session_name, window_id, notes_pane, "notes", "pm notes")
         _log.info("created notes_pane=%s", notes_pane)
+        # Use register_and_rebalance so the user_modified flag set by the
+        # after-split-window hook (which fires before the pane is in the
+        # registry) is cleared before rebalancing.
+        pane_layout.register_and_rebalance(
+            session_name, window_id, [(notes_pane, "notes", "pm notes")]
+        )
     else:
         _log.info("guide will auto-launch, skipping notes pane")
-
-    # Apply initial balanced layout
-    pane_layout.rebalance(session_name, window_id)
+        # Apply initial balanced layout (only TUI pane, no split hook issue)
+        pane_layout.rebalance(session_name, window_id)
     _log.info("rebalanced layout, attaching to session")
 
     # If mobile mode, start zoomed into TUI
