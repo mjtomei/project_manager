@@ -723,6 +723,37 @@ class TestBuildGitSetupScript:
         # newline following the WRAPEOF marker)
         assert "\n#!/bin/sh\n" in script
 
+    def test_host_workdir_baked_into_wrapper(self):
+        """host_workdir is baked as HOST_WORKDIR and included in request JSON."""
+        script = _build_git_setup_script(has_push_proxy=True,
+                                         host_workdir="/home/user/repo")
+        assert 'HOST_WORKDIR="/home/user/repo"' in script
+        assert '"workdir"' in script
+
+    def test_host_workdir_produces_valid_json_in_request(self):
+        """The request= line must assemble valid JSON — no stray quote after args_json.
+
+        The shell fragment looks like:
+            request='{"cmd": "'$escaped_cmd'", "args": '$args_json', "workdir": "...'
+        After $args_json (an array like ["origin"]), the next shell literal must
+        start with ', "workdir"' NOT '", "workdir"' — the latter would produce
+        ["origin"]", "workdir" which is invalid JSON.
+        """
+        script = _build_git_setup_script(has_push_proxy=True,
+                                         host_workdir="/some/clone")
+        # Bad pattern: stray " after $args_json (produces invalid JSON)
+        bad = "$args_json'\", \"workdir\""
+        # Good pattern: no stray " (produces valid JSON)
+        good = "$args_json', \"workdir\""
+        assert bad not in script, "Stray '\"' after $args_json produces invalid JSON"
+        assert good in script, "Expected '$args_json', \"workdir\"' pattern"
+
+    def test_no_host_workdir_omits_workdir_field(self):
+        """Without host_workdir, no HOST_WORKDIR or workdir field in request."""
+        script = _build_git_setup_script(has_push_proxy=True)
+        assert "HOST_WORKDIR" not in script
+        assert '"workdir"' not in script
+
 
 @patch("pm_core.container.container_is_running", return_value=False)
 class TestCreateContainerPushProxy:
