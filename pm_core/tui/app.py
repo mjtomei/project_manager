@@ -256,7 +256,7 @@ class ProjectManagerApp(App):
             if not prs and self._current_guide_step is not None:
                 _log.debug("check_action: blocked %s (in guide mode, no PRs)", action)
                 return False
-            if self._plans_visible:
+            if self._plans_visible and action != "toggle_plans":
                 _log.debug("check_action: blocked %s (in plans view)", action)
                 return False
             if self._qa_visible:
@@ -544,7 +544,6 @@ class ProjectManagerApp(App):
         self._stop_tasks_poll()
         # Restore status bar to normal view
         self._update_status_bar()
-        self._clear_log_message()
         self.query_one("#tech-tree", TechTree).focus()
         # Capture frame after view change (use call_after_refresh to ensure screen is updated)
         self.call_after_refresh(self._capture_frame, "show_normal_view")
@@ -1136,12 +1135,6 @@ class ProjectManagerApp(App):
         # Update status bar
         status_bar = self.query_one("#status-bar", StatusBar)
         status_bar.update(" [bold]Tasks[/bold]    [dim]T=back to tree  Enter=switch window  ?=help[/dim]")
-        # Show keybinding hints in the log line (visible at bottom of pane)
-        try:
-            log = self.query_one("#log-line", LogLine)
-            log.update(" [bold]Enter[/bold][dim]=switch  [/dim][bold]Space[/bold][dim]=expand  [/dim][bold]T[/bold][dim]=back[/dim]")
-        except Exception:
-            pass
         self.call_after_refresh(self._capture_frame, "show_tasks_view")
 
     def _refresh_tasks_pane(self) -> None:

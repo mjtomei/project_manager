@@ -214,7 +214,7 @@ class TasksPane(Widget):
         # Clamp selection
         selectable = self._selectable_indices()
         if selectable and self.selected_index not in selectable:
-            self.selected_index = selectable[0] if selectable else 0
+            self.selected_index = selectable[0]
 
         self.refresh(layout=True)
 
@@ -291,13 +291,20 @@ class TasksPane(Widget):
             output.append(" or launch a review with ", style="dim")
             output.append("d", style="bold")
             output.append(".\n", style="dim")
+            output.append("\n")
+            output.append("  Enter", style="bold")
+            output.append("=switch  ", style="dim")
+            output.append("Space", style="bold")
+            output.append("=expand  ", style="dim")
+            output.append("T", style="bold")
+            output.append("=back\n", style="dim")
             return output
 
         for i, item in enumerate(self._flat_items):
             if "_header" in item:
                 label = item["_header"]
                 count = item["_count"]
-                output.append(f"  {label} ({count})\n", style="bold underline")
+                output.append(f"\n  {label} ({count})\n", style="bold underline")
                 output.append("  " + "\u2500" * min(content_width - 2, 40) + "\n",
                               style="dim")
                 continue
@@ -376,18 +383,28 @@ class TasksPane(Widget):
 
             output.append("\n")
 
+        # Footer
+        output.append("\n")
+        output.append("  Enter", style="bold")
+        output.append("=switch  ", style="dim")
+        output.append("Space", style="bold")
+        output.append("=expand  ", style="dim")
+        output.append("T", style="bold")
+        output.append("=back\n", style="dim")
+
         return output
 
     def _entry_lines(self, item: dict) -> int:
         if "_header" in item:
-            return 2  # header + divider
+            return 3  # blank + header + divider
         return 1  # each entry/sub is one line
 
     def get_content_height(self, container, viewport, width) -> int:
         """Return the total content height so Textual can size the widget correctly."""
         if not self._flat_items:
-            return 3  # "No running tasks." + blank + instruction
-        return sum(self._entry_lines(item) for item in self._flat_items)
+            return 5  # "No running tasks." + blank + instruction + blank + footer
+        # Sum all entry lines plus 2 for the footer (blank + footer text)
+        return sum(self._entry_lines(item) for item in self._flat_items) + 2
 
     def _scroll_selected_into_view(self) -> None:
         if not self._flat_items or not self.parent:

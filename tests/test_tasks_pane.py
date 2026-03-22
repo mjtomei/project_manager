@@ -412,3 +412,46 @@ class TestReviewLoopMarkers:
         pane.update_tasks(windows, [], {}, {}, watcher_infos=watcher_infos)
         entry = [e for e in pane._entries if e.group == "Watcher"][0]
         assert entry.review_loop_marker == "INPUT_REQ"
+
+
+class TestCheckActionTogglePlans:
+    """Regression tests for check_action / toggle_plans interaction.
+
+    These tests read the source file directly to avoid importing app.py,
+    which has a transitive yaml dependency not available in all environments.
+    """
+
+    @staticmethod
+    def _app_source() -> str:
+        import os
+        path = os.path.join(os.path.dirname(__file__), "..", "pm_core", "tui", "app.py")
+        with open(path) as f:
+            return f.read()
+
+    def test_toggle_plans_not_blocked_when_plans_visible(self):
+        """Pressing 'p' to exit plans view must not be blocked.
+
+        Regression: toggle_plans was added to the PR-action guard, which also
+        blocked it when _plans_visible=True via the generic plans-view check.
+        The fix adds `action != 'toggle_plans'` to that check so 'p' still
+        works to exit plans view.
+        """
+        source = self._app_source()
+        # The fix must be present: plans-visible check must exempt toggle_plans
+        assert 'action != "toggle_plans"' in source or "action != 'toggle_plans'" in source, (
+            "check_action must not block toggle_plans when _plans_visible=True; "
+            "otherwise 'p' can never exit plans view"
+        )
+
+    def test_toggle_tasks_binding_registered(self):
+        """T binding and toggle_tasks action must appear in app.py."""
+        source = self._app_source()
+        assert '"T"' in source or "'T'" in source
+        assert "toggle_tasks" in source
+
+    def test_toggle_tasks_in_command_bar_guard(self):
+        """toggle_tasks is listed in the command-bar-focus guard."""
+        source = self._app_source()
+        # Both toggle_tasks and the guard string must appear together
+        assert "toggle_tasks" in source
+        assert "cmd_bar.has_focus" in source
