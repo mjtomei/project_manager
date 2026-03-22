@@ -472,3 +472,28 @@ class TestCheckActionTogglePlans:
             "check_action must not block toggle_plans when _qa_visible=True; "
             "otherwise 'p' can never exit QA view"
         )
+
+    def test_toggle_plans_allowed_from_tasks_view(self):
+        """Pressing 'p' while tasks pane is visible must navigate to plans view.
+
+        Regression: toggle_plans was not in tasks_allowed, blocking 'p' from
+        tasks view. This prevented the user from navigating to plans without
+        first pressing T to exit tasks. It also prevented _pre_mobile_view from
+        being cleared on manual 'p' navigation, causing a spurious jump back to
+        tasks when the terminal widened.
+        """
+        source = self._app_source()
+        # tasks_allowed must include toggle_plans
+        assert '"toggle_plans"' in source or "'toggle_plans'" in source, (
+            "toggle_plans must appear in tasks_allowed so 'p' works from tasks view"
+        )
+        # Verify both toggle_plans and tasks_allowed co-occur in the tasks block
+        tasks_allowed_idx = source.find("tasks_allowed")
+        toggle_plans_nearby = (
+            "toggle_plans" in source[max(0, tasks_allowed_idx - 50):tasks_allowed_idx + 300]
+        )
+        assert toggle_plans_nearby, (
+            "toggle_plans must be in tasks_allowed list in check_action; "
+            "otherwise 'p' is blocked from tasks view and _pre_mobile_view is "
+            "not cleared on manual navigation to plans"
+        )

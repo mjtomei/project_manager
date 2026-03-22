@@ -263,8 +263,10 @@ class ProjectManagerApp(App):
                 _log.debug("check_action: blocked %s (in QA view)", action)
                 return False
             # In tasks view, only allow actions that work with the tasks pane
+            # View-switching actions (toggle_plans, toggle_qa) are also allowed
+            # so the user can navigate away without going through normal view first.
             if self._tasks_visible:
-                tasks_allowed = ("start_pr", "start_pr_companion", "done_pr", "merge_pr", "merge_pr_companion", "start_qa_on_pr", "launch_claude")
+                tasks_allowed = ("start_pr", "start_pr_companion", "done_pr", "merge_pr", "merge_pr_companion", "start_qa_on_pr", "launch_claude", "toggle_plans", "toggle_qa")
                 if action not in tasks_allowed:
                     _log.debug("check_action: blocked %s (in tasks view, not supported)", action)
                     return False
