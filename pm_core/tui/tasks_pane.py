@@ -404,7 +404,11 @@ class TasksPane(Widget):
     def get_content_height(self, container, viewport, width) -> int:
         """Return the total content height so Textual can size the widget correctly."""
         if not self._flat_items:
-            return 5  # "No running tasks." + blank + instruction + blank + footer
+            # "No running tasks." + blank + instruction (may wrap) + blank + hint
+            content_width = (width - 4) if width > 8 else 60
+            instruction = "  Start a PR with s or launch a review with d."
+            instr_lines = max(1, (len(instruction) + content_width - 1) // content_width) if content_width > 0 else 1
+            return 4 + instr_lines
         # Sum all entry lines plus 2 for the footer (blank + footer text)
         return sum(self._entry_lines(item) for item in self._flat_items) + 2
 
