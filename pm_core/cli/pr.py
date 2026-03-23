@@ -1759,6 +1759,18 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
                     companion=companion,
                 )
                 if pull_ok:
+                    if workdir and Path(workdir).exists() and branch:
+                        push_branch_r = git_ops.run_git(
+                            "push", "origin", branch, cwd=workdir, check=False
+                        )
+                        if push_branch_r.returncode == 0:
+                            click.echo(f"Pushed {branch} to origin.")
+                        else:
+                            click.echo(
+                                f"Warning: could not push {branch} to origin: "
+                                f"{push_branch_r.stderr.strip()}",
+                                err=True,
+                            )
                     _finalize_merge(data, root, pr_entry, pr_id, transcript=transcript)
                     # Restart TUI when managing the project_manager repo itself,
                     # so it picks up the latest pm code from the pull.
@@ -1866,6 +1878,19 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
         )
         if not pull_ok:
             return
+        if branch:
+            fetch_branch_r = git_ops.run_git(
+                "fetch", str(work_path), f"{branch}:{branch}",
+                cwd=repo_dir, check=False,
+            )
+            if fetch_branch_r.returncode == 0:
+                click.echo(f"Fetched {branch} into repo.")
+            else:
+                click.echo(
+                    f"Warning: could not fetch {branch} into repo: "
+                    f"{fetch_branch_r.stderr.strip()}",
+                    err=True,
+                )
         _finalize_merge(data, root, pr_entry, pr_id, transcript=transcript)
         repo = data.get("project", {}).get("repo", "")
         if "project_manager" in repo or "project-manager" in repo:
@@ -1886,6 +1911,18 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
                 click.echo("Push manually when ready, then re-run 'pm pr merge'.", err=True)
                 return
             click.echo(f"Pushed merged {base_branch} to origin.")
+            if branch:
+                push_branch_r = git_ops.run_git(
+                    "push", "origin", branch, cwd=workdir, check=False
+                )
+                if push_branch_r.returncode == 0:
+                    click.echo(f"Pushed {branch} to origin.")
+                else:
+                    click.echo(
+                        f"Warning: could not push {branch} to origin: "
+                        f"{push_branch_r.stderr.strip()}",
+                        err=True,
+                    )
         else:
             click.echo("Propagation only: skipping push to origin.")
         # Pull into the main repo dir so it stays up to date
