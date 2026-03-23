@@ -585,7 +585,7 @@ class ProjectManagerApp(App):
         tree.apply_project_settings(self._data.get("project", {}))
         tree.update_plans(self._data.get("plans") or [])
 
-        if immediate:
+        if immediate or self._is_tui_idle():
             tree.update_prs(self._data.get("prs") or [])
         else:
             # Write data immediately so new PRs are visible, but defer recompute
