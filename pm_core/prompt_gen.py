@@ -519,6 +519,14 @@ def generate_watcher_prompt(data: dict, session_name: str | None = None,
     windows for issues, attempting fixes when possible and surfacing
     problems that need human input.
 
+    INPUT_REQUIRED semantics: the watcher uses INPUT_REQUIRED only for
+    *project-wide* blockers (broken base branch, plan contradictions,
+    infrastructure failures, or a genuinely stuck ``in_progress`` branch
+    with no active review/QA loop).  If a branch is paused by its own
+    review or QA loop's INPUT_REQUIRED, the watcher should note it in the
+    summary but emit READY — the loop already handles that branch, and
+    escalating would block all other branches unnecessarily.
+
     Args:
         data: Project data dict.
         session_name: If provided, include TUI interaction instructions.
@@ -641,6 +649,15 @@ loop for a PR, use `pm tui send` to send `zzz d` while the PR is selected.
 - PR dependencies that are stuck, blocking downstream work
 - Circular or broken dependency chains
 - Implementation pane showing an error/crash rather than completed work
+
+**States that are handled and do NOT need watcher INPUT_REQUIRED:**
+- PR in `in_review` or `qa` whose review/QA loop pane ends with `INPUT_REQUIRED` — the
+  loop is already pausing that branch and the user has been notified. Note it in your
+  summary but emit **READY**, not INPUT_REQUIRED. Even if multiple branches are
+  simultaneously paused by their own loops, each loop is handling its own branch; the
+  watcher should still emit READY so other branches can continue.
+  (Exception: the PR is `in_review` but has **no** active review loop window — that is
+  the abnormal state above and does warrant attention.)
 {auto_start_scope_block}
 ### 1. Scan Active Tmux Panes
 You can use `tmux list-windows` and `tmux capture-pane` to inspect all active windows:
@@ -653,7 +670,26 @@ You can use `tmux list-windows` and `tmux capture-pane` to inspect all active wi
 Try to fix any issues you can without human guidance.
 
 ### 3. Surface Issues Needing Human Input
-Use the **INPUT_REQUIRED** verdict for anything you can't figure out yourself.
+Distinguish between **project-wide blockers** and **branch-specific issues already handled**.
+
+**Use INPUT_REQUIRED for project-wide blockers:**
+- Broken base branch that affects all downstream work
+- Plan contradictions or fundamental architectural issues
+- Infrastructure failures (git remote unreachable, disk full, etc.)
+- An `in_progress` branch that is genuinely stuck (idle/dead pane for several minutes)
+  with no active review or QA loop handling it
+
+**Use READY (not INPUT_REQUIRED) when a branch-specific issue is already handled:**
+- If a branch's review loop or QA loop pane ends with `INPUT_REQUIRED` (at the time of
+  your observation), that loop is already pausing the branch and notifying the user.
+  The watcher escalating to INPUT_REQUIRED would block **all** branches unnecessarily.
+  Instead, note the situation in your summary and emit READY.
+- This applies even when multiple branches are simultaneously paused by their own loops.
+
+To check whether a review or QA loop is waiting for input: capture the relevant tmux pane
+and see if its last meaningful output ends with `INPUT_REQUIRED`. If the loop pane ends
+with `INPUT_REQUIRED`, the loop is handling it. If the PR is `in_review` or `qa` but has
+**no** active loop window at all, that is a different (abnormal) state — see above.
 
 ### 4. Project Health Monitoring
 Look for patterns across PRs that might signal issues in a PR's plan.
@@ -721,8 +757,8 @@ tmux list-panes -t <session>:<window>
 2. Take corrective actions for issues that don't need human input
 3. Compile a brief summary of findings
 4. End with a verdict on its own line:
-   - **READY** -- All issues handled (or no issues found). The monitor will wait and then run another iteration.
-   - **INPUT_REQUIRED** -- You need human input or want to surface an important finding. Describe what you need clearly. The user will interact with you in this pane, and then you should provide a follow-up verdict (**READY** to continue monitoring).
+   - **READY** -- All issues handled (or no issues found). The monitor will wait and then run another iteration. This is also correct when some branches are individually paused by their own review/QA loops — those loops handle their branches; the watcher does not need to escalate.
+   - **INPUT_REQUIRED** -- A **project-wide** blocker exists (broken base branch, plan contradiction, infrastructure failure) or a branch is genuinely stuck with no active review/QA loop handling it. Describe what you need clearly. The user will interact with you in this pane, and then you should provide a follow-up verdict (**READY** to continue monitoring).
 
 IMPORTANT: Always end your response with the verdict keyword on its own line -- either **READY** or **INPUT_REQUIRED**.{watcher_specific_block}"""
 
