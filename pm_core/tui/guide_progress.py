@@ -30,6 +30,7 @@ _CHECKLIST = [
 class GuideProgress(Widget):
     """Displays a setup checklist showing what's been created and what's next."""
 
+    can_focus = True
     current_step: reactive[str] = reactive("no_project")
 
     def __init__(self, current_step: str = "no_project", **kwargs):
