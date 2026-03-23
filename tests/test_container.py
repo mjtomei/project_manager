@@ -20,6 +20,7 @@ from pm_core.container import (
     cleanup_qa_containers,
     cleanup_session_containers,
     cleanup_all_containers,
+    cleanup_stale_containers,
     wrap_claude_cmd,
     container_is_running,
     _docker_available,
@@ -861,3 +862,136 @@ class TestCreateContainerPushProxy:
                         session_tag="repo-abc", pr_id="pr-1")
         call_kwargs = mock_exec.call_args[1]
         assert call_kwargs["proxy_socket_path"] is None
+
+class TestCleanupStaleContainers:
+    """Tests for cleanup_stale_containers."""
+
+    @patch("pm_core.container._run_docker")
+    def test_docker_failure_returns_zero(self, mock_docker):
+        mock_docker.return_value = MagicMock(returncode=1, stdout="")
+        assert cleanup_stale_containers("pm-repo-abc", "repo-abc") == 0
+
+    @patch("pm_core.container._run_docker")
+    def test_no_containers_returns_zero(self, mock_docker):
+        mock_docker.return_value = MagicMock(returncode=0, stdout="")
+        assert cleanup_stale_containers("pm-repo-abc", "repo-abc") == 0
+
+    def _store_patch(self, prs):
+        """Return context managers that mock state_root + store.load."""
+        return (
+            patch("pm_core.cli.helpers.state_root", return_value="/fake"),
+            patch("pm_core.store.load", return_value={"prs": prs}),
+        )
+
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_docker")
+    def test_removes_stale_impl_container(self, mock_docker, mock_rm):
+        mock_docker.return_value = MagicMock(
+            returncode=0,
+            stdout="pm-repo-abc-impl-pr-1\n",
+        )
+        p1, p2 = self._store_patch([{"id": "pr-1", "gh_pr_number": 42}])
+        with p1, p2, \
+             patch("pm_core.tmux.list_windows",
+                   return_value=[{"name": "other-window"}]):
+            count = cleanup_stale_containers("pm-repo-abc", "repo-abc")
+        assert count == 1
+        mock_rm.assert_called_once_with("pm-repo-abc-impl-pr-1")
+
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_docker")
+    def test_keeps_live_impl_container(self, mock_docker, mock_rm):
+        mock_docker.return_value = MagicMock(
+            returncode=0,
+            stdout="pm-repo-abc-impl-pr-1\n",
+        )
+        p1, p2 = self._store_patch([{"id": "pr-1", "gh_pr_number": 42}])
+        # Window "#42" exists — container should be kept
+        with p1, p2, \
+             patch("pm_core.tmux.list_windows",
+                   return_value=[{"name": "#42"}]):
+            count = cleanup_stale_containers("pm-repo-abc", "repo-abc")
+        assert count == 0
+        mock_rm.assert_not_called()
+
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_docker")
+    def test_removes_stale_review_container(self, mock_docker, mock_rm):
+        mock_docker.return_value = MagicMock(
+            returncode=0,
+            stdout="pm-repo-abc-review-pr-2\n",
+        )
+        p1, p2 = self._store_patch([{"id": "pr-2", "gh_pr_number": 7}])
+        with p1, p2, \
+             patch("pm_core.tmux.list_windows",
+                   return_value=[{"name": "other"}]):
+            count = cleanup_stale_containers("pm-repo-abc", "repo-abc")
+        assert count == 1
+        mock_rm.assert_called_once_with("pm-repo-abc-review-pr-2")
+
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_docker")
+    def test_removes_pr_not_in_store(self, mock_docker, mock_rm):
+        mock_docker.return_value = MagicMock(
+            returncode=0,
+            stdout="pm-repo-abc-impl-pr-gone\n",
+        )
+        p1, p2 = self._store_patch([])
+        with p1, p2, \
+             patch("pm_core.tmux.list_windows",
+                   return_value=[]):
+            count = cleanup_stale_containers("pm-repo-abc", "repo-abc")
+        assert count == 1
+        mock_rm.assert_called_once_with("pm-repo-abc-impl-pr-gone")
+
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_docker")
+    def test_removes_stale_qa_container(self, mock_docker, mock_rm):
+        mock_docker.return_value = MagicMock(
+            returncode=0,
+            stdout="pm-repo-abc-qa-pr-1-loop1-s3\n",
+        )
+        p1, p2 = self._store_patch([{"id": "pr-1"}])
+        with p1, p2, \
+             patch("pm_core.tmux.list_windows",
+                   return_value=[{"name": "qa-pr-1-s1"}]):
+            # s3 doesn't match any live window — stale
+            count = cleanup_stale_containers("pm-repo-abc", "repo-abc")
+        assert count == 1
+
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_docker")
+    def test_keeps_live_qa_container(self, mock_docker, mock_rm):
+        mock_docker.return_value = MagicMock(
+            returncode=0,
+            stdout="pm-repo-abc-qa-pr-1-loop1-s3\n",
+        )
+        p1, p2 = self._store_patch([{"id": "pr-1"}])
+        with p1, p2, \
+             patch("pm_core.tmux.list_windows",
+                   return_value=[{"name": "qa-pr-1-s3"}]):
+            count = cleanup_stale_containers("pm-repo-abc", "repo-abc")
+        assert count == 0
+        mock_rm.assert_not_called()
+
+    @patch("pm_core.container._run_docker")
+    def test_bails_on_tmux_failure(self, mock_docker):
+        mock_docker.return_value = MagicMock(
+            returncode=0, stdout="pm-repo-abc-impl-pr-1\n",
+        )
+        with patch("pm_core.tmux.list_windows",
+                    side_effect=Exception("tmux gone")):
+            count = cleanup_stale_containers("pm-repo-abc", "repo-abc")
+        assert count == 0
+
+    @patch("pm_core.container._run_docker")
+    def test_bails_on_store_failure(self, mock_docker):
+        mock_docker.return_value = MagicMock(
+            returncode=0, stdout="pm-repo-abc-impl-pr-1\n",
+        )
+        with patch("pm_core.tmux.list_windows",
+                    return_value=[]), \
+             patch("pm_core.store.load",
+                   side_effect=Exception("store broken")):
+            count = cleanup_stale_containers("pm-repo-abc", "repo-abc")
+        assert count == 0

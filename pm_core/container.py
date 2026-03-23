@@ -844,6 +844,111 @@ def cleanup_session_containers(session_tag: str) -> int:
     return count
 
 
+def cleanup_stale_containers(session_name: str, session_tag: str) -> int:
+    """Remove containers whose tmux windows no longer exist.
+
+    For each container matching ``pm-{session_tag}-*``, derives the
+    expected tmux window name and checks if it still exists.  Containers
+    whose windows are gone are removed along with their push proxies.
+
+    Returns the number of containers removed.
+    """
+    from pm_core import tmux as tmux_mod
+
+    prefix = f"{CONTAINER_PREFIX}{session_tag}-"
+    result = _run_docker(
+        "ps", "-a", "--filter", f"name={prefix}",
+        "--format", "{{.Names}}",
+        check=False, timeout=30,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return 0
+
+    # Build set of live window names
+    try:
+        live_windows = {w["name"] for w in tmux_mod.list_windows(session_name)}
+    except Exception:
+        return 0
+
+    # Build pr_id → display_id map from the store so we can map container
+    # names back to tmux window names.  If the store can't be loaded we
+    # must bail out — an empty map would cause every container to be
+    # treated as stale and removed.
+    pr_display_map: dict[str, str] = {}
+    try:
+        from pm_core.cli.helpers import state_root
+        from pm_core import store
+        root = state_root()
+        data = store.load(root)
+        for pr in data.get("prs", []):
+            pr_id = pr["id"]
+            gh = pr.get("gh_pr_number")
+            pr_display_map[pr_id] = f"#{gh}" if gh else pr_id
+    except Exception:
+        return 0
+
+    count = 0
+    for line in result.stdout.strip().splitlines():
+        cname = line.strip()
+        if not cname:
+            continue
+        # Strip the prefix to get the label
+        label = cname.removeprefix(prefix)
+
+        # Determine expected window name from the label
+        window_name: str | None = None
+
+        if label.startswith("impl-"):
+            pr_id = label.removeprefix("impl-")
+            display_id = pr_display_map.get(pr_id)
+            if display_id:
+                window_name = display_id
+            else:
+                # PR no longer in store — container is definitely stale
+                remove_container(cname)
+                count += 1
+                continue
+
+        elif label.startswith("review-"):
+            pr_id = label.removeprefix("review-")
+            display_id = pr_display_map.get(pr_id)
+            if display_id:
+                window_name = f"review-{display_id}"
+            else:
+                remove_container(cname)
+                count += 1
+                continue
+
+        elif label.startswith("qa-"):
+            # QA containers: pm-{tag}-qa-{pr_id}-{loop_id}-s{N}
+            # Window names:  qa-{display_id}-s{N}
+            # Use suffix matching (same logic as cleanup_orphaned_qa_containers)
+            parts = cname.split("-s")
+            if len(parts) < 2:
+                continue
+            suffix = f"-s{parts[-1]}"
+            has_window = any(w.endswith(suffix) and w.startswith("qa-")
+                             for w in live_windows)
+            if not has_window:
+                remove_container(cname)
+                count += 1
+            continue
+
+        else:
+            # Unknown label type — skip
+            continue
+
+        # Check if the expected window exists
+        if window_name not in live_windows:
+            remove_container(cname)
+            count += 1
+
+    if count:
+        _log.info("Cleaned up %d stale container(s) for session %s",
+                  count, session_tag)
+    return count
+
+
 def cleanup_all_containers() -> int:
     """Remove all pm containers. Returns count removed."""
     result = _run_docker(
