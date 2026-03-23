@@ -841,11 +841,13 @@ def stop_session_proxies(session_tag: str) -> int:
 def cleanup_stale_proxy_dirs(session_tag: str) -> int:
     """Remove proxy socket directories whose proxy process is dead.
 
-    Scans ``/tmp/pm-push-proxy-{session_tag}-*`` directories and checks
-    each socket for liveness.  Directories with dead or missing sockets
-    are cleaned up.
+    Scans ``/tmp/pm-push-proxy-{session_tag}-*`` (both real directories and
+    symlinks created by :func:`_shared_sock_dir`) and checks each socket for
+    liveness.  Entries with dead or missing sockets are removed via
+    :func:`_kill_proxy_socket`, which correctly resolves symlinks so both
+    the symlink and the underlying hashed directory are cleaned up.
 
-    Returns the number of directories removed.
+    Returns the number of entries removed.
     """
     import glob
     import tempfile
@@ -853,41 +855,13 @@ def cleanup_stale_proxy_dirs(session_tag: str) -> int:
     pattern = os.path.join(tempfile.gettempdir(),
                            f"{_SOCKET_DIR_PREFIX}{session_tag}-*")
     count = 0
-    for sock_dir in glob.glob(pattern):
-        if not os.path.isdir(sock_dir):
+    for entry in glob.glob(pattern):
+        if not os.path.isdir(entry):  # follows symlinks
             continue
-        sock_path = os.path.join(sock_dir, "push.sock")
-
-        # Check if the proxy is alive by probing the socket
-        alive = False
-        if os.path.exists(sock_path):
-            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            try:
-                s.settimeout(1.0)
-                s.connect(sock_path)
-                alive = True
-            except (ConnectionRefusedError, FileNotFoundError, OSError):
-                pass
-            finally:
-                s.close()
-
-        if not alive:
-            # Remove socket file and directory
-            try:
-                os.unlink(sock_path)
-            except FileNotFoundError:
-                pass
-            try:
-                # Remove any remaining files (e.g. stale lock files)
-                for f in os.listdir(sock_dir):
-                    try:
-                        os.unlink(os.path.join(sock_dir, f))
-                    except OSError:
-                        pass
-                os.rmdir(sock_dir)
-                count += 1
-            except OSError:
-                pass
+        sock_path = os.path.join(entry, "push.sock")
+        if not proxy_is_alive(sock_path):
+            _kill_proxy_socket(sock_path)
+            count += 1
 
     if count:
         _log.info("Cleaned up %d stale proxy dir(s) for session %s",

@@ -750,15 +750,30 @@ class TestCleanupStaleProxyDirs:
             count = cleanup_stale_proxy_dirs("repo-xyz")
         assert count == 0
 
-    def test_removes_extra_files_in_dir(self, tmp_path):
-        """Should clean up extra files (e.g. lock files) before rmdir."""
+    def test_cleans_up_via_kill_proxy_socket(self, tmp_path):
+        """Delegates to _kill_proxy_socket so the dead proxy is counted."""
         sock_dir = tmp_path / f"{_SOCKET_DIR_PREFIX}repo-abc-pr-4"
         sock_dir.mkdir()
         (sock_dir / "push.sock").touch()
-        (sock_dir / "lock").touch()
 
         with patch("tempfile.gettempdir", return_value=str(tmp_path)):
             count = cleanup_stale_proxy_dirs("repo-abc")
 
         assert count == 1
         assert not sock_dir.exists()
+
+    def test_cleans_up_symlink_pointing_to_hashed_dir(self, tmp_path):
+        """Long-name symlinks created by _shared_sock_dir are also cleaned."""
+        # Simulate: real dir has hash name, symlink has long name
+        real_dir = tmp_path / f"{_SOCKET_DIR_PREFIX}abcdef1234567890"
+        real_dir.mkdir()
+        (real_dir / "push.sock").touch()
+        symlink = tmp_path / f"{_SOCKET_DIR_PREFIX}repo-abc-pr-5"
+        symlink.symlink_to(real_dir)
+
+        with patch("tempfile.gettempdir", return_value=str(tmp_path)):
+            count = cleanup_stale_proxy_dirs("repo-abc")
+
+        assert count == 1
+        assert not symlink.exists()  # symlink removed
+        assert not real_dir.exists()  # real dir also removed
