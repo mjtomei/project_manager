@@ -153,6 +153,18 @@ skip_no_ollama = pytest.mark.skipif(
     reason="Ollama not running on localhost:11434",
 )
 
+# ---------------------------------------------------------------------------
+# Remote LLM endpoint integration tests
+# Set PM_TEST_LLM_URL to point at a remote OpenAI-compatible endpoint to run.
+# ---------------------------------------------------------------------------
+
+PM_TEST_LLM_URL = os.environ.get("PM_TEST_LLM_URL", "")
+
+skip_no_remote_llm = pytest.mark.skipif(
+    not PM_TEST_LLM_URL,
+    reason="PM_TEST_LLM_URL not set (set to remote LLM endpoint URL to run)",
+)
+
 
 class TestRealOllamaIntegration:
     """Integration tests that exercise a real local Ollama endpoint.
@@ -189,3 +201,36 @@ class TestRealOllamaIntegration:
         # but we should get a definitive True/False (not None)
         assert result.tool_use is not None
         assert result.inference_ok is True
+
+
+class TestRemoteLLMIntegration:
+    """Integration tests against a remote OpenAI-compatible endpoint.
+
+    Run by setting PM_TEST_LLM_URL, e.g.:
+        PM_TEST_LLM_URL=http://spark-424d.lan:30002 pytest tests/test_provider_integration.py
+    """
+
+    @skip_no_remote_llm
+    def test_connectivity_check(self):
+        """check_provider confirms remote endpoint is reachable."""
+        p = ProviderConfig(
+            name="remote-test", type="openai",
+            api_base=PM_TEST_LLM_URL,
+            api_key="unused",
+        )
+        result = check_provider(p, check_tools=False)
+        assert result.reachable, f"Remote endpoint unreachable: {result.reachable_detail}"
+
+    @skip_no_remote_llm
+    def test_inference_with_real_model(self):
+        """check_provider runs inference against the remote endpoint."""
+        p = ProviderConfig(
+            name="remote-test", type="openai",
+            api_base=PM_TEST_LLM_URL,
+            api_key="unused",
+        )
+        result = check_provider(p, check_tools=True)
+        assert result.reachable, f"Remote endpoint unreachable: {result.reachable_detail}"
+        assert result.inference_ok is True, f"Inference failed: {result.inference_detail}"
+        # Tool use may or may not be supported — just verify we got a result (not None)
+        assert result.tool_use is not None
