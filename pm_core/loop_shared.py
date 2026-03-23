@@ -20,11 +20,21 @@ def get_pm_session() -> str | None:
 
 
 def find_claude_pane(session: str, window_name: str) -> str | None:
-    """Find the Claude pane ID in a window (first pane)."""
+    """Find the Claude pane ID in a window.
+
+    Checks the pane registry first (role ``impl-claude``), falling back
+    to the first pane for legacy windows created before registry tracking.
+    """
     from pm_core import tmux as tmux_mod
     win = tmux_mod.find_window_by_name(session, window_name)
     if not win:
         return None
+    # Registry-first lookup
+    from pm_core import pane_registry as _reg
+    pane_id = _reg.find_live_pane_by_role(session, "impl-claude", window=win["id"])
+    if pane_id:
+        return pane_id
+    # Fall back to first pane for legacy windows
     panes = tmux_mod.get_pane_indices(session, win["index"])
     if panes:
         return panes[0][0]

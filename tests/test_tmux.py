@@ -402,37 +402,29 @@ class TestCurrentOrBaseSession:
 # ---------------------------------------------------------------------------
 
 class TestNewWindowGetPane:
-    @patch("pm_core.tmux.get_pane_indices", return_value=[("%5", 0)])
     @patch("pm_core.tmux.current_or_base_session", return_value="sess")
     @patch("pm_core.tmux.find_window_by_name", return_value={"id": "@1", "index": "1", "name": "review"})
     @patch("pm_core.tmux.subprocess.run")
-    def test_returns_pane_id(self, mock_run, mock_fwbn, mock_cobs, mock_gpi):
-        mock_run.return_value = MagicMock(returncode=0)
+    def test_returns_pane_id(self, mock_run, mock_fwbn, mock_cobs):
+        # new-window returns pane ID directly via -P -F #{pane_id}
+        mock_run.return_value = MagicMock(returncode=0, stdout="%5\n")
         result = new_window_get_pane("sess", "review", "bash", "/tmp")
         assert result == "%5"
+        # Verify -P and -F #{pane_id} flags are in the new-window call
+        first_call_args = mock_run.call_args_list[0][0][0]
+        assert "-P" in first_call_args
+        assert "#{pane_id}" in first_call_args
 
-    @patch("pm_core.tmux.find_window_by_name", return_value=None)
     @patch("pm_core.tmux.subprocess.run")
-    def test_returns_none_when_window_not_found(self, mock_run, mock_fwbn):
-        mock_run.return_value = MagicMock(returncode=0)
+    def test_returns_none_when_empty_pane_id(self, mock_run):
+        # Empty stdout means pane ID could not be obtained
+        mock_run.return_value = MagicMock(returncode=0, stdout="\n")
         result = new_window_get_pane("sess", "review", "bash", "/tmp")
         assert result is None
 
-    @patch("pm_core.tmux.get_pane_indices", return_value=[])
-    @patch("pm_core.tmux.current_or_base_session", return_value="sess")
-    @patch("pm_core.tmux.find_window_by_name", return_value={"id": "@1", "index": "1", "name": "review"})
     @patch("pm_core.tmux.subprocess.run")
-    def test_returns_none_when_no_panes(self, mock_run, mock_fwbn, mock_cobs, mock_gpi):
-        mock_run.return_value = MagicMock(returncode=0)
-        result = new_window_get_pane("sess", "review", "bash", "/tmp")
-        assert result is None
-
-    @patch("pm_core.tmux.get_pane_indices", return_value=[("%5", 0)])
-    @patch("pm_core.tmux.current_or_base_session", return_value="sess")
-    @patch("pm_core.tmux.find_window_by_name", return_value={"id": "@1", "index": "1", "name": "review"})
-    @patch("pm_core.tmux.subprocess.run")
-    def test_switch_false_skips_select_window(self, mock_run, mock_fwbn, mock_cobs, mock_gpi):
-        mock_run.return_value = MagicMock(returncode=0)
+    def test_switch_false_skips_select_window(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="%5\n")
         result = new_window_get_pane("sess", "review", "bash", "/tmp", switch=False)
         assert result == "%5"
         # select-window should NOT have been called — only new-window
@@ -440,7 +432,6 @@ class TestNewWindowGetPane:
         cmds = [c[0][0] for c in calls]
         assert any("new-window" in cmd for cmd in cmds)
         assert not any("select-window" in cmd for cmd in cmds)
-        mock_cobs.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

@@ -158,30 +158,32 @@ def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
     """Create a new tmux window and return its initial pane ID.
 
     Like new_window but returns the pane ID so callers can split on it.
-    Returns None if the window couldn't be found after creation.
+    Uses ``-P -F #{pane_id}`` to get the pane ID directly from tmux at
+    creation time, avoiding a secondary lookup that could return the
+    wrong pane if the window already had panes.
+    Returns None if the pane ID could not be obtained.
 
     Set *switch* to False to create the window without changing the
     active window (useful for background operations like the review loop).
     """
     target = f"{session}:"
-    _run(
-        _tmux_cmd("new-window", "-d", "-t", target, "-n", name, "-c", cwd, cmd),
-        check=True,
+    result = _run(
+        _tmux_cmd("new-window", "-d", "-t", target, "-n", name, "-c", cwd,
+                  "-P", "-F", "#{pane_id}", cmd),
+        text=True, check=True,
     )
-    win = find_window_by_name(session, name)
-    if not win:
+    pane_id = result.stdout.strip()
+    if not pane_id:
         return None
     if switch:
         # Switch the current grouped session to the new window
-        current = current_or_base_session(session)
-        _run(
-            _tmux_cmd("select-window", "-t", f"{current}:{win['index']}"),
-        )
-    # Discover the pane ID
-    panes = get_pane_indices(session, win["index"])
-    if panes:
-        return panes[0][0]
-    return None
+        win = find_window_by_name(session, name)
+        if win:
+            current = current_or_base_session(session)
+            _run(
+                _tmux_cmd("select-window", "-t", f"{current}:{win['index']}"),
+            )
+    return pane_id
 
 
 def create_window(session: str, cmd: str) -> tuple[str, str]:
@@ -374,12 +376,22 @@ def list_windows(session: str) -> list[dict]:
     return windows
 
 
+def find_windows_by_name(session: str, name: str) -> list[dict]:
+    """Find all windows with the given name. Returns list of {id, index, name}."""
+    return [w for w in list_windows(session) if w["name"] == name]
+
+
 def find_window_by_name(session: str, name: str) -> dict | None:
     """Find a window by name. Returns {id, index, name} or None."""
     for w in list_windows(session):
         if w["name"] == name:
             return w
     return None
+
+
+def rename_window(session: str, window_id: str, new_name: str) -> None:
+    """Rename a tmux window by its ID."""
+    _run(_tmux_cmd("rename-window", "-t", f"{session}:{window_id}", new_name))
 
 
 def select_window(session: str, window: str) -> bool:

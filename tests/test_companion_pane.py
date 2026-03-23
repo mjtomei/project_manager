@@ -48,6 +48,8 @@ class TestAddCompanionPane:
             mock_tmux.split_pane_at.return_value = "%2"
             mock_reg.load_registry.return_value = {}
             mock_reg.get_window_data.return_value = {"user_modified": True}
+            # Registry has no entry yet for this window; fall back to first pane
+            mock_reg.find_live_pane_by_role.return_value = None
 
             pr_mod._add_companion_pane("sess", {"id": "@1", "index": "1"},
                                         "/work/dir", "impl")
@@ -55,15 +57,13 @@ class TestAddCompanionPane:
             mock_tmux.split_pane_at.assert_called_once_with(
                 "%1", "h", mock.ANY, background=True,
             )
-            # Both panes registered
-            assert mock_reg.register_pane.call_count == 2
-            roles = [c[0][3] for c in mock_reg.register_pane.call_args_list]
+            # register_and_rebalance called with both panes (impl-claude + impl-companion)
+            mock_layout.register_and_rebalance.assert_called_once()
+            call_args = mock_layout.register_and_rebalance.call_args[0]
+            pane_list = call_args[2]
+            roles = [p[1] for p in pane_list]
             assert "impl-claude" in roles
             assert "impl-companion" in roles
-
-            # user_modified reset and layout rebalanced
-            mock_reg.save_registry.assert_called_once()
-            mock_layout.rebalance.assert_called_once_with("sess", "@1")
 
 
 # ---------------------------------------------------------------------------
@@ -98,11 +98,17 @@ class TestPrStartCompanion:
         mock_tmux.has_tmux.return_value = True
         mock_tmux.in_tmux.return_value = True
         mock_tmux.session_exists.return_value = True
+        # find_windows_by_name is used for stale-window detection
+        mock_tmux.find_windows_by_name.return_value = [{"id": "@1", "index": "1", "name": "pr-001"}]
         mock_tmux.find_window_by_name.return_value = {"id": "@1", "index": "1", "name": "pr-001"}
         mock_tmux.get_pane_indices.return_value = [("%1", 0)]  # single pane
         mock_tmux.split_pane_at.return_value = "%2"
-        _reg.load_registry.return_value = {}
+        # Registry must have pm panes so window is treated as valid (not stale)
+        _reg.load_registry.return_value = {
+            "windows": {"@1": {"panes": [{"id": "%1", "role": "impl-claude"}], "user_modified": False}},
+        }
         _reg.get_window_data.return_value = {"user_modified": True}
+        _reg.find_live_pane_by_role.return_value = None  # fall back in _add_companion_pane
 
         from click.testing import CliRunner
         runner = CliRunner()
@@ -141,11 +147,17 @@ class TestPrStartCompanion:
         mock_tmux.has_tmux.return_value = True
         mock_tmux.in_tmux.return_value = True
         mock_tmux.session_exists.return_value = True
+        # find_windows_by_name is used for stale-window detection
+        mock_tmux.find_windows_by_name.return_value = [{"id": "@1", "index": "1", "name": "pr-001"}]
         mock_tmux.find_window_by_name.return_value = {"id": "@1", "index": "1", "name": "pr-001"}
         mock_tmux.get_pane_indices.return_value = [("%1", 0)]
         mock_tmux.split_pane_at.return_value = "%2"
-        _reg.load_registry.return_value = {}
+        # Registry must have pm panes so window is treated as valid (not stale)
+        _reg.load_registry.return_value = {
+            "windows": {"@1": {"panes": [{"id": "%1", "role": "impl-claude"}], "user_modified": False}},
+        }
         _reg.get_window_data.return_value = {"user_modified": True}
+        _reg.find_live_pane_by_role.return_value = None  # fall back in _add_companion_pane
 
         from click.testing import CliRunner
         runner = CliRunner()
@@ -176,15 +188,15 @@ class TestMergeWindowCompanion:
         mock_tmux.has_tmux.return_value = True
         mock_tmux.in_tmux.return_value = True
         mock_tmux.session_exists.return_value = True
-        mock_tmux.find_window_by_name.side_effect = [
-            None,  # first check: no existing
-            {"id": "@2", "index": "2", "name": "merge-pr-001"},  # after creation
-        ]
+        # find_windows_by_name used for stale-window check (no existing window)
+        mock_tmux.find_windows_by_name.return_value = []
+        mock_tmux.find_window_by_name.return_value = {"id": "@2", "index": "2", "name": "merge-pr-001"}
         mock_tmux.new_window_get_pane.return_value = "%1"
         mock_tmux.get_pane_indices.return_value = [("%1", 0)]
         mock_tmux.split_pane_at.return_value = "%2"
         _reg.load_registry.return_value = {}
         _reg.get_window_data.return_value = {"user_modified": True}
+        _reg.find_live_pane_by_role.return_value = None  # fall back in _add_companion_pane
 
         data = {"project": {"base_branch": "master"}}
         pr_entry = {"id": "pr-001", "workdir": "/work/dir"}
@@ -199,16 +211,20 @@ class TestMergeWindowCompanion:
         mock_tmux.split_pane_at.assert_called_once()
 
     @patch.object(pr_mod, "tmux_mod")
+    @patch.object(pr_mod, "pane_registry")
     @patch.object(pr_mod, "prompt_gen")
     @patch.object(pr_mod, "build_claude_shell_cmd", return_value="claude ...")
-    def test_no_companion_uses_new_window(
-        self, _cmd, _prompt, mock_tmux,
+    def test_no_companion_uses_new_window_get_pane(
+        self, _cmd, _prompt, _reg, mock_tmux,
     ):
-        """_launch_merge_window without companion uses simple new_window."""
+        """_launch_merge_window without companion uses new_window_get_pane and registers pane."""
         mock_tmux.has_tmux.return_value = True
         mock_tmux.in_tmux.return_value = True
         mock_tmux.session_exists.return_value = True
-        mock_tmux.find_window_by_name.return_value = None
+        # find_windows_by_name used for stale-window check (no existing window)
+        mock_tmux.find_windows_by_name.return_value = []
+        mock_tmux.find_window_by_name.return_value = {"id": "@2", "index": "2", "name": "merge-pr-001"}
+        mock_tmux.new_window_get_pane.return_value = "%1"
 
         data = {"project": {"base_branch": "master"}}
         pr_entry = {"id": "pr-001", "workdir": "/work/dir"}
@@ -218,8 +234,12 @@ class TestMergeWindowCompanion:
              patch.object(pr_mod, "_ensure_workdir", return_value="/work/dir"):
             pr_mod._launch_merge_window(data, pr_entry, "conflict error")
 
-        mock_tmux.new_window.assert_called_once()
-        mock_tmux.new_window_get_pane.assert_not_called()
+        mock_tmux.new_window_get_pane.assert_called_once()
+        mock_tmux.new_window.assert_not_called()
+        # Pane should be registered with merge-claude role
+        _reg.register_pane.assert_called_once()
+        call_args = _reg.register_pane.call_args[0]
+        assert call_args[3] == "merge-claude"
 
 
 # ---------------------------------------------------------------------------

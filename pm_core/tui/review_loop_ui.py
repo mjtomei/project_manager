@@ -609,11 +609,23 @@ def _handle_merge_input_required(app, pr_id: str, merge_key: str) -> None:
 # ---------------------------------------------------------------------------
 
 def _find_impl_pane(session: str, window_name: str) -> str | None:
-    """Find the first pane ID in an implementation window."""
+    """Find the Claude pane ID in an implementation or merge window.
+
+    Checks the pane registry first (role ``merge-claude`` for merge-* windows,
+    ``impl-claude`` for others), falling back to the first pane for legacy
+    windows created before registry tracking.
+    """
     from pm_core import tmux as tmux_mod
     win = tmux_mod.find_window_by_name(session, window_name)
     if not win:
         return None
+    # Registry-first lookup — role depends on window name prefix
+    from pm_core import pane_registry as _reg
+    role = "merge-claude" if window_name.startswith("merge-") else "impl-claude"
+    pane_id = _reg.find_live_pane_by_role(session, role, window=win["id"])
+    if pane_id:
+        return pane_id
+    # Fall back to first pane for legacy windows
     panes = tmux_mod.get_pane_indices(session, win["index"])
     if panes:
         return panes[0][0]
