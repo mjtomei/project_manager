@@ -269,7 +269,7 @@ class ProjectManagerApp(App):
             if self._tasks_visible:
                 tasks_allowed = ("start_pr", "start_pr_companion", "done_pr", "merge_pr", "merge_pr_companion", "start_qa_on_pr", "launch_claude", "toggle_plans")
                 if action not in tasks_allowed:
-                    _log.info("check_action: blocked %s (in tasks view, not supported)", action)
+                    _log.debug("check_action: blocked %s (in tasks view, not supported)", action)
                     return False
         return True
 
