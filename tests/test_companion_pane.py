@@ -410,3 +410,105 @@ class TestTuiMergePrCompanion:
         cmd = mock_run.call_args[0][1]
         assert "--companion" in cmd
         assert "--resolve-window" in cmd
+
+
+# ---------------------------------------------------------------------------
+# _has_pm_panes and _find_or_rename_stale_window helpers
+# ---------------------------------------------------------------------------
+
+class TestHasPmPanes:
+    def test_returns_false_when_no_registry_entry(self):
+        with patch.object(pr_mod, "pane_registry") as mock_reg, \
+             patch.object(pr_mod, "tmux_mod"):
+            mock_reg.load_registry.return_value = {"windows": {}}
+            assert pr_mod._has_pm_panes("sess", "@1") is False
+
+    def test_returns_false_when_registered_pane_is_dead(self):
+        with patch.object(pr_mod, "pane_registry") as mock_reg, \
+             patch.object(pr_mod, "tmux_mod") as mock_tmux:
+            mock_reg.load_registry.return_value = {
+                "windows": {"@1": {"panes": [{"id": "%99", "role": "impl-claude"}]}}
+            }
+            mock_tmux.get_pane_indices.return_value = []  # no live panes
+            assert pr_mod._has_pm_panes("sess", "@1") is False
+
+    def test_returns_true_when_registered_pane_is_live(self):
+        with patch.object(pr_mod, "pane_registry") as mock_reg, \
+             patch.object(pr_mod, "tmux_mod") as mock_tmux:
+            mock_reg.load_registry.return_value = {
+                "windows": {"@1": {"panes": [{"id": "%1", "role": "impl-claude"}]}}
+            }
+            mock_tmux.get_pane_indices.return_value = [("%1", 0)]
+            assert pr_mod._has_pm_panes("sess", "@1") is True
+
+
+class TestFindOrRenameStaleWindow:
+    def test_returns_none_when_no_window(self):
+        with patch.object(pr_mod, "tmux_mod") as mock_tmux:
+            mock_tmux.find_windows_by_name.return_value = []
+            assert pr_mod._find_or_rename_stale_window("sess", "pr-001") is None
+            mock_tmux.rename_window.assert_not_called()
+
+    def test_returns_window_when_pm_managed(self):
+        window = {"id": "@1", "index": "1", "name": "pr-001"}
+        with patch.object(pr_mod, "tmux_mod") as mock_tmux, \
+             patch.object(pr_mod, "pane_registry") as mock_reg:
+            mock_tmux.find_windows_by_name.return_value = [window]
+            mock_reg.load_registry.return_value = {
+                "windows": {"@1": {"panes": [{"id": "%1", "role": "impl-claude"}]}}
+            }
+            mock_tmux.get_pane_indices.return_value = [("%1", 0)]
+            result = pr_mod._find_or_rename_stale_window("sess", "pr-001")
+            assert result == window
+            mock_tmux.rename_window.assert_not_called()
+
+    def test_renames_stale_window_and_returns_none(self):
+        window = {"id": "@1", "index": "1", "name": "pr-001"}
+        with patch.object(pr_mod, "tmux_mod") as mock_tmux, \
+             patch.object(pr_mod, "pane_registry") as mock_reg:
+            mock_tmux.find_windows_by_name.return_value = [window]
+            mock_reg.load_registry.return_value = {"windows": {}}  # no registry entry
+            result = pr_mod._find_or_rename_stale_window("sess", "pr-001")
+            assert result is None
+            mock_tmux.rename_window.assert_called_once()
+            new_name = mock_tmux.rename_window.call_args[0][2]
+            assert new_name.startswith("pr-001-stale-")
+
+    def test_disambiguates_duplicates_preferring_pm_managed(self):
+        managed_win = {"id": "@1", "index": "1", "name": "pr-001"}
+        stale_win = {"id": "@2", "index": "2", "name": "pr-001"}
+        with patch.object(pr_mod, "tmux_mod") as mock_tmux, \
+             patch.object(pr_mod, "pane_registry") as mock_reg:
+            mock_tmux.find_windows_by_name.return_value = [managed_win, stale_win]
+            # @1 has live pane, @2 does not
+            mock_reg.load_registry.return_value = {
+                "windows": {
+                    "@1": {"panes": [{"id": "%1", "role": "impl-claude"}]},
+                    "@2": {"panes": []},
+                }
+            }
+            mock_tmux.get_pane_indices.side_effect = lambda sess, win: (
+                [("%1", 0)] if win == "@1" else []
+            )
+            result = pr_mod._find_or_rename_stale_window("sess", "pr-001")
+            assert result == managed_win
+            # Only the stale window should be renamed
+            mock_tmux.rename_window.assert_called_once()
+            assert mock_tmux.rename_window.call_args[0][1] == "@2"
+
+    def test_all_duplicates_unmanaged_renames_all_uniquely(self):
+        windows = [
+            {"id": "@1", "index": "1", "name": "pr-001"},
+            {"id": "@2", "index": "2", "name": "pr-001"},
+        ]
+        with patch.object(pr_mod, "tmux_mod") as mock_tmux, \
+             patch.object(pr_mod, "pane_registry") as mock_reg:
+            mock_tmux.find_windows_by_name.return_value = windows
+            mock_reg.load_registry.return_value = {"windows": {}}
+            mock_tmux.get_pane_indices.return_value = []
+            result = pr_mod._find_or_rename_stale_window("sess", "pr-001")
+            assert result is None
+            assert mock_tmux.rename_window.call_count == 2
+            # Both renamed names must be unique
+            names = [c[0][2] for c in mock_tmux.rename_window.call_args_list]
+            assert len(set(names)) == 2, f"Expected unique stale names, got: {names}"

@@ -8,6 +8,7 @@ import platform
 import re
 import shutil
 import subprocess
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -1045,18 +1046,18 @@ def _find_or_rename_stale_window(session: str, name: str) -> dict | None:
     If multiple windows share the name, prefers the pm-managed one and
     renames the rest stale. Logs a warning when duplicates are detected.
     """
-    import time as _time
-
     windows = tmux_mod.find_windows_by_name(session, name)
     if not windows:
         return None
 
     if len(windows) > 1:
         _log.warning("Found %d windows named '%s', preferring pm-managed", len(windows), name)
-        managed = [w for w in windows if _has_pm_panes(session, w["id"])]
-        unmanaged = [w for w in windows if not _has_pm_panes(session, w["id"])]
-        for w in unmanaged:
-            new_name = f"{name}-stale-{int(_time.time())}"
+        managed_state = {w["id"]: _has_pm_panes(session, w["id"]) for w in windows}
+        managed = [w for w in windows if managed_state[w["id"]]]
+        unmanaged = [w for w in windows if not managed_state[w["id"]]]
+        ts = int(time.time())
+        for i, w in enumerate(unmanaged):
+            new_name = f"{name}-stale-{ts}" if i == 0 else f"{name}-stale-{ts}-{i}"
             _log.warning("Renaming duplicate unmanaged window '%s' (%s) → '%s'",
                          name, w["id"], new_name)
             tmux_mod.rename_window(session, w["id"], new_name)
@@ -1070,7 +1071,7 @@ def _find_or_rename_stale_window(session: str, name: str) -> dict | None:
         return window
 
     # Stale window — rename and signal caller to create fresh
-    new_name = f"{name}-stale-{int(_time.time())}"
+    new_name = f"{name}-stale-{int(time.time())}"
     _log.warning("Renaming stale window '%s' (%s) → '%s' (no pm-managed panes)",
                  name, window["id"], new_name)
     click.echo(f"Renamed stale window '{name}' to '{new_name}' (no pm-managed panes found)")
