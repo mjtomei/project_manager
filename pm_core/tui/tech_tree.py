@@ -118,6 +118,16 @@ class TechTree(Widget):
         self._recompute()
         self.refresh(layout=True)
 
+    def update_prs_data(self, prs: list[dict]) -> None:
+        """Update PR data without triggering a recompute.
+
+        Used by deferred re-sort: data is written immediately so newly-started
+        PRs are not invisible, but the sort/layout recompute is deferred until
+        the TUI is idle.
+        """
+        self._prs = prs
+        self.prs = prs
+
     def select_pr(self, pr_id: str) -> None:
         """Move the cursor to the given PR if it exists in the tree."""
         if not pr_id:
@@ -181,6 +191,10 @@ class TechTree(Widget):
 
     def _recompute(self) -> None:
         """Recompute layout positions using the tree_layout module."""
+        try:
+            self.app._resort_pending = False
+        except Exception:
+            pass
         result = compute_tree_layout(
             self._prs,
             hidden_plans=self._hidden_plans,
