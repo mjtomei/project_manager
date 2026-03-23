@@ -212,10 +212,28 @@ def setup_tmux_session() -> str:
         check=True,
     )
 
+    # Create a second window now (before hooks), so user can practice switching
+    # without this setup step auto-completing the create_window exercise.
+    subprocess.run(
+        ["tmux", "-S", socket_path, "new-window", "-t", f"{session_name}:",
+         "-n", "practice"],
+        check=True,
+    )
+    # Go back to tutorial window (also before hooks, so no auto-complete).
+    subprocess.run(
+        ["tmux", "-S", socket_path, "select-window", "-t",
+         f"{session_name}:tutorial"],
+        capture_output=True,
+    )
+
     # Write hook script
     hook_script = write_hook_script()
 
-    # Register tmux hooks to detect user actions
+    # Register tmux hooks to detect user actions.
+    # Hooks are registered AFTER all setup windows/selections are done so that
+    # the setup itself does not auto-complete exercises.
+    # Note: shlex.quote wraps only the script path; step names are alphanumeric
+    # and safe to pass unquoted as a separate shell word.
     hooks = {
         "after-select-pane": "switch_pane",
         "after-resize-pane": "resize_pane",
@@ -226,22 +244,9 @@ def setup_tmux_session() -> str:
     for hook, step in hooks.items():
         subprocess.run(
             ["tmux", "-S", socket_path, "set-hook", "-t", session_name,
-             hook, f"run-shell {shlex.quote(str(hook_script) + ' ' + step)}"],
+             hook, f"run-shell {shlex.quote(str(hook_script))} {step}"],
             capture_output=True,
         )
-
-    # Create a second window so user can practice switching
-    subprocess.run(
-        ["tmux", "-S", socket_path, "new-window", "-t", f"{session_name}:",
-         "-n", "practice"],
-        check=True,
-    )
-    # Go back to tutorial window
-    subprocess.run(
-        ["tmux", "-S", socket_path, "select-window", "-t",
-         f"{session_name}:tutorial"],
-        capture_output=True,
-    )
 
     return socket_path
 
