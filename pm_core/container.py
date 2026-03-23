@@ -589,7 +589,11 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
         if proxy_socket_path:
             sock_dir = str(Path(proxy_socket_path).parent)
             cleanup_parts.append(f"rmdir {shlex.quote(sock_dir)} 2>/dev/null")
-        return f"{exec_part}; {'; '.join(cleanup_parts)}"
+        # Wrap in a bash trap so cleanup runs even when the pane is killed
+        # via tmux kill-pane/kill-window (SIGHUP to the outer shell causes
+        # ';'-chained commands to be skipped, but EXIT traps always fire).
+        trap_cmd = shlex.quote("; ".join(cleanup_parts))
+        return f"bash -c 'trap {trap_cmd} EXIT; {exec_part}'"
     return exec_part
 
 
