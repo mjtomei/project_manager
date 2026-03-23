@@ -1897,7 +1897,7 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
             trigger_tui_restart()
     else:
         if not propagation_only:
-            # Vanilla backend: push to remote origin (already done in step 1 or by Claude)
+            # Vanilla backend: push merged base branch to origin
             push_result = git_ops.run_git("push", "origin", base_branch,
                                           cwd=workdir, check=False)
             if push_result.returncode != 0:
