@@ -229,7 +229,14 @@ class TestMergeWindowCompanion:
         mock_tmux.find_windows_by_name.return_value = []
         mock_tmux.find_window_by_name.return_value = {"id": "@2", "index": "2", "name": "merge-pr-001"}
         mock_tmux.new_window_get_pane.return_value = "%1"
-        mock_tmux.get_pane_indices.return_value = [("%1", 0)]
+        mock_tmux.pane_window_id.return_value = "@2"
+        # Calls: (1) post-creation validation (1 pane OK), (2) pre-split in
+        # _add_companion_pane (1 pane, not >=2, continue), (3) post-split (2 panes OK)
+        mock_tmux.get_pane_indices.side_effect = [
+            [("%1", 0)],
+            [("%1", 0)],
+            [("%1", 0), ("%2", 1)],
+        ]
         mock_tmux.split_pane_at.return_value = "%2"
         _reg.load_registry.return_value = {}
         _reg.get_window_data.return_value = {"user_modified": True}
@@ -246,6 +253,15 @@ class TestMergeWindowCompanion:
 
         mock_tmux.new_window_get_pane.assert_called_once()
         mock_tmux.split_pane_at.assert_called_once()
+        # merge-claude must NOT be pre-registered separately; registration
+        # happens once via _add_companion_pane's register_and_rebalance.
+        _reg.register_pane.assert_not_called()
+        _layout.register_and_rebalance.assert_called_once()
+        call_args = _layout.register_and_rebalance.call_args[0]
+        pane_list = call_args[2]
+        roles = [p[1] for p in pane_list]
+        assert "merge-claude" in roles
+        assert "merge-companion" in roles
 
     @patch.object(pr_mod, "tmux_mod")
     @patch.object(pr_mod, "pane_registry")

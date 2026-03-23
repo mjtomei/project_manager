@@ -1548,9 +1548,13 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
                 return
             if merge_win_id:
                 tmux_mod.set_shared_window_size(pm_session, merge_win_id)
-                pane_registry.register_pane(
-                    pm_session, merge_win_id, claude_pane, "merge-claude", claude_cmd
-                )
+                if not use_companion:
+                    # When using companion, _add_companion_pane registers both
+                    # panes via register_and_rebalance — don't pre-register here
+                    # or merge-claude would end up with a duplicate registry entry.
+                    pane_registry.register_pane(
+                        pm_session, merge_win_id, claude_pane, "merge-claude", claude_cmd
+                    )
             if use_companion:
                 merge_win = tmux_mod.find_window_by_name(pm_session, window_name)
                 if merge_win:
