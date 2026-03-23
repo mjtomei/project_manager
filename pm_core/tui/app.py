@@ -284,6 +284,7 @@ class ProjectManagerApp(App):
         self._qa_visible = False
         self._tasks_visible = False
         self._pre_mobile_view: str | None = None  # view before mobile mode switch
+        self._mounted = False  # True after on_mount completes; guards on_resize mobile check
         self._tasks_poll_timer = None
         # Frame capture state (always enabled)
         self._frame_rate: int = DEFAULT_FRAME_RATE
@@ -401,6 +402,7 @@ class ProjectManagerApp(App):
         self._load_state()
         self._update_orientation()
         self._check_mobile_transition()
+        self._mounted = True
         # Background sync interval: 5 minutes for automatic PR sync
         self._sync_timer = self.set_interval(300, self._background_sync)
         # Run heavier startup tasks (heal_registry, tmux bindings) in a
@@ -1210,7 +1212,10 @@ class ProjectManagerApp(App):
         # Mobile mode transition: auto-switch to tasks pane.
         # Use event.size directly — self.size isn't updated until App._on_resize
         # runs (which fires after this user handler in the MRO dispatch order).
-        self._check_mobile_transition(event.size.width)
+        # Guard: skip before on_mount completes — _current_guide_step not set yet,
+        # so the guide-mode skip would not fire, causing spurious tasks auto-show.
+        if self._mounted:
+            self._check_mobile_transition(event.size.width)
 
     def _check_mobile_transition(self, width: int | None = None) -> None:
         """Auto-switch to tasks pane in mobile mode, restore on exit."""
