@@ -44,7 +44,11 @@ class TestAddCompanionPane:
         with patch.object(pr_mod, "tmux_mod") as mock_tmux, \
              patch.object(pr_mod, "pane_registry") as mock_reg, \
              patch.object(pr_mod, "pane_layout") as mock_layout:
-            mock_tmux.get_pane_indices.return_value = [("%1", 0)]
+            # First call: pre-split (1 pane); second call: post-split (2 panes)
+            mock_tmux.get_pane_indices.side_effect = [
+                [("%1", 0)],
+                [("%1", 0), ("%2", 1)],
+            ]
             mock_tmux.split_pane_at.return_value = "%2"
             mock_reg.load_registry.return_value = {}
             mock_reg.get_window_data.return_value = {"user_modified": True}
@@ -64,6 +68,29 @@ class TestAddCompanionPane:
             roles = [p[1] for p in pane_list]
             assert "impl-claude" in roles
             assert "impl-companion" in roles
+
+    def test_aborts_if_post_split_pane_count_wrong(self):
+        """If pane count after split is not 2, kills companion pane and returns."""
+        with patch.object(pr_mod, "tmux_mod") as mock_tmux, \
+             patch.object(pr_mod, "pane_registry") as mock_reg, \
+             patch.object(pr_mod, "pane_layout") as mock_layout, \
+             patch.object(pr_mod, "subprocess") as mock_sub:
+            # Pre-split: 1 pane; post-split: still only 1 (unexpected)
+            mock_tmux.get_pane_indices.side_effect = [
+                [("%1", 0)],
+                [("%1", 0)],
+            ]
+            mock_tmux.split_pane_at.return_value = "%2"
+            mock_reg.find_live_pane_by_role.return_value = None
+
+            pr_mod._add_companion_pane("sess", {"id": "@1", "index": "1"},
+                                        "/work/dir", "impl")
+
+            # Should kill the companion pane
+            mock_tmux._tmux_cmd.assert_called_with("kill-pane", "-t", "%2")
+            mock_sub.run.assert_called_once()
+            # Should not register anything
+            mock_layout.register_and_rebalance.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -101,7 +128,12 @@ class TestPrStartCompanion:
         # find_windows_by_name is used for stale-window detection
         mock_tmux.find_windows_by_name.return_value = [{"id": "@1", "index": "1", "name": "pr-001"}]
         mock_tmux.find_window_by_name.return_value = {"id": "@1", "index": "1", "name": "pr-001"}
-        mock_tmux.get_pane_indices.return_value = [("%1", 0)]  # single pane
+        # Calls: (1) _has_pm_panes liveness check, (2) pre-split check, (3) post-split validation
+        mock_tmux.get_pane_indices.side_effect = [
+            [("%1", 0)],
+            [("%1", 0)],
+            [("%1", 0), ("%2", 1)],
+        ]
         mock_tmux.split_pane_at.return_value = "%2"
         # Registry must have pm panes so window is treated as valid (not stale)
         _reg.load_registry.return_value = {
@@ -150,7 +182,12 @@ class TestPrStartCompanion:
         # find_windows_by_name is used for stale-window detection
         mock_tmux.find_windows_by_name.return_value = [{"id": "@1", "index": "1", "name": "pr-001"}]
         mock_tmux.find_window_by_name.return_value = {"id": "@1", "index": "1", "name": "pr-001"}
-        mock_tmux.get_pane_indices.return_value = [("%1", 0)]
+        # Calls: (1) _has_pm_panes liveness check, (2) pre-split check, (3) post-split validation
+        mock_tmux.get_pane_indices.side_effect = [
+            [("%1", 0)],
+            [("%1", 0)],
+            [("%1", 0), ("%2", 1)],
+        ]
         mock_tmux.split_pane_at.return_value = "%2"
         # Registry must have pm panes so window is treated as valid (not stale)
         _reg.load_registry.return_value = {

@@ -1115,6 +1115,17 @@ def _add_companion_pane(pm_session: str, window_info: dict, workdir: str,
     companion_pane = tmux_mod.split_pane_at(claude_pane, "h", companion_cmd,
                                              background=True)
 
+    # Validate: expect exactly 2 panes after split
+    post_panes = tmux_mod.get_pane_indices(pm_session, win_index)
+    if len(post_panes) != 2:
+        _log.error("_add_companion_pane: expected 2 panes after split, got %d — aborting",
+                   len(post_panes))
+        click.echo(f"Companion pane: unexpected pane count ({len(post_panes)}), aborting.",
+                   err=True)
+        if companion_pane:
+            subprocess.run(tmux_mod._tmux_cmd("kill-pane", "-t", companion_pane), check=False)
+        return
+
     # Register panes for layout management
     tmux_mod.set_shared_window_size(pm_session, win_id)
     panes = [(claude_pane, f"{role_prefix}-claude", "claude")]
