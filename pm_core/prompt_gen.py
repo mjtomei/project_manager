@@ -315,7 +315,15 @@ def _remote_sync_tip(data: dict, branch: str) -> str:
     return (
         f"- Pull from remote before starting work to pick up changes from "
         f"other sessions or machines: `git pull origin {branch}`. "
-        f"If there are merge conflicts, resolve them before continuing."
+        f"If there are merge conflicts, resolve them before continuing.\n"
+        f"- After pulling, read the *current* version of every module this PR "
+        f"modifies or calls into — not the GitHub branch's version. "
+        f"Check whether any functions or behaviors have been added since the spec "
+        f"was written that your implementation should use or account for. "
+        f"The spec's Ambiguities section describes what was true when the spec was "
+        f"written; verify those resolutions are still accurate against the current code. "
+        f"Do not adopt code from a previous session's branch without checking it against "
+        f"the current module state."
     )
 
 
