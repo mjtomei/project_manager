@@ -11,6 +11,7 @@ Progress is tracked in ~/.pm/tutorial/progress.json and persists across sessions
 import json
 import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 from pm_core.paths import pm_home
@@ -151,6 +152,9 @@ def write_hook_script() -> Path:
     # This script is called by tmux hooks with the step name as $1.
     # Validate the step name against a whitelist to avoid injection.
     valid_steps = " ".join(TMUX_STEPS)
+    # Use the same Python interpreter that is running pm so that pm_core is
+    # importable even when pm is installed in a virtualenv.
+    python_exe = shlex.quote(sys.executable)
     script.write_text(f"""\
 #!/usr/bin/env bash
 # Called by tmux hooks to mark tutorial steps complete
@@ -159,7 +163,7 @@ VALID_STEPS="{valid_steps}"
 # Validate step name against whitelist
 for s in $VALID_STEPS; do
     if [ "$STEP" = "$s" ]; then
-        python3 -c "
+        {python_exe} -c "
 import sys
 from pm_core.tutorial import mark_step_complete
 mark_step_complete('tmux', sys.argv[1])
