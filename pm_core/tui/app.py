@@ -391,6 +391,13 @@ class ProjectManagerApp(App):
         # Load state and render immediately so the TUI shows content fast.
         # Defer heavier operations (heal_registry, tmux bindings, GitHub
         # sync) to after the first frame.
+        # Reset view flags to neutralize any pre-mount resize events that may
+        # have fired on_resize before on_mount and incorrectly set
+        # _tasks_visible=True before the initial view was decided.
+        self._tasks_visible = False
+        self._plans_visible = False
+        self._qa_visible = False
+        self._pre_mobile_view = None
         self._load_state()
         self._update_orientation()
         self._check_mobile_transition()
