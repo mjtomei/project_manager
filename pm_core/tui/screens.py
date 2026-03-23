@@ -205,15 +205,32 @@ class HelpScreen(ModalScreen):
     }
     """
 
-    def __init__(self, in_plans: bool = False, in_qa: bool = False):
+    def __init__(self, in_plans: bool = False, in_qa: bool = False, in_tasks: bool = False):
         super().__init__()
         self._in_plans = in_plans
         self._in_qa = in_qa
+        self._in_tasks = in_tasks
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="help-container"):
             yield Label("Keyboard Shortcuts", id="help-title")
-            if self._in_qa:
+            if self._in_tasks:
+                yield Label("Tasks Navigation", classes="help-section")
+                yield Label("  [bold]↑↓[/] or [bold]jk[/]  Move selection", classes="help-row")
+                yield Label("  [bold]J/K[/]  Jump between groups", classes="help-row")
+                yield Label("  [bold]Space[/] or [bold]→[/]  Expand/collapse", classes="help-row")
+                yield Label("  [bold]←[/]  Collapse", classes="help-row")
+                yield Label("  [bold]Enter[/]  Switch to window", classes="help-row")
+                yield Label("  [bold]T[/]  Back to tree view", classes="help-row")
+                yield Label("PR Actions (on selected task)", classes="help-section")
+                yield Label("  [bold]s[/]  Start PR", classes="help-row")
+                yield Label("  [bold]S[/]  Start PR with companion pane", classes="help-row")
+                yield Label("  [bold]d[/]  Review (zz d: loop, zzz d: strict)", classes="help-row")
+                yield Label("  [bold]g[/]  Merge PR", classes="help-row")
+                yield Label("  [bold]G[/]  Merge PR with companion pane", classes="help-row")
+                yield Label("  [bold]t[/]  Start QA on PR", classes="help-row")
+                yield Label("  [bold]c[/]  Launch Claude session", classes="help-row")
+            elif self._in_qa:
                 yield Label("QA Navigation", classes="help-section")
                 yield Label("  [bold]↑↓[/] or [bold]jk[/]  Move selection", classes="help-row")
                 yield Label("  [bold]Enter[/]  Run selected item", classes="help-row")
@@ -261,6 +278,7 @@ class HelpScreen(ModalScreen):
             yield Label("  [bold]p[/]  Toggle plans view", classes="help-row")
             yield Label("  [bold]t[/]  Start QA on selected PR", classes="help-row")
             yield Label("  [bold]q[/]  Toggle QA instructions", classes="help-row")
+            yield Label("  [bold]T[/]  Toggle running tasks", classes="help-row")
             yield Label("  [bold]b[/]  Rebalance panes", classes="help-row")
             yield Label("Companion Pane", classes="help-section")
             yield Label("  [bold]S[/]  Start PR with companion pane", classes="help-row")

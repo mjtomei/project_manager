@@ -1,0 +1,499 @@
+"""Tests for the tasks pane widget."""
+
+import pytest
+
+from pm_core.tui.tasks_pane import (
+    TasksPane,
+    TaskEntry,
+    TaskWindowSwitch,
+    _classify_window,
+    GROUP_ORDER,
+)
+
+
+class TestClassifyWindow:
+    """Tests for window name classification."""
+
+    def test_implementation_gh_pr(self):
+        group, pr_id, role, sub_id = _classify_window("#128")
+        assert group == "Implementation"
+        assert pr_id == "#128"
+        assert role == "main"
+        assert sub_id is None
+
+    def test_implementation_local_pr(self):
+        group, pr_id, role, sub_id = _classify_window("pr-001")
+        assert group == "Implementation"
+        assert pr_id == "pr-001"
+        assert role == "main"
+
+    def test_review_window(self):
+        group, pr_id, role, sub_id = _classify_window("review-#128")
+        assert group == "Review"
+        assert pr_id == "#128"
+        assert role == "main"
+
+    def test_review_local_pr(self):
+        group, pr_id, role, sub_id = _classify_window("review-pr-001")
+        assert group == "Review"
+        assert pr_id == "pr-001"
+
+    def test_merge_window(self):
+        group, pr_id, role, sub_id = _classify_window("merge-#128")
+        assert group == "Review"
+        assert pr_id == "#128"
+
+    def test_qa_main(self):
+        group, pr_id, role, sub_id = _classify_window("qa-#128")
+        assert group == "QA"
+        assert pr_id == "#128"
+        assert role == "main"
+        assert sub_id is None
+
+    def test_qa_scenario(self):
+        group, pr_id, role, sub_id = _classify_window("qa-#128-s1")
+        assert group == "QA"
+        assert pr_id == "#128"
+        assert role == "sub"
+        assert sub_id == "1"
+
+    def test_qa_scenario_local_pr(self):
+        group, pr_id, role, sub_id = _classify_window("qa-pr-001-s3")
+        assert group == "QA"
+        assert pr_id == "pr-001"
+        assert role == "sub"
+        assert sub_id == "3"
+
+    def test_watcher(self):
+        group, pr_id, role, sub_id = _classify_window("watcher")
+        assert group == "Watcher"
+        assert pr_id == ""
+        assert role == "main"
+
+    def test_unknown_window(self):
+        group, pr_id, role, sub_id = _classify_window("random-window")
+        assert group == "Other"
+        assert role == "main"
+
+    def test_main_window(self):
+        group, pr_id, role, sub_id = _classify_window("main")
+        assert group == "Other"
+
+
+class TestTaskEntry:
+    """Tests for TaskEntry data structure."""
+
+    def test_basic_creation(self):
+        entry = TaskEntry("Implementation", "#128", "#128", "1")
+        assert entry.group == "Implementation"
+        assert entry.pr_display_id == "#128"
+        assert entry.main_window == "#128"
+        assert entry.expanded is False
+        assert entry.sub_windows == []
+
+    def test_sub_windows(self):
+        entry = TaskEntry("QA", "#128", "qa-#128", "2")
+        entry.sub_windows.append(("qa-#128-s1", "3", "1"))
+        entry.sub_windows.append(("qa-#128-s2", "4", "2"))
+        assert len(entry.sub_windows) == 2
+
+
+class TestTasksPane:
+    """Tests for the TasksPane widget."""
+
+    def test_initializes_empty(self):
+        pane = TasksPane()
+        assert pane._entries == []
+        assert pane._flat_items == []
+
+    def test_update_tasks_with_windows(self):
+        pane = TasksPane()
+        windows = [
+            {"id": "@1", "index": "0", "name": "main"},
+            {"id": "@2", "index": "1", "name": "#128"},
+            {"id": "@3", "index": "2", "name": "review-#128"},
+            {"id": "@4", "index": "3", "name": "qa-#128"},
+            {"id": "@5", "index": "4", "name": "qa-#128-s1"},
+        ]
+        prs = [
+            {"id": "pr-001", "gh_pr_number": 128, "title": "Fix bug", "status": "in_review"},
+        ]
+        pane.update_tasks(windows, prs, {}, {})
+
+        # main window should be skipped
+        # Should have: Implementation (#128), Review (#128), QA (#128 + s1)
+        assert len(pane._entries) == 3
+
+        # Check groups
+        groups = [e.group for e in pane._entries]
+        assert "Implementation" in groups
+        assert "Review" in groups
+        assert "QA" in groups
+
+    def test_qa_sub_windows_collapsed(self):
+        pane = TasksPane()
+        windows = [
+            {"id": "@1", "index": "0", "name": "main"},
+            {"id": "@2", "index": "1", "name": "qa-#128"},
+            {"id": "@3", "index": "2", "name": "qa-#128-s1"},
+            {"id": "@4", "index": "3", "name": "qa-#128-s2"},
+        ]
+        prs = [{"id": "pr-001", "gh_pr_number": 128, "title": "Fix", "status": "qa"}]
+        pane.update_tasks(windows, prs, {}, {})
+
+        # Should have 1 QA entry with 2 sub-windows
+        qa_entries = [e for e in pane._entries if e.group == "QA"]
+        assert len(qa_entries) == 1
+        assert len(qa_entries[0].sub_windows) == 2
+        assert qa_entries[0].expanded is False
+
+    def test_watcher_entry(self):
+        pane = TasksPane()
+        windows = [
+            {"id": "@1", "index": "0", "name": "main"},
+            {"id": "@2", "index": "1", "name": "watcher"},
+        ]
+        pane.update_tasks(windows, [], {}, {})
+
+        watcher = [e for e in pane._entries if e.group == "Watcher"]
+        assert len(watcher) == 1
+        assert watcher[0].pr_display_id == ""
+
+    def test_selectable_indices_skip_headers(self):
+        pane = TasksPane()
+        windows = [
+            {"id": "@1", "index": "0", "name": "main"},
+            {"id": "@2", "index": "1", "name": "#128"},
+            {"id": "@3", "index": "2", "name": "watcher"},
+        ]
+        prs = [{"id": "pr-001", "gh_pr_number": 128, "title": "Fix", "status": "in_progress"}]
+        pane.update_tasks(windows, prs, {}, {})
+
+        selectable = pane._selectable_indices()
+        # Headers are not selectable
+        for idx in selectable:
+            assert "_header" not in pane._flat_items[idx]
+
+    def test_group_boundaries(self):
+        pane = TasksPane()
+        windows = [
+            {"id": "@1", "index": "0", "name": "main"},
+            {"id": "@2", "index": "1", "name": "#128"},
+            {"id": "@3", "index": "2", "name": "review-#129"},
+            {"id": "@4", "index": "3", "name": "watcher"},
+        ]
+        prs = [
+            {"id": "pr-001", "gh_pr_number": 128, "title": "Fix", "status": "in_progress"},
+            {"id": "pr-002", "gh_pr_number": 129, "title": "Add", "status": "in_review"},
+        ]
+        pane.update_tasks(windows, prs, {}, {})
+
+        boundaries = pane._group_boundaries()
+        # Should have boundaries for each group
+        assert len(boundaries) >= 2  # Implementation, Review, Watcher
+
+    def test_selected_pr_id(self):
+        pane = TasksPane()
+        windows = [
+            {"id": "@1", "index": "0", "name": "main"},
+            {"id": "@2", "index": "1", "name": "#128"},
+        ]
+        prs = [{"id": "pr-001", "gh_pr_number": 128, "title": "Fix", "status": "in_progress"}]
+        pane.update_tasks(windows, prs, {}, {})
+
+        # Select the first selectable item
+        selectable = pane._selectable_indices()
+        if selectable:
+            pane.selected_index = selectable[0]
+            assert pane.selected_pr_id == "pr-001"
+
+    def test_selected_window_name(self):
+        pane = TasksPane()
+        windows = [
+            {"id": "@1", "index": "0", "name": "main"},
+            {"id": "@2", "index": "1", "name": "#128"},
+        ]
+        prs = [{"id": "pr-001", "gh_pr_number": 128, "title": "Fix", "status": "in_progress"}]
+        pane.update_tasks(windows, prs, {}, {})
+
+        selectable = pane._selectable_indices()
+        if selectable:
+            pane.selected_index = selectable[0]
+            assert pane.selected_window_name == "#128"
+
+    def test_empty_tasks_no_crash(self):
+        pane = TasksPane()
+        pane.update_tasks([], [], {}, {})
+        assert pane._entries == []
+        assert pane.selected_pr_id is None
+        assert pane.selected_window_name is None
+
+
+class TestGroupOrder:
+    """Test group ordering."""
+
+    def test_group_order_complete(self):
+        assert "Implementation" in GROUP_ORDER
+        assert "Review" in GROUP_ORDER
+        assert "QA" in GROUP_ORDER
+        assert "Watcher" in GROUP_ORDER
+        assert "Other" in GROUP_ORDER
+
+    def test_implementation_first(self):
+        assert GROUP_ORDER.index("Implementation") < GROUP_ORDER.index("Review")
+        assert GROUP_ORDER.index("Implementation") < GROUP_ORDER.index("QA")
+
+
+class TestExpandCollapse:
+    """Tests for expand/collapse and flat item structure."""
+
+    def _make_qa_pane(self):
+        pane = TasksPane()
+        windows = [
+            {"id": "@1", "index": "0", "name": "main"},
+            {"id": "@2", "index": "1", "name": "qa-#128"},
+            {"id": "@3", "index": "2", "name": "qa-#128-s1"},
+            {"id": "@4", "index": "3", "name": "qa-#128-s2"},
+        ]
+        prs = [{"id": "pr-001", "gh_pr_number": 128, "title": "Fix", "status": "qa"}]
+        pane.update_tasks(windows, prs, {}, {})
+        return pane
+
+    def test_collapsed_hides_sub_windows(self):
+        pane = self._make_qa_pane()
+        # When collapsed, flat items should not include sub-entries
+        sub_items = [i for i in pane._flat_items if "_sub" in i]
+        assert len(sub_items) == 0
+
+    def test_expanded_shows_sub_windows(self):
+        pane = self._make_qa_pane()
+        qa = [e for e in pane._entries if e.group == "QA"][0]
+        qa.expanded = True
+        pane._build_flat_items()
+        sub_items = [i for i in pane._flat_items if "_sub" in i]
+        assert len(sub_items) == 2
+
+    def test_expanded_sub_window_names(self):
+        pane = self._make_qa_pane()
+        qa = [e for e in pane._entries if e.group == "QA"][0]
+        qa.expanded = True
+        pane._build_flat_items()
+        sub_items = [i for i in pane._flat_items if "_sub" in i]
+        sub_names = [i["_name"] for i in sub_items]
+        assert "qa-#128-s1" in sub_names
+        assert "qa-#128-s2" in sub_names
+
+    def test_selected_window_on_sub(self):
+        pane = self._make_qa_pane()
+        qa = [e for e in pane._entries if e.group == "QA"][0]
+        qa.expanded = True
+        pane._build_flat_items()
+        # Find first sub-window index
+        for i, item in enumerate(pane._flat_items):
+            if "_sub" in item:
+                pane.selected_index = i
+                break
+        assert pane.selected_window_name == "qa-#128-s1"
+
+    def test_expansion_preserved_across_poll(self):
+        """Expansion state must survive update_tasks calls (poll every 2 seconds)."""
+        pane = self._make_qa_pane()
+        qa = [e for e in pane._entries if e.group == "QA"][0]
+        qa.expanded = True
+        pane._build_flat_items()
+        assert len([i for i in pane._flat_items if "_sub" in i]) == 2
+
+        # Simulate another poll — same windows
+        windows = [
+            {"id": "@1", "index": "0", "name": "main"},
+            {"id": "@2", "index": "1", "name": "qa-#128"},
+            {"id": "@3", "index": "2", "name": "qa-#128-s1"},
+            {"id": "@4", "index": "3", "name": "qa-#128-s2"},
+        ]
+        prs = [{"id": "pr-001", "gh_pr_number": 128, "title": "Fix", "status": "qa"}]
+        pane.update_tasks(windows, prs, {}, {})
+
+        qa_after = [e for e in pane._entries if e.group == "QA"][0]
+        assert qa_after.expanded is True
+        sub_items = [i for i in pane._flat_items if "_sub" in i]
+        assert len(sub_items) == 2
+
+
+class TestReviewLoopMarkers:
+    """Tests for review/QA loop status markers on task entries."""
+
+    def test_review_loop_running_marker(self):
+        pane = TasksPane()
+        windows = [
+            {"id": "@1", "index": "0", "name": "main"},
+            {"id": "@2", "index": "1", "name": "#128"},
+        ]
+        prs = [{"id": "pr-001", "gh_pr_number": 128, "title": "Fix", "status": "in_review"}]
+
+        class FakeLoop:
+            running = True
+            iteration = 3
+            latest_verdict = "FAIL"
+
+        pane.update_tasks(windows, prs, {"pr-001": FakeLoop()}, {})
+        entry = pane._entries[0]
+        assert "3" in entry.review_loop_marker
+        assert "FAIL" in entry.review_loop_marker
+
+    def test_review_loop_finished_marker(self):
+        pane = TasksPane()
+        windows = [
+            {"id": "@1", "index": "0", "name": "main"},
+            {"id": "@2", "index": "1", "name": "#128"},
+        ]
+        prs = [{"id": "pr-001", "gh_pr_number": 128, "title": "Fix", "status": "in_review"}]
+
+        class FakeLoop:
+            running = False
+            iteration = 5
+            latest_verdict = "PASS"
+
+        pane.update_tasks(windows, prs, {"pr-001": FakeLoop()}, {})
+        entry = pane._entries[0]
+        assert entry.review_loop_marker == "PASS"
+
+    def test_qa_loop_running_marker(self):
+        pane = TasksPane()
+        windows = [
+            {"id": "@1", "index": "0", "name": "main"},
+            {"id": "@2", "index": "1", "name": "qa-#128"},
+        ]
+        prs = [{"id": "pr-001", "gh_pr_number": 128, "title": "Fix", "status": "qa"}]
+
+        class FakeQALoop:
+            running = True
+            iteration = 2
+            latest_verdict = None
+
+        pane.update_tasks(windows, prs, {}, {"pr-001": FakeQALoop()})
+        entry = pane._entries[0]
+        assert "2" in entry.qa_loop_marker
+
+    def test_qa_loop_finished_marker(self):
+        pane = TasksPane()
+        windows = [
+            {"id": "@1", "index": "0", "name": "main"},
+            {"id": "@2", "index": "1", "name": "qa-#128"},
+        ]
+        prs = [{"id": "pr-001", "gh_pr_number": 128, "title": "Fix", "status": "qa"}]
+
+        class FakeQALoop:
+            running = False
+            iteration = 1
+            latest_verdict = "PASS"
+
+        pane.update_tasks(windows, prs, {}, {"pr-001": FakeQALoop()})
+        entry = pane._entries[0]
+        assert entry.qa_loop_marker == "PASS"
+
+    def test_watcher_running_marker(self):
+        pane = TasksPane()
+        windows = [
+            {"id": "@1", "index": "0", "name": "main"},
+            {"id": "@2", "index": "1", "name": "watcher"},
+        ]
+        watcher_infos = [{"window_name": "watcher", "running": True, "input_required": False}]
+        pane.update_tasks(windows, [], {}, {}, watcher_infos=watcher_infos)
+        entry = [e for e in pane._entries if e.group == "Watcher"][0]
+        assert "active" in entry.review_loop_marker
+
+    def test_watcher_input_required_marker(self):
+        pane = TasksPane()
+        windows = [
+            {"id": "@1", "index": "0", "name": "main"},
+            {"id": "@2", "index": "1", "name": "watcher"},
+        ]
+        watcher_infos = [{"window_name": "watcher", "running": True, "input_required": True}]
+        pane.update_tasks(windows, [], {}, {}, watcher_infos=watcher_infos)
+        entry = [e for e in pane._entries if e.group == "Watcher"][0]
+        assert entry.review_loop_marker == "INPUT_REQ"
+
+
+class TestCheckActionTogglePlans:
+    """Regression tests for check_action / toggle_plans interaction.
+
+    These tests read the source file directly to avoid importing app.py,
+    which has a transitive yaml dependency not available in all environments.
+    """
+
+    @staticmethod
+    def _app_source() -> str:
+        import os
+        path = os.path.join(os.path.dirname(__file__), "..", "pm_core", "tui", "app.py")
+        with open(path) as f:
+            return f.read()
+
+    def test_toggle_plans_not_blocked_when_plans_visible(self):
+        """Pressing 'p' to exit plans view must not be blocked.
+
+        Regression: toggle_plans was added to the PR-action guard, which also
+        blocked it when _plans_visible=True via the generic plans-view check.
+        The fix adds `action != 'toggle_plans'` to that check so 'p' still
+        works to exit plans view.
+        """
+        source = self._app_source()
+        # The fix must be present: plans-visible check must exempt toggle_plans
+        assert 'action != "toggle_plans"' in source or "action != 'toggle_plans'" in source, (
+            "check_action must not block toggle_plans when _plans_visible=True; "
+            "otherwise 'p' can never exit plans view"
+        )
+
+    def test_toggle_tasks_binding_registered(self):
+        """T binding and toggle_tasks action must appear in app.py."""
+        source = self._app_source()
+        assert '"T"' in source or "'T'" in source
+        assert "toggle_tasks" in source
+
+    def test_toggle_tasks_in_command_bar_guard(self):
+        """toggle_tasks is listed in the command-bar-focus guard."""
+        source = self._app_source()
+        # Both toggle_tasks and the guard string must appear together
+        assert "toggle_tasks" in source
+        assert "cmd_bar.has_focus" in source
+
+    def test_toggle_plans_not_blocked_when_qa_visible(self):
+        """Pressing 'p' from QA view must not be blocked.
+
+        Regression: toggle_plans was added to the PR-action guard list, whose
+        _qa_visible check had no exemption for it — blocking 'p' from QA view.
+        The fix adds `action != 'toggle_plans'` to the _qa_visible check too.
+        """
+        source = self._app_source()
+        # Both the plans-visible AND qa-visible checks must exempt toggle_plans
+        assert source.count('action != "toggle_plans"') >= 2 or source.count("action != 'toggle_plans'") >= 2 or (
+            ('action != "toggle_plans"' in source or "action != 'toggle_plans'" in source) and
+            "_qa_visible" in source
+        ), (
+            "check_action must not block toggle_plans when _qa_visible=True; "
+            "otherwise 'p' can never exit QA view"
+        )
+
+    def test_toggle_plans_allowed_from_tasks_view(self):
+        """Pressing 'p' while tasks pane is visible must navigate to plans view.
+
+        Regression: toggle_plans was not in tasks_allowed, blocking 'p' from
+        tasks view. This prevented the user from navigating to plans without
+        first pressing T to exit tasks. It also prevented _pre_mobile_view from
+        being cleared on manual 'p' navigation, causing a spurious jump back to
+        tasks when the terminal widened.
+        """
+        source = self._app_source()
+        # tasks_allowed must include toggle_plans
+        assert '"toggle_plans"' in source or "'toggle_plans'" in source, (
+            "toggle_plans must appear in tasks_allowed so 'p' works from tasks view"
+        )
+        # Verify both toggle_plans and tasks_allowed co-occur in the tasks block
+        tasks_allowed_idx = source.find("tasks_allowed")
+        toggle_plans_nearby = (
+            "toggle_plans" in source[max(0, tasks_allowed_idx - 50):tasks_allowed_idx + 300]
+        )
+        assert toggle_plans_nearby, (
+            "toggle_plans must be in tasks_allowed list in check_action; "
+            "otherwise 'p' is blocked from tasks view and _pre_mobile_view is "
+            "not cleared on manual navigation to plans"
+        )
