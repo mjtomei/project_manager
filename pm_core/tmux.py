@@ -381,13 +381,19 @@ def find_window_by_name(session: str, name: str) -> dict | None:
 
 
 def select_window(session: str, window: str) -> bool:
-    """Select (switch to) a window by index or name. Returns True on success.
+    """Select (switch to) a window by exact name. Returns True on success.
 
     Targets the current grouped session so only the caller's terminal switches.
+    Uses exact name matching to avoid tmux prefix-matching a different window.
     """
+    # Resolve to an exact index first so tmux doesn't prefix-match a different
+    # window (e.g. "qa-#2" would otherwise match "qa-#2-s1").
+    win = find_window_by_name(session, window)
+    if win is None:
+        return False
     target = current_or_base_session(session)
     result = subprocess.run(
-        _tmux_cmd("select-window", "-t", f"{target}:{window}"),
+        _tmux_cmd("select-window", "-t", f"{target}:{win['index']}"),
         capture_output=True,
     )
     return result.returncode == 0
