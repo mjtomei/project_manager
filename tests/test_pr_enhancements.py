@@ -748,6 +748,12 @@ class TestGitHubMergePull:
         assert ("merge", "--ff-only", "origin/master") in git_calls
         mock_finalize.assert_called_once()
 
+        # Should also push the feature branch to origin for downstream workdirs (R2)
+        push_calls = [c for c in git_calls if c[0] == "push"]
+        assert ("push", "origin", "pm/pr-001") in push_calls, (
+            "GitHub merge should push feature branch to origin"
+        )
+
         # The fetch/merge ops must target the main repo dir, NOT the PR workdir.
         # The feature-branch push is the one exception (runs from workdir).
         repo_dir = tmp_github_merge_project["pm_dir"].parent
