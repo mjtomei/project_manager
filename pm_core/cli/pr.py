@@ -449,7 +449,7 @@ def pr_cd(identifier: str):
 
 @pr.command("list")
 @click.option("--workdirs", is_flag=True, default=False, help="Show workdir paths and their git status")
-@click.option("-t", "--timestamps", is_flag=True, default=False, help="Show updated_at timestamp for each PR")
+@click.option("-t", "--timestamps", is_flag=True, default=False, help="Show updated_at timestamp and sort by most recently updated")
 @click.option("--open", "open_only", is_flag=True, default=False, help="Exclude closed and merged PRs")
 @click.option("--status", "filter_status", default=None, help="Show only PRs with this status (e.g. in_progress, qa, merged)")
 def pr_list(workdirs: bool, timestamps: bool, open_only: bool, filter_status: str | None):
@@ -467,8 +467,11 @@ def pr_list(workdirs: bool, timestamps: bool, open_only: bool, filter_status: st
     if filter_status:
         prs = [p for p in prs if p.get("status") == filter_status]
 
-    # Sort newest first (by gh_pr_number descending, then pr id descending)
-    prs = sorted(prs, key=lambda p: (p.get("gh_pr_number") or _pr_id_sort_key(p["id"])[0], _pr_id_sort_key(p["id"])[1]), reverse=True)
+    if timestamps:
+        prs = sorted(prs, key=lambda p: p.get("updated_at") or p.get("created_at") or "", reverse=True)
+    else:
+        # Sort newest first (by gh_pr_number descending, then pr id descending)
+        prs = sorted(prs, key=lambda p: (p.get("gh_pr_number") or _pr_id_sort_key(p["id"])[0], _pr_id_sort_key(p["id"])[1]), reverse=True)
 
     active_pr = data.get("project", {}).get("active_pr")
     status_icons = {
