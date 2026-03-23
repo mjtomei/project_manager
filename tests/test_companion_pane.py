@@ -225,6 +225,8 @@ class TestMergeWindowCompanion:
         mock_tmux.find_windows_by_name.return_value = []
         mock_tmux.find_window_by_name.return_value = {"id": "@2", "index": "2", "name": "merge-pr-001"}
         mock_tmux.new_window_get_pane.return_value = "%1"
+        mock_tmux.pane_window_id.return_value = "@2"
+        mock_tmux.get_pane_indices.return_value = [("%1", 0)]
 
         data = {"project": {"base_branch": "master"}}
         pr_entry = {"id": "pr-001", "workdir": "/work/dir"}

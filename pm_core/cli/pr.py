@@ -1280,14 +1280,16 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         )
         review_win_id = wid_result.stdout.strip()
         if review_win_id:
-            # Validate pane count after creation
+            # Post-creation validation: verify exactly 2 panes (claude + diff)
             post_panes = tmux_mod.get_pane_indices(pm_session, review_win_id)
-            expected_panes = 2 if diff_pane else 1
-            if len(post_panes) != expected_panes:
-                _log.warning(
-                    "Review window '%s' has %d pane(s) after creation, expected %d",
-                    window_name, len(post_panes), expected_panes,
+            if len(post_panes) != 2:
+                _log.error(
+                    "_launch_review_window: expected 2 panes after split, got %d — aborting",
+                    len(post_panes),
                 )
+                click.echo(f"Review window error: unexpected pane count ({len(post_panes)}), expected 2")
+                tmux_mod.kill_window(pm_session, review_win_id)
+                return
             tmux_mod.set_shared_window_size(pm_session, review_win_id)
             panes = [(claude_pane, "review-claude", claude_cmd)]
             if diff_pane:
@@ -1514,26 +1516,33 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
         return
 
     try:
-        if use_companion:
-            claude_pane = tmux_mod.new_window_get_pane(
-                pm_session, window_name, claude_cmd, workdir,
-                switch=not background,
-            )
-            if claude_pane:
-                win = tmux_mod.find_window_by_name(pm_session, window_name)
-                if win:
-                    _add_companion_pane(pm_session, win, workdir, "merge")
-        else:
-            merge_pane_id = tmux_mod.new_window_get_pane(
-                pm_session, window_name, claude_cmd, workdir,
-                switch=not background,
-            )
-            merge_win = tmux_mod.find_window_by_name(pm_session, window_name)
-            if merge_win and merge_pane_id:
-                tmux_mod.set_shared_window_size(pm_session, merge_win["id"])
+        claude_pane = tmux_mod.new_window_get_pane(
+            pm_session, window_name, claude_cmd, workdir,
+            switch=not background,
+        )
+        if claude_pane:
+            merge_win_id = tmux_mod.pane_window_id(claude_pane)
+            # Post-creation validation: verify exactly 1 pane before splitting
+            if merge_win_id:
+                post_panes = tmux_mod.get_pane_indices(pm_session, merge_win_id)
+            else:
+                post_panes = []
+            if len(post_panes) != 1:
+                _log.error("_launch_merge_window: expected 1 pane, got %d — aborting",
+                           len(post_panes))
+                click.echo(f"Merge window error: unexpected pane count ({len(post_panes)}), expected 1")
+                if merge_win_id:
+                    tmux_mod.kill_window(pm_session, merge_win_id)
+                return
+            if merge_win_id:
+                tmux_mod.set_shared_window_size(pm_session, merge_win_id)
                 pane_registry.register_pane(
-                    pm_session, merge_win["id"], merge_pane_id, "merge-claude", claude_cmd
+                    pm_session, merge_win_id, claude_pane, "merge-claude", claude_cmd
                 )
+            if use_companion:
+                merge_win = tmux_mod.find_window_by_name(pm_session, window_name)
+                if merge_win:
+                    _add_companion_pane(pm_session, merge_win, workdir, "merge")
         click.echo(f"Opened merge resolution window '{window_name}'")
     except Exception as e:
         _log.warning("Failed to launch merge window: %s", e)

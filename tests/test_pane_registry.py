@@ -409,9 +409,12 @@ class TestReconcileRegistry:
 
     @patch("pm_core.pane_registry.save_registry")
     @patch("pm_core.pane_registry.load_registry")
+    @patch("pm_core.tmux.session_exists", return_value=False)
     @patch("pm_core.tmux.get_pane_indices")
-    def test_skips_when_no_live_panes_but_registry_has_panes(self, mock_indices, mock_load, mock_save):
-        """Don't wipe registry if window doesn't exist (no live panes returned)."""
+    def test_skips_when_no_live_panes_and_session_gone(
+        self, mock_indices, mock_session_exists, mock_load, mock_save
+    ):
+        """Don't wipe registry if session no longer exists (stale file)."""
         mock_load.return_value = {
             "session": "sess",
             "windows": {
@@ -425,3 +428,24 @@ class TestReconcileRegistry:
         removed = _reconcile_registry("sess", "0")
         assert removed == []
         mock_save.assert_not_called()
+
+    @patch("pm_core.pane_registry.save_registry")
+    @patch("pm_core.pane_registry.load_registry")
+    @patch("pm_core.tmux.session_exists", return_value=True)
+    @patch("pm_core.tmux.get_pane_indices")
+    def test_reports_removed_when_no_live_panes_but_session_alive(
+        self, mock_indices, mock_session_exists, mock_load, mock_save
+    ):
+        """When session is alive but window has no panes, report panes as removed."""
+        mock_load.return_value = {
+            "session": "sess",
+            "windows": {
+                "0": {
+                    "panes": [{"id": "%1", "role": "tui"}],
+                    "user_modified": False,
+                },
+            },
+        }
+        mock_indices.return_value = []
+        removed = _reconcile_registry("sess", "0")
+        assert removed == ["%1"]

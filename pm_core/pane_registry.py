@@ -120,6 +120,34 @@ def kill_and_unregister(session: str, pane_id: str) -> None:
     unregister_pane(session, pane_id)
 
 
+def find_claude_pane_in_window(session: str, window_id: str) -> str | None:
+    """Find a live pane whose role contains ``claude`` in the given window.
+
+    Searches the registry for roles like ``review-claude``, ``impl-claude``,
+    ``merge-claude``, ``watcher-claude``, etc.  Role-agnostic so callers
+    don't need to know which role a window uses.
+    Returns the pane ID if found and alive, None otherwise.
+    """
+    from pm_core import tmux as tmux_mod
+
+    data = load_registry(session)
+    wdata = data.get("windows", {}).get(window_id)
+    if not wdata:
+        return None
+
+    live_panes = tmux_mod.get_pane_indices(session, window_id)
+    live_ids = {p[0] for p in live_panes}
+
+    for pane in wdata.get("panes", []):
+        if "claude" in pane.get("role", "") and pane.get("id") in live_ids:
+            _logger.info("find_claude_pane_in_window: found %s role=%s in %s",
+                         pane["id"], pane["role"], window_id)
+            return pane["id"]
+
+    _logger.info("find_claude_pane_in_window: no live claude pane in window %s", window_id)
+    return None
+
+
 def find_live_pane_by_role(session: str, role: str,
                            window: str | None = None) -> str | None:
     """Find a live pane with the given role, or None if not found.
