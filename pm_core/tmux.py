@@ -176,12 +176,13 @@ def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
     if not pane_id:
         return None
     if switch:
-        # Switch the current grouped session to the new window
-        win = find_window_by_name(session, name)
-        if win:
+        # Derive window ID from the returned pane ID — more robust than
+        # a secondary name lookup (avoids race with duplicate window names).
+        win_id = pane_window_id(pane_id)
+        if win_id:
             current = current_or_base_session(session)
             _run(
-                _tmux_cmd("select-window", "-t", f"{current}:{win['index']}"),
+                _tmux_cmd("select-window", "-t", f"{current}:{win_id}"),
             )
     return pane_id
 
