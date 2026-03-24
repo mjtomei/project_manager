@@ -293,6 +293,13 @@ class TestFeedbackLogging:
 class TestFeedbackInjection:
     """Test SupervisorWatcher.on_verdict() feedback injection."""
 
+    def _idle_pane_patches(self):
+        """Return context managers that simulate an idle pane at a clean prompt."""
+        return (
+            patch("pm_core.tmux.get_pane_activity_age", return_value=10.0),
+            patch("pm_core.tmux.capture_pane", return_value="some output\n> "),
+        )
+
     @patch("pm_core.loop_shared.get_pm_session", return_value="test-session")
     @patch("pm_core.watchers.supervisor_watcher.log_feedback")
     def test_injects_feedback_via_send_keys(self, mock_log, mock_session):
@@ -301,9 +308,11 @@ class TestFeedbackInjection:
             {"target_window": "pr-abc", "observation": "bug", "feedback": "fix it"},
         ]
 
+        age_patch, capture_patch = self._idle_pane_patches()
         with patch("pm_core.tmux.find_window_by_name",
                     return_value={"id": "@1", "index": "1", "name": "pr-abc"}), \
              patch("pm_core.tmux.get_pane_indices", return_value=[("%5", 0)]), \
+             age_patch, capture_patch, \
              patch("pm_core.tmux.send_keys") as mock_send:
             w.on_verdict("FEEDBACK_SENT", "output")
 
@@ -334,6 +343,88 @@ class TestFeedbackInjection:
         w._pending_feedback = []
         # Should not raise
         w.on_verdict("NO_ISSUES", "output")
+
+
+# --- Safe injection helper ---
+
+class TestSafeInject:
+    """Test SupervisorWatcher._safe_inject() idle and prompt guards."""
+
+    def _make_watcher(self):
+        return SupervisorWatcher(pm_root="")
+
+    def test_injects_when_idle_and_empty_prompt(self):
+        w = self._make_watcher()
+        with patch("pm_core.tmux.get_pane_activity_age", return_value=10.0), \
+             patch("pm_core.tmux.capture_pane", return_value="some output\n> "), \
+             patch("pm_core.tmux.send_keys") as mock_send:
+            result = w._safe_inject("%1", "hello")
+        assert result is True
+        mock_send.assert_called_once_with("%1", "hello")
+
+    def test_skips_when_pane_active_recently(self):
+        w = self._make_watcher()
+        with patch("pm_core.tmux.get_pane_activity_age", return_value=2.0), \
+             patch("pm_core.tmux.send_keys") as mock_send:
+            result = w._safe_inject("%1", "hello")
+        assert result is False
+        mock_send.assert_not_called()
+
+    def test_skips_when_activity_age_unknown(self):
+        w = self._make_watcher()
+        with patch("pm_core.tmux.get_pane_activity_age", return_value=None), \
+             patch("pm_core.tmux.send_keys") as mock_send:
+            result = w._safe_inject("%1", "hello")
+        assert result is False
+        mock_send.assert_not_called()
+
+    def test_skips_when_text_already_in_prompt(self):
+        w = self._make_watcher()
+        with patch("pm_core.tmux.get_pane_activity_age", return_value=10.0), \
+             patch("pm_core.tmux.capture_pane", return_value="some output\n> partial text"), \
+             patch("pm_core.tmux.send_keys") as mock_send:
+            result = w._safe_inject("%1", "hello")
+        assert result is False
+        mock_send.assert_not_called()
+
+    def test_skips_when_last_line_is_not_a_prompt(self):
+        """Session is mid-output (no prompt visible yet)."""
+        w = self._make_watcher()
+        with patch("pm_core.tmux.get_pane_activity_age", return_value=10.0), \
+             patch("pm_core.tmux.capture_pane", return_value="Running tests...\nAll passed."), \
+             patch("pm_core.tmux.send_keys") as mock_send:
+            result = w._safe_inject("%1", "hello")
+        assert result is False
+        mock_send.assert_not_called()
+
+    def test_custom_min_idle_seconds(self):
+        """min_idle_seconds parameter is respected."""
+        w = self._make_watcher()
+        with patch("pm_core.tmux.get_pane_activity_age", return_value=3.0), \
+             patch("pm_core.tmux.capture_pane", return_value="> "), \
+             patch("pm_core.tmux.send_keys") as mock_send:
+            # 3s is not enough for default (5s) but enough for custom (2s)
+            assert w._safe_inject("%1", "hello", min_idle_seconds=2.0) is True
+            assert w._safe_inject("%2", "hello", min_idle_seconds=5.0) is False
+        mock_send.assert_called_once()
+
+    def test_returns_false_when_send_keys_raises(self):
+        w = self._make_watcher()
+        with patch("pm_core.tmux.get_pane_activity_age", return_value=10.0), \
+             patch("pm_core.tmux.capture_pane", return_value="> "), \
+             patch("pm_core.tmux.send_keys", side_effect=RuntimeError("tmux gone")):
+            result = w._safe_inject("%1", "hello")
+        assert result is False
+
+    def test_prompt_with_leading_whitespace(self):
+        """Prompt may have leading spaces in some terminal layouts."""
+        w = self._make_watcher()
+        with patch("pm_core.tmux.get_pane_activity_age", return_value=10.0), \
+             patch("pm_core.tmux.capture_pane", return_value="   >   "), \
+             patch("pm_core.tmux.send_keys") as mock_send:
+            result = w._safe_inject("%1", "hello")
+        assert result is True
+        mock_send.assert_called_once()
 
 
 # --- Prompt generation ---

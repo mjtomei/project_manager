@@ -537,6 +537,26 @@ def next_grouped_session_name(base: str, socket_path: str | None = None) -> str:
     return f"{base}~{max_n + 1}"
 
 
+def get_pane_activity_age(pane_id: str) -> float | None:
+    """Return seconds since the last activity in a pane.
+
+    Uses tmux ``#{pane_activity}`` (a Unix timestamp).  Returns None if
+    the pane doesn't exist or the value can't be parsed.
+    """
+    result = subprocess.run(
+        _tmux_cmd("display-message", "-p", "-t", pane_id, "#{pane_activity}"),
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return None
+    raw = result.stdout.strip()
+    try:
+        import time
+        return time.time() - float(raw)
+    except ValueError:
+        return None
+
+
 def capture_pane(pane_id: str, full_scrollback: bool = False) -> str:
     """Capture the contents of a tmux pane.
 

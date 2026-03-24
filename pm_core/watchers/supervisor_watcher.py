@@ -16,6 +16,14 @@ import sys
 import time
 from datetime import datetime
 
+# Minimum pane idle time (seconds) before injecting feedback.
+# If the pane had activity more recently than this, the session is busy.
+_MIN_IDLE_SECONDS = 5
+
+# Regex matching a Claude Code prompt line with no text typed yet.
+# Claude Code uses "> " as the input prompt prefix.
+_EMPTY_PROMPT_RE = re.compile(r"^\s*>\s*$")
+
 from pm_core.paths import configure_logger
 from pm_core.watcher_base import BaseWatcher, WatcherState
 from pm_core.loop_shared import match_verdict
@@ -257,18 +265,8 @@ Important: Be concise in your feedback. Each feedback message will be injected i
             injected = False
 
             if pane_id:
-                try:
-                    # Format feedback for injection — use a clear marker
-                    inject_text = (
-                        f"[SUPERVISOR FEEDBACK] {feedback_text}"
-                    )
-                    tmux_mod.send_keys(pane_id, inject_text)
-                    injected = True
-                    _log.info("supervisor: injected feedback into %s (pane %s)",
-                              target_window, pane_id)
-                except Exception as e:
-                    _log.warning("supervisor: failed to inject into %s: %s",
-                                 target_window, e)
+                inject_text = f"[SUPERVISOR FEEDBACK] {feedback_text}"
+                injected = self._safe_inject(pane_id, inject_text, target_window)
 
             # Log feedback regardless of injection success
             entry = FeedbackEntry(
@@ -285,6 +283,66 @@ Important: Be concise in your feedback. Each feedback message will be injected i
         self._pending_feedback = []
 
     # ── Helpers ────────────────────────────────────────────────────────
+
+    def _safe_inject(
+        self,
+        pane_id: str,
+        text: str,
+        window_name: str = "",
+        min_idle_seconds: float = _MIN_IDLE_SECONDS,
+    ) -> bool:
+        """Inject feedback into a pane only when it is idle at a clean prompt.
+
+        Two guards run before injecting:
+
+        1. **Activity age** — the pane must have been idle for at least
+           *min_idle_seconds*.  If the session had recent output or keystrokes,
+           it is busy and injection would clobber in-progress work.
+
+        2. **Empty prompt** — the last visible line of the pane must look like
+           a clean Claude Code prompt (``> `` with nothing after it).  If the
+           user or another process has already typed text, injecting would
+           corrupt the partial input.
+
+        Returns True if the feedback was sent, False otherwise.
+        """
+        from pm_core import tmux as tmux_mod
+
+        # Guard 1: idle time
+        age = tmux_mod.get_pane_activity_age(pane_id)
+        if age is None or age < min_idle_seconds:
+            _log.info(
+                "supervisor: skipping injection into %s (pane %s): "
+                "activity age=%.1fs < %.1fs",
+                window_name, pane_id, age if age is not None else -1,
+                min_idle_seconds,
+            )
+            return False
+
+        # Guard 2: no text already typed into the prompt
+        content = tmux_mod.capture_pane(pane_id, full_scrollback=False)
+        last_line = ""
+        for line in reversed(content.splitlines()):
+            if line.strip():
+                last_line = line
+                break
+        if not _EMPTY_PROMPT_RE.match(last_line):
+            _log.info(
+                "supervisor: skipping injection into %s (pane %s): "
+                "prompt is not empty (last_line=%r)",
+                window_name, pane_id, last_line[:60],
+            )
+            return False
+
+        try:
+            tmux_mod.send_keys(pane_id, text)
+            _log.info("supervisor: injected feedback into %s (pane %s)",
+                      window_name, pane_id)
+            return True
+        except Exception as e:
+            _log.warning("supervisor: failed to inject into %s: %s",
+                         window_name, e)
+            return False
 
     def _find_target_pane(self, session: str, window_name: str) -> str | None:
         """Find the first pane ID for a window by name."""
