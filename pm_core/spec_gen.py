@@ -643,10 +643,48 @@ def format_spec_for_prompt(pr: dict, phase: str) -> str:
     }
     label = phase_labels.get(phase, f"{phase} Spec")
 
+    mode = pr_spec_mode(pr)
+    pr_id = pr.get("id", "???")
+    try:
+        root = store.find_project_root()
+    except FileNotFoundError:
+        root = Path("pm")
+    file_path = spec_file_path(root, pr_id, phase)
+
+    if mode == "auto":
+        review_note = (
+            "Before proceeding, check the spec's Ambiguities section for any open "
+            "questions left unanswered (the session that generated it may have exited "
+            "before resolving them). If you find any, resolve them using your best "
+            "judgment, document the resolution in the spec, re-save to "
+            f"`{file_path}`, and run `pm pr spec-save {pr_id} {phase}` before continuing."
+        )
+    elif mode == "prompt":
+        review_note = (
+            "Before proceeding, check the spec's Ambiguities section for any items "
+            "marked **[UNRESOLVED]** (the session that generated it may have exited "
+            "before resolving them). Resolve any you can confidently handle based on "
+            f"the codebase and document them in the spec. Re-save to `{file_path}` "
+            f"and run `pm pr spec-save {pr_id} {phase}`. "
+            "If any remain genuinely unresolvable, present them to the user and wait "
+            "for their response before proceeding."
+        )
+    else:  # review
+        review_note = (
+            "Before proceeding, check the spec's Ambiguities section for any open "
+            "questions left unanswered (the session that generated it may have exited "
+            "before resolving them). If you find any, present them to the user along "
+            "with your proposed resolutions. Update the spec with their answers, "
+            f"re-save to `{file_path}`, run `pm pr spec-save {pr_id} {phase}`, "
+            "and ask for approval before continuing."
+        )
+
     return f"""
 ## {label}
 
 The following spec was generated to guide this phase. Work from this spec rather than interpreting the raw PR description directly.
+
+{review_note}
 
 {spec}
 """

@@ -1082,21 +1082,6 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     title = pr_entry.get("title", "")
     base_branch = data.get("project", {}).get("base_branch", "master")
 
-    # Generate review prompt and build Claude command
-    review_prompt = prompt_gen.generate_review_prompt(data, pr_id, session_name=pm_session,
-                                                      review_loop=review_loop,
-                                                      review_iteration=review_iteration,
-                                                      review_loop_id=review_loop_id)
-    claude_cmd = build_claude_shell_cmd(prompt=review_prompt,
-                                         transcript=transcript, cwd=workdir)
-    # Optionally wrap in a container for isolation
-    branch = pr_entry.get("branch", "")
-    from pm_core.container import wrap_claude_cmd
-    _stag = pm_session.removeprefix("pm-") if pm_session else None
-    claude_cmd, _cname = wrap_claude_cmd(claude_cmd, workdir, label=f"review-{pr_id}",
-                                          allowed_push_branch=branch,
-                                          session_tag=_stag, pr_id=pr_id)
-
     window_name = f"review-{display_id}"
 
     # Fast path: if review window already exists and we don't need fresh,
@@ -1111,6 +1096,15 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                 )
             tmux_mod.kill_window(pm_session, existing["id"])
             click.echo(f"Killed existing review window '{window_name}'")
+            # Explicitly remove the container so the race between the old
+            # pane's EXIT trap (docker rm -f) and the new wrap_claude_cmd
+            # (which would "reuse" the same deterministic container name)
+            # can't kill the new session.  remove_container is a no-op if
+            # the container is already gone.
+            from pm_core.container import remove_container, is_container_mode_enabled, _make_container_name
+            if is_container_mode_enabled():
+                _cname = _make_container_name(f"review-{pr_id}")
+                remove_container(_cname)
         else:
             tmux_mod.select_window(pm_session, existing["id"])
             click.echo(f"Switched to existing review window '{window_name}'")

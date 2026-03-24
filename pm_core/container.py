@@ -592,8 +592,11 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
         # Wrap in a bash trap so cleanup runs even when the pane is killed
         # via tmux kill-pane/kill-window (SIGHUP to the outer shell causes
         # ';'-chained commands to be skipped, but EXIT traps always fire).
-        trap_cmd = shlex.quote("; ".join(cleanup_parts))
-        return f"bash -c 'trap {trap_cmd} EXIT; {exec_part}'"
+        # Use shlex.quote on the full inner script to avoid quote nesting
+        # issues: exec_part already contains single-quoted arguments from
+        # shlex.quote(), so wrapping in literal '...' would break parsing.
+        inner = f"trap {shlex.quote('; '.join(cleanup_parts))} EXIT; {exec_part}"
+        return f"bash -c {shlex.quote(inner)}"
     return exec_part
 
 
