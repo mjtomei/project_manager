@@ -1096,15 +1096,6 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                 )
             tmux_mod.kill_window(pm_session, existing["id"])
             click.echo(f"Killed existing review window '{window_name}'")
-            # Explicitly remove the container so the race between the old
-            # pane's EXIT trap (docker rm -f) and the new wrap_claude_cmd
-            # (which would "reuse" the same deterministic container name)
-            # can't kill the new session.  remove_container is a no-op if
-            # the container is already gone.
-            from pm_core.container import remove_container, is_container_mode_enabled, _make_container_name
-            if is_container_mode_enabled():
-                _cname = _make_container_name(f"review-{pr_id}")
-                remove_container(_cname)
         else:
             tmux_mod.select_window(pm_session, existing["id"])
             click.echo(f"Switched to existing review window '{window_name}'")
@@ -1131,9 +1122,18 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                                          model=_resolution.model,
                                          provider=_resolution.provider,
                                          effort=_resolution.effort)
-    # Optionally wrap in a container for isolation
+    # Optionally wrap in a container for isolation.
+    # Always remove any existing container for this review before creating a
+    # new one.  The previous session's bash EXIT trap runs "docker rm -f"
+    # asynchronously after its pane is killed; if wrap_claude_cmd runs while
+    # that rm is still in flight it will "reuse" the dying container, then
+    # the old trap's rm completes and kills the new session mid-init.
+    # Removing it here (synchronously) closes that race regardless of whether
+    # an existing tmux window was found above.
     branch = pr_entry.get("branch", "")
-    from pm_core.container import wrap_claude_cmd, ContainerError
+    from pm_core.container import wrap_claude_cmd, ContainerError, remove_container, is_container_mode_enabled, _make_container_name
+    if is_container_mode_enabled():
+        remove_container(_make_container_name(f"review-{pr_id}"))
     try:
         claude_cmd, _cname = wrap_claude_cmd(claude_cmd, workdir, label=f"review-{pr_id}",
                                               allowed_push_branch=branch)
