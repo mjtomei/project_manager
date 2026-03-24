@@ -43,6 +43,14 @@ class TestLoadSaveProgress:
         progress = tut.load_progress()
         assert progress == {"modules": {}}
 
+    def test_save_progress_is_atomic(self):
+        """save_progress must write via a temp file then rename, not in-place."""
+        data = {"modules": {"git": {"completed_steps": ["init_repo"]}}}
+        tut.save_progress(data)
+        # After save, no .tmp file should linger
+        assert not tut.PROGRESS_FILE.with_suffix(".tmp").exists()
+        assert tut.load_progress() == data
+
 
 # ---------------------------------------------------------------------------
 # mark_step_complete
@@ -186,3 +194,34 @@ class TestHookCommandQuoting:
         assert cmd.endswith(" switch_pane")
         # The path portion should be properly quoted
         assert "'/home/my user/.pm/tutorial/hook_helper.sh'" in cmd
+
+
+# ---------------------------------------------------------------------------
+# setup_git_practice_repo — verify existing repo is preserved on re-entry
+# ---------------------------------------------------------------------------
+
+
+class TestGitPracticeRepoPreservation:
+    def test_existing_repo_is_preserved(self, tmp_path):
+        """If .git already exists, setup_git_practice_repo must not delete it."""
+        repo_dir = tmp_path / "tutorial" / "git-practice"
+        repo_dir.mkdir(parents=True)
+        (repo_dir / ".git").mkdir()
+        sentinel = repo_dir / "my_work.txt"
+        sentinel.write_text("in progress")
+
+        with patch.object(tut, "TUTORIAL_DIR", tmp_path / "tutorial"):
+            returned = tut.setup_git_practice_repo()
+
+        assert returned == repo_dir
+        assert sentinel.exists(), "Existing repo work must not be deleted on re-entry"
+
+    def test_missing_repo_is_created(self, tmp_path):
+        """If no repo exists, setup_git_practice_repo must create and init it."""
+        with patch.object(tut, "TUTORIAL_DIR", tmp_path / "tutorial"):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = type("R", (), {"returncode": 0})()
+                repo_dir = tut.setup_git_practice_repo()
+
+        assert repo_dir == tmp_path / "tutorial" / "git-practice"
+        assert repo_dir.exists()

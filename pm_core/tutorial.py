@@ -77,9 +77,11 @@ def load_progress() -> dict:
 
 
 def save_progress(progress: dict) -> None:
-    """Save tutorial progress to disk."""
+    """Save tutorial progress to disk atomically (write-then-rename)."""
     _ensure_dir()
-    PROGRESS_FILE.write_text(json.dumps(progress, indent=2) + "\n")
+    tmp = PROGRESS_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(progress, indent=2) + "\n")
+    tmp.rename(PROGRESS_FILE)
 
 
 def mark_step_complete(module: str, step: str) -> None:
@@ -372,9 +374,16 @@ def setup_tui_project() -> Path:
 def setup_git_practice_repo() -> Path:
     """Create a disposable git practice repository.
 
+    If the repository already exists (e.g. the user is resuming a partially
+    completed module), it is preserved so that prior work is not lost.
+    To get a fresh repo, delete ~/.pm/tutorial/git-practice manually or run
+    ``pm tutorial --reset -m git`` followed by removing the directory.
+
     Returns the path to the practice repo.
     """
     repo_dir = TUTORIAL_DIR / "git-practice"
+    if (repo_dir / ".git").exists():
+        return repo_dir  # Preserve existing work on mid-progress re-entry
     if repo_dir.exists():
         import shutil
         shutil.rmtree(repo_dir)
