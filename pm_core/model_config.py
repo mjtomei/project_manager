@@ -81,7 +81,6 @@ DEFAULT_SESSION_EFFORT: dict[str, str] = {
 }
 
 
-
 @dataclass
 class ModelResolution:
     """Result of resolving a model for a session type.
