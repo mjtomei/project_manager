@@ -13,7 +13,6 @@ different task subsets.
 import json
 import re
 import sys
-import time
 from datetime import datetime
 
 # Minimum pane idle time (seconds) before injecting feedback.
@@ -31,9 +30,10 @@ from pm_core.supervisor_feedback import FeedbackEntry, log_feedback
 
 _log = configure_logger("pm.watchers.supervisor")
 
-# Windows the supervisor should never observe (infrastructure windows)
+# Windows the supervisor should never observe (infrastructure windows).
+# Note: "supervisor-*" windows are also excluded via the startswith check below.
 _EXCLUDED_WINDOWS = frozenset({
-    "tui", "watcher", "supervisor", "repl",
+    "tui", "watcher", "repl",
 })
 
 # Maximum pane output to capture per target (chars)
