@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-0b827df
+  active_pr: pr-df1aa3f
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -7105,6 +7105,38 @@ prs:
   gh_pr_number: null
   created_at: '2026-03-22T19:31:05.710967+00:00'
   updated_at: '2026-03-22T19:31:05.710967+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-df1aa3f
+  plan: null
+  title: 'fix: rename tmux session after git init in guide to restore pm session access'
+  branch: pm/pr-df1aa3f-fix-rename-tmux-session-after-git-init-in-guide-to
+  status: pending
+  depends_on: []
+  description: 'When the guide initializes a new git repo for a user who has none,
+    the session tag changes (derived from the new git repo name/path hash). The tmux
+    session retains the old tag-based name, making `pm session` unable to find it
+    — it looks up the new tag and finds nothing.
+
+
+    The fix is to add a section to the guide prompt instructing the guide to rename
+    the tmux session with the correct new tag after git repo creation. The guide can:
+
+    1. Get the new tag by running `pm session --tag` (or compute it) after git init
+    / pm init
+
+    2. Rename the tmux session: `tmux rename-session $(tmux display-message -p ''#{session_name}'')
+    pm-<new-tag>`
+
+
+    This ensures the session remains accessible via `pm session` after the tag changes.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-25T19:34:49.847790+00:00'
+  updated_at: '2026-03-25T19:34:49.847790+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
