@@ -391,13 +391,10 @@ def _create_supervisor_window(iteration: int, loop_id: str,
     repo_dir = str(root.parent) if store.is_internal_pm_dir(root) else str(root)
 
     # Resolve model/provider — supervisor uses "supervisor" session type,
-    # falling back to "watcher" if not configured.  Default to high effort.
+    # falling back to "watcher" if not configured.  Effort defaults to "high"
+    # via DEFAULT_SESSION_EFFORT["supervisor"] in model_config.py.
     from pm_core.model_config import resolve_model_and_provider
     _resolution = resolve_model_and_provider("supervisor", project_data=data)
-
-    # Supervisor should default to high effort unless explicitly overridden
-    if not _resolution.effort:
-        _resolution.effort = "high"
 
     claude_cmd = build_claude_shell_cmd(
         prompt=supervisor_prompt,
