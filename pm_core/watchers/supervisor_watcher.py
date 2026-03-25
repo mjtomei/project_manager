@@ -250,6 +250,7 @@ Important: Be concise in your feedback. Each feedback message will be injected i
         session = get_pm_session()
         if not session:
             _log.warning("supervisor: no PM session for feedback injection")
+            self._pending_feedback = []
             return
 
         for fb in self._pending_feedback[:_MAX_FEEDBACK_PER_ITERATION]:

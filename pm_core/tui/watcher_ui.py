@@ -194,6 +194,7 @@ def start_watcher(app, transcript_dir: str | None = None,
         kwargs["auto_start_target"] = getattr(app, '_auto_start_target', None)
         kwargs["meta_pm_root"] = meta_pm_root
     elif watcher_type == "supervisor":
+        # TODO: set app._supervisor_target when TUI gains a supervisor-start dialog
         kwargs["target_filter"] = getattr(app, '_supervisor_target', None)
     watcher = cls(pm_root=pm_root, **kwargs)
     manager.register(watcher)
