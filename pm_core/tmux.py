@@ -2,6 +2,7 @@
 
 import os
 import subprocess
+import time
 
 from pm_core.paths import configure_logger
 
@@ -551,7 +552,6 @@ def get_pane_activity_age(pane_id: str) -> float | None:
         return None
     raw = result.stdout.strip()
     try:
-        import time
         return time.time() - float(raw)
     except ValueError:
         return None
