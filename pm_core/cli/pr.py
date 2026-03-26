@@ -1065,7 +1065,7 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
                           transcript=transcript)
 
 
-def _finalize_merge(data: dict, root, pr_entry: dict, pr_id: str,
+def _finalize_merge(root, pr_entry: dict, pr_id: str,
                     transcript: str | None = None) -> None:
     """Mark PR as merged, kill tmux windows, and show newly ready PRs."""
     def apply(data):
@@ -1494,7 +1494,7 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
                     companion=companion,
                 )
                 if pull_ok:
-                    _finalize_merge(data, root, pr_entry, pr_id, transcript=transcript)
+                    _finalize_merge(root, pr_entry, pr_id, transcript=transcript)
                     # Restart TUI when managing the project_manager repo itself,
                     # so it picks up the latest pm code from the pull.
                     repo = data.get("project", {}).get("repo", "")
@@ -1599,7 +1599,7 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
         )
         if not pull_ok:
             return
-        _finalize_merge(data, root, pr_entry, pr_id, transcript=transcript)
+        _finalize_merge(root, pr_entry, pr_id, transcript=transcript)
         repo = data.get("project", {}).get("repo", "")
         if "project_manager" in repo or "project-manager" in repo:
             trigger_tui_restart()
@@ -1633,7 +1633,7 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
         if not pull_ok:
             # Merge window launched for pull conflict — don't finalize yet
             return
-        _finalize_merge(data, root, pr_entry, pr_id, transcript=transcript)
+        _finalize_merge(root, pr_entry, pr_id, transcript=transcript)
         repo = data.get("project", {}).get("repo", "")
         if "project_manager" in repo or "project-manager" in repo:
             trigger_tui_restart()

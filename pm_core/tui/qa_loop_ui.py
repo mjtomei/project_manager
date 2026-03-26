@@ -418,13 +418,18 @@ def _transition_pr_status(app, pr_id: str, from_status: str, to_status: str) -> 
     if not app._root:
         return
     try:
+        transitioned = False
+
         def apply(data):
+            nonlocal transitioned
             pr = store.get_pr(data, pr_id)
             if pr and pr.get("status", "") == from_status:
                 pr["status"] = to_status
+                transitioned = True
 
         store.locked_update(app._root, apply)
-        _log.info("Transitioned %s: %s → %s", pr_id, from_status, to_status)
+        if transitioned:
+            _log.info("Transitioned %s: %s → %s", pr_id, from_status, to_status)
     except store.StoreLockTimeout as e:
         _log.warning("_transition_pr_status: lock timeout for %s: %s", pr_id, e)
     except Exception:
