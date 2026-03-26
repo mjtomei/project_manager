@@ -1952,18 +1952,18 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool):
     data = store.load(root)
 
     if prune:
+        pruned = 0
+
         def apply_prune(data):
-            count = 0
+            nonlocal pruned
             for p in data.get("prs") or []:
                 wd = p.get("workdir")
                 if wd and not Path(wd).exists():
                     click.echo(f"  {p['id']}: cleared missing workdir {wd}")
                     p["workdir"] = None
-                    count += 1
-            apply_prune.count = count
+                    pruned += 1
 
         store.locked_update(root, apply_prune)
-        pruned = apply_prune.count
         if pruned:
             trigger_tui_refresh()
             click.echo(f"Pruned {pruned} stale workdir reference(s).")
