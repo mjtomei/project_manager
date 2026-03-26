@@ -52,7 +52,7 @@ class ProjectManagerApp(App):
     }
     SessionBar {
         height: 1;
-        background: $surface-darken-1;
+        background: $surface;
         color: $text;
         padding: 0 1;
         display: none;
