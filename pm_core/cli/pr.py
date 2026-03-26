@@ -1534,27 +1534,26 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
         )
         if claude_pane:
             merge_win_id = tmux_mod.pane_window_id(claude_pane)
+            if not merge_win_id:
+                _log.error("_launch_merge_window: could not get window ID for pane %s", claude_pane)
+                click.echo("Merge window error: could not get window ID after creation")
+                return
             # Post-creation validation: verify exactly 1 pane before splitting
-            if merge_win_id:
-                post_panes = tmux_mod.get_pane_indices(pm_session, merge_win_id)
-            else:
-                post_panes = []
+            post_panes = tmux_mod.get_pane_indices(pm_session, merge_win_id)
             if len(post_panes) != 1:
                 _log.error("_launch_merge_window: expected 1 pane, got %d — aborting",
                            len(post_panes))
                 click.echo(f"Merge window error: unexpected pane count ({len(post_panes)}), expected 1")
-                if merge_win_id:
-                    tmux_mod.kill_window(pm_session, merge_win_id)
+                tmux_mod.kill_window(pm_session, merge_win_id)
                 return
-            if merge_win_id:
-                tmux_mod.set_shared_window_size(pm_session, merge_win_id)
-                if not use_companion:
-                    # When using companion, _add_companion_pane registers both
-                    # panes via register_and_rebalance — don't pre-register here
-                    # or merge-claude would end up with a duplicate registry entry.
-                    pane_registry.register_pane(
-                        pm_session, merge_win_id, claude_pane, "merge-claude", claude_cmd
-                    )
+            tmux_mod.set_shared_window_size(pm_session, merge_win_id)
+            if not use_companion:
+                # When using companion, _add_companion_pane registers both
+                # panes via register_and_rebalance — don't pre-register here
+                # or merge-claude would end up with a duplicate registry entry.
+                pane_registry.register_pane(
+                    pm_session, merge_win_id, claude_pane, "merge-claude", claude_cmd
+                )
             if use_companion:
                 merge_win = tmux_mod.find_window_by_name(pm_session, window_name)
                 if merge_win:

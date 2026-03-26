@@ -288,18 +288,22 @@ def _create_watcher_window(iteration: int, loop_id: str,
     watcher_win_id = tmux_mod.pane_window_id(claude_pane)
     _log.info("_create_watcher_window: new pane=%s window=%s", claude_pane, watcher_win_id)
 
-    if watcher_win_id:
-        post_panes = tmux_mod.get_pane_indices(pm_session, watcher_win_id)
-        if len(post_panes) != 1:
-            _log.error("_create_watcher_window: expected 1 pane, got %d — aborting",
-                       len(post_panes))
-            click.echo(f"Watcher: unexpected pane count ({len(post_panes)}), aborting.", err=True)
-            tmux_mod.kill_window(pm_session, watcher_win_id)
-            raise SystemExit(1)
-        tmux_mod.set_shared_window_size(pm_session, watcher_win_id)
-        from pm_core import pane_registry
-        pane_registry.register_pane(pm_session, watcher_win_id, claude_pane,
-                                    "watcher-claude", claude_cmd)
+    if not watcher_win_id:
+        _log.error("_create_watcher_window: could not get window ID for pane %s", claude_pane)
+        click.echo("Watcher: could not get window ID after creation.", err=True)
+        raise SystemExit(1)
+
+    post_panes = tmux_mod.get_pane_indices(pm_session, watcher_win_id)
+    if len(post_panes) != 1:
+        _log.error("_create_watcher_window: expected 1 pane, got %d — aborting",
+                   len(post_panes))
+        click.echo(f"Watcher: unexpected pane count ({len(post_panes)}), aborting.", err=True)
+        tmux_mod.kill_window(pm_session, watcher_win_id)
+        raise SystemExit(1)
+    tmux_mod.set_shared_window_size(pm_session, watcher_win_id)
+    from pm_core import pane_registry
+    pane_registry.register_pane(pm_session, watcher_win_id, claude_pane,
+                                "watcher-claude", claude_cmd)
 
     click.echo(f"Watcher window launched (iteration {iteration})")
 
