@@ -607,4 +607,9 @@ from pm_core.cli import pr, plan, session, tui, guide, meta, cluster, bench, wat
 
 
 def main():
-    cli()
+    try:
+        cli()
+    except store.StoreLockTimeout as e:
+        import sys
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)

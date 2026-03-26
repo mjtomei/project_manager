@@ -128,7 +128,7 @@ def _lock(root: Path, timeout: float = LOCK_TIMEOUT_SECONDS):
     """
     lock_path = root / "project.yaml.lock"
     deadline = time.monotonic() + timeout
-    fd = open(lock_path, "w")
+    fd = open(lock_path, "a")
     try:
         while True:
             try:
