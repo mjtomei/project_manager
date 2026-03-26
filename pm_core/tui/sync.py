@@ -131,6 +131,7 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
                 app.log_message(f"Sync: {e}")
                 _log.warning("do_normal_sync: lock timeout applying merges: %s", e)
                 app._data = store.load(app._root)
+                app._update_display()
                 return
             _kill_merged_pr_windows(app, result.merged_prs)
         else:
