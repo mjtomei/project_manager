@@ -1916,7 +1916,7 @@ def _unstash_after_merge(cwd: Path, info: dict) -> bool:
     return clean
 
 
-def _cleanup_pr(pr_entry: dict, data: dict, root: Path, force: bool) -> bool:
+def _cleanup_pr(pr_entry: dict, root: Path, force: bool) -> bool:
     """Clean up a single PR's workdir. Returns True if cleaned."""
     pr_id = pr_entry["id"]
     work_path = Path(pr_entry["workdir"]) if pr_entry.get("workdir") else None
@@ -1932,7 +1932,6 @@ def _cleanup_pr(pr_entry: dict, data: dict, root: Path, force: bool) -> bool:
 
     shutil.rmtree(work_path)
     click.echo(f"  {pr_id}: removed {work_path}")
-    pr_entry["workdir"] = None
     return True
 
 
@@ -1982,7 +1981,7 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool):
         # Do filesystem cleanup first (outside lock), collect cleaned IDs
         cleaned_ids = set()
         for pr_entry in with_workdir:
-            if _cleanup_pr(pr_entry, data, root, force):
+            if _cleanup_pr(pr_entry, root, force):
                 cleaned_ids.add(pr_entry["id"])
         if cleaned_ids:
             def apply_cleanup_all(data):
@@ -2021,7 +2020,7 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool):
         click.echo("Cleaning up anyway.", err=True)
 
     target_id = pr_entry["id"]
-    if _cleanup_pr(pr_entry, data, root, force):
+    if _cleanup_pr(pr_entry, root, force):
         store.locked_update(root, lambda d: _clear_workdir(d, target_id))
         trigger_tui_refresh()
 
