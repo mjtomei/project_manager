@@ -368,7 +368,9 @@ def _maybe_start_qa(app, pr_id: str) -> None:
             from pm_core.tui import qa_loop_ui
             qa_loop_ui.start_qa(app, pr_id)
         else:
-            _log.debug("auto_qa: %s not in_review, skipping", pr_id)
+            current = store.get_pr(app._data, pr_id)
+            _log.debug("auto_qa: %s not in_review (status=%s), skipping",
+                       pr_id, current.get("status") if current else "missing")
 
 
 # ---------------------------------------------------------------------------
