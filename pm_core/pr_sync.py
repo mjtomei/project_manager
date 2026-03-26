@@ -250,10 +250,10 @@ def sync_prs(
             except Exception as e:
                 _log.warning("Error checking merge status for %s: %s", pr_entry["id"], e)
 
-    # Update timestamp
-    set_last_sync_timestamp(data, datetime.now(timezone.utc))
-
     # Save if requested and there were changes
+    # Note: the pr_entry status mutations above (lines 244-248) are intentionally
+    # applied to the in-memory `data` so that graph.ready_prs(prs) below sees
+    # merged PRs correctly. The locked_update below persists the authoritative save.
     if save_state:
         merged_set = set(merged_prs)
 
@@ -392,9 +392,6 @@ def sync_from_github(
             _log.warning("Timeout fetching GitHub PR #%s for %s", gh_pr_number, pr_id)
         except Exception as e:
             _log.warning("Error fetching GitHub status for %s: %s", pr_id, e)
-
-    # Update timestamp
-    set_last_sync_timestamp(data, datetime.now(timezone.utc))
 
     if save_state and updated:
         def apply(fresh_data):
