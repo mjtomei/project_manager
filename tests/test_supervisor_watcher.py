@@ -344,6 +344,22 @@ class TestFeedbackInjection:
         # Should not raise
         w.on_verdict("NO_ISSUES", "output")
 
+    @patch("pm_core.loop_shared.get_pm_session", return_value=None)
+    @patch("pm_core.watchers.supervisor_watcher.log_feedback")
+    def test_logs_feedback_even_when_no_pm_session(self, mock_log, mock_session):
+        """Feedback must be logged even if PM session is unavailable (can't inject)."""
+        w = SupervisorWatcher(pm_root="")
+        w._pending_feedback = [
+            {"target_window": "pr-abc", "observation": "bug", "feedback": "fix it"},
+        ]
+        w.on_verdict("FEEDBACK_SENT", "output")
+
+        mock_log.assert_called_once()
+        entry = mock_log.call_args[0][0]
+        assert entry.injected is False
+        assert entry.feedback == "fix it"
+        assert w._pending_feedback == []
+
 
 # --- Safe injection helper ---
 

@@ -249,7 +249,21 @@ Important: Be concise in your feedback. Each feedback message will be injected i
 
         session = get_pm_session()
         if not session:
-            _log.warning("supervisor: no PM session for feedback injection")
+            _log.warning("supervisor: no PM session for feedback injection; logging without injection")
+            for fb in self._pending_feedback[:_MAX_FEEDBACK_PER_ITERATION]:
+                feedback_text = fb.get("feedback", "")
+                if not feedback_text:
+                    continue
+                entry = FeedbackEntry(
+                    timestamp=datetime.now().isoformat(),
+                    supervisor_id=self.state.watcher_id,
+                    target_window=fb.get("target_window", ""),
+                    target_pane="",
+                    observation=fb.get("observation", ""),
+                    feedback=feedback_text,
+                    injected=False,
+                )
+                log_feedback(entry)
             self._pending_feedback = []
             return
 
