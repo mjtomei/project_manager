@@ -9,6 +9,10 @@ from typing import Optional
 import yaml
 
 
+class ProjectYamlParseError(Exception):
+    """Raised when project.yaml cannot be parsed (e.g. mid-edit or merge conflict)."""
+
+
 def find_project_root(start: Optional[str] = None) -> Path:
     """Walk up from start (or cwd) to find directory containing project.yaml.
 
@@ -42,8 +46,11 @@ def load(root: Optional[Path] = None, validate: bool = True) -> dict:
     if root is None:
         root = find_project_root()
     path = root / "project.yaml"
-    with open(path) as f:
-        data = yaml.safe_load(f)
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        raise ProjectYamlParseError(f"project.yaml is not valid YAML: {e}") from e
 
     if data is None:
         data = {}
