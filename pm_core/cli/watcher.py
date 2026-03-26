@@ -16,7 +16,7 @@ from datetime import datetime
 
 import click
 
-from pm_core import store, prompt_gen
+from pm_core import store, prompt_gen, pane_registry
 from pm_core import tmux as tmux_mod
 from pm_core.claude_launcher import build_claude_shell_cmd, finalize_transcript
 from pm_core.watchers.auto_start_watcher import AutoStartWatcher
@@ -301,7 +301,6 @@ def _create_watcher_window(iteration: int, loop_id: str,
         tmux_mod.kill_window(pm_session, watcher_win_id)
         raise SystemExit(1)
     tmux_mod.set_shared_window_size(pm_session, watcher_win_id)
-    from pm_core import pane_registry
     pane_registry.register_pane(pm_session, watcher_win_id, claude_pane,
                                 "watcher-claude", claude_cmd)
 
