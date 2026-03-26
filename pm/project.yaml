@@ -2229,6 +2229,7 @@ prs:
   created_at: '2026-03-01T17:48:54.305206+00:00'
   updated_at: '2026-03-02T00:28:30.910840+00:00'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-89296d3-harden-window-management-against-une-c82777eb
+  spec_impl: /workspace/pm/specs/pr-89296d3/impl.md
 - id: pr-eee190a
   plan: null
   title: Add —disconnect–others flag to pm session to disconnect stale clients

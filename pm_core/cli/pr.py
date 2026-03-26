@@ -8,6 +8,7 @@ import platform
 import re
 import shutil
 import subprocess
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -812,27 +813,32 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     if pm_session:
         if tmux_mod.session_exists(pm_session):
             window_name = _pr_display_id(pr_entry)
-            existing = tmux_mod.find_window_by_name(pm_session, window_name)
-            if existing:
-                if fresh:
+            if fresh:
+                # --fresh: kill whatever exists, regardless of pm-managed state
+                existing = tmux_mod.find_window_by_name(pm_session, window_name)
+                if existing:
                     tmux_mod.kill_window(pm_session, existing["id"])
                     click.echo(f"Killed existing window '{window_name}'")
-                elif use_companion and not background:
-                    # Add companion pane to existing window if missing
-                    impl_workdir = pr_entry.get("workdir") or workdir
-                    if impl_workdir:
-                        _add_companion_pane(pm_session, existing, impl_workdir, "impl")
-                    tmux_mod.select_window(pm_session, existing["id"])
-                    click.echo(f"Switched to existing window '{window_name}' (session: {pm_session})")
-                    return
-                elif background:
-                    # Window already exists, nothing to do in background mode
-                    click.echo(f"Window '{window_name}' already exists (background mode, no focus change)")
-                    return
-                else:
-                    tmux_mod.select_window(pm_session, existing["id"])
-                    click.echo(f"Switched to existing window '{window_name}' (session: {pm_session})")
-                    return
+            else:
+                # Non-fresh: only reuse pm-managed windows; rename stale ones
+                existing = _find_or_rename_stale_window(pm_session, window_name)
+                if existing:
+                    if use_companion and not background:
+                        # Add companion pane to existing window if missing
+                        impl_workdir = pr_entry.get("workdir") or workdir
+                        if impl_workdir:
+                            _add_companion_pane(pm_session, existing, impl_workdir, "impl")
+                        tmux_mod.select_window(pm_session, existing["id"])
+                        click.echo(f"Switched to existing window '{window_name}' (session: {pm_session})")
+                        return
+                    elif background:
+                        # Window already exists, nothing to do in background mode
+                        click.echo(f"Window '{window_name}' already exists (background mode, no focus change)")
+                        return
+                    else:
+                        tmux_mod.select_window(pm_session, existing["id"])
+                        click.echo(f"Switched to existing window '{window_name}' (session: {pm_session})")
+                        return
 
     repo_url = data["project"]["repo"]
     base_branch = data["project"].get("base_branch", "master")
@@ -990,11 +996,17 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                         if win:
                             _add_companion_pane(pm_session, win, str(work_path), "impl")
                 else:
-                    tmux_mod.new_window(pm_session, window_name, cmd, str(work_path),
-                                        switch=not background)
+                    impl_pane_id = tmux_mod.new_window_get_pane(
+                        pm_session, window_name, cmd, str(work_path),
+                        switch=not background,
+                    )
                     win = tmux_mod.find_window_by_name(pm_session, window_name)
                     if win:
                         tmux_mod.set_shared_window_size(pm_session, win["id"])
+                        if impl_pane_id:
+                            pane_registry.register_pane(
+                                pm_session, win["id"], impl_pane_id, "impl-claude", cmd
+                            )
                 click.echo(f"Launched Claude in tmux window '{window_name}' (session: {pm_session})")
                 return
             except Exception as e:
@@ -1010,11 +1022,68 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                   provider=resolved_provider, model=resolved_model, effort=_resolution.effort)
 
 
+def _has_pm_panes(session: str, window_id: str) -> bool:
+    """Return True if the window has any live pm-managed panes in the registry."""
+    data = pane_registry.load_registry(session)
+    wdata = data.get("windows", {}).get(window_id, {})
+    panes = wdata.get("panes", [])
+    if not panes:
+        return False
+    live_panes = tmux_mod.get_pane_indices(session, window_id)
+    live_ids = {p[0] for p in live_panes}
+    return any(p.get("id") in live_ids for p in panes)
+
+
+def _find_or_rename_stale_window(session: str, name: str) -> dict | None:
+    """Find a window by name, renaming it stale if it has no pm-managed panes.
+
+    Returns the window dict if the window is pm-managed (valid to reuse),
+    or None if:
+    - No window with that name exists (caller should create fresh), or
+    - The window had no pm-managed panes and was renamed ``<name>-stale-<ts>``
+      (caller should create fresh).
+
+    If multiple windows share the name, prefers the pm-managed one and
+    renames the rest stale. Logs a warning when duplicates are detected.
+    """
+    windows = tmux_mod.find_windows_by_name(session, name)
+    if not windows:
+        return None
+
+    if len(windows) > 1:
+        _log.warning("Found %d windows named '%s', preferring pm-managed", len(windows), name)
+        managed_state = {w["id"]: _has_pm_panes(session, w["id"]) for w in windows}
+        managed = [w for w in windows if managed_state[w["id"]]]
+        unmanaged = [w for w in windows if not managed_state[w["id"]]]
+        ts = int(time.time())
+        for i, w in enumerate(unmanaged):
+            new_name = f"{name}-stale-{ts}" if i == 0 else f"{name}-stale-{ts}-{i}"
+            _log.warning("Renaming duplicate unmanaged window '%s' (%s) → '%s'",
+                         name, w["id"], new_name)
+            tmux_mod.rename_window(session, w["id"], new_name)
+        if managed:
+            return managed[0]
+        # All were unmanaged and renamed — caller creates fresh
+        return None
+
+    window = windows[0]
+    if _has_pm_panes(session, window["id"]):
+        return window
+
+    # Stale window — rename and signal caller to create fresh
+    new_name = f"{name}-stale-{int(time.time())}"
+    _log.warning("Renaming stale window '%s' (%s) → '%s' (no pm-managed panes)",
+                 name, window["id"], new_name)
+    click.echo(f"Renamed stale window '{name}' to '{new_name}' (no pm-managed panes found)")
+    tmux_mod.rename_window(session, window["id"], new_name)
+    return None
+
+
 def _add_companion_pane(pm_session: str, window_info: dict, workdir: str,
                         role_prefix: str) -> None:
     """Add a companion shell pane to an existing tmux window.
 
-    Splits the first pane horizontally with a shell cd'ed into *workdir*.
+    Splits the Claude pane horizontally with a shell cd'ed into *workdir*.
     Registers both panes in the pane registry and rebalances the layout.
 
     If the window already has 2+ panes (companion already present), this
@@ -1033,13 +1102,30 @@ def _add_companion_pane(pm_session: str, window_info: dict, workdir: str,
         click.echo("Could not find panes in window.")
         return
 
-    claude_pane = panes[0][0]
+    # Use registry to find the Claude pane; fall back to first pane for
+    # legacy windows that were created before registry tracking.
+    claude_pane = pane_registry.find_live_pane_by_role(
+        pm_session, f"{role_prefix}-claude", window=win_id
+    )
+    if not claude_pane:
+        claude_pane = panes[0][0]
 
     # Split horizontally with an interactive shell in the workdir
     shell = os.environ.get("SHELL", "/bin/bash")
     companion_cmd = f"cd '{workdir}' && exec {shell}"
     companion_pane = tmux_mod.split_pane_at(claude_pane, "h", companion_cmd,
                                              background=True)
+
+    # Validate: expect exactly 2 panes after split
+    post_panes = tmux_mod.get_pane_indices(pm_session, win_index)
+    if len(post_panes) != 2:
+        _log.error("_add_companion_pane: expected 2 panes after split, got %d — aborting",
+                   len(post_panes))
+        click.echo(f"Companion pane: unexpected pane count ({len(post_panes)}), aborting.",
+                   err=True)
+        if companion_pane:
+            subprocess.run(tmux_mod._tmux_cmd("kill-pane", "-t", companion_pane), check=False)
+        return
 
     # Register panes for layout management
     tmux_mod.set_shared_window_size(pm_session, win_id)
@@ -1101,17 +1187,21 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
 
     # Fast path: if review window already exists and we don't need fresh,
     # just switch to it — skip expensive prompt generation and container setup.
-    existing = tmux_mod.find_window_by_name(pm_session, window_name)
     sessions_on_review: list[str] = []
-    if existing:
-        if fresh:
+    if fresh:
+        # fresh: kill whatever exists, regardless of pm-managed state
+        existing = tmux_mod.find_window_by_name(pm_session, window_name)
+        if existing:
             if review_loop:
                 sessions_on_review = tmux_mod.sessions_on_window(
                     pm_session, existing["id"],
                 )
             tmux_mod.kill_window(pm_session, existing["id"])
             click.echo(f"Killed existing review window '{window_name}'")
-        else:
+    else:
+        # Non-fresh: only reuse pm-managed windows; rename stale ones
+        existing = _find_or_rename_stale_window(pm_session, window_name)
+        if existing:
             tmux_mod.select_window(pm_session, existing["id"])
             click.echo(f"Switched to existing review window '{window_name}'")
             return
@@ -1202,6 +1292,16 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         )
         review_win_id = wid_result.stdout.strip()
         if review_win_id:
+            # Post-creation validation: verify exactly 2 panes (claude + diff)
+            post_panes = tmux_mod.get_pane_indices(pm_session, review_win_id)
+            if len(post_panes) != 2:
+                _log.error(
+                    "_launch_review_window: expected 2 panes after split, got %d — aborting",
+                    len(post_panes),
+                )
+                click.echo(f"Review window error: unexpected pane count ({len(post_panes)}), expected 2")
+                tmux_mod.kill_window(pm_session, review_win_id)
+                return
             tmux_mod.set_shared_window_size(pm_session, review_win_id)
             panes = [(claude_pane, "review-claude", claude_cmd)]
             if diff_pane:
@@ -1416,8 +1516,9 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
     # main repo, which the branch-scoped push proxy would block.
     window_name = f"merge-{display_id}"
 
-    # No-op if a merge window is already running for this PR
-    existing = tmux_mod.find_window_by_name(pm_session, window_name)
+    # No-op if a pm-managed merge window is already running for this PR.
+    # Rename stale (non-pm-managed) windows so a fresh one can be created.
+    existing = _find_or_rename_stale_window(pm_session, window_name)
     if existing:
         if background:
             click.echo(f"Merge window '{window_name}' already exists (background mode, no-op)")
@@ -1427,20 +1528,36 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
         return
 
     try:
-        if use_companion:
-            claude_pane = tmux_mod.new_window_get_pane(
-                pm_session, window_name, claude_cmd, workdir,
-                switch=not background,
-            )
-            if claude_pane:
-                win = tmux_mod.find_window_by_name(pm_session, window_name)
-                if win:
-                    _add_companion_pane(pm_session, win, workdir, "merge")
-        else:
-            tmux_mod.new_window(
-                pm_session, window_name, claude_cmd, workdir,
-                switch=not background,
-            )
+        claude_pane = tmux_mod.new_window_get_pane(
+            pm_session, window_name, claude_cmd, workdir,
+            switch=not background,
+        )
+        if claude_pane:
+            merge_win_id = tmux_mod.pane_window_id(claude_pane)
+            if not merge_win_id:
+                _log.error("_launch_merge_window: could not get window ID for pane %s", claude_pane)
+                click.echo("Merge window error: could not get window ID after creation")
+                return
+            # Post-creation validation: verify exactly 1 pane before splitting
+            post_panes = tmux_mod.get_pane_indices(pm_session, merge_win_id)
+            if len(post_panes) != 1:
+                _log.error("_launch_merge_window: expected 1 pane, got %d — aborting",
+                           len(post_panes))
+                click.echo(f"Merge window error: unexpected pane count ({len(post_panes)}), expected 1")
+                tmux_mod.kill_window(pm_session, merge_win_id)
+                return
+            tmux_mod.set_shared_window_size(pm_session, merge_win_id)
+            if not use_companion:
+                # When using companion, _add_companion_pane registers both
+                # panes via register_and_rebalance — don't pre-register here
+                # or merge-claude would end up with a duplicate registry entry.
+                pane_registry.register_pane(
+                    pm_session, merge_win_id, claude_pane, "merge-claude", claude_cmd
+                )
+            if use_companion:
+                merge_win = tmux_mod.find_window_by_name(pm_session, window_name)
+                if merge_win:
+                    _add_companion_pane(pm_session, merge_win, workdir, "merge")
         click.echo(f"Opened merge resolution window '{window_name}'")
     except Exception as e:
         _log.warning("Failed to launch merge window: %s", e)
