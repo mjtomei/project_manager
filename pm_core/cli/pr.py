@@ -1539,7 +1539,7 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
         merge_win_id = tmux_mod.pane_window_id(claude_pane)
         if not merge_win_id:
             _log.error("_launch_merge_window: could not get window ID for pane %s", claude_pane)
-            click.echo("Merge window error: could not get window ID after creation")
+            click.echo("Merge window error: could not get window ID after creation", err=True)
             return
         # Post-creation validation: verify exactly 1 pane before splitting
         post_panes = tmux_mod.get_pane_indices(pm_session, merge_win_id)
@@ -1561,6 +1561,9 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
             merge_win = tmux_mod.find_window_by_name(pm_session, window_name)
             if merge_win:
                 _add_companion_pane(pm_session, merge_win, workdir, "merge")
+            else:
+                _log.error("_launch_merge_window: could not find window '%s' for companion pane",
+                           window_name)
         click.echo(f"Opened merge resolution window '{window_name}'")
     except Exception as e:
         _log.warning("Failed to launch merge window: %s", e)
