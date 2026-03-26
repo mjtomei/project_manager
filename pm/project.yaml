@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-df1aa3f
+  active_pr: pr-f38005f
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -4228,6 +4228,55 @@ prs:
   gh_pr_number: null
   created_at: '2026-03-07T15:35:59.862741+00:00'
   updated_at: '2026-03-07T15:35:59.862741+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-0238fa4
+  plan: plan-003
+  title: Atomic staging write for project.yaml (tmp→rename with validation)
+  branch: pm/pr-0238fa4-atomic-staging-write-for-project-yaml-tmp-rename-wit
+  status: pending
+  depends_on:
+  - pr-f38005f
+  description: 'Write project.yaml atomically via a staging file to prevent the TUI
+    from reading partial or invalid YAML.
+
+
+    ## Approach
+
+
+    1. Write new content to project.yaml.tmp
+
+    2. Parse/validate the YAML before committing
+
+    3. Use os.rename() (atomic on POSIX) to replace the canonical file
+
+
+    ## Motivation
+
+
+    The TUI periodically reloads project.yaml. If a write is interrupted (crash,
+    editor mid-save, merge conflict markers inserted by git) the TUI currently crashes
+    or skips the reload silently. The minimal fix (ProjectYamlParseError + skip-cycle)
+    handles transient parse errors, but atomic writes eliminate the window of inconsistency
+    entirely so the TUI always sees a fully valid file.
+
+
+    ## Scope
+
+
+    - store.save() becomes: write tmp → validate → os.rename
+
+    - Any existing tmp file from a previous crash is removed before writing
+
+    - Depends on PR file-locking (pr-f38005f) so concurrent readers hold a shared
+    lock during the rename, preventing a torn read'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-26T00:00:00.000000+00:00'
+  updated_at: '2026-03-26T00:00:00.000000+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
