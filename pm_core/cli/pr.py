@@ -266,6 +266,10 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
     def apply(data):
         if data.get("prs") is None:
             data["prs"] = []
+        # Re-check ID uniqueness against fresh state (handles concurrent adds)
+        fresh_ids = {p["id"] for p in data["prs"]}
+        if entry["id"] in fresh_ids:
+            return
         data["prs"].append(entry)
         data["project"]["active_pr"] = pr_id
 

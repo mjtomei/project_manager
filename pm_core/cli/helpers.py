@@ -287,11 +287,6 @@ def _record_status_timestamp(pr_entry: dict, status: str | None = None) -> None:
         pr_entry["merged_at"] = now
 
 
-def save_and_push(data: dict, root: Path, message: str = "pm: update state") -> None:
-    """Save state. Use 'pm push' to commit and share changes."""
-    store.save(data, root)
-
-
 def trigger_tui_refresh() -> None:
     """Send reload key to TUI pane in the pm session for the current directory.
 

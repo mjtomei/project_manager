@@ -125,7 +125,13 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
                         pr["status"] = "merged"
                         _record_status_timestamp(pr, "merged")
 
-            app._data = store.locked_update(app._root, apply_merged)
+            try:
+                app._data = store.locked_update(app._root, apply_merged)
+            except store.StoreLockTimeout as e:
+                app.log_message(f"Sync: {e}")
+                _log.warning("do_normal_sync: lock timeout applying merges: %s", e)
+                app._data = store.load(app._root)
+                return
             _kill_merged_pr_windows(app, result.merged_prs)
         else:
             app._data = store.load(app._root)
@@ -217,7 +223,12 @@ async def startup_github_sync(app) -> None:
                         pr["status"] = new_status
                         _record_status_timestamp(pr, new_status)
 
-            app._data = store.locked_update(app._root, apply_github)
+            try:
+                app._data = store.locked_update(app._root, apply_github)
+            except store.StoreLockTimeout as e:
+                app.log_message(f"GitHub sync: {e}")
+                _log.warning("startup_github_sync: lock timeout applying updates: %s", e)
+                return
             if newly_merged:
                 _kill_merged_pr_windows(app, newly_merged)
             app._update_display()

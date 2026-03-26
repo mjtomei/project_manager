@@ -87,7 +87,10 @@ def ensure_watcher_plans(app) -> Path | None:
                 if entry["id"] not in current_ids:
                     data["plans"].append(entry)
 
-        store.locked_update(root, apply)
+        try:
+            store.locked_update(root, apply)
+        except store.StoreLockTimeout as e:
+            _log.warning("ensure_watcher_plans: lock timeout registering plans: %s", e)
 
     return root
 
@@ -161,7 +164,11 @@ def load_watcher_plan_prs(app) -> int:
                 if entry["id"] not in current_ids:
                     data["prs"].append(entry)
 
-        store.locked_update(root, apply)
+        try:
+            store.locked_update(root, apply)
+        except store.StoreLockTimeout as e:
+            _log.warning("load_watcher_plan_prs: lock timeout loading PRs: %s", e)
+            return 0
 
     return len(new_entries)
 

@@ -353,7 +353,12 @@ def _maybe_start_qa(app, pr_id: str) -> None:
                 p["status"] = "qa"
                 transitioned = True
 
-        store.locked_update(app._root, apply_qa)
+        try:
+            store.locked_update(app._root, apply_qa)
+        except store.StoreLockTimeout as e:
+            app.log_message(f"Error: {e}")
+            _log.warning("auto_qa: lock timeout for %s: %s", pr_id, e)
+            return
         app._load_state()
         if transitioned:
             _log.info("auto_qa: transitioned %s to qa status", pr_id)
