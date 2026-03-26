@@ -1532,32 +1532,35 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
             pm_session, window_name, claude_cmd, workdir,
             switch=not background,
         )
-        if claude_pane:
-            merge_win_id = tmux_mod.pane_window_id(claude_pane)
-            if not merge_win_id:
-                _log.error("_launch_merge_window: could not get window ID for pane %s", claude_pane)
-                click.echo("Merge window error: could not get window ID after creation")
-                return
-            # Post-creation validation: verify exactly 1 pane before splitting
-            post_panes = tmux_mod.get_pane_indices(pm_session, merge_win_id)
-            if len(post_panes) != 1:
-                _log.error("_launch_merge_window: expected 1 pane, got %d — aborting",
-                           len(post_panes))
-                click.echo(f"Merge window error: unexpected pane count ({len(post_panes)}), expected 1")
-                tmux_mod.kill_window(pm_session, merge_win_id)
-                return
-            tmux_mod.set_shared_window_size(pm_session, merge_win_id)
-            if not use_companion:
-                # When using companion, _add_companion_pane registers both
-                # panes via register_and_rebalance — don't pre-register here
-                # or merge-claude would end up with a duplicate registry entry.
-                pane_registry.register_pane(
-                    pm_session, merge_win_id, claude_pane, "merge-claude", claude_cmd
-                )
-            if use_companion:
-                merge_win = tmux_mod.find_window_by_name(pm_session, window_name)
-                if merge_win:
-                    _add_companion_pane(pm_session, merge_win, workdir, "merge")
+        if not claude_pane:
+            _log.error("_launch_merge_window: new_window_get_pane returned no pane ID")
+            click.echo("Merge window error: could not create window", err=True)
+            return
+        merge_win_id = tmux_mod.pane_window_id(claude_pane)
+        if not merge_win_id:
+            _log.error("_launch_merge_window: could not get window ID for pane %s", claude_pane)
+            click.echo("Merge window error: could not get window ID after creation")
+            return
+        # Post-creation validation: verify exactly 1 pane before splitting
+        post_panes = tmux_mod.get_pane_indices(pm_session, merge_win_id)
+        if len(post_panes) != 1:
+            _log.error("_launch_merge_window: expected 1 pane, got %d — aborting",
+                       len(post_panes))
+            click.echo(f"Merge window error: unexpected pane count ({len(post_panes)}), expected 1")
+            tmux_mod.kill_window(pm_session, merge_win_id)
+            return
+        tmux_mod.set_shared_window_size(pm_session, merge_win_id)
+        if not use_companion:
+            # When using companion, _add_companion_pane registers both
+            # panes via register_and_rebalance — don't pre-register here
+            # or merge-claude would end up with a duplicate registry entry.
+            pane_registry.register_pane(
+                pm_session, merge_win_id, claude_pane, "merge-claude", claude_cmd
+            )
+        if use_companion:
+            merge_win = tmux_mod.find_window_by_name(pm_session, window_name)
+            if merge_win:
+                _add_companion_pane(pm_session, merge_win, workdir, "merge")
         click.echo(f"Opened merge resolution window '{window_name}'")
     except Exception as e:
         _log.warning("Failed to launch merge window: %s", e)

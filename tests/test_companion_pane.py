@@ -296,6 +296,35 @@ class TestMergeWindowCompanion:
         call_args = _reg.register_pane.call_args[0]
         assert call_args[3] == "merge-claude"
 
+    @patch.object(pr_mod, "tmux_mod")
+    @patch.object(pr_mod, "pane_registry")
+    @patch.object(pr_mod, "prompt_gen")
+    @patch.object(pr_mod, "build_claude_shell_cmd", return_value="claude ...")
+    def test_aborts_cleanly_when_pane_id_not_returned(
+        self, _cmd, _prompt, _reg, mock_tmux,
+    ):
+        """_launch_merge_window does not print success when new_window_get_pane returns None."""
+        mock_tmux.has_tmux.return_value = True
+        mock_tmux.in_tmux.return_value = True
+        mock_tmux.session_exists.return_value = True
+        mock_tmux.find_windows_by_name.return_value = []
+        mock_tmux.new_window_get_pane.return_value = None  # creation failed
+
+        data = {"project": {"base_branch": "master"}}
+        pr_entry = {"id": "pr-001", "workdir": "/work/dir"}
+
+        from io import StringIO
+        import click
+        output = StringIO()
+        with patch.object(pr_mod, "_get_pm_session", return_value="pm-sess"), \
+             patch("pm_core.paths.get_global_setting", return_value=False), \
+             patch.object(pr_mod, "_ensure_workdir", return_value="/work/dir"):
+            pr_mod._launch_merge_window(data, pr_entry, "conflict error")
+
+        # Window ID should not be queried and pane should not be registered
+        mock_tmux.pane_window_id.assert_not_called()
+        _reg.register_pane.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # TUI companion parameter for start_pr
