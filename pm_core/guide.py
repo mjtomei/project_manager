@@ -429,7 +429,10 @@ Are there plans that haven't been broken down into PRs yet?
 PRs in review or QA that need attention, or pending PRs whose dependencies \
 are all met.
 
-Give the user a brief summary of where the project stands, then suggest \
-one or two concrete next actions. Prefer finishing in-progress work over \
-starting new work.
+Start with the big picture: summarize where the project stands at the \
+plan level — which plans are in flight, how far along each is, and what \
+the overall trajectory looks like. Then suggest one or two concrete next \
+actions. Prefer finishing in-progress work over starting new work. Frame \
+recommendations in terms of plan progress ("plan X needs Y to move \
+forward") rather than individual PR mechanics.
 {notes_block}"""
