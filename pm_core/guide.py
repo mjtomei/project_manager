@@ -324,27 +324,7 @@ def build_assist_prompt(data: dict, root: Optional[Path],
     project = data.get("project", {})
     project_name = project.get("name", "unknown")
     repo = project.get("repo", "unknown")
-    prs = data.get("prs") or []
     plans = data.get("plans") or []
-
-    # Build PR summary
-    pr_lines = []
-    for pr in prs:
-        status = pr.get("status", "pending")
-        title = pr.get("title", "???")
-        pr_id = pr.get("id", "???")
-        deps = pr.get("depends_on") or []
-        dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
-        wd = pr.get("workdir", "")
-        wd_str = ""
-        if wd:
-            wd_path = Path(wd)
-            if wd_path.exists():
-                wd_str = f" workdir: {wd}"
-            else:
-                wd_str = f" workdir: {wd} (MISSING)"
-        pr_lines.append(f"  - {pr_id}: {title} [{status}]{dep_str}{wd_str}")
-    pr_summary = "\n".join(pr_lines) if pr_lines else "  (no PRs yet)"
 
     # Build plan summary
     plan_lines = []
@@ -388,9 +368,6 @@ TUI pane ID: {pane_id}
 Current plans:
 {plan_summary}
 
-Current PRs:
-{pr_summary}
-
 ## pm Project Lifecycle
 
 pm organizes work in a structured lifecycle. Actions can be done through the \
@@ -430,23 +407,29 @@ check on in-progress work, or understand what to tackle next.
 
 ## Your Task
 
-Before making any recommendations, check the project's current health:
+Before making any recommendations, check the project's current state:
 
 1. Run `pm pr list --workdirs -t` to see all PRs sorted by most recently \
 updated, with their workdir paths, git status, and timestamps.
 2. Run `pm plan list` to see existing plans
 
-Then assess:
-- Are there workdirs with uncommitted changes for merged PRs? (work that might be lost)
-- Are there in-progress PRs that could be resumed?
-- Are there PRs in review that might need attention?
-- Are there pending PRs whose dependencies are all met?
-- Are there plans that haven't been broken down yet?
-- Is the dependency tree healthy?
+Then assess the project holistically. Tailor your assessment to the project's \
+maturity:
 
-Based on what you find, give the user clear, simple recommendations for \
-what to do next. Suggest one or two concrete actions, not an overwhelming list. \
-Prefer finishing in-progress work over starting new work. Among PRs at the \
-same stage, prefer more recently updated ones — the timestamps in the list \
-show when each PR was last touched.
+**Early projects** (few or no plans/PRs): Help the user get started. \
+Do they need to initialize pm? Create their first plan? Walk them through \
+the lifecycle.
+
+**Projects with active plans**: Anchor your assessment to the plans. \
+For each in-flight plan, where does it stand overall? What fraction of its \
+PRs are done vs remaining? What's the next unblocked step in each plan? \
+Are there plans that haven't been broken down into PRs yet?
+
+**General**: Check whether there are in-progress PRs that could be resumed, \
+PRs in review or QA that need attention, or pending PRs whose dependencies \
+are all met.
+
+Give the user a brief summary of where the project stands, then suggest \
+one or two concrete next actions. Prefer finishing in-progress work over \
+starting new work.
 {notes_block}"""
