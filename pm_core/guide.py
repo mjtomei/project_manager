@@ -267,12 +267,27 @@ you learned about the codebase, the user's goals, and any decisions made.
 The user can then pass that file path to the add dialog so the plan session
 picks up where this conversation left off.
 
+**Scope check — one plan or several?** Before creating a plan, consider
+whether the user's goals are better served by a single plan or multiple plans.
+Each plan produces its own independent PR tree, so splitting makes sense when:
+- The goals span distinct features or areas of the codebase that don't depend
+  on each other (e.g. "add auth" and "redesign the dashboard").
+- The overall scope is very large — a single plan with 15+ PRs becomes hard
+  to review and track. Two or three focused plans are easier to manage.
+- Different parts have different priorities or timelines.
+
+If you think the scope warrants multiple plans, suggest it to the user and
+help them decide how to divide the work. They can press `a` multiple times
+in the plans view to create each plan in sequence. Write a separate notes
+file for each plan so every plan session starts with the right context.
+
 Tell the user to press `p` in the TUI to open the plans view, then press `a`
 to add a new plan. A dialog will ask for a title or file path — if you wrote
 a notes file, tell them to enter that path; otherwise help them choose a good
 title based on what you learned about the codebase and their goals. The `a`
 action launches a session in a new pane. Once the plan session finishes,
-walk the user through the remaining steps below.
+walk the user through the remaining steps below (repeat for each plan if
+creating multiple).
 
 ### Breaking the plan into PRs
 
