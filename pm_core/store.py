@@ -83,12 +83,20 @@ def _validate_pr_statuses(data: dict) -> None:
 
 
 def save(data: dict, root: Optional[Path] = None) -> None:
-    """Write project.yaml to root directory."""
+    """Write project.yaml to root directory.
+
+    Uses atomic write (write to temp file, then rename) so concurrent
+    readers never see a truncated or partially-written file.
+    """
     if root is None:
         root = find_project_root()
     path = root / "project.yaml"
-    with open(path, "w") as f:
+    tmp = path.with_suffix(".yaml.tmp")
+    with open(tmp, "w") as f:
         yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        f.flush()
+        os.fsync(f.fileno())
+    tmp.rename(path)
 
 
 def next_plan_id(data: dict) -> str:
