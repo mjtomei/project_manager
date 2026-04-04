@@ -550,7 +550,6 @@ def next_grouped_session_name(base: str, socket_path: str | None = None) -> str:
     return f"{base}~{max_n + 1}"
 
 
-
 def capture_pane(pane_id: str, full_scrollback: bool = False) -> str:
     """Capture the contents of a tmux pane.
 
