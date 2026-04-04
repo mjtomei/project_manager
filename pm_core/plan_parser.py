@@ -1,4 +1,4 @@
-"""Parse the ## PRs section from a plan file."""
+"""Parse structured sections (## PRs, ## Plans) from plan markdown files."""
 
 import re
 
@@ -70,6 +70,58 @@ def parse_plan_prs(text: str) -> list[dict]:
             "tests": extract_field(body, "tests"),
             "files": extract_field(body, "files"),
             "depends_on": extract_field(body, "depends_on"),
+        }
+        results.append(entry)
+
+    return results
+
+
+def parse_plan_children(text: str) -> list[dict]:
+    """Parse child plan entries from a plan file's ## Plans section.
+
+    Expected format:
+        ## Plans
+
+        ### Plan: Title here
+        - **summary**: One-line summary
+        - **status**: draft | active | done
+        - **id**: plan-abc1234
+
+    Returns a list of dicts with keys: title, summary, status, id.
+    """
+    plans_match = re.search(r'^## Plans\s*$', text, re.MULTILINE)
+    if not plans_match:
+        return []
+
+    plans_text = text[plans_match.end():]
+
+    # Stop at next ## heading (but not ###)
+    next_section = re.search(r'^## [^#]', plans_text, re.MULTILINE)
+    if next_section:
+        plans_text = plans_text[:next_section.start()]
+
+    # Split on ### Plan: headings
+    plan_blocks = re.split(r'^### Plan:\s*', plans_text, flags=re.MULTILINE)
+
+    results = []
+    for block in plan_blocks:
+        block = block.strip()
+        if not block:
+            continue
+
+        # Remove --- separators
+        block = re.sub(r'^\s*---\s*$', '', block, flags=re.MULTILINE).strip()
+
+        # First line is the title
+        lines = block.split('\n', 1)
+        title = lines[0].strip()
+        body = lines[1] if len(lines) > 1 else ""
+
+        entry = {
+            "title": title,
+            "summary": extract_field(body, "summary"),
+            "status": extract_field(body, "status"),
+            "id": extract_field(body, "id"),
         }
         results.append(entry)
 

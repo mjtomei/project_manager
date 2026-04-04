@@ -1,6 +1,6 @@
 """Tests for pm_core.plan_parser."""
 
-from pm_core.plan_parser import parse_plan_prs
+from pm_core.plan_parser import extract_field, parse_plan_children, parse_plan_prs
 
 
 def test_parse_empty():
@@ -92,3 +92,94 @@ def test_parse_missing_fields():
     assert result[0]["tests"] == ""
     assert result[0]["files"] == ""
     assert result[0]["depends_on"] == ""
+
+
+# --- parse_plan_children tests ---
+
+
+def test_parse_children_multiple():
+    text = """\
+# Hierarchical Plans
+
+Overview of the project.
+
+## Plans
+
+### Plan: Auth overhaul
+- **summary**: Rework authentication to use OAuth2
+- **status**: active
+- **id**: plan-a1b2c3d
+
+---
+
+### Plan: API v2
+- **summary**: New versioned API endpoints
+- **status**: draft
+- **id**: plan-e4f5a6b
+"""
+    result = parse_plan_children(text)
+    assert len(result) == 2
+    assert result[0]["title"] == "Auth overhaul"
+    assert result[0]["summary"] == "Rework authentication to use OAuth2"
+    assert result[0]["status"] == "active"
+    assert result[0]["id"] == "plan-a1b2c3d"
+    assert result[1]["title"] == "API v2"
+    assert result[1]["summary"] == "New versioned API endpoints"
+    assert result[1]["status"] == "draft"
+    assert result[1]["id"] == "plan-e4f5a6b"
+
+
+def test_parse_children_with_prs_section():
+    text = """\
+# Big Plan
+
+## Plans
+
+### Plan: Sub-plan A
+- **summary**: First child
+- **status**: done
+- **id**: plan-1111111
+
+## PRs
+
+### PR: Some PR
+- **description**: A PR in the parent plan
+- **tests**: Test it
+- **files**: foo.py
+- **depends_on**:
+"""
+    children = parse_plan_children(text)
+    assert len(children) == 1
+    assert children[0]["title"] == "Sub-plan A"
+    assert children[0]["status"] == "done"
+
+    prs = parse_plan_prs(text)
+    assert len(prs) == 1
+    assert prs[0]["title"] == "Some PR"
+
+
+def test_parse_children_no_section():
+    text = """\
+# Plan with only PRs
+
+## PRs
+
+### PR: Only PR
+- **description**: Something
+- **tests**: Tests
+- **files**: f.py
+- **depends_on**:
+"""
+    assert parse_plan_children(text) == []
+
+
+def test_extract_field_summary_status_id():
+    body = """\
+- **summary**: Build the new auth system
+- **status**: active
+- **id**: plan-abc1234
+"""
+    assert extract_field(body, "summary") == "Build the new auth system"
+    assert extract_field(body, "status") == "active"
+    assert extract_field(body, "id") == "plan-abc1234"
+    assert extract_field(body, "nonexistent") == ""
