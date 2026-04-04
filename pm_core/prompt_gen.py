@@ -686,10 +686,7 @@ Distinguish between **project-wide blockers** and **branch-specific issues alrea
   Instead, note the situation in your summary and emit READY.
 - This applies even when multiple branches are simultaneously paused by their own loops.
 
-To check whether a review or QA loop is waiting for input: capture the relevant tmux pane
-and see if its last meaningful output ends with `INPUT_REQUIRED`. If the loop pane ends
-with `INPUT_REQUIRED`, the loop is handling it. If the PR is `in_review` or `qa` but has
-**no** active loop window at all, that is a different (abnormal) state — see above.
+To check whether a review or QA loop is waiting for input: capture the relevant tmux pane and see if its last meaningful output ends with `INPUT_REQUIRED`. If the loop pane ends with `INPUT_REQUIRED`, the loop is handling it. If the PR is `in_review` but has **no** active review loop window at all, that is a different (abnormal) state — see above.
 
 ### 4. Project Health Monitoring
 Look for patterns across PRs that might signal issues in a PR's plan.
