@@ -134,6 +134,24 @@ def save(data: dict, root: Optional[Path] = None) -> None:
         yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
 
 
+def make_plan_entry(
+    plan_id: str,
+    name: str,
+    file: str,
+    *,
+    status: str = "draft",
+    parent: Optional[str] = None,
+) -> dict:
+    """Create a standard plan entry dict with all required keys."""
+    return {
+        "id": plan_id,
+        "name": name,
+        "file": file,
+        "status": status,
+        "parent": parent,
+    }
+
+
 def next_plan_id(data: dict) -> str:
     """Generate next plan-NNN id."""
     plans = data.get("plans") or []

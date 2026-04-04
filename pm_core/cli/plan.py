@@ -63,13 +63,7 @@ def plan_add(name: str, description: str, fresh: bool):
     plan_id = store.generate_plan_id(name, existing_ids)
     plan_file = f"plans/{plan_id}.md"
 
-    entry = {
-        "id": plan_id,
-        "name": name,
-        "file": plan_file,
-        "status": "draft",
-        "parent": None,
-    }
+    entry = store.make_plan_entry(plan_id, name, plan_file)
     if data.get("plans") is None:
         data["plans"] = []
     data["plans"].append(entry)
@@ -726,13 +720,7 @@ def _run_plan_import(name: str):
     plan_id = store.generate_plan_id(name, existing_ids)
     plan_file = f"plans/{plan_id}.md"
 
-    entry = {
-        "id": plan_id,
-        "name": name,
-        "file": plan_file,
-        "status": "draft",
-        "parent": None,
-    }
+    entry = store.make_plan_entry(plan_id, name, plan_file)
     if data.get("plans") is None:
         data["plans"] = []
     data["plans"].append(entry)

@@ -59,13 +59,7 @@ def ensure_watcher_plans(app) -> Path | None:
     for plan_id, info in WATCHER_PLANS.items():
         if plan_id in existing_plan_ids:
             continue
-        data["plans"].append({
-            "id": plan_id,
-            "name": info["name"],
-            "file": info["file"],
-            "status": "draft",
-            "parent": None,
-        })
+        data["plans"].append(store.make_plan_entry(plan_id, info["name"], info["file"]))
         plan_path = root / info["file"]
         if not plan_path.exists():
             plan_path.write_text(info["description"])
