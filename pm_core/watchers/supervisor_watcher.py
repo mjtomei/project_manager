@@ -5,42 +5,20 @@ Runs at high effort (Opus-level) and observes other running Claude sessions
 spots issues, suboptimal approaches, or opportunities, it injects feedback
 at the target session's message prompt.
 
-Each supervisor targets a configurable subset of tasks based on a window
-name filter pattern.  Multiple supervisors can run concurrently covering
-different task subsets.
+The supervisor prompt instructs Claude to discover targets, analyze their
+output, and inject feedback — all via tmux commands.  This gives Claude full
+freedom to decide what to look at and how to respond, rather than constraining
+it with hardcoded filtering or capture logic.
 """
 
-import json
-import re
 import sys
-from datetime import datetime
-
-# Minimum pane idle time (seconds) before injecting feedback.
-# If the pane had activity more recently than this, the session is busy.
-_MIN_IDLE_SECONDS = 5
-
-# Regex matching a Claude Code prompt line with no text typed yet.
-# Claude Code uses "> " as the input prompt prefix.
-_EMPTY_PROMPT_RE = re.compile(r"^\s*>\s*$")
 
 from pm_core.paths import configure_logger
 from pm_core.watcher_base import BaseWatcher, WatcherState
-from pm_core.loop_shared import match_verdict
-from pm_core.supervisor_feedback import FeedbackEntry, log_feedback
+from pm_core.loop_shared import match_verdict, get_pm_session
+from pm_core.supervisor_feedback import SUPERVISOR_LOG_DIR
 
 _log = configure_logger("pm.watchers.supervisor")
-
-# Windows the supervisor should never observe (infrastructure windows).
-# Note: "supervisor-*" windows are also excluded via the startswith check below.
-_EXCLUDED_WINDOWS = frozenset({
-    "tui", "watcher", "repl",
-})
-
-# Maximum pane output to capture per target (chars)
-_MAX_CAPTURE_CHARS = 8000
-
-# Maximum feedback items per iteration
-_MAX_FEEDBACK_PER_ITERATION = 5
 
 
 class SupervisorWatcher(BaseWatcher):
@@ -69,141 +47,67 @@ class SupervisorWatcher(BaseWatcher):
         # Use a per-instance window name so multiple supervisors don't clobber
         # each other.  The watcher_id is already unique (e.g. "supervisor-ab12").
         self.WINDOW_NAME = self.state.watcher_id
-        # Collected feedback from the latest iteration (parsed from output)
-        self._pending_feedback: list[dict] = []
 
     def should_continue(self, verdict: str) -> bool:
         """Continue on CONTINUE, FEEDBACK_SENT, or NO_ISSUES."""
         return verdict in ("CONTINUE", "FEEDBACK_SENT", "NO_ISSUES")
 
-    # ── Target discovery ──────────────────────────────────────────────
-
-    def discover_targets(self) -> list[dict]:
-        """Discover target tmux windows to observe.
-
-        Returns list of dicts with keys: window_name, pane_id, content.
-        """
-        from pm_core import tmux as tmux_mod
-        from pm_core.loop_shared import get_pm_session
-
-        session = get_pm_session()
-        if not session:
-            _log.warning("supervisor: no PM session found")
-            return []
-
-        windows = tmux_mod.list_windows(session)
-        targets = []
-
-        for win in windows:
-            name = win["name"]
-
-            # Skip infrastructure windows
-            if name.lower() in _EXCLUDED_WINDOWS:
-                continue
-            # Skip windows whose name starts with "supervisor"
-            if name.lower().startswith("supervisor"):
-                continue
-
-            # Apply target filter if set
-            if self.target_filter and self.target_filter not in name:
-                continue
-
-            # Get pane content
-            panes = tmux_mod.get_pane_indices(session, win["index"])
-            if not panes:
-                continue
-
-            pane_id = panes[0][0]  # first pane
-            content = tmux_mod.capture_pane(pane_id, full_scrollback=False)
-            if not content or not content.strip():
-                continue
-
-            # Truncate to limit
-            if len(content) > _MAX_CAPTURE_CHARS:
-                content = content[-_MAX_CAPTURE_CHARS:]
-
-            targets.append({
-                "window_name": name,
-                "pane_id": pane_id,
-                "content": content,
-            })
-
-        _log.info("supervisor: discovered %d target(s) (filter=%s)",
-                  len(targets), self.target_filter)
-        return targets
-
     # ── BaseWatcher interface ─────────────────────────────────────────
 
     def generate_prompt(self, iteration: int) -> str:
-        """Generate a supervisor prompt with captured target session outputs."""
-        targets = self.discover_targets()
+        """Generate a prompt that instructs Claude to discover and monitor targets."""
+        session = get_pm_session()
+        session_flag = f" -t {session}" if session else ""
 
-        if not targets:
-            return self._build_no_targets_prompt(iteration)
-
-        return self._build_supervisor_prompt(iteration, targets)
-
-    def _build_no_targets_prompt(self, iteration: int) -> str:
-        return f"""You are a supervisor watcher (iteration {iteration}).
-
-No active target sessions were found to monitor.
-
-Respond with:
-NO_ISSUES
-"""
-
-    def _build_supervisor_prompt(self, iteration: int,
-                                  targets: list[dict]) -> str:
-        target_sections = []
-        for i, t in enumerate(targets, 1):
-            target_sections.append(
-                f"### Target {i}: Window '{t['window_name']}'\n"
-                f"```\n{t['content']}\n```"
+        target_clause = ""
+        if self.target_filter:
+            target_clause = (
+                f"\n**Target filter:** Focus on windows whose name contains "
+                f"'{self.target_filter}'. Skip others unless they seem relevant.\n"
             )
 
-        targets_text = "\n\n".join(target_sections)
-        target_names = ", ".join(t["window_name"] for t in targets)
+        log_dir = str(SUPERVISOR_LOG_DIR)
+        log_path = str(SUPERVISOR_LOG_DIR / f"{self.state.watcher_id}.jsonl")
 
-        return f"""You are a high-effort supervisor watcher monitoring {len(targets)} active Claude session(s).
+        return f"""You are a high-effort supervisor watcher (iteration {iteration}, id: {self.state.watcher_id}).
 
 ## Your Role
-You are an experienced senior engineer observing other Claude Code sessions. Your job is to:
-1. Read the captured output from each target session
-2. Identify issues, suboptimal approaches, bugs, or missed opportunities
-3. Provide targeted, actionable feedback for each session that needs it
-4. Be selective — only provide feedback when it adds genuine value
+You are an experienced senior engineer observing other Claude Code sessions running in this tmux session. Your job is to:
+1. Discover active sessions by listing tmux windows
+2. Read their recent output to understand what they're working on
+3. Identify issues, suboptimal approaches, bugs, or missed opportunities
+4. Provide targeted, actionable feedback when warranted
+5. Be selective — only intervene when it adds genuine value
+{target_clause}
+## How to Discover Targets
+Run `tmux list-windows{session_flag}` to see available windows. Each window typically runs a Claude Code session working on a task. Use your judgment about which windows are worth monitoring — skip infrastructure windows (like the TUI, watcher, or REPL) and focus on sessions doing implementation, review, or QA work. Skip any window whose name starts with "supervisor" (those are other supervisors like you).
 
-## Iteration
-This is supervisor iteration {iteration}. Monitoring: {target_names}
+## How to Read Session Output
+Use `tmux capture-pane -t <pane_id> -p` to read a session's recent output. Focus on the most recent activity to understand what they're currently doing.
 
-## Captured Session Outputs
-
-{targets_text}
-
-## Instructions
-
-Analyze each target session's output carefully. Look for:
-- **Bugs or errors** the session is introducing or missing
-- **Suboptimal approaches** where a better strategy exists
-- **Missed edge cases** in testing or implementation
-- **Architecture concerns** that could cause problems later
-- **Wasted effort** on unnecessary work
-
-For each piece of feedback, output a JSON block in this exact format:
-
-```json
-{{"target_window": "<window_name>", "observation": "<what you noticed>", "feedback": "<your coaching advice>"}}
+## How to Provide Feedback
+When you identify an issue worth flagging, inject feedback into the target session's prompt using:
+```
+tmux send-keys -t <pane_id> '[SUPERVISOR FEEDBACK] <your feedback>'
 ```
 
-You may output 0 to {_MAX_FEEDBACK_PER_ITERATION} feedback blocks.
+Before injecting, verify that the session appears idle (at a prompt, not mid-output). Keep feedback concise and actionable (1-3 sentences).
 
-After all feedback blocks (or if there are none), end your response with exactly one of:
-- FEEDBACK_SENT — if you provided feedback for any session
-- NO_ISSUES — if all sessions look fine
-- CONTINUE — if you want to keep observing without sending feedback yet
-- INPUT_REQUIRED — if you need human input to proceed
+## Feedback Logging
+Log every piece of feedback to: {log_path}
+Create the directory first if needed: `mkdir -p {log_dir}`
 
-Important: Be concise in your feedback. Each feedback message will be injected into the target session's prompt, so keep it brief and actionable (1-3 sentences).
+Each line should be a JSON object:
+```
+{{"timestamp": "<ISO>", "supervisor_id": "{self.state.watcher_id}", "target_window": "<name>", "target_pane": "<pane_id>", "observation": "<what you noticed>", "feedback": "<what you said>", "injected": true/false}}
+```
+
+## Verdict
+When done with this iteration, end your response with exactly one of:
+- FEEDBACK_SENT — you provided feedback to one or more sessions
+- NO_ISSUES — all sessions look fine, no intervention needed
+- CONTINUE — you want to keep observing (will trigger another iteration)
+- INPUT_REQUIRED — you need human input to proceed
 """
 
     def build_launch_cmd(self, iteration: int,
@@ -225,165 +129,15 @@ Important: Be concise in your feedback. Each feedback message will be injected i
 
     def parse_verdict(self, output: str) -> str:
         """Extract a supervisor verdict from Claude output."""
-        # Also parse feedback blocks from output
-        self._pending_feedback = self._extract_feedback(output)
-
         lines = output.strip().splitlines()
         for line in reversed(lines[-30:]):
             stripped = line.strip().strip("*").strip()
             verdict = match_verdict(stripped, self.VERDICTS)
             if verdict:
                 return verdict
-        # Default: if feedback was found, treat as FEEDBACK_SENT
-        if self._pending_feedback:
-            return "FEEDBACK_SENT"
         return "NO_ISSUES"
 
     def on_verdict(self, verdict: str, output: str) -> None:
-        """After each iteration, inject feedback and log it."""
-        if not self._pending_feedback:
-            return
-
-        from pm_core import tmux as tmux_mod
-        from pm_core.loop_shared import get_pm_session
-
-        session = get_pm_session()
-        if not session:
-            _log.warning("supervisor: no PM session for feedback injection; logging without injection")
-            for fb in self._pending_feedback[:_MAX_FEEDBACK_PER_ITERATION]:
-                feedback_text = fb.get("feedback", "")
-                if not feedback_text:
-                    continue
-                entry = FeedbackEntry(
-                    timestamp=datetime.now().isoformat(),
-                    supervisor_id=self.state.watcher_id,
-                    target_window=fb.get("target_window", ""),
-                    target_pane="",
-                    observation=fb.get("observation", ""),
-                    feedback=feedback_text,
-                    injected=False,
-                )
-                log_feedback(entry)
-            self._pending_feedback = []
-            return
-
-        for fb in self._pending_feedback[:_MAX_FEEDBACK_PER_ITERATION]:
-            target_window = fb.get("target_window", "")
-            observation = fb.get("observation", "")
-            feedback_text = fb.get("feedback", "")
-
-            if not feedback_text:
-                continue
-
-            # Find the target pane
-            pane_id = self._find_target_pane(session, target_window)
-            injected = False
-
-            if pane_id:
-                inject_text = f"[SUPERVISOR FEEDBACK] {feedback_text}"
-                injected = self._safe_inject(pane_id, inject_text, target_window)
-
-            # Log feedback regardless of injection success
-            entry = FeedbackEntry(
-                timestamp=datetime.now().isoformat(),
-                supervisor_id=self.state.watcher_id,
-                target_window=target_window,
-                target_pane=pane_id or "",
-                observation=observation,
-                feedback=feedback_text,
-                injected=injected,
-            )
-            log_feedback(entry)
-
-        self._pending_feedback = []
-
-    # ── Helpers ────────────────────────────────────────────────────────
-
-    def _safe_inject(
-        self,
-        pane_id: str,
-        text: str,
-        window_name: str = "",
-        min_idle_seconds: float = _MIN_IDLE_SECONDS,
-    ) -> bool:
-        """Inject feedback into a pane only when it is idle at a clean prompt.
-
-        Two guards run before injecting:
-
-        1. **Activity age** — the pane must have been idle for at least
-           *min_idle_seconds*.  If the session had recent output or keystrokes,
-           it is busy and injection would clobber in-progress work.
-
-        2. **Empty prompt** — the last visible line of the pane must look like
-           a clean Claude Code prompt (``> `` with nothing after it).  If the
-           user or another process has already typed text, injecting would
-           corrupt the partial input.
-
-        Returns True if the feedback was sent, False otherwise.
-        """
-        from pm_core import tmux as tmux_mod
-
-        # Guard 1: idle time
-        age = tmux_mod.get_pane_activity_age(pane_id)
-        if age is None or age < min_idle_seconds:
-            _log.info(
-                "supervisor: skipping injection into %s (pane %s): "
-                "activity age=%.1fs < %.1fs",
-                window_name, pane_id, age if age is not None else -1,
-                min_idle_seconds,
-            )
-            return False
-
-        # Guard 2: no text already typed into the prompt
-        content = tmux_mod.capture_pane(pane_id, full_scrollback=False)
-        last_line = ""
-        for line in reversed(content.splitlines()):
-            if line.strip():
-                last_line = line
-                break
-        if not _EMPTY_PROMPT_RE.match(last_line):
-            _log.info(
-                "supervisor: skipping injection into %s (pane %s): "
-                "prompt is not empty (last_line=%r)",
-                window_name, pane_id, last_line[:60],
-            )
-            return False
-
-        try:
-            tmux_mod.send_keys(pane_id, text)
-            _log.info("supervisor: injected feedback into %s (pane %s)",
-                      window_name, pane_id)
-            return True
-        except Exception as e:
-            _log.warning("supervisor: failed to inject into %s: %s",
-                         window_name, e)
-            return False
-
-    def _find_target_pane(self, session: str, window_name: str) -> str | None:
-        """Find the first pane ID for a window by name."""
-        from pm_core import tmux as tmux_mod
-
-        win = tmux_mod.find_window_by_name(session, window_name)
-        if not win:
-            return None
-        panes = tmux_mod.get_pane_indices(session, win["index"])
-        return panes[0][0] if panes else None
-
-    @staticmethod
-    def _extract_feedback(output: str) -> list[dict]:
-        """Extract JSON feedback blocks from Claude's output."""
-        feedback = []
-        # Match any bare JSON object (no nested braces).  Key-ordering is NOT
-        # enforced here — we rely on json.loads + the explicit key check below.
-        json_pattern = re.compile(r'\{[^{}]+\}', re.DOTALL)
-
-        for match in json_pattern.finditer(output):
-            try:
-                data = json.loads(match.group())
-                if all(k in data for k in ("target_window", "observation", "feedback")):
-                    feedback.append(data)
-            except json.JSONDecodeError:
-                continue
-
-        _log.info("supervisor: extracted %d feedback block(s)", len(feedback))
-        return feedback
+        """Log iteration completion. Claude handles feedback injection directly."""
+        _log.info("supervisor[%s]: iteration complete, verdict=%s",
+                  self.state.watcher_id, verdict)

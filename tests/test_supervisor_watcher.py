@@ -2,17 +2,11 @@
 
 import json
 import os
-import tempfile
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
-from pm_core.watchers.supervisor_watcher import (
-    SupervisorWatcher,
-    _EXCLUDED_WINDOWS,
-    _MAX_FEEDBACK_PER_ITERATION,
-)
+from pm_core.watchers.supervisor_watcher import SupervisorWatcher
 from pm_core.supervisor_feedback import (
     FeedbackEntry,
     log_feedback,
@@ -58,62 +52,6 @@ class TestSupervisorWatcherConfig:
         assert w.should_continue("UNKNOWN") is False
 
 
-# --- Target discovery ---
-
-class TestTargetDiscovery:
-    """Test SupervisorWatcher.discover_targets()."""
-
-    def _make_watcher(self, target_filter=None):
-        return SupervisorWatcher(pm_root="", target_filter=target_filter)
-
-    @patch("pm_core.loop_shared.get_pm_session", return_value="test-session")
-    def test_excludes_infrastructure_windows(self, mock_session):
-        w = self._make_watcher()
-        windows = [
-            {"id": "@1", "index": "1", "name": "tui"},
-            {"id": "@2", "index": "2", "name": "watcher"},
-            {"id": "@3", "index": "3", "name": "supervisor"},
-            {"id": "@4", "index": "4", "name": "repl"},
-            {"id": "@5", "index": "5", "name": "pr-abc-impl"},
-        ]
-        with patch("pm_core.tmux.list_windows", return_value=windows), \
-             patch("pm_core.tmux.get_pane_indices", return_value=[("%5", 0)]), \
-             patch("pm_core.tmux.capture_pane", return_value="some output"):
-            targets = w.discover_targets()
-        assert len(targets) == 1
-        assert targets[0]["window_name"] == "pr-abc-impl"
-
-    @patch("pm_core.loop_shared.get_pm_session", return_value="test-session")
-    def test_target_filter(self, mock_session):
-        w = self._make_watcher(target_filter="pr-abc")
-        windows = [
-            {"id": "@1", "index": "1", "name": "pr-abc-impl"},
-            {"id": "@2", "index": "2", "name": "pr-def-impl"},
-        ]
-        with patch("pm_core.tmux.list_windows", return_value=windows), \
-             patch("pm_core.tmux.get_pane_indices", return_value=[("%1", 0)]), \
-             patch("pm_core.tmux.capture_pane", return_value="output"):
-            targets = w.discover_targets()
-        assert len(targets) == 1
-        assert targets[0]["window_name"] == "pr-abc-impl"
-
-    @patch("pm_core.loop_shared.get_pm_session", return_value=None)
-    def test_no_session(self, mock_session):
-        w = self._make_watcher()
-        targets = w.discover_targets()
-        assert targets == []
-
-    @patch("pm_core.loop_shared.get_pm_session", return_value="test-session")
-    def test_skips_empty_panes(self, mock_session):
-        w = self._make_watcher()
-        windows = [{"id": "@1", "index": "1", "name": "pr-abc"}]
-        with patch("pm_core.tmux.list_windows", return_value=windows), \
-             patch("pm_core.tmux.get_pane_indices", return_value=[("%1", 0)]), \
-             patch("pm_core.tmux.capture_pane", return_value=""):
-            targets = w.discover_targets()
-        assert targets == []
-
-
 # --- Verdict parsing ---
 
 class TestSupervisorVerdictParsing:
@@ -139,77 +77,10 @@ class TestSupervisorVerdictParsing:
         output = 'need help\n\nINPUT_REQUIRED\n'
         assert w.parse_verdict(output) == "INPUT_REQUIRED"
 
-    def test_default_with_feedback_blocks(self):
-        w = SupervisorWatcher(pm_root="")
-        output = (
-            'analysis\n'
-            '```json\n'
-            '{"target_window": "pr-abc", "observation": "bug", "feedback": "fix it"}\n'
-            '```\n'
-        )
-        assert w.parse_verdict(output) == "FEEDBACK_SENT"
-
-    def test_default_no_feedback(self):
+    def test_default_no_verdict(self):
         w = SupervisorWatcher(pm_root="")
         output = 'some random text without verdict\n'
         assert w.parse_verdict(output) == "NO_ISSUES"
-
-
-# --- Feedback extraction ---
-
-class TestFeedbackExtraction:
-    """Test SupervisorWatcher._extract_feedback()."""
-
-    def test_extracts_json_feedback(self):
-        output = (
-            'Analysis:\n\n'
-            '```json\n'
-            '{"target_window": "pr-abc", "observation": "missing test", "feedback": "add edge case test"}\n'
-            '```\n\n'
-            'FEEDBACK_SENT\n'
-        )
-        feedback = SupervisorWatcher._extract_feedback(output)
-        assert len(feedback) == 1
-        assert feedback[0]["target_window"] == "pr-abc"
-        assert feedback[0]["observation"] == "missing test"
-        assert feedback[0]["feedback"] == "add edge case test"
-
-    def test_extracts_multiple_feedback(self):
-        output = (
-            '{"target_window": "a", "observation": "o1", "feedback": "f1"}\n'
-            '{"target_window": "b", "observation": "o2", "feedback": "f2"}\n'
-        )
-        feedback = SupervisorWatcher._extract_feedback(output)
-        assert len(feedback) == 2
-
-    def test_skips_invalid_json(self):
-        output = (
-            '{"target_window": "a", "observation": "o1", "feedback": "f1"}\n'
-            '{invalid json}\n'
-        )
-        feedback = SupervisorWatcher._extract_feedback(output)
-        assert len(feedback) == 1
-
-    def test_skips_incomplete_json(self):
-        output = '{"target_window": "a", "other_key": "value"}\n'
-        feedback = SupervisorWatcher._extract_feedback(output)
-        assert len(feedback) == 0
-
-    def test_extracts_out_of_order_keys(self):
-        # Regex must not enforce key ordering — Claude may output keys
-        # in any order while still producing a valid feedback object.
-        output = (
-            '{"observation": "bug", "feedback": "fix it", "target_window": "pr-abc"}\n'
-        )
-        feedback = SupervisorWatcher._extract_feedback(output)
-        assert len(feedback) == 1
-        assert feedback[0]["target_window"] == "pr-abc"
-        assert feedback[0]["observation"] == "bug"
-        assert feedback[0]["feedback"] == "fix it"
-
-    def test_empty_output(self):
-        feedback = SupervisorWatcher._extract_feedback("")
-        assert feedback == []
 
 
 # --- Feedback logging ---
@@ -288,185 +159,69 @@ class TestFeedbackLogging:
         assert "Injected: yes" in output
 
 
-# --- Feedback injection (on_verdict) ---
-
-class TestFeedbackInjection:
-    """Test SupervisorWatcher.on_verdict() feedback injection."""
-
-    def _idle_pane_patches(self):
-        """Return context managers that simulate an idle pane at a clean prompt."""
-        return (
-            patch("pm_core.tmux.get_pane_activity_age", return_value=10.0),
-            patch("pm_core.tmux.capture_pane", return_value="some output\n> "),
-        )
-
-    @patch("pm_core.loop_shared.get_pm_session", return_value="test-session")
-    @patch("pm_core.watchers.supervisor_watcher.log_feedback")
-    def test_injects_feedback_via_send_keys(self, mock_log, mock_session):
-        w = SupervisorWatcher(pm_root="")
-        w._pending_feedback = [
-            {"target_window": "pr-abc", "observation": "bug", "feedback": "fix it"},
-        ]
-
-        age_patch, capture_patch = self._idle_pane_patches()
-        with patch("pm_core.tmux.find_window_by_name",
-                    return_value={"id": "@1", "index": "1", "name": "pr-abc"}), \
-             patch("pm_core.tmux.get_pane_indices", return_value=[("%5", 0)]), \
-             age_patch, capture_patch, \
-             patch("pm_core.tmux.send_keys") as mock_send:
-            w.on_verdict("FEEDBACK_SENT", "output")
-
-        mock_send.assert_called_once()
-        call_args = mock_send.call_args
-        assert "%5" in call_args[0]
-        assert "[SUPERVISOR FEEDBACK]" in call_args[0][1]
-        mock_log.assert_called_once()
-
-    @patch("pm_core.loop_shared.get_pm_session", return_value="test-session")
-    @patch("pm_core.watchers.supervisor_watcher.log_feedback")
-    def test_logs_even_when_injection_fails(self, mock_log, mock_session):
-        w = SupervisorWatcher(pm_root="")
-        w._pending_feedback = [
-            {"target_window": "pr-abc", "observation": "bug", "feedback": "fix it"},
-        ]
-
-        with patch("pm_core.tmux.find_window_by_name", return_value=None):
-            w.on_verdict("FEEDBACK_SENT", "output")
-
-        # Should still log, just with injected=False
-        mock_log.assert_called_once()
-        entry = mock_log.call_args[0][0]
-        assert entry.injected is False
-
-    def test_no_pending_feedback_is_noop(self):
-        w = SupervisorWatcher(pm_root="")
-        w._pending_feedback = []
-        # Should not raise
-        w.on_verdict("NO_ISSUES", "output")
-
-    @patch("pm_core.loop_shared.get_pm_session", return_value=None)
-    @patch("pm_core.watchers.supervisor_watcher.log_feedback")
-    def test_logs_feedback_even_when_no_pm_session(self, mock_log, mock_session):
-        """Feedback must be logged even if PM session is unavailable (can't inject)."""
-        w = SupervisorWatcher(pm_root="")
-        w._pending_feedback = [
-            {"target_window": "pr-abc", "observation": "bug", "feedback": "fix it"},
-        ]
-        w.on_verdict("FEEDBACK_SENT", "output")
-
-        mock_log.assert_called_once()
-        entry = mock_log.call_args[0][0]
-        assert entry.injected is False
-        assert entry.feedback == "fix it"
-        assert w._pending_feedback == []
-
-
-# --- Safe injection helper ---
-
-class TestSafeInject:
-    """Test SupervisorWatcher._safe_inject() idle and prompt guards."""
-
-    def _make_watcher(self):
-        return SupervisorWatcher(pm_root="")
-
-    def test_injects_when_idle_and_empty_prompt(self):
-        w = self._make_watcher()
-        with patch("pm_core.tmux.get_pane_activity_age", return_value=10.0), \
-             patch("pm_core.tmux.capture_pane", return_value="some output\n> "), \
-             patch("pm_core.tmux.send_keys") as mock_send:
-            result = w._safe_inject("%1", "hello")
-        assert result is True
-        mock_send.assert_called_once_with("%1", "hello")
-
-    def test_skips_when_pane_active_recently(self):
-        w = self._make_watcher()
-        with patch("pm_core.tmux.get_pane_activity_age", return_value=2.0), \
-             patch("pm_core.tmux.send_keys") as mock_send:
-            result = w._safe_inject("%1", "hello")
-        assert result is False
-        mock_send.assert_not_called()
-
-    def test_skips_when_activity_age_unknown(self):
-        w = self._make_watcher()
-        with patch("pm_core.tmux.get_pane_activity_age", return_value=None), \
-             patch("pm_core.tmux.send_keys") as mock_send:
-            result = w._safe_inject("%1", "hello")
-        assert result is False
-        mock_send.assert_not_called()
-
-    def test_skips_when_text_already_in_prompt(self):
-        w = self._make_watcher()
-        with patch("pm_core.tmux.get_pane_activity_age", return_value=10.0), \
-             patch("pm_core.tmux.capture_pane", return_value="some output\n> partial text"), \
-             patch("pm_core.tmux.send_keys") as mock_send:
-            result = w._safe_inject("%1", "hello")
-        assert result is False
-        mock_send.assert_not_called()
-
-    def test_skips_when_last_line_is_not_a_prompt(self):
-        """Session is mid-output (no prompt visible yet)."""
-        w = self._make_watcher()
-        with patch("pm_core.tmux.get_pane_activity_age", return_value=10.0), \
-             patch("pm_core.tmux.capture_pane", return_value="Running tests...\nAll passed."), \
-             patch("pm_core.tmux.send_keys") as mock_send:
-            result = w._safe_inject("%1", "hello")
-        assert result is False
-        mock_send.assert_not_called()
-
-    def test_custom_min_idle_seconds(self):
-        """min_idle_seconds parameter is respected."""
-        w = self._make_watcher()
-        with patch("pm_core.tmux.get_pane_activity_age", return_value=3.0), \
-             patch("pm_core.tmux.capture_pane", return_value="> "), \
-             patch("pm_core.tmux.send_keys") as mock_send:
-            # 3s is not enough for default (5s) but enough for custom (2s)
-            assert w._safe_inject("%1", "hello", min_idle_seconds=2.0) is True
-            assert w._safe_inject("%2", "hello", min_idle_seconds=5.0) is False
-        mock_send.assert_called_once()
-
-    def test_returns_false_when_send_keys_raises(self):
-        w = self._make_watcher()
-        with patch("pm_core.tmux.get_pane_activity_age", return_value=10.0), \
-             patch("pm_core.tmux.capture_pane", return_value="> "), \
-             patch("pm_core.tmux.send_keys", side_effect=RuntimeError("tmux gone")):
-            result = w._safe_inject("%1", "hello")
-        assert result is False
-
-    def test_prompt_with_leading_whitespace(self):
-        """Prompt may have leading spaces in some terminal layouts."""
-        w = self._make_watcher()
-        with patch("pm_core.tmux.get_pane_activity_age", return_value=10.0), \
-             patch("pm_core.tmux.capture_pane", return_value="   >   "), \
-             patch("pm_core.tmux.send_keys") as mock_send:
-            result = w._safe_inject("%1", "hello")
-        assert result is True
-        mock_send.assert_called_once()
-
-
 # --- Prompt generation ---
 
 class TestSupervisorPromptGeneration:
     """Test SupervisorWatcher.generate_prompt()."""
 
-    @patch("pm_core.loop_shared.get_pm_session", return_value="test-session")
-    def test_no_targets_prompt(self, mock_session):
+    @patch("pm_core.watchers.supervisor_watcher.get_pm_session", return_value="test-session")
+    def test_prompt_includes_role_and_instructions(self, mock_session):
         w = SupervisorWatcher(pm_root="")
-        with patch("pm_core.tmux.list_windows", return_value=[]):
-            prompt = w.generate_prompt(1)
-        assert "No active target sessions" in prompt
-        assert "NO_ISSUES" in prompt
-
-    @patch("pm_core.loop_shared.get_pm_session", return_value="test-session")
-    def test_prompt_includes_targets(self, mock_session):
-        w = SupervisorWatcher(pm_root="")
-        windows = [{"id": "@1", "index": "1", "name": "pr-abc-impl"}]
-        with patch("pm_core.tmux.list_windows", return_value=windows), \
-             patch("pm_core.tmux.get_pane_indices", return_value=[("%1", 0)]), \
-             patch("pm_core.tmux.capture_pane", return_value="doing some work"):
-            prompt = w.generate_prompt(1)
-        assert "pr-abc-impl" in prompt
-        assert "doing some work" in prompt
+        prompt = w.generate_prompt(1)
         assert "senior engineer" in prompt
+        assert "iteration 1" in prompt
+        assert "tmux list-windows" in prompt
+        assert "tmux capture-pane" in prompt
+        assert "tmux send-keys" in prompt
+
+    @patch("pm_core.watchers.supervisor_watcher.get_pm_session", return_value="test-session")
+    def test_prompt_includes_session_flag(self, mock_session):
+        w = SupervisorWatcher(pm_root="")
+        prompt = w.generate_prompt(1)
+        assert "-t test-session" in prompt
+
+    @patch("pm_core.watchers.supervisor_watcher.get_pm_session", return_value=None)
+    def test_prompt_without_session(self, mock_session):
+        w = SupervisorWatcher(pm_root="")
+        prompt = w.generate_prompt(1)
+        # Should not have a specific session flag
+        assert "-t None" not in prompt
+        assert "tmux list-windows" in prompt
+
+    @patch("pm_core.watchers.supervisor_watcher.get_pm_session", return_value="test-session")
+    def test_prompt_includes_target_filter(self, mock_session):
+        w = SupervisorWatcher(pm_root="", target_filter="pr-abc")
+        prompt = w.generate_prompt(1)
+        assert "pr-abc" in prompt
+        assert "Target filter" in prompt
+
+    @patch("pm_core.watchers.supervisor_watcher.get_pm_session", return_value="test-session")
+    def test_prompt_no_target_filter(self, mock_session):
+        w = SupervisorWatcher(pm_root="")
+        prompt = w.generate_prompt(1)
+        assert "Target filter" not in prompt
+
+    @patch("pm_core.watchers.supervisor_watcher.get_pm_session", return_value="test-session")
+    def test_prompt_includes_supervisor_id(self, mock_session):
+        w = SupervisorWatcher(pm_root="")
+        prompt = w.generate_prompt(1)
+        assert w.state.watcher_id in prompt
+
+    @patch("pm_core.watchers.supervisor_watcher.get_pm_session", return_value="test-session")
+    def test_prompt_includes_log_path(self, mock_session):
+        w = SupervisorWatcher(pm_root="")
+        prompt = w.generate_prompt(1)
+        assert str(SUPERVISOR_LOG_DIR) in prompt
+        assert f"{w.state.watcher_id}.jsonl" in prompt
+
+    @patch("pm_core.watchers.supervisor_watcher.get_pm_session", return_value="test-session")
+    def test_prompt_includes_verdict_instructions(self, mock_session):
+        w = SupervisorWatcher(pm_root="")
+        prompt = w.generate_prompt(1)
+        assert "FEEDBACK_SENT" in prompt
+        assert "NO_ISSUES" in prompt
+        assert "CONTINUE" in prompt
+        assert "INPUT_REQUIRED" in prompt
 
 
 # --- Build launch command ---
