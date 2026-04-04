@@ -68,6 +68,7 @@ def plan_add(name: str, description: str, fresh: bool):
         "name": name,
         "file": plan_file,
         "status": "draft",
+        "parent": None,
     }
     if data.get("plans") is None:
         data["plans"] = []
@@ -730,6 +731,7 @@ def _run_plan_import(name: str):
         "name": name,
         "file": plan_file,
         "status": "draft",
+        "parent": None,
     }
     if data.get("plans") is None:
         data["plans"] = []

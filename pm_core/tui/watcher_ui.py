@@ -64,6 +64,7 @@ def ensure_watcher_plans(app) -> Path | None:
             "name": info["name"],
             "file": info["file"],
             "status": "draft",
+            "parent": None,
         })
         plan_path = root / info["file"]
         if not plan_path.exists():

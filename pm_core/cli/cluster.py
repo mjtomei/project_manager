@@ -126,7 +126,7 @@ def cluster_auto(threshold, max_commits, weights, output_fmt):
         plan_path.write_text(md)
 
         plans = data.setdefault("plans", [])
-        plans.append({"id": plan_id, "name": plan_name, "file": plan_file, "status": "draft"})
+        plans.append({"id": plan_id, "name": plan_name, "file": plan_file, "status": "draft", "parent": None})
         save_and_push(data, root, f"pm: cluster auto → {plan_id}")
         trigger_tui_refresh()
 

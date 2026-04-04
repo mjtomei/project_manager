@@ -320,7 +320,7 @@ def handle_plan_pick(app, pr_id: str, result) -> None:
         _, title = result
         plan_id = store.next_plan_id(app._data)
         plan_file = f"plans/{plan_id}.md"
-        entry = {"id": plan_id, "name": title, "file": plan_file, "status": "draft"}
+        entry = {"id": plan_id, "name": title, "file": plan_file, "status": "draft", "parent": None}
         if app._data.get("plans") is None:
             app._data["plans"] = []
         app._data["plans"].append(entry)
