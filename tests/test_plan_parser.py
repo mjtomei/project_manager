@@ -173,6 +173,70 @@ def test_parse_children_no_section():
     assert parse_plan_children(text) == []
 
 
+def test_parse_children_empty_section():
+    text = """\
+# Plan with empty Plans section
+
+## Plans
+
+## PRs
+
+### PR: Some PR
+- **description**: A PR
+- **tests**: Tests
+- **files**: f.py
+- **depends_on**:
+"""
+    assert parse_plan_children(text) == []
+
+
+def test_parse_children_prs_before_plans():
+    """## PRs appears before ## Plans — both parsers still work."""
+    text = """\
+# Plan
+
+## PRs
+
+### PR: First PR
+- **description**: Do something
+- **tests**: Tests
+- **files**: a.py
+- **depends_on**:
+
+## Plans
+
+### Plan: Child plan
+- **summary**: A child
+- **status**: active
+- **id**: plan-ffff000
+"""
+    children = parse_plan_children(text)
+    assert len(children) == 1
+    assert children[0]["title"] == "Child plan"
+    assert children[0]["summary"] == "A child"
+    assert children[0]["status"] == "active"
+    assert children[0]["id"] == "plan-ffff000"
+
+    prs = parse_plan_prs(text)
+    assert len(prs) == 1
+    assert prs[0]["title"] == "First PR"
+
+
+def test_parse_children_title_only():
+    """Plan blocks with only titles — missing fields default to empty string."""
+    text = """\
+## Plans
+
+### Plan: Bare plan
+"""
+    result = parse_plan_children(text)
+    assert len(result) == 1
+    assert result[0]["title"] == "Bare plan"
+    assert result[0]["summary"] == ""
+    assert result[0]["status"] == ""
+    assert result[0]["id"] == ""
+
+
 def test_extract_field_summary_status_id():
     body = """\
 - **summary**: Build the new auth system
