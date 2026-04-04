@@ -116,6 +116,7 @@ This session is managed by `pm`. Run `pm help` to see available commands.
 - Before referencing existing code (imports, function calls, class usage), read the source to verify the interface.
 - This workdir is a clone managed by pm. The base pm state (project.yaml, PR status) lives in a separate directory and is not automatically synced with this clone. Commands like `pm pr start` and `pm pr review` should be run from the base directory, not here — your session for {pr_id} is already running.
 {_remote_sync_tip(data, branch)}
+{_base_branch_sync_tip(data, base_branch)}
 
 ## Workflow
 {instructions}
@@ -316,6 +317,19 @@ def _remote_sync_tip(data: dict, branch: str) -> str:
         f"- Pull from remote before starting work to pick up changes from "
         f"other sessions or machines: `git pull origin {branch}`. "
         f"If there are merge conflicts, resolve them before continuing."
+    )
+
+
+def _base_branch_sync_tip(data: dict, base_branch: str) -> str:
+    """Return a tip about pulling the base branch, or empty string for local backend."""
+    backend_name = data.get("project", {}).get("backend", "vanilla")
+    if backend_name == "local":
+        return ""
+    return (
+        f"- Pull the latest `{base_branch}` and merge it into your branch so you're "
+        f"building on up-to-date code: "
+        f"`git fetch origin {base_branch} && git merge origin/{base_branch}`. "
+        f"Resolve any conflicts before continuing."
     )
 
 
