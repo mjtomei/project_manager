@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-945ba50
+  active_pr: pr-6f04a57
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -52,6 +52,10 @@ plans:
 - id: onboarding
   name: Onboarding and developer experience
   file: plans/onboarding.md
+  status: draft
+- id: plan-cb4ef69
+  name: Hierarchical plans
+  file: plans/plan-cb4ef69.md
   status: draft
 prs:
 - id: pr-001
@@ -2575,7 +2579,7 @@ prs:
   title: Refine watcher INPUT_REQUIRED to distinguish project-wide vs branch-specific
     issues
   branch: pm/pr-7122c11-refine-watcher-input-required-to-distinguish-proje
-  status: in_progress
+  status: merged
   depends_on: []
   description: 'When the watcher detects an issue on a single branch that is already
     paused by a review loop INPUT_REQUIRED, it should NOT report INPUT_REQUIRED itself
@@ -2615,11 +2619,24 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/115
   gh_pr_number: 115
   created_at: '2026-03-02T03:07:32.581497+00:00'
-  updated_at: '2026-03-23T13:17:52.842508+00:00'
+  updated_at: '2026-04-04T13:51:33.031198+00:00'
   started_at: '2026-03-02T03:08:34.327716+00:00'
-  reviewed_at: null
-  merged_at: null
-  notes: []
+  reviewed_at: '2026-04-04T13:18:07.079219+00:00'
+  merged_at: '2026-04-04T13:51:33.031198+00:00'
+  notes:
+  - id: note-8edbcec
+    text: 'QA NEEDS_WORK: Prompt contains "handled states" block distinguishing loop-managed
+      branches: PASS; Prompt Section 3 distinguishes project-wide vs branch-specific
+      blockers: NEEDS_WORK; Iteration Protocol verdict descriptions reflect refined
+      semantics: PASS; Docstring documents INPUT_REQUIRED semantics: PASS; Plan file
+      watchers.md updated with refined testing description: PASS; QA loop parity —
+      prompt treats QA loop INPUT_REQUIRED same as review loop: PASS; Prompt with
+      auto_start_target still includes refined INPUT_REQUIRED guidance: PASS; Manual
+      test — watcher emits READY when one branch is paused by its review loop: PASS;
+      Manual test — watcher emits INPUT_REQUIRED for stuck in_progress with no loop:
+      PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-7122c11-7adf1ab157841521)'
+    created_at: '2026-04-04T13:50:59Z'
+    last_edited: '2026-04-04T13:50:59Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-7122c11-refine-watcher-input-required-to-dis-ab512a43
 - id: pr-6a06089
   plan: improvements
@@ -4399,7 +4416,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/129
   gh_pr_number: 129
   created_at: '2026-03-08T01:38:37.869518+00:00'
-  updated_at: '2026-03-23T13:14:04.928958+00:00'
+  updated_at: '2026-04-02T13:51:23.889527+00:00'
   started_at: '2026-03-08T01:41:11.161062+00:00'
   reviewed_at: '2026-03-08T02:10:07.745342+00:00'
   merged_at: null
@@ -4857,7 +4874,7 @@ prs:
   plan: watchers
   title: Add high-effort watcher supervisors that monitor and coach lower-effort sessions
   branch: pm/pr-871dbf5-add-high-effort-watcher-supervisors-that-monitor-a
-  status: in_review
+  status: qa
   depends_on:
   - pr-3032fb6
   description: 'Add a new watcher type that runs at high effort (Opus-level) and monitors
@@ -4918,11 +4935,30 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/144
   gh_pr_number: 144
   created_at: '2026-03-08T23:09:07.312432+00:00'
-  updated_at: '2026-03-23T13:17:22.650530+00:00'
+  updated_at: '2026-04-04T14:17:04.718380+00:00'
   started_at: '2026-03-14T17:21:14.310809+00:00'
   reviewed_at: '2026-03-14T21:54:58.823224+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-9e01251
+    text: 'QA PASS: Existing unit tests pass: PASS; SupervisorWatcher class configuration
+      and BaseWatcher integration: PASS; Per-instance unique window names: PASS; Prompt
+      generation with session and target filter: PASS; Prompt includes correct log
+      path and JSON format: PASS; Verdict parsing — all verdict types and fallback:
+      PASS; should_continue — verdicts that continue vs stop: PASS; build_launch_cmd
+      — correct CLI arguments: PASS; on_verdict is a no-op (logging only): PASS; Feedback
+      logging — write and read round-trip: PASS; read_feedback_log with target_filter
+      and limit: PASS; read_feedback_log with missing directory: PASS; read_feedback_log
+      with malformed JSONL lines: PASS; format_feedback_log output: PASS; CLI supervisor
+      start — requires tmux: PASS; CLI supervisor start --count > 1 rejected: PASS;
+      CLI supervisor log command: PASS; CLI supervisor stop shows guidance: PASS;
+      CLI supervisor-iter hidden command: PASS; TUI verdict icons for new supervisor
+      verdicts: PASS; TUI start_watcher passes target_filter for supervisor type:
+      PASS; Watcher list command includes supervisor: PASS; Prompt instructs Claude
+      to skip supervisor windows: PASS; CLI supervisor start with --target and --wait
+      flags: PASS; FeedbackEntry dataclass field completeness: PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-871dbf5-edac1874b2782501)'
+    created_at: '2026-04-04T14:34:26Z'
+    last_edited: '2026-04-04T14:34:26Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-871dbf5-add-high-effort-watcher-supervisors--cbe54f5e
 - id: pr-b7ada6a
   plan: tui-ux
@@ -5120,7 +5156,12 @@ prs:
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-85c3833
+    text: 'QA INPUT_REQUIRED:  (workdir: /home/mjtomei/.pm/workdirs/qa/pr-18ac983-e21fdbbf66b41d89)'
+    created_at: '2026-04-04T14:56:24Z'
+    last_edited: '2026-04-04T14:56:24Z'
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-18ac983-session-health-watcher-detect-and-re-63382040
 - id: pr-945546e
   plan: watchers
   title: 'Project state watcher: monitor project health and recommend actions'
@@ -7230,6 +7271,411 @@ prs:
   gh_pr_number: null
   created_at: '2026-03-26T12:47:22.115142+00:00'
   updated_at: '2026-03-26T12:47:35.403906+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-6ca8113
+  plan: plan-cb4ef69
+  title: Add `parent` field to plan schema
+  branch: pm/pr-6ca8113-add-parent-field-to-plan-schema
+  status: in_progress
+  depends_on: []
+  description: 'Add optional `parent` field to plan entries in project.yaml. Update
+    `store.py` to include `parent: null` in new plan entries. Add validation in `store.load()`
+    that `parent` references a valid plan ID (or null). Update `init_project` and
+    any plan creation paths to set `parent`. This is the foundation — no UI or behavioral
+    changes yet.
+
+
+    Tests: Test that plans with valid parent IDs load correctly. Test that plans with
+    invalid parent IDs raise validation errors. Test that plans with null parent are
+    treated as root plans. Test cycle detection (a plan cannot be its own ancestor).
+
+
+    Files: pm_core/store.py, tests/test_store.py'
+  agent_machine: arch-home
+  gh_pr: https://github.com/mjtomei/project_manager/pull/150
+  gh_pr_number: 150
+  created_at: '2026-04-04T15:58:06.096910+00:00'
+  updated_at: '2026-04-04T15:59:02.833618+00:00'
+  started_at: '2026-04-04T15:59:02.833618+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-6ca8113-add-parent-field-to-plan-schema-63382040
+- id: pr-939d8cf
+  plan: plan-cb4ef69
+  title: Add hierarchy traversal helpers to store
+  branch: pm/pr-939d8cf-add-hierarchy-traversal-helpers-to-store
+  status: pending
+  depends_on:
+  - pr-6ca8113
+  description: 'Add functions to store.py for navigating the plan tree: `get_children(data,
+    plan_id)` returns direct children, `get_ancestors(data, plan_id)` returns the
+    ancestor chain, `get_subtree(data, plan_id)` returns all descendants, `get_root_plans(data)`
+    returns plans with no parent, `is_ancestor(data, ancestor_id, descendant_id)`
+    for cycle checks. These are pure data helpers with no side effects.
+
+
+    Tests: Test each helper with a 3-level hierarchy. Test edge cases: root plans,
+    leaf plans, empty project. Test `is_ancestor` with direct parent, grandparent,
+    non-ancestor, and self.
+
+
+    Files: pm_core/store.py, tests/test_store.py'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-04T15:58:06.096953+00:00'
+  updated_at: '2026-04-04T15:58:06.096953+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-e839314
+  plan: plan-cb4ef69
+  title: Plan parser support for `## Plans` section
+  branch: pm/pr-e839314-plan-parser-support-for-plans-section
+  status: in_progress
+  depends_on: []
+  description: 'Extend `plan_parser.py` to parse a `## Plans` section from parent
+    plan markdown files. Add `parse_plan_children()` function that extracts child
+    plan blocks (similar to `parse_plan_prs()`). Each block has: title, summary, status,
+    id. Add `extract_field()` support for the summary field. This is parsing only
+    — no load/write behavior.
+
+
+    Tests: Test parsing a plan file with `## Plans` section containing multiple children.
+    Test parsing a plan with both `## Plans` and `## PRs` sections. Test parsing a
+    plan with no `## Plans` section (returns empty list). Test field extraction for
+    summary, status, id.
+
+
+    Files: pm_core/plan_parser.py, tests/test_plan_parser.py'
+  agent_machine: arch-home
+  gh_pr: https://github.com/mjtomei/project_manager/pull/151
+  gh_pr_number: 151
+  created_at: '2026-04-04T15:58:06.096976+00:00'
+  updated_at: '2026-04-04T15:59:22.837433+00:00'
+  started_at: '2026-04-04T15:59:22.837433+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-e839314-plan-parser-support-for-plans-sectio-63382040
+- id: pr-6c5e53c
+  plan: plan-cb4ef69
+  title: '`pm plan add --parent` option'
+  branch: pm/pr-6c5e53c-pm-plan-add-parent-option
+  status: pending
+  depends_on:
+  - pr-6ca8113
+  description: 'Add `--parent` option to `pm plan add` command. When specified, sets
+    the `parent` field on the new plan entry. Validates that the parent plan exists.
+    The Claude session prompt for plan development should include the parent plan''s
+    content as context so the child plan is developed with awareness of the parent''s
+    goals and scope.
+
+
+    Tests: Test that `pm plan add --parent plan-top` creates a plan with correct parent
+    field. Test that `--parent` with nonexistent plan ID raises an error. Test that
+    omitting `--parent` creates a root plan (parent: null).
+
+
+    Files: pm_core/cli/plan.py, tests/test_plan_cli.py'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-04T15:58:06.096997+00:00'
+  updated_at: '2026-04-04T15:58:06.096997+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-c53b937
+  plan: plan-cb4ef69
+  title: '`pm plan load` handles `## Plans` section'
+  branch: pm/pr-c53b937-pm-plan-load-handles-plans-section
+  status: pending
+  depends_on:
+  - pr-e839314
+  - pr-6ca8113
+  description: 'Extend `pm plan load` to process the `## Plans` section in parent
+    plan files. For each child plan block: if a plan with matching ID already exists,
+    update its name and status; if not, create a new plan entry with the parent set.
+    This mirrors how `## PRs` blocks create PR entries. Also update the child plan''s
+    markdown file header if it was just created. Does not recurse — loading a parent
+    plan creates/links children but does not load their PRs.
+
+
+    Tests: Test loading a parent plan creates child plan entries with correct parent
+    field. Test loading when child plans already exist updates metadata without duplicating.
+    Test that child plan markdown files are created when missing.
+
+
+    Files: pm_core/cli/plan.py, pm_core/plan_parser.py, tests/test_plan_cli.py'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-04T15:58:06.097018+00:00'
+  updated_at: '2026-04-04T15:58:06.097018+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-67e53e9
+  plan: plan-cb4ef69
+  title: TUI plans pane tree rendering
+  branch: pm/pr-67e53e9-tui-plans-pane-tree-rendering
+  status: pending
+  depends_on:
+  - pr-939d8cf
+  description: 'Update `PlansPane` to render plans as a tree. Root plans render at
+    the left edge; children indent with tree characters (├── and └──). Show aggregate
+    PR count for parent plans (sum of own + descendants'' PRs). Add expand/collapse
+    toggle: collapsed parents show as a single line with child count; expanded parents
+    show their children below. Persist expand/collapse state in the widget. **Human-guided
+    testing needed**: tree rendering with various hierarchy depths, expand/collapse
+    keyboard interaction, visual alignment of tree characters.
+
+
+    Tests: Test that `update_plans()` with hierarchical data produces correct tree
+    ordering. Test expand/collapse state toggling. Test aggregate PR count calculation.
+    Test rendering with 1-level, 2-level, and 3-level hierarchies. Test that flat
+    plans (no parent) render identically to current behavior.
+
+
+    Files: pm_core/tui/plans_pane.py, pm_core/tui/app.py, tests/test_plans_pane.py'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-04T15:58:06.097037+00:00'
+  updated_at: '2026-04-04T15:58:06.097037+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-8e6bc47
+  plan: plan-cb4ef69
+  title: 'Plan review: parent context for child reviews'
+  branch: pm/pr-8e6bc47-plan-review-parent-context-for-child-reviews
+  status: pending
+  depends_on:
+  - pr-939d8cf
+  description: 'When reviewing a child plan (one with a `parent` field), include the
+    parent plan''s content in the review prompt. The parent plan already contains
+    the `## Plans` section with sibling summaries, so no separate sibling data is
+    needed — the parent file is sufficient context. The review prompt should instruct
+    Claude to: check that the child plan''s work aligns with the parent''s goals,
+    flag work that might belong in a sibling (referencing the parent''s summaries),
+    and anticipate cross-cutting issues.
+
+
+    Tests: Test that child plan review prompt includes parent plan file content. Test
+    that no separate sibling plan data is injected (parent file covers it). Test that
+    root plan review does not include parent context.
+
+
+    Files: pm_core/cli/plan.py, pm_core/review.py, tests/test_plan_review.py'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-04T15:58:06.097056+00:00'
+  updated_at: '2026-04-04T15:58:06.097056+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-6f04a57
+  plan: plan-cb4ef69
+  title: 'Plan review: summary accuracy checking for parent plans'
+  branch: pm/pr-6f04a57-plan-review-summary-accuracy-checking-for-parent-p
+  status: pending
+  depends_on:
+  - pr-e839314
+  - pr-8e6bc47
+  description: 'When reviewing a parent plan (one that has children), the review prompt
+    lists child plans by ID, name, status, and file path — with instructions on how
+    to read them (e.g. `Read the file at pm/plans/plan-auth.md`). It does NOT include
+    full child plan content in the prompt. The reviewer is instructed to read child
+    plan files as needed to verify that the `## Plans` summaries are still accurate.
+    The prompt should instruct Claude to flag: summaries that no longer match the
+    child''s actual scope, children in project.yaml missing from the `## Plans` section,
+    status mismatches, and coverage gaps where parent goals aren''t addressed by any
+    child. Suggest specific edits to the `## Plans` section.
+
+
+    Tests: Test that parent plan review prompt lists child plans with file paths.
+    Test that full child plan content is NOT embedded in the prompt. Test that review
+    instructions reference reading child files.
+
+
+    Files: pm_core/cli/plan.py, pm_core/review.py, tests/test_plan_review.py'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-04T15:58:06.097076+00:00'
+  updated_at: '2026-04-04T15:58:06.097076+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-b4ee7f9
+  plan: plan-cb4ef69
+  title: '`pm plan reparent` command'
+  branch: pm/pr-b4ee7f9-pm-plan-reparent-command
+  status: pending
+  depends_on:
+  - pr-939d8cf
+  description: 'Add `pm plan reparent <plan-id> [--parent <new-parent-id>]` command.
+    Moves a plan to a new parent, or to root if `--parent` is omitted. Validates:
+    target parent exists, no cycle would be created (plan cannot become its own ancestor),
+    plan is not already under the target parent. After reparenting, prints a warning
+    listing affected parent plans whose `## Plans` sections may need updating, and
+    suggests running `pm plan review` on them. **Human-guided testing needed**: verify
+    reparent with TUI refresh, check that plans pane reflects new hierarchy.
+
+
+    Tests: Test reparenting a child to a different parent. Test reparenting to root
+    (clearing parent). Test cycle detection rejects self-parenting and indirect cycles.
+    Test error on nonexistent target parent. Test warning message lists affected plans.
+
+
+    Files: pm_core/cli/plan.py, tests/test_plan_cli.py'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-04T15:58:06.097097+00:00'
+  updated_at: '2026-04-04T15:58:06.097097+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-bfc8ace
+  plan: plan-cb4ef69
+  title: '`pm pr move` with cross-plan integrity checks'
+  branch: pm/pr-bfc8ace-pm-pr-move-with-cross-plan-integrity-checks
+  status: pending
+  depends_on:
+  - pr-939d8cf
+  description: 'Add `pm pr move <pr-id> --plan <target-plan-id>` command (or enhance
+    existing `pm pr edit --plan`). Moves a PR to a different plan. After moving, checks
+    whether the PR''s dependencies are still satisfiable (warns if depends_on PRs
+    are in unrelated plans). Prints a warning listing affected plans whose summaries
+    or PR coverage may need review. Also supports moving a PR to a plan in a different
+    subtree of the hierarchy. **Human-guided testing needed**: verify PR moves reflect
+    correctly in TUI tech tree and plans pane.
+
+
+    Tests: Test moving a PR between plans in same subtree. Test moving a PR to an
+    unrelated plan. Test dependency warning when depends_on PR is in a different subtree.
+    Test error on nonexistent target plan.
+
+
+    Files: pm_core/cli/pr.py, pm_core/cli/plan.py, tests/test_pr_cli.py'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-04T15:58:06.097116+00:00'
+  updated_at: '2026-04-04T15:58:06.097116+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-edf320e
+  plan: plan-cb4ef69
+  title: Tech tree hierarchical plan group labels
+  branch: pm/pr-edf320e-tech-tree-hierarchical-plan-group-labels
+  status: pending
+  depends_on:
+  - pr-939d8cf
+  description: 'Update plan group labels in the tech tree to reflect hierarchy. When
+    PRs are grouped by plan, and the plan has a parent, prefix the plan label with
+    its ancestry path (e.g. "Project overview > Auth refactor") or indent it under
+    its parent group. This gives users hierarchy context without leaving the PR view.
+    The tree layout engine (`tree_layout.py`) should order plan groups so that children
+    appear after their parents. **Human-guided testing needed**: verify label rendering
+    with nested hierarchies, check that label scrolling and plan-jump navigation (`{`/`}`
+    keys) still work correctly with hierarchical labels.
+
+
+    Tests: Test that plan group labels include parent context when hierarchy exists.
+    Test label ordering follows hierarchy (parent groups before children). Test that
+    flat plans (no hierarchy) render labels identically to current behavior. Test
+    plan-jump navigation across hierarchical groups.
+
+
+    Files: pm_core/tui/tech_tree.py, pm_core/tui/tree_layout.py, tests/test_tech_tree.py'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-04T15:58:06.097135+00:00'
+  updated_at: '2026-04-04T15:58:06.097135+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-b011eb1
+  plan: plan-cb4ef69
+  title: Tech tree collapse-all-leaves action
+  branch: pm/pr-b011eb1-tech-tree-collapse-all-leaves-action
+  status: pending
+  depends_on:
+  - pr-edf320e
+  description: 'Add a `C` keybinding in the tech tree that collapses all leaf-level
+    plan groups (plans with no children — the ones containing PRs). This gives a birds-eye
+    view showing only the plan hierarchy labels. The user can then selectively expand
+    individual plan groups with `Enter` or `space` to drill into the PRs they care
+    about. Add an `E` keybinding to expand all groups back. Update the footer to show
+    `C`=collapse-all and `E`=expand-all. **Human-guided testing needed**: full interaction
+    flow — collapse all, navigate between collapsed groups, expand one, verify PRs
+    appear, expand all restores full view.
+
+
+    Tests: Test that `C` collapses all leaf plan groups. Test that collapsed groups
+    show as label-only rows. Test that `Enter`/`space` on a collapsed group expands
+    it. Test that `E` expands all groups. Test that navigation between collapsed groups
+    works correctly.
+
+
+    Files: pm_core/tui/tech_tree.py, pm_core/tui/tree_layout.py, tests/test_tech_tree.py'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-04T15:58:06.097154+00:00'
+  updated_at: '2026-04-04T15:58:06.097154+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-1e674f3
+  plan: plan-cb4ef69
+  title: TUI hierarchy mutation shortcuts
+  branch: pm/pr-1e674f3-tui-hierarchy-mutation-shortcuts
+  status: pending
+  depends_on:
+  - pr-67e53e9
+  - pr-b4ee7f9
+  - pr-bfc8ace
+  description: 'Add keyboard shortcuts in the plans pane for hierarchy mutation. `R`
+    to reparent the selected plan (opens a selection modal for target parent), `M`
+    to move PRs (switches to PR selection within the plan, then target plan selection).
+    These shortcuts launch the underlying CLI commands via pane operations. Update
+    the footer to show new shortcuts. **Human-guided testing needed**: full interactive
+    flow of reparent and move via TUI, modal selection UX, footer display.
+
+
+    Tests: Test that `R` key fires the correct PlanAction. Test that `M` key fires
+    the correct PlanAction. Test footer rendering includes new shortcuts.
+
+
+    Files: pm_core/tui/plans_pane.py, pm_core/tui/app.py, pm_core/tui/pane_ops.py,
+    tests/test_plans_pane.py'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-04T15:58:06.097172+00:00'
+  updated_at: '2026-04-04T15:58:06.097172+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
