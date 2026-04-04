@@ -427,7 +427,6 @@ def _auto_start_review_loops(app, target: str | None = None,
         # Skip if no workdir (shouldn't happen for in_review, but guard)
         if not pr.get("workdir"):
             continue
-
         _log.info("auto_start: starting review loop for %s", pr_id)
         app.log_message(f"Auto-start: review loop for {pr_id}")
         from pm_core.tui.review_loop_ui import _start_loop
@@ -472,7 +471,6 @@ def _auto_start_qa_loops(app, target: str | None = None,
         # Skip if no workdir
         if not pr.get("workdir"):
             continue
-
         _log.info("auto_start: starting QA loop for %s", pr_id)
         app.log_message(f"Auto-start: QA for {pr_id}")
         from pm_core.tui import qa_loop_ui

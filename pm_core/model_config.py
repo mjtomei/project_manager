@@ -47,7 +47,7 @@ _HAIKU_PATTERNS = ("haiku",)
 
 # ── Session types ────────────────────────────────────────────────────
 
-SESSION_TYPES = ("impl", "review", "qa", "qa_planning", "qa_scenario", "watcher", "supervisor", "merge")
+SESSION_TYPES = ("impl", "review", "qa", "qa_planning", "qa_scenario", "qa_verification", "watcher", "supervisor", "merge")
 
 DEFAULT_SESSION_MODELS: dict[str, str] = {
     # Empty — use Claude CLI defaults unless explicitly configured via
@@ -61,6 +61,7 @@ _PROVIDER_PREFIX = "provider:"
 _FALLBACK_TYPES: dict[str, str] = {
     "qa_planning": "qa",
     "qa_scenario": "qa",
+    "qa_verification": "qa",
     "supervisor": "watcher",
 }
 

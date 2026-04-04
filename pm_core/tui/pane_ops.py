@@ -141,17 +141,7 @@ def launch_pane(app, cmd: str, role: str, fresh: bool = False) -> None:
     try:
         direction = pane_layout.preferred_split_direction(session, window)
         pane_id = tmux_mod.split_pane(session, direction, wrap)
-        pane_registry.register_pane(session, window, pane_id, role, cmd)
-        # The after-split-window hook fires handle_pane_opened which sets
-        # user_modified=True (because the pane wasn't registered yet when the
-        # hook ran).  Reset it so rebalance doesn't skip.
-        # NOTE: this register → reset → rebalance pattern is also used in
-        # cli/pr.py (review window) and pane_layout._respawn_tui().
-        data = pane_registry.load_registry(session)
-        wdata = pane_registry.get_window_data(data, window)
-        wdata["user_modified"] = False
-        pane_registry.save_registry(session, data)
-        pane_layout.rebalance(session, window)
+        pane_layout.register_and_rebalance(session, window, [(pane_id, role, cmd)])
         tmux_mod.select_pane_smart(pane_id, session, window)
         app.log_message(f"Launched {role} pane")
         _log.info("launched pane: role=%s id=%s", role, pane_id)

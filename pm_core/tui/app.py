@@ -22,7 +22,7 @@ from pm_core.tui.plans_pane import PlansPane, PlanSelected, PlanActivated, PlanA
 from pm_core.tui.qa_pane import QAPane, QAItemSelected, QAItemActivated, QAAction
 from pm_core.plan_parser import extract_plan_intro
 
-from pm_core.tui.widgets import TreeScroll, StatusBar, LogLine
+from pm_core.tui.widgets import TreeScroll, StatusBar, SessionBar, LogLine
 from pm_core.tui.screens import (
     ConnectScreen, HelpScreen, MergeLockScreen, PlanPickerScreen, PlanAddScreen,
 )
@@ -49,6 +49,13 @@ class ProjectManagerApp(App):
         color: $text;
         padding: 0 1;
         margin-top: 1;
+    }
+    SessionBar {
+        height: 1;
+        background: $surface;
+        color: $text;
+        padding: 0 1;
+        display: none;
     }
     #main-area {
         layout: horizontal;
@@ -144,7 +151,8 @@ class ProjectManagerApp(App):
         Binding("H", "launch_guide", "Guide", show=True),
         Binding("C", "show_connect", "Connect", show=False),
         Binding("A", "toggle_auto_start", "Auto-start", show=False),
-        # w is handled as a prefix key in on_key (wf=focus, ww=list, ws=start/stop)
+        Binding("w", "focus_watcher", "Watcher", show=False),
+        Binding("V", "review_spec", "Review Spec", show=False),
     ]
 
     def on_key(self, event) -> None:
@@ -228,7 +236,8 @@ class ProjectManagerApp(App):
                        "launch_meta", "launch_claude", "launch_guide",
                        "view_log", "refresh", "rebalance", "show_help",
                        "toggle_plans", "toggle_qa", "start_qa_on_pr", "hide_plan", "move_to_plan", "toggle_merged",
-                       "cycle_filter", "cycle_sort", "toggle_auto_start", "focus_watcher"):
+                       "cycle_filter", "cycle_sort", "toggle_auto_start", "focus_watcher",
+                       "review_spec"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus or self._command_pending:
                 _log.debug("check_action: blocked %s (command bar focused/pending)", action)
@@ -328,6 +337,7 @@ class ProjectManagerApp(App):
 
     def compose(self) -> ComposeResult:
         yield StatusBar(id="status-bar")
+        yield SessionBar(id="session-bar")
         with Container(id="main-area"):
             with TreeScroll(id="tree-container"):
                 yield TechTree(id="tech-tree")
@@ -557,6 +567,7 @@ class ProjectManagerApp(App):
             auto_start=self._auto_start,
             watcher_status=watcher_status,
         )
+        self.query_one("#session-bar", SessionBar).refresh_session_info()
 
     def _update_display(self) -> None:
         """Refresh all widgets with current data."""
@@ -804,6 +815,35 @@ class ProjectManagerApp(App):
             meta_pm_root=str(meta_root) if meta_root else None,
         )
 
+    def action_review_spec(self) -> None:
+        """Open the oldest pending spec for review (V key)."""
+        from pm_core import spec_gen
+        _log.info("action: review_spec")
+
+        pr_id = spec_gen.oldest_pending_spec_pr(self._data)
+        if not pr_id:
+            self.log_message("No specs pending review")
+            return
+
+        pr = store.get_pr(self._data, pr_id)
+        if not pr:
+            self.log_message(f"PR {pr_id} not found")
+            return
+
+        phase = spec_gen.get_pending_spec_phase(pr)
+        if not phase:
+            self.log_message(f"No pending spec for {pr_id}")
+            return
+
+        # Select this PR in the tree
+        tree = self.query_one("#tech-tree", TechTree)
+        tree.select_pr(pr_id)
+
+        # Launch spec-approve in a pane
+        pane_ops.launch_pane(self, f"pm pr spec-approve {pr_id}",
+                             "spec-review", fresh=True)
+        self.log_message(f"Reviewing {phase} spec for {pr_id}")
+
     def action_quit(self) -> None:
         pane_ops.quit_app(self)
 
@@ -984,7 +1024,7 @@ class ProjectManagerApp(App):
         else:
             total = 0
         status_bar = self.query_one("#status-bar", StatusBar)
-        status_bar.update(f" [bold]QA[/bold]    {total} item(s)    [dim]Enter=run  e=edit  a=add  q=back[/dim]")
+        status_bar.update(f" [bold]QA[/bold]    {total} item(s)    [dim]Enter=run  e=edit  d=debug  a=add  q=back[/dim]")
         self.call_after_refresh(self._capture_frame, "show_qa_view")
 
     def _refresh_qa_pane(self) -> None:
@@ -1050,6 +1090,16 @@ class ProjectManagerApp(App):
                     category, qa_id = parts
                     pane_ops.launch_pane(
                         self, f"pm qa edit {qa_id} --category {category}", "qa-edit"
+                    )
+            else:
+                self.log_message("No QA item selected")
+        elif message.action == "debug":
+            if message.item_id:
+                parts = message.item_id.split(":", 1)
+                if len(parts) == 2:
+                    _category, qa_id = parts
+                    pane_ops.launch_pane(
+                        self, f"pm qa debug --foreground {qa_id}", "qa-debug"
                     )
             else:
                 self.log_message("No QA item selected")

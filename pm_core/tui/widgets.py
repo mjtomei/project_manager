@@ -50,6 +50,38 @@ class StatusBar(Static):
         self.update(f" Project: [bold]{project_name}[/bold]    {pr_info}{filter_display}{sort_display}    repo: [cyan]{safe_repo}[/cyan]    {sync_display}{auto_display}{watcher_display}{assist_display}")
 
 
+class SessionBar(Static):
+    """Second status bar row showing active session overrides."""
+
+    def refresh_session_info(self) -> None:
+        """Read session files and update display; hide self if nothing active."""
+        from pathlib import Path
+        from pm_core.paths import session_dir, skip_permissions_enabled
+
+        sd = session_dir()
+        parts: list[str] = []
+
+        if sd:
+            override_file = sd / "override"
+            if override_file.exists():
+                try:
+                    content = override_file.read_text().strip()
+                    if content:
+                        from rich.markup import escape
+                        parts.append(f"[dim]override:[/dim] [cyan]{escape(content)}[/cyan]")
+                except OSError:
+                    pass
+
+            if skip_permissions_enabled():
+                parts.append("[bold red]dangerously-skip-permissions[/bold red]")
+
+        if parts:
+            self.update(" " + "    ".join(parts))
+            self.display = True
+        else:
+            self.display = False
+
+
 class LogLine(Static):
     """Single-line log output above the command bar."""
     pass
