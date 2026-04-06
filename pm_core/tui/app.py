@@ -22,7 +22,7 @@ from pm_core.tui.plans_pane import PlansPane, PlanSelected, PlanActivated, PlanA
 from pm_core.tui.qa_pane import QAPane, QAItemSelected, QAItemActivated, QAAction
 from pm_core.plan_parser import extract_plan_intro
 
-from pm_core.tui.widgets import TreeScroll, StatusBar, LogLine
+from pm_core.tui.widgets import TreeScroll, StatusBar, SessionBar, LogLine
 from pm_core.tui.screens import (
     ConnectScreen, HelpScreen, MergeLockScreen, PlanPickerScreen, PlanAddScreen,
 )
@@ -49,6 +49,13 @@ class ProjectManagerApp(App):
         color: $text;
         padding: 0 1;
         margin-top: 1;
+    }
+    SessionBar {
+        height: 1;
+        background: $surface;
+        color: $text;
+        padding: 0 1;
+        display: none;
     }
     #main-area {
         layout: horizontal;
@@ -330,6 +337,7 @@ class ProjectManagerApp(App):
 
     def compose(self) -> ComposeResult:
         yield StatusBar(id="status-bar")
+        yield SessionBar(id="session-bar")
         with Container(id="main-area"):
             with TreeScroll(id="tree-container"):
                 yield TechTree(id="tech-tree")
@@ -570,6 +578,7 @@ class ProjectManagerApp(App):
             auto_start=self._auto_start,
             watcher_status=watcher_status,
         )
+        self.query_one("#session-bar", SessionBar).refresh_session_info()
 
     def _update_display(self) -> None:
         """Refresh all widgets with current data."""

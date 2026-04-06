@@ -589,15 +589,38 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
         if proxy_socket_path:
             sock_dir = str(Path(proxy_socket_path).parent)
             cleanup_parts.append(f"rmdir {shlex.quote(sock_dir)} 2>/dev/null")
-        return f"{exec_part}; {'; '.join(cleanup_parts)}"
+        # Wrap in a bash trap so cleanup runs even when the pane is killed
+        # via tmux kill-pane/kill-window (SIGHUP to the outer shell causes
+        # ';'-chained commands to be skipped, but EXIT traps always fire).
+        # Use shlex.quote on the full inner script to avoid quote nesting
+        # issues: exec_part already contains single-quoted arguments from
+        # shlex.quote(), so wrapping in literal '...' would break parsing.
+        inner = f"trap {shlex.quote('; '.join(cleanup_parts))} EXIT; {exec_part}"
+        return f"bash -c {shlex.quote(inner)}"
     return exec_part
 
 
 def remove_container(name: str) -> None:
-    """Force-remove a container and its push proxy (no-op if it doesn't exist)."""
+    """Force-remove a container and its push proxy, then wait until it is gone.
+
+    If another 'docker rm -f' is already in flight (e.g. the previous session's
+    EXIT trap), this still blocks until the container has fully disappeared so
+    that the caller can safely create a fresh container with the same name.
+    """
+    import time
     from pm_core.push_proxy import stop_push_proxy
     stop_push_proxy(name)
     _run_docker("rm", "-f", name, check=False, timeout=30)
+    # Wait for the container to be fully gone.  When another rm is already in
+    # flight the daemon returns "removal already in progress" and our rm returns
+    # immediately, but the container still exists for a brief moment.
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        result = _run_docker("inspect", name, check=False, timeout=5)
+        if result.returncode != 0:
+            return  # container is gone
+        time.sleep(0.1)
+    _log.warning("remove_container: %s still present after 10 s", name)
 
 
 # ---------------------------------------------------------------------------

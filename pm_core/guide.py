@@ -267,12 +267,27 @@ you learned about the codebase, the user's goals, and any decisions made.
 The user can then pass that file path to the add dialog so the plan session
 picks up where this conversation left off.
 
+**Scope check — one plan or several?** Before creating a plan, consider
+whether the user's goals are better served by a single plan or multiple plans.
+Each plan produces its own independent PR tree, so splitting makes sense when:
+- The goals span distinct features or areas of the codebase that don't depend
+  on each other (e.g. "add auth" and "redesign the dashboard").
+- The overall scope is very large — a single plan with 15+ PRs becomes hard
+  to review and track. Two or three focused plans are easier to manage.
+- Different parts have different priorities or timelines.
+
+If you think the scope warrants multiple plans, suggest it to the user and
+help them decide how to divide the work. They can press `a` multiple times
+in the plans view to create each plan in sequence. Write a separate notes
+file for each plan so every plan session starts with the right context.
+
 Tell the user to press `p` in the TUI to open the plans view, then press `a`
 to add a new plan. A dialog will ask for a title or file path — if you wrote
 a notes file, tell them to enter that path; otherwise help them choose a good
 title based on what you learned about the codebase and their goals. The `a`
 action launches a session in a new pane. Once the plan session finishes,
-walk the user through the remaining steps below.
+walk the user through the remaining steps below (repeat for each plan if
+creating multiple).
 
 ### Breaking the plan into PRs
 
@@ -324,27 +339,7 @@ def build_assist_prompt(data: dict, root: Optional[Path],
     project = data.get("project", {})
     project_name = project.get("name", "unknown")
     repo = project.get("repo", "unknown")
-    prs = data.get("prs") or []
     plans = data.get("plans") or []
-
-    # Build PR summary
-    pr_lines = []
-    for pr in prs:
-        status = pr.get("status", "pending")
-        title = pr.get("title", "???")
-        pr_id = pr.get("id", "???")
-        deps = pr.get("depends_on") or []
-        dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
-        wd = pr.get("workdir", "")
-        wd_str = ""
-        if wd:
-            wd_path = Path(wd)
-            if wd_path.exists():
-                wd_str = f" workdir: {wd}"
-            else:
-                wd_str = f" workdir: {wd} (MISSING)"
-        pr_lines.append(f"  - {pr_id}: {title} [{status}]{dep_str}{wd_str}")
-    pr_summary = "\n".join(pr_lines) if pr_lines else "  (no PRs yet)"
 
     # Build plan summary
     plan_lines = []
@@ -388,9 +383,6 @@ TUI pane ID: {pane_id}
 Current plans:
 {plan_summary}
 
-Current PRs:
-{pr_summary}
-
 ## pm Project Lifecycle
 
 pm organizes work in a structured lifecycle. Actions can be done through the \
@@ -430,23 +422,32 @@ check on in-progress work, or understand what to tackle next.
 
 ## Your Task
 
-Before making any recommendations, check the project's current health:
+Before making any recommendations, check the project's current state:
 
 1. Run `pm pr list --workdirs -t` to see all PRs sorted by most recently \
 updated, with their workdir paths, git status, and timestamps.
 2. Run `pm plan list` to see existing plans
 
-Then assess:
-- Are there workdirs with uncommitted changes for merged PRs? (work that might be lost)
-- Are there in-progress PRs that could be resumed?
-- Are there PRs in review that might need attention?
-- Are there pending PRs whose dependencies are all met?
-- Are there plans that haven't been broken down yet?
-- Is the dependency tree healthy?
+Then assess the project holistically. Tailor your assessment to the project's \
+maturity:
 
-Based on what you find, give the user clear, simple recommendations for \
-what to do next. Suggest one or two concrete actions, not an overwhelming list. \
-Prefer finishing in-progress work over starting new work. Among PRs at the \
-same stage, prefer more recently updated ones — the timestamps in the list \
-show when each PR was last touched.
+**Early projects** (few or no plans/PRs): Help the user get started. \
+Do they need to initialize pm? Create their first plan? Walk them through \
+the lifecycle.
+
+**Projects with active plans**: Anchor your assessment to the plans. \
+For each in-flight plan, where does it stand overall? What fraction of its \
+PRs are done vs remaining? What's the next unblocked step in each plan? \
+Are there plans that haven't been broken down into PRs yet?
+
+**General**: Check whether there are in-progress PRs that could be resumed, \
+PRs in review or QA that need attention, or pending PRs whose dependencies \
+are all met.
+
+Start with the big picture: summarize where the project stands at the \
+plan level — which plans are in flight, how far along each is, and what \
+the overall trajectory looks like. Then suggest one or two concrete next \
+actions. Prefer finishing in-progress work over starting new work. Frame \
+recommendations in terms of plan progress ("plan X needs Y to move \
+forward") rather than individual PR mechanics.
 {notes_block}"""
