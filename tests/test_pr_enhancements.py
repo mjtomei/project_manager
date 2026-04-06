@@ -1150,3 +1150,79 @@ class TestPrStartSpecGate:
 
         # Should NOT fail with the spec gate message
         assert "pending review" not in result.output
+
+
+# ---------------------------------------------------------------------------
+# pr start: committed-state gate
+# ---------------------------------------------------------------------------
+
+class TestPrStartCommittedGate:
+    """pr start should refuse if the PR is not in the committed project.yaml."""
+
+    def test_blocks_when_pr_not_committed(self, tmp_start_project):
+        """pr start should exit non-zero when PR is not in committed project.yaml."""
+        runner = CliRunner()
+        # git show returns the file content but without the PR
+        git_show_result = MagicMock(returncode=0, stdout="project:\n  name: test\nprs: []\n")
+        with mock.patch.object(pr_mod, "state_root", return_value=tmp_start_project["pm_dir"]), \
+             mock.patch("pm_core.cli.pr.git_ops.run_git", return_value=git_show_result), \
+             mock.patch("pm_core.cli.pr._get_pm_session", return_value=None):
+            result = runner.invoke(pr_mod.pr, ["start", "pr-001"])
+
+        assert result.exit_code != 0
+        assert "not committed" in result.output
+
+    def test_blocks_when_git_show_fails(self, tmp_start_project):
+        """pr start should exit non-zero when git show fails (e.g. no commits)."""
+        runner = CliRunner()
+        git_show_result = MagicMock(returncode=128, stdout="", stderr="fatal: not a git repo")
+        with mock.patch.object(pr_mod, "state_root", return_value=tmp_start_project["pm_dir"]), \
+             mock.patch("pm_core.cli.pr.git_ops.run_git", return_value=git_show_result), \
+             mock.patch("pm_core.cli.pr._get_pm_session", return_value=None):
+            result = runner.invoke(pr_mod.pr, ["start", "pr-001"])
+
+        assert result.exit_code != 0
+        assert "not committed" in result.output
+
+    def test_blocks_when_committed_yaml_invalid(self, tmp_start_project):
+        """pr start should exit non-zero when committed project.yaml is invalid YAML."""
+        runner = CliRunner()
+        git_show_result = MagicMock(returncode=0, stdout=": {invalid yaml\n  - [broken")
+        with mock.patch.object(pr_mod, "state_root", return_value=tmp_start_project["pm_dir"]), \
+             mock.patch("pm_core.cli.pr.git_ops.run_git", return_value=git_show_result), \
+             mock.patch("pm_core.cli.pr._get_pm_session", return_value=None):
+            result = runner.invoke(pr_mod.pr, ["start", "pr-001"])
+
+        assert result.exit_code != 0
+        assert "not committed" in result.output
+
+    def test_allows_start_when_pr_committed(self, tmp_start_project, tmp_path):
+        """pr start should proceed when PR exists in committed project.yaml."""
+        import yaml as _yaml
+        committed_yaml = _yaml.dump({
+            "project": {"name": "test", "repo": str(tmp_path), "base_branch": "master"},
+            "prs": [{"id": "pr-001", "title": "Test", "status": "pending"}],
+        })
+        git_show_result = MagicMock(returncode=0, stdout=committed_yaml)
+
+        runner = CliRunner()
+        with mock.patch.object(pr_mod, "state_root", return_value=tmp_start_project["pm_dir"]), \
+             mock.patch("pm_core.cli.pr.git_ops") as mock_git, \
+             mock.patch("pm_core.cli.pr.find_claude", return_value=None), \
+             mock.patch("pm_core.cli.pr._get_pm_session", return_value=None), \
+             mock.patch("pm_core.cli.pr.save_and_push"), \
+             mock.patch("pm_core.cli.pr.trigger_tui_refresh"), \
+             mock.patch("pm_core.cli.pr._resolve_repo_id"), \
+             mock.patch("pm_core.cli.pr.prompt_gen.generate_prompt", return_value="prompt"):
+            # First call is the committed-state check (git show); rest are clone ops
+            mock_git.run_git.return_value = MagicMock(returncode=0, stdout="abc12345\n")
+            mock_git.run_git.side_effect = [
+                git_show_result,  # git show for committed check
+                MagicMock(returncode=0, stdout="abc12345\n"),  # rev-parse for base hash
+            ]
+            mock_git.clone.return_value = None
+            mock_git.is_git_repo.return_value = False
+            mock_git.checkout_branch.return_value = None
+            result = runner.invoke(pr_mod.pr, ["start", "pr-001"])
+
+        assert "not committed" not in (result.output or "")
