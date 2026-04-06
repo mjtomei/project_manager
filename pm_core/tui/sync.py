@@ -46,16 +46,20 @@ async def background_sync(app) -> None:
     # Reload capture config in case it was updated via CLI
     load_capture_config(app)
 
-    # Check current guide state
+    # Check current guide state — use temporaries so a mid-sequence
+    # exception (e.g. corrupt YAML) never leaves app in a half-updated state.
     try:
-        app._root = store.find_project_root()
-        app._data = store.load(app._root)
+        root = store.find_project_root()
+        data = store.load(root)
     except FileNotFoundError:
         app._root = None
         app._data = {}
     except store.ProjectYamlParseError as e:
         _log.warning("Skipping sync: %s", e)
         return
+    else:
+        app._root = root
+        app._data = data
 
     # If we're in guide mode, check for state changes
     if app._current_guide_step is not None:
