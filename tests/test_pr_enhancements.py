@@ -1207,6 +1207,19 @@ class TestPrStartCommittedGate:
         assert result.exit_code != 0
         assert "not committed" in result.output
 
+    def test_blocks_when_committed_yaml_empty(self, tmp_start_project):
+        """Empty committed project.yaml (yaml.safe_load returns None) should not crash."""
+        runner = CliRunner()
+        git_show_result = MagicMock(returncode=0, stdout="")
+        with mock.patch.object(pr_mod, "state_root", return_value=tmp_start_project["pm_dir"]), \
+             mock.patch("pm_core.cli.pr.git_ops.run_git", return_value=git_show_result), \
+             mock.patch("pm_core.cli.pr._get_pm_session", return_value=None):
+            result = runner.invoke(pr_mod.pr, ["start", "pr-001"])
+
+        assert result.exit_code != 0
+        assert "not committed" in result.output
+        assert "NoneType" not in (result.output + (result.stderr if hasattr(result, 'stderr') and result.stderr else ""))
+
     def test_allows_start_when_pr_committed(self, tmp_start_project, tmp_path):
         """pr start should proceed when PR exists in committed project.yaml."""
         import yaml as _yaml
