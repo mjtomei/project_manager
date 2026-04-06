@@ -1250,3 +1250,41 @@ class TestPrStartCommittedGate:
             result = runner.invoke(pr_mod.pr, ["start", "pr-001"])
 
         assert "not committed" not in (result.output or "")
+
+    def test_standalone_dir_uses_correct_git_show_path(self, tmp_path):
+        """When is_internal_pm_dir returns False, git show uses project.yaml and cwd=root."""
+        standalone = tmp_path / "standalone"
+        standalone.mkdir()
+
+        data = {
+            "project": {
+                "name": "test-project",
+                "repo": str(tmp_path),
+                "base_branch": "master",
+                "backend": "local",
+            },
+            "prs": [
+                {
+                    "id": "pr-001",
+                    "title": "Test PR",
+                    "description": "Test",
+                    "branch": "pm/pr-001",
+                    "status": "pending",
+                }
+            ],
+            "plans": [],
+        }
+        store.save(data, standalone)
+
+        runner = CliRunner()
+        git_show_result = MagicMock(returncode=0, stdout="project:\n  name: test\nprs: []\n")
+        with mock.patch.object(pr_mod, "state_root", return_value=standalone), \
+             mock.patch("pm_core.cli.pr.git_ops.run_git", return_value=git_show_result) as mock_run_git, \
+             mock.patch("pm_core.cli.pr._get_pm_session", return_value=None):
+            result = runner.invoke(pr_mod.pr, ["start", "pr-001"])
+
+        assert result.exit_code != 0
+        assert "not committed" in result.output
+        mock_run_git.assert_called_once_with(
+            "show", "master:project.yaml", cwd=str(standalone), check=False
+        )
