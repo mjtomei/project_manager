@@ -1131,6 +1131,13 @@ class TestPrStartSpecGate:
 
     def test_allows_start_when_no_spec_pending(self, tmp_start_project, tmp_path):
         """pr start should proceed normally when no spec is pending."""
+        import yaml as _yaml
+        committed_yaml = _yaml.dump({
+            "project": {"name": "test", "repo": str(tmp_path), "base_branch": "master"},
+            "prs": [{"id": "pr-001", "title": "Test", "status": "pending"}],
+        })
+        git_show_result = MagicMock(returncode=0, stdout=committed_yaml)
+
         # We just need to verify the gate doesn't block — mock everything after
         runner = CliRunner()
         with mock.patch.object(pr_mod, "state_root", return_value=tmp_start_project["pm_dir"]), \
@@ -1143,6 +1150,10 @@ class TestPrStartSpecGate:
              mock.patch("pm_core.cli.pr.prompt_gen.generate_prompt", return_value="prompt"):
             mock_git.clone.return_value = None
             mock_git.run_git.return_value = MagicMock(returncode=0, stdout="abc12345\n")
+            mock_git.run_git.side_effect = [
+                git_show_result,  # git show for committed check
+                MagicMock(returncode=0, stdout="abc12345\n"),  # rev-parse for base hash
+            ]
             mock_git.is_git_repo.return_value = False
             mock_git.checkout_branch.return_value = None
             # Should not exit with error 1 (spec gate)
