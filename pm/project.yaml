@@ -7363,6 +7363,7 @@ prs:
   merged_at: null
   notes: []
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-e839314-plan-parser-support-for-plans-sectio-63382040
+  spec_impl: /workspace/pm/specs/pr-e839314/impl.md
 - id: pr-6c5e53c
   plan: plan-cb4ef69
   title: '`pm plan add --parent` option'
