@@ -852,7 +852,9 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     if pr_committed:
         try:
             committed_data = yaml.safe_load(committed_result.stdout) or {}
-        except yaml.YAMLError:
+            if not isinstance(committed_data, dict):
+                raise ValueError("not a mapping")
+        except (yaml.YAMLError, ValueError):
             pr_committed = False
         else:
             pr_committed = bool(store.get_pr(committed_data, pr_id))
