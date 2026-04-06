@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import click
+import yaml
 
 from pm_core import store, graph, git_ops, prompt_gen
 from pm_core import pr_sync as pr_sync_mod
@@ -837,6 +838,38 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     repo_url = data["project"]["repo"]
     base_branch = data["project"].get("base_branch", "master")
     branch = pr_entry.get("branch") or f"pm/{pr_id}"
+
+    # Verify the PR exists in the committed project.yaml on base_branch.
+    # The clone checks out base_branch, so if the PR isn't committed there
+    # the workdir won't contain it, causing confusing downstream failures.
+    repo_root = str(root.parent) if store.is_internal_pm_dir(root) else str(root)
+    yaml_path = "pm/project.yaml" if store.is_internal_pm_dir(root) else "project.yaml"
+    committed_result = git_ops.run_git(
+        "show", f"{base_branch}:{yaml_path}", cwd=repo_root, check=False
+    )
+    if committed_result.returncode != 0:
+        click.echo(
+            f"PR {pr_id} is not committed on {base_branch} yet. "
+            f"Run `pm push` to commit project state before starting.",
+            err=True,
+        )
+        raise SystemExit(1)
+    try:
+        committed_data = yaml.safe_load(committed_result.stdout) or {}
+    except yaml.YAMLError:
+        click.echo(
+            f"PR {pr_id} is not committed on {base_branch} yet. "
+            f"Run `pm push` to commit project state before starting.",
+            err=True,
+        )
+        raise SystemExit(1)
+    if not store.get_pr(committed_data, pr_id):
+        click.echo(
+            f"PR {pr_id} is not committed on {base_branch} yet. "
+            f"Run `pm push` to commit project state before starting.",
+            err=True,
+        )
+        raise SystemExit(1)
 
     if workdir:
         work_path = Path(workdir).resolve()
