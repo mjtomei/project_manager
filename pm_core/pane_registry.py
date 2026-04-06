@@ -70,7 +70,7 @@ def locked_read_modify_write(path: Path, modifier_fn, *, timeout: float = 5.0):
                     raise TimeoutError(
                         f"Could not acquire lock on {lock_path} within {timeout}s"
                     )
-                time.sleep(0.05)
+                time.sleep(0.01)
 
         # Read
         if path.exists():

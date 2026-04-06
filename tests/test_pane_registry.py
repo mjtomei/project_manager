@@ -237,6 +237,36 @@ class TestRegisterPane:
         assert roles == ["tui", "claude", "notes"]
 
 
+    def test_concurrent_register_pane_no_data_loss(self, registry_dir):
+        """20 threads each registering a unique pane — all 20 must be present."""
+        errors = []
+
+        def worker(i):
+            try:
+                register_pane(
+                    session="stress",
+                    window="main",
+                    pane_id=f"pane-{i}",
+                    role="worker",
+                    cmd="sleep 1",
+                )
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(20)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors, f"Worker errors: {errors}"
+        data = load_registry("stress")
+        panes = data["windows"]["main"]["panes"]
+        assert len(panes) == 20, f"Expected 20 panes, got {len(panes)}"
+        ids = set(p["id"] for p in panes)
+        assert len(ids) == 20, f"Expected 20 unique IDs, got {len(ids)}: {ids}"
+
+
 class TestUnregisterPane:
     def test_removes_existing_pane(self, registry_dir):
         register_pane("sess", "0", "%1", "tui", "pm _tui")
