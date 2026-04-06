@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-6f04a57
+  active_pr: pr-e3cf481
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -13,50 +13,62 @@ plans:
   name: Import from existing repo
   file: plans/plan-001.md
   status: draft
+  parent: null
 - id: plan-002
   name: Multi-candidate test-driven code generation
   file: plans/plan-002.md
   status: draft
+  parent: null
 - id: plan-003
   name: Multiuser Support
   file: plans/plan-003.md
   status: draft
+  parent: null
 - id: plan-e4fa5cb
   name: refactor for code quality
   file: plans/plan-e4fa5cb.md
   status: done
+  parent: null
 - id: plan-c493724
   name: project metrics and optimization
   file: plans/plan-c493724.md
   status: draft
+  parent: null
 - id: plan-qa
   name: Fully specified project from project.yaml
   file: plans/plan-qa.md
   status: active
+  parent: null
 - id: bugs
   name: ''
   file: bugs.md
   status: active
+  parent: null
 - id: improvements
   name: ''
   file: improvements.md
   status: active
+  parent: null
 - id: watchers
   name: Watcher framework and session health
   file: plans/watchers.md
   status: draft
+  parent: null
 - id: tui-ux
   name: TUI and UX improvements
   file: plans/tui-ux.md
   status: draft
+  parent: null
 - id: onboarding
   name: Onboarding and developer experience
   file: plans/onboarding.md
   status: draft
+  parent: null
 - id: plan-cb4ef69
   name: Hierarchical plans
   file: plans/plan-cb4ef69.md
   status: draft
+  parent: null
 prs:
 - id: pr-001
   plan: plan-001
@@ -7279,7 +7291,7 @@ prs:
   plan: plan-cb4ef69
   title: Add `parent` field to plan schema
   branch: pm/pr-6ca8113-add-parent-field-to-plan-schema
-  status: in_progress
+  status: merged
   depends_on: []
   description: 'Add optional `parent` field to plan entries in project.yaml. Update
     `store.py` to include `parent: null` in new plan entries. Add validation in `store.load()`
@@ -7298,12 +7310,31 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/150
   gh_pr_number: 150
   created_at: '2026-04-04T15:58:06.096910+00:00'
-  updated_at: '2026-04-04T15:59:02.833618+00:00'
+  updated_at: '2026-04-06T18:29:56.936421+00:00'
   started_at: '2026-04-04T15:59:02.833618+00:00'
-  reviewed_at: null
-  merged_at: null
-  notes: []
+  reviewed_at: '2026-04-06T17:30:15.011048+00:00'
+  merged_at: '2026-04-06T18:29:56.936421+00:00'
+  notes:
+  - id: note-962120d
+    text: removed new plan option from plan picker in tui (M key), please verify in
+      qa that M key still works and new plan option is gone
+    created_at: '2026-04-04T16:20:14Z'
+    last_edited: '2026-04-04T16:20:14Z'
+  - id: note-4cae795
+    text: 'QA ERROR: '
+    created_at: '2026-04-06T18:12:41Z'
+    last_edited: '2026-04-06T18:12:41Z'
+  - id: note-1cc1d45
+    text: 'QA PASS: Unit tests pass — all 17 test_store.py tests: PASS; make_plan_entry
+      helper produces correct output: PASS; All plan creation paths include parent
+      field: PASS; Backward compatibility — real project.yaml loads without error:
+      PASS; VALID_PLAN_STATUSES constant is correct: PASS; TUI PlanPickerScreen —
+      "New plan" option removed, M key works: PASS; PlanValidationError is a distinct
+      exception type: PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-6ca8113-bc43e63528aaf89b)'
+    created_at: '2026-04-06T18:30:18Z'
+    last_edited: '2026-04-06T18:30:18Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-6ca8113-add-parent-field-to-plan-schema-63382040
+  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-6ca8113/qa.md
 - id: pr-939d8cf
   plan: plan-cb4ef69
   title: Add hierarchy traversal helpers to store
@@ -7337,7 +7368,7 @@ prs:
   plan: plan-cb4ef69
   title: Plan parser support for `## Plans` section
   branch: pm/pr-e839314-plan-parser-support-for-plans-section
-  status: in_progress
+  status: merged
   depends_on: []
   description: 'Extend `plan_parser.py` to parse a `## Plans` section from parent
     plan markdown files. Add `parse_plan_children()` function that extracts child
@@ -7357,13 +7388,12 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/151
   gh_pr_number: 151
   created_at: '2026-04-04T15:58:06.096976+00:00'
-  updated_at: '2026-04-04T15:59:22.837433+00:00'
+  updated_at: '2026-04-06T18:19:07.766704+00:00'
   started_at: '2026-04-04T15:59:22.837433+00:00'
-  reviewed_at: null
-  merged_at: null
+  reviewed_at: '2026-04-04T16:11:55.101170+00:00'
+  merged_at: '2026-04-06T18:19:07.766704+00:00'
   notes: []
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-e839314-plan-parser-support-for-plans-sectio-63382040
-  spec_impl: /workspace/pm/specs/pr-e839314/impl.md
 - id: pr-6c5e53c
   plan: plan-cb4ef69
   title: '`pm plan add --parent` option'
@@ -7681,4 +7711,124 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-83b98d5
+  plan: improvements
+  title: Merge PR notes from both main and workdir project.yaml into prompts
+  branch: pm/pr-83b98d5-merge-pr-notes-from-both-main-and-workdir-project-
+  status: in_progress
+  depends_on: []
+  description: 'Currently _format_pr_notes in prompt_gen.py only reads notes from
+    the main repo project.yaml. Notes added from a workdir session (e.g. by an implementation
+    Claude running pm pr note add from the workdir) end up in the workdir copy of
+    project.yaml but not the main copy. When prompts are generated for review or subsequent
+    sessions, these workdir-only notes are lost.
+
+
+    Modify _format_pr_notes (prompt_gen.py:31-41) to also load the PR entry from the
+    workdir project.yaml (using the pr workdir field), collect notes from both sources,
+    deduplicate by note ID, and merge them into the prompt. This ensures notes added
+    from either location appear in all prompts.
+
+
+    Key changes:
+
+    - In _format_pr_notes, accept the workdir path (from pr.get("workdir"))
+
+    - If the workdir exists and has a pm/project.yaml, load it and find the matching
+    PR entry
+
+    - Collect notes from both main and workdir PR entries
+
+    - Deduplicate by note ID (prefer the version with the later last_edited timestamp)
+
+    - Sort merged notes by created_at
+
+    - Update all callers of _format_pr_notes to pass the workdir path'
+  agent_machine: arch-home
+  gh_pr: https://github.com/mjtomei/project_manager/pull/152
+  gh_pr_number: 152
+  created_at: '2026-04-04T16:32:19.297115+00:00'
+  updated_at: '2026-04-06T18:37:58.648506+00:00'
+  started_at: '2026-04-06T18:35:47.532852+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-83b98d5-merge-pr-notes-from-both-main-and-wo-b1d18e14
+- id: pr-7251b72
+  plan: improvements
+  title: Refuse pm pr start when PR is not committed on base branch
+  branch: pm/pr-7251b72-refuse-pm-pr-start-when-pr-is-not-committed-on-bas
+  status: in_progress
+  depends_on: []
+  description: 'When pm pr start clones the main repo to create a workdir, it clones
+    from the committed state of master (or the configured base_branch). If the PR
+    entry has been added to project.yaml but not yet committed to git, the workdir
+    clone will not contain that PR entry. This causes confusing failures downstream
+    when the implementation session tries to read its own PR from the workdir project.yaml.
+
+
+    Add a pre-start check that verifies the PR ID exists in the committed (git show
+    HEAD:pm/project.yaml) version of project.yaml before proceeding with the clone.
+    If the PR is not committed, print a clear error message telling the user to commit
+    the pm state first (e.g. via pm push or git commit) and refuse to start.
+
+
+    Key changes:
+
+    - In pr_start (cli/pr.py), before cloning, read the committed project.yaml from
+    git (git show HEAD:pm/project.yaml)
+
+    - Check that the PR ID appears in the committed data
+
+    - If missing, emit an error like "PR {pr_id} is not committed to {base_branch}
+    yet. Run pm push to commit project state before starting."
+
+    - Exit with a non-zero return code'
+  agent_machine: arch-home
+  gh_pr: https://github.com/mjtomei/project_manager/pull/153
+  gh_pr_number: 153
+  created_at: '2026-04-04T16:32:21.564023+00:00'
+  updated_at: '2026-04-06T18:37:47.901600+00:00'
+  started_at: '2026-04-06T18:36:08.322443+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-7251b72-refuse-pm-pr-start-when-pr-is-not-co-b1d18e14
+- id: pr-e3cf481
+  plan: null
+  title: Add file-locked read-modify-write helper for pane registry
+  branch: pm/pr-e3cf481-add-file-locked-read-modify-write-helper-for-pane-
+  status: in_progress
+  depends_on: []
+  description: 'The pane registry (pane_registry.py) uses a load→modify→save pattern
+    on a shared JSON file with no file locking. When the QA loop spawns many panes
+    in parallel, concurrent register_pane/unregister_pane calls race each other —
+    the last writer wins, silently dropping data from concurrent writers. This causes
+    existing panes (like a claude pane launched with ''c'') to disappear from the
+    registry, so pressing ''c'' again launches a duplicate instead of focusing the
+    existing one.
+
+
+    Fix:
+
+    1. Add a generic locked_read_modify_write(path, modifier_fn) helper that uses
+    fcntl.flock for cross-process file locking around the load→modify→save cycle.
+
+    2. Convert pane_registry.py save_registry to use atomic write (temp file + rename)
+    like store.py already does.
+
+    3. Replace the bare load→modify→save calls in register_pane, unregister_pane,
+    kill_and_unregister, and _reconcile_registry with the new locked helper.
+
+    4. Add tests for the locking helper (concurrent writers, timeout behavior).'
+  agent_machine: arch-home
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-06T18:36:59.216942+00:00'
+  updated_at: '2026-04-06T18:40:32.910998+00:00'
+  started_at: '2026-04-06T18:39:53.655732+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-e3cf481-add-file-locked-read-modify-write-he-b1d18e14
 es: []
