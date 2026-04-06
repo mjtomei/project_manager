@@ -540,3 +540,34 @@ class TestLockedReadModifyWrite:
         # Lock should be free -- a second call should succeed immediately
         result = locked_read_modify_write(path, lambda d: d, timeout=0.2)
         assert result == {"v": 1}
+
+    def test_sidecar_lock_pattern_and_leftover(self, tmp_path):
+        """Lock file uses .json.lock sidecar and persists as empty after call."""
+        path = tmp_path / "session.json"
+        path.write_text(json.dumps({"key": "value"}))
+
+        locked_read_modify_write(path, lambda d: d)
+
+        lock_file = tmp_path / "session.json.lock"
+        assert lock_file.exists(), "lock sidecar should persist after call"
+        assert lock_file.read_text() == "", "lock sidecar should be empty"
+        assert path.exists(), "data file should still exist"
+        assert str(path) != str(lock_file), "data file and lock file must be distinct paths"
+
+    def test_leftover_lock_does_not_block_subsequent_call(self, tmp_path):
+        """A leftover .lock file is harmlessly reused by subsequent calls."""
+        path = tmp_path / "data.json"
+        path.write_text(json.dumps({"v": 1}))
+
+        # First call creates the .lock file
+        locked_read_modify_write(path, lambda d: d)
+        lock_file = tmp_path / "data.json.lock"
+        assert lock_file.exists()
+
+        # Second call with a modifier that increments v
+        def bump(data):
+            data["v"] += 1
+            return data
+
+        locked_read_modify_write(path, bump)
+        assert json.loads(path.read_text()) == {"v": 2}
