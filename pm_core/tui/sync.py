@@ -53,6 +53,9 @@ async def background_sync(app) -> None:
     except FileNotFoundError:
         app._root = None
         app._data = {}
+    except store.ProjectYamlParseError as e:
+        _log.warning("Skipping sync: %s", e)
+        return
 
     # If we're in guide mode, check for state changes
     if app._current_guide_step is not None:
@@ -183,6 +186,8 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
         # Clear log message after 1 second for manual refresh
         if is_manual:
             app.set_timer(1.0, app._clear_log_message)
+    except SystemExit as e:
+        _log.error("Sync raised SystemExit(%s) — suppressing to prevent TUI crash", e.code)
     except Exception as e:
         _log.exception("Sync error")
         app.log_message(f"Sync error: {e}")

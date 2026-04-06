@@ -256,11 +256,48 @@ def which_cmd():
     click.echo(pm_core.__path__[0])
 
 
+_BOOLEAN_SETTINGS = {"hide-assist", "hide-merged", "beginner-mode", "auto-cleanup",
+                     "qa-verify-pass"}
+_INT_SETTINGS = {"min-pane-width", "qa-max-scenarios", "qa-verify-retries",
+                 "qa-verdict-reminder-timeout"}
+_ENUM_SETTINGS = {"spec-mode": {"auto", "review", "prompt"}}
+_SETTING_DEFAULTS = {
+    "hide-assist": "off",
+    "hide-merged": "off",
+    "beginner-mode": "off",
+    "auto-cleanup": "off",
+    "qa-verify-pass": "on",
+    "min-pane-width": "100",
+    "qa-max-scenarios": "(unset)",
+    "qa-verify-retries": "(unset)",
+    "qa-verdict-reminder-timeout": "(unset)",
+    "spec-mode": "prompt",
+}
+_LIST_ALIASES = {"list", "ls", "l"}
+
+
+def _list_settings():
+    """Print all settings and their current values."""
+    from pm_core.paths import get_global_setting, get_global_setting_value
+    all_settings = sorted(_BOOLEAN_SETTINGS | _INT_SETTINGS | set(_ENUM_SETTINGS))
+    for name in all_settings:
+        if name in _BOOLEAN_SETTINGS:
+            val = "on" if get_global_setting(name) else "off"
+        else:
+            raw = get_global_setting_value(name, "")
+            val = raw if raw else _SETTING_DEFAULTS.get(name, "(unset)")
+        default = _SETTING_DEFAULTS.get(name, "")
+        marker = " (default)" if val == default else ""
+        click.echo(f"  {name:<22} {val}{marker}")
+
+
 @cli.command("set")
 @click.argument("setting")
-@click.argument("value")
+@click.argument("value", required=False, default=None)
 def set_cmd(setting, value):
     """Configure a global pm setting.
+
+    Run 'pm set list' to see all settings and their current values.
 
     Boolean settings (on/off):
 
@@ -274,22 +311,42 @@ def set_cmd(setting, value):
 
     Value settings:
 
-      min-pane-width  Minimum characters per horizontal pane (default 100)
+      min-pane-width       Minimum characters per horizontal pane (default 100)
+
+      qa-max-scenarios     Max QA scenarios to run (0 = unlimited, default 0)
+
+      qa-verify-retries    Max verification retries before marking NEEDS_WORK (default 3)
+
+      qa-verdict-reminder-timeout  Seconds of pane silence before sending a verdict-format
+                                   reminder to a scenario agent (0 or unset = disabled)
+
+      qa-verify-pass       Enable/disable PASS verdict verification (on/off, default on)
+
+      spec-mode            Spec generation mode: auto, review, or prompt (default: prompt)
     """
+    if setting in _LIST_ALIASES:
+        _list_settings()
+        return
+    if value is None:
+        raise click.UsageError("Missing argument 'VALUE'.")
     from pm_core.paths import set_global_setting, set_global_setting_value
-    boolean_settings = {"hide-assist", "hide-merged", "beginner-mode", "auto-cleanup"}
-    int_settings = {"min-pane-width"}
-    known = boolean_settings | int_settings
+    known = _BOOLEAN_SETTINGS | _INT_SETTINGS | set(_ENUM_SETTINGS)
     if setting not in known:
         click.echo(f"Unknown setting: {setting}", err=True)
         click.echo(f"Available: {', '.join(sorted(known))}", err=True)
         raise SystemExit(1)
-    if setting in boolean_settings:
+    if setting in _BOOLEAN_SETTINGS:
         if value not in ("on", "off"):
             click.echo(f"Setting '{setting}' takes 'on' or 'off'", err=True)
             raise SystemExit(1)
         set_global_setting(setting, value == "on")
-    elif setting in int_settings:
+    elif setting in _ENUM_SETTINGS:
+        valid = _ENUM_SETTINGS[setting]
+        if value not in valid:
+            click.echo(f"Setting '{setting}' takes one of: {', '.join(sorted(valid))}", err=True)
+            raise SystemExit(1)
+        set_global_setting_value(setting, value)
+    elif setting in _INT_SETTINGS:
         try:
             int(value)
         except ValueError:
@@ -301,7 +358,7 @@ def set_cmd(setting, value):
 
 @cli.command("setting")
 @click.argument("setting")
-@click.argument("value")
+@click.argument("value", required=False, default=None)
 @click.pass_context
 def setting_cmd(ctx, setting, value):
     """Alias for 'pm set'. Configure a global pm setting."""
@@ -541,10 +598,17 @@ COMMANDS
   pm qa run <id> --pr <pr-id>    Run a QA instruction against a PR
   pm qa standalone <id>          Run a QA instruction against master
 
+  pm qa mocks list               List shared mock definitions
+  pm qa mocks show <id>          Show a mock definition
+  pm qa mocks add <name>         Create a new mock definition
+  pm qa mocks edit <id>          Edit a mock definition
+  pm qa mocks prompt             Print the mocks block injected into scenario prompts
+
   pm container status            Show container isolation settings
   pm container enable            Enable container isolation for Claude sessions
   pm container disable           Disable container isolation
   pm container set <key> <val>   Configure container image, memory, cpu
+  pm container build             Launch Claude to build project-specific image
   pm container cleanup           Remove stale pm containers
 
   pm bench models               List models on local inference backend
@@ -603,7 +667,7 @@ def getting_started_cmd():
 # Import submodules to register their commands on ``cli``.
 # This must be at the bottom of the file, after ``cli`` is defined.
 # ---------------------------------------------------------------------------
-from pm_core.cli import pr, plan, session, tui, guide, meta, cluster, bench, watcher, qa, container  # noqa: E402, F401
+from pm_core.cli import pr, plan, session, tui, guide, meta, cluster, bench, watcher, qa, container, model, provider, log  # noqa: E402, F401
 
 
 def main():

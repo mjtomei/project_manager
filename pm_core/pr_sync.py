@@ -8,7 +8,6 @@ This module provides the core sync functionality used by:
 It tracks the last sync timestamp to avoid excessive API calls.
 """
 
-import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -16,8 +15,9 @@ from typing import Optional
 from pm_core import store, git_ops, graph
 from pm_core.backend import get_backend
 from pm_core.cli.helpers import _record_status_timestamp
+from pm_core.paths import configure_logger
 
-_log = logging.getLogger("pm.pr_sync")
+_log = configure_logger("pm.pr_sync")
 
 
 def _trigger_tui_refresh() -> None:

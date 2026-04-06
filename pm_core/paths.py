@@ -203,8 +203,11 @@ def configure_logger(name: str, log_file: str | None = None, max_bytes: int = 10
         maxBytes=max_bytes,
         backupCount=1,  # Keep one backup file
     )
+    # Derive short source tag from logger name for easy grep filtering.
+    # "pm.tui.app" -> "tui.app", "pm.qa_loop" -> "qa_loop"
+    source = name.removeprefix("pm.")
     handler.setFormatter(logging.Formatter(
-        "%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S"
+        f"%(asctime)s %(levelname)-5s [{source}] %(message)s", datefmt="%H:%M:%S"
     ))
     logger.addHandler(handler)
     logger.propagate = False
@@ -339,11 +342,11 @@ def log_shell_command(cmd: list[str] | str, prefix: str = "shell", returncode: i
 
         if returncode is not None:
             if returncode == 0:
-                entry = f"{timestamp} INFO  {prefix} done: {cmd_str}\n"
+                entry = f"{timestamp} INFO  [{prefix}] done: {cmd_str}\n"
             else:
-                entry = f"{timestamp} WARN  {prefix} failed (rc={returncode}): {cmd_str}\n"
+                entry = f"{timestamp} WARN  [{prefix}] failed (rc={returncode}): {cmd_str}\n"
         else:
-            entry = f"{timestamp} INFO  {prefix}: {cmd_str}\n"
+            entry = f"{timestamp} INFO  [{prefix}] {cmd_str}\n"
 
         with open(log_file, "a") as f:
             f.write(entry)

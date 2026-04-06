@@ -7,3 +7,5 @@ __pycache__/
 .venv/
 pm.egg-info/
 .pane-registry.json
+Dockerfile.pm-project
+pm_prompt_*.txt

@@ -1,8 +1,7 @@
 """Host-side git remote proxy for containerised sessions.
 
 Containers must not hold git credentials directly.  Each container gets a
-dedicated proxy — a daemon on the host listening on a Unix socket that is
-mounted into the container.  A git wrapper inside the container intercepts
+proxy socket mounted into it.  A git wrapper inside the container intercepts
 remote-interacting commands (``push``, ``fetch``, ``pull``, ``ls-remote``)
 and forwards them to the proxy.
 
@@ -13,28 +12,35 @@ The proxy:
      via ``git fetch`` from the target side to avoid ``denyCurrentBranch``
   4. Streams back exit code, stdout, and stderr transparently
 
-One proxy per container — no shared state, no routing.  The proxy starts
-when the container is created and is cleaned up when the container is removed.
+When multiple QA scenario containers share a proxy (same session + PR), each
+container's git wrapper includes its host-side clone path in the request as
+``"workdir"``.  The proxy uses this path as the source for push and the target
+for fetch/pull, falling back to ``self.workdir`` for legacy requests that omit
+the field.
 
 Protocol (newline-delimited JSON over Unix socket):
-  Request:  {"cmd": "push|fetch|pull|ls-remote", "args": ["origin", "branch"]}
+  Request:  {"cmd": "push|fetch|pull|ls-remote", "args": ["origin", "branch"],
+             "workdir": "/host/path/to/clone"}
   Response: {"exit_code": 0, "stdout": "...", "stderr": "..."}
 
 Legacy requests without ``cmd`` are treated as push (backward compat).
+``"workdir"`` is optional; omitting it falls back to ``self.workdir``.
 """
 
 import json
-import logging
 import os
 import socket
 import subprocess
 import threading
 from pathlib import Path
 
-_log = logging.getLogger("pm.push_proxy")
+from pm_core.paths import configure_logger
+
+_log = configure_logger("pm.push_proxy")
 
 _SOCKET_DIR_PREFIX = "pm-push-proxy-"
-_CONTAINER_SOCKET_PATH = "/run/pm-push-proxy.sock"
+_CONTAINER_SOCKET_DIR = "/run/pm-push-proxy"
+_CONTAINER_SOCKET_PATH = f"{_CONTAINER_SOCKET_DIR}/push.sock"
 
 
 def _resolve_local_remote_url(workdir: str, remote: str = "origin") -> str | None:
@@ -221,12 +227,19 @@ class PushProxy:
             conn.sendall((json.dumps(response) + "\n").encode())
             return
 
+        # Caller's host-side workdir (optional — omitted by legacy wrappers).
+        # When present, used as the source for push and the target for
+        # fetch/pull instead of self.workdir (which is only correct for the
+        # first scenario that started the proxy).
+        caller_workdir: str | None = request.get("workdir") or None
+
         # Dispatch based on cmd (default "push" for backward compat)
         cmd = request.get("cmd", "push")
         if cmd == "push":
-            response = self._execute_push(args)
+            response = self._execute_push(args, caller_workdir=caller_workdir)
         elif cmd in ("fetch", "pull", "ls-remote"):
-            response = self._execute_read_cmd(cmd, args)
+            response = self._execute_read_cmd(cmd, args,
+                                              caller_workdir=caller_workdir)
         else:
             response = {"exit_code": 1, "stdout": "",
                         "stderr": f"git-proxy: unknown command '{cmd}'\n"}
@@ -255,7 +268,8 @@ class PushProxy:
                 return {"exit_code": 1, "stdout": "", "stderr": msg}
         return None
 
-    def _execute_push(self, push_args: list[str]) -> dict:
+    def _execute_push(self, push_args: list[str],
+                      caller_workdir: str | None = None) -> dict:
         """Validate the branch and execute git push on the host."""
         # Reject flags that could execute arbitrary programs on the host
         danger = self._check_dangerous_flags(push_args, "push")
@@ -272,7 +286,8 @@ class PushProxy:
                 return {"exit_code": 1, "stdout": "", "stderr": msg}
 
         # Determine the target branch from the push args
-        target_branch = self._extract_target_branch(push_args)
+        target_branch = self._extract_target_branch(
+            push_args, workdir=caller_workdir or self.workdir)
 
         if target_branch is None:
             msg = ("push-proxy: rejected — could not determine target branch "
@@ -293,17 +308,19 @@ class PushProxy:
         # can't ``git push`` (fails with receive.denyCurrentBranch on
         # non-bare repos), so we fetch from the clone into the target repo
         # instead — the proxy can see both paths on the host.
+        workdir = caller_workdir or self.workdir
         remote = self._extract_remote_name(push_args)
-        local_target = _resolve_local_remote_url(self.workdir, remote)
+        local_target = _resolve_local_remote_url(workdir, remote)
 
         if local_target is not None:
-            return self._local_push(local_target, target_branch)
+            return self._local_push(local_target, target_branch,
+                                    caller_workdir=workdir)
 
         cmd = ["git", "push"] + push_args
-        _log.info("Push proxy executing: %s (in %s)", cmd, self.workdir)
+        _log.info("Push proxy executing: %s (in %s)", cmd, workdir)
         try:
             result = subprocess.run(
-                cmd, cwd=self.workdir,
+                cmd, cwd=workdir,
                 capture_output=True, text=True, timeout=120,
             )
             return {
@@ -318,7 +335,8 @@ class PushProxy:
             return {"exit_code": 1, "stdout": "",
                     "stderr": f"push-proxy: {exc}\n"}
 
-    def _local_push(self, target_repo: str, branch: str) -> dict:
+    def _local_push(self, target_repo: str, branch: str,
+                    caller_workdir: str | None = None) -> dict:
         """Push to a local repo, then forward to the real upstream if any.
 
         ``git push`` to a non-bare repo with the branch checked out fails
@@ -332,9 +350,25 @@ class PushProxy:
         # --update-head-ok is needed because the target repo typically has
         # this branch checked out, and git refuses to fetch into a checked-out
         # branch without it.
-        refspec = f"refs/heads/{branch}:refs/heads/{branch}"
+        source = caller_workdir or self.workdir
+
+        # Prefer the explicit branch ref; fall back to HEAD when the source
+        # clone doesn't have a local branch by that name (e.g. legacy requests
+        # where self.workdir is on a differently-named default branch).
+        src_ref = f"refs/heads/{branch}"
+        try:
+            _check = subprocess.run(
+                ["git", "rev-parse", "--verify", src_ref],
+                cwd=source, capture_output=True, timeout=5,
+            )
+            if _check.returncode != 0:
+                src_ref = "HEAD"
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            src_ref = "HEAD"
+
+        refspec = f"{src_ref}:refs/heads/{branch}"
         cmd = ["git", "-C", target_repo, "fetch", "--update-head-ok",
-               self.workdir, refspec]
+               source, refspec]
         _log.info("Push proxy local push (step 1 — update local): %s", cmd)
         try:
             result = subprocess.run(
@@ -354,7 +388,7 @@ class PushProxy:
                 "stderr": result.stderr,
             }
         _log.info("Local push succeeded: %s → %s (%s)",
-                  self.workdir, target_repo, branch)
+                  source, target_repo, branch)
 
         # Step 2: Forward to real upstream if the target repo has one
         real_url = resolve_real_origin(target_repo)
@@ -389,22 +423,25 @@ class PushProxy:
             "stderr": result.stderr,
         }
 
-    def _execute_read_cmd(self, git_cmd: str, args: list[str]) -> dict:
+    def _execute_read_cmd(self, git_cmd: str, args: list[str],
+                          caller_workdir: str | None = None) -> dict:
         """Execute a read-only git remote command (fetch, pull, ls-remote).
 
-        These run directly from self.workdir with no branch restriction —
-        containers have full read access to the remote.
+        These run directly from the caller's workdir with no branch
+        restriction — containers have full read access to the remote.
+        Falls back to self.workdir for legacy requests without a workdir field.
         """
         # Reject flags that could execute arbitrary programs on the host
         danger = self._check_dangerous_flags(args, git_cmd)
         if danger:
             return danger
 
+        workdir = caller_workdir or self.workdir
         cmd = ["git", git_cmd] + args
-        _log.info("Git proxy executing read cmd: %s (in %s)", cmd, self.workdir)
+        _log.info("Git proxy executing read cmd: %s (in %s)", cmd, workdir)
         try:
             result = subprocess.run(
-                cmd, cwd=self.workdir,
+                cmd, cwd=workdir,
                 capture_output=True, text=True, timeout=120,
             )
             return {
@@ -436,11 +473,13 @@ class PushProxy:
             return arg
         return "origin"
 
-    def _extract_target_branch(self, push_args: list[str]) -> str | None:
+    def _extract_target_branch(self, push_args: list[str],
+                               workdir: str | None = None) -> str | None:
         """Extract the target branch from git push arguments.
 
         Returns the branch name, or None if it can't be determined
         (in which case we fall back to current branch check).
+        Uses *workdir* (or self.workdir) for HEAD resolution.
         """
         # Skip flags, first positional is remote, second is refspec
         positional: list[str] = []
@@ -476,11 +515,12 @@ class PushProxy:
             if dst.startswith("refs/heads/"):
                 dst = dst[len("refs/heads/"):]
             # Resolve symbolic refs like HEAD to actual branch name
+            _wd = workdir or self.workdir
             if dst == "HEAD":
                 try:
                     result = subprocess.run(
                         ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                        cwd=self.workdir, capture_output=True, text=True,
+                        cwd=_wd, capture_output=True, text=True,
                         timeout=5,
                     )
                     if result.returncode == 0:
@@ -490,11 +530,12 @@ class PushProxy:
             return dst if dst else None
 
         # No explicit refspec — check what branch HEAD is on
+        _wd = workdir or self.workdir
         if not positional or len(positional) == 1:
             try:
                 result = subprocess.run(
                     ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                    cwd=self.workdir, capture_output=True, text=True,
+                    cwd=_wd, capture_output=True, text=True,
                     timeout=5,
                 )
                 if result.returncode == 0:
@@ -509,65 +550,389 @@ class PushProxy:
 # Proxy lifecycle helpers (used by container.py)
 # ---------------------------------------------------------------------------
 
-# Track running proxies so they can be cleaned up
-_active_proxies: dict[str, PushProxy] = {}
+# Track running proxies so they can be cleaned up.
+#
+# Two keying schemes coexist:
+#   1. Per-container (legacy): key = container_name
+#   2. Shared per (session, branch): key = "{session_tag}\0{pr_id}"
+#      Multiple containers reference the same proxy via _proxy_refs.
+_active_proxies: dict[str, str] = {}  # key -> socket path
 _proxy_lock = threading.Lock()
+
+# For shared proxies: which containers reference each proxy key
+_proxy_refs: dict[str, set[str]] = {}
+# Reverse lookup: container_name -> proxy key
+_container_to_proxy_key: dict[str, str] = {}
+
+
+def _shared_proxy_key(session_tag: str, pr_id: str) -> str:
+    """Build the dict key for a shared proxy."""
+    return f"{session_tag}\0{pr_id}"
+
+
+# Unix sockets have a max path length of 107 bytes (+ null terminator).
+# With prefix "/tmp/pm-push-proxy-" (19) + "/push.sock" (10) = 29 overhead,
+# the dir name portion must be ≤ 78 chars.  Long session tags easily
+# exceed this, so we hash when necessary.
+def _shared_sock_dir_path(session_tag: str, pr_id: str) -> str:
+    """Compute the socket directory path without creating anything on disk.
+
+    Returns the short (hashed) path when the readable name would exceed
+    the Unix socket 107-byte limit, or the readable path otherwise.
+    Pure computation — no filesystem side effects.
+    """
+    long_name = f"{session_tag}-{pr_id}"
+    long_dir = f"/tmp/{_SOCKET_DIR_PREFIX}{long_name}"
+    sock_in_long = f"{long_dir}/push.sock"
+
+    if len(sock_in_long) <= 107:
+        return long_dir
+
+    import hashlib
+    dir_hash = hashlib.sha256(long_name.encode()).hexdigest()[:16]
+    return f"/tmp/{_SOCKET_DIR_PREFIX}{dir_hash}"
+
+
+def _shared_sock_dir(session_tag: str, pr_id: str) -> str:
+    """Build a socket directory path and create it on disk.
+
+    Like :func:`_shared_sock_dir_path` but also creates the directory
+    and a long-named symlink for discoverability/cleanup.  Use this
+    when starting a proxy; use ``_shared_sock_dir_path`` for read-only
+    lookups.
+    """
+    long_name = f"{session_tag}-{pr_id}"
+    long_dir = f"/tmp/{_SOCKET_DIR_PREFIX}{long_name}"
+    short_dir = _shared_sock_dir_path(session_tag, pr_id)
+
+    if short_dir == long_dir:
+        # Fits — no hash needed, no symlink needed
+        return long_dir
+
+    os.makedirs(short_dir, exist_ok=True)
+
+    # Create long-named symlink for discoverability/cleanup
+    try:
+        os.symlink(short_dir, long_dir)
+    except FileExistsError:
+        # If it's a stale real directory, replace with symlink
+        if os.path.isdir(long_dir) and not os.path.islink(long_dir):
+            import shutil
+            shutil.rmtree(long_dir, ignore_errors=True)
+            try:
+                os.symlink(short_dir, long_dir)
+            except FileExistsError:
+                pass  # race — another process created it
+    return short_dir
+
+
+def _start_proxy_subprocess(sock_path: str, workdir: str,
+                            allowed_branch: str) -> None:
+    """Spawn a push proxy as an independent subprocess that outlives the caller."""
+    import sys
+    import time
+
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "pm_core.push_proxy",
+         sock_path, workdir, allowed_branch],
+        start_new_session=True,  # detach from parent process group
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    # Wait briefly for the socket to appear and become connectable
+    for _ in range(30):
+        if os.path.exists(sock_path) and proxy_is_alive(sock_path):
+            break
+        time.sleep(0.1)
+    else:
+        _log.warning("Push proxy subprocess (pid=%d) did not become ready "
+                     "at %s within 3s", proc.pid, sock_path)
+    _log.info("Push proxy subprocess started: pid=%d socket=%s branch=%s",
+              proc.pid, sock_path, allowed_branch)
 
 
 def start_push_proxy(container_name: str, workdir: str,
-                     allowed_branch: str) -> str:
+                     allowed_branch: str,
+                     session_tag: str | None = None,
+                     pr_id: str | None = None) -> str:
     """Start a push proxy for a container.
 
+    When *session_tag* and *pr_id* are both provided the proxy is shared:
+    only one proxy runs per unique ``(session_tag, pr_id)`` pair and its
+    socket lives at a deterministic path
+    ``/tmp/pm-push-proxy-{session_tag}-{pr_id}/push.sock``.  Additional
+    containers on the same branch reuse the existing proxy.
+
+    Without *session_tag*/*pr_id* a per-container proxy with a random
+    temp directory is created (legacy behaviour).
+
     Args:
-        container_name: Container name (used for socket naming).
+        container_name: Container name (used for reference tracking).
         workdir: Host path to the git working directory.
         allowed_branch: Only allow pushes to this branch.
+        session_tag: Session tag for proxy sharing.
+        pr_id: PR identifier for proxy sharing.
 
     Returns:
         Host path to the Unix socket (to be mounted into the container).
     """
-    import tempfile
-    sock_dir = tempfile.mkdtemp(prefix=_SOCKET_DIR_PREFIX)
-    sock_path = os.path.join(sock_dir, "push.sock")
+    shared = session_tag is not None and pr_id is not None
 
-    proxy = PushProxy(sock_path, workdir, allowed_branch)
-    proxy.start()
+    if shared:
+        key = _shared_proxy_key(session_tag, pr_id)
+        sock_dir = _shared_sock_dir(session_tag, pr_id)
+        sock_path = os.path.join(sock_dir, "push.sock")
+
+        # Reuse if an existing proxy is alive on this socket
+        if os.path.exists(sock_path) and proxy_is_alive(sock_path):
+            with _proxy_lock:
+                _proxy_refs.setdefault(key, set()).add(container_name)
+                _container_to_proxy_key[container_name] = key
+            _log.info("Reusing live shared push proxy for %s (container %s)",
+                      key, container_name)
+            return sock_path
+
+        # Socket missing or dead — spawn a new subprocess proxy
+        os.makedirs(sock_dir, exist_ok=True)
+        # Remove stale socket before spawning.  Docker creates a
+        # *directory* when bind-mounting a non-existent socket path, so
+        # handle both files and directories left over from old runs.
+        try:
+            os.unlink(sock_path)
+        except IsADirectoryError:
+            import shutil
+            shutil.rmtree(sock_path, ignore_errors=True)
+        except FileNotFoundError:
+            pass
+
+        _start_proxy_subprocess(sock_path, workdir, allowed_branch)
+
+        with _proxy_lock:
+            _proxy_refs[key] = {container_name}
+            _container_to_proxy_key[container_name] = key
+
+        return sock_path
+
+    # Legacy per-container proxy
+    import tempfile
+    # Use a deterministic path based on the container name so the
+    # socket can be found after a TUI restart without a registry.
+    sock_dir = os.path.join(tempfile.gettempdir(),
+                            f"{_SOCKET_DIR_PREFIX}{container_name}")
+    os.makedirs(sock_dir, exist_ok=True)
+    sock_path = os.path.join(sock_dir, "push.sock")
+    # Remove stale socket before spawning (see above for why we handle
+    # IsADirectoryError).
+    try:
+        os.unlink(sock_path)
+    except IsADirectoryError:
+        import shutil
+        shutil.rmtree(sock_path, ignore_errors=True)
+    except FileNotFoundError:
+        pass
+
+    _start_proxy_subprocess(sock_path, workdir, allowed_branch)
 
     with _proxy_lock:
-        _active_proxies[container_name] = proxy
+        _active_proxies[container_name] = sock_path
+        _container_to_proxy_key[container_name] = container_name
 
     return sock_path
 
 
-def stop_push_proxy(container_name: str) -> None:
-    """Stop and clean up the push proxy for a container."""
-    with _proxy_lock:
-        proxy = _active_proxies.pop(container_name, None)
-    if proxy:
-        sock_dir = str(Path(proxy.socket_path).parent)
-        proxy.stop()
-        # Clean up the temp directory
+def _kill_proxy_socket(sock_path: str) -> None:
+    """Stop a subprocess proxy by removing its socket (triggers exit) and clean up."""
+    sock_dir = str(Path(sock_path).parent)
+    # Resolve the real directory if sock_dir is a symlink
+    real_dir = os.path.realpath(sock_dir)
+    try:
+        os.unlink(sock_path)
+    except FileNotFoundError:
+        pass
+    # Clean up the symlink if sock_dir is one
+    if os.path.islink(sock_dir):
         try:
-            os.rmdir(sock_dir)
+            os.unlink(sock_dir)
         except OSError:
             pass
+    # Clean up the real directory
+    try:
+        os.rmdir(real_dir)
+    except OSError:
+        pass
+
+
+def stop_push_proxy(container_name: str) -> None:
+    """Stop and clean up the push proxy for a container.
+
+    For shared proxies the proxy is only stopped when the last container
+    referencing it is removed.
+    """
+    with _proxy_lock:
+        key = _container_to_proxy_key.pop(container_name, None)
+        if key is None:
+            return
+
+        # Shared proxy path — decrement refcount
+        if key in _proxy_refs:
+            refs = _proxy_refs[key]
+            refs.discard(container_name)
+            if refs:
+                return  # Other containers still using this proxy
+            del _proxy_refs[key]
+
+        _active_proxies.pop(key, None)
+
+    # Derive the socket path from the key and remove it to stop the
+    # subprocess proxy (the __main__ loop exits when socket disappears).
+    if "\0" in key:
+        # Shared proxy key: "session_tag\0pr_id"
+        stag, pid = key.split("\0", 1)
+        sock_dir = _shared_sock_dir_path(stag, pid)
+        sock_path = os.path.join(sock_dir, "push.sock")
+    else:
+        # Legacy key = container_name
+        import tempfile
+        sock_path = os.path.join(tempfile.gettempdir(),
+                                 f"{_SOCKET_DIR_PREFIX}{key}",
+                                 "push.sock")
+    _kill_proxy_socket(sock_path)
 
 
 def stop_all_proxies() -> None:
     """Stop all running push proxies."""
+    import glob as _glob
     with _proxy_lock:
-        names = list(_active_proxies.keys())
-    for name in names:
-        stop_push_proxy(name)
+        _active_proxies.clear()
+        _proxy_refs.clear()
+        _container_to_proxy_key.clear()
+
+    # Kill all proxy sockets on disk
+    for sock in _glob.glob(f"/tmp/{_SOCKET_DIR_PREFIX}*/push.sock"):
+        _kill_proxy_socket(sock)
 
 
-def get_proxy_socket_path(container_name: str) -> str | None:
-    """Return the host socket path for a container's push proxy, or None."""
+def stop_session_proxies(session_tag: str) -> int:
+    """Stop all push proxies belonging to a session.
+
+    Returns the number of proxies stopped.
+    """
+    import glob as _glob
+    prefix = f"{session_tag}\0"
     with _proxy_lock:
-        proxy = _active_proxies.get(container_name)
-    return proxy.socket_path if proxy else None
+        keys_to_remove = [k for k in _active_proxies if k.startswith(prefix)]
+        for k in keys_to_remove:
+            _active_proxies.pop(k, None)
+            for cname in _proxy_refs.pop(k, set()):
+                _container_to_proxy_key.pop(cname, None)
+
+    # Kill sockets matching the session tag
+    count = 0
+    for sock in _glob.glob(f"/tmp/{_SOCKET_DIR_PREFIX}{session_tag}-*/push.sock"):
+        _kill_proxy_socket(sock)
+        count += 1
+
+    if count:
+        _log.info("Stopped %d session proxy(ies) for %s", count, session_tag)
+    return count
+
+
+def proxy_is_alive(sock_path: str) -> bool:
+    """Test whether a push proxy socket is actually accepting connections."""
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(2.0)
+        s.connect(sock_path)
+        s.close()
+        return True
+    except (OSError, socket.timeout):
+        return False
+
+
+def get_proxy_socket_path(container_name: str,
+                          session_tag: str | None = None,
+                          pr_id: str | None = None) -> str | None:
+    """Return the host socket path for a container's push proxy, or None.
+
+    Uses the deterministic path convention so this works even after a
+    TUI restart (no in-memory state needed).  Always returns the real
+    (resolved) path so callers can ``connect()`` without hitting the
+    Unix socket 107-byte path limit.
+    """
+    import tempfile
+
+    def _resolve(path: str) -> str | None:
+        """Return the realpath if the socket exists, else None."""
+        if os.path.exists(path):
+            return os.path.realpath(path)
+        return None
+
+    # Try shared proxy path first (session_tag + pr_id)
+    if session_tag and pr_id:
+        # Check via _shared_sock_dir_path (read-only, no side effects)
+        shared_dir = _shared_sock_dir_path(session_tag, pr_id)
+        result = _resolve(os.path.join(shared_dir, "push.sock"))
+        if result:
+            return result
+        # Also check the long-named symlink path
+        long_path = os.path.join(tempfile.gettempdir(),
+                                 f"{_SOCKET_DIR_PREFIX}{session_tag}-{pr_id}",
+                                 "push.sock")
+        result = _resolve(long_path)
+        if result:
+            return result
+
+    # Try legacy per-container path
+    sock_path = os.path.join(tempfile.gettempdir(),
+                             f"{_SOCKET_DIR_PREFIX}{container_name}",
+                             "push.sock")
+    result = _resolve(sock_path)
+    if result:
+        return result
+
+    # Fall back to in-memory registry — derive path from the key
+    with _proxy_lock:
+        key = _container_to_proxy_key.get(container_name)
+        if key is None:
+            return None
+    if "\0" in key:
+        stag, pid = key.split("\0", 1)
+        derived_dir = _shared_sock_dir_path(stag, pid)
+        result = _resolve(os.path.join(derived_dir, "push.sock"))
+        if result:
+            return result
+    return None
 
 
 def container_socket_path() -> str:
     """Return the fixed socket path inside the container."""
     return _CONTAINER_SOCKET_PATH
+
+
+# ---------------------------------------------------------------------------
+# Standalone entry point: python -m pm_core.push_proxy <sock> <workdir> <branch>
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    import sys as _sys
+
+    if len(_sys.argv) != 4:
+        print(f"Usage: {_sys.argv[0]} <socket_path> <workdir> <allowed_branch>",
+              file=_sys.stderr)
+        _sys.exit(1)
+
+    _sock, _workdir, _branch = _sys.argv[1], _sys.argv[2], _sys.argv[3]
+    proxy = PushProxy(_sock, _workdir, _branch)
+    proxy.start()
+
+    # Block until the socket is removed or we get a signal
+    import signal as _signal
+    _stop = threading.Event()
+    _signal.signal(_signal.SIGTERM, lambda *_: _stop.set())
+    _signal.signal(_signal.SIGINT, lambda *_: _stop.set())
+    while not _stop.is_set():
+        if not os.path.exists(_sock):
+            break
+        _stop.wait(2.0)
+    proxy.stop()

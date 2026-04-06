@@ -235,6 +235,23 @@ def ensure_animation_timer(app) -> None:
 
 def _poll_loop_state(app) -> None:
     """Periodic timer callback to update TUI from loop state."""
+    try:
+        _poll_loop_state_inner(app)
+    except SystemExit as e:
+        import traceback
+        from pm_core.paths import configure_logger
+        _log = configure_logger("pm.tui.poll")
+        _log.error("_poll_loop_state raised SystemExit(%s):\n%s", e.code, traceback.format_exc())
+    except BaseException as e:
+        import traceback
+        from pm_core.paths import configure_logger
+        _log = configure_logger("pm.tui.poll")
+        _log.error("_poll_loop_state raised %s:\n%s", type(e).__name__, traceback.format_exc())
+        raise
+
+
+def _poll_loop_state_inner(app) -> None:
+    """Inner implementation of poll loop state."""
     any_running = False
     newly_done = []
 
@@ -272,11 +289,17 @@ def _poll_loop_state(app) -> None:
     # Announce completed loops and auto-merge passing PRs
     for state in newly_done:
         verdict_icon = VERDICT_ICONS.get(state.latest_verdict, state.latest_verdict)
-        app.log_message(
+        msg = (
             f"Review loop done for {state.pr_id}: {verdict_icon} "
-            f"({state.iteration} iteration{'s' if state.iteration != 1 else ''})",
-            sticky=10,
+            f"({state.iteration} iteration{'s' if state.iteration != 1 else ''})"
         )
+        if state.latest_verdict == "ERROR" and state.latest_output:
+            # Truncate for display but show enough to be useful
+            err_text = state.latest_output[:300]
+            msg += f"\n  Error: {err_text}"
+            from pm_core.paths import command_log_file
+            msg += f"\n  See log: {command_log_file()}"
+        app.log_message(msg, sticky=10)
 
         # Auto-start next step: review pass → QA (then QA pass → merge)
         if state.latest_verdict in (VERDICT_PASS, VERDICT_PASS_WITH_SUGGESTIONS):
@@ -289,7 +312,7 @@ def _poll_loop_state(app) -> None:
         for pr in (app._data.get("prs") or [])
     )
     qa_running = any(s.running for s in app._qa_loops.values())
-    watcher_running = app._watcher_state and app._watcher_state.running
+    watcher_running = app._watcher_manager.is_any_running()
     if not any_running and not has_active_prs and not watcher_running and not qa_running:
         if app._review_loop_timer:
             app._review_loop_timer.stop()

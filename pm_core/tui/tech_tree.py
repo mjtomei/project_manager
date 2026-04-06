@@ -120,7 +120,19 @@ class TechTree(Widget):
 
     def select_pr(self, pr_id: str) -> None:
         """Move the cursor to the given PR if it exists in the tree."""
-        if pr_id and pr_id in self._ordered_ids:
+        if not pr_id:
+            return
+        if pr_id not in self._ordered_ids:
+            # PR might be in a hidden/collapsed plan group — find and expand it
+            pr_map = {pr["id"]: pr for pr in self._prs}
+            pr_entry = pr_map.get(pr_id)
+            if pr_entry:
+                plan_id = pr_entry.get("plan") or "_standalone"
+                if plan_id in self._hidden_plans:
+                    self._hidden_plans.discard(plan_id)
+                    self._recompute()
+                    self.refresh(layout=True)
+        if pr_id in self._ordered_ids:
             idx = self._ordered_ids.index(pr_id)
             if idx != self.selected_index:
                 self.selected_index = idx
@@ -523,6 +535,11 @@ class TechTree(Widget):
                         marker_offset = 2 + len(status_text) + 1
                         loop_style = "bold cyan"
                         status_text += f" {spinner}"
+            # Show spec-pending marker
+            if pr.get("spec_pending") and not loop_marker:
+                marker_offset = 2 + len(status_text) + 1
+                loop_style = "bold yellow"
+                status_text += " S"
             machine = pr.get("agent_machine")
             if machine:
                 avail = NODE_W - 4 - cell_len(status_text) - 1

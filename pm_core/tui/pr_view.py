@@ -84,6 +84,24 @@ def start_pr(app, companion: bool = False) -> None:
                 app.log_error("Blocked", f"{pr_id} has unmerged deps: {', '.join(unmerged)}")
                 return
 
+    # Fast path: if implementation window already exists and not fresh,
+    # just switch to it without spawning a subprocess.
+    if not fresh:
+        from pm_core.loop_shared import get_pm_session
+        from pm_core import tmux as tmux_mod
+        session = get_pm_session()
+        if session and app._root:
+            data = store.load(app._root)
+            pr_entry = store.get_pr(data, pr_id)
+            if pr_entry:
+                from pm_core.cli.pr import _pr_display_id
+                display_id = _pr_display_id(pr_entry)
+                existing = tmux_mod.find_window_by_name(session, display_id)
+                if existing:
+                    tmux_mod.select_window(session, existing["id"])
+                    app.log_message(f"Switched to window '{display_id}'")
+                    return
+
     suffix = ""
     if fresh:
         suffix += " (fresh)"
@@ -113,6 +131,26 @@ def done_pr(app, fresh: bool = False) -> None:
     if not pr_id:
         app.log_message("No PR selected")
         return
+
+    # Fast path: if review window already exists and not fresh, just
+    # switch to it without spawning a subprocess.
+    if not fresh:
+        from pm_core.loop_shared import get_pm_session
+        from pm_core import tmux as tmux_mod, store
+        session = get_pm_session()
+        if session and app._root:
+            data = store.load(app._root)
+            pr_entry = store.get_pr(data, pr_id)
+            if pr_entry:
+                from pm_core.cli.pr import _pr_display_id
+                display_id = _pr_display_id(pr_entry)
+                window_name = f"review-{display_id}"
+                existing = tmux_mod.find_window_by_name(session, window_name)
+                if existing:
+                    tmux_mod.select_window(session, existing["id"])
+                    app.log_message(f"Switched to review window '{window_name}'")
+                    return
+
     action_key = f"Reviewing {pr_id}" + (" (fresh)" if fresh else "")
     if not guard_pr_action(app, action_key):
         return
@@ -285,7 +323,7 @@ def handle_plan_pick(app, pr_id: str, result) -> None:
         _, title = result
         plan_id = store.next_plan_id(app._data)
         plan_file = f"plans/{plan_id}.md"
-        entry = {"id": plan_id, "name": title, "file": plan_file, "status": "draft"}
+        entry = store.make_plan_entry(plan_id, title, plan_file)
         # Create plan file (idempotent, safe outside lock)
         if app._root:
             plan_path = app._root / plan_file
@@ -420,7 +458,6 @@ def handle_command_submitted(app, cmd: str) -> None:
             qa_pr_id = parts[2]
         else:
             # Use the selected PR if no ID given
-            from pm_core.tui.tech_tree import TechTree
             tree = app.query_one("#tech-tree", TechTree)
             qa_pr_id = tree.selected_pr_id
         if not qa_pr_id:

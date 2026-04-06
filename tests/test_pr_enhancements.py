@@ -1078,3 +1078,75 @@ class TestTwoStepMergePhaseTracking:
 
 # _finalize_merge no longer manages auto-start state (it's in-memory on the TUI).
 # Target-merged detection is handled by check_and_start() in auto_start.py.
+
+
+# ---------------------------------------------------------------------------
+# pr start: spec_pending blocking gate
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def tmp_start_project(tmp_path):
+    """Create a project with a pending PR for start testing."""
+    pm_dir = tmp_path / "pm"
+    pm_dir.mkdir()
+
+    data = {
+        "project": {
+            "name": "test-project",
+            "repo": str(tmp_path),
+            "base_branch": "master",
+            "backend": "local",
+        },
+        "prs": [
+            {
+                "id": "pr-001",
+                "title": "Test PR",
+                "description": "Test",
+                "branch": "pm/pr-001",
+                "status": "pending",
+            }
+        ],
+        "plans": [],
+    }
+    store.save(data, pm_dir)
+    return {"pm_dir": pm_dir, "data": data}
+
+
+class TestPrStartSpecGate:
+    def test_blocks_when_spec_pending(self, tmp_start_project):
+        """pr start should exit non-zero when spec_pending is set."""
+        data = store.load(tmp_start_project["pm_dir"])
+        data["prs"][0]["spec_pending"] = {
+            "phase": "impl",
+            "generated_at": "2026-01-01T00:00:00",
+        }
+        store.save(data, tmp_start_project["pm_dir"])
+
+        runner = CliRunner()
+        with mock.patch.object(pr_mod, "state_root", return_value=tmp_start_project["pm_dir"]):
+            result = runner.invoke(pr_mod.pr, ["start", "pr-001"])
+
+        assert result.exit_code != 0
+        assert "pending review" in result.output or "spec-approve" in result.output
+
+    def test_allows_start_when_no_spec_pending(self, tmp_start_project, tmp_path):
+        """pr start should proceed normally when no spec is pending."""
+        # We just need to verify the gate doesn't block — mock everything after
+        runner = CliRunner()
+        with mock.patch.object(pr_mod, "state_root", return_value=tmp_start_project["pm_dir"]), \
+             mock.patch("pm_core.cli.pr.git_ops") as mock_git, \
+             mock.patch("pm_core.cli.pr.find_claude", return_value=None), \
+             mock.patch("pm_core.cli.pr._get_pm_session", return_value=None), \
+             mock.patch("pm_core.cli.pr.save_and_push"), \
+             mock.patch("pm_core.cli.pr.trigger_tui_refresh"), \
+             mock.patch("pm_core.cli.pr._resolve_repo_id"), \
+             mock.patch("pm_core.cli.pr.prompt_gen.generate_prompt", return_value="prompt"):
+            mock_git.clone.return_value = None
+            mock_git.run_git.return_value = MagicMock(returncode=0, stdout="abc12345\n")
+            mock_git.is_git_repo.return_value = False
+            mock_git.checkout_branch.return_value = None
+            # Should not exit with error 1 (spec gate)
+            result = runner.invoke(pr_mod.pr, ["start", "pr-001"])
+
+        # Should NOT fail with the spec gate message
+        assert "pending review" not in result.output

@@ -26,6 +26,17 @@ _YAML_HEADER = (
 )
 
 
+class ProjectYamlParseError(Exception):
+    """Raised when project.yaml cannot be parsed (e.g. mid-edit or merge conflict)."""
+
+
+class PlanValidationError(Exception):
+    """Raised when plan entries have invalid references (e.g. bad parent ID, cycles)."""
+
+
+VALID_PLAN_STATUSES = {"draft", "active", "done"}
+
+
 def find_project_root(start: Optional[str] = None) -> Path:
     """Walk up from start (or cwd) to find directory containing project.yaml.
 
@@ -54,16 +65,23 @@ def load(root: Optional[Path] = None, validate: bool = True) -> dict:
 
     Args:
         root: Directory containing project.yaml
-        validate: If True, validate PR statuses and fix invalid ones
+        validate: If True, validate PR statuses, plan statuses, and parent references
     """
     if root is None:
         root = find_project_root()
     path = root / "project.yaml"
-    with open(path) as f:
-        data = yaml.safe_load(f)
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        raise ProjectYamlParseError(f"project.yaml is not valid YAML: {e}") from e
+
+    if data is None:
+        data = {}
 
     if validate:
         _validate_pr_statuses(data)
+        _validate_plans(data)
 
     return data
 
@@ -89,8 +107,46 @@ def _validate_pr_statuses(data: dict) -> None:
                                 or pr.get("started_at"))
 
 
+def _validate_plans(data: dict) -> None:
+    """Validate plan entries: normalize statuses, check parent references, detect cycles."""
+    plans = data.get("plans") or []
+    plan_ids = {p["id"] for p in plans}
+
+    for plan in plans:
+        # Status normalization (silent fix, same as PRs)
+        if plan.get("status") not in VALID_PLAN_STATUSES:
+            plan["status"] = "draft"
+
+        # Backfill missing parent field
+        if "parent" not in plan:
+            plan["parent"] = None
+
+        # Validate parent reference
+        parent = plan["parent"]
+        if parent is not None and parent not in plan_ids:
+            raise PlanValidationError(
+                f"Plan {plan['id']} references non-existent parent '{parent}'"
+            )
+
+    # Cycle detection: walk parent chains with a visited set
+    parent_map = {p["id"]: p.get("parent") for p in plans}
+    for plan_id in plan_ids:
+        visited = set()
+        current = plan_id
+        while current is not None:
+            if current in visited:
+                raise PlanValidationError(
+                    f"Cycle detected in plan hierarchy involving '{plan_id}'"
+                )
+            visited.add(current)
+            current = parent_map.get(current)
+
+
 def save(data: dict, root: Optional[Path] = None) -> None:
     """Write project.yaml to root directory.
+
+    Uses atomic write (write to temp file, then rename) so concurrent
+    readers never see a truncated or partially-written file.
 
     Makes the file writable before writing and read-only afterwards
     so that casual manual edits are blocked with a permission error.
@@ -101,11 +157,34 @@ def save(data: dict, root: Optional[Path] = None) -> None:
     # Make writable if it exists and is read-only
     if path.exists():
         path.chmod(path.stat().st_mode | stat.S_IWUSR)
-    with open(path, "w") as f:
+    # Atomic write: write to temp file, then rename
+    tmp = path.with_suffix(".yaml.tmp")
+    with open(tmp, "w") as f:
         f.write(_YAML_HEADER)
         yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        f.flush()
+        os.fsync(f.fileno())
+    tmp.rename(path)
     # Set read-only (owner read, group/other read)
     path.chmod(stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+
+
+def make_plan_entry(
+    plan_id: str,
+    name: str,
+    file: str,
+    *,
+    status: str = "draft",
+    parent: Optional[str] = None,
+) -> dict:
+    """Create a standard plan entry dict with all required keys."""
+    return {
+        "id": plan_id,
+        "name": name,
+        "file": file,
+        "status": status,
+        "parent": parent,
+    }
 
 
 # ---------------------------------------------------------------------------

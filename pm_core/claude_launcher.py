@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import shlex
 import shutil
 import subprocess
 import uuid
@@ -11,6 +12,20 @@ from pathlib import Path
 
 from pm_core.paths import configure_logger, log_shell_command
 _log = configure_logger("pm.claude_launcher")
+
+
+def _resolve_provider(provider: str | None = None):
+    """Resolve provider config and return (env_vars, model_flag, run_env).
+
+    Shared helper for launch_claude, launch_claude_print, and
+    launch_claude_print_background to avoid repeating the same pattern.
+    """
+    from pm_core.providers import get_provider
+    provider_cfg = get_provider(provider)
+    provider_env = provider_cfg.env_vars()
+    model_flag = provider_cfg.model_flag()
+    run_env = {**os.environ, **provider_env} if provider_env else None
+    return provider_env, model_flag, run_env
 
 SESSION_REGISTRY = ".pm-sessions.json"
 
@@ -110,18 +125,31 @@ def find_editor() -> str:
 
 
 def launch_claude(prompt: str, session_key: str, pm_root: Path,
-                  cwd: str | None = None, resume: bool = True) -> int:
+                  cwd: str | None = None, resume: bool = True,
+                  provider: str | None = None,
+                  model: str | None = None,
+                  effort: str | None = None) -> int:
     """Run claude interactively with a prompt. Returns exit code.
 
     Attempts to resume a previous session if one exists for session_key.
     If no session exists, generates a new UUID and passes it via --session-id
     so we can resume later.
+
+    Args:
+        provider: Name of the LLM provider to use. See providers.py.
+        model: Explicit model ID to pass via --model (overrides provider model).
+        effort: Effort level to pass via --effort (low, medium, high).
     """
     import uuid
 
     claude = find_claude()
     if not claude:
         raise FileNotFoundError("claude CLI not found. Install it first.")
+
+    # Resolve provider for env vars and model flag
+    _, provider_model_flag, run_env = _resolve_provider(provider)
+    # Explicit model param overrides provider's model_flag
+    model_flag = model or provider_model_flag
 
     # Try to resume existing session, or generate new session ID
     session_id = None
@@ -141,8 +169,10 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
     cmd = [claude]
     if _skip_permissions():
         cmd.append("--dangerously-skip-permissions")
-    if cwd:
-        cmd.extend(["--cwd", cwd])
+    if model_flag:
+        cmd.extend(["--model", model_flag])
+    if effort:
+        cmd.extend(["--effort", effort])
     if is_resuming:
         cmd.extend(["--resume", session_id])
         # Don't pass prompt when resuming - Claude already has the conversation
@@ -154,7 +184,9 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
               cmd[:6], cwd, session_key, session_id[:8] + "...")
 
     log_shell_command(cmd, prefix="claude")
-    result = subprocess.run(cmd, cwd=cwd)
+    # Log the environment variables passed to the claude CLI (filtered for ANTHROPIC_/OPENAI_ prefixes)
+    _log.debug("Claude env vars: %s", {k: v for k, v in (run_env or {}).items() if k.startswith('ANTHROPIC_') or k.startswith('OPENAI_')})
+    result = subprocess.run(cmd, cwd=cwd, env=run_env)
     returncode = result.returncode
     if returncode != 0:
         log_shell_command(cmd, prefix="claude", returncode=returncode)
@@ -167,12 +199,14 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
         cmd = [claude]
         if _skip_permissions():
             cmd.append("--dangerously-skip-permissions")
-        if cwd:
-            cmd.extend(["--cwd", cwd])
+        if model_flag:
+            cmd.extend(["--model", model_flag])
+        if effort:
+            cmd.extend(["--effort", effort])
         cmd.extend(["--session-id", session_id])
         cmd.append(prompt)
         log_shell_command(cmd, prefix="claude")
-        result = subprocess.run(cmd, cwd=cwd)
+        result = subprocess.run(cmd, cwd=cwd, env=run_env)
         returncode = result.returncode
         if returncode != 0:
             log_shell_command(cmd, prefix="claude", returncode=returncode)
@@ -181,10 +215,22 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
 
 
 def launch_claude_print(prompt: str, cwd: str | None = None,
-                        message: str = "Claude is working") -> str:
+                        message: str = "Claude is working",
+                        provider: str | None = None,
+                        model: str | None = None,
+                        effort: str | None = None,
+                        allowed_tools: list[str] | None = None) -> str:
     """Run claude -p (non-interactive print mode). Returns stdout.
 
     Shows a spinner on stderr while waiting for Claude to finish.
+
+    Args:
+        provider: Name of the LLM provider to use. See providers.py.
+        model: Explicit model ID (overrides provider model_flag).
+        effort: Effort level for the Claude CLI --effort flag.
+        allowed_tools: Tool patterns to allow without permission prompts
+            (passed via ``--allowedTools``).  Useful for granting file
+            access in print mode without ``--dangerously-skip-permissions``.
     """
     import sys
     import threading
@@ -194,9 +240,22 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
     claude = find_claude()
     if not claude:
         raise FileNotFoundError("claude CLI not found. Install it first.")
+
+    # Resolve provider
+    _, model_flag, run_env = _resolve_provider(provider)
+
     cmd = [claude]
     if _skip_permissions():
         cmd.append("--dangerously-skip-permissions")
+    # Explicit model takes precedence over provider model_flag
+    effective_model = model or model_flag
+    if effective_model:
+        cmd.extend(["--model", effective_model])
+    if effort:
+        cmd.extend(["--effort", effort])
+    if allowed_tools:
+        for tool in allowed_tools:
+            cmd.extend(["--allowedTools", tool])
     cmd.extend(["-p", prompt])
 
     done = threading.Event()
@@ -221,6 +280,7 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
             cwd=cwd,
             capture_output=True,
             text=True,
+            env=run_env,
         )
         if result.returncode != 0:
             log_shell_command(cmd, prefix="claude-print", returncode=result.returncode)
@@ -248,6 +308,10 @@ def build_claude_shell_cmd(
     session_tag: str | None = None,
     transcript: str | None = None,
     cwd: str | None = None,
+    model: str | None = None,
+    provider: str | None = None,
+    effort: str | None = None,
+    write_dir: str | None = None,
 ) -> str:
     """Build a claude shell command string with proper flags and logging.
 
@@ -265,7 +329,22 @@ def build_claude_shell_cmd(
             Generates a UUID session ID and creates a symlink from
             ``transcript`` to Claude's native .jsonl file.
         cwd: Working directory for computing Claude's project dir (required
-            when ``transcript`` is set).
+            when ``transcript`` is set).  Also used as the reference path
+            for the prompt file in the generated command (see ``write_dir``).
+        model: Model identifier to pass via ``--model`` flag.  When set,
+            overrides Claude CLI's default model selection and any
+            provider-resolved model.
+        provider: Name of the LLM provider to use (e.g. "ollama", "vllm").
+            Resolves via providers.yaml config. When set, injects the
+            appropriate environment variables and --model flag for the
+            provider. None uses the default resolution order.
+        effort: Effort level to pass via ``--effort`` flag (low, medium, high).
+        write_dir: Host filesystem path where the prompt file should be
+            written.  Defaults to ``cwd``.  When ``cwd`` is a
+            container-internal path (e.g. ``/workspace``) that does not
+            exist on the host, pass the corresponding host path here so
+            the file can be written.  The command will still reference the
+            file via ``cwd`` (the path claude sees at runtime).
     """
     # When transcript is requested, generate a UUID and create a symlink
     if transcript and cwd:
@@ -282,9 +361,26 @@ def build_claude_shell_cmd(
         transcript_path.symlink_to(target)
         _log.info("transcript: symlink %s -> %s", transcript_path, target)
 
+    # Resolve provider configuration
+    provider_env, model_flag, _ = _resolve_provider(provider)
+
+    # Build env prefix for non-claude providers
+    env_prefix = ""
+    if provider_env:
+        parts = [f"{k}={shlex.quote(v)}" for k, v in provider_env.items()]
+        env_prefix = " ".join(parts) + " "
+
     from pm_core.paths import skip_permissions_enabled
     skip = " --dangerously-skip-permissions" if skip_permissions_enabled(session_tag) else ""
-    cmd = f"claude{skip}"
+    cmd = f"{env_prefix}claude{skip}"
+
+    # Explicit model param overrides provider's model_flag
+    effective_model = model or model_flag
+    if effective_model:
+        cmd += f" --model {shlex.quote(effective_model)}"
+
+    if effort:
+        cmd += f" --effort {shlex.quote(effort)}"
 
     if session_id:
         if resume:
@@ -293,8 +389,26 @@ def build_claude_shell_cmd(
             cmd += f" --session-id {session_id}"
 
     if prompt and not resume:
-        escaped = prompt.replace("'", "'\\''")
-        cmd += f" '{escaped}'"
+        # Write the prompt to a file and use "$(cat file)" to avoid tmux
+        # command-length limits (~16 KB) with large prompts.
+        _host_dir = Path(write_dir) if write_dir else (Path(cwd) if cwd else None)
+        _prompt_written = False
+        if _host_dir:
+            try:
+                if _host_dir.is_dir():
+                    _fname = f"pm_prompt_{session_id or uuid.uuid4()}.txt"
+                    (_host_dir / _fname).write_text(prompt)
+                    _ref_dir = cwd if cwd else str(_host_dir)
+                    _prompt_ref = Path(_ref_dir) / _fname
+                    # Delete the temp file after claude reads it via $(cat ...).
+                    # The semicolon ensures cleanup runs whether claude succeeds or fails.
+                    cmd += f' "$(cat {_prompt_ref})"; rm -f {shlex.quote(str(_prompt_ref))}'
+                    _prompt_written = True
+            except Exception:
+                pass
+        if not _prompt_written:
+            escaped = prompt.replace("'", "'\\''")
+            cmd += f" '{escaped}'"
 
     log_shell_command(cmd, prefix="claude")
     return cmd
@@ -321,9 +435,7 @@ def finalize_transcript(transcript_path: Path) -> None:
 def launch_claude_in_tmux(pane_target: str, prompt: str, cwd: str | None = None) -> None:
     """Send a claude command to a tmux pane."""
     from pm_core.tmux import send_keys
-    cmd = build_claude_shell_cmd(prompt=prompt)
-    if cwd:
-        cmd = f"cd '{cwd}' && {cmd}"
+    cmd = build_claude_shell_cmd(prompt=prompt, cwd=cwd)
     send_keys(pane_target, cmd)
 
 
@@ -342,9 +454,18 @@ def launch_bridge_in_tmux(prompt: str | None, cwd: str, session_name: str) -> st
     return socket_path
 
 
-def launch_claude_print_background(prompt: str, cwd: str | None = None, callback=None) -> None:
-    """Run claude -p in a background thread. Calls callback(stdout, stderr, returncode) when done."""
+def launch_claude_print_background(prompt: str, cwd: str | None = None,
+                                    callback=None,
+                                    provider: str | None = None) -> None:
+    """Run claude -p in a background thread. Calls callback(stdout, stderr, returncode) when done.
+
+    Args:
+        provider: Name of the LLM provider to use. See providers.py.
+    """
     import threading
+
+    # Resolve provider outside the thread so config is read on the caller's thread
+    _, model_flag, run_env = _resolve_provider(provider)
 
     def _run():
         claude = find_claude()
@@ -355,6 +476,8 @@ def launch_claude_print_background(prompt: str, cwd: str | None = None, callback
         cmd = [claude]
         if _skip_permissions():
             cmd.append("--dangerously-skip-permissions")
+        if model_flag:
+            cmd.extend(["--model", model_flag])
         cmd.extend(["-p", prompt])
         log_shell_command(cmd, prefix="claude-print")
         result = subprocess.run(
@@ -362,6 +485,7 @@ def launch_claude_print_background(prompt: str, cwd: str | None = None, callback
             cwd=cwd,
             capture_output=True,
             text=True,
+            env=run_env,
         )
         if result.returncode != 0:
             log_shell_command(cmd, prefix="claude-print", returncode=result.returncode)

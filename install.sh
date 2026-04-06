@@ -55,7 +55,7 @@ if [ "$MODE" = "local" ]; then
     echo "Creating venv at $VENV_DIR ..."
     mkdir -p "$(dirname "$VENV_DIR")"
     python3 -m venv "$VENV_DIR"
-    "$VENV_DIR/bin/pip" install -e "$SCRIPT_DIR"
+    "$VENV_DIR/bin/pip" install -e "$SCRIPT_DIR[test]"
 
     mkdir -p "$HOME/.local/bin"
     ln -sf "$VENV_DIR/bin/pm" "$BIN_LINK"
@@ -75,7 +75,7 @@ fi
 
 echo "Creating local venv at $LOCAL_VENV ..."
 python3 -m venv "$LOCAL_VENV"
-"$LOCAL_VENV/bin/pip" install -e "$SCRIPT_DIR"
+"$LOCAL_VENV/bin/pip" install -e "$SCRIPT_DIR[test]"
 
 echo ""
 echo "Installed pm into .venv/. To use it:"

@@ -38,7 +38,6 @@ Requirements:
 """
 
 import os
-import secrets
 import shlex
 import shutil
 import subprocess
@@ -49,6 +48,11 @@ from pathlib import Path
 from pm_core.paths import configure_logger
 
 _log = configure_logger("pm.container")
+
+
+class ContainerError(RuntimeError):
+    """Raised when container creation fails and container mode is enabled."""
+    pass
 
 # Default settings
 DEFAULT_IMAGE = "pm-dev:latest"
@@ -66,6 +70,11 @@ _CLAUDE_ENV_VARS = (
     "AWS_PROFILE", "AWS_REGION", "AWS_DEFAULT_REGION",
     "CLAUDE_CODE_USE_VERTEX", "CLOUD_ML_REGION",
     "ANTHROPIC_MODEL", "ANTHROPIC_SMALL_FAST_MODEL",
+    # Local LLM provider support (Ollama, vLLM, llama.cpp, etc.)
+    "OPENAI_API_KEY", "OPENAI_BASE_URL",
+    "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN",
+    # Provider and model selection
+    "PM_PROVIDER", "PM_MODEL", "PM_EFFORT",
 )
 
 
@@ -160,10 +169,28 @@ def _run_docker(*args: str, check: bool = True,
     """Run a docker command."""
     cmd = ["docker", *args]
     _log.debug("docker: %s", " ".join(cmd))
-    return subprocess.run(
+    result = subprocess.run(
         cmd, capture_output=True, text=True,
-        check=check, timeout=timeout,
+        check=False, timeout=timeout,
     )
+    if result.returncode != 0:
+        _log.error("docker failed (rc=%d): %s\nstderr: %s\nstdout: %s",
+                   result.returncode, " ".join(cmd),
+                   result.stderr.strip()[:500], result.stdout.strip()[:200])
+        if check:
+            raise subprocess.CalledProcessError(
+                result.returncode, cmd,
+                output=result.stdout, stderr=result.stderr)
+    return result
+
+
+def container_is_running(name: str) -> bool:
+    """Return True if a container with *name* exists and is running."""
+    result = _run_docker(
+        "inspect", "-f", "{{.State.Running}}", name,
+        check=False, timeout=10,
+    )
+    return result.returncode == 0 and result.stdout.strip() == "true"
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +200,7 @@ def _run_docker(*args: str, check: bool = True,
 
 def _build_git_setup_script(
     has_push_proxy: bool = False,
+    host_workdir: str | None = None,
 ) -> str:
     """Build a shell script snippet to configure git inside the container.
 
@@ -197,6 +225,13 @@ def _build_git_setup_script(
     # etc.) run directly via /usr/bin/git.
     if has_push_proxy:
         from pm_core.push_proxy import _CONTAINER_SOCKET_PATH
+        # Escape the host workdir for safe embedding in a JSON string literal.
+        # Backslash must come first to avoid double-escaping.
+        _escaped_host_workdir = ""
+        if host_workdir:
+            _escaped_host_workdir = (
+                host_workdir.replace("\\", "\\\\").replace('"', '\\"')
+            )
         # NOTE: The inline Python block must start at column 0 inside the
         # shell $(...) substitution, so we can't use textwrap.dedent here.
         wrapper_script = (
@@ -204,7 +239,12 @@ def _build_git_setup_script(
             "# pm: git wrapper — remote commands go through the host-side proxy\n"
             "REAL_GIT=/usr/bin/git\n"
             f'SOCKET="{_CONTAINER_SOCKET_PATH}"\n'
-            '# Commands that interact with remotes and need proxy forwarding\n'
+            # HOST_WORKDIR is the host-side clone path for this container,
+            # baked in at creation time so the proxy can use the correct
+            # source/target when multiple scenario containers share a proxy.
+            + (f'HOST_WORKDIR="{_escaped_host_workdir}"\n'
+               if _escaped_host_workdir else "")
+            + '# Commands that interact with remotes and need proxy forwarding\n'
             'case "$1" in\n'
             '  push|fetch|pull|ls-remote)\n'
             '    CMD="$1"\n'
@@ -218,8 +258,11 @@ def _build_git_setup_script(
             '    done\n'
             '    args_json="$args_json]"\n'
             '    escaped_cmd=$(printf \'%s\' "$CMD" | sed \'s/"/\\\\"/g\')\n'
-            '    request=\'{"cmd": "\'$escaped_cmd\'", "args": \'$args_json\'}\'\n'
-            '    if ! command -v python3 >/dev/null 2>&1; then\n'
+            + ('    escaped_workdir=$(printf \'%s\' "$HOST_WORKDIR" | sed \'s/\\\\/\\\\\\\\/g; s/"/\\\\"/g\')\n'
+               '    request=\'{"cmd": "\'$escaped_cmd\'", "args": \'$args_json\', "workdir": "\'$escaped_workdir\'"}\'\n'
+               if _escaped_host_workdir else
+               '    request=\'{"cmd": "\'$escaped_cmd\'", "args": \'$args_json\'}\'\n')
+            + '    if ! command -v python3 >/dev/null 2>&1; then\n'
             '      echo "pm: python3 required for git proxy client" >&2\n'
             '      exit 1\n'
             '    fi\n'
@@ -274,14 +317,27 @@ def _resolve_claude_binary() -> Path | None:
 # Container naming
 # ---------------------------------------------------------------------------
 
-def _make_container_name(label: str) -> str:
-    """Generate a unique container name with the given label."""
-    suffix = secrets.token_hex(4)
-    return f"{CONTAINER_PREFIX}{label}-{suffix}"
+def _make_container_name(label: str, session_tag: str | None = None) -> str:
+    """Build a deterministic container name from the label.
+
+    When *session_tag* is provided the name includes it so that all
+    containers for a session can be listed with
+    ``docker ps --filter name=pm-{session_tag}-``.
+
+    Names are deterministic (no random suffix) so that an existing
+    container can be detected and reused when the same step is
+    re-launched after closing its window.
+    """
+    if session_tag:
+        return f"{CONTAINER_PREFIX}{session_tag}-{label}"
+    return f"{CONTAINER_PREFIX}{label}"
 
 
-def qa_container_name(pr_id: str, loop_id: str, scenario_index: int) -> str:
+def qa_container_name(pr_id: str, loop_id: str, scenario_index: int,
+                      session_tag: str | None = None) -> str:
     """Generate a deterministic container name for a QA scenario."""
+    if session_tag:
+        return f"{CONTAINER_PREFIX}{session_tag}-qa-{pr_id}-{loop_id}-s{scenario_index}"
     return f"{CONTAINER_PREFIX}qa-{pr_id}-{loop_id}-s{scenario_index}"
 
 
@@ -296,6 +352,8 @@ def create_container(
     extra_ro_mounts: dict[Path, str] | None = None,
     extra_rw_mounts: dict[Path, str] | None = None,
     allowed_push_branch: str | None = None,
+    session_tag: str | None = None,
+    pr_id: str | None = None,
 ) -> str:
     """Create a detached container with the workdir and claude mounted.
 
@@ -316,10 +374,41 @@ def create_container(
         extra_ro_mounts: Additional read-only mounts {host_path: container_path}.
         extra_rw_mounts: Additional read-write mounts {host_path: container_path}.
         allowed_push_branch: If set, restrict git push to this branch only.
+        session_tag: Session tag for shared push proxies.  When provided
+            together with *pr_id*, multiple containers on the same branch
+            share a single proxy (socket at a deterministic path).
+        pr_id: PR identifier — combined with *session_tag* to key shared
+            push proxies.
 
     Returns:
         Container ID.
     """
+    # If a running container with this name already exists, reuse it.
+    # The proxy socket directory is bind-mounted (not the socket file),
+    # so a restarted proxy is visible to the container immediately.
+    if container_is_running(name):
+        result = _run_docker(
+            "inspect", "-f", "{{.Id}}", name,
+            check=False, timeout=10,
+        )
+        container_id = result.stdout.strip()
+        _log.info("Reusing existing container %s (id=%s)", name, container_id[:12])
+        # Ensure the push proxy is running (it may have died in a crash)
+        if allowed_push_branch:
+            from pm_core.push_proxy import (
+                start_push_proxy, get_proxy_socket_path, proxy_is_alive,
+            )
+            sock = get_proxy_socket_path(name, session_tag=session_tag,
+                                         pr_id=pr_id)
+            if not sock or not proxy_is_alive(sock):
+                _log.warning("Push proxy dead/missing for container %s — "
+                             "restarting proxy", name)
+                start_push_proxy(
+                    name, str(workdir), allowed_push_branch,
+                    session_tag=session_tag, pr_id=pr_id,
+                )
+        return container_id
+
     remove_container(name)
 
     # Auto-build the pm-dev image if it's the default and not yet built.
@@ -358,9 +447,11 @@ def create_container(
     if claude_config.is_dir():
         cmd.extend(["-v", f"{claude_config}:{_CONTAINER_HOME}/.claude"])
 
-    claude_json = Path.home() / ".claude.json"
-    if claude_json.exists():
-        cmd.extend(["-v", f"{claude_json}:{_CONTAINER_HOME}/.claude.json"])
+    # NOTE: .claude.json is NOT bind-mounted.  Claude writes it atomically
+    # (write tmp + rename) which replaces the inode — a single-file bind
+    # mount keeps the old inode so the container sees stale content.
+    # Instead we copy it in after the container is created (see below).
+    _claude_json_src = Path.home() / ".claude.json"
 
     # --- Additional mounts ---
     if extra_ro_mounts:
@@ -393,10 +484,18 @@ def create_container(
     has_push_proxy = False
     if allowed_push_branch:
         from pm_core.push_proxy import (
-            start_push_proxy, _CONTAINER_SOCKET_PATH,
+            start_push_proxy, _CONTAINER_SOCKET_DIR, _CONTAINER_SOCKET_PATH,
         )
-        sock_path = start_push_proxy(name, str(workdir), allowed_push_branch)
-        cmd.extend(["-v", f"{sock_path}:{_CONTAINER_SOCKET_PATH}"])
+        sock_path = start_push_proxy(
+            name, str(workdir), allowed_push_branch,
+            session_tag=session_tag, pr_id=pr_id,
+        )
+        # Mount the socket's parent *directory* rather than the socket
+        # file itself.  This way, if the proxy restarts and recreates
+        # the socket (new inode), the container sees the new one
+        # through the directory mount.
+        sock_dir = str(Path(sock_path).parent)
+        cmd.extend(["-v", f"{sock_dir}:{_CONTAINER_SOCKET_DIR}"])
         has_push_proxy = True
         _log.info("Push proxy started for container %s (branch=%s)",
                   name, allowed_push_branch)
@@ -416,7 +515,8 @@ def create_container(
         ["git", "config", "user.email"], capture_output=True, text=True,
     ).stdout.strip()
 
-    git_setup = _build_git_setup_script(has_push_proxy=has_push_proxy)
+    git_setup = _build_git_setup_script(has_push_proxy=has_push_proxy,
+                                        host_workdir=str(workdir) if has_push_proxy else None)
     setup_parts = [
         f"groupadd -g {host_gid} {_CONTAINER_USER} 2>/dev/null",
         f"useradd -u {host_uid} -g {host_gid} -m -s /bin/bash {_CONTAINER_USER} 2>/dev/null",
@@ -448,6 +548,20 @@ def create_container(
             break
         time.sleep(0.1)
 
+    # Copy .claude.json into the container (not bind-mounted — see note above)
+    if _claude_json_src.exists():
+        try:
+            _run_docker("cp", str(_claude_json_src),
+                        f"{name}:{_CONTAINER_HOME}/.claude.json",
+                        timeout=10)
+            _run_docker("exec", name, "chown",
+                        f"{host_uid}:{host_gid}",
+                        f"{_CONTAINER_HOME}/.claude.json",
+                        timeout=5)
+        except Exception:
+            _log.warning("Failed to copy .claude.json into container %s",
+                         name, exc_info=True)
+
     _log.info("Created container %s (id=%s)", name, container_id[:12])
     return container_id
 
@@ -475,15 +589,38 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
         if proxy_socket_path:
             sock_dir = str(Path(proxy_socket_path).parent)
             cleanup_parts.append(f"rmdir {shlex.quote(sock_dir)} 2>/dev/null")
-        return f"{exec_part}; {'; '.join(cleanup_parts)}"
+        # Wrap in a bash trap so cleanup runs even when the pane is killed
+        # via tmux kill-pane/kill-window (SIGHUP to the outer shell causes
+        # ';'-chained commands to be skipped, but EXIT traps always fire).
+        # Use shlex.quote on the full inner script to avoid quote nesting
+        # issues: exec_part already contains single-quoted arguments from
+        # shlex.quote(), so wrapping in literal '...' would break parsing.
+        inner = f"trap {shlex.quote('; '.join(cleanup_parts))} EXIT; {exec_part}"
+        return f"bash -c {shlex.quote(inner)}"
     return exec_part
 
 
 def remove_container(name: str) -> None:
-    """Force-remove a container and its push proxy (no-op if it doesn't exist)."""
+    """Force-remove a container and its push proxy, then wait until it is gone.
+
+    If another 'docker rm -f' is already in flight (e.g. the previous session's
+    EXIT trap), this still blocks until the container has fully disappeared so
+    that the caller can safely create a fresh container with the same name.
+    """
+    import time
     from pm_core.push_proxy import stop_push_proxy
     stop_push_proxy(name)
     _run_docker("rm", "-f", name, check=False, timeout=30)
+    # Wait for the container to be fully gone.  When another rm is already in
+    # flight the daemon returns "removal already in progress" and our rm returns
+    # immediately, but the container still exists for a brief moment.
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        result = _run_docker("inspect", name, check=False, timeout=5)
+        if result.returncode != 0:
+            return  # container is gone
+        time.sleep(0.1)
+    _log.warning("remove_container: %s still present after 10 s", name)
 
 
 # ---------------------------------------------------------------------------
@@ -497,6 +634,8 @@ def wrap_claude_cmd(
     extra_ro_mounts: dict[Path, str] | None = None,
     extra_rw_mounts: dict[Path, str] | None = None,
     allowed_push_branch: str | None = None,
+    session_tag: str | None = None,
+    pr_id: str | None = None,
 ) -> tuple[str, str]:
     """Create a container and return a wrapped command for tmux.
 
@@ -511,6 +650,10 @@ def wrap_claude_cmd(
         extra_ro_mounts: Additional read-only mounts {host_path: container_path}.
         extra_rw_mounts: Additional read-write mounts {host_path: container_path}.
         allowed_push_branch: If set, restrict git push to this branch inside the container.
+        session_tag: Session tag — embedded in the container name and used
+            for shared push proxies (with *pr_id*).
+        pr_id: PR identifier — combined with *session_tag* to share push
+            proxies across containers on the same branch.
 
     Returns:
         (wrapped_cmd, container_name).  container_name is "" if not containerised.
@@ -519,7 +662,7 @@ def wrap_claude_cmd(
         return claude_cmd, ""
 
     config = load_container_config()
-    cname = _make_container_name(label)
+    cname = _make_container_name(label, session_tag=session_tag)
 
     try:
         create_container(
@@ -529,15 +672,39 @@ def wrap_claude_cmd(
             extra_ro_mounts=extra_ro_mounts,
             extra_rw_mounts=extra_rw_mounts,
             allowed_push_branch=allowed_push_branch,
+            session_tag=session_tag,
+            pr_id=pr_id,
         )
     except Exception:
-        _log.warning("Failed to create container %s — falling back to host",
-                     cname, exc_info=True)
-        return claude_cmd, ""
+        _log.error("Failed to create container %s — aborting (container mode is enabled)",
+                   cname, exc_info=True)
+        raise ContainerError(
+            f"Failed to create container '{cname}'. "
+            f"Is Docker running? Disable container mode with 'pm container disable' "
+            f"to run without containers."
+        )
+
+    # Rewrite any prompt-file reference that used the host workdir path.
+    # build_claude_shell_cmd writes the file to the host and embeds
+    # "$(cat <host_workdir>/pm_prompt_*.txt)" in the command.  Inside the
+    # container that host path doesn't exist — the workdir is mounted at
+    # _CONTAINER_WORKDIR — so replace the prefix now.
+    host_prefix = f"$(cat {workdir}/"
+    container_prefix = f"$(cat {_CONTAINER_WORKDIR}/"
+    if host_prefix in claude_cmd:
+        claude_cmd = claude_cmd.replace(host_prefix, container_prefix)
+        _log.debug("wrap_claude_cmd: rewrote prompt-file path to container path")
 
     from pm_core.push_proxy import get_proxy_socket_path
     proxy_sock = get_proxy_socket_path(cname)
-    exec_cmd = build_exec_cmd(cname, claude_cmd, proxy_socket_path=proxy_sock)
+    # For shared proxies (session_tag + pr_id), don't embed socket cleanup
+    # in the exec command — the socket is shared across containers and its
+    # lifetime is managed via reference counting in stop_push_proxy().
+    shared_proxy = session_tag is not None and pr_id is not None
+    exec_cmd = build_exec_cmd(
+        cname, claude_cmd,
+        proxy_socket_path=None if shared_proxy else proxy_sock,
+    )
     _log.info("Wrapped claude command in container %s", cname)
     return exec_cmd, cname
 
@@ -552,6 +719,8 @@ def create_qa_container(
     workdir: Path,
     scratch_path: Path,
     allowed_push_branch: str | None = None,
+    session_tag: str | None = None,
+    pr_id: str | None = None,
 ) -> str:
     """Create a detached container for a QA scenario.
 
@@ -569,11 +738,14 @@ def create_qa_container(
         workdir=workdir,
         extra_rw_mounts={scratch_path: _CONTAINER_SCRATCH},
         allowed_push_branch=allowed_push_branch,
+        session_tag=session_tag,
+        pr_id=pr_id,
     )
 
 
 def cleanup_qa_containers(pr_id: str, loop_id: str,
-                          exclude: set[str] | None = None) -> int:
+                          exclude: set[str] | None = None,
+                          session_tag: str | None = None) -> int:
     """Remove all containers for a given QA loop.
 
     *exclude* is an optional set of container names to skip (e.g. the
@@ -581,28 +753,35 @@ def cleanup_qa_containers(pr_id: str, loop_id: str,
 
     Returns the number of containers removed.
     """
-    prefix = f"{CONTAINER_PREFIX}qa-{pr_id}-{loop_id}-"
-    result = _run_docker(
-        "ps", "-a", "--filter", f"name={prefix}",
-        "--format", "{{.Names}}",
-        check=False, timeout=30,
-    )
-    if result.returncode != 0:
-        return 0
+    # Search for both session-tagged and legacy container names
+    prefixes = []
+    if session_tag:
+        prefixes.append(f"{CONTAINER_PREFIX}{session_tag}-qa-{pr_id}-{loop_id}-")
+    prefixes.append(f"{CONTAINER_PREFIX}qa-{pr_id}-{loop_id}-")
 
     count = 0
-    for line in result.stdout.strip().splitlines():
-        cname = line.strip()
-        if cname and cname not in (exclude or set()):
-            remove_container(cname)
-            count += 1
+    for prefix in prefixes:
+        result = _run_docker(
+            "ps", "-a", "--filter", f"name={prefix}",
+            "--format", "{{.Names}}",
+            check=False, timeout=30,
+        )
+        if result.returncode != 0:
+            continue
+
+        for line in result.stdout.strip().splitlines():
+            cname = line.strip()
+            if cname and cname not in (exclude or set()):
+                remove_container(cname)
+                count += 1
 
     if count:
         _log.info("Cleaned up %d container(s) for %s/%s", count, pr_id, loop_id)
     return count
 
 
-def cleanup_orphaned_qa_containers(session: str, pr_id: str) -> int:
+def cleanup_orphaned_qa_containers(session: str, pr_id: str,
+                                   session_tag: str | None = None) -> int:
     """Remove QA containers whose tmux windows no longer exist.
 
     Called at the start of a new QA run.  Scans all containers matching
@@ -613,14 +792,11 @@ def cleanup_orphaned_qa_containers(session: str, pr_id: str) -> int:
     """
     from pm_core import tmux as tmux_mod
 
-    prefix = f"{CONTAINER_PREFIX}qa-{pr_id}-"
-    result = _run_docker(
-        "ps", "-a", "--filter", f"name={prefix}",
-        "--format", "{{.Names}}",
-        check=False, timeout=30,
-    )
-    if result.returncode != 0:
-        return 0
+    # Search for both session-tagged and legacy container names
+    prefixes = []
+    if session_tag:
+        prefixes.append(f"{CONTAINER_PREFIX}{session_tag}-qa-{pr_id}-")
+    prefixes.append(f"{CONTAINER_PREFIX}qa-{pr_id}-")
 
     # Build set of live window names for fast lookup
     try:
@@ -629,27 +805,65 @@ def cleanup_orphaned_qa_containers(session: str, pr_id: str) -> int:
         return 0
 
     count = 0
-    for line in result.stdout.strip().splitlines():
-        cname = line.strip()
-        if not cname:
+    for prefix in prefixes:
+        result = _run_docker(
+            "ps", "-a", "--filter", f"name={prefix}",
+            "--format", "{{.Names}}",
+            check=False, timeout=30,
+        )
+        if result.returncode != 0:
             continue
-        # Container name: pm-qa-{pr_id}-{loop_id}-s{N}
-        # Window name:    qa-{display_id}-s{N}
-        # Extract the -s{N} suffix to check against windows.
-        parts = cname.split("-s")
-        if len(parts) < 2:
-            continue
-        suffix = f"-s{parts[-1]}"
-        # Check if ANY window ending with this suffix exists
-        has_window = any(w.endswith(suffix) and w.startswith("qa-")
-                         for w in live_windows)
-        if not has_window:
-            remove_container(cname)
-            count += 1
+
+        for line in result.stdout.strip().splitlines():
+            cname = line.strip()
+            if not cname:
+                continue
+            # Container name: pm[-{session_tag}]-qa-{pr_id}-{loop_id}-s{N}
+            # Window name:    qa-{display_id}-s{N}
+            # Extract the -s{N} suffix to check against windows.
+            parts = cname.split("-s")
+            if len(parts) < 2:
+                continue
+            suffix = f"-s{parts[-1]}"
+            # Check if ANY window ending with this suffix exists
+            has_window = any(w.endswith(suffix) and w.startswith("qa-")
+                             for w in live_windows)
+            if not has_window:
+                remove_container(cname)
+                count += 1
 
     if count:
         _log.info("Cleaned up %d orphaned QA container(s) for %s",
                   count, pr_id)
+    return count
+
+
+def cleanup_session_containers(session_tag: str) -> int:
+    """Remove all containers belonging to a session.
+
+    Filters by ``pm-{session_tag}-`` which matches every container whose
+    name was generated with this session tag embedded.
+
+    Returns the number of containers removed.
+    """
+    prefix = f"{CONTAINER_PREFIX}{session_tag}-"
+    result = _run_docker(
+        "ps", "-a", "--filter", f"name={prefix}",
+        "--format", "{{.Names}}",
+        check=False, timeout=30,
+    )
+    if result.returncode != 0:
+        return 0
+
+    count = 0
+    for line in result.stdout.strip().splitlines():
+        cname = line.strip()
+        if cname:
+            remove_container(cname)
+            count += 1
+
+    if count:
+        _log.info("Cleaned up %d container(s) for session %s", count, session_tag)
     return count
 
 
