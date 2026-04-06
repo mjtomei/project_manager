@@ -496,7 +496,7 @@ class TestLockedReadModifyWrite:
                             data = {"count": 0}
                         data["count"] += 1
                         return data
-                    locked_read_modify_write(path, increment)
+                    locked_read_modify_write(path, increment, timeout=30.0)
             except Exception as e:
                 errors.append(e)
 
