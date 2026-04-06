@@ -315,26 +315,7 @@ def handle_plan_pick(app, pr_id: str, result) -> None:
     if not pr:
         return
 
-    if isinstance(result, tuple) and result[0] == "_new":
-        # Create a new plan
-        _, title = result
-        plan_id = store.next_plan_id(app._data)
-        plan_file = f"plans/{plan_id}.md"
-        entry = {"id": plan_id, "name": title, "file": plan_file, "status": "draft"}
-        if app._data.get("plans") is None:
-            app._data["plans"] = []
-        app._data["plans"].append(entry)
-        # Create plan file
-        if app._root:
-            plan_path = app._root / plan_file
-            plan_path.parent.mkdir(parents=True, exist_ok=True)
-            plan_path.write_text(f"# {title}\n\n<!-- Describe the plan here -->\n")
-        pr["plan"] = plan_id
-        _record_status_timestamp(pr)
-        store.save(app._data, app._root)
-        app._load_state()
-        app.log_message(f"Moved {pr_id} → {plan_id}: {title} (new)")
-    elif result == "_standalone":
+    if result == "_standalone":
         # Remove plan assignment
         old_plan = pr.get("plan")
         if not old_plan:
