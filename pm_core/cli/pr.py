@@ -669,9 +669,16 @@ def pr_spec_save(pr_id: str, phase: str):
         click.echo(f"Spec file is empty: {spec_path}", err=True)
         raise SystemExit(1)
 
-    # Record the path in the PR entry
-    pr_entry[field] = str(spec_path)
-    store.save(data, root)
+    # Record the path in the PR entry atomically
+    spec_path_str = str(spec_path)
+
+    def apply(data):
+        for pr in data.get("prs") or []:
+            if pr["id"] == pr_id:
+                pr[field] = spec_path_str
+                break
+
+    store.locked_update(root, apply)
     click.echo(f"Saved {phase} spec for {_pr_display_id(pr_entry)} ({len(content)} chars).")
     trigger_tui_refresh()
 

@@ -290,38 +290,52 @@ def generate_spec(data: dict, pr_id: str, phase: str,
         _log.warning("spec_gen: empty spec generated for %s/%s", pr_id, phase)
         return "", False
 
-    # Save spec to file and update PR entry
-    set_spec(pr, phase, spec_text, root=root)
-    if root:
-        store.save(data, root)
-        _log.info("spec_gen: saved %s spec for %s (%d chars)",
-                  phase, pr_id, len(spec_text))
-
     # Determine if review is needed
     needs_review = False
     if mode == "review":
         needs_review = True
     elif mode == "prompt":
-        # Check for ambiguity flags
         if "AMBIGUITY_FLAG" in spec_text:
             needs_review = True
             _log.info("spec_gen: ambiguity detected in %s spec for %s, "
                       "pausing for review", phase, pr_id)
 
-    # Set spec_pending if review is needed, clear it otherwise
+    # Write spec file (safe outside lock — file writes are independent of YAML)
+    set_spec(pr, phase, spec_text, root=root)
+
+    # Build pending value for both in-memory and on-disk use
+    pending_value = None
     if needs_review:
-        pr["spec_pending"] = {
+        pending_value = {
             "phase": phase,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
-        if root:
-            store.save(data, root)
-        _log.info("spec_gen: marked spec_pending for %s/%s", pr_id, phase)
+
+    # Apply all state mutations atomically via locked_update
+    if root:
+        def apply(fresh_data):
+            fresh_pr = store.get_pr(fresh_data, pr_id)
+            if not fresh_pr:
+                return
+            # Record the spec file path
+            field = _SPEC_FIELD.get(phase)
+            if field and pr.get(field):
+                fresh_pr[field] = pr[field]
+            # Set or clear spec_pending
+            if pending_value:
+                fresh_pr["spec_pending"] = pending_value
+            else:
+                fresh_pr.pop("spec_pending", None)
+
+        store.locked_update(root, apply)
+        _log.info("spec_gen: saved %s spec for %s (%d chars, needs_review=%s)",
+                  phase, pr_id, len(spec_text), needs_review)
+
+    # Keep caller's in-memory pr in sync
+    if pending_value:
+        pr["spec_pending"] = pending_value
     else:
-        if pr.pop("spec_pending", None) is not None:
-            if root:
-                store.save(data, root)
-            _log.info("spec_gen: cleared spec_pending for %s/%s", pr_id, phase)
+        pr.pop("spec_pending", None)
 
     return spec_text, needs_review
 
@@ -360,12 +374,26 @@ def approve_spec(data: dict, pr_id: str, root: Path | None = None,
     if not phase:
         return None
 
+    # Write edited spec file (safe outside lock)
     if edited_text is not None:
         set_spec(pr, phase, edited_text.strip(), root=root)
 
+    # Also update in-memory data for caller
     del pr["spec_pending"]
+
     if root:
-        store.save(data, root)
+        spec_path = pr.get(_SPEC_FIELD.get(phase, ""))
+
+        def apply(fresh_data):
+            fresh_pr = store.get_pr(fresh_data, pr_id)
+            if not fresh_pr:
+                return
+            if edited_text is not None and spec_path:
+                fresh_pr[_SPEC_FIELD[phase]] = spec_path
+            fresh_pr.pop("spec_pending", None)
+
+        store.locked_update(root, apply)
+
     _log.info("spec_gen: approved %s spec for %s", phase, pr_id)
     return phase
 
@@ -405,7 +433,12 @@ def reject_spec(data: dict, pr_id: str, feedback: str | None = None,
             original_desc.rstrip() + f"\n\n[Spec review feedback]: {feedback}"
         )
         if root:
-            store.save(data, root)
+            def apply_feedback(fresh_data):
+                fresh_pr = store.get_pr(fresh_data, pr_id)
+                if fresh_pr:
+                    fresh_pr["description"] = pr["description"]
+
+            store.locked_update(root, apply_feedback)
 
     try:
         generate_spec(data, pr_id, phase, root=root, force=True)
@@ -414,7 +447,12 @@ def reject_spec(data: dict, pr_id: str, feedback: str | None = None,
         if feedback:
             pr["description"] = original_desc
             if root:
-                store.save(data, root)
+                def restore_desc(fresh_data):
+                    fresh_pr = store.get_pr(fresh_data, pr_id)
+                    if fresh_pr:
+                        fresh_pr["description"] = original_desc
+
+                store.locked_update(root, restore_desc)
 
     _log.info("spec_gen: regenerated %s spec for %s after rejection", phase, pr_id)
     return phase

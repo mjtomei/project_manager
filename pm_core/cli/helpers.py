@@ -493,11 +493,19 @@ def _ensure_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
     # Checkout the PR branch
     git_ops.checkout_branch(work_path, branch, create=True)
 
-    # Update and persist the new workdir path
-    pr_entry["workdir"] = str(work_path)
-    save_and_push(data, root, f"pm: ensure workdir for {pr_id}")
+    # Update and persist the new workdir path atomically
+    workdir_str = str(work_path)
+    pr_entry["workdir"] = workdir_str
+
+    def apply(fresh_data):
+        for pr in fresh_data.get("prs") or []:
+            if pr["id"] == pr_id:
+                pr["workdir"] = workdir_str
+                break
+
+    store.locked_update(root, apply)
     click.echo(f"Workdir created at {work_path}")
-    return str(work_path)
+    return workdir_str
 
 
 def _resolve_repo_id(data: dict, workdir: Path, root: Path) -> None:
