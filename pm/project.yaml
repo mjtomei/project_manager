@@ -7794,6 +7794,7 @@ prs:
   merged_at: null
   notes: []
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-7251b72-refuse-pm-pr-start-when-pr-is-not-co-b1d18e14
+  spec_impl: /workspace/pm/specs/pr-7251b72/impl.md
 - id: pr-e3cf481
   plan: null
   title: Add file-locked read-modify-write helper for pane registry
