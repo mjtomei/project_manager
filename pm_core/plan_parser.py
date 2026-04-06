@@ -21,37 +21,31 @@ def extract_plan_intro(text: str) -> str:
     return '\n'.join(result).strip()
 
 
-def parse_plan_prs(text: str) -> list[dict]:
-    """Parse structured PR entries from a plan file's ## PRs section.
+def _parse_section(
+    text: str, section: str, block_prefix: str, fields: list[str],
+) -> list[dict]:
+    """Parse a markdown section into a list of dicts.
 
-    Expected format:
-        ## PRs
-
-        ### PR: Title here
-        - **description**: ...
-        - **tests**: ...
-        - **files**: ...
-        - **depends_on**: Other PR title
-
-    Returns a list of dicts with keys: title, description, tests, files, depends_on.
+    Finds ``## <section>``, splits on ``### <block_prefix>:`` headings,
+    and extracts *title* plus each named field via ``extract_field()``.
     """
-    # Find the ## PRs section
-    prs_match = re.search(r'^## PRs\s*$', text, re.MULTILINE)
-    if not prs_match:
+    header = re.search(rf'^## {re.escape(section)}\s*$', text, re.MULTILINE)
+    if not header:
         return []
 
-    prs_text = text[prs_match.end():]
+    section_text = text[header.end():]
 
     # Stop at next ## heading (but not ###)
-    next_section = re.search(r'^## [^#]', prs_text, re.MULTILINE)
+    next_section = re.search(r'^## [^#]', section_text, re.MULTILINE)
     if next_section:
-        prs_text = prs_text[:next_section.start()]
+        section_text = section_text[:next_section.start()]
 
-    # Split on ### PR: headings
-    pr_blocks = re.split(r'^### PR:\s*', prs_text, flags=re.MULTILINE)
+    blocks = re.split(
+        rf'^### {re.escape(block_prefix)}:\s*', section_text, flags=re.MULTILINE,
+    )
 
     results = []
-    for block in pr_blocks:
+    for block in blocks:
         block = block.strip()
         if not block:
             continue
@@ -64,68 +58,30 @@ def parse_plan_prs(text: str) -> list[dict]:
         title = lines[0].strip()
         body = lines[1] if len(lines) > 1 else ""
 
-        entry = {
-            "title": title,
-            "description": extract_field(body, "description"),
-            "tests": extract_field(body, "tests"),
-            "files": extract_field(body, "files"),
-            "depends_on": extract_field(body, "depends_on"),
-        }
+        entry = {"title": title}
+        for field in fields:
+            entry[field] = extract_field(body, field)
         results.append(entry)
 
     return results
+
+
+def parse_plan_prs(text: str) -> list[dict]:
+    """Parse structured PR entries from a plan file's ## PRs section.
+
+    Returns a list of dicts with keys: title, description, tests, files, depends_on.
+    """
+    return _parse_section(text, "PRs", "PR", [
+        "description", "tests", "files", "depends_on",
+    ])
 
 
 def parse_plan_children(text: str) -> list[dict]:
     """Parse child plan entries from a plan file's ## Plans section.
 
-    Expected format:
-        ## Plans
-
-        ### Plan: Title here
-        - **summary**: One-line summary
-        - **status**: draft | active | done
-        - **id**: plan-abc1234
-
     Returns a list of dicts with keys: title, summary, status, id.
     """
-    plans_match = re.search(r'^## Plans\s*$', text, re.MULTILINE)
-    if not plans_match:
-        return []
-
-    plans_text = text[plans_match.end():]
-
-    # Stop at next ## heading (but not ###)
-    next_section = re.search(r'^## [^#]', plans_text, re.MULTILINE)
-    if next_section:
-        plans_text = plans_text[:next_section.start()]
-
-    # Split on ### Plan: headings
-    plan_blocks = re.split(r'^### Plan:\s*', plans_text, flags=re.MULTILINE)
-
-    results = []
-    for block in plan_blocks:
-        block = block.strip()
-        if not block:
-            continue
-
-        # Remove --- separators
-        block = re.sub(r'^\s*---\s*$', '', block, flags=re.MULTILINE).strip()
-
-        # First line is the title
-        lines = block.split('\n', 1)
-        title = lines[0].strip()
-        body = lines[1] if len(lines) > 1 else ""
-
-        entry = {
-            "title": title,
-            "summary": extract_field(body, "summary"),
-            "status": extract_field(body, "status"),
-            "id": extract_field(body, "id"),
-        }
-        results.append(entry)
-
-    return results
+    return _parse_section(text, "Plans", "Plan", ["summary", "status", "id"])
 
 
 def extract_field(body: str, field: str) -> str:

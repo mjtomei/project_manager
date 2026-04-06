@@ -6,6 +6,8 @@ from pm_core.plan_parser import extract_field, parse_plan_children, parse_plan_p
 def test_parse_empty():
     assert parse_plan_prs("") == []
     assert parse_plan_prs("# Plan\n\nSome content") == []
+    assert parse_plan_children("") == []
+    assert parse_plan_children("# Plan\n\nSome content") == []
 
 
 def test_parse_single_pr():
