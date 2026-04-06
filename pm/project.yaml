@@ -3,11 +3,11 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-e3cf481
+  active_pr: pr-177dec0
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
-  hide_merged: false
+  hide_merged: true
 plans:
 - id: plan-001
   name: Import from existing repo
@@ -903,7 +903,7 @@ prs:
   plan: plan-003
   title: Add file locking to project.yaml read-modify-write operations
   branch: pm/pr-f38005f-add-file-locking-to-project-yaml-read-modify-write
-  status: in_review
+  status: qa
   depends_on:
   - pr-022
   description: 'Add advisory file locking to store.py so that concurrent processes
@@ -919,7 +919,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/109
   gh_pr_number: 109
   created_at: '2026-03-02T01:04:39.190560+00:00'
-  updated_at: '2026-03-23T13:14:22.104034+00:00'
+  updated_at: '2026-04-06T18:48:51.118103+00:00'
   started_at: '2026-03-02T01:04:39.190560+00:00'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-f38005f-add-file-locking-to-project-yaml-rea-ab512a43
   reviewed_at: '2026-03-02T01:27:28.059956+00:00'
@@ -930,6 +930,7 @@ prs:
       to locked_update too, or they can still overwrite with stale data.
     created_at: '2026-03-07T15:29:28Z'
     last_edited: '2026-03-07T15:29:28Z'
+  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-f38005f/qa.md
 - id: pr-c11d04f
   plan: plan-003
   title: Add notes field to PRs for post-start addendums
@@ -5531,7 +5532,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/143
   gh_pr_number: 143
   created_at: '2026-03-10T00:41:37.907137+00:00'
-  updated_at: '2026-03-23T17:33:04.632542+00:00'
+  updated_at: '2026-04-06T19:05:01.947943+00:00'
   started_at: '2026-03-14T04:37:49.204416+00:00'
   reviewed_at: '2026-03-23T17:33:04.632542+00:00'
   merged_at: null
@@ -7715,7 +7716,7 @@ prs:
   plan: improvements
   title: Merge PR notes from both main and workdir project.yaml into prompts
   branch: pm/pr-83b98d5-merge-pr-notes-from-both-main-and-workdir-project-
-  status: in_progress
+  status: merged
   depends_on: []
   description: 'Currently _format_pr_notes in prompt_gen.py only reads notes from
     the main repo project.yaml. Notes added from a workdir session (e.g. by an implementation
@@ -7748,17 +7749,31 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/152
   gh_pr_number: 152
   created_at: '2026-04-04T16:32:19.297115+00:00'
-  updated_at: '2026-04-06T18:37:58.648506+00:00'
+  updated_at: '2026-04-06T19:17:21.660943+00:00'
   started_at: '2026-04-06T18:35:47.532852+00:00'
-  reviewed_at: null
-  merged_at: null
-  notes: []
+  reviewed_at: '2026-04-06T18:51:09.878626+00:00'
+  merged_at: '2026-04-06T19:17:21.660943+00:00'
+  notes:
+  - id: note-359211c
+    text: 'QA PASS: Unit tests pass — all existing and new tests green: PASS; Workdir
+      notes merge into main notes: PASS; Deduplication prefers later last_edited timestamp:
+      PASS; Dedup fallback to created_at when last_edited missing: PASS; Merged notes
+      sorted by created_at: PASS; Graceful degradation — nonexistent workdir path:
+      PASS; Graceful degradation — workdir exists but PR not found: PASS; Both sources
+      empty — returns empty string: PASS; Only workdir has notes, main has none: PASS;
+      All 5 callers pass workdir correctly: PASS; No mutation of input pr dict or
+      notes lists: PASS; Integration — generate_prompt includes workdir notes: PASS;
+      Integration — generate_review_prompt includes workdir notes: PASS (workdir:
+      /home/mjtomei/.pm/workdirs/qa/pr-83b98d5-bfdf20274c963582)'
+    created_at: '2026-04-06T19:07:59Z'
+    last_edited: '2026-04-06T19:07:59Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-83b98d5-merge-pr-notes-from-both-main-and-wo-b1d18e14
+  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-83b98d5/qa.md
 - id: pr-7251b72
   plan: improvements
   title: Refuse pm pr start when PR is not committed on base branch
   branch: pm/pr-7251b72-refuse-pm-pr-start-when-pr-is-not-committed-on-bas
-  status: in_progress
+  status: qa
   depends_on: []
   description: 'When pm pr start clones the main repo to create a workdir, it clones
     from the committed state of master (or the configured base_branch). If the PR
@@ -7788,17 +7803,18 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/153
   gh_pr_number: 153
   created_at: '2026-04-04T16:32:21.564023+00:00'
-  updated_at: '2026-04-06T18:37:47.901600+00:00'
+  updated_at: '2026-04-06T18:53:49.187083+00:00'
   started_at: '2026-04-06T18:36:08.322443+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-04-06T18:53:49.187083+00:00'
   merged_at: null
   notes: []
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-7251b72-refuse-pm-pr-start-when-pr-is-not-co-b1d18e14
+  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-7251b72/qa.md
 - id: pr-e3cf481
   plan: null
   title: Add file-locked read-modify-write helper for pane registry
   branch: pm/pr-e3cf481-add-file-locked-read-modify-write-helper-for-pane-
-  status: in_progress
+  status: in_review
   depends_on: []
   description: 'The pane registry (pane_registry.py) uses a load→modify→save pattern
     on a shared JSON file with no file locking. When the QA loop spawns many panes
@@ -7822,13 +7838,112 @@ prs:
 
     4. Add tests for the locking helper (concurrent writers, timeout behavior).'
   agent_machine: arch-home
-  gh_pr: null
-  gh_pr_number: null
+  gh_pr: https://github.com/mjtomei/project_manager/pull/154
+  gh_pr_number: 154
   created_at: '2026-04-06T18:36:59.216942+00:00'
-  updated_at: '2026-04-06T18:40:32.910998+00:00'
+  updated_at: '2026-04-06T19:13:19.491747+00:00'
   started_at: '2026-04-06T18:39:53.655732+00:00'
+  reviewed_at: '2026-04-06T19:09:23.080520+00:00'
+  merged_at: null
+  notes:
+  - id: note-b2e9be2
+    text: 'Secondary fix needed: the TUI respawn fallback in _session_start (session.py:248)
+      uses get_window_id(session_name) which returns the base session''s active window,
+      not window 0/main. When the registry is clobbered and the TUI role is missing,
+      this causes the TUI to be respawned in whatever window the base session happens
+      to have active (e.g. a QA window). The fallback should target the window named
+      ''main'' or window index 0 instead.'
+    created_at: '2026-04-06T19:12:13Z'
+    last_edited: '2026-04-06T19:12:13Z'
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-e3cf481-add-file-locked-read-modify-write-he-b1d18e14
+- id: pr-cb2a29d
+  plan: null
+  title: Kill tmux windows and containers for merged PRs on TUI startup
+  branch: pm/pr-cb2a29d-kill-tmux-windows-and-containers-for-merged-prs-on
+  status: in_progress
+  depends_on: []
+  description: 'When a PR is merged via the GitHub backend on the project_manager
+    repo, _finalize_merge calls kill_pr_windows inside a bare try/except that silently
+    swallows failures. The subsequent trigger_tui_restart causes the TUI to reload
+    with the status already set to merged, so neither the GitHub sync nor the background
+    sync treats it as newly merged — there is no second-chance cleanup.
+
+
+    Fix: On TUI startup (in _deferred_startup_sync or heal_registry), scan all merged
+    PRs and check if they still have live tmux windows (matching the naming patterns:
+    {display_id}, review-{display_id}, qa-{display_id}, qa-{display_id}-sN). Kill
+    any that exist. Also stop and remove any docker containers whose names match merged
+    PR workdir IDs.
+
+
+    Additionally, remove the bare except Exception: pass around kill_pr_windows in
+    _finalize_merge so failures are at least logged.'
+  agent_machine: arch-home
+  gh_pr: https://github.com/mjtomei/project_manager/pull/155
+  gh_pr_number: 155
+  created_at: '2026-04-06T18:53:56.850825+00:00'
+  updated_at: '2026-04-06T19:06:18.130597+00:00'
+  started_at: '2026-04-06T19:06:18.130597+00:00'
   reviewed_at: null
   merged_at: null
   notes: []
-  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-e3cf481-add-file-locked-read-modify-write-he-b1d18e14
-es: []
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-cb2a29d-kill-tmux-windows-and-containers-for-29829145
+- id: pr-fc6db6a
+  plan: bugs
+  title: Prevent plain 'd' from opening duplicate review window when review loop is
+    running
+  branch: pm/pr-fc6db6a-prevent-plain-d-from-opening-duplicate-review-wind
+  status: in_progress
+  depends_on: []
+  description: 'When a review loop is running for a PR (started via zz d), pressing
+    plain d opens a second review window instead of telling the user a loop is already
+    active.
+
+
+    The done_pr() function in pr_view.py has a fast-path that checks for an existing
+    review-{display_id} tmux window and switches to it. But this can fail when:
+
+    1. get_pm_session() returns None due to the pane registry race condition (pr-e3cf481)
+
+    2. The review loop is between iterations and the window was momentarily killed
+
+
+    The function does NOT check app._review_loops to see if a loop is already managing
+    this PR. The zz d and zzz d handlers (start_or_stop_loop) do check this, but plain
+    d bypasses it.
+
+
+    Fix: In done_pr() (pr_view.py ~line 136), check app._review_loops.get(pr_id) before
+    proceeding. If a loop is running for the selected PR, show a message like ''Review
+    loop running — use z d to stop'' and return without spawning a second window.'
+  agent_machine: arch-home
+  gh_pr: https://github.com/mjtomei/project_manager/pull/156
+  gh_pr_number: 156
+  created_at: '2026-04-06T19:14:44.223134+00:00'
+  updated_at: '2026-04-06T19:17:16.583998+00:00'
+  started_at: '2026-04-06T19:17:16.583998+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-fc6db6a-prevent-plain-d-from-opening-duplica-5a6a6c1c
+- id: pr-177dec0
+  plan: bugs
+  title: Fix pr select not scrolling selected PR into view in TUI
+  branch: pm/pr-177dec0-fix-pr-select-not-scrolling-selected-pr-into-view-
+  status: pending
+  depends_on: []
+  description: When using the pr select command (e.g. from the command bar), the TUI
+    updates the selected PR but does not scroll the tech tree to bring it into view.
+    The selected PR ends up hidden behind the scroll bar and command line at the bottom
+    of the screen. It appears the scroll-into-view logic is not being triggered after
+    a programmatic selection change from the command bar, only from keyboard navigation
+    within the tree.
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-06T19:18:52.240715+00:00'
+  updated_at: '2026-04-06T19:18:52.240715+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
