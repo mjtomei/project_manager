@@ -350,6 +350,7 @@ class PlanPickerScreen(ModalScreen):
             if pid == current_plan:
                 self._selected = i
                 break
+
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="picker-container"):
             yield Label(f"Move {self._pr_id} to plan:", id="picker-title")

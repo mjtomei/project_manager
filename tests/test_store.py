@@ -40,6 +40,22 @@ class TestPlanStatusValidation:
         data = store.load(tmp_pm_root)
         assert data["plans"][0]["status"] == "draft"
 
+    def test_active_status_unchanged(self, tmp_pm_root):
+        _write_yaml(tmp_pm_root,
+            "project:\n  name: test\nplans:\n"
+            "  - id: plan-001\n    name: A\n    file: a.md\n    status: active\n"
+        )
+        data = store.load(tmp_pm_root)
+        assert data["plans"][0]["status"] == "active"
+
+    def test_done_status_unchanged(self, tmp_pm_root):
+        _write_yaml(tmp_pm_root,
+            "project:\n  name: test\nplans:\n"
+            "  - id: plan-001\n    name: A\n    file: a.md\n    status: done\n"
+        )
+        data = store.load(tmp_pm_root)
+        assert data["plans"][0]["status"] == "done"
+
     def test_missing_status_normalized(self, tmp_pm_root):
         _write_yaml(tmp_pm_root,
             "project:\n  name: test\nplans:\n"

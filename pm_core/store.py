@@ -17,7 +17,7 @@ class PlanValidationError(Exception):
     """Raised when plan entries have invalid references (e.g. bad parent ID, cycles)."""
 
 
-VALID_PLAN_STATUSES = {"draft"}
+VALID_PLAN_STATUSES = {"draft", "active", "done"}
 
 
 def find_project_root(start: Optional[str] = None) -> Path:
@@ -48,7 +48,7 @@ def load(root: Optional[Path] = None, validate: bool = True) -> dict:
 
     Args:
         root: Directory containing project.yaml
-        validate: If True, validate PR statuses and fix invalid ones
+        validate: If True, validate PR statuses, plan statuses, and parent references
     """
     if root is None:
         root = find_project_root()
