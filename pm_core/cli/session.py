@@ -894,13 +894,15 @@ def popup_picker_cmd(session: str, window_name: str):
     current_pr = _current_window_pr_id(window_name)
 
     if not current_pr:
-        click.echo("Not a PR window.")
+        click.echo("PR Actions (prefix+P)")
+        click.echo("Switch to a PR window to use this picker.")
         raise SystemExit(0)
 
     lines = _build_picker_lines(prs, current_pr)
 
     if not lines:
-        click.echo("No actions available for this PR.")
+        click.echo(f"PR Actions — {current_pr}")
+        click.echo("No actions available (PR is merged or closed).")
         raise SystemExit(0)
 
     has_fzf = shutil.which("fzf") is not None
