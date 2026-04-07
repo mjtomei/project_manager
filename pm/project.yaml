@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-ac12b47
+  active_pr: pr-8aa9411
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -903,7 +903,7 @@ prs:
   plan: plan-003
   title: Add file locking to project.yaml read-modify-write operations
   branch: pm/pr-f38005f-add-file-locking-to-project-yaml-read-modify-write
-  status: qa
+  status: in_review
   depends_on:
   - pr-022
   description: 'Add advisory file locking to store.py so that concurrent processes
@@ -930,6 +930,29 @@ prs:
       to locked_update too, or they can still overwrite with stale data.
     created_at: '2026-03-07T15:29:28Z'
     last_edited: '2026-03-07T15:29:28Z'
+  - id: note-60be829
+    text: 'QA NEEDS_WORK: Unit tests — test_store_locking.py and test_store.py pass:
+      PASS; Regression — all pre-existing test suites pass: PASS; Code audit — no
+      bare store.save() in CLI or TUI modules: PASS; Code audit — no network calls
+      inside locked_update callbacks: PASS; CLI integration — pm pr add creates correct
+      on-disk state: PASS; CLI integration — pm pr edit updates fields atomically:
+      PASS; CLI integration — pm pr select, pm plan add, pm model set: PASS; CLI integration
+      — pm pr close removes PR and cleans up: PASS; CLI integration — pm pr note add/edit/delete:
+      PASS; Concurrent pm pr add — no lost writes: NEEDS_WORK; StoreLockTimeout —
+      CLI error message: PASS; pm edit command — editor under lock: PASS; Atomic write
+      — file never truncated: PASS; Read-only permissions and YAML header after save:
+      PASS; Exception in mutation function — lock released, data unsaved: PASS; ProjectYamlParseError
+      — corrupt YAML handling: PASS; TUI sync graceful lock timeout handling: PASS;
+      pr_sync — network calls before lock, results applied inside lock: PASS; spec_gen
+      — locked_update for generate, approve, reject: PASS; plan_load and GitHub import
+      — concurrent-safe duplicate checks: PASS; watcher_ui — intentional store.save
+      for creation is preserved: PASS; _finalize_merge — no data parameter, loads
+      fresh inside lock: PASS; lock file left on disk after unlock — standard fcntl
+      pattern: PASS; make_plan_entry helper used consistently: PASS; helpers.py —
+      _ensure_workdir and _resolve_repo_id use locked_update: PASS; background_sync
+      handles corrupt YAML without clobbering app state: PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-f38005f-d8d59509902b0358)'
+    created_at: '2026-04-07T22:51:44Z'
+    last_edited: '2026-04-07T22:51:44Z'
   spec_qa: /home/mjtomei/project_manager/pm/specs/pr-f38005f/qa.md
 - id: pr-c11d04f
   plan: plan-003
@@ -5463,7 +5486,7 @@ prs:
   plan: plan-qa
   title: Session cleanup for stale containers and push proxies
   branch: pm/pr-ac12b47-session-cleanup-for-stale-containers-and-push-prox
-  status: qa
+  status: in_review
   depends_on:
   - pr-6836fad
   description: 'Add a cleanup function that removes stale containers and push proxies
@@ -5502,9 +5525,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/143
   gh_pr_number: 143
   created_at: '2026-03-10T00:41:37.907137+00:00'
-  updated_at: '2026-04-07T14:35:41.793710+00:00'
+  updated_at: '2026-04-07T22:44:24.695069+00:00'
   started_at: '2026-03-14T04:37:49.204416+00:00'
-  reviewed_at: '2026-03-23T17:33:04.632542+00:00'
+  reviewed_at: '2026-04-07T22:44:24.695069+00:00'
   merged_at: null
   notes:
   - id: note-f252bbf
@@ -5693,7 +5716,7 @@ prs:
   title: 'Harden local LLM integration: model selection, real QA testing, init setup,
     and provider verification'
   branch: pm/pr-9a5b86e-harden-local-llm-integration-model-selection-real-
-  status: in_review
+  status: qa
   depends_on:
   - pr-dad0069
   description: "Follow-up to pr-dad0069 (local LLM provider support) addressing gaps\
@@ -5725,6 +5748,23 @@ prs:
       openai/gpt-oss-120b). Confirmed reachable from macbook.
     created_at: '2026-03-13T04:31:35Z'
     last_edited: '2026-03-13T04:31:35Z'
+  - id: note-11aa217
+    text: 'QA INPUT_REQUIRED: Model show always displays providers section with configured
+      providers: INPUT_REQUIRED; Model show displays none-configured message when
+      no providers exist: INPUT_REQUIRED; Provider verification — inference OK but
+      tool use fails: INPUT_REQUIRED; Anthropic API probe detects support on OpenAI-type
+      provider: INPUT_REQUIRED; Local provider falls back to OpenAI API when /v1/messages
+      returns 404: INPUT_REQUIRED; No double /v1 in Anthropic probe and tool check
+      URLs: INPUT_REQUIRED; Init detects Ollama installed and running with models:
+      INPUT_REQUIRED; Init skips Ollama prompt when not installed or not running:
+      INPUT_REQUIRED; Init with Ollama running but no models pulled: INPUT_REQUIRED;
+      Init skips LLM detection in non-interactive mode: INPUT_REQUIRED; Context window
+      detection for OpenAI-type providers: INPUT_REQUIRED; Provider test CLI displays
+      expanded results: INPUT_REQUIRED; Remote integration tests skip cleanly without
+      env vars: INPUT_REQUIRED; Full unit test suite passes: INPUT_REQUIRED (workdir:
+      /home/mjtomei/.pm/workdirs/qa/pr-9a5b86e-a533f08b0448cf72)'
+    created_at: '2026-04-07T22:39:27Z'
+    last_edited: '2026-04-07T22:39:27Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-9a5b86e-harden-local-llm-integration-model-s-cbe54f5e
 - id: pr-1f35c6d
   plan: watchers
@@ -6432,7 +6472,7 @@ prs:
   plan: plan-qa
   title: Review and QA regression benchmark suite with real-world bug test cases
   branch: pm/pr-8aa9411-review-and-qa-regression-benchmark-suite-with-real
-  status: in_progress
+  status: in_review
   depends_on:
   - pr-ee1ff04
   description: 'Build a benchmark suite for testing changes to review and QA prompts,
@@ -6476,9 +6516,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/160
   gh_pr_number: 160
   created_at: '2026-03-14T03:46:00.421065+00:00'
-  updated_at: '2026-04-07T22:22:18.999171+00:00'
+  updated_at: '2026-04-07T22:54:01.562371+00:00'
   started_at: '2026-04-07T16:49:46.605414+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-04-07T22:54:01.562371+00:00'
   merged_at: null
   notes:
   - id: note-6ff369e
@@ -6601,7 +6641,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-14T03:46:23.198794+00:00'
-  updated_at: '2026-04-07T22:23:50.859035+00:00'
+  updated_at: '2026-04-07T22:57:31.780376+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6645,6 +6685,13 @@ prs:
       into a single helper to prevent partial application?'''
     created_at: '2026-03-21T14:42:07Z'
     last_edited: '2026-03-21T14:42:07Z'
+  - id: note-9c7cc0e
+    text: Many OSS repos squash on merge, so git blame on master may point to a squash
+      commit covering an entire PR rather than the specific introducing commit. When
+      tracing bugs, check PR branches, forks, or the GitHub PR diff to find the granular
+      commit that introduced the buggy lines.
+    created_at: '2026-04-07T22:57:31Z'
+    last_edited: '2026-04-07T22:57:31Z'
 - id: pr-ac10f03
   plan: improvements
   title: Merge abort verdict when master changes are too large for auto-merge
@@ -7794,6 +7841,20 @@ prs:
       /home/mjtomei/.pm/workdirs/qa/pr-e3cf481-aaceab727c64fcf6)'
     created_at: '2026-04-06T19:36:09Z'
     last_edited: '2026-04-06T19:36:09Z'
+  - id: note-b3048a6
+    text: 'QA NEEDS_WORK: Unit test suite — all 33 tests green: PASS; Concurrent writers
+      — no data loss under thread contention: PASS; Lock timeout raises TimeoutError:
+      PASS; Lock released after modifier exception: PASS; Atomic save_registry — no
+      truncated reads: PASS; register_pane and unregister_pane use locked_read_modify_write:
+      PASS; _reconcile_registry does tmux calls outside the lock: PASS; _prepare_registry_data
+      handles all input cases: PASS; TUI respawn fallback targets ''main'' window
+      instead of active window: PASS; Modifier returning None skips file write: PASS;
+      Lock file sidecar pattern and cleanup: PASS; Concurrent register + unregister
+      serialization: PASS; Retry interval matches implementation: NEEDS_WORK; Missing
+      file creates atomically on first register_pane: PASS; Corrupt JSON recovery
+      path: PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-e3cf481-84e35430b602e6db)'
+    created_at: '2026-04-07T22:53:54Z'
+    last_edited: '2026-04-07T22:53:54Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-e3cf481-add-file-locked-read-modify-write-he-b1d18e14
 - id: pr-cb2a29d
   plan: null
@@ -7891,7 +7952,7 @@ prs:
   plan: improvements
   title: Tmux popup PR switcher and prefix-key pm command runner
   branch: pm/pr-2d0588a-tmux-popup-pr-switcher-and-prefix-key-pm-command-r
-  status: in_progress
+  status: in_review
   depends_on: []
   description: 'Add two tmux integrations registered via _register_tmux_bindings:
     (1) A prefix-key binding (e.g. prefix+P) that opens a tmux display-popup with
@@ -7911,9 +7972,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/158
   gh_pr_number: 158
   created_at: '2026-04-07T12:46:56.964240+00:00'
-  updated_at: '2026-04-07T14:35:21.432796+00:00'
+  updated_at: '2026-04-07T22:35:47.013280+00:00'
   started_at: '2026-04-07T12:49:34.016669+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-04-07T22:35:47.013280+00:00'
   merged_at: null
   notes: []
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d0588a-tmux-popup-pr-switcher-and-prefix-ke-d18c9763
@@ -8193,11 +8254,19 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-07T22:21:38.123974+00:00'
-  updated_at: '2026-04-07T22:22:21.122853+00:00'
+  updated_at: '2026-04-07T22:57:29.517073+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-99ac13e
+    text: When mining OSS repos, bug-introducing commits found via git blame on master
+      may point to squash-merged commits rather than the original granular commits.
+      If the repo squashes on merge, check PR branches, forks, or the GitHub PR page
+      for the original commit history — the individual introducing commit may only
+      exist there.
+    created_at: '2026-04-07T22:57:29Z'
+    last_edited: '2026-04-07T22:57:29Z'
 - id: pr-d3a9f46
   plan: plan-qa
   title: ELO ranking and IRT difficulty calibration for review benchmark
