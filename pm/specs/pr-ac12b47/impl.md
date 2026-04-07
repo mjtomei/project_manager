@@ -79,6 +79,7 @@ except Exception:
 ### R4 — CLI Command: `pm session cleanup`
 Add a `cleanup` subcommand to the `session` group in `pm_core/cli/session.py`:
 - Derives session name (and thus session tag) the same way other session subcommands do: via `_get_session_name_for_cwd()`.
+- Does **not** require an active tmux session — only Docker and the filesystem (see EC5).
 - Calls `cleanup_stale_containers`, `cleanup_stale_proxy_dirs`, and `restart_dead_proxies`.
 - Prints a summary of what was removed/restarted.
 
@@ -155,7 +156,7 @@ name of the just-closed session, not the current session.
 
 **Problem:** `_shared_sock_dir_path` may hash a long `{session_tag}-{pr_id}` to a short hex path, and creates a symlink from the long name to the short path. Cleanup needs to find both.
 
-**Proposed resolution:** In `cleanup_stale_session_proxies`, glob `f"/tmp/pm-push-proxy-{session_tag}-*"` to catch both real directories (short names) and symlinks (long names). `proxy_is_alive` works regardless of whether the path is a symlink. Calling `_kill_proxy_socket` resolves symlinks internally (uses `os.path.realpath`).
+**Resolution:** `cleanup_stale_proxy_dirs` globs `f"/tmp/pm-push-proxy-{session_tag}-*"` to catch both real directories (short names) and symlinks (long names). `proxy_is_alive` works regardless of whether the path is a symlink. `_kill_proxy_socket` resolves symlinks internally (uses `os.path.realpath`) so both the symlink and the underlying hashed directory are cleaned up.
 
 ---
 
@@ -202,4 +203,4 @@ If container mode is disabled, `docker ps` will return no results (or fail). Cle
 `_register_tmux_bindings` is called on TUI startup and reattach. The `session-closed` hook gets re-registered each time, which is safe since it's idempotent (same command string).
 
 ### EC5 — `pm session cleanup` When Not in tmux
-The CLI command should still work outside a tmux session (e.g., `pm session cleanup` from a plain terminal) since it only needs Docker and the filesystem, not an active tmux session. The `--session-tag` mode especially should work anywhere.
+The CLI command works outside a tmux session (e.g., `pm session cleanup` from a plain terminal) since it only needs Docker and the filesystem, not an active tmux session. The tmux `session_exists` guard was removed so the command proceeds regardless of tmux state.
