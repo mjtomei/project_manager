@@ -738,11 +738,22 @@ def rebalance_cmd():
 _ALL_ACTIONS: list[tuple[str, str]] = [
     ("start", "pr start {pr_id}"),
     ("review", "pr review {pr_id}"),
-    ("qa", "tui:pr qa {pr_id}"),
     ("review-loop", "tui:review-loop {pr_id}"),
     ("review-loop strict", "tui:review-loop strict {pr_id}"),
+    ("qa", "tui:pr qa {pr_id}"),
     ("merge", "pr merge {pr_id}"),
 ]
+
+# Map action labels to tmux window name patterns.
+# None means no associated window (loops, not windows).
+_ACTION_WINDOW_PATTERNS: dict[str, str | None] = {
+    "start": "{display_id}",
+    "review": "review-{display_id}",
+    "review-loop": None,
+    "review-loop strict": None,
+    "qa": "qa-{display_id}",
+    "merge": "merge-{display_id}",
+}
 
 # Terminal statuses — PRs in these states have no actions.
 _TERMINAL_STATUSES = {"merged", "closed"}
@@ -783,12 +794,16 @@ def _current_window_pr_id(window_name: str) -> str | None:
 def _build_picker_lines(
     prs: list[dict],
     current_pr_display: str | None,
+    open_windows: set[str] | None = None,
 ) -> list[tuple[str, str, str]]:
     """Build display lines for the action-based PR picker.
 
     Only shows actions for the PR matching `current_pr_display`.
     Returns list of (display_line, pm_command, pr_display_id) tuples.
     pm_command is empty for non-selectable header lines.
+
+    If `open_windows` is provided (set of tmux window names), actions
+    whose windows are already open are annotated with ``[open]``.
     """
     from pm_core.cli.helpers import _pr_display_id
 
@@ -824,7 +839,22 @@ def _build_picker_lines(
     for label, cmd_template in actions:
         cmd = cmd_template.format(pr_id=pr["id"])
         indicator = "●" if label == phase else " "
-        lines.append((f"  {indicator} {label:<14s} {display_id}", cmd, display_id))
+
+        # Check if this action's window is open
+        open_tag = ""
+        if open_windows is not None:
+            pattern = _ACTION_WINDOW_PATTERNS.get(label)
+            if pattern:
+                win_name = pattern.format(display_id=display_id)
+                # qa windows can have scenario suffixes (qa-#158-s1)
+                if label == "qa":
+                    if any(w == win_name or w.startswith(win_name + "-")
+                           for w in open_windows):
+                        open_tag = " [open]"
+                elif win_name in open_windows:
+                    open_tag = " [open]"
+
+        lines.append((f"  {indicator} {label:<18s}{display_id}{open_tag}", cmd, display_id))
 
     return lines
 
@@ -900,7 +930,11 @@ def popup_picker_cmd(session: str, window_name: str):
         click.echo("Switch to a PR window to use this picker.")
         raise SystemExit(0)
 
-    lines = _build_picker_lines(prs, current_pr)
+    # Gather open windows to annotate the picker
+    base = pane_registry.base_session_name(session)
+    open_windows = {w["name"] for w in tmux_mod.list_windows(base)}
+
+    lines = _build_picker_lines(prs, current_pr, open_windows)
 
     if not lines:
         click.echo(f"PR Actions — {current_pr}")
@@ -909,13 +943,14 @@ def popup_picker_cmd(session: str, window_name: str):
 
     has_fzf = shutil.which("fzf") is not None
 
-    # Shortcut keys: press a key to immediately run an action
+    # Shortcut keys: press a key to immediately run an action.
+    # Ordered to match _ALL_ACTIONS display order.
     _SHORTCUT_KEYS = {
         "s": "start",
         "d": "review",
-        "q": "qa",
         "l": "review-loop",
         "L": "review-loop strict",
+        "q": "qa",
         "g": "merge",
     }
     # Build label → command map from the action lines

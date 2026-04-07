@@ -21,8 +21,8 @@ class TestActionsForStatus:
         for status in ("pending", "in_progress", "in_review", "qa"):
             actions = _actions_for_status(status)
             labels = [a[0] for a in actions]
-            assert labels == ["start", "review", "qa", "review-loop",
-                              "review-loop strict", "merge"]
+            assert labels == ["start", "review", "review-loop",
+                              "review-loop strict", "qa", "merge"]
 
     def test_merged_has_no_actions(self):
         assert _actions_for_status("merged") == []
@@ -33,8 +33,8 @@ class TestActionsForStatus:
     def test_unknown_status_returns_all_actions(self):
         """Non-terminal unknown statuses still get all actions."""
         labels = [a[0] for a in _actions_for_status("bogus")]
-        assert labels == ["start", "review", "qa", "review-loop",
-                          "review-loop strict", "merge"]
+        assert labels == ["start", "review", "review-loop",
+                          "review-loop strict", "qa", "merge"]
 
     def test_qa_command_routes_through_tui(self):
         actions = _actions_for_status("in_progress")
@@ -183,3 +183,41 @@ class TestBuildPickerLines:
     def test_unmatched_pr_returns_empty(self):
         prs = [_pr("pr-001", "in_progress", "First", gh_pr_number=158)]
         assert _build_picker_lines(prs, "#999") == []
+
+    def test_open_window_indicator_start(self):
+        prs = [_pr("pr-001", "in_progress", "My PR", gh_pr_number=158)]
+        lines = _build_picker_lines(prs, "#158", open_windows={"#158", "tui"})
+        start_line = next(d for d, cmd, _ in lines if cmd and "start" in d)
+        assert "[open]" in start_line
+
+    def test_open_window_indicator_review(self):
+        prs = [_pr("pr-001", "in_progress", "My PR", gh_pr_number=158)]
+        lines = _build_picker_lines(prs, "#158", open_windows={"#158", "review-#158"})
+        review_line = next(d for d, cmd, _ in lines
+                          if cmd and "review" in d and "review-loop" not in d)
+        assert "[open]" in review_line
+
+    def test_open_window_indicator_qa_with_scenarios(self):
+        prs = [_pr("pr-001", "in_progress", "My PR", gh_pr_number=158)]
+        lines = _build_picker_lines(prs, "#158", open_windows={"qa-#158-s1"})
+        qa_line = next(d for d, cmd, _ in lines if cmd and "qa" in d and "review" not in d)
+        assert "[open]" in qa_line
+
+    def test_no_open_indicator_when_window_closed(self):
+        prs = [_pr("pr-001", "in_progress", "My PR", gh_pr_number=158)]
+        lines = _build_picker_lines(prs, "#158", open_windows={"#158"})
+        review_line = next(d for d, cmd, _ in lines
+                          if cmd and "review" in d and "review-loop" not in d)
+        assert "[open]" not in review_line
+
+    def test_no_open_indicator_without_open_windows(self):
+        prs = [_pr("pr-001", "in_progress", "My PR", gh_pr_number=158)]
+        lines = _build_picker_lines(prs, "#158")
+        action_lines = [d for d, cmd, _ in lines if cmd]
+        assert not any("[open]" in d for d in action_lines)
+
+    def test_review_loop_never_has_open_indicator(self):
+        prs = [_pr("pr-001", "in_progress", "My PR", gh_pr_number=158)]
+        lines = _build_picker_lines(prs, "#158", open_windows={"#158", "review-#158"})
+        rl_lines = [d for d, cmd, _ in lines if cmd and "review-loop" in d]
+        assert not any("[open]" in d for d in rl_lines)
