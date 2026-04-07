@@ -528,6 +528,7 @@ class TestCheckProvider:
         assert result.tool_use is False
         assert result.inference_ok is False
         assert "HTTP 500" in result.inference_detail
+        assert "HTTP 500" in result.tool_use_detail
 
     @patch("urllib.request.urlopen")
     def test_tool_use_failure_but_inference_ok(self, mock_urlopen):
