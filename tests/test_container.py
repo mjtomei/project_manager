@@ -709,13 +709,13 @@ class TestBuildGitSetupScript:
 
     def test_push_proxy_installs_wrapper(self):
         script = _build_git_setup_script(has_push_proxy=True)
-        assert "/usr/local/bin/git" in script
+        assert "/home/pm/.local/bin/git" in script
         assert "push-proxy" in script
         assert "REAL_GIT=/usr/bin/git" in script
 
     def test_no_proxy_no_wrapper(self):
         script = _build_git_setup_script(has_push_proxy=False)
-        assert "/usr/local/bin/git" not in script
+        assert ".local/bin/git" not in script
 
     def test_no_credentials_in_script(self):
         """Push proxy approach should never embed credentials."""
@@ -823,7 +823,7 @@ class TestCreateContainerPushProxy:
 
         args = mock_docker.call_args_list[0][0]
         setup_script = args[-1]
-        assert "/usr/local/bin/git" in setup_script
+        assert "/home/pm/.local/bin/git" in setup_script
         assert "REAL_GIT=/usr/bin/git" in setup_script
 
     @patch("pm_core.container.build_exec_cmd", return_value="docker exec ...")
