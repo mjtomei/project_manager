@@ -246,11 +246,6 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
         if len(plans) == 1:
             plan_id = plans[0]["id"]
 
-    existing_ids = {p["id"] for p in (data.get("prs") or [])}
-    pr_id = store.generate_pr_id(title, desc, existing_ids)
-    slug = store.slugify(title)
-    branch = f"pm/{pr_id}-{slug}"
-
     deps = []
     if depends_on:
         deps = [d.strip() for d in depends_on.split(",")]
@@ -262,20 +257,37 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
                 click.echo(f"Available PRs: {', '.join(sorted(existing_ids))}", err=True)
             raise SystemExit(1)
 
-    entry = _make_pr_entry(pr_id, title, branch, plan=plan_id,
-                           depends_on=deps, description=desc)
+    # Use a mutable container so the apply callback can communicate
+    # the created entry back to the outer scope for display.
+    result = {}
 
     def apply(data):
         if data.get("prs") is None:
             data["prs"] = []
-        # Re-check ID uniqueness against fresh state (handles concurrent adds)
+        # Check for duplicate title+description against fresh state
+        # inside the lock. This catches concurrent adds with the same
+        # title that would otherwise generate different IDs (because
+        # generate_pr_id extends the hash to avoid collisions).
+        for p in data["prs"]:
+            if p["title"] == title and p.get("description", "") == (desc or ""):
+                result["entry"] = p
+                result["duplicate"] = True
+                return
         fresh_ids = {p["id"] for p in data["prs"]}
-        if entry["id"] in fresh_ids:
-            return
+        pr_id = store.generate_pr_id(title, desc, fresh_ids)
+        slug = store.slugify(title)
+        branch = f"pm/{pr_id}-{slug}"
+        entry = _make_pr_entry(pr_id, title, branch, plan=plan_id,
+                               depends_on=deps, description=desc)
         data["prs"].append(entry)
         data["project"]["active_pr"] = pr_id
+        result["entry"] = entry
+        result["duplicate"] = False
 
     store.locked_update(root, apply)
+    entry = result["entry"]
+    pr_id = entry["id"]
+    branch = entry["branch"]
     click.echo(f"Created {_pr_display_id(entry)}: {title} (now active)")
     click.echo(f"  branch: {branch}")
     if deps:
