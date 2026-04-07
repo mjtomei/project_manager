@@ -870,6 +870,32 @@ def cleanup_orphaned_qa_containers(session: str, pr_id: str,
     return count
 
 
+def cleanup_pr_containers(pr_id: str) -> int:
+    """Remove all containers whose names contain *pr_id*.
+
+    Matches impl, review, and QA containers regardless of session tag.
+    Returns the number of containers removed.
+    """
+    result = _run_docker(
+        "ps", "-a", "--filter", f"name={pr_id}",
+        "--format", "{{.Names}}",
+        check=False, timeout=30,
+    )
+    if result.returncode != 0:
+        return 0
+
+    count = 0
+    for line in result.stdout.strip().splitlines():
+        cname = line.strip()
+        if cname:
+            remove_container(cname)
+            count += 1
+
+    if count:
+        _log.info("Cleaned up %d container(s) for PR %s", count, pr_id)
+    return count
+
+
 def cleanup_session_containers(session_tag: str) -> int:
     """Remove all containers belonging to a session.
 

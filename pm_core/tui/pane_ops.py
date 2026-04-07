@@ -23,6 +23,46 @@ _log = configure_logger("pm.tui.pane_ops")
 # Registry healing
 # ---------------------------------------------------------------------------
 
+def cleanup_merged_pr_resources(session: str) -> None:
+    """Kill tmux windows and docker containers for all merged PRs.
+
+    Called at TUI startup to catch resources that survived when
+    ``_finalize_merge()`` failed to clean up.
+    """
+    from pm_core.cli.helpers import kill_pr_windows
+
+    try:
+        data = store.load()
+    except Exception:
+        _log.warning("cleanup_merged_pr_resources: failed to load project data")
+        return
+
+    prs = data.get("prs") or []
+    merged = [pr for pr in prs if pr.get("status") == "merged"]
+    if not merged:
+        return
+
+    for pr in merged:
+        try:
+            killed = kill_pr_windows(session, pr)
+            for win_name in killed:
+                _log.info("Startup cleanup: killed window '%s' for merged %s",
+                          win_name, pr["id"])
+        except Exception:
+            _log.exception("Failed to kill windows for merged PR %s", pr["id"])
+
+    # Clean up docker containers for merged PRs
+    from pm_core.container import is_container_mode_enabled
+    if is_container_mode_enabled():
+        from pm_core.container import cleanup_pr_containers
+        for pr in merged:
+            try:
+                cleanup_pr_containers(pr["id"])
+            except Exception:
+                _log.exception("Failed to clean up containers for merged PR %s",
+                               pr["id"])
+
+
 def heal_registry(session: str | None) -> None:
     """Fix pane registry discrepancies on TUI startup.
 

@@ -403,6 +403,8 @@ class ProjectManagerApp(App):
         except Exception:
             pass
         pane_ops.heal_registry(self._session_name)
+        if self._session_name:
+            pane_ops.cleanup_merged_pr_resources(self._session_name)
         try:
             if self._session_name:
                 from pm_core.cli.session import _register_tmux_bindings
