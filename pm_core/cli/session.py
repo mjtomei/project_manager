@@ -115,7 +115,6 @@ def _register_tmux_bindings(session_name: str) -> None:
             check=False)
 
 
-
 def _schedule_rebalance(session_name: str) -> None:
     """Spawn a background process to rebalance all windows after a short delay.
 
@@ -931,7 +930,6 @@ def popup_picker_cmd(session: str, window_name: str):
         raise SystemExit(0)
 
     # Gather open windows to annotate the picker
-    base = pane_registry.base_session_name(session)
     open_windows = {w["name"] for w in tmux_mod.list_windows(base)}
 
     lines = _build_picker_lines(prs, current_pr, open_windows)
@@ -1002,9 +1000,6 @@ def popup_picker_cmd(session: str, window_name: str):
         click.echo("Tip: install fzf for a better experience"
                     " (brew install fzf / apt install fzf)\n")
         click.echo(f"PR Actions — {current_pr}\n")
-
-        # Build shortcut key reverse map for display
-        _key_for_label = {v: k for k, v in _SHORTCUT_KEYS.items()}
 
         numbered: list[tuple[int, str]] = []  # (num, command)
         num = 0
@@ -1078,7 +1073,7 @@ def popup_cmd_cmd(session: str):
     _cmd_norm = cmd.replace("review loop", "review-loop")
     if (_cmd_norm.startswith("pr qa")
             or _cmd_norm.startswith("review-loop")):
-        _run_picker_command(f"tui:{cmd}", session)
+        _run_picker_command(f"tui:{_cmd_norm}", session)
         return
 
     full_cmd = [sys.executable, "-m", "pm_core.wrapper"] + parts
