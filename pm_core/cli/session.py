@@ -559,14 +559,21 @@ def session_cleanup():
         raise SystemExit(1)
 
     from pm_core.container import cleanup_stale_containers
-    from pm_core.push_proxy import cleanup_stale_proxy_dirs
+    from pm_core.push_proxy import cleanup_stale_proxy_dirs, restart_dead_proxies
 
     n_containers = cleanup_stale_containers(session_name, session_tag)
     n_proxies = cleanup_stale_proxy_dirs(session_tag)
+    n_restarted = restart_dead_proxies(session_name, session_tag)
 
-    if n_containers or n_proxies:
-        click.echo(f"Cleaned up {n_containers} container(s) and "
-                   f"{n_proxies} proxy dir(s).")
+    if n_containers or n_proxies or n_restarted:
+        parts = []
+        if n_containers:
+            parts.append(f"{n_containers} stale container(s) removed")
+        if n_proxies:
+            parts.append(f"{n_proxies} dead proxy dir(s) cleaned")
+        if n_restarted:
+            parts.append(f"{n_restarted} proxy(ies) restarted")
+        click.echo(", ".join(parts) + ".")
     else:
         click.echo("No stale containers or proxies found.")
 

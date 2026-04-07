@@ -21,6 +21,7 @@ from pm_core.container import (
     cleanup_session_containers,
     cleanup_all_containers,
     cleanup_stale_containers,
+    _container_is_idle,
     wrap_claude_cmd,
     container_is_running,
     _docker_available,
@@ -863,8 +864,57 @@ class TestCreateContainerPushProxy:
         call_kwargs = mock_exec.call_args[1]
         assert call_kwargs["proxy_socket_path"] is None
 
+class TestContainerIsIdle:
+    """Tests for _container_is_idle."""
+
+    @patch("pm_core.container._run_docker")
+    def test_only_sleep_is_idle(self, mock_docker):
+        mock_docker.return_value = MagicMock(
+            returncode=0,
+            stdout="COMMAND\nsleep\n",
+        )
+        assert _container_is_idle("pm-repo-abc-impl-pr-1") is True
+
+    @patch("pm_core.container._run_docker")
+    def test_sleep_and_bash_is_idle(self, mock_docker):
+        # Entry point is bash -c "...; exec sleep infinity"
+        mock_docker.return_value = MagicMock(
+            returncode=0,
+            stdout="COMMAND\nbash\nsleep\n",
+        )
+        assert _container_is_idle("pm-repo-abc-impl-pr-1") is True
+
+    @patch("pm_core.container._run_docker")
+    def test_claude_running_is_not_idle(self, mock_docker):
+        mock_docker.return_value = MagicMock(
+            returncode=0,
+            stdout="COMMAND\nsleep\nbash\nclaude\n",
+        )
+        assert _container_is_idle("pm-repo-abc-impl-pr-1") is False
+
+    @patch("pm_core.container._run_docker")
+    def test_any_extra_process_is_not_idle(self, mock_docker):
+        mock_docker.return_value = MagicMock(
+            returncode=0,
+            stdout="COMMAND\nsleep\npython3\n",
+        )
+        assert _container_is_idle("pm-repo-abc-impl-pr-1") is False
+
+    @patch("pm_core.container._run_docker")
+    def test_docker_failure_is_idle(self, mock_docker):
+        mock_docker.return_value = MagicMock(returncode=1, stdout="")
+        assert _container_is_idle("pm-repo-abc-impl-pr-1") is True
+
+    @patch("pm_core.container._run_docker")
+    def test_header_only_is_idle(self, mock_docker):
+        mock_docker.return_value = MagicMock(
+            returncode=0, stdout="COMMAND\n",
+        )
+        assert _container_is_idle("pm-repo-abc-impl-pr-1") is True
+
+
 class TestCleanupStaleContainers:
-    """Tests for cleanup_stale_containers."""
+    """Tests for cleanup_stale_containers using docker top."""
 
     @patch("pm_core.container._run_docker")
     def test_docker_failure_returns_zero(self, mock_docker):
@@ -876,122 +926,53 @@ class TestCleanupStaleContainers:
         mock_docker.return_value = MagicMock(returncode=0, stdout="")
         assert cleanup_stale_containers("pm-repo-abc", "repo-abc") == 0
 
-    def _store_patch(self, prs):
-        """Return context managers that mock state_root + store.load."""
-        return (
-            patch("pm_core.cli.helpers.state_root", return_value="/fake"),
-            patch("pm_core.store.load", return_value={"prs": prs}),
-        )
-
     @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._container_is_idle", return_value=True)
     @patch("pm_core.container._run_docker")
-    def test_removes_stale_impl_container(self, mock_docker, mock_rm):
+    def test_removes_idle_container(self, mock_docker, mock_idle, mock_rm):
         mock_docker.return_value = MagicMock(
             returncode=0,
             stdout="pm-repo-abc-impl-pr-1\n",
         )
-        p1, p2 = self._store_patch([{"id": "pr-1", "gh_pr_number": 42}])
-        with p1, p2, \
-             patch("pm_core.tmux.list_windows",
-                   return_value=[{"name": "other-window"}]):
-            count = cleanup_stale_containers("pm-repo-abc", "repo-abc")
+        count = cleanup_stale_containers("pm-repo-abc", "repo-abc")
         assert count == 1
         mock_rm.assert_called_once_with("pm-repo-abc-impl-pr-1")
 
     @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._container_is_idle", return_value=False)
     @patch("pm_core.container._run_docker")
-    def test_keeps_live_impl_container(self, mock_docker, mock_rm):
+    def test_keeps_active_container(self, mock_docker, mock_idle, mock_rm):
         mock_docker.return_value = MagicMock(
             returncode=0,
             stdout="pm-repo-abc-impl-pr-1\n",
         )
-        p1, p2 = self._store_patch([{"id": "pr-1", "gh_pr_number": 42}])
-        # Window "#42" exists — container should be kept
-        with p1, p2, \
-             patch("pm_core.tmux.list_windows",
-                   return_value=[{"name": "#42"}]):
-            count = cleanup_stale_containers("pm-repo-abc", "repo-abc")
+        count = cleanup_stale_containers("pm-repo-abc", "repo-abc")
         assert count == 0
         mock_rm.assert_not_called()
 
     @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._container_is_idle")
     @patch("pm_core.container._run_docker")
-    def test_removes_stale_review_container(self, mock_docker, mock_rm):
+    def test_mixed_idle_and_active(self, mock_docker, mock_idle, mock_rm):
         mock_docker.return_value = MagicMock(
             returncode=0,
-            stdout="pm-repo-abc-review-pr-2\n",
+            stdout="pm-repo-abc-impl-pr-1\npm-repo-abc-review-pr-2\n",
         )
-        p1, p2 = self._store_patch([{"id": "pr-2", "gh_pr_number": 7}])
-        with p1, p2, \
-             patch("pm_core.tmux.list_windows",
-                   return_value=[{"name": "other"}]):
-            count = cleanup_stale_containers("pm-repo-abc", "repo-abc")
+        # First container idle, second active
+        mock_idle.side_effect = [True, False]
+        count = cleanup_stale_containers("pm-repo-abc", "repo-abc")
         assert count == 1
-        mock_rm.assert_called_once_with("pm-repo-abc-review-pr-2")
+        mock_rm.assert_called_once_with("pm-repo-abc-impl-pr-1")
 
     @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._container_is_idle", return_value=True)
     @patch("pm_core.container._run_docker")
-    def test_removes_pr_not_in_store(self, mock_docker, mock_rm):
+    def test_handles_any_label_format(self, mock_docker, mock_idle, mock_rm):
+        """docker top approach works for any container label — no name parsing."""
         mock_docker.return_value = MagicMock(
             returncode=0,
-            stdout="pm-repo-abc-impl-pr-gone\n",
+            stdout="pm-repo-abc-unknown-label\n",
         )
-        p1, p2 = self._store_patch([])
-        with p1, p2, \
-             patch("pm_core.tmux.list_windows",
-                   return_value=[]):
-            count = cleanup_stale_containers("pm-repo-abc", "repo-abc")
+        count = cleanup_stale_containers("pm-repo-abc", "repo-abc")
         assert count == 1
-        mock_rm.assert_called_once_with("pm-repo-abc-impl-pr-gone")
-
-    @patch("pm_core.container.remove_container")
-    @patch("pm_core.container._run_docker")
-    def test_removes_stale_qa_container(self, mock_docker, mock_rm):
-        mock_docker.return_value = MagicMock(
-            returncode=0,
-            stdout="pm-repo-abc-qa-pr-1-loop1-s3\n",
-        )
-        p1, p2 = self._store_patch([{"id": "pr-1"}])
-        with p1, p2, \
-             patch("pm_core.tmux.list_windows",
-                   return_value=[{"name": "qa-pr-1-s1"}]):
-            # s3 doesn't match any live window — stale
-            count = cleanup_stale_containers("pm-repo-abc", "repo-abc")
-        assert count == 1
-
-    @patch("pm_core.container.remove_container")
-    @patch("pm_core.container._run_docker")
-    def test_keeps_live_qa_container(self, mock_docker, mock_rm):
-        mock_docker.return_value = MagicMock(
-            returncode=0,
-            stdout="pm-repo-abc-qa-pr-1-loop1-s3\n",
-        )
-        p1, p2 = self._store_patch([{"id": "pr-1"}])
-        with p1, p2, \
-             patch("pm_core.tmux.list_windows",
-                   return_value=[{"name": "qa-pr-1-s3"}]):
-            count = cleanup_stale_containers("pm-repo-abc", "repo-abc")
-        assert count == 0
-        mock_rm.assert_not_called()
-
-    @patch("pm_core.container._run_docker")
-    def test_bails_on_tmux_failure(self, mock_docker):
-        mock_docker.return_value = MagicMock(
-            returncode=0, stdout="pm-repo-abc-impl-pr-1\n",
-        )
-        with patch("pm_core.tmux.list_windows",
-                    side_effect=Exception("tmux gone")):
-            count = cleanup_stale_containers("pm-repo-abc", "repo-abc")
-        assert count == 0
-
-    @patch("pm_core.container._run_docker")
-    def test_bails_on_store_failure(self, mock_docker):
-        mock_docker.return_value = MagicMock(
-            returncode=0, stdout="pm-repo-abc-impl-pr-1\n",
-        )
-        with patch("pm_core.tmux.list_windows",
-                    return_value=[]), \
-             patch("pm_core.store.load",
-                   side_effect=Exception("store broken")):
-            count = cleanup_stale_containers("pm-repo-abc", "repo-abc")
-        assert count == 0
+        mock_rm.assert_called_once_with("pm-repo-abc-unknown-label")

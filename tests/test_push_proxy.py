@@ -17,6 +17,7 @@ from pm_core.push_proxy import (
     stop_all_proxies,
     stop_session_proxies,
     cleanup_stale_proxy_dirs,
+    restart_dead_proxies,
     get_proxy_socket_path,
     container_socket_path,
     _CONTAINER_SOCKET_PATH,
@@ -777,3 +778,114 @@ class TestCleanupStaleProxyDirs:
         assert count == 1
         assert not symlink.exists()  # symlink removed
         assert not real_dir.exists()  # real dir also removed
+
+
+class TestRestartDeadProxies:
+    """Tests for restart_dead_proxies."""
+
+    @patch("pm_core.container._run_docker")
+    def test_no_containers_returns_zero(self, mock_docker):
+        mock_docker.return_value = MagicMock(returncode=0, stdout="")
+        assert restart_dead_proxies("pm-repo-abc", "repo-abc") == 0
+
+    @patch("pm_core.container._run_docker")
+    def test_docker_failure_returns_zero(self, mock_docker):
+        mock_docker.return_value = MagicMock(returncode=1, stdout="")
+        assert restart_dead_proxies("pm-repo-abc", "repo-abc") == 0
+
+    @patch("pm_core.push_proxy.start_push_proxy")
+    @patch("subprocess.run")
+    @patch("pm_core.push_proxy.proxy_is_alive", return_value=False)
+    @patch("pm_core.container._run_docker")
+    def test_restarts_dead_proxy(self, mock_docker, mock_alive,
+                                 mock_subproc, mock_start):
+        # First call: list containers; second call: inspect mounts
+        mock_docker.side_effect = [
+            MagicMock(returncode=0, stdout="pm-repo-abc-impl-pr-1\n"),
+            MagicMock(returncode=0, stdout=(
+                "/tmp/pm-push-proxy-repo-abc-pr-1:/run/pm-push-proxy\n"
+                "/home/user/project:/workspace\n"
+            )),
+        ]
+        mock_subproc.return_value = MagicMock(
+            returncode=0, stdout="pm/pr-1-feature\n",
+        )
+        mock_start.return_value = "/tmp/pm-push-proxy-repo-abc-pr-1/push.sock"
+
+        count = restart_dead_proxies("pm-repo-abc", "repo-abc")
+        assert count == 1
+        mock_start.assert_called_once_with(
+            "pm-repo-abc-impl-pr-1", "/home/user/project",
+            "pm/pr-1-feature",
+            session_tag="repo-abc", pr_id="pr-1",
+        )
+
+    @patch("pm_core.push_proxy.start_push_proxy")
+    @patch("pm_core.push_proxy.proxy_is_alive", return_value=True)
+    @patch("pm_core.container._run_docker")
+    def test_skips_alive_proxy(self, mock_docker, mock_alive, mock_start):
+        mock_docker.side_effect = [
+            MagicMock(returncode=0, stdout="pm-repo-abc-impl-pr-1\n"),
+            MagicMock(returncode=0, stdout=(
+                "/tmp/pm-push-proxy-repo-abc-pr-1:/run/pm-push-proxy\n"
+                "/home/user/project:/workspace\n"
+            )),
+        ]
+        count = restart_dead_proxies("pm-repo-abc", "repo-abc")
+        assert count == 0
+        mock_start.assert_not_called()
+
+    @patch("pm_core.push_proxy.start_push_proxy")
+    @patch("pm_core.container._run_docker")
+    def test_skips_container_without_proxy_mount(self, mock_docker, mock_start):
+        mock_docker.side_effect = [
+            MagicMock(returncode=0, stdout="pm-repo-abc-impl-pr-1\n"),
+            MagicMock(returncode=0, stdout="/home/user/project:/workspace\n"),
+        ]
+        count = restart_dead_proxies("pm-repo-abc", "repo-abc")
+        assert count == 0
+        mock_start.assert_not_called()
+
+    @patch("pm_core.push_proxy.start_push_proxy")
+    @patch("subprocess.run")
+    @patch("pm_core.push_proxy.proxy_is_alive", return_value=False)
+    @patch("pm_core.container._run_docker")
+    def test_skips_when_git_branch_fails(self, mock_docker, mock_alive,
+                                         mock_subproc, mock_start):
+        mock_docker.side_effect = [
+            MagicMock(returncode=0, stdout="pm-repo-abc-impl-pr-1\n"),
+            MagicMock(returncode=0, stdout=(
+                "/tmp/pm-push-proxy-repo-abc-pr-1:/run/pm-push-proxy\n"
+                "/home/user/project:/workspace\n"
+            )),
+        ]
+        mock_subproc.return_value = MagicMock(returncode=1, stdout="")
+        count = restart_dead_proxies("pm-repo-abc", "repo-abc")
+        assert count == 0
+        mock_start.assert_not_called()
+
+    @patch("pm_core.push_proxy.start_push_proxy")
+    @patch("subprocess.run")
+    @patch("pm_core.push_proxy.proxy_is_alive", return_value=False)
+    @patch("pm_core.container._run_docker")
+    def test_extracts_qa_pr_id(self, mock_docker, mock_alive,
+                               mock_subproc, mock_start):
+        mock_docker.side_effect = [
+            MagicMock(returncode=0,
+                      stdout="pm-repo-abc-qa-pr-1234567-loop1-s2\n"),
+            MagicMock(returncode=0, stdout=(
+                "/tmp/pm-push-proxy-repo-abc-pr-1234567:/run/pm-push-proxy\n"
+                "/home/user/clone:/workspace\n"
+            )),
+        ]
+        mock_subproc.return_value = MagicMock(
+            returncode=0, stdout="pm/pr-1-branch\n",
+        )
+        mock_start.return_value = "/tmp/sock"
+
+        count = restart_dead_proxies("pm-repo-abc", "repo-abc")
+        assert count == 1
+        # pr_id should be extracted as "pr-1234567"
+        mock_start.assert_called_once()
+        call_kwargs = mock_start.call_args
+        assert call_kwargs[1]["pr_id"] == "pr-1234567"

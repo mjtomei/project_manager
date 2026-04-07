@@ -869,6 +869,117 @@ def cleanup_stale_proxy_dirs(session_tag: str) -> int:
     return count
 
 
+def restart_dead_proxies(session_name: str, session_tag: str) -> int:
+    """Restart push proxies that have died for containers that are still alive.
+
+    After a crash, proxy subprocesses may have died while their containers
+    are still running.  This function finds containers with dead proxy
+    sockets and restarts the proxies.
+
+    Derives ``workdir`` and ``allowed_branch`` from Docker inspect (bind
+    mount source for ``/workspace``) and git (current branch).
+
+    Returns the number of proxies restarted.
+    """
+    from pm_core.container import CONTAINER_PREFIX, _run_docker
+
+    prefix = f"{CONTAINER_PREFIX}{session_tag}-"
+    result = _run_docker(
+        "ps", "--filter", f"name={prefix}",
+        "--format", "{{.Names}}",
+        check=False, timeout=30,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return 0
+
+    count = 0
+    for line in result.stdout.strip().splitlines():
+        cname = line.strip()
+        if not cname:
+            continue
+
+        # Check if the container has a proxy socket directory mounted
+        mounts_result = _run_docker(
+            "inspect", "-f",
+            "{{range .Mounts}}"
+            "{{.Source}}:{{.Destination}}\n"
+            "{{end}}",
+            cname, check=False, timeout=10,
+        )
+        if mounts_result.returncode != 0:
+            continue
+
+        sock_dir: str | None = None
+        workdir: str | None = None
+        for mount_line in mounts_result.stdout.strip().splitlines():
+            mount_line = mount_line.strip()
+            if not mount_line:
+                continue
+            parts = mount_line.split(":", 1)
+            if len(parts) != 2:
+                continue
+            src, dst = parts
+            if dst == "/run/pm-push-proxy":
+                sock_dir = src
+            elif dst == "/workspace":
+                workdir = src
+
+        if not sock_dir or not workdir:
+            continue  # No proxy mount or no workdir — skip
+
+        sock_path = os.path.join(sock_dir, "push.sock")
+        if proxy_is_alive(sock_path):
+            continue  # Proxy is healthy
+
+        # Derive the allowed branch from git in the workdir
+        try:
+            branch_result = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=workdir, capture_output=True, text=True, timeout=5,
+            )
+            if branch_result.returncode != 0 or not branch_result.stdout.strip():
+                _log.warning("restart_dead_proxies: cannot determine branch "
+                             "for %s (workdir=%s)", cname, workdir)
+                continue
+            allowed_branch = branch_result.stdout.strip()
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            _log.warning("restart_dead_proxies: git failed for %s (workdir=%s)",
+                         cname, workdir, exc_info=True)
+            continue
+
+        # Derive pr_id from the container label for shared proxy keying
+        label = cname.removeprefix(prefix)
+        pr_id: str | None = None
+        if label.startswith("impl-"):
+            pr_id = label.removeprefix("impl-")
+        elif label.startswith("review-"):
+            pr_id = label.removeprefix("review-")
+        elif label.startswith("qa-"):
+            # qa-{pr_id}-{loop_id}-s{N} — extract pr_id
+            # pr_id is the part between "qa-" and the loop_id
+            qa_rest = label.removeprefix("qa-")
+            # pr_id format: "pr-XXXXXXX" (always 10 chars)
+            if qa_rest.startswith("pr-") and len(qa_rest) >= 10:
+                pr_id = qa_rest[:10]
+
+        _log.info("Restarting dead proxy for container %s (branch=%s, "
+                  "workdir=%s)", cname, allowed_branch, workdir)
+        try:
+            start_push_proxy(
+                cname, workdir, allowed_branch,
+                session_tag=session_tag, pr_id=pr_id,
+            )
+            count += 1
+        except Exception:
+            _log.warning("restart_dead_proxies: failed to restart proxy "
+                         "for %s", cname, exc_info=True)
+
+    if count:
+        _log.info("Restarted %d dead proxy(ies) for session %s",
+                  count, session_tag)
+    return count
+
+
 def proxy_is_alive(sock_path: str) -> bool:
     """Test whether a push proxy socket is actually accepting connections."""
     try:
