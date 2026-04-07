@@ -96,35 +96,33 @@ class TestCurrentWindowPrId:
 class TestBuildPickerLines:
     def test_basic_layout(self):
         prs = [_pr("pr-001", "in_progress", "My Feature", gh_pr_number=158)]
-        lines = _build_picker_lines(prs, None)
+        lines = _build_picker_lines(prs, "#158")
         displays = [d for d, _, _ in lines]
-        # Should have a header and action lines
         assert any("#158" in d for d in displays)
         assert any("start" in d for d in displays)
         assert any("review" in d for d in displays)
 
-    def test_current_pr_sorted_first(self):
+    def test_no_current_pr_returns_empty(self):
+        prs = [_pr("pr-001", "in_progress", "My Feature", gh_pr_number=158)]
+        assert _build_picker_lines(prs, None) == []
+
+    def test_only_current_pr_shown(self):
         prs = [
-            _pr("pr-002", "in_progress", "Second", gh_pr_number=160),
             _pr("pr-001", "in_progress", "First", gh_pr_number=158),
+            _pr("pr-002", "pending", "Second", gh_pr_number=160),
         ]
         lines = _build_picker_lines(prs, "#158")
-        # First line should be the header for #158
-        assert "#158" in lines[0][0]
+        displays = " ".join(d for d, _, _ in lines)
+        assert "#158" in displays
+        assert "#160" not in displays
 
-    def test_merged_prs_excluded(self):
-        prs = [
-            _pr("pr-001", "merged", "Done PR", gh_pr_number=158),
-            _pr("pr-002", "in_progress", "Active PR", gh_pr_number=160),
-        ]
-        lines = _build_picker_lines(prs, None)
-        displays = [d for d, _, _ in lines]
-        assert not any("#158" in d for d in displays)
-        assert any("#160" in d for d in displays)
+    def test_merged_pr_returns_empty(self):
+        prs = [_pr("pr-001", "merged", "Done PR", gh_pr_number=158)]
+        assert _build_picker_lines(prs, "#158") == []
 
     def test_all_actions_shown_regardless_of_status(self):
         prs = [_pr("pr-001", "pending", "New PR", gh_pr_number=158)]
-        lines = _build_picker_lines(prs, None)
+        lines = _build_picker_lines(prs, "#158")
         action_lines = [d for d, cmd, _ in lines if cmd]
         assert len(action_lines) == 5
         assert any("start" in d for d in action_lines)
@@ -132,34 +130,32 @@ class TestBuildPickerLines:
 
     def test_phase_indicator_shown(self):
         prs = [_pr("pr-001", "in_progress", "My PR", gh_pr_number=158)]
-        lines = _build_picker_lines(prs, None)
+        lines = _build_picker_lines(prs, "#158")
         action_lines = [(d, cmd) for d, cmd, _ in lines if cmd]
-        # "start" should have the ● indicator for in_progress
         start_line = next(d for d, _ in action_lines if "start" in d)
         assert "●" in start_line
-        # "review" should not have it
         review_line = next(d for d, _ in action_lines if "review" in d and "review-loop" not in d)
         assert "●" not in review_line
 
     def test_in_review_phase_indicator(self):
         prs = [_pr("pr-001", "in_review", "Ready PR", gh_pr_number=158)]
-        lines = _build_picker_lines(prs, None)
+        lines = _build_picker_lines(prs, "#158")
         action_lines = [(d, cmd) for d, cmd, _ in lines if cmd]
         review_line = next(d for d, _ in action_lines if "review" in d and "review-loop" not in d)
         assert "●" in review_line
 
     def test_commands_contain_pr_id(self):
         prs = [_pr("pr-001", "in_progress", "My PR")]
-        lines = _build_picker_lines(prs, None)
+        lines = _build_picker_lines(prs, "pr-001")
         commands = [cmd for _, cmd, _ in lines if cmd]
         assert all("pr-001" in cmd for cmd in commands)
 
     def test_empty_prs(self):
-        assert _build_picker_lines([], None) == []
+        assert _build_picker_lines([], "#158") == []
 
     def test_header_lines_have_no_command(self):
         prs = [_pr("pr-001", "in_progress", "My PR", gh_pr_number=158)]
-        lines = _build_picker_lines(prs, None)
+        lines = _build_picker_lines(prs, "#158")
         headers = [(d, cmd) for d, cmd, _ in lines if not cmd]
         assert len(headers) == 1
         assert "#158" in headers[0][0]
@@ -168,23 +164,17 @@ class TestBuildPickerLines:
     def test_long_title_truncated(self):
         long_title = "A" * 60
         prs = [_pr("pr-001", "pending", long_title)]
-        lines = _build_picker_lines(prs, None)
+        lines = _build_picker_lines(prs, "pr-001")
         header = lines[0][0]
         assert "…" in header
         assert len(header) < 80
 
     def test_pr_display_id_without_gh_number(self):
         prs = [_pr("pr-001", "in_progress", "My PR")]
-        lines = _build_picker_lines(prs, None)
+        lines = _build_picker_lines(prs, "pr-001")
         displays = [d for d, _, _ in lines]
         assert any("pr-001" in d for d in displays)
 
-    def test_multiple_prs_all_listed(self):
-        prs = [
-            _pr("pr-001", "in_progress", "First", gh_pr_number=158),
-            _pr("pr-002", "pending", "Second", gh_pr_number=160),
-        ]
-        lines = _build_picker_lines(prs, None)
-        displays = " ".join(d for d, _, _ in lines)
-        assert "#158" in displays
-        assert "#160" in displays
+    def test_unmatched_pr_returns_empty(self):
+        prs = [_pr("pr-001", "in_progress", "First", gh_pr_number=158)]
+        assert _build_picker_lines(prs, "#999") == []

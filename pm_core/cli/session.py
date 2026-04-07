@@ -784,38 +784,45 @@ def _build_picker_lines(
 ) -> list[tuple[str, str, str]]:
     """Build display lines for the action-based PR picker.
 
+    Only shows actions for the PR matching `current_pr_display`.
     Returns list of (display_line, pm_command, pr_display_id) tuples.
     pm_command is empty for non-selectable header lines.
     """
     from pm_core.cli.helpers import _pr_display_id
 
+    if not current_pr_display:
+        return []
+
+    # Find the PR matching the current window
+    pr = None
+    display_id = None
+    for p in prs:
+        did = _pr_display_id(p)
+        if did == current_pr_display:
+            pr = p
+            display_id = did
+            break
+
+    if not pr:
+        return []
+
+    status = pr.get("status", "")
+    actions = _actions_for_status(status)
+    if not actions:
+        return []
+
     lines: list[tuple[str, str, str]] = []
+    title = pr.get("title", "")
+    max_title = 40
+    short_title = (title[:max_title - 1] + "…") if len(title) > max_title else title
 
-    # Filter to PRs with available actions
-    actionable = [(pr, _pr_display_id(pr)) for pr in prs
-                  if _actions_for_status(pr.get("status", ""))]
-    if not actionable:
-        return lines
+    lines.append((f"  {display_id}  ({status})  {short_title}", "", display_id))
 
-    # Sort: current PR first, then by display ID
-    actionable.sort(key=lambda x: (x[1] != current_pr_display, x[1]))
-
-    for pr, display_id in actionable:
-        status = pr.get("status", "")
-        title = pr.get("title", "")
-        # Truncate long titles
-        max_title = 40
-        short_title = (title[:max_title - 1] + "…") if len(title) > max_title else title
-
-        marker = ">" if display_id == current_pr_display else " "
-        lines.append((f"{marker} {display_id}  ({status})  {short_title}", "", display_id))
-
-        phase = _status_phase(status)
-        actions = _actions_for_status(status)
-        for label, cmd_template in actions:
-            cmd = cmd_template.format(pr_id=pr["id"])
-            indicator = "●" if label == phase else " "
-            lines.append((f"  {indicator} {label:<14s} {display_id}", cmd, display_id))
+    phase = _status_phase(status)
+    for label, cmd_template in actions:
+        cmd = cmd_template.format(pr_id=pr["id"])
+        indicator = "●" if label == phase else " "
+        lines.append((f"  {indicator} {label:<14s} {display_id}", cmd, display_id))
 
     return lines
 
@@ -885,10 +892,15 @@ def popup_picker_cmd(session: str, window_name: str):
 
     prs = data.get("prs") or []
     current_pr = _current_window_pr_id(window_name)
+
+    if not current_pr:
+        click.echo("Not a PR window.")
+        raise SystemExit(0)
+
     lines = _build_picker_lines(prs, current_pr)
 
     if not lines:
-        click.echo("No PRs with available actions.")
+        click.echo("No actions available for this PR.")
         raise SystemExit(0)
 
     has_fzf = shutil.which("fzf") is not None
