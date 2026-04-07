@@ -6476,7 +6476,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/160
   gh_pr_number: 160
   created_at: '2026-03-14T03:46:00.421065+00:00'
-  updated_at: '2026-04-07T22:22:18.999171+00:00'
+  updated_at: '2026-04-07T22:33:02.601404+00:00'
   started_at: '2026-04-07T16:49:46.605414+00:00'
   reviewed_at: null
   merged_at: null
@@ -6522,6 +6522,64 @@ prs:
       security bypasses'
     created_at: '2026-03-14T03:58:23Z'
     last_edited: '2026-03-14T03:58:23Z'
+  - id: note-010100c
+    text: 'This PR is now scoped to the architecture spec only (pm/specs/pr-8aa9411/impl.md).
+      Implementation is broken into 4 child PRs: pr-83fee65 (corpus format + internal
+      cases), pr-e07f72d (runner + multi-judge scorer), pr-09e8420 (agent-driven corpus
+      miner), pr-d3a9f46 (ELO + IRT). Plus pr-24f2958 runs the miner against OSS repos.'
+    created_at: '2026-04-07T22:32:44Z'
+    last_edited: '2026-04-07T22:32:44Z'
+  - id: note-cb9cce4
+    text: 'Key design decisions made during spec review:
+
+
+      1. NO synthetic diffs — all test cases use actual diffs traced from real fix
+      commits via git blame to find the introducing commit. For internal bugs we have
+      50+ fix commit hashes. For OSS bugs the corpus miner finds them.
+
+
+      2. NO AI vs non-AI categorization — replaced with orthogonal project_type (devtool,
+      ml-framework, ml-inference, database, language-runtime, web-framework, hardware-rtl)
+      and language (python, c, cpp, systemverilog, verilog, chisel, javascript) fields.
+
+
+      3. Hardware RTL added as a project type — OpenTitan, PULP, Rocket Chip with
+      bug patterns like clock domain crossings, FSM deadlocks, bit-width truncation,
+      synthesis/sim mismatches.
+
+
+      4. LLM-as-judge with configurable multi-judge panels instead of keyword/location
+      matching. Multiple judges (different models and/or copies) vote on findings.
+      Majority vote for booleans, median for counts. Judge agreement rate flags ambiguous
+      corpus cases.
+
+
+      5. Prometheus-style rubric (1-5 scale with explicit per-level descriptions)
+      for quality scoring — adapted from Kim et al. 2024. The exact judge prompt is
+      in R3 section 6 of the spec.
+
+
+      6. ELO ranking via Bradley-Terry model (adapted from Chatbot Arena/LMSYS) for
+      cross-run comparison. Does NOT require every model to be evaluated on every
+      case — works with partial evaluations.
+
+
+      7. IRT (Item Response Theory) 2PL model for difficulty calibration instead of
+      static easy/medium/hard labels. Enables adaptive evaluation — prioritize high-discrimination
+      cases for efficient ranking.
+
+
+      8. Corpus miner is fully agent-driven — NO hardcoded keyword lists or regex.
+      Each stage (discovery, tracing, classification) delegates to a Claude agent
+      that uses its own judgment about what constitutes a bug fix.
+
+
+      9. Review prompt reuses prompt_gen.py:generate_review_prompt() directly — construct
+      a synthetic PR data dict, inject the diff where git diff instructions normally
+      go. Maximizes code reuse.'
+    created_at: '2026-04-07T22:33:02Z'
+    last_edited: '2026-04-07T22:33:02Z'
+  spec_impl: /workspace/pm/specs/pr-8aa9411/impl.md
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-8aa9411-review-and-qa-regression-benchmark-s-5da5b1da
 - id: pr-4eb96ff
   plan: plan-qa
@@ -6601,7 +6659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-14T03:46:23.198794+00:00'
-  updated_at: '2026-04-07T22:23:50.859035+00:00'
+  updated_at: '2026-04-07T22:30:37.501242+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6645,6 +6703,16 @@ prs:
       into a single helper to prevent partial application?'''
     created_at: '2026-03-21T14:42:07Z'
     last_edited: '2026-03-21T14:42:07Z'
+  - id: note-9c02926
+    text: 'Updated scope: This PR now runs the corpus miner (pr-09e8420) against OSS
+      repos rather than manually curating cases. Target: 3-5 cases per project type
+      — ml-framework (LangChain, Transformers, vLLM), ml-inference (llama.cpp), database
+      (PostgreSQL, Redis), language-runtime (CPython, Node.js), web-framework (Django,
+      Express), hardware-rtl (OpenTitan, PULP, Rocket Chip). Use pm bench review mine
+      on each repo, then review candidates and accept the best ones. The spec (pr-8aa9411
+      impl.md section R5/A4) has full details on the mining process.'
+    created_at: '2026-04-07T22:30:37Z'
+    last_edited: '2026-04-07T22:30:37Z'
 - id: pr-ac10f03
   plan: improvements
   title: Merge abort verdict when master changes are too large for auto-merge
@@ -8132,11 +8200,23 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-07T22:21:04.997364+00:00'
-  updated_at: '2026-04-07T22:22:19.698796+00:00'
+  updated_at: '2026-04-07T22:29:52.864333+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-8365529
+    text: 'Spec reference: Section 7 ''PR A'' in pr-8aa9411 impl spec (pm/specs/pr-8aa9411/impl.md).
+      Covers R1 (corpus format, internal bugs only), IR2, A1, E1, E5. Key details:
+      (1) For each of the 50+ fix commits listed in R1, use git blame on the pre-fix
+      state to trace back to the introducing commit — the buggy_diff is the actual
+      introducing commit''s diff, not a synthetic reconstruction. (2) The file_context
+      field is important for cases where the diff alone doesnt make sense. (3) Include
+      the full list of fix commit hashes from the spec so the implementation agent
+      has them. (4) Hardware RTL is listed in the project_type enum but cases come
+      from PR C (miner), not this PR.'
+    created_at: '2026-04-07T22:29:52Z'
+    last_edited: '2026-04-07T22:29:52Z'
 - id: pr-e07f72d
   plan: plan-qa
   title: Review benchmark runner with multi-judge scoring
@@ -8173,11 +8253,23 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-07T22:21:13.152701+00:00'
-  updated_at: '2026-04-07T22:22:20.392652+00:00'
+  updated_at: '2026-04-07T22:30:05.224578+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-272c5db
+    text: 'Spec reference: Section 7 ''PR B'' in pr-8aa9411 impl spec. Covers R2,
+      R3, IR1, IR3-5, A2-3, A5, E2-4, plus run-result persistence from R7. Key details:
+      (1) The review prompt MUST reuse prompt_gen.py:generate_review_prompt() — construct
+      a synthetic PR data dict, dont duplicate the prompt template. Inject the buggy
+      diff where the prompt normally says to run git diff. (2) The Prometheus rubric
+      (1-5 scale) in R3 section 6 is the exact judge prompt — implement it verbatim.
+      (3) Verdict scoring reuses loop_shared.py:extract_verdict_from_content() — do
+      not reimplement. (4) Result persistence is timestamped JSON in ~/.pm/bench/review/,
+      not ELO/IRT (those are PR D).'
+    created_at: '2026-04-07T22:30:05Z'
+    last_edited: '2026-04-07T22:30:05Z'
 - id: pr-09e8420
   plan: plan-qa
   title: Agent-driven corpus miner for OSS repos
@@ -8193,11 +8285,25 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-07T22:21:38.123974+00:00'
-  updated_at: '2026-04-07T22:22:21.122853+00:00'
+  updated_at: '2026-04-07T22:30:15.912828+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-5930092
+    text: 'Spec reference: Section 7 ''PR C'' in pr-8aa9411 impl spec. Covers R5,
+      A4. Key details: (1) The miner is fully agent-driven — NO hardcoded keyword
+      lists or regex patterns for finding fix commits. Each stage (discovery, tracing,
+      classification) launches a Claude agent in --print mode with access to git tools.
+      The agent uses its own judgment for each projects conventions. (2) Candidates
+      go to ~/.pm/bench/review/candidates/ staging dir, NOT directly into corpus.
+      (3) CLI commands: mine, candidates, accept, reject. (4) Quality guardrails are
+      agent guidance, not hardcoded filters — e.g. prefer diffs under 500 lines but
+      dont enforce it. (5) Tracing agents run in parallel for speed. (6) The initial
+      OSS corpus (3-5 cases per project type including hardware-rtl) is created by
+      running this tool — that work lives in pr-24f2958 which depends on this PR.'
+    created_at: '2026-04-07T22:30:15Z'
+    last_edited: '2026-04-07T22:30:15Z'
 - id: pr-d3a9f46
   plan: plan-qa
   title: ELO ranking and IRT difficulty calibration for review benchmark
@@ -8214,8 +8320,21 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-07T22:21:44.189744+00:00'
-  updated_at: '2026-04-07T22:22:21.860819+00:00'
+  updated_at: '2026-04-07T22:30:26.048153+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-cb842b2
+    text: 'Spec reference: Section 7 ''PR D'' in pr-8aa9411 impl spec. Covers R4,
+      E5. Key details: (1) ELO uses Bradley-Terry model — pointwise quality scores
+      (1-5 from judge panel) converted to pairwise matchups. K=4 for stability, K-factor
+      weighted by IRT difficulty. Bootstrap resampling (100 iterations) for confidence
+      intervals. (2) IRT uses 2-Parameter Logistic (2PL) model: b=difficulty, a=discrimination.
+      Cold start from YAML difficulty field (easy/medium/hard mapped to b=-1/0/+1).
+      Needs 5+ configs worth of results before fitting is meaningful. (3) Persistent
+      files: elo.json (leaderboard), irt.json (per-case parameters). (4) Adaptive
+      evaluation: when ranking a new config, prioritize high-discrimination cases
+      — enables efficient evaluation without running full corpus.'
+    created_at: '2026-04-07T22:30:26Z'
+    last_edited: '2026-04-07T22:30:26Z'
