@@ -244,6 +244,32 @@ image, build it, tag it, and update the pm container config to use it.
    pm container status
    ```
 
+## pm container runtime requirements
+
+The pm tool runs a setup script inside the container at start time. The
+image MUST satisfy these constraints or the setup will fail silently:
+
+1. **A `pm` user must exist** with home at /home/pm. Create it in the
+   Dockerfile (e.g. `RUN useradd -m -s /bin/bash pm`). The setup script
+   will try to create it if missing, but this may fail on read-only layers.
+
+2. **PATH must include /home/pm/.local/bin before /usr/bin**. The setup
+   installs a git wrapper at /home/pm/.local/bin/git that must shadow
+   /usr/bin/git. Set this with:
+   `ENV PATH="/home/pm/.local/bin:${{PATH}}"`
+
+3. **The image may set USER pm** — the setup script runs as whatever user
+   the image specifies and does not require root. It will write to
+   /home/pm/.local/bin/ (must be writable by pm) and /tmp/.
+
+4. **Do NOT set an ENTRYPOINT** — pm passes the setup script as the CMD
+   via `docker run ... image bash -c "setup"`. An entrypoint that runs
+   before the CMD can interfere with the setup or delay container readiness.
+   If you need project-specific init steps, add them to a script in the
+   image and document them — don't use ENTRYPOINT.
+
+5. **git must be installed** at /usr/bin/git (the base image includes it).
+
 ## Tips
 
 - If the project has a Dockerfile already, use it as a reference but don't
