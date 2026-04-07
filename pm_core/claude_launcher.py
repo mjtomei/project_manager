@@ -437,7 +437,7 @@ def launch_claude_in_tmux(pane_target: str, prompt: str, cwd: str | None = None)
     from pm_core.tmux import send_keys
     cmd = build_claude_shell_cmd(prompt=prompt, cwd=cwd)
     if cwd:
-        cmd = f"cd '{cwd}' && {cmd}"
+        cmd = f"cd {shlex.quote(cwd)} && {cmd}"
     send_keys(pane_target, cmd)
 
 

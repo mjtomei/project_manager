@@ -189,7 +189,7 @@ class TestLaunchClaudeInTmux:
     def test_with_cwd(self, mock_sk, mock_build):
         launch_claude_in_tmux("%1", "hello", cwd="/tmp/proj")
         cmd = mock_sk.call_args[0][1]
-        assert cmd.startswith("cd '/tmp/proj' && ")
+        assert cmd.startswith("cd /tmp/proj && ")
 
 
 # ---------------------------------------------------------------------------

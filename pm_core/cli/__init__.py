@@ -81,7 +81,7 @@ def _detect_local_llm() -> dict:
                 name = m.get("name", "")
                 if name:
                     result["models"].append(name)
-    except (urllib.error.URLError, Exception):
+    except Exception:
         pass
 
     return result

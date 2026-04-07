@@ -60,11 +60,13 @@ pm provider remove test-ollama
 If no local Ollama is available, set `PM_TEST_LLM_URL` to a remote OpenAI-compatible endpoint:
 
 ```bash
-PM_TEST_LLM_URL=http://spark-424d.lan:30002 pytest tests/test_provider_integration.py -v
+PM_TEST_LLM_URL=http://spark-424d.lan:30002 PM_TEST_LLM_MODEL=openai/gpt-oss-120b \
+  pytest tests/test_provider_integration.py -v
 ```
 
 - Remote integration tests (TestRemoteLLMIntegration) should run and pass
-- Tests are skipped cleanly when the env var is not set
+- `PM_TEST_LLM_MODEL` is required for the inference test (skipped if not set)
+- Tests are skipped cleanly when the env vars are not set
 
 ## Expected Behavior
 

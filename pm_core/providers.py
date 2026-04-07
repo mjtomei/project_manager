@@ -612,8 +612,7 @@ def _check_context_window(
                 else:
                     result.context_window_detail = "OK"
 
-        except (urllib.error.URLError, urllib.error.HTTPError,
-                json.JSONDecodeError, ValueError, Exception):
+        except Exception:
             pass  # Best-effort — don't fail if we can't detect
 
     elif provider.type == "openai":
@@ -642,8 +641,7 @@ def _check_context_window(
                 else:
                     result.context_window_detail = "OK"
 
-        except (urllib.error.URLError, urllib.error.HTTPError,
-                json.JSONDecodeError, ValueError, Exception):
+        except Exception:
             pass  # Best-effort — don't fail if we can't detect
 
 

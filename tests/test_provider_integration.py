@@ -159,6 +159,7 @@ skip_no_ollama = pytest.mark.skipif(
 # ---------------------------------------------------------------------------
 
 PM_TEST_LLM_URL = os.environ.get("PM_TEST_LLM_URL", "")
+PM_TEST_LLM_MODEL = os.environ.get("PM_TEST_LLM_MODEL", "")
 
 skip_no_remote_llm = pytest.mark.skipif(
     not PM_TEST_LLM_URL,
@@ -224,10 +225,13 @@ class TestRemoteLLMIntegration:
     @skip_no_remote_llm
     def test_inference_with_real_model(self):
         """check_provider runs inference against the remote endpoint."""
+        if not PM_TEST_LLM_MODEL:
+            pytest.skip("PM_TEST_LLM_MODEL not set (required for inference test)")
         p = ProviderConfig(
             name="remote-test", type="openai",
             api_base=PM_TEST_LLM_URL,
             api_key="unused",
+            model=PM_TEST_LLM_MODEL,
         )
         result = check_provider(p, check_tools=True)
         assert result.reachable, f"Remote endpoint unreachable: {result.reachable_detail}"
