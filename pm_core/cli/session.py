@@ -910,23 +910,14 @@ def popup_picker_cmd(session: str, window_name: str):
     if has_fzf:
         fzf_input_lines = [display for display, _, _ in lines]
 
-        # Default cursor to first action of current PR
-        default_pos = None
-        if current_pr:
-            for i, (_, cmd, pr_disp) in enumerate(lines):
-                if cmd and pr_disp == current_pr:
-                    default_pos = i + 1  # fzf is 1-based with --reverse
-                    break
-
         fzf_cmd = ["fzf", "--ansi", "--no-sort", "--reverse",
                    "--header=PR Actions (Esc to cancel)",
                    "--no-info"]
 
-        import subprocess as sp
-        proc = sp.Popen(
+        proc = subprocess.Popen(
             fzf_cmd,
-            stdin=sp.PIPE, stdout=sp.PIPE, stderr=sp.PIPE,
-            text=True,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True,
         )
         stdout, _ = proc.communicate(input="\n".join(fzf_input_lines))
 
@@ -1000,7 +991,15 @@ def popup_cmd_cmd(session: str):
         raise SystemExit(0)
 
     # Route TUI-dependent commands through the TUI command bar
-    parts = shlex.split(cmd)
+    try:
+        parts = shlex.split(cmd)
+    except ValueError as e:
+        click.echo(f"Invalid command syntax: {e}")
+        try:
+            input("\nPress Enter to close...")
+        except (EOFError, KeyboardInterrupt):
+            pass
+        raise SystemExit(1)
     _cmd_norm = cmd.replace("review loop", "review-loop")
     if (_cmd_norm.startswith("pr qa")
             or _cmd_norm.startswith("review-loop")):
