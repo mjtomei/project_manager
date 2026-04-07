@@ -500,11 +500,14 @@ def check_provider(provider: ProviderConfig, check_tools: bool = True) -> Provid
 
     # 1. Connectivity check
     # For local (Anthropic-compatible): try /api/tags (Ollama) then /models
-    # For openai: try /models
+    # For openai: try /models, then /v1/models (for base URLs without /v1)
     check_urls = []
+    base = api_base.rstrip("/")
     if provider.type == "local":
-        check_urls.append(api_base.rstrip("/") + "/api/tags")
-    check_urls.append(api_base.rstrip("/") + "/models")
+        check_urls.append(base + "/api/tags")
+    check_urls.append(base + "/models")
+    if not base.endswith("/v1"):
+        check_urls.append(base + "/v1/models")
 
     for check_url in check_urls:
         try:
