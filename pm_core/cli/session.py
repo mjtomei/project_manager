@@ -731,38 +731,41 @@ def rebalance_cmd():
 
 # --- Popup commands ---
 
-# Actions available per PR status.  Each entry is (action_label, pm_command_template).
+# All available actions.  Each entry is (action_label, pm_command_template).
 # Templates use {pr_id} for the internal PR ID.
 # Commands prefixed with "tui:" are routed through the TUI command bar.
-_PR_ACTIONS: dict[str, list[tuple[str, str]]] = {
-    "pending": [
-        ("start", "pr start {pr_id}"),
-    ],
-    "in_progress": [
-        ("start", "pr start {pr_id}"),
-        ("review", "pr review {pr_id}"),
-        ("qa", "tui:pr qa {pr_id}"),
-        ("review-loop", "tui:review-loop {pr_id}"),
-    ],
-    "in_review": [
-        ("start", "pr start {pr_id}"),
-        ("review", "pr review {pr_id}"),
-        ("qa", "tui:pr qa {pr_id}"),
-        ("review-loop", "tui:review-loop {pr_id}"),
-        ("merge", "pr merge {pr_id}"),
-    ],
-    "qa": [
-        ("start", "pr start {pr_id}"),
-        ("review", "pr review {pr_id}"),
-        ("qa", "tui:pr qa {pr_id}"),
-        ("review-loop", "tui:review-loop {pr_id}"),
-    ],
+_ALL_ACTIONS: list[tuple[str, str]] = [
+    ("start", "pr start {pr_id}"),
+    ("review", "pr review {pr_id}"),
+    ("qa", "tui:pr qa {pr_id}"),
+    ("review-loop", "tui:review-loop {pr_id}"),
+    ("merge", "pr merge {pr_id}"),
+]
+
+# Terminal statuses — PRs in these states have no actions.
+_TERMINAL_STATUSES = {"merged", "closed"}
+
+# Map status to the action label representing the current phase.
+_STATUS_PHASE: dict[str, str] = {
+    "in_progress": "start",
+    "in_review": "review",
+    "qa": "qa",
 }
 
 
 def _actions_for_status(status: str) -> list[tuple[str, str]]:
-    """Return (action_label, command_template) pairs for a PR status."""
-    return _PR_ACTIONS.get(status, [])
+    """Return (action_label, command_template) pairs for a PR status.
+
+    All actions are returned for non-terminal statuses.
+    """
+    if status in _TERMINAL_STATUSES:
+        return []
+    return list(_ALL_ACTIONS)
+
+
+def _status_phase(status: str) -> str | None:
+    """Return the action label representing the current phase for a status."""
+    return _STATUS_PHASE.get(status)
 
 
 def _current_window_pr_id(window_name: str) -> str | None:
@@ -807,10 +810,12 @@ def _build_picker_lines(
         marker = ">" if display_id == current_pr_display else " "
         lines.append((f"{marker} {display_id}  ({status})  {short_title}", "", display_id))
 
+        phase = _status_phase(status)
         actions = _actions_for_status(status)
         for label, cmd_template in actions:
             cmd = cmd_template.format(pr_id=pr["id"])
-            lines.append((f"    {label:<14s} {display_id}", cmd, display_id))
+            indicator = "●" if label == phase else " "
+            lines.append((f"  {indicator} {label:<14s} {display_id}", cmd, display_id))
 
     return lines
 

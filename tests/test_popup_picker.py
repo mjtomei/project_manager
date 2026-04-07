@@ -2,6 +2,7 @@
 
 from pm_core.cli.session import (
     _actions_for_status,
+    _status_phase,
     _current_window_pr_id,
     _build_picker_lines,
 )
@@ -15,32 +16,12 @@ def _pr(pr_id, status="in_progress", title="Test PR", gh_pr_number=None):
 
 
 class TestActionsForStatus:
-    def test_pending_has_start(self):
-        actions = _actions_for_status("pending")
-        labels = [a[0] for a in actions]
-        assert labels == ["start"]
-
-    def test_in_progress_has_start_review_qa_loop(self):
-        actions = _actions_for_status("in_progress")
-        labels = [a[0] for a in actions]
-        assert "start" in labels
-        assert "review" in labels
-        assert "qa" in labels
-        assert "review-loop" in labels
-
-    def test_in_review_has_merge(self):
-        actions = _actions_for_status("in_review")
-        labels = [a[0] for a in actions]
-        assert "merge" in labels
-        assert "start" in labels
-        assert "review" in labels
-
-    def test_qa_status_actions(self):
-        actions = _actions_for_status("qa")
-        labels = [a[0] for a in actions]
-        assert "start" in labels
-        assert "qa" in labels
-        assert "merge" not in labels
+    def test_all_actions_for_non_terminal(self):
+        """Every non-terminal status returns the full action list."""
+        for status in ("pending", "in_progress", "in_review", "qa"):
+            actions = _actions_for_status(status)
+            labels = [a[0] for a in actions]
+            assert labels == ["start", "review", "qa", "review-loop", "merge"]
 
     def test_merged_has_no_actions(self):
         assert _actions_for_status("merged") == []
@@ -48,8 +29,10 @@ class TestActionsForStatus:
     def test_closed_has_no_actions(self):
         assert _actions_for_status("closed") == []
 
-    def test_unknown_status_has_no_actions(self):
-        assert _actions_for_status("bogus") == []
+    def test_unknown_status_returns_all_actions(self):
+        """Non-terminal unknown statuses still get all actions."""
+        labels = [a[0] for a in _actions_for_status("bogus")]
+        assert labels == ["start", "review", "qa", "review-loop", "merge"]
 
     def test_qa_command_routes_through_tui(self):
         actions = _actions_for_status("in_progress")
@@ -65,6 +48,23 @@ class TestActionsForStatus:
         actions = _actions_for_status("in_progress")
         start_cmd = next(cmd for label, cmd in actions if label == "start")
         assert not start_cmd.startswith("tui:")
+
+
+class TestStatusPhase:
+    def test_in_progress_phase_is_start(self):
+        assert _status_phase("in_progress") == "start"
+
+    def test_in_review_phase_is_review(self):
+        assert _status_phase("in_review") == "review"
+
+    def test_qa_phase_is_qa(self):
+        assert _status_phase("qa") == "qa"
+
+    def test_pending_has_no_phase(self):
+        assert _status_phase("pending") is None
+
+    def test_merged_has_no_phase(self):
+        assert _status_phase("merged") is None
 
 
 class TestCurrentWindowPrId:
@@ -122,18 +122,31 @@ class TestBuildPickerLines:
         assert not any("#158" in d for d in displays)
         assert any("#160" in d for d in displays)
 
-    def test_pending_pr_only_has_start(self):
+    def test_all_actions_shown_regardless_of_status(self):
         prs = [_pr("pr-001", "pending", "New PR", gh_pr_number=158)]
         lines = _build_picker_lines(prs, None)
-        action_lines = [(d, cmd) for d, cmd, _ in lines if cmd]
-        assert len(action_lines) == 1
-        assert "start" in action_lines[0][0]
+        action_lines = [d for d, cmd, _ in lines if cmd]
+        assert len(action_lines) == 5
+        assert any("start" in d for d in action_lines)
+        assert any("merge" in d for d in action_lines)
 
-    def test_in_review_has_merge(self):
+    def test_phase_indicator_shown(self):
+        prs = [_pr("pr-001", "in_progress", "My PR", gh_pr_number=158)]
+        lines = _build_picker_lines(prs, None)
+        action_lines = [(d, cmd) for d, cmd, _ in lines if cmd]
+        # "start" should have the ● indicator for in_progress
+        start_line = next(d for d, _ in action_lines if "start" in d)
+        assert "●" in start_line
+        # "review" should not have it
+        review_line = next(d for d, _ in action_lines if "review" in d and "review-loop" not in d)
+        assert "●" not in review_line
+
+    def test_in_review_phase_indicator(self):
         prs = [_pr("pr-001", "in_review", "Ready PR", gh_pr_number=158)]
         lines = _build_picker_lines(prs, None)
-        action_lines = [d for d, cmd, _ in lines if cmd]
-        assert any("merge" in d for d in action_lines)
+        action_lines = [(d, cmd) for d, cmd, _ in lines if cmd]
+        review_line = next(d for d, _ in action_lines if "review" in d and "review-loop" not in d)
+        assert "●" in review_line
 
     def test_commands_contain_pr_id(self):
         prs = [_pr("pr-001", "in_progress", "My PR")]
