@@ -422,6 +422,7 @@ def create_container(
     cmd = [
         "run", "-d",
         "--name", name,
+        "--user", "root",
         "--memory", config.memory_limit,
         "--cpus", config.cpu_limit,
         "-v", f"{workdir}:{_CONTAINER_WORKDIR}",
