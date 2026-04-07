@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-177dec0
+  active_pr: pr-2d0588a
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -903,7 +903,7 @@ prs:
   plan: plan-003
   title: Add file locking to project.yaml read-modify-write operations
   branch: pm/pr-f38005f-add-file-locking-to-project-yaml-read-modify-write
-  status: qa
+  status: in_review
   depends_on:
   - pr-022
   description: 'Add advisory file locking to store.py so that concurrent processes
@@ -7773,7 +7773,7 @@ prs:
   plan: improvements
   title: Refuse pm pr start when PR is not committed on base branch
   branch: pm/pr-7251b72-refuse-pm-pr-start-when-pr-is-not-committed-on-bas
-  status: qa
+  status: merged
   depends_on: []
   description: 'When pm pr start clones the main repo to create a workdir, it clones
     from the committed state of master (or the configured base_branch). If the PR
@@ -7803,11 +7803,22 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/153
   gh_pr_number: 153
   created_at: '2026-04-04T16:32:21.564023+00:00'
-  updated_at: '2026-04-06T18:53:49.187083+00:00'
+  updated_at: '2026-04-06T19:33:32.459784+00:00'
   started_at: '2026-04-06T18:36:08.322443+00:00'
   reviewed_at: '2026-04-06T18:53:49.187083+00:00'
-  merged_at: null
-  notes: []
+  merged_at: '2026-04-06T19:33:32.459784+00:00'
+  notes:
+  - id: note-1537d29
+    text: 'QA PASS: PR not in committed project.yaml is blocked: PASS; git show failure
+      triggers the same block: PASS; Invalid YAML in committed project.yaml is treated
+      as not-committed: PASS; Non-dict YAML (e.g. list or scalar) is treated as not-committed:
+      PASS; PR committed on base_branch — happy path proceeds: PASS; Spec-pending
+      gate still takes priority over committed-state check: PASS; Spec gate passes
+      and committed-state check runs in sequence: PASS; Empty committed project.yaml
+      (yaml.safe_load returns None): PASS; Error message goes to stderr not stdout:
+      PASS; Standalone PM dir uses correct git show path: PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-7251b72-91d6492487c83ce7)'
+    created_at: '2026-04-06T19:26:06Z'
+    last_edited: '2026-04-06T19:26:06Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-7251b72-refuse-pm-pr-start-when-pr-is-not-co-b1d18e14
   spec_qa: /home/mjtomei/project_manager/pm/specs/pr-7251b72/qa.md
   spec_impl: /workspace/pm/specs/pr-7251b72/impl.md
@@ -7856,6 +7867,18 @@ prs:
       ''main'' or window index 0 instead.'
     created_at: '2026-04-06T19:12:13Z'
     last_edited: '2026-04-06T19:12:13Z'
+  - id: note-bb6bc1a
+    text: 'QA NEEDS_WORK: Unit test suite passes — all 33 tests green: NEEDS_WORK;
+      Concurrent writers — no data loss under thread contention: NEEDS_WORK; Lock
+      timeout raises TimeoutError: PASS; Lock released after modifier exception: PASS;
+      Atomic save_registry — no truncated reads: PASS; register_pane and unregister_pane
+      use locked_read_modify_write: PASS; _reconcile_registry does tmux calls outside
+      the lock: PASS; _prepare_registry_data handles all input cases: PASS; TUI respawn
+      fallback targets ''main'' window instead of active window: PASS; Modifier returning
+      None skips file write: PASS; Lock file sidecar pattern and cleanup: PASS (workdir:
+      /home/mjtomei/.pm/workdirs/qa/pr-e3cf481-aaceab727c64fcf6)'
+    created_at: '2026-04-06T19:36:09Z'
+    last_edited: '2026-04-06T19:36:09Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-e3cf481-add-file-locked-read-modify-write-he-b1d18e14
 - id: pr-cb2a29d
   plan: null
@@ -7931,7 +7954,7 @@ prs:
   plan: bugs
   title: Fix pr select not scrolling selected PR into view in TUI
   branch: pm/pr-177dec0-fix-pr-select-not-scrolling-selected-pr-into-view-
-  status: pending
+  status: in_progress
   depends_on: []
   description: When using the pr select command (e.g. from the command bar), the TUI
     updates the selected PR but does not scroll the tech tree to bring it into view.
@@ -7939,11 +7962,69 @@ prs:
     of the screen. It appears the scroll-into-view logic is not being triggered after
     a programmatic selection change from the command bar, only from keyboard navigation
     within the tree.
+  agent_machine: arch-home
+  gh_pr: https://github.com/mjtomei/project_manager/pull/157
+  gh_pr_number: 157
+  created_at: '2026-04-06T19:18:52.240715+00:00'
+  updated_at: '2026-04-06T19:20:59.040562+00:00'
+  started_at: '2026-04-06T19:20:59.040562+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-177dec0-fix-pr-select-not-scrolling-selected-d18c9763
+- id: pr-2d0588a
+  plan: improvements
+  title: Tmux popup PR switcher and prefix-key pm command runner
+  branch: pm/pr-2d0588a-tmux-popup-pr-switcher-and-prefix-key-pm-command-r
+  status: in_progress
+  depends_on: []
+  description: 'Add two tmux integrations registered via _register_tmux_bindings:
+    (1) A prefix-key binding (e.g. prefix+P) that opens a tmux display-popup with
+    an fzf-style picker listing all active PR windows grouped by PR. The picker defaults
+    to showing windows for the PR of the current active window (implementation, review,
+    QA phases). QA sessions are collapsible and collapsed by default so the list is
+    not cluttered — the user can expand them if needed. Selecting a window switches
+    to it in the current session only (using select-window, not switch_sessions_to_window).
+    (2) A prefix-key binding (e.g. prefix+C) that opens a tmux display-popup with
+    a pm command prompt — the user types a pm command, it runs in the popup, and if
+    the command opens a window it refocuses the invoking session only using the same
+    mechanism as TUI-launched commands. Both popups run and exit without affecting
+    the current window pane layout or resizing the TUI. Human-guided testing needed:
+    popup display from various window contexts, refocus behavior after selecting a
+    PR, QA collapse/expand, command execution in popup, verify TUI window is not resized.'
+  agent_machine: arch-home
+  gh_pr: https://github.com/mjtomei/project_manager/pull/158
+  gh_pr_number: 158
+  created_at: '2026-04-07T12:46:56.964240+00:00'
+  updated_at: '2026-04-07T12:52:01.016944+00:00'
+  started_at: '2026-04-07T12:49:34.016669+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d0588a-tmux-popup-pr-switcher-and-prefix-ke-d18c9763
+- id: pr-1735d44
+  plan: bugs
+  title: 'Consolidate window refocus: switch all co-viewing sessions consistently'
+  branch: pm/pr-1735d44-consolidate-window-refocus-switch-all-co-viewing-s
+  status: pending
+  depends_on: []
+  description: 'Window refocusing is split between tmux.select_window (switches one
+    session) and tmux.switch_sessions_to_window (switches all grouped sessions). The
+    correct behavior for all refocusing is: if multiple sessions are attached and
+    viewing the same window, they should all switch together. Currently select_window
+    is used in pr.py (4 call sites), meta.py, container.py, pr_view.py (2), pane_layout.py,
+    qa_status.py, and qa_loop.py — these only switch the invoking session, leaving
+    co-viewers behind. Consolidate into a single refocus function (e.g. tmux.focus_window)
+    that detects sessions currently viewing the same window as the caller and switches
+    them all. Replace all select_window and switch_sessions_to_window call sites with
+    the unified function. Human-guided testing needed: verify co-viewing sessions
+    follow the switch, verify sessions viewing different windows are not affected,
+    test from TUI-launched commands and from CLI.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
-  created_at: '2026-04-06T19:18:52.240715+00:00'
-  updated_at: '2026-04-06T19:18:52.240715+00:00'
+  created_at: '2026-04-07T12:51:22.561975+00:00'
+  updated_at: '2026-04-07T12:51:22.561975+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
