@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-2d0588a
+  active_pr: pr-ac12b47
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -903,7 +903,7 @@ prs:
   plan: plan-003
   title: Add file locking to project.yaml read-modify-write operations
   branch: pm/pr-f38005f-add-file-locking-to-project-yaml-read-modify-write
-  status: in_review
+  status: qa
   depends_on:
   - pr-022
   description: 'Add advisory file locking to store.py so that concurrent processes
@@ -4299,22 +4299,11 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/131
   gh_pr_number: 131
   created_at: '2026-03-07T15:58:50.876583+00:00'
-  updated_at: '2026-03-23T13:16:32.862119+00:00'
+  updated_at: '2026-04-07T13:53:48.512780+00:00'
   started_at: '2026-03-08T22:27:50.279825+00:00'
   reviewed_at: '2026-03-09T17:23:26.156810+00:00'
   merged_at: null
-  notes:
-  - id: note-529f5a7
-    text: 'QA NEEDS_WORK: Tech tree visual rendering with compositional widgets: NEEDS_WORK;
-      Keyboard navigation with neighbor map: PASS; PR node selection and status indicators:
-      PASS; Status filter cycling and merged toggle with widget rebuild: PASS; Plan
-      group hide/show with widget lifecycle: PASS; Edge canvas caching and dirty tracking:
-      PASS; Layout cache invalidation: PASS; PR interaction and actions after refactor:
-      PASS; Widget rebuild on PR list update: PASS; Animation performance - selective
-      refresh: PASS; Sort field cycling with widget rebuild: NEEDS_WORK; Window resize
-      rebalance with compositional widgets: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-4c41017-e092217d921b6b35)'
-    created_at: '2026-03-10T03:25:27Z'
-    last_edited: '2026-03-10T03:25:27Z'
+  notes: []
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-4c41017-refactor-techtree-split-pr-nodes-int-ab512a43
 - id: pr-e9d4b24
   plan: bugs
@@ -4948,30 +4937,11 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/144
   gh_pr_number: 144
   created_at: '2026-03-08T23:09:07.312432+00:00'
-  updated_at: '2026-04-04T14:17:04.718380+00:00'
+  updated_at: '2026-04-07T13:53:49.302231+00:00'
   started_at: '2026-03-14T17:21:14.310809+00:00'
   reviewed_at: '2026-03-14T21:54:58.823224+00:00'
   merged_at: null
-  notes:
-  - id: note-9e01251
-    text: 'QA PASS: Existing unit tests pass: PASS; SupervisorWatcher class configuration
-      and BaseWatcher integration: PASS; Per-instance unique window names: PASS; Prompt
-      generation with session and target filter: PASS; Prompt includes correct log
-      path and JSON format: PASS; Verdict parsing — all verdict types and fallback:
-      PASS; should_continue — verdicts that continue vs stop: PASS; build_launch_cmd
-      — correct CLI arguments: PASS; on_verdict is a no-op (logging only): PASS; Feedback
-      logging — write and read round-trip: PASS; read_feedback_log with target_filter
-      and limit: PASS; read_feedback_log with missing directory: PASS; read_feedback_log
-      with malformed JSONL lines: PASS; format_feedback_log output: PASS; CLI supervisor
-      start — requires tmux: PASS; CLI supervisor start --count > 1 rejected: PASS;
-      CLI supervisor log command: PASS; CLI supervisor stop shows guidance: PASS;
-      CLI supervisor-iter hidden command: PASS; TUI verdict icons for new supervisor
-      verdicts: PASS; TUI start_watcher passes target_filter for supervisor type:
-      PASS; Watcher list command includes supervisor: PASS; Prompt instructs Claude
-      to skip supervisor windows: PASS; CLI supervisor start with --target and --wait
-      flags: PASS; FeedbackEntry dataclass field completeness: PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-871dbf5-edac1874b2782501)'
-    created_at: '2026-04-04T14:34:26Z'
-    last_edited: '2026-04-04T14:34:26Z'
+  notes: []
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-871dbf5-add-high-effort-watcher-supervisors--cbe54f5e
 - id: pr-b7ada6a
   plan: tui-ux
@@ -5493,7 +5463,7 @@ prs:
   plan: plan-qa
   title: Session cleanup for stale containers and push proxies
   branch: pm/pr-ac12b47-session-cleanup-for-stale-containers-and-push-prox
-  status: in_review
+  status: qa
   depends_on:
   - pr-6836fad
   description: 'Add a cleanup function that removes stale containers and push proxies
@@ -5532,11 +5502,15 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/143
   gh_pr_number: 143
   created_at: '2026-03-10T00:41:37.907137+00:00'
-  updated_at: '2026-04-06T19:05:01.947943+00:00'
+  updated_at: '2026-04-07T14:35:41.793710+00:00'
   started_at: '2026-03-14T04:37:49.204416+00:00'
   reviewed_at: '2026-03-23T17:33:04.632542+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-f252bbf
+    text: 'QA INPUT_REQUIRED:  (workdir: /home/mjtomei/.pm/workdirs/qa/pr-ac12b47-79d4f9af4b607a9b)'
+    created_at: '2026-04-07T14:13:07Z'
+    last_edited: '2026-04-07T14:13:07Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-ac12b47-session-cleanup-for-stale-containers-ab512a43
 - id: pr-53e47a1
   plan: tui-ux
@@ -5715,7 +5689,7 @@ prs:
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8463df9-per-session-model-and-quality-target-10e74920
 - id: pr-9a5b86e
-  plan: watchers
+  plan: plan-qa
   title: 'Harden local LLM integration: model selection, real QA testing, init setup,
     and provider verification'
   branch: pm/pr-9a5b86e-harden-local-llm-integration-model-selection-real-
@@ -5741,34 +5715,11 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/140
   gh_pr_number: 140
   created_at: '2026-03-11T17:38:30.495007+00:00'
-  updated_at: '2026-03-23T13:17:38.033548+00:00'
+  updated_at: '2026-04-07T22:25:21.835153+00:00'
   started_at: '2026-03-11T17:42:07.268473+00:00'
   reviewed_at: '2026-03-14T21:45:26.781038+00:00'
   merged_at: null
   notes:
-  - id: note-ed2331e
-    text: 'QA PASS: Unit and integration tests pass: PASS; Provider add and full verification
-      with real Ollama: PASS; Model show displays local providers section: PASS; Init
-      detects Ollama and offers provider setup: PASS; Init skips Ollama prompt when
-      not running or not installed: PASS; Init skips prompt when provider already
-      configured: PASS; OpenAI-type provider with Anthropic API support detected:
-      PASS; Provider verification reports inference failure distinctly from tool use
-      failure: PASS; Double /v1 bug fix in Anthropic API probe URL: PASS; Init with
-      Ollama running but no models pulled: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-9a5b86e-83c4726d6d5a43e4)'
-    created_at: '2026-03-11T18:47:58Z'
-    last_edited: '2026-03-11T18:47:58Z'
-  - id: note-4020a44
-    text: 'QA INPUT_REQUIRED:  (workdir: /home/matt/.pm/workdirs/qa/pr-9a5b86e-a387c01606a8b945)'
-    created_at: '2026-03-12T00:10:06Z'
-    last_edited: '2026-03-12T00:10:06Z'
-  - id: note-1ac58da
-    text: 'QA ERROR: Local Models Always Visible in Model Selection: NEEDS_WORK; Real
-      Local LLM Integration Testing: ?; Init Hardware Detection and Local Model Setup:
-      ?; Enhanced Provider Verification and API Support: ?; Model Selection Persistence
-      and Provider Integration: ?; Provider Error Handling and Edge Cases: ? (workdir:
-      /Users/matthewtomei/.pm/workdirs/qa/pr-9a5b86e-66e915e6a58d34d0)'
-    created_at: '2026-03-12T00:56:12Z'
-    last_edited: '2026-03-12T00:56:12Z'
   - id: note-394afe0
     text: Local LLM available at spark-424d.lan:30002 (OpenAI-compatible API, serving
       openai/gpt-oss-120b). Confirmed reachable from macbook.
@@ -5817,7 +5768,7 @@ prs:
   merged_at: null
   notes: []
 - id: pr-4bd08d7
-  plan: watchers
+  plan: plan-qa
   title: Add built-in Anthropic-to-OpenAI translation proxy for local LLM providers
   branch: pm/pr-4bd08d7-add-built-in-anthropic-to-openai-translation-proxy
   status: pending
@@ -5952,7 +5903,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-11T20:40:49.721162+00:00'
-  updated_at: '2026-03-11T20:40:49.721162+00:00'
+  updated_at: '2026-04-07T22:25:22.552660+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5977,7 +5928,7 @@ prs:
   merged_at: null
   notes: []
 - id: pr-094939c
-  plan: watchers
+  plan: plan-qa
   title: Automated local model setup with optimal tool-call and performance settings
   branch: pm/pr-094939c-automated-local-model-setup-with-optimal-tool-call
   status: pending
@@ -5994,7 +5945,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-13T05:52:07.222845+00:00'
-  updated_at: '2026-03-14T03:49:53.078497+00:00'
+  updated_at: '2026-04-07T22:25:23.348664+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6481,7 +6432,7 @@ prs:
   plan: plan-qa
   title: Review and QA regression benchmark suite with real-world bug test cases
   branch: pm/pr-8aa9411-review-and-qa-regression-benchmark-suite-with-real
-  status: pending
+  status: in_progress
   depends_on:
   - pr-ee1ff04
   description: 'Build a benchmark suite for testing changes to review and QA prompts,
@@ -6521,12 +6472,12 @@ prs:
 
 
     Enables data-driven iteration on review prompts and QA scenarios rather than guessing.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: arch-home
+  gh_pr: https://github.com/mjtomei/project_manager/pull/160
+  gh_pr_number: 160
   created_at: '2026-03-14T03:46:00.421065+00:00'
-  updated_at: '2026-03-14T03:58:23.715875+00:00'
-  started_at: null
+  updated_at: '2026-04-07T22:22:18.999171+00:00'
+  started_at: '2026-04-07T16:49:46.605414+00:00'
   reviewed_at: null
   merged_at: null
   notes:
@@ -6571,6 +6522,7 @@ prs:
       security bypasses'
     created_at: '2026-03-14T03:58:23Z'
     last_edited: '2026-03-14T03:58:23Z'
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-8aa9411-review-and-qa-regression-benchmark-s-5da5b1da
 - id: pr-4eb96ff
   plan: plan-qa
   title: Adversarial review with voting step to balance false positives
@@ -6578,7 +6530,7 @@ prs:
   status: pending
   depends_on:
   - pr-ee1ff04
-  - pr-8aa9411
+  - pr-e07f72d
   description: 'Add a two-phase review flow that balances thoroughness with accuracy:
 
 
@@ -6606,7 +6558,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-14T03:46:11.848316+00:00'
-  updated_at: '2026-03-18T10:45:04.581821+00:00'
+  updated_at: '2026-04-07T22:22:25.499843+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6636,57 +6588,20 @@ prs:
   branch: pm/pr-24f2958-open-source-bug-corpus-for-review-qa-benchmarking
   status: pending
   depends_on:
-  - pr-8aa9411
-  description: 'Curate a corpus of real bugs from open source repos for benchmarking
-    review and QA quality. Each entry is a before/after pair with metadata about what
-    broke and how it was caught.
-
-
-    AI repos to mine:
-
-    - LangChain: chain composition bugs, prompt injection issues, retrieval failures
-
-    - vLLM: inference correctness, memory management, batching edge cases
-
-    - llama.cpp: quantization bugs, sampling issues, context handling
-
-    - Transformers (HuggingFace): model loading, tokenizer bugs, generation config
-    issues
-
-    - SGLang: scheduling bugs, cache invalidation
-
-
-    Non-AI repos to mine:
-
-    - CPython: interpreter edge cases, C extension bugs, stdlib issues
-
-    - PostgreSQL: query planner bugs, transaction isolation, index corruption
-
-    - Redis: data structure bugs, replication edge cases, persistence issues
-
-    - Node.js: event loop bugs, stream handling, crypto issues
-
-    - curl: protocol handling, certificate validation, encoding bugs
-
-
-    Selection criteria for each bug:
-
-    - Must have been merged to main before being caught
-
-    - Fix commit clearly identifiable
-
-    - Bug is in application logic (not build/CI/docs)
-
-    - Reviewable in isolation (doesn''t require deep domain context)
-
-
-    Target: 50-100 test cases across categories (race conditions, security, logic
-    errors, resource leaks, API misuse, edge cases).'
+  - pr-09e8420
+  description: 'Run the corpus miner (pr-09e8420) against clones of target OSS repos
+    to build a curated collection of real-world bug test cases. Mine 3-5 cases per
+    project type: ml-framework (LangChain, Transformers, vLLM), ml-inference (llama.cpp),
+    database (PostgreSQL, Redis), language-runtime (CPython, Node.js), web-framework
+    (Django, Express), hardware-rtl (OpenTitan, PULP). Review and accept candidates
+    that are self-contained and reviewable without deep domain context. Target: 50-100
+    cases across categories. This is a dedicated mining run, not new tooling — the
+    miner itself lives in pr-09e8420.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-14T03:46:23.198794+00:00'
-  updated_at: '2026-03-21T14:42:07.323323+00:00'
+  updated_at: '2026-04-07T22:23:50.859035+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7917,7 +7832,7 @@ prs:
   title: Prevent plain 'd' from opening duplicate review window when review loop is
     running
   branch: pm/pr-fc6db6a-prevent-plain-d-from-opening-duplicate-review-wind
-  status: in_progress
+  status: in_review
   depends_on: []
   description: 'When a review loop is running for a PR (started via zz d), pressing
     plain d opens a second review window instead of telling the user a loop is already
@@ -7944,9 +7859,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/156
   gh_pr_number: 156
   created_at: '2026-04-06T19:14:44.223134+00:00'
-  updated_at: '2026-04-06T19:17:16.583998+00:00'
+  updated_at: '2026-04-07T13:30:18.816990+00:00'
   started_at: '2026-04-06T19:17:16.583998+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-04-07T13:30:18.816990+00:00'
   merged_at: null
   notes: []
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-fc6db6a-prevent-plain-d-from-opening-duplica-5a6a6c1c
@@ -7996,7 +7911,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/158
   gh_pr_number: 158
   created_at: '2026-04-07T12:46:56.964240+00:00'
-  updated_at: '2026-04-07T12:52:01.016944+00:00'
+  updated_at: '2026-04-07T14:35:21.432796+00:00'
   started_at: '2026-04-07T12:49:34.016669+00:00'
   reviewed_at: null
   merged_at: null
@@ -8006,7 +7921,7 @@ prs:
   plan: bugs
   title: 'Consolidate window refocus: switch all co-viewing sessions consistently'
   branch: pm/pr-1735d44-consolidate-window-refocus-switch-all-co-viewing-s
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'Window refocusing is split between tmux.select_window (switches one
     session) and tmux.switch_sessions_to_window (switches all grouped sessions). The
@@ -8020,11 +7935,286 @@ prs:
     the unified function. Human-guided testing needed: verify co-viewing sessions
     follow the switch, verify sessions viewing different windows are not affected,
     test from TUI-launched commands and from CLI.'
+  agent_machine: arch-home
+  gh_pr: https://github.com/mjtomei/project_manager/pull/159
+  gh_pr_number: 159
+  created_at: '2026-04-07T12:51:22.561975+00:00'
+  updated_at: '2026-04-07T14:11:26.766315+00:00'
+  started_at: '2026-04-07T13:06:32.173284+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-3b6b377
+    text: 'Bug: window refocus targets the currently-selected session at refocus time
+      instead of the session that originally created the command. Fix: log the attached
+      session (the one from which the command was created) at command creation time,
+      and use that recorded session for the refocus rather than querying the active
+      session at refocus time.'
+    created_at: '2026-04-07T13:47:24Z'
+    last_edited: '2026-04-07T13:47:24Z'
+  - id: note-980be03
+    text: 'Bug: when running with --fresh, if a window is already in view in another
+      attached session, refocus should switch that session''s window — not the TUI
+      session where fresh was triggered. Review already works this way, but implementation
+      (and possibly QA) does not — they switch the TUI window instead of the co-viewing
+      session that has the target window visible.'
+    created_at: '2026-04-07T14:11:26Z'
+    last_edited: '2026-04-07T14:11:26Z'
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-1735d44-consolidate-window-refocus-switch-al-1f4460f5
+- id: pr-322f503
+  plan: plan-qa
+  title: 'Per-PR model override: associate a model with a PR so all sessions use it'
+  branch: pm/pr-322f503-per-pr-model-override-associate-a-model-with-a-pr-
+  status: pending
+  depends_on:
+  - pr-9a5b86e
+  description: 'Add the ability to associate a specific model with a PR, so that all
+    Claude sessions started for that PR (implementation, review, QA) use that model
+    instead of the default or phase-specific model settings.
+
+
+    This should work for both custom providers (e.g. local LLMs configured via pm
+    provider) and built-in Anthropic models. The per-PR model setting overrides both
+    the project default model and the phase-specific model settings (e.g. review uses
+    sonnet, impl uses opus).
+
+
+    Implementation:
+
+    1. Add a ''model'' field to the PR schema in project.yaml
+
+    2. Add CLI: pm pr model <pr-id> [model] — set or clear the model override for
+    a PR
+
+    3. Prompt generation: when a PR has a model override, set the appropriate env
+    vars (ANTHROPIC_MODEL or provider-specific vars) in the session
+
+    4. Container support: pass the model override through to container env vars
+
+    5. TUI: show the model override in the PR detail panel if set
+
+    6. The override should flow through to all session types: impl, review, QA planner,
+    QA child sessions'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
-  created_at: '2026-04-07T12:51:22.561975+00:00'
-  updated_at: '2026-04-07T12:51:22.561975+00:00'
+  created_at: '2026-04-07T14:09:06.666582+00:00'
+  updated_at: '2026-04-07T22:22:24.729056+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-dea90b5
+  plan: plan-qa
+  title: Auto-extract QA and review regression test cases from git history
+  branch: pm/pr-dea90b5-auto-extract-qa-and-review-regression-test-cases-f
+  status: pending
+  depends_on:
+  - pr-09e8420
+  description: 'Run the corpus miner (pr-09e8420) against our own repo to build a
+    comprehensive set of internal regression test cases. Point the miner at the pm
+    project repo with focus on the 50+ known fix commits across categories (ensure_workdir,
+    push proxy, container isolation, QA system, race conditions, shell quoting, dead
+    code). Review and accept the best candidates. Target: all internal bugs with clear
+    introducing commits become benchmark cases. This is a dedicated mining run, not
+    new tooling — the miner itself lives in pr-09e8420.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-07T16:28:08.722459+00:00'
+  updated_at: '2026-04-07T22:23:46.487655+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-5dc3808
+  plan: plan-qa
+  title: 'Review/QA model comparison: benchmark results and analysis for local vs
+    frontier models'
+  branch: pm/pr-5dc3808-review-qa-model-comparison-benchmark-results-and-a
+  status: pending
+  depends_on:
+  - pr-24f2958
+  - pr-dea90b5
+  - pr-322f503
+  - pr-d3a9f46
+  description: 'Run the review/QA regression benchmark suite across multiple models
+    and publish the results.
+
+
+    Models to compare:
+
+    - Claude Opus (current default for review/QA)
+
+    - Claude Sonnet (cheaper frontier option)
+
+    - gpt-oss-120b self-hosted (target replacement for QA scenarios)
+
+
+    Test corpora:
+
+    - Our own git history regression cases (from pr-dea90b5)
+
+    - Open source bug corpus (from pr-24f2958)
+
+
+    Metrics per model per corpus:
+
+    - Bug detection rate (recall): what fraction of known bugs does the model catch?
+
+    - False positive rate (precision): how many flagged issues are real vs noise?
+
+    - Iteration count: how many QA/review loop iterations to reach a verdict?
+
+    - Cost per run: API cost or compute cost for self-hosted
+
+    - Wall clock time per scenario
+
+
+    Analysis:
+
+    - Per-category breakdown (race conditions, security, logic errors, resource leaks,
+    etc.)
+
+    - Failure mode analysis: what kinds of bugs does each model miss?
+
+    - Cost-adjusted quality score: quality per dollar
+
+    - Recommendation: which model to use for which session type, with confidence intervals
+
+
+    Deliverables:
+
+    - Results JSON files under pm/bench-results/review-qa/
+
+    - Summary markdown with comparison tables and charts
+
+    - Recommended model configuration for each session type (impl, review, QA scenario,
+    QA planner)
+
+    - If gpt-oss-120b is within acceptable range, a follow-up commit switching QA
+    scenario defaults'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-07T16:33:09.846505+00:00'
+  updated_at: '2026-04-07T22:26:39.734162+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-83fee65
+  plan: plan-qa
+  title: Review benchmark corpus format and internal test cases
+  branch: pm/pr-83fee65-review-benchmark-corpus-format-and-internal-test-c
+  status: pending
+  depends_on:
+  - pr-8aa9411
+  description: 'Foundation PR for the review/QA benchmark suite. Implements:
+
+    - TestCase dataclass matching the YAML schema (id, source, language, project_type,
+    bug_type, diffs, etc.)
+
+    - load_corpus() loader with filtering by source/project_type/language/bug_type/severity/difficulty
+
+    - Corpus version hashing for reproducibility
+
+    - ~16 internal YAML test cases mined from our 50+ known fix commits by tracing
+    each to its introducing commit via git blame
+
+    - pm bench review list CLI subcommand
+
+    - Unit tests for loader, filtering, schema validation
+
+
+    Key files: pm_core/bench/review_corpus.py, pm/bench/review_corpus/internal/, tests/test_review_corpus.py'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-07T22:21:04.997364+00:00'
+  updated_at: '2026-04-07T22:22:19.698796+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-e07f72d
+  plan: plan-qa
+  title: Review benchmark runner with multi-judge scoring
+  branch: pm/pr-e07f72d-review-benchmark-runner-with-multi-judge-scoring
+  status: pending
+  depends_on:
+  - pr-83fee65
+  description: 'Runner and scoring engine for the review/QA benchmark suite. Implements:
+
+    - ReviewBenchConfig dataclass with parameterized model/effort/prompt_variant/system_prompt_additions
+
+    - ReviewBenchRunner: loads corpus, generates review prompts via prompt_gen.py,
+    invokes Claude CLI in --print mode, scores via judge panel. Supports dry-run,
+    token tracking, parallel execution.
+
+    - Multi-judge scoring panel: JudgePanel/JudgeSlot dataclasses, structured Prometheus-style
+    rubric (1-5 scale), parallel judge invocation, majority-vote aggregation, agreement
+    tracking
+
+    - CaseResult with bug_found, quality_score, precision, verdict_correct, judge_agreement
+
+    - Verdict scoring via loop_shared.py:extract_verdict_from_content()
+
+    - pm bench review run and pm bench review report CLI subcommands
+
+    - Result persistence: timestamped JSON run files in ~/.pm/bench/review/
+
+    - Unit tests for runner and scorer
+
+
+    Key files: pm_core/bench/review_bench.py, pm_core/bench/review_scorer.py, tests/test_review_bench.py,
+    tests/test_review_scorer.py'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-07T22:21:13.152701+00:00'
+  updated_at: '2026-04-07T22:22:20.392652+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-09e8420
+  plan: plan-qa
+  title: Agent-driven corpus miner for OSS repos
+  branch: pm/pr-09e8420-agent-driven-corpus-miner-for-oss-repos
+  status: pending
+  depends_on:
+  - pr-83fee65
+  description: Three-stage agent pipeline for mining bug test cases from any git repo.
+    Discovery agent finds fix commits, tracing agent blames back to introducing commit,
+    classification agent generates metadata. Candidates staged for human review. Includes
+    initial OSS test cases across project types.
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-07T22:21:38.123974+00:00'
+  updated_at: '2026-04-07T22:22:21.122853+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-d3a9f46
+  plan: plan-qa
+  title: ELO ranking and IRT difficulty calibration for review benchmark
+  branch: pm/pr-d3a9f46-elo-ranking-and-irt-difficulty-calibration-for-rev
+  status: pending
+  depends_on:
+  - pr-e07f72d
+  description: 'Bradley-Terry ELO ranking across benchmark runs with IRT-based difficulty
+    calibration. ELO uses pointwise-to-pairwise conversion with K-factor weighted
+    by IRT difficulty. 2PL IRT model fits per-case discrimination and difficulty parameters.
+    Enables adaptive evaluation — fewer cases needed for accurate ranking of new configs.
+    CLI: pm bench review compare, pm bench review leaderboard.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-07T22:21:44.189744+00:00'
+  updated_at: '2026-04-07T22:22:21.860819+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
