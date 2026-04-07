@@ -104,7 +104,7 @@ def _register_tmux_bindings(session_name: str) -> None:
     subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gu", "after-resize-window"),
             check=False)
 
-    # Popup bindings: PR window picker (prefix+P) and pm command runner (prefix+M)
+    # Popup bindings: PR action picker (prefix+P) and pm command runner (prefix+M)
     subprocess.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", "P",
              "display-popup", "-E", "-w", "80", "-h", "80%",
              "pm _popup-picker '#{session_name}' '#{window_name}'"),
@@ -113,6 +113,7 @@ def _register_tmux_bindings(session_name: str) -> None:
              "display-popup", "-E", "-w", "80", "-h", "50%",
              "pm _popup-cmd '#{session_name}'"),
             check=False)
+
 
 
 def _schedule_rebalance(session_name: str) -> None:
@@ -739,6 +740,7 @@ _ALL_ACTIONS: list[tuple[str, str]] = [
     ("review", "pr review {pr_id}"),
     ("qa", "tui:pr qa {pr_id}"),
     ("review-loop", "tui:review-loop {pr_id}"),
+    ("review-loop strict", "tui:review-loop strict {pr_id}"),
     ("merge", "pr merge {pr_id}"),
 ]
 
@@ -907,12 +909,33 @@ def popup_picker_cmd(session: str, window_name: str):
 
     has_fzf = shutil.which("fzf") is not None
 
+    # Shortcut keys: press a key to immediately run an action
+    _SHORTCUT_KEYS = {
+        "s": "start",
+        "d": "review",
+        "q": "qa",
+        "l": "review-loop",
+        "L": "review-loop strict",
+        "g": "merge",
+    }
+    # Build label → command map from the action lines
+    action_cmds = [cmd for _, cmd, _ in lines if cmd]
+    _label_to_cmd: dict[str, str] = {}
+    for (label, _), cmd in zip(_ALL_ACTIONS, action_cmds):
+        _label_to_cmd[label] = cmd
+
     if has_fzf:
         fzf_input_lines = [display for display, _, _ in lines]
 
+        expect_keys = ",".join(_SHORTCUT_KEYS.keys())
+        shortcut_hint = "  ".join(
+            f"{key}={label}" for key, label in _SHORTCUT_KEYS.items()
+        )
+        header = f"PR Actions — {current_pr}  (Esc to cancel)\n{shortcut_hint}"
         fzf_cmd = ["fzf", "--ansi", "--no-sort", "--reverse",
-                   "--header=PR Actions (Esc to cancel)",
-                   "--no-info"]
+                   f"--header={header}",
+                   "--no-info",
+                   f"--expect={expect_keys}"]
 
         proc = subprocess.Popen(
             fzf_cmd,
@@ -924,22 +947,29 @@ def popup_picker_cmd(session: str, window_name: str):
         if proc.returncode != 0:
             raise SystemExit(0)
 
-        selected = stdout.strip()
-        if not selected:
-            raise SystemExit(0)
+        out_lines = stdout.strip().split("\n")
+        pressed_key = out_lines[0] if out_lines else ""
+        selected = out_lines[1] if len(out_lines) > 1 else ""
 
-        # Match selected line back to command
-        for display, cmd, _ in lines:
-            if display == selected:
-                if cmd:
-                    _run_picker_command(cmd, session)
-                # else: header line — ignore
-                break
+        if pressed_key and pressed_key in _SHORTCUT_KEYS:
+            target_label = _SHORTCUT_KEYS[pressed_key]
+            cmd = _label_to_cmd.get(target_label)
+            if cmd:
+                _run_picker_command(cmd, session)
+        elif selected:
+            for display, cmd, _ in lines:
+                if display == selected:
+                    if cmd:
+                        _run_picker_command(cmd, session)
+                    break
     else:
-        # Fallback: numbered list
+        # Fallback: numbered list with shortcut keys
         click.echo("Tip: install fzf for a better experience"
                     " (brew install fzf / apt install fzf)\n")
-        click.echo("PR Actions:\n")
+        click.echo(f"PR Actions — {current_pr}\n")
+
+        # Build shortcut key reverse map for display
+        _key_for_label = {v: k for k, v in _SHORTCUT_KEYS.items()}
 
         numbered: list[tuple[int, str]] = []  # (num, command)
         num = 0
@@ -954,21 +984,31 @@ def popup_picker_cmd(session: str, window_name: str):
         if not numbered:
             raise SystemExit(0)
 
-        click.echo()
+        shortcut_hint = "  ".join(
+            f"{key}={label}" for key, label in _SHORTCUT_KEYS.items()
+        )
+        click.echo(f"\nShortcuts: {shortcut_hint}")
         try:
-            choice = input(f"Select [1-{num}]: ").strip()
+            choice = input(f"Select [1-{num}] or shortcut key: ").strip()
         except (EOFError, KeyboardInterrupt):
             raise SystemExit(0)
 
-        try:
-            choice_num = int(choice)
-        except ValueError:
-            raise SystemExit(0)
-
-        for n, cmd in numbered:
-            if n == choice_num:
+        # Check if it's a shortcut key
+        if choice in _SHORTCUT_KEYS:
+            target_label = _SHORTCUT_KEYS[choice]
+            cmd = _label_to_cmd.get(target_label)
+            if cmd:
                 _run_picker_command(cmd, session)
-                break
+        else:
+            try:
+                choice_num = int(choice)
+            except ValueError:
+                raise SystemExit(0)
+
+            for n, cmd in numbered:
+                if n == choice_num:
+                    _run_picker_command(cmd, session)
+                    break
 
 
 @cli.command("_popup-cmd", hidden=True)
