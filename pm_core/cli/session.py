@@ -544,18 +544,15 @@ def session_kill(start_dir):
 def session_cleanup():
     """Remove stale containers and push proxies for this session.
 
-    A container is stale when the tmux window it was launched from no
-    longer exists.  Also removes push proxy socket directories whose
-    proxy process is dead.
+    A container is stale when it has no processes beyond ``sleep infinity``
+    (i.e., no ``docker exec`` session or ``claude`` process is running).
+    Also removes push proxy socket directories whose proxy process is dead,
+    and restarts proxies for live containers that lost their proxy.
     """
     session_name = _get_session_name_for_cwd()
     session_tag = session_name.removeprefix("pm-")
     if not session_tag:
         click.echo("Cannot determine session tag.", err=True)
-        raise SystemExit(1)
-
-    if not tmux_mod.session_exists(session_name):
-        click.echo(f"No session '{session_name}' found.", err=True)
         raise SystemExit(1)
 
     from pm_core.container import cleanup_stale_containers
