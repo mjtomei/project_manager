@@ -6571,6 +6571,7 @@ prs:
       security bypasses'
     created_at: '2026-03-14T03:58:23Z'
     last_edited: '2026-03-14T03:58:23Z'
+  spec_impl: /workspace/pm/specs/pr-8aa9411/impl.md
 - id: pr-4eb96ff
   plan: plan-qa
   title: Adversarial review with voting step to balance false positives
