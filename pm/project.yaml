@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-8aa9411
+  active_pr: pr-eb2dbfc
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -5486,7 +5486,7 @@ prs:
   plan: plan-qa
   title: Session cleanup for stale containers and push proxies
   branch: pm/pr-ac12b47-session-cleanup-for-stale-containers-and-push-prox
-  status: in_review
+  status: qa
   depends_on:
   - pr-6836fad
   description: 'Add a cleanup function that removes stale containers and push proxies
@@ -5535,6 +5535,7 @@ prs:
     created_at: '2026-04-07T14:13:07Z'
     last_edited: '2026-04-07T14:13:07Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-ac12b47-session-cleanup-for-stale-containers-ab512a43
+  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-ac12b47/qa.md
 - id: pr-53e47a1
   plan: tui-ux
   title: Shift+key reverses cycle direction for TUI keybindings
@@ -5716,7 +5717,7 @@ prs:
   title: 'Harden local LLM integration: model selection, real QA testing, init setup,
     and provider verification'
   branch: pm/pr-9a5b86e-harden-local-llm-integration-model-selection-real-
-  status: qa
+  status: in_review
   depends_on:
   - pr-dad0069
   description: "Follow-up to pr-dad0069 (local LLM provider support) addressing gaps\
@@ -5765,6 +5766,26 @@ prs:
       /home/mjtomei/.pm/workdirs/qa/pr-9a5b86e-a533f08b0448cf72)'
     created_at: '2026-04-07T22:39:27Z'
     last_edited: '2026-04-07T22:39:27Z'
+  - id: note-88e1001
+    text: 'QA NEEDS_WORK: Model show always displays providers section with configured
+      providers: PASS; Model show displays none-configured message when no providers
+      exist: PASS; Provider verification — inference OK but tool use fails: PASS;
+      Anthropic API probe detects support on OpenAI-type provider: PASS; Local provider
+      falls back to OpenAI API when /v1/messages returns 404: PASS; No double /v1
+      in Anthropic probe and tool check URLs: PASS; Init detects Ollama installed
+      and running with models: INPUT_REQUIRED; Init skips Ollama prompt when not installed
+      or not running: PASS; Init with Ollama running but no models pulled: PASS; Init
+      skips LLM detection in non-interactive mode: PASS; Init skips prompt when provider
+      already configured: INPUT_REQUIRED; Context window detection for OpenAI-type
+      providers: PASS; Provider test CLI displays expanded results: PASS; Remote integration
+      tests skip cleanly without env vars: NEEDS_WORK; Full unit test suite passes:
+      PASS; capabilities_summary returns structured output: PASS; Model show excludes
+      default Claude providers from local providers section: PASS; Provider add with
+      api_base trailing slash: PASS; HTTP 500 during tool check marks both inference
+      and tool_use as False: PASS; max_tokens bump from 100 to 1024 in tool-use checks:
+      PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-9a5b86e-e6e107031dbc8944)'
+    created_at: '2026-04-07T23:04:17Z'
+    last_edited: '2026-04-07T23:04:17Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-9a5b86e-harden-local-llm-integration-model-s-cbe54f5e
 - id: pr-1f35c6d
   plan: watchers
@@ -7788,7 +7809,7 @@ prs:
   plan: null
   title: Add file-locked read-modify-write helper for pane registry
   branch: pm/pr-e3cf481-add-file-locked-read-modify-write-helper-for-pane-
-  status: in_review
+  status: merged
   depends_on: []
   description: 'The pane registry (pane_registry.py) uses a load→modify→save pattern
     on a shared JSON file with no file locking. When the QA loop spawns many panes
@@ -7815,10 +7836,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/154
   gh_pr_number: 154
   created_at: '2026-04-06T18:36:59.216942+00:00'
-  updated_at: '2026-04-06T19:13:19.491747+00:00'
+  updated_at: '2026-04-07T23:03:51.482983+00:00'
   started_at: '2026-04-06T18:39:53.655732+00:00'
   reviewed_at: '2026-04-06T19:09:23.080520+00:00'
-  merged_at: null
+  merged_at: '2026-04-07T23:03:51.482983+00:00'
   notes:
   - id: note-b2e9be2
     text: 'Secondary fix needed: the TUI respawn fallback in _session_start (session.py:248)
@@ -7882,7 +7903,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/155
   gh_pr_number: 155
   created_at: '2026-04-06T18:53:56.850825+00:00'
-  updated_at: '2026-04-06T19:06:18.130597+00:00'
+  updated_at: '2026-04-07T23:07:11.606301+00:00'
   started_at: '2026-04-06T19:06:18.130597+00:00'
   reviewed_at: null
   merged_at: null
@@ -8284,6 +8305,85 @@ prs:
   gh_pr_number: null
   created_at: '2026-04-07T22:21:44.189744+00:00'
   updated_at: '2026-04-07T22:22:21.860819+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-eb2dbfc
+  plan: plan-qa
+  title: 'Container memory governor: dynamic memory limits with per-type stop policy
+    and QA queuing'
+  branch: pm/pr-eb2dbfc-container-memory-governor-dynamic-memory-limits-wi
+  status: pending
+  depends_on: []
+  description: 'Add a memory governor that prevents OOM crashes by projecting memory
+    consumption before launching containers, with configurable stop-on-idle for different
+    container types.
+
+
+    ## Global memory target
+
+    - User-configurable target max memory consumption (e.g. pm container set memory-target
+    48g)
+
+    - Before launching any container, the governor checks: current_used + projected_new
+    <= target
+
+    - Projection uses a rolling average of peak memory per container type (impl, review,
+    qa_scenario, qa_planner), observed from docker stats and persisted across sessions
+
+
+    ## Per-type stop-on-idle policy
+
+    - Configurable per container type: pm container set stop-idle impl|review|qa on|off
+
+    - When enabled, containers of that type are docker stopped (not removed) after
+    their session completes (verdict emitted, review done, impl session idle)
+
+    - Stopped containers preserve filesystem overlay — docker start brings them back
+    with packages/venv intact
+
+    - Default: qa on, impl off, review off (QA scenarios are the main memory hog)
+
+
+    ## Memory projection
+
+    - Track historical peak memory per container type using docker stats samples
+
+    - Store rolling averages in ~/.pm/container-stats.json
+
+    - Projection for a new container = average peak for that type
+
+    - For QA scenarios: project total = current + (remaining_scenarios * avg_qa_peak)
+
+
+    ## Launch gating
+
+    - Implementation and review: if projected memory exceeds target, show error in
+    TUI status bar and refuse to launch. User can free memory by stopping containers
+    manually or lowering the target.
+
+    - QA scenarios: if a scenario fails the memory check, it enters a wait loop. The
+    TUI status pane shows which scenarios are waiting for memory. The QA loop retries
+    the check periodically and launches the scenario once memory is available (other
+    scenarios finishing and being stopped frees memory).
+
+    - QA planner projects memory for all scenarios at once. If the full batch would
+    exceed the target, it launches as many as fit and queues the rest.
+
+
+    ## Status bar integration
+
+    - TUI status bar shows current memory usage vs target (e.g. 34G/48G)
+
+    - When a launch is blocked, status bar shows the blocked action
+
+    - QA scenarios waiting for memory show a waiting indicator in the QA status pane'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-07T23:32:03.613084+00:00'
+  updated_at: '2026-04-07T23:32:03.613084+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
