@@ -651,13 +651,22 @@ def format_spec_for_prompt(pr: dict, phase: str) -> str:
         root = Path("pm")
     file_path = spec_file_path(root, pr_id, phase)
 
+    staleness_note = (
+        "Also check whether the spec is still consistent with the current code "
+        "and PR notes — the code or notes may have changed since the spec was "
+        "generated. If you find requirements that no longer match the "
+        "implementation, or PR notes that contradict or extend the spec, update "
+        f"the spec in `{file_path}` and run `pm pr spec-save {pr_id} {phase}`."
+    )
+
     if mode == "auto":
         review_note = (
             "Before proceeding, check the spec's Ambiguities section for any open "
             "questions left unanswered (the session that generated it may have exited "
             "before resolving them). If you find any, resolve them using your best "
             "judgment, document the resolution in the spec, re-save to "
-            f"`{file_path}`, and run `pm pr spec-save {pr_id} {phase}` before continuing."
+            f"`{file_path}`, and run `pm pr spec-save {pr_id} {phase}` before continuing. "
+            + staleness_note
         )
     elif mode == "prompt":
         review_note = (
@@ -667,7 +676,8 @@ def format_spec_for_prompt(pr: dict, phase: str) -> str:
             f"the codebase and document them in the spec. Re-save to `{file_path}` "
             f"and run `pm pr spec-save {pr_id} {phase}`. "
             "If any remain genuinely unresolvable, present them to the user and wait "
-            "for their response before proceeding."
+            "for their response before proceeding. "
+            + staleness_note
         )
     else:  # review
         review_note = (
@@ -676,7 +686,8 @@ def format_spec_for_prompt(pr: dict, phase: str) -> str:
             "before resolving them). If you find any, present them to the user along "
             "with your proposed resolutions. Update the spec with their answers, "
             f"re-save to `{file_path}`, run `pm pr spec-save {pr_id} {phase}`, "
-            "and ask for approval before continuing."
+            "and ask for approval before continuing. "
+            + staleness_note
         )
 
     return f"""
