@@ -369,34 +369,34 @@ def handle_command_submitted(app, cmd: str) -> None:
             break
 
     # Handle review loop commands
+    # Accepts: review-loop [strict] [PR_ID], review-loop stop [PR_ID]
     parts = shlex.split(cmd)
-    if cmd in ("review-loop", "review loop"):
+    _rl_base = cmd.replace("review loop", "review-loop")
+    _rl_parts = _rl_base.split()
+    if _rl_parts and _rl_parts[0] == "review-loop":
         from pm_core.tui import review_loop_ui
-        review_loop_ui.start_or_stop_loop(app, stop_on_suggestions=True)
+        _rl_rest = _rl_parts[1:]
+        _rl_strict = "strict" in _rl_rest
+        _rl_stop = "stop" in _rl_rest
+        # Extract PR ID: any token that isn't "strict" or "stop"
+        _rl_pr_id = next((t for t in _rl_rest if t not in ("strict", "stop")), None)
+
+        tree = app.query_one("#tech-tree", TechTree)
+        if _rl_pr_id:
+            tree.select_pr(_rl_pr_id)
+
+        if _rl_stop:
+            pr_id, _ = review_loop_ui._get_selected_pr(app)
+            if pr_id:
+                review_loop_ui.stop_loop_for_pr(app, pr_id)
+            else:
+                app.log_message("No PR selected")
+        else:
+            review_loop_ui.start_or_stop_loop(app, stop_on_suggestions=not _rl_strict)
         if app._plans_visible:
             app.query_one("#plans-pane", PlansPane).focus()
         else:
-            app.query_one("#tech-tree", TechTree).focus()
-        return
-    if cmd in ("review-loop strict", "review loop strict"):
-        from pm_core.tui import review_loop_ui
-        review_loop_ui.start_or_stop_loop(app, stop_on_suggestions=False)
-        if app._plans_visible:
-            app.query_one("#plans-pane", PlansPane).focus()
-        else:
-            app.query_one("#tech-tree", TechTree).focus()
-        return
-    if cmd in ("review-loop stop", "review loop stop"):
-        from pm_core.tui import review_loop_ui
-        pr_id, _ = review_loop_ui._get_selected_pr(app)
-        if pr_id:
-            review_loop_ui.stop_loop_for_pr(app, pr_id)
-        else:
-            app.log_message("No PR selected")
-        if app._plans_visible:
-            app.query_one("#plans-pane", PlansPane).focus()
-        else:
-            app.query_one("#tech-tree", TechTree).focus()
+            tree.focus()
         return
 
     # Handle auto-start commands

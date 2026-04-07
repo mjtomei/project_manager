@@ -731,42 +731,38 @@ def rebalance_cmd():
 
 # --- Popup commands ---
 
-def _group_windows_by_pr(windows: list[dict]) -> dict[str, dict[str, dict]]:
-    """Group tmux windows by PR display ID.
+# Actions available per PR status.  Each entry is (action_label, pm_command_template).
+# Templates use {pr_id} for the internal PR ID.
+# Commands prefixed with "tui:" are routed through the TUI command bar.
+_PR_ACTIONS: dict[str, list[tuple[str, str]]] = {
+    "pending": [
+        ("start", "pr start {pr_id}"),
+    ],
+    "in_progress": [
+        ("start", "pr start {pr_id}"),
+        ("review", "pr review {pr_id}"),
+        ("qa", "tui:pr qa {pr_id}"),
+        ("review-loop", "tui:review-loop {pr_id}"),
+    ],
+    "in_review": [
+        ("start", "pr start {pr_id}"),
+        ("review", "pr review {pr_id}"),
+        ("qa", "tui:pr qa {pr_id}"),
+        ("review-loop", "tui:review-loop {pr_id}"),
+        ("merge", "pr merge {pr_id}"),
+    ],
+    "qa": [
+        ("start", "pr start {pr_id}"),
+        ("review", "pr review {pr_id}"),
+        ("qa", "tui:pr qa {pr_id}"),
+        ("review-loop", "tui:review-loop {pr_id}"),
+    ],
+}
 
-    Returns {pr_display_id: {phase: window_dict}} where phase is one of
-    'impl', 'review', 'merge', 'qa', or 'qa-sN'.
-    Non-PR windows are excluded.
-    """
-    import re
 
-    groups: dict[str, dict[str, dict]] = {}
-    for win in windows:
-        name = win.get("name", "")
-        # Match PR window naming patterns:
-        #   #N or pr-NNN          → impl
-        #   review-#N / review-pr-NNN → review
-        #   merge-#N / merge-pr-NNN   → merge
-        #   qa-#N / qa-pr-NNN         → qa (main)
-        #   qa-#N-sM / qa-pr-NNN-sM   → qa scenario
-        m = re.match(
-            r'^(review-|merge-|qa-)?(#\d+|pr-[a-zA-Z0-9]+)(-s\d+)?$', name
-        )
-        if not m:
-            continue
-        prefix, pr_id, scenario = m.group(1), m.group(2), m.group(3)
-        if prefix == "review-":
-            phase = "review"
-        elif prefix == "merge-":
-            phase = "merge"
-        elif prefix == "qa-" and scenario:
-            phase = f"qa{scenario}"  # e.g. qa-s1
-        elif prefix == "qa-":
-            phase = "qa"
-        else:
-            phase = "impl"
-        groups.setdefault(pr_id, {})[phase] = win
-    return groups
+def _actions_for_status(status: str) -> list[tuple[str, str]]:
+    """Return (action_label, command_template) pairs for a PR status."""
+    return _PR_ACTIONS.get(status, [])
 
 
 def _current_window_pr_id(window_name: str) -> str | None:
@@ -779,107 +775,133 @@ def _current_window_pr_id(window_name: str) -> str | None:
     return m.group(1) if m else None
 
 
-def _format_picker_lines(
-    groups: dict[str, dict[str, dict]],
-    current_pr: str | None,
-    expand_qa: bool = False,
-) -> list[tuple[str, str]]:
-    """Build display lines for the PR picker.
+def _build_picker_lines(
+    prs: list[dict],
+    current_pr_display: str | None,
+) -> list[tuple[str, str, str]]:
+    """Build display lines for the action-based PR picker.
 
-    Returns list of (display_line, window_index) tuples.
-    window_index is empty for non-selectable lines (headers, toggles).
+    Returns list of (display_line, pm_command, pr_display_id) tuples.
+    pm_command is empty for non-selectable header lines.
     """
-    lines: list[tuple[str, str]] = []
-    # Sort PRs: current PR first, then by display ID
-    pr_ids = sorted(groups.keys(), key=lambda x: (x != current_pr, x))
+    from pm_core.cli.helpers import _pr_display_id
 
-    for pr_id in pr_ids:
-        phases = groups[pr_id]
-        marker = ">" if pr_id == current_pr else " "
-        lines.append((f"{marker} {pr_id}", ""))  # PR header (not selectable)
+    lines: list[tuple[str, str, str]] = []
 
-        # Show impl, review, merge first
-        for phase_key, label in [("impl", pr_id), ("review", f"review-{pr_id}"),
-                                  ("merge", f"merge-{pr_id}")]:
-            if phase_key in phases:
-                win = phases[phase_key]
-                lines.append((f"    {label}", win["index"]))
+    # Filter to PRs with available actions
+    actionable = [(pr, _pr_display_id(pr)) for pr in prs
+                  if _actions_for_status(pr.get("status", ""))]
+    if not actionable:
+        return lines
 
-        # QA: main window always shown
-        if "qa" in phases:
-            win = phases["qa"]
-            lines.append((f"    qa-{pr_id}", win["index"]))
+    # Sort: current PR first, then by display ID
+    actionable.sort(key=lambda x: (x[1] != current_pr_display, x[1]))
 
-        # QA scenarios: collapsed by default
-        qa_scenarios = {k: v for k, v in phases.items()
-                       if k.startswith("qa-s")}
-        if qa_scenarios:
-            if expand_qa:
-                for sk in sorted(qa_scenarios.keys()):
-                    win = qa_scenarios[sk]
-                    lines.append((f"      qa-{pr_id}{sk.replace('qa', '')}", win["index"]))
-            else:
-                lines.append((f"    [+] {len(qa_scenarios)} QA scenario(s)", "expand"))
+    for pr, display_id in actionable:
+        status = pr.get("status", "")
+        title = pr.get("title", "")
+        # Truncate long titles
+        max_title = 40
+        short_title = (title[:max_title - 1] + "…") if len(title) > max_title else title
+
+        marker = ">" if display_id == current_pr_display else " "
+        lines.append((f"{marker} {display_id}  ({status})  {short_title}", "", display_id))
+
+        actions = _actions_for_status(status)
+        for label, cmd_template in actions:
+            cmd = cmd_template.format(pr_id=pr["id"])
+            lines.append((f"    {label:<14s} {display_id}", cmd, display_id))
 
     return lines
+
+
+def _run_picker_command(cmd: str, session: str) -> None:
+    """Execute a picker command — either direct CLI or routed through TUI."""
+    import sys
+
+    if cmd.startswith("tui:"):
+        # Route through the TUI command bar
+        tui_cmd = cmd[4:]
+        from pm_core.cli.helpers import _find_tui_pane
+        base = pane_registry.base_session_name(session)
+        pane_id, _ = _find_tui_pane(base)
+        if not pane_id:
+            click.echo("TUI pane not found — cannot run this command.")
+            try:
+                input("\nPress Enter to close...")
+            except (EOFError, KeyboardInterrupt):
+                pass
+            return
+        # Send the command to the TUI command bar:
+        # Escape (ensure clean state) → / (open command bar) → command → Enter
+        subprocess.run(tmux_mod._tmux_cmd("send-keys", "-t", pane_id, "Escape"),
+                       check=False)
+        subprocess.run(tmux_mod._tmux_cmd("send-keys", "-t", pane_id, "/"),
+                       check=False)
+        subprocess.run(tmux_mod._tmux_cmd("send-keys", "-t", pane_id,
+                                           "-l", tui_cmd),
+                       check=False)
+        subprocess.run(tmux_mod._tmux_cmd("send-keys", "-t", pane_id, "Enter"),
+                       check=False)
+    else:
+        # Run pm command directly
+        full_cmd = [sys.executable, "-m", "pm_core.wrapper"] + shlex.split(cmd)
+        result = subprocess.run(full_cmd, text=True)
+        if result.returncode != 0:
+            try:
+                input("\nPress Enter to close...")
+            except (EOFError, KeyboardInterrupt):
+                pass
 
 
 @cli.command("_popup-picker", hidden=True)
 @click.argument("session")
 @click.argument("window_name", default="")
-@click.option("--expand-qa", is_flag=True, default=False,
-              help="Show QA scenario windows")
-def popup_picker_cmd(session: str, window_name: str, expand_qa: bool):
-    """Internal: interactive PR window picker for tmux popup."""
+def popup_picker_cmd(session: str, window_name: str):
+    """Internal: action-based PR picker for tmux popup.
+
+    Lists all active PRs with available actions (start, review, qa, merge,
+    review-loop) based on PR status.  Selecting an action runs the
+    corresponding pm command.
+    """
     import shutil
-    import sys
 
     base = pane_registry.base_session_name(session)
     if not tmux_mod.session_exists(base):
         click.echo("Not a pm session.")
         raise SystemExit(1)
 
-    windows = tmux_mod.list_windows(base)
-    groups = _group_windows_by_pr(windows)
+    try:
+        root = state_root()
+        data = store.load(root)
+    except FileNotFoundError:
+        click.echo("No project.yaml found.")
+        raise SystemExit(1)
 
-    if not groups:
-        click.echo("No PR windows open.")
-        raise SystemExit(0)
-
+    prs = data.get("prs") or []
     current_pr = _current_window_pr_id(window_name)
-    lines = _format_picker_lines(groups, current_pr, expand_qa=expand_qa)
+    lines = _build_picker_lines(prs, current_pr)
 
-    # Filter to selectable lines for fzf/fallback
-    selectable = [(display, idx) for display, idx in lines if idx and idx != "expand"]
-    expand_present = any(idx == "expand" for _, idx in lines)
+    if not lines:
+        click.echo("No PRs with available actions.")
+        raise SystemExit(0)
 
     has_fzf = shutil.which("fzf") is not None
 
     if has_fzf:
-        # Build display with all lines; use fzf for selection
-        fzf_input_lines = []
-        index_map: dict[int, str] = {}  # fzf line number → action
-        for display, idx in lines:
-            fzf_input_lines.append(display)
-            index_map[len(fzf_input_lines) - 1] = idx
+        fzf_input_lines = [display for display, _, _ in lines]
 
-        # Find default selection line (first window of current PR)
-        default_line = None
+        # Default cursor to first action of current PR
+        default_pos = None
         if current_pr:
-            for i, (_, idx) in enumerate(lines):
-                if idx and idx != "expand":
-                    display = lines[i][0]
-                    if current_pr in display:
-                        default_line = i
-                        break
+            for i, (_, cmd, pr_disp) in enumerate(lines):
+                if cmd and pr_disp == current_pr:
+                    default_pos = i + 1  # fzf is 1-based with --reverse
+                    break
 
         fzf_cmd = ["fzf", "--ansi", "--no-sort", "--reverse",
-                   "--header=PR Windows (Esc to cancel)",
+                   "--header=PR Actions (Esc to cancel)",
                    "--no-info"]
-        if default_line is not None:
-            # fzf uses 1-based positioning for --scroll-off but we need
-            # the cursor: use a query trick or just accept first match
-            pass
 
         import subprocess as sp
         proc = sp.Popen(
@@ -887,51 +909,36 @@ def popup_picker_cmd(session: str, window_name: str, expand_qa: bool):
             stdin=sp.PIPE, stdout=sp.PIPE, stderr=sp.PIPE,
             text=True,
         )
-        fzf_input = "\n".join(fzf_input_lines)
-        stdout, _ = proc.communicate(input=fzf_input)
+        stdout, _ = proc.communicate(input="\n".join(fzf_input_lines))
 
         if proc.returncode != 0:
-            # User cancelled (Esc or Ctrl-C)
             raise SystemExit(0)
 
         selected = stdout.strip()
         if not selected:
             raise SystemExit(0)
 
-        # Find the matching line
-        for display, idx in lines:
+        # Match selected line back to command
+        for display, cmd, _ in lines:
             if display == selected:
-                if idx == "expand":
-                    # Re-run with QA expanded
-                    os.execvp(sys.executable, [
-                        sys.executable, "-m", "pm_core.wrapper",
-                        "_popup-picker", session, window_name, "--expand-qa",
-                    ])
-                elif idx:
-                    tmux_mod.select_window(session, idx)
-                else:
-                    # Header line selected — ignore
-                    pass
+                if cmd:
+                    _run_picker_command(cmd, session)
+                # else: header line — ignore
                 break
     else:
         # Fallback: numbered list
         click.echo("Tip: install fzf for a better experience"
                     " (brew install fzf / apt install fzf)\n")
-        click.echo("PR Windows:\n")
+        click.echo("PR Actions:\n")
 
-        numbered: list[tuple[int, str, str]] = []  # (num, display, action)
+        numbered: list[tuple[int, str]] = []  # (num, command)
         num = 0
-        for display, idx in lines:
-            if not idx:
-                # Header
+        for display, cmd, _ in lines:
+            if not cmd:
                 click.echo(display)
-            elif idx == "expand":
-                num += 1
-                numbered.append((num, display, "expand"))
-                click.echo(f"  {num}) {display.strip()}")
             else:
                 num += 1
-                numbered.append((num, display, idx))
+                numbered.append((num, cmd))
                 click.echo(f"  {num}) {display.strip()}")
 
         if not numbered:
@@ -948,15 +955,9 @@ def popup_picker_cmd(session: str, window_name: str, expand_qa: bool):
         except ValueError:
             raise SystemExit(0)
 
-        for n, _, action in numbered:
+        for n, cmd in numbered:
             if n == choice_num:
-                if action == "expand":
-                    os.execvp(sys.executable, [
-                        sys.executable, "-m", "pm_core.wrapper",
-                        "_popup-picker", session, window_name, "--expand-qa",
-                    ])
-                else:
-                    tmux_mod.select_window(session, action)
+                _run_picker_command(cmd, session)
                 break
 
 
