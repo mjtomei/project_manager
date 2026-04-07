@@ -1,10 +1,25 @@
 # Implementation Spec: Review & QA Regression Benchmark Suite
 
+## Scope of This PR (pr-8aa9411)
+
+This PR delivers the **architecture spec only** — the document you're reading. The actual implementation is broken into four child PRs:
+
+- **pr-83fee65** (PR A): Corpus format, loader, and internal test cases
+- **pr-e07f72d** (PR B): Benchmark runner with multi-judge scoring
+- **pr-09e8420** (PR C): Agent-driven corpus miner for OSS repos
+- **pr-d3a9f46** (PR D): ELO ranking and IRT difficulty calibration
+
+Plus **pr-24f2958** which runs the miner (PR C) against OSS repos to populate the corpus.
+
+This spec is the shared reference for all child PRs. Each PR's notes point back to the relevant spec sections.
+
+---
+
 ## 1. Requirements
 
 ### R1: Test Case Corpus
 
-Build a structured corpus of before/after code pairs representing known bugs, using **actual diffs** from real commits — not synthetic/handcrafted code. **All YAML files are created as part of this PR** — they do not exist yet.
+Build a structured corpus of before/after code pairs representing known bugs, using **actual diffs** from real commits — not synthetic/handcrafted code. All YAML files are created as part of **pr-83fee65** (PR A) for internal cases and **pr-24f2958** for OSS cases.
 
 Test cases are organized by two orthogonal axes:
 - **Source**: `internal` (our own post-merge bugs) vs `oss` (real bugs from open-source projects)

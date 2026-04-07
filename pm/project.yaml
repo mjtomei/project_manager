@@ -6476,7 +6476,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/160
   gh_pr_number: 160
   created_at: '2026-03-14T03:46:00.421065+00:00'
-  updated_at: '2026-04-07T22:22:18.999171+00:00'
+  updated_at: '2026-04-07T22:33:02.601404+00:00'
   started_at: '2026-04-07T16:49:46.605414+00:00'
   reviewed_at: null
   merged_at: null
@@ -6522,6 +6522,63 @@ prs:
       security bypasses'
     created_at: '2026-03-14T03:58:23Z'
     last_edited: '2026-03-14T03:58:23Z'
+  - id: note-010100c
+    text: 'This PR is now scoped to the architecture spec only (pm/specs/pr-8aa9411/impl.md).
+      Implementation is broken into 4 child PRs: pr-83fee65 (corpus format + internal
+      cases), pr-e07f72d (runner + multi-judge scorer), pr-09e8420 (agent-driven corpus
+      miner), pr-d3a9f46 (ELO + IRT). Plus pr-24f2958 runs the miner against OSS repos.'
+    created_at: '2026-04-07T22:32:44Z'
+    last_edited: '2026-04-07T22:32:44Z'
+  - id: note-cb9cce4
+    text: 'Key design decisions made during spec review:
+
+
+      1. NO synthetic diffs — all test cases use actual diffs traced from real fix
+      commits via git blame to find the introducing commit. For internal bugs we have
+      50+ fix commit hashes. For OSS bugs the corpus miner finds them.
+
+
+      2. NO AI vs non-AI categorization — replaced with orthogonal project_type (devtool,
+      ml-framework, ml-inference, database, language-runtime, web-framework, hardware-rtl)
+      and language (python, c, cpp, systemverilog, verilog, chisel, javascript) fields.
+
+
+      3. Hardware RTL added as a project type — OpenTitan, PULP, Rocket Chip with
+      bug patterns like clock domain crossings, FSM deadlocks, bit-width truncation,
+      synthesis/sim mismatches.
+
+
+      4. LLM-as-judge with configurable multi-judge panels instead of keyword/location
+      matching. Multiple judges (different models and/or copies) vote on findings.
+      Majority vote for booleans, median for counts. Judge agreement rate flags ambiguous
+      corpus cases.
+
+
+      5. Prometheus-style rubric (1-5 scale with explicit per-level descriptions)
+      for quality scoring — adapted from Kim et al. 2024. The exact judge prompt is
+      in R3 section 6 of the spec.
+
+
+      6. ELO ranking via Bradley-Terry model (adapted from Chatbot Arena/LMSYS) for
+      cross-run comparison. Does NOT require every model to be evaluated on every
+      case — works with partial evaluations.
+
+
+      7. IRT (Item Response Theory) 2PL model for difficulty calibration instead of
+      static easy/medium/hard labels. Enables adaptive evaluation — prioritize high-discrimination
+      cases for efficient ranking.
+
+
+      8. Corpus miner is fully agent-driven — NO hardcoded keyword lists or regex.
+      Each stage (discovery, tracing, classification) delegates to a Claude agent
+      that uses its own judgment about what constitutes a bug fix.
+
+
+      9. Review prompt reuses prompt_gen.py:generate_review_prompt() directly — construct
+      a synthetic PR data dict, inject the diff where git diff instructions normally
+      go. Maximizes code reuse.'
+    created_at: '2026-04-07T22:33:02Z'
+    last_edited: '2026-04-07T22:33:02Z'
   spec_impl: /workspace/pm/specs/pr-8aa9411/impl.md
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-8aa9411-review-and-qa-regression-benchmark-s-5da5b1da
 - id: pr-4eb96ff
