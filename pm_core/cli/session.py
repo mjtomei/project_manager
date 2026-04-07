@@ -999,7 +999,14 @@ def popup_cmd_cmd(session: str):
     if not cmd:
         raise SystemExit(0)
 
+    # Route TUI-dependent commands through the TUI command bar
     parts = shlex.split(cmd)
+    _cmd_norm = cmd.replace("review loop", "review-loop")
+    if (_cmd_norm.startswith("pr qa")
+            or _cmd_norm.startswith("review-loop")):
+        _run_picker_command(f"tui:{cmd}", session)
+        return
+
     full_cmd = [sys.executable, "-m", "pm_core.wrapper"] + parts
 
     result = subprocess.run(full_cmd, text=True)
