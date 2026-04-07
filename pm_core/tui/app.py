@@ -22,7 +22,7 @@ from pm_core.tui.plans_pane import PlansPane, PlanSelected, PlanActivated, PlanA
 from pm_core.tui.qa_pane import QAPane, QAItemSelected, QAItemActivated, QAAction
 from pm_core.plan_parser import extract_plan_intro
 
-from pm_core.tui.widgets import TreeScroll, StatusBar, LogLine
+from pm_core.tui.widgets import TreeScroll, StatusBar, SessionBar, LogLine
 from pm_core.tui.screens import (
     ConnectScreen, HelpScreen, MergeLockScreen, PlanPickerScreen, PlanAddScreen,
 )
@@ -49,6 +49,13 @@ class ProjectManagerApp(App):
         color: $text;
         padding: 0 1;
         margin-top: 1;
+    }
+    SessionBar {
+        height: 1;
+        background: $surface;
+        color: $text;
+        padding: 0 1;
+        display: none;
     }
     #main-area {
         layout: horizontal;
@@ -145,10 +152,14 @@ class ProjectManagerApp(App):
         Binding("C", "show_connect", "Connect", show=False),
         Binding("A", "toggle_auto_start", "Auto-start", show=False),
         Binding("w", "focus_watcher", "Watcher", show=False),
+        Binding("V", "review_spec", "Review Spec", show=False),
     ]
 
     def on_key(self, event) -> None:
-        """Handle z modifier prefix key (supports z, zz, zzz).
+        """Handle z and w modifier prefix keys.
+
+        z supports z, zz, zzz modifiers for review/QA loop control.
+        w is a prefix key for watcher commands: wf=focus, ww=list, ws=start/stop.
 
         Also buffers keystrokes when / was pressed but the command bar
         hasn't received focus yet (race condition fix).
@@ -167,6 +178,36 @@ class ProjectManagerApp(App):
             event.prevent_default()
             event.stop()
             return
+        # Handle w prefix mode: dispatch second key
+        if self._w_mode:
+            self._w_mode = False
+            if self._w_cancel_timer:
+                self._w_cancel_timer.stop()
+                self._w_cancel_timer = None
+            self._clear_log_message()
+            key = event.character or event.key
+            if key == "w":
+                self._action_watcher_list()
+            elif key == "f":
+                self._action_focus_watcher()
+            elif key == "s":
+                self._action_watcher_toggle()
+            else:
+                self.log_message("[dim]w cancelled[/]")
+            event.prevent_default()
+            event.stop()
+            return
+        if event.key == "w" or event.character == "w":
+            # Enter w prefix mode (check_action guard for command bar etc)
+            if not self.check_action("focus_watcher", ()):
+                return
+            self._w_mode = True
+            self.log_message("[bold]w …[/] [dim](w=list f=focus s=start/stop)[/]")
+            # Auto-cancel after 2 seconds
+            self._w_cancel_timer = self.set_timer(2.0, self._cancel_w_mode)
+            event.prevent_default()
+            event.stop()
+            return
         if event.key == "z":
             if self._z_count >= 3:
                 # zzz → cancel (toggle off)
@@ -177,8 +218,13 @@ class ProjectManagerApp(App):
                 self.log_message(f"[bold]{'z' * self._z_count} …[/]")
             event.prevent_default()
             event.stop()
-        elif event.key == "escape" and self._z_count > 0:
+        elif event.key == "escape" and (self._z_count > 0 or self._w_mode):
             self._z_count = 0
+            if self._w_mode:
+                self._w_mode = False
+                if self._w_cancel_timer:
+                    self._w_cancel_timer.stop()
+                    self._w_cancel_timer = None
             self._clear_log_message()
             # Don't prevent — let escape also do its normal thing
 
@@ -190,7 +236,8 @@ class ProjectManagerApp(App):
                        "launch_meta", "launch_claude", "launch_guide",
                        "view_log", "refresh", "rebalance", "show_help",
                        "toggle_plans", "toggle_qa", "start_qa_on_pr", "hide_plan", "move_to_plan", "toggle_merged",
-                       "cycle_filter", "cycle_sort", "toggle_auto_start", "focus_watcher"):
+                       "cycle_filter", "cycle_sort", "toggle_auto_start", "focus_watcher",
+                       "review_spec"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus or self._command_pending:
                 _log.debug("check_action: blocked %s (command bar focused/pending)", action)
@@ -249,8 +296,12 @@ class ProjectManagerApp(App):
         self._auto_start: bool = False
         self._auto_start_target: str | None = None
         self._auto_start_run_id: str | None = None
-        # Watcher loop state (purely in-memory, lost on TUI restart)
-        self._watcher_state = None  # WatcherLoopState | None
+        # Watcher framework manager (purely in-memory, lost on TUI restart)
+        from pm_core.watcher_manager import WatcherManager
+        self._watcher_manager = WatcherManager()
+        # w prefix key state
+        self._w_mode: bool = False
+        self._w_cancel_timer = None
         # QA loop state (purely in-memory)
         self._qa_loops: dict = {}
         # Self-driving QA state (zz t / zzz t — tracks pass counts per PR)
@@ -286,6 +337,7 @@ class ProjectManagerApp(App):
 
     def compose(self) -> ComposeResult:
         yield StatusBar(id="status-bar")
+        yield SessionBar(id="session-bar")
         with Container(id="main-area"):
             with TreeScroll(id="tree-container"):
                 yield TechTree(id="tech-tree")
@@ -502,8 +554,8 @@ class ProjectManagerApp(App):
             sort_text = dict(SORT_FIELDS).get(tree._sort_field, tree._sort_field)
         status_bar = self.query_one("#status-bar", StatusBar)
         watcher_status = ""
-        if self._watcher_state and self._watcher_state.running:
-            watcher_status = "input_required" if self._watcher_state.input_required else "running"
+        if self._watcher_manager.is_any_running():
+            watcher_status = "input_required" if self._watcher_manager.any_input_required() else "running"
         status_bar.update_status(
             project.get("name", "???"),
             project.get("repo", "???"),
@@ -515,6 +567,7 @@ class ProjectManagerApp(App):
             auto_start=self._auto_start,
             watcher_status=watcher_status,
         )
+        self.query_one("#session-bar", SessionBar).refresh_session_info()
 
     def _update_display(self) -> None:
         """Refresh all widgets with current data."""
@@ -684,33 +737,76 @@ class ProjectManagerApp(App):
         tree = self.query_one("#tech-tree", TechTree)
         self.run_worker(toggle(self, selected_pr_id=tree.selected_pr_id))
 
-    def action_focus_watcher(self) -> None:
-        """Focus the watcher window (w key)."""
-        _log.info("action: focus_watcher")
-        from pm_core.tui import auto_start, watcher_ui
-        from pm_core.watcher_loop import WATCHER_WINDOW_NAME
+    def _cancel_w_mode(self) -> None:
+        """Auto-cancel w prefix mode after timeout."""
+        if self._w_mode:
+            self._w_mode = False
+            self._clear_log_message()
 
-        if not auto_start.is_enabled(self):
-            self.log_message("Auto-start must be running to use watcher (press A)")
-            return
+    def _action_focus_watcher(self) -> None:
+        """Focus the watcher window (wf key chord)."""
+        _log.info("action: focus_watcher")
+        from pm_core.tui import watcher_ui
 
         session = self._session_name
         if not session:
             self.log_message("No tmux session found")
             return
 
-        existing = tmux_mod.find_window_by_name(session, WATCHER_WINDOW_NAME)
-        if existing:
-            tmux_mod.select_window(session, WATCHER_WINDOW_NAME)
-            return
+        # Try to find and focus any running watcher's window
+        watchers = self._watcher_manager.list_watchers()
+        for w in watchers:
+            win = tmux_mod.find_window_by_name(session, w["window_name"])
+            if win:
+                tmux_mod.select_window(session, w["window_name"])
+                return
 
-        # No window — check if the watcher loop is running (between iterations)
-        if self._watcher_state and self._watcher_state.running:
+        # Check if a watcher is running but between iterations
+        if self._watcher_manager.is_any_running():
             self.log_message("Watcher is between iterations — window will appear shortly")
-            self._poll_for_watcher_window(attempts=10)
             return
 
-        # Watcher not running — create plans and start it
+        # No watcher running — start one
+        self._action_watcher_toggle()
+
+    def _action_watcher_list(self) -> None:
+        """Show list of all watchers and their status (ww key chord)."""
+        _log.info("action: watcher_list")
+        watchers = self._watcher_manager.list_watchers()
+
+        if not watchers:
+            self.log_message("[dim]No watchers registered. Press ws to start one.[/]")
+            return
+
+        lines = []
+        for w in watchers:
+            status = "[green]running[/]" if w["running"] else "[dim]stopped[/]"
+            if w.get("input_required"):
+                status = "[red bold]INPUT_REQUIRED[/]"
+            verdict = w.get("verdict", "")
+            iter_info = f"i{w['iteration']}" if w["iteration"] else ""
+            lines.append(
+                f"  {w['display_name']}: {status}"
+                + (f" {verdict}" if verdict else "")
+                + (f" ({iter_info})" if iter_info else "")
+            )
+        msg = "[bold]Watchers:[/]\n" + "\n".join(lines)
+        self.log_message(msg, sticky=5)
+
+    def _action_watcher_toggle(self) -> None:
+        """Start or stop the auto-start watcher (ws key chord)."""
+        _log.info("action: watcher_toggle")
+        from pm_core.tui import watcher_ui
+
+        # Check if auto-start watcher is running
+        manager_watcher = self._watcher_manager.find_by_type("auto-start")
+
+        if manager_watcher and manager_watcher.state.running:
+            watcher_ui.stop_watcher(self)
+            return
+
+        # Start watcher
+        from pm_core.tui import auto_start
         meta_root = watcher_ui.ensure_watcher_plans(self)
         tdir = auto_start.get_transcript_dir(self)
         watcher_ui.start_watcher(
@@ -718,26 +814,35 @@ class ProjectManagerApp(App):
             transcript_dir=str(tdir) if tdir else None,
             meta_pm_root=str(meta_root) if meta_root else None,
         )
-        self._poll_for_watcher_window(attempts=15)
 
-    def _poll_for_watcher_window(self, attempts: int = 10) -> None:
-        """Poll for the watcher window to appear and focus it."""
-        from pm_core.watcher_loop import WATCHER_WINDOW_NAME
+    def action_review_spec(self) -> None:
+        """Open the oldest pending spec for review (V key)."""
+        from pm_core import spec_gen
+        _log.info("action: review_spec")
 
-        session = self._session_name
-        if not session:
+        pr_id = spec_gen.oldest_pending_spec_pr(self._data)
+        if not pr_id:
+            self.log_message("No specs pending review")
             return
 
-        def _check() -> None:
-            nonlocal attempts
-            attempts -= 1
-            win = tmux_mod.find_window_by_name(session, WATCHER_WINDOW_NAME)
-            if win:
-                tmux_mod.select_window(session, WATCHER_WINDOW_NAME)
-            elif attempts > 0:
-                self.set_timer(1, _check)
+        pr = store.get_pr(self._data, pr_id)
+        if not pr:
+            self.log_message(f"PR {pr_id} not found")
+            return
 
-        self.set_timer(1, _check)
+        phase = spec_gen.get_pending_spec_phase(pr)
+        if not phase:
+            self.log_message(f"No pending spec for {pr_id}")
+            return
+
+        # Select this PR in the tree
+        tree = self.query_one("#tech-tree", TechTree)
+        tree.select_pr(pr_id)
+
+        # Launch spec-approve in a pane
+        pane_ops.launch_pane(self, f"pm pr spec-approve {pr_id}",
+                             "spec-review", fresh=True)
+        self.log_message(f"Reviewing {phase} spec for {pr_id}")
 
     def action_quit(self) -> None:
         pane_ops.quit_app(self)
@@ -919,7 +1024,7 @@ class ProjectManagerApp(App):
         else:
             total = 0
         status_bar = self.query_one("#status-bar", StatusBar)
-        status_bar.update(f" [bold]QA[/bold]    {total} item(s)    [dim]Enter=run  e=edit  a=add  q=back[/dim]")
+        status_bar.update(f" [bold]QA[/bold]    {total} item(s)    [dim]Enter=run  e=edit  d=debug  a=add  q=back[/dim]")
         self.call_after_refresh(self._capture_frame, "show_qa_view")
 
     def _refresh_qa_pane(self) -> None:
@@ -985,6 +1090,16 @@ class ProjectManagerApp(App):
                     category, qa_id = parts
                     pane_ops.launch_pane(
                         self, f"pm qa edit {qa_id} --category {category}", "qa-edit"
+                    )
+            else:
+                self.log_message("No QA item selected")
+        elif message.action == "debug":
+            if message.item_id:
+                parts = message.item_id.split(":", 1)
+                if len(parts) == 2:
+                    _category, qa_id = parts
+                    pane_ops.launch_pane(
+                        self, f"pm qa debug --foreground {qa_id}", "qa-debug"
                     )
             else:
                 self.log_message("No QA item selected")

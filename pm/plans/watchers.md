@@ -84,25 +84,23 @@ A decision point represents a fork where multiple approaches are worth exploring
 
 Convergence is a decision made by either human or machine. For now, humans are better at understanding real-world constraints that inform the choice, so the interface prioritizes making large decision trees digestible and explorable. LLMs get list-style commands optimized for their consumption.
 
-- **pr-848ba9b**: Decision point entity and CLI commands (no dependencies)
-  - Data model: decision points stored in project.yaml with id, description, branches, status (open/resolved), resolution
-  - `pm decision add [--parent-pr <id>] [--description "..."]` — create a decision point, optionally attached to a PR or spec
-  - `pm decision branch <decision-id> [--title "..."]` — add a branch to explore
-  - `pm decision resolve <decision-id> <branch>` — pick a winner, archive losers
-  - `pm decision list` / `pm decision show <id>` — list-style output for both humans and LLMs
-  - `pm decision remove <decision-id>` — clean up a decision point and its branches
-  - Automated workdir management: creating a branch auto-creates workdirs for its PRs, resolving auto-cleans loser workdirs
-  - Each branch can have its own sub-tree of PRs with independent depends_on chains
+- **pr-848ba9b**: Decision point entity, CLI commands, and branch-aware PR targeting (no dependencies)
+  - Data model: decision points in project.yaml with id, branches, status (open/resolved), resolution
+  - `pm decision add/branch/resolve/list/show/remove` commands
+  - Branch-aware PR commands: all existing PR commands gain `--branch` flag to target a specific branch
+  - Default targeting: when no `--branch` specified, commands target the most recent branch that worked on that PR
+  - Write ops (start, edit, note) target the branch's workdir; read ops (list, show, ready) aggregate across branches
+  - No decision points = identical to current behavior (backward compatible)
+  - Automated workdir management: creating a branch auto-creates workdirs, resolving auto-cleans losers
 
-- **pr-d925d69**: TUI decision tree explorer (no dependencies beyond pr-848ba9b)
-  - Visual representation of decision trees integrated into the tech tree view
-  - Decision points shown as fork nodes with branches fanning out
-  - Navigate into a branch to see its variant subtree
-  - Compare branches side-by-side: diff summaries, PR status, test results
-  - Collapse/expand branches, filter to show only open decisions
-  - Pick winner from TUI with confirmation
+- **pr-d925d69**: TUI decision tree explorer with branch-aware project state (depends on pr-848ba9b)
+  - Two view modes switchable via keybinding:
+    - **Aggregate (default)**: merges state from all active branches on this machine — the "what's actually happening" view
+    - **Single branch**: isolates one branch's state (including master) for focused inspection
+  - Solves the stale/forked project.yaml problem as a side effect of making decisions first class
+  - Decision points shown as fork nodes; navigate into branches, compare side-by-side, pick winner
   - Scales to large trees: progressive disclosure, search, breadcrumb navigation
-  - Manual testing required: TUI interactions, keyboard navigation, visual layout
+  - Manual testing required: both view modes, mode switching, branch targeting, keyboard navigation
 
 - **pr-3f7815c**: Spec tree branching (depends on pr-942aa21)
   - Extend spec generation to produce multiple candidate specs from a base (title + short description)
@@ -172,7 +170,7 @@ These remain as separate fixes outside the watcher framework:
 
 These PRs will need human-guided testing (INPUT_REQUIRED during review):
 - **pr-3032fb6**: TUI `w` prefix key, `ww` watcher list pane, tmux pane management, watcher start/stop
-- **pr-7122c11**: Observe watcher with multiple branches in different states (paused vs active)
+- **pr-7122c11**: Observe watcher with multiple branches in different states — verify watcher emits READY (not INPUT_REQUIRED) when one or more branches are paused by their own review/QA loop INPUT_REQUIRED, while still noting the paused branches in its summary; verify watcher does emit INPUT_REQUIRED for a project-wide blocker or a genuinely stuck in_progress branch with no active loop
 - **pr-18ac983**: Trigger real session failures (API errors, OOM) to verify detection and recovery
 - **pr-945546e**: TUI watcher pane gated actions, user approval flow
 - **pr-1f35c6d**: Hardware-dependent — local model process lifecycle, VRAM/RAM detection

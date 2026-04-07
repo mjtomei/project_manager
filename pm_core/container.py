@@ -200,6 +200,7 @@ def container_is_running(name: str) -> bool:
 
 def _build_git_setup_script(
     has_push_proxy: bool = False,
+    host_workdir: str | None = None,
 ) -> str:
     """Build a shell script snippet to configure git inside the container.
 
@@ -224,6 +225,13 @@ def _build_git_setup_script(
     # etc.) run directly via /usr/bin/git.
     if has_push_proxy:
         from pm_core.push_proxy import _CONTAINER_SOCKET_PATH
+        # Escape the host workdir for safe embedding in a JSON string literal.
+        # Backslash must come first to avoid double-escaping.
+        _escaped_host_workdir = ""
+        if host_workdir:
+            _escaped_host_workdir = (
+                host_workdir.replace("\\", "\\\\").replace('"', '\\"')
+            )
         # NOTE: The inline Python block must start at column 0 inside the
         # shell $(...) substitution, so we can't use textwrap.dedent here.
         wrapper_script = (
@@ -231,7 +239,12 @@ def _build_git_setup_script(
             "# pm: git wrapper — remote commands go through the host-side proxy\n"
             "REAL_GIT=/usr/bin/git\n"
             f'SOCKET="{_CONTAINER_SOCKET_PATH}"\n'
-            '# Commands that interact with remotes and need proxy forwarding\n'
+            # HOST_WORKDIR is the host-side clone path for this container,
+            # baked in at creation time so the proxy can use the correct
+            # source/target when multiple scenario containers share a proxy.
+            + (f'HOST_WORKDIR="{_escaped_host_workdir}"\n'
+               if _escaped_host_workdir else "")
+            + '# Commands that interact with remotes and need proxy forwarding\n'
             'case "$1" in\n'
             '  push|fetch|pull|ls-remote)\n'
             '    CMD="$1"\n'
@@ -245,8 +258,11 @@ def _build_git_setup_script(
             '    done\n'
             '    args_json="$args_json]"\n'
             '    escaped_cmd=$(printf \'%s\' "$CMD" | sed \'s/"/\\\\"/g\')\n'
-            '    request=\'{"cmd": "\'$escaped_cmd\'", "args": \'$args_json\'}\'\n'
-            '    if ! command -v python3 >/dev/null 2>&1; then\n'
+            + ('    escaped_workdir=$(printf \'%s\' "$HOST_WORKDIR" | sed \'s/\\\\/\\\\\\\\/g; s/"/\\\\"/g\')\n'
+               '    request=\'{"cmd": "\'$escaped_cmd\'", "args": \'$args_json\', "workdir": "\'$escaped_workdir\'"}\'\n'
+               if _escaped_host_workdir else
+               '    request=\'{"cmd": "\'$escaped_cmd\'", "args": \'$args_json\'}\'\n')
+            + '    if ! command -v python3 >/dev/null 2>&1; then\n'
             '      echo "pm: python3 required for git proxy client" >&2\n'
             '      exit 1\n'
             '    fi\n'
@@ -368,6 +384,8 @@ def create_container(
         Container ID.
     """
     # If a running container with this name already exists, reuse it.
+    # The proxy socket directory is bind-mounted (not the socket file),
+    # so a restarted proxy is visible to the container immediately.
     if container_is_running(name):
         result = _run_docker(
             "inspect", "-f", "{{.Id}}", name,
@@ -375,12 +393,16 @@ def create_container(
         )
         container_id = result.stdout.strip()
         _log.info("Reusing existing container %s (id=%s)", name, container_id[:12])
-        # Ensure the push proxy is running (it may have been stopped)
+        # Ensure the push proxy is running (it may have died in a crash)
         if allowed_push_branch:
             from pm_core.push_proxy import (
-                start_push_proxy, get_proxy_socket_path,
+                start_push_proxy, get_proxy_socket_path, proxy_is_alive,
             )
-            if not get_proxy_socket_path(name):
+            sock = get_proxy_socket_path(name, session_tag=session_tag,
+                                         pr_id=pr_id)
+            if not sock or not proxy_is_alive(sock):
+                _log.warning("Push proxy dead/missing for container %s — "
+                             "restarting proxy", name)
                 start_push_proxy(
                     name, str(workdir), allowed_push_branch,
                     session_tag=session_tag, pr_id=pr_id,
@@ -425,9 +447,11 @@ def create_container(
     if claude_config.is_dir():
         cmd.extend(["-v", f"{claude_config}:{_CONTAINER_HOME}/.claude"])
 
-    claude_json = Path.home() / ".claude.json"
-    if claude_json.exists():
-        cmd.extend(["-v", f"{claude_json}:{_CONTAINER_HOME}/.claude.json"])
+    # NOTE: .claude.json is NOT bind-mounted.  Claude writes it atomically
+    # (write tmp + rename) which replaces the inode — a single-file bind
+    # mount keeps the old inode so the container sees stale content.
+    # Instead we copy it in after the container is created (see below).
+    _claude_json_src = Path.home() / ".claude.json"
 
     # --- Additional mounts ---
     if extra_ro_mounts:
@@ -460,13 +484,18 @@ def create_container(
     has_push_proxy = False
     if allowed_push_branch:
         from pm_core.push_proxy import (
-            start_push_proxy, _CONTAINER_SOCKET_PATH,
+            start_push_proxy, _CONTAINER_SOCKET_DIR, _CONTAINER_SOCKET_PATH,
         )
         sock_path = start_push_proxy(
             name, str(workdir), allowed_push_branch,
             session_tag=session_tag, pr_id=pr_id,
         )
-        cmd.extend(["-v", f"{sock_path}:{_CONTAINER_SOCKET_PATH}"])
+        # Mount the socket's parent *directory* rather than the socket
+        # file itself.  This way, if the proxy restarts and recreates
+        # the socket (new inode), the container sees the new one
+        # through the directory mount.
+        sock_dir = str(Path(sock_path).parent)
+        cmd.extend(["-v", f"{sock_dir}:{_CONTAINER_SOCKET_DIR}"])
         has_push_proxy = True
         _log.info("Push proxy started for container %s (branch=%s)",
                   name, allowed_push_branch)
@@ -486,7 +515,8 @@ def create_container(
         ["git", "config", "user.email"], capture_output=True, text=True,
     ).stdout.strip()
 
-    git_setup = _build_git_setup_script(has_push_proxy=has_push_proxy)
+    git_setup = _build_git_setup_script(has_push_proxy=has_push_proxy,
+                                        host_workdir=str(workdir) if has_push_proxy else None)
     setup_parts = [
         f"groupadd -g {host_gid} {_CONTAINER_USER} 2>/dev/null",
         f"useradd -u {host_uid} -g {host_gid} -m -s /bin/bash {_CONTAINER_USER} 2>/dev/null",
@@ -518,6 +548,20 @@ def create_container(
             break
         time.sleep(0.1)
 
+    # Copy .claude.json into the container (not bind-mounted — see note above)
+    if _claude_json_src.exists():
+        try:
+            _run_docker("cp", str(_claude_json_src),
+                        f"{name}:{_CONTAINER_HOME}/.claude.json",
+                        timeout=10)
+            _run_docker("exec", name, "chown",
+                        f"{host_uid}:{host_gid}",
+                        f"{_CONTAINER_HOME}/.claude.json",
+                        timeout=5)
+        except Exception:
+            _log.warning("Failed to copy .claude.json into container %s",
+                         name, exc_info=True)
+
     _log.info("Created container %s (id=%s)", name, container_id[:12])
     return container_id
 
@@ -545,15 +589,38 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
         if proxy_socket_path:
             sock_dir = str(Path(proxy_socket_path).parent)
             cleanup_parts.append(f"rmdir {shlex.quote(sock_dir)} 2>/dev/null")
-        return f"{exec_part}; {'; '.join(cleanup_parts)}"
+        # Wrap in a bash trap so cleanup runs even when the pane is killed
+        # via tmux kill-pane/kill-window (SIGHUP to the outer shell causes
+        # ';'-chained commands to be skipped, but EXIT traps always fire).
+        # Use shlex.quote on the full inner script to avoid quote nesting
+        # issues: exec_part already contains single-quoted arguments from
+        # shlex.quote(), so wrapping in literal '...' would break parsing.
+        inner = f"trap {shlex.quote('; '.join(cleanup_parts))} EXIT; {exec_part}"
+        return f"bash -c {shlex.quote(inner)}"
     return exec_part
 
 
 def remove_container(name: str) -> None:
-    """Force-remove a container and its push proxy (no-op if it doesn't exist)."""
+    """Force-remove a container and its push proxy, then wait until it is gone.
+
+    If another 'docker rm -f' is already in flight (e.g. the previous session's
+    EXIT trap), this still blocks until the container has fully disappeared so
+    that the caller can safely create a fresh container with the same name.
+    """
+    import time
     from pm_core.push_proxy import stop_push_proxy
     stop_push_proxy(name)
     _run_docker("rm", "-f", name, check=False, timeout=30)
+    # Wait for the container to be fully gone.  When another rm is already in
+    # flight the daemon returns "removal already in progress" and our rm returns
+    # immediately, but the container still exists for a brief moment.
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        result = _run_docker("inspect", name, check=False, timeout=5)
+        if result.returncode != 0:
+            return  # container is gone
+        time.sleep(0.1)
+    _log.warning("remove_container: %s still present after 10 s", name)
 
 
 # ---------------------------------------------------------------------------
@@ -616,6 +683,17 @@ def wrap_claude_cmd(
             f"Is Docker running? Disable container mode with 'pm container disable' "
             f"to run without containers."
         )
+
+    # Rewrite any prompt-file reference that used the host workdir path.
+    # build_claude_shell_cmd writes the file to the host and embeds
+    # "$(cat <host_workdir>/pm_prompt_*.txt)" in the command.  Inside the
+    # container that host path doesn't exist — the workdir is mounted at
+    # _CONTAINER_WORKDIR — so replace the prefix now.
+    host_prefix = f"$(cat {workdir}/"
+    container_prefix = f"$(cat {_CONTAINER_WORKDIR}/"
+    if host_prefix in claude_cmd:
+        claude_cmd = claude_cmd.replace(host_prefix, container_prefix)
+        _log.debug("wrap_claude_cmd: rewrote prompt-file path to container path")
 
     from pm_core.push_proxy import get_proxy_socket_path
     proxy_sock = get_proxy_socket_path(cname)
