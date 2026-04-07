@@ -96,6 +96,8 @@ A runner module at `pm_core/bench/review_bench.py` that:
 
    The prompt is generated with `review_loop=False` (no fix/commit instructions — we only want the review analysis). Plan context and sibling PRs are omitted since they don't exist for synthetic test cases.
 
+   **Implementation note**: `generate_review_prompt()` always emits a `Run git diff ...` instruction; it does not accept inline diff text. The runner must post-process the returned prompt string to replace the `git diff` instruction line with the inline buggy diff. This is a simple string replacement and keeps the benchmark decoupled from prompt_gen internals.
+
    This approach maximizes code reuse: any changes to the review prompt template automatically flow into the benchmark.
 
 3. **Invokes Claude** in headless `--print` mode via CLI subprocess, capturing the full output text. No tmux infrastructure needed.
@@ -137,12 +139,14 @@ A scoring module at `pm_core/bench/review_scorer.py` that uses a configurable pa
 
 4. **Verdict scoring** (non-LLM): Compare the emitted verdict against expected using `loop_shared.py:extract_verdict_from_content()`. All test cases contain bugs, so NEEDS_WORK is always the correct verdict. This is a simple string match — no judge needed.
 
-5. **Per-case result**: `CaseResult` dataclass with:
-   - `same_bug_found: bool` — majority vote: did the review catch the target bug?
-   - `different_bugs_found: int` — median count of other real bugs identified
-   - `false_positives: int` — median count of non-issues flagged
+5. **Per-case result**: `CaseResult` dataclass with all fields in one place:
+   - `bug_found: bool` — majority vote across judges on whether any SAME_BUG finding exists
+   - `different_bugs_found: int` — median count of other real bugs identified (REAL_BUG findings)
+   - `false_positives: int` — median count of non-issues flagged (FALSE_POSITIVE findings)
+   - `quality_score: float` — mean of judges' 1-5 Prometheus scores, normalized to 0.0-1.0
+   - `precision: float` — fraction of findings that are SAME_BUG or REAL_BUG (vs FALSE_POSITIVE)
    - `verdict_correct: bool` — did the reviewer output NEEDS_WORK?
-   - `judge_agreement: float` — 0.0-1.0, fraction of judges that agreed on `same_bug_found`
+   - `judge_agreement: float` — 0.0-1.0, fraction of judges that agreed on `bug_found`
    - `judge_results: list[dict]` — per-judge raw results for debugging
 
 6. **Judge prompt and criteria**: Each judge receives a Prometheus-style structured rubric (adapted from Kim et al., 2024) with explicit per-level descriptions. This format is shown to achieve high inter-judge agreement:
@@ -193,13 +197,7 @@ A scoring module at `pm_core/bench/review_scorer.py` that uses a configurable pa
    }
    ```
 
-7. **Numeric scoring per case**: The `CaseResult` captures both binary and graded metrics:
-   - `bug_found: bool` — majority vote across judges on whether any SAME_BUG finding exists
-   - `quality_score: float` — mean of judges' 1-5 Prometheus scores, normalized to 0.0-1.0
-   - `precision: float` — fraction of findings that are SAME_BUG or REAL_BUG (vs FALSE_POSITIVE)
-   - `verdict_correct: bool` — did the reviewer output NEEDS_WORK?
-
-   The `quality_score` is the primary metric for ranking — it captures detection, precision, and explanation quality in a single graded score, following the established Prometheus rubric methodology. Binary `bug_found` and `verdict_correct` are tracked separately for clear pass/fail reporting.
+7. **Aggregate scoring**: The `quality_score` is the primary metric for ranking — it captures detection, precision, and explanation quality in a single graded score, following the established Prometheus rubric methodology. Binary `bug_found` and `verdict_correct` are tracked separately for clear pass/fail reporting.
 
    Aggregate scores across the corpus: mean `quality_score`, detection rate (% `bug_found`), precision, verdict accuracy. Per-project-type, per-language, and per-bug-type breakdowns.
 
@@ -318,7 +316,7 @@ Add a CLI subcommand under `pm bench review` (in `pm_core/cli/bench.py`) with:
 
 **Grounding**: Follows the existing `pm bench` CLI pattern in `pm_core/cli/bench.py`.
 
-### R6: Result Persistence
+### R7: Result Persistence
 
 Benchmark results saved to `~/.pm/bench/review/` as:
 - **Run results**: Timestamped JSON files with full reproducibility metadata (config, corpus version, per-case results)
@@ -553,7 +551,7 @@ tests/test_review_corpus.py           # NEW: unit tests
 
 ### PR B: Benchmark Runner & Multi-Judge Scorer
 
-**Scope**: R2 (runner), R3 (multi-judge panel + Prometheus rubric), IR1 (headless review), IR3 (reproducibility), IR4 (cost awareness), IR5 (no circular deps), A2 (headless invocation), A3 (LLM-as-judge), A5 (watcher configs as prompt additions), E2 (output format variation), E3 (token limits), E4 (model availability), R7 result persistence (run results only, not ELO/IRT)
+**Scope**: R2 (runner), R3 (multi-judge panel + Prometheus rubric), IR1 (headless review), IR3 (reproducibility), IR4 (cost awareness), IR5 (no circular deps), A2 (headless invocation), A3 (LLM-as-judge), A5 (watcher configs as prompt additions), E2 (output format variation), E3 (token limits), E4 (model availability), R7 (result persistence — run results only, not ELO/IRT)
 
 **Delivers**:
 - `pm_core/bench/review_bench.py` — `ReviewBenchConfig` dataclass, `ReviewBenchRunner` that loads corpus → generates review prompts via `prompt_gen.py` → invokes Claude CLI in `--print` mode → scores via judge panel. Supports parameterized model/effort/prompt_variant/system_prompt_additions. Dry-run mode, token tracking, parallel execution.
