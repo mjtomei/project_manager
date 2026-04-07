@@ -245,7 +245,15 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
                 if tui_window:
                     break
             if not tui_window:
-                tui_window = tmux_mod.get_window_id(session_name)
+                # Fall back to window named 'main' (or first window) rather
+                # than the active window, which may be a QA/work window.
+                main_win = tmux_mod.find_window_by_name(session_name, "main")
+                if main_win:
+                    tui_window = main_win["id"]
+                else:
+                    all_wins = tmux_mod.list_windows(session_name)
+                    if all_wins:
+                        tui_window = all_wins[0]["id"]
             if tui_window:
                 pane_layout._respawn_tui(session_name, tui_window)
                 pane_layout.rebalance(session_name, tui_window)
