@@ -253,6 +253,11 @@ image, build it, tag it, and update the pm container config to use it.
 - If you're unsure about system dependencies, try building first and fix errors.
 - The goal is a reusable image — dependencies change rarely, so this image
   avoids reinstalling them on every container start.
+- Ensure the host git user identity is available inside the container. Use
+  ENV to set GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL, GIT_COMMITTER_NAME, and
+  GIT_COMMITTER_EMAIL so that commits made inside the container are attributed
+  correctly. Read the host's git config (git config user.name / user.email)
+  to get the values.
 """
 
 
