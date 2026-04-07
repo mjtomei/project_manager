@@ -126,14 +126,14 @@ A scoring module at `pm_core/bench/review_scorer.py` that uses a configurable pa
 2. **Per-judge call**: For each (review_output, test_case) pair, each judge is invoked with a structured prompt:
    - Input: the `expected_finding` (what the bug actually is), the `fix_diff` (what the correct fix looks like), and the review output
    - Output: a structured JSON response classifying each distinct issue the reviewer flagged as one of:
-     - `same_bug_found` — the reviewer identified the same bug described in `expected_finding`
-     - `different_real_bug_found` — the reviewer identified a genuine issue, but not the one we're testing for
-     - `false_positive` — the reviewer flagged something that isn't actually a bug
+     - `SAME_BUG` — the reviewer identified the same bug described in `expected_finding`
+     - `REAL_BUG` — the reviewer identified a genuine issue, but not the one we're testing for
+     - `FALSE_POSITIVE` — the reviewer flagged something that isn't actually a bug
    - Multiple classifications can be returned simultaneously (a review may find the target bug AND a different real bug AND flag some false positives)
 
 3. **Aggregation across judges**: The panel's individual verdicts are combined:
-   - `same_bug_found`: majority vote across all judges (>50% must agree)
-   - `different_bugs_found` / `false_positives`: median count across judges
+   - `SAME_BUG`: majority vote across all judges (>50% must agree)
+   - `REAL_BUG` / `FALSE_POSITIVE` counts: median count across judges
    - Agreement rate tracked per case — low agreement flags ambiguous cases for corpus refinement
    - Each judge's raw output preserved for debugging
 
