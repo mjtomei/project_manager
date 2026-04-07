@@ -71,7 +71,6 @@ def _detect_local_llm() -> dict:
 
     import json
     import urllib.request
-    import urllib.error
     try:
         req = urllib.request.Request("http://localhost:11434/api/tags")
         with urllib.request.urlopen(req, timeout=3) as resp:
