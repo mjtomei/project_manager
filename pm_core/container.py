@@ -211,8 +211,11 @@ def _build_git_setup_script(
     """
     lines: list[str] = []
 
-    # Set safe directory for /workspace
+    # Set safe directory for /workspace.
+    # Use plain git config (works when already running as pm) with su
+    # fallback (works when running as root in the default image).
     lines.append(
+        f"git config --global --add safe.directory {_CONTAINER_WORKDIR} 2>/dev/null || "
         f"su - {_CONTAINER_USER} -c "
         f"'git config --global --add safe.directory {_CONTAINER_WORKDIR}'"
     )
@@ -290,8 +293,14 @@ def _build_git_setup_script(
             'esac\n'
             'exec $REAL_GIT "$@"\n'
         )
-        wrapper_path = "/usr/local/bin/git"
-        lines.append(f"cat > {wrapper_path} << 'WRAPEOF'\n{wrapper_script}WRAPEOF\nchmod 755 {wrapper_path}")
+        # Install to the pm user's local bin — it's first on PATH in both
+        # the default image and project-specific images, and doesn't need
+        # root to write.  /usr/local/bin/git would require root which
+        # project-specific images (USER pm) don't have.
+        wrapper_path = f"{_CONTAINER_HOME}/.local/bin/git"
+        lines.append(f"mkdir -p {_CONTAINER_HOME}/.local/bin && "
+                     f"cat > {wrapper_path} << 'WRAPEOF'\n{wrapper_script}WRAPEOF\n"
+                     f"chmod 755 {wrapper_path}")
 
     return "; ".join(lines) if lines else ""
 
@@ -422,7 +431,6 @@ def create_container(
     cmd = [
         "run", "-d",
         "--name", name,
-        "--user", "root",
         "--memory", config.memory_limit,
         "--cpus", config.cpu_limit,
         "-v", f"{workdir}:{_CONTAINER_WORKDIR}",
@@ -518,13 +526,19 @@ def create_container(
 
     git_setup = _build_git_setup_script(has_push_proxy=has_push_proxy,
                                         host_workdir=str(workdir) if has_push_proxy else None)
+    # User creation — no-ops when the image already has the pm user (e.g.
+    # project-specific images built via `pm container build`).
     setup_parts = [
-        f"groupadd -g {host_gid} {_CONTAINER_USER} 2>/dev/null",
-        f"useradd -u {host_uid} -g {host_gid} -m -s /bin/bash {_CONTAINER_USER} 2>/dev/null",
-        f"chown {host_uid}:{host_gid} {_CONTAINER_HOME}",
+        f"groupadd -g {host_gid} {_CONTAINER_USER} 2>/dev/null || true",
+        f"useradd -u {host_uid} -g {host_gid} -m -s /bin/bash {_CONTAINER_USER} 2>/dev/null || true",
+        f"chown {host_uid}:{host_gid} {_CONTAINER_HOME} 2>/dev/null || true",
     ]
     if git_name and git_email:
+        # Try as current user first (works when running as pm), fall back
+        # to su (works when running as root in the default image).
         setup_parts.append(
+            f"(git config --global user.name \"{git_name}\" && "
+            f"git config --global user.email \"{git_email}\") 2>/dev/null || "
             f"su -c 'git config --global user.name \"{git_name}\" && "
             f"git config --global user.email \"{git_email}\"' {_CONTAINER_USER}"
         )
