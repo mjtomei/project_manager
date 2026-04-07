@@ -3,56 +3,72 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-0b827df
+  active_pr: pr-2d0588a
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
-  hide_merged: false
+  hide_merged: true
 plans:
 - id: plan-001
   name: Import from existing repo
   file: plans/plan-001.md
   status: draft
+  parent: null
 - id: plan-002
   name: Multi-candidate test-driven code generation
   file: plans/plan-002.md
   status: draft
+  parent: null
 - id: plan-003
   name: Multiuser Support
   file: plans/plan-003.md
   status: draft
+  parent: null
 - id: plan-e4fa5cb
   name: refactor for code quality
   file: plans/plan-e4fa5cb.md
   status: done
+  parent: null
 - id: plan-c493724
   name: project metrics and optimization
   file: plans/plan-c493724.md
   status: draft
+  parent: null
 - id: plan-qa
   name: Fully specified project from project.yaml
   file: plans/plan-qa.md
   status: active
+  parent: null
 - id: bugs
   name: ''
   file: bugs.md
   status: active
+  parent: null
 - id: improvements
   name: ''
   file: improvements.md
   status: active
+  parent: null
 - id: watchers
   name: Watcher framework and session health
   file: plans/watchers.md
   status: draft
+  parent: null
 - id: tui-ux
   name: TUI and UX improvements
   file: plans/tui-ux.md
   status: draft
+  parent: null
 - id: onboarding
   name: Onboarding and developer experience
   file: plans/onboarding.md
   status: draft
+  parent: null
+- id: plan-cb4ef69
+  name: Hierarchical plans
+  file: plans/plan-cb4ef69.md
+  status: draft
+  parent: null
 prs:
 - id: pr-001
   plan: plan-001
@@ -899,13 +915,13 @@ prs:
     GitHub API calls must be restructured to do the external call first, then acquire
     the lock, load fresh state, merge results, and save. Lock timeout of 2 seconds
     with clear error message.'
-  agent_machine: spark-424d
+  agent_machine: arch-home
   gh_pr: https://github.com/mjtomei/project_manager/pull/109
   gh_pr_number: 109
   created_at: '2026-03-02T01:04:39.190560+00:00'
-  updated_at: '2026-03-07T16:07:35.098359+00:00'
+  updated_at: '2026-04-06T18:48:51.118103+00:00'
   started_at: '2026-03-02T01:04:39.190560+00:00'
-  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-f38005f-add-file-locking-to-project-yaml-rea-6142872c
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-f38005f-add-file-locking-to-project-yaml-rea-ab512a43
   reviewed_at: '2026-03-02T01:27:28.059956+00:00'
   notes:
   - id: note-181f05d
@@ -914,6 +930,7 @@ prs:
       to locked_update too, or they can still overwrite with stale data.
     created_at: '2026-03-07T15:29:28Z'
     last_edited: '2026-03-07T15:29:28Z'
+  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-f38005f/qa.md
 - id: pr-c11d04f
   plan: plan-003
   title: Add notes field to PRs for post-start addendums
@@ -1328,7 +1345,7 @@ prs:
   description: Intelligently increase the size of a pane to fit Claude's output when
     a session pane is selected. Apply the same behavior for the TUI pane. Allow disabling
     in global settings.
-  agent_machine: spark-424d
+  agent_machine: arch-home
   gh_pr: https://github.com/mjtomei/project_manager/pull/82
   gh_pr_number: 82
   notes:
@@ -1340,9 +1357,10 @@ prs:
       correctly disables resizing, (4) all 103 unit tests pass.'
     created_at: '2026-03-02T00:35:07Z'
     last_edited: '2026-03-02T00:35:07Z'
-  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-7f01e33-auto-resize-pane-to-fit-claude-outpu-9cfc4712
-  created_at: null
-  updated_at: '2026-03-08T22:04:53.504103+00:00'
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-7f01e33-auto-resize-pane-to-fit-claude-outpu-ab512a43
+  created_at: '2026-03-23T12:50:02.927242+00:00'
+  updated_at: '2026-03-23T13:15:26.460853+00:00'
+  started_at: '2026-03-23T12:50:02.927242+00:00'
 - id: pr-97c1be3
   plan: null
   title: Add pm pr note subcommand for querying and editing PR notes
@@ -1840,16 +1858,16 @@ prs:
 
     - Shared pane management module for pull/push logic, used by all commands that
     start their own window'
-  agent_machine: spark-424d
+  agent_machine: arch-home
   gh_pr: https://github.com/mjtomei/project_manager/pull/89
   gh_pr_number: 89
   started_at: '2026-02-26T15:41:30.621658+00:00'
   reviewed_at: '2026-02-27T10:21:50.275823+00:00'
   merged_at: null
   notes: []
-  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ff68ef5-single-window-focus-mode-with-pane-p-b6481329
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-ff68ef5-single-window-focus-mode-with-pane-p-ab512a43
   created_at: '2026-02-26T15:41:30.621658+00:00'
-  updated_at: '2026-03-08T22:04:54.458480+00:00'
+  updated_at: '2026-03-23T13:15:38.518354+00:00'
 - id: pr-0f4baf1
   plan: null
   title: 'Fix local backend merge: pull from workdir instead of push'
@@ -1910,7 +1928,7 @@ prs:
     be launched via something like pm plan work <plan–id> or similar. The prompt should
     be generic and not reference any specific tools beyond pm itself. Should be launchable
     from the plans pane in the tui with the w key, remap breakdown to d.'
-  agent_machine: spark-424d
+  agent_machine: arch-home
   gh_pr: https://github.com/mjtomei/project_manager/pull/97
   gh_pr_number: 97
   started_at: '2026-02-27T10:12:26.609316+00:00'
@@ -1927,9 +1945,9 @@ prs:
       5 pre-existing test failures unrelated to this PR.'
     created_at: '2026-03-02T00:32:58Z'
     last_edited: '2026-03-02T00:32:58Z'
-  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-b764a0c-add-plan-worker-pane-generic-claude--2b310716
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-b764a0c-add-plan-worker-pane-generic-claude--ab512a43
   created_at: '2026-02-27T10:12:26.609316+00:00'
-  updated_at: '2026-03-08T22:04:58.901796+00:00'
+  updated_at: '2026-03-23T13:16:19.520063+00:00'
 - id: pr-0a7d9ee
   plan: null
   title: Add companion workdir pane for implementation and merge windows
@@ -2093,7 +2111,7 @@ prs:
     into the plan add step so that when a plan is created, it already includes the
     PR breakdown. Remove the separate breakdown prompt/command. This reduces the number
     of steps to go from idea to actionable PRs.'
-  agent_machine: spark-424d
+  agent_machine: arch-home
   gh_pr: https://github.com/mjtomei/project_manager/pull/104
   gh_pr_number: 104
   started_at: '2026-03-01T17:51:46.490716+00:00'
@@ -2101,8 +2119,8 @@ prs:
   merged_at: null
   notes: []
   created_at: '2026-03-01T17:51:46.490716+00:00'
-  updated_at: '2026-03-02T00:28:13.443852+00:00'
-  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-30888b1-fold-plan-breakdown-into-plan-add-st-c82777eb
+  updated_at: '2026-03-23T13:13:51.902620+00:00'
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-30888b1-fold-plan-breakdown-into-plan-add-st-ab512a43
 - id: pr-3116896
   plan: tui-ux
   title: Move Claude panes from current window into their own window
@@ -2219,7 +2237,7 @@ prs:
 
     – Pane registry (pm_core/tui/pane_registry.py) — should be the source of truth
     for pane lookups'
-  agent_machine: spark-424d
+  agent_machine: arch-home
   gh_pr: https://github.com/mjtomei/project_manager/pull/102
   gh_pr_number: 102
   started_at: '2026-03-01T17:48:54.305206+00:00'
@@ -2227,8 +2245,8 @@ prs:
   merged_at: null
   notes: []
   created_at: '2026-03-01T17:48:54.305206+00:00'
-  updated_at: '2026-03-02T00:28:30.910840+00:00'
-  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-89296d3-harden-window-management-against-une-c82777eb
+  updated_at: '2026-03-23T13:13:26.308098+00:00'
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-89296d3-harden-window-management-against-une-ab512a43
 - id: pr-eee190a
   plan: null
   title: Add —disconnect–others flag to pm session to disconnect stale clients
@@ -2286,11 +2304,11 @@ prs:
     idle (no user interaction) for a configurable amount of time, defaulting to 10
     seconds. This prevents the list from shifting under the user mid-navigation while
     still keeping it fresh when they step away.
-  agent_machine: spark-424d
+  agent_machine: arch-home
   gh_pr: https://github.com/mjtomei/project_manager/pull/105
   gh_pr_number: 105
   created_at: '2026-03-02T00:29:21.099342+00:00'
-  updated_at: '2026-03-08T22:04:55.524473+00:00'
+  updated_at: '2026-03-23T13:15:53.097904+00:00'
   started_at: '2026-03-02T00:29:39.194707+00:00'
   reviewed_at: '2026-03-02T00:43:40.296320+00:00'
   merged_at: null
@@ -2304,7 +2322,7 @@ prs:
       and added test.'
     created_at: '2026-03-02T01:00:23Z'
     last_edited: '2026-03-02T01:00:23Z'
-  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-92301fc-defer-pr-re-sort-until-tui-is-idle-f-6142872c
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-92301fc-defer-pr-re-sort-until-tui-is-idle-f-ab512a43
 - id: pr-ff5030f
   plan: null
   title: 'Fix stale tests: plans pane key map and watcher prompt assertions'
@@ -2488,11 +2506,11 @@ prs:
 
     The watchdog should run on its own lightweight timer (e.g. every 30s) separate
     from the main poll timer, so it can detect and recover from poll timer failures.'
-  agent_machine: spark-424d
+  agent_machine: arch-home
   gh_pr: https://github.com/mjtomei/project_manager/pull/113
   gh_pr_number: 113
   created_at: '2026-03-02T02:29:03.713168+00:00'
-  updated_at: '2026-03-06T13:46:24.367448+00:00'
+  updated_at: '2026-03-23T13:13:42.135194+00:00'
   started_at: '2026-03-02T02:34:58.036488+00:00'
   reviewed_at: '2026-03-02T02:56:54.736623+00:00'
   merged_at: null
@@ -2508,7 +2526,7 @@ prs:
       to QA scenario workers and implementation sessions.'
     created_at: '2026-03-06T13:46:24Z'
     last_edited: '2026-03-06T13:46:24Z'
-  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-923f22b-add-tui-watchdog-for-dead-background-27e0a73b
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-923f22b-add-tui-watchdog-for-dead-background-ab512a43
 - id: pr-7f958f3
   plan: tui-ux
   title: Change TUI restart from Ctrl+R to a typed character sequence
@@ -2533,11 +2551,11 @@ prs:
     Reminder: all associated documentation and prompts must be updated, including
     help screens, keybinding references in prompts (watcher prompt, monitor prompt,
     etc.), and any references to Ctrl+R in code comments or docstrings.'
-  agent_machine: spark-424d
+  agent_machine: arch-home
   gh_pr: https://github.com/mjtomei/project_manager/pull/114
   gh_pr_number: 114
   created_at: '2026-03-02T02:56:06.968805+00:00'
-  updated_at: '2026-03-08T22:04:56.600870+00:00'
+  updated_at: '2026-03-23T13:16:05.060755+00:00'
   started_at: '2026-03-02T02:56:46.721498+00:00'
   reviewed_at: '2026-03-02T03:08:03.583632+00:00'
   merged_at: null
@@ -2568,13 +2586,13 @@ prs:
       found in codebase. All changes are correct and complete.'
     created_at: '2026-03-02T03:38:04Z'
     last_edited: '2026-03-02T03:38:04Z'
-  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-7f958f3-change-tui-restart-from-ctrl-r-to-a--48107183
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-7f958f3-change-tui-restart-from-ctrl-r-to-a--ab512a43
 - id: pr-7122c11
   plan: watchers
   title: Refine watcher INPUT_REQUIRED to distinguish project-wide vs branch-specific
     issues
   branch: pm/pr-7122c11-refine-watcher-input-required-to-distinguish-proje
-  status: in_progress
+  status: merged
   depends_on: []
   description: 'When the watcher detects an issue on a single branch that is already
     paused by a review loop INPUT_REQUIRED, it should NOT report INPUT_REQUIRED itself
@@ -2610,16 +2628,29 @@ prs:
     Reminder: all associated documentation and prompts should be updated, including
     any references to the watcher''s INPUT_REQUIRED behavior in help text, docstrings,
     or other prompt templates.'
-  agent_machine: spark-424d
+  agent_machine: arch-home
   gh_pr: https://github.com/mjtomei/project_manager/pull/115
   gh_pr_number: 115
   created_at: '2026-03-02T03:07:32.581497+00:00'
-  updated_at: '2026-03-08T22:04:42.734471+00:00'
+  updated_at: '2026-04-04T13:51:33.031198+00:00'
   started_at: '2026-03-02T03:08:34.327716+00:00'
-  reviewed_at: null
-  merged_at: null
-  notes: []
-  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-7122c11-refine-watcher-input-required-to-dis-48107183
+  reviewed_at: '2026-04-04T13:18:07.079219+00:00'
+  merged_at: '2026-04-04T13:51:33.031198+00:00'
+  notes:
+  - id: note-8edbcec
+    text: 'QA NEEDS_WORK: Prompt contains "handled states" block distinguishing loop-managed
+      branches: PASS; Prompt Section 3 distinguishes project-wide vs branch-specific
+      blockers: NEEDS_WORK; Iteration Protocol verdict descriptions reflect refined
+      semantics: PASS; Docstring documents INPUT_REQUIRED semantics: PASS; Plan file
+      watchers.md updated with refined testing description: PASS; QA loop parity —
+      prompt treats QA loop INPUT_REQUIRED same as review loop: PASS; Prompt with
+      auto_start_target still includes refined INPUT_REQUIRED guidance: PASS; Manual
+      test — watcher emits READY when one branch is paused by its review loop: PASS;
+      Manual test — watcher emits INPUT_REQUIRED for stuck in_progress with no loop:
+      PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-7122c11-7adf1ab157841521)'
+    created_at: '2026-04-04T13:50:59Z'
+    last_edited: '2026-04-04T13:50:59Z'
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-7122c11-refine-watcher-input-required-to-dis-ab512a43
 - id: pr-6a06089
   plan: improvements
   title: Warn when workdir is out of date with master during implementation start
@@ -2999,7 +3030,7 @@ prs:
   plan: bugs
   title: Fix merged PR branches not pushed to main repo origin
   branch: pm/pr-156a4d0-fix-merged-pr-branches-not-pushed-to-main-repo-ori
-  status: in_progress
+  status: in_review
   depends_on: []
   description: 'After merging a PR, downstream workdirs that depend on it can''t access
     the merged code because only the base branch is pushed/synced. The feature branch
@@ -3011,12 +3042,13 @@ prs:
     local backend: fetch the feature branch ref from the workdir into the main repo
     so new clones can see it.'
   created_at: '2026-03-02T17:02:40.155710+00:00'
-  updated_at: '2026-03-09T15:30:47.746414+00:00'
+  updated_at: '2026-03-23T15:03:46.791455+00:00'
   gh_pr: https://github.com/mjtomei/project_manager/pull/117
   gh_pr_number: 117
   started_at: '2026-03-02T17:02:40.155710+00:00'
-  agent_machine: spark-424d
-  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-156a4d0-fix-merged-pr-branches-not-pushed-to-35caed6a
+  agent_machine: arch-home
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-156a4d0-fix-merged-pr-branches-not-pushed-to-ab512a43
+  reviewed_at: '2026-03-23T15:03:46.791455+00:00'
 - id: pr-b53bfe2
   plan: bugs
   title: Fix trust prompt blocking implementation sessions
@@ -4263,11 +4295,11 @@ prs:
 
     5. **Keyboard navigation simplification**: Each node widget knows its grid neighbors,
     replacing the current on_key candidate-finding loops.'
-  agent_machine: spark-424d
+  agent_machine: arch-home
   gh_pr: https://github.com/mjtomei/project_manager/pull/131
   gh_pr_number: 131
   created_at: '2026-03-07T15:58:50.876583+00:00'
-  updated_at: '2026-03-09T17:23:26.156810+00:00'
+  updated_at: '2026-03-23T13:16:32.862119+00:00'
   started_at: '2026-03-08T22:27:50.279825+00:00'
   reviewed_at: '2026-03-09T17:23:26.156810+00:00'
   merged_at: null
@@ -4283,7 +4315,7 @@ prs:
       rebalance with compositional widgets: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-4c41017-e092217d921b6b35)'
     created_at: '2026-03-10T03:25:27Z'
     last_edited: '2026-03-10T03:25:27Z'
-  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-4c41017-refactor-techtree-split-pr-nodes-int-8023bb22
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-4c41017-refactor-techtree-split-pr-nodes-int-ab512a43
 - id: pr-e9d4b24
   plan: bugs
   title: 'Fix: keystrokes typed after / are discarded instead of appearing in command
@@ -4393,11 +4425,11 @@ prs:
 
     - Claude session prompt instructs watching for state file changes and guiding
     the user through steps'
-  agent_machine: spark-424d
+  agent_machine: arch-home
   gh_pr: https://github.com/mjtomei/project_manager/pull/129
   gh_pr_number: 129
   created_at: '2026-03-08T01:38:37.869518+00:00'
-  updated_at: '2026-03-08T22:05:46.124362+00:00'
+  updated_at: '2026-04-02T13:51:23.889527+00:00'
   started_at: '2026-03-08T01:41:11.161062+00:00'
   reviewed_at: '2026-03-08T02:10:07.745342+00:00'
   merged_at: null
@@ -4426,7 +4458,7 @@ prs:
       /home/matt/.pm/workdirs/qa/pr-fd54424-438336bf7dacd96b)'
     created_at: '2026-03-08T20:16:53Z'
     last_edited: '2026-03-08T20:16:53Z'
-  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-fd54424-add-interactive-pm-tutorial-command--8023bb22
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-fd54424-add-interactive-pm-tutorial-command--ab512a43
 - id: pr-3032fb6
   plan: watchers
   title: 'Watcher core framework: BaseWatcher, WatcherManager, and auto-start refactor'
@@ -4561,9 +4593,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/137
   gh_pr_number: 137
   created_at: '2026-03-08T21:45:42.636585+00:00'
-  updated_at: '2026-03-22T19:20:54.768396+00:00'
+  updated_at: '2026-03-23T13:18:57.337047+00:00'
   started_at: '2026-03-10T21:38:57.198809+00:00'
-  reviewed_at: '2026-03-22T19:04:10.021257+00:00'
+  reviewed_at: '2026-03-23T13:18:57.337047+00:00'
   merged_at: null
   notes:
   - id: note-834855f
@@ -4595,6 +4627,37 @@ prs:
     text: 'QA ERROR:  (workdir: /home/mjtomei/.pm/workdirs/qa/pr-0b827df-93218e8d27ec4b9b)'
     created_at: '2026-03-22T18:52:30Z'
     last_edited: '2026-03-22T18:52:30Z'
+  - id: note-20cfcd2
+    text: 'QA NEEDS_WORK: Tasks pane toggle and basic group display: NEEDS_WORK; Empty
+      tasks pane state and content height: PASS; Task entry display — PR title truncation
+      and expand: PASS; Navigation — j/k movement and J/K group jumping: PASS; Expand/collapse
+      multi-window QA entries with: PASS; Window switching via Enter key: PASS; PR
+      actions from tasks pane — _get_active_pr_id uses: NEEDS_WORK; Polling and live
+      updates — tasks appear/disappear: PASS; Expansion state preserved across polls:
+      PASS; Watcher entry display — active spinner and INPUT_REQ: PASS; Mobile mode
+      auto-transition and restoration: INPUT_REQUIRED; Mobile mode fires on_mount
+      via: PASS; Guide mode interaction with tasks pane — T exits: NEEDS_WORK; View
+      exclusivity — exactly one view visible at all: PASS; No PR match for window
+      and unknown window patterns: PASS; Selection clamping after poll removes selected
+      item: PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-0b827df-0c2cb1730e4e9231)'
+    created_at: '2026-03-22T19:55:47Z'
+    last_edited: '2026-03-22T19:55:47Z'
+  - id: note-cb79f13
+    text: 'QA NEEDS_WORK: Tasks pane toggle and basic group display: PASS; Tasks pane
+      navigation — j/k movement and J/K group jumping: PASS; Expand/collapse multi-window
+      QA entries: PASS; Window switching via Enter key: NEEDS_WORK; PR actions from
+      tasks pane — _get_active_pr_id: PASS; Guide mode interaction — T key and GuideProgress
+      focus behavior: PASS; Mobile mode auto-transition — fires on resize and on_mount,
+      restores previous view: PASS; Polling and live updates — tasks appear/disappear
+      within ~2s: PASS; Expansion state preserved across polls: PASS; Watcher entry
+      display — active spinner and INPUT_REQ marker: PASS; Help screen shows tasks-specific
+      keybindings: PASS; Empty tasks pane state and footer: PASS; View exclusivity
+      — exactly one view visible at all times: PASS; No PR match for window and unknown
+      window patterns: PASS; Selection clamping after poll removes selected item:
+      PASS; Blocked actions in tasks view logged at DEBUG (not INFO): NEEDS_WORK (workdir:
+      /home/mjtomei/.pm/workdirs/qa/pr-0b827df-c16f3600a94a4026)'
+    created_at: '2026-03-23T13:50:21Z'
+    last_edited: '2026-03-23T13:50:21Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b827df-add-running-tasks-pane-to-tui-with-w-cbe54f5e
   spec_qa: /home/mjtomei/project_manager/pm/specs/pr-0b827df/qa.md
 - id: pr-341100c
@@ -4824,7 +4887,7 @@ prs:
   plan: watchers
   title: Add high-effort watcher supervisors that monitor and coach lower-effort sessions
   branch: pm/pr-871dbf5-add-high-effort-watcher-supervisors-that-monitor-a
-  status: in_review
+  status: qa
   depends_on:
   - pr-3032fb6
   description: 'Add a new watcher type that runs at high effort (Opus-level) and monitors
@@ -4881,15 +4944,34 @@ prs:
     course-correct
 
     - The feedback log lets us evaluate ROI and tune the approach'
-  agent_machine: spark-424d
+  agent_machine: arch-home
   gh_pr: https://github.com/mjtomei/project_manager/pull/144
   gh_pr_number: 144
   created_at: '2026-03-08T23:09:07.312432+00:00'
-  updated_at: '2026-03-14T21:54:58.823224+00:00'
+  updated_at: '2026-04-04T14:17:04.718380+00:00'
   started_at: '2026-03-14T17:21:14.310809+00:00'
   reviewed_at: '2026-03-14T21:54:58.823224+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-9e01251
+    text: 'QA PASS: Existing unit tests pass: PASS; SupervisorWatcher class configuration
+      and BaseWatcher integration: PASS; Per-instance unique window names: PASS; Prompt
+      generation with session and target filter: PASS; Prompt includes correct log
+      path and JSON format: PASS; Verdict parsing — all verdict types and fallback:
+      PASS; should_continue — verdicts that continue vs stop: PASS; build_launch_cmd
+      — correct CLI arguments: PASS; on_verdict is a no-op (logging only): PASS; Feedback
+      logging — write and read round-trip: PASS; read_feedback_log with target_filter
+      and limit: PASS; read_feedback_log with missing directory: PASS; read_feedback_log
+      with malformed JSONL lines: PASS; format_feedback_log output: PASS; CLI supervisor
+      start — requires tmux: PASS; CLI supervisor start --count > 1 rejected: PASS;
+      CLI supervisor log command: PASS; CLI supervisor stop shows guidance: PASS;
+      CLI supervisor-iter hidden command: PASS; TUI verdict icons for new supervisor
+      verdicts: PASS; TUI start_watcher passes target_filter for supervisor type:
+      PASS; Watcher list command includes supervisor: PASS; Prompt instructs Claude
+      to skip supervisor windows: PASS; CLI supervisor start with --target and --wait
+      flags: PASS; FeedbackEntry dataclass field completeness: PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-871dbf5-edac1874b2782501)'
+    created_at: '2026-04-04T14:34:26Z'
+    last_edited: '2026-04-04T14:34:26Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-871dbf5-add-high-effort-watcher-supervisors--cbe54f5e
 - id: pr-b7ada6a
   plan: tui-ux
@@ -5087,7 +5169,12 @@ prs:
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-85c3833
+    text: 'QA INPUT_REQUIRED:  (workdir: /home/mjtomei/.pm/workdirs/qa/pr-18ac983-e21fdbbf66b41d89)'
+    created_at: '2026-04-04T14:56:24Z'
+    last_edited: '2026-04-04T14:56:24Z'
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-18ac983-session-health-watcher-detect-and-re-63382040
 - id: pr-945546e
   plan: watchers
   title: 'Project state watcher: monitor project health and recommend actions'
@@ -5251,11 +5338,11 @@ prs:
     For plan select, auto-expands collapsed plan groups and moves cursor to the first
     PR in that plan. Works with display IDs (#125) and raw IDs (pr-942aa21) as before,
     plus now also partial matches.'
-  agent_machine: spark-424d
+  agent_machine: arch-home
   gh_pr: https://github.com/mjtomei/project_manager/pull/136
   gh_pr_number: 136
   created_at: '2026-03-09T16:23:27.180369+00:00'
-  updated_at: '2026-03-11T00:23:28.233394+00:00'
+  updated_at: '2026-03-23T13:16:45.851043+00:00'
   started_at: '2026-03-10T15:18:02.866746+00:00'
   reviewed_at: '2026-03-11T00:23:28.233394+00:00'
   merged_at: null
@@ -5274,7 +5361,7 @@ prs:
       exact ID: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-6aa74c6-32ce8ddb3cb52310)'
     created_at: '2026-03-14T22:07:31Z'
     last_edited: '2026-03-14T22:07:31Z'
-  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-6aa74c6-fuzzy-select-for-pr-and-plan-command-10e74920
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-6aa74c6-fuzzy-select-for-pr-and-plan-command-ab512a43
 - id: pr-98bf8df
   plan: plan-qa
   title: QA start responsiveness with progress feedback
@@ -5319,11 +5406,11 @@ prs:
     (merge, back-to-review, etc.). The initial scenario list and window names are
     seeded into qa_status.json by the TUI at launch time, and qa_status.py takes over
     monitoring from there.'
-  agent_machine: spark-424d
+  agent_machine: arch-home
   gh_pr: https://github.com/mjtomei/project_manager/pull/145
   gh_pr_number: 145
   created_at: '2026-03-09T20:05:57.251516+00:00'
-  updated_at: '2026-03-14T22:12:44.106792+00:00'
+  updated_at: '2026-03-23T13:14:52.951803+00:00'
   started_at: '2026-03-14T21:52:27.806921+00:00'
   reviewed_at: '2026-03-14T22:12:44.106792+00:00'
   merged_at: null
@@ -5406,7 +5493,7 @@ prs:
   plan: plan-qa
   title: Session cleanup for stale containers and push proxies
   branch: pm/pr-ac12b47-session-cleanup-for-stale-containers-and-push-prox
-  status: qa
+  status: in_review
   depends_on:
   - pr-6836fad
   description: 'Add a cleanup function that removes stale containers and push proxies
@@ -5441,26 +5528,16 @@ prs:
 
     Depends on pr-6836fad (session tag in container names) since cleanup relies on
     the session tag prefix to find containers belonging to a session.'
-  agent_machine: MacBook-Pro.lan
+  agent_machine: arch-home
   gh_pr: https://github.com/mjtomei/project_manager/pull/143
   gh_pr_number: 143
   created_at: '2026-03-10T00:41:37.907137+00:00'
-  updated_at: '2026-03-23T17:27:21.486440+00:00'
+  updated_at: '2026-04-06T19:05:01.947943+00:00'
   started_at: '2026-03-14T04:37:49.204416+00:00'
-  reviewed_at: '2026-03-14T21:45:10.236298+00:00'
+  reviewed_at: '2026-03-23T17:33:04.632542+00:00'
   merged_at: null
-  notes:
-  - id: note-bbc0bfd
-    text: After pulling from remote, read the current version of every module this
-      PR modifies or calls into. The GitHub branch's version may be based on an older
-      master. Verify the spec's Ambiguity resolutions against the current code — this
-      is how a symlink-handling bug in cleanup_stale_proxy_dirs was missed on first
-      pass (adopted GitHub branch's implementation without checking that _kill_proxy_socket
-      already handled symlinks correctly in master).
-    created_at: '2026-03-23T17:27:21Z'
-    last_edited: '2026-03-23T17:27:21Z'
-  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ac12b47-session-cleanup-for-stale-containers-3e33a282
-  spec_impl: /workspace/pm/specs/pr-ac12b47/impl.md
+  notes: []
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-ac12b47-session-cleanup-for-stale-containers-ab512a43
 - id: pr-53e47a1
   plan: tui-ux
   title: Shift+key reverses cycle direction for TUI keybindings
@@ -5660,11 +5737,11 @@ prs:
     \ endpoint is available, ensure we have a translation/adapter layer\n   - Test\
     \ actual inference capability, not just connectivity\n   - Report model capabilities\
     \ and limitations clearly"
-  agent_machine: spark-424d
+  agent_machine: arch-home
   gh_pr: https://github.com/mjtomei/project_manager/pull/140
   gh_pr_number: 140
   created_at: '2026-03-11T17:38:30.495007+00:00'
-  updated_at: '2026-03-14T21:45:26.781038+00:00'
+  updated_at: '2026-03-23T13:17:38.033548+00:00'
   started_at: '2026-03-11T17:42:07.268473+00:00'
   reviewed_at: '2026-03-14T21:45:26.781038+00:00'
   merged_at: null
@@ -6736,7 +6813,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/148
   gh_pr_number: 148
   created_at: '2026-03-18T16:31:56.522254+00:00'
-  updated_at: '2026-03-19T16:25:44.605020+00:00'
+  updated_at: '2026-03-23T13:15:07.491165+00:00'
   started_at: '2026-03-18T16:42:13.266300+00:00'
   reviewed_at: '2026-03-19T16:25:44.605020+00:00'
   merged_at: null
@@ -7119,4 +7196,836 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
-es: []
+- id: pr-df1aa3f
+  plan: null
+  title: 'fix: rename tmux session after git init in guide to restore pm session access'
+  branch: pm/pr-df1aa3f-fix-rename-tmux-session-after-git-init-in-guide-to
+  status: pending
+  depends_on: []
+  description: 'When the guide initializes a new git repo for a user who has none,
+    the session tag changes (derived from the new git repo name/path hash). The tmux
+    session retains the old tag-based name, making `pm session` unable to find it
+    — it looks up the new tag and finds nothing.
+
+
+    The fix is to add a section to the guide prompt instructing the guide to rename
+    the tmux session with the correct new tag after git repo creation. The guide can:
+
+    1. Get the new tag by running `pm session --tag` (or compute it) after git init
+    / pm init
+
+    2. Rename the tmux session: `tmux rename-session $(tmux display-message -p ''#{session_name}'')
+    pm-<new-tag>`
+
+
+    This ensures the session remains accessible via `pm session` after the tag changes.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-25T19:34:49.847790+00:00'
+  updated_at: '2026-03-25T19:34:49.847790+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-945ba50
+  plan: plan-003
+  title: Replace project.yaml with SQLite database
+  branch: pm/pr-945ba50-replace-project-yaml-with-sqlite-database
+  status: pending
+  depends_on:
+  - pr-f38005f
+  description: 'Replace the YAML file-based state store with SQLite to get proper
+    ACID transactions, concurrent read safety, and atomic writes without hacks.
+
+
+    ## Motivation
+
+
+    project.yaml is a flat YAML file that requires file locking (pr-f38005f), atomic
+    staging writes, and parse-error guards to safely handle concurrent access from
+    the TUI, CLI, and background sync. These are workarounds for the absence of a
+    real database. SQLite provides all of this for free with better performance.
+
+
+    ## Approach
+
+
+    - Introduce a project.db SQLite database alongside (then replacing) project.yaml
+
+    - Schema mirrors current YAML structure: project table, prs table, plans table,
+    notes table
+
+    - store.py load/save API stays the same externally — implementation switches to
+    SQLite
+
+    - Migration: on first open, if project.yaml exists and project.db does not, import
+    from YAML
+
+    - All reads/writes go through sqlite3 with WAL mode enabled (concurrent readers,
+    single writer, no corruption on crash)
+
+    - Remove file locking, atomic staging, and parse-error guard workarounds once
+    migration is complete
+
+
+    ## Scope
+
+
+    - pm_core/store.py: replace yaml.load/dump with sqlite3 queries
+
+    - Migration path from existing project.yaml installs
+
+    - TUI reload becomes a lightweight SELECT instead of full file parse
+
+    - CLI commands unchanged from the user perspective'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-03-26T12:47:22.115142+00:00'
+  updated_at: '2026-03-26T12:47:35.403906+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-6ca8113
+  plan: plan-cb4ef69
+  title: Add `parent` field to plan schema
+  branch: pm/pr-6ca8113-add-parent-field-to-plan-schema
+  status: merged
+  depends_on: []
+  description: 'Add optional `parent` field to plan entries in project.yaml. Update
+    `store.py` to include `parent: null` in new plan entries. Add validation in `store.load()`
+    that `parent` references a valid plan ID (or null). Update `init_project` and
+    any plan creation paths to set `parent`. This is the foundation — no UI or behavioral
+    changes yet.
+
+
+    Tests: Test that plans with valid parent IDs load correctly. Test that plans with
+    invalid parent IDs raise validation errors. Test that plans with null parent are
+    treated as root plans. Test cycle detection (a plan cannot be its own ancestor).
+
+
+    Files: pm_core/store.py, tests/test_store.py'
+  agent_machine: arch-home
+  gh_pr: https://github.com/mjtomei/project_manager/pull/150
+  gh_pr_number: 150
+  created_at: '2026-04-04T15:58:06.096910+00:00'
+  updated_at: '2026-04-06T18:29:56.936421+00:00'
+  started_at: '2026-04-04T15:59:02.833618+00:00'
+  reviewed_at: '2026-04-06T17:30:15.011048+00:00'
+  merged_at: '2026-04-06T18:29:56.936421+00:00'
+  notes:
+  - id: note-962120d
+    text: removed new plan option from plan picker in tui (M key), please verify in
+      qa that M key still works and new plan option is gone
+    created_at: '2026-04-04T16:20:14Z'
+    last_edited: '2026-04-04T16:20:14Z'
+  - id: note-4cae795
+    text: 'QA ERROR: '
+    created_at: '2026-04-06T18:12:41Z'
+    last_edited: '2026-04-06T18:12:41Z'
+  - id: note-1cc1d45
+    text: 'QA PASS: Unit tests pass — all 17 test_store.py tests: PASS; make_plan_entry
+      helper produces correct output: PASS; All plan creation paths include parent
+      field: PASS; Backward compatibility — real project.yaml loads without error:
+      PASS; VALID_PLAN_STATUSES constant is correct: PASS; TUI PlanPickerScreen —
+      "New plan" option removed, M key works: PASS; PlanValidationError is a distinct
+      exception type: PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-6ca8113-bc43e63528aaf89b)'
+    created_at: '2026-04-06T18:30:18Z'
+    last_edited: '2026-04-06T18:30:18Z'
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-6ca8113-add-parent-field-to-plan-schema-63382040
+  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-6ca8113/qa.md
+- id: pr-939d8cf
+  plan: plan-cb4ef69
+  title: Add hierarchy traversal helpers to store
+  branch: pm/pr-939d8cf-add-hierarchy-traversal-helpers-to-store
+  status: pending
+  depends_on:
+  - pr-6ca8113
+  description: 'Add functions to store.py for navigating the plan tree: `get_children(data,
+    plan_id)` returns direct children, `get_ancestors(data, plan_id)` returns the
+    ancestor chain, `get_subtree(data, plan_id)` returns all descendants, `get_root_plans(data)`
+    returns plans with no parent, `is_ancestor(data, ancestor_id, descendant_id)`
+    for cycle checks. These are pure data helpers with no side effects.
+
+
+    Tests: Test each helper with a 3-level hierarchy. Test edge cases: root plans,
+    leaf plans, empty project. Test `is_ancestor` with direct parent, grandparent,
+    non-ancestor, and self.
+
+
+    Files: pm_core/store.py, tests/test_store.py'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-04T15:58:06.096953+00:00'
+  updated_at: '2026-04-04T15:58:06.096953+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-e839314
+  plan: plan-cb4ef69
+  title: Plan parser support for `## Plans` section
+  branch: pm/pr-e839314-plan-parser-support-for-plans-section
+  status: merged
+  depends_on: []
+  description: 'Extend `plan_parser.py` to parse a `## Plans` section from parent
+    plan markdown files. Add `parse_plan_children()` function that extracts child
+    plan blocks (similar to `parse_plan_prs()`). Each block has: title, summary, status,
+    id. Add `extract_field()` support for the summary field. This is parsing only
+    — no load/write behavior.
+
+
+    Tests: Test parsing a plan file with `## Plans` section containing multiple children.
+    Test parsing a plan with both `## Plans` and `## PRs` sections. Test parsing a
+    plan with no `## Plans` section (returns empty list). Test field extraction for
+    summary, status, id.
+
+
+    Files: pm_core/plan_parser.py, tests/test_plan_parser.py'
+  agent_machine: arch-home
+  gh_pr: https://github.com/mjtomei/project_manager/pull/151
+  gh_pr_number: 151
+  created_at: '2026-04-04T15:58:06.096976+00:00'
+  updated_at: '2026-04-06T18:19:07.766704+00:00'
+  started_at: '2026-04-04T15:59:22.837433+00:00'
+  reviewed_at: '2026-04-04T16:11:55.101170+00:00'
+  merged_at: '2026-04-06T18:19:07.766704+00:00'
+  notes: []
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-e839314-plan-parser-support-for-plans-sectio-63382040
+- id: pr-6c5e53c
+  plan: plan-cb4ef69
+  title: '`pm plan add --parent` option'
+  branch: pm/pr-6c5e53c-pm-plan-add-parent-option
+  status: pending
+  depends_on:
+  - pr-6ca8113
+  description: 'Add `--parent` option to `pm plan add` command. When specified, sets
+    the `parent` field on the new plan entry. Validates that the parent plan exists.
+    The Claude session prompt for plan development should include the parent plan''s
+    content as context so the child plan is developed with awareness of the parent''s
+    goals and scope.
+
+
+    Tests: Test that `pm plan add --parent plan-top` creates a plan with correct parent
+    field. Test that `--parent` with nonexistent plan ID raises an error. Test that
+    omitting `--parent` creates a root plan (parent: null).
+
+
+    Files: pm_core/cli/plan.py, tests/test_plan_cli.py'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-04T15:58:06.096997+00:00'
+  updated_at: '2026-04-04T15:58:06.096997+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-c53b937
+  plan: plan-cb4ef69
+  title: '`pm plan load` handles `## Plans` section'
+  branch: pm/pr-c53b937-pm-plan-load-handles-plans-section
+  status: pending
+  depends_on:
+  - pr-e839314
+  - pr-6ca8113
+  description: 'Extend `pm plan load` to process the `## Plans` section in parent
+    plan files. For each child plan block: if a plan with matching ID already exists,
+    update its name and status; if not, create a new plan entry with the parent set.
+    This mirrors how `## PRs` blocks create PR entries. Also update the child plan''s
+    markdown file header if it was just created. Does not recurse — loading a parent
+    plan creates/links children but does not load their PRs.
+
+
+    Tests: Test loading a parent plan creates child plan entries with correct parent
+    field. Test loading when child plans already exist updates metadata without duplicating.
+    Test that child plan markdown files are created when missing.
+
+
+    Files: pm_core/cli/plan.py, pm_core/plan_parser.py, tests/test_plan_cli.py'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-04T15:58:06.097018+00:00'
+  updated_at: '2026-04-04T15:58:06.097018+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-67e53e9
+  plan: plan-cb4ef69
+  title: TUI plans pane tree rendering
+  branch: pm/pr-67e53e9-tui-plans-pane-tree-rendering
+  status: pending
+  depends_on:
+  - pr-939d8cf
+  description: 'Update `PlansPane` to render plans as a tree. Root plans render at
+    the left edge; children indent with tree characters (├── and └──). Show aggregate
+    PR count for parent plans (sum of own + descendants'' PRs). Add expand/collapse
+    toggle: collapsed parents show as a single line with child count; expanded parents
+    show their children below. Persist expand/collapse state in the widget. **Human-guided
+    testing needed**: tree rendering with various hierarchy depths, expand/collapse
+    keyboard interaction, visual alignment of tree characters.
+
+
+    Tests: Test that `update_plans()` with hierarchical data produces correct tree
+    ordering. Test expand/collapse state toggling. Test aggregate PR count calculation.
+    Test rendering with 1-level, 2-level, and 3-level hierarchies. Test that flat
+    plans (no parent) render identically to current behavior.
+
+
+    Files: pm_core/tui/plans_pane.py, pm_core/tui/app.py, tests/test_plans_pane.py'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-04T15:58:06.097037+00:00'
+  updated_at: '2026-04-04T15:58:06.097037+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-8e6bc47
+  plan: plan-cb4ef69
+  title: 'Plan review: parent context for child reviews'
+  branch: pm/pr-8e6bc47-plan-review-parent-context-for-child-reviews
+  status: pending
+  depends_on:
+  - pr-939d8cf
+  description: 'When reviewing a child plan (one with a `parent` field), include the
+    parent plan''s content in the review prompt. The parent plan already contains
+    the `## Plans` section with sibling summaries, so no separate sibling data is
+    needed — the parent file is sufficient context. The review prompt should instruct
+    Claude to: check that the child plan''s work aligns with the parent''s goals,
+    flag work that might belong in a sibling (referencing the parent''s summaries),
+    and anticipate cross-cutting issues.
+
+
+    Tests: Test that child plan review prompt includes parent plan file content. Test
+    that no separate sibling plan data is injected (parent file covers it). Test that
+    root plan review does not include parent context.
+
+
+    Files: pm_core/cli/plan.py, pm_core/review.py, tests/test_plan_review.py'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-04T15:58:06.097056+00:00'
+  updated_at: '2026-04-04T15:58:06.097056+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-6f04a57
+  plan: plan-cb4ef69
+  title: 'Plan review: summary accuracy checking for parent plans'
+  branch: pm/pr-6f04a57-plan-review-summary-accuracy-checking-for-parent-p
+  status: pending
+  depends_on:
+  - pr-e839314
+  - pr-8e6bc47
+  description: 'When reviewing a parent plan (one that has children), the review prompt
+    lists child plans by ID, name, status, and file path — with instructions on how
+    to read them (e.g. `Read the file at pm/plans/plan-auth.md`). It does NOT include
+    full child plan content in the prompt. The reviewer is instructed to read child
+    plan files as needed to verify that the `## Plans` summaries are still accurate.
+    The prompt should instruct Claude to flag: summaries that no longer match the
+    child''s actual scope, children in project.yaml missing from the `## Plans` section,
+    status mismatches, and coverage gaps where parent goals aren''t addressed by any
+    child. Suggest specific edits to the `## Plans` section.
+
+
+    Tests: Test that parent plan review prompt lists child plans with file paths.
+    Test that full child plan content is NOT embedded in the prompt. Test that review
+    instructions reference reading child files.
+
+
+    Files: pm_core/cli/plan.py, pm_core/review.py, tests/test_plan_review.py'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-04T15:58:06.097076+00:00'
+  updated_at: '2026-04-04T15:58:06.097076+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-b4ee7f9
+  plan: plan-cb4ef69
+  title: '`pm plan reparent` command'
+  branch: pm/pr-b4ee7f9-pm-plan-reparent-command
+  status: pending
+  depends_on:
+  - pr-939d8cf
+  description: 'Add `pm plan reparent <plan-id> [--parent <new-parent-id>]` command.
+    Moves a plan to a new parent, or to root if `--parent` is omitted. Validates:
+    target parent exists, no cycle would be created (plan cannot become its own ancestor),
+    plan is not already under the target parent. After reparenting, prints a warning
+    listing affected parent plans whose `## Plans` sections may need updating, and
+    suggests running `pm plan review` on them. **Human-guided testing needed**: verify
+    reparent with TUI refresh, check that plans pane reflects new hierarchy.
+
+
+    Tests: Test reparenting a child to a different parent. Test reparenting to root
+    (clearing parent). Test cycle detection rejects self-parenting and indirect cycles.
+    Test error on nonexistent target parent. Test warning message lists affected plans.
+
+
+    Files: pm_core/cli/plan.py, tests/test_plan_cli.py'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-04T15:58:06.097097+00:00'
+  updated_at: '2026-04-04T15:58:06.097097+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-bfc8ace
+  plan: plan-cb4ef69
+  title: '`pm pr move` with cross-plan integrity checks'
+  branch: pm/pr-bfc8ace-pm-pr-move-with-cross-plan-integrity-checks
+  status: pending
+  depends_on:
+  - pr-939d8cf
+  description: 'Add `pm pr move <pr-id> --plan <target-plan-id>` command (or enhance
+    existing `pm pr edit --plan`). Moves a PR to a different plan. After moving, checks
+    whether the PR''s dependencies are still satisfiable (warns if depends_on PRs
+    are in unrelated plans). Prints a warning listing affected plans whose summaries
+    or PR coverage may need review. Also supports moving a PR to a plan in a different
+    subtree of the hierarchy. **Human-guided testing needed**: verify PR moves reflect
+    correctly in TUI tech tree and plans pane.
+
+
+    Tests: Test moving a PR between plans in same subtree. Test moving a PR to an
+    unrelated plan. Test dependency warning when depends_on PR is in a different subtree.
+    Test error on nonexistent target plan.
+
+
+    Files: pm_core/cli/pr.py, pm_core/cli/plan.py, tests/test_pr_cli.py'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-04T15:58:06.097116+00:00'
+  updated_at: '2026-04-04T15:58:06.097116+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-edf320e
+  plan: plan-cb4ef69
+  title: Tech tree hierarchical plan group labels
+  branch: pm/pr-edf320e-tech-tree-hierarchical-plan-group-labels
+  status: pending
+  depends_on:
+  - pr-939d8cf
+  description: 'Update plan group labels in the tech tree to reflect hierarchy. When
+    PRs are grouped by plan, and the plan has a parent, prefix the plan label with
+    its ancestry path (e.g. "Project overview > Auth refactor") or indent it under
+    its parent group. This gives users hierarchy context without leaving the PR view.
+    The tree layout engine (`tree_layout.py`) should order plan groups so that children
+    appear after their parents. **Human-guided testing needed**: verify label rendering
+    with nested hierarchies, check that label scrolling and plan-jump navigation (`{`/`}`
+    keys) still work correctly with hierarchical labels.
+
+
+    Tests: Test that plan group labels include parent context when hierarchy exists.
+    Test label ordering follows hierarchy (parent groups before children). Test that
+    flat plans (no hierarchy) render labels identically to current behavior. Test
+    plan-jump navigation across hierarchical groups.
+
+
+    Files: pm_core/tui/tech_tree.py, pm_core/tui/tree_layout.py, tests/test_tech_tree.py'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-04T15:58:06.097135+00:00'
+  updated_at: '2026-04-04T15:58:06.097135+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-b011eb1
+  plan: plan-cb4ef69
+  title: Tech tree collapse-all-leaves action
+  branch: pm/pr-b011eb1-tech-tree-collapse-all-leaves-action
+  status: pending
+  depends_on:
+  - pr-edf320e
+  description: 'Add a `C` keybinding in the tech tree that collapses all leaf-level
+    plan groups (plans with no children — the ones containing PRs). This gives a birds-eye
+    view showing only the plan hierarchy labels. The user can then selectively expand
+    individual plan groups with `Enter` or `space` to drill into the PRs they care
+    about. Add an `E` keybinding to expand all groups back. Update the footer to show
+    `C`=collapse-all and `E`=expand-all. **Human-guided testing needed**: full interaction
+    flow — collapse all, navigate between collapsed groups, expand one, verify PRs
+    appear, expand all restores full view.
+
+
+    Tests: Test that `C` collapses all leaf plan groups. Test that collapsed groups
+    show as label-only rows. Test that `Enter`/`space` on a collapsed group expands
+    it. Test that `E` expands all groups. Test that navigation between collapsed groups
+    works correctly.
+
+
+    Files: pm_core/tui/tech_tree.py, pm_core/tui/tree_layout.py, tests/test_tech_tree.py'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-04T15:58:06.097154+00:00'
+  updated_at: '2026-04-04T15:58:06.097154+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-1e674f3
+  plan: plan-cb4ef69
+  title: TUI hierarchy mutation shortcuts
+  branch: pm/pr-1e674f3-tui-hierarchy-mutation-shortcuts
+  status: pending
+  depends_on:
+  - pr-67e53e9
+  - pr-b4ee7f9
+  - pr-bfc8ace
+  description: 'Add keyboard shortcuts in the plans pane for hierarchy mutation. `R`
+    to reparent the selected plan (opens a selection modal for target parent), `M`
+    to move PRs (switches to PR selection within the plan, then target plan selection).
+    These shortcuts launch the underlying CLI commands via pane operations. Update
+    the footer to show new shortcuts. **Human-guided testing needed**: full interactive
+    flow of reparent and move via TUI, modal selection UX, footer display.
+
+
+    Tests: Test that `R` key fires the correct PlanAction. Test that `M` key fires
+    the correct PlanAction. Test footer rendering includes new shortcuts.
+
+
+    Files: pm_core/tui/plans_pane.py, pm_core/tui/app.py, pm_core/tui/pane_ops.py,
+    tests/test_plans_pane.py'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-04T15:58:06.097172+00:00'
+  updated_at: '2026-04-04T15:58:06.097172+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-83b98d5
+  plan: improvements
+  title: Merge PR notes from both main and workdir project.yaml into prompts
+  branch: pm/pr-83b98d5-merge-pr-notes-from-both-main-and-workdir-project-
+  status: merged
+  depends_on: []
+  description: 'Currently _format_pr_notes in prompt_gen.py only reads notes from
+    the main repo project.yaml. Notes added from a workdir session (e.g. by an implementation
+    Claude running pm pr note add from the workdir) end up in the workdir copy of
+    project.yaml but not the main copy. When prompts are generated for review or subsequent
+    sessions, these workdir-only notes are lost.
+
+
+    Modify _format_pr_notes (prompt_gen.py:31-41) to also load the PR entry from the
+    workdir project.yaml (using the pr workdir field), collect notes from both sources,
+    deduplicate by note ID, and merge them into the prompt. This ensures notes added
+    from either location appear in all prompts.
+
+
+    Key changes:
+
+    - In _format_pr_notes, accept the workdir path (from pr.get("workdir"))
+
+    - If the workdir exists and has a pm/project.yaml, load it and find the matching
+    PR entry
+
+    - Collect notes from both main and workdir PR entries
+
+    - Deduplicate by note ID (prefer the version with the later last_edited timestamp)
+
+    - Sort merged notes by created_at
+
+    - Update all callers of _format_pr_notes to pass the workdir path'
+  agent_machine: arch-home
+  gh_pr: https://github.com/mjtomei/project_manager/pull/152
+  gh_pr_number: 152
+  created_at: '2026-04-04T16:32:19.297115+00:00'
+  updated_at: '2026-04-06T19:17:21.660943+00:00'
+  started_at: '2026-04-06T18:35:47.532852+00:00'
+  reviewed_at: '2026-04-06T18:51:09.878626+00:00'
+  merged_at: '2026-04-06T19:17:21.660943+00:00'
+  notes:
+  - id: note-359211c
+    text: 'QA PASS: Unit tests pass — all existing and new tests green: PASS; Workdir
+      notes merge into main notes: PASS; Deduplication prefers later last_edited timestamp:
+      PASS; Dedup fallback to created_at when last_edited missing: PASS; Merged notes
+      sorted by created_at: PASS; Graceful degradation — nonexistent workdir path:
+      PASS; Graceful degradation — workdir exists but PR not found: PASS; Both sources
+      empty — returns empty string: PASS; Only workdir has notes, main has none: PASS;
+      All 5 callers pass workdir correctly: PASS; No mutation of input pr dict or
+      notes lists: PASS; Integration — generate_prompt includes workdir notes: PASS;
+      Integration — generate_review_prompt includes workdir notes: PASS (workdir:
+      /home/mjtomei/.pm/workdirs/qa/pr-83b98d5-bfdf20274c963582)'
+    created_at: '2026-04-06T19:07:59Z'
+    last_edited: '2026-04-06T19:07:59Z'
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-83b98d5-merge-pr-notes-from-both-main-and-wo-b1d18e14
+  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-83b98d5/qa.md
+- id: pr-7251b72
+  plan: improvements
+  title: Refuse pm pr start when PR is not committed on base branch
+  branch: pm/pr-7251b72-refuse-pm-pr-start-when-pr-is-not-committed-on-bas
+  status: merged
+  depends_on: []
+  description: 'When pm pr start clones the main repo to create a workdir, it clones
+    from the committed state of master (or the configured base_branch). If the PR
+    entry has been added to project.yaml but not yet committed to git, the workdir
+    clone will not contain that PR entry. This causes confusing failures downstream
+    when the implementation session tries to read its own PR from the workdir project.yaml.
+
+
+    Add a pre-start check that verifies the PR ID exists in the committed (git show
+    HEAD:pm/project.yaml) version of project.yaml before proceeding with the clone.
+    If the PR is not committed, print a clear error message telling the user to commit
+    the pm state first (e.g. via pm push or git commit) and refuse to start.
+
+
+    Key changes:
+
+    - In pr_start (cli/pr.py), before cloning, read the committed project.yaml from
+    git (git show HEAD:pm/project.yaml)
+
+    - Check that the PR ID appears in the committed data
+
+    - If missing, emit an error like "PR {pr_id} is not committed to {base_branch}
+    yet. Run pm push to commit project state before starting."
+
+    - Exit with a non-zero return code'
+  agent_machine: arch-home
+  gh_pr: https://github.com/mjtomei/project_manager/pull/153
+  gh_pr_number: 153
+  created_at: '2026-04-04T16:32:21.564023+00:00'
+  updated_at: '2026-04-06T19:33:32.459784+00:00'
+  started_at: '2026-04-06T18:36:08.322443+00:00'
+  reviewed_at: '2026-04-06T18:53:49.187083+00:00'
+  merged_at: '2026-04-06T19:33:32.459784+00:00'
+  notes:
+  - id: note-1537d29
+    text: 'QA PASS: PR not in committed project.yaml is blocked: PASS; git show failure
+      triggers the same block: PASS; Invalid YAML in committed project.yaml is treated
+      as not-committed: PASS; Non-dict YAML (e.g. list or scalar) is treated as not-committed:
+      PASS; PR committed on base_branch — happy path proceeds: PASS; Spec-pending
+      gate still takes priority over committed-state check: PASS; Spec gate passes
+      and committed-state check runs in sequence: PASS; Empty committed project.yaml
+      (yaml.safe_load returns None): PASS; Error message goes to stderr not stdout:
+      PASS; Standalone PM dir uses correct git show path: PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-7251b72-91d6492487c83ce7)'
+    created_at: '2026-04-06T19:26:06Z'
+    last_edited: '2026-04-06T19:26:06Z'
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-7251b72-refuse-pm-pr-start-when-pr-is-not-co-b1d18e14
+  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-7251b72/qa.md
+  spec_impl: /workspace/pm/specs/pr-7251b72/impl.md
+- id: pr-e3cf481
+  plan: null
+  title: Add file-locked read-modify-write helper for pane registry
+  branch: pm/pr-e3cf481-add-file-locked-read-modify-write-helper-for-pane-
+  status: in_review
+  depends_on: []
+  description: 'The pane registry (pane_registry.py) uses a load→modify→save pattern
+    on a shared JSON file with no file locking. When the QA loop spawns many panes
+    in parallel, concurrent register_pane/unregister_pane calls race each other —
+    the last writer wins, silently dropping data from concurrent writers. This causes
+    existing panes (like a claude pane launched with ''c'') to disappear from the
+    registry, so pressing ''c'' again launches a duplicate instead of focusing the
+    existing one.
+
+
+    Fix:
+
+    1. Add a generic locked_read_modify_write(path, modifier_fn) helper that uses
+    fcntl.flock for cross-process file locking around the load→modify→save cycle.
+
+    2. Convert pane_registry.py save_registry to use atomic write (temp file + rename)
+    like store.py already does.
+
+    3. Replace the bare load→modify→save calls in register_pane, unregister_pane,
+    kill_and_unregister, and _reconcile_registry with the new locked helper.
+
+    4. Add tests for the locking helper (concurrent writers, timeout behavior).'
+  agent_machine: arch-home
+  gh_pr: https://github.com/mjtomei/project_manager/pull/154
+  gh_pr_number: 154
+  created_at: '2026-04-06T18:36:59.216942+00:00'
+  updated_at: '2026-04-06T19:13:19.491747+00:00'
+  started_at: '2026-04-06T18:39:53.655732+00:00'
+  reviewed_at: '2026-04-06T19:09:23.080520+00:00'
+  merged_at: null
+  notes:
+  - id: note-b2e9be2
+    text: 'Secondary fix needed: the TUI respawn fallback in _session_start (session.py:248)
+      uses get_window_id(session_name) which returns the base session''s active window,
+      not window 0/main. When the registry is clobbered and the TUI role is missing,
+      this causes the TUI to be respawned in whatever window the base session happens
+      to have active (e.g. a QA window). The fallback should target the window named
+      ''main'' or window index 0 instead.'
+    created_at: '2026-04-06T19:12:13Z'
+    last_edited: '2026-04-06T19:12:13Z'
+  - id: note-bb6bc1a
+    text: 'QA NEEDS_WORK: Unit test suite passes — all 33 tests green: NEEDS_WORK;
+      Concurrent writers — no data loss under thread contention: NEEDS_WORK; Lock
+      timeout raises TimeoutError: PASS; Lock released after modifier exception: PASS;
+      Atomic save_registry — no truncated reads: PASS; register_pane and unregister_pane
+      use locked_read_modify_write: PASS; _reconcile_registry does tmux calls outside
+      the lock: PASS; _prepare_registry_data handles all input cases: PASS; TUI respawn
+      fallback targets ''main'' window instead of active window: PASS; Modifier returning
+      None skips file write: PASS; Lock file sidecar pattern and cleanup: PASS (workdir:
+      /home/mjtomei/.pm/workdirs/qa/pr-e3cf481-aaceab727c64fcf6)'
+    created_at: '2026-04-06T19:36:09Z'
+    last_edited: '2026-04-06T19:36:09Z'
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-e3cf481-add-file-locked-read-modify-write-he-b1d18e14
+- id: pr-cb2a29d
+  plan: null
+  title: Kill tmux windows and containers for merged PRs on TUI startup
+  branch: pm/pr-cb2a29d-kill-tmux-windows-and-containers-for-merged-prs-on
+  status: in_progress
+  depends_on: []
+  description: 'When a PR is merged via the GitHub backend on the project_manager
+    repo, _finalize_merge calls kill_pr_windows inside a bare try/except that silently
+    swallows failures. The subsequent trigger_tui_restart causes the TUI to reload
+    with the status already set to merged, so neither the GitHub sync nor the background
+    sync treats it as newly merged — there is no second-chance cleanup.
+
+
+    Fix: On TUI startup (in _deferred_startup_sync or heal_registry), scan all merged
+    PRs and check if they still have live tmux windows (matching the naming patterns:
+    {display_id}, review-{display_id}, qa-{display_id}, qa-{display_id}-sN). Kill
+    any that exist. Also stop and remove any docker containers whose names match merged
+    PR workdir IDs.
+
+
+    Additionally, remove the bare except Exception: pass around kill_pr_windows in
+    _finalize_merge so failures are at least logged.'
+  agent_machine: arch-home
+  gh_pr: https://github.com/mjtomei/project_manager/pull/155
+  gh_pr_number: 155
+  created_at: '2026-04-06T18:53:56.850825+00:00'
+  updated_at: '2026-04-06T19:06:18.130597+00:00'
+  started_at: '2026-04-06T19:06:18.130597+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-cb2a29d-kill-tmux-windows-and-containers-for-29829145
+- id: pr-fc6db6a
+  plan: bugs
+  title: Prevent plain 'd' from opening duplicate review window when review loop is
+    running
+  branch: pm/pr-fc6db6a-prevent-plain-d-from-opening-duplicate-review-wind
+  status: in_progress
+  depends_on: []
+  description: 'When a review loop is running for a PR (started via zz d), pressing
+    plain d opens a second review window instead of telling the user a loop is already
+    active.
+
+
+    The done_pr() function in pr_view.py has a fast-path that checks for an existing
+    review-{display_id} tmux window and switches to it. But this can fail when:
+
+    1. get_pm_session() returns None due to the pane registry race condition (pr-e3cf481)
+
+    2. The review loop is between iterations and the window was momentarily killed
+
+
+    The function does NOT check app._review_loops to see if a loop is already managing
+    this PR. The zz d and zzz d handlers (start_or_stop_loop) do check this, but plain
+    d bypasses it.
+
+
+    Fix: In done_pr() (pr_view.py ~line 136), check app._review_loops.get(pr_id) before
+    proceeding. If a loop is running for the selected PR, show a message like ''Review
+    loop running — use z d to stop'' and return without spawning a second window.'
+  agent_machine: arch-home
+  gh_pr: https://github.com/mjtomei/project_manager/pull/156
+  gh_pr_number: 156
+  created_at: '2026-04-06T19:14:44.223134+00:00'
+  updated_at: '2026-04-06T19:17:16.583998+00:00'
+  started_at: '2026-04-06T19:17:16.583998+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-fc6db6a-prevent-plain-d-from-opening-duplica-5a6a6c1c
+- id: pr-177dec0
+  plan: bugs
+  title: Fix pr select not scrolling selected PR into view in TUI
+  branch: pm/pr-177dec0-fix-pr-select-not-scrolling-selected-pr-into-view-
+  status: in_progress
+  depends_on: []
+  description: When using the pr select command (e.g. from the command bar), the TUI
+    updates the selected PR but does not scroll the tech tree to bring it into view.
+    The selected PR ends up hidden behind the scroll bar and command line at the bottom
+    of the screen. It appears the scroll-into-view logic is not being triggered after
+    a programmatic selection change from the command bar, only from keyboard navigation
+    within the tree.
+  agent_machine: arch-home
+  gh_pr: https://github.com/mjtomei/project_manager/pull/157
+  gh_pr_number: 157
+  created_at: '2026-04-06T19:18:52.240715+00:00'
+  updated_at: '2026-04-06T19:20:59.040562+00:00'
+  started_at: '2026-04-06T19:20:59.040562+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-177dec0-fix-pr-select-not-scrolling-selected-d18c9763
+- id: pr-2d0588a
+  plan: improvements
+  title: Tmux popup PR switcher and prefix-key pm command runner
+  branch: pm/pr-2d0588a-tmux-popup-pr-switcher-and-prefix-key-pm-command-r
+  status: in_progress
+  depends_on: []
+  description: 'Add two tmux integrations registered via _register_tmux_bindings:
+    (1) A prefix-key binding (e.g. prefix+P) that opens a tmux display-popup with
+    an fzf-style picker listing all active PR windows grouped by PR. The picker defaults
+    to showing windows for the PR of the current active window (implementation, review,
+    QA phases). QA sessions are collapsible and collapsed by default so the list is
+    not cluttered — the user can expand them if needed. Selecting a window switches
+    to it in the current session only (using select-window, not switch_sessions_to_window).
+    (2) A prefix-key binding (e.g. prefix+C) that opens a tmux display-popup with
+    a pm command prompt — the user types a pm command, it runs in the popup, and if
+    the command opens a window it refocuses the invoking session only using the same
+    mechanism as TUI-launched commands. Both popups run and exit without affecting
+    the current window pane layout or resizing the TUI. Human-guided testing needed:
+    popup display from various window contexts, refocus behavior after selecting a
+    PR, QA collapse/expand, command execution in popup, verify TUI window is not resized.'
+  agent_machine: arch-home
+  gh_pr: https://github.com/mjtomei/project_manager/pull/158
+  gh_pr_number: 158
+  created_at: '2026-04-07T12:46:56.964240+00:00'
+  updated_at: '2026-04-07T12:52:01.016944+00:00'
+  started_at: '2026-04-07T12:49:34.016669+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d0588a-tmux-popup-pr-switcher-and-prefix-ke-d18c9763
+- id: pr-1735d44
+  plan: bugs
+  title: 'Consolidate window refocus: switch all co-viewing sessions consistently'
+  branch: pm/pr-1735d44-consolidate-window-refocus-switch-all-co-viewing-s
+  status: pending
+  depends_on: []
+  description: 'Window refocusing is split between tmux.select_window (switches one
+    session) and tmux.switch_sessions_to_window (switches all grouped sessions). The
+    correct behavior for all refocusing is: if multiple sessions are attached and
+    viewing the same window, they should all switch together. Currently select_window
+    is used in pr.py (4 call sites), meta.py, container.py, pr_view.py (2), pane_layout.py,
+    qa_status.py, and qa_loop.py — these only switch the invoking session, leaving
+    co-viewers behind. Consolidate into a single refocus function (e.g. tmux.focus_window)
+    that detects sessions currently viewing the same window as the caller and switches
+    them all. Replace all select_window and switch_sessions_to_window call sites with
+    the unified function. Human-guided testing needed: verify co-viewing sessions
+    follow the switch, verify sessions viewing different windows are not affected,
+    test from TUI-launched commands and from CLI.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-07T12:51:22.561975+00:00'
+  updated_at: '2026-04-07T12:51:22.561975+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []

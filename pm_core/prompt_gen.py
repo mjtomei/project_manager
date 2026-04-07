@@ -28,13 +28,50 @@ the appropriate key in the TUI instead.
 """
 
 
-def _format_pr_notes(pr: dict) -> str:
-    """Format PR notes as a markdown section, or empty string if none."""
-    pr_notes = pr.get("notes") or []
-    if not pr_notes:
+def _format_pr_notes(pr: dict, workdir: str | None = None) -> str:
+    """Format PR notes as a markdown section, or empty string if none.
+
+    Merges notes from the main project.yaml and the workdir project.yaml
+    (if present).  Deduplicates by note ID, preferring whichever copy has
+    the later ``last_edited`` timestamp.  The merged list is sorted by
+    ``created_at``.
+    """
+    main_notes = list(pr.get("notes") or [])
+
+    # Collect notes from the workdir project.yaml, if available.
+    workdir_notes: list[dict] = []
+    if workdir:
+        try:
+            wd_root = store.find_project_root(start=workdir)
+            wd_data = store.load(wd_root, validate=False)
+            wd_pr = store.get_pr(wd_data, pr["id"])
+            if wd_pr:
+                workdir_notes = list(wd_pr.get("notes") or [])
+        except Exception:
+            pass  # graceful degradation — use main notes only
+
+    # Merge: index by note ID, prefer later last_edited on collision.
+    merged: dict[str, dict] = {}
+    for n in main_notes + workdir_notes:
+        nid = n.get("id")
+        if nid is None:
+            # Notes without an ID can't be deduped; give them a unique key.
+            merged[id(n)] = n
+            continue
+        existing = merged.get(nid)
+        if existing is None:
+            merged[nid] = n
+        else:
+            new_ts = n.get("last_edited") or n.get("created_at", "")
+            old_ts = existing.get("last_edited") or existing.get("created_at", "")
+            if new_ts > old_ts:
+                merged[nid] = n
+
+    all_notes = sorted(merged.values(), key=lambda n: n.get("created_at", ""))
+    if not all_notes:
         return ""
     note_lines = []
-    for n in pr_notes:
+    for n in all_notes:
         ts = n.get("created_at", "")
         ts_str = f" ({ts})" if ts else ""
         note_lines.append(f"- {n['text']}{ts_str}")
@@ -91,7 +128,7 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
     tui_block = tui_section(session_name) if session_name else ""
 
     # Include PR notes (addendums added after work began)
-    pr_notes_block = _format_pr_notes(pr)
+    pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
 
     beginner_block = _beginner_addendum()
     cleanup_block = _auto_cleanup_addendum()
@@ -180,7 +217,7 @@ This PR is part of plan "{plan['name']}" ({plan['id']}). Other PRs in this plan:
         pass
 
     # Include PR notes (addendums)
-    pr_notes_block = _format_pr_notes(pr)
+    pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
 
     # Backend-appropriate diff and sync commands
     backend_name = data.get("project", {}).get("backend", "vanilla")
@@ -839,7 +876,7 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
         pass
 
     # Include PR notes (prior QA results, addendums)
-    pr_notes_block = _format_pr_notes(pr)
+    pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
 
     # Include QA spec if already generated, or preamble to generate one
     qa_spec_block = format_spec_for_prompt(pr, "qa")
@@ -959,7 +996,7 @@ def generate_qa_interactive_prompt(data: dict, pr_id: str,
     pr_workdir = pr.get("workdir", "")
     base_branch = data.get("project", {}).get("base_branch", "master")
 
-    pr_notes_block = _format_pr_notes(pr)
+    pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
 
     scratch_line = f"\n- **Scratch dir** (throwaway test projects): {scratch_dir}" if scratch_dir else ""
     if worktree_mode:
@@ -1078,7 +1115,7 @@ If a setup step fails or a required tool is unavailable, report
 """
 
     # Include PR notes (prior QA results, addendums)
-    pr_notes_block = _format_pr_notes(pr)
+    pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
 
     # Include mocks section from QA spec so every scenario uses the same strategy
     mocks_block = get_spec_mocks_section(pr)
