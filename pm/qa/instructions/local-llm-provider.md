@@ -55,6 +55,17 @@ pm model unset watcher
 pm provider remove test-ollama
 ```
 
+### 7. Remote Endpoint Testing (optional)
+
+If no local Ollama is available, set `PM_TEST_LLM_URL` to a remote OpenAI-compatible endpoint:
+
+```bash
+PM_TEST_LLM_URL=http://spark-424d.lan:30002 pytest tests/test_provider_integration.py -v
+```
+
+- Remote integration tests (TestRemoteLLMIntegration) should run and pass
+- Tests are skipped cleanly when the env var is not set
+
 ## Expected Behavior
 
 - Provider add performs real connectivity and inference checks
