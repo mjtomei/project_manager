@@ -211,8 +211,11 @@ def _build_git_setup_script(
     """
     lines: list[str] = []
 
-    # Set safe directory for /workspace
+    # Set safe directory for /workspace.
+    # Use plain git config (works when already running as pm) with su
+    # fallback (works when running as root in the default image).
     lines.append(
+        f"git config --global --add safe.directory {_CONTAINER_WORKDIR} 2>/dev/null || "
         f"su - {_CONTAINER_USER} -c "
         f"'git config --global --add safe.directory {_CONTAINER_WORKDIR}'"
     )
@@ -290,8 +293,14 @@ def _build_git_setup_script(
             'esac\n'
             'exec $REAL_GIT "$@"\n'
         )
-        wrapper_path = "/usr/local/bin/git"
-        lines.append(f"cat > {wrapper_path} << 'WRAPEOF'\n{wrapper_script}WRAPEOF\nchmod 755 {wrapper_path}")
+        # Install to the pm user's local bin — it's first on PATH in both
+        # the default image and project-specific images, and doesn't need
+        # root to write.  /usr/local/bin/git would require root which
+        # project-specific images (USER pm) don't have.
+        wrapper_path = f"{_CONTAINER_HOME}/.local/bin/git"
+        lines.append(f"mkdir -p {_CONTAINER_HOME}/.local/bin && "
+                     f"cat > {wrapper_path} << 'WRAPEOF'\n{wrapper_script}WRAPEOF\n"
+                     f"chmod 755 {wrapper_path}")
 
     return "; ".join(lines) if lines else ""
 
@@ -517,13 +526,19 @@ def create_container(
 
     git_setup = _build_git_setup_script(has_push_proxy=has_push_proxy,
                                         host_workdir=str(workdir) if has_push_proxy else None)
+    # User creation — no-ops when the image already has the pm user (e.g.
+    # project-specific images built via `pm container build`).
     setup_parts = [
-        f"groupadd -g {host_gid} {_CONTAINER_USER} 2>/dev/null",
-        f"useradd -u {host_uid} -g {host_gid} -m -s /bin/bash {_CONTAINER_USER} 2>/dev/null",
-        f"chown {host_uid}:{host_gid} {_CONTAINER_HOME}",
+        f"groupadd -g {host_gid} {_CONTAINER_USER} 2>/dev/null || true",
+        f"useradd -u {host_uid} -g {host_gid} -m -s /bin/bash {_CONTAINER_USER} 2>/dev/null || true",
+        f"chown {host_uid}:{host_gid} {_CONTAINER_HOME} 2>/dev/null || true",
     ]
     if git_name and git_email:
+        # Try as current user first (works when running as pm), fall back
+        # to su (works when running as root in the default image).
         setup_parts.append(
+            f"(git config --global user.name \"{git_name}\" && "
+            f"git config --global user.email \"{git_email}\") 2>/dev/null || "
             f"su -c 'git config --global user.name \"{git_name}\" && "
             f"git config --global user.email \"{git_email}\"' {_CONTAINER_USER}"
         )
@@ -538,15 +553,32 @@ def create_container(
     container_id = result.stdout.strip()
 
     # Wait for the setup script to finish (sentinel file appears).
+    # The setup installs the git push-proxy wrapper and configures the
+    # user — if we proceed before it completes, the wrapper won't exist
+    # and git push will bypass the proxy, failing with no credentials.
     import time
-    for _ in range(50):  # up to ~5 seconds
+    _SETUP_TIMEOUT = 30  # seconds — needs headroom under memory pressure
+    _POLL_INTERVAL = 0.2
+    _setup_ready = False
+    _deadline = time.monotonic() + _SETUP_TIMEOUT
+    while time.monotonic() < _deadline:
         check = _run_docker(
             "exec", name, "test", "-f", _READY_SENTINEL,
             check=False, timeout=5,
         )
         if check.returncode == 0:
+            _setup_ready = True
             break
-        time.sleep(0.1)
+        time.sleep(_POLL_INTERVAL)
+    if not _setup_ready:
+        _log.error("Container %s setup did not complete within %ds — "
+                   "git push proxy wrapper may not be installed",
+                   name, _SETUP_TIMEOUT)
+        raise ContainerError(
+            f"Container '{name}' setup timed out after {_SETUP_TIMEOUT}s. "
+            f"The system may be under memory pressure (try stopping unused "
+            f"containers with 'pm session cleanup')."
+        )
 
     # Copy .claude.json into the container (not bind-mounted — see note above)
     if _claude_json_src.exists():

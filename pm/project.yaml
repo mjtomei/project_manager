@@ -3,11 +3,11 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-e3cf481
+  active_pr: pr-8aa9411
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
-  hide_merged: false
+  hide_merged: true
 plans:
 - id: plan-001
   name: Import from existing repo
@@ -919,7 +919,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/109
   gh_pr_number: 109
   created_at: '2026-03-02T01:04:39.190560+00:00'
-  updated_at: '2026-03-23T13:14:22.104034+00:00'
+  updated_at: '2026-04-06T18:48:51.118103+00:00'
   started_at: '2026-03-02T01:04:39.190560+00:00'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-f38005f-add-file-locking-to-project-yaml-rea-ab512a43
   reviewed_at: '2026-03-02T01:27:28.059956+00:00'
@@ -930,6 +930,30 @@ prs:
       to locked_update too, or they can still overwrite with stale data.
     created_at: '2026-03-07T15:29:28Z'
     last_edited: '2026-03-07T15:29:28Z'
+  - id: note-60be829
+    text: 'QA NEEDS_WORK: Unit tests — test_store_locking.py and test_store.py pass:
+      PASS; Regression — all pre-existing test suites pass: PASS; Code audit — no
+      bare store.save() in CLI or TUI modules: PASS; Code audit — no network calls
+      inside locked_update callbacks: PASS; CLI integration — pm pr add creates correct
+      on-disk state: PASS; CLI integration — pm pr edit updates fields atomically:
+      PASS; CLI integration — pm pr select, pm plan add, pm model set: PASS; CLI integration
+      — pm pr close removes PR and cleans up: PASS; CLI integration — pm pr note add/edit/delete:
+      PASS; Concurrent pm pr add — no lost writes: NEEDS_WORK; StoreLockTimeout —
+      CLI error message: PASS; pm edit command — editor under lock: PASS; Atomic write
+      — file never truncated: PASS; Read-only permissions and YAML header after save:
+      PASS; Exception in mutation function — lock released, data unsaved: PASS; ProjectYamlParseError
+      — corrupt YAML handling: PASS; TUI sync graceful lock timeout handling: PASS;
+      pr_sync — network calls before lock, results applied inside lock: PASS; spec_gen
+      — locked_update for generate, approve, reject: PASS; plan_load and GitHub import
+      — concurrent-safe duplicate checks: PASS; watcher_ui — intentional store.save
+      for creation is preserved: PASS; _finalize_merge — no data parameter, loads
+      fresh inside lock: PASS; lock file left on disk after unlock — standard fcntl
+      pattern: PASS; make_plan_entry helper used consistently: PASS; helpers.py —
+      _ensure_workdir and _resolve_repo_id use locked_update: PASS; background_sync
+      handles corrupt YAML without clobbering app state: PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-f38005f-d8d59509902b0358)'
+    created_at: '2026-04-07T22:51:44Z'
+    last_edited: '2026-04-07T22:51:44Z'
+  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-f38005f/qa.md
 - id: pr-c11d04f
   plan: plan-003
   title: Add notes field to PRs for post-start addendums
@@ -4298,22 +4322,11 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/131
   gh_pr_number: 131
   created_at: '2026-03-07T15:58:50.876583+00:00'
-  updated_at: '2026-03-23T13:16:32.862119+00:00'
+  updated_at: '2026-04-07T13:53:48.512780+00:00'
   started_at: '2026-03-08T22:27:50.279825+00:00'
   reviewed_at: '2026-03-09T17:23:26.156810+00:00'
   merged_at: null
-  notes:
-  - id: note-529f5a7
-    text: 'QA NEEDS_WORK: Tech tree visual rendering with compositional widgets: NEEDS_WORK;
-      Keyboard navigation with neighbor map: PASS; PR node selection and status indicators:
-      PASS; Status filter cycling and merged toggle with widget rebuild: PASS; Plan
-      group hide/show with widget lifecycle: PASS; Edge canvas caching and dirty tracking:
-      PASS; Layout cache invalidation: PASS; PR interaction and actions after refactor:
-      PASS; Widget rebuild on PR list update: PASS; Animation performance - selective
-      refresh: PASS; Sort field cycling with widget rebuild: NEEDS_WORK; Window resize
-      rebalance with compositional widgets: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-4c41017-e092217d921b6b35)'
-    created_at: '2026-03-10T03:25:27Z'
-    last_edited: '2026-03-10T03:25:27Z'
+  notes: []
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-4c41017-refactor-techtree-split-pr-nodes-int-ab512a43
 - id: pr-e9d4b24
   plan: bugs
@@ -4947,30 +4960,11 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/144
   gh_pr_number: 144
   created_at: '2026-03-08T23:09:07.312432+00:00'
-  updated_at: '2026-04-04T14:17:04.718380+00:00'
+  updated_at: '2026-04-07T13:53:49.302231+00:00'
   started_at: '2026-03-14T17:21:14.310809+00:00'
   reviewed_at: '2026-03-14T21:54:58.823224+00:00'
   merged_at: null
-  notes:
-  - id: note-9e01251
-    text: 'QA PASS: Existing unit tests pass: PASS; SupervisorWatcher class configuration
-      and BaseWatcher integration: PASS; Per-instance unique window names: PASS; Prompt
-      generation with session and target filter: PASS; Prompt includes correct log
-      path and JSON format: PASS; Verdict parsing — all verdict types and fallback:
-      PASS; should_continue — verdicts that continue vs stop: PASS; build_launch_cmd
-      — correct CLI arguments: PASS; on_verdict is a no-op (logging only): PASS; Feedback
-      logging — write and read round-trip: PASS; read_feedback_log with target_filter
-      and limit: PASS; read_feedback_log with missing directory: PASS; read_feedback_log
-      with malformed JSONL lines: PASS; format_feedback_log output: PASS; CLI supervisor
-      start — requires tmux: PASS; CLI supervisor start --count > 1 rejected: PASS;
-      CLI supervisor log command: PASS; CLI supervisor stop shows guidance: PASS;
-      CLI supervisor-iter hidden command: PASS; TUI verdict icons for new supervisor
-      verdicts: PASS; TUI start_watcher passes target_filter for supervisor type:
-      PASS; Watcher list command includes supervisor: PASS; Prompt instructs Claude
-      to skip supervisor windows: PASS; CLI supervisor start with --target and --wait
-      flags: PASS; FeedbackEntry dataclass field completeness: PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-871dbf5-edac1874b2782501)'
-    created_at: '2026-04-04T14:34:26Z'
-    last_edited: '2026-04-04T14:34:26Z'
+  notes: []
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-871dbf5-add-high-effort-watcher-supervisors--cbe54f5e
 - id: pr-b7ada6a
   plan: tui-ux
@@ -5531,11 +5525,15 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/143
   gh_pr_number: 143
   created_at: '2026-03-10T00:41:37.907137+00:00'
-  updated_at: '2026-03-23T17:33:04.632542+00:00'
+  updated_at: '2026-04-07T22:44:24.695069+00:00'
   started_at: '2026-03-14T04:37:49.204416+00:00'
-  reviewed_at: '2026-03-23T17:33:04.632542+00:00'
+  reviewed_at: '2026-04-07T22:44:24.695069+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-f252bbf
+    text: 'QA INPUT_REQUIRED:  (workdir: /home/mjtomei/.pm/workdirs/qa/pr-ac12b47-79d4f9af4b607a9b)'
+    created_at: '2026-04-07T14:13:07Z'
+    last_edited: '2026-04-07T14:13:07Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-ac12b47-session-cleanup-for-stale-containers-ab512a43
 - id: pr-53e47a1
   plan: tui-ux
@@ -5714,11 +5712,11 @@ prs:
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8463df9-per-session-model-and-quality-target-10e74920
 - id: pr-9a5b86e
-  plan: watchers
+  plan: plan-qa
   title: 'Harden local LLM integration: model selection, real QA testing, init setup,
     and provider verification'
   branch: pm/pr-9a5b86e-harden-local-llm-integration-model-selection-real-
-  status: in_review
+  status: qa
   depends_on:
   - pr-dad0069
   description: "Follow-up to pr-dad0069 (local LLM provider support) addressing gaps\
@@ -5740,39 +5738,33 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/140
   gh_pr_number: 140
   created_at: '2026-03-11T17:38:30.495007+00:00'
-  updated_at: '2026-03-23T13:17:38.033548+00:00'
+  updated_at: '2026-04-07T22:25:21.835153+00:00'
   started_at: '2026-03-11T17:42:07.268473+00:00'
   reviewed_at: '2026-03-14T21:45:26.781038+00:00'
   merged_at: null
   notes:
-  - id: note-ed2331e
-    text: 'QA PASS: Unit and integration tests pass: PASS; Provider add and full verification
-      with real Ollama: PASS; Model show displays local providers section: PASS; Init
-      detects Ollama and offers provider setup: PASS; Init skips Ollama prompt when
-      not running or not installed: PASS; Init skips prompt when provider already
-      configured: PASS; OpenAI-type provider with Anthropic API support detected:
-      PASS; Provider verification reports inference failure distinctly from tool use
-      failure: PASS; Double /v1 bug fix in Anthropic API probe URL: PASS; Init with
-      Ollama running but no models pulled: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-9a5b86e-83c4726d6d5a43e4)'
-    created_at: '2026-03-11T18:47:58Z'
-    last_edited: '2026-03-11T18:47:58Z'
-  - id: note-4020a44
-    text: 'QA INPUT_REQUIRED:  (workdir: /home/matt/.pm/workdirs/qa/pr-9a5b86e-a387c01606a8b945)'
-    created_at: '2026-03-12T00:10:06Z'
-    last_edited: '2026-03-12T00:10:06Z'
-  - id: note-1ac58da
-    text: 'QA ERROR: Local Models Always Visible in Model Selection: NEEDS_WORK; Real
-      Local LLM Integration Testing: ?; Init Hardware Detection and Local Model Setup:
-      ?; Enhanced Provider Verification and API Support: ?; Model Selection Persistence
-      and Provider Integration: ?; Provider Error Handling and Edge Cases: ? (workdir:
-      /Users/matthewtomei/.pm/workdirs/qa/pr-9a5b86e-66e915e6a58d34d0)'
-    created_at: '2026-03-12T00:56:12Z'
-    last_edited: '2026-03-12T00:56:12Z'
   - id: note-394afe0
     text: Local LLM available at spark-424d.lan:30002 (OpenAI-compatible API, serving
       openai/gpt-oss-120b). Confirmed reachable from macbook.
     created_at: '2026-03-13T04:31:35Z'
     last_edited: '2026-03-13T04:31:35Z'
+  - id: note-11aa217
+    text: 'QA INPUT_REQUIRED: Model show always displays providers section with configured
+      providers: INPUT_REQUIRED; Model show displays none-configured message when
+      no providers exist: INPUT_REQUIRED; Provider verification — inference OK but
+      tool use fails: INPUT_REQUIRED; Anthropic API probe detects support on OpenAI-type
+      provider: INPUT_REQUIRED; Local provider falls back to OpenAI API when /v1/messages
+      returns 404: INPUT_REQUIRED; No double /v1 in Anthropic probe and tool check
+      URLs: INPUT_REQUIRED; Init detects Ollama installed and running with models:
+      INPUT_REQUIRED; Init skips Ollama prompt when not installed or not running:
+      INPUT_REQUIRED; Init with Ollama running but no models pulled: INPUT_REQUIRED;
+      Init skips LLM detection in non-interactive mode: INPUT_REQUIRED; Context window
+      detection for OpenAI-type providers: INPUT_REQUIRED; Provider test CLI displays
+      expanded results: INPUT_REQUIRED; Remote integration tests skip cleanly without
+      env vars: INPUT_REQUIRED; Full unit test suite passes: INPUT_REQUIRED (workdir:
+      /home/mjtomei/.pm/workdirs/qa/pr-9a5b86e-a533f08b0448cf72)'
+    created_at: '2026-04-07T22:39:27Z'
+    last_edited: '2026-04-07T22:39:27Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-9a5b86e-harden-local-llm-integration-model-s-cbe54f5e
 - id: pr-1f35c6d
   plan: watchers
@@ -5816,7 +5808,7 @@ prs:
   merged_at: null
   notes: []
 - id: pr-4bd08d7
-  plan: watchers
+  plan: plan-qa
   title: Add built-in Anthropic-to-OpenAI translation proxy for local LLM providers
   branch: pm/pr-4bd08d7-add-built-in-anthropic-to-openai-translation-proxy
   status: pending
@@ -5951,7 +5943,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-11T20:40:49.721162+00:00'
-  updated_at: '2026-03-11T20:40:49.721162+00:00'
+  updated_at: '2026-04-07T22:25:22.552660+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5976,7 +5968,7 @@ prs:
   merged_at: null
   notes: []
 - id: pr-094939c
-  plan: watchers
+  plan: plan-qa
   title: Automated local model setup with optimal tool-call and performance settings
   branch: pm/pr-094939c-automated-local-model-setup-with-optimal-tool-call
   status: pending
@@ -5993,7 +5985,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-13T05:52:07.222845+00:00'
-  updated_at: '2026-03-14T03:49:53.078497+00:00'
+  updated_at: '2026-04-07T22:25:23.348664+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6480,7 +6472,7 @@ prs:
   plan: plan-qa
   title: Review and QA regression benchmark suite with real-world bug test cases
   branch: pm/pr-8aa9411-review-and-qa-regression-benchmark-suite-with-real
-  status: pending
+  status: in_review
   depends_on:
   - pr-ee1ff04
   description: 'Build a benchmark suite for testing changes to review and QA prompts,
@@ -6520,13 +6512,13 @@ prs:
 
 
     Enables data-driven iteration on review prompts and QA scenarios rather than guessing.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: arch-home
+  gh_pr: https://github.com/mjtomei/project_manager/pull/160
+  gh_pr_number: 160
   created_at: '2026-03-14T03:46:00.421065+00:00'
-  updated_at: '2026-03-14T03:58:23.715875+00:00'
-  started_at: null
-  reviewed_at: null
+  updated_at: '2026-04-07T22:54:01.562371+00:00'
+  started_at: '2026-04-07T16:49:46.605414+00:00'
+  reviewed_at: '2026-04-07T22:54:01.562371+00:00'
   merged_at: null
   notes:
   - id: note-6ff369e
@@ -6570,6 +6562,7 @@ prs:
       security bypasses'
     created_at: '2026-03-14T03:58:23Z'
     last_edited: '2026-03-14T03:58:23Z'
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-8aa9411-review-and-qa-regression-benchmark-s-5da5b1da
 - id: pr-4eb96ff
   plan: plan-qa
   title: Adversarial review with voting step to balance false positives
@@ -6577,7 +6570,7 @@ prs:
   status: pending
   depends_on:
   - pr-ee1ff04
-  - pr-8aa9411
+  - pr-e07f72d
   description: 'Add a two-phase review flow that balances thoroughness with accuracy:
 
 
@@ -6605,7 +6598,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-14T03:46:11.848316+00:00'
-  updated_at: '2026-03-18T10:45:04.581821+00:00'
+  updated_at: '2026-04-07T22:22:25.499843+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6635,57 +6628,20 @@ prs:
   branch: pm/pr-24f2958-open-source-bug-corpus-for-review-qa-benchmarking
   status: pending
   depends_on:
-  - pr-8aa9411
-  description: 'Curate a corpus of real bugs from open source repos for benchmarking
-    review and QA quality. Each entry is a before/after pair with metadata about what
-    broke and how it was caught.
-
-
-    AI repos to mine:
-
-    - LangChain: chain composition bugs, prompt injection issues, retrieval failures
-
-    - vLLM: inference correctness, memory management, batching edge cases
-
-    - llama.cpp: quantization bugs, sampling issues, context handling
-
-    - Transformers (HuggingFace): model loading, tokenizer bugs, generation config
-    issues
-
-    - SGLang: scheduling bugs, cache invalidation
-
-
-    Non-AI repos to mine:
-
-    - CPython: interpreter edge cases, C extension bugs, stdlib issues
-
-    - PostgreSQL: query planner bugs, transaction isolation, index corruption
-
-    - Redis: data structure bugs, replication edge cases, persistence issues
-
-    - Node.js: event loop bugs, stream handling, crypto issues
-
-    - curl: protocol handling, certificate validation, encoding bugs
-
-
-    Selection criteria for each bug:
-
-    - Must have been merged to main before being caught
-
-    - Fix commit clearly identifiable
-
-    - Bug is in application logic (not build/CI/docs)
-
-    - Reviewable in isolation (doesn''t require deep domain context)
-
-
-    Target: 50-100 test cases across categories (race conditions, security, logic
-    errors, resource leaks, API misuse, edge cases).'
+  - pr-09e8420
+  description: 'Run the corpus miner (pr-09e8420) against clones of target OSS repos
+    to build a curated collection of real-world bug test cases. Mine 3-5 cases per
+    project type: ml-framework (LangChain, Transformers, vLLM), ml-inference (llama.cpp),
+    database (PostgreSQL, Redis), language-runtime (CPython, Node.js), web-framework
+    (Django, Express), hardware-rtl (OpenTitan, PULP). Review and accept candidates
+    that are self-contained and reviewable without deep domain context. Target: 50-100
+    cases across categories. This is a dedicated mining run, not new tooling — the
+    miner itself lives in pr-09e8420.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-14T03:46:23.198794+00:00'
-  updated_at: '2026-03-21T14:42:07.323323+00:00'
+  updated_at: '2026-04-07T22:57:31.780376+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6729,6 +6685,13 @@ prs:
       into a single helper to prevent partial application?'''
     created_at: '2026-03-21T14:42:07Z'
     last_edited: '2026-03-21T14:42:07Z'
+  - id: note-9c7cc0e
+    text: Many OSS repos squash on merge, so git blame on master may point to a squash
+      commit covering an entire PR rather than the specific introducing commit. When
+      tracing bugs, check PR branches, forks, or the GitHub PR diff to find the granular
+      commit that introduced the buggy lines.
+    created_at: '2026-04-07T22:57:31Z'
+    last_edited: '2026-04-07T22:57:31Z'
 - id: pr-ac10f03
   plan: improvements
   title: Merge abort verdict when master changes are too large for auto-merge
@@ -7715,7 +7678,7 @@ prs:
   plan: improvements
   title: Merge PR notes from both main and workdir project.yaml into prompts
   branch: pm/pr-83b98d5-merge-pr-notes-from-both-main-and-workdir-project-
-  status: in_progress
+  status: merged
   depends_on: []
   description: 'Currently _format_pr_notes in prompt_gen.py only reads notes from
     the main repo project.yaml. Notes added from a workdir session (e.g. by an implementation
@@ -7748,17 +7711,31 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/152
   gh_pr_number: 152
   created_at: '2026-04-04T16:32:19.297115+00:00'
-  updated_at: '2026-04-06T18:37:58.648506+00:00'
+  updated_at: '2026-04-06T19:17:21.660943+00:00'
   started_at: '2026-04-06T18:35:47.532852+00:00'
-  reviewed_at: null
-  merged_at: null
-  notes: []
+  reviewed_at: '2026-04-06T18:51:09.878626+00:00'
+  merged_at: '2026-04-06T19:17:21.660943+00:00'
+  notes:
+  - id: note-359211c
+    text: 'QA PASS: Unit tests pass — all existing and new tests green: PASS; Workdir
+      notes merge into main notes: PASS; Deduplication prefers later last_edited timestamp:
+      PASS; Dedup fallback to created_at when last_edited missing: PASS; Merged notes
+      sorted by created_at: PASS; Graceful degradation — nonexistent workdir path:
+      PASS; Graceful degradation — workdir exists but PR not found: PASS; Both sources
+      empty — returns empty string: PASS; Only workdir has notes, main has none: PASS;
+      All 5 callers pass workdir correctly: PASS; No mutation of input pr dict or
+      notes lists: PASS; Integration — generate_prompt includes workdir notes: PASS;
+      Integration — generate_review_prompt includes workdir notes: PASS (workdir:
+      /home/mjtomei/.pm/workdirs/qa/pr-83b98d5-bfdf20274c963582)'
+    created_at: '2026-04-06T19:07:59Z'
+    last_edited: '2026-04-06T19:07:59Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-83b98d5-merge-pr-notes-from-both-main-and-wo-b1d18e14
+  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-83b98d5/qa.md
 - id: pr-7251b72
   plan: improvements
   title: Refuse pm pr start when PR is not committed on base branch
   branch: pm/pr-7251b72-refuse-pm-pr-start-when-pr-is-not-committed-on-bas
-  status: in_progress
+  status: merged
   depends_on: []
   description: 'When pm pr start clones the main repo to create a workdir, it clones
     from the committed state of master (or the configured base_branch). If the PR
@@ -7788,17 +7765,30 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/153
   gh_pr_number: 153
   created_at: '2026-04-04T16:32:21.564023+00:00'
-  updated_at: '2026-04-06T18:37:47.901600+00:00'
+  updated_at: '2026-04-06T19:33:32.459784+00:00'
   started_at: '2026-04-06T18:36:08.322443+00:00'
-  reviewed_at: null
-  merged_at: null
-  notes: []
+  reviewed_at: '2026-04-06T18:53:49.187083+00:00'
+  merged_at: '2026-04-06T19:33:32.459784+00:00'
+  notes:
+  - id: note-1537d29
+    text: 'QA PASS: PR not in committed project.yaml is blocked: PASS; git show failure
+      triggers the same block: PASS; Invalid YAML in committed project.yaml is treated
+      as not-committed: PASS; Non-dict YAML (e.g. list or scalar) is treated as not-committed:
+      PASS; PR committed on base_branch — happy path proceeds: PASS; Spec-pending
+      gate still takes priority over committed-state check: PASS; Spec gate passes
+      and committed-state check runs in sequence: PASS; Empty committed project.yaml
+      (yaml.safe_load returns None): PASS; Error message goes to stderr not stdout:
+      PASS; Standalone PM dir uses correct git show path: PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-7251b72-91d6492487c83ce7)'
+    created_at: '2026-04-06T19:26:06Z'
+    last_edited: '2026-04-06T19:26:06Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-7251b72-refuse-pm-pr-start-when-pr-is-not-co-b1d18e14
+  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-7251b72/qa.md
+  spec_impl: /workspace/pm/specs/pr-7251b72/impl.md
 - id: pr-e3cf481
   plan: null
   title: Add file-locked read-modify-write helper for pane registry
   branch: pm/pr-e3cf481-add-file-locked-read-modify-write-helper-for-pane-
-  status: in_progress
+  status: in_review
   depends_on: []
   description: 'The pane registry (pane_registry.py) uses a load→modify→save pattern
     on a shared JSON file with no file locking. When the QA loop spawns many panes
@@ -7822,13 +7812,479 @@ prs:
 
     4. Add tests for the locking helper (concurrent writers, timeout behavior).'
   agent_machine: arch-home
-  gh_pr: null
-  gh_pr_number: null
+  gh_pr: https://github.com/mjtomei/project_manager/pull/154
+  gh_pr_number: 154
   created_at: '2026-04-06T18:36:59.216942+00:00'
-  updated_at: '2026-04-06T18:40:32.910998+00:00'
+  updated_at: '2026-04-06T19:13:19.491747+00:00'
   started_at: '2026-04-06T18:39:53.655732+00:00'
+  reviewed_at: '2026-04-06T19:09:23.080520+00:00'
+  merged_at: null
+  notes:
+  - id: note-b2e9be2
+    text: 'Secondary fix needed: the TUI respawn fallback in _session_start (session.py:248)
+      uses get_window_id(session_name) which returns the base session''s active window,
+      not window 0/main. When the registry is clobbered and the TUI role is missing,
+      this causes the TUI to be respawned in whatever window the base session happens
+      to have active (e.g. a QA window). The fallback should target the window named
+      ''main'' or window index 0 instead.'
+    created_at: '2026-04-06T19:12:13Z'
+    last_edited: '2026-04-06T19:12:13Z'
+  - id: note-bb6bc1a
+    text: 'QA NEEDS_WORK: Unit test suite passes — all 33 tests green: NEEDS_WORK;
+      Concurrent writers — no data loss under thread contention: NEEDS_WORK; Lock
+      timeout raises TimeoutError: PASS; Lock released after modifier exception: PASS;
+      Atomic save_registry — no truncated reads: PASS; register_pane and unregister_pane
+      use locked_read_modify_write: PASS; _reconcile_registry does tmux calls outside
+      the lock: PASS; _prepare_registry_data handles all input cases: PASS; TUI respawn
+      fallback targets ''main'' window instead of active window: PASS; Modifier returning
+      None skips file write: PASS; Lock file sidecar pattern and cleanup: PASS (workdir:
+      /home/mjtomei/.pm/workdirs/qa/pr-e3cf481-aaceab727c64fcf6)'
+    created_at: '2026-04-06T19:36:09Z'
+    last_edited: '2026-04-06T19:36:09Z'
+  - id: note-b3048a6
+    text: 'QA NEEDS_WORK: Unit test suite — all 33 tests green: PASS; Concurrent writers
+      — no data loss under thread contention: PASS; Lock timeout raises TimeoutError:
+      PASS; Lock released after modifier exception: PASS; Atomic save_registry — no
+      truncated reads: PASS; register_pane and unregister_pane use locked_read_modify_write:
+      PASS; _reconcile_registry does tmux calls outside the lock: PASS; _prepare_registry_data
+      handles all input cases: PASS; TUI respawn fallback targets ''main'' window
+      instead of active window: PASS; Modifier returning None skips file write: PASS;
+      Lock file sidecar pattern and cleanup: PASS; Concurrent register + unregister
+      serialization: PASS; Retry interval matches implementation: NEEDS_WORK; Missing
+      file creates atomically on first register_pane: PASS; Corrupt JSON recovery
+      path: PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-e3cf481-84e35430b602e6db)'
+    created_at: '2026-04-07T22:53:54Z'
+    last_edited: '2026-04-07T22:53:54Z'
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-e3cf481-add-file-locked-read-modify-write-he-b1d18e14
+- id: pr-cb2a29d
+  plan: null
+  title: Kill tmux windows and containers for merged PRs on TUI startup
+  branch: pm/pr-cb2a29d-kill-tmux-windows-and-containers-for-merged-prs-on
+  status: in_progress
+  depends_on: []
+  description: 'When a PR is merged via the GitHub backend on the project_manager
+    repo, _finalize_merge calls kill_pr_windows inside a bare try/except that silently
+    swallows failures. The subsequent trigger_tui_restart causes the TUI to reload
+    with the status already set to merged, so neither the GitHub sync nor the background
+    sync treats it as newly merged — there is no second-chance cleanup.
+
+
+    Fix: On TUI startup (in _deferred_startup_sync or heal_registry), scan all merged
+    PRs and check if they still have live tmux windows (matching the naming patterns:
+    {display_id}, review-{display_id}, qa-{display_id}, qa-{display_id}-sN). Kill
+    any that exist. Also stop and remove any docker containers whose names match merged
+    PR workdir IDs.
+
+
+    Additionally, remove the bare except Exception: pass around kill_pr_windows in
+    _finalize_merge so failures are at least logged.'
+  agent_machine: arch-home
+  gh_pr: https://github.com/mjtomei/project_manager/pull/155
+  gh_pr_number: 155
+  created_at: '2026-04-06T18:53:56.850825+00:00'
+  updated_at: '2026-04-06T19:06:18.130597+00:00'
+  started_at: '2026-04-06T19:06:18.130597+00:00'
   reviewed_at: null
   merged_at: null
   notes: []
-  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-e3cf481-add-file-locked-read-modify-write-he-b1d18e14
-es: []
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-cb2a29d-kill-tmux-windows-and-containers-for-29829145
+- id: pr-fc6db6a
+  plan: bugs
+  title: Prevent plain 'd' from opening duplicate review window when review loop is
+    running
+  branch: pm/pr-fc6db6a-prevent-plain-d-from-opening-duplicate-review-wind
+  status: in_review
+  depends_on: []
+  description: 'When a review loop is running for a PR (started via zz d), pressing
+    plain d opens a second review window instead of telling the user a loop is already
+    active.
+
+
+    The done_pr() function in pr_view.py has a fast-path that checks for an existing
+    review-{display_id} tmux window and switches to it. But this can fail when:
+
+    1. get_pm_session() returns None due to the pane registry race condition (pr-e3cf481)
+
+    2. The review loop is between iterations and the window was momentarily killed
+
+
+    The function does NOT check app._review_loops to see if a loop is already managing
+    this PR. The zz d and zzz d handlers (start_or_stop_loop) do check this, but plain
+    d bypasses it.
+
+
+    Fix: In done_pr() (pr_view.py ~line 136), check app._review_loops.get(pr_id) before
+    proceeding. If a loop is running for the selected PR, show a message like ''Review
+    loop running — use z d to stop'' and return without spawning a second window.'
+  agent_machine: arch-home
+  gh_pr: https://github.com/mjtomei/project_manager/pull/156
+  gh_pr_number: 156
+  created_at: '2026-04-06T19:14:44.223134+00:00'
+  updated_at: '2026-04-07T13:30:18.816990+00:00'
+  started_at: '2026-04-06T19:17:16.583998+00:00'
+  reviewed_at: '2026-04-07T13:30:18.816990+00:00'
+  merged_at: null
+  notes: []
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-fc6db6a-prevent-plain-d-from-opening-duplica-5a6a6c1c
+- id: pr-177dec0
+  plan: bugs
+  title: Fix pr select not scrolling selected PR into view in TUI
+  branch: pm/pr-177dec0-fix-pr-select-not-scrolling-selected-pr-into-view-
+  status: in_progress
+  depends_on: []
+  description: When using the pr select command (e.g. from the command bar), the TUI
+    updates the selected PR but does not scroll the tech tree to bring it into view.
+    The selected PR ends up hidden behind the scroll bar and command line at the bottom
+    of the screen. It appears the scroll-into-view logic is not being triggered after
+    a programmatic selection change from the command bar, only from keyboard navigation
+    within the tree.
+  agent_machine: arch-home
+  gh_pr: https://github.com/mjtomei/project_manager/pull/157
+  gh_pr_number: 157
+  created_at: '2026-04-06T19:18:52.240715+00:00'
+  updated_at: '2026-04-06T19:20:59.040562+00:00'
+  started_at: '2026-04-06T19:20:59.040562+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-177dec0-fix-pr-select-not-scrolling-selected-d18c9763
+- id: pr-2d0588a
+  plan: improvements
+  title: Tmux popup PR switcher and prefix-key pm command runner
+  branch: pm/pr-2d0588a-tmux-popup-pr-switcher-and-prefix-key-pm-command-r
+  status: in_review
+  depends_on: []
+  description: 'Add two tmux integrations registered via _register_tmux_bindings:
+    (1) A prefix-key binding (e.g. prefix+P) that opens a tmux display-popup with
+    an fzf-style picker listing all active PR windows grouped by PR. The picker defaults
+    to showing windows for the PR of the current active window (implementation, review,
+    QA phases). QA sessions are collapsible and collapsed by default so the list is
+    not cluttered — the user can expand them if needed. Selecting a window switches
+    to it in the current session only (using select-window, not switch_sessions_to_window).
+    (2) A prefix-key binding (e.g. prefix+C) that opens a tmux display-popup with
+    a pm command prompt — the user types a pm command, it runs in the popup, and if
+    the command opens a window it refocuses the invoking session only using the same
+    mechanism as TUI-launched commands. Both popups run and exit without affecting
+    the current window pane layout or resizing the TUI. Human-guided testing needed:
+    popup display from various window contexts, refocus behavior after selecting a
+    PR, QA collapse/expand, command execution in popup, verify TUI window is not resized.'
+  agent_machine: arch-home
+  gh_pr: https://github.com/mjtomei/project_manager/pull/158
+  gh_pr_number: 158
+  created_at: '2026-04-07T12:46:56.964240+00:00'
+  updated_at: '2026-04-07T22:35:47.013280+00:00'
+  started_at: '2026-04-07T12:49:34.016669+00:00'
+  reviewed_at: '2026-04-07T22:35:47.013280+00:00'
+  merged_at: null
+  notes: []
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d0588a-tmux-popup-pr-switcher-and-prefix-ke-d18c9763
+- id: pr-1735d44
+  plan: bugs
+  title: 'Consolidate window refocus: switch all co-viewing sessions consistently'
+  branch: pm/pr-1735d44-consolidate-window-refocus-switch-all-co-viewing-s
+  status: in_progress
+  depends_on: []
+  description: 'Window refocusing is split between tmux.select_window (switches one
+    session) and tmux.switch_sessions_to_window (switches all grouped sessions). The
+    correct behavior for all refocusing is: if multiple sessions are attached and
+    viewing the same window, they should all switch together. Currently select_window
+    is used in pr.py (4 call sites), meta.py, container.py, pr_view.py (2), pane_layout.py,
+    qa_status.py, and qa_loop.py — these only switch the invoking session, leaving
+    co-viewers behind. Consolidate into a single refocus function (e.g. tmux.focus_window)
+    that detects sessions currently viewing the same window as the caller and switches
+    them all. Replace all select_window and switch_sessions_to_window call sites with
+    the unified function. Human-guided testing needed: verify co-viewing sessions
+    follow the switch, verify sessions viewing different windows are not affected,
+    test from TUI-launched commands and from CLI.'
+  agent_machine: arch-home
+  gh_pr: https://github.com/mjtomei/project_manager/pull/159
+  gh_pr_number: 159
+  created_at: '2026-04-07T12:51:22.561975+00:00'
+  updated_at: '2026-04-07T14:11:26.766315+00:00'
+  started_at: '2026-04-07T13:06:32.173284+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-3b6b377
+    text: 'Bug: window refocus targets the currently-selected session at refocus time
+      instead of the session that originally created the command. Fix: log the attached
+      session (the one from which the command was created) at command creation time,
+      and use that recorded session for the refocus rather than querying the active
+      session at refocus time.'
+    created_at: '2026-04-07T13:47:24Z'
+    last_edited: '2026-04-07T13:47:24Z'
+  - id: note-980be03
+    text: 'Bug: when running with --fresh, if a window is already in view in another
+      attached session, refocus should switch that session''s window — not the TUI
+      session where fresh was triggered. Review already works this way, but implementation
+      (and possibly QA) does not — they switch the TUI window instead of the co-viewing
+      session that has the target window visible.'
+    created_at: '2026-04-07T14:11:26Z'
+    last_edited: '2026-04-07T14:11:26Z'
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-1735d44-consolidate-window-refocus-switch-al-1f4460f5
+- id: pr-322f503
+  plan: plan-qa
+  title: 'Per-PR model override: associate a model with a PR so all sessions use it'
+  branch: pm/pr-322f503-per-pr-model-override-associate-a-model-with-a-pr-
+  status: pending
+  depends_on:
+  - pr-9a5b86e
+  description: 'Add the ability to associate a specific model with a PR, so that all
+    Claude sessions started for that PR (implementation, review, QA) use that model
+    instead of the default or phase-specific model settings.
+
+
+    This should work for both custom providers (e.g. local LLMs configured via pm
+    provider) and built-in Anthropic models. The per-PR model setting overrides both
+    the project default model and the phase-specific model settings (e.g. review uses
+    sonnet, impl uses opus).
+
+
+    Implementation:
+
+    1. Add a ''model'' field to the PR schema in project.yaml
+
+    2. Add CLI: pm pr model <pr-id> [model] — set or clear the model override for
+    a PR
+
+    3. Prompt generation: when a PR has a model override, set the appropriate env
+    vars (ANTHROPIC_MODEL or provider-specific vars) in the session
+
+    4. Container support: pass the model override through to container env vars
+
+    5. TUI: show the model override in the PR detail panel if set
+
+    6. The override should flow through to all session types: impl, review, QA planner,
+    QA child sessions'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-07T14:09:06.666582+00:00'
+  updated_at: '2026-04-07T22:22:24.729056+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-dea90b5
+  plan: plan-qa
+  title: Auto-extract QA and review regression test cases from git history
+  branch: pm/pr-dea90b5-auto-extract-qa-and-review-regression-test-cases-f
+  status: pending
+  depends_on:
+  - pr-09e8420
+  description: 'Run the corpus miner (pr-09e8420) against our own repo to build a
+    comprehensive set of internal regression test cases. Point the miner at the pm
+    project repo with focus on the 50+ known fix commits across categories (ensure_workdir,
+    push proxy, container isolation, QA system, race conditions, shell quoting, dead
+    code). Review and accept the best candidates. Target: all internal bugs with clear
+    introducing commits become benchmark cases. This is a dedicated mining run, not
+    new tooling — the miner itself lives in pr-09e8420.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-07T16:28:08.722459+00:00'
+  updated_at: '2026-04-07T22:23:46.487655+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-5dc3808
+  plan: plan-qa
+  title: 'Review/QA model comparison: benchmark results and analysis for local vs
+    frontier models'
+  branch: pm/pr-5dc3808-review-qa-model-comparison-benchmark-results-and-a
+  status: pending
+  depends_on:
+  - pr-24f2958
+  - pr-dea90b5
+  - pr-322f503
+  - pr-d3a9f46
+  description: 'Run the review/QA regression benchmark suite across multiple models
+    and publish the results.
+
+
+    Models to compare:
+
+    - Claude Opus (current default for review/QA)
+
+    - Claude Sonnet (cheaper frontier option)
+
+    - gpt-oss-120b self-hosted (target replacement for QA scenarios)
+
+
+    Test corpora:
+
+    - Our own git history regression cases (from pr-dea90b5)
+
+    - Open source bug corpus (from pr-24f2958)
+
+
+    Metrics per model per corpus:
+
+    - Bug detection rate (recall): what fraction of known bugs does the model catch?
+
+    - False positive rate (precision): how many flagged issues are real vs noise?
+
+    - Iteration count: how many QA/review loop iterations to reach a verdict?
+
+    - Cost per run: API cost or compute cost for self-hosted
+
+    - Wall clock time per scenario
+
+
+    Analysis:
+
+    - Per-category breakdown (race conditions, security, logic errors, resource leaks,
+    etc.)
+
+    - Failure mode analysis: what kinds of bugs does each model miss?
+
+    - Cost-adjusted quality score: quality per dollar
+
+    - Recommendation: which model to use for which session type, with confidence intervals
+
+
+    Deliverables:
+
+    - Results JSON files under pm/bench-results/review-qa/
+
+    - Summary markdown with comparison tables and charts
+
+    - Recommended model configuration for each session type (impl, review, QA scenario,
+    QA planner)
+
+    - If gpt-oss-120b is within acceptable range, a follow-up commit switching QA
+    scenario defaults'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-07T16:33:09.846505+00:00'
+  updated_at: '2026-04-07T22:26:39.734162+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-83fee65
+  plan: plan-qa
+  title: Review benchmark corpus format and internal test cases
+  branch: pm/pr-83fee65-review-benchmark-corpus-format-and-internal-test-c
+  status: pending
+  depends_on:
+  - pr-8aa9411
+  description: 'Foundation PR for the review/QA benchmark suite. Implements:
+
+    - TestCase dataclass matching the YAML schema (id, source, language, project_type,
+    bug_type, diffs, etc.)
+
+    - load_corpus() loader with filtering by source/project_type/language/bug_type/severity/difficulty
+
+    - Corpus version hashing for reproducibility
+
+    - ~16 internal YAML test cases mined from our 50+ known fix commits by tracing
+    each to its introducing commit via git blame
+
+    - pm bench review list CLI subcommand
+
+    - Unit tests for loader, filtering, schema validation
+
+
+    Key files: pm_core/bench/review_corpus.py, pm/bench/review_corpus/internal/, tests/test_review_corpus.py'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-07T22:21:04.997364+00:00'
+  updated_at: '2026-04-07T22:22:19.698796+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-e07f72d
+  plan: plan-qa
+  title: Review benchmark runner with multi-judge scoring
+  branch: pm/pr-e07f72d-review-benchmark-runner-with-multi-judge-scoring
+  status: pending
+  depends_on:
+  - pr-83fee65
+  description: 'Runner and scoring engine for the review/QA benchmark suite. Implements:
+
+    - ReviewBenchConfig dataclass with parameterized model/effort/prompt_variant/system_prompt_additions
+
+    - ReviewBenchRunner: loads corpus, generates review prompts via prompt_gen.py,
+    invokes Claude CLI in --print mode, scores via judge panel. Supports dry-run,
+    token tracking, parallel execution.
+
+    - Multi-judge scoring panel: JudgePanel/JudgeSlot dataclasses, structured Prometheus-style
+    rubric (1-5 scale), parallel judge invocation, majority-vote aggregation, agreement
+    tracking
+
+    - CaseResult with bug_found, quality_score, precision, verdict_correct, judge_agreement
+
+    - Verdict scoring via loop_shared.py:extract_verdict_from_content()
+
+    - pm bench review run and pm bench review report CLI subcommands
+
+    - Result persistence: timestamped JSON run files in ~/.pm/bench/review/
+
+    - Unit tests for runner and scorer
+
+
+    Key files: pm_core/bench/review_bench.py, pm_core/bench/review_scorer.py, tests/test_review_bench.py,
+    tests/test_review_scorer.py'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-07T22:21:13.152701+00:00'
+  updated_at: '2026-04-07T22:22:20.392652+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-09e8420
+  plan: plan-qa
+  title: Agent-driven corpus miner for OSS repos
+  branch: pm/pr-09e8420-agent-driven-corpus-miner-for-oss-repos
+  status: pending
+  depends_on:
+  - pr-83fee65
+  description: Three-stage agent pipeline for mining bug test cases from any git repo.
+    Discovery agent finds fix commits, tracing agent blames back to introducing commit,
+    classification agent generates metadata. Candidates staged for human review. Includes
+    initial OSS test cases across project types.
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-07T22:21:38.123974+00:00'
+  updated_at: '2026-04-07T22:57:29.517073+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-99ac13e
+    text: When mining OSS repos, bug-introducing commits found via git blame on master
+      may point to squash-merged commits rather than the original granular commits.
+      If the repo squashes on merge, check PR branches, forks, or the GitHub PR page
+      for the original commit history — the individual introducing commit may only
+      exist there.
+    created_at: '2026-04-07T22:57:29Z'
+    last_edited: '2026-04-07T22:57:29Z'
+- id: pr-d3a9f46
+  plan: plan-qa
+  title: ELO ranking and IRT difficulty calibration for review benchmark
+  branch: pm/pr-d3a9f46-elo-ranking-and-irt-difficulty-calibration-for-rev
+  status: pending
+  depends_on:
+  - pr-e07f72d
+  description: 'Bradley-Terry ELO ranking across benchmark runs with IRT-based difficulty
+    calibration. ELO uses pointwise-to-pairwise conversion with K-factor weighted
+    by IRT difficulty. 2PL IRT model fits per-case discrimination and difficulty parameters.
+    Enables adaptive evaluation — fewer cases needed for accurate ranking of new configs.
+    CLI: pm bench review compare, pm bench review leaderboard.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-07T22:21:44.189744+00:00'
+  updated_at: '2026-04-07T22:22:21.860819+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
