@@ -7926,6 +7926,7 @@ prs:
   merged_at: null
   notes: []
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-fc6db6a-prevent-plain-d-from-opening-duplica-5a6a6c1c
+  spec_impl: /workspace/pm/specs/pr-fc6db6a/impl.md
 - id: pr-177dec0
   plan: bugs
   title: Fix pr select not scrolling selected PR into view in TUI

@@ -131,6 +131,12 @@ def done_pr(app, fresh: bool = False) -> None:
         app.log_message("No PR selected")
         return
 
+    # Block if a review loop is already managing this PR.
+    loop = app._review_loops.get(pr_id)
+    if loop and loop.running:
+        app.log_message(f"Review loop running for {pr_id}")
+        return
+
     # Fast path: if review window already exists and not fresh, just
     # switch to it without spawning a subprocess.
     if not fresh:
