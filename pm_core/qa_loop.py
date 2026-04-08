@@ -1872,7 +1872,21 @@ def _poll_tmux_verdicts(
         if completed_verifications:
             _launch_next_queued()
 
-        if verdicts_changed or completed_verifications:
+        # Periodic retry: when scenarios are waiting for memory (no verdicts
+        # triggering _launch_next_queued), try on each poll cycle.
+        if _launch_queue and not pending and not verifying:
+            _launch_next_queued()
+
+        # Determine which queued scenarios are waiting for memory vs
+        # waiting for a concurrency slot.
+        _mem_waiting: set[int] = set()
+        if _launch_queue and use_containers:
+            from pm_core.memory_governor import check_launch as _cl
+            _allowed, _ = _cl("qa_scenario")
+            if not _allowed:
+                _mem_waiting = {s.index for s in _launch_queue}
+
+        if verdicts_changed or completed_verifications or _mem_waiting:
             with verification_lock:
                 verifying_snapshot = set(verifying)
             _write_status_file(status_path, state.pr_id, state.scenarios,
@@ -1880,7 +1894,8 @@ def _poll_tmux_verdicts(
                                scenario_0=state.scenario_0,
                                verifying_scenarios=verifying_snapshot,
                                queued_scenarios=_queued_indices,
-                               verification_failures=verification_failures)
+                               verification_failures=verification_failures,
+                               memory_waiting_scenarios=_mem_waiting)
 
 
 # ---------------------------------------------------------------------------
@@ -2487,6 +2502,7 @@ def run_qa_sync(
     concurrency_cap = max_scenarios if max_scenarios is not None else _get_max_scenarios()
 
     # Memory governor: further constrain how many scenarios launch at once
+    _mem_all_blocked = False
     if use_containers:
         from pm_core.memory_governor import check_launch, get_memory_target
         mem_target = get_memory_target()
@@ -2507,7 +2523,8 @@ def run_qa_sync(
                 # Even one doesn't fit — queue everything and let
                 # _launch_next_queued retry periodically
                 _log.info("Memory governor: no scenarios fit — all queued")
-                concurrency_cap = 0  # will be set to 1 below to enable queuing
+                _mem_all_blocked = True
+                concurrency_cap = 1  # enable queuing (launch 0, queue rest)
 
     if concurrency_cap > 0:
         launch_scenarios = state.scenarios[:concurrency_cap]
@@ -2515,6 +2532,12 @@ def run_qa_sync(
     else:
         launch_scenarios = state.scenarios
         queued_scenarios = []
+
+    # When the memory governor blocked even the first scenario, move all
+    # launch_scenarios into the queue — they'll be retried by the poll loop.
+    if _mem_all_blocked:
+        queued_scenarios = launch_scenarios + queued_scenarios
+        launch_scenarios = []
 
     _log.info("QA execution phase: %d scenarios for %s (%d to launch, %d queued)",
               len(state.scenarios), state.pr_id,

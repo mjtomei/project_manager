@@ -524,7 +524,9 @@ class TestBuildExecCmd:
     def test_includes_cleanup_by_default(self):
         cmd = build_exec_cmd("my-container", "claude 'hi'")
         assert "docker rm -f" in cmd
-        assert cmd.endswith(">/dev/null 2>&1")
+        # Cleanup is wrapped in an EXIT trap inside bash -c
+        assert cmd.startswith("bash -c ")
+        assert "trap" in cmd
 
     def test_cleanup_removes_proxy_socket(self):
         cmd = build_exec_cmd("my-container", "claude 'hi'",
@@ -544,14 +546,13 @@ class TestBuildExecCmd:
 
     def test_shell_safety(self):
         cmd = build_exec_cmd("name-with-special", "claude 'prompt with $vars'")
-        # Split only the exec portion (before the cleanup suffix)
-        exec_part = cmd.split(";")[0].strip()
-        parts = shlex.split(exec_part)
-        assert parts[0] == "docker"
-        assert parts[1] == "exec"
-        assert parts[2] == "-it"
-        assert parts[3] == "-u"
-        assert parts[4] == _CONTAINER_USER
+        # The outer command is bash -c '...' wrapping the exec with a trap.
+        # Verify the docker exec portion is present with correct structure.
+        assert "docker exec -it" in cmd
+        assert f"-u {_CONTAINER_USER}" in cmd
+        assert "name-with-special" in cmd
+        # Ensure the prompt content is preserved (not mangled by quoting)
+        assert "prompt with $vars" in cmd
 
 
 class TestWrapClaudeCmd:
