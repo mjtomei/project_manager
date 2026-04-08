@@ -424,6 +424,35 @@ def run_review_loop_sync(
 
     finally:
         state.running = False
+        # Stop-on-idle: stop the review container if policy enabled
+        # and the final verdict is not INPUT_REQUIRED (user may need it)
+        if (state.latest_verdict
+                and state.latest_verdict != VERDICT_INPUT_REQUIRED):
+            try:
+                from pm_core.container import is_container_mode_enabled
+                if is_container_mode_enabled():
+                    from pm_core.memory_governor import get_stop_idle_policy
+                    if get_stop_idle_policy("review"):
+                        from pm_core.container import (
+                            _run_docker, CONTAINER_PREFIX, stop_container,
+                        )
+                        # Find the review container for this PR
+                        result = _run_docker(
+                            "ps", "--filter",
+                            f"name={CONTAINER_PREFIX}",
+                            "--format", "{{.Names}}",
+                            check=False, timeout=10,
+                        )
+                        if result.returncode == 0:
+                            for line in result.stdout.strip().splitlines():
+                                name = line.strip()
+                                if name and state.pr_id in name and "review" in name:
+                                    _log.info("review_loop: stop-on-idle "
+                                              "stopping %s", name)
+                                    stop_container(name)
+            except Exception:
+                _log.debug("review_loop: stop-on-idle failed",
+                           exc_info=True)
 
     return state
 

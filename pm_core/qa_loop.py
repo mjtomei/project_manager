@@ -371,11 +371,13 @@ def _write_status_file(status_path: Path, pr_id: str,
                        verifying_scenarios: set[int] | None = None,
                        queued_scenarios: set[int] | None = None,
                        verification_failures: dict[int, int] | None = None,
+                       memory_waiting_scenarios: set[int] | None = None,
                        error: str = "") -> None:
     """Atomically write the qa_status.json file."""
     _verifying = verifying_scenarios or set()
     _queued = queued_scenarios or set()
     _verify_fails = verification_failures or {}
+    _mem_waiting = memory_waiting_scenarios or set()
     all_scenarios = []
     if scenario_0 and scenario_0.window_name:
         all_scenarios.append({
@@ -392,6 +394,8 @@ def _write_status_file(status_path: Path, pr_id: str,
                 verdict = f"{verdict} (verifying:{fails})" if verdict else f"verifying:{fails}"
             else:
                 verdict = f"{verdict} (verifying)" if verdict else "verifying"
+        elif s.index in _mem_waiting:
+            verdict = "waiting_memory"
         elif s.index in _queued:
             verdict = "queued"
         elif not verdict and fails:
@@ -1451,6 +1455,24 @@ def _relaunch_scenario_window(
 
 
 # ---------------------------------------------------------------------------
+# Stop-on-idle helper
+# ---------------------------------------------------------------------------
+
+def _maybe_stop_idle_container(container_name: str, container_type: str) -> None:
+    """Stop a container if the stop-on-idle policy is enabled for its type."""
+    from pm_core.memory_governor import get_stop_idle_policy
+    from pm_core.container import stop_container
+    if get_stop_idle_policy(container_type):
+        _log.info("Stop-on-idle: stopping container %s (%s)",
+                  container_name, container_type)
+        try:
+            stop_container(container_name)
+        except Exception:
+            _log.warning("Failed to stop container %s", container_name,
+                         exc_info=True)
+
+
+# ---------------------------------------------------------------------------
 # Verdict polling helpers
 # ---------------------------------------------------------------------------
 
@@ -1558,13 +1580,20 @@ def _poll_tmux_verdicts(
             # sees the result (race condition).
 
     def _launch_next_queued():
-        """Launch the next queued scenario if concurrency allows."""
+        """Launch the next queued scenario if concurrency and memory allow."""
         if not _launch_queue:
             return
         # Count currently active (pending + verifying)
         active = len(pending) + len(verifying)
         if concurrency_cap > 0 and active >= concurrency_cap:
             return
+        # Memory governor gate check (containers only)
+        if use_containers:
+            from pm_core.memory_governor import check_launch
+            allowed, reason = check_launch("qa_scenario")
+            if not allowed:
+                _log.info("Memory governor blocked queued launch: %s", reason)
+                return
         scenario = _launch_queue.pop(0)
         _queued_indices.discard(scenario.index)
         _log.info("Launching queued scenario %d (%s), %d remain in queue",
@@ -1631,6 +1660,10 @@ def _poll_tmux_verdicts(
                     f"{state.scenario_verdicts[scenario_idx]} (verified)"
                 )
                 _notify()
+                # Stop-on-idle: stop the container now that scenario is done
+                if use_containers and scenario.container_name:
+                    _maybe_stop_idle_container(scenario.container_name,
+                                               "qa_scenario")
             else:
                 fails = verification_failures.get(scenario_idx, 0) + 1
                 verification_failures[scenario_idx] = fails
@@ -1648,6 +1681,10 @@ def _poll_tmux_verdicts(
                     )
                     verdicts_changed = True
                     _notify()
+                    # Stop-on-idle: scenario is done
+                    if use_containers and scenario.container_name:
+                        _maybe_stop_idle_container(scenario.container_name,
+                                                   "qa_scenario")
                 else:
                     # Send the scenario a follow-up message and put back in pending.
                     # Use the stored pane_id to target the original scenario
@@ -1822,6 +1859,12 @@ def _poll_tmux_verdicts(
                         f"{verdict}"
                     )
                     _notify()
+                    # Stop-on-idle: NEEDS_WORK is done; INPUT_REQUIRED
+                    # must stay alive for user interaction
+                    if (use_containers and scenario.container_name
+                            and verdict != VERDICT_INPUT_REQUIRED):
+                        _maybe_stop_idle_container(scenario.container_name,
+                                                   "qa_scenario")
                     # Scenario fully done — launch next queued if available
                     _launch_next_queued()
 
@@ -2442,6 +2485,30 @@ def run_qa_sync(
     # --- Phase 2: Execution ---
     # Determine concurrency cap (0 = launch all at once)
     concurrency_cap = max_scenarios if max_scenarios is not None else _get_max_scenarios()
+
+    # Memory governor: further constrain how many scenarios launch at once
+    if use_containers:
+        from pm_core.memory_governor import check_launch, get_memory_target
+        mem_target = get_memory_target()
+        if mem_target is not None:
+            # Find how many fit
+            mem_cap = 0
+            for i in range(1, len(state.scenarios) + 1):
+                allowed, _reason = check_launch("qa_scenario", count=i)
+                if allowed:
+                    mem_cap = i
+                else:
+                    break
+            if mem_cap > 0 and (concurrency_cap <= 0 or mem_cap < concurrency_cap):
+                _log.info("Memory governor limits QA launch to %d scenarios "
+                          "(concurrency_cap was %d)", mem_cap, concurrency_cap)
+                concurrency_cap = mem_cap
+            elif mem_cap == 0:
+                # Even one doesn't fit — queue everything and let
+                # _launch_next_queued retry periodically
+                _log.info("Memory governor: no scenarios fit — all queued")
+                concurrency_cap = 0  # will be set to 1 below to enable queuing
+
     if concurrency_cap > 0:
         launch_scenarios = state.scenarios[:concurrency_cap]
         queued_scenarios = state.scenarios[concurrency_cap:]

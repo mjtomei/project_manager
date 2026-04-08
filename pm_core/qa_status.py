@@ -47,12 +47,15 @@ _HIDE_CURSOR = "\033[?25l"
 _SHOW_CURSOR = "\033[?25h"
 _CLEAR_SCREEN = "\033[H\033[2J"
 
+_MAGENTA = "\033[35m"
+
 _VERDICT_COLORS = {
     "PASS": _GREEN,
     "NEEDS_WORK": _YELLOW,
     "INPUT_REQUIRED": _RED,
     "interactive": _DIM,
     "queued": _DIM,
+    "waiting_memory": _MAGENTA,
 }
 
 _REFRESH_INTERVAL = 1.0  # seconds

@@ -34,6 +34,48 @@ _log = configure_logger("pm.tui.review_loop_ui")
 # Uses the same stability mechanism as review/watcher verdict detection.
 _merge_verdict_tracker = VerdictStabilityTracker()
 
+
+def _try_stop_idle_container(pr_id: str, container_type: str) -> None:
+    """Stop a PR's container if stop-on-idle is enabled for the type.
+
+    Finds the container by looking up all running pm containers and
+    matching the PR ID in the container name.
+    """
+    from pm_core.container import is_container_mode_enabled
+    if not is_container_mode_enabled():
+        return
+
+    from pm_core.memory_governor import get_stop_idle_policy
+    if not get_stop_idle_policy(container_type):
+        return
+
+    from pm_core.container import (
+        stop_container, _run_docker, CONTAINER_PREFIX,
+    )
+    # Find containers matching this PR's type
+    # Impl: pm-{tag}-impl  or pm-{tag}-{pr_id}
+    # Review: pm-{tag}-review-{pr_id}
+    try:
+        result = _run_docker(
+            "ps", "--filter", f"name={CONTAINER_PREFIX}",
+            "--format", "{{.Names}}",
+            check=False, timeout=10,
+        )
+        if result.returncode != 0:
+            return
+        for line in result.stdout.strip().splitlines():
+            name = line.strip()
+            if not name:
+                continue
+            # Match by PR ID in the name and container type
+            if pr_id in name and container_type in name:
+                _log.info("stop-on-idle: stopping %s container %s for %s",
+                          container_type, name, pr_id)
+                stop_container(name)
+    except Exception:
+        _log.debug("stop-on-idle: failed for %s/%s", container_type, pr_id,
+                    exc_info=True)
+
 # Icons for review verdicts (used in log line)
 VERDICT_ICONS = {
     VERDICT_PASS: "[green bold]✓ PASS[/]",
@@ -677,7 +719,19 @@ def _poll_impl_idle(app) -> None:
                 _log.info("impl_idle: %s idle but showing interactive prompt, resetting", pr_id)
                 tracker.mark_active(pr_id)
             else:
+                # Stop-on-idle: stop impl container if policy enabled
+                _try_stop_idle_container(pr_id, "impl")
                 newly_idle.append((pr_id, pr))
+
+        # Detect newly-idle in_review PRs for standalone review stop-on-idle
+        # (review loops are handled in run_review_loop_sync)
+        if status == "in_review" and tracker.became_idle(pr_id):
+            from pm_core.pane_idle import content_has_interactive_prompt
+            content = tracker.get_content(pr_id)
+            if content_has_interactive_prompt(content):
+                tracker.mark_active(pr_id)
+            else:
+                _try_stop_idle_container(pr_id, "review")
 
     # --- Second pass: merge resolution windows ---
     # Discover merge windows for ALL in_review PRs, not just
