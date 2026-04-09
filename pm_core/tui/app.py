@@ -1,5 +1,6 @@
 """Textual TUI App for Project Manager."""
 
+import time
 from pathlib import Path
 
 from pm_core.paths import configure_logger
@@ -164,6 +165,7 @@ class ProjectManagerApp(App):
         Also buffers keystrokes when / was pressed but the command bar
         hasn't received focus yet (race condition fix).
         """
+        self._last_interaction_time = time.monotonic()
         cmd_bar = self.query_one("#command-bar", CommandBar)
         if cmd_bar.has_focus:
             return
@@ -309,6 +311,10 @@ class ProjectManagerApp(App):
         # Command-input race condition fix: buffer keystrokes between / and focus
         self._command_pending: bool = False
         self._command_buffer: list[str] = []
+        # Deferred re-sort state: re-sort is delayed until TUI is idle
+        self._resort_pending: bool = False
+        self._resort_timer: Timer | None = None
+        self._last_interaction_time: float = 0.0
 
     def _consume_z(self) -> int:
         """Atomically read and clear the z modifier count.
@@ -452,7 +458,7 @@ class ProjectManagerApp(App):
             self._data = store.load(self._root)
             _log.debug("loaded state from %s, %d PRs",
                        self._root, len(self._data.get("prs") or []))
-            self._update_display()
+            self._update_display(immediate=True)
         except FileNotFoundError:
             _log.warning("no project.yaml found")
             self._root = None
@@ -569,8 +575,16 @@ class ProjectManagerApp(App):
         )
         self.query_one("#session-bar", SessionBar).refresh_session_info()
 
-    def _update_display(self) -> None:
-        """Refresh all widgets with current data."""
+    def _update_display(self, immediate: bool = False) -> None:
+        """Refresh all widgets with current data.
+
+        Args:
+            immediate: If True, recompute the PR tree sort order now.
+                       If False (default), write PR data immediately but defer
+                       the sort/layout recompute until the TUI has been idle for
+                       the configured threshold (prevents the list from shifting
+                       under the user while they're navigating).
+        """
         if not self._data:
             return
 
@@ -579,7 +593,14 @@ class ProjectManagerApp(App):
         tree = self.query_one("#tech-tree", TechTree)
         tree.apply_project_settings(self._data.get("project", {}))
         tree.update_plans(self._data.get("plans") or [])
-        tree.update_prs(self._data.get("prs") or [])
+
+        if immediate or self._is_tui_idle():
+            tree.update_prs(self._data.get("prs") or [])
+        else:
+            # Write data immediately so new PRs are visible, but defer recompute
+            tree.update_prs_data(self._data.get("prs") or [])
+            self._schedule_resort()
+
         active_pr = self._data.get("project", {}).get("active_pr")
         if active_pr:
             tree.select_pr(active_pr)
@@ -588,6 +609,55 @@ class ProjectManagerApp(App):
         # Start animation timer if there are active PRs
         from pm_core.tui.review_loop_ui import ensure_animation_timer
         ensure_animation_timer(self)
+
+    def _resort_idle_threshold(self) -> float:
+        """Return the idle threshold in seconds (from settings, default 10)."""
+        from pm_core.paths import get_global_setting_value
+        try:
+            return float(get_global_setting_value("resort-idle-threshold", "10"))
+        except (ValueError, TypeError):
+            return 10.0
+
+    def _is_tui_idle(self) -> bool:
+        """Return True if TUI has had no key events for the idle threshold."""
+        return time.monotonic() - self._last_interaction_time >= self._resort_idle_threshold()
+
+    def _schedule_resort(self) -> None:
+        """Mark a re-sort as pending and schedule the idle check timer."""
+        threshold = self._resort_idle_threshold()
+        self._resort_pending = True
+        # Cancel any existing timer to avoid accumulation
+        if self._resort_timer is not None:
+            try:
+                self._resort_timer.stop()
+            except Exception:
+                pass
+            self._resort_timer = None
+        self._resort_timer = self.set_timer(threshold, self._check_resort_timer)
+
+    def _check_resort_timer(self) -> None:
+        """Timer callback: apply pending resort if idle, otherwise reschedule."""
+        if not self._resort_pending:
+            return
+        if self._is_tui_idle():
+            self._apply_pending_resort()
+        else:
+            # User is still active — reschedule
+            threshold = self._resort_idle_threshold()
+            self._resort_timer = self.set_timer(threshold, self._check_resort_timer)
+
+    def _apply_pending_resort(self) -> None:
+        """Apply the deferred PR sort/layout recompute."""
+        if not self._resort_pending:
+            return
+        try:
+            tree = self.query_one("#tech-tree", TechTree)
+            tree._recompute()
+            tree.refresh(layout=True)
+        except Exception:
+            pass
+        self._resort_pending = False
+        self._resort_timer = None
 
     def _update_filter_status(self) -> None:
         """Update the status bar to reflect active filters."""
