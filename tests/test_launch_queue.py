@@ -322,9 +322,9 @@ class TestTryAcquire:
             qa_ids = enqueue("qa_scenario", qa_run_id="run-1", count=1)
 
             qa_granted = try_acquire(qa_ids)
-            # impl is not ours, so used += 16G = 52G > 48G,
-            # then qa needs 52+4=56 > 48, won't fit.
-            assert len(qa_granted) == 0
+            # impl doesn't fit (36+16=52 > 48), so its projected memory
+            # is NOT counted (E17).  qa fits: 36+4=40 <= 48.
+            assert len(qa_granted) == 1
 
 
 # ---------------------------------------------------------------------------

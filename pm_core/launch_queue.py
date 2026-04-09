@@ -351,8 +351,11 @@ def try_acquire(entry_ids: list[str]) -> list[str]:
                         queue["last_served_qa_run"] = entry["qa_run_id"]
                 # If doesn't fit, skip but continue walking (E17)
             else:
-                # Not ours — account for its projected memory (it may launch soon)
-                used += projected
+                # Not ours — account for its projected memory only if it
+                # could actually fit (E17: entries that don't fit shouldn't
+                # block smaller entries behind them in the queue)
+                if used + projected <= target:
+                    used += projected
 
         _save_queue(queue)
 
