@@ -24,8 +24,7 @@ class TestStoreLoadParseError:
 class TestBackgroundSyncParseError:
     """background_sync catches ProjectYamlParseError and leaves app unchanged."""
 
-    @pytest.mark.asyncio
-    async def test_corrupt_yaml_skips_sync(self):
+    def test_corrupt_yaml_skips_sync(self):
         app = types.SimpleNamespace(
             _root="/original/root",
             _data={"original": True},
@@ -45,7 +44,7 @@ class TestBackgroundSyncParseError:
         ), patch(
             "pm_core.tui.frame_capture.load_capture_config",
         ), patch("pm_core.tui.sync._log") as mock_log:
-            await background_sync(app)
+            asyncio.run(background_sync(app))
 
         # app._data and app._root unchanged
         assert app._root == original_root

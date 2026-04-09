@@ -273,6 +273,7 @@ def locked_edit(root: Path, timeout: float = 30.0) -> dict:
 
     Raises ``StoreLockTimeout`` if the lock cannot be acquired.
     """
+    import shlex
     import subprocess
 
     editor = os.environ.get("EDITOR", "vi")
@@ -283,7 +284,7 @@ def locked_edit(root: Path, timeout: float = 30.0) -> dict:
         if path.exists():
             path.chmod(path.stat().st_mode | stat.S_IWUSR)
         try:
-            subprocess.run([editor, str(path)], check=True)
+            subprocess.run([*shlex.split(editor), str(path)], check=True)
         except (subprocess.CalledProcessError, FileNotFoundError) as e:
             # Restore read-only even on editor failure
             if path.exists():

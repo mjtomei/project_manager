@@ -288,12 +288,15 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
     entry = result["entry"]
     pr_id = entry["id"]
     branch = entry["branch"]
-    click.echo(f"Created {_pr_display_id(entry)}: {title} (now active)")
-    click.echo(f"  branch: {branch}")
-    if deps:
-        click.echo(f"  depends_on: {', '.join(deps)}")
-    if entry.get("gh_pr"):
-        click.echo(f"  draft PR: {entry['gh_pr']}")
+    if result.get("duplicate"):
+        click.echo(f"PR already exists: {_pr_display_id(entry)}: {title}")
+    else:
+        click.echo(f"Created {_pr_display_id(entry)}: {title} (now active)")
+        click.echo(f"  branch: {branch}")
+        if deps:
+            click.echo(f"  depends_on: {', '.join(deps)}")
+        if entry.get("gh_pr"):
+            click.echo(f"  draft PR: {entry['gh_pr']}")
     trigger_tui_refresh()
 
 
