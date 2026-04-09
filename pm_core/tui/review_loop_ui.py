@@ -51,30 +51,13 @@ def _try_stop_idle_container(pr_id: str, container_type: str,
     if not get_stop_idle_policy(container_type):
         return
 
-    from pm_core.container import (
-        stop_container, _run_docker, CONTAINER_PREFIX,
-    )
+    from pm_core.container import stop_container, find_containers_by_keywords
     pane_ids = [pane_id] if pane_id else None
-    # Find containers matching this PR's type
-    # Impl: pm-{tag}-impl  or pm-{tag}-{pr_id}
-    # Review: pm-{tag}-review-{pr_id}
     try:
-        result = _run_docker(
-            "ps", "--filter", f"name={CONTAINER_PREFIX}",
-            "--format", "{{.Names}}",
-            check=False, timeout=10,
-        )
-        if result.returncode != 0:
-            return
-        for line in result.stdout.strip().splitlines():
-            name = line.strip()
-            if not name:
-                continue
-            # Match by PR ID in the name and container type
-            if pr_id in name and container_type in name:
-                _log.info("stop-on-idle: stopping %s container %s for %s",
-                          container_type, name, pr_id)
-                stop_container(name, pane_ids=pane_ids)
+        for name in find_containers_by_keywords(pr_id, container_type):
+            _log.info("stop-on-idle: stopping %s container %s for %s",
+                      container_type, name, pr_id)
+            stop_container(name, pane_ids=pane_ids)
     except Exception:
         _log.debug("stop-on-idle: failed for %s/%s", container_type, pr_id,
                     exc_info=True)

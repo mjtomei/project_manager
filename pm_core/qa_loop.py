@@ -2525,17 +2525,19 @@ def run_qa_sync(
     # Memory governor: further constrain how many scenarios launch at once
     _mem_all_blocked = False
     if use_containers:
-        from pm_core.memory_governor import check_launch, get_memory_target
+        from pm_core.memory_governor import (
+            get_memory_target, get_current_used_mb, project_memory,
+        )
         mem_target = get_memory_target()
         if mem_target is not None:
-            # Find how many fit
-            mem_cap = 0
-            for i in range(1, len(state.scenarios) + 1):
-                allowed, _reason = check_launch("qa_scenario", count=i)
-                if allowed:
-                    mem_cap = i
-                else:
-                    break
+            current = get_current_used_mb()
+            projected = project_memory("qa_scenario")
+            if current is not None and projected > 0:
+                headroom = max(0, mem_target - current)
+                mem_cap = headroom // projected
+            else:
+                mem_cap = len(state.scenarios)  # can't measure — allow all
+
             if mem_cap > 0 and (concurrency_cap <= 0 or mem_cap < concurrency_cap):
                 _log.info("Memory governor limits QA launch to %d scenarios "
                           "(concurrency_cap was %d)", mem_cap, concurrency_cap)

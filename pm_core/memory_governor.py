@@ -49,6 +49,10 @@ _DOCKER_STATS_TIMEOUT = 5  # seconds — must not block teardown
 # pass simultaneously.
 _gate_lock = threading.Lock()
 
+# Lock protecting stats file read-modify-write cycles (record_sample
+# can be called from multiple threads when QA scenarios complete).
+_stats_lock = threading.Lock()
+
 # Container name prefix (mirrors container.py)
 _CONTAINER_PREFIX = "pm-"
 
@@ -430,24 +434,25 @@ def record_sample(container_type: str, memory_mb: int,
     """Record an end-of-life memory sample for a container type.
 
     Appends to the rolling window, dropping the oldest sample if over
-    the configured history size.
+    the configured history size.  Thread-safe via ``_stats_lock``.
     """
-    stats = load_stats()
-    entry = stats.setdefault(container_type, {})
-    samples = entry.setdefault("samples", [])
+    with _stats_lock:
+        stats = load_stats()
+        entry = stats.setdefault(container_type, {})
+        samples = entry.setdefault("samples", [])
 
-    samples.append({
-        "memory_mb": memory_mb,
-        "age_minutes": round(age_minutes, 1),
-        "recorded_at": datetime.now(timezone.utc).isoformat(),
-    })
+        samples.append({
+            "memory_mb": memory_mb,
+            "age_minutes": round(age_minutes, 1),
+            "recorded_at": datetime.now(timezone.utc).isoformat(),
+        })
 
-    # Trim to history size
-    max_samples = get_history_size()
-    if len(samples) > max_samples:
-        entry["samples"] = samples[-max_samples:]
+        # Trim to history size
+        max_samples = get_history_size()
+        if len(samples) > max_samples:
+            entry["samples"] = samples[-max_samples:]
 
-    save_stats(stats)
+        save_stats(stats)
 
 
 # ---------------------------------------------------------------------------

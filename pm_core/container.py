@@ -747,8 +747,37 @@ def stop_container(name: str, pane_ids: list[str] | None = None) -> None:
         _log.debug("Failed to capture stats for %s before stop", name,
                     exc_info=True)
 
+    # Stop the push proxy — it will be restarted when the container is reused.
+    from pm_core.push_proxy import stop_push_proxy
+    stop_push_proxy(name)
+
     _run_docker("stop", name, check=False, timeout=30)
     _log.info("Stopped container %s", name)
+
+
+def find_containers_by_keywords(*keywords: str) -> list[str]:
+    """Return names of running pm containers whose name contains all *keywords*.
+
+    Useful for finding a PR's container by matching the PR ID and type
+    (e.g. ``find_containers_by_keywords(pr_id, "review")``).
+    Returns an empty list on Docker failure.
+    """
+    try:
+        result = _run_docker(
+            "ps", "--filter", f"name={CONTAINER_PREFIX}",
+            "--format", "{{.Names}}",
+            check=False, timeout=10,
+        )
+        if result.returncode != 0:
+            return []
+    except Exception:
+        return []
+    matches = []
+    for line in result.stdout.strip().splitlines():
+        name = line.strip()
+        if name and all(kw in name for kw in keywords):
+            matches.append(name)
+    return matches
 
 
 # ---------------------------------------------------------------------------
