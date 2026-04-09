@@ -612,6 +612,39 @@ class TestRemoveContainer:
         assert rm_call[0] == ("rm", "-f", "test-container")
         assert rm_call[1] == {"check": False, "timeout": 30}
 
+    @patch("pm_core.container._run_docker")
+    @patch("pm_core.memory_governor.capture_and_record")
+    def test_capture_called_with_container_name(self, mock_capture, mock_docker):
+        mock_docker.return_value = MagicMock(returncode=1)
+        remove_container("pm-impl")
+        mock_capture.assert_called_once_with("pm-impl")
+
+    @patch("pm_core.container._run_docker")
+    @patch("pm_core.push_proxy.stop_push_proxy")
+    @patch("pm_core.memory_governor.capture_and_record")
+    def test_capture_before_docker_rm(self, mock_capture, mock_proxy, mock_docker):
+        mock_docker.return_value = MagicMock(returncode=1)
+        from unittest.mock import Mock
+        manager = Mock()
+        manager.attach_mock(mock_capture, "capture")
+        manager.attach_mock(mock_proxy, "proxy")
+        manager.attach_mock(mock_docker, "docker")
+        remove_container("pm-impl")
+        # Verify capture is called before docker rm -f
+        calls = manager.mock_calls
+        capture_idx = next(i for i, c in enumerate(calls) if c == call.capture("pm-impl"))
+        rm_idx = next(i for i, c in enumerate(calls)
+                      if c == call.docker("rm", "-f", "pm-impl", check=False, timeout=30))
+        assert capture_idx < rm_idx
+
+    @patch("pm_core.container._run_docker")
+    @patch("pm_core.push_proxy.stop_push_proxy")
+    @patch("pm_core.memory_governor.capture_and_record", side_effect=RuntimeError("stats failed"))
+    def test_capture_failure_does_not_block_removal(self, mock_capture, mock_proxy, mock_docker):
+        mock_docker.return_value = MagicMock(returncode=1)
+        remove_container("pm-impl")
+        mock_docker.assert_any_call("rm", "-f", "pm-impl", check=False, timeout=30)
+
 
 class TestCleanupContainers:
     @patch("pm_core.container.remove_container")

@@ -343,3 +343,21 @@ class TestCaptureAndRecord:
              patch("pm_core.memory_governor.record_sample") as mock_record:
             capture_and_record("pm-impl")
             mock_record.assert_called_once_with("impl", 4200, 45.0)
+
+    def test_record_sample_integration(self, tmp_path):
+        with patch("pm_core.memory_governor.infer_container_type",
+                   return_value="impl"), \
+             patch("pm_core.memory_governor.capture_container_memory",
+                   return_value=5325), \
+             patch("pm_core.memory_governor.get_container_age_minutes",
+                   return_value=45.0), \
+             patch("pm_core.memory_governor.pm_home",
+                   return_value=tmp_path):
+            capture_and_record("pm-impl")
+            stats = load_stats()
+            assert "impl" in stats
+            samples = stats["impl"]["samples"]
+            assert len(samples) == 1
+            assert samples[0]["memory_mb"] == 5325
+            assert samples[0]["age_minutes"] == 45.0
+            assert "recorded_at" in samples[0]
