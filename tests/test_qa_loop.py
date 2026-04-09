@@ -2477,6 +2477,287 @@ class TestScenarioRetryLogic:
 
 
 # ---------------------------------------------------------------------------
+# Stop-on-idle QA verdict transitions
+# ---------------------------------------------------------------------------
+
+class TestStopOnIdleQAVerdicts:
+    """Tests that _maybe_stop_idle_container is called at the right verdict
+    transitions and skipped for INPUT_REQUIRED, use_containers=False, and
+    container_name=None."""
+
+    def _make_scenario(self, container_name="test-container"):
+        s = QAScenario(index=1, title="Test", focus="t")
+        s.window_name = "qa-test-s1"
+        s.container_name = container_name
+        return s
+
+    def _make_state(self, scenario):
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        state.scenario_verdicts = {}
+        return state
+
+    @staticmethod
+    def _monotonic():
+        """Return a side_effect that yields 0 for the first call (grace_start)
+        and 100 for all subsequent calls (past the 30s grace period)."""
+        call = [0]
+        def _fn():
+            n = call[0]
+            call[0] += 1
+            return 0.0 if n == 0 else 100.0
+        return _fn
+
+    def test_pass_verified_calls_stop_on_idle(self, tmp_path):
+        """PASS + verification passes → _maybe_stop_idle_container called (line 1683)."""
+        from pm_core.qa_loop import _poll_tmux_verdicts
+
+        scenario = self._make_scenario()
+        state = self._make_state(scenario)
+        status_path = tmp_path / "status.json"
+
+        # Make the verification thread run synchronously so results are
+        # available on the same poll iteration.
+        class FakeThread:
+            def __init__(self, target=None, args=None, daemon=None, name=None):
+                self._target = target
+                self._args = args or ()
+
+            def start(self):
+                self._target(*self._args)
+
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%42"), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic", side_effect=self._monotonic()), \
+             patch("pm_core.qa_loop.VerdictStabilityTracker") as MockTracker, \
+             patch("pm_core.qa_loop.extract_verdict_from_content", return_value="PASS"), \
+             patch("pm_core.tmux.capture_pane", return_value="PASS"), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.qa_loop._is_verification_enabled", return_value=True), \
+             patch("pm_core.qa_loop._get_verification_max_retries", return_value=3), \
+             patch("pm_core.qa_loop._verify_single_scenario", return_value=(True, "", None)), \
+             patch("pm_core.qa_loop.threading.Thread", FakeThread), \
+             patch("pm_core.qa_loop._maybe_stop_idle_container") as mock_stop, \
+             patch("pm_core.qa_loop._get_window_pane_ids", return_value=["%10", "%11"]) as mock_panes, \
+             patch("pm_core.qa_loop._write_status_file"), \
+             patch("pm_core.qa_loop._get_verdict_reminder_timeout", return_value=None):
+            tracker_inst = MockTracker.return_value
+            tracker_inst.update.return_value = True
+
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", status_path, lambda *a: None,
+                use_containers=True,
+            )
+
+        mock_stop.assert_called_once_with(
+            "test-container", "qa_scenario",
+            pane_ids=["%10", "%11"],
+        )
+        mock_panes.assert_called_with("sess", "qa-test-s1")
+
+    def test_needs_work_from_verification_failure_calls_stop(self, tmp_path):
+        """NEEDS_WORK from verification failure exceeding max retries → stop called (line 1705)."""
+        from pm_core.qa_loop import _poll_tmux_verdicts
+
+        scenario = self._make_scenario()
+        state = self._make_state(scenario)
+        status_path = tmp_path / "status.json"
+
+        class FakeThread:
+            def __init__(self, target=None, args=None, daemon=None, name=None):
+                self._target = target
+                self._args = args or ()
+
+            def start(self):
+                self._target(*self._args)
+
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%42"), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic", side_effect=self._monotonic()), \
+             patch("pm_core.qa_loop.VerdictStabilityTracker") as MockTracker, \
+             patch("pm_core.qa_loop.extract_verdict_from_content", return_value="PASS"), \
+             patch("pm_core.tmux.capture_pane", return_value="PASS"), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.qa_loop._is_verification_enabled", return_value=True), \
+             patch("pm_core.qa_loop._get_verification_max_retries", return_value=0), \
+             patch("pm_core.qa_loop._verify_single_scenario", return_value=(False, "bad", None)), \
+             patch("pm_core.qa_loop.threading.Thread", FakeThread), \
+             patch("pm_core.qa_loop._maybe_stop_idle_container") as mock_stop, \
+             patch("pm_core.qa_loop._get_window_pane_ids", return_value=["%10", "%11"]), \
+             patch("pm_core.qa_loop._write_status_file"), \
+             patch("pm_core.qa_loop._get_verdict_reminder_timeout", return_value=None):
+            tracker_inst = MockTracker.return_value
+            tracker_inst.update.return_value = True
+
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", status_path, lambda *a: None,
+                use_containers=True,
+            )
+
+        assert state.scenario_verdicts[1] == VERDICT_NEEDS_WORK
+        mock_stop.assert_called_once_with(
+            "test-container", "qa_scenario",
+            pane_ids=["%10", "%11"],
+        )
+
+    def test_needs_work_direct_calls_stop(self, tmp_path):
+        """NEEDS_WORK verdict directly (no verification) → stop called (line 1886)."""
+        from pm_core.qa_loop import _poll_tmux_verdicts
+
+        scenario = self._make_scenario()
+        state = self._make_state(scenario)
+        status_path = tmp_path / "status.json"
+
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%42"), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic", side_effect=self._monotonic()), \
+             patch("pm_core.qa_loop.VerdictStabilityTracker") as MockTracker, \
+             patch("pm_core.qa_loop.extract_verdict_from_content", return_value="NEEDS_WORK"), \
+             patch("pm_core.tmux.capture_pane", return_value="NEEDS_WORK"), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.qa_loop._is_verification_enabled", return_value=False), \
+             patch("pm_core.qa_loop._maybe_stop_idle_container") as mock_stop, \
+             patch("pm_core.qa_loop._get_window_pane_ids", return_value=["%20", "%21"]) as mock_panes, \
+             patch("pm_core.qa_loop._write_status_file"), \
+             patch("pm_core.qa_loop._get_verdict_reminder_timeout", return_value=None):
+            tracker_inst = MockTracker.return_value
+            tracker_inst.update.return_value = True
+
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", status_path, lambda *a: None,
+                use_containers=True,
+            )
+
+        mock_stop.assert_called_once_with(
+            "test-container", "qa_scenario",
+            pane_ids=["%20", "%21"],
+        )
+        mock_panes.assert_called_with("sess", "qa-test-s1")
+
+    def test_input_required_does_not_call_stop(self, tmp_path):
+        """INPUT_REQUIRED verdict → stop NOT called (lines 1884-1885)."""
+        from pm_core.qa_loop import _poll_tmux_verdicts
+
+        scenario = self._make_scenario()
+        state = self._make_state(scenario)
+        status_path = tmp_path / "status.json"
+
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%42"), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic", side_effect=self._monotonic()), \
+             patch("pm_core.qa_loop.VerdictStabilityTracker") as MockTracker, \
+             patch("pm_core.qa_loop.extract_verdict_from_content", return_value="INPUT_REQUIRED"), \
+             patch("pm_core.tmux.capture_pane", return_value="INPUT_REQUIRED"), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.qa_loop._is_verification_enabled", return_value=False), \
+             patch("pm_core.qa_loop._maybe_stop_idle_container") as mock_stop, \
+             patch("pm_core.qa_loop._get_window_pane_ids", return_value=["%10", "%11"]), \
+             patch("pm_core.qa_loop._write_status_file"), \
+             patch("pm_core.qa_loop._get_verdict_reminder_timeout", return_value=None):
+            tracker_inst = MockTracker.return_value
+            tracker_inst.update.return_value = True
+
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", status_path, lambda *a: None,
+                use_containers=True,
+            )
+
+        mock_stop.assert_not_called()
+
+    def test_use_containers_false_never_calls_stop(self, tmp_path):
+        """use_containers=False → stop never called."""
+        from pm_core.qa_loop import _poll_tmux_verdicts
+
+        scenario = self._make_scenario()
+        state = self._make_state(scenario)
+        status_path = tmp_path / "status.json"
+
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%42"), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic", side_effect=self._monotonic()), \
+             patch("pm_core.qa_loop.VerdictStabilityTracker") as MockTracker, \
+             patch("pm_core.qa_loop.extract_verdict_from_content", return_value="NEEDS_WORK"), \
+             patch("pm_core.tmux.capture_pane", return_value="NEEDS_WORK"), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.qa_loop._is_verification_enabled", return_value=False), \
+             patch("pm_core.qa_loop._maybe_stop_idle_container") as mock_stop, \
+             patch("pm_core.qa_loop._write_status_file"), \
+             patch("pm_core.qa_loop._get_verdict_reminder_timeout", return_value=None):
+            tracker_inst = MockTracker.return_value
+            tracker_inst.update.return_value = True
+
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", status_path, lambda *a: None,
+                use_containers=False,
+            )
+
+        mock_stop.assert_not_called()
+
+    def test_container_name_none_does_not_call_stop(self, tmp_path):
+        """container_name=None → stop not called even with use_containers=True."""
+        from pm_core.qa_loop import _poll_tmux_verdicts
+
+        scenario = self._make_scenario(container_name=None)
+        state = self._make_state(scenario)
+        status_path = tmp_path / "status.json"
+
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%42"), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic", side_effect=self._monotonic()), \
+             patch("pm_core.qa_loop.VerdictStabilityTracker") as MockTracker, \
+             patch("pm_core.qa_loop.extract_verdict_from_content", return_value="NEEDS_WORK"), \
+             patch("pm_core.tmux.capture_pane", return_value="NEEDS_WORK"), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.qa_loop._is_verification_enabled", return_value=False), \
+             patch("pm_core.qa_loop._maybe_stop_idle_container") as mock_stop, \
+             patch("pm_core.qa_loop._write_status_file"), \
+             patch("pm_core.qa_loop._get_verdict_reminder_timeout", return_value=None):
+            tracker_inst = MockTracker.return_value
+            tracker_inst.update.return_value = True
+
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", status_path, lambda *a: None,
+                use_containers=True,
+            )
+
+        mock_stop.assert_not_called()
+
+    def test_pane_ids_forwarded_from_get_window_pane_ids(self, tmp_path):
+        """_get_window_pane_ids result is forwarded to _maybe_stop_idle_container."""
+        from pm_core.qa_loop import _poll_tmux_verdicts
+
+        scenario = self._make_scenario()
+        state = self._make_state(scenario)
+        status_path = tmp_path / "status.json"
+
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%42"), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic", side_effect=self._monotonic()), \
+             patch("pm_core.qa_loop.VerdictStabilityTracker") as MockTracker, \
+             patch("pm_core.qa_loop.extract_verdict_from_content", return_value="NEEDS_WORK"), \
+             patch("pm_core.tmux.capture_pane", return_value="NEEDS_WORK"), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.qa_loop._is_verification_enabled", return_value=False), \
+             patch("pm_core.qa_loop._maybe_stop_idle_container") as mock_stop, \
+             patch("pm_core.qa_loop._get_window_pane_ids", return_value=["%20", "%21"]) as mock_panes, \
+             patch("pm_core.qa_loop._write_status_file"), \
+             patch("pm_core.qa_loop._get_verdict_reminder_timeout", return_value=None):
+            tracker_inst = MockTracker.return_value
+            tracker_inst.update.return_value = True
+
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", status_path, lambda *a: None,
+                use_containers=True,
+            )
+
+        mock_panes.assert_called_with("sess", "qa-test-s1")
+        mock_stop.assert_called_once_with(
+            "test-container", "qa_scenario",
+            pane_ids=["%20", "%21"],
+        )
+
+
+# ---------------------------------------------------------------------------
 # state._error wiring: written to status file and preserved through verdict aggregation
 # ---------------------------------------------------------------------------
 
