@@ -3341,3 +3341,210 @@ class TestLaunchNextQueued:
 
         # Scenario should be marked INPUT_REQUIRED
         assert state.scenario_verdicts[10] == VERDICT_INPUT_REQUIRED
+
+    def test_queued_launch_after_needs_work_verdict(self, tmp_path):
+        """Non-PASS verdict (NEEDS_WORK) frees a slot and launches queued scenario."""
+        # s1 is active with a window; s10 is queued waiting for a slot.
+        s1 = self._make_scenario(1, title="Active", window_name="qa-s1")
+        s10 = self._make_scenario(10, title="Queued")
+        state = self._make_state(scenarios=[s1])
+        status_path = tmp_path / "qa_status.json"
+
+        launched_scenarios = []
+
+        def fake_launch_containers(state_arg, data, pr_data, session,
+                                   repo_root, workdir_path, pm_root=None,
+                                   _status_scenarios=None):
+            for s in state_arg.scenarios:
+                s.window_name = f"qa-test-s{s.index}"
+                launched_scenarios.append(s.index)
+
+        sleep_calls = []
+        # Use a large monotonic time so grace period (30s) is always past.
+        mono_time = [1000.0]
+
+        def fake_monotonic():
+            mono_time[0] += 10.0
+            return mono_time[0]
+
+        verdict_poll_count = [0]
+
+        def fake_extract_verdict(content, verdicts=None, keywords=None,
+                                 log_prefix=None):
+            verdict_poll_count[0] += 1
+            # Return NEEDS_WORK consistently so stability tracker fires
+            # after STABILITY_POLLS=2 consecutive detections.
+            return VERDICT_NEEDS_WORK
+
+        def fake_sleep(secs):
+            sleep_calls.append(secs)
+            if len(sleep_calls) >= 6:
+                state.stop_requested = True
+
+        with (
+            patch("pm_core.memory_governor.check_launch",
+                  return_value=(True, "")),
+            patch("pm_core.qa_loop.time.sleep", side_effect=fake_sleep),
+            patch("pm_core.qa_loop.time.monotonic", side_effect=fake_monotonic),
+            patch("pm_core.qa_loop._write_status_file"),
+            patch("pm_core.qa_loop._is_verification_enabled",
+                  return_value=False),
+            patch("pm_core.qa_loop._get_verification_max_retries",
+                  return_value=3),
+            patch("pm_core.qa_loop._get_verdict_reminder_timeout",
+                  return_value=None),
+            patch("pm_core.qa_loop._launch_scenarios_in_containers",
+                  side_effect=fake_launch_containers),
+            patch("pm_core.qa_loop._get_scenario_pane",
+                  return_value="%10"),
+            patch("pm_core.qa_loop.extract_verdict_from_content",
+                  side_effect=fake_extract_verdict),
+            patch("pm_core.tmux.pane_exists", return_value=True),
+            patch("pm_core.tmux.capture_pane",
+                  return_value="some output\nNEEDS_WORK"),
+        ):
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", status_path,
+                lambda: None,
+                queued_scenarios=[s10],
+                concurrency_cap=5,
+                use_containers=True,
+            )
+
+        # s1 should have NEEDS_WORK verdict
+        assert state.scenario_verdicts.get(1) == VERDICT_NEEDS_WORK
+        # s10 should have been launched after s1 freed a slot
+        assert 10 in launched_scenarios
+
+    def test_queued_launch_after_verification_completion(self, tmp_path):
+        """Verified PASS completion triggers _launch_next_queued for queued scenario."""
+        import threading
+
+        # s1 is active with a PASS that triggers verification; s10 is queued.
+        s1 = self._make_scenario(1, title="Active", window_name="qa-s1")
+        s10 = self._make_scenario(10, title="Queued")
+        state = self._make_state(scenarios=[s1])
+        status_path = tmp_path / "qa_status.json"
+
+        launched_scenarios = []
+
+        def fake_launch_containers(state_arg, data, pr_data, session,
+                                   repo_root, workdir_path, pm_root=None,
+                                   _status_scenarios=None):
+            for s in state_arg.scenarios:
+                s.window_name = f"qa-test-s{s.index}"
+                launched_scenarios.append(s.index)
+
+        sleep_calls = []
+        mono_time = [1000.0]
+
+        def fake_monotonic():
+            mono_time[0] += 10.0
+            return mono_time[0]
+
+        verdict_poll_count = [0]
+
+        def fake_extract_verdict(content, verdicts=None, keywords=None,
+                                 log_prefix=None):
+            verdict_poll_count[0] += 1
+            # Return PASS consistently so stability tracker fires
+            return VERDICT_PASS
+
+        # We need to intercept the verification thread to inject a result
+        # directly into the verification_results dict. We do this by
+        # patching _verify_single_scenario to return immediately.
+        def fake_verify(scenario, verdict, content, pr_data, data,
+                        session=None, stop_check=None, qa_workdir=None):
+            return (True, "", None)  # passed, reason, vpane
+
+        def fake_sleep(secs):
+            sleep_calls.append(secs)
+            if len(sleep_calls) >= 8:
+                state.stop_requested = True
+
+        with (
+            patch("pm_core.memory_governor.check_launch",
+                  return_value=(True, "")),
+            patch("pm_core.qa_loop.time.sleep", side_effect=fake_sleep),
+            patch("pm_core.qa_loop.time.monotonic", side_effect=fake_monotonic),
+            patch("pm_core.qa_loop._write_status_file"),
+            patch("pm_core.qa_loop._is_verification_enabled",
+                  return_value=True),
+            patch("pm_core.qa_loop._get_verification_max_retries",
+                  return_value=3),
+            patch("pm_core.qa_loop._get_verdict_reminder_timeout",
+                  return_value=None),
+            patch("pm_core.qa_loop._launch_scenarios_in_containers",
+                  side_effect=fake_launch_containers),
+            patch("pm_core.qa_loop._get_scenario_pane",
+                  return_value="%10"),
+            patch("pm_core.qa_loop.extract_verdict_from_content",
+                  side_effect=fake_extract_verdict),
+            patch("pm_core.tmux.pane_exists", return_value=True),
+            patch("pm_core.tmux.capture_pane",
+                  return_value="some output\nPASS"),
+            patch("pm_core.qa_loop._verify_single_scenario",
+                  side_effect=fake_verify),
+            patch("pm_core.qa_loop._get_window_pane_ids",
+                  return_value=[]),
+            patch("pm_core.qa_loop._maybe_stop_idle_container"),
+        ):
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", status_path,
+                lambda: None,
+                queued_scenarios=[s10],
+                concurrency_cap=5,
+                use_containers=True,
+            )
+
+        # s1 should have PASS verdict
+        assert state.scenario_verdicts.get(1) == VERDICT_PASS
+        # s10 should have been launched after verification freed a slot
+        assert 10 in launched_scenarios
+
+    def test_memory_waiting_status_tracking(self, tmp_path):
+        """_write_status_file receives memory_waiting_scenarios from check_launch."""
+        s10 = self._make_scenario(10, title="S10")
+        state = self._make_state(scenarios=[])
+        status_path = tmp_path / "qa_status.json"
+
+        sleep_calls = []
+        status_file_calls = []
+
+        def fake_sleep(secs):
+            sleep_calls.append(secs)
+            if len(sleep_calls) >= 3:
+                state.stop_requested = True
+
+        def fake_write_status(status_path, pr_id, scenarios,
+                              scenario_verdicts, **kwargs):
+            mem_waiting = kwargs.get("memory_waiting_scenarios", set())
+            status_file_calls.append(set(mem_waiting))
+
+        with (
+            patch("pm_core.memory_governor.check_launch",
+                  return_value=(False, "over budget")),
+            patch("pm_core.qa_loop.time.sleep", side_effect=fake_sleep),
+            patch("pm_core.qa_loop._write_status_file",
+                  side_effect=fake_write_status),
+            patch("pm_core.qa_loop._is_verification_enabled",
+                  return_value=False),
+            patch("pm_core.qa_loop._get_verification_max_retries",
+                  return_value=3),
+            patch("pm_core.qa_loop._get_verdict_reminder_timeout",
+                  return_value=None),
+        ):
+            try:
+                _poll_tmux_verdicts(
+                    state, {}, {}, "sess", "/tmp/work", status_path,
+                    lambda: None,
+                    queued_scenarios=[s10],
+                    concurrency_cap=5,
+                    use_containers=True,
+                )
+            except StopIteration:
+                pass
+
+        # At least one status write should have memory_waiting_scenarios={10}
+        assert any(10 in call for call in status_file_calls), \
+            f"Expected memory_waiting_scenarios to include 10, got: {status_file_calls}"
