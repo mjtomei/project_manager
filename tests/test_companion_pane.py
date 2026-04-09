@@ -55,15 +55,15 @@ class TestAddCompanionPane:
             mock_tmux.split_pane_at.assert_called_once_with(
                 "%1", "h", mock.ANY, background=True,
             )
-            # Both panes registered
-            assert mock_reg.register_pane.call_count == 2
-            roles = [c[0][3] for c in mock_reg.register_pane.call_args_list]
+            # Both panes registered and layout rebalanced via register_and_rebalance
+            mock_layout.register_and_rebalance.assert_called_once()
+            call_args = mock_layout.register_and_rebalance.call_args
+            assert call_args[0][0] == "sess"
+            assert call_args[0][1] == "@1"
+            panes_arg = call_args[0][2]
+            roles = [p[1] for p in panes_arg]
             assert "impl-claude" in roles
             assert "impl-companion" in roles
-
-            # user_modified reset and layout rebalanced
-            mock_reg.save_registry.assert_called_once()
-            mock_layout.rebalance.assert_called_once_with("sess", "@1")
 
 
 # ---------------------------------------------------------------------------

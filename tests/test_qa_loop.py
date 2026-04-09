@@ -1402,7 +1402,7 @@ class TestVerifySingleScenario:
              patch("pm_core.pane_registry.register_pane"), \
              patch("pm_core.pane_registry.load_registry", return_value=mock_reg), \
              patch("pm_core.pane_registry.get_window_data", return_value=mock_wdata), \
-             patch("pm_core.pane_registry.save_registry"), \
+             patch("pm_core.pane_registry.locked_read_modify_write"), \
              patch("pm_core.pane_layout.rebalance"):
             return _verify_single_scenario(
                 scenario, verdict, pane_output,
@@ -1486,7 +1486,7 @@ class TestVerifySingleScenario:
              patch("pm_core.pane_registry.register_pane"), \
              patch("pm_core.pane_registry.load_registry", return_value=mock_reg), \
              patch("pm_core.pane_registry.get_window_data", return_value=mock_wdata), \
-             patch("pm_core.pane_registry.save_registry"), \
+             patch("pm_core.pane_registry.locked_read_modify_write"), \
              patch("pm_core.pane_layout.rebalance"):
             passed, _, _ = _verify_single_scenario(
                 scenario, "PASS", "pane output", {}, {},
@@ -1514,7 +1514,7 @@ class TestVerifySingleScenario:
              patch("pm_core.pane_registry.register_pane"), \
              patch("pm_core.pane_registry.load_registry", return_value=mock_reg), \
              patch("pm_core.pane_registry.get_window_data", return_value=mock_wdata), \
-             patch("pm_core.pane_registry.save_registry"), \
+             patch("pm_core.pane_registry.locked_read_modify_write"), \
              patch("pm_core.pane_layout.rebalance"):
             _verify_single_scenario(
                 scenario, "PASS", "pane output", {}, {},

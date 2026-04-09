@@ -13,7 +13,7 @@ from pm_core.pane_registry import (
     get_window_data,
     _iter_all_panes,
     load_registry,
-    save_registry,
+    _save_registry,
     register_pane,
     unregister_pane,
     kill_and_unregister,
@@ -106,7 +106,7 @@ class TestLoadRegistry:
 class TestSaveRegistry:
     def test_creates_file(self, registry_dir):
         data = {"session": "my-session", "windows": {}, "generation": ""}
-        save_registry("my-session", data)
+        _save_registry("my-session", data)
         file_path = registry_dir / "my-session.json"
         assert file_path.exists()
         saved = json.loads(file_path.read_text())
@@ -114,13 +114,13 @@ class TestSaveRegistry:
 
     def test_overwrites_existing(self, registry_dir):
         data1 = {"session": "s", "windows": {}, "generation": ""}
-        save_registry("s", data1)
+        _save_registry("s", data1)
         data2 = {
             "session": "s",
             "windows": {"1": {"panes": [{"id": "%1"}], "user_modified": True}},
             "generation": "123",
         }
-        save_registry("s", data2)
+        _save_registry("s", data2)
         saved = json.loads((registry_dir / "s.json").read_text())
         assert "1" in saved["windows"]
         assert len(saved["windows"]["1"]["panes"]) == 1
@@ -141,13 +141,13 @@ class TestLoadSaveRoundTrip:
             },
             "generation": "456",
         }
-        save_registry("rt-session", data)
+        _save_registry("rt-session", data)
         loaded = load_registry("rt-session")
         assert loaded == data
 
     def test_round_trip_empty_windows(self, registry_dir):
         data = {"session": "empty", "windows": {}, "generation": ""}
-        save_registry("empty", data)
+        _save_registry("empty", data)
         loaded = load_registry("empty")
         assert loaded == data
 
@@ -416,7 +416,7 @@ class TestReconcileRegistry:
                 },
             },
         }
-        save_registry("sess", data)
+        _save_registry("sess", data)
         # Only %1 is alive
         mock_indices.return_value = [("%1", 0)]
         removed = _reconcile_registry("sess", "0")
@@ -436,7 +436,7 @@ class TestReconcileRegistry:
                 },
             },
         }
-        save_registry("sess", data)
+        _save_registry("sess", data)
         mock_indices.return_value = [("%1", 0)]
         removed = _reconcile_registry("sess", "0")
         assert removed == []
@@ -454,7 +454,7 @@ class TestReconcileRegistry:
                 },
             },
         }
-        save_registry("sess", data)
+        _save_registry("sess", data)
         removed = _reconcile_registry("sess", "0")
         assert removed == []
         # Registry should be unchanged
