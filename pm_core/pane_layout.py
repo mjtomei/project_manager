@@ -441,6 +441,24 @@ def rebalance(session: str, window: str, query_session: str | None = None) -> bo
         _logger.warning("rebalance: apply_layout failed")
         return False
 
+    # Force SIGWINCH to all panes so TUI apps (like Claude Code) re-render
+    # at the new size.  select-layout doesn't reliably deliver SIGWINCH.
+    # Send the signal directly to each pane's process group to avoid any
+    # geometry side effects that could trigger user_modified detection or
+    # window-resized hooks.
+    import signal
+    for pid in desired_order:
+        result = subprocess.run(
+            tmux_mod._tmux_cmd("display", "-t", pid, "-p", "#{pane_pid}"),
+            capture_output=True, text=True,
+        )
+        pane_pid = result.stdout.strip()
+        if pane_pid:
+            try:
+                os.killpg(int(pane_pid), signal.SIGWINCH)
+            except (ProcessLookupError, PermissionError, ValueError):
+                pass
+
     # In mobile mode, zoom the active pane after layout.
     # Use already-computed width instead of re-querying via is_mobile(),
     # which might hit a different session/window and get a stale size.
