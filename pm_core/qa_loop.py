@@ -1507,6 +1507,8 @@ def _poll_tmux_verdicts(
     use_containers: bool = False,
     repo_root: Path | None = None,
     pm_root: Path | None = None,
+    entry_id_map: dict[int, str] | None = None,
+    pending_entry_ids: set[str] | None = None,
 ) -> None:
     """Poll tmux scenario windows for verdicts.
 
@@ -1531,6 +1533,10 @@ def _poll_tmux_verdicts(
     # Queue of scenarios waiting to be launched
     _launch_queue: list[QAScenario] = list(queued_scenarios or [])
     _queued_indices: set[int] = {s.index for s in _launch_queue}
+
+    # Cross-process launch queue tracking
+    _entry_id_map: dict[int, str] = dict(entry_id_map or {})
+    _pending_entry_ids: set[str] = set(pending_entry_ids or set())
 
     tracker = VerdictStabilityTracker()
     pending = {s.index for s in state.scenarios if s.window_name}
@@ -1597,6 +1603,17 @@ def _poll_tmux_verdicts(
             # and ``pending`` is also empty the loop exits before it
             # sees the result (race condition).
 
+    def _dequeue_scenario(scenario_index: int) -> None:
+        """Remove a scenario's entry from the cross-process launch queue."""
+        eid = _entry_id_map.get(scenario_index)
+        if eid and use_containers:
+            try:
+                from pm_core.launch_queue import dequeue as lq_dequeue
+                lq_dequeue(eid)
+            except Exception:
+                _log.debug("Failed to dequeue entry for scenario %d",
+                           scenario_index, exc_info=True)
+
     def _launch_next_queued():
         """Launch the next queued scenario if concurrency and memory allow."""
         if not _launch_queue:
@@ -1605,14 +1622,37 @@ def _poll_tmux_verdicts(
         active = len(pending) + len(verifying)
         if concurrency_cap > 0 and active >= concurrency_cap:
             return
-        # Memory governor gate check (containers only)
-        if use_containers:
+        # Memory governor gate check via launch queue (containers only)
+        if use_containers and _pending_entry_ids:
+            from pm_core.launch_queue import try_acquire
+            granted = try_acquire(list(_pending_entry_ids))
+            if not granted:
+                _log.info("Launch queue: no entries granted — waiting for memory")
+                return
+            # Find the first queued scenario whose entry was granted
+            granted_set = set(granted)
+            target_scenario = None
+            for i, s in enumerate(_launch_queue):
+                eid = _entry_id_map.get(s.index)
+                if eid and eid in granted_set:
+                    target_scenario = _launch_queue.pop(i)
+                    break
+            if target_scenario is None:
+                return
+            scenario = target_scenario
+            eid = _entry_id_map.get(scenario.index)
+            if eid:
+                _pending_entry_ids.discard(eid)
+        elif use_containers:
+            # Governor inactive or no entry IDs — use old check_launch path
             from pm_core.memory_governor import check_launch
             allowed, reason = check_launch("qa_scenario")
             if not allowed:
                 _log.info("Memory governor blocked queued launch: %s", reason)
                 return
-        scenario = _launch_queue.pop(0)
+            scenario = _launch_queue.pop(0)
+        else:
+            scenario = _launch_queue.pop(0)
         _queued_indices.discard(scenario.index)
         _log.info("Launching queued scenario %d (%s), %d remain in queue",
                   scenario.index, scenario.title, len(_launch_queue))
@@ -1634,6 +1674,8 @@ def _poll_tmux_verdicts(
             state.scenarios = orig
         if scenario.window_name:
             pending.add(scenario.index)
+            # Dequeue the acquired entry now that the container is running
+            _dequeue_scenario(scenario.index)
         else:
             # Window creation failed — mark INPUT_REQUIRED so this
             # scenario isn't silently lost (which could cause a false
@@ -1641,6 +1683,7 @@ def _poll_tmux_verdicts(
             _log.warning("Queued scenario %d window creation failed — "
                          "marking INPUT_REQUIRED", scenario.index)
             state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+            _dequeue_scenario(scenario.index)
 
     # Fill any open slots that were freed by initial workdir failures.
     # Scenarios that fail workdir creation are marked INPUT_REQUIRED without
@@ -1680,6 +1723,8 @@ def _poll_tmux_verdicts(
                     f"{state.scenario_verdicts[scenario_idx]} (verified)"
                 )
                 _notify()
+                # Dequeue the scenario's launch queue entry
+                _dequeue_scenario(scenario_idx)
                 # Stop-on-idle: stop the container now that scenario is done
                 if use_containers and scenario.container_name:
                     _maybe_stop_idle_container(
@@ -1702,6 +1747,8 @@ def _poll_tmux_verdicts(
                     )
                     verdicts_changed = True
                     _notify()
+                    # Dequeue the scenario's launch queue entry
+                    _dequeue_scenario(scenario_idx)
                     # Stop-on-idle: scenario is done
                     if use_containers and scenario.container_name:
                         _maybe_stop_idle_container(
@@ -1881,6 +1928,8 @@ def _poll_tmux_verdicts(
                         f"{verdict}"
                     )
                     _notify()
+                    # Dequeue the scenario's launch queue entry
+                    _dequeue_scenario(scenario.index)
                     # Stop-on-idle: NEEDS_WORK is done; INPUT_REQUIRED
                     # must stay alive for user interaction
                     if (use_containers and scenario.container_name
@@ -1924,6 +1973,16 @@ def _poll_tmux_verdicts(
                                queued_scenarios=_queued_indices,
                                verification_failures=verification_failures,
                                memory_waiting_scenarios=_mem_waiting)
+
+    # Cleanup: dequeue any remaining entries (stop requested or loop exited)
+    if _pending_entry_ids and use_containers:
+        try:
+            from pm_core.launch_queue import dequeue as lq_dequeue
+            lq_dequeue(list(_pending_entry_ids))
+            _pending_entry_ids.clear()
+        except Exception:
+            _log.debug("Failed to dequeue remaining entries on exit",
+                       exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -2532,6 +2591,7 @@ def run_qa_sync(
     # Memory governor: further constrain how many scenarios launch at once
     _mem_all_blocked = False
     _pre_mem_cap = concurrency_cap  # preserve for poll loop
+    mem_target = None  # set below if governor is active
     if use_containers:
         from pm_core.memory_governor import (
             get_memory_target, get_current_used_mb, project_memory,
@@ -2573,6 +2633,37 @@ def run_qa_sync(
         queued_scenarios = launch_scenarios + queued_scenarios
         launch_scenarios = []
         concurrency_cap = _pre_mem_cap
+
+    # Enqueue all scenarios in the cross-process launch queue.
+    # Scenarios that launch immediately are dequeued after creation;
+    # queued scenarios are dequeued on verdict or stop.
+    _qa_run_id = f"{state.pr_id}-{int(time.time())}"
+    _entry_id_map: dict[int, str] = {}  # scenario index -> queue entry ID
+    _pending_entry_ids: set[str] = set()
+    if use_containers and mem_target is not None:
+        from pm_core.launch_queue import enqueue, try_acquire, dequeue as lq_dequeue
+        all_entry_ids = enqueue(
+            "qa_scenario", qa_run_id=_qa_run_id,
+            count=len(state.scenarios),
+        )
+        for scenario, eid in zip(state.scenarios, all_entry_ids):
+            _entry_id_map[scenario.index] = eid
+        # Immediately acquire entries for scenarios we're launching now
+        launch_eids = [_entry_id_map[s.index] for s in launch_scenarios]
+        if launch_eids:
+            granted = try_acquire(launch_eids)
+            granted_set = set(granted)
+            # Move any non-granted launch scenarios to the queue
+            still_launch = []
+            for s in launch_scenarios:
+                eid = _entry_id_map[s.index]
+                if eid in granted_set:
+                    still_launch.append(s)
+                else:
+                    queued_scenarios.insert(0, s)
+            launch_scenarios = still_launch
+        # Track pending entry IDs for queued scenarios
+        _pending_entry_ids = {_entry_id_map[s.index] for s in queued_scenarios}
 
     _log.info("QA execution phase: %d scenarios for %s (%d to launch, %d queued)",
               len(state.scenarios), state.pr_id,
@@ -2642,6 +2733,19 @@ def run_qa_sync(
         )
     state.scenarios = all_scenarios
 
+    # Dequeue entries for successfully launched scenarios
+    if use_containers and _entry_id_map:
+        from pm_core.launch_queue import dequeue as _lq_dequeue
+        launched_eids = [
+            _entry_id_map[s.index] for s in launch_scenarios
+            if s.index in _entry_id_map and s.window_name
+        ]
+        if launched_eids:
+            try:
+                _lq_dequeue(launched_eids)
+            except Exception:
+                _log.debug("Failed to dequeue launched entries", exc_info=True)
+
     state.latest_output = f"Running {len(state.scenarios)} scenario(s)..."
     _notify()
 
@@ -2652,7 +2756,9 @@ def run_qa_sync(
                         concurrency_cap=concurrency_cap,
                         use_containers=use_containers,
                         repo_root=repo_root,
-                        pm_root=pm_root)
+                        pm_root=pm_root,
+                        entry_id_map=_entry_id_map,
+                        pending_entry_ids=_pending_entry_ids)
 
     # --- Cleanup ---
     # Keep scenario windows AND containers alive so users can inspect

@@ -768,18 +768,21 @@ def wrap_claude_cmd(
     # Memory governor gate check for impl/review containers.
     # QA containers are gated separately in qa_loop.py.
     from pm_core.memory_governor import (
-        check_launch, check_single_container_fits, infer_container_type,
+        check_single_container_fits, infer_container_type,
     )
+    from pm_core.launch_queue import enqueue_and_try_acquire, dequeue
     ctype = infer_container_type(
         _make_container_name(label, session_tag=session_tag))
+    _queue_entry_id: str | None = None
     if ctype and ctype not in ("qa_scenario", "qa_planner"):
         fits, fits_reason = check_single_container_fits(ctype)
         if not fits:
             raise ContainerError(fits_reason)
-        allowed, reason = check_launch(ctype)
-        if not allowed:
+        _queue_entry_id, acquired = enqueue_and_try_acquire(ctype)
+        if not acquired:
+            dequeue(_queue_entry_id)
             raise ContainerError(
-                f"Memory governor blocked launch: {reason}. "
+                f"Memory governor blocked launch. "
                 f"Free memory by stopping containers or raise the target."
             )
 
@@ -798,6 +801,8 @@ def wrap_claude_cmd(
             pr_id=pr_id,
         )
     except Exception:
+        if _queue_entry_id:
+            dequeue(_queue_entry_id)
         _log.error("Failed to create container %s — aborting (container mode is enabled)",
                    cname, exc_info=True)
         raise ContainerError(
@@ -805,6 +810,10 @@ def wrap_claude_cmd(
             f"Is Docker running? Disable container mode with 'pm container disable' "
             f"to run without containers."
         )
+
+    # Container created — dequeue the queue entry
+    if _queue_entry_id:
+        dequeue(_queue_entry_id)
 
     # Rewrite any prompt-file reference that used the host workdir path.
     # build_claude_shell_cmd writes the file to the host and embeds

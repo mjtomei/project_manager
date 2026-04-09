@@ -57,6 +57,19 @@ def container_status():
     if mem_status:
         click.echo(f"  Current:       {mem_status}")
 
+    # Queue policy
+    from pm_core.launch_queue import get_queue_policy, get_queue_status
+    queue_policy = get_queue_policy()
+    click.echo(f"  Queue policy:  {queue_policy}")
+
+    queue = get_queue_status()
+    waiting = [e for e in queue.get("entries", [])
+               if e.get("status") == "waiting"]
+    acquired = [e for e in queue.get("entries", [])
+                if e.get("status") == "acquired"]
+    if waiting or acquired:
+        click.echo(f"  Queue depth:   {len(waiting)} waiting, {len(acquired)} acquired")
+
     click.echo("")
     click.echo("Stop-on-idle:")
     click.echo(f"  impl:          {'on' if get_stop_idle_policy('impl') else 'off'}")
@@ -99,6 +112,7 @@ def container_disable():
     "image", "memory-limit", "cpu-limit",
     "system-memory-target", "system-memory-scope",
     "system-memory-default-projection", "system-memory-history-size",
+    "system-memory-queue-policy",
     "stop-idle-impl", "stop-idle-review", "stop-idle-qa",
 ]))
 @click.argument("value")
@@ -108,6 +122,7 @@ def container_set(key: str, value: str):
     Keys: image, memory-limit, cpu-limit,
           system-memory-target, system-memory-scope,
           system-memory-default-projection, system-memory-history-size,
+          system-memory-queue-policy,
           stop-idle-impl, stop-idle-review, stop-idle-qa
     """
     from pm_core.paths import set_global_setting_value
@@ -116,6 +131,13 @@ def container_set(key: str, value: str):
     if key == "system-memory-scope" and value not in ("pm", "system"):
         click.echo("Error: system-memory-scope must be 'pm' or 'system'", err=True)
         raise SystemExit(1)
+    if key == "system-memory-queue-policy":
+        from pm_core.launch_queue import VALID_POLICIES
+        if value not in VALID_POLICIES:
+            click.echo(
+                f"Error: system-memory-queue-policy must be one of: "
+                f"{', '.join(VALID_POLICIES)}", err=True)
+            raise SystemExit(1)
     if key.startswith("stop-idle-") and value not in ("on", "off"):
         click.echo("Error: stop-idle value must be 'on' or 'off'", err=True)
         raise SystemExit(1)

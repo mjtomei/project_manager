@@ -8442,6 +8442,8 @@ prs:
     created_at: '2026-04-09T12:38:05Z'
     last_edited: '2026-04-09T12:38:05Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-02512b49
+  spec_impl: /workspace/pm/specs/pr-eb2dbfc/impl.md
+  spec_qa: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-02512b49/pm/specs/pr-eb2dbfc/qa.md
 - id: pr-a3a081a
   plan: plan-qa
   title: Auto-extract QA-relevant notes from implementation and review session transcripts

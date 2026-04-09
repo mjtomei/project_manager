@@ -151,13 +151,110 @@ PR: pr-eb2dbfc — "Container memory governor: dynamic memory limits with per-ty
 - `pm_core/tui/app.py:_update_status_bar()` (line 530) — compute memory info and pass to `update_status`.
 - QA status pane: `pm_core/qa_status.py` — render `"waiting_memory"` verdict with a distinct color/icon.
 
+### R8: Cross-process launch queue with fairness policies
+
+**What:** Multiple pm projects can run simultaneously. The in-process threading locks in the memory governor are insufficient — two pm processes can both pass the memory check simultaneously, overshooting the target. A global launch queue serializes cross-process access and provides configurable fairness when multiple QA runs compete for memory.
+
+**Problems solved:**
+1. **Stats file race**: `record_sample()` uses a threading lock but no cross-process lock. Two pm processes can lose each other's samples during concurrent write.
+2. **Gate check race**: `check_launch()` uses a threading lock. Two processes can both pass the memory check simultaneously, overshooting the target.
+3. **No fairness**: QA scenarios waiting for memory just poll `check_launch()` every 5 seconds. Whoever polls at the right time wins. No ordering between processes or QA runs.
+
+**Design:**
+
+#### Single governor file lock
+All governor operations serialize through `~/.pm/governor.lock` using `fcntl.flock` (same pattern as `pane_registry.py:locked_read_modify_write()`). This one lock covers stats file writes, gate checks, and queue mutations. Lock timeout: 10 seconds (generous because docker stats takes 1-2s under the lock).
+
+#### Global launch queue
+New file `~/.pm/launch-queue.json`, managed by new module `pm_core/launch_queue.py`.
+
+Queue file format:
+```json
+{
+  "entries": [
+    {
+      "id": "a1b2c3d4",
+      "container_type": "qa_scenario",
+      "pid": 12345,
+      "enqueued_at": 1712678400.123,
+      "qa_run_id": "pr-eb2dbfc-abc123"
+    }
+  ],
+  "last_served_qa_run": null
+}
+```
+
+#### Queue policy setting
+Single setting: `pm container set system-memory-queue-policy fifo|priority-drain|priority-round-robin`
+
+- **`fifo`** (default): All entries served strictly by enqueue time. No type priority, no QA sub-ordering.
+- **`priority-drain`**: impl (0) > review (1) > qa (2). Within QA, all scenarios from one QA run complete before moving to the next. Runs ordered by earliest entry time.
+- **`priority-round-robin`**: Same type priority as `priority-drain`. Within QA, alternate between QA runs. Tracks `last_served_qa_run` to resume rotation.
+
+The QA sub-policies (drain vs round-robin) are modes of priority ordering — they only make sense when QA entries are grouped together by type priority. In FIFO mode, entries interleave by time regardless of type, so sub-ordering is meaningless.
+
+#### Memory accounting for acquired entries
+When an entry is granted by `try_acquire`, it stays in the queue briefly (status="acquired") until the container is running. The `try_acquire` walk accounts for acquired entries' projected memory so two processes can't both claim the same headroom. Entries are cleaned up via `dequeue()` after container creation or by stale PID cleanup.
+
+**Grounded in code:**
+- New module: `pm_core/launch_queue.py` — lock, queue I/O, enqueue/try_acquire/dequeue, policy sorting.
+- Cross-process lock replaces `_gate_lock` and `_stats_lock` threading.Lock in `memory_governor.py`.
+- `container.py:wrap_claude_cmd()` (~line 770): replace direct `check_launch` call with `enqueue_and_try_acquire(ctype)`.
+- `qa_loop.py`: enqueue all scenarios at phase 2 entry, use `try_acquire` in `_launch_next_queued`, dequeue on completion/stop.
+- CLI: add `system-memory-queue-policy` to `container_set` choices.
+
+#### `pm_core/launch_queue.py` public API
+```python
+def governor_lock(timeout=10.0) -> contextmanager
+    # Cross-process file lock on ~/.pm/governor.lock
+    # Reusable by memory_governor.py for stats operations
+
+def enqueue(container_type, qa_run_id=None, count=1) -> list[str]
+    # Add entries to queue. Returns entry IDs.
+    # count>1 for batch QA enqueue.
+
+def try_acquire(entry_ids: list[str]) -> list[str]
+    # Under lock: clean stale, sort by policy, walk sorted order,
+    # grant entries from entry_ids that are next AND fit in memory.
+    # Returns granted entry IDs (may be empty).
+    # Accounts for acquired entries' projected memory.
+
+def enqueue_and_try_acquire(container_type, qa_run_id=None) -> tuple[str, bool]
+    # Atomic fast path for impl/review: enqueue 1 + immediate try.
+    # Returns (entry_id, acquired). One lock round-trip.
+
+def dequeue(entry_ids: list[str]) -> None
+    # Remove entries (post-launch cleanup, cancellation, stop).
+
+def get_queue_status() -> dict
+    # Read-only snapshot for status display (no lock needed).
+```
+
+#### try_acquire walk logic
+```
+1. Clean stale entries (check PID alive via os.kill(pid, 0))
+2. Sort by policy (_sort_queue)
+3. Compute: used = current_docker_stats + sum(projected for acquired entries)
+4. Walk sorted waiting entries:
+   - If entry.id in my entry_ids AND used + projected <= target → grant it
+   - If entry.id NOT mine → add its projected to `used` (it might launch soon)
+   - If used > target → stop walking
+5. Update last_served_qa_run if QA entry granted (priority-round-robin only)
+6. Save queue
+```
+
+#### Policy sorting
+- **FIFO**: sort all by `enqueued_at`
+- **Priority-drain**: sort by (type_priority, then group QA by `qa_run_id` ordered by earliest entry, concatenate)
+- **Priority-round-robin**: sort by (type_priority, then interleave QA entries across `qa_run_id` groups starting from `last_served_qa_run + 1`)
+
 ## 2. Implicit Requirements
 
 ### IR1: Graceful degradation when Docker stats unavailable
 `docker stats` may fail (Docker not running, permissions). The governor must not block launches when stats are unavailable — fall back to allowing the launch and logging a warning.
 
-### IR2: Thread safety
-Memory governor state (stats file, current usage cache) is accessed from multiple threads: QA scenario threads, the TUI poll timer, the review loop. All shared state must use locks.
+### IR2: Thread and cross-process safety
+Memory governor state (stats file, current usage cache) is accessed from multiple threads within a process (QA scenario threads, TUI poll timer, review loop) and from multiple pm processes running concurrently. All shared state must be protected by the cross-process file lock (`governor_lock` from `launch_queue.py`), which also serializes within-process access. The threading locks (`_gate_lock`, `_stats_lock`) in `memory_governor.py` are replaced by this file lock.
 
 ### IR3: Stats file atomicity
 `~/.pm/container-stats.json` must be written atomically (write-to-temp + rename) to avoid corruption from concurrent readers/writers, following the pattern used elsewhere in pm (e.g. `qa_status.json`).
@@ -220,7 +317,11 @@ The key principle: any real observation beats a configured default, and a config
 **Ambiguity:** When exactly is memory captured?
 **Resolution:** At container end-of-life — immediately before `docker stop` or `docker rm -f`. A single `docker stats --no-stream` call for that specific container, with a 5s timeout. This replaces periodic background polling. For the gate check's "current used" value, a one-shot `docker stats` (all pm containers) or `/proc/meminfo` read is done synchronously at check time.
 
-### A9: Container age and its use in projection
+### A9: Queue policy vs QA sub-policy interaction
+**Ambiguity:** The original design had two independent settings: `system-memory-queue-policy fifo|priority` and `system-memory-qa-policy drain|round-robin`. With FIFO queue policy, the QA sub-policies conflict — FIFO means strict time ordering, but drain/round-robin reorder QA entries.
+**Resolution:** Collapsed into a single setting: `pm container set system-memory-queue-policy fifo|priority-drain|priority-round-robin`. The drain and round-robin modes are sub-modes of priority ordering — they only apply when QA entries are grouped together by type priority. In FIFO mode, all entries (including QA) are strictly ordered by enqueue time with no sub-ordering. This removes the ambiguity entirely. One setting, three values.
+
+### A10: Container age and its use in projection
 **Ambiguity:** Should projection account for how long the new container is expected to run?
 **Resolution:** Not initially. The rolling average of end-of-life samples already reflects typical session durations for each type (QA scenarios are short, impl sessions are long). The age is stored in each sample for future refinement — e.g., if we later want to project differently for a quick QA scenario vs. a long impl session. For now, average of all samples per type is sufficient.
 
@@ -271,10 +372,25 @@ If the user changes the target while a QA run is active, the new value should ta
 ### E9: Stats file corruption
 If `container-stats.json` is corrupted (truncated write, manual edit), the governor should catch JSON parse errors, log a warning, and reset to empty stats (falling back to per-container limits for projection).
 
-### E14: Container removed externally (no stats captured)
+### E14: Stale queue entries from dead processes
+A pm process may crash or be killed with entries still in the launch queue. `try_acquire` cleans stale entries by checking PID liveness via `os.kill(pid, 0)`. This runs on every `try_acquire` call, so stale entries are cleared promptly.
+
+### E15: Lock timeout on governor lock
+If `governor_lock()` times out (10s), the operation should fall back to allowing the launch and logging a warning — same graceful degradation as when Docker stats are unavailable (IR1). A stuck lock is better than a blocked launch.
+
+### E16: Acquired-entry double counting
+Brief window where both `docker stats` reports a container's memory AND the queue still has its acquired entry (before `dequeue()`). This double-counts the memory, making the gate more conservative. Self-correcting on next poll cycle — conservative is acceptable.
+
+### E17: Priority mode with entries that don't fit
+In priority-drain/priority-round-robin, an impl entry at the front of the queue may not fit in memory. The walk should continue past entries that don't fit to find smaller entries that do — an impl container needing 8GB shouldn't block a QA scenario that only needs 2GB when there's 3GB of headroom.
+
+### E18: Queue file corruption
+If `launch-queue.json` is corrupted, return empty queue and start fresh (same pattern as `container-stats.json` — E9).
+
+### E19: Container removed externally (no stats captured)
 Containers may be removed outside pm's control (`docker rm` by user, Docker daemon restart, system reboot). No end-of-life stats are captured in these cases. This is fine — the sample is simply missed. The governor still works with whatever historical samples exist.
 
-### E15: Container type classification for stats
+### E20: Container type classification for stats
 Stats are keyed by container type, but container names encode the type: `pm-{tag}-impl`, `pm-{tag}-review`, `pm-{tag}-qa-{pr}-{loop}-s{N}`. `remove_container()` and `stop_container()` need to infer the type from the name to record the sample correctly. Add `infer_container_type(name: str) -> str | None` to parse the naming convention.
 
 ## 5. Implementation Plan
@@ -287,23 +403,36 @@ Stats are keyed by container type, but container names encode the type: `pm-{tag
    - `get_current_used_mb() -> int` — dispatch based on `system-memory-scope` setting
    - `capture_container_memory(name: str) -> int | None` — `docker stats --no-stream` for a single container, returns MB or None on failure. Called before stop/removal.
    - `get_container_age_minutes(name: str) -> float | None` — `docker inspect` StartedAt, returns age in minutes
-   - `load_stats() -> dict` / `save_stats(stats)` — read/write `~/.pm/container-stats.json` (atomic write via temp+rename)
-   - `record_sample(container_type: str, memory_mb: int, age_minutes: float)` — append sample to stats file, drop oldest if over `system-memory-history-size`
+   - `load_stats() -> dict` / `save_stats(stats)` — read/write `~/.pm/container-stats.json` (atomic write via temp+rename). Uses `governor_lock()` from `launch_queue.py` for cross-process safety.
+   - `record_sample(container_type: str, memory_mb: int, age_minutes: float)` — append sample to stats file under `governor_lock()`, drop oldest if over `system-memory-history-size`
    - `project_memory(container_type: str) -> int` — average of stored end-of-life samples (uses whatever samples exist, even if fewer than `history-size`); only falls back to `system-memory-default-projection` / `memory-limit` when zero samples
    - `get_history_size() -> int` — read `system-memory-history-size` setting, default 20
-   - `check_launch(container_type: str, count: int = 1) -> tuple[bool, str]` — gate check (current_used + count * projected <= target)
+   - `check_launch(container_type: str, count: int = 1) -> tuple[bool, str]` — gate check (current_used + count * projected <= target). Uses `governor_lock()`. Kept as convenience API for non-queued checks (status display, diagnostics).
    - `get_memory_target() -> int | None` — read setting, None if unset (governor inactive)
    - `get_stop_idle_policy(container_type: str) -> bool` — check stop-on-idle setting
+   - No threading locks (`_gate_lock`, `_stats_lock`) — cross-process file lock from `launch_queue.py` replaces them.
 
-2. **`tests/test_memory_governor.py`** — Unit tests for the governor module
+2. **`pm_core/launch_queue.py`** — Cross-process launch queue:
+   - `governor_lock(timeout=10.0) -> contextmanager` — `fcntl.flock` on `~/.pm/governor.lock`. Shared by `memory_governor.py`.
+   - `enqueue(container_type, qa_run_id=None, count=1) -> list[str]` — add entries to `~/.pm/launch-queue.json`, return entry IDs.
+   - `try_acquire(entry_ids: list[str]) -> list[str]` — under lock: clean stale PIDs, sort by policy, walk and grant entries that are next in line AND fit in memory. Accounts for acquired entries' projected memory.
+   - `enqueue_and_try_acquire(container_type, qa_run_id=None) -> tuple[str, bool]` — atomic fast path for impl/review (one lock round-trip).
+   - `dequeue(entry_ids: list[str]) -> None` — remove entries post-launch or on cancellation.
+   - `get_queue_status() -> dict` — read-only snapshot for status display.
+   - Internal: `_sort_queue(entries, policy, last_served)` — sort by FIFO / priority-drain / priority-round-robin. `_clean_stale(entries)` — remove entries from dead PIDs via `os.kill(pid, 0)`.
+
+3. **`tests/test_memory_governor.py`** — Unit tests for the governor module
+
+4. **`tests/test_launch_queue.py`** — Unit tests for launch queue: policy sorting, enqueue/acquire/dequeue, stale cleanup, round-robin state, concurrent acquire accounting.
 
 ### Modified files:
-1. **`pm_core/cli/container.py`** — Add `system-memory-target`, `system-memory-scope`, `system-memory-default-projection`, `system-memory-history-size`, `stop-idle-impl`, `stop-idle-review`, `stop-idle-qa` to `container_set` choices. Add memory info to `container_status` output.
-2. **`pm_core/container.py`** — Add `stop_container()` (captures memory before stopping), modify `remove_container()` to capture memory before removal, modify `create_container()` to handle stopped container restart, add governor gate calls.
-3. **`pm_core/qa_loop.py`** — Integrate governor into `_launch_scenarios_in_containers()` and `_launch_next_queued()`. Add `"waiting_memory"` status. Call `stop_container()` (not `remove_container()`) for completed QA scenarios when stop-on-idle is enabled.
+1. **`pm_core/cli/container.py`** — Add `system-memory-target`, `system-memory-scope`, `system-memory-default-projection`, `system-memory-history-size`, `system-memory-queue-policy`, `stop-idle-impl`, `stop-idle-review`, `stop-idle-qa` to `container_set` choices. Add validation for `system-memory-queue-policy` (`fifo|priority-drain|priority-round-robin`). Add memory info and queue status to `container_status` output.
+2. **`pm_core/container.py`** — Add `stop_container()` (captures memory before stopping), modify `remove_container()` to capture memory before removal, modify `create_container()` to handle stopped container restart. Replace direct `check_launch()` call in `wrap_claude_cmd()` with `enqueue_and_try_acquire()` for impl/review gating; `dequeue()` after container creation or on denial.
+3. **`pm_core/qa_loop.py`** — At phase 2 entry: `enqueue("qa_scenario", qa_run_id, count=N)` for all scenarios. In `_launch_next_queued()`: call `try_acquire(pending_entry_ids)` instead of direct `check_launch()`. Track `_entry_id_map` (scenario index → queue entry ID) and `_pending_entry_ids`. `dequeue()` on verdict completion or `stop_requested`. Add `"waiting_memory"` status. Call `stop_container()` for completed QA scenarios when stop-on-idle is enabled.
 4. **`pm_core/tui/widgets.py`** — Add `memory_status` parameter to `StatusBar.update_status()`.
 5. **`pm_core/tui/app.py`** — Compute and pass memory status to status bar.
 6. **`pm_core/qa_status.py`** — Render `"waiting_memory"` verdict state with distinct indicator.
+7. **`pm_core/memory_governor.py`** — (self-modification) Remove `_gate_lock` and `_stats_lock` threading locks. All lock-protected operations use `governor_lock()` from `launch_queue.py` instead.
 
 ## 6. QA Testing Notes
 

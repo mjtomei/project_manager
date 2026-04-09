@@ -114,7 +114,8 @@ class TestStats:
             assert stats == {}
 
     def test_record_sample_creates_entry(self, tmp_path):
-        with patch("pm_core.memory_governor.pm_home", return_value=tmp_path):
+        with patch("pm_core.memory_governor.pm_home", return_value=tmp_path), \
+             patch("pm_core.launch_queue.pm_home", return_value=tmp_path):
             record_sample("qa_scenario", 5100, 12.5)
             stats = load_stats()
             assert "qa_scenario" in stats
@@ -125,6 +126,7 @@ class TestStats:
 
     def test_record_sample_trims_to_history_size(self, tmp_path):
         with patch("pm_core.memory_governor.pm_home", return_value=tmp_path), \
+             patch("pm_core.launch_queue.pm_home", return_value=tmp_path), \
              patch("pm_core.memory_governor.get_history_size", return_value=3):
             for i in range(5):
                 record_sample("impl", 4000 + i * 100, 30.0)
@@ -189,34 +191,37 @@ class TestCheckLaunch:
             assert allowed is True
             assert reason == ""
 
-    def test_within_budget(self):
+    def test_within_budget(self, tmp_path):
         with patch("pm_core.memory_governor.get_memory_target",
                    return_value=48 * 1024), \
              patch("pm_core.memory_governor.get_current_used_mb",
                    return_value=30 * 1024), \
              patch("pm_core.memory_governor.project_memory",
-                   return_value=8 * 1024):
+                   return_value=8 * 1024), \
+             patch("pm_core.launch_queue.pm_home", return_value=tmp_path):
             allowed, reason = check_launch("impl")
             assert allowed is True
 
-    def test_exceeds_budget(self):
+    def test_exceeds_budget(self, tmp_path):
         with patch("pm_core.memory_governor.get_memory_target",
                    return_value=48 * 1024), \
              patch("pm_core.memory_governor.get_current_used_mb",
                    return_value=44 * 1024), \
              patch("pm_core.memory_governor.project_memory",
-                   return_value=8 * 1024):
+                   return_value=8 * 1024), \
+             patch("pm_core.launch_queue.pm_home", return_value=tmp_path):
             allowed, reason = check_launch("impl")
             assert allowed is False
             assert "Memory gate" in reason
 
-    def test_multiple_count(self):
+    def test_multiple_count(self, tmp_path):
         with patch("pm_core.memory_governor.get_memory_target",
                    return_value=48 * 1024), \
              patch("pm_core.memory_governor.get_current_used_mb",
                    return_value=10 * 1024), \
              patch("pm_core.memory_governor.project_memory",
-                   return_value=5 * 1024):
+                   return_value=5 * 1024), \
+             patch("pm_core.launch_queue.pm_home", return_value=tmp_path):
             # 10G + 3*5G = 25G <= 48G
             allowed, _ = check_launch("qa_scenario", count=3)
             assert allowed is True
@@ -224,11 +229,12 @@ class TestCheckLaunch:
             allowed, _ = check_launch("qa_scenario", count=10)
             assert allowed is False
 
-    def test_measurement_failure_allows(self):
+    def test_measurement_failure_allows(self, tmp_path):
         with patch("pm_core.memory_governor.get_memory_target",
                    return_value=48 * 1024), \
              patch("pm_core.memory_governor.get_current_used_mb",
-                   return_value=None):
+                   return_value=None), \
+             patch("pm_core.launch_queue.pm_home", return_value=tmp_path):
             allowed, _ = check_launch("impl")
             assert allowed is True
 
@@ -379,6 +385,8 @@ class TestCaptureAndRecord:
              patch("pm_core.memory_governor.get_container_age_minutes",
                    return_value=45.0), \
              patch("pm_core.memory_governor.pm_home",
+                   return_value=tmp_path), \
+             patch("pm_core.launch_queue.pm_home",
                    return_value=tmp_path):
             capture_and_record("pm-impl")
             stats = load_stats()

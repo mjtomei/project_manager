@@ -27,7 +27,6 @@ import json
 import platform
 import re
 import subprocess
-import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -42,14 +41,6 @@ _log = configure_logger("pm.memory_governor")
 _DEFAULT_HISTORY_SIZE = 20
 _STATS_FILE = "container-stats.json"
 _DOCKER_STATS_TIMEOUT = 5  # seconds — must not block teardown
-
-# Lock serialising gate checks so concurrent launch threads don't all
-# pass simultaneously.
-_gate_lock = threading.Lock()
-
-# Lock protecting stats file read-modify-write cycles (record_sample
-# can be called from multiple threads when QA scenarios complete).
-_stats_lock = threading.Lock()
 
 # Container name prefix (mirrors container.py)
 _CONTAINER_PREFIX = "pm-"
@@ -432,9 +423,11 @@ def record_sample(container_type: str, memory_mb: int,
     """Record an end-of-life memory sample for a container type.
 
     Appends to the rolling window, dropping the oldest sample if over
-    the configured history size.  Thread-safe via ``_stats_lock``.
+    the configured history size.  Cross-process safe via ``governor_lock``.
     """
-    with _stats_lock:
+    from pm_core.launch_queue import governor_lock
+
+    with governor_lock():
         stats = load_stats()
         entry = stats.setdefault(container_type, {})
         samples = entry.setdefault("samples", [])
@@ -498,13 +491,17 @@ def check_launch(container_type: str,
     Returns ``(allowed, reason)``.  If the governor is inactive (no target
     configured), always returns ``(True, "")``.
 
-    Thread-safe: serialised via ``_gate_lock``.
+    Cross-process safe via ``governor_lock``.  Kept as a convenience API
+    for non-queued checks (status display, diagnostics).  Production
+    launch gating should use ``launch_queue.try_acquire`` instead.
     """
     target = get_memory_target()
     if target is None:
         return True, ""
 
-    with _gate_lock:
+    from pm_core.launch_queue import governor_lock
+
+    with governor_lock():
         current = get_current_used_mb()
         if current is None:
             # Can't measure — allow the launch but warn
