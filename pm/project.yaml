@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-343be0c
+  active_pr: pr-b764a0c
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -8460,7 +8460,7 @@ prs:
   branch: pm/pr-343be0c-window-visibility-management-link-unlink-sub-windo
   status: pending
   depends_on:
-  - pr-ff68ef5
+  - pr-2d0588a
   description: 'Reduce tmux window clutter by only linking windows that are actively
     needed. Uses tmux link-window/unlink-window to control which windows appear in
     the session''s window list.
@@ -8527,7 +8527,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-09T11:30:47.906403+00:00'
-  updated_at: '2026-04-09T11:31:39.606268+00:00'
+  updated_at: '2026-04-09T11:33:02.835719+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
