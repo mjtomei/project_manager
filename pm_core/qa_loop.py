@@ -1622,27 +1622,31 @@ def _poll_tmux_verdicts(
         active = len(pending) + len(verifying)
         if concurrency_cap > 0 and active >= concurrency_cap:
             return
-        # Memory governor gate check via launch queue (containers only)
+        # Memory governor gate check via launch queue (containers only).
+        # Only try to acquire ONE entry at a time — passing all pending IDs
+        # could grant multiple entries, but this function only launches one.
+        # Orphaned "acquired" entries would consume phantom memory budget.
         if use_containers and _pending_entry_ids:
             from pm_core.launch_queue import try_acquire
-            granted = try_acquire(list(_pending_entry_ids))
-            if not granted:
-                _log.info("Launch queue: no entries granted — waiting for memory")
-                return
-            # Find the first queued scenario whose entry was granted
-            granted_set = set(granted)
-            target_scenario = None
+            # Find the first queued scenario with a pending entry ID
+            target_eid = None
+            target_idx = None
             for i, s in enumerate(_launch_queue):
                 eid = _entry_id_map.get(s.index)
-                if eid and eid in granted_set:
-                    target_scenario = _launch_queue.pop(i)
+                if eid and eid in _pending_entry_ids:
+                    target_eid = eid
+                    target_idx = i
                     break
-            if target_scenario is None:
-                return
-            scenario = target_scenario
-            eid = _entry_id_map.get(scenario.index)
-            if eid:
-                _pending_entry_ids.discard(eid)
+            if target_eid is None:
+                # No pending entry IDs left — fall through to non-governor path
+                scenario = _launch_queue.pop(0)
+            else:
+                granted = try_acquire([target_eid])
+                if not granted:
+                    _log.info("Launch queue: entry not granted — waiting for memory")
+                    return
+                scenario = _launch_queue.pop(target_idx)
+                _pending_entry_ids.discard(target_eid)
         elif use_containers:
             # Governor inactive or no entry IDs — use old check_launch path
             from pm_core.memory_governor import check_launch
@@ -1944,10 +1948,11 @@ def _poll_tmux_verdicts(
         if completed_verifications:
             _launch_next_queued()
 
-        # Periodic retry: when scenarios are waiting for memory (no verdicts
-        # triggering _launch_next_queued), try on each poll cycle.  Loop
-        # so we fill as many slots as the cap and memory allow (not just one).
-        if _launch_queue and not pending and not verifying:
+        # Periodic retry: memory may have been freed externally (other pm
+        # processes stopping containers, user running docker stop, etc.).
+        # Try on each poll cycle when scenarios are queued — concurrency and
+        # memory checks inside _launch_next_queued gate the actual launch.
+        if _launch_queue:
             for _ in range(len(_launch_queue)):
                 _launch_next_queued()
 
