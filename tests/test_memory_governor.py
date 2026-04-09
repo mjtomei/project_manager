@@ -73,6 +73,11 @@ class TestInferContainerType:
         assert infer_container_type("pm-impl") == "impl"
         assert infer_container_type("pm-repo-abc123-impl") == "impl"
 
+    def test_impl_with_pr_id(self):
+        """Real naming pattern: label='impl-{pr_id}' → pm-{tag}-impl-{pr_id}."""
+        assert infer_container_type("pm-project_manager-b894f7e4-impl-pr-eb2dbfc") == "impl"
+        assert infer_container_type("pm-impl-pr-eb2dbfc") == "impl"
+
     def test_review(self):
         assert infer_container_type("pm-review-pr-abc") == "review"
         assert infer_container_type("pm-repo-abc123-review-pr-abc") == "review"

@@ -1649,6 +1649,8 @@ def _poll_tmux_verdicts(
     for _ in range(len(_launch_queue)):
         _launch_next_queued()  # returns immediately once cap is reached
 
+    _prev_mem_waiting: set[int] = set()
+
     while (pending or verifying or _launch_queue) and not state.stop_requested:
         time.sleep(_POLL_INTERVAL)
 
@@ -1907,7 +1909,10 @@ def _poll_tmux_verdicts(
             if not _allowed:
                 _mem_waiting = {s.index for s in _launch_queue}
 
-        if verdicts_changed or completed_verifications or _mem_waiting:
+        _mem_waiting_changed = _mem_waiting != _prev_mem_waiting
+        _prev_mem_waiting = set(_mem_waiting)
+
+        if verdicts_changed or completed_verifications or _mem_waiting_changed:
             with verification_lock:
                 verifying_snapshot = set(verifying)
             _write_status_file(status_path, state.pr_id, state.scenarios,

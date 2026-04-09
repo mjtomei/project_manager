@@ -96,8 +96,8 @@ def parse_memory(s: str) -> int:
 # ---------------------------------------------------------------------------
 
 # Container names follow these patterns (see container.py):
-#   pm-{tag}-impl         or  pm-impl
-#   pm-{tag}-review-{id}  or  pm-review-{id}
+#   pm-{tag}-impl-{pr_id}   or  pm-impl-{pr_id}   or  pm-{tag}-impl
+#   pm-{tag}-review-{pr_id}  or  pm-review-{pr_id}
 #   pm-{tag}-qa-{pr}-{loop}-s{N}  or  pm-qa-{pr}-{loop}-s{N}
 # The tag is a session identifier that may contain hyphens.
 
@@ -119,8 +119,8 @@ def infer_container_type(name: str) -> str | None:
     if suffix.endswith("-qa-planner") or suffix == "qa-planner":
         return "qa_planner"
 
-    # Impl: ends with "-impl" or is exactly "impl"
-    if suffix.endswith("-impl") or suffix == "impl":
+    # Impl: label is "impl-{pr_id}" so name contains "-impl-" or ends with "-impl"
+    if "-impl-" in suffix or suffix.endswith("-impl") or suffix == "impl" or suffix.startswith("impl-"):
         return "impl"
 
     # Review: contains "-review-" or starts with "review-"
