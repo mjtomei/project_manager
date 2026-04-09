@@ -17,6 +17,7 @@ from pm_core.container import (
     build_image,
     image_exists,
     remove_container,
+    stop_container,
     cleanup_qa_containers,
     cleanup_session_containers,
     cleanup_all_containers,
@@ -898,3 +899,54 @@ class TestCreateContainerPushProxy:
                         session_tag="repo-abc", pr_id="pr-1")
         call_kwargs = mock_exec.call_args[1]
         assert call_kwargs["proxy_socket_path"] is None
+
+
+class TestStopContainer:
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.tmux.set_pane_option")
+    def test_set_pane_option_called_for_each_pane(self, mock_set_pane, mock_remove):
+        stop_container("pm-qa-s1", pane_ids=["%10", "%11", "%12"])
+        assert mock_set_pane.call_count == 3
+        mock_set_pane.assert_has_calls([
+            call("%10", "remain-on-exit", "on"),
+            call("%11", "remain-on-exit", "on"),
+            call("%12", "remain-on-exit", "on"),
+        ])
+
+        # Verify ordering: all set_pane_option calls before remove_container
+        manager = MagicMock()
+        manager.attach_mock(mock_set_pane, "set_pane")
+        manager.attach_mock(mock_remove, "remove")
+        # Reset and replay to capture ordering
+        manager.reset_mock()
+        mock_set_pane.reset_mock()
+        mock_remove.reset_mock()
+        stop_container("pm-qa-s1", pane_ids=["%10", "%11", "%12"])
+        assert manager.mock_calls[:3] == [
+            call.set_pane("%10", "remain-on-exit", "on"),
+            call.set_pane("%11", "remain-on-exit", "on"),
+            call.set_pane("%12", "remain-on-exit", "on"),
+        ]
+        assert manager.mock_calls[3] == call.remove("pm-qa-s1")
+
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.tmux.set_pane_option")
+    def test_pane_ids_none_skips_set_pane_option(self, mock_set_pane, mock_remove):
+        stop_container("pm-qa-s1", pane_ids=None)
+        mock_set_pane.assert_not_called()
+        mock_remove.assert_called_once_with("pm-qa-s1")
+
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.tmux.set_pane_option")
+    def test_pane_ids_empty_list_skips_set_pane_option(self, mock_set_pane, mock_remove):
+        stop_container("pm-qa-s1", pane_ids=[])
+        mock_set_pane.assert_not_called()
+        mock_remove.assert_called_once_with("pm-qa-s1")
+
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.tmux.set_pane_option")
+    def test_set_pane_option_failure_is_nonfatal(self, mock_set_pane, mock_remove):
+        mock_set_pane.side_effect = [None, RuntimeError("dead pane"), None]
+        stop_container("pm-qa-s1", pane_ids=["%10", "%11", "%12"])
+        assert mock_set_pane.call_count == 3
+        mock_remove.assert_called_once_with("pm-qa-s1")

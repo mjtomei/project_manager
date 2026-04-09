@@ -30,6 +30,7 @@ from pm_core.qa_loop import (
     _VERIFICATION_MAX_PANE_LINES,
     _DEFAULT_VERIFICATION_MAX_RETRIES,
     _QA_KEYWORDS,
+    _get_window_pane_ids,
 )
 
 
@@ -2665,3 +2666,34 @@ STEPS: do something
 QA_PLAN_END"""
         scenarios = parse_qa_plan(output)
         assert scenarios[0].mock_ids == []
+
+
+@patch("pm_core.qa_loop.tmux_mod", create=True)
+class TestGetWindowPaneIds:
+    def test_returns_pane_ids(self, mock_tmux_mod):
+        mock_tmux_mod.find_window_by_name.return_value = {
+            "id": "@1", "index": "2", "name": "qa-1-s1",
+        }
+        mock_tmux_mod.get_pane_indices.return_value = [
+            ("%10", 0), ("%11", 1), ("%12", 2),
+        ]
+        result = _get_window_pane_ids("pm", "qa-1-s1")
+        assert result == ["%10", "%11", "%12"]
+        mock_tmux_mod.find_window_by_name.assert_called_with("pm", "qa-1-s1")
+        mock_tmux_mod.get_pane_indices.assert_called_with("pm", "2")
+
+    def test_window_name_none_returns_empty(self, mock_tmux_mod):
+        result = _get_window_pane_ids("pm", None)
+        assert result == []
+        mock_tmux_mod.find_window_by_name.assert_not_called()
+
+    def test_window_not_found_returns_empty(self, mock_tmux_mod):
+        mock_tmux_mod.find_window_by_name.return_value = None
+        result = _get_window_pane_ids("pm", "nonexistent")
+        assert result == []
+        mock_tmux_mod.get_pane_indices.assert_not_called()
+
+    def test_exception_returns_empty(self, mock_tmux_mod):
+        mock_tmux_mod.find_window_by_name.side_effect = RuntimeError("tmux dead")
+        result = _get_window_pane_ids("pm", "qa-1-s1")
+        assert result == []
