@@ -137,12 +137,24 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
             except store.StoreLockTimeout as e:
                 app.log_message(f"Sync: {e}")
                 _log.warning("do_normal_sync: lock timeout applying merges: %s", e)
-                app._data = store.load(app._root)
+                try:
+                    app._data = store.load(app._root)
+                except store.ProjectYamlParseError:
+                    pass  # keep existing app._data
                 app._update_display()
+                return
+            except store.ProjectYamlParseError as e:
+                _log.warning("Skipping reload: %s", e)
+                app._update_status_bar()
                 return
             _kill_merged_pr_windows(app, result.merged_prs)
         else:
-            app._data = store.load(app._root)
+            try:
+                app._data = store.load(app._root)
+            except store.ProjectYamlParseError as e:
+                _log.warning("Skipping reload: %s", e)
+                app._update_status_bar()
+                return
         app._update_display()
 
         # Detect PRs that became merged — either via sync or via CLI
