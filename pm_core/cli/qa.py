@@ -12,7 +12,7 @@ from pm_core.cli import cli
 
 @cli.group()
 def qa():
-    """Manage QA instructions and regression tests."""
+    """Manage QA instructions, regression tests, and mock definitions."""
 
 
 @qa.command("list")
@@ -407,7 +407,7 @@ def qa_standalone(instruction_id: str):
     click.echo(f"Running standalone QA: {item['title']}")
     click.echo(f"  Workdir: {workdir}")
 
-    cmd = build_claude_shell_cmd(prompt=prompt)
+    cmd = build_claude_shell_cmd(prompt=prompt, cwd=workdir)
     # Launch as tmux window if in a session, otherwise blocking
     session = tmux_mod.get_session_name() if tmux_mod.in_tmux() else None
     if session:
@@ -418,3 +418,141 @@ def qa_standalone(instruction_id: str):
         click.echo("  Running in foreground (no tmux session detected)")
         os.chdir(workdir)
         os.execvp("bash", ["bash", "-c", cmd])
+
+
+# ---------------------------------------------------------------------------
+# pm qa mocks — shared mock definition library
+# ---------------------------------------------------------------------------
+
+@qa.group("mocks")
+def qa_mocks():
+    """Manage shared mock definitions (pm/qa/mocks/).
+
+    Mocks defined here are injected into every QA scenario prompt so all
+    parallel scenario agents use the same contracts rather than independently
+    deciding how to simulate external dependencies (Claude sessions, git
+    operations, tmux, etc.).
+    """
+
+
+@qa_mocks.command("list")
+def qa_mocks_list():
+    """List all shared mock definitions."""
+    from pm_core import qa_instructions
+
+    root = state_root()
+    mocks = qa_instructions.list_mocks(root)
+
+    if not mocks:
+        click.echo("No mock definitions found in pm/qa/mocks/")
+        click.echo("Use 'pm qa mocks add <name>' to create one.")
+        return
+
+    click.echo(f"\nMocks ({len(mocks)}):")
+    for mock in mocks:
+        desc = f" — {mock['description']}" if mock["description"] else ""
+        click.echo(f"  {mock['id']}: {mock['title']}{desc}")
+    click.echo()
+
+
+@qa_mocks.command("show")
+@click.argument("mock_id")
+def qa_mocks_show(mock_id: str):
+    """Print the full content of a mock definition."""
+    from pm_core import qa_instructions
+
+    root = state_root()
+    mock = qa_instructions.get_mock(root, mock_id)
+
+    if mock is None:
+        click.echo(f"Mock not found: {mock_id}", err=True)
+        raise SystemExit(1)
+
+    click.echo(f"# {mock['title']}")
+    if mock["description"]:
+        click.echo(mock["description"])
+    click.echo(f"[{mock['path']}]\n")
+    click.echo(mock["body"])
+
+
+@qa_mocks.command("add")
+@click.argument("name")
+def qa_mocks_add(name: str):
+    """Create a new mock definition and open it in $EDITOR."""
+    from pm_core import qa_instructions
+
+    root = state_root()
+    d = qa_instructions.mocks_dir(root)
+
+    file_id = name.lower().replace(" ", "-")
+    file_id = "".join(c for c in file_id if c.isalnum() or c == "-")
+    filepath = d / f"{file_id}.md"
+
+    if filepath.exists():
+        click.echo(f"Mock already exists: {filepath}", err=True)
+        raise SystemExit(1)
+
+    title = name.replace("-", " ").title()
+    filepath.write_text(f"""\
+---
+title: {title}
+description:
+tags: []
+---
+## Contract
+
+What external dependency this mock simulates, and what behavior it stands
+in for (e.g. "Claude API sessions — simulates a Claude session that returns
+scripted responses without making real API calls").
+
+## Scripted Responses
+
+The responses or return values this mock should produce for common test
+scenarios.  Be specific enough that scenario agents can implement the mock
+consistently.
+
+## What Remains Unmocked
+
+What is still real (not mocked) even when this mock is active.
+""")
+
+    click.echo(f"Created: {filepath}")
+
+    editor = os.environ.get("EDITOR", "vim")
+    subprocess.run([editor, str(filepath)])
+
+
+@qa_mocks.command("edit")
+@click.argument("mock_id")
+def qa_mocks_edit(mock_id: str):
+    """Edit a mock definition in $EDITOR."""
+    from pm_core import qa_instructions
+
+    root = state_root()
+    mock = qa_instructions.get_mock(root, mock_id)
+
+    if mock is None:
+        click.echo(f"Mock not found: {mock_id}", err=True)
+        raise SystemExit(1)
+
+    editor = os.environ.get("EDITOR", "vim")
+    subprocess.run([editor, mock["path"]])
+
+
+@qa_mocks.command("prompt")
+def qa_mocks_prompt():
+    """Print the mocks block that gets injected into QA scenario prompts.
+
+    Use this to verify what mock contracts scenario agents will see.
+    """
+    from pm_core import qa_instructions
+
+    root = state_root()
+    block = qa_instructions.mocks_for_prompt(root)
+
+    if not block:
+        click.echo("No mocks defined — scenario prompts will have no Mocks section.")
+        click.echo("Use 'pm qa mocks add <name>' to define one.")
+        return
+
+    click.echo(block)

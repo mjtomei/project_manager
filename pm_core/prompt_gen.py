@@ -3,6 +3,8 @@
 from pm_core import store, notes
 from pm_core.backend import get_backend
 from pm_core.paths import get_global_setting
+from pm_core.spec_gen import (format_spec_for_prompt, spec_generation_preamble,
+                               get_spec_mocks_section)
 
 
 def tui_section(session_name: str) -> str:
@@ -26,13 +28,50 @@ the appropriate key in the TUI instead.
 """
 
 
-def _format_pr_notes(pr: dict) -> str:
-    """Format PR notes as a markdown section, or empty string if none."""
-    pr_notes = pr.get("notes") or []
-    if not pr_notes:
+def _format_pr_notes(pr: dict, workdir: str | None = None) -> str:
+    """Format PR notes as a markdown section, or empty string if none.
+
+    Merges notes from the main project.yaml and the workdir project.yaml
+    (if present).  Deduplicates by note ID, preferring whichever copy has
+    the later ``last_edited`` timestamp.  The merged list is sorted by
+    ``created_at``.
+    """
+    main_notes = list(pr.get("notes") or [])
+
+    # Collect notes from the workdir project.yaml, if available.
+    workdir_notes: list[dict] = []
+    if workdir:
+        try:
+            wd_root = store.find_project_root(start=workdir)
+            wd_data = store.load(wd_root, validate=False)
+            wd_pr = store.get_pr(wd_data, pr["id"])
+            if wd_pr:
+                workdir_notes = list(wd_pr.get("notes") or [])
+        except Exception:
+            pass  # graceful degradation — use main notes only
+
+    # Merge: index by note ID, prefer later last_edited on collision.
+    merged: dict[str, dict] = {}
+    for n in main_notes + workdir_notes:
+        nid = n.get("id")
+        if nid is None:
+            # Notes without an ID can't be deduped; give them a unique key.
+            merged[id(n)] = n
+            continue
+        existing = merged.get(nid)
+        if existing is None:
+            merged[nid] = n
+        else:
+            new_ts = n.get("last_edited") or n.get("created_at", "")
+            old_ts = existing.get("last_edited") or existing.get("created_at", "")
+            if new_ts > old_ts:
+                merged[nid] = n
+
+    all_notes = sorted(merged.values(), key=lambda n: n.get("created_at", ""))
+    if not all_notes:
         return ""
     note_lines = []
-    for n in pr_notes:
+    for n in all_notes:
         ts = n.get("created_at", "")
         ts_str = f" ({ts})" if ts else ""
         note_lines.append(f"- {n['text']}{ts_str}")
@@ -79,6 +118,7 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
     # Include session notes if available
     general_notes_block = ""
     impl_specific_block = ""
+    root = None
     try:
         root = store.find_project_root()
         general_notes_block, impl_specific_block = notes.notes_for_prompt(root, "impl")
@@ -88,10 +128,14 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
     tui_block = tui_section(session_name) if session_name else ""
 
     # Include PR notes (addendums added after work began)
-    pr_notes_block = _format_pr_notes(pr)
+    pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
 
     beginner_block = _beginner_addendum()
     cleanup_block = _auto_cleanup_addendum()
+
+    # Include implementation spec if already generated, or preamble to generate one
+    impl_spec_block = format_spec_for_prompt(pr, "impl")
+    impl_spec_preamble = spec_generation_preamble(pr, "impl", root=root)
 
     prompt = f"""You're working on PR {pr_id}: "{title}"
 
@@ -103,12 +147,13 @@ This session is managed by `pm`. Run `pm help` to see available commands.
 
 ## Task
 {description}
-{pr_notes_block}
+{pr_notes_block}{impl_spec_block}{impl_spec_preamble}
 ## Tips
 - This session may be resuming after a restart. Check `git status` and `git log` to see if previous work exists on this branch — if so, continue from there. The directory may contain uncommitted implementation work from a previous session.
 - Before referencing existing code (imports, function calls, class usage), read the source to verify the interface.
 - This workdir is a clone managed by pm. The base pm state (project.yaml, PR status) lives in a separate directory and is not automatically synced with this clone. Commands like `pm pr start` and `pm pr review` should be run from the base directory, not here — your session for {pr_id} is already running.
 {_remote_sync_tip(data, branch)}
+{_base_branch_sync_tip(data, base_branch)}
 
 ## Workflow
 {instructions}
@@ -172,7 +217,7 @@ This PR is part of plan "{plan['name']}" ({plan['id']}). Other PRs in this plan:
         pass
 
     # Include PR notes (addendums)
-    pr_notes_block = _format_pr_notes(pr)
+    pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
 
     # Backend-appropriate diff and sync commands
     backend_name = data.get("project", {}).get("backend", "vanilla")
@@ -190,6 +235,24 @@ This PR is part of plan "{plan['name']}" ({plan['id']}). Other PRs in this plan:
     # Renumber steps based on whether pull step is present
     n = 2 if pull_step else 1
 
+    # Include implementation spec in review prompt for context.
+    # If no spec exists, warn the reviewer — the implementation session
+    # should have generated one in Step 0.
+    impl_spec_block = format_spec_for_prompt(pr, "impl")
+    if not impl_spec_block:
+        impl_spec_block = """
+## Implementation Spec — MISSING
+
+No implementation spec was generated for this PR.  The implementation session
+should have produced one as Step 0.  Without a spec, the reviewer cannot
+verify that the implementation matches an agreed-upon set of requirements.
+
+**Action**: If the implementation is otherwise sound, generate the spec now
+with `pm pr spec {pr_id} impl` so it is available for QA.  If the
+implementation has significant gaps, consider requesting re-implementation
+with spec generation enabled.
+""".replace("{pr_id}", pr_id)
+
     prompt = f"""You are reviewing PR {pr_id}: "{title}"
 
 ## Task
@@ -197,7 +260,7 @@ Review the code changes in this PR for quality, correctness, and architectural f
 
 ## Description
 {description}
-{pr_notes_block}{plan_context}{tui_block}{general_notes_block}
+{pr_notes_block}{impl_spec_block}{plan_context}{tui_block}{general_notes_block}
 ## Steps
 {pull_step}{n}. Run `{diff_cmd}` to see all changes
 {n+1}. **Generic checks** — things any codebase should get right:
@@ -291,6 +354,19 @@ def _remote_sync_tip(data: dict, branch: str) -> str:
         f"- Pull from remote before starting work to pick up changes from "
         f"other sessions or machines: `git pull origin {branch}`. "
         f"If there are merge conflicts, resolve them before continuing."
+    )
+
+
+def _base_branch_sync_tip(data: dict, base_branch: str) -> str:
+    """Return a tip about pulling the base branch, or empty string for local backend."""
+    backend_name = data.get("project", {}).get("backend", "vanilla")
+    if backend_name == "local":
+        return ""
+    return (
+        f"- Pull the latest `{base_branch}` and merge it into your branch so you're "
+        f"building on up-to-date code: "
+        f"`git fetch origin {base_branch} && git merge origin/{base_branch}`. "
+        f"Resolve any conflicts before continuing."
     )
 
 
@@ -494,6 +570,14 @@ def generate_watcher_prompt(data: dict, session_name: str | None = None,
     windows for issues, attempting fixes when possible and surfacing
     problems that need human input.
 
+    INPUT_REQUIRED semantics: the watcher uses INPUT_REQUIRED only for
+    *project-wide* blockers (broken base branch, plan contradictions,
+    infrastructure failures, or a genuinely stuck ``in_progress`` branch
+    with no active review/QA loop).  If a branch is paused by its own
+    review or QA loop's INPUT_REQUIRED, the watcher should note it in the
+    summary but emit READY — the loop already handles that branch, and
+    escalating would block all other branches unnecessarily.
+
     Args:
         data: Project data dict.
         session_name: If provided, include TUI interaction instructions.
@@ -616,6 +700,15 @@ loop for a PR, use `pm tui send` to send `zzz d` while the PR is selected.
 - PR dependencies that are stuck, blocking downstream work
 - Circular or broken dependency chains
 - Implementation pane showing an error/crash rather than completed work
+
+**States that are handled and do NOT need watcher INPUT_REQUIRED:**
+- PR in `in_review` or `qa` whose review/QA loop pane ends with `INPUT_REQUIRED` — the
+  loop is already pausing that branch and the user has been notified. Note it in your
+  summary but emit **READY**, not INPUT_REQUIRED. Even if multiple branches are
+  simultaneously paused by their own loops, each loop is handling its own branch; the
+  watcher should still emit READY so other branches can continue.
+  (Exception: the PR is `in_review` but has **no** active review loop window — that is
+  the abnormal state above and does warrant attention.)
 {auto_start_scope_block}
 ### 1. Scan Active Tmux Panes
 You can use `tmux list-windows` and `tmux capture-pane` to inspect all active windows:
@@ -628,7 +721,23 @@ You can use `tmux list-windows` and `tmux capture-pane` to inspect all active wi
 Try to fix any issues you can without human guidance.
 
 ### 3. Surface Issues Needing Human Input
-Use the **INPUT_REQUIRED** verdict for anything you can't figure out yourself.
+Distinguish between **project-wide blockers** and **branch-specific issues already handled**.
+
+**Use INPUT_REQUIRED for project-wide blockers:**
+- Broken base branch that affects all downstream work
+- Plan contradictions or fundamental architectural issues
+- Infrastructure failures (git remote unreachable, disk full, etc.)
+- An `in_progress` branch that is genuinely stuck (idle/dead pane for several minutes)
+  with no active review or QA loop handling it
+
+**Use READY (not INPUT_REQUIRED) when a branch-specific issue is already handled:**
+- If a branch's review loop or QA loop pane ends with `INPUT_REQUIRED` (at the time of
+  your observation), that loop is already pausing the branch and notifying the user.
+  The watcher escalating to INPUT_REQUIRED would block **all** branches unnecessarily.
+  Instead, note the situation in your summary and emit READY.
+- This applies even when multiple branches are simultaneously paused by their own loops.
+
+To check whether a review or QA loop is waiting for input: capture the relevant tmux pane and see if its last meaningful output ends with `INPUT_REQUIRED`. If the loop pane ends with `INPUT_REQUIRED`, the loop is handling it. If the PR is `in_review` but has **no** active review loop window at all, that is a different (abnormal) state — see above.
 
 ### 4. Project Health Monitoring
 Look for patterns across PRs that might signal issues in a PR's plan.
@@ -696,8 +805,8 @@ tmux list-panes -t <session>:<window>
 2. Take corrective actions for issues that don't need human input
 3. Compile a brief summary of findings
 4. End with a verdict on its own line:
-   - **READY** -- All issues handled (or no issues found). The monitor will wait and then run another iteration.
-   - **INPUT_REQUIRED** -- You need human input or want to surface an important finding. Describe what you need clearly. The user will interact with you in this pane, and then you should provide a follow-up verdict (**READY** to continue monitoring).
+   - **READY** -- All issues handled (or no issues found). The monitor will wait and then run another iteration. This is also correct when some branches are individually paused by their own review/QA loops — those loops handle their branches; the watcher does not need to escalate.
+   - **INPUT_REQUIRED** -- A **project-wide** blocker exists (broken base branch, plan contradiction, infrastructure failure) or a branch is genuinely stuck with no active review/QA loop handling it. Describe what you need clearly. The user will interact with you in this pane, and then you should provide a follow-up verdict (**READY** to continue monitoring).
 
 IMPORTANT: Always end your response with the verdict keyword on its own line -- either **READY** or **INPUT_REQUIRED**.{watcher_specific_block}"""
 
@@ -738,19 +847,55 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
     workdir = pr.get("workdir", "")
     base_branch = data.get("project", {}).get("base_branch", "master")
 
-    # Get instruction library summary and notes
+    # Get instruction library summary, mocks library, and notes
     library_summary = "No instruction library found."
+    mocks_summary = ""
     general_notes_block = ""
     qa_specific_block = ""
+    root = None
     try:
         root = store.find_project_root()
         library_summary = qa_instructions.instruction_summary_for_prompt(root)
+        mocks_list = qa_instructions.list_mocks(root)
+        if mocks_list:
+            mocks_lines = []
+            for m in mocks_list:
+                desc = f" — {m['description']}" if m["description"] else ""
+                mocks_lines.append(f"- **{m['id']}**{desc}")
+            mocks_summary = "\n".join(mocks_lines)
         general_notes_block, qa_specific_block = notes.notes_for_prompt(root, "qa")
     except FileNotFoundError:
         pass
 
     # Include PR notes (prior QA results, addendums)
-    pr_notes_block = _format_pr_notes(pr)
+    pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
+
+    # Include QA spec if already generated, or preamble to generate one
+    qa_spec_block = format_spec_for_prompt(pr, "qa")
+    qa_spec_preamble = spec_generation_preamble(pr, "qa", root=root)
+
+    mocks_library_section = ""
+    if mocks_summary:
+        mocks_library_section = f"""
+## Mock Library
+
+These shared mock definitions are available.  Reference them by ID in each
+scenario's MOCKS field.  Each mock is injected into the scenario prompt so
+all agents share the same contracts.
+
+{mocks_summary}
+
+If a scenario needs to mock an external dependency that is NOT listed above,
+declare it as a NEW_MOCK before the scenarios so it can be generated first.
+"""
+    else:
+        mocks_library_section = """
+## Mock Library
+
+No shared mocks are defined yet.  If any scenarios need to mock external
+dependencies (Claude sessions, git operations, tmux, network calls, etc.),
+declare them as NEW_MOCK blocks before the scenarios.
+"""
 
     prompt = f"""You are a QA planner analyzing PR {pr_id}: "{title}"
 
@@ -768,7 +913,9 @@ to verify this PR works correctly.
 - **Base branch**: {base_branch}
 - **Workdir**: {workdir}
 
-{pr_notes_block}
+Inspect the diff yourself — run `git diff {base_branch}...HEAD` in the workdir
+to see what changed.  Read source files as needed to understand the context.
+{pr_notes_block}{qa_spec_block}{qa_spec_preamble}
 ## QA Instruction Library
 
 These are available QA instructions.  Reference any that are relevant to
@@ -780,23 +927,34 @@ at the paths shown below.
 Instructions tell scenario agents how to set up a test environment.  Without
 one, agents fall back to reading code and auto-passing.  Try to assign an instruction
 to every scenario.
-
+{mocks_library_section}
 ## Output Format
 
 Your output is machine-parsed.  Use ALL CAPS markers exactly as shown.
 Do NOT use markdown headings or code fences — output the plain-text markers
 directly at the start of a line.
 
+First declare any new mocks needed (omit this section if all needed mocks
+already exist in the Mock Library above):
+
+NEW_MOCK: <mock-id e.g. "claude-session">
+DEPENDENCY: <the external system being mocked e.g. "Anthropic Claude API">
+REASON: <why scenarios need this mocked rather than real>
+
+Then list the scenarios:
+
 QA_PLAN_START
 
 SCENARIO {scenario_start}: <descriptive title for this scenario>
 FOCUS: <what area or behavior to test>
 INSTRUCTION: <filename from the library above, or "none" if no existing instruction applies>
+MOCKS: <comma-separated mock IDs this scenario uses, or "none">
 STEPS: <concrete test steps to perform>
 
 SCENARIO {scenario_start + 1}: <descriptive title for next scenario>
 FOCUS: <what area or behavior to test>
 INSTRUCTION: <filename or "none">
+MOCKS: <mock IDs or "none">
 STEPS: <concrete test steps>
 
 QA_PLAN_END
@@ -830,7 +988,7 @@ def generate_qa_interactive_prompt(data: dict, pr_id: str,
     pr_workdir = pr.get("workdir", "")
     base_branch = data.get("project", {}).get("base_branch", "master")
 
-    pr_notes_block = _format_pr_notes(pr)
+    pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
 
     scratch_line = f"\n- **Scratch dir** (throwaway test projects): {scratch_dir}" if scratch_dir else ""
     if worktree_mode:
@@ -863,7 +1021,7 @@ understand what's being tested:
     except (FileNotFoundError, Exception):
         pass
 
-    prompt = f"""You are an interactive QA session (Scenario 0) for PR {pr_id}: "{title}"
+    prompt = f"""You are in an interactive QA session (Scenario 0) for PR {pr_id}: "{title}"
 
 ## Context
 
@@ -949,7 +1107,10 @@ If a setup step fails or a required tool is unavailable, report
 """
 
     # Include PR notes (prior QA results, addendums)
-    pr_notes_block = _format_pr_notes(pr)
+    pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
+
+    # Include mocks section from QA spec so every scenario uses the same strategy
+    mocks_block = get_spec_mocks_section(pr)
 
     # Workdir description and execution instructions differ by mode
     backend_name = data.get("project", {}).get("backend", "vanilla")
@@ -975,8 +1136,8 @@ If a setup step fails or a required tool is unavailable, report
      `git pull --rebase origin {branch} && git push origin {branch}`
 {n+2}. End with a verdict on its own line — one of:
    - **PASS** — Scenario passed, no issues found
-   - **NEEDS_WORK** — Issues found (explain what and whether you fixed them)
-   - **INPUT_REQUIRED** — Genuine ambiguity requiring human judgment"""
+   - **NEEDS_WORK** — Issues found and fixed (the fix is committed and pushed)
+   - **INPUT_REQUIRED** — Issues found that you could not fix, or genuine ambiguity requiring human judgment"""
     else:
         workdir_block = f"""\
 - **PR workdir** (source code): {pr_workdir}
@@ -989,8 +1150,8 @@ If a setup step fails or a required tool is unavailable, report
    - Push: `git push origin {branch}`
 {n+2}. End with a verdict on its own line — one of:
    - **PASS** — Scenario passed, no issues found
-   - **NEEDS_WORK** — Issues found (explain what and whether you fixed them)
-   - **INPUT_REQUIRED** — Genuine ambiguity requiring human judgment"""
+   - **NEEDS_WORK** — Issues found and fixed (the fix is committed and pushed)
+   - **INPUT_REQUIRED** — Issues found that you could not fix, or genuine ambiguity requiring human judgment"""
 
     prompt = f"""You are running QA scenario {scenario.index}: "{scenario.title}"
 
@@ -1000,7 +1161,7 @@ If a setup step fails or a required tool is unavailable, report
 - **Branch**: {branch}
 - **Base branch**: {base_branch}
 {workdir_block}
-{pr_notes_block}
+{pr_notes_block}{mocks_block}
 ## How QA Works
 
 You are in one of several QA scenarios running in parallel, each in its own

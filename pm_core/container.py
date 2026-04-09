@@ -200,6 +200,7 @@ def container_is_running(name: str) -> bool:
 
 def _build_git_setup_script(
     has_push_proxy: bool = False,
+    host_workdir: str | None = None,
 ) -> str:
     """Build a shell script snippet to configure git inside the container.
 
@@ -210,8 +211,11 @@ def _build_git_setup_script(
     """
     lines: list[str] = []
 
-    # Set safe directory for /workspace
+    # Set safe directory for /workspace.
+    # Use plain git config (works when already running as pm) with su
+    # fallback (works when running as root in the default image).
     lines.append(
+        f"git config --global --add safe.directory {_CONTAINER_WORKDIR} 2>/dev/null || "
         f"su - {_CONTAINER_USER} -c "
         f"'git config --global --add safe.directory {_CONTAINER_WORKDIR}'"
     )
@@ -224,6 +228,13 @@ def _build_git_setup_script(
     # etc.) run directly via /usr/bin/git.
     if has_push_proxy:
         from pm_core.push_proxy import _CONTAINER_SOCKET_PATH
+        # Escape the host workdir for safe embedding in a JSON string literal.
+        # Backslash must come first to avoid double-escaping.
+        _escaped_host_workdir = ""
+        if host_workdir:
+            _escaped_host_workdir = (
+                host_workdir.replace("\\", "\\\\").replace('"', '\\"')
+            )
         # NOTE: The inline Python block must start at column 0 inside the
         # shell $(...) substitution, so we can't use textwrap.dedent here.
         wrapper_script = (
@@ -231,7 +242,12 @@ def _build_git_setup_script(
             "# pm: git wrapper — remote commands go through the host-side proxy\n"
             "REAL_GIT=/usr/bin/git\n"
             f'SOCKET="{_CONTAINER_SOCKET_PATH}"\n'
-            '# Commands that interact with remotes and need proxy forwarding\n'
+            # HOST_WORKDIR is the host-side clone path for this container,
+            # baked in at creation time so the proxy can use the correct
+            # source/target when multiple scenario containers share a proxy.
+            + (f'HOST_WORKDIR="{_escaped_host_workdir}"\n'
+               if _escaped_host_workdir else "")
+            + '# Commands that interact with remotes and need proxy forwarding\n'
             'case "$1" in\n'
             '  push|fetch|pull|ls-remote)\n'
             '    CMD="$1"\n'
@@ -245,8 +261,11 @@ def _build_git_setup_script(
             '    done\n'
             '    args_json="$args_json]"\n'
             '    escaped_cmd=$(printf \'%s\' "$CMD" | sed \'s/"/\\\\"/g\')\n'
-            '    request=\'{"cmd": "\'$escaped_cmd\'", "args": \'$args_json\'}\'\n'
-            '    if ! command -v python3 >/dev/null 2>&1; then\n'
+            + ('    escaped_workdir=$(printf \'%s\' "$HOST_WORKDIR" | sed \'s/\\\\/\\\\\\\\/g; s/"/\\\\"/g\')\n'
+               '    request=\'{"cmd": "\'$escaped_cmd\'", "args": \'$args_json\', "workdir": "\'$escaped_workdir\'"}\'\n'
+               if _escaped_host_workdir else
+               '    request=\'{"cmd": "\'$escaped_cmd\'", "args": \'$args_json\'}\'\n')
+            + '    if ! command -v python3 >/dev/null 2>&1; then\n'
             '      echo "pm: python3 required for git proxy client" >&2\n'
             '      exit 1\n'
             '    fi\n'
@@ -274,8 +293,14 @@ def _build_git_setup_script(
             'esac\n'
             'exec $REAL_GIT "$@"\n'
         )
-        wrapper_path = "/usr/local/bin/git"
-        lines.append(f"cat > {wrapper_path} << 'WRAPEOF'\n{wrapper_script}WRAPEOF\nchmod 755 {wrapper_path}")
+        # Install to the pm user's local bin — it's first on PATH in both
+        # the default image and project-specific images, and doesn't need
+        # root to write.  /usr/local/bin/git would require root which
+        # project-specific images (USER pm) don't have.
+        wrapper_path = f"{_CONTAINER_HOME}/.local/bin/git"
+        lines.append(f"mkdir -p {_CONTAINER_HOME}/.local/bin && "
+                     f"cat > {wrapper_path} << 'WRAPEOF'\n{wrapper_script}WRAPEOF\n"
+                     f"chmod 755 {wrapper_path}")
 
     return "; ".join(lines) if lines else ""
 
@@ -499,14 +524,21 @@ def create_container(
         ["git", "config", "user.email"], capture_output=True, text=True,
     ).stdout.strip()
 
-    git_setup = _build_git_setup_script(has_push_proxy=has_push_proxy)
+    git_setup = _build_git_setup_script(has_push_proxy=has_push_proxy,
+                                        host_workdir=str(workdir) if has_push_proxy else None)
+    # User creation — no-ops when the image already has the pm user (e.g.
+    # project-specific images built via `pm container build`).
     setup_parts = [
-        f"groupadd -g {host_gid} {_CONTAINER_USER} 2>/dev/null",
-        f"useradd -u {host_uid} -g {host_gid} -m -s /bin/bash {_CONTAINER_USER} 2>/dev/null",
-        f"chown {host_uid}:{host_gid} {_CONTAINER_HOME}",
+        f"groupadd -g {host_gid} {_CONTAINER_USER} 2>/dev/null || true",
+        f"useradd -u {host_uid} -g {host_gid} -m -s /bin/bash {_CONTAINER_USER} 2>/dev/null || true",
+        f"chown {host_uid}:{host_gid} {_CONTAINER_HOME} 2>/dev/null || true",
     ]
     if git_name and git_email:
+        # Try as current user first (works when running as pm), fall back
+        # to su (works when running as root in the default image).
         setup_parts.append(
+            f"(git config --global user.name \"{git_name}\" && "
+            f"git config --global user.email \"{git_email}\") 2>/dev/null || "
             f"su -c 'git config --global user.name \"{git_name}\" && "
             f"git config --global user.email \"{git_email}\"' {_CONTAINER_USER}"
         )
@@ -521,15 +553,32 @@ def create_container(
     container_id = result.stdout.strip()
 
     # Wait for the setup script to finish (sentinel file appears).
+    # The setup installs the git push-proxy wrapper and configures the
+    # user — if we proceed before it completes, the wrapper won't exist
+    # and git push will bypass the proxy, failing with no credentials.
     import time
-    for _ in range(50):  # up to ~5 seconds
+    _SETUP_TIMEOUT = 30  # seconds — needs headroom under memory pressure
+    _POLL_INTERVAL = 0.2
+    _setup_ready = False
+    _deadline = time.monotonic() + _SETUP_TIMEOUT
+    while time.monotonic() < _deadline:
         check = _run_docker(
             "exec", name, "test", "-f", _READY_SENTINEL,
             check=False, timeout=5,
         )
         if check.returncode == 0:
+            _setup_ready = True
             break
-        time.sleep(0.1)
+        time.sleep(_POLL_INTERVAL)
+    if not _setup_ready:
+        _log.error("Container %s setup did not complete within %ds — "
+                   "git push proxy wrapper may not be installed",
+                   name, _SETUP_TIMEOUT)
+        raise ContainerError(
+            f"Container '{name}' setup timed out after {_SETUP_TIMEOUT}s. "
+            f"The system may be under memory pressure (try stopping unused "
+            f"containers with 'pm session cleanup')."
+        )
 
     # Copy .claude.json into the container (not bind-mounted — see note above)
     if _claude_json_src.exists():
@@ -572,15 +621,38 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
         if proxy_socket_path:
             sock_dir = str(Path(proxy_socket_path).parent)
             cleanup_parts.append(f"rmdir {shlex.quote(sock_dir)} 2>/dev/null")
-        return f"{exec_part}; {'; '.join(cleanup_parts)}"
+        # Wrap in a bash trap so cleanup runs even when the pane is killed
+        # via tmux kill-pane/kill-window (SIGHUP to the outer shell causes
+        # ';'-chained commands to be skipped, but EXIT traps always fire).
+        # Use shlex.quote on the full inner script to avoid quote nesting
+        # issues: exec_part already contains single-quoted arguments from
+        # shlex.quote(), so wrapping in literal '...' would break parsing.
+        inner = f"trap {shlex.quote('; '.join(cleanup_parts))} EXIT; {exec_part}"
+        return f"bash -c {shlex.quote(inner)}"
     return exec_part
 
 
 def remove_container(name: str) -> None:
-    """Force-remove a container and its push proxy (no-op if it doesn't exist)."""
+    """Force-remove a container and its push proxy, then wait until it is gone.
+
+    If another 'docker rm -f' is already in flight (e.g. the previous session's
+    EXIT trap), this still blocks until the container has fully disappeared so
+    that the caller can safely create a fresh container with the same name.
+    """
+    import time
     from pm_core.push_proxy import stop_push_proxy
     stop_push_proxy(name)
     _run_docker("rm", "-f", name, check=False, timeout=30)
+    # Wait for the container to be fully gone.  When another rm is already in
+    # flight the daemon returns "removal already in progress" and our rm returns
+    # immediately, but the container still exists for a brief moment.
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        result = _run_docker("inspect", name, check=False, timeout=5)
+        if result.returncode != 0:
+            return  # container is gone
+        time.sleep(0.1)
+    _log.warning("remove_container: %s still present after 10 s", name)
 
 
 # ---------------------------------------------------------------------------

@@ -24,7 +24,8 @@ from pm_core.pane_registry import (  # noqa: F401
     get_window_data,
     _iter_all_panes,
     load_registry,
-    save_registry,
+    locked_read_modify_write,
+    _prepare_registry_data,
     register_pane,
     unregister_pane,
     kill_and_unregister,
@@ -317,6 +318,37 @@ def compute_layout(n_panes: int, width: int, height: int) -> str:
     return f"{_checksum(body)},{body}"
 
 
+def register_and_rebalance(
+    session: str,
+    window: str,
+    panes: list[tuple[str, str, str]],
+) -> None:
+    """Register panes, reset user_modified, and rebalance.
+
+    This is the canonical way to register newly-created panes.  The
+    after-split-window hook fires handle_pane_opened which sets
+    user_modified=True before the pane is in the registry; this function
+    always resets that flag so rebalance() is not a no-op.
+
+    Args:
+        session: tmux session name.
+        window:  tmux window ID.
+        panes:   List of (pane_id, role, cmd) tuples to register.
+    """
+    from pm_core import pane_registry as _reg
+    for pane_id, role, cmd in panes:
+        _reg.register_pane(session, window, pane_id, role, cmd)
+
+    def _reset_user_modified(raw):
+        data = _reg._prepare_registry_data(raw, session)
+        wdata = _reg.get_window_data(data, window)
+        wdata["user_modified"] = False
+        return data
+
+    _reg.locked_read_modify_write(_reg.registry_path(session), _reset_user_modified)
+    rebalance(session, window)
+
+
 def rebalance(session: str, window: str, query_session: str | None = None) -> bool:
     """Load registry, compute layout, apply via tmux select-layout.
 
@@ -438,7 +470,9 @@ def check_user_modified(session: str, window: str) -> bool:
     sets user_modified flag in the per-window registry entry.
     """
     from pm_core import tmux as tmux_mod
+    from pm_core.pane_registry import locked_read_modify_write, _prepare_registry_data
 
+    # Fast path: read-only check (unlocked, stale read is fine)
     data = load_registry(session)
     wdata = get_window_data(data, window)
     if wdata.get("user_modified"):
@@ -448,18 +482,23 @@ def check_user_modified(session: str, window: str) -> bool:
     if len(panes) < 2:
         return False
 
+    # Query tmux state outside the lock
     current = tmux_mod.get_pane_geometries(session, window)
     if not current:
         return False
 
-    # Check pane count matches
     pane_indices = tmux_mod.get_pane_indices(session, window)
     id_to_index = {pid: idx for pid, idx in pane_indices}
 
     registered_live = [p for p in panes if p["id"] in id_to_index]
     if len(registered_live) != len(current):
-        wdata["user_modified"] = True
-        save_registry(session, data)
+        def _set_user_modified(raw):
+            d = _prepare_registry_data(raw, session)
+            wd = get_window_data(d, window)
+            wd["user_modified"] = True
+            return d
+
+        locked_read_modify_write(registry_path(session), _set_user_modified)
         return True
 
     return False
@@ -577,22 +616,26 @@ def _respawn_tui(session: str, window: str) -> str:
             tmux_mod.select_window(session, window)
 
         # Register with lowest order so TUI sorts first (leftmost)
-        data = load_registry(session)
-        wdata = get_window_data(data, window)
-        min_order = min((p["order"] for p in wdata["panes"]), default=1) - 1
-        wdata["panes"].insert(0, {
-            "id": pane_id,
-            "role": "tui",
-            "order": min_order,
-            "cmd": "pm _tui",
-        })
-        # Reset user_modified — same pattern as pane_ops.launch_pane()
-        # and cli/pr.py review window (after-split-window hook may have
-        # set it before panes are registered).  Caller rebalances.
-        wdata["user_modified"] = False
-        save_registry(session, data)
-        _logger.info("_respawn_tui: created pane %s in window %s order=%d",
-                     pane_id, window, min_order)
+        from pm_core.pane_registry import locked_read_modify_write, _prepare_registry_data
+
+        def _insert_tui(raw):
+            data = _prepare_registry_data(raw, session)
+            wdata = get_window_data(data, window)
+            min_order = min((p["order"] for p in wdata["panes"]), default=1) - 1
+            wdata["panes"].insert(0, {
+                "id": pane_id,
+                "role": "tui",
+                "order": min_order,
+                "cmd": "pm _tui",
+            })
+            # Reset user_modified — same pattern as pane_ops.launch_pane()
+            # and cli/pr.py review window (after-split-window hook may have
+            # set it before panes are registered).  Caller rebalances.
+            wdata["user_modified"] = False
+            return data
+
+        locked_read_modify_write(registry_path(session), _insert_tui)
+        _logger.info("_respawn_tui: created pane %s in window %s", pane_id, window)
     except Exception:
         _logger.exception("_respawn_tui: failed to respawn TUI")
     return window
@@ -660,11 +703,17 @@ def handle_pane_opened(session: str, window: str, pane_id: str) -> None:
     _logger.info("handle_pane_opened called: session=%s window=%s pane_id=%s",
                  session, window, pane_id)
 
-    data = load_registry(session)
-    wdata = get_window_data(data, window)
-    known_ids = {p["id"] for p in wdata["panes"]}
-    if pane_id not in known_ids:
-        _logger.info("handle_pane_opened: unknown pane %s in window %s, setting user_modified",
-                     pane_id, window)
-        wdata["user_modified"] = True
-        save_registry(session, data)
+    from pm_core.pane_registry import locked_read_modify_write, _prepare_registry_data
+
+    def _mark_user_modified(raw):
+        data = _prepare_registry_data(raw, session)
+        wdata = get_window_data(data, window)
+        known_ids = {p["id"] for p in wdata["panes"]}
+        if pane_id not in known_ids:
+            _logger.info("handle_pane_opened: unknown pane %s in window %s, setting user_modified",
+                         pane_id, window)
+            wdata["user_modified"] = True
+            return data
+        return None  # pane already known, skip write
+
+    locked_read_modify_write(registry_path(session), _mark_user_modified)

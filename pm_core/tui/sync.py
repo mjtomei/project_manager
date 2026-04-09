@@ -53,6 +53,9 @@ async def background_sync(app) -> None:
     except FileNotFoundError:
         app._root = None
         app._data = {}
+    except store.ProjectYamlParseError as e:
+        _log.warning("Skipping sync: %s", e)
+        return
 
     # If we're in guide mode, check for state changes
     if app._current_guide_step is not None:
@@ -117,7 +120,12 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
 
         # Reload from disk (picks up any concurrent user changes) and
         # apply sync results (merged PRs) on the main thread.
-        app._data = store.load(app._root)
+        try:
+            app._data = store.load(app._root)
+        except store.ProjectYamlParseError as e:
+            _log.warning("Skipping reload: %s", e)
+            app._update_status_bar()
+            return
         if result.merged_prs:
             for pr in app._data.get("prs") or []:
                 if pr["id"] in result.merged_prs:

@@ -170,7 +170,7 @@ These remain as separate fixes outside the watcher framework:
 
 These PRs will need human-guided testing (INPUT_REQUIRED during review):
 - **pr-3032fb6**: TUI `w` prefix key, `ww` watcher list pane, tmux pane management, watcher start/stop
-- **pr-7122c11**: Observe watcher with multiple branches in different states (paused vs active)
+- **pr-7122c11**: Observe watcher with multiple branches in different states — verify watcher emits READY (not INPUT_REQUIRED) when one or more branches are paused by their own review/QA loop INPUT_REQUIRED, while still noting the paused branches in its summary; verify watcher does emit INPUT_REQUIRED for a project-wide blocker or a genuinely stuck in_progress branch with no active loop
 - **pr-18ac983**: Trigger real session failures (API errors, OOM) to verify detection and recovery
 - **pr-945546e**: TUI watcher pane gated actions, user approval flow
 - **pr-1f35c6d**: Hardware-dependent — local model process lifecycle, VRAM/RAM detection

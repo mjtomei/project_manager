@@ -435,9 +435,7 @@ def finalize_transcript(transcript_path: Path) -> None:
 def launch_claude_in_tmux(pane_target: str, prompt: str, cwd: str | None = None) -> None:
     """Send a claude command to a tmux pane."""
     from pm_core.tmux import send_keys
-    cmd = build_claude_shell_cmd(prompt=prompt)
-    if cwd:
-        cmd = f"cd '{cwd}' && {cmd}"
+    cmd = build_claude_shell_cmd(prompt=prompt, cwd=cwd)
     send_keys(pane_target, cmd)
 
 

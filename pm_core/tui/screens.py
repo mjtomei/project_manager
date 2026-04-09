@@ -248,6 +248,7 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]v[/]  View plan file", classes="help-row")
                 yield Label("  [bold]M[/]  Move to plan", classes="help-row")
                 yield Label("  [bold]A[/]  Auto-start to selected PR / off", classes="help-row")
+                yield Label("  [bold]V[/]  Review oldest pending spec", classes="help-row")
                 yield Label("  [bold]w[/]  Focus watcher window", classes="help-row")
             yield Label("Panes & Views", classes="help-section")
             if not self._in_plans:
@@ -331,10 +332,6 @@ class PlanPickerScreen(ModalScreen):
     .picker-row {
         height: 1;
     }
-    #picker-input {
-        display: none;
-        margin-top: 1;
-    }
     """
 
     def __init__(self, plans: list[dict], current_plan: str | None, pr_id: str):
@@ -343,25 +340,21 @@ class PlanPickerScreen(ModalScreen):
         self._current_plan = current_plan
         self._pr_id = pr_id
         self._selected = 0
-        # Options: each plan + "No plan (standalone)" + "New plan..."
+        # Options: each plan + "No plan (standalone)"
         self._options: list[tuple[str | None, str]] = []  # (plan_id_or_None, display_label)
         for p in plans:
             self._options.append((p["id"], f"{p['id']}: {p.get('name', '')}"))
         self._options.append(("_standalone", "No plan (standalone)"))
-        self._options.append(("_new", "New plan..."))
         # Pre-select current plan
         for i, (pid, _) in enumerate(self._options):
             if pid == current_plan:
                 self._selected = i
                 break
-        self._input_mode = False
 
     def compose(self) -> ComposeResult:
-        from textual.widgets import Input
         with VerticalScroll(id="picker-container"):
             yield Label(f"Move {self._pr_id} to plan:", id="picker-title")
             yield Label("", id="picker-options")
-            yield Input(placeholder="Plan name", id="picker-input")
             yield Label("[dim]↑↓ navigate  Enter select  Esc cancel[/]", classes="picker-row")
 
     def on_mount(self) -> None:
@@ -379,8 +372,6 @@ class PlanPickerScreen(ModalScreen):
         options_label.update("\n".join(lines))
 
     def on_key(self, event) -> None:
-        if self._input_mode:
-            return  # Let Input widget handle keys
         if event.key in ("up", "k"):
             self._selected = max(0, self._selected - 1)
             self._refresh_options()
@@ -393,27 +384,9 @@ class PlanPickerScreen(ModalScreen):
             event.stop()
         elif event.key == "enter":
             pid, label = self._options[self._selected]
-            if pid == "_new":
-                self._enter_input_mode()
-            else:
-                self.dismiss(pid)
+            self.dismiss(pid)
             event.prevent_default()
             event.stop()
-
-    def _enter_input_mode(self) -> None:
-        from textual.widgets import Input
-        self._input_mode = True
-        input_widget = self.query_one("#picker-input", Input)
-        input_widget.styles.display = "block"
-        input_widget.focus()
-
-    def on_input_submitted(self, event) -> None:
-        title = event.value.strip()
-        if title:
-            self.dismiss(("_new", title))
-        else:
-            self._input_mode = False
-            event.input.styles.display = "none"
 
     def action_cancel(self) -> None:
         self.dismiss(None)
