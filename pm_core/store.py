@@ -79,6 +79,11 @@ def load(root: Optional[Path] = None, validate: bool = True) -> dict:
     if data is None:
         data = {}
 
+    if not isinstance(data, dict):
+        raise ProjectYamlParseError(
+            "project.yaml is not valid YAML: expected a mapping at the top level"
+        )
+
     if validate:
         _validate_pr_statuses(data)
         _validate_plans(data)
