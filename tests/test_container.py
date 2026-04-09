@@ -17,11 +17,13 @@ from pm_core.container import (
     build_image,
     image_exists,
     remove_container,
+    stop_container,
     cleanup_qa_containers,
     cleanup_session_containers,
     cleanup_all_containers,
     wrap_claude_cmd,
     container_is_running,
+    find_containers_by_keywords,
     _docker_available,
     _build_git_setup_script,
     _get_dockerfile_path,
@@ -521,7 +523,9 @@ class TestBuildExecCmd:
     def test_includes_cleanup_by_default(self):
         cmd = build_exec_cmd("my-container", "claude 'hi'")
         assert "docker rm -f" in cmd
-        assert cmd.endswith(">/dev/null 2>&1")
+        # Cleanup is wrapped in an EXIT trap inside bash -c
+        assert cmd.startswith("bash -c ")
+        assert "trap" in cmd
 
     def test_cleanup_removes_proxy_socket(self):
         cmd = build_exec_cmd("my-container", "claude 'hi'",
@@ -541,14 +545,13 @@ class TestBuildExecCmd:
 
     def test_shell_safety(self):
         cmd = build_exec_cmd("name-with-special", "claude 'prompt with $vars'")
-        # Split only the exec portion (before the cleanup suffix)
-        exec_part = cmd.split(";")[0].strip()
-        parts = shlex.split(exec_part)
-        assert parts[0] == "docker"
-        assert parts[1] == "exec"
-        assert parts[2] == "-it"
-        assert parts[3] == "-u"
-        assert parts[4] == _CONTAINER_USER
+        # The outer command is bash -c '...' wrapping the exec with a trap.
+        # Verify the docker exec portion is present with correct structure.
+        assert "docker exec -it" in cmd
+        assert f"-u {_CONTAINER_USER}" in cmd
+        assert "name-with-special" in cmd
+        # Ensure the prompt content is preserved (not mangled by quoting)
+        assert "prompt with $vars" in cmd
 
 
 class TestWrapClaudeCmd:
@@ -602,11 +605,47 @@ class TestWrapClaudeCmd:
 
 
 class TestRemoveContainer:
+    @patch("pm_core.memory_governor.capture_and_record")
     @patch("pm_core.container._run_docker")
-    def test_removes_container(self, mock_docker):
+    def test_removes_container(self, mock_docker, _mock_capture):
         remove_container("test-container")
-        mock_docker.assert_called_once_with(
-            "rm", "-f", "test-container", check=False, timeout=30)
+        # First call is rm -f, then inspect polling
+        rm_call = mock_docker.call_args_list[0]
+        assert rm_call[0] == ("rm", "-f", "test-container")
+        assert rm_call[1] == {"check": False, "timeout": 30}
+
+    @patch("pm_core.container._run_docker")
+    @patch("pm_core.memory_governor.capture_and_record")
+    def test_capture_called_with_container_name(self, mock_capture, mock_docker):
+        mock_docker.return_value = MagicMock(returncode=1)
+        remove_container("pm-impl")
+        mock_capture.assert_called_once_with("pm-impl")
+
+    @patch("pm_core.container._run_docker")
+    @patch("pm_core.push_proxy.stop_push_proxy")
+    @patch("pm_core.memory_governor.capture_and_record")
+    def test_capture_before_docker_rm(self, mock_capture, mock_proxy, mock_docker):
+        mock_docker.return_value = MagicMock(returncode=1)
+        from unittest.mock import Mock
+        manager = Mock()
+        manager.attach_mock(mock_capture, "capture")
+        manager.attach_mock(mock_proxy, "proxy")
+        manager.attach_mock(mock_docker, "docker")
+        remove_container("pm-impl")
+        # Verify capture is called before docker rm -f
+        calls = manager.mock_calls
+        capture_idx = next(i for i, c in enumerate(calls) if c == call.capture("pm-impl"))
+        rm_idx = next(i for i, c in enumerate(calls)
+                      if c == call.docker("rm", "-f", "pm-impl", check=False, timeout=30))
+        assert capture_idx < rm_idx
+
+    @patch("pm_core.container._run_docker")
+    @patch("pm_core.push_proxy.stop_push_proxy")
+    @patch("pm_core.memory_governor.capture_and_record", side_effect=RuntimeError("stats failed"))
+    def test_capture_failure_does_not_block_removal(self, mock_capture, mock_proxy, mock_docker):
+        mock_docker.return_value = MagicMock(returncode=1)
+        remove_container("pm-impl")
+        mock_docker.assert_any_call("rm", "-f", "pm-impl", check=False, timeout=30)
 
 
 class TestCleanupContainers:
@@ -861,3 +900,130 @@ class TestCreateContainerPushProxy:
                         session_tag="repo-abc", pr_id="pr-1")
         call_kwargs = mock_exec.call_args[1]
         assert call_kwargs["proxy_socket_path"] is None
+
+
+class TestStopContainer:
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.tmux.set_pane_option")
+    def test_set_pane_option_called_for_each_pane(self, mock_set_pane, mock_remove):
+        stop_container("pm-qa-s1", pane_ids=["%10", "%11", "%12"])
+        assert mock_set_pane.call_count == 3
+        mock_set_pane.assert_has_calls([
+            call("%10", "remain-on-exit", "on"),
+            call("%11", "remain-on-exit", "on"),
+            call("%12", "remain-on-exit", "on"),
+        ])
+
+        # Verify ordering: all set_pane_option calls before remove_container
+        manager = MagicMock()
+        manager.attach_mock(mock_set_pane, "set_pane")
+        manager.attach_mock(mock_remove, "remove")
+        # Reset and replay to capture ordering
+        manager.reset_mock()
+        mock_set_pane.reset_mock()
+        mock_remove.reset_mock()
+        stop_container("pm-qa-s1", pane_ids=["%10", "%11", "%12"])
+        assert manager.mock_calls[:3] == [
+            call.set_pane("%10", "remain-on-exit", "on"),
+            call.set_pane("%11", "remain-on-exit", "on"),
+            call.set_pane("%12", "remain-on-exit", "on"),
+        ]
+        assert manager.mock_calls[3] == call.remove("pm-qa-s1")
+
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.tmux.set_pane_option")
+    def test_pane_ids_none_skips_set_pane_option(self, mock_set_pane, mock_remove):
+        stop_container("pm-qa-s1", pane_ids=None)
+        mock_set_pane.assert_not_called()
+        mock_remove.assert_called_once_with("pm-qa-s1")
+
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.tmux.set_pane_option")
+    def test_pane_ids_empty_list_skips_set_pane_option(self, mock_set_pane, mock_remove):
+        stop_container("pm-qa-s1", pane_ids=[])
+        mock_set_pane.assert_not_called()
+        mock_remove.assert_called_once_with("pm-qa-s1")
+
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.tmux.set_pane_option")
+    def test_set_pane_option_failure_is_nonfatal(self, mock_set_pane, mock_remove):
+        mock_set_pane.side_effect = [None, RuntimeError("dead pane"), None]
+        stop_container("pm-qa-s1", pane_ids=["%10", "%11", "%12"])
+        assert mock_set_pane.call_count == 3
+        mock_remove.assert_called_once_with("pm-qa-s1")
+
+
+class TestFindContainersByKeywords:
+    CONTAINER_NAMES = [
+        "pm-repo-abc-impl-pr-123",
+        "pm-repo-abc-review-pr-123",
+        "pm-repo-abc-qa-pr-123-loop1-s0",
+        "pm-repo-abc-qa-pr-123-loop1-s1",
+        "pm-other-impl-pr-456",
+    ]
+    MOCK_STDOUT = "\n".join(CONTAINER_NAMES)
+
+    def _mock_result(self, stdout=None, returncode=0):
+        if stdout is None:
+            stdout = self.MOCK_STDOUT
+        return MagicMock(stdout=stdout, returncode=returncode)
+
+    @patch("pm_core.container._run_docker")
+    def test_single_type_match(self, mock_docker):
+        mock_docker.return_value = self._mock_result()
+        result = find_containers_by_keywords("pr-123", "impl")
+        assert result == ["pm-repo-abc-impl-pr-123"]
+
+    @patch("pm_core.container._run_docker")
+    def test_multi_match_by_type(self, mock_docker):
+        mock_docker.return_value = self._mock_result()
+        result = find_containers_by_keywords("pr-123", "qa")
+        assert result == [
+            "pm-repo-abc-qa-pr-123-loop1-s0",
+            "pm-repo-abc-qa-pr-123-loop1-s1",
+        ]
+
+    @patch("pm_core.container._run_docker")
+    def test_broad_match_single_keyword(self, mock_docker):
+        mock_docker.return_value = self._mock_result()
+        result = find_containers_by_keywords("pr-123")
+        assert result == [
+            "pm-repo-abc-impl-pr-123",
+            "pm-repo-abc-review-pr-123",
+            "pm-repo-abc-qa-pr-123-loop1-s0",
+            "pm-repo-abc-qa-pr-123-loop1-s1",
+        ]
+
+    @patch("pm_core.container._run_docker")
+    def test_no_match(self, mock_docker):
+        mock_docker.return_value = self._mock_result()
+        result = find_containers_by_keywords("pr-999")
+        assert result == []
+
+    @patch("pm_core.container._run_docker")
+    def test_docker_nonzero_exit(self, mock_docker):
+        mock_docker.return_value = self._mock_result(stdout="", returncode=1)
+        result = find_containers_by_keywords("pr-123")
+        assert result == []
+
+    @patch("pm_core.container._run_docker")
+    def test_docker_exception(self, mock_docker):
+        import subprocess
+        mock_docker.side_effect = subprocess.TimeoutExpired(cmd="docker", timeout=10)
+        result = find_containers_by_keywords("pr-123")
+        assert result == []
+
+    @patch("pm_core.container._run_docker")
+    def test_all_keywords_must_match(self, mock_docker):
+        mock_docker.return_value = self._mock_result()
+        result = find_containers_by_keywords("impl", "pr-456")
+        assert result == ["pm-other-impl-pr-456"]
+
+        result = find_containers_by_keywords("impl", "qa")
+        assert result == []
+
+    @patch("pm_core.container._run_docker")
+    def test_zero_keywords_returns_all(self, mock_docker):
+        mock_docker.return_value = self._mock_result()
+        result = find_containers_by_keywords()
+        assert result == self.CONTAINER_NAMES

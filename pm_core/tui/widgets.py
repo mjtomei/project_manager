@@ -26,7 +26,8 @@ class StatusBar(Static):
                        sort_text: str = "",
                        show_assist: bool = False,
                        auto_start: bool = False,
-                       watcher_status: str = "") -> None:
+                       watcher_status: str = "",
+                       memory_status: str = "") -> None:
         sync_icons = {
             "synced": "[green]synced[/green]",
             "pulling": "[yellow]pulling...[/yellow]",
@@ -47,7 +48,8 @@ class StatusBar(Static):
             watcher_display = "    [bold cyan]WCH[/bold cyan]"
         else:
             watcher_display = ""
-        self.update(f" Project: [bold]{project_name}[/bold]    {pr_info}{filter_display}{sort_display}    repo: [cyan]{safe_repo}[/cyan]    {sync_display}{auto_display}{watcher_display}{assist_display}")
+        memory_display = f"    [bold cyan]{memory_status}[/bold cyan]" if memory_status else ""
+        self.update(f" Project: [bold]{project_name}[/bold]    {pr_info}{filter_display}{sort_display}    repo: [cyan]{safe_repo}[/cyan]    {sync_display}{auto_display}{watcher_display}{memory_display}{assist_display}")
 
 
 class SessionBar(Static):

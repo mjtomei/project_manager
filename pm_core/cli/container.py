@@ -34,6 +34,35 @@ def container_status():
     click.echo(f"Memory limit:    {cfg.memory_limit}")
     click.echo(f"CPU limit:       {cfg.cpu_limit}")
 
+    # Memory governor settings
+    from pm_core.paths import get_global_setting_value
+    from pm_core.memory_governor import (
+        get_memory_target, format_memory_status, get_stop_idle_policy,
+    )
+    target_raw = get_global_setting_value("container-system-memory-target", "")
+    scope = get_global_setting_value("container-system-memory-scope", "pm")
+    default_proj = get_global_setting_value(
+        "container-system-memory-default-projection", "")
+    history_size = get_global_setting_value(
+        "container-system-memory-history-size", "20")
+
+    click.echo("")
+    click.echo("Memory governor:")
+    click.echo(f"  Target:        {target_raw or '(not set — governor inactive)'}")
+    click.echo(f"  Scope:         {scope}")
+    click.echo(f"  Default proj:  {default_proj or '(not set — uses memory-limit)'}")
+    click.echo(f"  History size:  {history_size}")
+
+    mem_status = format_memory_status()
+    if mem_status:
+        click.echo(f"  Current:       {mem_status}")
+
+    click.echo("")
+    click.echo("Stop-on-idle:")
+    click.echo(f"  impl:          {'on' if get_stop_idle_policy('impl') else 'off'}")
+    click.echo(f"  review:        {'on' if get_stop_idle_policy('review') else 'off'}")
+    click.echo(f"  qa:            {'on' if get_stop_idle_policy('qa_scenario') else 'off'}")
+
     if enabled and not docker_ok:
         click.echo(
             "\nWarning: Container mode is enabled but Docker is not available.",
@@ -66,14 +95,46 @@ def container_disable():
 
 
 @container_group.command("set")
-@click.argument("key", type=click.Choice(["image", "memory-limit", "cpu-limit"]))
+@click.argument("key", type=click.Choice([
+    "image", "memory-limit", "cpu-limit",
+    "system-memory-target", "system-memory-scope",
+    "system-memory-default-projection", "system-memory-history-size",
+    "stop-idle-impl", "stop-idle-review", "stop-idle-qa",
+]))
 @click.argument("value")
 def container_set(key: str, value: str):
     """Set a container configuration value.
 
-    Keys: image, memory-limit, cpu-limit
+    Keys: image, memory-limit, cpu-limit,
+          system-memory-target, system-memory-scope,
+          system-memory-default-projection, system-memory-history-size,
+          stop-idle-impl, stop-idle-review, stop-idle-qa
     """
     from pm_core.paths import set_global_setting_value
+
+    # Validate specific keys
+    if key == "system-memory-scope" and value not in ("pm", "system"):
+        click.echo("Error: system-memory-scope must be 'pm' or 'system'", err=True)
+        raise SystemExit(1)
+    if key.startswith("stop-idle-") and value not in ("on", "off"):
+        click.echo("Error: stop-idle value must be 'on' or 'off'", err=True)
+        raise SystemExit(1)
+    if key == "system-memory-history-size":
+        try:
+            n = int(value)
+            if n < 1:
+                raise ValueError
+        except ValueError:
+            click.echo("Error: system-memory-history-size must be a positive integer",
+                        err=True)
+            raise SystemExit(1)
+    if key in ("system-memory-target", "system-memory-default-projection"):
+        from pm_core.memory_governor import parse_memory
+        try:
+            parse_memory(value)
+        except ValueError:
+            click.echo(f"Error: cannot parse memory value: {value!r}", err=True)
+            raise SystemExit(1)
 
     setting_name = f"container-{key}"
     set_global_setting_value(setting_name, value)

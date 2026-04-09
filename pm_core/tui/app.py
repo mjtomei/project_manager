@@ -556,6 +556,13 @@ class ProjectManagerApp(App):
         watcher_status = ""
         if self._watcher_manager.is_any_running():
             watcher_status = "input_required" if self._watcher_manager.any_input_required() else "running"
+        # Memory governor status (best-effort, don't crash the TUI)
+        memory_status = ""
+        try:
+            from pm_core.memory_governor import format_memory_status
+            memory_status = format_memory_status()
+        except Exception:
+            pass
         status_bar.update_status(
             project.get("name", "???"),
             project.get("repo", "???"),
@@ -566,6 +573,7 @@ class ProjectManagerApp(App):
             show_assist=not get_global_setting("hide-assist"),
             auto_start=self._auto_start,
             watcher_status=watcher_status,
+            memory_status=memory_status,
         )
         self.query_one("#session-bar", SessionBar).refresh_session_info()
 
