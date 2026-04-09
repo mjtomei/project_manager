@@ -10,8 +10,8 @@ Key concepts:
   - **Projection**: estimated peak memory for a new container, based on
     rolling average of observed end-of-life peaks.
   - **Gate check**: ``current_used + projection <= target``.
-  - **Stop-on-idle**: completed containers can be ``docker stop``ped
-    (not removed) to free memory while preserving filesystem overlay.
+  - **Stop-on-idle**: completed containers are removed to free memory.
+    The workdir is bind-mounted from the host so project state survives.
 
 Settings (all via ``pm container set <key> <value>``):
   system-memory-target          — aggregate memory ceiling (e.g. "48g")

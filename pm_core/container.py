@@ -193,21 +193,6 @@ def container_is_running(name: str) -> bool:
     return result.returncode == 0 and result.stdout.strip() == "true"
 
 
-def _container_state(name: str) -> str | None:
-    """Return the state of a container: "running", "stopped", or None (absent)."""
-    result = _run_docker(
-        "inspect", "-f", "{{.State.Status}}", name,
-        check=False, timeout=10,
-    )
-    if result.returncode != 0:
-        return None
-    status = result.stdout.strip()
-    if status == "running":
-        return "running"
-    if status in ("exited", "created"):
-        return "stopped"
-    return status  # e.g. "paused", "restarting", "dead"
-
 
 def _ensure_push_proxy(name: str, workdir: str,
                        allowed_push_branch: str | None,
@@ -439,33 +424,6 @@ def create_container(
         )
         container_id = result.stdout.strip()
         _log.info("Reusing running container %s (id=%s)", name, container_id[:12])
-        _ensure_push_proxy(name, str(workdir), allowed_push_branch,
-                           session_tag=session_tag, pr_id=pr_id)
-        return container_id
-
-    # Check for a stopped container (from stop-on-idle) — restart instead
-    # of removing.  This preserves the filesystem overlay (packages, venv).
-    existing_state = _container_state(name)
-    if existing_state == "stopped":
-        _log.info("Restarting stopped container %s", name)
-        _run_docker("start", name, check=False, timeout=30)
-        # Wait for ready sentinel (setup script re-runs if /tmp was tmpfs)
-        import time
-        _READY_SENTINEL = "/tmp/.pm-ready"
-        _deadline = time.monotonic() + 15
-        while time.monotonic() < _deadline:
-            check = _run_docker(
-                "exec", name, "test", "-f", _READY_SENTINEL,
-                check=False, timeout=5,
-            )
-            if check.returncode == 0:
-                break
-            time.sleep(0.2)
-        result = _run_docker(
-            "inspect", "-f", "{{.Id}}", name,
-            check=False, timeout=10,
-        )
-        container_id = result.stdout.strip()
         _ensure_push_proxy(name, str(workdir), allowed_push_branch,
                            session_tag=session_tag, pr_id=pr_id)
         return container_id
@@ -720,11 +678,11 @@ def remove_container(name: str) -> None:
 
 
 def stop_container(name: str, pane_ids: list[str] | None = None) -> None:
-    """Stop a container (preserving its filesystem overlay) for memory reclamation.
+    """Stop and remove a container to free memory.
 
-    Captures memory stats before stopping.  The container can be restarted
-    later with ``docker start``.  The push proxy on the host is stopped
-    and will be restarted when the container is reused.
+    Captures memory stats before removal.  The workdir is bind-mounted
+    from the host, so all project state (packages, venv, source) survives
+    container removal — only ephemeral container-internal state is lost.
 
     If *pane_ids* are provided, sets ``remain-on-exit on`` on those tmux
     panes before stopping so the session text is preserved for inspection.
@@ -739,20 +697,9 @@ def stop_container(name: str, pane_ids: list[str] | None = None) -> None:
             except Exception:
                 _log.debug("Failed to set remain-on-exit for pane %s", pid)
 
-    # Capture memory stats before stopping (best-effort)
-    try:
-        from pm_core.memory_governor import capture_and_record
-        capture_and_record(name)
-    except Exception:
-        _log.debug("Failed to capture stats for %s before stop", name,
-                    exc_info=True)
-
-    # Stop the push proxy — it will be restarted when the container is reused.
-    from pm_core.push_proxy import stop_push_proxy
-    stop_push_proxy(name)
-
-    _run_docker("stop", name, check=False, timeout=30)
-    _log.info("Stopped container %s", name)
+    # remove_container captures memory stats and removes the push proxy.
+    remove_container(name)
+    _log.info("Stop-on-idle: removed container %s", name)
 
 
 def find_containers_by_keywords(*keywords: str) -> list[str]:
