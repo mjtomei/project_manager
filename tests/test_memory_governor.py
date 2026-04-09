@@ -311,6 +311,33 @@ class TestFormatMemoryStatus:
             assert "56G" in result
             assert "(sys)" in result
 
+    def test_current_none(self):
+        with patch("pm_core.memory_governor.get_memory_target",
+                   return_value=48 * 1024), \
+             patch("pm_core.memory_governor.get_current_used_mb",
+                   return_value=None):
+            assert format_memory_status() == ""
+
+    def test_fractional_gigabyte(self):
+        with patch("pm_core.memory_governor.get_memory_target",
+                   return_value=48 * 1024), \
+             patch("pm_core.memory_governor.get_current_used_mb",
+                   return_value=1536), \
+             patch("pm_core.memory_governor.get_global_setting_value",
+                   return_value="pm"):
+            result = format_memory_status()
+            assert result == "1.5G/48G (pm)"
+
+    def test_sub_gigabyte(self):
+        with patch("pm_core.memory_governor.get_memory_target",
+                   return_value=48 * 1024), \
+             patch("pm_core.memory_governor.get_current_used_mb",
+                   return_value=500), \
+             patch("pm_core.memory_governor.get_global_setting_value",
+                   return_value="pm"):
+            result = format_memory_status()
+            assert result == "500M/48G (pm)"
+
 
 # ---------------------------------------------------------------------------
 # capture_and_record integration
