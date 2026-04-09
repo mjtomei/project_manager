@@ -51,8 +51,8 @@ def handle_pr_selected(app, pr_id: str) -> None:
             app._data = store.locked_update(
                 app._root, lambda d: d["project"].__setitem__("active_pr", pr_id)
             )
-        except store.StoreLockTimeout as e:
-            _log.warning("handle_pr_selected: lock timeout: %s", e)
+        except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+            _log.warning("handle_pr_selected: %s", e)
             app.log_message(f"Error: {e}")
 
 
@@ -236,8 +236,8 @@ def toggle_merged(app) -> None:
         app._data = store.locked_update(
             app._root, lambda d: d.setdefault("project", {}).__setitem__("hide_merged", hide)
         )
-    except store.StoreLockTimeout as e:
-        _log.warning("toggle_merged: lock timeout: %s", e)
+    except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+        _log.warning("toggle_merged: %s", e)
         app.log_message(f"Error: {e}")
     tree._recompute()
     tree.refresh(layout=True)
@@ -349,8 +349,8 @@ def handle_plan_pick(app, pr_id: str, result) -> None:
 
         try:
             app._data = store.locked_update(app._root, apply_new_plan)
-        except store.StoreLockTimeout as e:
-            _log.warning("handle_plan_pick: lock timeout: %s", e)
+        except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+            _log.warning("handle_plan_pick: %s", e)
             app.log_message(f"Error: {e}")
             return
         app._load_state()
@@ -370,8 +370,8 @@ def handle_plan_pick(app, pr_id: str, result) -> None:
 
         try:
             app._data = store.locked_update(app._root, apply_standalone)
-        except store.StoreLockTimeout as e:
-            _log.warning("handle_plan_pick: lock timeout: %s", e)
+        except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+            _log.warning("handle_plan_pick: %s", e)
             app.log_message(f"Error: {e}")
             return
         app._load_state()
@@ -392,8 +392,8 @@ def handle_plan_pick(app, pr_id: str, result) -> None:
 
         try:
             app._data = store.locked_update(app._root, apply_move)
-        except store.StoreLockTimeout as e:
-            _log.warning("handle_plan_pick: lock timeout: %s", e)
+        except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+            _log.warning("handle_plan_pick: %s", e)
             app.log_message(f"Error: {e}")
             return
         app._load_state()

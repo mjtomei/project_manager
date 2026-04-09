@@ -378,9 +378,9 @@ def _maybe_start_qa(app, pr_id: str) -> None:
 
         try:
             store.locked_update(app._root, apply_qa)
-        except store.StoreLockTimeout as e:
+        except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
             app.log_message(f"Error: {e}")
-            _log.warning("auto_qa: lock timeout for %s: %s", pr_id, e)
+            _log.warning("auto_qa: %s for %s: %s", type(e).__name__, pr_id, e)
             return
         app._load_state()
         if transitioned:

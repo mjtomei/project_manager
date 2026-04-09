@@ -76,8 +76,8 @@ def ensure_watcher_plans(app) -> Path | None:
 
         try:
             store.locked_update(root, apply)
-        except store.StoreLockTimeout as e:
-            _log.warning("ensure_watcher_plans: lock timeout registering plans: %s", e)
+        except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+            _log.warning("ensure_watcher_plans: %s: %s", type(e).__name__, e)
 
     return root
 
@@ -153,8 +153,8 @@ def load_watcher_plan_prs(app) -> int:
 
         try:
             store.locked_update(root, apply)
-        except store.StoreLockTimeout as e:
-            _log.warning("load_watcher_plan_prs: lock timeout loading PRs: %s", e)
+        except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+            _log.warning("load_watcher_plan_prs: %s: %s", type(e).__name__, e)
             return 0
 
     return len(new_entries)

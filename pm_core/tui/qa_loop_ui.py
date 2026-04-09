@@ -113,9 +113,9 @@ def start_qa(app, pr_id: str) -> None:
                 p["status"] = "qa"
         try:
             store.locked_update(app._root, _set_qa)
-        except store.StoreLockTimeout as e:
+        except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
             app.log_message(f"Error: {e}")
-            _log.warning("start_qa: lock timeout for %s: %s", pr_id, e)
+            _log.warning("start_qa: %s for %s: %s", type(e).__name__, pr_id, e)
             return
         app._load_state()
         _log.info("start_qa: transitioned %s to qa status", pr_id)

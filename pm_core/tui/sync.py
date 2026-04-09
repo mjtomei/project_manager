@@ -247,9 +247,9 @@ async def startup_github_sync(app) -> None:
 
             try:
                 app._data = store.locked_update(app._root, apply_github)
-            except store.StoreLockTimeout as e:
+            except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
                 app.log_message(f"GitHub sync: {e}")
-                _log.warning("startup_github_sync: lock timeout applying updates: %s", e)
+                _log.warning("startup_github_sync: %s: %s", type(e).__name__, e)
                 return
             if newly_merged:
                 _kill_merged_pr_windows(app, newly_merged)
