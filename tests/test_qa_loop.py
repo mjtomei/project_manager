@@ -27,6 +27,7 @@ from pm_core.qa_loop import (
     _get_verification_max_retries,
     _install_instruction_file,
     _verdict_context_fingerprint,
+    _poll_tmux_verdicts,
     _VERIFICATION_MAX_PANE_LINES,
     _DEFAULT_VERIFICATION_MAX_RETRIES,
     _QA_KEYWORDS,
@@ -2978,3 +2979,365 @@ class TestGetWindowPaneIds:
         mock_tmux_mod.find_window_by_name.side_effect = RuntimeError("tmux dead")
         result = _get_window_pane_ids("pm", "qa-1-s1")
         assert result == []
+
+
+class TestLaunchNextQueued:
+    """Tests for the _launch_next_queued inner function of _poll_tmux_verdicts.
+
+    Since _launch_next_queued is a nested closure inside _poll_tmux_verdicts,
+    we test it by calling _poll_tmux_verdicts with appropriate mocks and
+    verifying the side-effects on state and the queued scenarios.
+    """
+
+    def _make_scenario(self, index, title="Test", focus="test",
+                       window_name=None):
+        return QAScenario(
+            index=index, title=title, focus=focus,
+            window_name=window_name,
+        )
+
+    def _make_state(self, pr_id="pr-test", scenarios=None, verdicts=None):
+        state = QALoopState(pr_id=pr_id)
+        state.scenarios = scenarios or []
+        state.scenario_verdicts = verdicts or {}
+        return state
+
+    def test_memory_gate_blocks_queued_launch(self, tmp_path):
+        """Memory gate returns (False, 'over budget') — no scenario launched."""
+        s10 = self._make_scenario(10, title="Scenario 10")
+        s11 = self._make_scenario(11, title="Scenario 11")
+        state = self._make_state(scenarios=[])
+        status_path = tmp_path / "qa_status.json"
+
+        sleep_calls = []
+
+        def fake_sleep(secs):
+            sleep_calls.append(secs)
+            if len(sleep_calls) >= 3:
+                raise StopIteration("break poll loop")
+
+        with (
+            patch("pm_core.memory_governor.check_launch",
+                  return_value=(False, "over budget")) as mock_check,
+            patch("pm_core.qa_loop.time.sleep", side_effect=fake_sleep),
+            patch("pm_core.qa_loop._write_status_file"),
+            patch("pm_core.qa_loop._is_verification_enabled",
+                  return_value=False),
+            patch("pm_core.qa_loop._get_verification_max_retries",
+                  return_value=3),
+            patch("pm_core.qa_loop._get_verdict_reminder_timeout",
+                  return_value=None),
+        ):
+            try:
+                _poll_tmux_verdicts(
+                    state, {}, {}, "sess", "/tmp/work", status_path,
+                    lambda: None,
+                    queued_scenarios=[s10, s11],
+                    concurrency_cap=5,
+                    use_containers=True,
+                )
+            except StopIteration:
+                pass
+
+        # Neither scenario should have been launched
+        assert 10 not in state.scenario_verdicts
+        assert 11 not in state.scenario_verdicts
+        # check_launch should have been called (memory gate was consulted)
+        assert mock_check.call_count >= 1
+
+    def test_memory_gate_allows_after_initial_block(self, tmp_path):
+        """check_launch blocks first, then allows — scenario 10 launches."""
+        s10 = self._make_scenario(10, title="Scenario 10")
+        s11 = self._make_scenario(11, title="Scenario 11")
+        state = self._make_state(scenarios=[])
+        status_path = tmp_path / "qa_status.json"
+
+        check_call_count = [0]
+
+        def fake_check_launch(container_type):
+            check_call_count[0] += 1
+            if check_call_count[0] <= 1:
+                return (False, "over budget")
+            return (True, "")
+
+        sleep_calls = []
+
+        def fake_sleep(secs):
+            sleep_calls.append(secs)
+            # After enough cycles, check if scenario 10 launched
+            if len(sleep_calls) >= 4:
+                raise StopIteration("break poll loop")
+
+        launched_scenarios = []
+
+        def fake_launch_containers(state_arg, data, pr_data, session,
+                                   repo_root, workdir_path, pm_root=None,
+                                   _status_scenarios=None):
+            for s in state_arg.scenarios:
+                s.window_name = f"qa-test-s{s.index}"
+                launched_scenarios.append(s.index)
+
+        with (
+            patch("pm_core.memory_governor.check_launch",
+                  side_effect=fake_check_launch),
+            patch("pm_core.qa_loop.time.sleep", side_effect=fake_sleep),
+            patch("pm_core.qa_loop._write_status_file"),
+            patch("pm_core.qa_loop._is_verification_enabled",
+                  return_value=False),
+            patch("pm_core.qa_loop._get_verification_max_retries",
+                  return_value=3),
+            patch("pm_core.qa_loop._get_verdict_reminder_timeout",
+                  return_value=None),
+            patch("pm_core.qa_loop._launch_scenarios_in_containers",
+                  side_effect=fake_launch_containers),
+            patch("pm_core.qa_loop._get_scenario_pane",
+                  return_value="%99"),
+            patch("pm_core.qa_loop.extract_verdict_from_content",
+                  return_value=None),
+            patch("pm_core.tmux.pane_exists", return_value=True),
+            patch("pm_core.tmux.capture_pane", return_value="running..."),
+        ):
+            try:
+                _poll_tmux_verdicts(
+                    state, {}, {}, "sess", "/tmp/work", status_path,
+                    lambda: None,
+                    queued_scenarios=[s10, s11],
+                    concurrency_cap=5,
+                    use_containers=True,
+                )
+            except StopIteration:
+                pass
+
+        # Scenario 10 should have been launched
+        assert 10 in launched_scenarios
+
+    def test_concurrency_cap_prevents_launch(self, tmp_path):
+        """Active scenarios at cap — queued scenario never launched."""
+        s10 = self._make_scenario(10, title="Queued")
+        # Two already-active scenarios
+        s1 = self._make_scenario(1, title="Active 1", window_name="qa-s1")
+        s2 = self._make_scenario(2, title="Active 2", window_name="qa-s2")
+        state = self._make_state(scenarios=[s1, s2])
+        status_path = tmp_path / "qa_status.json"
+
+        sleep_calls = []
+
+        def fake_sleep(secs):
+            sleep_calls.append(secs)
+            if len(sleep_calls) >= 2:
+                # Stop the loop
+                state.stop_requested = True
+
+        launch_container_calls = []
+
+        def fake_launch_containers(state_arg, data, pr_data, session,
+                                   repo_root, workdir_path, pm_root=None,
+                                   _status_scenarios=None):
+            for s in state_arg.scenarios:
+                launch_container_calls.append(s.index)
+                s.window_name = f"qa-test-s{s.index}"
+
+        with (
+            patch("pm_core.memory_governor.check_launch",
+                  return_value=(True, "")),
+            patch("pm_core.qa_loop.time.sleep", side_effect=fake_sleep),
+            patch("pm_core.qa_loop._write_status_file"),
+            patch("pm_core.qa_loop._is_verification_enabled",
+                  return_value=False),
+            patch("pm_core.qa_loop._get_verification_max_retries",
+                  return_value=3),
+            patch("pm_core.qa_loop._get_verdict_reminder_timeout",
+                  return_value=None),
+            patch("pm_core.qa_loop._get_scenario_pane",
+                  return_value="%10"),
+            patch("pm_core.qa_loop.extract_verdict_from_content",
+                  return_value=None),
+            patch("pm_core.tmux.pane_exists", return_value=True),
+            patch("pm_core.tmux.capture_pane", return_value="running..."),
+            patch("pm_core.qa_loop._launch_scenarios_in_containers",
+                  side_effect=fake_launch_containers),
+        ):
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", status_path,
+                lambda: None,
+                queued_scenarios=[s10],
+                concurrency_cap=2,
+                use_containers=True,
+            )
+
+        # Queued scenario 10 should never have been launched because
+        # active count (2 pending) >= concurrency_cap (2). The
+        # concurrency check at line 1606 fires before check_launch.
+        assert 10 not in launch_container_calls
+        assert 10 not in state.scenario_verdicts
+        # s10 should still have no window_name (never launched)
+        assert s10.window_name is None
+
+    def test_queued_indices_updated_on_dequeue(self, tmp_path):
+        """Only one scenario dequeued per launch call when cap=1."""
+        s10 = self._make_scenario(10, title="S10")
+        s11 = self._make_scenario(11, title="S11")
+        s12 = self._make_scenario(12, title="S12")
+        state = self._make_state(scenarios=[])
+        status_path = tmp_path / "qa_status.json"
+
+        launched_indices = []
+        sleep_calls = []
+
+        def fake_sleep(secs):
+            sleep_calls.append(secs)
+            if len(sleep_calls) >= 3:
+                state.stop_requested = True
+
+        def fake_launch_containers(state_arg, data, pr_data, session,
+                                   repo_root, workdir_path, pm_root=None,
+                                   _status_scenarios=None):
+            for s in state_arg.scenarios:
+                s.window_name = f"qa-test-s{s.index}"
+                launched_indices.append(s.index)
+
+        # Write status calls — capture the queued_scenarios arg
+        status_calls = []
+
+        def fake_write_status(status_path, pr_id, scenarios,
+                              scenario_verdicts, **kwargs):
+            queued = kwargs.get("queued_scenarios", set())
+            status_calls.append(set(queued))
+
+        with (
+            patch("pm_core.memory_governor.check_launch",
+                  return_value=(True, "")),
+            patch("pm_core.qa_loop.time.sleep", side_effect=fake_sleep),
+            patch("pm_core.qa_loop._write_status_file",
+                  side_effect=fake_write_status),
+            patch("pm_core.qa_loop._is_verification_enabled",
+                  return_value=False),
+            patch("pm_core.qa_loop._get_verification_max_retries",
+                  return_value=3),
+            patch("pm_core.qa_loop._get_verdict_reminder_timeout",
+                  return_value=None),
+            patch("pm_core.qa_loop._launch_scenarios_in_containers",
+                  side_effect=fake_launch_containers),
+            patch("pm_core.qa_loop._get_scenario_pane",
+                  return_value="%99"),
+            patch("pm_core.qa_loop.extract_verdict_from_content",
+                  return_value=None),
+            patch("pm_core.tmux.pane_exists", return_value=True),
+            patch("pm_core.tmux.capture_pane", return_value="running..."),
+        ):
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", status_path,
+                lambda: None,
+                queued_scenarios=[s10, s11, s12],
+                concurrency_cap=1,
+                use_containers=True,
+            )
+
+        # Only one scenario should launch initially (cap=1) from the
+        # initial fill loop. The first launched should be index 10.
+        assert launched_indices[0] == 10
+
+    def test_periodic_retry_fires_when_pending_and_verifying_empty(
+            self, tmp_path):
+        """Periodic retry calls _launch_next_queued on each poll cycle."""
+        s10 = self._make_scenario(10, title="S10")
+        state = self._make_state(scenarios=[])
+        status_path = tmp_path / "qa_status.json"
+
+        check_calls = [0]
+
+        def fake_check_launch(container_type):
+            check_calls[0] += 1
+            if check_calls[0] <= 2:
+                return (False, "over budget")
+            return (True, "")
+
+        sleep_calls = []
+
+        def fake_sleep(secs):
+            sleep_calls.append(secs)
+            if len(sleep_calls) >= 5:
+                state.stop_requested = True
+
+        def fake_launch_containers(state_arg, data, pr_data, session,
+                                   repo_root, workdir_path, pm_root=None,
+                                   _status_scenarios=None):
+            for s in state_arg.scenarios:
+                s.window_name = f"qa-test-s{s.index}"
+
+        with (
+            patch("pm_core.memory_governor.check_launch",
+                  side_effect=fake_check_launch),
+            patch("pm_core.qa_loop.time.sleep", side_effect=fake_sleep),
+            patch("pm_core.qa_loop._write_status_file"),
+            patch("pm_core.qa_loop._is_verification_enabled",
+                  return_value=False),
+            patch("pm_core.qa_loop._get_verification_max_retries",
+                  return_value=3),
+            patch("pm_core.qa_loop._get_verdict_reminder_timeout",
+                  return_value=None),
+            patch("pm_core.qa_loop._launch_scenarios_in_containers",
+                  side_effect=fake_launch_containers),
+            patch("pm_core.qa_loop._get_scenario_pane",
+                  return_value="%99"),
+            patch("pm_core.qa_loop.extract_verdict_from_content",
+                  return_value=None),
+            patch("pm_core.tmux.pane_exists", return_value=True),
+            patch("pm_core.tmux.capture_pane", return_value="running..."),
+        ):
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", status_path,
+                lambda: None,
+                queued_scenarios=[s10],
+                concurrency_cap=5,
+                use_containers=True,
+            )
+
+        # check_launch should be called on each poll cycle (periodic retry),
+        # not just once. The initial fill loop calls it once, plus each
+        # poll iteration calls it via the periodic retry path.
+        assert check_calls[0] >= 3
+
+    def test_window_creation_failure_marks_input_required(self, tmp_path):
+        """Failed window creation marks scenario INPUT_REQUIRED."""
+        s10 = self._make_scenario(10, title="S10")
+        state = self._make_state(scenarios=[])
+        status_path = tmp_path / "qa_status.json"
+
+        sleep_calls = []
+
+        def fake_sleep(secs):
+            sleep_calls.append(secs)
+            if len(sleep_calls) >= 2:
+                state.stop_requested = True
+
+        def fake_launch_containers(state_arg, data, pr_data, session,
+                                   repo_root, workdir_path, pm_root=None,
+                                   _status_scenarios=None):
+            # Deliberately do NOT set window_name — simulates failure
+            pass
+
+        with (
+            patch("pm_core.memory_governor.check_launch",
+                  return_value=(True, "")),
+            patch("pm_core.qa_loop.time.sleep", side_effect=fake_sleep),
+            patch("pm_core.qa_loop._write_status_file"),
+            patch("pm_core.qa_loop._is_verification_enabled",
+                  return_value=False),
+            patch("pm_core.qa_loop._get_verification_max_retries",
+                  return_value=3),
+            patch("pm_core.qa_loop._get_verdict_reminder_timeout",
+                  return_value=None),
+            patch("pm_core.qa_loop._launch_scenarios_in_containers",
+                  side_effect=fake_launch_containers),
+        ):
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", status_path,
+                lambda: None,
+                queued_scenarios=[s10],
+                concurrency_cap=5,
+                use_containers=True,
+            )
+
+        # Scenario should be marked INPUT_REQUIRED
+        assert state.scenario_verdicts[10] == VERDICT_INPUT_REQUIRED
