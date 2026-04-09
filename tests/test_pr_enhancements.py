@@ -619,6 +619,60 @@ class TestPrMerge:
         assert "Push to origin failed" in result.output
         mock_finalize.assert_not_called()
 
+    @mock.patch.object(pr_mod, "_finalize_merge")
+    @mock.patch("pm_core.cli.pr.git_ops")
+    def test_vanilla_merge_pushes_feature_branch(self, mock_git_ops, mock_finalize, tmp_merge_project):
+        """Vanilla merge should push the feature branch to origin for downstream workdirs."""
+        data = store.load(tmp_merge_project["pm_dir"])
+        data["project"]["backend"] = "vanilla"
+        store.save(data, tmp_merge_project["pm_dir"])
+
+        def run_git_side_effect(*args, **kwargs):
+            if args[0] == "rev-parse":
+                return MagicMock(returncode=0, stdout="abc1234\n", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+        mock_git_ops.run_git.side_effect = run_git_side_effect
+
+        runner = CliRunner()
+        with mock.patch.object(pr_mod, "state_root", return_value=tmp_merge_project["pm_dir"]):
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+
+        assert result.exit_code == 0
+        git_calls = [c[0] for c in mock_git_ops.run_git.call_args_list]
+        # Should push both the feature branch and the base branch
+        push_calls = [c for c in git_calls if c[0] == "push"]
+        assert ("push", "origin", "pm/pr-001") in push_calls
+        assert ("push", "origin", "master") in push_calls
+        assert "Pushed pm/pr-001 to origin" in result.output
+        mock_finalize.assert_called_once()
+
+    @mock.patch.object(pr_mod, "_finalize_merge")
+    @mock.patch("pm_core.cli.pr.git_ops")
+    def test_local_merge_fetches_feature_branch_into_repo(self, mock_git_ops, mock_finalize, tmp_merge_project):
+        """Local merge should fetch the feature branch ref into the main repo."""
+        def run_git_side_effect(*args, **kwargs):
+            if args[0] == "status":
+                return MagicMock(returncode=0, stdout="", stderr="")
+            if args[:2] == ("rev-parse", "--abbrev-ref"):
+                return MagicMock(returncode=0, stdout="master\n", stderr="")
+            if args[0] == "rev-parse":
+                return MagicMock(returncode=0, stdout="abc1234\n", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+        mock_git_ops.run_git.side_effect = run_git_side_effect
+
+        runner = CliRunner()
+        with mock.patch.object(pr_mod, "state_root", return_value=tmp_merge_project["pm_dir"]):
+            result = runner.invoke(pr_mod.pr, ["merge", "pr-001"])
+
+        assert result.exit_code == 0
+        git_calls = [c[0] for c in mock_git_ops.run_git.call_args_list]
+        # Should fetch feature branch into the repo dir
+        feature_fetch = [c for c in git_calls
+                         if c[0] == "fetch" and len(c) >= 3
+                         and "pm/pr-001:pm/pr-001" in c[2]]
+        assert len(feature_fetch) == 1
+        mock_finalize.assert_called_once()
+
 
 # ---------------------------------------------------------------------------
 # GitHub merge: pull after merge with dirty-workdir detection
@@ -694,13 +748,24 @@ class TestGitHubMergePull:
         assert ("merge", "--ff-only", "origin/master") in git_calls
         mock_finalize.assert_called_once()
 
-        # Git ops must target the main repo dir, NOT the PR workdir
+        # Should also push the feature branch to origin for downstream workdirs (R2)
+        push_calls = [c for c in git_calls if c[0] == "push"]
+        assert ("push", "origin", "pm/pr-001") in push_calls, (
+            "GitHub merge should push feature branch to origin"
+        )
+
+        # The fetch/merge ops must target the main repo dir, NOT the PR workdir.
+        # The feature-branch push is the one exception (runs from workdir).
         repo_dir = tmp_github_merge_project["pm_dir"].parent
         workdir = tmp_github_merge_project["workdir"]
         for call in mock_git_ops.run_git.call_args_list:
+            args = call[0]
             cwd = Path(call[1].get("cwd"))
-            assert cwd == repo_dir, f"git op cwd={cwd} should be repo dir, not workdir"
-            assert cwd != workdir
+            if args[0] == "push" and len(args) >= 3 and args[1] == "origin" and args[2] != "master":
+                # Feature-branch push runs from workdir — that's expected
+                assert cwd == workdir
+            else:
+                assert cwd == repo_dir, f"git op cwd={cwd} should be repo dir, not workdir"
 
     @mock.patch.object(pr_mod, "trigger_tui_restart")
     @mock.patch.object(pr_mod, "_finalize_merge")
