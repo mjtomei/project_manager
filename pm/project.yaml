@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-a3a081a
+  active_pr: pr-eb2dbfc
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -8314,7 +8314,7 @@ prs:
   title: 'Container memory governor: dynamic memory limits with per-type stop policy
     and QA queuing'
   branch: pm/pr-eb2dbfc-container-memory-governor-dynamic-memory-limits-wi
-  status: in_progress
+  status: in_review
   depends_on: []
   description: 'Add a memory governor that prevents OOM crashes by projecting memory
     consumption before launching containers, with configurable stop-on-idle for different
@@ -8383,9 +8383,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-04-09T10:32:59.631025+00:00'
+  updated_at: '2026-04-09T10:53:08.497318+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-04-09T10:53:08.497318+00:00'
   merged_at: null
   notes:
   - id: note-b9293d6
@@ -8438,8 +8438,19 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-09T10:52:28.978330+00:00'
-  updated_at: '2026-04-09T10:52:28.978330+00:00'
+  updated_at: '2026-04-09T11:14:18.353533+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-eaf57af
+    text: 'The PR-to-session mapping is not straightforward. Container sessions all
+      write to ~/.claude/projects/-workspace/ with UUID filenames. Transcript symlinks
+      in PR workdirs provide the mapping but are fragile (370 symlinks, 0 finalized
+      copies, 34 already dangling from Claude pruning). This PR needs to: (1) build
+      a PR-to-session index by resolving transcript symlinks and/or parsing JSONL
+      prompt content, (2) handle missing sessions gracefully (Claude prunes old sessions,
+      so some will be gone), (3) finalize transcripts to standalone copies when possible
+      so they survive pruning.'
+    created_at: '2026-04-09T11:14:18Z'
+    last_edited: '2026-04-09T11:14:18Z'
