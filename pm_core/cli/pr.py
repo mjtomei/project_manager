@@ -1176,16 +1176,7 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     switch = not review_loop and not background
 
     try:
-        claude_pane = tmux_mod.new_window_get_pane(
-            pm_session, window_name, claude_cmd, workdir,
-            switch=switch,
-        )
-        if not claude_pane:
-            click.echo(f"Review window: failed to create tmux window '{window_name}'.")
-            return
-
-        # Build shell command that shows PR info via a pager then drops
-        # to an interactive shell in the workdir.  We use git --no-pager
+        # Build the diff pane command first.  We use git --no-pager
         # and pipe through less ourselves so that quitting the pager
         # doesn't kill the pane (git's built-in pager can cause SIGPIPE
         # exit codes that break && chains).
@@ -1213,13 +1204,27 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
             f"; }} | less -R"
             f"; exec {shell}"
         )
-        diff_pane = tmux_mod.split_pane_at(claude_pane, "h", diff_cmd, background=True)
+
+        # Create the window with the diff pane first, then split to add
+        # the claude pane.  This ensures the window is already at its
+        # final 2-pane width before docker exec launches — so the
+        # container PTY inherits the correct column count and Claude
+        # Code renders at the right width.
+        diff_pane = tmux_mod.new_window_get_pane(
+            pm_session, window_name, diff_cmd, workdir,
+            switch=switch,
+        )
+        if not diff_pane:
+            click.echo(f"Review window: failed to create tmux window '{window_name}'.")
+            return
+
+        claude_pane = tmux_mod.split_pane_at(diff_pane, "h", claude_cmd, background=True)
 
         # Register review panes under the review window (multi-window safe).
         # Derive window ID from the pane we just created rather than
         # searching by name, which is more robust.
         wid_result = subprocess.run(
-            tmux_mod._tmux_cmd("display", "-t", claude_pane, "-p", "#{window_id}"),
+            tmux_mod._tmux_cmd("display", "-t", diff_pane, "-p", "#{window_id}"),
             capture_output=True, text=True,
         )
         review_win_id = wid_result.stdout.strip()
