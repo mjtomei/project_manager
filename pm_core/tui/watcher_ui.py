@@ -50,7 +50,11 @@ def ensure_watcher_plans(app) -> Path | None:
     if not project_yaml.exists():
         store.save({"project": {"name": "pm-meta"}, "plans": [], "prs": []}, root)
 
-    data = store.load(root)
+    try:
+        data = store.load(root)
+    except store.ProjectYamlParseError as e:
+        _log.warning("ensure_watcher_plans: %s", e)
+        return None
     existing_plan_ids = {p["id"] for p in (data.get("plans") or [])}
     if data.get("plans") is None:
         data["plans"] = []
@@ -102,7 +106,11 @@ def load_watcher_plan_prs(app) -> int:
     if not root.is_dir():
         return 0
 
-    data = store.load(root)
+    try:
+        data = store.load(root)
+    except store.ProjectYamlParseError as e:
+        _log.warning("load_watcher_plan_prs: %s", e)
+        return 0
     existing_ids = {p["id"] for p in (data.get("prs") or [])}
     existing_titles = {p.get("title", ""): p["id"] for p in (data.get("prs") or [])}
     new_entries = []

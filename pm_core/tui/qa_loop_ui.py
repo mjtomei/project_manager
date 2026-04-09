@@ -41,7 +41,10 @@ def _get_selected_pr(app) -> tuple[str | None, dict | None]:
     pr_id = tree.selected_pr_id
     if not pr_id or not app._root:
         return None, None
-    data = store.load(app._root)
+    try:
+        data = store.load(app._root)
+    except store.ProjectYamlParseError:
+        return None, None
     pr = store.get_pr(data, pr_id)
     return pr_id, pr
 
@@ -61,7 +64,11 @@ def focus_or_start_qa(app, pr_id: str) -> None:
         app.log_message("No project root")
         return
 
-    data = store.load(app._root)
+    try:
+        data = store.load(app._root)
+    except store.ProjectYamlParseError as e:
+        app.log_message(f"Error: {e}")
+        return
     pr = store.get_pr(data, pr_id)
     if not pr:
         app.log_message(f"PR not found: {pr_id}")
@@ -92,7 +99,11 @@ def start_qa(app, pr_id: str) -> None:
         app.log_message("No project root")
         return
 
-    data = store.load(app._root)
+    try:
+        data = store.load(app._root)
+    except store.ProjectYamlParseError as e:
+        app.log_message(f"Error: {e}")
+        return
     pr = store.get_pr(data, pr_id)
     if not pr:
         app.log_message(f"PR not found: {pr_id}")
@@ -149,7 +160,11 @@ def fresh_start_qa(app, pr_id: str) -> None:
         app.log_message("No project root")
         return
 
-    data = store.load(app._root)
+    try:
+        data = store.load(app._root)
+    except store.ProjectYamlParseError as e:
+        app.log_message(f"Error: {e}")
+        return
     pr = store.get_pr(data, pr_id)
     if not pr:
         app.log_message(f"PR not found: {pr_id}")
@@ -188,7 +203,11 @@ def start_or_stop_qa_loop(app, pr_id: str, strict: bool) -> None:
         app.log_message("No project root")
         return
 
-    data = store.load(app._root)
+    try:
+        data = store.load(app._root)
+    except store.ProjectYamlParseError as e:
+        app.log_message(f"Error: {e}")
+        return
     pr = store.get_pr(data, pr_id)
     if not pr:
         app.log_message(f"PR not found: {pr_id}")
@@ -345,7 +364,10 @@ def _on_qa_complete(app, state: QALoopState) -> None:
         app._review_loops.pop(pr_id, None)
         # Reload in-memory state
         if app._root:
-            app._data = store.load(app._root)
+            try:
+                app._data = store.load(app._root)
+            except store.ProjectYamlParseError:
+                pass  # keep existing app._data
 
         if sd:
             # Self-driving: reset pass count and directly start review loop
@@ -383,7 +405,11 @@ def _start_self_driving_review(app, pr_id: str, strict: bool) -> None:
     if not app._root:
         return
 
-    data = store.load(app._root)
+    try:
+        data = store.load(app._root)
+    except store.ProjectYamlParseError as e:
+        _log.warning("_start_self_driving_review: %s", e)
+        return
     pr = store.get_pr(data, pr_id)
     if not pr:
         _log.warning("_start_self_driving_review: PR %s not found", pr_id)

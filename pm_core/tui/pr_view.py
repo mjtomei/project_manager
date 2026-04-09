@@ -95,16 +95,20 @@ def start_pr(app, companion: bool = False) -> None:
         from pm_core import tmux as tmux_mod
         session = get_pm_session()
         if session and app._root:
-            data = store.load(app._root)
-            pr_entry = store.get_pr(data, pr_id)
-            if pr_entry:
-                from pm_core.cli.pr import _pr_display_id
-                display_id = _pr_display_id(pr_entry)
-                existing = tmux_mod.find_window_by_name(session, display_id)
-                if existing:
-                    tmux_mod.select_window(session, existing["id"])
-                    app.log_message(f"Switched to window '{display_id}'")
-                    return
+            try:
+                data = store.load(app._root)
+            except store.ProjectYamlParseError:
+                data = None
+            if data:
+                pr_entry = store.get_pr(data, pr_id)
+                if pr_entry:
+                    from pm_core.cli.pr import _pr_display_id
+                    display_id = _pr_display_id(pr_entry)
+                    existing = tmux_mod.find_window_by_name(session, display_id)
+                    if existing:
+                        tmux_mod.select_window(session, existing["id"])
+                        app.log_message(f"Switched to window '{display_id}'")
+                        return
 
     suffix = ""
     if fresh:
@@ -143,17 +147,21 @@ def done_pr(app, fresh: bool = False) -> None:
         from pm_core import tmux as tmux_mod, store
         session = get_pm_session()
         if session and app._root:
-            data = store.load(app._root)
-            pr_entry = store.get_pr(data, pr_id)
-            if pr_entry:
-                from pm_core.cli.pr import _pr_display_id
-                display_id = _pr_display_id(pr_entry)
-                window_name = f"review-{display_id}"
-                existing = tmux_mod.find_window_by_name(session, window_name)
-                if existing:
-                    tmux_mod.select_window(session, existing["id"])
-                    app.log_message(f"Switched to review window '{window_name}'")
-                    return
+            try:
+                data = store.load(app._root)
+            except store.ProjectYamlParseError:
+                data = None
+            if data:
+                pr_entry = store.get_pr(data, pr_id)
+                if pr_entry:
+                    from pm_core.cli.pr import _pr_display_id
+                    display_id = _pr_display_id(pr_entry)
+                    window_name = f"review-{display_id}"
+                    existing = tmux_mod.find_window_by_name(session, window_name)
+                    if existing:
+                        tmux_mod.select_window(session, existing["id"])
+                        app.log_message(f"Switched to review window '{window_name}'")
+                        return
 
     action_key = f"Reviewing {pr_id}" + (" (fresh)" if fresh else "")
     if not guard_pr_action(app, action_key):
@@ -488,12 +496,17 @@ def handle_command_submitted(app, cmd: str) -> None:
         else:
             # Resolve short ID to full ID
             if app._root:
-                qa_data = _store.load(app._root)
-                qa_pr = _store.get_pr(qa_data, qa_pr_id)
-                if qa_pr:
-                    qa_loop_ui.focus_or_start_qa(app, qa_pr["id"])
-                else:
-                    app.log_message(f"PR not found: {qa_pr_id}")
+                try:
+                    qa_data = _store.load(app._root)
+                except _store.ProjectYamlParseError as e:
+                    app.log_message(f"Error: {e}")
+                    qa_data = None
+                if qa_data is not None:
+                    qa_pr = _store.get_pr(qa_data, qa_pr_id)
+                    if qa_pr:
+                        qa_loop_ui.focus_or_start_qa(app, qa_pr["id"])
+                    else:
+                        app.log_message(f"PR not found: {qa_pr_id}")
             else:
                 app.log_message("No project root")
         # QA is handled directly (not via run_command), so clear the guard
