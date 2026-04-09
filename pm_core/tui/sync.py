@@ -90,7 +90,14 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
         status_bar = app.query_one("#status-bar", StatusBar)
         project = app._data.get("project", {})
         prs = app._data.get("prs") or []
-        status_bar.update_status(project.get("name", "???"), project.get("repo", "???"), "pulling", pr_count=len(prs))
+        # Memory governor status (best-effort)
+        memory_status = ""
+        try:
+            from pm_core.memory_governor import format_memory_status
+            memory_status = format_memory_status()
+        except Exception:
+            pass
+        status_bar.update_status(project.get("name", "???"), project.get("repo", "???"), "pulling", pr_count=len(prs), memory_status=memory_status)
 
         # Use shorter interval for manual refresh, longer for background
         min_interval = (
@@ -175,7 +182,7 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
             if is_manual:
                 app.log_message("Refreshed")
 
-        status_bar.update_status(project.get("name", "???"), project.get("repo", "???"), sync_status, pr_count=len(prs))
+        status_bar.update_status(project.get("name", "???"), project.get("repo", "???"), sync_status, pr_count=len(prs), memory_status=memory_status)
 
         # Clear log message after 1 second for manual refresh
         if is_manual:
