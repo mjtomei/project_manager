@@ -436,6 +436,19 @@ def run_review_loop_sync(
                         from pm_core.container import (
                             _run_docker, CONTAINER_PREFIX, stop_container,
                         )
+                        # Find the review pane so we can preserve its
+                        # text (remain-on-exit) before stopping.
+                        pane_ids: list[str] = []
+                        try:
+                            from pm_core import tmux as tmux_mod
+                            win_name = _compute_review_window_name(pr_data)
+                            session = _get_pm_session()
+                            if session:
+                                pane_id = _find_claude_pane(session, win_name)
+                                if pane_id:
+                                    pane_ids = [pane_id]
+                        except Exception:
+                            pass
                         # Find the review container for this PR
                         result = _run_docker(
                             "ps", "--filter",
@@ -449,7 +462,7 @@ def run_review_loop_sync(
                                 if name and state.pr_id in name and "review" in name:
                                     _log.info("review_loop: stop-on-idle "
                                               "stopping %s", name)
-                                    stop_container(name)
+                                    stop_container(name, pane_ids=pane_ids)
             except Exception:
                 _log.debug("review_loop: stop-on-idle failed",
                            exc_info=True)

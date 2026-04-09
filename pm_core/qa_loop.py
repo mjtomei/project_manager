@@ -1455,18 +1455,36 @@ def _relaunch_scenario_window(
 
 
 # ---------------------------------------------------------------------------
+def _get_window_pane_ids(session: str, window_name: str | None) -> list[str]:
+    """Collect all pane IDs in a tmux window (for remain-on-exit)."""
+    if not window_name:
+        return []
+    try:
+        win = tmux_mod.find_window_by_name(session, window_name)
+        if not win:
+            return []
+        panes = tmux_mod.get_pane_indices(session, win["index"])
+        return [pid for pid, _idx in panes]
+    except Exception:
+        return []
+
+
 # Stop-on-idle helper
 # ---------------------------------------------------------------------------
 
-def _maybe_stop_idle_container(container_name: str, container_type: str) -> None:
-    """Stop a container if the stop-on-idle policy is enabled for its type."""
+def _maybe_stop_idle_container(container_name: str, container_type: str,
+                               pane_ids: list[str] | None = None) -> None:
+    """Stop a container if the stop-on-idle policy is enabled for its type.
+
+    *pane_ids*: tmux panes to preserve (remain-on-exit) before stopping.
+    """
     from pm_core.memory_governor import get_stop_idle_policy
     from pm_core.container import stop_container
     if get_stop_idle_policy(container_type):
         _log.info("Stop-on-idle: stopping container %s (%s)",
                   container_name, container_type)
         try:
-            stop_container(container_name)
+            stop_container(container_name, pane_ids=pane_ids)
         except Exception:
             _log.warning("Failed to stop container %s", container_name,
                          exc_info=True)
@@ -1662,8 +1680,9 @@ def _poll_tmux_verdicts(
                 _notify()
                 # Stop-on-idle: stop the container now that scenario is done
                 if use_containers and scenario.container_name:
-                    _maybe_stop_idle_container(scenario.container_name,
-                                               "qa_scenario")
+                    _maybe_stop_idle_container(
+                        scenario.container_name, "qa_scenario",
+                        pane_ids=_get_window_pane_ids(session, scenario.window_name))
             else:
                 fails = verification_failures.get(scenario_idx, 0) + 1
                 verification_failures[scenario_idx] = fails
@@ -1683,8 +1702,9 @@ def _poll_tmux_verdicts(
                     _notify()
                     # Stop-on-idle: scenario is done
                     if use_containers and scenario.container_name:
-                        _maybe_stop_idle_container(scenario.container_name,
-                                                   "qa_scenario")
+                        _maybe_stop_idle_container(
+                            scenario.container_name, "qa_scenario",
+                            pane_ids=_get_window_pane_ids(session, scenario.window_name))
                 else:
                     # Send the scenario a follow-up message and put back in pending.
                     # Use the stored pane_id to target the original scenario
@@ -1863,8 +1883,9 @@ def _poll_tmux_verdicts(
                     # must stay alive for user interaction
                     if (use_containers and scenario.container_name
                             and verdict != VERDICT_INPUT_REQUIRED):
-                        _maybe_stop_idle_container(scenario.container_name,
-                                                   "qa_scenario")
+                        _maybe_stop_idle_container(
+                            scenario.container_name, "qa_scenario",
+                            pane_ids=_get_window_pane_ids(session, scenario.window_name))
                     # Scenario fully done — launch next queued if available
                     _launch_next_queued()
 

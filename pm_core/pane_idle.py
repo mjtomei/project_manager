@@ -148,6 +148,12 @@ class PaneIdleTracker:
             state = self._states.get(key)
             return state.idle if state else False
 
+    def get_pane_id(self, key: str) -> str | None:
+        """Return the tracked pane ID for *key*.  Zero-cost read."""
+        with self._lock:
+            state = self._states.get(key)
+            return state.pane_id if state else None
+
     def get_content(self, key: str) -> str:
         """Return last captured pane content.  Zero-cost read."""
         with self._lock:

@@ -719,13 +719,26 @@ def remove_container(name: str) -> None:
     _log.warning("remove_container: %s still present after 10 s", name)
 
 
-def stop_container(name: str) -> None:
+def stop_container(name: str, pane_ids: list[str] | None = None) -> None:
     """Stop a container (preserving its filesystem overlay) for memory reclamation.
 
     Captures memory stats before stopping.  The container can be restarted
     later with ``docker start``.  The push proxy on the host is stopped
     and will be restarted when the container is reused.
+
+    If *pane_ids* are provided, sets ``remain-on-exit on`` on those tmux
+    panes before stopping so the session text is preserved for inspection.
     """
+    # Preserve tmux panes before stopping (the docker exec processes will
+    # die when the container stops, which would normally close the panes).
+    if pane_ids:
+        from pm_core import tmux as tmux_mod
+        for pid in pane_ids:
+            try:
+                tmux_mod.set_pane_option(pid, "remain-on-exit", "on")
+            except Exception:
+                _log.debug("Failed to set remain-on-exit for pane %s", pid)
+
     # Capture memory stats before stopping (best-effort)
     try:
         from pm_core.memory_governor import capture_and_record

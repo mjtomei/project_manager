@@ -35,11 +35,13 @@ _log = configure_logger("pm.tui.review_loop_ui")
 _merge_verdict_tracker = VerdictStabilityTracker()
 
 
-def _try_stop_idle_container(pr_id: str, container_type: str) -> None:
+def _try_stop_idle_container(pr_id: str, container_type: str,
+                             pane_id: str | None = None) -> None:
     """Stop a PR's container if stop-on-idle is enabled for the type.
 
     Finds the container by looking up all running pm containers and
-    matching the PR ID in the container name.
+    matching the PR ID in the container name.  If *pane_id* is given,
+    sets ``remain-on-exit`` on that pane so session text is preserved.
     """
     from pm_core.container import is_container_mode_enabled
     if not is_container_mode_enabled():
@@ -52,6 +54,7 @@ def _try_stop_idle_container(pr_id: str, container_type: str) -> None:
     from pm_core.container import (
         stop_container, _run_docker, CONTAINER_PREFIX,
     )
+    pane_ids = [pane_id] if pane_id else None
     # Find containers matching this PR's type
     # Impl: pm-{tag}-impl  or pm-{tag}-{pr_id}
     # Review: pm-{tag}-review-{pr_id}
@@ -71,7 +74,7 @@ def _try_stop_idle_container(pr_id: str, container_type: str) -> None:
             if pr_id in name and container_type in name:
                 _log.info("stop-on-idle: stopping %s container %s for %s",
                           container_type, name, pr_id)
-                stop_container(name)
+                stop_container(name, pane_ids=pane_ids)
     except Exception:
         _log.debug("stop-on-idle: failed for %s/%s", container_type, pr_id,
                     exc_info=True)
@@ -720,7 +723,8 @@ def _poll_impl_idle(app) -> None:
                 tracker.mark_active(pr_id)
             else:
                 # Stop-on-idle: stop impl container if policy enabled
-                _try_stop_idle_container(pr_id, "impl")
+                _try_stop_idle_container(pr_id, "impl",
+                                         pane_id=tracker.get_pane_id(pr_id))
                 newly_idle.append((pr_id, pr))
 
         # Detect newly-idle in_review PRs for standalone review stop-on-idle
@@ -731,7 +735,8 @@ def _poll_impl_idle(app) -> None:
             if content_has_interactive_prompt(content):
                 tracker.mark_active(pr_id)
             else:
-                _try_stop_idle_container(pr_id, "review")
+                _try_stop_idle_container(pr_id, "review",
+                                         pane_id=tracker.get_pane_id(pr_id))
 
     # --- Second pass: merge resolution windows ---
     # Discover merge windows for ALL in_review PRs, not just
