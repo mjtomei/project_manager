@@ -2,7 +2,7 @@
 
 import asyncio
 import types
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import pytest
 
@@ -53,3 +53,40 @@ class TestBackgroundSyncParseError:
         # Warning was logged
         mock_log.warning.assert_called_once()
         assert "Skipping sync" in mock_log.warning.call_args[0][0]
+
+
+class TestLoadStateParseError:
+    """app._load_state catches ProjectYamlParseError and keeps previous state."""
+
+    def test_corrupt_yaml_keeps_previous_data(self):
+        """_load_state should log a warning and keep app._data unchanged on corrupt YAML."""
+        from pm_core.tui.app import ProjectManagerApp
+
+        previous_data = {"project": {"name": "test"}, "prs": [{"id": "pr-001"}]}
+
+        with patch.object(
+            store,
+            "find_project_root",
+            return_value="/some/root",
+        ), patch.object(
+            store,
+            "load",
+            side_effect=store.ProjectYamlParseError("corrupt"),
+        ), patch("pm_core.tui.app._log") as mock_log:
+            app = types.SimpleNamespace(
+                _root="/some/root",
+                _data=previous_data.copy(),
+                _plans_visible=False,
+                _qa_visible=False,
+                _update_display=MagicMock(),
+                _show_normal_view=MagicMock(),
+            )
+            # Call _load_state as unbound method with our namespace
+            ProjectManagerApp._load_state(app)
+
+        # app._data should be unchanged (not wiped to {})
+        assert app._data == previous_data
+
+        # Warning was logged
+        mock_log.warning.assert_called_once()
+        assert "corrupt" in str(mock_log.warning.call_args[0][1])

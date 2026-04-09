@@ -476,7 +476,11 @@ def _attempt_merge(app, pr_id: str, *, resolve_window: bool = False,
     pr_view.run_command(app, merge_cmd)
 
     # Reload state — subprocess modified project.yaml on disk
-    app._data = store.load(app._root)
+    try:
+        app._data = store.load(app._root)
+    except store.ProjectYamlParseError as e:
+        _log.warning("_attempt_auto_merge: corrupt YAML after merge cmd: %s", e)
+        return False
     merged_pr = store.get_pr(app._data, pr_id)
     return bool(merged_pr and merged_pr.get("status") == "merged")
 
@@ -827,7 +831,11 @@ def _auto_review_idle_prs(app, newly_idle: list[tuple[str, dict]]) -> None:
 
         # Reload state — subprocess modified project.yaml on disk
         # but _run_command_sync doesn't update in-memory data.
-        app._data = store.load(app._root)
+        try:
+            app._data = store.load(app._root)
+        except store.ProjectYamlParseError as e:
+            _log.warning("_auto_start_single: corrupt YAML after review cmd: %s", e)
+            return
         updated_pr = store.get_pr(app._data, pr_id)
         if updated_pr and updated_pr.get("status") == "in_review":
             # Start a review loop (same as _auto_start_review_loops)
