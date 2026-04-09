@@ -8,6 +8,7 @@ from click.testing import CliRunner
 
 from pm_core.cli.container import (
     container_build,
+    container_group,
     _build_container_build_prompt,
 )
 
@@ -217,3 +218,103 @@ class TestContainerBuildCommand:
         mock_launch.assert_called_once()
         call_kwargs = mock_launch.call_args
         assert call_kwargs[1]["session_key"] == "container:build"
+
+
+class TestContainerSetValidation:
+    """Tests for pm container set — validates governor keys."""
+
+    def _invoke(self, key, value):
+        runner = CliRunner()
+        return runner.invoke(container_group, ["set", key, value])
+
+    # --- Valid inputs ---
+
+    @patch("pm_core.paths.set_global_setting_value")
+    def test_valid_system_memory_target(self, mock_set):
+        result = self._invoke("system-memory-target", "48g")
+        assert result.exit_code == 0
+        assert "Set system-memory-target = 48g" in result.output
+        mock_set.assert_called_once_with("container-system-memory-target", "48g")
+
+    @patch("pm_core.paths.set_global_setting_value")
+    def test_valid_system_memory_scope_pm(self, mock_set):
+        result = self._invoke("system-memory-scope", "pm")
+        assert result.exit_code == 0
+        assert "Set system-memory-scope = pm" in result.output
+        mock_set.assert_called_once_with("container-system-memory-scope", "pm")
+
+    @patch("pm_core.paths.set_global_setting_value")
+    def test_valid_system_memory_scope_system(self, mock_set):
+        result = self._invoke("system-memory-scope", "system")
+        assert result.exit_code == 0
+        assert "Set system-memory-scope = system" in result.output
+        mock_set.assert_called_once_with("container-system-memory-scope", "system")
+
+    @patch("pm_core.paths.set_global_setting_value")
+    def test_valid_system_memory_default_projection(self, mock_set):
+        result = self._invoke("system-memory-default-projection", "6g")
+        assert result.exit_code == 0
+        assert "Set system-memory-default-projection = 6g" in result.output
+        mock_set.assert_called_once_with("container-system-memory-default-projection", "6g")
+
+    @patch("pm_core.paths.set_global_setting_value")
+    def test_valid_system_memory_history_size(self, mock_set):
+        result = self._invoke("system-memory-history-size", "10")
+        assert result.exit_code == 0
+        assert "Set system-memory-history-size = 10" in result.output
+        mock_set.assert_called_once_with("container-system-memory-history-size", "10")
+
+    @patch("pm_core.paths.set_global_setting_value")
+    def test_valid_stop_idle_impl_on(self, mock_set):
+        result = self._invoke("stop-idle-impl", "on")
+        assert result.exit_code == 0
+        assert "Set stop-idle-impl = on" in result.output
+        mock_set.assert_called_once_with("container-stop-idle-impl", "on")
+
+    @patch("pm_core.paths.set_global_setting_value")
+    def test_valid_stop_idle_qa_off(self, mock_set):
+        result = self._invoke("stop-idle-qa", "off")
+        assert result.exit_code == 0
+        assert "Set stop-idle-qa = off" in result.output
+        mock_set.assert_called_once_with("container-stop-idle-qa", "off")
+
+    # --- Invalid inputs ---
+
+    def test_invalid_system_memory_scope_both(self):
+        result = self._invoke("system-memory-scope", "both")
+        assert result.exit_code == 1
+        assert "system-memory-scope must be 'pm' or 'system'" in result.stderr
+
+    def test_invalid_stop_idle_impl_maybe(self):
+        result = self._invoke("stop-idle-impl", "maybe")
+        assert result.exit_code == 1
+        assert "stop-idle value must be 'on' or 'off'" in result.stderr
+
+    def test_invalid_system_memory_history_size_zero(self):
+        result = self._invoke("system-memory-history-size", "0")
+        assert result.exit_code == 1
+        assert "system-memory-history-size must be a positive integer" in result.stderr
+
+    def test_invalid_system_memory_history_size_abc(self):
+        result = self._invoke("system-memory-history-size", "abc")
+        assert result.exit_code == 1
+        assert "system-memory-history-size must be a positive integer" in result.stderr
+
+    def test_invalid_system_memory_target_notmem(self):
+        result = self._invoke("system-memory-target", "notmem")
+        assert result.exit_code == 1
+        assert "cannot parse memory value: 'notmem'" in result.stderr
+
+    # --- Fractional memory value ---
+
+    @patch("pm_core.paths.set_global_setting_value")
+    def test_fractional_memory_target(self, mock_set):
+        result = self._invoke("system-memory-target", "1.5g")
+        assert result.exit_code == 0
+        assert "Set system-memory-target = 1.5g" in result.output
+
+    # --- Invalid key (Click-level rejection) ---
+
+    def test_invalid_key_rejected_by_click(self):
+        result = self._invoke("bad-key", "whatever")
+        assert result.exit_code == 2

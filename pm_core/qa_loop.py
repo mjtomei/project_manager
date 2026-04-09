@@ -1896,9 +1896,11 @@ def _poll_tmux_verdicts(
             _launch_next_queued()
 
         # Periodic retry: when scenarios are waiting for memory (no verdicts
-        # triggering _launch_next_queued), try on each poll cycle.
+        # triggering _launch_next_queued), try on each poll cycle.  Loop
+        # so we fill as many slots as the cap and memory allow (not just one).
         if _launch_queue and not pending and not verifying:
-            _launch_next_queued()
+            for _ in range(len(_launch_queue)):
+                _launch_next_queued()
 
         # Determine which queued scenarios are waiting for memory vs
         # waiting for a concurrency slot.
@@ -2529,6 +2531,7 @@ def run_qa_sync(
 
     # Memory governor: further constrain how many scenarios launch at once
     _mem_all_blocked = False
+    _pre_mem_cap = concurrency_cap  # preserve for poll loop
     if use_containers:
         from pm_core.memory_governor import (
             get_memory_target, get_current_used_mb, project_memory,
@@ -2563,9 +2566,13 @@ def run_qa_sync(
 
     # When the memory governor blocked even the first scenario, move all
     # launch_scenarios into the queue — they'll be retried by the poll loop.
+    # Restore the original concurrency cap so the poll loop uses the right
+    # limit — the memory governor gate in _launch_next_queued dynamically
+    # constrains launches based on actual available memory.
     if _mem_all_blocked:
         queued_scenarios = launch_scenarios + queued_scenarios
         launch_scenarios = []
+        concurrency_cap = _pre_mem_cap
 
     _log.info("QA execution phase: %d scenarios for %s (%d to launch, %d queued)",
               len(state.scenarios), state.pr_id,

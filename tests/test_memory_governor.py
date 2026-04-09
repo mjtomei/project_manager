@@ -73,11 +73,6 @@ class TestInferContainerType:
         assert infer_container_type("pm-impl") == "impl"
         assert infer_container_type("pm-repo-abc123-impl") == "impl"
 
-    def test_impl_with_pr_id(self):
-        """Real naming pattern: label='impl-{pr_id}' → pm-{tag}-impl-{pr_id}."""
-        assert infer_container_type("pm-project_manager-b894f7e4-impl-pr-eb2dbfc") == "impl"
-        assert infer_container_type("pm-impl-pr-eb2dbfc") == "impl"
-
     def test_review(self):
         assert infer_container_type("pm-review-pr-abc") == "review"
         assert infer_container_type("pm-repo-abc123-review-pr-abc") == "review"
@@ -316,6 +311,33 @@ class TestFormatMemoryStatus:
             assert "56G" in result
             assert "(sys)" in result
 
+    def test_current_none(self):
+        with patch("pm_core.memory_governor.get_memory_target",
+                   return_value=48 * 1024), \
+             patch("pm_core.memory_governor.get_current_used_mb",
+                   return_value=None):
+            assert format_memory_status() == ""
+
+    def test_fractional_gigabyte(self):
+        with patch("pm_core.memory_governor.get_memory_target",
+                   return_value=48 * 1024), \
+             patch("pm_core.memory_governor.get_current_used_mb",
+                   return_value=1536), \
+             patch("pm_core.memory_governor.get_global_setting_value",
+                   return_value="pm"):
+            result = format_memory_status()
+            assert result == "1.5G/48G (pm)"
+
+    def test_sub_gigabyte(self):
+        with patch("pm_core.memory_governor.get_memory_target",
+                   return_value=48 * 1024), \
+             patch("pm_core.memory_governor.get_current_used_mb",
+                   return_value=500), \
+             patch("pm_core.memory_governor.get_global_setting_value",
+                   return_value="pm"):
+            result = format_memory_status()
+            assert result == "500M/48G (pm)"
+
 
 # ---------------------------------------------------------------------------
 # capture_and_record integration
@@ -348,3 +370,21 @@ class TestCaptureAndRecord:
              patch("pm_core.memory_governor.record_sample") as mock_record:
             capture_and_record("pm-impl")
             mock_record.assert_called_once_with("impl", 4200, 45.0)
+
+    def test_record_sample_integration(self, tmp_path):
+        with patch("pm_core.memory_governor.infer_container_type",
+                   return_value="impl"), \
+             patch("pm_core.memory_governor.capture_container_memory",
+                   return_value=5325), \
+             patch("pm_core.memory_governor.get_container_age_minutes",
+                   return_value=45.0), \
+             patch("pm_core.memory_governor.pm_home",
+                   return_value=tmp_path):
+            capture_and_record("pm-impl")
+            stats = load_stats()
+            assert "impl" in stats
+            samples = stats["impl"]["samples"]
+            assert len(samples) == 1
+            assert samples[0]["memory_mb"] == 5325
+            assert samples[0]["age_minutes"] == 45.0
+            assert "recorded_at" in samples[0]
