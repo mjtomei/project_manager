@@ -673,7 +673,7 @@ from pm_core.cli import pr, plan, session, tui, guide, meta, cluster, bench, wat
 def main():
     try:
         cli()
-    except store.StoreLockTimeout as e:
+    except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
         import sys
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
