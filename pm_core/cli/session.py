@@ -569,6 +569,7 @@ def session_mobile(force: bool | None):
             else:
                 # Entering mobile: unzoom current window before rebalance
                 tmux_mod.unzoom_pane(session_name, window)
+
             def _reset_all_user_modified(raw):
                 data = pane_registry._prepare_registry_data(raw, session_name)
                 for wdata in data.get("windows", {}).values():

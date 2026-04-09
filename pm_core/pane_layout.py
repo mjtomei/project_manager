@@ -635,8 +635,7 @@ def _respawn_tui(session: str, window: str) -> str:
             return data
 
         locked_read_modify_write(registry_path(session), _insert_tui)
-        _logger.info("_respawn_tui: created pane %s in window %s order=%d",
-                     pane_id, window, min_order)
+        _logger.info("_respawn_tui: created pane %s in window %s", pane_id, window)
     except Exception:
         _logger.exception("_respawn_tui: failed to respawn TUI")
     return window
