@@ -103,6 +103,9 @@ def _register_tmux_bindings(session_name: str) -> None:
     # Clean up stale hook from earlier versions that used the wrong name
     subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gu", "after-resize-window"),
             check=False)
+    subprocess.run(tmux_mod._tmux_cmd("set-hook", "-g", "session-closed",
+             "run-shell 'pm _session-closed \"#{hook_session_name}\"'"),
+            check=False)
 
 
 def _schedule_rebalance(session_name: str) -> None:
@@ -544,6 +547,42 @@ def session_kill(start_dir):
     click.echo(f"Killed session '{session_name}'.")
 
 
+@session.command("cleanup")
+@_share_mode_options
+def session_cleanup():
+    """Remove stale containers and push proxies for this session.
+
+    A container is stale when it has no processes beyond ``sleep infinity``
+    (i.e., no ``docker exec`` session or ``claude`` process is running).
+    Also removes push proxy socket directories whose proxy process is dead,
+    and restarts proxies for live containers that lost their proxy.
+    """
+    session_name = _get_session_name_for_cwd()
+    session_tag = session_name.removeprefix("pm-")
+    if not session_tag:
+        click.echo("Cannot determine session tag.", err=True)
+        raise SystemExit(1)
+
+    from pm_core.container import cleanup_stale_containers
+    from pm_core.push_proxy import cleanup_stale_proxy_dirs, restart_dead_proxies
+
+    n_containers = cleanup_stale_containers(session_name, session_tag)
+    n_proxies = cleanup_stale_proxy_dirs(session_tag)
+    n_restarted = restart_dead_proxies(session_name, session_tag)
+
+    if n_containers or n_proxies or n_restarted:
+        parts = []
+        if n_containers:
+            parts.append(f"{n_containers} stale container(s) removed")
+        if n_proxies:
+            parts.append(f"{n_proxies} dead proxy dir(s) cleaned")
+        if n_restarted:
+            parts.append(f"{n_restarted} proxy(ies) restarted")
+        click.echo(", ".join(parts) + ".")
+    else:
+        click.echo("No stale containers or proxies found.")
+
+
 @session.command("mobile")
 @click.option("--force/--no-force", default=None, help="Force mobile mode on/off")
 def session_mobile(force: bool | None):
@@ -597,6 +636,35 @@ def session_mobile(force: bool | None):
 
 
 # --- Internal pane/window commands ---
+
+@cli.command("_session-closed", hidden=True)
+@click.argument("session_name")
+def session_closed_cmd(session_name: str):
+    """Internal: handle tmux session-closed hook — clean up containers and proxies."""
+    # Grouped sessions (e.g. pm-tag~2) fire this hook too; only act on
+    # the base session being fully gone.
+    base = session_name.split("~")[0]
+    if not base.startswith("pm-"):
+        return
+    # If the base session still exists, this was just a grouped session closing
+    if tmux_mod.session_exists(base):
+        return
+
+    session_tag = base.removeprefix("pm-")
+    if not session_tag:
+        return
+
+    from pm_core.container import cleanup_session_containers
+    from pm_core.push_proxy import stop_session_proxies, cleanup_stale_proxy_dirs
+
+    n_containers = cleanup_session_containers(session_tag)
+    n_proxies = stop_session_proxies(session_tag)
+    n_dirs = cleanup_stale_proxy_dirs(session_tag)
+    if n_containers or n_proxies or n_dirs:
+        _log.info("session-closed cleanup for %s: %d container(s), "
+                  "%d proxy(ies), %d dir(s)",
+                  session_tag, n_containers, n_proxies, n_dirs)
+
 
 @cli.command("_pane-exited", hidden=True)
 @click.argument("session")

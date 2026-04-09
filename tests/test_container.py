@@ -20,6 +20,8 @@ from pm_core.container import (
     cleanup_qa_containers,
     cleanup_session_containers,
     cleanup_all_containers,
+    cleanup_stale_containers,
+    _container_is_idle,
     wrap_claude_cmd,
     container_is_running,
     _docker_available,
@@ -521,7 +523,9 @@ class TestBuildExecCmd:
     def test_includes_cleanup_by_default(self):
         cmd = build_exec_cmd("my-container", "claude 'hi'")
         assert "docker rm -f" in cmd
-        assert cmd.endswith(">/dev/null 2>&1")
+        # Cleanup is wrapped in an EXIT trap
+        assert "trap" in cmd
+        assert "EXIT" in cmd
 
     def test_cleanup_removes_proxy_socket(self):
         cmd = build_exec_cmd("my-container", "claude 'hi'",
@@ -541,14 +545,14 @@ class TestBuildExecCmd:
 
     def test_shell_safety(self):
         cmd = build_exec_cmd("name-with-special", "claude 'prompt with $vars'")
-        # Split only the exec portion (before the cleanup suffix)
-        exec_part = cmd.split(";")[0].strip()
-        parts = shlex.split(exec_part)
-        assert parts[0] == "docker"
-        assert parts[1] == "exec"
-        assert parts[2] == "-it"
-        assert parts[3] == "-u"
-        assert parts[4] == _CONTAINER_USER
+        # With EXIT trap the outer command is bash -c '...' wrapping
+        # the exec and cleanup.  Verify the wrapper is properly quoted.
+        parts = shlex.split(cmd)
+        assert parts[0] == "bash"
+        assert parts[1] == "-c"
+        inner = parts[2]
+        assert "docker exec -it -u" in inner
+        assert _CONTAINER_USER in inner
 
 
 class TestWrapClaudeCmd:
@@ -604,8 +608,12 @@ class TestWrapClaudeCmd:
 class TestRemoveContainer:
     @patch("pm_core.container._run_docker")
     def test_removes_container(self, mock_docker):
+        # After rm -f, remove_container polls with inspect until gone.
+        # Make inspect return non-zero (container gone) on first check.
+        mock_docker.return_value = MagicMock(returncode=1)
         remove_container("test-container")
-        mock_docker.assert_called_once_with(
+        rm_call = mock_docker.call_args_list[0]
+        assert rm_call == call(
             "rm", "-f", "test-container", check=False, timeout=30)
 
 
@@ -861,3 +869,116 @@ class TestCreateContainerPushProxy:
                         session_tag="repo-abc", pr_id="pr-1")
         call_kwargs = mock_exec.call_args[1]
         assert call_kwargs["proxy_socket_path"] is None
+
+class TestContainerIsIdle:
+    """Tests for _container_is_idle."""
+
+    @patch("pm_core.container._run_docker")
+    def test_only_sleep_is_idle(self, mock_docker):
+        mock_docker.return_value = MagicMock(
+            returncode=0,
+            stdout="COMMAND\nsleep\n",
+        )
+        assert _container_is_idle("pm-repo-abc-impl-pr-1") is True
+
+    @patch("pm_core.container._run_docker")
+    def test_sleep_and_bash_is_idle(self, mock_docker):
+        # Entry point is bash -c "...; exec sleep infinity"
+        mock_docker.return_value = MagicMock(
+            returncode=0,
+            stdout="COMMAND\nbash\nsleep\n",
+        )
+        assert _container_is_idle("pm-repo-abc-impl-pr-1") is True
+
+    @patch("pm_core.container._run_docker")
+    def test_claude_running_is_not_idle(self, mock_docker):
+        mock_docker.return_value = MagicMock(
+            returncode=0,
+            stdout="COMMAND\nsleep\nbash\nclaude\n",
+        )
+        assert _container_is_idle("pm-repo-abc-impl-pr-1") is False
+
+    @patch("pm_core.container._run_docker")
+    def test_any_extra_process_is_not_idle(self, mock_docker):
+        mock_docker.return_value = MagicMock(
+            returncode=0,
+            stdout="COMMAND\nsleep\npython3\n",
+        )
+        assert _container_is_idle("pm-repo-abc-impl-pr-1") is False
+
+    @patch("pm_core.container._run_docker")
+    def test_docker_failure_is_idle(self, mock_docker):
+        mock_docker.return_value = MagicMock(returncode=1, stdout="")
+        assert _container_is_idle("pm-repo-abc-impl-pr-1") is True
+
+    @patch("pm_core.container._run_docker")
+    def test_header_only_is_idle(self, mock_docker):
+        mock_docker.return_value = MagicMock(
+            returncode=0, stdout="COMMAND\n",
+        )
+        assert _container_is_idle("pm-repo-abc-impl-pr-1") is True
+
+
+class TestCleanupStaleContainers:
+    """Tests for cleanup_stale_containers using docker top."""
+
+    @patch("pm_core.container._run_docker")
+    def test_docker_failure_returns_zero(self, mock_docker):
+        mock_docker.return_value = MagicMock(returncode=1, stdout="")
+        assert cleanup_stale_containers("pm-repo-abc", "repo-abc") == 0
+
+    @patch("pm_core.container._run_docker")
+    def test_no_containers_returns_zero(self, mock_docker):
+        mock_docker.return_value = MagicMock(returncode=0, stdout="")
+        assert cleanup_stale_containers("pm-repo-abc", "repo-abc") == 0
+
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._container_is_idle", return_value=True)
+    @patch("pm_core.container._run_docker")
+    def test_removes_idle_container(self, mock_docker, mock_idle, mock_rm):
+        mock_docker.return_value = MagicMock(
+            returncode=0,
+            stdout="pm-repo-abc-impl-pr-1\n",
+        )
+        count = cleanup_stale_containers("pm-repo-abc", "repo-abc")
+        assert count == 1
+        mock_rm.assert_called_once_with("pm-repo-abc-impl-pr-1")
+
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._container_is_idle", return_value=False)
+    @patch("pm_core.container._run_docker")
+    def test_keeps_active_container(self, mock_docker, mock_idle, mock_rm):
+        mock_docker.return_value = MagicMock(
+            returncode=0,
+            stdout="pm-repo-abc-impl-pr-1\n",
+        )
+        count = cleanup_stale_containers("pm-repo-abc", "repo-abc")
+        assert count == 0
+        mock_rm.assert_not_called()
+
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._container_is_idle")
+    @patch("pm_core.container._run_docker")
+    def test_mixed_idle_and_active(self, mock_docker, mock_idle, mock_rm):
+        mock_docker.return_value = MagicMock(
+            returncode=0,
+            stdout="pm-repo-abc-impl-pr-1\npm-repo-abc-review-pr-2\n",
+        )
+        # First container idle, second active
+        mock_idle.side_effect = [True, False]
+        count = cleanup_stale_containers("pm-repo-abc", "repo-abc")
+        assert count == 1
+        mock_rm.assert_called_once_with("pm-repo-abc-impl-pr-1")
+
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._container_is_idle", return_value=True)
+    @patch("pm_core.container._run_docker")
+    def test_handles_any_label_format(self, mock_docker, mock_idle, mock_rm):
+        """docker top approach works for any container label — no name parsing."""
+        mock_docker.return_value = MagicMock(
+            returncode=0,
+            stdout="pm-repo-abc-unknown-label\n",
+        )
+        count = cleanup_stale_containers("pm-repo-abc", "repo-abc")
+        assert count == 1
+        mock_rm.assert_called_once_with("pm-repo-abc-unknown-label")

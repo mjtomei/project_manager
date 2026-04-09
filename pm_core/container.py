@@ -899,6 +899,71 @@ def cleanup_session_containers(session_tag: str) -> int:
     return count
 
 
+def _container_is_idle(name: str) -> bool:
+    """Return True if the container has no processes beyond ``sleep infinity``.
+
+    Uses ``docker top`` to list processes.  A container is idle when only
+    the ``sleep`` entry point is running — no ``docker exec`` session and
+    no leftover ``claude`` process.
+    """
+    result = _run_docker("top", name, "-o", "comm", check=False, timeout=10)
+    if result.returncode != 0:
+        # Container not running or docker unavailable — treat as idle
+        # so it gets cleaned up.
+        return True
+
+    # ``docker top -o comm`` output: header line, then one line per process.
+    # We check if any process beyond ``sleep`` (and ``bash`` from the
+    # entry point wrapper) is present.  If only sleep/bash are running,
+    # there's no exec session attached.
+    lines = result.stdout.strip().splitlines()
+    if len(lines) <= 1:
+        # Only the header — shouldn't happen for a running container
+        return True
+
+    procs = {line.strip() for line in lines[1:]}
+    # The entry point is ``bash -c "...; exec sleep infinity"`` so we
+    # may see both ``bash`` and ``sleep``.  Any other process means an
+    # exec session is active.
+    idle_procs = {"sleep", "bash"}
+    return procs.issubset(idle_procs)
+
+
+def cleanup_stale_containers(session_name: str, session_tag: str) -> int:
+    """Remove idle containers with no active exec session.
+
+    For each container matching ``pm-{session_tag}-*``, checks if the
+    container has any processes running beyond the ``sleep infinity``
+    entry point using ``docker top``.  Containers with only ``sleep``
+    are idle (no ``docker exec`` session, no ``claude`` process) and
+    are removed along with their push proxies.
+
+    Returns the number of containers removed.
+    """
+    prefix = f"{CONTAINER_PREFIX}{session_tag}-"
+    result = _run_docker(
+        "ps", "-a", "--filter", f"name={prefix}",
+        "--format", "{{.Names}}",
+        check=False, timeout=30,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return 0
+
+    count = 0
+    for line in result.stdout.strip().splitlines():
+        cname = line.strip()
+        if not cname:
+            continue
+        if _container_is_idle(cname):
+            remove_container(cname)
+            count += 1
+
+    if count:
+        _log.info("Cleaned up %d stale container(s) for session %s",
+                  count, session_tag)
+    return count
+
+
 def cleanup_all_containers() -> int:
     """Remove all pm containers. Returns count removed."""
     result = _run_docker(
