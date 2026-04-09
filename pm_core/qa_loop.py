@@ -2584,10 +2584,12 @@ def run_qa_sync(
     # scenarios — scenario launch blocks until all concretizers finish, so
     # the status pane must be up first so users can see progress.
     queued_indices = {s.index for s in queued_scenarios}
+    _mem_waiting_indices = queued_indices if _mem_all_blocked else None
     _write_status_file(status_path, state.pr_id, state.scenarios,
                        state.scenario_verdicts,
                        scenario_0=state.scenario_0,
                        queued_scenarios=queued_indices,
+                       memory_waiting_scenarios=_mem_waiting_indices,
                        error=state._error)
 
     # Add status pane to the main QA window (split planner pane horizontally)

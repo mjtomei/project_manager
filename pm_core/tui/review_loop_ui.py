@@ -710,16 +710,30 @@ def _poll_impl_idle(app) -> None:
                                          pane_id=tracker.get_pane_id(pr_id))
                 newly_idle.append((pr_id, pr))
 
-        # Detect newly-idle in_review PRs for standalone review stop-on-idle
-        # (review loops are handled in run_review_loop_sync)
-        if status == "in_review" and tracker.became_idle(pr_id):
-            from pm_core.pane_idle import content_has_interactive_prompt
-            content = tracker.get_content(pr_id)
-            if content_has_interactive_prompt(content):
-                tracker.mark_active(pr_id)
-            else:
-                _try_stop_idle_container(pr_id, "review",
-                                         pane_id=tracker.get_pane_id(pr_id))
+        # Detect newly-idle in_review PRs for standalone review stop-on-idle.
+        # (Review loops are handled in run_review_loop_sync.)
+        # The review pane lives in window "review-{display_id}", not the
+        # impl window, so we track it under a separate key — same pattern
+        # as merge windows above.
+        if status == "in_review":
+            review_key = f"review:{pr_id}"
+            review_window = f"review-{window_name}"
+            active_pr_ids.add(review_key)
+            if not tracker.is_tracked(review_key) or tracker.is_gone(review_key):
+                review_pane = _find_impl_pane(session, review_window)
+                if review_pane:
+                    tracker.register(review_key, review_pane)
+            if tracker.is_tracked(review_key):
+                tracker.poll(review_key)
+                if tracker.became_idle(review_key):
+                    from pm_core.pane_idle import content_has_interactive_prompt
+                    content = tracker.get_content(review_key)
+                    if content_has_interactive_prompt(content):
+                        tracker.mark_active(review_key)
+                    else:
+                        _try_stop_idle_container(
+                            pr_id, "review",
+                            pane_id=tracker.get_pane_id(review_key))
 
     # --- Second pass: merge resolution windows ---
     # Discover merge windows for ALL in_review PRs, not just
