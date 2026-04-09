@@ -150,11 +150,14 @@ def load_registry(session: str) -> dict:
     return _prepare_registry_data(raw, session)
 
 
-def save_registry(session: str, data: dict) -> None:
-    """Save the pane registry for a session.
+def _save_registry(session: str, data: dict) -> None:
+    """Save the pane registry for a session (internal).
 
     Uses atomic write (temp file + fsync + rename) so concurrent readers
     never see a truncated or partially-written file.
+
+    This is private — all mutations should go through
+    ``locked_read_modify_write`` to prevent race conditions.
     """
     path = registry_path(session)
     path.parent.mkdir(parents=True, exist_ok=True)

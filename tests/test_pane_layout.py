@@ -18,13 +18,13 @@ from pm_core.pane_layout import (
     get_window_data,
     _iter_all_panes,
     load_registry,
-    save_registry,
     register_pane,
     unregister_pane,
     _reconcile_registry,
     MOBILE_WIDTH_THRESHOLD,
     DEFAULT_MIN_PANE_WIDTH,
 )
+from pm_core.pane_registry import _save_registry
 
 
 class TestBaseSessionName:
@@ -432,7 +432,7 @@ class TestMultiWindowRegistry:
 
     def test_register_pane_different_windows(self, mock_registry):
         """Registering panes in different windows creates separate entries."""
-        save_registry("pm-test", {
+        _save_registry("pm-test", {
             "session": "pm-test", "windows": {}, "generation": "1",
         })
 
@@ -448,7 +448,7 @@ class TestMultiWindowRegistry:
 
     def test_unregister_pane_finds_across_windows(self, mock_registry):
         """Unregister searches all windows for the pane."""
-        save_registry("pm-test", {
+        _save_registry("pm-test", {
             "session": "pm-test",
             "windows": {
                 "@30": {"panes": [{"id": "%1", "role": "tui", "order": 0, "cmd": "tui"}],
@@ -469,7 +469,7 @@ class TestMultiWindowRegistry:
     @patch("pm_core.tmux.get_pane_indices")
     def test_reconcile_one_window_doesnt_affect_other(self, mock_panes, mock_registry):
         """Reconciling window @30 doesn't touch window @38."""
-        save_registry("pm-test", {
+        _save_registry("pm-test", {
             "session": "pm-test",
             "windows": {
                 "@30": {"panes": [
@@ -498,7 +498,7 @@ class TestMultiWindowRegistry:
     @patch("pm_core.tmux.get_pane_indices")
     def test_empty_window_removed_after_reconcile(self, mock_panes, mock_registry):
         """Window entry is removed when all its panes die."""
-        save_registry("pm-test", {
+        _save_registry("pm-test", {
             "session": "pm-test",
             "windows": {
                 "@30": {"panes": [
@@ -525,7 +525,7 @@ class TestMultiWindowRegistry:
 
     def test_per_window_user_modified_isolation(self, mock_registry):
         """user_modified is per-window, not global."""
-        save_registry("pm-test", {
+        _save_registry("pm-test", {
             "session": "pm-test",
             "windows": {
                 "@30": {"panes": [{"id": "%1", "role": "tui", "order": 0, "cmd": "tui"}],
@@ -588,7 +588,7 @@ class TestHealRegistry:
     @patch("pm_core.tmux.get_pane_indices")
     def test_dead_panes_removed(self, mock_panes, mock_registry):
         """Dead panes are removed during reconciliation."""
-        save_registry("pm-test", {
+        _save_registry("pm-test", {
             "session": "pm-test",
             "windows": {
                 "@30": {"panes": [
@@ -612,7 +612,7 @@ class TestHealRegistry:
     @patch("pm_core.tmux.get_pane_indices")
     def test_dead_window_cleaned_up(self, mock_panes, mock_registry):
         """Window with all dead panes is removed (if tmux returns other panes)."""
-        save_registry("pm-test", {
+        _save_registry("pm-test", {
             "session": "pm-test",
             "windows": {
                 "@30": {"panes": [{"id": "%1", "role": "tui", "order": 0, "cmd": "tui"}],
@@ -644,7 +644,7 @@ class TestHealRegistry:
             },
             "generation": "1",
         }
-        save_registry("pm-test", original)
+        _save_registry("pm-test", original)
 
         # Both panes alive
         mock_panes.return_value = [("%1", 0), ("%2", 1)]
