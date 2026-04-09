@@ -82,10 +82,15 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
     Args:
         is_manual: True if triggered by user (r key), False for periodic background sync
     """
+    from pm_core.tui.widgets import StatusBar
+
     if not app._root:
         return
     try:
-        app._update_status_bar("pulling")
+        status_bar = app.query_one("#status-bar", StatusBar)
+        project = app._data.get("project", {})
+        prs = app._data.get("prs") or []
+        status_bar.update_status(project.get("name", "???"), project.get("repo", "???"), "pulling", pr_count=len(prs))
 
         # Use shorter interval for manual refresh, longer for background
         min_interval = (
@@ -170,7 +175,7 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
             if is_manual:
                 app.log_message("Refreshed")
 
-        app._update_status_bar(sync_status)
+        status_bar.update_status(project.get("name", "???"), project.get("repo", "???"), sync_status, pr_count=len(prs))
 
         # Clear log message after 1 second for manual refresh
         if is_manual:

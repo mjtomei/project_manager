@@ -24,12 +24,10 @@ Settings (all via ``pm container set <key> <value>``):
 """
 
 import json
-import os
 import platform
 import re
 import subprocess
 import threading
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 
