@@ -265,15 +265,25 @@ def get_window_size(session: str, window: str = "0") -> tuple[int, int]:
 
 def apply_layout(session: str, window: str, layout_string: str) -> bool:
     """Apply a custom layout string via tmux select-layout. Returns True on success."""
+    target = f"{session}:{window}"
+    # Suppress after-resize-pane hook — select-layout internally resizes panes.
+    # The flag stays set through refresh_client so any deferred hook processing
+    # still sees it.
+    _run(_tmux_cmd("set", "-w", "-t", target, "@pm_no_resize_hook", "1"),
+         check=False)
     result = _run(
-        _tmux_cmd("select-layout", "-t", f"{session}:{window}", layout_string),
+        _tmux_cmd("select-layout", "-t", target, layout_string),
         text=True,
     )
     if result.returncode != 0:
+        _run(_tmux_cmd("set", "-wu", "-t", target, "@pm_no_resize_hook"),
+             check=False)
         _log.warning(
             "tmux select-layout failed: %s", result.stderr.strip())
         return False
     refresh_client(session, window)
+    _run(_tmux_cmd("set", "-wu", "-t", target, "@pm_no_resize_hook"),
+         check=False)
     return True
 
 
@@ -409,7 +419,11 @@ def refresh_client(session: str, window: str = "") -> None:
 
 def zoom_pane(pane_id: str) -> None:
     """Zoom (maximize) a pane within its window."""
+    _run(_tmux_cmd("set", "-w", "-t", pane_id, "@pm_no_resize_hook", "1"),
+         check=False)
     _run(_tmux_cmd("resize-pane", "-t", pane_id, "-Z"))
+    _run(_tmux_cmd("set", "-wu", "-t", pane_id, "@pm_no_resize_hook"),
+         check=False)
 
 
 def is_zoomed(session: str, window: str = "0") -> bool:
@@ -425,10 +439,16 @@ def is_zoomed(session: str, window: str = "0") -> bool:
 def unzoom_pane(session: str, window: str = "0") -> None:
     """Unzoom the window if it's currently zoomed."""
     if is_zoomed(session, window):
+        target = f"{session}:{window}"
+        # Suppress after-resize-pane hook for pm-internal zoom toggles
+        _run(_tmux_cmd("set", "-w", "-t", target, "@pm_no_resize_hook", "1"),
+             check=False)
         # Toggle zoom off by zooming the active pane again
         _run(
-            _tmux_cmd("resize-pane", "-t", f"{session}:{window}", "-Z"),
+            _tmux_cmd("resize-pane", "-t", target, "-Z"),
         )
+        _run(_tmux_cmd("set", "-wu", "-t", target, "@pm_no_resize_hook"),
+             check=False)
 
 
 def select_pane_smart(pane_id: str, session: str, window: str) -> None:

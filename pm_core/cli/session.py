@@ -100,6 +100,14 @@ def _register_tmux_bindings(session_name: str) -> None:
     subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gw", "window-resized",
              "run-shell 'pm _window-resized \"#{session_name}\" \"#{window_id}\"'"),
             check=False)
+    # Detect user-initiated pane resizes (e.g. dragging a border).
+    # Uses if-shell -F to check @pm_no_resize_hook synchronously — pm sets
+    # this option around its own zoom/unzoom calls so the hook is suppressed
+    # for internal resize-pane -Z operations.
+    subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gw", "after-resize-pane",
+             'if-shell -F "#{@pm_no_resize_hook}" "" '
+             "'run-shell \"pm _pane-resized \\\"#{session_name}\\\" \\\"#{window_id}\\\"\"'"),
+            check=False)
     # Clean up stale hook from earlier versions that used the wrong name
     subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gu", "after-resize-window"),
             check=False)
@@ -626,6 +634,29 @@ def pane_closed_cmd():
 def pane_opened_cmd(session: str, window: str, pane_id: str):
     """Internal: handle tmux after-split-window hook."""
     pane_layout.handle_pane_opened(session, window, pane_id)
+
+
+@cli.command("_pane-resized", hidden=True)
+@click.argument("session")
+@click.argument("window")
+def pane_resized_cmd(session: str, window: str):
+    """Internal: handle tmux after-resize-pane hook — mark user_modified."""
+    base = pane_registry.base_session_name(session)
+    data = pane_registry.load_registry(base)
+    wdata = pane_registry.get_window_data(data, window)
+    if wdata.get("user_modified"):
+        return  # already flagged
+    if len(wdata["panes"]) < 2:
+        return  # single pane, nothing to track
+
+    def _set_modified(raw):
+        d = pane_registry._prepare_registry_data(raw, base)
+        wd = pane_registry.get_window_data(d, window)
+        wd["user_modified"] = True
+        return d
+
+    pane_registry.locked_read_modify_write(
+        pane_registry.registry_path(base), _set_modified)
 
 
 @cli.command("_window-resized", hidden=True)
