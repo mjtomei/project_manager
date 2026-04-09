@@ -430,8 +430,8 @@ def _transition_pr_status(app, pr_id: str, from_status: str, to_status: str) -> 
         store.locked_update(app._root, apply)
         if transitioned:
             _log.info("Transitioned %s: %s → %s", pr_id, from_status, to_status)
-    except store.StoreLockTimeout as e:
-        _log.warning("_transition_pr_status: lock timeout for %s: %s", pr_id, e)
+    except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+        _log.warning("_transition_pr_status: %s for %s: %s", type(e).__name__, pr_id, e)
     except Exception:
         _log.exception("Failed to transition PR status for %s", pr_id)
 
@@ -465,7 +465,7 @@ def _record_qa_note(app, state: QALoopState) -> None:
             pr["notes"] = notes
 
         store.locked_update(app._root, apply)
-    except store.StoreLockTimeout as e:
-        _log.warning("_record_qa_note: lock timeout for %s: %s", state.pr_id, e)
+    except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+        _log.warning("_record_qa_note: %s for %s: %s", type(e).__name__, state.pr_id, e)
     except Exception:
         _log.exception("Failed to record QA note for %s", state.pr_id)
