@@ -23,6 +23,7 @@ from pm_core.container import (
     cleanup_all_containers,
     wrap_claude_cmd,
     container_is_running,
+    find_containers_by_keywords,
     _docker_available,
     _build_git_setup_script,
     _get_dockerfile_path,
@@ -950,3 +951,79 @@ class TestStopContainer:
         stop_container("pm-qa-s1", pane_ids=["%10", "%11", "%12"])
         assert mock_set_pane.call_count == 3
         mock_remove.assert_called_once_with("pm-qa-s1")
+
+
+class TestFindContainersByKeywords:
+    CONTAINER_NAMES = [
+        "pm-repo-abc-impl-pr-123",
+        "pm-repo-abc-review-pr-123",
+        "pm-repo-abc-qa-pr-123-loop1-s0",
+        "pm-repo-abc-qa-pr-123-loop1-s1",
+        "pm-other-impl-pr-456",
+    ]
+    MOCK_STDOUT = "\n".join(CONTAINER_NAMES)
+
+    def _mock_result(self, stdout=None, returncode=0):
+        if stdout is None:
+            stdout = self.MOCK_STDOUT
+        return MagicMock(stdout=stdout, returncode=returncode)
+
+    @patch("pm_core.container._run_docker")
+    def test_single_type_match(self, mock_docker):
+        mock_docker.return_value = self._mock_result()
+        result = find_containers_by_keywords("pr-123", "impl")
+        assert result == ["pm-repo-abc-impl-pr-123"]
+
+    @patch("pm_core.container._run_docker")
+    def test_multi_match_by_type(self, mock_docker):
+        mock_docker.return_value = self._mock_result()
+        result = find_containers_by_keywords("pr-123", "qa")
+        assert result == [
+            "pm-repo-abc-qa-pr-123-loop1-s0",
+            "pm-repo-abc-qa-pr-123-loop1-s1",
+        ]
+
+    @patch("pm_core.container._run_docker")
+    def test_broad_match_single_keyword(self, mock_docker):
+        mock_docker.return_value = self._mock_result()
+        result = find_containers_by_keywords("pr-123")
+        assert result == [
+            "pm-repo-abc-impl-pr-123",
+            "pm-repo-abc-review-pr-123",
+            "pm-repo-abc-qa-pr-123-loop1-s0",
+            "pm-repo-abc-qa-pr-123-loop1-s1",
+        ]
+
+    @patch("pm_core.container._run_docker")
+    def test_no_match(self, mock_docker):
+        mock_docker.return_value = self._mock_result()
+        result = find_containers_by_keywords("pr-999")
+        assert result == []
+
+    @patch("pm_core.container._run_docker")
+    def test_docker_nonzero_exit(self, mock_docker):
+        mock_docker.return_value = self._mock_result(stdout="", returncode=1)
+        result = find_containers_by_keywords("pr-123")
+        assert result == []
+
+    @patch("pm_core.container._run_docker")
+    def test_docker_exception(self, mock_docker):
+        import subprocess
+        mock_docker.side_effect = subprocess.TimeoutExpired(cmd="docker", timeout=10)
+        result = find_containers_by_keywords("pr-123")
+        assert result == []
+
+    @patch("pm_core.container._run_docker")
+    def test_all_keywords_must_match(self, mock_docker):
+        mock_docker.return_value = self._mock_result()
+        result = find_containers_by_keywords("impl", "pr-456")
+        assert result == ["pm-other-impl-pr-456"]
+
+        result = find_containers_by_keywords("impl", "qa")
+        assert result == []
+
+    @patch("pm_core.container._run_docker")
+    def test_zero_keywords_returns_all(self, mock_docker):
+        mock_docker.return_value = self._mock_result()
+        result = find_containers_by_keywords()
+        assert result == self.CONTAINER_NAMES
