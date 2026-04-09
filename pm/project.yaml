@@ -8459,7 +8459,8 @@ prs:
   title: 'Window visibility management: link/unlink sub-windows with pin support'
   branch: pm/pr-343be0c-window-visibility-management-link-unlink-sub-windo
   status: pending
-  depends_on: []
+  depends_on:
+  - pr-ff68ef5
   description: 'Reduce tmux window clutter by only linking windows that are actively
     needed. Uses tmux link-window/unlink-window to control which windows appear in
     the session''s window list.
@@ -8526,8 +8527,16 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-09T11:30:47.906403+00:00'
-  updated_at: '2026-04-09T11:30:47.906403+00:00'
+  updated_at: '2026-04-09T11:31:39.606268+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-aed25d1
+    text: The popup picker from pr-ff68ef5 should be converted to a persistent pane
+      that is always visible in the main TUI window — not a popup that appears and
+      disappears. This gives a permanent navigation sidebar showing all windows (linked
+      and unlinked) alongside the tech tree. Selecting a window from the picker links
+      it and switches to it.
+    created_at: '2026-04-09T11:31:39Z'
+    last_edited: '2026-04-09T11:31:39Z'
