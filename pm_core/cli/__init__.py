@@ -54,6 +54,97 @@ def cli(ctx, project_dir: str | None):
             ctx.invoke(help_cmd)
 
 
+def _detect_local_llm() -> dict:
+    """Detect local LLM infrastructure (Ollama).
+
+    Returns dict with keys:
+      - installed: bool (ollama binary found)
+      - running: bool (server responding)
+      - models: list of model name strings
+    """
+    import shutil
+    result = {"installed": False, "running": False, "models": []}
+
+    if not shutil.which("ollama"):
+        return result
+    result["installed"] = True
+
+    import json
+    import urllib.request
+    try:
+        req = urllib.request.Request("http://localhost:11434/api/tags")
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            body = json.loads(resp.read())
+            result["running"] = True
+            for m in body.get("models", []):
+                name = m.get("name", "")
+                if name:
+                    result["models"].append(name)
+    except Exception:
+        pass
+
+    return result
+
+
+def _offer_local_model_setup() -> None:
+    """Detect local LLM and offer to configure it as a provider during init."""
+    detection = _detect_local_llm()
+
+    if not detection["installed"]:
+        return  # Ollama not installed, skip silently
+
+    if not detection["running"]:
+        click.echo()
+        click.echo("Local LLM: Ollama is installed but not running.")
+        click.echo("  Start it with: ollama serve")
+        click.echo("  Then run: pm provider add ollama --api-base http://localhost:11434 --model <name>")
+        return
+
+    if not detection["models"]:
+        click.echo()
+        click.echo("Local LLM: Ollama is running but no models are pulled.")
+        from pm_core.providers import format_model_recommendations
+        click.echo(format_model_recommendations())
+        click.echo()
+        click.echo("  Pull a model with: ollama pull <model-tag>")
+        click.echo("  Then run: pm provider add ollama --api-base http://localhost:11434 --model <name>")
+        return
+
+    # Ollama is running with models available
+    click.echo()
+    click.echo(f"Local LLM: Ollama detected with {len(detection['models'])} model(s):")
+    for m in detection["models"][:10]:
+        click.echo(f"    {m}")
+
+    # Check if provider is already configured
+    from pm_core.providers import load_providers
+    config = load_providers()
+    existing = config.get("providers", {})
+    if any(e.get("api_base", "").startswith("http://localhost:11434") for e in existing.values()):
+        click.echo("  (provider already configured)")
+        return
+
+    if click.confirm("  Configure Ollama as a local LLM provider?", default=False):
+        # Pick the first model by default, let user override
+        default_model = detection["models"][0]
+        if len(detection["models"]) > 1:
+            model_name = click.prompt("  Model to use", default=default_model)
+        else:
+            model_name = default_model
+
+        from pm_core.providers import save_providers
+        if "providers" not in config:
+            config["providers"] = {}
+        config["providers"]["ollama"] = {
+            "type": "local",
+            "api_base": "http://localhost:11434",
+            "model": model_name,
+        }
+        save_providers(config)
+        click.echo(f"  Added provider 'ollama' (model={model_name})")
+        click.echo("  Use with: pm model set <type> provider:ollama")
+
+
 @cli.command()
 @click.argument("repo_url", metavar="TARGET_REPO_URL", default=None, required=False)
 @click.option("--name", default=None, help="Project name (defaults to repo name)")
@@ -180,6 +271,11 @@ def init(repo_url: str | None, name: str, base_branch: str, directory: str,
     if backend == "github":
         from pm_core.cli.plan import _import_github_prs
         _import_github_prs(root, data)
+
+    # Detect and offer local LLM setup
+    import sys
+    if sys.stdin.isatty():
+        _offer_local_model_setup()
 
     if no_import:
         click.echo("Run 'pm plan import' to bootstrap a PR graph from this repo.")

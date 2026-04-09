@@ -2,10 +2,13 @@
 
 Supports multiple provider types:
   - claude: Default Anthropic Claude API (no extra config needed)
-  - local: Local model via Anthropic-compatible API (Ollama 0.14+,
-    LM Studio 0.4.1+, llama.cpp).  Recommended for local models.
+  - local: Local model via Ollama, LM Studio, llama.cpp, or any server
+    with an OpenAI-compatible or Anthropic-compatible API.
+    Recommended for all local models.  Uses ANTHROPIC_BASE_URL.
+    Tool-use check tries Anthropic API first, falls back to OpenAI API.
   - openai: OpenAI-compatible API endpoint (vLLM, etc.).
-    Use only if your server doesn't speak the Anthropic Messages API.
+    NOTE: Claude Code currently routes all requests through the Anthropic
+    API, so OPENAI_BASE_URL may not work as expected.  Prefer type=local.
 
 Configuration is stored in ~/.pm/providers.yaml:
 
@@ -51,12 +54,13 @@ class ProviderConfig:
 
     Provider types:
       - claude: Default Anthropic Claude API (no extra config needed)
-      - local: Local model via Anthropic-compatible API (Ollama 0.14+,
-        LM Studio 0.4.1+, llama.cpp).  Uses ANTHROPIC_BASE_URL.
-        This is the recommended approach for local models.
-      - openai: OpenAI-compatible API endpoint (vLLM, older Ollama, etc.).
-        Uses OPENAI_BASE_URL with --model openai:name prefix.  Use this
-        only if your server doesn't speak the Anthropic Messages API.
+      - local: Local model via Ollama, LM Studio, llama.cpp, or any
+        server.  Uses ANTHROPIC_BASE_URL.  Recommended for all local
+        models.  Tool-use check auto-detects API format.
+      - openai: OpenAI-compatible API endpoint (vLLM, etc.).
+        Uses OPENAI_BASE_URL with --model openai:name prefix.
+        NOTE: Claude Code may not route to OPENAI_BASE_URL correctly;
+        prefer type=local.
     """
     name: str
     type: str = "claude"  # "claude", "local", or "openai"
@@ -417,6 +421,10 @@ class ProviderTestResult:
     tool_use_detail: str = ""
     context_window: int | None = None  # Detected context length, or None
     context_window_detail: str = ""
+    anthropic_api: bool | None = None  # None = not tested
+    anthropic_api_detail: str = ""
+    inference_ok: bool | None = None  # None = not tested
+    inference_detail: str = ""
 
     @property
     def ok(self) -> bool:
@@ -447,6 +455,16 @@ class ProviderTestResult:
             )
             msgs.append(warning)
         return msgs
+
+    def capabilities_summary(self) -> dict[str, Any]:
+        """Return a structured summary of tested capabilities."""
+        return {
+            "reachable": self.reachable,
+            "anthropic_api": self.anthropic_api,
+            "tool_use": self.tool_use,
+            "context_window": self.context_window,
+            "inference": self.inference_ok,
+        }
 
 
 def check_provider(provider: ProviderConfig, check_tools: bool = True) -> ProviderTestResult:
@@ -482,11 +500,14 @@ def check_provider(provider: ProviderConfig, check_tools: bool = True) -> Provid
 
     # 1. Connectivity check
     # For local (Anthropic-compatible): try /api/tags (Ollama) then /models
-    # For openai: try /models
+    # For openai: try /models, then /v1/models (for base URLs without /v1)
     check_urls = []
+    base = api_base.rstrip("/")
     if provider.type == "local":
-        check_urls.append(api_base.rstrip("/") + "/api/tags")
-    check_urls.append(api_base.rstrip("/") + "/models")
+        check_urls.append(base + "/api/tags")
+    check_urls.append(base + "/models")
+    if not base.endswith("/v1"):
+        check_urls.append(base + "/v1/models")
 
     for check_url in check_urls:
         try:
@@ -497,7 +518,7 @@ def check_provider(provider: ProviderConfig, check_tools: bool = True) -> Provid
                 result.reachable = True
                 result.reachable_detail = f"{check_url} (HTTP {resp.status})"
                 break
-        except (urllib.error.URLError, Exception):
+        except Exception:
             continue
 
     if not result.reachable:
@@ -508,12 +529,31 @@ def check_provider(provider: ProviderConfig, check_tools: bool = True) -> Provid
     if provider.model:
         _check_context_window(api_base, api_key, provider, result)
 
-    # 3. Tool-use check
+    # 3. For openai providers, probe for Anthropic Messages API support
+    if provider.type == "openai" and provider.model:
+        _check_anthropic_api_support(api_base, api_key, provider.model, result)
+
+    # 4. Tool-use check (also validates inference)
     if not check_tools or not provider.model:
         return result
 
     if provider.type == "local":
         result = _check_tools_anthropic(api_base, api_key, provider.model, result)
+        # If Anthropic API returned 404, the server doesn't support /v1/messages.
+        # Fall back to OpenAI chat completions (common for Ollama without a proxy).
+        if (result.tool_use is False
+                and "HTTP 404" in (result.tool_use_detail or "")):
+            result.tool_use = None
+            result.tool_use_detail = ""
+            result.inference_ok = None
+            result.inference_detail = ""
+            # Local providers typically use base URL without /v1 suffix,
+            # but the OpenAI chat completions endpoint needs /v1.
+            openai_base = api_base.rstrip("/")
+            if not openai_base.endswith("/v1"):
+                openai_base += "/v1"
+            result = _check_tools_openai(
+                openai_base, api_key, provider.model, result)
     elif provider.type == "openai":
         result = _check_tools_openai(api_base, api_key, provider.model, result)
 
@@ -526,7 +566,8 @@ def _check_context_window(
 ) -> None:
     """Try to detect the model's context window size.
 
-    For Ollama: POST /api/show with model name to get model_info.
+    For Ollama (local): POST /api/show with model name to get model_info.
+    For OpenAI-compatible (openai): parse max_model_len from /models response.
     Falls back silently if the endpoint doesn't support this.
     """
     import json
@@ -574,9 +615,98 @@ def _check_context_window(
                 else:
                     result.context_window_detail = "OK"
 
-        except (urllib.error.URLError, urllib.error.HTTPError,
-                json.JSONDecodeError, ValueError, Exception):
+        except Exception:
             pass  # Best-effort — don't fail if we can't detect
+
+    elif provider.type == "openai":
+        # Try to read max_model_len from /models response (vLLM, SGLang, etc.)
+        models_url = api_base.rstrip("/") + "/models"
+        try:
+            req = urllib.request.Request(models_url)
+            if api_key:
+                req.add_header("Authorization", f"Bearer {api_key}")
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                body = json.loads(resp.read())
+
+            for model_entry in body.get("data", []):
+                if model_entry.get("id") == provider.model:
+                    max_len = model_entry.get("max_model_len")
+                    if max_len is not None:
+                        result.context_window = int(max_len)
+                    break
+
+            if result.context_window is not None:
+                if result.context_window < MIN_CONTEXT_TOKENS:
+                    result.context_window_detail = (
+                        f"Model context too small for Claude Code "
+                        f"(need {MIN_CONTEXT_TOKENS:,}+)"
+                    )
+                else:
+                    result.context_window_detail = "OK"
+
+        except Exception:
+            pass  # Best-effort — don't fail if we can't detect
+
+
+def _check_anthropic_api_support(
+    api_base: str, api_key: str, model: str,
+    result: ProviderTestResult,
+) -> None:
+    """Probe whether an openai-type provider also supports the Anthropic Messages API.
+
+    If /v1/messages responds (even with an error other than 404), the server
+    likely supports the Anthropic API natively, and the user should consider
+    switching to type=local for better Claude Code compatibility.
+    """
+    import json
+    import urllib.request
+    import urllib.error
+
+    # Strip trailing /v1 since openai api_base typically includes it already
+    base = api_base.rstrip("/")
+    if base.endswith("/v1"):
+        base = base[:-3]
+    messages_url = base + "/v1/messages"
+    # Send a minimal request to see if the endpoint exists
+    payload = json.dumps({
+        "model": model,
+        "max_tokens": 1,
+        "messages": [{"role": "user", "content": "hi"}],
+    }).encode()
+
+    try:
+        req = urllib.request.Request(
+            messages_url, data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": api_key or "no-key",
+                "anthropic-version": "2023-06-01",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            # Got a successful response — Anthropic API is supported
+            result.anthropic_api = True
+            result.anthropic_api_detail = (
+                "Server supports Anthropic Messages API (/v1/messages). "
+                "Consider using type=local instead of type=openai for "
+                "better Claude Code compatibility."
+            )
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            result.anthropic_api = False
+            result.anthropic_api_detail = "Anthropic Messages API not available"
+        else:
+            # Non-404 error means the endpoint exists but rejected our request
+            result.anthropic_api = True
+            result.anthropic_api_detail = (
+                "Server supports Anthropic Messages API (/v1/messages). "
+                "Consider using type=local instead of type=openai for "
+                "better Claude Code compatibility."
+            )
+    except Exception:
+        result.anthropic_api = False
+        result.anthropic_api_detail = "Anthropic Messages API not available"
 
 
 def _check_tools_anthropic(
@@ -587,10 +717,13 @@ def _check_tools_anthropic(
     import urllib.request
     import urllib.error
 
-    messages_url = api_base.rstrip("/") + "/v1/messages"
+    base = api_base.rstrip("/")
+    if base.endswith("/v1"):
+        base = base[:-3]
+    messages_url = base + "/v1/messages"
     payload = json.dumps({
         "model": model,
-        "max_tokens": 100,
+        "max_tokens": 1024,
         "messages": [
             {"role": "user", "content": "What is 2+2? Use the calculator tool."}
         ],
@@ -630,6 +763,10 @@ def _check_tools_anthropic(
         )
         stop_reason = body.get("stop_reason", "")
 
+        # Model produced a response — inference works regardless of tool use
+        result.inference_ok = True
+        result.inference_detail = "model produced output"
+
         if has_tool_use or stop_reason == "tool_use":
             result.tool_use = True
             result.tool_use_detail = "model produced a tool call"
@@ -644,6 +781,8 @@ def _check_tools_anthropic(
 
     except urllib.error.HTTPError as e:
         result.tool_use = False
+        result.inference_ok = False
+        result.inference_detail = f"HTTP {e.code}"
         error_body = ""
         try:
             error_body = e.read().decode()[:200]
@@ -658,9 +797,13 @@ def _check_tools_anthropic(
     except urllib.error.URLError as e:
         result.tool_use = False
         result.tool_use_detail = str(e.reason)
+        result.inference_ok = False
+        result.inference_detail = str(e.reason)
     except Exception as e:
         result.tool_use = False
         result.tool_use_detail = str(e)
+        result.inference_ok = False
+        result.inference_detail = str(e)
 
     return result
 
@@ -676,7 +819,7 @@ def _check_tools_openai(
     chat_url = api_base.rstrip("/") + "/chat/completions"
     payload = json.dumps({
         "model": model,
-        "max_tokens": 100,
+        "max_tokens": 1024,
         "messages": [
             {"role": "user", "content": "What is 2+2? Use the calculator tool."}
         ],
@@ -715,11 +858,17 @@ def _check_tools_openai(
         if not choices:
             result.tool_use = False
             result.tool_use_detail = "empty response from model"
+            result.inference_ok = False
+            result.inference_detail = "model returned empty choices"
             return result
 
         message = choices[0].get("message", {})
         tool_calls = message.get("tool_calls", [])
         finish_reason = choices[0].get("finish_reason", "")
+
+        # Model produced a response — inference works regardless of tool use
+        result.inference_ok = True
+        result.inference_detail = "model produced output"
 
         if tool_calls or finish_reason == "tool_calls":
             result.tool_use = True
@@ -731,6 +880,7 @@ def _check_tools_openai(
 
     except urllib.error.HTTPError as e:
         result.tool_use = False
+        result.inference_ok = False
         error_body = ""
         try:
             error_body = e.read().decode()[:200]
@@ -742,11 +892,16 @@ def _check_tools_openai(
         if error_body:
             detail += f" ({error_body})"
         result.tool_use_detail = detail
+        result.inference_detail = detail
     except urllib.error.URLError as e:
         result.tool_use = False
         result.tool_use_detail = str(e.reason)
+        result.inference_ok = False
+        result.inference_detail = str(e.reason)
     except Exception as e:
         result.tool_use = False
         result.tool_use_detail = str(e)
+        result.inference_ok = False
+        result.inference_detail = str(e)
 
     return result
