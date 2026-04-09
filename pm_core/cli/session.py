@@ -316,10 +316,10 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
     # Clear stale pane registry and bump generation to invalidate old EXIT traps
     import time as _time
     generation = str(int(_time.time()))
-    pane_registry.save_registry(session_name, {
-        "session": session_name, "windows": {},
-        "generation": generation,
-    })
+    pane_registry.locked_read_modify_write(
+        pane_registry.registry_path(session_name),
+        lambda _old: {"session": session_name, "windows": {}, "generation": generation},
+    )
 
     # Always create session with TUI in the left pane
     _log.info("creating tmux session: %s cwd=%s socket=%s", session_name, cwd, socket_path)
@@ -569,10 +569,15 @@ def session_mobile(force: bool | None):
             else:
                 # Entering mobile: unzoom current window before rebalance
                 tmux_mod.unzoom_pane(session_name, window)
-            data = pane_registry.load_registry(session_name)
-            for wdata in data.get("windows", {}).values():
-                wdata["user_modified"] = False
-            pane_registry.save_registry(session_name, data)
+
+            def _reset_all_user_modified(raw):
+                data = pane_registry._prepare_registry_data(raw, session_name)
+                for wdata in data.get("windows", {}).values():
+                    wdata["user_modified"] = False
+                return data
+
+            pane_registry.locked_read_modify_write(
+                pane_registry.registry_path(session_name), _reset_all_user_modified)
             pane_layout.rebalance(session_name, window)
             if force:
                 # Entering mobile: zoom active pane on every window
@@ -712,14 +717,21 @@ def rebalance_cmd():
     session = tmux_mod.get_session_name()
     window = tmux_mod.get_window_id(session)
 
+    # Check for panes (read-only) then reset user_modified under lock
     data = pane_registry.load_registry(session)
     wdata = pane_registry.get_window_data(data, window)
     if not wdata["panes"]:
         click.echo("No panes registered for this session.", err=True)
         raise SystemExit(1)
 
-    wdata["user_modified"] = False
-    pane_registry.save_registry(session, data)
+    def _reset_user_modified(raw):
+        d = pane_registry._prepare_registry_data(raw, session)
+        wd = pane_registry.get_window_data(d, window)
+        wd["user_modified"] = False
+        return d
+
+    pane_registry.locked_read_modify_write(
+        pane_registry.registry_path(session), _reset_user_modified)
 
     # Unzoom before rebalance so layout applies to all panes
     tmux_mod.unzoom_pane(session, window)

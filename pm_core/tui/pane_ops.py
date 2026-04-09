@@ -41,56 +41,71 @@ def heal_registry(session: str | None) -> None:
         if not window:
             return
 
-        data = pane_registry.load_registry(session)
-        changed = False
-
-        # Heal every window: remove dead panes, drop empty windows
-        for win_id in list(data.get("windows", {})):
-            wdata = data["windows"][win_id]
+        # Query all tmux state OUTSIDE the lock to avoid holding it
+        # during subprocess calls (per IR3).
+        reg_snapshot = pane_registry.load_registry(session)
+        window_live_ids: dict[str, set[str]] = {}
+        for win_id in list(reg_snapshot.get("windows", {})):
             live_panes = tmux_mod.get_pane_indices(session, win_id)
-            live_ids = {pid for pid, _ in live_panes}
+            window_live_ids[win_id] = {pid for pid, _ in live_panes}
 
-            # If no live panes returned for this window, it's gone
-            if not live_ids:
-                if wdata["panes"]:
-                    _log.info("heal_registry: window %s has no live panes, removing", win_id)
+        # Also query current window's live panes for TUI re-registration
+        if window not in window_live_ids:
+            live_panes = tmux_mod.get_pane_indices(session, window)
+            window_live_ids[window] = {pid for pid, _ in live_panes}
+
+        def _heal(raw):
+            data = pane_registry._prepare_registry_data(raw, session)
+            changed = False
+
+            # Heal every window: remove dead panes, drop empty windows
+            for win_id in list(data.get("windows", {})):
+                live_ids = window_live_ids.get(win_id, set())
+                wdata = data["windows"][win_id]
+
+                # If no live panes returned for this window, it's gone
+                if not live_ids:
+                    if wdata["panes"]:
+                        _log.info("heal_registry: window %s has no live panes, removing", win_id)
+                        del data["windows"][win_id]
+                        changed = True
+                    continue
+
+                before = len(wdata["panes"])
+                wdata["panes"] = [p for p in wdata["panes"] if p["id"] in live_ids]
+                removed = before - len(wdata["panes"])
+                if removed:
+                    _log.info("heal_registry: removed %d dead pane(s) from window %s", removed, win_id)
+                    changed = True
+
+                # Drop empty window entry
+                if not wdata["panes"]:
                     del data["windows"][win_id]
                     changed = True
-                continue
 
-            before = len(wdata["panes"])
-            wdata["panes"] = [p for p in wdata["panes"] if p["id"] in live_ids]
-            removed = before - len(wdata["panes"])
-            if removed:
-                _log.info("heal_registry: removed %d dead pane(s) from window %s", removed, win_id)
-                changed = True
+            # Ensure TUI pane is registered in the current window
+            cur_live_ids = window_live_ids.get(window, set())
+            if tui_pane_id in cur_live_ids:
+                wdata = pane_registry.get_window_data(data, window)
+                if not any(p["id"] == tui_pane_id for p in wdata["panes"]):
+                    wdata["panes"].insert(0, {
+                        "id": tui_pane_id,
+                        "role": "tui",
+                        "order": 0,
+                        "cmd": "tui",
+                    })
+                    _log.info("heal_registry: re-registered TUI pane %s in window %s",
+                              tui_pane_id, window)
+                    changed = True
 
-            # Drop empty window entry
-            if not wdata["panes"]:
-                del data["windows"][win_id]
-                changed = True
-
-        # Ensure TUI pane is registered in the current window
-        live_panes = tmux_mod.get_pane_indices(session, window)
-        live_ids = {pid for pid, _ in live_panes}
-        if tui_pane_id in live_ids:
-            wdata = pane_registry.get_window_data(data, window)
-            if not any(p["id"] == tui_pane_id for p in wdata["panes"]):
-                wdata["panes"].insert(0, {
-                    "id": tui_pane_id,
-                    "role": "tui",
-                    "order": 0,
-                    "cmd": "tui",
-                })
-                _log.info("heal_registry: re-registered TUI pane %s in window %s",
-                          tui_pane_id, window)
-                changed = True
-
-        if changed:
-            pane_registry.save_registry(session, data)
-            _log.info("heal_registry: saved corrected registry")
-        else:
+            if changed:
+                _log.info("heal_registry: saved corrected registry")
+                return data
             _log.info("heal_registry: registry OK")
+            return None  # no changes, skip write
+
+        pane_registry.locked_read_modify_write(
+            pane_registry.registry_path(session), _heal)
     except Exception:
         _log.exception("heal_registry failed")
 
@@ -157,10 +172,15 @@ def rebalance(app) -> None:
     if not info:
         return
     session, window = info
-    data = pane_registry.load_registry(session)
-    wdata = pane_registry.get_window_data(data, window)
-    wdata["user_modified"] = False
-    pane_registry.save_registry(session, data)
+
+    def _reset_user_modified(raw):
+        data = pane_registry._prepare_registry_data(raw, session)
+        wdata = pane_registry.get_window_data(data, window)
+        wdata["user_modified"] = False
+        return data
+
+    pane_registry.locked_read_modify_write(
+        pane_registry.registry_path(session), _reset_user_modified)
     pane_layout.rebalance(session, window)
     app.log_message("Layout rebalanced")
 

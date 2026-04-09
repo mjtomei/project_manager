@@ -1234,10 +1234,15 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
             from pm_core import pane_registry as _reg
             for pane_id, role, cmd in panes:
                 _reg.register_pane(pm_session, review_win_id, pane_id, role, cmd)
-            reg = _reg.load_registry(pm_session)
-            wdata = _reg.get_window_data(reg, review_win_id)
-            wdata["user_modified"] = False
-            _reg.save_registry(pm_session, reg)
+
+            def _reset_user_modified(raw):
+                data = _reg._prepare_registry_data(raw, pm_session)
+                wd = _reg.get_window_data(data, review_win_id)
+                wd["user_modified"] = False
+                return data
+
+            _reg.locked_read_modify_write(
+                _reg.registry_path(pm_session), _reset_user_modified)
 
         # Switch ALL grouped sessions that were watching the old review
         # window to the new one.
