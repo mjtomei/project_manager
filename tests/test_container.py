@@ -521,7 +521,10 @@ class TestBuildExecCmd:
     def test_includes_cleanup_by_default(self):
         cmd = build_exec_cmd("my-container", "claude 'hi'")
         assert "docker rm -f" in cmd
-        assert cmd.endswith(">/dev/null 2>&1")
+        # Cleanup is wrapped in a bash trap for robustness against kill-pane
+        assert cmd.startswith("bash -c ")
+        assert "trap " in cmd
+        assert "EXIT" in cmd
 
     def test_cleanup_removes_proxy_socket(self):
         cmd = build_exec_cmd("my-container", "claude 'hi'",
@@ -541,14 +544,15 @@ class TestBuildExecCmd:
 
     def test_shell_safety(self):
         cmd = build_exec_cmd("name-with-special", "claude 'prompt with $vars'")
-        # Split only the exec portion (before the cleanup suffix)
-        exec_part = cmd.split(";")[0].strip()
-        parts = shlex.split(exec_part)
-        assert parts[0] == "docker"
-        assert parts[1] == "exec"
-        assert parts[2] == "-it"
-        assert parts[3] == "-u"
-        assert parts[4] == _CONTAINER_USER
+        # The command is wrapped in bash -c with a trap, so parse the outer layer
+        outer = shlex.split(cmd)
+        assert outer[0] == "bash"
+        assert outer[1] == "-c"
+        # The inner script should contain a proper docker exec invocation
+        inner = outer[2]
+        assert "docker exec -it" in inner
+        assert f"-u {_CONTAINER_USER}" in inner
+        assert "name-with-special" in inner
 
 
 class TestWrapClaudeCmd:
@@ -604,9 +608,14 @@ class TestWrapClaudeCmd:
 class TestRemoveContainer:
     @patch("pm_core.container._run_docker")
     def test_removes_container(self, mock_docker):
+        # After rm, remove_container polls with inspect until the container is gone.
+        # Simulate inspect returning non-zero (container gone) on first poll.
+        mock_docker.return_value.returncode = 1
         remove_container("test-container")
-        mock_docker.assert_called_once_with(
+        mock_docker.assert_any_call(
             "rm", "-f", "test-container", check=False, timeout=30)
+        mock_docker.assert_any_call(
+            "inspect", "test-container", check=False, timeout=5)
 
 
 class TestCleanupContainers:
