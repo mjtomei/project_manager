@@ -93,6 +93,41 @@ class TestLockedUpdate:
         on_disk = store.load(project_dir)
         assert len(on_disk["prs"]) == 0  # Nothing saved
 
+    def test_corrupt_yaml_raises_parse_error_and_releases_lock(self, project_dir):
+        """locked_update raises ProjectYamlParseError on corrupt YAML and releases the lock."""
+        # Corrupt the YAML file
+        path = project_dir / "project.yaml"
+        path.chmod(path.stat().st_mode | 0o200)  # make writable
+        path.write_text(":\n  - :\n  bad: [unterminated")
+
+        with pytest.raises(store.ProjectYamlParseError, match="not valid YAML"):
+            store.locked_update(project_dir, lambda d: None)
+
+        # Lock should be released — fix the file and verify we can lock again
+        data = {
+            "project": {"name": "test", "repo": "/tmp/repo", "base_branch": "main"},
+            "plans": [],
+            "prs": [],
+        }
+        with open(path, "w") as f:
+            yaml.dump(data, f)
+
+        store.locked_update(
+            project_dir,
+            lambda d: d["project"].__setitem__("active_pr", "pr-001"),
+        )
+        on_disk = store.load(project_dir)
+        assert on_disk["project"]["active_pr"] == "pr-001"
+
+    def test_non_dict_yaml_raises_parse_error(self, project_dir):
+        """locked_update raises ProjectYamlParseError when YAML is not a dict."""
+        path = project_dir / "project.yaml"
+        path.chmod(path.stat().st_mode | 0o200)
+        path.write_text("- item1\n- item2\n")
+
+        with pytest.raises(store.ProjectYamlParseError, match="expected a mapping"):
+            store.locked_update(project_dir, lambda d: None)
+
     def test_lockfile_created(self, project_dir):
         """A .lock file is created during locking."""
         lock_path = project_dir / "project.yaml.lock"
