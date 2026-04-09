@@ -3,11 +3,11 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-6634fb0
+  active_pr: pr-d8cfa16
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
-  hide_merged: true
+  hide_merged: false
 plans:
 - id: plan-001
   name: Import from existing repo
@@ -981,6 +981,30 @@ prs:
       handles corrupt YAML without clobbering app state: PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-f38005f-bdca24011d0bf8cd)'
     created_at: '2026-04-09T18:18:02Z'
     last_edited: '2026-04-09T18:18:02Z'
+  - id: note-2ffde86
+    text: 'QA NEEDS_WORK: Unit tests — test_store_locking.py and test_store.py pass:
+      PASS; Regression — all pre-existing test suites pass: PASS; Code audit — no
+      bare store.save() in CLI or TUI modules: PASS; Code audit — no network calls
+      inside locked_update callbacks: PASS; CLI integration — pm pr add creates correct
+      on-disk state: PASS; CLI integration — pm pr edit updates fields atomically:
+      PASS; CLI integration — pm pr select, pm plan add, pm model set: PASS; CLI integration
+      — pm pr close removes PR and cleans up: PASS; CLI integration — pm pr note add/edit/delete:
+      PASS; Concurrent pm pr add — no lost writes: PASS; Concurrent duplicate-title
+      prevention in pr_add: PASS; StoreLockTimeout — CLI error message: PASS; pm edit
+      command — editor under lock: PASS; Atomic write — file never truncated: PASS;
+      Read-only permissions and YAML header after save: PASS; Exception in mutation
+      function — lock released, data unsaved: PASS; ProjectYamlParseError — corrupt
+      YAML handling: NEEDS_WORK; TUI sync graceful lock timeout handling: PASS; pr_sync
+      — network calls before lock, results applied inside lock: PASS; spec_gen — locked_update
+      for generate, approve, reject: PASS; plan_load and GitHub import — concurrent-safe
+      duplicate checks: PASS; watcher_ui — intentional store.save for creation is
+      preserved: PASS; _finalize_merge — loads fresh inside lock: PASS; lock file
+      left on disk after unlock — standard fcntl pattern: PASS; make_plan_entry helper
+      used consistently: PASS; helpers.py — _ensure_workdir and _resolve_repo_id use
+      locked_update: PASS; background_sync handles corrupt YAML without clobbering
+      app state: PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-f38005f-1fd1b3aeb3203659)'
+    created_at: '2026-04-09T21:20:04Z'
+    last_edited: '2026-04-09T21:20:04Z'
   spec_qa: /home/mjtomei/project_manager/pm/specs/pr-f38005f/qa.md
 - id: pr-c11d04f
   plan: plan-003
@@ -3453,7 +3477,11 @@ prs:
     text: 'QA INPUT_REQUIRED:  (workdir: /home/matt/.pm/workdirs/qa/pr-a9a71a4-139c93ea4716517a)'
     created_at: '2026-03-06T02:04:48Z'
     last_edited: '2026-03-06T02:04:48Z'
-  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a9a71a4-qa-pass-should-not-auto-merge-withou-4bba2cbf
+  - id: note-a530263
+    text: 'QA ERROR: '
+    created_at: '2026-04-09T21:39:32Z'
+    last_edited: '2026-04-09T21:39:32Z'
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-a9a71a4-qa-pass-should-not-auto-merge-withou-e6d0566c
 - id: pr-9fc6e27
   plan: improvements
   title: Keep PR description and notes in sync during development
@@ -8365,7 +8393,7 @@ prs:
   title: 'Container memory governor: dynamic memory limits with per-type stop policy
     and QA queuing'
   branch: pm/pr-eb2dbfc-container-memory-governor-dynamic-memory-limits-wi
-  status: qa
+  status: in_review
   depends_on: []
   description: 'Add a memory governor that prevents OOM crashes by projecting memory
     consumption before launching containers, with configurable stop-on-idle for different
@@ -8434,9 +8462,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-04-09T10:53:08.497318+00:00'
+  updated_at: '2026-04-09T22:11:09.274855+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
-  reviewed_at: '2026-04-09T10:53:08.497318+00:00'
+  reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
   notes:
   - id: note-b9293d6
@@ -8640,7 +8668,7 @@ prs:
   plan: bugs
   title: Convert all pane registry callers to locked_read_modify_write
   branch: pm/pr-6634fb0-convert-all-pane-registry-callers-to-locked-read-m
-  status: pending
+  status: merged
   depends_on:
   - pr-e3cf481
   description: 'PR #154 added locked_read_modify_write to pane_registry.py and converted
@@ -8678,13 +8706,102 @@ prs:
     must go through locked_read_modify_write. load_registry can remain public for
     read-only access but save_registry should be removed from the public API — the
     only way to write should be through the locked helper.'
+  agent_machine: arch-home
+  gh_pr: https://github.com/mjtomei/project_manager/pull/162
+  gh_pr_number: 162
+  created_at: '2026-04-09T20:47:36.625276+00:00'
+  updated_at: '2026-04-09T21:59:06.284207+00:00'
+  started_at: '2026-04-09T20:49:38.462555+00:00'
+  reviewed_at: '2026-04-09T21:12:42.841714+00:00'
+  merged_at: '2026-04-09T21:59:06.284207+00:00'
+  notes:
+  - id: note-f2e5da8
+    text: 'QA PASS: Unit tests pass with updated mocks: PASS; No production code uses
+      public save_registry: PASS; All modifier closures call _prepare_registry_data:
+      PASS; Conditional modifiers return None to skip writes: PASS; Tmux calls outside
+      lock (IR3 compliance): PASS; TUI session lifecycle smoke test: PASS; Session
+      creation atomically resets registry: PASS; Mobile toggle resets user_modified
+      across all windows: PASS; rebalance_cmd read-then-lock pattern: PASS; heal_registry
+      complex healing under lock: PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-6634fb0-a58da9830ed532fd)'
+    created_at: '2026-04-09T21:59:08Z'
+    last_edited: '2026-04-09T21:59:08Z'
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-6634fb0-convert-all-pane-registry-callers-to-e6d0566c
+  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-6634fb0/qa.md
+- id: pr-f8abc94
+  plan: improvements
+  title: TUI command for PR resource cleanup
+  branch: pm/pr-f8abc94-tui-command-for-pr-resource-cleanup
+  status: pending
+  depends_on: []
+  description: 'Add two ways to clean up all resources for a PR across all phases
+    (implementation, review, QA): (1) A dedicated TUI key on a selected PR that tears
+    down everything for that PR (specific key TBD based on available bindings). (2)
+    A prefix that can be applied to any TUI command to run cleanup before/after the
+    command executes. Both paths perform the same cleanup: kill all tmux windows for
+    the PR — QA windows (scenario/planner/status/verify/concretize), review windows
+    (review-claude/review-diff), and implementation windows — stop and remove docker
+    containers matched by PR hash naming convention, remove pane registry entries,
+    and clean up push-proxy sockets. Should work at any time regardless of PR state
+    — useful for freeing resources after a failed QA run, abandoning a review, or
+    general housekeeping. Should confirm the action in the TUI before proceeding and
+    report what was cleaned up.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
-  created_at: '2026-04-09T20:47:36.625276+00:00'
-  updated_at: '2026-04-09T20:47:36.625276+00:00'
+  created_at: '2026-04-09T21:37:50.239172+00:00'
+  updated_at: '2026-04-09T21:50:06.546946+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
   notes: []
-  spec_impl: /workspace/pm/specs/pr-6634fb0/impl.md
+- id: pr-ee2dae6
+  plan: improvements
+  title: 'Bug: QA verdict detection triggers during active progress animation'
+  branch: pm/pr-ee2dae6-bug-qa-verdict-detection-triggers-during-active-pr
+  status: pending
+  depends_on: []
+  description: 'QA scenario windows can return a false verdict when the Claude session
+    takes a long time without producing visible output other than the progress animation
+    indicator at the bottom of the pane. The verdict detection logic sees no new content
+    and concludes the session is done, but the progress animation proves Claude is
+    still actively working. Fix: before returning a verdict, check whether the bottom-of-pane
+    progress animation is still running. If the animation is active, the session is
+    not done — do not return a verdict yet.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-09T21:58:09.533708+00:00'
+  updated_at: '2026-04-09T21:58:09.533708+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-d8cfa16
+  plan: plan-qa
+  title: Batched QA scenario execution
+  branch: pm/pr-d8cfa16-batched-qa-scenario-execution
+  status: pending
+  depends_on: []
+  description: 'Instead of spawning one session per QA scenario, batch scenarios into
+    a configurable number of worker sessions. The scenario generator/concretizer groups
+    scenarios across the configured worker count, choosing groupings that maximize
+    shared context (e.g. by functional area, related files, or test theme). Each worker
+    session reviews the diff and loads relevant files once, then runs its assigned
+    scenarios sequentially. After each scenario completes, the worker writes a per-scenario
+    report and waits for approval before proceeding to the next — preserving the existing
+    approval flow so the user can review each scenario''s results individually. Workers
+    must also stop and wait when hitting INPUT_REQUIRED state, just as individual
+    scenario sessions do today. Benefits: drastically reduces session count (avoids
+    hitting subscription usage limits and API credit fallback), eliminates redundant
+    diff review and file loading across scenarios, and reduces total token usage.
+    The QA status watcher should poll per-scenario report files so the TUI can still
+    show individual scenario progress.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-09T22:50:59.769426+00:00'
+  updated_at: '2026-04-09T22:54:10.085078+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
