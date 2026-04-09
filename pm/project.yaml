@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-0939d97
+  active_pr: pr-f38005f
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -953,6 +953,10 @@ prs:
       handles corrupt YAML without clobbering app state: PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-f38005f-d8d59509902b0358)'
     created_at: '2026-04-07T22:51:44Z'
     last_edited: '2026-04-07T22:51:44Z'
+  - id: note-23e1756
+    text: 'QA INPUT_REQUIRED:  (workdir: /home/mjtomei/.pm/workdirs/qa/pr-f38005f-592c914eaa2d86f9)'
+    created_at: '2026-04-09T11:42:22Z'
+    last_edited: '2026-04-09T11:42:22Z'
   spec_qa: /home/mjtomei/project_manager/pm/specs/pr-f38005f/qa.md
 - id: pr-c11d04f
   plan: plan-003
@@ -8456,7 +8460,7 @@ prs:
     last_edited: '2026-04-09T11:14:18Z'
 - id: pr-343be0c
   plan: improvements
-  title: 'Window visibility management: link/unlink sub-windows with pin support'
+  title: 'Window visibility management: link/unlink sub–windows with pin support'
   branch: pm/pr-343be0c-window-visibility-management-link-unlink-sub-windo
   status: pending
   depends_on:
@@ -8471,7 +8475,8 @@ prs:
     - **TUI window**: always linked
 
     - **Main PR windows** (implementation): always linked for active PRs — these are
-    the entry point per PR
+    the entry point per PR. Each main PR window includes a persistent picker pane
+    (from pr-2d0588a) showing all windows for that PR (linked and unlinked).
 
     - **Sub-windows** (review, QA scenarios, merge, companion): linked on demand when
     navigated to, unlinked when deselected
@@ -8484,8 +8489,8 @@ prs:
 
     - When selecting a PR in the TUI, its main impl window is always visible
 
-    - When navigating to a sub-window (e.g. via the picker, or pressing r for review),
-    it gets linked into the session
+    - When navigating to a sub-window (e.g. via the picker pane, or pressing r for
+    review), it gets linked into the session
 
     - When navigating away from a sub-window to a different PR or back to the TUI,
     the sub-window gets unlinked (unless pinned)
@@ -8495,13 +8500,17 @@ prs:
     - Pinned state persists in the pane registry
 
 
-    ## Picker integration
+    ## Picker pane (per PR)
 
-    - The popup picker (pr-158) shows ALL windows including unlinked ones
+    - The picker from pr-2d0588a becomes a persistent pane in each PR''s main implementation
+    window — not a popup
+
+    - Shows all windows for that PR: impl, review, QA scenarios, merge — both linked
+    and unlinked
 
     - Selecting an unlinked window from the picker links it and switches to it
 
-    - Picker shows pin status and window category (main/review/qa/etc.)
+    - Shows pin status and window category (main/review/qa/etc.)
 
 
     ## Window list
@@ -8527,19 +8536,18 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-09T11:30:47.906403+00:00'
-  updated_at: '2026-04-09T11:33:33.900337+00:00'
+  updated_at: '2026-04-09T11:44:21.835841+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
   notes:
-  - id: note-aed25d1
-    text: The popup picker from pr-ff68ef5 should be converted to a persistent pane
-      that is always visible in the main TUI window — not a popup that appears and
-      disappears. This gives a permanent navigation sidebar showing all windows (linked
-      and unlinked) alongside the tech tree. Selecting a window from the picker links
-      it and switches to it.
-    created_at: '2026-04-09T11:31:39Z'
-    last_edited: '2026-04-09T11:31:39Z'
+  - id: note-86a21e3
+    text: The picker from pr-2d0588a (#158) should be converted to a persistent pane
+      in each PR's main implementation window — not a popup that appears and disappears.
+      This gives a permanent navigation sidebar per PR showing all its windows (linked
+      and unlinked). Selecting a window from the picker links it and switches to it.
+    created_at: '2026-04-09T11:44:21Z'
+    last_edited: '2026-04-09T11:44:21Z'
 - id: pr-0939d97
   plan: bugs
   title: 'Fix: selecting a hidden PR in TUI should show error instead of silently
