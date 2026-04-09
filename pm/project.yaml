@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-f38005f
+  active_pr: pr-6634fb0
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -957,6 +957,30 @@ prs:
     text: 'QA INPUT_REQUIRED:  (workdir: /home/mjtomei/.pm/workdirs/qa/pr-f38005f-592c914eaa2d86f9)'
     created_at: '2026-04-09T11:42:22Z'
     last_edited: '2026-04-09T11:42:22Z'
+  - id: note-ed85f13
+    text: 'QA NEEDS_WORK: Unit tests — test_store_locking.py and test_store.py pass:
+      PASS; Regression — all pre-existing test suites pass: PASS; Code audit — no
+      bare store.save() in CLI or TUI modules: PASS; Code audit — no network calls
+      inside locked_update callbacks: PASS; CLI integration — pm pr add creates correct
+      on-disk state: PASS; CLI integration — pm pr edit updates fields atomically:
+      PASS; CLI integration — pm pr select, pm plan add, pm model set: PASS; CLI integration
+      — pm pr close removes PR and cleans up: PASS; CLI integration — pm pr note add/edit/delete:
+      PASS; Concurrent pm pr add — no lost writes: INPUT_REQUIRED; Concurrent duplicate-title
+      prevention in pr_add: PASS; StoreLockTimeout — CLI error message: PASS; pm edit
+      command — editor under lock: PASS; Atomic write — file never truncated: PASS;
+      Read-only permissions and YAML header after save: PASS; Exception in mutation
+      function — lock released, data unsaved: NEEDS_WORK; ProjectYamlParseError —
+      corrupt YAML handling: PASS; TUI sync graceful lock timeout handling: PASS;
+      pr_sync — network calls before lock, results applied inside lock: PASS; spec_gen
+      — locked_update for generate, approve, reject: PASS; plan_load and GitHub import
+      — concurrent-safe duplicate checks: PASS; watcher_ui — intentional store.save
+      for creation is preserved: PASS; _finalize_merge — no data parameter, loads
+      fresh inside lock: PASS; lock file left on disk after unlock — standard fcntl
+      pattern: PASS; make_plan_entry helper used consistently: PASS; helpers.py —
+      _ensure_workdir and _resolve_repo_id use locked_update: PASS; background_sync
+      handles corrupt YAML without clobbering app state: PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-f38005f-bdca24011d0bf8cd)'
+    created_at: '2026-04-09T18:18:02Z'
+    last_edited: '2026-04-09T18:18:02Z'
   spec_qa: /home/mjtomei/project_manager/pm/specs/pr-f38005f/qa.md
 - id: pr-c11d04f
   plan: plan-003
@@ -8396,6 +8420,27 @@ prs:
     text: 'QA INPUT_REQUIRED:  (workdir: /home/mjtomei/.pm/workdirs/qa/pr-eb2dbfc-b7561ca5a762d2c6)'
     created_at: '2026-04-09T10:47:23Z'
     last_edited: '2026-04-09T10:47:23Z'
+  - id: note-d3346af
+    text: 'QA INPUT_REQUIRED: Existing unit tests pass: PASS; CLI settings validation
+      accepts valid and rejects invalid values: PASS; container status displays governor
+      settings and current memory: PASS; Memory gate blocks impl/review launch via
+      wrap_claude_cmd: PASS; Governor inactive when no target configured: PASS; QA
+      concurrency cap constrained by memory headroom: PASS; Queued scenario launch
+      checks memory gate and retries: PASS; waiting_memory status written to qa_status.json
+      and rendered in QA status pane: PASS; Stop-on-idle QA removes container on PASS-verified
+      and NEEDS_WORK but not INPUT_REQUIRED: PASS; Stop-on-idle for impl containers
+      on idle detection: PASS; Stop-on-idle for review loop completion and standalone
+      review idle: PASS; Tmux pane preservation sets remain-on-exit before container
+      removal: PASS; Stats captured before container removal in remove_container:
+      PASS; Stats file corruption and Docker stats failure graceful degradation: PASS;
+      TUI status bar displays memory usage: INPUT_REQUIRED; Single container projection
+      exceeds target: PASS; History trimming keeps only newest N samples: PASS; Container
+      type inference handles all patterns and edge cases: PASS; Concurrent gate check
+      serialization via _gate_lock: PASS; Memory target changed mid-QA-run takes effect
+      on next cycle: PASS; find_containers_by_keywords matches correctly: PASS (workdir:
+      /home/mjtomei/.pm/workdirs/qa/pr-eb2dbfc-0c395042dd9187fc)'
+    created_at: '2026-04-09T12:38:05Z'
+    last_edited: '2026-04-09T12:38:05Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-02512b49
 - id: pr-a3a081a
   plan: plan-qa
@@ -8564,6 +8609,57 @@ prs:
   gh_pr_number: null
   created_at: '2026-04-09T11:42:16.820369+00:00'
   updated_at: '2026-04-09T11:42:16.820369+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-6634fb0
+  plan: bugs
+  title: Convert all pane registry callers to locked_read_modify_write
+  branch: pm/pr-6634fb0-convert-all-pane-registry-callers-to-locked-read-m
+  status: pending
+  depends_on:
+  - pr-e3cf481
+  description: 'PR #154 added locked_read_modify_write to pane_registry.py and converted
+    register_pane, unregister_pane, and _reconcile_registry. But 10 call sites in
+    other files still do unlocked load_registry → modify → save_registry, racing with
+    the locked paths and each other. Under concurrency (QA spawning 20+ panes), a
+    stale load overwrites another operation''s save, silently dropping pane registrations.
+
+
+    Unlocked call sites to convert:
+
+    1. pane_layout.py:340-343 — register_and_rebalance
+
+    2. pane_layout.py:469-489 — check_user_modified
+
+    3. pane_layout.py:607-620 — handle_pane_exited
+
+    4. pane_layout.py:690-697 — handle_pane_opened
+
+    5. cli/session.py:319 — session creation (overwrites entire registry)
+
+    6. cli/session.py:572-575 — _pane-closed
+
+    7. cli/session.py:715-722 — _window-resized handler
+
+    8. cli/pr.py:1237-1240 — PR merge cleanup
+
+    9. tui/pane_ops.py:44-90 — heal_registry
+
+    10. tui/pane_ops.py:160-163 — rebalance wrapper
+
+
+    After conversion, remove the public load_registry and save_registry functions
+    (or mark them read-only / private) so callers can''t bypass locking. All mutations
+    must go through locked_read_modify_write. load_registry can remain public for
+    read-only access but save_registry should be removed from the public API — the
+    only way to write should be through the locked helper.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-09T20:47:36.625276+00:00'
+  updated_at: '2026-04-09T20:47:36.625276+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
