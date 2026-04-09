@@ -47,9 +47,13 @@ def handle_pr_selected(app, pr_id: str) -> None:
 
     # Persist selection so TUI restarts on this PR
     if app._data.get("project", {}).get("active_pr") != pr_id:
-        app._data = store.locked_update(
-            app._root, lambda d: d["project"].__setitem__("active_pr", pr_id)
-        )
+        try:
+            app._data = store.locked_update(
+                app._root, lambda d: d["project"].__setitem__("active_pr", pr_id)
+            )
+        except store.StoreLockTimeout as e:
+            _log.warning("handle_pr_selected: lock timeout: %s", e)
+            app.log_message(f"Error: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -228,9 +232,13 @@ def toggle_merged(app) -> None:
     tree._hide_merged = not tree._hide_merged
     # Persist to project.yaml (per-project, overrides global)
     hide = tree._hide_merged
-    app._data = store.locked_update(
-        app._root, lambda d: d.setdefault("project", {}).__setitem__("hide_merged", hide)
-    )
+    try:
+        app._data = store.locked_update(
+            app._root, lambda d: d.setdefault("project", {}).__setitem__("hide_merged", hide)
+        )
+    except store.StoreLockTimeout as e:
+        _log.warning("toggle_merged: lock timeout: %s", e)
+        app.log_message(f"Error: {e}")
     tree._recompute()
     tree.refresh(layout=True)
     app._update_filter_status()
@@ -339,7 +347,12 @@ def handle_plan_pick(app, pr_id: str, result) -> None:
                 p["plan"] = plan_id
                 _record_status_timestamp(p)
 
-        app._data = store.locked_update(app._root, apply_new_plan)
+        try:
+            app._data = store.locked_update(app._root, apply_new_plan)
+        except store.StoreLockTimeout as e:
+            _log.warning("handle_plan_pick: lock timeout: %s", e)
+            app.log_message(f"Error: {e}")
+            return
         app._load_state()
         app.log_message(f"Moved {pr_id} → {plan_id}: {title} (new)")
     elif result == "_standalone":
@@ -355,7 +368,12 @@ def handle_plan_pick(app, pr_id: str, result) -> None:
                 p.pop("plan", None)
                 _record_status_timestamp(p)
 
-        app._data = store.locked_update(app._root, apply_standalone)
+        try:
+            app._data = store.locked_update(app._root, apply_standalone)
+        except store.StoreLockTimeout as e:
+            _log.warning("handle_plan_pick: lock timeout: %s", e)
+            app.log_message(f"Error: {e}")
+            return
         app._load_state()
         app.log_message(f"Moved {pr_id} → Standalone")
     elif isinstance(result, str):
@@ -372,7 +390,12 @@ def handle_plan_pick(app, pr_id: str, result) -> None:
                 p["plan"] = target_plan
                 _record_status_timestamp(p)
 
-        app._data = store.locked_update(app._root, apply_move)
+        try:
+            app._data = store.locked_update(app._root, apply_move)
+        except store.StoreLockTimeout as e:
+            _log.warning("handle_plan_pick: lock timeout: %s", e)
+            app.log_message(f"Error: {e}")
+            return
         app._load_state()
         tree = app.query_one("#tech-tree", TechTree)
         display = tree.get_plan_display_name(result)
