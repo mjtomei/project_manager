@@ -8805,3 +8805,4 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+  spec_impl: /workspace/pm/specs/pr-d8cfa16/impl.md

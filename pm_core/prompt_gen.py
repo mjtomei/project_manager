@@ -827,13 +827,43 @@ def generate_review_loop_prompt(data: dict, pr_id: str) -> str:
 # QA prompts
 # ---------------------------------------------------------------------------
 
+
+def _worker_group_field(worker_count: int) -> str:
+    """Return the GROUP field line for the planner output format."""
+    if worker_count <= 0:
+        return ""
+    return f"\nGROUP: <worker number 1-{worker_count}>"
+
+
+def _worker_grouping_instructions(worker_count: int) -> str:
+    """Return instructions for the planner to group scenarios into workers."""
+    if worker_count <= 0:
+        return ""
+    return f"""
+## Worker Grouping
+
+Scenarios will be batched into {worker_count} worker session(s).  Each worker
+executes its assigned scenarios sequentially in a single Claude session,
+sharing the diff review and file loading across scenarios.
+
+Assign each scenario a GROUP number (1-{worker_count}).  Group scenarios that
+share functional area, related files, or test theme together to maximize the
+benefit of shared context within each worker.  Distribute scenarios as evenly
+as possible across groups.
+"""
+
+
 def generate_qa_planner_prompt(data: dict, pr_id: str,
                                session_name: str | None = None,
-                               scenario_start: int = 1) -> str:
+                               scenario_start: int = 1,
+                               worker_count: int = 0) -> str:
     """Generate a prompt for the QA planning session.
 
     The planner analyzes the PR and the instruction library to generate
     a structured QA plan with test scenarios.
+
+    When *worker_count* > 0, the prompt asks the planner to assign each
+    scenario to a worker group (1..worker_count) to maximize shared context.
     """
     from pm_core import qa_instructions
 
@@ -948,13 +978,13 @@ QA_PLAN_START
 SCENARIO {scenario_start}: <descriptive title for this scenario>
 FOCUS: <what area or behavior to test>
 INSTRUCTION: <filename from the library above, or "none" if no existing instruction applies>
-MOCKS: <comma-separated mock IDs this scenario uses, or "none">
+MOCKS: <comma-separated mock IDs this scenario uses, or "none">{_worker_group_field(worker_count)}
 STEPS: <concrete test steps to perform>
 
 SCENARIO {scenario_start + 1}: <descriptive title for next scenario>
 FOCUS: <what area or behavior to test>
 INSTRUCTION: <filename or "none">
-MOCKS: <mock IDs or "none">
+MOCKS: <mock IDs or "none">{_worker_group_field(worker_count)}
 STEPS: <concrete test steps>
 
 QA_PLAN_END
@@ -964,7 +994,7 @@ Number scenarios starting from {scenario_start}.
 Include as many scenarios as required to fully exercise the functionality
 of the PR.  Exercise the core functionality as well as any edge cases
 that may expose bugs.
-
+{_worker_grouping_instructions(worker_count)}
 {general_notes_block}{qa_specific_block}"""
     return prompt.strip()
 
@@ -1193,6 +1223,154 @@ final verdict.
 {execution_block}
 
 IMPORTANT: Always end your response with the verdict keyword on its own line."""
+    return prompt.strip()
+
+
+def generate_qa_worker_prompt(data: dict, pr_id: str,
+                              scenarios: list,
+                              worker_index: int,
+                              workdir: str,
+                              qa_workdir: str,
+                              session_name: str | None = None,
+                              worktree_mode: bool = False,
+                              scratch_dir: str | None = None) -> str:
+    """Generate a prompt for a batched QA worker session.
+
+    A worker executes multiple scenarios sequentially in a single session,
+    sharing diff review and file loading across scenarios.
+
+    Args:
+        data: Project data dict.
+        pr_id: PR identifier.
+        scenarios: List of QAScenario objects assigned to this worker.
+        worker_index: 1-based worker index.
+        workdir: Worker's workdir (clone path).
+        qa_workdir: QA session workdir (for report files).
+        session_name: tmux session name.
+        worktree_mode: When True, the worker runs in an isolated clone.
+        scratch_dir: Path to a scratch directory for throwaway test projects.
+    """
+    pr = store.get_pr(data, pr_id)
+    if not pr:
+        raise ValueError(f"PR {pr_id} not found")
+
+    title = pr.get("title", "")
+    branch = pr.get("branch", f"pm/{pr_id}")
+    pr_workdir = pr.get("workdir", "")
+    base_branch = data.get("project", {}).get("base_branch", "master")
+
+    # Include PR notes and mocks
+    pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
+    mocks_block = get_spec_mocks_section(pr)
+
+    # Workdir description
+    backend_name = data.get("project", {}).get("backend", "vanilla")
+    has_remote = backend_name != "local"
+
+    scratch_line = f"\n- **Scratch dir** (throwaway test projects): {scratch_dir}" if scratch_dir else ""
+    if worktree_mode:
+        workdir_block = f"""\
+- **Your workdir** (isolated clone): {workdir}{scratch_line}
+- **PR workdir** (canonical source): {pr_workdir}"""
+    else:
+        workdir_block = f"""\
+- **PR workdir** (source code): {pr_workdir}
+- **Your workdir** (throwaway test projects): {workdir}"""
+
+    # Build scenario list
+    scenario_blocks = []
+    for sc in scenarios:
+        report_path = f"{qa_workdir}/report-s{sc.index}.md"
+        scenario_blocks.append(f"""### Scenario {sc.index}: {sc.title}
+
+**Focus**: {sc.focus}
+
+**Steps**:
+{sc.steps}
+
+**Report file**: `{report_path}`""")
+
+    scenarios_text = "\n\n".join(scenario_blocks)
+    scenario_indices = ", ".join(str(sc.index) for sc in scenarios)
+
+    # Push instructions
+    pull_step = (
+        f"- Pull the latest changes: `git pull origin {branch}`. "
+        f"Resolve any merge conflicts.\n"
+    ) if has_remote else ""
+
+    push_instructions = ""
+    if worktree_mode:
+        push_instructions = f"""- If you find and fix issues, commit with message prefix `qa: `
+- Push: `git push origin {branch}`
+- If push fails: `git pull --rebase origin {branch} && git push origin {branch}`"""
+
+    prompt = f"""You are a QA worker (Worker {worker_index}) running {len(scenarios)} scenarios sequentially for PR {pr_id}: "{title}"
+
+## Context
+
+- **PR**: {pr_id} — "{title}"
+- **Branch**: {branch}
+- **Base branch**: {base_branch}
+{workdir_block}
+{pr_notes_block}{mocks_block}
+## How This Works
+
+You are a batched QA worker. You will execute {len(scenarios)} scenario(s) sequentially
+(scenarios {scenario_indices}).  An orchestrator is monitoring your tmux pane.
+
+**For each scenario:**
+1. Review the diff and relevant files (you only need to do this thoroughly once —
+   reuse your understanding across scenarios)
+{pull_step}2. Execute the test steps described for that scenario
+3. Write a per-scenario report file (path given per scenario below)
+4. Output the scenario verdict in this exact format on its own line:
+   `SCENARIO_<N>_VERDICT: <VERDICT>`
+   where N is the scenario number and VERDICT is PASS, NEEDS_WORK, or INPUT_REQUIRED
+5. **WAIT** — do not proceed to the next scenario until the orchestrator sends you
+   a message saying "PROCEED TO SCENARIO <next>". This allows the orchestrator to
+   verify your verdict and the user to review results.
+
+## Important: When to use each verdict
+
+- **PASS** — You executed the test steps AND they succeeded. A PASS is only valid
+  when you have **runtime evidence** (command output, observed behavior, test results).
+- **NEEDS_WORK** — You executed the test steps and found concrete bugs or issues.
+{push_instructions}
+- **INPUT_REQUIRED** — You could not execute one or more test steps because of
+  missing tools, unavailable commands, environment limitations, or ambiguity.
+  **Stop and wait for human input** — do NOT proceed to the next scenario.
+
+## Report File Format
+
+For each scenario, write a markdown report to the specified path BEFORE outputting
+the verdict. Use this format:
+
+```
+# Scenario <N>: <title>
+
+## Verdict: <PASS|NEEDS_WORK|INPUT_REQUIRED>
+
+## Summary
+<brief summary of what you tested and found>
+
+## Details
+<detailed findings, command outputs, issues discovered>
+```
+
+Write the report atomically: write to a `.tmp` file first, then rename it.
+
+## Scenarios
+
+{scenarios_text}
+
+## Execution Order
+
+Execute scenarios in this order: {scenario_indices}.
+Start with Scenario {scenarios[0].index} now.
+
+IMPORTANT: After each scenario's verdict, WAIT for the orchestrator to tell you
+to proceed. Do not start the next scenario until instructed."""
     return prompt.strip()
 
 
