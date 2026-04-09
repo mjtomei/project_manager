@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-eb2dbfc
+  active_pr: pr-343be0c
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -8454,3 +8454,80 @@ prs:
       so they survive pruning.'
     created_at: '2026-04-09T11:14:18Z'
     last_edited: '2026-04-09T11:14:18Z'
+- id: pr-343be0c
+  plan: tui-ux
+  title: 'Window visibility management: link/unlink sub-windows with pin support'
+  branch: pm/pr-343be0c-window-visibility-management-link-unlink-sub-windo
+  status: pending
+  depends_on: []
+  description: 'Reduce tmux window clutter by only linking windows that are actively
+    needed. Uses tmux link-window/unlink-window to control which windows appear in
+    the session''s window list.
+
+
+    ## Window categories
+
+    - **TUI window**: always linked
+
+    - **Main PR windows** (implementation): always linked for active PRs — these are
+    the entry point per PR
+
+    - **Sub-windows** (review, QA scenarios, merge, companion): linked on demand when
+    navigated to, unlinked when deselected
+
+    - **Pinned windows**: user can pin any window to keep it linked regardless of
+    navigation
+
+
+    ## Behavior
+
+    - When selecting a PR in the TUI, its main impl window is always visible
+
+    - When navigating to a sub-window (e.g. via the picker, or pressing r for review),
+    it gets linked into the session
+
+    - When navigating away from a sub-window to a different PR or back to the TUI,
+    the sub-window gets unlinked (unless pinned)
+
+    - Pin/unpin via a prefix key or TUI command
+
+    - Pinned state persists in the pane registry
+
+
+    ## Picker integration
+
+    - The popup picker (pr-158) shows ALL windows including unlinked ones
+
+    - Selecting an unlinked window from the picker links it and switches to it
+
+    - Picker shows pin status and window category (main/review/qa/etc.)
+
+
+    ## Window list
+
+    - The tmux status bar window list stays clean: TUI + main PR windows + currently
+    viewed sub-window + pins
+
+    - Total visible windows roughly equals: 1 (TUI) + N (active PRs) + 1 (current
+    sub-window) + pins
+
+
+    ## Implementation
+
+    - Track link state in pane registry (linked: bool, pinned: bool per window)
+
+    - Hook into window selection/focus events to trigger link/unlink
+
+    - tmux link-window -s source -t target to link, unlink-window -t target to unlink
+
+    - Unlinked windows still exist in the base session — they are not destroyed, just
+    hidden from the grouped session''s window list'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-09T11:30:47.906403+00:00'
+  updated_at: '2026-04-09T11:30:47.906403+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
