@@ -423,6 +423,8 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
         pr = store.get_pr(data, pr_id)
         if not pr:
             return
+        if plan is not None:
+            pr["plan"] = plan if plan else None
         if title is not None:
             pr["title"] = title
         if desc is not None:
