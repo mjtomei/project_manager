@@ -146,6 +146,7 @@ class ProjectManagerApp(App):
         Binding("X", "toggle_merged", "Toggle Merged", show=False),
         Binding("f", "cycle_filter", "Filter", show=False),
         Binding("F", "cycle_sort", "Sort", show=False),
+        Binding("P", "split_pr", "Split PR", show=False),
         Binding("question_mark", "show_help", "Help", show=True),
         Binding("c", "launch_claude", "Claude", show=True),
         Binding("H", "launch_guide", "Guide", show=True),
@@ -687,6 +688,9 @@ class ProjectManagerApp(App):
 
     def action_merge_pr_companion(self) -> None:
         pr_view.merge_pr(self, companion=True)
+
+    def action_split_pr(self) -> None:
+        pr_view.split_pr(self)
 
     def action_hide_plan(self) -> None:
         pr_view.hide_plan(self)

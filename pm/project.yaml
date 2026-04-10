@@ -8940,3 +8940,4 @@ prs:
       the backend abstraction layer, not assume GitHub.
     created_at: '2026-04-10T14:15:37Z'
     last_edited: '2026-04-10T14:15:37Z'
+  spec_impl: /workspace/pm/specs/pr-4db3696/impl.md

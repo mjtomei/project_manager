@@ -722,6 +722,203 @@ def pr_spec_approve(pr_id: str):
     trigger_tui_refresh()
 
 
+# ---------------------------------------------------------------------------
+# PR split
+# ---------------------------------------------------------------------------
+
+@pr.command("split")
+@click.argument("pr_id", default=None, required=False)
+@click.option("--fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
+def pr_split(pr_id: str | None, fresh: bool):
+    """Launch Claude to split a PR into smaller child PRs.
+
+    Opens an interactive session where Claude helps decompose the PR.
+    The session creates branches for each child PR and writes a split
+    manifest.  After the session, run ``pm pr split-load <pr_id>`` (the
+    session does this automatically) to push branches and create PR entries.
+    """
+    root = state_root()
+    data = store.load(root)
+
+    # Auto-select PR (same pattern as pr_start)
+    if pr_id is None:
+        active = data.get("project", {}).get("active_pr")
+        if active:
+            active_entry = store.get_pr(data, active)
+            if active_entry:
+                pr_id = active
+                click.echo(f"Using active PR {_pr_display_id(active_entry)}: {active_entry.get('title', '???')}")
+
+    if pr_id is None:
+        click.echo("No PR specified and no active PR.", err=True)
+        raise SystemExit(1)
+
+    pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
+
+    # Ensure workdir exists — the split agent needs the code
+    workdir = pr_entry.get("workdir")
+    if not workdir or not Path(workdir).exists():
+        workdir = _ensure_workdir(data, pr_entry, root)
+    if not workdir or not Path(workdir).exists():
+        click.echo(
+            f"No workdir for {_pr_display_id(pr_entry)}. "
+            f"Start the PR first with `pm pr start {pr_id}`.",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    pm_session = _get_pm_session()
+    prompt = prompt_gen.generate_split_prompt(data, pr_id, session_name=pm_session)
+
+    claude = find_claude()
+    if not claude:
+        click.echo(f"\n{'='*60}")
+        click.echo("SPLIT PROMPT:")
+        click.echo(f"{'='*60}\n")
+        click.echo(prompt)
+        return
+
+    display_id = _pr_display_id(pr_entry)
+    window_name = f"split-{display_id}"
+
+    # Try tmux first
+    if pm_session and tmux_mod.session_exists(pm_session):
+        existing = tmux_mod.find_window_by_name(pm_session, window_name)
+        if existing:
+            if fresh:
+                tmux_mod.kill_window(pm_session, existing["id"])
+                click.echo(f"Killed existing window '{window_name}'")
+            else:
+                tmux_mod.select_window(pm_session, existing["id"])
+                click.echo(f"Switched to existing window '{window_name}'")
+                return
+
+        cmd = build_claude_shell_cmd(prompt=prompt, cwd=workdir)
+        try:
+            tmux_mod.new_window(pm_session, window_name, cmd, workdir)
+            click.echo(f"Launched split session in tmux window '{window_name}' (session: {pm_session})")
+            return
+        except Exception as e:
+            click.echo(f"Failed to create tmux window: {e}", err=True)
+            click.echo("Launching Claude in current terminal...")
+
+    # Fallback: interactive in current terminal
+    session_key = f"pr:split:{pr_id}"
+    if fresh:
+        clear_session(root, session_key)
+    click.echo("Launching split session...")
+    launch_claude(prompt, cwd=workdir, session_key=session_key, pm_root=root,
+                  resume=not fresh)
+
+
+@pr.command("split-load")
+@click.argument("pr_id")
+def pr_split_load(pr_id: str):
+    """Load child PRs from a split manifest and push their branches.
+
+    Reads the split manifest at ``pm/specs/<pr_id>/split.md``, pushes
+    each child branch from the PR's workdir, and creates PR entries in
+    project.yaml.  Analogous to ``pm plan load``.
+    """
+    from pm_core.plan_parser import parse_split_prs
+
+    root = state_root()
+    data = store.load(root)
+    pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
+
+    # Read manifest
+    manifest_path = spec_gen.spec_dir(root, pr_id) / "split.md"
+    if not manifest_path.exists():
+        click.echo(f"Split manifest not found: {manifest_path}", err=True)
+        click.echo("Run `pm pr split` first to create the manifest.")
+        raise SystemExit(1)
+
+    manifest_text = manifest_path.read_text()
+    child_prs = parse_split_prs(manifest_text)
+    if not child_prs:
+        click.echo("No child PRs found in split manifest.", err=True)
+        raise SystemExit(1)
+
+    click.echo(f"Found {len(child_prs)} child PRs in split manifest:")
+
+    # Resolve workdir for pushing branches
+    workdir = pr_entry.get("workdir")
+    if not workdir or not Path(workdir).exists():
+        click.echo(
+            f"Workdir for {_pr_display_id(pr_entry)} not found. "
+            f"Cannot push child branches.",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    if data.get("prs") is None:
+        data["prs"] = []
+
+    # Pre-compute IDs for dependency resolution (same pattern as plan_load)
+    existing_ids = {p["id"] for p in data["prs"]}
+    existing_titles = {p.get("title", ""): p["id"] for p in data["prs"]}
+    title_to_id: dict[str, str] = {}
+    for child in child_prs:
+        if child["title"] in existing_titles:
+            title_to_id[child["title"]] = existing_titles[child["title"]]
+        else:
+            cid = store.generate_pr_id(child["title"], child.get("description", ""), existing_ids)
+            title_to_id[child["title"]] = cid
+            existing_ids.add(cid)
+
+    plan_id = pr_entry.get("plan")
+
+    created = 0
+    for child in child_prs:
+        child_id = title_to_id[child["title"]]
+
+        if child["title"] in existing_titles:
+            click.echo(f"  Skipped {child_id}: {child['title']} (already exists)")
+            continue
+
+        branch = child.get("branch", "").strip()
+        if not branch:
+            slug = store.slugify(child["title"])
+            branch = f"pm/{child_id}-{slug}"
+
+        # Push branch from workdir
+        click.echo(f"  Pushing branch {branch}...")
+        push_result = git_ops.run_git(
+            "push", "-u", "origin", branch, cwd=workdir, check=False,
+        )
+        if push_result.returncode != 0:
+            click.echo(f"  Warning: failed to push {branch}: {push_result.stderr.strip()}", err=True)
+
+        # Resolve depends_on titles to IDs
+        deps: list[str] = []
+        if child.get("depends_on"):
+            for dep_title in child["depends_on"].split(","):
+                dep_title = dep_title.strip()
+                if not dep_title:
+                    continue
+                if dep_title in title_to_id:
+                    deps.append(title_to_id[dep_title])
+                else:
+                    click.echo(f"  Warning: unknown dependency '{dep_title}' for '{child['title']}'", err=True)
+
+        entry = _make_pr_entry(
+            child_id, child["title"], branch,
+            plan=plan_id, depends_on=deps,
+            description=child.get("description", ""),
+        )
+        data["prs"].append(entry)
+        existing_titles[child["title"]] = child_id
+        created += 1
+        click.echo(f"  Created {child_id}: {child['title']}")
+
+    if created:
+        save_and_push(data, root, f"pm: split-load {pr_id} ({created} child PRs)")
+        trigger_tui_refresh()
+    click.echo(f"\nLoaded {created} child PRs from split of {_pr_display_id(pr_entry)}.")
+
+
 @pr.command("start")
 @click.argument("pr_id", default=None, required=False)
 @click.option("--workdir", default=None, help="Custom work directory")

@@ -179,6 +179,43 @@ def merge_pr(app, companion: bool = False) -> None:
     run_command(app, cmd, working_message=action_key, action_key=action_key)
 
 
+def split_pr(app) -> None:
+    """Split the selected PR, or load an existing split manifest.
+
+    If a split manifest (``pm/specs/<pr_id>/split.md``) already exists,
+    runs ``pm pr split-load`` to create the child PRs.  Otherwise launches
+    the interactive split session via ``pm pr split``.
+    """
+    from pm_core.tui.tech_tree import TechTree
+    from pm_core import spec_gen
+
+    tree = app.query_one("#tech-tree", TechTree)
+    pr_id = tree.selected_pr_id
+    _log.info("action: split_pr selected=%s", pr_id)
+    if not pr_id:
+        app.log_message("No PR selected")
+        return
+
+    # Check if split manifest already exists
+    has_manifest = False
+    if app._root:
+        manifest = spec_gen.spec_dir(app._root, pr_id) / "split.md"
+        has_manifest = manifest.exists()
+
+    if has_manifest:
+        action_key = f"Loading split {pr_id}"
+        if not guard_pr_action(app, action_key):
+            return
+        app._inflight_pr_action = action_key
+        run_command(app, f"pr split-load {pr_id}", working_message=action_key, action_key=action_key)
+    else:
+        action_key = f"Splitting {pr_id}"
+        if not guard_pr_action(app, action_key):
+            return
+        app._inflight_pr_action = action_key
+        run_command(app, f"pr split {pr_id}", working_message=action_key, action_key=action_key)
+
+
 # ---------------------------------------------------------------------------
 # Tree filtering
 # ---------------------------------------------------------------------------

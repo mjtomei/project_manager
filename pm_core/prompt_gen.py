@@ -289,6 +289,127 @@ Review the code changes in this PR for quality, correctness, and architectural f
     return base
 
 
+def generate_split_prompt(data: dict, pr_id: str,
+                          session_name: str | None = None) -> str:
+    """Generate a Claude Code prompt for splitting a PR into smaller pieces.
+
+    The prompt instructs Claude to discuss the split with the user, create
+    branches for each child PR in the workdir, and write a split manifest
+    file that post-processing (``pm pr split-load``) can parse.
+    """
+    pr = store.get_pr(data, pr_id)
+    if not pr:
+        raise ValueError(f"PR {pr_id} not found")
+
+    title = pr.get("title", "")
+    description = pr.get("description", "").strip()
+    branch = pr.get("branch", f"pm/{pr_id}")
+    base_branch = data.get("project", {}).get("base_branch", "master")
+    plan_ref = pr.get("plan")
+    plan = store.get_plan(data, plan_ref) if plan_ref else None
+    workdir = pr.get("workdir", "")
+
+    # Plan context
+    plan_block = ""
+    if plan:
+        plan_file = plan.get("file", "")
+        plan_block = f"""
+## Plan Context
+This PR is part of plan "{plan['name']}" ({plan['id']}).
+Plan file: {plan_file}
+Read the plan file for context on sibling PRs and overall goals.
+Child PRs must be added to the same plan: use `--plan {plan['id']}` when the
+manifest is loaded.
+"""
+
+    # Spec context
+    impl_spec_block = format_spec_for_prompt(pr, "impl")
+
+    # Dependency context
+    dep_lines = []
+    for dep_id in pr.get("depends_on") or []:
+        dep_pr = store.get_pr(data, dep_id)
+        if dep_pr:
+            status = dep_pr.get("status", "unknown").upper()
+            dep_lines.append(f"- {dep_id} ({dep_pr.get('title', '???')}) - {status}")
+    deps_block = ""
+    if dep_lines:
+        deps_block = "\n## Dependencies\nThis PR depends on:\n" + "\n".join(dep_lines) + "\n"
+
+    tui_block = tui_section(session_name) if session_name else ""
+
+    # Diff command depends on backend
+    backend_name = data.get("project", {}).get("backend", "vanilla")
+    if backend_name == "local":
+        diff_cmd = f"git diff {base_branch}...HEAD"
+    else:
+        diff_cmd = f"git diff origin/{base_branch}...HEAD"
+
+    manifest_path = f"pm/specs/{pr_id}/split.md"
+
+    prompt = f"""\
+You're splitting PR {pr_id}: "{title}" into smaller child PRs.
+
+## Original PR
+**Description:**
+{description}
+{deps_block}{plan_block}{impl_spec_block}
+## Your Task
+
+1. **Understand the PR**: Run `{diff_cmd}` to see the current changes. Read the
+   spec and code to understand what this PR does.
+
+2. **Discuss the split**: Talk with the user about how to decompose the work.
+   Consider which pieces are independent (can be worked in parallel) vs
+   sequential (must be ordered). Propose a split and iterate until agreed.
+
+3. **Create branches**: For each child PR, create a branch from `{base_branch}`
+   in this workdir and cherry-pick or write the relevant changes:
+   ```
+   git checkout -b pm/split-{pr_id}-<slug> origin/{base_branch}
+   # cherry-pick, write code, or copy files as needed
+   git add ... && git commit -m "..."
+   git checkout {branch}  # return to original branch
+   ```
+
+4. **Write the split manifest**: Write the file `{manifest_path}` with this
+   exact format:
+
+   ```markdown
+   ## Child PRs
+
+   ### PR: <child title>
+   - **description**: What this child PR does
+   - **branch**: pm/split-{pr_id}-<slug>
+   - **depends_on**: <comma-separated titles of other child PRs, or empty>
+
+   ---
+
+   ### PR: <next child title>
+   - **description**: ...
+   - **branch**: pm/split-{pr_id}-<slug>
+   - **depends_on**: ...
+   ```
+
+   Rules for the manifest:
+   - Each `### PR:` block needs title, description, branch, and depends_on
+   - The **branch** must match the branch you created in step 3
+   - **depends_on** uses child PR titles (not IDs), comma-separated
+   - Leave depends_on empty for independent child PRs
+
+5. **Load the split**: Run `pm pr split-load {pr_id}` to create the child PR
+   entries and push their branches. This reads the manifest and does the rest.
+
+## Important
+- Do NOT call `pm pr add` directly — the manifest is the output contract
+- Do NOT push branches — `split-load` handles pushing from outside the container
+- Branch naming convention: `pm/split-{pr_id}-<descriptive-slug>`
+- Keep the original branch `{branch}` intact — do not reset or modify it
+{tui_block}"""
+
+    return prompt.strip()
+
+
 def _review_loop_addendum(branch: str, iteration: int = 0,
                           loop_id: str = "") -> str:
     """Return the review loop addendum text for fix/commit/push instructions."""
