@@ -317,8 +317,7 @@ def generate_split_prompt(data: dict, pr_id: str,
 This PR is part of plan "{plan['name']}" ({plan['id']}).
 Plan file: {plan_file}
 Read the plan file for context on sibling PRs and overall goals.
-Child PRs must be added to the same plan: use `--plan {plan['id']}` when the
-manifest is loaded.
+Child PRs will automatically inherit this plan when the manifest is loaded.
 """
 
     # Spec context
@@ -401,12 +400,18 @@ You're splitting PR {pr_id}: "{title}" into smaller child PRs.
    - **depends_on** uses child PR titles (not IDs), comma-separated
    - Leave depends_on empty for independent child PRs
 
-5. **Load the split**: Run `pm pr split-load {pr_id}` to create the child PR
-   entries and push their branches. This reads the manifest and does the rest.
+5. **Load the split**: After writing the manifest, tell the user to press `P` in
+   the TUI (or run `pm pr split-load {pr_id}` from the project root directory)
+   to create the child PR entries and push their branches.
+   Do NOT run `split-load` yourself from this workdir — it must run from the
+   base project directory so it writes to the correct project.yaml.
+   Let them know it is safe to close this pane — loading runs instantly without
+   a session.
 
 ## Important
 - Do NOT call `pm pr add` directly — the manifest is the output contract
-- Do NOT push branches — `split-load` handles pushing from outside the container
+- Do NOT push branches — `split-load` handles pushing from the base directory
+- Do NOT run `pm pr split-load` from this workdir — it must run from the project root
 - Branch naming convention: `pm/split-{pr_id}-<descriptive-slug>`
 - Keep the original branch `{branch}` intact — do not reset or modify it
 {tui_block}"""
