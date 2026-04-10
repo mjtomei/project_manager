@@ -307,7 +307,6 @@ def generate_split_prompt(data: dict, pr_id: str,
     base_branch = data.get("project", {}).get("base_branch", "master")
     plan_ref = pr.get("plan")
     plan = store.get_plan(data, plan_ref) if plan_ref else None
-    workdir = pr.get("workdir", "")
 
     # Plan context
     plan_block = ""
@@ -338,12 +337,17 @@ manifest is loaded.
 
     tui_block = tui_section(session_name) if session_name else ""
 
-    # Diff command depends on backend
+    # Backend-appropriate refs and commands
     backend_name = data.get("project", {}).get("backend", "vanilla")
     if backend_name == "local":
         diff_cmd = f"git diff {base_branch}...HEAD"
+        base_ref = base_branch
     else:
         diff_cmd = f"git diff origin/{base_branch}...HEAD"
+        base_ref = f"origin/{base_branch}"
+
+    # Include PR notes (addendums)
+    pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
 
     manifest_path = f"pm/specs/{pr_id}/split.md"
 
@@ -353,7 +357,7 @@ You're splitting PR {pr_id}: "{title}" into smaller child PRs.
 ## Original PR
 **Description:**
 {description}
-{deps_block}{plan_block}{impl_spec_block}
+{pr_notes_block}{deps_block}{plan_block}{impl_spec_block}
 ## Your Task
 
 1. **Understand the PR**: Run `{diff_cmd}` to see the current changes. Read the
@@ -366,7 +370,7 @@ You're splitting PR {pr_id}: "{title}" into smaller child PRs.
 3. **Create branches**: For each child PR, create a branch from `{base_branch}`
    in this workdir and cherry-pick or write the relevant changes:
    ```
-   git checkout -b pm/split-{pr_id}-<slug> origin/{base_branch}
+   git checkout -b pm/split-{pr_id}-<slug> {base_ref}
    # cherry-pick, write code, or copy files as needed
    git add ... && git commit -m "..."
    git checkout {branch}  # return to original branch
