@@ -60,12 +60,12 @@
 ## Setup
 
 Testing requires:
-1. A project initialized with `pm init --backend local --no-import`
-2. At least one PR added with `pm pr add` that has been started (has a workdir)
-3. For split-load testing: a pre-written split manifest at the correct path in the workdir
-4. Python environment with pm installed (`pip install -e .`)
-5. For TUI testing: a tmux session via `pm session`
-6. For backend tests: separate projects with local and vanilla backends
+1. A project initialized with `pm init --backend local --no-import` for local backend tests
+2. A separate project initialized with `pm init --backend vanilla --no-import` inside a git repo with a remote, for vanilla backend tests (branch push path)
+3. At least one PR added with `pm pr add` that has been started (has a workdir)
+4. For split-load testing: a pre-written split manifest at the correct path in the workdir
+5. Python environment with pm installed (`pip install -e .`)
+6. For TUI testing: a tmux session via `pm session`
 
 ## Edge Cases
 
@@ -81,7 +81,10 @@ Testing requires:
 10. **`--fresh` flag** -- Kills existing tmux window or clears session state before starting
 11. **Existing tmux window without `--fresh`** -- Switches to existing window instead of creating new one
 12. **Local backend** -- Skips `git push` for child branches (no remote)
-13. **Plan inheritance** -- Child PRs inherit the parent's `plan` field; standalone PRs get `plan=None`
+13. **Vanilla backend** -- Pushes child branches to origin via `git push -u origin <branch>`; prompt uses `origin/<base_branch>` refs in diff command and branch creation base
+14. **Vanilla backend push success** -- `split-load` pushes each child branch and creates the PR entry
+15. **Vanilla backend push failure** -- A failed `git push` logs a warning but still creates the PR entry in project.yaml (branch can be pushed manually later)
+16. **Plan inheritance** -- Child PRs inherit the parent's `plan` field; standalone PRs get `plan=None`
 14. **z-prefix in TUI** -- `z a` triggers fresh split, plain `a` triggers normal split
 15. **TUI manifest detection** -- `split_pr()` checks workdir for existing manifest, runs split-load if found
 
@@ -93,6 +96,8 @@ Testing requires:
 - `pm pr split` errors gracefully when PR has no workdir
 - `pm pr split-load` creates correct PR entries in project.yaml with proper IDs, branches, dependencies, and plan inheritance
 - `pm pr split-load` skips push for local backend
+- `pm pr split-load` pushes branches for vanilla backend and continues on push failure
+- `pm pr split` prompt uses `origin/<base>` refs for vanilla backend, bare `<base>` for local
 - `pm pr split-load` skips already-existing PRs
 - TUI `a` keybinding dispatches correctly (split or split-load depending on manifest existence)
 - TUI action guards block split during other in-flight actions
@@ -101,6 +106,8 @@ Testing requires:
 - Manifest parsing returns wrong fields or wrong number of entries
 - `split-load` reads manifest from project root instead of workdir
 - `split-load` attempts to push branches on local backend
+- `split-load` fails to push branches on vanilla backend (should push successfully or warn on failure)
+- Prompt uses wrong ref format for the backend (e.g. `origin/` on local or bare ref on vanilla)
 - Dependency resolution fails (title-to-ID mapping broken)
 - TUI `a` keybinding fires during command bar input or guide mode
 - `--fresh` flag doesn't clear existing session/window
@@ -141,5 +148,5 @@ Testing requires:
 
 ### store / project state
 - **Contract**: `store.load()`, `store.get_pr()`, `store.generate_pr_id()`, `save_and_push()`.
-- **Scripted responses**: For unit tests, construct project data dicts directly. For integration tests, use a real `pm init --backend local` project.
+- **Scripted responses**: For unit tests, construct project data dicts directly. For integration tests, use real `pm init` projects (both local and vanilla backends).
 - **Unmocked**: All store operations in integration and manual tests use real project.yaml.
