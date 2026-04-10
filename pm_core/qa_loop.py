@@ -862,7 +862,6 @@ def _launch_scenario_0(
     """
     from pm_core import tmux as tmux_mod, prompt_gen
     from pm_core.claude_launcher import build_claude_shell_cmd
-    from pm_core.container import is_container_mode_enabled, _docker_available
     from pm_core import container as container_mod
     _qa_resolution = _resolve_qa_model(pr_data, data, session_type="qa_scenario")
 
@@ -1383,12 +1382,12 @@ def _relaunch_scenario_window(
     """
     from pm_core import tmux as tmux_mod, prompt_gen
     from pm_core.claude_launcher import build_claude_shell_cmd
-    from pm_core.container import is_container_mode_enabled, _docker_available
+    from pm_core.container import is_container_mode_enabled, _runtime_available
     from pm_core import container as container_mod
     _qa_resolution = _resolve_qa_model(pr_data, data, session_type="qa_scenario")
 
     win_name = _scenario_window_name(pr_data, scenario.index)
-    use_containers = is_container_mode_enabled() and _docker_available()
+    use_containers = is_container_mode_enabled() and _runtime_available()
 
     # New transcript for the relaunched session (old one is stale)
     transcript = _scenario_transcript_path(state.qa_workdir, scenario.index)
@@ -2218,13 +2217,13 @@ def run_qa_sync(
 
     # Determine execution mode (container vs tmux) early — needed by both
     # the planning phase (orphan cleanup, Scenario 0) and execution phase.
-    from pm_core.container import is_container_mode_enabled, _docker_available
+    from pm_core.container import is_container_mode_enabled, _runtime_available
     use_containers = is_container_mode_enabled()
     if use_containers:
-        if _docker_available():
+        if _runtime_available():
             _log.info("Container mode enabled for QA execution")
         else:
-            _log.warning("Container mode enabled but Docker unavailable "
+            _log.warning("Container mode enabled but runtime unavailable "
                          "— falling back to host execution")
             use_containers = False
 
