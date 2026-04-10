@@ -189,9 +189,10 @@ def split_pr(app) -> None:
     from pm_core.tui.tech_tree import TechTree
     from pm_core import spec_gen
 
+    fresh = app._consume_z()
     tree = app.query_one("#tech-tree", TechTree)
     pr_id = tree.selected_pr_id
-    _log.info("action: split_pr selected=%s", pr_id)
+    _log.info("action: split_pr selected=%s fresh=%s", pr_id, fresh)
     if not pr_id:
         app.log_message("No PR selected")
         return
@@ -202,7 +203,7 @@ def split_pr(app) -> None:
         manifest = spec_gen.spec_dir(app._root, pr_id) / "split.md"
         has_manifest = manifest.exists()
 
-    if has_manifest:
+    if has_manifest and not fresh:
         action_key = f"Loading split {pr_id}"
         if not guard_pr_action(app, action_key):
             return
@@ -213,7 +214,8 @@ def split_pr(app) -> None:
         if not guard_pr_action(app, action_key):
             return
         app._inflight_pr_action = action_key
-        run_command(app, f"pr split {pr_id}", working_message=action_key, action_key=action_key)
+        cmd = f"pr split --fresh {pr_id}" if fresh else f"pr split {pr_id}"
+        run_command(app, cmd, working_message=action_key, action_key=action_key)
 
 
 # ---------------------------------------------------------------------------

@@ -232,7 +232,7 @@ class ProjectManagerApp(App):
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """Disable single-key shortcuts when command bar is focused or in guide mode."""
         if action in ("start_pr", "start_pr_companion", "done_pr",
-                       "merge_pr", "merge_pr_companion",
+                       "merge_pr", "merge_pr_companion", "split_pr",
                        "edit_plan", "view_plan", "launch_notes",
                        "launch_meta", "launch_claude", "launch_guide",
                        "view_log", "refresh", "rebalance", "show_help",
@@ -244,7 +244,7 @@ class ProjectManagerApp(App):
                 _log.debug("check_action: blocked %s (command bar focused/pending)", action)
                 return False
         # Block PR actions when in guide mode or plans view (can't see the PR tree)
-        if action in ("start_pr", "start_pr_companion", "done_pr", "merge_pr", "merge_pr_companion", "launch_claude", "edit_plan", "view_plan", "hide_plan", "move_to_plan", "toggle_merged", "cycle_filter", "cycle_sort", "start_qa_on_pr"):
+        if action in ("start_pr", "start_pr_companion", "done_pr", "merge_pr", "merge_pr_companion", "split_pr", "launch_claude", "edit_plan", "view_plan", "hide_plan", "move_to_plan", "toggle_merged", "cycle_filter", "cycle_sort", "start_qa_on_pr"):
             prs = self._data.get("prs") or []
             if not prs and self._current_guide_step is not None:
                 _log.debug("check_action: blocked %s (in guide mode, no PRs)", action)
