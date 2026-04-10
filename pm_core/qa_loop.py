@@ -2026,8 +2026,6 @@ def _poll_worker_verdicts(
     # Queue of workers waiting to be launched
     _launch_queue: dict[int, list[QAScenario]] = dict(queued_workers or {})
 
-    retry_counts: dict[int, int] = {}
-
     # Mark scenarios without windows as INPUT_REQUIRED
     has_failed = False
     for wi, scenarios in worker_groups.items():
