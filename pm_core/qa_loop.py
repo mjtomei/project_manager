@@ -2204,17 +2204,8 @@ def _poll_worker_verdicts(
                     sc.pane_id = None
 
             if pane_id is None:
-                retries = retry_counts.get(wi, 0)
-                if retries < _SCENARIO_MAX_RETRIES:
-                    # Relaunch using the first scenario that doesn't have a verdict
-                    retry_counts[wi] = retries + 1
-                    backoff = _SCENARIO_RETRY_BASE * (2 ** retries)
-                    _log.warning("Worker %d window died — retry %d/%d",
-                                 wi, retries + 1, _SCENARIO_MAX_RETRIES)
-                    time.sleep(backoff)
-                    # For simplicity, mark remaining scenarios INPUT_REQUIRED
-                    # (full worker relaunch would need remaining-scenario prompt)
-                    pass  # fall through to INPUT_REQUIRED below
+                _log.warning("Worker %d window died — marking remaining "
+                             "scenarios INPUT_REQUIRED", wi)
                 for sc in scenarios:
                     if sc.index not in state.scenario_verdicts:
                         state.scenario_verdicts[sc.index] = VERDICT_INPUT_REQUIRED
