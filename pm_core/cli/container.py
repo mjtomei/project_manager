@@ -77,6 +77,11 @@ def container_set(key: str, value: str):
     """
     from pm_core.paths import set_global_setting_value
 
+    if key == "runtime" and value not in ("docker", "podman"):
+        click.echo(f"Error: runtime must be 'docker' or 'podman', got '{value}'",
+                    err=True)
+        raise SystemExit(1)
+
     setting_name = f"container-{key}"
     set_global_setting_value(setting_name, value)
     click.echo(f"Set {key} = {value}")

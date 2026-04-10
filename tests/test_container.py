@@ -213,6 +213,47 @@ class TestRuntimeAvailable:
         assert _docker_available is _runtime_available
 
 
+@patch("pm_core.container.container_is_running", return_value=False)
+class TestCreateContainerPodman:
+    """Podman-specific create_container tests."""
+
+    @patch("pm_core.container._get_runtime", return_value="podman")
+    @patch("pm_core.container.image_exists", return_value=True)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
+    def test_userns_keep_id_added_for_podman(self, mock_runtime_cmd, mock_rm,
+                                              mock_exists, mock_get_runtime,
+                                              _mock_running):
+        """Podman runtime adds --userns=keep-id to run commands."""
+        mock_runtime_cmd.return_value = MagicMock(stdout="id\n", returncode=0)
+        config = ContainerConfig()
+
+        with patch.object(Path, "is_dir", return_value=False):
+            create_container(name="test", config=config, workdir=Path("/w"))
+
+        run_call = mock_runtime_cmd.call_args_list[0]
+        args = run_call[0]
+        assert "--userns=keep-id" in args
+
+    @patch("pm_core.container._get_runtime", return_value="docker")
+    @patch("pm_core.container.image_exists", return_value=True)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
+    def test_userns_keep_id_not_added_for_docker(self, mock_runtime_cmd, mock_rm,
+                                                  mock_exists, mock_get_runtime,
+                                                  _mock_running):
+        """Docker runtime does NOT add --userns=keep-id."""
+        mock_runtime_cmd.return_value = MagicMock(stdout="id\n", returncode=0)
+        config = ContainerConfig()
+
+        with patch.object(Path, "is_dir", return_value=False):
+            create_container(name="test", config=config, workdir=Path("/w"))
+
+        run_call = mock_runtime_cmd.call_args_list[0]
+        args = run_call[0]
+        assert "--userns=keep-id" not in args
+
+
 @patch("pm_core.container._get_runtime", return_value="docker")
 @patch("pm_core.container.container_is_running", return_value=False)
 class TestCreateContainer:
