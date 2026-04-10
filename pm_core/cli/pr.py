@@ -869,6 +869,7 @@ def pr_split_load(pr_id: str):
             existing_ids.add(cid)
 
     plan_id = pr_entry.get("plan")
+    backend_name = data.get("project", {}).get("backend", "vanilla")
 
     created = 0
     for child in child_prs:
@@ -883,13 +884,14 @@ def pr_split_load(pr_id: str):
             slug = store.slugify(child["title"])
             branch = f"pm/{child_id}-{slug}"
 
-        # Push branch from workdir
-        click.echo(f"  Pushing branch {branch}...")
-        push_result = git_ops.run_git(
-            "push", "-u", "origin", branch, cwd=workdir, check=False,
-        )
-        if push_result.returncode != 0:
-            click.echo(f"  Warning: failed to push {branch}: {push_result.stderr.strip()}", err=True)
+        # Push branch from workdir (skip for local backend — no remote)
+        if backend_name != "local":
+            click.echo(f"  Pushing branch {branch}...")
+            push_result = git_ops.run_git(
+                "push", "-u", "origin", branch, cwd=workdir, check=False,
+            )
+            if push_result.returncode != 0:
+                click.echo(f"  Warning: failed to push {branch}: {push_result.stderr.strip()}", err=True)
 
         # Resolve depends_on titles to IDs
         deps: list[str] = []
