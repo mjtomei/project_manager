@@ -21,22 +21,23 @@ def container_group():
 def container_status():
     """Show current container isolation settings."""
     from pm_core.container import (
-        is_container_mode_enabled, load_container_config, _docker_available,
+        is_container_mode_enabled, load_container_config, _runtime_available,
     )
 
     enabled = is_container_mode_enabled()
     cfg = load_container_config()
-    docker_ok = _docker_available()
+    runtime_ok = _runtime_available()
 
     click.echo(f"Container mode:  {'enabled' if enabled else 'disabled'}")
-    click.echo(f"Docker available: {'yes' if docker_ok else 'no'}")
+    click.echo(f"Runtime:         {cfg.runtime}")
+    click.echo(f"Runtime available: {'yes' if runtime_ok else 'no'}")
     click.echo(f"Image:           {cfg.image}")
     click.echo(f"Memory limit:    {cfg.memory_limit}")
     click.echo(f"CPU limit:       {cfg.cpu_limit}")
 
-    if enabled and not docker_ok:
+    if enabled and not runtime_ok:
         click.echo(
-            "\nWarning: Container mode is enabled but Docker is not available.",
+            f"\nWarning: Container mode is enabled but {cfg.runtime} is not available.",
             err=True,
         )
 
@@ -45,10 +46,11 @@ def container_status():
 def container_enable():
     """Enable container isolation for Claude sessions."""
     from pm_core.paths import set_global_setting
-    from pm_core.container import _docker_available
+    from pm_core.container import _runtime_available, _get_runtime
 
-    if not _docker_available():
-        click.echo("Error: Docker is not available. Install and start Docker first.",
+    if not _runtime_available():
+        runtime = _get_runtime()
+        click.echo(f"Error: {runtime} is not available. Install and start {runtime} first.",
                     err=True)
         raise SystemExit(1)
 
@@ -66,12 +68,12 @@ def container_disable():
 
 
 @container_group.command("set")
-@click.argument("key", type=click.Choice(["image", "memory-limit", "cpu-limit"]))
+@click.argument("key", type=click.Choice(["image", "memory-limit", "cpu-limit", "runtime"]))
 @click.argument("value")
 def container_set(key: str, value: str):
     """Set a container configuration value.
 
-    Keys: image, memory-limit, cpu-limit
+    Keys: image, memory-limit, cpu-limit, runtime
     """
     from pm_core.paths import set_global_setting_value
 
@@ -293,9 +295,9 @@ image MUST satisfy these constraints or the setup will fail silently:
 @click.option("--pr", "pr_id", default=None, help="Filter by PR ID")
 def container_cleanup(pr_id: str | None):
     """Remove stale pm containers."""
-    from pm_core.container import _run_docker, remove_container, CONTAINER_PREFIX
+    from pm_core.container import _run_runtime, remove_container, CONTAINER_PREFIX
 
-    result = _run_docker(
+    result = _run_runtime(
         "ps", "-a", "--filter", f"name={CONTAINER_PREFIX}",
         "--format", "{{.Names}}\t{{.Status}}",
         check=False, timeout=30,

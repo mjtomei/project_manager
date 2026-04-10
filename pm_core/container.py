@@ -1,7 +1,7 @@
-"""Docker container isolation for Claude sessions.
+"""Container isolation for Claude sessions.
 
-Wraps Claude CLI commands in Docker containers to provide isolation.
-Each containerised session gets:
+Wraps Claude CLI commands in containers (Docker or Podman) to provide
+isolation.  Each containerised session gets:
   - The working directory bind-mounted as /workspace (read-write)
   - The host's claude binary bind-mounted at /usr/local/bin/claude
   - Claude config (~/.claude) mounted read-write for auth and session state
@@ -10,11 +10,11 @@ Each containerised session gets:
 
 The user experience is transparent: tmux windows look the same, but the
 claude process runs inside a resource-limited container via
-``docker exec -it`` rather than directly on the host.
+``<runtime> exec -it`` rather than directly on the host.
 
 Container lifecycle:
-  create (detached, sleeping) -> tmux window runs ``docker exec -it``
-  -> monitor via tmux pane capture (unchanged) -> cleanup: ``docker rm -f``
+  create (detached, sleeping) -> tmux window runs ``<runtime> exec -it``
+  -> monitor via tmux pane capture (unchanged) -> cleanup: ``<runtime> rm -f``
 
 Git push support:
   Credentials (SSH keys, HTTPS tokens) stay on the host.  Each container
@@ -34,7 +34,8 @@ Requirements:
     curl, jq, and build-essential.  It is auto-built from the bundled
     Dockerfile on first use.  Users can swap in a custom image via
     ``pm container set image <image>``.
-  - Docker must be installed and the current user must have access.
+  - Docker or Podman must be installed and the current user must have access.
+    Select the runtime via ``pm container set runtime podman`` (default: docker).
 """
 
 import os
@@ -58,6 +59,7 @@ class ContainerError(RuntimeError):
 DEFAULT_IMAGE = "pm-dev:latest"
 DEFAULT_MEMORY_LIMIT = "8g"
 DEFAULT_CPU_LIMIT = "4.0"
+DEFAULT_RUNTIME = "docker"
 CONTAINER_PREFIX = "pm-"
 _CONTAINER_WORKDIR = "/workspace"
 _CONTAINER_SCRATCH = "/scratch"
@@ -84,8 +86,15 @@ class ContainerConfig:
     image: str = DEFAULT_IMAGE
     memory_limit: str = DEFAULT_MEMORY_LIMIT
     cpu_limit: str = DEFAULT_CPU_LIMIT
+    runtime: str = DEFAULT_RUNTIME
     env: dict[str, str] = field(default_factory=dict)
     extra_mounts: list[str] = field(default_factory=list)
+
+
+def _get_runtime() -> str:
+    """Return the configured container runtime binary name."""
+    from pm_core.paths import get_global_setting_value
+    return get_global_setting_value("container-runtime", DEFAULT_RUNTIME)
 
 
 def _get_dockerfile_path() -> Path:
@@ -97,14 +106,15 @@ def build_image(tag: str = DEFAULT_IMAGE, quiet: bool = False) -> None:
     """Build the pm developer base image from the bundled Dockerfile.
 
     Args:
-        tag: Docker image tag (default: pm-dev:latest).
+        tag: Image tag (default: pm-dev:latest).
         quiet: Suppress build output.
     """
     dockerfile = _get_dockerfile_path()
     if not dockerfile.exists():
         raise FileNotFoundError(f"Dockerfile not found: {dockerfile}")
 
-    cmd = ["docker", "build", "-t", tag, "-f", str(dockerfile), str(dockerfile.parent)]
+    runtime = _get_runtime()
+    cmd = [runtime, "build", "-t", tag, "-f", str(dockerfile), str(dockerfile.parent)]
     _log.info("Building image %s from %s", tag, dockerfile)
     result = subprocess.run(
         cmd,
@@ -122,10 +132,11 @@ _build_lock = threading.Lock()
 
 
 def image_exists(tag: str = DEFAULT_IMAGE) -> bool:
-    """Check if a Docker image exists locally."""
+    """Check if the container image exists locally."""
+    runtime = _get_runtime()
     try:
         result = subprocess.run(
-            ["docker", "image", "inspect", tag],
+            [runtime, "image", "inspect", tag],
             capture_output=True, timeout=10,
         )
         return result.returncode == 0
@@ -133,16 +144,21 @@ def image_exists(tag: str = DEFAULT_IMAGE) -> bool:
         return False
 
 
-def _docker_available() -> bool:
-    """Check if docker is available and the daemon is running."""
+def _runtime_available() -> bool:
+    """Check if the configured container runtime is available."""
+    runtime = _get_runtime()
     try:
         result = subprocess.run(
-            ["docker", "info"],
+            [runtime, "info"],
             capture_output=True, timeout=10,
         )
         return result.returncode == 0
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return False
+
+
+# Backward-compatible alias
+_docker_available = _runtime_available
 
 
 def load_container_config() -> ContainerConfig:
@@ -155,6 +171,8 @@ def load_container_config() -> ContainerConfig:
             "container-memory-limit", DEFAULT_MEMORY_LIMIT),
         cpu_limit=get_global_setting_value(
             "container-cpu-limit", DEFAULT_CPU_LIMIT),
+        runtime=get_global_setting_value(
+            "container-runtime", DEFAULT_RUNTIME),
     )
 
 
@@ -164,17 +182,18 @@ def is_container_mode_enabled() -> bool:
     return get_global_setting("container-enabled")
 
 
-def _run_docker(*args: str, check: bool = True,
-                timeout: int | None = 30) -> subprocess.CompletedProcess:
-    """Run a docker command."""
-    cmd = ["docker", *args]
-    _log.debug("docker: %s", " ".join(cmd))
+def _run_runtime(*args: str, check: bool = True,
+                 timeout: int | None = 30) -> subprocess.CompletedProcess:
+    """Run a container runtime command."""
+    runtime = _get_runtime()
+    cmd = [runtime, *args]
+    _log.debug("container: %s", " ".join(cmd))
     result = subprocess.run(
         cmd, capture_output=True, text=True,
         check=False, timeout=timeout,
     )
     if result.returncode != 0:
-        _log.error("docker failed (rc=%d): %s\nstderr: %s\nstdout: %s",
+        _log.error("container runtime failed (rc=%d): %s\nstderr: %s\nstdout: %s",
                    result.returncode, " ".join(cmd),
                    result.stderr.strip()[:500], result.stdout.strip()[:200])
         if check:
@@ -184,9 +203,13 @@ def _run_docker(*args: str, check: bool = True,
     return result
 
 
+# Backward-compatible alias
+_run_docker = _run_runtime
+
+
 def container_is_running(name: str) -> bool:
     """Return True if a container with *name* exists and is running."""
-    result = _run_docker(
+    result = _run_runtime(
         "inspect", "-f", "{{.State.Running}}", name,
         check=False, timeout=10,
     )
@@ -396,7 +419,7 @@ def create_container(
     # The proxy socket directory is bind-mounted (not the socket file),
     # so a restarted proxy is visible to the container immediately.
     if container_is_running(name):
-        result = _run_docker(
+        result = _run_runtime(
             "inspect", "-f", "{{.Id}}", name,
             check=False, timeout=10,
         )
@@ -428,6 +451,7 @@ def create_container(
                 _log.info("Default image %s not found — building automatically", config.image)
                 build_image(tag=config.image, quiet=True)
 
+    runtime = _get_runtime()
     cmd = [
         "run", "-d",
         "--name", name,
@@ -436,6 +460,11 @@ def create_container(
         "-v", f"{workdir}:{_CONTAINER_WORKDIR}",
         "-w", _CONTAINER_WORKDIR,
     ]
+
+    # Podman rootless: map host UID into the container without manual
+    # useradd/groupadd.  Harmless under Podman rootful (no-op).
+    if "podman" in runtime:
+        cmd.extend(["--userns=keep-id"])
 
     # --- Claude binary ---
     # Mount the resolved claude binary into the container so the
@@ -549,7 +578,7 @@ def create_container(
     setup = "; ".join(setup_parts)
     cmd.extend([config.image, "bash", "-c", setup])
 
-    result = _run_docker(*cmd, timeout=60)
+    result = _run_runtime(*cmd, timeout=60)
     container_id = result.stdout.strip()
 
     # Wait for the setup script to finish (sentinel file appears).
@@ -562,7 +591,7 @@ def create_container(
     _setup_ready = False
     _deadline = time.monotonic() + _SETUP_TIMEOUT
     while time.monotonic() < _deadline:
-        check = _run_docker(
+        check = _run_runtime(
             "exec", name, "test", "-f", _READY_SENTINEL,
             check=False, timeout=5,
         )
@@ -583,10 +612,10 @@ def create_container(
     # Copy .claude.json into the container (not bind-mounted — see note above)
     if _claude_json_src.exists():
         try:
-            _run_docker("cp", str(_claude_json_src),
+            _run_runtime("cp", str(_claude_json_src),
                         f"{name}:{_CONTAINER_HOME}/.claude.json",
                         timeout=10)
-            _run_docker("exec", name, "chown",
+            _run_runtime("exec", name, "chown",
                         f"{host_uid}:{host_gid}",
                         f"{_CONTAINER_HOME}/.claude.json",
                         timeout=5)
@@ -610,14 +639,15 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
     push proxy socket file and its parent directory.  This triggers the
     proxy daemon thread to self-terminate (it checks for socket existence).
     """
+    runtime = _get_runtime()
     escaped = shlex.quote(shell_cmd)
-    exec_part = f"docker exec -it -u {_CONTAINER_USER} {shlex.quote(name)} bash -c {escaped}"
+    exec_part = f"{runtime} exec -it -u {_CONTAINER_USER} {shlex.quote(name)} bash -c {escaped}"
     if cleanup:
         cleanup_parts = []
         if proxy_socket_path:
             cleanup_parts.append(f"rm -f {shlex.quote(proxy_socket_path)}")
         cleanup_parts.append(
-            f"docker rm -f {shlex.quote(name)} >/dev/null 2>&1")
+            f"{runtime} rm -f {shlex.quote(name)} >/dev/null 2>&1")
         if proxy_socket_path:
             sock_dir = str(Path(proxy_socket_path).parent)
             cleanup_parts.append(f"rmdir {shlex.quote(sock_dir)} 2>/dev/null")
@@ -642,13 +672,13 @@ def remove_container(name: str) -> None:
     import time
     from pm_core.push_proxy import stop_push_proxy
     stop_push_proxy(name)
-    _run_docker("rm", "-f", name, check=False, timeout=30)
+    _run_runtime("rm", "-f", name, check=False, timeout=30)
     # Wait for the container to be fully gone.  When another rm is already in
     # flight the daemon returns "removal already in progress" and our rm returns
     # immediately, but the container still exists for a brief moment.
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
-        result = _run_docker("inspect", name, check=False, timeout=5)
+        result = _run_runtime("inspect", name, check=False, timeout=5)
         if result.returncode != 0:
             return  # container is gone
         time.sleep(0.1)
@@ -710,9 +740,10 @@ def wrap_claude_cmd(
     except Exception:
         _log.error("Failed to create container %s — aborting (container mode is enabled)",
                    cname, exc_info=True)
+        runtime = _get_runtime()
         raise ContainerError(
             f"Failed to create container '{cname}'. "
-            f"Is Docker running? Disable container mode with 'pm container disable' "
+            f"Is {runtime} running? Disable container mode with 'pm container disable' "
             f"to run without containers."
         )
 
@@ -793,7 +824,7 @@ def cleanup_qa_containers(pr_id: str, loop_id: str,
 
     count = 0
     for prefix in prefixes:
-        result = _run_docker(
+        result = _run_runtime(
             "ps", "-a", "--filter", f"name={prefix}",
             "--format", "{{.Names}}",
             check=False, timeout=30,
@@ -838,7 +869,7 @@ def cleanup_orphaned_qa_containers(session: str, pr_id: str,
 
     count = 0
     for prefix in prefixes:
-        result = _run_docker(
+        result = _run_runtime(
             "ps", "-a", "--filter", f"name={prefix}",
             "--format", "{{.Names}}",
             check=False, timeout=30,
@@ -879,7 +910,7 @@ def cleanup_session_containers(session_tag: str) -> int:
     Returns the number of containers removed.
     """
     prefix = f"{CONTAINER_PREFIX}{session_tag}-"
-    result = _run_docker(
+    result = _run_runtime(
         "ps", "-a", "--filter", f"name={prefix}",
         "--format", "{{.Names}}",
         check=False, timeout=30,
@@ -901,7 +932,7 @@ def cleanup_session_containers(session_tag: str) -> int:
 
 def cleanup_all_containers() -> int:
     """Remove all pm containers. Returns count removed."""
-    result = _run_docker(
+    result = _run_runtime(
         "ps", "-a", "--filter", f"name={CONTAINER_PREFIX}",
         "--format", "{{.Names}}",
         check=False, timeout=30,

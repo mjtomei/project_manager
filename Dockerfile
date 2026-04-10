@@ -14,7 +14,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-venv \
     ca-certificates \
     gnupg \
+    podman \
+    fuse-overlayfs \
+    slirp4netns \
+    uidmap \
     && rm -rf /var/lib/apt/lists/*
+
+# Configure Podman for nested container use (vfs driver avoids needing
+# /dev/fuse, which would require --device or --privileged on the outer
+# container).
+RUN mkdir -p /etc/containers && \
+    printf '[storage]\ndriver = "vfs"\n' > /etc/containers/storage.conf && \
+    printf '[containers]\nnetns = "host"\n' > /etc/containers/containers.conf
 
 # Install Node.js 22.x LTS via NodeSource
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
