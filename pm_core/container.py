@@ -652,10 +652,15 @@ def create_container(
             _run_runtime("cp", str(_claude_json_src),
                         f"{name}:{_CONTAINER_HOME}/.claude.json",
                         timeout=10)
-            _run_runtime("exec", name, "chown",
-                        f"{host_uid}:{host_gid}",
-                        f"{_CONTAINER_HOME}/.claude.json",
-                        timeout=5)
+            # Under Docker (root), fix ownership so the pm user can read it.
+            # Under Podman (--userns=keep-id), the file already has the
+            # correct ownership via namespace mapping, and chown would fail
+            # because the process is not root.
+            if not _is_podman:
+                _run_runtime("exec", name, "chown",
+                            f"{host_uid}:{host_gid}",
+                            f"{_CONTAINER_HOME}/.claude.json",
+                            timeout=5)
         except Exception:
             _log.warning("Failed to copy .claude.json into container %s",
                          name, exc_info=True)
@@ -666,7 +671,7 @@ def create_container(
 
 def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
                    proxy_socket_path: str | None = None) -> str:
-    """Build a ``docker exec -it`` command string for use in a tmux window.
+    """Build a ``<runtime> exec -it`` command string for use in a tmux window.
 
     When the exec'd process exits, the container is removed (unless
     *cleanup* is False).  The tmux pane stays open so the user can
