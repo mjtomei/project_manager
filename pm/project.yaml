@@ -1005,6 +1005,31 @@ prs:
       app state: PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-f38005f-1fd1b3aeb3203659)'
     created_at: '2026-04-09T21:20:04Z'
     last_edited: '2026-04-09T21:20:04Z'
+  - id: note-5482f04
+    text: 'QA NEEDS_WORK: Unit tests — test_store_locking.py and test_store.py pass:
+      PASS; Regression — all pre-existing test suites pass: NEEDS_WORK; Code audit
+      — no bare store.save() in CLI or TUI modules: PASS; Code audit — no network
+      calls inside locked_update callbacks: PASS; CLI integration — pm pr add creates
+      correct on-disk state: PASS; CLI integration — pm pr edit updates fields atomically:
+      PASS; CLI integration — pm pr select, pm plan add, pm model set: PASS; CLI integration
+      — pm pr close removes PR and cleans up: PASS; CLI integration — pm pr note add/edit/delete:
+      PASS; Concurrent pm pr add — no lost writes: PASS; Concurrent duplicate-title
+      prevention in pr_add: PASS; StoreLockTimeout — CLI error message: PASS; pm edit
+      command — editor under lock: PASS; Atomic write — file never truncated: PASS;
+      Read-only permissions and YAML header after save: PASS; Exception in mutation
+      function — lock released, data unsaved: PASS; ProjectYamlParseError — corrupt
+      YAML handling: PASS; TUI sync graceful lock timeout handling: PASS; pr_sync
+      — network calls before lock, results applied inside lock: PASS; spec_gen — locked_update
+      for generate, approve, reject: PASS; plan_load and GitHub import — concurrent-safe
+      duplicate checks: PASS; watcher_ui — intentional store.save for creation is
+      preserved: PASS; _finalize_merge — loads fresh inside lock: PASS; Lock file
+      left on disk after unlock — standard fcntl pattern: PASS; make_plan_entry helper
+      used consistently: PASS; helpers.py — _ensure_workdir and _resolve_repo_id use
+      locked_update: PASS; background_sync handles corrupt YAML without clobbering
+      app state: PASS; store.load() bare calls in TUI with ProjectYamlParseError handling:
+      PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-f38005f-c31d04be54fae4fa)'
+    created_at: '2026-04-09T23:47:57Z'
+    last_edited: '2026-04-09T23:47:57Z'
   spec_qa: /home/mjtomei/project_manager/pm/specs/pr-f38005f/qa.md
 - id: pr-c11d04f
   plan: plan-003
@@ -7982,11 +8007,19 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/155
   gh_pr_number: 155
   created_at: '2026-04-06T18:53:56.850825+00:00'
-  updated_at: '2026-04-07T23:07:11.606301+00:00'
+  updated_at: '2026-04-10T14:00:25.845943+00:00'
   started_at: '2026-04-06T19:06:18.130597+00:00'
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-cf90659
+    text: 'Mostly redundant with #143. #143 cleans up any container whose tmux window
+      is gone (covers crash/restart). #155 only adds coverage for the narrow case
+      where a merged PR''s container survives because _finalize_merge failed silently
+      while the session is still running. If #143 lands, consider folding the bare-except
+      fix from #155 into it and closing this PR.'
+    created_at: '2026-04-10T14:00:25Z'
+    last_edited: '2026-04-10T14:00:25Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-cb2a29d-kill-tmux-windows-and-containers-for-29829145
 - id: pr-fc6db6a
   plan: bugs
@@ -8799,7 +8832,7 @@ prs:
   plan: plan-qa
   title: Batched QA scenario execution
   branch: pm/pr-d8cfa16-batched-qa-scenario-execution
-  status: in_progress
+  status: in_review
   depends_on: []
   description: 'Instead of spawning one session per QA scenario, batch scenarios into
     a configurable number of worker sessions. The scenario generator/concretizer groups
@@ -8860,11 +8893,50 @@ prs:
     when the user switches to the TUI pane and starts typing prose meant for a Claude
     session. Non-destructive keys (r, v, n, p, etc.) remain single-tap.
   agent_machine: null
+  gh_pr: https://github.com/mjtomei/project_manager/pull/163
+  gh_pr_number: 163
+  created_at: '2026-04-09T22:50:59.769426+00:00'
+  updated_at: '2026-04-10T14:07:52.235631+00:00'
+  started_at: null
+  reviewed_at: '2026-04-10T14:07:52.235621+00:00'
+  merged_at: null
+  notes: []
+- id: pr-4db3696
+  plan: null
+  title: Add pm pr split command for breaking large PRs into smaller pieces
+  branch: pm/pr-4db3696-add-pm-pr-split-command-for-breaking-large-prs-int
+  status: pending
+  depends_on: []
+  description: "Add a 'pm pr split' command (CLI + TUI keybinding) that launches a\
+    \ Claude session to decompose a large PR into multiple smaller PRs.\n\nWorkflow:\n\
+    1. User selects a PR in the TUI and triggers split (or runs 'pm pr split <pr_id>'\
+    \ from CLI)\n2. Opens a new window with a Claude session that:\n   a. Reads the\
+    \ PR's current diff/branch, spec file, and plan context\n   b. Works with the\
+    \ user to decide how to split the work\n   c. Creates new child PRs (with plan\
+    \ and depends_on set) and writes spec files for each\n   d. Transitions the original\
+    \ PR to planning-only: resets its branch so the only changes are the new spec\
+    \ files\n3. After merging the planning PR, the user can start implementation/review\
+    \ on each child PR independently\n\nKey design points:\n- The original PR becomes\
+    \ a planning-only PR — its branch is rewritten to contain only the new specs in\
+    \ pm/specs/\n- Child PRs get the original PR's plan field set, so plan review\
+    \ sees them\n- Child PRs get depends_on wired up between them as needed\n- The\
+    \ split prompt should be aware of the spec file format and write proper impl specs\
+    \ for each child\n- No code relies on deriving PR IDs from branch names, so child\
+    \ PRs with new branches work fine\n- Plan markdown reconciliation happens naturally\
+    \ via 'pm plan review' since the review prompt pulls PRs from project.yaml not\
+    \ the markdown"
+  agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-10T11:34:57.339723+00:00'
-  updated_at: '2026-04-10T11:34:57.339723+00:00'
+  updated_at: '2026-04-10T14:15:37.331993+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-654a677
+    text: Must work across all three git backends (bare local, GitHub, and workdir-based).
+      Branch operations (reset, cherry-pick, rebase) and PR creation need to go through
+      the backend abstraction layer, not assume GitHub.
+    created_at: '2026-04-10T14:15:37Z'
+    last_edited: '2026-04-10T14:15:37Z'
