@@ -235,7 +235,8 @@ _BOOLEAN_SETTINGS = {"hide-assist", "hide-merged", "beginner-mode", "auto-cleanu
                      "qa-verify-pass"}
 _INT_SETTINGS = {"min-pane-width", "qa-max-scenarios", "qa-verify-retries",
                  "qa-verdict-reminder-timeout"}
-_ENUM_SETTINGS = {"spec-mode": {"auto", "review", "prompt"}}
+_ENUM_SETTINGS = {"spec-mode": {"auto", "review", "prompt"},
+                  "container-runtime": {"docker", "podman"}}
 _SETTING_DEFAULTS = {
     "hide-assist": "off",
     "hide-merged": "off",
