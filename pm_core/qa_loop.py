@@ -1697,21 +1697,27 @@ def _launch_workers_in_containers(
                          worker_index)
             return
 
+        # Read instruction content and install files before clearing paths.
+        # We must store instruction_content per-scenario before setting
+        # sc.instruction_path = None, otherwise the concretize loop below
+        # can't read the instructions.
+        instruction_contents: dict[int, str | None] = {}
         for sc in scenarios:
             sc.worktree_path = str(clone_path)
             sc.report_path = _scenario_report_path(state.qa_workdir, sc.index)
 
-            instruction_content: str | None = None
+            instr: str | None = None
             if pm_root and sc.instruction_path:
                 src = pm_root / "qa" / sc.instruction_path
                 if src.is_file():
                     try:
-                        instruction_content = src.read_text()
+                        instr = src.read_text()
                     except Exception:
                         pass
                 _install_instruction_file(pm_root, sc, scratch_path,
                                           scratch_dir=container_scratch)
                 sc.instruction_path = None
+            instruction_contents[sc.index] = instr
 
         # Create container for this worker
         cname = container_mod.qa_container_name(
@@ -1736,14 +1742,7 @@ def _launch_workers_in_containers(
         # Concretize in parallel using container
         concretize_threads = []
         for sc in scenarios:
-            instruction_content = None
-            if pm_root and sc.instruction_path:
-                src = pm_root / "qa" / sc.instruction_path
-                if src.is_file():
-                    try:
-                        instruction_content = src.read_text()
-                    except Exception:
-                        pass
+            instruction_content = instruction_contents.get(sc.index)
 
             concretize_cmd = _build_concretize_cmd(
                 sc, pr_data, data, cwd=container_workdir,
@@ -3281,11 +3280,7 @@ def run_qa_sync(
     concurrency_cap = max_scenarios if max_scenarios is not None else _get_max_scenarios()
 
     # Determine batched worker mode
-    worker_count = _get_worker_count() if not hasattr(state, '_worker_count_override') else 0
-    # Re-read worker count (may not have been set during planning if
-    # planning was skipped due to pre-loaded scenarios)
-    if not state.planning_phase:
-        worker_count = _get_worker_count()
+    worker_count = _get_worker_count()
 
     repo_root = Path(workdir_path) if workdir_path and Path(workdir_path).is_dir() else None
 

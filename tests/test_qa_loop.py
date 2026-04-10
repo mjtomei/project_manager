@@ -13,11 +13,13 @@ from pm_core.qa_loop import (
     QALoopState,
     create_qa_workdir,
     create_scenario_workdir,
+    group_scenarios_into_workers,
     VERDICT_PASS,
     VERDICT_NEEDS_WORK,
     VERDICT_INPUT_REQUIRED,
     ALL_VERDICTS,
     _scenario_window_name,
+    _worker_window_name,
     _cleanup_stale_scenario_windows,
     _tail_has_marker_on_own_line,
     _build_verification_prompt,
@@ -26,6 +28,7 @@ from pm_core.qa_loop import (
     _extract_flagged_reason,
     _get_verification_max_retries,
     _install_instruction_file,
+    _extract_worker_verdicts,
     _verdict_context_fingerprint,
     _VERIFICATION_MAX_PANE_LINES,
     _DEFAULT_VERIFICATION_MAX_RETRIES,
@@ -2665,3 +2668,189 @@ STEPS: do something
 QA_PLAN_END"""
         scenarios = parse_qa_plan(output)
         assert scenarios[0].mock_ids == []
+
+
+class TestParseQAPlanGroupField:
+    """Tests for GROUP field parsing in batched worker mode."""
+
+    def test_group_parsed(self):
+        output = """QA_PLAN_START
+SCENARIO 1: Test A
+FOCUS: area-a
+INSTRUCTION: none
+MOCKS: none
+GROUP: 2
+STEPS: do something
+QA_PLAN_END"""
+        scenarios = parse_qa_plan(output)
+        assert len(scenarios) == 1
+        assert scenarios[0].group == 2
+
+    def test_group_missing_defaults_to_none(self):
+        output = """QA_PLAN_START
+SCENARIO 1: Test A
+FOCUS: area-a
+INSTRUCTION: none
+MOCKS: none
+STEPS: do something
+QA_PLAN_END"""
+        scenarios = parse_qa_plan(output)
+        assert scenarios[0].group is None
+
+    def test_multiple_scenarios_different_groups(self):
+        output = """QA_PLAN_START
+SCENARIO 1: Test A
+FOCUS: area-a
+INSTRUCTION: none
+MOCKS: none
+GROUP: 1
+STEPS: step a
+
+SCENARIO 2: Test B
+FOCUS: area-b
+INSTRUCTION: none
+MOCKS: none
+GROUP: 2
+STEPS: step b
+
+SCENARIO 3: Test C
+FOCUS: area-c
+INSTRUCTION: none
+MOCKS: none
+GROUP: 1
+STEPS: step c
+QA_PLAN_END"""
+        scenarios = parse_qa_plan(output)
+        assert len(scenarios) == 3
+        assert scenarios[0].group == 1
+        assert scenarios[1].group == 2
+        assert scenarios[2].group == 1
+
+    def test_steps_not_truncated_by_group_field(self):
+        """GROUP field before STEPS should not eat into step content."""
+        output = """QA_PLAN_START
+SCENARIO 1: Test
+FOCUS: area
+INSTRUCTION: none
+MOCKS: none
+GROUP: 1
+STEPS: first step
+second step
+third step
+QA_PLAN_END"""
+        scenarios = parse_qa_plan(output)
+        assert "third step" in scenarios[0].steps
+
+
+class TestGroupScenariosIntoWorkers:
+    """Tests for group_scenarios_into_workers."""
+
+    def _make_scenario(self, index, group=None):
+        return QAScenario(index=index, title=f"S{index}", focus="f",
+                          steps="s", group=group)
+
+    def test_disabled_returns_empty(self):
+        scs = [self._make_scenario(1)]
+        assert group_scenarios_into_workers(scs, worker_count=0) == {}
+
+    def test_empty_scenarios_returns_empty(self):
+        assert group_scenarios_into_workers([], worker_count=3) == {}
+
+    def test_fixed_count_with_groups(self):
+        scs = [self._make_scenario(1, group=1),
+               self._make_scenario(2, group=2),
+               self._make_scenario(3, group=1)]
+        result = group_scenarios_into_workers(scs, worker_count=2)
+        assert len(result) == 2
+        assert len(result[1]) == 2  # scenarios 1 and 3
+        assert len(result[2]) == 1  # scenario 2
+
+    def test_round_robin_fallback_for_unassigned(self):
+        scs = [self._make_scenario(1), self._make_scenario(2),
+               self._make_scenario(3)]
+        result = group_scenarios_into_workers(scs, worker_count=2)
+        # Should distribute across 2 workers
+        total = sum(len(v) for v in result.values())
+        assert total == 3
+        assert len(result) == 2
+
+    def test_planner_decides_groups(self):
+        scs = [self._make_scenario(1, group=1),
+               self._make_scenario(2, group=2),
+               self._make_scenario(3, group=3)]
+        result = group_scenarios_into_workers(scs, worker_count=-1)
+        assert len(result) == 3
+
+    def test_planner_decides_no_groups_defaults_to_one(self):
+        scs = [self._make_scenario(1), self._make_scenario(2)]
+        result = group_scenarios_into_workers(scs, worker_count=-1)
+        assert len(result) == 1
+        assert len(result[1]) == 2
+
+    def test_out_of_range_group_gets_round_robin(self):
+        scs = [self._make_scenario(1, group=1),
+               self._make_scenario(2, group=99)]  # out of range
+        result = group_scenarios_into_workers(scs, worker_count=2)
+        # Scenario 2 should be round-robined
+        total = sum(len(v) for v in result.values())
+        assert total == 2
+
+    def test_empty_workers_removed(self):
+        scs = [self._make_scenario(1, group=1)]
+        result = group_scenarios_into_workers(scs, worker_count=3)
+        # Workers 2 and 3 should be removed
+        assert 2 not in result
+        assert 3 not in result
+        assert 1 in result
+
+
+class TestExtractWorkerVerdicts:
+    """Tests for _extract_worker_verdicts."""
+
+    def test_basic_extraction(self):
+        content = "SCENARIO_1_VERDICT: PASS\nSCENARIO_3_VERDICT: NEEDS_WORK\n"
+        result = _extract_worker_verdicts(content)
+        assert result == {1: "PASS", 3: "NEEDS_WORK"}
+
+    def test_input_required(self):
+        content = "SCENARIO_2_VERDICT: INPUT_REQUIRED\n"
+        result = _extract_worker_verdicts(content)
+        assert result == {2: "INPUT_REQUIRED"}
+
+    def test_no_verdicts(self):
+        content = "just some output\nno verdicts here\n"
+        assert _extract_worker_verdicts(content) == {}
+
+    def test_leading_whitespace(self):
+        content = "  SCENARIO_5_VERDICT: PASS\n"
+        result = _extract_worker_verdicts(content)
+        assert result == {5: "PASS"}
+
+    def test_multiple_verdicts_last_wins(self):
+        """If a scenario re-emits a verdict, the last one should win."""
+        content = ("SCENARIO_1_VERDICT: NEEDS_WORK\n"
+                   "some output\n"
+                   "SCENARIO_1_VERDICT: PASS\n")
+        result = _extract_worker_verdicts(content)
+        assert result == {1: "PASS"}
+
+    def test_mixed_content(self):
+        content = """Running tests...
+All tests passed.
+SCENARIO_1_VERDICT: PASS
+Now checking scenario 2...
+Found issue in handler.
+SCENARIO_2_VERDICT: NEEDS_WORK
+"""
+        result = _extract_worker_verdicts(content)
+        assert result == {1: "PASS", 2: "NEEDS_WORK"}
+
+
+class TestWorkerWindowName:
+    def test_with_gh_pr_number(self):
+        pr_data = {"gh_pr_number": 42}
+        assert _worker_window_name(pr_data, 1) == "qa-#42-w1"
+
+    def test_without_gh_pr_number(self):
+        pr_data = {"id": "abc123"}
+        assert _worker_window_name(pr_data, 3) == "qa-abc123-w3"
