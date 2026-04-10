@@ -236,6 +236,45 @@ class TestCreateContainerPodman:
         args = run_call[0]
         assert "--userns=keep-id" in args
 
+    @patch("pm_core.container._get_runtime", return_value="podman")
+    @patch("pm_core.container.image_exists", return_value=True)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
+    def test_podman_skips_useradd(self, mock_runtime_cmd, mock_rm,
+                                   mock_exists, mock_get_runtime,
+                                   _mock_running):
+        """Podman setup script does NOT run groupadd/useradd."""
+        mock_runtime_cmd.return_value = MagicMock(stdout="id\n", returncode=0)
+        config = ContainerConfig()
+
+        with patch.object(Path, "is_dir", return_value=False):
+            create_container(name="test", config=config, workdir=Path("/w"))
+
+        run_call = mock_runtime_cmd.call_args_list[0]
+        setup_script = run_call[0][-1]  # last arg is the bash -c script
+        assert "groupadd" not in setup_script
+        assert "useradd" not in setup_script
+        assert "mkdir -p /home/pm" in setup_script
+
+    @patch("pm_core.container._get_runtime", return_value="podman")
+    @patch("pm_core.container.image_exists", return_value=True)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
+    def test_podman_no_su_in_git_config(self, mock_runtime_cmd, mock_rm,
+                                         mock_exists, mock_get_runtime,
+                                         _mock_running):
+        """Podman setup script does NOT use su for git config."""
+        mock_runtime_cmd.return_value = MagicMock(stdout="id\n", returncode=0)
+        config = ContainerConfig()
+
+        with patch.object(Path, "is_dir", return_value=False):
+            create_container(name="test", config=config, workdir=Path("/w"))
+
+        run_call = mock_runtime_cmd.call_args_list[0]
+        setup_script = run_call[0][-1]
+        assert "su -" not in setup_script
+        assert "su -c" not in setup_script
+
     @patch("pm_core.container._get_runtime", return_value="docker")
     @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container.remove_container")
@@ -253,6 +292,25 @@ class TestCreateContainerPodman:
         run_call = mock_runtime_cmd.call_args_list[0]
         args = run_call[0]
         assert "--userns=keep-id" not in args
+
+    @patch("pm_core.container._get_runtime", return_value="docker")
+    @patch("pm_core.container.image_exists", return_value=True)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
+    def test_docker_uses_useradd(self, mock_runtime_cmd, mock_rm,
+                                  mock_exists, mock_get_runtime,
+                                  _mock_running):
+        """Docker setup script runs groupadd/useradd."""
+        mock_runtime_cmd.return_value = MagicMock(stdout="id\n", returncode=0)
+        config = ContainerConfig()
+
+        with patch.object(Path, "is_dir", return_value=False):
+            create_container(name="test", config=config, workdir=Path("/w"))
+
+        run_call = mock_runtime_cmd.call_args_list[0]
+        setup_script = run_call[0][-1]
+        assert "groupadd" in setup_script
+        assert "useradd" in setup_script
 
 
 @patch("pm_core.container._get_runtime", return_value="docker")
@@ -637,6 +695,8 @@ class TestBuildExecCmd:
         cmd = build_exec_cmd("my-container", "claude 'hi'")
         assert "podman exec -it" in cmd
         assert "podman rm -f" in cmd
+        # Podman should NOT use -u pm (user is already mapped via --userns=keep-id)
+        assert f"-u {_CONTAINER_USER}" not in cmd
 
 
 class TestWrapClaudeCmd:

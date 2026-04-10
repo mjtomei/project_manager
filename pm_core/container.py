@@ -224,24 +224,35 @@ def container_is_running(name: str) -> bool:
 def _build_git_setup_script(
     has_push_proxy: bool = False,
     host_workdir: str | None = None,
+    is_podman: bool = False,
 ) -> str:
     """Build a shell script snippet to configure git inside the container.
 
-    This script runs as root at container start, configuring:
+    This script runs at container start, configuring:
       - safe.directory for /workspace
       - A git wrapper that forwards ``git push`` to the host-side push proxy
         (if has_push_proxy is True)
+
+    Under Docker (root), falls back to ``su - pm`` for git config.
+    Under Podman (--userns=keep-id), the process is already the correct
+    user, so direct git config works and ``su`` is not used.
     """
     lines: list[str] = []
 
     # Set safe directory for /workspace.
-    # Use plain git config (works when already running as pm) with su
-    # fallback (works when running as root in the default image).
-    lines.append(
-        f"git config --global --add safe.directory {_CONTAINER_WORKDIR} 2>/dev/null || "
-        f"su - {_CONTAINER_USER} -c "
-        f"'git config --global --add safe.directory {_CONTAINER_WORKDIR}'"
-    )
+    if is_podman:
+        # Already running as the correct user — direct git config works.
+        lines.append(
+            f"git config --global --add safe.directory {_CONTAINER_WORKDIR}"
+        )
+    else:
+        # Use plain git config (works when already running as pm) with su
+        # fallback (works when running as root in the default image).
+        lines.append(
+            f"git config --global --add safe.directory {_CONTAINER_WORKDIR} 2>/dev/null || "
+            f"su - {_CONTAINER_USER} -c "
+            f"'git config --global --add safe.directory {_CONTAINER_WORKDIR}'"
+        )
 
     # Install a git wrapper that intercepts remote-interacting commands
     # (push, fetch, pull, ls-remote) and forwards them to the host-side
@@ -560,24 +571,43 @@ def create_container(
         ["git", "config", "user.email"], capture_output=True, text=True,
     ).stdout.strip()
 
+    _is_podman = "podman" in runtime
     git_setup = _build_git_setup_script(has_push_proxy=has_push_proxy,
-                                        host_workdir=str(workdir) if has_push_proxy else None)
-    # User creation — no-ops when the image already has the pm user (e.g.
-    # project-specific images built via `pm container build`).
-    setup_parts = [
-        f"groupadd -g {host_gid} {_CONTAINER_USER} 2>/dev/null || true",
-        f"useradd -u {host_uid} -g {host_gid} -m -s /bin/bash {_CONTAINER_USER} 2>/dev/null || true",
-        f"chown {host_uid}:{host_gid} {_CONTAINER_HOME} 2>/dev/null || true",
-    ]
+                                        host_workdir=str(workdir) if has_push_proxy else None,
+                                        is_podman=_is_podman)
+    if _is_podman:
+        # Podman with --userns=keep-id: the host UID is already mapped into
+        # the container.  No user creation needed (and we're not root, so
+        # groupadd/useradd would fail).  Just ensure /home/pm exists and
+        # set HOME explicitly so git config writes to the right place.
+        setup_parts = [
+            f"mkdir -p {_CONTAINER_HOME}",
+            f"export HOME={_CONTAINER_HOME}",
+        ]
+    else:
+        # Docker: runs as root, create the pm user.  No-ops when the image
+        # already has the pm user (e.g. project-specific images).
+        setup_parts = [
+            f"groupadd -g {host_gid} {_CONTAINER_USER} 2>/dev/null || true",
+            f"useradd -u {host_uid} -g {host_gid} -m -s /bin/bash {_CONTAINER_USER} 2>/dev/null || true",
+            f"chown {host_uid}:{host_gid} {_CONTAINER_HOME} 2>/dev/null || true",
+        ]
     if git_name and git_email:
-        # Try as current user first (works when running as pm), fall back
-        # to su (works when running as root in the default image).
-        setup_parts.append(
-            f"(git config --global user.name \"{git_name}\" && "
-            f"git config --global user.email \"{git_email}\") 2>/dev/null || "
-            f"su -c 'git config --global user.name \"{git_name}\" && "
-            f"git config --global user.email \"{git_email}\"' {_CONTAINER_USER}"
-        )
+        if _is_podman:
+            # Already running as the correct user — direct git config works.
+            setup_parts.append(
+                f"git config --global user.name \"{git_name}\" && "
+                f"git config --global user.email \"{git_email}\""
+            )
+        else:
+            # Try as current user first (works when running as pm), fall back
+            # to su (works when running as root in the default image).
+            setup_parts.append(
+                f"(git config --global user.name \"{git_name}\" && "
+                f"git config --global user.email \"{git_email}\") 2>/dev/null || "
+                f"su -c 'git config --global user.name \"{git_name}\" && "
+                f"git config --global user.email \"{git_email}\"' {_CONTAINER_USER}"
+            )
     if git_setup:
         setup_parts.append(git_setup)
     setup_parts.append(f"touch {_READY_SENTINEL}")
@@ -648,7 +678,14 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
     """
     runtime = _get_runtime()
     escaped = shlex.quote(shell_cmd)
-    exec_part = f"{runtime} exec -it -u {_CONTAINER_USER} {shlex.quote(name)} bash -c {escaped}"
+    # Under Podman with --userns=keep-id, the default user is already the
+    # host user (correct UID).  The "pm" username doesn't exist in
+    # /etc/passwd, so -u pm would fail.  Under Docker, -u pm switches
+    # from root to the pm user created during setup.
+    if "podman" in runtime:
+        exec_part = f"{runtime} exec -it {shlex.quote(name)} bash -c {escaped}"
+    else:
+        exec_part = f"{runtime} exec -it -u {_CONTAINER_USER} {shlex.quote(name)} bash -c {escaped}"
     if cleanup:
         cleanup_parts = []
         if proxy_socket_path:
