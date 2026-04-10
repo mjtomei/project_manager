@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-3fe2696
+  active_pr: pr-5471329
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -8829,7 +8829,7 @@ prs:
   plan: plan-qa
   title: Switch container runtime from Docker to Podman for nested container support
   branch: pm/pr-3fe2696-switch-container-runtime-from-docker-to-podman-for
-  status: pending
+  status: in_review
   depends_on: []
   description: Replace hardcoded docker CLI calls in container.py with a configurable
     container runtime (podman or docker). Add --userns=keep-id to container run commands
@@ -8837,11 +8837,33 @@ prs:
     (Dockerfile) so QA scenarios inside containers can spawn their own nested containers
     without privileged mode. Update _docker_available() and related checks to support
     the configured runtime.
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/164
+  gh_pr_number: 164
+  created_at: '2026-04-10T10:57:00.444225+00:00'
+  updated_at: '2026-04-10T11:18:37.323098+00:00'
+  started_at: '2026-04-10T10:58:23.832726+00:00'
+  reviewed_at: '2026-04-10T11:18:37.323098+00:00'
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-3fe2696-switch-container-runtime-from-docker-fcb1d53b
+- id: pr-5471329
+  plan: improvements
+  title: Double-tap for destructive TUI shortcuts to prevent accidental triggers
+  branch: pm/pr-5471329-double-tap-for-destructive-tui-shortcuts-to-preven
+  status: pending
+  depends_on: []
+  description: Require a quick double-tap (within 300-400ms) for destructive single-key
+    TUI shortcuts like s (start PR), d (review), g (merge), and t (QA run). First
+    press shows a brief confirmation hint in the status bar (e.g. 's … start PR'),
+    second press within the window executes the action. Prevents accidental triggers
+    when the user switches to the TUI pane and starts typing prose meant for a Claude
+    session. Non-destructive keys (r, v, n, p, etc.) remain single-tap.
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
-  created_at: '2026-04-10T10:57:00.444225+00:00'
-  updated_at: '2026-04-10T10:57:00.444225+00:00'
+  created_at: '2026-04-10T11:34:57.339723+00:00'
+  updated_at: '2026-04-10T11:34:57.339723+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
