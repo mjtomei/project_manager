@@ -70,17 +70,19 @@ def _get_max_scenarios() -> int:
 
 
 def _get_worker_count() -> int:
-    """Read qa-worker-count from global settings (default: 0 = disabled).
+    """Read qa-worker-count from global settings (default: -1).
 
-    When > 0, QA scenarios are batched into this many worker sessions
-    instead of spawning one session per scenario.
+    Values:
+      -1  — planner decides how many workers/groups (default)
+       0  — disabled, one session per scenario (legacy behavior)
+      >0  — fixed number of worker sessions
     """
     from pm_core.paths import get_global_setting_value
     val = get_global_setting_value("qa-worker-count", "")
     try:
-        return max(0, int(val))
+        return int(val)
     except ValueError:
-        return 0
+        return -1
 
 
 def _get_verification_max_retries() -> int:
@@ -584,10 +586,23 @@ def group_scenarios_into_workers(
     Falls back to round-robin distribution for scenarios without a group
     or when groups are invalid.
 
+    When *worker_count* is -1 (planner decides), the number of workers
+    is derived from the unique GROUP values in the parsed scenarios.
+    If no valid groups exist, defaults to 1 worker.
+
     Returns a dict mapping worker index (1-based) to list of scenarios.
     """
-    if worker_count <= 0 or not scenarios:
+    if worker_count == 0 or not scenarios:
         return {}
+
+    # When worker_count == -1, derive from planner's GROUP assignments
+    if worker_count < 0:
+        groups_seen = {sc.group for sc in scenarios if sc.group is not None and sc.group >= 1}
+        if groups_seen:
+            worker_count = max(groups_seen)
+        else:
+            # Planner didn't assign groups — default to 1 worker
+            worker_count = 1
 
     workers: dict[int, list[QAScenario]] = {i: [] for i in range(1, worker_count + 1)}
 
@@ -3286,9 +3301,9 @@ def run_qa_sync(
         panes = tmux_mod.get_pane_indices(session, win["index"])
         planner_pane = panes[0][0] if panes else None
 
-    if worker_count > 0 and state.scenarios:
+    if worker_count != 0 and state.scenarios:
         # --- Batched worker mode ---
-        _log.info("QA batched worker mode: %d workers for %d scenarios",
+        _log.info("QA batched worker mode: worker_count=%d for %d scenarios",
                   worker_count, len(state.scenarios))
 
         all_worker_groups = group_scenarios_into_workers(

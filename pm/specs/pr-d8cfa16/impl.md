@@ -3,16 +3,19 @@
 ## 1. Requirements
 
 ### 1.1 Batched Worker Configuration
-- Add a new global setting `qa-worker-count` (integer) that controls how many worker sessions are spawned for QA execution. Default: 0 (disabled, current behavior — one session per scenario).
-- When `qa-worker-count` > 0, the planner's scenarios are grouped into that many batches instead of being launched as individual sessions.
+- Add a new global setting `qa-worker-count` (integer) that controls how many worker sessions are spawned for QA execution.
+  - `-1` (default): The planner decides how many worker groups to create based on scenario relationships. Scenarios are grouped by shared context (functional area, files, theme).
+  - `0`: Disabled — one session per scenario (legacy behavior).
+  - `>0`: Fixed number of worker sessions — scenarios are grouped into exactly this many batches.
 - The setting is read via `_get_worker_count()` in `pm_core/qa_loop.py`, following the same pattern as `_get_max_scenarios()` (reads from `pm_core.paths.get_global_setting_value`).
-- Registered in `pm_core/cli/__init__.py`: added to `_INT_SETTINGS`, `_SETTING_DEFAULTS` (default `"(unset)"`), and the `set_cmd` help text.
+- Registered in `pm_core/cli/__init__.py`: added to `_INT_SETTINGS`, `_SETTING_DEFAULTS` (default `"-1"`), and the `set_cmd` help text.
 
 ### 1.2 Scenario Grouping by Shared Context
-- When batching is enabled, the planner prompt (`pm_core/prompt_gen.py:generate_qa_planner_prompt()`) is extended to ask the planner to output a `GROUP: <N>` field per scenario, where N is the worker index (1-based, up to `qa-worker-count`).
+- When batching is enabled (`worker_count != 0`), the planner prompt (`pm_core/prompt_gen.py:generate_qa_planner_prompt()`) is extended to ask the planner to output a `GROUP: <N>` field per scenario, where N is the worker index (1-based).
+- When `worker_count == -1`, the planner is told to decide the number of groups itself. When `worker_count > 0`, groups are capped at that value.
 - The planner is instructed to group scenarios that share functional area, related files, or test theme together to maximize shared context within each worker.
 - `parse_qa_plan()` in `pm_core/qa_loop.py` is extended to parse the optional `GROUP` field and store it on `QAScenario.group` (new field, default `None`).
-- If the planner doesn't produce valid GROUP assignments (or batching is disabled), scenarios are distributed round-robin across workers as a fallback.
+- If the planner doesn't produce valid GROUP assignments, scenarios are distributed round-robin across workers as a fallback. When `worker_count == -1` and no groups are assigned, defaults to 1 worker.
 
 ### 1.3 Worker Session Architecture
 - Each worker is a single Claude session running in its own tmux window (`qa-{display_id}-w{N}` naming pattern).
@@ -58,7 +61,8 @@
 - Alternative: concretization could run inside the worker session as a first step. However, running it externally preserves the existing parallel concretization and keeps the worker prompt cleaner.
 
 ### 1.9 Backward Compatibility
-- When `qa-worker-count` is 0 or unset, the existing behavior is preserved exactly: one session per scenario, each in its own tmux window.
+- When `qa-worker-count` is 0, the existing behavior is preserved exactly: one session per scenario, each in its own tmux window.
+- The default (`-1`) enables batched mode with planner-decided grouping, which is the new standard behavior.
 - The `qa-max-scenarios` concurrency cap still applies: it limits how many workers (not scenarios) run concurrently when batching is enabled.
 
 ## 2. Implicit Requirements

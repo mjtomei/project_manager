@@ -244,7 +244,7 @@ _SETTING_DEFAULTS = {
     "qa-verify-pass": "on",
     "min-pane-width": "100",
     "qa-max-scenarios": "(unset)",
-    "qa-worker-count": "(unset)",
+    "qa-worker-count": "-1",
     "qa-verify-retries": "(unset)",
     "qa-verdict-reminder-timeout": "(unset)",
     "spec-mode": "prompt",
@@ -291,7 +291,8 @@ def set_cmd(setting, value):
 
       qa-max-scenarios     Max QA scenarios to run concurrently (0 = unlimited, default 0)
 
-      qa-worker-count      Batch scenarios into N worker sessions (0 = disabled, default 0)
+      qa-worker-count      Batch scenarios into worker sessions (-1 = planner decides,
+                           0 = disabled/one-per-scenario, N = fixed count; default -1)
 
       qa-verify-retries    Max verification retries before marking NEEDS_WORK (default 3)
 

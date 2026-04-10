@@ -830,15 +830,33 @@ def generate_review_loop_prompt(data: dict, pr_id: str) -> str:
 
 def _worker_group_field(worker_count: int) -> str:
     """Return the GROUP field line for the planner output format."""
-    if worker_count <= 0:
+    if worker_count == 0:
         return ""
+    if worker_count < 0:
+        return "\nGROUP: <worker group number, starting from 1>"
     return f"\nGROUP: <worker number 1-{worker_count}>"
 
 
 def _worker_grouping_instructions(worker_count: int) -> str:
     """Return instructions for the planner to group scenarios into workers."""
-    if worker_count <= 0:
+    if worker_count == 0:
         return ""
+    if worker_count < 0:
+        # Planner decides grouping
+        return """
+## Worker Grouping
+
+Scenarios will be batched into worker sessions.  Each worker executes its
+assigned scenarios sequentially in a single Claude session, sharing the
+diff review and file loading across scenarios.
+
+Decide how many worker groups are appropriate and assign each scenario a
+GROUP number (starting from 1).  Group scenarios that share functional area,
+related files, or test theme together to maximize the benefit of shared
+context within each worker.  Use your judgment on the right number of groups
+— fewer groups means more shared context per worker, more groups means more
+parallelism.  Distribute scenarios as evenly as possible across groups.
+"""
     return f"""
 ## Worker Grouping
 
@@ -862,8 +880,9 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
     The planner analyzes the PR and the instruction library to generate
     a structured QA plan with test scenarios.
 
-    When *worker_count* > 0, the prompt asks the planner to assign each
-    scenario to a worker group (1..worker_count) to maximize shared context.
+    When *worker_count* != 0, the prompt asks the planner to assign each
+    scenario to a worker group.  -1 lets the planner decide how many groups;
+    >0 fixes the number of groups.
     """
     from pm_core import qa_instructions
 
