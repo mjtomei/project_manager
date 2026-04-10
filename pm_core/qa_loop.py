@@ -862,7 +862,6 @@ def _launch_scenario_0(
     """
     from pm_core import tmux as tmux_mod, prompt_gen
     from pm_core.claude_launcher import build_claude_shell_cmd
-    from pm_core.container import is_container_mode_enabled, _runtime_available
     from pm_core import container as container_mod
     _qa_resolution = _resolve_qa_model(pr_data, data, session_type="qa_scenario")
 
