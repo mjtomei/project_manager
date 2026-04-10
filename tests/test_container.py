@@ -24,7 +24,6 @@ from pm_core.container import (
     wrap_claude_cmd,
     container_is_running,
     _runtime_available,
-    _docker_available,
     _build_git_setup_script,
     _get_dockerfile_path,
     _get_runtime,
@@ -211,9 +210,6 @@ class TestRuntimeAvailable:
         mock_run.assert_called_once()
         assert mock_run.call_args[0][0][0] == "podman"
 
-    def test_backward_compat_alias(self):
-        assert _docker_available is _runtime_available
-
 
 class TestDetectDefaultRuntime:
     @patch("shutil.which", side_effect=lambda cmd: "/usr/bin/podman" if cmd == "podman" else None)
@@ -234,14 +230,14 @@ class TestDetectDefaultRuntime:
 
 
 class TestGetRuntime:
-    @patch("pm_core.paths.get_global_setting_value", return_value="docker")
+    @patch("pm_core.paths.get_global_setting_value", return_value="podman")
     def test_explicit_setting_wins(self, mock_get):
-        assert _get_runtime() == "docker"
-
-    @patch("pm_core.paths.get_global_setting_value", return_value="")
-    @patch("pm_core.container._detect_default_runtime", return_value="podman")
-    def test_auto_detects_when_unset(self, mock_detect, mock_get):
         assert _get_runtime() == "podman"
+
+    @patch("pm_core.paths.get_global_setting_value")
+    def test_defaults_to_docker(self, mock_get):
+        mock_get.side_effect = lambda name, default: default
+        assert _get_runtime() == "docker"
 
 
 @patch("pm_core.container.container_is_running", return_value=False)

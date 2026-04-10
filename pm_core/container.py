@@ -107,14 +107,12 @@ def _detect_default_runtime() -> str:
 def _get_runtime() -> str:
     """Return the configured container runtime binary name.
 
-    If the user has explicitly set ``container-runtime``, use that.
-    Otherwise auto-detect: prefer podman if installed, fall back to docker.
+    Returns the explicit ``container-runtime`` setting if set, otherwise
+    defaults to ``docker`` for backward compatibility.  Users opt into
+    Podman via ``pm container set runtime podman``.
     """
     from pm_core.paths import get_global_setting_value
-    explicit = get_global_setting_value("container-runtime", "")
-    if explicit:
-        return explicit
-    return _detect_default_runtime()
+    return get_global_setting_value("container-runtime", DEFAULT_RUNTIME)
 
 
 def _get_dockerfile_path() -> Path:
@@ -177,9 +175,6 @@ def _runtime_available() -> bool:
         return False
 
 
-# Backward-compatible alias
-_docker_available = _runtime_available
-
 
 def load_container_config() -> ContainerConfig:
     """Load container configuration from global pm settings."""
@@ -191,8 +186,7 @@ def load_container_config() -> ContainerConfig:
             "container-memory-limit", DEFAULT_MEMORY_LIMIT),
         cpu_limit=get_global_setting_value(
             "container-cpu-limit", DEFAULT_CPU_LIMIT),
-        runtime=get_global_setting_value(
-            "container-runtime", DEFAULT_RUNTIME),
+        runtime=_get_runtime(),
     )
 
 
@@ -222,9 +216,6 @@ def _run_runtime(*args: str, check: bool = True,
                 output=result.stdout, stderr=result.stderr)
     return result
 
-
-# Backward-compatible alias
-_run_docker = _run_runtime
 
 
 def container_is_running(name: str) -> bool:
