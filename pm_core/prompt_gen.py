@@ -849,9 +849,8 @@ def _worker_grouping_instructions(worker_count: int) -> str:
 Scenarios will be batched into worker sessions.  Each worker executes its
 assigned scenarios sequentially, sharing diff review and file loading.
 
-Assign each scenario a GROUP number (starting from 1).  Choose an appropriate
-number of groups.  Group scenarios that share functional area or related files
-together.
+Assign each scenario a GROUP number (starting from 1). Group scenarios that 
+share functional area or related files together.
 """
     return f"""
 ## Worker Grouping
