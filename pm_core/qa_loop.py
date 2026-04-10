@@ -2286,7 +2286,7 @@ def _poll_worker_verdicts(
                     _notify()
                     # Don't remove from pending — user may resolve it
                 else:
-                    # NEEDS_WORK — advance to next scenario
+                    # PASS (no verification) or NEEDS_WORK — advance to next scenario
                     state.latest_output = (
                         f"Scenario {current_sc.index} ({current_sc.title}): "
                         f"{verdict}")
