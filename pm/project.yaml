@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-d8cfa16
+  active_pr: pr-3fe2696
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -8393,7 +8393,7 @@ prs:
   title: 'Container memory governor: dynamic memory limits with per-type stop policy
     and QA queuing'
   branch: pm/pr-eb2dbfc-container-memory-governor-dynamic-memory-limits-wi
-  status: in_review
+  status: qa
   depends_on: []
   description: 'Add a memory governor that prevents OOM crashes by projecting memory
     consumption before launching containers, with configurable stop-on-idle for different
@@ -8492,7 +8492,26 @@ prs:
       /home/mjtomei/.pm/workdirs/qa/pr-eb2dbfc-0c395042dd9187fc)'
     created_at: '2026-04-09T12:38:05Z'
     last_edited: '2026-04-09T12:38:05Z'
-  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-02512b49
+  - id: note-adf7327
+    text: 'QA INPUT_REQUIRED: TUI status bar displays memory usage and blocked launch
+      indicators: INPUT_REQUIRED; Non-fitting queue entries do not block smaller entries
+      behind them (E17 fix): PASS; Multi-grant orphan prevention — _launch_next_queued
+      passes only one entry ID: PASS; Cross-process launch queue serialization and
+      fairness policies: PASS; Stop-on-idle policy per container type with tmux pane
+      preservation: INPUT_REQUIRED; Memory projection cascade and stats persistence:
+      PASS; QA planner batch projection and partial launch with queuing: INPUT_REQUIRED;
+      Memory target changed mid-QA-run takes effect on next cycle: INPUT_REQUIRED;
+      Governor inactive when no memory target configured: INPUT_REQUIRED; Stats file
+      corruption and Docker stats failure graceful degradation: PASS; Concurrent gate
+      check serialization via _gate_lock: PASS; System memory scope vs PM-only scope
+      measurement: PASS; waiting_memory status rendered in QA status pane when all
+      initial scenarios are memory-blocked: INPUT_REQUIRED; enqueue_and_try_acquire
+      atomic fast path for impl/review containers: INPUT_REQUIRED; Periodic retry
+      launches queued scenarios even while other scenarios are running: PASS (workdir:
+      /home/matt/.pm/workdirs/qa/pr-eb2dbfc-1eb09c5efa20c727)'
+    created_at: '2026-04-10T10:50:03Z'
+    last_edited: '2026-04-10T10:50:03Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
   title: Auto-extract QA-relevant notes from implementation and review session transcripts
@@ -8780,7 +8799,7 @@ prs:
   plan: plan-qa
   title: Batched QA scenario execution
   branch: pm/pr-d8cfa16-batched-qa-scenario-execution
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'Instead of spawning one session per QA scenario, batch scenarios into
     a configurable number of worker sessions. The scenario generator/concretizer groups
@@ -8796,11 +8815,33 @@ prs:
     diff review and file loading across scenarios, and reduces total token usage.
     The QA status watcher should poll per-scenario report files so the TUI can still
     show individual scenario progress.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/163
+  gh_pr_number: 163
+  created_at: '2026-04-09T22:50:59.769426+00:00'
+  updated_at: '2026-04-09T23:30:04.624901+00:00'
+  started_at: '2026-04-09T23:30:04.624901+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-d8cfa16-batched-qa-scenario-execution-ebce8630
+- id: pr-3fe2696
+  plan: plan-qa
+  title: Switch container runtime from Docker to Podman for nested container support
+  branch: pm/pr-3fe2696-switch-container-runtime-from-docker-to-podman-for
+  status: pending
+  depends_on: []
+  description: Replace hardcoded docker CLI calls in container.py with a configurable
+    container runtime (podman or docker). Add --userns=keep-id to container run commands
+    for correct UID mapping under Podman rootless. Install podman in the base image
+    (Dockerfile) so QA scenarios inside containers can spawn their own nested containers
+    without privileged mode. Update _docker_available() and related checks to support
+    the configured runtime.
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
-  created_at: '2026-04-09T22:50:59.769426+00:00'
-  updated_at: '2026-04-09T22:54:10.085078+00:00'
+  created_at: '2026-04-10T10:57:00.444225+00:00'
+  updated_at: '2026-04-10T10:57:00.444225+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
