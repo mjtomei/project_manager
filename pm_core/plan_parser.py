@@ -1,4 +1,4 @@
-"""Parse structured sections (## PRs, ## Plans) from plan markdown files."""
+"""Parse structured sections (## PRs, ## Plans, ## Child PRs) from plan markdown files."""
 
 import re
 
@@ -82,6 +82,16 @@ def parse_plan_children(text: str) -> list[dict]:
     Returns a list of dicts with keys: title, summary, status, id.
     """
     return _parse_section(text, "Plans", "Plan", ["summary", "status", "id"])
+
+
+def parse_split_prs(text: str) -> list[dict]:
+    """Parse child PR entries from a split manifest's ## Child PRs section.
+
+    Returns a list of dicts with keys: title, description, branch, depends_on.
+    """
+    return _parse_section(text, "Child PRs", "PR", [
+        "description", "branch", "depends_on",
+    ])
 
 
 def extract_field(body: str, field: str) -> str:

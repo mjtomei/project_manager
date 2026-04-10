@@ -146,6 +146,7 @@ class ProjectManagerApp(App):
         Binding("X", "toggle_merged", "Toggle Merged", show=False),
         Binding("f", "cycle_filter", "Filter", show=False),
         Binding("F", "cycle_sort", "Sort", show=False),
+        Binding("a", "split_pr", "Split PR", show=False),
         Binding("question_mark", "show_help", "Help", show=True),
         Binding("c", "launch_claude", "Claude", show=True),
         Binding("H", "launch_guide", "Guide", show=True),
@@ -231,7 +232,7 @@ class ProjectManagerApp(App):
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """Disable single-key shortcuts when command bar is focused or in guide mode."""
         if action in ("start_pr", "start_pr_companion", "done_pr",
-                       "merge_pr", "merge_pr_companion",
+                       "merge_pr", "merge_pr_companion", "split_pr",
                        "edit_plan", "view_plan", "launch_notes",
                        "launch_meta", "launch_claude", "launch_guide",
                        "view_log", "refresh", "rebalance", "show_help",
@@ -243,7 +244,7 @@ class ProjectManagerApp(App):
                 _log.debug("check_action: blocked %s (command bar focused/pending)", action)
                 return False
         # Block PR actions when in guide mode or plans view (can't see the PR tree)
-        if action in ("start_pr", "start_pr_companion", "done_pr", "merge_pr", "merge_pr_companion", "launch_claude", "edit_plan", "view_plan", "hide_plan", "move_to_plan", "toggle_merged", "cycle_filter", "cycle_sort", "start_qa_on_pr"):
+        if action in ("start_pr", "start_pr_companion", "done_pr", "merge_pr", "merge_pr_companion", "split_pr", "launch_claude", "edit_plan", "view_plan", "hide_plan", "move_to_plan", "toggle_merged", "cycle_filter", "cycle_sort", "start_qa_on_pr"):
             prs = self._data.get("prs") or []
             if not prs and self._current_guide_step is not None:
                 _log.debug("check_action: blocked %s (in guide mode, no PRs)", action)
@@ -687,6 +688,9 @@ class ProjectManagerApp(App):
 
     def action_merge_pr_companion(self) -> None:
         pr_view.merge_pr(self, companion=True)
+
+    def action_split_pr(self) -> None:
+        pr_view.split_pr(self)
 
     def action_hide_plan(self) -> None:
         pr_view.hide_plan(self)

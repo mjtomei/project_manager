@@ -6,6 +6,7 @@ access app state and call app methods (log_message, _load_state, etc.).
 
 import shlex
 import sys
+from pathlib import Path
 
 from pm_core.paths import configure_logger
 from pm_core import store
@@ -14,7 +15,7 @@ from pm_core.tui._shell import _run_shell, _run_shell_async
 _log = configure_logger("pm.tui.pr_view")
 
 # PR command prefixes that require in-flight action guarding
-PR_ACTION_PREFIXES = ("pr start", "pr review", "pr qa", "pr merge")
+PR_ACTION_PREFIXES = ("pr start", "pr review", "pr qa", "pr merge", "pr split")
 
 
 # ---------------------------------------------------------------------------
@@ -177,6 +178,52 @@ def merge_pr(app, companion: bool = False) -> None:
     if companion:
         cmd += " --companion"
     run_command(app, cmd, working_message=action_key, action_key=action_key)
+
+
+def split_pr(app) -> None:
+    """Split the selected PR, or load an existing split manifest.
+
+    If a split manifest (``pm/specs/<pr_id>/split.md``) already exists,
+    runs ``pm pr split-load`` to create the child PRs.  Otherwise launches
+    the interactive split session via ``pm pr split``.
+    """
+    from pm_core.tui.tech_tree import TechTree
+    from pm_core import spec_gen
+
+    fresh = app._consume_z()
+    tree = app.query_one("#tech-tree", TechTree)
+    pr_id = tree.selected_pr_id
+    _log.info("action: split_pr selected=%s fresh=%s", pr_id, fresh)
+    if not pr_id:
+        app.log_message("No PR selected")
+        return
+
+    # Check if split manifest already exists (in the workdir, where the
+    # split agent writes it — not the main project root).
+    has_manifest = False
+    pr = store.get_pr(app._data, pr_id)
+    workdir = pr.get("workdir") if pr else None
+    if workdir and Path(workdir).exists():
+        try:
+            wd_root = store.find_project_root(start=workdir)
+            manifest = spec_gen.spec_dir(wd_root, pr_id) / "split.md"
+            has_manifest = manifest.exists()
+        except FileNotFoundError:
+            pass
+
+    if has_manifest and not fresh:
+        action_key = f"Loading split {pr_id}"
+        if not guard_pr_action(app, action_key):
+            return
+        app._inflight_pr_action = action_key
+        run_command(app, f"pr split-load {pr_id}", working_message=action_key, action_key=action_key)
+    else:
+        action_key = f"Splitting {pr_id}"
+        if not guard_pr_action(app, action_key):
+            return
+        app._inflight_pr_action = action_key
+        cmd = f"pr split --fresh {pr_id}" if fresh else f"pr split {pr_id}"
+        run_command(app, cmd, working_message=action_key, action_key=action_key)
 
 
 # ---------------------------------------------------------------------------
