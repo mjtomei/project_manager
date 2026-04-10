@@ -91,10 +91,30 @@ class ContainerConfig:
     extra_mounts: list[str] = field(default_factory=list)
 
 
+def _detect_default_runtime() -> str:
+    """Auto-detect the best available container runtime.
+
+    Prefers podman (rootless, nested container support) over docker.
+    Falls back to DEFAULT_RUNTIME if neither is found (will fail later
+    with a clear error from _runtime_available).
+    """
+    for candidate in ("podman", "docker"):
+        if shutil.which(candidate):
+            return candidate
+    return DEFAULT_RUNTIME
+
+
 def _get_runtime() -> str:
-    """Return the configured container runtime binary name."""
+    """Return the configured container runtime binary name.
+
+    If the user has explicitly set ``container-runtime``, use that.
+    Otherwise auto-detect: prefer podman if installed, fall back to docker.
+    """
     from pm_core.paths import get_global_setting_value
-    return get_global_setting_value("container-runtime", DEFAULT_RUNTIME)
+    explicit = get_global_setting_value("container-runtime", "")
+    if explicit:
+        return explicit
+    return _detect_default_runtime()
 
 
 def _get_dockerfile_path() -> Path:
@@ -786,7 +806,11 @@ def wrap_claude_cmd(
             session_tag=session_tag,
             pr_id=pr_id,
         )
-    except Exception:
+    except ContainerError:
+        _log.error("Failed to create container %s — aborting (container mode is enabled)",
+                   cname, exc_info=True)
+        raise
+    except Exception as exc:
         _log.error("Failed to create container %s — aborting (container mode is enabled)",
                    cname, exc_info=True)
         runtime = _get_runtime()
@@ -794,7 +818,7 @@ def wrap_claude_cmd(
             f"Failed to create container '{cname}'. "
             f"Is {runtime} running? Disable container mode with 'pm container disable' "
             f"to run without containers."
-        )
+        ) from exc
 
     # Rewrite any prompt-file reference that used the host workdir path.
     # build_claude_shell_cmd writes the file to the host and embeds

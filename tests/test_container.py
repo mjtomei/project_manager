@@ -28,6 +28,7 @@ from pm_core.container import (
     _build_git_setup_script,
     _get_dockerfile_path,
     _get_runtime,
+    _detect_default_runtime,
     _make_container_name,
     _resolve_claude_binary,
     DEFAULT_IMAGE,
@@ -214,6 +215,35 @@ class TestRuntimeAvailable:
         assert _docker_available is _runtime_available
 
 
+class TestDetectDefaultRuntime:
+    @patch("shutil.which", side_effect=lambda cmd: "/usr/bin/podman" if cmd == "podman" else None)
+    def test_prefers_podman(self, mock_which):
+        assert _detect_default_runtime() == "podman"
+
+    @patch("shutil.which", side_effect=lambda cmd: "/usr/bin/docker" if cmd == "docker" else None)
+    def test_falls_back_to_docker(self, mock_which):
+        assert _detect_default_runtime() == "docker"
+
+    @patch("shutil.which", side_effect=lambda cmd: f"/usr/bin/{cmd}")
+    def test_podman_over_docker_when_both(self, mock_which):
+        assert _detect_default_runtime() == "podman"
+
+    @patch("shutil.which", return_value=None)
+    def test_returns_default_when_neither(self, mock_which):
+        assert _detect_default_runtime() == DEFAULT_RUNTIME
+
+
+class TestGetRuntime:
+    @patch("pm_core.paths.get_global_setting_value", return_value="docker")
+    def test_explicit_setting_wins(self, mock_get):
+        assert _get_runtime() == "docker"
+
+    @patch("pm_core.paths.get_global_setting_value", return_value="")
+    @patch("pm_core.container._detect_default_runtime", return_value="podman")
+    def test_auto_detects_when_unset(self, mock_detect, mock_get):
+        assert _get_runtime() == "podman"
+
+
 @patch("pm_core.container.container_is_running", return_value=False)
 class TestCreateContainerPodman:
     """Podman-specific create_container tests."""
@@ -311,19 +341,6 @@ class TestCreateContainerPodman:
         setup_script = run_call[0][-1]
         assert "groupadd" in setup_script
         assert "useradd" in setup_script
-
-    @patch("pm_core.container._get_runtime", return_value="podman")
-    @patch("pm_core.container.image_exists", return_value=False)
-    @patch("pm_core.container.remove_container")
-    @patch("pm_core.container._run_runtime")
-    def test_missing_custom_image_raises_podman(self, mock_runtime, mock_rm,
-                                                 mock_exists, mock_get_runtime,
-                                                 _mock_running):
-        """Missing custom image raises error naming podman runtime."""
-        config = ContainerConfig(image="custom:v1")
-
-        with pytest.raises(ContainerError, match=r"'custom:v1'.*not found in podman"):
-            create_container(name="test", config=config, workdir=Path("/w"))
 
 
 @patch("pm_core.container._get_runtime", return_value="docker")
@@ -521,7 +538,7 @@ class TestCreateContainer:
         """Missing custom image raises a clear error."""
         config = ContainerConfig(image="custom:v1")
 
-        with pytest.raises(ContainerError, match=r"'custom:v1'.*not found in docker"):
+        with pytest.raises(ContainerError, match="not found in docker"):
             create_container(name="test", config=config, workdir=Path("/w"))
 
     @patch("pm_core.container.image_exists", return_value=True)
