@@ -312,6 +312,19 @@ class TestCreateContainerPodman:
         assert "groupadd" in setup_script
         assert "useradd" in setup_script
 
+    @patch("pm_core.container._get_runtime", return_value="podman")
+    @patch("pm_core.container.image_exists", return_value=False)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
+    def test_missing_custom_image_raises_podman(self, mock_runtime, mock_rm,
+                                                 mock_exists, mock_get_runtime,
+                                                 _mock_running):
+        """Missing custom image raises error naming podman runtime."""
+        config = ContainerConfig(image="custom:v1")
+
+        with pytest.raises(ContainerError, match=r"'custom:v1'.*not found in podman"):
+            create_container(name="test", config=config, workdir=Path("/w"))
+
 
 @patch("pm_core.container._get_runtime", return_value="docker")
 @patch("pm_core.container.container_is_running", return_value=False)
@@ -508,7 +521,7 @@ class TestCreateContainer:
         """Missing custom image raises a clear error."""
         config = ContainerConfig(image="custom:v1")
 
-        with pytest.raises(ContainerError, match="not found in docker"):
+        with pytest.raises(ContainerError, match=r"'custom:v1'.*not found in docker"):
             create_container(name="test", config=config, workdir=Path("/w"))
 
     @patch("pm_core.container.image_exists", return_value=True)
