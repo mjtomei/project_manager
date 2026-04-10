@@ -2869,6 +2869,59 @@ SCENARIO_2_VERDICT: NEEDS_WORK
         assert result == {1: "PASS", 2: "NEEDS_WORK"}
 
 
+    def test_scenario_zero(self):
+        content = "SCENARIO_0_VERDICT: PASS\n"
+        result = _extract_worker_verdicts(content)
+        assert result == {0: "PASS"}
+
+    def test_verdict_in_fenced_code_block(self):
+        """Verdict line inside triple-backtick fences still matches because
+        the backtick lines are separate — the verdict line itself starts at
+        column 0."""
+        content = "```\nSCENARIO_1_VERDICT: PASS\n```\n"
+        result = _extract_worker_verdicts(content)
+        assert result == {1: "PASS"}
+
+    def test_mid_line_no_match(self):
+        """Verdict text that doesn't start the line should NOT match."""
+        content = "echo SCENARIO_1_VERDICT: PASS\n"
+        result = _extract_worker_verdicts(content)
+        assert result == {}
+
+    def test_ansi_escape_no_match(self):
+        """ANSI escape codes before the keyword break the ^ anchor."""
+        content = "\x1b[32mSCENARIO_1_VERDICT: PASS\x1b[0m\n"
+        result = _extract_worker_verdicts(content)
+        assert result == {}
+
+    def test_tab_indented(self):
+        content = "\tSCENARIO_3_VERDICT: NEEDS_WORK\n"
+        result = _extract_worker_verdicts(content)
+        assert result == {3: "NEEDS_WORK"}
+
+    def test_trailing_whitespace(self):
+        content = "SCENARIO_1_VERDICT: PASS   \n"
+        result = _extract_worker_verdicts(content)
+        assert result == {1: "PASS"}
+
+    def test_extra_whitespace_after_colon(self):
+        content = "SCENARIO_1_VERDICT:   PASS\n"
+        result = _extract_worker_verdicts(content)
+        assert result == {1: "PASS"}
+
+    def test_large_input_performance(self):
+        """Correctness on ~100K lines with 5 verdicts scattered throughout."""
+        lines = ["filler line number {}\n".format(i) for i in range(100_000)]
+        expected = {}
+        for sc_idx, insert_at in enumerate([1000, 25000, 50000, 75000, 99000]):
+            verdict = ["PASS", "NEEDS_WORK", "INPUT_REQUIRED", "PASS", "NEEDS_WORK"][sc_idx]
+            lines[insert_at] = "SCENARIO_{}_VERDICT: {}\n".format(sc_idx, verdict)
+            expected[sc_idx] = verdict
+        content = "".join(lines)
+        result = _extract_worker_verdicts(content)
+        assert result == expected
+
+
 class TestWorkerWindowName:
     def test_with_gh_pr_number(self):
         pr_data = {"gh_pr_number": 42}
