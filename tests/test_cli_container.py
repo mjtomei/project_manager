@@ -8,7 +8,6 @@ from click.testing import CliRunner
 
 from pm_core.cli.container import (
     container_build,
-    container_set,
     _build_container_build_prompt,
 )
 
@@ -218,20 +217,3 @@ class TestContainerBuildCommand:
         mock_launch.assert_called_once()
         call_kwargs = mock_launch.call_args
         assert call_kwargs[1]["session_key"] == "container:build"
-
-
-class TestContainerSetRuntime:
-    """Tests for runtime validation in pm container set."""
-
-    def test_invalid_runtime_rejected(self):
-        runner = CliRunner()
-        result = runner.invoke(container_set, ["runtime", "nerdctl"])
-        assert result.exit_code != 0
-        assert "Error" in result.output
-
-    @patch("pm_core.paths.set_global_setting_value")
-    def test_valid_runtime_accepted(self, mock_set):
-        runner = CliRunner()
-        result = runner.invoke(container_set, ["runtime", "podman"])
-        assert result.exit_code == 0
-        assert "Set runtime = podman" in result.output

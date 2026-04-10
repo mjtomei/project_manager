@@ -148,6 +148,7 @@ def container_build(tag: str | None, base: str | None):
         project_dir=str(project_dir),
         base_image=base_image,
         image_tag=image_tag,
+        runtime=config.runtime,
     )
 
     if not find_claude():
@@ -191,11 +192,12 @@ def _build_container_build_prompt(
     project_dir: str,
     base_image: str,
     image_tag: str,
+    runtime: str = "docker",
 ) -> str:
     """Build the prompt for the container build Claude session."""
 
     return f"""\
-You are building a project-specific Docker image for "{project_name}".
+You are building a project-specific container image for "{project_name}".
 
 ## Goal
 
@@ -232,7 +234,7 @@ image, build it, tag it, and update the pm container config to use it.
 
 3. Build the image:
    ```bash
-   docker build -t {image_tag} -f {project_dir}/Dockerfile.pm-project {project_dir}
+   {runtime} build -t {image_tag} -f {project_dir}/Dockerfile.pm-project {project_dir}
    ```
 
 4. If the build fails, analyze the error, fix the Dockerfile, and retry.
@@ -270,7 +272,7 @@ image MUST satisfy these constraints or the setup will fail silently:
    /home/pm/.local/bin/ (must be writable by pm) and /tmp/.
 
 4. **Do NOT set an ENTRYPOINT** — pm passes the setup script as the CMD
-   via `docker run ... image bash -c "setup"`. An entrypoint that runs
+   via `{runtime} run ... image bash -c "setup"`. An entrypoint that runs
    before the CMD can interfere with the setup or delay container readiness.
    If you need project-specific init steps, add them to a script in the
    image and document them — don't use ENTRYPOINT.
