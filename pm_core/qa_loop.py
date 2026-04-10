@@ -1459,6 +1459,27 @@ def _scenario_report_path(qa_workdir: str | Path, scenario_index: int) -> str:
     return str(Path(qa_workdir) / f"report-s{scenario_index}.md")
 
 
+def _add_status_pane(session: str, planner_pane: str | None,
+                     status_path: Path) -> None:
+    """Create the QA status TUI pane next to the planner pane."""
+    if not planner_pane:
+        return
+    from pm_core import tmux as tmux_mod, pane_layout
+    try:
+        _qa_status_script = Path(__file__).parent / "qa_status.py"
+        status_cmd = f"python3 {_qa_status_script} {status_path} {session}"
+        status_pane = tmux_mod.split_pane_at(
+            planner_pane, "h", status_cmd, background=True)
+        qa_win_id = tmux_mod.pane_window_id(planner_pane)
+        if qa_win_id:
+            pane_layout.register_and_rebalance(session, qa_win_id, [
+                (planner_pane, "qa-planner", "planner"),
+                (status_pane, "qa-status", status_cmd),
+            ])
+    except Exception:
+        _log.exception("Failed to create status pane")
+
+
 def _launch_workers_in_tmux(
     state: QALoopState,
     data: dict,
@@ -2014,8 +2035,11 @@ def _poll_worker_verdicts(
         if scenarios and scenarios[0].window_name:
             pending_workers.add(wi)
 
-    # Track known verdicts to avoid re-processing
-    seen_verdicts: set[int] = set()
+    # Track known verdicts to avoid re-processing.
+    # Maps scenario index -> number of verdict lines already processed,
+    # so re-emitted verdicts (e.g. after INPUT_REQUIRED resolution) are
+    # still detected.
+    seen_verdicts: dict[int, int] = {}
 
     # Verification state
     verification_failures: dict[int, int] = {}
@@ -2180,7 +2204,7 @@ def _poll_worker_verdicts(
                             time.sleep(1)
                             tmux_mod.send_keys(pane_id, "")
                         state.scenario_verdicts.pop(scenario_idx, None)
-                        seen_verdicts.discard(scenario_idx)
+                        seen_verdicts.pop(scenario_idx, None)
                         verdicts_changed = True
                         _notify()
                     else:
@@ -2223,10 +2247,19 @@ def _poll_worker_verdicts(
             if current_sc is None:
                 continue
 
-            # Check if the current scenario has a new verdict
-            if current_sc.index in worker_verdicts and current_sc.index not in seen_verdicts:
+            # Check if the current scenario has a new verdict.
+            # For INPUT_REQUIRED we track a per-scenario *count* of how
+            # many verdict lines we've already processed so that a
+            # re-emitted verdict (after the user resolves the issue) is
+            # still picked up.
+            prev_verdict_count = seen_verdicts.get(current_sc.index, 0)
+            total_for_sc = sum(
+                1 for m in _WORKER_VERDICT_RE.finditer(content)
+                if int(m.group(1)) == current_sc.index
+            )
+            if current_sc.index in worker_verdicts and total_for_sc > prev_verdict_count:
                 verdict = worker_verdicts[current_sc.index]
-                seen_verdicts.add(current_sc.index)
+                seen_verdicts[current_sc.index] = total_for_sc
                 state.scenario_verdicts[current_sc.index] = verdict
                 verdicts_changed = True
                 _log.info("Worker %d scenario %d (%s) verdict: %s",
@@ -3316,22 +3349,7 @@ def run_qa_sync(
                            queued_scenarios=queued_indices,
                            error=state._error)
 
-        # Add status pane
-        if planner_pane:
-            try:
-                _qa_status_script = Path(__file__).parent / "qa_status.py"
-                status_cmd = (
-                    f"python3 {_qa_status_script} {status_path} {session}")
-                status_pane = tmux_mod.split_pane_at(
-                    planner_pane, "h", status_cmd, background=True)
-                qa_win_id = tmux_mod.pane_window_id(planner_pane)
-                if qa_win_id:
-                    pane_layout.register_and_rebalance(session, qa_win_id, [
-                        (planner_pane, "qa-planner", "planner"),
-                        (status_pane, "qa-status", status_cmd),
-                    ])
-            except Exception:
-                _log.exception("Failed to create status pane")
+        _add_status_pane(session, planner_pane, status_path)
 
         # Launch initial batch of workers
         if use_containers:
@@ -3382,22 +3400,7 @@ def run_qa_sync(
                            queued_scenarios=queued_indices,
                            error=state._error)
 
-        # Add status pane to the main QA window
-        if planner_pane:
-            try:
-                _qa_status_script = Path(__file__).parent / "qa_status.py"
-                status_cmd = (
-                    f"python3 {_qa_status_script} {status_path} {session}")
-                status_pane = tmux_mod.split_pane_at(
-                    planner_pane, "h", status_cmd, background=True)
-                qa_win_id = tmux_mod.pane_window_id(planner_pane)
-                if qa_win_id:
-                    pane_layout.register_and_rebalance(session, qa_win_id, [
-                        (planner_pane, "qa-planner", "planner"),
-                        (status_pane, "qa-status", status_cmd),
-                    ])
-            except Exception:
-                _log.exception("Failed to create status pane")
+        _add_status_pane(session, planner_pane, status_path)
 
         # Only launch the initial batch
         all_scenarios = state.scenarios
