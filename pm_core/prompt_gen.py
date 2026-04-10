@@ -847,28 +847,20 @@ def _worker_grouping_instructions(worker_count: int) -> str:
 ## Worker Grouping
 
 Scenarios will be batched into worker sessions.  Each worker executes its
-assigned scenarios sequentially in a single Claude session, sharing the
-diff review and file loading across scenarios.
+assigned scenarios sequentially, sharing diff review and file loading.
 
-Decide how many worker groups are appropriate and assign each scenario a
-GROUP number (starting from 1).  Group scenarios that share functional area,
-related files, or test theme together to maximize the benefit of shared
-context within each worker.  Use your judgment on the right number of groups
-— fewer groups means more shared context per worker, more groups means more
-parallelism.  Distribute scenarios as evenly as possible across groups.
+Assign each scenario a GROUP number (starting from 1).  Choose an appropriate
+number of groups.  Group scenarios that share functional area or related files
+together.
 """
     return f"""
 ## Worker Grouping
 
-Scenarios will be batched into up to {worker_count} worker session(s).  Each
-worker executes its assigned scenarios sequentially in a single Claude session,
-sharing the diff review and file loading across scenarios.
+Scenarios will be batched into worker sessions.  Each worker executes its
+assigned scenarios sequentially, sharing diff review and file loading.
 
-Assign each scenario a GROUP number (1-{worker_count}).  You may use fewer
-groups than {worker_count} if there aren't enough scenarios or if grouping
-naturally produces fewer clusters.  Group scenarios that share functional area,
-related files, or test theme together to maximize the benefit of shared context
-within each worker.  Distribute scenarios as evenly as possible across groups.
+Assign each scenario a GROUP number.  Use up to {worker_count} groups.
+Group scenarios that share functional area or related files together.
 """
 
 
