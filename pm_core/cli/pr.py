@@ -828,8 +828,23 @@ def pr_split_load(pr_id: str):
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
 
-    # Read manifest
-    manifest_path = spec_gen.spec_dir(root, pr_id) / "split.md"
+    # Resolve workdir — the split agent writes the manifest there
+    workdir = pr_entry.get("workdir")
+    if not workdir or not Path(workdir).exists():
+        click.echo(
+            f"Workdir for {_pr_display_id(pr_entry)} not found. "
+            f"Cannot read split manifest or push child branches.",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    # Read manifest from the workdir (the split agent writes it in the
+    # workdir's pm/specs/ directory, not the main project root).
+    try:
+        workdir_pm = store.find_project_root(start=workdir)
+    except FileNotFoundError:
+        workdir_pm = root
+    manifest_path = spec_gen.spec_dir(workdir_pm, pr_id) / "split.md"
     if not manifest_path.exists():
         click.echo(f"Split manifest not found: {manifest_path}", err=True)
         click.echo("Run `pm pr split` first to create the manifest.")
@@ -842,16 +857,6 @@ def pr_split_load(pr_id: str):
         raise SystemExit(1)
 
     click.echo(f"Found {len(child_prs)} child PRs in split manifest:")
-
-    # Resolve workdir for pushing branches
-    workdir = pr_entry.get("workdir")
-    if not workdir or not Path(workdir).exists():
-        click.echo(
-            f"Workdir for {_pr_display_id(pr_entry)} not found. "
-            f"Cannot push child branches.",
-            err=True,
-        )
-        raise SystemExit(1)
 
     if data.get("prs") is None:
         data["prs"] = []

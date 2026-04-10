@@ -6,6 +6,7 @@ access app state and call app methods (log_message, _load_state, etc.).
 
 import shlex
 import sys
+from pathlib import Path
 
 from pm_core.paths import configure_logger
 from pm_core import store
@@ -197,11 +198,18 @@ def split_pr(app) -> None:
         app.log_message("No PR selected")
         return
 
-    # Check if split manifest already exists
+    # Check if split manifest already exists (in the workdir, where the
+    # split agent writes it — not the main project root).
     has_manifest = False
-    if app._root:
-        manifest = spec_gen.spec_dir(app._root, pr_id) / "split.md"
-        has_manifest = manifest.exists()
+    pr = store.get_pr(app._data, pr_id)
+    workdir = pr.get("workdir") if pr else None
+    if workdir and Path(workdir).exists():
+        try:
+            wd_root = store.find_project_root(start=workdir)
+            manifest = spec_gen.spec_dir(wd_root, pr_id) / "split.md"
+            has_manifest = manifest.exists()
+        except FileNotFoundError:
+            pass
 
     if has_manifest and not fresh:
         action_key = f"Loading split {pr_id}"
