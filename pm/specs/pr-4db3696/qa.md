@@ -44,7 +44,7 @@
 - Generates fallback branch name if manifest branch is empty
 
 ### 5. TUI keybinding (`pm_core/tui/app.py`)
-- `P` keybinding bound to `action_split_pr()`
+- `a` keybinding bound to `action_split_pr()`
 - Action is blocked when command bar is focused, in guide mode, or when no PRs exist
 - Added to both `check_action` guard sets
 
@@ -82,7 +82,7 @@ Testing requires:
 11. **Existing tmux window without `--fresh`** -- Switches to existing window instead of creating new one
 12. **Local backend** -- Skips `git push` for child branches (no remote)
 13. **Plan inheritance** -- Child PRs inherit the parent's `plan` field; standalone PRs get `plan=None`
-14. **z-prefix in TUI** -- `z P` triggers fresh split, plain `P` triggers normal split
+14. **z-prefix in TUI** -- `z a` triggers fresh split, plain `a` triggers normal split
 15. **TUI manifest detection** -- `split_pr()` checks workdir for existing manifest, runs split-load if found
 
 ## Pass/Fail Criteria
@@ -94,7 +94,7 @@ Testing requires:
 - `pm pr split-load` creates correct PR entries in project.yaml with proper IDs, branches, dependencies, and plan inheritance
 - `pm pr split-load` skips push for local backend
 - `pm pr split-load` skips already-existing PRs
-- TUI `P` keybinding dispatches correctly (split or split-load depending on manifest existence)
+- TUI `a` keybinding dispatches correctly (split or split-load depending on manifest existence)
 - TUI action guards block split during other in-flight actions
 
 ### Fail
@@ -102,7 +102,7 @@ Testing requires:
 - `split-load` reads manifest from project root instead of workdir
 - `split-load` attempts to push branches on local backend
 - Dependency resolution fails (title-to-ID mapping broken)
-- TUI `P` keybinding fires during command bar input or guide mode
+- TUI `a` keybinding fires during command bar input or guide mode
 - `--fresh` flag doesn't clear existing session/window
 
 ## Ambiguities
@@ -117,7 +117,7 @@ Testing requires:
    Resolution: If a manifest exists and the user didn't press `z` first, the TUI runs `split-load` directly instead of launching a new split session. This is a convenience shortcut so the user doesn't need to manually run split-load.
 
 4. **How does the z-prefix interact with manifest detection?**
-   Resolution: `z P` sets `fresh=True`, which bypasses the manifest check and always launches a new split session. This allows re-splitting even when a manifest already exists.
+   Resolution: `z a` sets `fresh=True`, which bypasses the manifest check and always launches a new split session. This allows re-splitting even when a manifest already exists.
 
 5. **Should `split-load` error or silently succeed when all children already exist?**
    Resolution: It skips each existing child with a "Skipped" message but still prints a summary. If no new children are created, `created == 0` so no save/push happens.
