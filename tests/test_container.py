@@ -8,6 +8,7 @@ import pytest
 
 from pm_core.container import (
     ContainerConfig,
+    ContainerError,
     qa_container_name,
     load_container_config,
     is_container_mode_enabled,
@@ -257,9 +258,10 @@ class TestCreateContainerPodman:
 @patch("pm_core.container._get_runtime", return_value="docker")
 @patch("pm_core.container.container_is_running", return_value=False)
 class TestCreateContainer:
+    @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_runtime")
-    def test_creates_with_workdir(self, mock_docker, mock_rm, _mock_running, _mock_runtime):
+    def test_creates_with_workdir(self, mock_docker, mock_rm, mock_exists, _mock_running, _mock_runtime):
         mock_docker.return_value = MagicMock(stdout="abc123\n", returncode=0)
 
         config = ContainerConfig(image="test:v1", memory_limit="2g", cpu_limit="1.0")
@@ -430,15 +432,26 @@ class TestCreateContainer:
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_runtime")
     def test_no_auto_build_for_custom_image(self, mock_docker, mock_rm, mock_exists, _mock_running, _mock_runtime):
-        """Custom images are not auto-built."""
+        """Custom images are not auto-built, but existence is checked."""
         mock_docker.return_value = MagicMock(stdout="id\n", returncode=0)
         config = ContainerConfig(image="custom:v1")
 
         with patch.object(Path, "is_dir", return_value=False):
             create_container(name="test", config=config, workdir=Path("/w"))
 
-        # image_exists should not be called for non-default images
-        mock_exists.assert_not_called()
+        # image_exists is called to verify the custom image exists,
+        # but build_image should NOT be called
+        mock_exists.assert_called_once_with("custom:v1")
+
+    @patch("pm_core.container.image_exists", return_value=False)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
+    def test_missing_custom_image_raises(self, mock_docker, mock_rm, mock_exists, _mock_running, _mock_runtime):
+        """Missing custom image raises a clear error."""
+        config = ContainerConfig(image="custom:v1")
+
+        with pytest.raises(ContainerError, match="not found in docker"):
+            create_container(name="test", config=config, workdir=Path("/w"))
 
     @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container._resolve_claude_binary", return_value=None)

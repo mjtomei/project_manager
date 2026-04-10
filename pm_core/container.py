@@ -450,6 +450,13 @@ def create_container(
             if not image_exists(config.image):
                 _log.info("Default image %s not found — building automatically", config.image)
                 build_image(tag=config.image, quiet=True)
+    elif config.image != DEFAULT_IMAGE and not image_exists(config.image):
+        runtime = _get_runtime()
+        raise ContainerError(
+            f"Image '{config.image}' not found in {runtime}. "
+            f"Run 'pm container build' to rebuild it, or "
+            f"'pm container build-image' for the base image."
+        )
 
     runtime = _get_runtime()
     cmd = [
