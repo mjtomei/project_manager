@@ -91,19 +91,6 @@ class ContainerConfig:
     extra_mounts: list[str] = field(default_factory=list)
 
 
-def _detect_default_runtime() -> str:
-    """Auto-detect the best available container runtime.
-
-    Prefers podman (rootless, nested container support) over docker.
-    Falls back to DEFAULT_RUNTIME if neither is found (will fail later
-    with a clear error from _runtime_available).
-    """
-    for candidate in ("podman", "docker"):
-        if shutil.which(candidate):
-            return candidate
-    return DEFAULT_RUNTIME
-
-
 def _get_runtime() -> str:
     """Return the configured container runtime binary name.
 
@@ -175,7 +162,6 @@ def _runtime_available() -> bool:
         return False
 
 
-
 def load_container_config() -> ContainerConfig:
     """Load container configuration from global pm settings."""
     from pm_core.paths import get_global_setting_value
@@ -215,7 +201,6 @@ def _run_runtime(*args: str, check: bool = True,
                 result.returncode, cmd,
                 output=result.stdout, stderr=result.stderr)
     return result
-
 
 
 def container_is_running(name: str) -> bool:

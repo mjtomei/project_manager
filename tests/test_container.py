@@ -27,7 +27,6 @@ from pm_core.container import (
     _build_git_setup_script,
     _get_dockerfile_path,
     _get_runtime,
-    _detect_default_runtime,
     _make_container_name,
     _resolve_claude_binary,
     DEFAULT_IMAGE,
@@ -209,24 +208,6 @@ class TestRuntimeAvailable:
         assert _runtime_available() is True
         mock_run.assert_called_once()
         assert mock_run.call_args[0][0][0] == "podman"
-
-
-class TestDetectDefaultRuntime:
-    @patch("shutil.which", side_effect=lambda cmd: "/usr/bin/podman" if cmd == "podman" else None)
-    def test_prefers_podman(self, mock_which):
-        assert _detect_default_runtime() == "podman"
-
-    @patch("shutil.which", side_effect=lambda cmd: "/usr/bin/docker" if cmd == "docker" else None)
-    def test_falls_back_to_docker(self, mock_which):
-        assert _detect_default_runtime() == "docker"
-
-    @patch("shutil.which", side_effect=lambda cmd: f"/usr/bin/{cmd}")
-    def test_podman_over_docker_when_both(self, mock_which):
-        assert _detect_default_runtime() == "podman"
-
-    @patch("shutil.which", return_value=None)
-    def test_returns_default_when_neither(self, mock_which):
-        assert _detect_default_runtime() == DEFAULT_RUNTIME
 
 
 class TestGetRuntime:
