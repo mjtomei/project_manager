@@ -2126,6 +2126,7 @@ def _poll_worker_verdicts(
             state.scenarios = orig
 
         if scenarios[0].window_name:
+            worker_groups[wi] = scenarios
             pending_workers.add(wi)
             worker_current[wi] = 0
             for sc in scenarios:
