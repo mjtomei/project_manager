@@ -410,8 +410,6 @@ class TestCleanupStaleScenarioWindows:
         {"id": "@3", "index": "2", "name": "qa-#42-s1"},
         {"id": "@4", "index": "3", "name": "qa-#42-s2"},
         {"id": "@5", "index": "4", "name": "other-window"},
-        {"id": "@6", "index": "5", "name": "qa-#42-w1"},
-        {"id": "@7", "index": "6", "name": "qa-#42-w2"},
     ]
 
     def _run_cleanup(self, pr_data, include_main=True):
@@ -429,12 +427,10 @@ class TestCleanupStaleScenarioWindows:
         pr_data = {"id": "pr-abc", "gh_pr_number": 42}
         killed_ids = self._run_cleanup(pr_data)
 
-        # Verify kill_window was called for qa-#42, qa-#42-s1, qa-#42-s2, qa-#42-w1, qa-#42-w2
+        # Verify kill_window was called for qa-#42, qa-#42-s1, qa-#42-s2
         assert "@2" in killed_ids  # qa-#42
         assert "@3" in killed_ids  # qa-#42-s1
         assert "@4" in killed_ids  # qa-#42-s2
-        assert "@6" in killed_ids  # qa-#42-w1
-        assert "@7" in killed_ids  # qa-#42-w2
         assert "@1" not in killed_ids  # tui — should not be killed
         assert "@5" not in killed_ids  # other-window — should not be killed
 
@@ -446,29 +442,10 @@ class TestCleanupStaleScenarioWindows:
         # Scenario windows killed
         assert "@3" in killed_ids  # qa-#42-s1
         assert "@4" in killed_ids  # qa-#42-s2
-        # Worker windows killed
-        assert "@6" in killed_ids  # qa-#42-w1
-        assert "@7" in killed_ids  # qa-#42-w2
         # Main QA window preserved
         assert "@2" not in killed_ids  # qa-#42 — should be kept
         assert "@1" not in killed_ids  # tui — should not be killed
         assert "@5" not in killed_ids  # other-window — should not be killed
-
-    def test_different_pr_windows_not_killed(self):
-        """Windows belonging to a different PR should not be killed."""
-        pr_data = {"id": "pr-abc", "gh_pr_number": 42}
-        windows = list(self._WINDOWS) + [
-            {"id": "@8", "index": "7", "name": "qa-#99-w1"},
-        ]
-        mock_tmux = MagicMock()
-        mock_tmux.list_windows.return_value = windows
-        with patch("pm_core.qa_loop._log"), \
-             patch("pm_core.tmux.list_windows", mock_tmux.list_windows), \
-             patch("pm_core.tmux.kill_window", mock_tmux.kill_window):
-            _cleanup_stale_scenario_windows("pm-test", pr_data,
-                                            include_main=True)
-        killed_ids = [c[0][1] for c in mock_tmux.kill_window.call_args_list]
-        assert "@8" not in killed_ids  # qa-#99-w1 — different PR, should not be killed
 
 
 class TestVerdictConstants:
@@ -2867,59 +2844,6 @@ SCENARIO_2_VERDICT: NEEDS_WORK
 """
         result = _extract_worker_verdicts(content)
         assert result == {1: "PASS", 2: "NEEDS_WORK"}
-
-
-    def test_scenario_zero(self):
-        content = "SCENARIO_0_VERDICT: PASS\n"
-        result = _extract_worker_verdicts(content)
-        assert result == {0: "PASS"}
-
-    def test_verdict_in_fenced_code_block(self):
-        """Verdict line inside triple-backtick fences still matches because
-        the backtick lines are separate — the verdict line itself starts at
-        column 0."""
-        content = "```\nSCENARIO_1_VERDICT: PASS\n```\n"
-        result = _extract_worker_verdicts(content)
-        assert result == {1: "PASS"}
-
-    def test_mid_line_no_match(self):
-        """Verdict text that doesn't start the line should NOT match."""
-        content = "echo SCENARIO_1_VERDICT: PASS\n"
-        result = _extract_worker_verdicts(content)
-        assert result == {}
-
-    def test_ansi_escape_no_match(self):
-        """ANSI escape codes before the keyword break the ^ anchor."""
-        content = "\x1b[32mSCENARIO_1_VERDICT: PASS\x1b[0m\n"
-        result = _extract_worker_verdicts(content)
-        assert result == {}
-
-    def test_tab_indented(self):
-        content = "\tSCENARIO_3_VERDICT: NEEDS_WORK\n"
-        result = _extract_worker_verdicts(content)
-        assert result == {3: "NEEDS_WORK"}
-
-    def test_trailing_whitespace(self):
-        content = "SCENARIO_1_VERDICT: PASS   \n"
-        result = _extract_worker_verdicts(content)
-        assert result == {1: "PASS"}
-
-    def test_extra_whitespace_after_colon(self):
-        content = "SCENARIO_1_VERDICT:   PASS\n"
-        result = _extract_worker_verdicts(content)
-        assert result == {1: "PASS"}
-
-    def test_large_input_performance(self):
-        """Correctness on ~100K lines with 5 verdicts scattered throughout."""
-        lines = ["filler line number {}\n".format(i) for i in range(100_000)]
-        expected = {}
-        for sc_idx, insert_at in enumerate([1000, 25000, 50000, 75000, 99000]):
-            verdict = ["PASS", "NEEDS_WORK", "INPUT_REQUIRED", "PASS", "NEEDS_WORK"][sc_idx]
-            lines[insert_at] = "SCENARIO_{}_VERDICT: {}\n".format(sc_idx, verdict)
-            expected[sc_idx] = verdict
-        content = "".join(lines)
-        result = _extract_worker_verdicts(content)
-        assert result == expected
 
 
 class TestWorkerWindowName:

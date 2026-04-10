@@ -834,7 +834,7 @@ def _worker_group_field(worker_count: int) -> str:
         return ""
     if worker_count < 0:
         return "\nGROUP: <worker group number, starting from 1>"
-    return f"\nGROUP: <worker number 1-{worker_count}>"
+    return f"\nGROUP: <worker group number, 1 to {worker_count}>"
 
 
 def _worker_grouping_instructions(worker_count: int) -> str:
@@ -860,14 +860,15 @@ parallelism.  Distribute scenarios as evenly as possible across groups.
     return f"""
 ## Worker Grouping
 
-Scenarios will be batched into {worker_count} worker session(s).  Each worker
-executes its assigned scenarios sequentially in a single Claude session,
+Scenarios will be batched into up to {worker_count} worker session(s).  Each
+worker executes its assigned scenarios sequentially in a single Claude session,
 sharing the diff review and file loading across scenarios.
 
-Assign each scenario a GROUP number (1-{worker_count}).  Group scenarios that
-share functional area, related files, or test theme together to maximize the
-benefit of shared context within each worker.  Distribute scenarios as evenly
-as possible across groups.
+Assign each scenario a GROUP number (1-{worker_count}).  You may use fewer
+groups than {worker_count} if there aren't enough scenarios or if grouping
+naturally produces fewer clusters.  Group scenarios that share functional area,
+related files, or test theme together to maximize the benefit of shared context
+within each worker.  Distribute scenarios as evenly as possible across groups.
 """
 
 
