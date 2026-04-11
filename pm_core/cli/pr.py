@@ -620,8 +620,8 @@ def pr_spec_path(pr_id: str, phase: str):
 def pr_spec_save(pr_id: str, phase: str):
     """Register a spec file for a PR phase (used by Claude sessions).
 
-    Reads spec content from the canonical path
-    (<pm-root>/specs/<pr-id>/<phase>.md) and records it in project.yaml.
+    Validates that the spec file exists at the canonical path
+    (<pm-root>/specs/<pr-id>/<phase>.md) and is non-empty.
     The Claude session writes the file first, then runs this command.
     """
     root = state_root()
@@ -634,7 +634,6 @@ def pr_spec_save(pr_id: str, phase: str):
         raise SystemExit(1)
 
     spec_path = spec_gen.spec_file_path(root, pr_id, phase)
-    field = spec_gen._SPEC_FIELD[phase]
 
     if not spec_path.exists():
         click.echo(f"Spec file not found: {spec_path}", err=True)
@@ -646,9 +645,6 @@ def pr_spec_save(pr_id: str, phase: str):
         click.echo(f"Spec file is empty: {spec_path}", err=True)
         raise SystemExit(1)
 
-    # Record the path in the PR entry
-    pr_entry[field] = str(spec_path)
-    store.save(data, root)
     click.echo(f"Saved {phase} spec for {_pr_display_id(pr_entry)} ({len(content)} chars).")
     trigger_tui_refresh()
 
@@ -859,11 +855,19 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         else:
             pr_committed = bool(store.get_pr(committed_data, pr_id))
     if not pr_committed:
-        click.echo(
-            f"PR {pr_id} is not committed on {base_branch} yet. "
-            f"Run `pm push` to commit project state before starting.",
-            err=True,
-        )
+        # Distinguish: does the PR exist in the current (working) project.yaml?
+        if store.get_pr(data, pr_id):
+            click.echo(
+                f"PR {pr_id} is not committed on {base_branch} yet. "
+                f"Run `pm push` to commit project state before starting.",
+                err=True,
+            )
+        else:
+            click.echo(
+                f"PR {pr_id} was not found in project.yaml. "
+                f"Check that the PR ID is correct and has been added to the project.",
+                err=True,
+            )
         raise SystemExit(1)
 
     if workdir:
