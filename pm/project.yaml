@@ -3,7 +3,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-5471329
+  active_pr: pr-4db3696
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -8862,7 +8862,7 @@ prs:
   plan: plan-qa
   title: Switch container runtime from Docker to Podman for nested container support
   branch: pm/pr-3fe2696-switch-container-runtime-from-docker-to-podman-for
-  status: in_review
+  status: merged
   depends_on: []
   description: Replace hardcoded docker CLI calls in container.py with a configurable
     container runtime (podman or docker). Add --userns=keep-id to container run commands
@@ -8874,17 +8874,17 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/164
   gh_pr_number: 164
   created_at: '2026-04-10T10:57:00.444225+00:00'
-  updated_at: '2026-04-10T11:18:37.323098+00:00'
+  updated_at: '2026-04-10T14:17:59.034451+00:00'
   started_at: '2026-04-10T10:58:23.832726+00:00'
   reviewed_at: '2026-04-10T11:18:37.323098+00:00'
-  merged_at: null
+  merged_at: '2026-04-10T14:17:59.034451+00:00'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-3fe2696-switch-container-runtime-from-docker-fcb1d53b
 - id: pr-5471329
   plan: improvements
   title: Double-tap for destructive TUI shortcuts to prevent accidental triggers
   branch: pm/pr-5471329-double-tap-for-destructive-tui-shortcuts-to-preven
-  status: pending
+  status: in_review
   depends_on: []
   description: Require a quick double-tap (within 300-400ms) for destructive single-key
     TUI shortcuts like s (start PR), d (review), g (merge), and t (QA run). First
@@ -8896,16 +8896,16 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/163
   gh_pr_number: 163
   created_at: '2026-04-09T22:50:59.769426+00:00'
-  updated_at: '2026-04-10T14:07:52.235631+00:00'
+  updated_at: '2026-04-10T16:56:47.454801+00:00'
   started_at: null
-  reviewed_at: '2026-04-10T14:07:52.235621+00:00'
+  reviewed_at: '2026-04-10T16:56:47.454801+00:00'
   merged_at: null
   notes: []
 - id: pr-4db3696
   plan: null
   title: Add pm pr split command for breaking large PRs into smaller pieces
   branch: pm/pr-4db3696-add-pm-pr-split-command-for-breaking-large-prs-int
-  status: pending
+  status: qa
   depends_on: []
   description: "Add a 'pm pr split' command (CLI + TUI keybinding) that launches a\
     \ Claude session to decompose a large PR into multiple smaller PRs.\n\nWorkflow:\n\
@@ -8925,13 +8925,13 @@ prs:
     \ PRs with new branches work fine\n- Plan markdown reconciliation happens naturally\
     \ via 'pm plan review' since the review prompt pulls PRs from project.yaml not\
     \ the markdown"
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: arch-home
+  gh_pr: https://github.com/mjtomei/project_manager/pull/165
+  gh_pr_number: 165
   created_at: '2026-04-10T11:34:57.339723+00:00'
-  updated_at: '2026-04-10T14:15:37.331993+00:00'
-  started_at: null
-  reviewed_at: null
+  updated_at: '2026-04-10T16:01:58.038791+00:00'
+  started_at: '2026-04-10T14:17:39.293056+00:00'
+  reviewed_at: '2026-04-10T16:01:58.038791+00:00'
   merged_at: null
   notes:
   - id: note-654a677
@@ -8940,3 +8940,17 @@ prs:
       the backend abstraction layer, not assume GitHub.
     created_at: '2026-04-10T14:15:37Z'
     last_edited: '2026-04-10T14:15:37Z'
+  - id: note-4293386
+    text: 'QA ERROR:  (workdir: /home/mjtomei/.pm/workdirs/qa/pr-4db3696-7234227cfbeecef8)'
+    created_at: '2026-04-10T16:47:27Z'
+    last_edited: '2026-04-10T16:47:27Z'
+  - id: note-b4ac9fa
+    text: 'QA ERROR:  (workdir: /home/mjtomei/.pm/workdirs/qa/pr-4db3696-8396e9356eacb4b5)'
+    created_at: '2026-04-10T16:49:22Z'
+    last_edited: '2026-04-10T16:49:22Z'
+  - id: note-7c93923
+    text: 'QA INPUT_REQUIRED:  (workdir: /home/mjtomei/.pm/workdirs/qa/pr-4db3696-14d4014763e37dcc)'
+    created_at: '2026-04-10T17:56:15Z'
+    last_edited: '2026-04-10T17:56:15Z'
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-4db3696-add-pm-pr-split-command-for-breaking-2ed2a6a3
+  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-4db3696/qa.md
