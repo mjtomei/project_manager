@@ -45,7 +45,8 @@ def _parse_section(
     )
 
     results = []
-    for block in blocks:
+    # blocks[0] is preamble text before the first ### heading — skip it
+    for block in blocks[1:]:
         block = block.strip()
         if not block:
             continue
