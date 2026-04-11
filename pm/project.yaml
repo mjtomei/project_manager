@@ -8,6 +8,7 @@ project:
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
   hide_merged: false
+  skip_qa: false
 plans:
 - id: plan-001
   name: Import from existing repo
@@ -4775,7 +4776,6 @@ prs:
     created_at: '2026-03-23T13:50:21Z'
     last_edited: '2026-03-23T13:50:21Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b827df-add-running-tasks-pane-to-tui-with-w-cbe54f5e
-  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-0b827df/qa.md
 - id: pr-341100c
   plan: tui-ux
   title: Add per-plan standalone PM sessions within the same project
@@ -5639,7 +5639,6 @@ prs:
     created_at: '2026-04-07T14:13:07Z'
     last_edited: '2026-04-07T14:13:07Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-ac12b47-session-cleanup-for-stale-containers-ab512a43
-  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-ac12b47/qa.md
 - id: pr-53e47a1
   plan: tui-ux
   title: Shift+key reverses cycle direction for TUI keybindings
@@ -7208,7 +7207,6 @@ prs:
     created_at: '2026-03-22T01:15:43Z'
     last_edited: '2026-03-22T01:15:43Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-88fdba1-fix-shared-push-proxy-using-first-sc-d0f78a09
-  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-88fdba1/qa.md
 - id: pr-291e891
   plan: improvements
   title: 'Track action source metadata for TUI operations: session, window, and task
@@ -7422,7 +7420,6 @@ prs:
     created_at: '2026-04-06T18:30:18Z'
     last_edited: '2026-04-06T18:30:18Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-6ca8113-add-parent-field-to-plan-schema-63382040
-  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-6ca8113/qa.md
 - id: pr-939d8cf
   plan: plan-cb4ef69
   title: Add hierarchy traversal helpers to store
@@ -7855,7 +7852,6 @@ prs:
     created_at: '2026-04-06T19:07:59Z'
     last_edited: '2026-04-06T19:07:59Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-83b98d5-merge-pr-notes-from-both-main-and-wo-b1d18e14
-  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-83b98d5/qa.md
 - id: pr-7251b72
   plan: improvements
   title: Refuse pm pr start when PR is not committed on base branch
@@ -7907,8 +7903,6 @@ prs:
     created_at: '2026-04-06T19:26:06Z'
     last_edited: '2026-04-06T19:26:06Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-7251b72-refuse-pm-pr-start-when-pr-is-not-co-b1d18e14
-  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-7251b72/qa.md
-  spec_impl: /workspace/pm/specs/pr-7251b72/impl.md
 - id: pr-e3cf481
   plan: null
   title: Add file-locked read-modify-write helper for pane registry
@@ -8544,6 +8538,27 @@ prs:
       /home/matt/.pm/workdirs/qa/pr-eb2dbfc-1eb09c5efa20c727)'
     created_at: '2026-04-10T10:50:03Z'
     last_edited: '2026-04-10T10:50:03Z'
+  - id: note-a903529
+    text: 'QA INPUT_REQUIRED: TUI status bar displays memory usage and blocked launch
+      indicators: INPUT_REQUIRED; Stop-on-idle policy per container type with tmux
+      pane preservation: INPUT_REQUIRED; QA planner batch projection and partial launch
+      with queuing: INPUT_REQUIRED; Memory target changed mid-QA-run takes effect
+      on next cycle: PASS; Governor inactive when no memory target configured: PASS;
+      waiting_memory status rendered in QA status pane when all initial scenarios
+      are memory-blocked: INPUT_REQUIRED; enqueue_and_try_acquire atomic fast path
+      for impl/review containers: PASS; Non-fitting queue entries do not block smaller
+      entries behind them (E17 fix): PASS; Cross-process launch queue serialization
+      and fairness policies: PASS; Memory projection cascade and stats persistence:
+      PASS; Stats file corruption and Docker stats failure graceful degradation: PASS;
+      Concurrent gate check serialization via _gate_lock: PASS; Single container projection
+      exceeds target (E1): PASS; System memory scope vs PM-only scope measurement:
+      PASS; Container type inference handles all patterns and edge cases (E8): PASS;
+      History trimming keeps only newest N samples (E9): PASS; Periodic retry launches
+      queued scenarios even while other scenarios are running: INPUT_REQUIRED; Stop-on-idle
+      does NOT remove containers during active verification: INPUT_REQUIRED; find_containers_by_keywords
+      matches correctly: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-eb2dbfc-92a70215734d8ef3)'
+    created_at: '2026-04-10T13:33:17Z'
+    last_edited: '2026-04-10T13:33:17Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
@@ -8778,7 +8793,6 @@ prs:
     created_at: '2026-04-09T21:59:08Z'
     last_edited: '2026-04-09T21:59:08Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-6634fb0-convert-all-pane-registry-callers-to-e6d0566c
-  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-6634fb0/qa.md
 - id: pr-f8abc94
   plan: improvements
   title: TUI command for PR resource cleanup
@@ -8852,11 +8866,24 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/163
   gh_pr_number: 163
   created_at: '2026-04-09T22:50:59.769426+00:00'
-  updated_at: '2026-04-09T23:30:04.624901+00:00'
+  updated_at: '2026-04-10T18:43:57.689457+00:00'
   started_at: '2026-04-09T23:30:04.624901+00:00'
-  reviewed_at: null
+  reviewed_at: '2026-04-10T18:43:57.689457+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-837f29c
+    text: 'QA PASS: parse_qa_plan correctly extracts GROUP field from planner output:
+      PASS; group_scenarios_into_workers distributes scenarios correctly across all
+      modes: PASS; generate_qa_planner_prompt includes GROUP field and grouping instructions
+      based on worker_count: PASS; generate_qa_worker_prompt produces correct batched
+      worker prompt: PASS; _extract_worker_verdicts regex handles all verdict patterns:
+      PASS; _poll_worker_verdicts advances worker through scenarios correctly: PASS;
+      run_qa_sync branches correctly between batched and standard modes: PASS; Worker
+      window naming and stale cleanup includes worker windows: PASS; qa-worker-count
+      CLI setting registration and defaults: PASS; Verification flow within batched
+      worker polling: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-d8cfa16-b86fb4d37ecd876f)'
+    created_at: '2026-04-10T13:35:59Z'
+    last_edited: '2026-04-10T13:35:59Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-d8cfa16-batched-qa-scenario-execution-ebce8630
 - id: pr-3fe2696
   plan: plan-qa
@@ -8952,5 +8979,43 @@ prs:
     text: 'QA INPUT_REQUIRED:  (workdir: /home/mjtomei/.pm/workdirs/qa/pr-4db3696-14d4014763e37dcc)'
     created_at: '2026-04-10T17:56:15Z'
     last_edited: '2026-04-10T17:56:15Z'
-  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-4db3696-add-pm-pr-split-command-for-breaking-2ed2a6a3
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-4db3696-add-pm-pr-split-command-for-breaking-7efdf042
   spec_qa: /home/mjtomei/project_manager/pm/specs/pr-4db3696/qa.md
+- id: pr-8a56712
+  plan: bugs
+  title: 'Bug: auto-start silently swallows command launch failures'
+  branch: pm/pr-8a56712-bug-auto-start-silently-swallows-command-launch
+  status: pending
+  depends_on: []
+  description: 'When auto-start runs and a command fails to start (e.g. pm pr start
+    fails), the failure is silently ignored. There is no error message, log entry,
+    or TUI indication that anything went wrong. The user has no way to know a PR failed
+    to launch without manually checking. Fix: surface command launch failures visibly
+    — log the error and show a notification or status update in the TUI.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-11T21:03:47.534988+00:00'
+  updated_at: '2026-04-11T21:03:47.534988+00:00'
+  started_at: null
+  reviewed_at: null
+- id: pr-8719fee
+  plan: bugs
+  title: 'Bug: switching backend from local to github leaves existing PRs on local
+    backend'
+  branch: pm/pr-8719fee-bug-switching-backend-from-local-to-github-leaves
+  status: pending
+  depends_on: []
+  description: 'If you manually change the project backend from local to github in
+    project.yaml after creating a GitHub repo, PRs that were already started remain
+    on the local backend. Running implementation on such a PR continues to use the
+    local backend instead of creating a GitHub PR. Fix: when the project backend changes,
+    detect in-progress PRs that are still using the old backend and migrate them (or
+    at minimum warn the user and offer to migrate).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-11T21:03:47.534988+00:00'
+  updated_at: '2026-04-11T21:03:47.534988+00:00'
+  started_at: null
+  reviewed_at: null

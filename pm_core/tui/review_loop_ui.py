@@ -346,6 +346,9 @@ def _maybe_start_qa(app, pr_id: str) -> None:
     - **Auto-start mode**: only transitions if auto-start is enabled and
       the PR is within the target scope.
 
+    If the project-level ``skip_qa`` setting is true, QA is skipped and
+    the PR goes straight to merge.
+
     QA completion is handled by qa_loop_ui which triggers merge on QA PASS.
     """
     from pm_core.tui import auto_start as _auto_start
@@ -364,6 +367,14 @@ def _maybe_start_qa(app, pr_id: str) -> None:
             allowed.add(target)
             if pr_id not in allowed:
                 return
+
+    # If project has skip_qa enabled, skip QA and go straight to merge
+    project = (app._data or {}).get("project") or {}
+    if project.get("skip_qa"):
+        _log.info("auto_qa: skip_qa enabled, skipping QA for %s", pr_id)
+        app.log_message(f"Auto-start: {pr_id} review passed, skipping QA (skip_qa enabled)")
+        _maybe_auto_merge(app, pr_id, force=bool(sd))
+        return
 
     # Transition PR status to "qa"
     if app._root:
