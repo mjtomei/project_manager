@@ -687,6 +687,11 @@ def _poll_impl_idle(app) -> None:
             if content_has_interactive_prompt(content):
                 _log.info("impl_idle: %s idle but showing interactive prompt, resetting", pr_id)
                 tracker.mark_active(pr_id)
+            elif pr.get("spec_pending"):
+                # Spec generation paused for user input (ambiguity
+                # resolution).  The session is waiting, not done.
+                _log.info("impl_idle: %s idle but spec_pending, resetting", pr_id)
+                tracker.mark_active(pr_id)
             else:
                 newly_idle.append((pr_id, pr))
 
