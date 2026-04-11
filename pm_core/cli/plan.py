@@ -120,9 +120,11 @@ when there's a real ordering constraint.
 
 {_MANUAL_TESTING_GUIDANCE}
 
-After writing the PRs section, tell the user to run `pm plan review {plan_id}`
-(key: c in the plans pane) to check consistency and coverage before loading.
-Let them know it is safe to close this pane — the review will run in a new session.
+After writing the PRs section, tell the user to run `pm plan load {plan_id}`
+(key: l in the plans pane) to load the PRs into project.yaml. They can
+optionally run `pm plan review {plan_id}` (key: c) afterward to check
+consistency and coverage.
+Let them know it is safe to close this pane — load and review will run in new sessions.
 {tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
 
     claude = find_claude()
@@ -222,9 +224,10 @@ Guidelines:
 - Write the ## PRs section directly into the plan file at {plan_path}
 - {_MANUAL_TESTING_GUIDANCE}
 
-After writing, tell the user to run `pm plan review {plan_id}` (key: c in the
-plans pane) to check consistency and coverage before loading PRs.
-Let them know it is safe to close this pane — the review will run in a new session.
+After writing, tell the user to run `pm plan load {plan_id}` (key: l in the
+plans pane) to load the PRs into project.yaml. They can optionally run
+`pm plan review {plan_id}` (key: c) afterward to check consistency and coverage.
+Let them know it is safe to close this pane — load and review will run in new sessions.
 {tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
 
     claude = find_claude()
