@@ -96,7 +96,7 @@ def parse_split_prs(text: str) -> list[dict]:
 
 def extract_field(body: str, field: str) -> str:
     """Extract a **field**: value from the body text."""
-    pattern = rf'^\s*-\s*\*\*{re.escape(field)}\*\*:\s*(.*?)$'
+    pattern = rf'^\s*-\s*\*\*{re.escape(field)}\*\*:[^\S\n]*(.*?)$'
     match = re.search(pattern, body, re.MULTILINE | re.IGNORECASE)
     if match:
         return match.group(1).strip()
