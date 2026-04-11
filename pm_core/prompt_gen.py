@@ -400,7 +400,7 @@ You're splitting PR {pr_id}: "{title}" into smaller child PRs.
    - **depends_on** uses child PR titles (not IDs), comma-separated
    - Leave depends_on empty for independent child PRs
 
-5. **Load the split**: After writing the manifest, tell the user to press `P` in
+5. **Load the split**: After writing the manifest, tell the user to press `a` in
    the TUI (or run `pm pr split-load {pr_id}` from the project root directory)
    to create the child PR entries and push their branches.
    Do NOT run `split-load` yourself from this workdir — it must run from the
