@@ -1728,7 +1728,12 @@ def _launch_workers_in_containers(
         instruction_contents: dict[int, str | None] = {}
         for sc in scenarios:
             sc.worktree_path = str(clone_path)
-            sc.report_path = _scenario_report_path(state.qa_workdir, sc.index)
+            # In container mode reports are written to /scratch (which is
+            # bind-mounted to `scratch_path` on the host) so the worker can
+            # actually create the file — the host qa_workdir isn't mounted
+            # inside the container.  `sc.report_path` tracks the host-side
+            # location for post-hoc inspection.
+            sc.report_path = str(scratch_path / f"report-s{sc.index}.md")
 
             instr: str | None = None
             if pm_root and sc.instruction_path:
@@ -1835,7 +1840,10 @@ def _launch_workers_in_containers(
             data, state.pr_id, scenarios,
             worker_index=worker_index,
             workdir=container_workdir,
-            qa_workdir=str(state.qa_workdir),
+            # Report files are written to /scratch inside the container
+            # (bind-mounted to host scratch_path).  Do NOT pass the host
+            # qa_workdir here — that path doesn't exist inside the container.
+            qa_workdir=container_scratch,
             session_name=None,
             worktree_mode=bool(repo_root),
             scratch_dir=container_scratch,
@@ -2155,6 +2163,10 @@ def _poll_worker_verdicts(
         else:
             for sc in scenarios:
                 state.scenario_verdicts[sc.index] = VERDICT_INPUT_REQUIRED
+            # Try the next queued worker — otherwise the poll loop can
+            # stall with items still in `_launch_queue` but no running
+            # workers to trigger another launch attempt.
+            _launch_next_queued()
 
     # Fill initial slots
     for _ in range(len(_launch_queue)):
