@@ -1304,11 +1304,15 @@ def generate_qa_worker_prompt(data: dict, pr_id: str,
     scenarios_text = "\n\n".join(scenario_blocks)
     scenario_indices = ", ".join(str(sc.index) for sc in scenarios)
 
-    # Push instructions
-    pull_step = (
-        f"- Pull the latest changes: `git pull origin {branch}`. "
-        f"Resolve any merge conflicts.\n"
-    ) if has_remote else ""
+    # Once-only setup steps (pull, diff review) before the per-scenario loop
+    setup_lines = ["1. Review the diff and relevant files — you will reuse this "
+                   "understanding across all scenarios in this batch"]
+    if has_remote:
+        setup_lines.append(
+            f"2. Pull the latest changes: `git pull origin {branch}`. "
+            f"Resolve any merge conflicts."
+        )
+    setup_steps = "\n".join(setup_lines)
 
     push_instructions = ""
     if worktree_mode:
@@ -1330,15 +1334,16 @@ def generate_qa_worker_prompt(data: dict, pr_id: str,
 You are a batched QA worker. You will execute {len(scenarios)} scenario(s) sequentially
 (scenarios {scenario_indices}).  An orchestrator is monitoring your tmux pane.
 
-**For each scenario:**
-1. Review the diff and relevant files (you only need to do this thoroughly once —
-   reuse your understanding across scenarios)
-{pull_step}2. Execute the test steps described for that scenario
-3. Write a per-scenario report file (path given per scenario below)
-4. Output the scenario verdict in this exact format on its own line:
+**Once, at the start:**
+{setup_steps}
+
+**Then, for each scenario in order:**
+1. Execute the test steps described for that scenario
+2. Write a per-scenario report file (path given per scenario below)
+3. Output the scenario verdict in this exact format on its own line:
    `SCENARIO_<N>_VERDICT: <VERDICT>`
    where N is the scenario number and VERDICT is PASS, NEEDS_WORK, or INPUT_REQUIRED
-5. **WAIT** — do not proceed to the next scenario until the orchestrator sends you
+4. **WAIT** — do not proceed to the next scenario until the orchestrator sends you
    a message saying "PROCEED TO SCENARIO <next>". This allows the orchestrator to
    verify your verdict and the user to review results.
 
