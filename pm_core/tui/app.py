@@ -457,6 +457,8 @@ class ProjectManagerApp(App):
             _log.warning("no project.yaml found")
             self._root = None
             self._data = {}
+        except store.ProjectYamlParseError as e:
+            _log.warning("corrupt project.yaml, keeping previous state: %s", e)
 
         # Decide which view to show based on whether PRs exist
         prs = self._data.get("prs") or []

@@ -668,7 +668,10 @@ class TestBuildExecCmd:
     def test_includes_cleanup_by_default(self, mock_runtime):
         cmd = build_exec_cmd("my-container", "claude 'hi'")
         assert "docker rm -f" in cmd
-        assert ">/dev/null 2>&1" in cmd
+        # Cleanup is wrapped in a bash trap for robustness against kill-pane
+        assert cmd.startswith("bash -c ")
+        assert "trap " in cmd
+        assert "EXIT" in cmd
 
     @patch("pm_core.container._get_runtime", return_value="docker")
     def test_cleanup_removes_proxy_socket(self, mock_runtime):
@@ -691,11 +694,15 @@ class TestBuildExecCmd:
     @patch("pm_core.container._get_runtime", return_value="docker")
     def test_shell_safety(self, mock_runtime):
         cmd = build_exec_cmd("name-with-special", "claude 'prompt with $vars'")
-        # The command is wrapped in bash -c with trap for cleanup.
-        # Verify the key components are present in the output.
-        assert "docker exec -it" in cmd
-        assert f"-u {_CONTAINER_USER}" in cmd
-        assert "name-with-special" in cmd
+        # The command is wrapped in bash -c with a trap, so parse the outer layer
+        outer = shlex.split(cmd)
+        assert outer[0] == "bash"
+        assert outer[1] == "-c"
+        # The inner script should contain a proper docker exec invocation
+        inner = outer[2]
+        assert "docker exec -it" in inner
+        assert f"-u {_CONTAINER_USER}" in inner
+        assert "name-with-special" in inner
 
     @patch("pm_core.container._get_runtime", return_value="podman")
     def test_uses_configured_runtime(self, mock_runtime):
@@ -759,10 +766,15 @@ class TestWrapClaudeCmd:
 class TestRemoveContainer:
     @patch("pm_core.container._run_runtime")
     def test_removes_container(self, mock_docker):
+        # After rm, remove_container polls with inspect until the container is gone.
+        # Simulate inspect returning non-zero (container gone) on first poll.
+        mock_docker.return_value.returncode = 1
         remove_container("test-container")
         # First call is rm -f, second is inspect (wait loop)
         mock_docker.assert_any_call(
             "rm", "-f", "test-container", check=False, timeout=30)
+        mock_docker.assert_any_call(
+            "inspect", "test-container", check=False, timeout=5)
 
 
 class TestCleanupContainers:

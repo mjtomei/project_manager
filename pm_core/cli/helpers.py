@@ -291,11 +291,6 @@ def _record_status_timestamp(pr_entry: dict, status: str | None = None) -> None:
         pr_entry["merged_at"] = now
 
 
-def save_and_push(data: dict, root: Path, message: str = "pm: update state") -> None:
-    """Save state. Use 'pm push' to commit and share changes."""
-    store.save(data, root)
-
-
 def trigger_tui_refresh() -> None:
     """Send reload key to TUI pane in the pm session for the current directory.
 
@@ -498,11 +493,19 @@ def _ensure_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
     # Checkout the PR branch
     git_ops.checkout_branch(work_path, branch, create=True)
 
-    # Update and persist the new workdir path
-    pr_entry["workdir"] = str(work_path)
-    save_and_push(data, root, f"pm: ensure workdir for {pr_id}")
+    # Update and persist the new workdir path atomically
+    workdir_str = str(work_path)
+    pr_entry["workdir"] = workdir_str
+
+    def apply(fresh_data):
+        for pr in fresh_data.get("prs") or []:
+            if pr["id"] == pr_id:
+                pr["workdir"] = workdir_str
+                break
+
+    store.locked_update(root, apply)
     click.echo(f"Workdir created at {work_path}")
-    return str(work_path)
+    return workdir_str
 
 
 def _resolve_repo_id(data: dict, workdir: Path, root: Path) -> None:
@@ -512,8 +515,13 @@ def _resolve_repo_id(data: dict, workdir: Path, root: Path) -> None:
     result = git_ops.run_git("rev-list", "--max-parents=0", "HEAD", cwd=workdir, check=False)
     lines = result.stdout.strip().splitlines() if result.returncode == 0 else []
     if lines:
-        data["project"]["repo_id"] = lines[0]
-        save_and_push(data, root, "pm: cache repo_id")
+        repo_id = lines[0]
+        data["project"]["repo_id"] = repo_id
+
+        def apply(d):
+            d.setdefault("project", {})["repo_id"] = repo_id
+
+        store.locked_update(root, apply)
 
 
 def _infer_pr_id(data: dict, status_filter: tuple[str, ...] | None = None) -> str | None:

@@ -349,7 +349,7 @@ class TestEnsureWorkdir:
              patch("pm_core.cli.helpers.git_ops.run_git", side_effect=fake_run_git), \
              patch("pm_core.cli.helpers.git_ops.is_git_repo", return_value=False), \
              patch("pm_core.cli.helpers._resolve_repo_id"), \
-             patch("pm_core.cli.helpers.save_and_push"):
+             patch("pm_core.cli.helpers.store.locked_update"):
             result = _ensure_workdir(data, pr_entry, pm_root)
 
         assert result is not None

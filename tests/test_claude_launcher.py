@@ -188,8 +188,9 @@ class TestLaunchClaudeInTmux:
     @patch("pm_core.tmux.send_keys")
     def test_with_cwd(self, mock_sk, mock_build):
         launch_claude_in_tmux("%1", "hello", cwd="/tmp/proj")
-        cmd = mock_sk.call_args[0][1]
-        assert cmd.startswith("cd '/tmp/proj' && ")
+        # cwd is now forwarded to build_claude_shell_cmd rather than prepended
+        mock_build.assert_called_once_with(prompt="hello", cwd="/tmp/proj")
+        mock_sk.assert_called_once_with("%1", "claude 'hello'")
 
 
 # ---------------------------------------------------------------------------

@@ -41,7 +41,10 @@ def _get_selected_pr(app) -> tuple[str | None, dict | None]:
     pr_id = tree.selected_pr_id
     if not pr_id or not app._root:
         return None, None
-    data = store.load(app._root)
+    try:
+        data = store.load(app._root)
+    except store.ProjectYamlParseError:
+        return None, None
     pr = store.get_pr(data, pr_id)
     return pr_id, pr
 
@@ -61,7 +64,11 @@ def focus_or_start_qa(app, pr_id: str) -> None:
         app.log_message("No project root")
         return
 
-    data = store.load(app._root)
+    try:
+        data = store.load(app._root)
+    except store.ProjectYamlParseError as e:
+        app.log_message(f"Error: {e}")
+        return
     pr = store.get_pr(data, pr_id)
     if not pr:
         app.log_message(f"PR not found: {pr_id}")
@@ -92,7 +99,11 @@ def start_qa(app, pr_id: str) -> None:
         app.log_message("No project root")
         return
 
-    data = store.load(app._root)
+    try:
+        data = store.load(app._root)
+    except store.ProjectYamlParseError as e:
+        app.log_message(f"Error: {e}")
+        return
     pr = store.get_pr(data, pr_id)
     if not pr:
         app.log_message(f"PR not found: {pr_id}")
@@ -107,8 +118,16 @@ def start_qa(app, pr_id: str) -> None:
 
     # Transition status to "qa" if currently in_review
     if pr.get("status") == "in_review":
-        pr["status"] = "qa"
-        store.save(data, app._root)
+        def _set_qa(d):
+            p = store.get_pr(d, pr_id)
+            if p and p.get("status") == "in_review":
+                p["status"] = "qa"
+        try:
+            store.locked_update(app._root, _set_qa)
+        except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+            app.log_message(f"Error: {e}")
+            _log.warning("start_qa: %s for %s: %s", type(e).__name__, pr_id, e)
+            return
         app._load_state()
         _log.info("start_qa: transitioned %s to qa status", pr_id)
 
@@ -141,7 +160,11 @@ def fresh_start_qa(app, pr_id: str) -> None:
         app.log_message("No project root")
         return
 
-    data = store.load(app._root)
+    try:
+        data = store.load(app._root)
+    except store.ProjectYamlParseError as e:
+        app.log_message(f"Error: {e}")
+        return
     pr = store.get_pr(data, pr_id)
     if not pr:
         app.log_message(f"PR not found: {pr_id}")
@@ -180,7 +203,11 @@ def start_or_stop_qa_loop(app, pr_id: str, strict: bool) -> None:
         app.log_message("No project root")
         return
 
-    data = store.load(app._root)
+    try:
+        data = store.load(app._root)
+    except store.ProjectYamlParseError as e:
+        app.log_message(f"Error: {e}")
+        return
     pr = store.get_pr(data, pr_id)
     if not pr:
         app.log_message(f"PR not found: {pr_id}")
@@ -337,7 +364,10 @@ def _on_qa_complete(app, state: QALoopState) -> None:
         app._review_loops.pop(pr_id, None)
         # Reload in-memory state
         if app._root:
-            app._data = store.load(app._root)
+            try:
+                app._data = store.load(app._root)
+            except store.ProjectYamlParseError:
+                pass  # keep existing app._data
 
         if sd:
             # Self-driving: reset pass count and directly start review loop
@@ -375,7 +405,11 @@ def _start_self_driving_review(app, pr_id: str, strict: bool) -> None:
     if not app._root:
         return
 
-    data = store.load(app._root)
+    try:
+        data = store.load(app._root)
+    except store.ProjectYamlParseError as e:
+        _log.warning("_start_self_driving_review: %s", e)
+        return
     pr = store.get_pr(data, pr_id)
     if not pr:
         _log.warning("_start_self_driving_review: PR %s not found", pr_id)
@@ -410,15 +444,20 @@ def _transition_pr_status(app, pr_id: str, from_status: str, to_status: str) -> 
     if not app._root:
         return
     try:
-        data = store.load(app._root)
-        pr = store.get_pr(data, pr_id)
-        if not pr:
-            return
-        current = pr.get("status", "")
-        if current == from_status:
-            pr["status"] = to_status
-            store.save(data, app._root)
+        transitioned = False
+
+        def apply(data):
+            nonlocal transitioned
+            pr = store.get_pr(data, pr_id)
+            if pr and pr.get("status", "") == from_status:
+                pr["status"] = to_status
+                transitioned = True
+
+        store.locked_update(app._root, apply)
+        if transitioned:
             _log.info("Transitioned %s: %s → %s", pr_id, from_status, to_status)
+    except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+        _log.warning("_transition_pr_status: %s for %s: %s", type(e).__name__, pr_id, e)
     except Exception:
         _log.exception("Failed to transition PR status for %s", pr_id)
 
@@ -430,11 +469,6 @@ def _record_qa_note(app, state: QALoopState) -> None:
         return
     try:
         from datetime import datetime, timezone
-        data = store.load(app._root)
-        pr = store.get_pr(data, state.pr_id)
-        if not pr:
-            _log.warning("Cannot record QA note: PR %s not found", state.pr_id)
-            return
         summary_parts = []
         for s in state.scenarios:
             v = state.scenario_verdicts.get(s.index, "?")
@@ -442,13 +476,22 @@ def _record_qa_note(app, state: QALoopState) -> None:
         note_text = f"QA {state.latest_verdict}: " + "; ".join(summary_parts)
         if state.qa_workdir:
             note_text += f" (workdir: {state.qa_workdir})"
-        notes = pr.get("notes") or []
-        existing_ids = {n["id"] for n in notes}
-        note_id = store.generate_note_id(state.pr_id, note_text, existing_ids)
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        notes.append({"id": note_id, "text": note_text,
-                       "created_at": now, "last_edited": now})
-        pr["notes"] = notes
-        store.save(data, app._root)
+
+        def apply(data):
+            pr = store.get_pr(data, state.pr_id)
+            if not pr:
+                _log.warning("Cannot record QA note: PR %s not found", state.pr_id)
+                return
+            notes = pr.get("notes") or []
+            existing_ids = {n["id"] for n in notes}
+            note_id = store.generate_note_id(state.pr_id, note_text, existing_ids)
+            now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            notes.append({"id": note_id, "text": note_text,
+                           "created_at": now, "last_edited": now})
+            pr["notes"] = notes
+
+        store.locked_update(app._root, apply)
+    except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+        _log.warning("_record_qa_note: %s for %s: %s", type(e).__name__, state.pr_id, e)
     except Exception:
         _log.exception("Failed to record QA note for %s", state.pr_id)
