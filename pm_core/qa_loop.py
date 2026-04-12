@@ -2050,6 +2050,14 @@ def _poll_worker_verdicts(
     # Queue of workers waiting to be launched
     _launch_queue: dict[int, list[QAScenario]] = dict(queued_workers or {})
 
+    def _queued_scenario_indices() -> set[int]:
+        """Scenario indices belonging to workers still waiting to launch."""
+        out: set[int] = set()
+        for scs in _launch_queue.values():
+            for sc in scs:
+                out.add(sc.index)
+        return out
+
     # Mark scenarios without windows as INPUT_REQUIRED
     has_failed = False
     for wi, scenarios in worker_groups.items():
@@ -2060,7 +2068,8 @@ def _poll_worker_verdicts(
     if has_failed:
         _write_status_file(status_path, state.pr_id, state.scenarios,
                            state.scenario_verdicts,
-                           scenario_0=state.scenario_0)
+                           scenario_0=state.scenario_0,
+                           queued_scenarios=_queued_scenario_indices())
 
     grace_start = time.monotonic()
 
@@ -2205,7 +2214,17 @@ def _poll_worker_verdicts(
                             time.sleep(1)
                             tmux_mod.send_keys(pane_id, "")
                         state.scenario_verdicts.pop(scenario_idx, None)
-                        seen_verdicts.pop(scenario_idx, None)
+                        # NOTE: do NOT pop seen_verdicts[scenario_idx].
+                        # The stale verdict line is still in the pane
+                        # scrollback; keeping the count means we only
+                        # re-capture once the worker emits a *new*
+                        # SCENARIO_N_VERDICT line (total count > prev).
+                        # Popping would immediately re-trigger
+                        # verification on the same stale content every
+                        # 5s until the worker finishes re-evaluating.
+                        state.latest_output = (
+                            f"Scenario {scenario_idx} ({scenario.title}): "
+                            f"re-evaluating after verification")
                         verdicts_changed = True
                         _notify()
                     else:
@@ -2308,6 +2327,7 @@ def _poll_worker_verdicts(
                                state.scenario_verdicts,
                                scenario_0=state.scenario_0,
                                verifying_scenarios=verifying_snapshot,
+                               queued_scenarios=_queued_scenario_indices(),
                                verification_failures=verification_failures)
 
 
