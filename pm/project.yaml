@@ -7938,18 +7938,28 @@ prs:
   reviewed_at: null
 - id: pr-a7d4dae
   plan: bugs
-  title: 'Bug: plan add/breakdown prompt tells agent to run review instead of load'
+  title: 'Bug: plan add/breakdown prompt errors (wrong next step, INPUT_REQUIRED misuse)'
   branch: pm/pr-a7d4dae-bug-plan-add-breakdown-prompt-tells-agent-to
   status: pending
   depends_on: []
-  description: The plan add and plan breakdown prompts tell the Claude agent to run pm plan review as the next step after
-    writing the PRs section. The correct next step is pm plan load to load PRs into project.yaml. Review is optional and can
-    happen after load.
+  description: 'Two bugs in the plan add and plan breakdown prompts in pm_core/cli/plan.py:
+
+
+    1. Wrong next step: the prompts tell the Claude agent to run pm plan review as the next step after writing the PRs section.
+    The correct next step is pm plan load to load PRs into project.yaml. Review is optional and can happen after load.
+
+
+    2. INPUT_REQUIRED misuse in _MANUAL_TESTING_GUIDANCE: the guidance says to call out manual-testing PRs "so the review
+    loop can use INPUT_REQUIRED appropriately", which leads Claude to write INPUT_REQUIRED: Human testing needed in PR descriptions.
+    But the review loop prompt explicitly says INPUT_REQUIRED is reserved for architectural ambiguity, NOT manual testing
+    — QA handles testing separately. Fix: reword _MANUAL_TESTING_GUIDANCE to use a different tag (e.g. MANUAL_TESTING: or
+    HUMAN_TESTING:) that does not collide with the INPUT_REQUIRED verdict semantics, and make sure the review/QA loop prompts
+    recognize it.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-11T21:35:26.923277+00:00'
-  updated_at: '2026-04-11T21:35:26.923277+00:00'
+  updated_at: '2026-04-12T00:58:16.384705+00:00'
   started_at: null
   reviewed_at: null
 - id: pr-a353c3d
