@@ -1490,6 +1490,7 @@ def _launch_workers_in_tmux(
     worker_groups: dict[int, list[QAScenario]],
     pm_root: Path | None = None,
     _status_scenarios: list | None = None,
+    _queued_scenario_indices: set[int] | None = None,
 ) -> None:
     """Launch batched worker sessions in tmux (one window per worker).
 
@@ -1614,6 +1615,7 @@ def _launch_workers_in_tmux(
             _status_scenarios if _status_scenarios is not None else state.scenarios,
             state.scenario_verdicts,
             scenario_0=state.scenario_0,
+            queued_scenarios=_queued_scenario_indices,
         )
 
     # Phase 2: Launch worker Claude sessions
@@ -1680,6 +1682,7 @@ def _launch_workers_in_containers(
     worker_groups: dict[int, list[QAScenario]],
     pm_root: Path | None = None,
     _status_scenarios: list | None = None,
+    _queued_scenario_indices: set[int] | None = None,
 ) -> None:
     """Launch batched worker sessions in containers (one container per worker).
 
@@ -1820,6 +1823,7 @@ def _launch_workers_in_containers(
             _status_scenarios if _status_scenarios is not None else state.scenarios,
             state.scenario_verdicts,
             scenario_0=state.scenario_0,
+            queued_scenarios=_queued_scenario_indices,
         )
 
     for worker_index, scenarios, clone_path, scratch_path, cname, win_name in ready_workers:
@@ -2122,18 +2126,22 @@ def _poll_worker_verdicts(
 
         orig = state.scenarios
         state.scenarios = scenarios
+        # Remaining queued indices after popping the one we're about to launch
+        remaining_queued = _queued_scenario_indices()
         try:
             if use_containers:
                 _launch_workers_in_containers(
                     state, data, pr_data, session, repo_root, workdir_path,
                     worker_groups={wi: scenarios},
                     pm_root=pm_root, _status_scenarios=orig,
+                    _queued_scenario_indices=remaining_queued,
                 )
             else:
                 _launch_workers_in_tmux(
                     state, data, pr_data, session, repo_root, workdir_path,
                     worker_groups={wi: scenarios},
                     pm_root=pm_root, _status_scenarios=orig,
+                    _queued_scenario_indices=remaining_queued,
                 )
         finally:
             state.scenarios = orig
@@ -3381,11 +3389,13 @@ def run_qa_sync(
             _launch_workers_in_containers(
                 state, data, pr_data, session, repo_root, workdir_path,
                 worker_groups=launch_workers, pm_root=pm_root,
+                _queued_scenario_indices=queued_indices,
             )
         else:
             _launch_workers_in_tmux(
                 state, data, pr_data, session, repo_root, workdir_path,
                 worker_groups=launch_workers, pm_root=pm_root,
+                _queued_scenario_indices=queued_indices,
             )
 
         state.latest_output = (
