@@ -2108,7 +2108,11 @@ def _poll_worker_verdicts(
     def _launch_next_queued():
         if not _launch_queue:
             return
-        active = len(pending_workers) + len(verifying)
+        # pending_workers already captures busy slots — a worker with a
+        # scenario in `verifying` is still in pending_workers (we only
+        # discard from pending_workers after verification completes for
+        # its final scenario). Don't double-count.
+        active = len(pending_workers)
         if concurrency_cap > 0 and active >= concurrency_cap:
             return
         wi = next(iter(_launch_queue))
