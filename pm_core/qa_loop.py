@@ -1095,6 +1095,7 @@ def _launch_scenarios_in_tmux(
                          scenario.index)
             return
         scenario.worktree_path = str(clone_path)
+        scenario.report_path = _scenario_report_path(state.qa_workdir, scenario.index)
 
         if repo_root:
             _setup_clone_override(clone_path)
@@ -1292,6 +1293,7 @@ def _launch_scenarios_in_containers(
                          scenario.index)
             return
         scenario.worktree_path = str(clone_path)
+        scenario.report_path = _scenario_report_path(state.qa_workdir, scenario.index)
 
         # Read instruction content from source before installing
         instruction_content: str | None = None

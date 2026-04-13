@@ -1229,6 +1229,13 @@ final verdict.
 **Steps**:
 {scenario.steps}
 {instruction_block}
+## Report File
+
+Before emitting your verdict, write a short report to `{scenario.report_path}`
+containing: the scenario title, your verdict (PASS/NEEDS_WORK/INPUT_REQUIRED),
+a brief summary of findings, and any issues encountered.  Use your Write tool
+to create the file.
+
 ## Execution
 
 {execution_block}
