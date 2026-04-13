@@ -410,6 +410,8 @@ class TestCleanupStaleScenarioWindows:
         {"id": "@3", "index": "2", "name": "qa-#42-s1"},
         {"id": "@4", "index": "3", "name": "qa-#42-s2"},
         {"id": "@5", "index": "4", "name": "other-window"},
+        {"id": "@6", "index": "5", "name": "qa-#42-w0"},
+        {"id": "@7", "index": "6", "name": "qa-#42-w1"},
     ]
 
     def _run_cleanup(self, pr_data, include_main=True):
@@ -433,6 +435,8 @@ class TestCleanupStaleScenarioWindows:
         assert "@4" in killed_ids  # qa-#42-s2
         assert "@1" not in killed_ids  # tui — should not be killed
         assert "@5" not in killed_ids  # other-window — should not be killed
+        assert "@6" in killed_ids  # qa-#42-w0 — worker window
+        assert "@7" in killed_ids  # qa-#42-w1 — worker window
 
     def test_kills_worker_windows(self):
         """_cleanup_stale_scenario_windows also kills qa-{display_id}-w* windows."""
@@ -484,6 +488,9 @@ class TestCleanupStaleScenarioWindows:
         assert "@2" not in killed_ids  # qa-#42 — should be kept
         assert "@1" not in killed_ids  # tui — should not be killed
         assert "@5" not in killed_ids  # other-window — should not be killed
+        # Worker windows still killed when include_main=False
+        assert "@6" in killed_ids  # qa-#42-w0
+        assert "@7" in killed_ids  # qa-#42-w1
 
 
 class TestVerdictConstants:
