@@ -160,6 +160,27 @@ class QAScenario:
 
 
 @dataclass
+class _WorkerPanes:
+    """Per-worker pane bookkeeping for the 3-pane batched QA pipeline.
+
+    - concretizer_pane: persistent Claude session refining steps serially.
+    - evaluator_pane: the worker Claude session that executes scenarios.
+    - refined: map of scenario_index -> refined steps string, populated
+      as the concretizer emits REFINED_STEPS_START/END pairs.
+    - concretizer_kicked: scenario indices whose `CONCRETIZE SCENARIO N`
+      request has already been sent to the concretizer pane.
+    - refined_count_consumed: number of REFINED_STEPS_END markers we've
+      already processed (starts at 1 because the initial prompt contains
+      an example marker pair).
+    """
+    concretizer_pane: str | None = None
+    evaluator_pane: str | None = None
+    refined: dict = field(default_factory=dict)
+    concretizer_kicked: set = field(default_factory=set)
+    refined_count_consumed: int = 1
+
+
+@dataclass
 class NewMockRequest:
     """A new mock definition requested by the planner."""
     mock_id: str
@@ -932,6 +953,61 @@ def _concretize_scenario(
     return None
 
 
+_REFINED_END_RE = re.compile(r'^[ \t>*`]*REFINED_STEPS_END[ \t*`]*$',
+                             re.MULTILINE)
+
+
+def _count_refined_end_markers(content: str) -> int:
+    """Count whole-line REFINED_STEPS_END occurrences in pane content."""
+    return len(_REFINED_END_RE.findall(content))
+
+
+def _poll_concretizer_for_next(
+    pane_id: str,
+    prev_consumed_count: int,
+    stop_check: Callable[[], bool],
+    timeout: float,
+) -> tuple[str | None, int]:
+    """Poll the concretizer pane until a new REFINED_STEPS_END marker appears.
+
+    Returns (refined_steps, new_count). On timeout or pane death the
+    returned steps are ``None`` and the count is unchanged.
+
+    We require the total count to stay stable for one extra poll before
+    accepting it, so we don't catch a mid-output END line.
+    """
+    from pm_core import tmux as tmux_mod
+    from pm_core.loop_shared import extract_between_markers
+
+    deadline = time.monotonic() + timeout
+    stable_count: int | None = None
+    while time.monotonic() < deadline:
+        if stop_check():
+            return None, prev_consumed_count
+        if not tmux_mod.pane_exists(pane_id):
+            return None, prev_consumed_count
+        try:
+            content = tmux_mod.capture_pane(pane_id, full_scrollback=True)
+        except Exception:
+            time.sleep(_POLL_INTERVAL)
+            continue
+        total = _count_refined_end_markers(content)
+        if total > prev_consumed_count:
+            if stable_count == total:
+                refined = extract_between_markers(
+                    content, "REFINED_STEPS_START", "REFINED_STEPS_END")
+                if refined:
+                    return refined, total
+                # Marker found but extraction failed — try again.
+                stable_count = None
+            else:
+                stable_count = total
+        else:
+            stable_count = None
+        time.sleep(_POLL_INTERVAL)
+    return None, prev_consumed_count
+
+
 # ---------------------------------------------------------------------------
 # Scenario 0 — interactive session
 # ---------------------------------------------------------------------------
@@ -1480,6 +1556,9 @@ def _add_status_pane(session: str, planner_pane: str | None,
         _log.exception("Failed to create status pane")
 
 
+_CONCRETIZE_NEXT_TIMEOUT = 30 * 60  # blocking poll: allow up to 30m
+
+
 def _launch_workers_in_tmux(
     state: QALoopState,
     data: dict,
@@ -1491,21 +1570,25 @@ def _launch_workers_in_tmux(
     pm_root: Path | None = None,
     _status_scenarios: list | None = None,
     _queued_scenario_indices: set[int] | None = None,
+    worker_panes_out: dict | None = None,
 ) -> None:
     """Launch batched worker sessions in tmux (one window per worker).
 
-    Each worker gets a single clone, concretizes all its scenarios in
-    parallel, then runs a single Claude session that executes scenarios
-    sequentially.
+    Each worker window hosts a persistent concretizer pane and a worker
+    (evaluator) pane. The concretizer refines scenarios serially via
+    follow-up messages; the evaluator executes them pipelined with the
+    next concretization.
     """
     from pm_core import tmux as tmux_mod, prompt_gen
     from pm_core.claude_launcher import build_claude_shell_cmd
     _qa_resolution = _resolve_qa_model(pr_data, data, session_type="qa_scenario")
 
     branch = pr_data.get("branch", "")
+    base_branch = data.get("project", {}).get("base_branch", "master")
 
-    # Phase 1: For each worker, create a clone and concretize all its scenarios
-    # Each entry: (worker_index, scenarios, clone_path, scratch_path, win_name)
+    # Phase 1: For each worker, create the clone, start the concretizer
+    # pane, block on Scenario 1's refinement, then split the evaluator
+    # pane and kick off concretize(N+1).
     ready_workers: list[tuple] = []
     ready_lock = threading.Lock()
 
@@ -1531,70 +1614,70 @@ def _launch_workers_in_tmux(
         if repo_root:
             _setup_clone_override(clone_path)
 
-        # Concretize all scenarios in parallel
-        concretize_threads = []
+        # Collect instruction content for all scenarios up front (stored
+        # per-scenario so we can re-ship it in follow-up messages).
+        instruction_contents: dict = {}
         for sc in scenarios:
             sc.worktree_path = str(clone_path)
             sc.report_path = _scenario_report_path(state.qa_workdir, sc.index)
 
-            # Read instruction content
-            instruction_content: str | None = None
+            instr: str | None = None
             if pm_root and sc.instruction_path:
                 src = pm_root / "qa" / sc.instruction_path
                 if src.is_file():
                     try:
-                        instruction_content = src.read_text()
+                        instr = src.read_text()
                     except Exception:
                         pass
                 _install_instruction_file(pm_root, sc, scratch_path,
                                           scratch_dir=str(scratch_path))
                 sc.instruction_path = None
+            instruction_contents[sc.index] = instr
 
-            scenario_cwd = str(clone_path) if repo_root else workdir_path
+        scenario_cwd = str(clone_path) if repo_root else workdir_path
+        win_name = _worker_window_name(pr_data, worker_index)
 
-            # Create a temporary concretize window
-            concretize_cmd = _build_concretize_cmd(
-                sc, pr_data, data, cwd=scenario_cwd,
-                instruction_content=instruction_content)
+        # 1) Launch the persistent concretizer pane in a new window.
+        concretizer_prompt = prompt_gen.generate_qa_batched_concretizer_prompt(
+            scenarios, branch, base_branch, instruction_contents)
+        concretizer_cmd = build_claude_shell_cmd(
+            prompt=concretizer_prompt,
+            model=_qa_resolution.model, provider=_qa_resolution.provider,
+            effort=_qa_resolution.effort, cwd=scenario_cwd)
+        try:
+            concretizer_pane = tmux_mod.new_window_get_pane(
+                session, win_name, concretizer_cmd,
+                cwd=scenario_cwd, switch=False)
+        except Exception:
+            _log.warning("Failed to create worker window for worker %d",
+                         worker_index, exc_info=True)
+            return
 
-            def _run_concretize(scenario=sc, cmd=concretize_cmd, cwd=scenario_cwd,
-                                instr=instruction_content):
-                # Use a temp window for concretization
-                temp_win = f"conc-w{worker_index}-s{scenario.index}"
-                try:
-                    pane_id = tmux_mod.new_window_get_pane(
-                        session, temp_win, cmd, cwd=cwd, switch=False)
-                except Exception:
-                    _log.warning("Failed to create concretize window for "
-                                 "worker %d scenario %d", worker_index,
-                                 scenario.index)
-                    return
+        wp = _WorkerPanes(concretizer_pane=concretizer_pane)
 
-                refined = _concretize_scenario(
-                    scenario, pr_data, data, pane_id,
-                    instruction_content=instr)
-                if refined:
-                    scenario.steps = refined
-
-                # Kill the temp concretize window
-                try:
-                    tmux_mod.kill_window(session, temp_win)
-                except Exception:
-                    pass
-
-            concretize_threads.append(
-                threading.Thread(target=_run_concretize, daemon=True,
-                                 name=f"conc-w{worker_index}-s{sc.index}"))
-
-        for t in concretize_threads:
-            t.start()
-        for t in concretize_threads:
-            t.join()
+        # 2) Block until Scenario 1 refined steps are available.
+        def _stop():
+            return state.stop_requested
+        refined, new_count = _poll_concretizer_for_next(
+            concretizer_pane,
+            prev_consumed_count=wp.refined_count_consumed,
+            stop_check=_stop,
+            timeout=_CONCRETIZE_GRACE + _CONCRETIZE_NEXT_TIMEOUT,
+        )
+        if refined is None:
+            _log.warning("Concretizer timed out/died before Scenario %d "
+                         "refined for worker %d",
+                         scenarios[0].index, worker_index)
+            # Fall through — evaluator will use the planner's rough steps.
+        else:
+            scenarios[0].steps = refined
+            wp.refined[scenarios[0].index] = refined
+            wp.refined_count_consumed = new_count
 
         with ready_lock:
             ready_workers.append((worker_index, scenarios, clone_path,
-                                  scratch_path,
-                                  _worker_window_name(pr_data, worker_index)))
+                                  scratch_path, win_name,
+                                  concretizer_pane, wp, instruction_contents))
 
     # Prepare all workers in parallel
     prep_threads = [
@@ -1618,8 +1701,11 @@ def _launch_workers_in_tmux(
             queued_scenarios=_queued_scenario_indices,
         )
 
-    # Phase 2: Launch worker Claude sessions
-    for worker_index, scenarios, clone_path, scratch_path, win_name in ready_workers:
+    # Phase 2: split the evaluator pane off each concretizer pane and
+    # launch the worker Claude session. Immediately kick off
+    # concretize(Scenario 2) so the pipeline is one step ahead.
+    for (worker_index, scenarios, clone_path, scratch_path, win_name,
+         concretizer_pane, wp, instruction_contents) in ready_workers:
         if state.stop_requested:
             break
 
@@ -1642,34 +1728,60 @@ def _launch_workers_in_tmux(
             transcript=transcript, cwd=scenario_cwd)
 
         try:
-            pane_id = tmux_mod.new_window_get_pane(
-                session, win_name, worker_cmd,
-                cwd=scenario_cwd, switch=False)
+            evaluator_pane = tmux_mod.split_pane_at(
+                concretizer_pane, "v", worker_cmd, background=True)
         except Exception:
-            _log.warning("Failed to create window for worker %d", worker_index)
-            pane_id = None
+            _log.warning("Failed to split evaluator pane for worker %d",
+                         worker_index, exc_info=True)
+            evaluator_pane = None
 
-        if pane_id:
-            # Set window_name and pane_id on all scenarios in this worker
+        if evaluator_pane:
+            wp.evaluator_pane = evaluator_pane
             for sc in scenarios:
                 sc.window_name = win_name
-                sc.pane_id = pane_id
+                sc.pane_id = evaluator_pane
                 sc.transcript_path = transcript
+            if worker_panes_out is not None:
+                worker_panes_out[worker_index] = wp
 
             _log.info("Launched worker %d (%d scenarios) in window %s",
                       worker_index, len(scenarios), win_name)
+
+            # Kick off concretize(Scenario 2) so it pipelines with
+            # evaluate(Scenario 1).
+            if len(scenarios) >= 2:
+                next_sc = scenarios[1]
+                if next_sc.index not in wp.concretizer_kicked:
+                    followup = prompt_gen.generate_concretizer_followup_message(
+                        next_sc, instruction_contents.get(next_sc.index))
+                    try:
+                        tmux_mod.send_keys(concretizer_pane, followup)
+                        for _ in range(2):
+                            time.sleep(1)
+                            tmux_mod.send_keys(concretizer_pane, "")
+                        wp.concretizer_kicked.add(next_sc.index)
+                    except Exception:
+                        _log.warning("Failed to kick concretize for "
+                                     "scenario %d in worker %d",
+                                     next_sc.index, worker_index,
+                                     exc_info=True)
+
             try:
                 from pm_core import pane_layout
-                win_id = tmux_mod.pane_window_id(pane_id)
+                win_id = tmux_mod.pane_window_id(evaluator_pane)
                 if win_id:
                     pane_layout.register_and_rebalance(session, win_id, [
-                        (pane_id, f"qa-worker-w{worker_index}", worker_cmd),
+                        (concretizer_pane, f"qa-conc-w{worker_index}",
+                         "concretizer"),
+                        (evaluator_pane, f"qa-worker-w{worker_index}",
+                         worker_cmd),
                     ])
             except Exception:
                 _log.debug("Registration/rebalance failed for worker %d",
                            worker_index, exc_info=True)
         else:
-            _log.warning("Worker %d window creation failed", worker_index)
+            _log.warning("Worker %d evaluator pane creation failed",
+                         worker_index)
 
 
 def _launch_workers_in_containers(
@@ -1683,6 +1795,7 @@ def _launch_workers_in_containers(
     pm_root: Path | None = None,
     _status_scenarios: list | None = None,
     _queued_scenario_indices: set[int] | None = None,
+    worker_panes_out: dict | None = None,
 ) -> None:
     """Launch batched worker sessions in containers (one container per worker).
 
@@ -1768,48 +1881,50 @@ def _launch_workers_in_containers(
                        exc_info=True)
             return
 
-        # Concretize in parallel using container
-        concretize_threads = []
-        for sc in scenarios:
-            instruction_content = instruction_contents.get(sc.index)
+        # Launch persistent concretizer pane inside the container.
+        base_branch = data.get("project", {}).get("base_branch", "master")
+        concretizer_prompt = prompt_gen.generate_qa_batched_concretizer_prompt(
+            scenarios, branch, base_branch, instruction_contents)
+        concretizer_claude_cmd = build_claude_shell_cmd(
+            prompt=concretizer_prompt,
+            model=_qa_resolution.model, provider=_qa_resolution.provider,
+            effort=_qa_resolution.effort,
+            cwd=container_workdir, write_dir=str(clone_path))
+        concretizer_exec = container_mod.build_exec_cmd(
+            cname, concretizer_claude_cmd, cleanup=False)
+        win_name = _worker_window_name(pr_data, worker_index)
+        try:
+            concretizer_pane = tmux_mod.new_window_get_pane(
+                session, win_name, concretizer_exec,
+                cwd=workdir_path, switch=False)
+        except Exception:
+            _log.warning("Failed to create worker window for worker %d",
+                         worker_index, exc_info=True)
+            return
 
-            concretize_cmd = _build_concretize_cmd(
-                sc, pr_data, data, cwd=container_workdir,
-                container_name=cname, instruction_content=instruction_content,
-                write_dir=str(clone_path))
+        wp = _WorkerPanes(concretizer_pane=concretizer_pane)
 
-            def _run_concretize(scenario=sc, cmd=concretize_cmd,
-                                instr=instruction_content):
-                temp_win = f"conc-w{worker_index}-s{scenario.index}"
-                try:
-                    pane_id = tmux_mod.new_window_get_pane(
-                        session, temp_win, cmd,
-                        cwd=workdir_path, switch=False)
-                except Exception:
-                    return
-                refined = _concretize_scenario(
-                    scenario, pr_data, data, pane_id,
-                    instruction_content=instr)
-                if refined:
-                    scenario.steps = refined
-                try:
-                    tmux_mod.kill_window(session, temp_win)
-                except Exception:
-                    pass
-
-            concretize_threads.append(
-                threading.Thread(target=_run_concretize, daemon=True,
-                                 name=f"conc-w{worker_index}-s{sc.index}"))
-
-        for t in concretize_threads:
-            t.start()
-        for t in concretize_threads:
-            t.join()
+        def _stop():
+            return state.stop_requested
+        refined, new_count = _poll_concretizer_for_next(
+            concretizer_pane,
+            prev_consumed_count=wp.refined_count_consumed,
+            stop_check=_stop,
+            timeout=_CONCRETIZE_GRACE + _CONCRETIZE_NEXT_TIMEOUT,
+        )
+        if refined is None:
+            _log.warning("Concretizer timed out/died before Scenario %d "
+                         "refined for worker %d",
+                         scenarios[0].index, worker_index)
+        else:
+            scenarios[0].steps = refined
+            wp.refined[scenarios[0].index] = refined
+            wp.refined_count_consumed = new_count
 
         with ready_lock:
             ready_workers.append((worker_index, scenarios, clone_path,
-                                  scratch_path, cname,
-                                  _worker_window_name(pr_data, worker_index)))
+                                  scratch_path, cname, win_name,
+                                  concretizer_pane, wp, instruction_contents))
 
     prep_threads = [
         threading.Thread(target=_prepare_worker, args=(wi, scs), daemon=True,
@@ -1831,7 +1946,8 @@ def _launch_workers_in_containers(
             queued_scenarios=_queued_scenario_indices,
         )
 
-    for worker_index, scenarios, clone_path, scratch_path, cname, win_name in ready_workers:
+    for (worker_index, scenarios, clone_path, scratch_path, cname, win_name,
+         concretizer_pane, wp, instruction_contents) in ready_workers:
         if state.stop_requested:
             break
 
@@ -1840,9 +1956,6 @@ def _launch_workers_in_containers(
             data, state.pr_id, scenarios,
             worker_index=worker_index,
             workdir=container_workdir,
-            # Report files are written to /scratch inside the container
-            # (bind-mounted to host scratch_path).  Do NOT pass the host
-            # qa_workdir here — that path doesn't exist inside the container.
             qa_workdir=container_scratch,
             session_name=None,
             worktree_mode=bool(repo_root),
@@ -1857,34 +1970,59 @@ def _launch_workers_in_containers(
         exec_cmd = container_mod.build_exec_cmd(cname, claude_cmd, cleanup=False)
 
         try:
-            pane_id = tmux_mod.new_window_get_pane(
-                session, win_name, exec_cmd,
-                cwd=workdir_path, switch=False)
+            evaluator_pane = tmux_mod.split_pane_at(
+                concretizer_pane, "v", exec_cmd, background=True)
         except Exception:
-            _log.warning("Failed to create window for worker %d", worker_index)
-            pane_id = None
+            _log.warning("Failed to split evaluator pane for worker %d",
+                         worker_index, exc_info=True)
+            evaluator_pane = None
 
-        if pane_id:
+        if evaluator_pane:
+            wp.evaluator_pane = evaluator_pane
             for sc in scenarios:
                 sc.window_name = win_name
-                sc.pane_id = pane_id
+                sc.pane_id = evaluator_pane
                 sc.transcript_path = transcript
                 sc.container_name = cname
+            if worker_panes_out is not None:
+                worker_panes_out[worker_index] = wp
 
             _log.info("Launched worker %d (%d scenarios) in container %s (window %s)",
                       worker_index, len(scenarios), cname, win_name)
+
+            if len(scenarios) >= 2:
+                next_sc = scenarios[1]
+                if next_sc.index not in wp.concretizer_kicked:
+                    followup = prompt_gen.generate_concretizer_followup_message(
+                        next_sc, instruction_contents.get(next_sc.index))
+                    try:
+                        tmux_mod.send_keys(concretizer_pane, followup)
+                        for _ in range(2):
+                            time.sleep(1)
+                            tmux_mod.send_keys(concretizer_pane, "")
+                        wp.concretizer_kicked.add(next_sc.index)
+                    except Exception:
+                        _log.warning("Failed to kick concretize for "
+                                     "scenario %d in worker %d",
+                                     next_sc.index, worker_index,
+                                     exc_info=True)
+
             try:
                 from pm_core import pane_layout
-                win_id = tmux_mod.pane_window_id(pane_id)
+                win_id = tmux_mod.pane_window_id(evaluator_pane)
                 if win_id:
                     pane_layout.register_and_rebalance(session, win_id, [
-                        (pane_id, f"qa-worker-w{worker_index}", exec_cmd),
+                        (concretizer_pane, f"qa-conc-w{worker_index}",
+                         "concretizer"),
+                        (evaluator_pane, f"qa-worker-w{worker_index}",
+                         exec_cmd),
                     ])
             except Exception:
                 _log.debug("Registration/rebalance failed for worker %d",
                            worker_index, exc_info=True)
         else:
-            _log.warning("Worker %d container/window creation failed", worker_index)
+            _log.warning("Worker %d evaluator pane creation failed",
+                         worker_index)
 
 
 # ---------------------------------------------------------------------------
@@ -2009,11 +2147,13 @@ def _poll_worker_verdicts(
     status_path: Path,
     _notify,
     worker_groups: dict[int, list[QAScenario]],
+    worker_panes: dict,
     queued_workers: dict[int, list[QAScenario]] | None = None,
     concurrency_cap: int = 0,
     use_containers: bool = False,
     repo_root: Path | None = None,
     pm_root: Path | None = None,
+    pm_root_for_instr: Path | None = None,
 ) -> None:
     """Poll batched worker panes for per-scenario verdicts.
 
@@ -2102,20 +2242,87 @@ def _poll_worker_verdicts(
         with verification_lock:
             verification_results[scenario.index] = (passed, reason)
 
-    def _send_proceed(worker_index: int, next_scenario_index: int):
-        """Send a PROCEED message to the worker pane."""
+    def _get_instruction_content(sc: QAScenario) -> str | None:
+        # pm_root is available via the outer parameter. We only need this
+        # when a worker's concretizer was initialised without having read
+        # the instruction file — but our concretizer prompt already bakes
+        # the content in up front, so the follow-up doesn't strictly need
+        # it. We pass None safely here.
+        return None
+
+    def _send_proceed(worker_index: int, pos_next: int):
+        """Send PROCEED TO SCENARIO to the evaluator pane.
+
+        *pos_next* is the position (0-based) in the worker's scenario
+        list of the scenario to advance to. The refined steps for that
+        scenario are extracted from the concretizer pane if not already
+        cached, then embedded inline in the PROCEED message. Immediately
+        after sending PROCEED we kick off concretize(pos_next+1) so the
+        pipeline stays one step ahead.
+        """
         scenarios = worker_groups[worker_index]
-        if not scenarios:
+        if not scenarios or pos_next >= len(scenarios):
             return
-        pane_id = scenarios[0].pane_id
-        if pane_id and tmux_mod.pane_exists(pane_id):
-            msg = f"PROCEED TO SCENARIO {next_scenario_index}"
-            tmux_mod.send_keys(pane_id, msg)
-            for _ in range(2):
-                time.sleep(1)
-                tmux_mod.send_keys(pane_id, "")
-            _log.info("Sent PROCEED to worker %d for scenario %d",
-                      worker_index, next_scenario_index)
+        wp = worker_panes.get(worker_index)
+        if wp is None:
+            _log.warning("No _WorkerPanes entry for worker %d", worker_index)
+            return
+        evaluator_pane = wp.evaluator_pane
+        if not evaluator_pane or not tmux_mod.pane_exists(evaluator_pane):
+            _log.warning("Evaluator pane missing for worker %d", worker_index)
+            return
+        next_sc = scenarios[pos_next]
+
+        # Ensure refined steps for next_sc are available.
+        refined = wp.refined.get(next_sc.index)
+        if refined is None and wp.concretizer_pane and tmux_mod.pane_exists(wp.concretizer_pane):
+            def _stop():
+                return state.stop_requested
+            refined, new_count = _poll_concretizer_for_next(
+                wp.concretizer_pane,
+                prev_consumed_count=wp.refined_count_consumed,
+                stop_check=_stop,
+                timeout=_CONCRETIZE_GRACE + _CONCRETIZE_NEXT_TIMEOUT,
+            )
+            if refined is not None:
+                wp.refined[next_sc.index] = refined
+                wp.refined_count_consumed = new_count
+        if refined is None:
+            _log.warning("No refined steps for worker %d scenario %d — "
+                         "falling back to planner steps",
+                         worker_index, next_sc.index)
+            refined = next_sc.steps
+        else:
+            next_sc.steps = refined
+
+        # Build and send the PROCEED message with inline steps.
+        from pm_core import prompt_gen as _pg
+        proceed_body = _pg.generate_qa_worker_proceed_message(next_sc, refined)
+        tmux_mod.send_keys(evaluator_pane, proceed_body)
+        for _ in range(2):
+            time.sleep(1)
+            tmux_mod.send_keys(evaluator_pane, "")
+        _log.info("Sent PROCEED to worker %d for scenario %d",
+                  worker_index, next_sc.index)
+
+        # Kick concretize(pos_next+1) to pipeline with evaluate(pos_next).
+        if pos_next + 1 < len(scenarios):
+            further = scenarios[pos_next + 1]
+            if (further.index not in wp.concretizer_kicked
+                    and wp.concretizer_pane
+                    and tmux_mod.pane_exists(wp.concretizer_pane)):
+                try:
+                    followup = _pg.generate_concretizer_followup_message(
+                        further, _get_instruction_content(further))
+                    tmux_mod.send_keys(wp.concretizer_pane, followup)
+                    for _ in range(2):
+                        time.sleep(1)
+                        tmux_mod.send_keys(wp.concretizer_pane, "")
+                    wp.concretizer_kicked.add(further.index)
+                except Exception:
+                    _log.warning("Failed to kick concretize for scenario "
+                                 "%d in worker %d",
+                                 further.index, worker_index, exc_info=True)
 
     def _launch_next_queued():
         if not _launch_queue:
@@ -2143,6 +2350,7 @@ def _poll_worker_verdicts(
                     worker_groups={wi: scenarios},
                     pm_root=pm_root, _status_scenarios=orig,
                     _queued_scenario_indices=remaining_queued,
+                    worker_panes_out=worker_panes,
                 )
             else:
                 _launch_workers_in_tmux(
@@ -2150,6 +2358,7 @@ def _poll_worker_verdicts(
                     worker_groups={wi: scenarios},
                     pm_root=pm_root, _status_scenarios=orig,
                     _queued_scenario_indices=remaining_queued,
+                    worker_panes_out=worker_panes,
                 )
         finally:
             state.scenarios = orig
@@ -2202,7 +2411,7 @@ def _poll_worker_verdicts(
                     pos = worker_current.get(wi, 0)
                     if pos + 1 < len(sc_list):
                         worker_current[wi] = pos + 1
-                        _send_proceed(wi, sc_list[pos + 1].index)
+                        _send_proceed(wi, pos + 1)
                     else:
                         # Worker done — all scenarios complete
                         pending_workers.discard(wi)
@@ -2220,7 +2429,7 @@ def _poll_worker_verdicts(
                         pos = worker_current.get(wi, 0)
                         if pos + 1 < len(sc_list):
                             worker_current[wi] = pos + 1
-                            _send_proceed(wi, sc_list[pos + 1].index)
+                            _send_proceed(wi, pos + 1)
                         else:
                             pending_workers.discard(wi)
                             _launch_next_queued()
@@ -2263,15 +2472,34 @@ def _poll_worker_verdicts(
                 pending_workers.discard(wi)
                 continue
 
-            pane_id = scenarios[0].pane_id
-            if pane_id and not tmux_mod.pane_exists(pane_id):
-                pane_id = None
+            wp = worker_panes.get(wi)
+            evaluator_pane = wp.evaluator_pane if wp else None
+            concretizer_pane = wp.concretizer_pane if wp else None
+
+            evaluator_alive = (
+                evaluator_pane is not None
+                and tmux_mod.pane_exists(evaluator_pane))
+            concretizer_alive = (
+                concretizer_pane is not None
+                and tmux_mod.pane_exists(concretizer_pane))
+
+            if not evaluator_alive:
+                _log.warning("Worker %d evaluator pane died — marking "
+                             "remaining scenarios INPUT_REQUIRED", wi)
                 for sc in scenarios:
                     sc.pane_id = None
-
-            if pane_id is None:
-                _log.warning("Worker %d window died — marking remaining "
-                             "scenarios INPUT_REQUIRED", wi)
+                    if sc.index not in state.scenario_verdicts:
+                        state.scenario_verdicts[sc.index] = VERDICT_INPUT_REQUIRED
+                pending_workers.discard(wi)
+                verdicts_changed = True
+                _launch_next_queued()
+                continue
+            if not concretizer_alive:
+                _log.warning("Worker %d concretizer pane died — cannot "
+                             "pipeline further scenarios, marking "
+                             "remaining INPUT_REQUIRED", wi)
+                # Preserve any already-completed verdicts; everything
+                # else we haven't yet dispatched is lost.
                 for sc in scenarios:
                     if sc.index not in state.scenario_verdicts:
                         state.scenario_verdicts[sc.index] = VERDICT_INPUT_REQUIRED
@@ -2279,6 +2507,8 @@ def _poll_worker_verdicts(
                 verdicts_changed = True
                 _launch_next_queued()
                 continue
+
+            pane_id = evaluator_pane
 
             if in_grace:
                 continue
@@ -2336,7 +2566,7 @@ def _poll_worker_verdicts(
                     _notify()
                     if pos + 1 < len(scenarios):
                         worker_current[wi] = pos + 1
-                        _send_proceed(wi, scenarios[pos + 1].index)
+                        _send_proceed(wi, pos + 1)
                     else:
                         pending_workers.discard(wi)
                         _launch_next_queued()
@@ -3397,17 +3627,20 @@ def run_qa_sync(
         _add_status_pane(session, planner_pane, status_path)
 
         # Launch initial batch of workers
+        worker_panes: dict = {}
         if use_containers:
             _launch_workers_in_containers(
                 state, data, pr_data, session, repo_root, workdir_path,
                 worker_groups=launch_workers, pm_root=pm_root,
                 _queued_scenario_indices=queued_indices,
+                worker_panes_out=worker_panes,
             )
         else:
             _launch_workers_in_tmux(
                 state, data, pr_data, session, repo_root, workdir_path,
                 worker_groups=launch_workers, pm_root=pm_root,
                 _queued_scenario_indices=queued_indices,
+                worker_panes_out=worker_panes,
             )
 
         state.latest_output = (
@@ -3420,6 +3653,7 @@ def run_qa_sync(
             state, data, pr_data, session, workdir_path,
             status_path, _notify,
             worker_groups=launch_workers,
+            worker_panes=worker_panes,
             queued_workers=queued_workers,
             concurrency_cap=concurrency_cap,
             use_containers=use_containers,

@@ -2846,6 +2846,70 @@ SCENARIO_2_VERDICT: NEEDS_WORK
         assert result == {1: "PASS", 2: "NEEDS_WORK"}
 
 
+class TestGenerateQAWorkerProceedMessage:
+    def test_contains_header_title_steps_and_report_path(self):
+        from pm_core.prompt_gen import generate_qa_worker_proceed_message
+        sc = QAScenario(
+            index=3,
+            title="Logout Flow",
+            focus="Session cleanup",
+            steps="planned",
+            report_path="/tmp/qa/report-s3.md",
+        )
+        refined = "1. Run `logout`\n2. Verify cookie cleared"
+        body = generate_qa_worker_proceed_message(sc, refined)
+        assert "PROCEED TO SCENARIO 3" in body
+        assert "Logout Flow" in body
+        assert refined in body
+        assert "/tmp/qa/report-s3.md" in body
+        assert "SCENARIO_3_VERDICT" in body
+
+
+class TestGenerateQABatchedConcretizerPrompt:
+    def test_embeds_all_scenarios_but_refines_only_first(self):
+        from pm_core.prompt_gen import generate_qa_batched_concretizer_prompt
+        scs = [
+            QAScenario(index=1, title="Login", focus="auth", steps="do login"),
+            QAScenario(index=2, title="Logout", focus="auth", steps="do logout"),
+        ]
+        prompt = generate_qa_batched_concretizer_prompt(
+            scs, "pm/pr-x", "master", {1: None, 2: "instr 2 body"})
+        assert "Scenario 1: Login" in prompt
+        assert "Scenario 2: Logout" in prompt
+        assert "instr 2 body" in prompt
+        assert "REFINED_STEPS_START" in prompt
+        assert "REFINED_STEPS_END" in prompt
+        assert "CONCRETIZE SCENARIO" in prompt
+        # It must tell the model to refine only Scenario 1 right now.
+        assert "Scenario 1" in prompt
+
+
+class TestGenerateQAWorkerPromptInitialOnly:
+    def test_only_first_scenario_steps_embedded(self):
+        from pm_core.prompt_gen import generate_qa_worker_prompt
+        scs = [
+            QAScenario(index=1, title="Login", focus="auth",
+                       steps="UNIQUE_STEP_ONE"),
+            QAScenario(index=2, title="Logout", focus="auth",
+                       steps="UNIQUE_STEP_TWO"),
+        ]
+        data = {"project": {"base_branch": "master"}}
+        with patch("pm_core.prompt_gen.store.get_pr",
+                   return_value={"title": "t", "branch": "b", "workdir": "/w"}), \
+             patch("pm_core.prompt_gen._format_pr_notes", return_value=""), \
+             patch("pm_core.prompt_gen.get_spec_mocks_section", return_value=""):
+            out = generate_qa_worker_prompt(
+                data, "pr-x", scs, worker_index=1,
+                workdir="/tmp/w", qa_workdir="/tmp/qa")
+        assert "UNIQUE_STEP_ONE" in out
+        assert "UNIQUE_STEP_TWO" not in out
+        # Titles of all scenarios must be listed.
+        assert "Scenario 1: Login" in out
+        assert "Scenario 2: Logout" in out
+        # PROCEED contract must be documented.
+        assert "PROCEED TO SCENARIO" in out
+
+
 class TestWorkerWindowName:
     def test_with_gh_pr_number(self):
         pr_data = {"gh_pr_number": 42}

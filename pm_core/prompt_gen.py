@@ -1288,20 +1288,28 @@ def generate_qa_worker_prompt(data: dict, pr_id: str,
 - **PR workdir** (source code): {pr_workdir}
 - **Your workdir** (throwaway test projects): {workdir}"""
 
-    # Build scenario list
-    scenario_blocks = []
-    for sc in scenarios:
-        report_path = f"{qa_workdir}/report-s{sc.index}.md"
-        scenario_blocks.append(f"""### Scenario {sc.index}: {sc.title}
+    # Build scenario list — for the INITIAL prompt, only Scenario 1's
+    # refined steps are embedded. All other scenarios arrive later via
+    # PROCEED TO SCENARIO N follow-ups (see generate_qa_worker_proceed_message).
+    first_sc = scenarios[0]
+    first_report_path = f"{qa_workdir}/report-s{first_sc.index}.md"
+    first_scenario_block = f"""### Scenario {first_sc.index}: {first_sc.title}
 
-**Focus**: {sc.focus}
+**Focus**: {first_sc.focus}
 
 **Steps**:
-{sc.steps}
+{first_sc.steps}
 
-**Report file**: `{report_path}`""")
+**Report file**: `{first_report_path}`"""
 
-    scenarios_text = "\n\n".join(scenario_blocks)
+    # Titles-only listing of all scenarios so the evaluator knows how
+    # many to expect and their order.
+    scenario_titles_lines = []
+    for sc in scenarios:
+        scenario_titles_lines.append(f"- Scenario {sc.index}: {sc.title}")
+    scenario_titles_text = "\n".join(scenario_titles_lines)
+
+    scenarios_text = first_scenario_block
     scenario_indices = ", ".join(str(sc.index) for sc in scenarios)
 
     # Once-only setup steps (pull, diff review) before the per-scenario loop
@@ -1338,14 +1346,19 @@ You are a batched QA worker. You will execute {len(scenarios)} scenario(s) seque
 {setup_steps}
 
 **Then, for each scenario in order:**
-1. Execute the test steps described for that scenario
-2. Write a per-scenario report file (path given per scenario below)
+1. Execute the test steps for the current scenario (steps are embedded in
+   this prompt for Scenario {scenarios[0].index}; for every subsequent scenario the
+   orchestrator will send you a `PROCEED TO SCENARIO <N>` message that
+   contains that scenario's refined steps inline).
+2. Write a per-scenario report file at the path given in the scenario block.
 3. Output the scenario verdict in this exact format on its own line:
    `SCENARIO_<N>_VERDICT: <VERDICT>`
    where N is the scenario number and VERDICT is PASS, NEEDS_WORK, or INPUT_REQUIRED
-4. **WAIT** — do not proceed to the next scenario until the orchestrator sends you
-   a message saying "PROCEED TO SCENARIO <next>". This allows the orchestrator to
-   verify your verdict and the user to review results.
+4. **WAIT** — do not proceed to the next scenario until you receive a
+   `PROCEED TO SCENARIO <M>` message from the orchestrator. That message
+   will carry Scenario M's full refined steps, focus, and report path.
+   Do NOT attempt to execute any scenario whose steps you have not yet
+   been shown.
 
 ## Important: When to use each verdict
 
@@ -1376,18 +1389,166 @@ the verdict. Use this format:
 
 Write the report atomically: write to a `.tmp` file first, then rename it.
 
-## Scenarios
+## Scenarios in this Worker
+
+You will run the scenarios below, in order. Only Scenario {first_sc.index}'s refined
+steps are embedded in this prompt. For every subsequent scenario you must
+wait for a `PROCEED TO SCENARIO <N>` message that will carry that
+scenario's steps inline.
+
+{scenario_titles_text}
+
+## Current Scenario (start here)
 
 {scenarios_text}
 
 ## Execution Order
 
 Execute scenarios in this order: {scenario_indices}.
-Start with Scenario {scenarios[0].index} now.
+Start with Scenario {scenarios[0].index} now. After emitting its
+`SCENARIO_{scenarios[0].index}_VERDICT:` line, WAIT for the orchestrator
+to send `PROCEED TO SCENARIO <next>` with the next scenario's steps.
 
 IMPORTANT: After each scenario's verdict, WAIT for the orchestrator to tell you
 to proceed. Do not start the next scenario until instructed."""
     return prompt.strip()
+
+
+def generate_qa_worker_proceed_message(scenario, refined_steps: str) -> str:
+    """Return the body of a PROCEED TO SCENARIO N follow-up message.
+
+    Sent by the orchestrator to the evaluator pane after an accepted
+    verdict for the previous scenario. Carries the refined steps for the
+    next scenario inline so the evaluator's initial prompt does not need
+    to embed them.
+    """
+    idx = scenario.index
+    report_path = scenario.report_path or f"report-s{idx}.md"
+    return f"""PROCEED TO SCENARIO {idx}
+
+### Scenario {idx}: {scenario.title}
+
+**Focus**: {scenario.focus}
+
+**Steps**:
+{refined_steps}
+
+**Report file**: `{report_path}`
+
+Execute this scenario, write the report, then output `SCENARIO_{idx}_VERDICT: <verdict>` on its own line."""
+
+
+def generate_qa_batched_concretizer_prompt(
+    scenarios: list,
+    pr_branch: str,
+    base_branch: str,
+    instruction_contents: dict,
+) -> str:
+    """Prompt for the persistent per-worker concretizer session.
+
+    The concretizer refines one scenario at a time, serially, across all
+    of the worker's scenarios. The initial response refines Scenario 1.
+    Subsequent refinements are triggered by follow-up messages of the
+    form `CONCRETIZE SCENARIO <N>`.  Each refinement is bracketed by the
+    `REFINED_STEPS_START` / `REFINED_STEPS_END` markers so the
+    orchestrator can extract them from pane scrollback.
+    """
+    # Build per-scenario sections (all scenarios up front so follow-ups
+    # don't need to reship planned steps or instruction content).
+    scenario_sections = []
+    for sc in scenarios:
+        instr = instruction_contents.get(sc.index)
+        instr_block = ""
+        if instr:
+            instr_block = f"""
+**Instruction file contents for Scenario {sc.index}**:
+{instr}
+"""
+        scenario_sections.append(f"""### Scenario {sc.index}: {sc.title}
+
+**Focus**: {sc.focus}
+
+**Planned steps**:
+{sc.steps}
+{instr_block}""")
+
+    all_scenarios_text = "\n".join(scenario_sections)
+    first = scenarios[0]
+    scenario_indices = ", ".join(str(sc.index) for sc in scenarios)
+
+    return f"""You are the step concretizer for a batch of QA scenarios on branch `{pr_branch}` (base `{base_branch}`).
+
+Your job: for each scenario in turn, verify the planned steps against the
+actual codebase and produce refined, concrete, executable steps. You can
+add, remove, or correct steps. If an instruction file is provided for a
+scenario, incorporate its setup steps into the refined list so the
+evaluator doesn't need to read the file separately.
+
+You will handle scenarios **one at a time, serially**, across {len(scenarios)}
+scenarios ({scenario_indices}). Do NOT refine more than one scenario per
+response.
+
+## All scenarios in this worker
+
+All scenarios are listed below so you have their planned steps and
+instruction content up front. DO NOT refine them all now — only refine
+the one you are currently asked about.
+
+{all_scenarios_text}
+
+## Output format (used for every refinement)
+
+When asked to refine a scenario, output **only** the refined steps for
+that one scenario, bracketed by these markers on their own lines:
+
+REFINED_STEPS_START
+<corrected, numbered, concrete, executable steps for the requested scenario>
+REFINED_STEPS_END
+
+Your response MUST end with `REFINED_STEPS_END`. Do not include any text
+after it.
+
+## What to do right now
+
+Refine **Scenario {first.index}: {first.title}** only. Output the refined
+steps between `REFINED_STEPS_START` / `REFINED_STEPS_END`, then STOP and
+wait for a follow-up message.
+
+After you output `REFINED_STEPS_END` for Scenario {first.index}, wait
+silently. The orchestrator will send you a follow-up message of the form
+`CONCRETIZE SCENARIO <N>` naming the next scenario to refine. When you
+receive such a follow-up, refine that scenario (and ONLY that scenario)
+using the same `REFINED_STEPS_START` / `REFINED_STEPS_END` format, then
+wait again.
+
+IMPORTANT: Refine only the scenario you are currently asked about. Each
+of your responses must contain exactly one `REFINED_STEPS_START` /
+`REFINED_STEPS_END` pair and must end with `REFINED_STEPS_END`."""
+
+
+def generate_concretizer_followup_message(scenario, instruction_content: str | None) -> str:
+    """Follow-up message sent to the concretizer pane for scenario N>1.
+
+    The concretizer already has the planned steps and instruction content
+    from its initial prompt, but we repeat the essentials here so the
+    model doesn't have to hunt for them in scrollback.
+    """
+    instr_block = ""
+    if instruction_content:
+        instr_block = f"\n**Instruction file contents**:\n{instruction_content}\n"
+    return f"""CONCRETIZE SCENARIO {scenario.index}
+
+### Scenario {scenario.index}: {scenario.title}
+
+**Focus**: {scenario.focus}
+
+**Planned steps**:
+{scenario.steps}
+{instr_block}
+Refine the steps for Scenario {scenario.index} only. Output the refined
+steps between `REFINED_STEPS_START` / `REFINED_STEPS_END` markers and end
+your response with `REFINED_STEPS_END`. Do not refine any other scenario
+in this response."""
 
 
 def generate_standalone_qa_prompt(data: dict, instruction_id: str,
