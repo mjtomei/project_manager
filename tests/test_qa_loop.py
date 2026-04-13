@@ -3261,6 +3261,7 @@ class TestWorkerPaneDeath:
             _poll_worker_verdicts,
             QALoopState,
             QAScenario,
+            _WorkerPanes,
             VERDICT_PASS,
             VERDICT_INPUT_REQUIRED,
         )
@@ -3273,6 +3274,9 @@ class TestWorkerPaneDeath:
             sc.window_name = "qa-w0"
             sc.pane_id = "%10"
         worker_groups = {0: scenarios}
+        worker_panes = {
+            0: _WorkerPanes(concretizer_pane="%11", evaluator_pane="%10")
+        }
 
         state = QALoopState(pr_id="pr-001")
         state.scenarios = scenarios
@@ -3304,7 +3308,8 @@ class TestWorkerPaneDeath:
             "/tmp/work",
             tmp_path / "status.json",
             lambda *a, **k: None,
-            worker_groups,
+            worker_groups=worker_groups,
+            worker_panes=worker_panes,
         )
 
         assert state.scenario_verdicts[1] == VERDICT_PASS

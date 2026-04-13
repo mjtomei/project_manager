@@ -11,6 +11,7 @@ from pm_core.qa_loop import (
     QAScenario,
     QALoopState,
     _poll_worker_verdicts,
+    _WorkerPanes,
     VERDICT_PASS,
     VERDICT_NEEDS_WORK,
     VERDICT_INPUT_REQUIRED,
@@ -26,6 +27,15 @@ def test_poll_worker_verdicts_batched_handshake(monkeypatch, tmp_path):
     s3 = QAScenario(index=3, title="s3", focus="f", window_name="qa-test-w1",
                     pane_id="%99", group=1)
     worker_groups = {1: [s1, s2, s3]}
+
+    # Pre-populate per-worker panes with cached refined steps so
+    # _send_proceed doesn't block polling the concretizer.
+    wp = _WorkerPanes(
+        concretizer_pane="%98",
+        evaluator_pane="%99",
+        refined={1: "steps 1", 2: "steps 2", 3: "steps 3"},
+    )
+    worker_panes = {1: wp}
 
     state = QALoopState(pr_id="test")
     state.scenarios = [s1, s2, s3]
@@ -111,6 +121,7 @@ def test_poll_worker_verdicts_batched_handshake(monkeypatch, tmp_path):
         status_path=tmp_path / "status.json",
         _notify=lambda: None,
         worker_groups=worker_groups,
+        worker_panes=worker_panes,
         queued_workers=None,
         concurrency_cap=0,
     )
@@ -123,19 +134,21 @@ def test_poll_worker_verdicts_batched_handshake(monkeypatch, tmp_path):
 
     # Exactly 2 PROCEED messages total (s1→2, s2→3). No PROCEED after final s3.
     assert len(proceed_calls) == 2, proceed_calls
-    assert proceed_calls[0].args == ("%99", "PROCEED TO SCENARIO 2")
-    assert proceed_calls[1].args == ("%99", "PROCEED TO SCENARIO 3")
+    assert proceed_calls[0].args[0] == "%99"
+    assert proceed_calls[0].args[1].startswith("PROCEED TO SCENARIO 2")
+    assert proceed_calls[1].args[0] == "%99"
+    assert proceed_calls[1].args[1].startswith("PROCEED TO SCENARIO 3")
 
     # Intermediate-state checkpoints.
     assert observations["after_1"]["verdict_1"] == VERDICT_PASS
     assert len(observations["after_1"]["proceeds"]) == 1
-    assert observations["after_1"]["proceeds"][0].args == (
-        "%99", "PROCEED TO SCENARIO 2")
+    assert observations["after_1"]["proceeds"][0].args[1].startswith(
+        "PROCEED TO SCENARIO 2")
 
     assert observations["after_2"]["verdict_2"] == VERDICT_NEEDS_WORK
     assert len(observations["after_2"]["proceeds"]) == 2
-    assert observations["after_2"]["proceeds"][1].args == (
-        "%99", "PROCEED TO SCENARIO 3")
+    assert observations["after_2"]["proceeds"][1].args[1].startswith(
+        "PROCEED TO SCENARIO 3")
 
     assert observations["after_3"]["verdict_3"] == VERDICT_INPUT_REQUIRED
     assert observations["after_3"]["proceed_count"] == 2
