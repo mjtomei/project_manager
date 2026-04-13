@@ -2779,6 +2779,54 @@ QA_PLAN_END"""
         scenarios = parse_qa_plan(output)
         assert "third step" in scenarios[0].steps
 
+    def test_group_non_numeric_defaults_to_none(self):
+        output = """QA_PLAN_START
+SCENARIO 1: Test
+FOCUS: area
+INSTRUCTION: none
+MOCKS: none
+GROUP: abc
+STEPS: do something
+QA_PLAN_END"""
+        scenarios = parse_qa_plan(output)
+        assert len(scenarios) == 1
+        assert scenarios[0].group is None
+
+    def test_steps_stops_at_group_field(self):
+        output = """QA_PLAN_START
+SCENARIO 1: Test
+FOCUS: area
+STEPS: real step content
+GROUP: 3
+QA_PLAN_END"""
+        scenarios = parse_qa_plan(output)
+        assert scenarios[0].steps == "real step content"
+        assert scenarios[0].group == 3
+
+    def test_steps_multiline_then_next_scenario_group(self):
+        output = """QA_PLAN_START
+SCENARIO 1: First
+FOCUS: area-a
+STEPS: line one
+line two
+line three
+GROUP: 1
+
+SCENARIO 2: Second
+FOCUS: area-b
+GROUP: 2
+STEPS: other step
+QA_PLAN_END"""
+        scenarios = parse_qa_plan(output)
+        assert len(scenarios) == 2
+        assert "line one" in scenarios[0].steps
+        assert "line two" in scenarios[0].steps
+        assert "line three" in scenarios[0].steps
+        assert "GROUP" not in scenarios[0].steps
+        assert scenarios[0].group == 1
+        assert scenarios[1].group == 2
+        assert "other step" in scenarios[1].steps
+
 
 class TestGroupScenariosIntoWorkers:
     """Tests for group_scenarios_into_workers."""
