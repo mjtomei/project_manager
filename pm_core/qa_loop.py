@@ -460,6 +460,7 @@ def _write_status_file(status_path: Path, pr_id: str,
             "title": s.title,
             "verdict": verdict,
             "window_name": s.window_name or "",
+            "group": s.group if s.group is not None else None,
         })
     data = {
         "pr_id": pr_id,
