@@ -17,15 +17,13 @@
 - `parse_qa_plan()` in `pm_core/qa_loop.py` is extended to parse the optional `GROUP` field and store it on `QAScenario.group` (new field, default `None`).
 - If the planner doesn't produce valid GROUP assignments, scenarios are distributed round-robin across workers as a fallback. When `worker_count == -1` and no groups are assigned, defaults to 1 worker.
 
-### 1.3 Worker Session Architecture
-- Each worker is a single Claude session running in its own tmux window (`qa-{display_id}-w{N}` naming pattern).
-- Each worker gets a single clone of the repo (via `create_scenario_workdir`), shared across all its scenarios.
-- The worker's prompt includes the full list of its assigned scenarios with their refined steps, and instructs it to:
-  1. Review the diff and load relevant files once
-  2. Execute scenario 1, write a per-scenario report file, output the verdict
-  3. Wait for approval (the orchestrator sends a "proceed" message after detecting the verdict)
-  4. Execute scenario 2, write report, output verdict, wait... and so on
-- A new prompt generator `generate_qa_worker_prompt()` is added to `pm_core/prompt_gen.py` that takes a list of `QAScenario` objects and the worker index.
+### 1.3 Worker Session Architecture (three panes per worker window)
+- Each worker has its own tmux window (`qa-{display_id}-w{N}`) and its own clone of the repo (via `create_scenario_workdir`), shared across all its scenarios.
+- The window is created **immediately at launch**, before any concretization, and hosts three persistent Claude sessions in three panes, all eagerly spawned at worker launch:
+  1. **Concretizer pane** — one persistent Claude session that refines scenario steps serially. Its initial prompt contains context (PR, diff hints, roster of scenarios by title/index) plus **only Scenario 1's draft steps and instruction content** — drafts for scenarios 2..N are delivered lazily via follow-ups at the moment each one is about to be refined. Output is bracketed by `REFINED_STEPS_START` / `REFINED_STEPS_END` markers. Refinements are pipelined with evaluation (see §1.5).
+  2. **Evaluator pane** — split off the concretizer after Scenario 1's refined steps are extracted. Its initial prompt embeds only Scenario 1's refined steps. Subsequent scenarios arrive inline in `PROCEED TO SCENARIO N` messages carrying the refined steps for N.
+  3. **Verifier pane** — split off the evaluator immediately after it launches. One persistent Claude session handles **all** of that worker's per-scenario verifications via follow-ups. Initial prompt sets up the role, lists the scenario roster (titles only), declares the `VERIFIED` / `FLAGGED_START` / `FLAGGED_END` marker contract, and instructs the session to wait silently for the first `VERIFY SCENARIO <N>` follow-up. Each follow-up carries the stated verdict and the evaluator transcript path.
+- New prompt generators: `generate_qa_worker_prompt()` (evaluator initial, scenario 1 only), `generate_qa_worker_proceed_message()` (inline-steps `PROCEED` follow-up), `generate_qa_batched_concretizer_prompt()` (concretizer initial, scenario 1 draft only), `generate_concretizer_followup_message()` (scenario N draft + instructions), `generate_qa_batched_verifier_prompt()` (verifier initial), and `generate_qa_verifier_followup_message()` (per-scenario verify request).
 
 ### 1.4 Per-Scenario Report Files
 - Each worker writes a per-scenario report to `{qa_workdir}/report-s{scenario_index}.md` after completing each scenario.
@@ -33,16 +31,14 @@
 - The worker prompt instructs the agent to write this file before outputting its verdict.
 - Report file path is tracked in a new field `QAScenario.report_path`.
 
-### 1.5 Per-Scenario Verdict Detection in Worker Panes
-- The verdict polling loop (`_poll_tmux_verdicts`) is extended to detect per-scenario verdicts from worker panes.
-- Workers output verdicts in the format: `SCENARIO_N_VERDICT: PASS|NEEDS_WORK|INPUT_REQUIRED` (where N is the scenario index).
+### 1.5 Per-Scenario Verdict Detection and Pipelined Proceed
+- The verdict polling loop (`_poll_worker_verdicts`) watches the **evaluator pane** of each worker for `SCENARIO_N_VERDICT: PASS|NEEDS_WORK|INPUT_REQUIRED` lines.
 - After detecting a scenario verdict, the orchestrator:
-  - Records the verdict in `state.scenario_verdicts[N]`
-  - Updates the status file
-  - If the verdict is PASS and verification is enabled, runs verification
-  - For PASS or NEEDS_WORK: sends a "proceed to next scenario" message to the worker pane
-  - For INPUT_REQUIRED: leaves the worker waiting (same as current INPUT_REQUIRED behavior)
-- New helper: `_poll_worker_verdicts()` that handles the sequential scenario-by-scenario polling within a single worker pane.
+  - Records the verdict in `state.scenario_verdicts[N]` and updates the status file.
+  - If PASS and verification is enabled, sends a `VERIFY SCENARIO <N>` follow-up to the worker's persistent **verifier pane** (with the evaluator transcript path) and polls the verifier pane with count-based stability detection for the next `VERIFIED` / `FLAGGED_END` marker. Verification failure causes a re-evaluation message back to the evaluator pane (existing behavior, unchanged semantics). If the verifier pane is missing or died, the orchestrator falls back to the one-off `_verify_single_scenario` split-pane path so a worker whose verifier failed to launch still functions.
+  - For accepted PASS or NEEDS_WORK: waits until the concretizer pane has emitted `REFINED_STEPS_END` for scenario N+1 (it should already be running in parallel — see below), extracts those refined steps, and sends `PROCEED TO SCENARIO N+1` to the evaluator pane with the refined steps embedded inline. Then immediately sends `concretize scenario N+2` to the concretizer pane to keep the pipeline one step ahead of the evaluator.
+  - For INPUT_REQUIRED: leaves the evaluator pane blocked for human input (same as today).
+- Pipeline invariant: concretization of scenario N+1 is kicked off as soon as the evaluator *starts* scenario N (i.e., right after its `PROCEED TO SCENARIO N` send). The worst case — concretizer slower than evaluator — means the orchestrator blocks briefly waiting for `REFINED_STEPS_END` before sending the next PROCEED; this is fine, it just collapses back to serial.
 
 ### 1.6 Worker Stops on INPUT_REQUIRED
 - When a worker outputs INPUT_REQUIRED for any scenario, it stops and waits for human input, just as individual scenario sessions do today.
@@ -54,11 +50,11 @@
 - The `qa_status.py` TUI dashboard works unchanged — it reads per-scenario entries from the status file.
 - When the user presses Enter on a scenario in the status dashboard, it navigates to the worker window containing that scenario (the `window_name` field on the scenario points to the worker window).
 
-### 1.8 Concretization in Batched Mode
-- When batching is enabled, concretization still runs per-scenario (not per-worker), because each scenario may reference different instruction files.
-- Concretization runs in a temporary pane before the worker launches, same as today.
-- All scenarios in a worker batch are concretized in parallel, then the worker is launched with the refined steps.
-- Alternative: concretization could run inside the worker session as a first step. However, running it externally preserves the existing parallel concretization and keeps the worker prompt cleaner.
+### 1.8 Concretization in Batched Mode (in-window, serial, pipelined)
+- Concretization runs inside the worker window's **concretizer pane**, not in temporary external `conc-w*-s*` windows (those are removed).
+- One Claude session per worker handles all of that worker's scenarios serially. The initial prompt includes only Scenario 1's draft steps and instruction content (the session knows the full scenario roster by title/index, but draft steps for scenarios 2..N are delivered lazily in follow-up messages at the moment each one is about to be refined). This keeps the initial prompt small and avoids shipping instructions the session may not need if an earlier scenario blocks on INPUT_REQUIRED. Refined output uses the existing `REFINED_STEPS_START` / `REFINED_STEPS_END` markers.
+- As soon as Scenario 1's refined steps are available, the evaluator pane is started (with scenario 1 embedded), the verifier pane is split off the evaluator, and the concretizer is immediately prompted with Scenario 2's draft + instructions. This pipelines concretize(N+1) with evaluate(N).
+- Concretization still happens per-scenario (one at a time within a worker), but the session is reused across scenarios within the worker so PR/diff context is amortized.
 
 ### 1.9 Backward Compatibility
 - When `qa-worker-count` is 0, the existing behavior is preserved exactly: one session per scenario, each in its own tmux window.
@@ -67,15 +63,15 @@
 
 ## 2. Implicit Requirements
 
-### 2.1 Worker Prompt Must Include All Scenario Details
-- The worker prompt must include the full refined steps for each scenario, the diff context, workdir paths, PR notes, and mocks — everything currently in `generate_qa_child_prompt()` but for multiple scenarios.
+### 2.1 Evaluator Prompt Content
+- The evaluator's **initial** prompt includes: diff context, workdir paths, PR notes, mocks, the scenario list headers (so the evaluator knows how many to expect and their titles), and the **refined steps for scenario 1 only**.
+- Subsequent scenarios arrive via `PROCEED TO SCENARIO N` follow-ups that carry N's refined steps inline. The evaluator prompt explicitly documents this contract so the model doesn't try to act on later scenarios until it sees the message.
 
 ### 2.2 Report File Atomicity
 - Report files should be written atomically (write to tmp, rename) to avoid partial reads by the status watcher.
 
-### 2.3 Transcript Per Worker
-- Each worker gets one transcript file (the Claude `--transcript` flag applies per-session). The transcript covers all scenarios in that worker.
-- `QAScenario.transcript_path` for batched scenarios points to the worker's transcript.
+### 2.3 Transcript Per Pane
+- Each of the three panes (concretizer, evaluator, verifier) is its own persistent Claude session and therefore gets its own transcript file. `QAScenario.transcript_path` for batched scenarios points to the **evaluator** transcript (the primary record, and what the verifier is handed via `VERIFY SCENARIO` follow-ups to read). Concretizer and verifier transcripts live alongside it with distinct suffixes and are available for debugging but not surfaced in the TUI.
 
 ### 2.4 Push Conflict Handling
 - Multiple workers may try to push fixes to the same PR branch. The worker prompt must include the pull-rebase-push retry pattern (already in `generate_qa_child_prompt`).
@@ -93,7 +89,7 @@
 **Resolution**: Workers use `SCENARIO_N_VERDICT: <verdict>` format (e.g., `SCENARIO_3_VERDICT: PASS`) so the orchestrator can distinguish which scenario the verdict belongs to. The worker prompt clearly instructs this format. After all scenarios in a worker complete, the worker session ends naturally.
 
 ### 3.2 Verification in Batched Mode
-**Resolution**: Verification still runs per-scenario. When a worker outputs `SCENARIO_N_VERDICT: PASS`, the orchestrator captures the pane content and runs verification for that scenario. The worker is told to wait after each verdict, giving the verification time to complete before the "proceed" message arrives.
+**Resolution**: Verification runs per-scenario in the worker window's dedicated **verifier pane** — one persistent Claude session per worker, reused across all that worker's verifications via `VERIFY SCENARIO <N>` follow-ups. When the evaluator outputs `SCENARIO_N_VERDICT: PASS`, the orchestrator sends a follow-up to the verifier pane (stating the verdict and pointing at the evaluator transcript path), polls the verifier pane with count-based stability detection for the next `VERIFIED` or `FLAGGED_END` marker, and either accepts (triggers pipelined PROCEED) or rejects (sends a re-evaluation message to the evaluator pane, same as today's verification-failure recovery). If the verifier pane is missing or died, the orchestrator falls back to the one-off `_verify_single_scenario` split-pane path.
 
 ### 3.3 Interaction Between `qa-worker-count` and `qa-max-scenarios`
 **Resolution**: When batching is enabled, `qa-max-scenarios` limits the number of concurrent workers (not scenarios). If `qa-worker-count=4` and `qa-max-scenarios=2`, only 2 workers run at a time, with the other 2 queued. This provides consistent behavior — the concurrency cap always limits the number of tmux windows/sessions.
@@ -102,7 +98,7 @@
 **Resolution**: If a worker window dies, the existing retry logic (`_relaunch_scenario_window`) applies to the worker window. The relaunched worker resumes from the last unfinished scenario (those without a verdict in `state.scenario_verdicts`). The worker prompt includes only remaining scenarios on relaunch.
 
 ### 3.5 Concretization Strategy
-**Resolution**: Concretization runs externally (before worker launch), in parallel across all scenarios in the batch. This preserves the existing concurrent concretization pattern and avoids making the worker session responsible for concretization. The concretizer panes are created and polled as today, then killed before the worker launches in the same window.
+**Resolution (updated 2026-04-13)**: Concretization runs inside the worker window in a dedicated **concretizer pane** (one persistent Claude session per worker), serially across that worker's scenarios via follow-up messages. The worker window is created immediately at launch so the concretizer has a home; the evaluator and verifier panes are split into the same window once scenario 1's refined steps are ready. Concretize(N+1) is kicked off as soon as evaluate(N) starts, so the two pipeline. Scenario drafts and instruction content for scenarios 2..N are NOT in the initial concretizer prompt — they ride along in the follow-up message when that scenario is about to be refined. No temporary `conc-w*-s*` windows.
 
 ## 4. Edge Cases
 

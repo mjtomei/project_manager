@@ -3111,6 +3111,134 @@ SCENARIO_2_VERDICT: NEEDS_WORK
         assert _extract_worker_verdicts(content) == {9: "PASS"}
 
 
+class TestGenerateQAWorkerProceedMessage:
+    def test_contains_header_title_steps_and_report_path(self):
+        from pm_core.prompt_gen import generate_qa_worker_proceed_message
+        sc = QAScenario(
+            index=3,
+            title="Logout Flow",
+            focus="Session cleanup",
+            steps="planned",
+            report_path="/tmp/qa/report-s3.md",
+        )
+        refined = "1. Run `logout`\n2. Verify cookie cleared"
+        body = generate_qa_worker_proceed_message(sc, refined)
+        assert "PROCEED TO SCENARIO 3" in body
+        assert "Logout Flow" in body
+        assert refined in body
+        assert "/tmp/qa/report-s3.md" in body
+        assert "SCENARIO_3_VERDICT" in body
+
+
+class TestGenerateQABatchedConcretizerPrompt:
+    def test_only_scenario_one_draft_embedded(self):
+        from pm_core.prompt_gen import generate_qa_batched_concretizer_prompt
+        scs = [
+            QAScenario(index=1, title="Login", focus="auth",
+                       steps="SCENARIO_ONE_UNIQUE_STEPS"),
+            QAScenario(index=2, title="Logout", focus="auth",
+                       steps="SCENARIO_TWO_UNIQUE_STEPS"),
+        ]
+        prompt = generate_qa_batched_concretizer_prompt(
+            scs, "pm/pr-x", "master",
+            {1: "instr 1 body", 2: "SCENARIO_TWO_INSTR"})
+        # Scenario 1's steps + instruction must be in the initial prompt.
+        assert "SCENARIO_ONE_UNIQUE_STEPS" in prompt
+        assert "instr 1 body" in prompt
+        # Scenario 2's draft + instruction must NOT be in the initial prompt.
+        assert "SCENARIO_TWO_UNIQUE_STEPS" not in prompt
+        assert "SCENARIO_TWO_INSTR" not in prompt
+        # Titles of both scenarios must still appear in the roster.
+        assert "Scenario 1: Login" in prompt
+        assert "Scenario 2: Logout" in prompt
+        # Output contract + follow-up rule must still be documented.
+        assert "REFINED_STEPS_START" in prompt
+        assert "REFINED_STEPS_END" in prompt
+        assert "CONCRETIZE SCENARIO" in prompt
+
+
+class TestGenerateQABatchedVerifierPrompt:
+    def test_role_roster_and_markers(self):
+        from pm_core.prompt_gen import generate_qa_batched_verifier_prompt
+        scs = [
+            QAScenario(index=3, title="Auth flow", focus="auth",
+                       steps="UNIQ_VERIF_SCN_STEPS_A"),
+            QAScenario(index=4, title="Settings", focus="ui",
+                       steps="UNIQ_VERIF_SCN_STEPS_B"),
+        ]
+        prompt = generate_qa_batched_verifier_prompt(
+            scs, worker_index=2, pr_branch="pm/pr-x", base_branch="master")
+        # Role + worker index.
+        assert "verifier" in prompt.lower()
+        assert "worker 2" in prompt
+        # Roster — titles should be listed.
+        assert "Scenario 3: Auth flow" in prompt
+        assert "Scenario 4: Settings" in prompt
+        # Marker convention.
+        assert "VERIFIED" in prompt
+        assert "FLAGGED_START" in prompt
+        assert "FLAGGED_END" in prompt
+        # Must wait-for-first-request semantics.
+        assert "VERIFY SCENARIO" in prompt
+        # Must NOT contain per-scenario planned steps or transcripts.
+        assert "UNIQ_VERIF_SCN_STEPS_A" not in prompt
+        assert "UNIQ_VERIF_SCN_STEPS_B" not in prompt
+
+
+class TestGenerateQAVerifierFollowupMessage:
+    def test_with_transcript_path(self):
+        from pm_core.prompt_gen import generate_qa_verifier_followup_message
+        scn = QAScenario(index=7, title="Cart checkout", focus="shop",
+                         steps="steps")
+        msg = generate_qa_verifier_followup_message(
+            scn, "PASS",
+            transcript_path="/tmp/qa/transcript-s7.jsonl")
+        assert "VERIFY SCENARIO 7" in msg
+        assert "Cart checkout" in msg
+        assert "PASS" in msg
+        assert "/tmp/qa/transcript-s7.jsonl" in msg
+        assert "VERIFIED" in msg
+        assert "FLAGGED_START" in msg
+        assert "FLAGGED_END" in msg
+
+    def test_with_pane_output_fallback(self):
+        from pm_core.prompt_gen import generate_qa_verifier_followup_message
+        scn = QAScenario(index=8, title="Search", focus="search",
+                         steps="steps")
+        msg = generate_qa_verifier_followup_message(
+            scn, "NEEDS_WORK", transcript_path=None,
+            pane_output="PANE_OUTPUT_UNIQ_MARK")
+        assert "VERIFY SCENARIO 8" in msg
+        assert "NEEDS_WORK" in msg
+        assert "PANE_OUTPUT_UNIQ_MARK" in msg
+
+
+class TestGenerateQAWorkerPromptInitialOnly:
+    def test_only_first_scenario_steps_embedded(self):
+        from pm_core.prompt_gen import generate_qa_worker_prompt
+        scs = [
+            QAScenario(index=1, title="Login", focus="auth",
+                       steps="UNIQUE_STEP_ONE"),
+            QAScenario(index=2, title="Logout", focus="auth",
+                       steps="UNIQUE_STEP_TWO"),
+        ]
+        data = {"project": {"base_branch": "master"}}
+        with patch("pm_core.prompt_gen.store.get_pr",
+                   return_value={"title": "t", "branch": "b", "workdir": "/w"}), \
+             patch("pm_core.prompt_gen._format_pr_notes", return_value=""), \
+             patch("pm_core.prompt_gen.get_spec_mocks_section", return_value=""):
+            out = generate_qa_worker_prompt(
+                data, "pr-x", scs, worker_index=1,
+                workdir="/tmp/w", qa_workdir="/tmp/qa")
+        assert "UNIQUE_STEP_ONE" in out
+        assert "UNIQUE_STEP_TWO" not in out
+        # Titles of all scenarios must be listed.
+        assert "Scenario 1: Login" in out
+        assert "Scenario 2: Logout" in out
+        # PROCEED contract must be documented.
+        assert "PROCEED TO SCENARIO" in out
+
+
 class TestWorkerWindowName:
     def test_with_gh_pr_number(self):
         pr_data = {"gh_pr_number": 42}
