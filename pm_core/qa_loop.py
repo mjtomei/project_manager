@@ -1102,7 +1102,8 @@ def _launch_scenarios_in_tmux(
 
         try:
             scenario_pane = tmux_mod.split_pane_at(
-                concretize_pane, "v", child_cmd, background=True)
+                concretize_pane, "v", child_cmd, background=True,
+                cwd=scenario_cwd)
             scenario.window_name = win_name
             scenario.pane_id = scenario_pane
             scenario.transcript_path = transcript
@@ -1319,7 +1320,8 @@ def _launch_scenarios_in_containers(
         exec_cmd = container_mod.build_exec_cmd(cname, claude_cmd, cleanup=False)
         try:
             scenario_pane = tmux_mod.split_pane_at(
-                concretize_pane, "v", exec_cmd, background=True)
+                concretize_pane, "v", exec_cmd, background=True,
+                cwd=str(clone_path))
             scenario.window_name = win_name
             scenario.pane_id = scenario_pane
             scenario.transcript_path = transcript
@@ -2065,6 +2067,7 @@ def _verify_single_scenario(
     try:
         verify_pane = tmux_mod.split_pane_at(
             scenario_pane, "v", verify_cmd, background=True,
+            cwd=_verify_cwd,
         )
     except Exception:
         _log.warning("Verification: failed to split pane for scenario %d, "

@@ -213,13 +213,21 @@ def split_pane_background(session: str, direction: str, cmd: str) -> str:
     return result.stdout.strip()
 
 
-def split_pane_at(pane_id: str, direction: str, cmd: str, background: bool = False) -> str:
+def split_pane_at(pane_id: str, direction: str, cmd: str,
+                  background: bool = False, cwd: str | None = None) -> str:
     """Split a specific pane. Returns new pane ID.
 
     direction: 'h' for horizontal (left/right), 'v' for vertical (top/bottom)
+    cwd: starting directory for the new pane. Without this, tmux inherits
+        the target pane's current /proc cwd, which can drift if the
+        target's shell has been chdir'd by a long-running process
+        (e.g. Claude Code's persistent Bash tool).
     """
     flag = "-h" if direction == "h" else "-v"
-    args = ["split-window", flag, "-t", pane_id, "-P", "-F", "#{pane_id}", cmd]
+    args = ["split-window", flag, "-t", pane_id, "-P", "-F", "#{pane_id}"]
+    if cwd:
+        args += ["-c", cwd]
+    args.append(cmd)
     if background:
         args.insert(2, "-d")
     result = _run(_tmux_cmd(*args), text=True, check=True)
