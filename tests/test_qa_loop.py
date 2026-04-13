@@ -2978,6 +2978,36 @@ SCENARIO_2_VERDICT: NEEDS_WORK
         result = _extract_worker_verdicts(content)
         assert result == {1: "PASS", 2: "NEEDS_WORK"}
 
+    def test_all_three_verdict_tokens(self):
+        content = ("SCENARIO_1_VERDICT: PASS\n"
+                   "SCENARIO_2_VERDICT: NEEDS_WORK\n"
+                   "SCENARIO_3_VERDICT: INPUT_REQUIRED\n")
+        result = _extract_worker_verdicts(content)
+        assert result == {1: "PASS", 2: "NEEDS_WORK", 3: "INPUT_REQUIRED"}
+
+    def test_mid_line_verdict_ignored(self):
+        """Verdict embedded mid-line (no newline before) must not match."""
+        content = "prefix SCENARIO_4_VERDICT: PASS\n"
+        assert _extract_worker_verdicts(content) == {}
+
+    def test_verdict_in_fenced_code_block(self):
+        """Verdict on its own line within code fences still matches."""
+        content = "```\nSCENARIO_7_VERDICT: PASS\n```\n"
+        assert _extract_worker_verdicts(content) == {7: "PASS"}
+
+    def test_malformed_tokens_ignored(self):
+        content = (
+            "SCENARIO_X_VERDICT: PASS\n"
+            "SCENARIO_1_VERDICT: MAYBE\n"
+            "SCENARIO__VERDICT: PASS\n"
+            "scenario_1_verdict: pass\n"
+        )
+        assert _extract_worker_verdicts(content) == {}
+
+    def test_trailing_whitespace_tolerated(self):
+        content = "SCENARIO_9_VERDICT: PASS   \n"
+        assert _extract_worker_verdicts(content) == {9: "PASS"}
+
 
 class TestWorkerWindowName:
     def test_with_gh_pr_number(self):
