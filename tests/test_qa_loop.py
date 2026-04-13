@@ -2889,6 +2889,53 @@ class TestGroupScenariosIntoWorkers:
         assert 3 not in result
         assert 1 in result
 
+    def test_single_worker_preserves_order(self):
+        scs = [self._make_scenario(i, group=g) for i, g in
+               enumerate([1, None, 5, 2], start=1)]
+        result = group_scenarios_into_workers(scs, worker_count=1)
+        assert list(result.keys()) == [1]
+        assert [s.index for s in result[1]] == [1, 2, 3, 4]
+
+    def test_out_of_range_groups_balanced_and_mutated(self):
+        # groups [5, 7, None, 1] with worker_count=2
+        scs = [self._make_scenario(1, group=5),
+               self._make_scenario(2, group=7),
+               self._make_scenario(3, group=None),
+               self._make_scenario(4, group=1)]
+        result = group_scenarios_into_workers(scs, worker_count=2)
+        assert set(result.keys()) == {1, 2}
+        total = sum(len(v) for v in result.values())
+        assert total == 4
+        # Worker 1 started with scenario 4 (group=1). Round-robin assigns
+        # least-loaded: sc1 -> worker 2, sc2 -> worker 1 (tie, min key=1),
+        # sc3 -> worker 2.
+        assert scs[0].group in {1, 2}
+        assert scs[1].group in {1, 2}
+        assert scs[2].group in {1, 2}
+        # Originally-valid group=1 is not mutated
+        assert scs[3].group == 1
+        # Balanced: 2 and 2
+        assert len(result[1]) == 2
+        assert len(result[2]) == 2
+
+    def test_planner_decides_with_sparse_groups(self):
+        # groups [1, 3, 3] with worker_count=-1 -> derive 3, keys {1,3}
+        scs = [self._make_scenario(1, group=1),
+               self._make_scenario(2, group=3),
+               self._make_scenario(3, group=3)]
+        result = group_scenarios_into_workers(scs, worker_count=-1)
+        assert set(result.keys()) == {1, 3}
+        assert len(result[1]) == 1
+        assert len(result[3]) == 2
+
+    def test_more_workers_than_scenarios(self):
+        scs = [self._make_scenario(1), self._make_scenario(2),
+               self._make_scenario(3)]
+        result = group_scenarios_into_workers(scs, worker_count=5)
+        assert set(result.keys()) == {1, 2, 3}
+        for k in (1, 2, 3):
+            assert len(result[k]) == 1
+
 
 class TestExtractWorkerVerdicts:
     """Tests for _extract_worker_verdicts."""
