@@ -224,7 +224,7 @@ def qa_debug(instruction_id: str, branch: str | None, foreground: bool):
     import secrets
     from pm_core import qa_instructions, store
     from pm_core import tmux as tmux_mod
-    from pm_core.container import is_container_mode_enabled, _docker_available
+    from pm_core.container import is_container_mode_enabled, _runtime_available
     from pm_core.claude_launcher import build_claude_shell_cmd
     from pm_core.loop_shared import get_pm_session
 
@@ -280,7 +280,7 @@ def qa_debug(instruction_id: str, branch: str | None, foreground: bool):
     import shutil
     shutil.copy2(item["path"], dest_dir / filename)
 
-    use_containers = is_container_mode_enabled() and _docker_available()
+    use_containers = is_container_mode_enabled() and _runtime_available()
 
     if use_containers:
         from pm_core import container as container_mod

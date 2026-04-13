@@ -23,7 +23,6 @@ from pm_core.cli.helpers import (
     _pr_display_id,
     _require_plan,
     _resolve_repo_dir,
-    save_and_push,
     state_root,
     trigger_tui_refresh,
 )
@@ -64,11 +63,8 @@ def plan_add(name: str, description: str, fresh: bool):
     plan_file = f"plans/{plan_id}.md"
 
     entry = store.make_plan_entry(plan_id, name, plan_file)
-    if data.get("plans") is None:
-        data["plans"] = []
-    data["plans"].append(entry)
 
-    # Create the plan file
+    # Create the plan file (idempotent, safe outside lock)
     plan_path = root / plan_file
     plan_path.parent.mkdir(parents=True, exist_ok=True)
     plan_path.write_text(f"# {name}\n\n<!-- Describe the plan here -->\n")
@@ -76,7 +72,12 @@ def plan_add(name: str, description: str, fresh: bool):
     # Ensure notes file exists
     notes.ensure_notes_file(root)
 
-    save_and_push(data, root, f"pm: add plan {plan_id}")
+    def apply(data):
+        if data.get("plans") is None:
+            data["plans"] = []
+        data["plans"].append(entry)
+
+    store.locked_update(root, apply)
     click.echo(f"Created plan {plan_id}: {name}")
     click.echo(f"  Plan file: {plan_path}")
     trigger_tui_refresh()
@@ -120,9 +121,11 @@ when there's a real ordering constraint.
 
 {_MANUAL_TESTING_GUIDANCE}
 
-After writing the PRs section, tell the user to run `pm plan review {plan_id}`
-(key: c in the plans pane) to check consistency and coverage before loading.
-Let them know it is safe to close this pane — the review will run in a new session.
+After writing the PRs section, tell the user to run `pm plan load {plan_id}`
+(key: l in the plans pane) to load the PRs into project.yaml. They can
+optionally run `pm plan review {plan_id}` (key: c) afterward to check
+consistency and coverage.
+Let them know it is safe to close this pane — load and review will run in new sessions.
 {tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
 
     claude = find_claude()
@@ -222,9 +225,10 @@ Guidelines:
 - Write the ## PRs section directly into the plan file at {plan_path}
 - {_MANUAL_TESTING_GUIDANCE}
 
-After writing, tell the user to run `pm plan review {plan_id}` (key: c in the
-plans pane) to check consistency and coverage before loading PRs.
-Let them know it is safe to close this pane — the review will run in a new session.
+After writing, tell the user to run `pm plan load {plan_id}` (key: l in the
+plans pane) to load the PRs into project.yaml. They can optionally run
+`pm plan review {plan_id}` (key: c) afterward to check consistency and coverage.
+Let them know it is safe to close this pane — load and review will run in new sessions.
 {tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
 
     claude = find_claude()
@@ -557,7 +561,7 @@ def plan_load(plan_id: str | None):
             title_to_id[pr["title"]] = pr_id
             existing_ids.add(pr_id)
 
-    created = 0
+    new_entries = []
     for pr in prs:
         pr_id = title_to_id[pr["title"]]
 
@@ -584,15 +588,22 @@ def plan_load(plan_id: str | None):
         entry = _make_pr_entry(pr_id, pr["title"], branch,
                                plan=plan_id, depends_on=deps,
                                description=desc)
-        data["prs"].append(entry)
+        new_entries.append(entry)
         existing_titles[pr["title"]] = pr_id
-        created += 1
         click.echo(f"  Created {pr_id}: {pr['title']}")
 
-    if created:
-        save_and_push(data, root, f"pm: load plan {plan_id}")
+    if new_entries:
+        def apply(data):
+            if data.get("prs") is None:
+                data["prs"] = []
+            current_ids = {p["id"] for p in data["prs"]}
+            for entry in new_entries:
+                if entry["id"] not in current_ids:
+                    data["prs"].append(entry)
+
+        store.locked_update(root, apply)
         trigger_tui_refresh()
-    click.echo(f"\nLoaded {created} PRs from plan {plan_id}.")
+    click.echo(f"\nLoaded {len(new_entries)} PRs from plan {plan_id}.")
 
 
 @plan.command("fixes")
@@ -685,31 +696,36 @@ def _import_github_prs(root: Path, data: dict) -> None:
         click.echo("  No open PRs found.")
         return
 
-    if data.get("prs") is None:
-        data["prs"] = []
+    existing_ids = {p["id"] for p in (data.get("prs") or [])}
+    entries_to_import = []
 
-    imported = 0
     for gh_pr in gh_prs:
         branch = gh_pr.get("headRefName", "")
         number = gh_pr.get("number")
         title = gh_pr.get("title", "")
         status = _gh_state_to_status(gh_pr.get("state", "OPEN"), gh_pr.get("isDraft", False))
 
-        existing_ids = {p["id"] for p in data["prs"]}
         desc = gh_pr.get("body", "") or ""
         pr_id = store.generate_pr_id(title, desc, existing_ids)
 
         entry = _make_pr_entry(pr_id, title, branch, status=status,
                                description=desc, gh_pr=gh_pr.get("url", ""),
                                gh_pr_number=number)
-        data["prs"].append(entry)
+        entries_to_import.append(entry)
         existing_ids.add(pr_id)
-        imported += 1
         click.echo(f"  + {pr_id}: {title} [{status}] (#{number})")
 
-    if imported:
-        store.save(data, root)
-        click.echo(f"  Imported {imported} PR(s) from GitHub.")
+    if entries_to_import:
+        def apply(data):
+            if data.get("prs") is None:
+                data["prs"] = []
+            current_ids = {p["id"] for p in data["prs"]}
+            for entry in entries_to_import:
+                if entry["id"] not in current_ids:
+                    data["prs"].append(entry)
+
+        store.locked_update(root, apply)
+        click.echo(f"  Imported {len(entries_to_import)} PR(s) from GitHub.")
 
 
 def _run_plan_import(name: str):
@@ -721,11 +737,8 @@ def _run_plan_import(name: str):
     plan_file = f"plans/{plan_id}.md"
 
     entry = store.make_plan_entry(plan_id, name, plan_file)
-    if data.get("plans") is None:
-        data["plans"] = []
-    data["plans"].append(entry)
 
-    # Create the plan file
+    # Create the plan file (idempotent, safe outside lock)
     plan_path = root / plan_file
     plan_path.parent.mkdir(parents=True, exist_ok=True)
     plan_path.write_text(f"# {name}\n\n")
@@ -733,7 +746,12 @@ def _run_plan_import(name: str):
     # Ensure notes file exists
     notes.ensure_notes_file(root)
 
-    save_and_push(data, root, f"pm: add plan {plan_id}")
+    def apply(data):
+        if data.get("plans") is None:
+            data["plans"] = []
+        data["plans"].append(entry)
+
+    store.locked_update(root, apply)
     click.echo(f"Created plan {plan_id}: {name}")
     click.echo(f"  Plan file: {plan_path}")
     trigger_tui_refresh()

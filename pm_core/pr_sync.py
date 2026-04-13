@@ -250,12 +250,21 @@ def sync_prs(
             except Exception as e:
                 _log.warning("Error checking merge status for %s: %s", pr_entry["id"], e)
 
-    # Update timestamp
-    set_last_sync_timestamp(data, datetime.now(timezone.utc))
-
     # Save if requested and there were changes
+    # Note: the pr_entry status mutations above (lines 244-248) are intentionally
+    # applied to the in-memory `data` so that graph.ready_prs(prs) below sees
+    # merged PRs correctly. The locked_update below persists the authoritative save.
     if save_state:
-        store.save(data, root)
+        merged_set = set(merged_prs)
+
+        def apply(fresh_data):
+            for pr in fresh_data.get("prs") or []:
+                if pr["id"] in merged_set:
+                    pr["status"] = "merged"
+                    _record_status_timestamp(pr, "merged")
+            set_last_sync_timestamp(fresh_data, datetime.now(timezone.utc))
+
+        store.locked_update(root, apply)
 
     # Get ready PRs
     ready = graph.ready_prs(prs)
@@ -384,11 +393,16 @@ def sync_from_github(
         except Exception as e:
             _log.warning("Error fetching GitHub status for %s: %s", pr_id, e)
 
-    # Update timestamp
-    set_last_sync_timestamp(data, datetime.now(timezone.utc))
-
     if save_state and updated:
-        store.save(data, root)
+        def apply(fresh_data):
+            for pr in fresh_data.get("prs") or []:
+                new_status = status_updates.get(pr["id"])
+                if new_status and pr.get("status") != new_status:
+                    pr["status"] = new_status
+                    _record_status_timestamp(pr, new_status)
+            set_last_sync_timestamp(fresh_data, datetime.now(timezone.utc))
+
+        store.locked_update(root, apply)
 
     # Closed PRs keep status "closed" in the yaml but are not auto-removed.
     # This avoids losing PRs that were auto-closed by GitHub (e.g. when a

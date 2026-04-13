@@ -1,7 +1,7 @@
-"""Docker container isolation for Claude sessions.
+"""Container isolation for Claude sessions.
 
-Wraps Claude CLI commands in Docker containers to provide isolation.
-Each containerised session gets:
+Wraps Claude CLI commands in containers (Docker or Podman) to provide
+isolation.  Each containerised session gets:
   - The working directory bind-mounted as /workspace (read-write)
   - The host's claude binary bind-mounted at /usr/local/bin/claude
   - Claude config (~/.claude) mounted read-write for auth and session state
@@ -10,11 +10,11 @@ Each containerised session gets:
 
 The user experience is transparent: tmux windows look the same, but the
 claude process runs inside a resource-limited container via
-``docker exec -it`` rather than directly on the host.
+``<runtime> exec -it`` rather than directly on the host.
 
 Container lifecycle:
-  create (detached, sleeping) -> tmux window runs ``docker exec -it``
-  -> monitor via tmux pane capture (unchanged) -> cleanup: ``docker rm -f``
+  create (detached, sleeping) -> tmux window runs ``<runtime> exec -it``
+  -> monitor via tmux pane capture (unchanged) -> cleanup: ``<runtime> rm -f``
 
 Git push support:
   Credentials (SSH keys, HTTPS tokens) stay on the host.  Each container
@@ -34,7 +34,8 @@ Requirements:
     curl, jq, and build-essential.  It is auto-built from the bundled
     Dockerfile on first use.  Users can swap in a custom image via
     ``pm container set image <image>``.
-  - Docker must be installed and the current user must have access.
+  - Docker or Podman must be installed and the current user must have access.
+    Select the runtime via ``pm container set runtime podman`` (default: docker).
 """
 
 import os
@@ -58,6 +59,7 @@ class ContainerError(RuntimeError):
 DEFAULT_IMAGE = "pm-dev:latest"
 DEFAULT_MEMORY_LIMIT = "8g"
 DEFAULT_CPU_LIMIT = "4.0"
+DEFAULT_RUNTIME = "docker"
 CONTAINER_PREFIX = "pm-"
 _CONTAINER_WORKDIR = "/workspace"
 _CONTAINER_SCRATCH = "/scratch"
@@ -84,8 +86,20 @@ class ContainerConfig:
     image: str = DEFAULT_IMAGE
     memory_limit: str = DEFAULT_MEMORY_LIMIT
     cpu_limit: str = DEFAULT_CPU_LIMIT
+    runtime: str = DEFAULT_RUNTIME
     env: dict[str, str] = field(default_factory=dict)
     extra_mounts: list[str] = field(default_factory=list)
+
+
+def _get_runtime() -> str:
+    """Return the configured container runtime binary name.
+
+    Returns the explicit ``container-runtime`` setting if set, otherwise
+    defaults to ``docker`` for backward compatibility.  Users opt into
+    Podman via ``pm container set runtime podman``.
+    """
+    from pm_core.paths import get_global_setting_value
+    return get_global_setting_value("container-runtime", DEFAULT_RUNTIME)
 
 
 def _get_dockerfile_path() -> Path:
@@ -97,14 +111,15 @@ def build_image(tag: str = DEFAULT_IMAGE, quiet: bool = False) -> None:
     """Build the pm developer base image from the bundled Dockerfile.
 
     Args:
-        tag: Docker image tag (default: pm-dev:latest).
+        tag: Image tag (default: pm-dev:latest).
         quiet: Suppress build output.
     """
     dockerfile = _get_dockerfile_path()
     if not dockerfile.exists():
         raise FileNotFoundError(f"Dockerfile not found: {dockerfile}")
 
-    cmd = ["docker", "build", "-t", tag, "-f", str(dockerfile), str(dockerfile.parent)]
+    runtime = _get_runtime()
+    cmd = [runtime, "build", "-t", tag, "-f", str(dockerfile), str(dockerfile.parent)]
     _log.info("Building image %s from %s", tag, dockerfile)
     result = subprocess.run(
         cmd,
@@ -122,10 +137,11 @@ _build_lock = threading.Lock()
 
 
 def image_exists(tag: str = DEFAULT_IMAGE) -> bool:
-    """Check if a Docker image exists locally."""
+    """Check if the container image exists locally."""
+    runtime = _get_runtime()
     try:
         result = subprocess.run(
-            ["docker", "image", "inspect", tag],
+            [runtime, "image", "inspect", tag],
             capture_output=True, timeout=10,
         )
         return result.returncode == 0
@@ -133,11 +149,12 @@ def image_exists(tag: str = DEFAULT_IMAGE) -> bool:
         return False
 
 
-def _docker_available() -> bool:
-    """Check if docker is available and the daemon is running."""
+def _runtime_available() -> bool:
+    """Check if the configured container runtime is available."""
+    runtime = _get_runtime()
     try:
         result = subprocess.run(
-            ["docker", "info"],
+            [runtime, "info"],
             capture_output=True, timeout=10,
         )
         return result.returncode == 0
@@ -155,6 +172,7 @@ def load_container_config() -> ContainerConfig:
             "container-memory-limit", DEFAULT_MEMORY_LIMIT),
         cpu_limit=get_global_setting_value(
             "container-cpu-limit", DEFAULT_CPU_LIMIT),
+        runtime=_get_runtime(),
     )
 
 
@@ -164,17 +182,18 @@ def is_container_mode_enabled() -> bool:
     return get_global_setting("container-enabled")
 
 
-def _run_docker(*args: str, check: bool = True,
-                timeout: int | None = 30) -> subprocess.CompletedProcess:
-    """Run a docker command."""
-    cmd = ["docker", *args]
-    _log.debug("docker: %s", " ".join(cmd))
+def _run_runtime(*args: str, check: bool = True,
+                 timeout: int | None = 30) -> subprocess.CompletedProcess:
+    """Run a container runtime command."""
+    runtime = _get_runtime()
+    cmd = [runtime, *args]
+    _log.debug("container: %s", " ".join(cmd))
     result = subprocess.run(
         cmd, capture_output=True, text=True,
         check=False, timeout=timeout,
     )
     if result.returncode != 0:
-        _log.error("docker failed (rc=%d): %s\nstderr: %s\nstdout: %s",
+        _log.error("container runtime failed (rc=%d): %s\nstderr: %s\nstdout: %s",
                    result.returncode, " ".join(cmd),
                    result.stderr.strip()[:500], result.stdout.strip()[:200])
         if check:
@@ -186,7 +205,7 @@ def _run_docker(*args: str, check: bool = True,
 
 def container_is_running(name: str) -> bool:
     """Return True if a container with *name* exists and is running."""
-    result = _run_docker(
+    result = _run_runtime(
         "inspect", "-f", "{{.State.Running}}", name,
         check=False, timeout=10,
     )
@@ -201,24 +220,35 @@ def container_is_running(name: str) -> bool:
 def _build_git_setup_script(
     has_push_proxy: bool = False,
     host_workdir: str | None = None,
+    is_podman: bool = False,
 ) -> str:
     """Build a shell script snippet to configure git inside the container.
 
-    This script runs as root at container start, configuring:
+    This script runs at container start, configuring:
       - safe.directory for /workspace
       - A git wrapper that forwards ``git push`` to the host-side push proxy
         (if has_push_proxy is True)
+
+    Under Docker (root), falls back to ``su - pm`` for git config.
+    Under Podman (--userns=keep-id), the process is already the correct
+    user, so direct git config works and ``su`` is not used.
     """
     lines: list[str] = []
 
     # Set safe directory for /workspace.
-    # Use plain git config (works when already running as pm) with su
-    # fallback (works when running as root in the default image).
-    lines.append(
-        f"git config --global --add safe.directory {_CONTAINER_WORKDIR} 2>/dev/null || "
-        f"su - {_CONTAINER_USER} -c "
-        f"'git config --global --add safe.directory {_CONTAINER_WORKDIR}'"
-    )
+    if is_podman:
+        # Already running as the correct user — direct git config works.
+        lines.append(
+            f"git config --global --add safe.directory {_CONTAINER_WORKDIR}"
+        )
+    else:
+        # Use plain git config (works when already running as pm) with su
+        # fallback (works when running as root in the default image).
+        lines.append(
+            f"git config --global --add safe.directory {_CONTAINER_WORKDIR} 2>/dev/null || "
+            f"su - {_CONTAINER_USER} -c "
+            f"'git config --global --add safe.directory {_CONTAINER_WORKDIR}'"
+        )
 
     # Install a git wrapper that intercepts remote-interacting commands
     # (push, fetch, pull, ls-remote) and forwards them to the host-side
@@ -396,7 +426,7 @@ def create_container(
     # The proxy socket directory is bind-mounted (not the socket file),
     # so a restarted proxy is visible to the container immediately.
     if container_is_running(name):
-        result = _run_docker(
+        result = _run_runtime(
             "inspect", "-f", "{{.Id}}", name,
             check=False, timeout=10,
         )
@@ -427,7 +457,15 @@ def create_container(
             if not image_exists(config.image):
                 _log.info("Default image %s not found — building automatically", config.image)
                 build_image(tag=config.image, quiet=True)
+    elif config.image != DEFAULT_IMAGE and not image_exists(config.image):
+        runtime = _get_runtime()
+        raise ContainerError(
+            f"Image '{config.image}' not found in {runtime}. "
+            f"Run 'pm container build' to rebuild it, or "
+            f"'pm container build-image' for the base image."
+        )
 
+    runtime = _get_runtime()
     cmd = [
         "run", "-d",
         "--name", name,
@@ -436,6 +474,11 @@ def create_container(
         "-v", f"{workdir}:{_CONTAINER_WORKDIR}",
         "-w", _CONTAINER_WORKDIR,
     ]
+
+    # Podman rootless: map host UID into the container without manual
+    # useradd/groupadd.  Harmless under Podman rootful (no-op).
+    if "podman" in runtime:
+        cmd.extend(["--userns=keep-id"])
 
     # --- Claude binary ---
     # Mount the resolved claude binary into the container so the
@@ -524,24 +567,43 @@ def create_container(
         ["git", "config", "user.email"], capture_output=True, text=True,
     ).stdout.strip()
 
+    _is_podman = "podman" in runtime
     git_setup = _build_git_setup_script(has_push_proxy=has_push_proxy,
-                                        host_workdir=str(workdir) if has_push_proxy else None)
-    # User creation — no-ops when the image already has the pm user (e.g.
-    # project-specific images built via `pm container build`).
-    setup_parts = [
-        f"groupadd -g {host_gid} {_CONTAINER_USER} 2>/dev/null || true",
-        f"useradd -u {host_uid} -g {host_gid} -m -s /bin/bash {_CONTAINER_USER} 2>/dev/null || true",
-        f"chown {host_uid}:{host_gid} {_CONTAINER_HOME} 2>/dev/null || true",
-    ]
+                                        host_workdir=str(workdir) if has_push_proxy else None,
+                                        is_podman=_is_podman)
+    if _is_podman:
+        # Podman with --userns=keep-id: the host UID is already mapped into
+        # the container.  No user creation needed (and we're not root, so
+        # groupadd/useradd would fail).  Just ensure /home/pm exists and
+        # set HOME explicitly so git config writes to the right place.
+        setup_parts = [
+            f"mkdir -p {_CONTAINER_HOME}",
+            f"export HOME={_CONTAINER_HOME}",
+        ]
+    else:
+        # Docker: runs as root, create the pm user.  No-ops when the image
+        # already has the pm user (e.g. project-specific images).
+        setup_parts = [
+            f"groupadd -g {host_gid} {_CONTAINER_USER} 2>/dev/null || true",
+            f"useradd -u {host_uid} -g {host_gid} -m -s /bin/bash {_CONTAINER_USER} 2>/dev/null || true",
+            f"chown {host_uid}:{host_gid} {_CONTAINER_HOME} 2>/dev/null || true",
+        ]
     if git_name and git_email:
-        # Try as current user first (works when running as pm), fall back
-        # to su (works when running as root in the default image).
-        setup_parts.append(
-            f"(git config --global user.name \"{git_name}\" && "
-            f"git config --global user.email \"{git_email}\") 2>/dev/null || "
-            f"su -c 'git config --global user.name \"{git_name}\" && "
-            f"git config --global user.email \"{git_email}\"' {_CONTAINER_USER}"
-        )
+        if _is_podman:
+            # Already running as the correct user — direct git config works.
+            setup_parts.append(
+                f"git config --global user.name \"{git_name}\" && "
+                f"git config --global user.email \"{git_email}\""
+            )
+        else:
+            # Try as current user first (works when running as pm), fall back
+            # to su (works when running as root in the default image).
+            setup_parts.append(
+                f"(git config --global user.name \"{git_name}\" && "
+                f"git config --global user.email \"{git_email}\") 2>/dev/null || "
+                f"su -c 'git config --global user.name \"{git_name}\" && "
+                f"git config --global user.email \"{git_email}\"' {_CONTAINER_USER}"
+            )
     if git_setup:
         setup_parts.append(git_setup)
     setup_parts.append(f"touch {_READY_SENTINEL}")
@@ -549,7 +611,7 @@ def create_container(
     setup = "; ".join(setup_parts)
     cmd.extend([config.image, "bash", "-c", setup])
 
-    result = _run_docker(*cmd, timeout=60)
+    result = _run_runtime(*cmd, timeout=60)
     container_id = result.stdout.strip()
 
     # Wait for the setup script to finish (sentinel file appears).
@@ -562,7 +624,7 @@ def create_container(
     _setup_ready = False
     _deadline = time.monotonic() + _SETUP_TIMEOUT
     while time.monotonic() < _deadline:
-        check = _run_docker(
+        check = _run_runtime(
             "exec", name, "test", "-f", _READY_SENTINEL,
             check=False, timeout=5,
         )
@@ -583,13 +645,18 @@ def create_container(
     # Copy .claude.json into the container (not bind-mounted — see note above)
     if _claude_json_src.exists():
         try:
-            _run_docker("cp", str(_claude_json_src),
+            _run_runtime("cp", str(_claude_json_src),
                         f"{name}:{_CONTAINER_HOME}/.claude.json",
                         timeout=10)
-            _run_docker("exec", name, "chown",
-                        f"{host_uid}:{host_gid}",
-                        f"{_CONTAINER_HOME}/.claude.json",
-                        timeout=5)
+            # Under Docker (root), fix ownership so the pm user can read it.
+            # Under Podman (--userns=keep-id), the file already has the
+            # correct ownership via namespace mapping, and chown would fail
+            # because the process is not root.
+            if not _is_podman:
+                _run_runtime("exec", name, "chown",
+                            f"{host_uid}:{host_gid}",
+                            f"{_CONTAINER_HOME}/.claude.json",
+                            timeout=5)
         except Exception:
             _log.warning("Failed to copy .claude.json into container %s",
                          name, exc_info=True)
@@ -600,7 +667,7 @@ def create_container(
 
 def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
                    proxy_socket_path: str | None = None) -> str:
-    """Build a ``docker exec -it`` command string for use in a tmux window.
+    """Build a ``<runtime> exec -it`` command string for use in a tmux window.
 
     When the exec'd process exits, the container is removed (unless
     *cleanup* is False).  The tmux pane stays open so the user can
@@ -610,14 +677,22 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
     push proxy socket file and its parent directory.  This triggers the
     proxy daemon thread to self-terminate (it checks for socket existence).
     """
+    runtime = _get_runtime()
     escaped = shlex.quote(shell_cmd)
-    exec_part = f"docker exec -it -u {_CONTAINER_USER} {shlex.quote(name)} bash -c {escaped}"
+    # Under Podman with --userns=keep-id, the default user is already the
+    # host user (correct UID).  The "pm" username doesn't exist in
+    # /etc/passwd, so -u pm would fail.  Under Docker, -u pm switches
+    # from root to the pm user created during setup.
+    if "podman" in runtime:
+        exec_part = f"{runtime} exec -it {shlex.quote(name)} bash -c {escaped}"
+    else:
+        exec_part = f"{runtime} exec -it -u {_CONTAINER_USER} {shlex.quote(name)} bash -c {escaped}"
     if cleanup:
         cleanup_parts = []
         if proxy_socket_path:
             cleanup_parts.append(f"rm -f {shlex.quote(proxy_socket_path)}")
         cleanup_parts.append(
-            f"docker rm -f {shlex.quote(name)} >/dev/null 2>&1")
+            f"{runtime} rm -f {shlex.quote(name)} >/dev/null 2>&1")
         if proxy_socket_path:
             sock_dir = str(Path(proxy_socket_path).parent)
             cleanup_parts.append(f"rmdir {shlex.quote(sock_dir)} 2>/dev/null")
@@ -642,13 +717,13 @@ def remove_container(name: str) -> None:
     import time
     from pm_core.push_proxy import stop_push_proxy
     stop_push_proxy(name)
-    _run_docker("rm", "-f", name, check=False, timeout=30)
+    _run_runtime("rm", "-f", name, check=False, timeout=30)
     # Wait for the container to be fully gone.  When another rm is already in
     # flight the daemon returns "removal already in progress" and our rm returns
     # immediately, but the container still exists for a brief moment.
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
-        result = _run_docker("inspect", name, check=False, timeout=5)
+        result = _run_runtime("inspect", name, check=False, timeout=5)
         if result.returncode != 0:
             return  # container is gone
         time.sleep(0.1)
@@ -707,14 +782,19 @@ def wrap_claude_cmd(
             session_tag=session_tag,
             pr_id=pr_id,
         )
-    except Exception:
+    except ContainerError:
         _log.error("Failed to create container %s — aborting (container mode is enabled)",
                    cname, exc_info=True)
+        raise
+    except Exception as exc:
+        _log.error("Failed to create container %s — aborting (container mode is enabled)",
+                   cname, exc_info=True)
+        runtime = _get_runtime()
         raise ContainerError(
             f"Failed to create container '{cname}'. "
-            f"Is Docker running? Disable container mode with 'pm container disable' "
+            f"Is {runtime} running? Disable container mode with 'pm container disable' "
             f"to run without containers."
-        )
+        ) from exc
 
     # Rewrite any prompt-file reference that used the host workdir path.
     # build_claude_shell_cmd writes the file to the host and embeds
@@ -793,7 +873,7 @@ def cleanup_qa_containers(pr_id: str, loop_id: str,
 
     count = 0
     for prefix in prefixes:
-        result = _run_docker(
+        result = _run_runtime(
             "ps", "-a", "--filter", f"name={prefix}",
             "--format", "{{.Names}}",
             check=False, timeout=30,
@@ -838,7 +918,7 @@ def cleanup_orphaned_qa_containers(session: str, pr_id: str,
 
     count = 0
     for prefix in prefixes:
-        result = _run_docker(
+        result = _run_runtime(
             "ps", "-a", "--filter", f"name={prefix}",
             "--format", "{{.Names}}",
             check=False, timeout=30,
@@ -879,7 +959,7 @@ def cleanup_session_containers(session_tag: str) -> int:
     Returns the number of containers removed.
     """
     prefix = f"{CONTAINER_PREFIX}{session_tag}-"
-    result = _run_docker(
+    result = _run_runtime(
         "ps", "-a", "--filter", f"name={prefix}",
         "--format", "{{.Names}}",
         check=False, timeout=30,
@@ -901,7 +981,7 @@ def cleanup_session_containers(session_tag: str) -> int:
 
 def cleanup_all_containers() -> int:
     """Remove all pm containers. Returns count removed."""
-    result = _run_docker(
+    result = _run_runtime(
         "ps", "-a", "--filter", f"name={CONTAINER_PREFIX}",
         "--format", "{{.Names}}",
         check=False, timeout=30,

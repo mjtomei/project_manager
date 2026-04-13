@@ -74,11 +74,13 @@ def model_set(session_type: str, model_value: str, effort: str, use_project: boo
     if use_project:
         from pm_core import store
         root = state_root()
-        data = store.load(root)
-        mc = data.setdefault("project", {}).setdefault("model_config", {})
-        mc.setdefault("session_models", {})[session_type] = model_value
-        mc.setdefault("session_effort", {})[session_type] = effort
-        store.save(data, root)
+
+        def apply(data):
+            mc = data.setdefault("project", {}).setdefault("model_config", {})
+            mc.setdefault("session_models", {})[session_type] = model_value
+            mc.setdefault("session_effort", {})[session_type] = effort
+
+        store.locked_update(root, apply)
         click.echo(f"Set project model for '{session_type}' to '{model_value}' (effort: {effort})")
     else:
         from pm_core.paths import set_global_setting_value
@@ -96,20 +98,23 @@ def model_unset(session_type: str, use_project: bool):
     if use_project:
         from pm_core import store
         root = state_root()
-        data = store.load(root)
-        mc = data.get("project", {}).get("model_config", {})
         removed = False
-        for key in ("session_models", "session_effort"):
-            mapping = mc.get(key, {})
-            if session_type in mapping:
-                del mapping[session_type]
-                removed = True
-                if not mapping and key in mc:
-                    del mc[key]
-        if not mc and "model_config" in data.get("project", {}):
-            del data["project"]["model_config"]
+
+        def apply(data):
+            nonlocal removed
+            mc = data.get("project", {}).get("model_config", {})
+            for key in ("session_models", "session_effort"):
+                mapping = mc.get(key, {})
+                if session_type in mapping:
+                    del mapping[session_type]
+                    removed = True
+                    if not mapping and key in mc:
+                        del mc[key]
+            if not mc and "model_config" in data.get("project", {}):
+                del data["project"]["model_config"]
+
+        store.locked_update(root, apply)
         if removed:
-            store.save(data, root)
             click.echo(f"Removed project overrides for '{session_type}'")
         else:
             click.echo(f"No project overrides set for '{session_type}'")

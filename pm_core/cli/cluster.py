@@ -17,7 +17,6 @@ from pm_core.cli import cli
 from pm_core.cli.helpers import (
     _get_pm_session,
     _resolve_repo_dir,
-    save_and_push,
     state_root,
     trigger_tui_refresh,
 )
@@ -125,9 +124,12 @@ def cluster_auto(threshold, max_commits, weights, output_fmt):
         plan_path.parent.mkdir(parents=True, exist_ok=True)
         plan_path.write_text(md)
 
-        plans = data.setdefault("plans", [])
-        plans.append(store.make_plan_entry(plan_id, plan_name, plan_file))
-        save_and_push(data, root, f"pm: cluster auto → {plan_id}")
+        entry = store.make_plan_entry(plan_id, plan_name, plan_file)
+
+        def apply(data):
+            data.setdefault("plans", []).append(entry)
+
+        store.locked_update(root, apply)
         trigger_tui_refresh()
 
         click.echo(f"Plan written to {plan_path}")

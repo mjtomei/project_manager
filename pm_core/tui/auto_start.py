@@ -441,8 +441,14 @@ def _auto_start_qa_loops(app, target: str | None = None,
 
     Only activates when auto-start mode is enabled. When a target is set,
     only starts loops for PRs in the target's dependency tree.
+
+    Skipped entirely when the project-level ``skip_qa`` setting is true.
     """
     if not is_enabled(app):
+        return
+
+    project = (app._data or {}).get("project") or {}
+    if project.get("skip_qa"):
         return
 
     if prs is None:

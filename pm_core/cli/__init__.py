@@ -224,6 +224,31 @@ def push_cmd():
             click.echo(f"  git merge {result['branch']}")
 
 
+@cli.command("edit")
+def edit_cmd():
+    """Open project.yaml in $EDITOR with file locking.
+
+    Acquires the project.yaml lock so no concurrent pm process can
+    overwrite your changes while you edit.  On save-and-quit the file
+    is validated, the standard header is restored, and permissions are
+    set back to read-only.
+    """
+    root = state_root()
+    path = root / "project.yaml"
+    click.echo(f"Opening {path} in $EDITOR (lock held until you quit)...")
+    try:
+        store.locked_edit(root)
+    except store.StoreLockTimeout:
+        click.echo("Could not acquire lock — another pm process may be writing project.yaml.", err=True)
+        raise SystemExit(1)
+    except RuntimeError as e:
+        click.echo(str(e), err=True)
+        raise SystemExit(1)
+    click.echo("Saved.")
+    from pm_core.cli.helpers import trigger_tui_refresh
+    trigger_tui_refresh()
+
+
 @cli.command("which")
 def which_cmd():
     """Print the path to the pm_core package being used."""
@@ -235,7 +260,8 @@ _BOOLEAN_SETTINGS = {"hide-assist", "hide-merged", "beginner-mode", "auto-cleanu
                      "qa-verify-pass"}
 _INT_SETTINGS = {"min-pane-width", "qa-max-scenarios", "qa-worker-count",
                  "qa-verify-retries", "qa-verdict-reminder-timeout"}
-_ENUM_SETTINGS = {"spec-mode": {"auto", "review", "prompt"}}
+_ENUM_SETTINGS = {"spec-mode": {"auto", "review", "prompt"},
+                  "container-runtime": {"docker", "podman"}}
 _SETTING_DEFAULTS = {
     "hide-assist": "off",
     "hide-merged": "off",
@@ -602,6 +628,7 @@ COMMANDS
   pm watcher                    Run autonomous watcher loop (blocking)
   pm rebalance                  Re-enable auto-balanced pane layout
   pm set <setting> <value>      Configure a global pm setting
+  pm edit                       Open project.yaml in $EDITOR (with locking)
   pm which                      Print path to pm_core package being used
   pm getting-started            Show getting started guide
 
@@ -645,8 +672,13 @@ def getting_started_cmd():
 # Import submodules to register their commands on ``cli``.
 # This must be at the bottom of the file, after ``cli`` is defined.
 # ---------------------------------------------------------------------------
-from pm_core.cli import pr, plan, session, tui, guide, meta, cluster, bench, watcher, qa, container, model, provider, log  # noqa: E402, F401
+from pm_core.cli import pr, plan, session, tui, guide, meta, cluster, bench, watcher, qa, container, model, provider, log, project  # noqa: E402, F401
 
 
 def main():
-    cli()
+    try:
+        cli()
+    except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+        import sys
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)

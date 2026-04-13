@@ -50,25 +50,38 @@ def ensure_watcher_plans(app) -> Path | None:
     if not project_yaml.exists():
         store.save({"project": {"name": "pm-meta"}, "plans": [], "prs": []}, root)
 
-    data = store.load(root)
+    try:
+        data = store.load(root)
+    except store.ProjectYamlParseError as e:
+        _log.warning("ensure_watcher_plans: %s", e)
+        return None
     existing_plan_ids = {p["id"] for p in (data.get("plans") or [])}
     if data.get("plans") is None:
         data["plans"] = []
 
-    changed = False
+    new_entries = []
     for plan_id, info in WATCHER_PLANS.items():
         if plan_id in existing_plan_ids:
             continue
-        data["plans"].append(store.make_plan_entry(plan_id, info["name"], info["file"]))
+        new_entries.append(store.make_plan_entry(plan_id, info["name"], info["file"]))
         plan_path = root / info["file"]
         if not plan_path.exists():
             plan_path.write_text(info["description"])
-        changed = True
         _log.info("watcher_ui: created watcher plan %s (%s) in %s", plan_id, info["file"], root)
 
-    if changed:
-        from pm_core.cli.helpers import save_and_push
-        save_and_push(data, root, "pm: register watcher plans")
+    if new_entries:
+        def apply(data):
+            if data.get("plans") is None:
+                data["plans"] = []
+            current_ids = {p["id"] for p in data["plans"]}
+            for entry in new_entries:
+                if entry["id"] not in current_ids:
+                    data["plans"].append(entry)
+
+        try:
+            store.locked_update(root, apply)
+        except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+            _log.warning("ensure_watcher_plans: %s: %s", type(e).__name__, e)
 
     return root
 
@@ -79,7 +92,7 @@ def load_watcher_plan_prs(app) -> int:
     Returns the number of PRs created.
     """
     from pm_core.plan_parser import parse_plan_prs
-    from pm_core.cli.helpers import _make_pr_entry, save_and_push
+    from pm_core.cli.helpers import _make_pr_entry
     from pm_core.cli.plan import _build_pr_description
     from pm_core.cli.meta import ensure_meta_workdir
 
@@ -93,13 +106,14 @@ def load_watcher_plan_prs(app) -> int:
     if not root.is_dir():
         return 0
 
-    data = store.load(root)
-    if data.get("prs") is None:
-        data["prs"] = []
-
-    existing_ids = {p["id"] for p in data["prs"]}
-    existing_titles = {p.get("title", ""): p["id"] for p in data["prs"]}
-    total_created = 0
+    try:
+        data = store.load(root)
+    except store.ProjectYamlParseError as e:
+        _log.warning("load_watcher_plan_prs: %s", e)
+        return 0
+    existing_ids = {p["id"] for p in (data.get("prs") or [])}
+    existing_titles = {p.get("title", ""): p["id"] for p in (data.get("prs") or [])}
+    new_entries = []
 
     for plan_id, info in WATCHER_PLANS.items():
         plan_path = root / info["file"]
@@ -132,15 +146,26 @@ def load_watcher_plan_prs(app) -> int:
 
             entry = _make_pr_entry(pr_id, pr["title"], branch,
                                    plan=plan_id, description=desc)
-            data["prs"].append(entry)
+            new_entries.append(entry)
             existing_titles[pr["title"]] = pr_id
-            total_created += 1
             _log.info("watcher_ui: loaded PR %s: %s (plan=%s) in %s", pr_id, pr["title"], plan_id, root)
 
-    if total_created:
-        save_and_push(data, root, "pm: load watcher plan PRs")
+    if new_entries:
+        def apply(data):
+            if data.get("prs") is None:
+                data["prs"] = []
+            current_ids = {p["id"] for p in data["prs"]}
+            for entry in new_entries:
+                if entry["id"] not in current_ids:
+                    data["prs"].append(entry)
 
-    return total_created
+        try:
+            store.locked_update(root, apply)
+        except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+            _log.warning("load_watcher_plan_prs: %s: %s", type(e).__name__, e)
+            return 0
+
+    return len(new_entries)
 
 
 # Icons for watcher verdicts (used in log line)

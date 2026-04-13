@@ -8,6 +8,7 @@ project:
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
   hide_merged: false
+  skip_qa: false
 plans:
 - id: plan-001
   name: Import from existing repo
@@ -903,7 +904,7 @@ prs:
   plan: plan-003
   title: Add file locking to project.yaml read-modify-write operations
   branch: pm/pr-f38005f-add-file-locking-to-project-yaml-read-modify-write
-  status: in_review
+  status: merged
   depends_on:
   - pr-022
   description: 'Add advisory file locking to store.py so that concurrent processes
@@ -919,7 +920,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/109
   gh_pr_number: 109
   created_at: '2026-03-02T01:04:39.190560+00:00'
-  updated_at: '2026-04-06T18:48:51.118103+00:00'
+  updated_at: '2026-04-12T14:36:10.940591+00:00'
   started_at: '2026-03-02T01:04:39.190560+00:00'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-f38005f-add-file-locking-to-project-yaml-rea-ab512a43
   reviewed_at: '2026-03-02T01:27:28.059956+00:00'
@@ -1005,7 +1006,58 @@ prs:
       app state: PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-f38005f-1fd1b3aeb3203659)'
     created_at: '2026-04-09T21:20:04Z'
     last_edited: '2026-04-09T21:20:04Z'
+  - id: note-5482f04
+    text: 'QA NEEDS_WORK: Unit tests — test_store_locking.py and test_store.py pass:
+      PASS; Regression — all pre-existing test suites pass: NEEDS_WORK; Code audit
+      — no bare store.save() in CLI or TUI modules: PASS; Code audit — no network
+      calls inside locked_update callbacks: PASS; CLI integration — pm pr add creates
+      correct on-disk state: PASS; CLI integration — pm pr edit updates fields atomically:
+      PASS; CLI integration — pm pr select, pm plan add, pm model set: PASS; CLI integration
+      — pm pr close removes PR and cleans up: PASS; CLI integration — pm pr note add/edit/delete:
+      PASS; Concurrent pm pr add — no lost writes: PASS; Concurrent duplicate-title
+      prevention in pr_add: PASS; StoreLockTimeout — CLI error message: PASS; pm edit
+      command — editor under lock: PASS; Atomic write — file never truncated: PASS;
+      Read-only permissions and YAML header after save: PASS; Exception in mutation
+      function — lock released, data unsaved: PASS; ProjectYamlParseError — corrupt
+      YAML handling: PASS; TUI sync graceful lock timeout handling: PASS; pr_sync
+      — network calls before lock, results applied inside lock: PASS; spec_gen — locked_update
+      for generate, approve, reject: PASS; plan_load and GitHub import — concurrent-safe
+      duplicate checks: PASS; watcher_ui — intentional store.save for creation is
+      preserved: PASS; _finalize_merge — loads fresh inside lock: PASS; Lock file
+      left on disk after unlock — standard fcntl pattern: PASS; make_plan_entry helper
+      used consistently: PASS; helpers.py — _ensure_workdir and _resolve_repo_id use
+      locked_update: PASS; background_sync handles corrupt YAML without clobbering
+      app state: PASS; store.load() bare calls in TUI with ProjectYamlParseError handling:
+      PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-f38005f-c31d04be54fae4fa)'
+    created_at: '2026-04-09T23:47:57Z'
+    last_edited: '2026-04-09T23:47:57Z'
+  - id: note-be7822e
+    text: 'QA PASS: Unit tests — test_store_locking.py and test_store.py pass: PASS;
+      Regression — all pre-existing test suites pass: PASS; Code audit — no bare store.save()
+      in CLI or TUI modules: PASS; Code audit — no network calls inside locked_update
+      callbacks: PASS; CLI integration — pm pr add creates correct on-disk state:
+      PASS; CLI integration — pm pr edit updates fields atomically: PASS; CLI integration
+      — pm pr select, pm plan add, pm model set: PASS; CLI integration — pm pr close
+      removes PR and cleans up: PASS; CLI integration — pm pr note add/edit/delete:
+      PASS; Concurrent pm pr add — no lost writes: PASS; Concurrent duplicate-title
+      prevention in pr_add: PASS; StoreLockTimeout — CLI error message: PASS; pm edit
+      command — editor under lock: PASS; Atomic write — file never truncated: PASS;
+      Read-only permissions and YAML header after save: PASS; Exception in mutation
+      function — lock released, data unsaved: PASS; ProjectYamlParseError — corrupt
+      YAML handling: PASS; TUI sync graceful lock timeout handling: PASS; pr_sync
+      — network calls before lock, results applied inside lock: PASS; spec_gen — locked_update
+      for generate, approve, reject: PASS; plan_load and GitHub import — concurrent-safe
+      duplicate checks: PASS; watcher_ui — intentional store.save for creation is
+      preserved: PASS; _finalize_merge — loads fresh inside lock: PASS; Lock file
+      left on disk after unlock — standard fcntl pattern: PASS; make_plan_entry helper
+      used consistently: PASS; helpers.py — _ensure_workdir and _resolve_repo_id use
+      locked_update: PASS; background_sync handles corrupt YAML without clobbering
+      app state: PASS; store.load() bare calls in TUI with ProjectYamlParseError handling:
+      PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-f38005f-1bc3406f2560f5ad)'
+    created_at: '2026-04-12T14:36:13Z'
+    last_edited: '2026-04-12T14:36:13Z'
   spec_qa: /home/mjtomei/project_manager/pm/specs/pr-f38005f/qa.md
+  merged_at: '2026-04-12T14:36:10.940591+00:00'
 - id: pr-c11d04f
   plan: plan-003
   title: Add notes field to PRs for post-start addendums
@@ -4750,7 +4802,6 @@ prs:
     created_at: '2026-03-23T13:50:21Z'
     last_edited: '2026-03-23T13:50:21Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b827df-add-running-tasks-pane-to-tui-with-w-cbe54f5e
-  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-0b827df/qa.md
 - id: pr-341100c
   plan: tui-ux
   title: Add per-plan standalone PM sessions within the same project
@@ -5614,7 +5665,6 @@ prs:
     created_at: '2026-04-07T14:13:07Z'
     last_edited: '2026-04-07T14:13:07Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-ac12b47-session-cleanup-for-stale-containers-ab512a43
-  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-ac12b47/qa.md
 - id: pr-53e47a1
   plan: tui-ux
   title: Shift+key reverses cycle direction for TUI keybindings
@@ -7183,7 +7233,6 @@ prs:
     created_at: '2026-03-22T01:15:43Z'
     last_edited: '2026-03-22T01:15:43Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-88fdba1-fix-shared-push-proxy-using-first-sc-d0f78a09
-  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-88fdba1/qa.md
 - id: pr-291e891
   plan: improvements
   title: 'Track action source metadata for TUI operations: session, window, and task
@@ -7397,7 +7446,6 @@ prs:
     created_at: '2026-04-06T18:30:18Z'
     last_edited: '2026-04-06T18:30:18Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-6ca8113-add-parent-field-to-plan-schema-63382040
-  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-6ca8113/qa.md
 - id: pr-939d8cf
   plan: plan-cb4ef69
   title: Add hierarchy traversal helpers to store
@@ -7830,7 +7878,6 @@ prs:
     created_at: '2026-04-06T19:07:59Z'
     last_edited: '2026-04-06T19:07:59Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-83b98d5-merge-pr-notes-from-both-main-and-wo-b1d18e14
-  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-83b98d5/qa.md
 - id: pr-7251b72
   plan: improvements
   title: Refuse pm pr start when PR is not committed on base branch
@@ -7882,8 +7929,6 @@ prs:
     created_at: '2026-04-06T19:26:06Z'
     last_edited: '2026-04-06T19:26:06Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-7251b72-refuse-pm-pr-start-when-pr-is-not-co-b1d18e14
-  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-7251b72/qa.md
-  spec_impl: /workspace/pm/specs/pr-7251b72/impl.md
 - id: pr-e3cf481
   plan: null
   title: Add file-locked read-modify-write helper for pane registry
@@ -7982,11 +8027,19 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/155
   gh_pr_number: 155
   created_at: '2026-04-06T18:53:56.850825+00:00'
-  updated_at: '2026-04-07T23:07:11.606301+00:00'
+  updated_at: '2026-04-10T14:00:25.845943+00:00'
   started_at: '2026-04-06T19:06:18.130597+00:00'
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-cf90659
+    text: 'Mostly redundant with #143. #143 cleans up any container whose tmux window
+      is gone (covers crash/restart). #155 only adds coverage for the narrow case
+      where a merged PR''s container survives because _finalize_merge failed silently
+      while the session is still running. If #143 lands, consider folding the bare-except
+      fix from #155 into it and closing this PR.'
+    created_at: '2026-04-10T14:00:25Z'
+    last_edited: '2026-04-10T14:00:25Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-cb2a29d-kill-tmux-windows-and-containers-for-29829145
 - id: pr-fc6db6a
   plan: bugs
@@ -8393,7 +8446,7 @@ prs:
   title: 'Container memory governor: dynamic memory limits with per-type stop policy
     and QA queuing'
   branch: pm/pr-eb2dbfc-container-memory-governor-dynamic-memory-limits-wi
-  status: in_review
+  status: qa
   depends_on: []
   description: 'Add a memory governor that prevents OOM crashes by projecting memory
     consumption before launching containers, with configurable stop-on-idle for different
@@ -8492,7 +8545,47 @@ prs:
       /home/mjtomei/.pm/workdirs/qa/pr-eb2dbfc-0c395042dd9187fc)'
     created_at: '2026-04-09T12:38:05Z'
     last_edited: '2026-04-09T12:38:05Z'
-  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-02512b49
+  - id: note-adf7327
+    text: 'QA INPUT_REQUIRED: TUI status bar displays memory usage and blocked launch
+      indicators: INPUT_REQUIRED; Non-fitting queue entries do not block smaller entries
+      behind them (E17 fix): PASS; Multi-grant orphan prevention — _launch_next_queued
+      passes only one entry ID: PASS; Cross-process launch queue serialization and
+      fairness policies: PASS; Stop-on-idle policy per container type with tmux pane
+      preservation: INPUT_REQUIRED; Memory projection cascade and stats persistence:
+      PASS; QA planner batch projection and partial launch with queuing: INPUT_REQUIRED;
+      Memory target changed mid-QA-run takes effect on next cycle: INPUT_REQUIRED;
+      Governor inactive when no memory target configured: INPUT_REQUIRED; Stats file
+      corruption and Docker stats failure graceful degradation: PASS; Concurrent gate
+      check serialization via _gate_lock: PASS; System memory scope vs PM-only scope
+      measurement: PASS; waiting_memory status rendered in QA status pane when all
+      initial scenarios are memory-blocked: INPUT_REQUIRED; enqueue_and_try_acquire
+      atomic fast path for impl/review containers: INPUT_REQUIRED; Periodic retry
+      launches queued scenarios even while other scenarios are running: PASS (workdir:
+      /home/matt/.pm/workdirs/qa/pr-eb2dbfc-1eb09c5efa20c727)'
+    created_at: '2026-04-10T10:50:03Z'
+    last_edited: '2026-04-10T10:50:03Z'
+  - id: note-a903529
+    text: 'QA INPUT_REQUIRED: TUI status bar displays memory usage and blocked launch
+      indicators: INPUT_REQUIRED; Stop-on-idle policy per container type with tmux
+      pane preservation: INPUT_REQUIRED; QA planner batch projection and partial launch
+      with queuing: INPUT_REQUIRED; Memory target changed mid-QA-run takes effect
+      on next cycle: PASS; Governor inactive when no memory target configured: PASS;
+      waiting_memory status rendered in QA status pane when all initial scenarios
+      are memory-blocked: INPUT_REQUIRED; enqueue_and_try_acquire atomic fast path
+      for impl/review containers: PASS; Non-fitting queue entries do not block smaller
+      entries behind them (E17 fix): PASS; Cross-process launch queue serialization
+      and fairness policies: PASS; Memory projection cascade and stats persistence:
+      PASS; Stats file corruption and Docker stats failure graceful degradation: PASS;
+      Concurrent gate check serialization via _gate_lock: PASS; Single container projection
+      exceeds target (E1): PASS; System memory scope vs PM-only scope measurement:
+      PASS; Container type inference handles all patterns and edge cases (E8): PASS;
+      History trimming keeps only newest N samples (E9): PASS; Periodic retry launches
+      queued scenarios even while other scenarios are running: INPUT_REQUIRED; Stop-on-idle
+      does NOT remove containers during active verification: INPUT_REQUIRED; find_containers_by_keywords
+      matches correctly: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-eb2dbfc-92a70215734d8ef3)'
+    created_at: '2026-04-10T13:33:17Z'
+    last_edited: '2026-04-10T13:33:17Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
   title: Auto-extract QA-relevant notes from implementation and review session transcripts
@@ -8726,7 +8819,6 @@ prs:
     created_at: '2026-04-09T21:59:08Z'
     last_edited: '2026-04-09T21:59:08Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-6634fb0-convert-all-pane-registry-callers-to-e6d0566c
-  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-6634fb0/qa.md
 - id: pr-f8abc94
   plan: improvements
   title: TUI command for PR resource cleanup
@@ -8780,7 +8872,7 @@ prs:
   plan: plan-qa
   title: Batched QA scenario execution
   branch: pm/pr-d8cfa16-batched-qa-scenario-execution
-  status: pending
+  status: qa
   depends_on: []
   description: 'Instead of spawning one session per QA scenario, batch scenarios into
     a configurable number of worker sessions. The scenario generator/concretizer groups
@@ -8796,14 +8888,214 @@ prs:
     diff review and file loading across scenarios, and reduces total token usage.
     The QA status watcher should poll per-scenario report files so the TUI can still
     show individual scenario progress.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/163
+  gh_pr_number: 163
+  created_at: '2026-04-09T22:50:59.769426+00:00'
+  updated_at: '2026-04-10T18:43:57.689457+00:00'
+  started_at: '2026-04-09T23:30:04.624901+00:00'
+  reviewed_at: '2026-04-10T18:43:57.689457+00:00'
+  merged_at: null
+  notes:
+  - id: note-837f29c
+    text: 'QA PASS: parse_qa_plan correctly extracts GROUP field from planner output:
+      PASS; group_scenarios_into_workers distributes scenarios correctly across all
+      modes: PASS; generate_qa_planner_prompt includes GROUP field and grouping instructions
+      based on worker_count: PASS; generate_qa_worker_prompt produces correct batched
+      worker prompt: PASS; _extract_worker_verdicts regex handles all verdict patterns:
+      PASS; _poll_worker_verdicts advances worker through scenarios correctly: PASS;
+      run_qa_sync branches correctly between batched and standard modes: PASS; Worker
+      window naming and stale cleanup includes worker windows: PASS; qa-worker-count
+      CLI setting registration and defaults: PASS; Verification flow within batched
+      worker polling: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-d8cfa16-b86fb4d37ecd876f)'
+    created_at: '2026-04-10T13:35:59Z'
+    last_edited: '2026-04-10T13:35:59Z'
+  - id: note-d1f5203
+    text: 'QA INPUT_REQUIRED:  (workdir: /home/mjtomei/.pm/workdirs/qa/pr-d8cfa16-f49388522c973a6e)'
+    created_at: '2026-04-13T19:05:29Z'
+    last_edited: '2026-04-13T19:05:29Z'
+  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-d8cfa16-batched-qa-scenario-execution-1b005701
+- id: pr-3fe2696
+  plan: plan-qa
+  title: Switch container runtime from Docker to Podman for nested container support
+  branch: pm/pr-3fe2696-switch-container-runtime-from-docker-to-podman-for
+  status: merged
+  depends_on: []
+  description: Replace hardcoded docker CLI calls in container.py with a configurable
+    container runtime (podman or docker). Add --userns=keep-id to container run commands
+    for correct UID mapping under Podman rootless. Install podman in the base image
+    (Dockerfile) so QA scenarios inside containers can spawn their own nested containers
+    without privileged mode. Update _docker_available() and related checks to support
+    the configured runtime.
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/164
+  gh_pr_number: 164
+  created_at: '2026-04-10T10:57:00.444225+00:00'
+  updated_at: '2026-04-10T14:17:59.034451+00:00'
+  started_at: '2026-04-10T10:58:23.832726+00:00'
+  reviewed_at: '2026-04-10T11:18:37.323098+00:00'
+  merged_at: '2026-04-10T14:17:59.034451+00:00'
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-3fe2696-switch-container-runtime-from-docker-fcb1d53b
+- id: pr-5471329
+  plan: improvements
+  title: Double-tap for destructive TUI shortcuts to prevent accidental triggers
+  branch: pm/pr-5471329-double-tap-for-destructive-tui-shortcuts-to-preven
+  status: in_review
+  depends_on: []
+  description: Require a quick double-tap (within 300-400ms) for destructive single-key
+    TUI shortcuts like s (start PR), d (review), g (merge), and t (QA run). First
+    press shows a brief confirmation hint in the status bar (e.g. 's … start PR'),
+    second press within the window executes the action. Prevents accidental triggers
+    when the user switches to the TUI pane and starts typing prose meant for a Claude
+    session. Non-destructive keys (r, v, n, p, etc.) remain single-tap.
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-09T22:50:59.769426+00:00'
-  updated_at: '2026-04-09T22:54:10.085078+00:00'
+  updated_at: '2026-04-10T16:56:47.454801+00:00'
   started_at: null
-  reviewed_at: null
+  reviewed_at: '2026-04-10T16:56:47.454801+00:00'
   merged_at: null
   notes: []
   spec_impl: /workspace/pm/specs/pr-d8cfa16/impl.md
   spec_qa: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-d8cfa16-batched-qa-scenario-execution-ebce8630/pm/specs/pr-d8cfa16/qa.md
+- id: pr-4db3696
+  plan: null
+  title: Add pm pr split command for breaking large PRs into smaller pieces
+  branch: pm/pr-4db3696-add-pm-pr-split-command-for-breaking-large-prs-int
+  status: qa
+  depends_on: []
+  description: "Add a 'pm pr split' command (CLI + TUI keybinding) that launches a\
+    \ Claude session to decompose a large PR into multiple smaller PRs.\n\nWorkflow:\n\
+    1. User selects a PR in the TUI and triggers split (or runs 'pm pr split <pr_id>'\
+    \ from CLI)\n2. Opens a new window with a Claude session that:\n   a. Reads the\
+    \ PR's current diff/branch, spec file, and plan context\n   b. Works with the\
+    \ user to decide how to split the work\n   c. Creates new child PRs (with plan\
+    \ and depends_on set) and writes spec files for each\n   d. Transitions the original\
+    \ PR to planning-only: resets its branch so the only changes are the new spec\
+    \ files\n3. After merging the planning PR, the user can start implementation/review\
+    \ on each child PR independently\n\nKey design points:\n- The original PR becomes\
+    \ a planning-only PR — its branch is rewritten to contain only the new specs in\
+    \ pm/specs/\n- Child PRs get the original PR's plan field set, so plan review\
+    \ sees them\n- Child PRs get depends_on wired up between them as needed\n- The\
+    \ split prompt should be aware of the spec file format and write proper impl specs\
+    \ for each child\n- No code relies on deriving PR IDs from branch names, so child\
+    \ PRs with new branches work fine\n- Plan markdown reconciliation happens naturally\
+    \ via 'pm plan review' since the review prompt pulls PRs from project.yaml not\
+    \ the markdown"
+  agent_machine: arch-home
+  gh_pr: https://github.com/mjtomei/project_manager/pull/165
+  gh_pr_number: 165
+  created_at: '2026-04-10T11:34:57.339723+00:00'
+  updated_at: '2026-04-10T16:01:58.038791+00:00'
+  started_at: '2026-04-10T14:17:39.293056+00:00'
+  reviewed_at: '2026-04-10T16:01:58.038791+00:00'
+  merged_at: null
+  notes:
+  - id: note-654a677
+    text: Must work across all three git backends (bare local, GitHub, and workdir-based).
+      Branch operations (reset, cherry-pick, rebase) and PR creation need to go through
+      the backend abstraction layer, not assume GitHub.
+    created_at: '2026-04-10T14:15:37Z'
+    last_edited: '2026-04-10T14:15:37Z'
+  - id: note-4293386
+    text: 'QA ERROR:  (workdir: /home/mjtomei/.pm/workdirs/qa/pr-4db3696-7234227cfbeecef8)'
+    created_at: '2026-04-10T16:47:27Z'
+    last_edited: '2026-04-10T16:47:27Z'
+  - id: note-b4ac9fa
+    text: 'QA ERROR:  (workdir: /home/mjtomei/.pm/workdirs/qa/pr-4db3696-8396e9356eacb4b5)'
+    created_at: '2026-04-10T16:49:22Z'
+    last_edited: '2026-04-10T16:49:22Z'
+  - id: note-7c93923
+    text: 'QA INPUT_REQUIRED:  (workdir: /home/mjtomei/.pm/workdirs/qa/pr-4db3696-14d4014763e37dcc)'
+    created_at: '2026-04-10T17:56:15Z'
+    last_edited: '2026-04-10T17:56:15Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-4db3696-add-pm-pr-split-command-for-breaking-7efdf042
+  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-4db3696/qa.md
+- id: pr-8a56712
+  plan: bugs
+  title: 'Bug: auto-start silently swallows command launch failures'
+  branch: pm/pr-8a56712-bug-auto-start-silently-swallows-command-launch
+  status: pending
+  depends_on: []
+  description: 'When auto-start runs and a command fails to start (e.g. pm pr start
+    fails), the failure is silently ignored. There is no error message, log entry,
+    or TUI indication that anything went wrong. The user has no way to know a PR failed
+    to launch without manually checking. Fix: surface command launch failures visibly
+    — log the error and show a notification or status update in the TUI.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-11T21:03:47.534988+00:00'
+  updated_at: '2026-04-11T21:03:47.534988+00:00'
+  started_at: null
+  reviewed_at: null
+- id: pr-8719fee
+  plan: bugs
+  title: 'Bug: switching backend from local to github leaves existing PRs on local
+    backend'
+  branch: pm/pr-8719fee-bug-switching-backend-from-local-to-github-leaves
+  status: pending
+  depends_on: []
+  description: 'If you manually change the project backend from local to github in
+    project.yaml after creating a GitHub repo, PRs that were already started remain
+    on the local backend. Running implementation on such a PR continues to use the
+    local backend instead of creating a GitHub PR. Fix: when the project backend changes,
+    detect in-progress PRs that are still using the old backend and migrate them (or
+    at minimum warn the user and offer to migrate).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-11T21:03:47.534988+00:00'
+  updated_at: '2026-04-11T21:03:47.534988+00:00'
+  started_at: null
+  reviewed_at: null
+- id: pr-a7d4dae
+  plan: bugs
+  title: 'Bug: plan add/breakdown prompt errors (wrong next step, INPUT_REQUIRED misuse)'
+  branch: pm/pr-a7d4dae-bug-plan-add-breakdown-prompt-tells-agent-to
+  status: pending
+  depends_on: []
+  description: 'Two bugs in the plan add and plan breakdown prompts in pm_core/cli/plan.py:
+
+
+    1. Wrong next step: the prompts tell the Claude agent to run pm plan review as
+    the next step after writing the PRs section. The correct next step is pm plan
+    load to load PRs into project.yaml. Review is optional and can happen after load.
+
+
+    2. INPUT_REQUIRED misuse in _MANUAL_TESTING_GUIDANCE: the guidance says to call
+    out manual-testing PRs "so the review loop can use INPUT_REQUIRED appropriately",
+    which leads Claude to write INPUT_REQUIRED: Human testing needed in PR descriptions.
+    But the review loop prompt explicitly says INPUT_REQUIRED is reserved for architectural
+    ambiguity, NOT manual testing — QA handles testing separately. Fix: reword _MANUAL_TESTING_GUIDANCE
+    to use a different tag (e.g. MANUAL_TESTING: or HUMAN_TESTING:) that does not
+    collide with the INPUT_REQUIRED verdict semantics, and make sure the review/QA
+    loop prompts recognize it.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-11T21:35:26.923277+00:00'
+  updated_at: '2026-04-12T00:58:16.384705+00:00'
+  started_at: null
+  reviewed_at: null
+- id: pr-a353c3d
+  plan: improvements
+  title: Launch plan pane actions in a dedicated plans window instead of the main
+    window
+  branch: pm/pr-a353c3d-launch-plan-pane-actions-in-dedicated-plans
+  status: pending
+  depends_on: []
+  description: Plan actions from the plans pane (add, review, breakdown, worker) currently
+    split panes in the main tmux window, cluttering it. They should open in a separate
+    dedicated plans window so plan work does not interfere with PR work. This also
+    enables running multiple plan actions in parallel (e.g. plan add on two plans
+    at the same time).
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-11T21:35:26.923277+00:00'
+  updated_at: '2026-04-11T21:35:26.923277+00:00'
+  started_at: null
+  reviewed_at: null

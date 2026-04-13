@@ -4,7 +4,9 @@ import pytest
 from unittest.mock import patch, MagicMock
 from pathlib import Path
 
-from pm_core import spec_gen
+import yaml
+
+from pm_core import spec_gen, store
 
 
 # ---------------------------------------------------------------------------
@@ -26,6 +28,11 @@ def _make_data(pr_overrides=None):
         "project": {"name": "test", "repo": "test-repo", "base_branch": "master"},
         "prs": [pr],
     }
+
+
+def _save_to_disk(data, root):
+    """Write project.yaml so locked_update can load it."""
+    store.save(data, root)
 
 
 def _make_spec_file(root, pr_id, phase, content):
@@ -154,6 +161,7 @@ class TestGenerateSpec:
     def test_basic_generation(self, mock_setting, mock_claude, tmp_path):
         mock_claude.return_value = "## Requirements\n- Add widget\n"
         data = _make_data()
+        _save_to_disk(data, tmp_path)
 
         spec, needs_review = spec_gen.generate_spec(data, "pr-abc1234", "impl",
                                                      root=tmp_path)
@@ -186,6 +194,7 @@ class TestGenerateSpec:
         mock_claude.return_value = "new spec"
         spec_path = _make_spec_file(tmp_path, "pr-abc1234", "impl", "existing spec")
         data = _make_data({"spec_impl": spec_path})
+        _save_to_disk(data, tmp_path)
 
         spec, needs_review = spec_gen.generate_spec(
             data, "pr-abc1234", "impl", root=tmp_path, force=True,
@@ -199,6 +208,7 @@ class TestGenerateSpec:
     def test_review_mode_needs_review(self, mock_setting, mock_claude, tmp_path):
         mock_claude.return_value = "some spec"
         data = _make_data()
+        _save_to_disk(data, tmp_path)
 
         spec, needs_review = spec_gen.generate_spec(data, "pr-abc1234", "impl",
                                                      root=tmp_path)
@@ -210,6 +220,7 @@ class TestGenerateSpec:
     def test_prompt_mode_ambiguity_flag(self, mock_setting, mock_claude, tmp_path):
         mock_claude.return_value = "spec\nAMBIGUITY_FLAG\nWhat should X be?"
         data = _make_data()
+        _save_to_disk(data, tmp_path)
 
         spec, needs_review = spec_gen.generate_spec(data, "pr-abc1234", "impl",
                                                      root=tmp_path)
@@ -222,6 +233,7 @@ class TestGenerateSpec:
     def test_auto_mode_no_review(self, mock_setting, mock_claude, tmp_path):
         mock_claude.return_value = "spec\nAMBIGUITY_FLAG\nQuestion?"
         data = _make_data()
+        _save_to_disk(data, tmp_path)
 
         spec, needs_review = spec_gen.generate_spec(data, "pr-abc1234", "impl",
                                                      root=tmp_path)
@@ -243,9 +255,7 @@ class TestGenerateSpec:
     def test_saves_to_root(self, mock_setting, mock_claude, tmp_path):
         mock_claude.return_value = "test spec"
         data = _make_data()
-
-        import yaml
-        (tmp_path / "project.yaml").write_text(yaml.dump(data))
+        _save_to_disk(data, tmp_path)
 
         spec_gen.generate_spec(data, "pr-abc1234", "impl", root=tmp_path)
 
@@ -369,6 +379,7 @@ class TestApproveSpec:
             "spec_impl": str(spec_file),
             "spec_pending": {"phase": "impl", "generated_at": "2025-01-01"},
         })
+        _save_to_disk(data, tmp_path)
 
         phase = spec_gen.approve_spec(data, "pr-abc1234", root=tmp_path,
                                        edited_text="edited spec")
@@ -426,6 +437,7 @@ class TestGenerateSpecPending:
     def test_review_mode_sets_pending(self, mock_setting, mock_claude, tmp_path):
         mock_claude.return_value = "some spec"
         data = _make_data()
+        _save_to_disk(data, tmp_path)
 
         spec_gen.generate_spec(data, "pr-abc1234", "impl", root=tmp_path)
 
@@ -438,6 +450,7 @@ class TestGenerateSpecPending:
     def test_no_pending_when_no_ambiguity(self, mock_setting, mock_claude, tmp_path):
         mock_claude.return_value = "clean spec"
         data = _make_data()
+        _save_to_disk(data, tmp_path)
 
         spec_gen.generate_spec(data, "pr-abc1234", "impl", root=tmp_path)
 
@@ -449,6 +462,7 @@ class TestGenerateSpecPending:
     def test_ambiguity_sets_pending(self, mock_setting, mock_claude, tmp_path):
         mock_claude.return_value = "spec\nAMBIGUITY_FLAG\nQuestion?"
         data = _make_data()
+        _save_to_disk(data, tmp_path)
 
         spec_gen.generate_spec(data, "pr-abc1234", "impl", root=tmp_path)
 
@@ -647,6 +661,7 @@ class TestRejectSpec:
         data = _make_data({
             "spec_pending": {"phase": "impl", "generated_at": "2025-01-01"},
         })
+        _save_to_disk(data, tmp_path)
 
         phase = spec_gen.reject_spec(data, "pr-abc1234", root=tmp_path)
 
@@ -673,6 +688,7 @@ class TestRejectSpec:
             "description": "Original description.",
             "spec_pending": {"phase": "impl", "generated_at": "2025-01-01"},
         })
+        _save_to_disk(data, tmp_path)
 
         spec_gen.reject_spec(
             data, "pr-abc1234", feedback="Make it shorter", root=tmp_path

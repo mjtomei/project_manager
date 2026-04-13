@@ -346,6 +346,9 @@ def _maybe_start_qa(app, pr_id: str) -> None:
     - **Auto-start mode**: only transitions if auto-start is enabled and
       the PR is within the target scope.
 
+    If the project-level ``skip_qa`` setting is true, QA is skipped and
+    the PR goes straight to merge.
+
     QA completion is handled by qa_loop_ui which triggers merge on QA PASS.
     """
     from pm_core.tui import auto_start as _auto_start
@@ -365,14 +368,33 @@ def _maybe_start_qa(app, pr_id: str) -> None:
             if pr_id not in allowed:
                 return
 
+    # If project has skip_qa enabled, skip QA and go straight to merge
+    project = (app._data or {}).get("project") or {}
+    if project.get("skip_qa"):
+        _log.info("auto_qa: skip_qa enabled, skipping QA for %s", pr_id)
+        app.log_message(f"Auto-start: {pr_id} review passed, skipping QA (skip_qa enabled)")
+        _maybe_auto_merge(app, pr_id, force=bool(sd))
+        return
+
     # Transition PR status to "qa"
     if app._root:
-        data = store.load(app._root)
-        pr = store.get_pr(data, pr_id)
-        if pr and pr.get("status") == "in_review":
-            pr["status"] = "qa"
-            store.save(data, app._root)
-            app._load_state()
+        transitioned = False
+
+        def apply_qa(data):
+            nonlocal transitioned
+            p = store.get_pr(data, pr_id)
+            if p and p.get("status") == "in_review":
+                p["status"] = "qa"
+                transitioned = True
+
+        try:
+            store.locked_update(app._root, apply_qa)
+        except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+            app.log_message(f"Error: {e}")
+            _log.warning("auto_qa: %s for %s: %s", type(e).__name__, pr_id, e)
+            return
+        app._load_state()
+        if transitioned:
             _log.info("auto_qa: transitioned %s to qa status", pr_id)
             app.log_message(f"Auto-QA: {pr_id} review passed, starting QA")
 
@@ -380,8 +402,9 @@ def _maybe_start_qa(app, pr_id: str) -> None:
             from pm_core.tui import qa_loop_ui
             qa_loop_ui.start_qa(app, pr_id)
         else:
+            current = store.get_pr(app._data, pr_id)
             _log.debug("auto_qa: %s not in_review (status=%s), skipping",
-                       pr_id, pr.get("status") if pr else "missing")
+                       pr_id, current.get("status") if current else "missing")
 
 
 # ---------------------------------------------------------------------------
@@ -464,7 +487,11 @@ def _attempt_merge(app, pr_id: str, *, resolve_window: bool = False,
     pr_view.run_command(app, merge_cmd)
 
     # Reload state — subprocess modified project.yaml on disk
-    app._data = store.load(app._root)
+    try:
+        app._data = store.load(app._root)
+    except store.ProjectYamlParseError as e:
+        _log.warning("_attempt_auto_merge: corrupt YAML after merge cmd: %s", e)
+        return False
     merged_pr = store.get_pr(app._data, pr_id)
     return bool(merged_pr and merged_pr.get("status") == "merged")
 
@@ -676,6 +703,11 @@ def _poll_impl_idle(app) -> None:
             if content_has_interactive_prompt(content):
                 _log.info("impl_idle: %s idle but showing interactive prompt, resetting", pr_id)
                 tracker.mark_active(pr_id)
+            elif pr.get("spec_pending"):
+                # Spec generation paused for user input (ambiguity
+                # resolution).  The session is waiting, not done.
+                _log.info("impl_idle: %s idle but spec_pending, resetting", pr_id)
+                tracker.mark_active(pr_id)
             else:
                 newly_idle.append((pr_id, pr))
 
@@ -815,7 +847,11 @@ def _auto_review_idle_prs(app, newly_idle: list[tuple[str, dict]]) -> None:
 
         # Reload state — subprocess modified project.yaml on disk
         # but _run_command_sync doesn't update in-memory data.
-        app._data = store.load(app._root)
+        try:
+            app._data = store.load(app._root)
+        except store.ProjectYamlParseError as e:
+            _log.warning("_auto_start_single: corrupt YAML after review cmd: %s", e)
+            return
         updated_pr = store.get_pr(app._data, pr_id)
         if updated_pr and updated_pr.get("status") == "in_review":
             # Start a review loop (same as _auto_start_review_loops)
