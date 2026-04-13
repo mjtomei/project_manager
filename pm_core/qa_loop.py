@@ -175,9 +175,17 @@ class _WorkerPanes:
     """
     concretizer_pane: str | None = None
     evaluator_pane: str | None = None
+    verifier_pane: str | None = None
     refined: dict = field(default_factory=dict)
     concretizer_kicked: set = field(default_factory=set)
     refined_count_consumed: int = 1
+    # Per-scenario instruction file contents, populated at worker launch.
+    # Used by concretizer follow-up messages (lazy delivery).
+    instruction_contents: dict = field(default_factory=dict)
+    # Count of total VERIFIED / FLAGGED_END markers already consumed on
+    # the verifier pane, mirroring `refined_count_consumed`. Starts at 0
+    # (verifier prompt has no example markers — it only describes them).
+    verifier_verdicts_consumed: int = 0
 
 
 @dataclass
@@ -956,10 +964,21 @@ def _concretize_scenario(
 _REFINED_END_RE = re.compile(r'^[ \t>*`]*REFINED_STEPS_END[ \t*`]*$',
                              re.MULTILINE)
 
+# Verifier verdict markers — a completed verification ends with either
+# `VERIFIED` on its own line OR `FLAGGED_END` on its own line. Count
+# either kind for stability polling.
+_VERIFIED_RE = re.compile(r'^[ \t>*`]*VERIFIED[ \t*`]*$', re.MULTILINE)
+_FLAGGED_END_RE = re.compile(r'^[ \t>*`]*FLAGGED_END[ \t*`]*$', re.MULTILINE)
+
 
 def _count_refined_end_markers(content: str) -> int:
     """Count whole-line REFINED_STEPS_END occurrences in pane content."""
     return len(_REFINED_END_RE.findall(content))
+
+
+def _count_verifier_verdicts(content: str) -> int:
+    """Count whole-line VERIFIED or FLAGGED_END markers in pane content."""
+    return len(_VERIFIED_RE.findall(content)) + len(_FLAGGED_END_RE.findall(content))
 
 
 def _poll_concretizer_for_next(
@@ -999,6 +1018,59 @@ def _poll_concretizer_for_next(
                 if refined:
                     return refined, total
                 # Marker found but extraction failed — try again.
+                stable_count = None
+            else:
+                stable_count = total
+        else:
+            stable_count = None
+        time.sleep(_POLL_INTERVAL)
+    return None, prev_consumed_count
+
+
+def _poll_verifier_for_next(
+    pane_id: str,
+    prev_consumed_count: int,
+    stop_check: Callable[[], bool],
+    timeout: float,
+) -> tuple[str | None, int]:
+    """Poll the verifier pane until a new VERIFIED / FLAGGED_END appears.
+
+    Returns (verdict, new_count) where verdict is "VERIFIED" or
+    "FLAGGED_END", or (None, prev_consumed_count) on timeout / pane
+    death / stop.
+
+    Mirrors ``_poll_concretizer_for_next``'s stability semantics: we
+    require the total count to stay stable for one extra poll before
+    accepting, so we don't catch a mid-output line.
+    """
+    from pm_core import tmux as tmux_mod
+
+    deadline = time.monotonic() + timeout
+    stable_count: int | None = None
+    while time.monotonic() < deadline:
+        if stop_check():
+            return None, prev_consumed_count
+        if not tmux_mod.pane_exists(pane_id):
+            return None, prev_consumed_count
+        try:
+            content = tmux_mod.capture_pane(pane_id, full_scrollback=True)
+        except Exception:
+            time.sleep(_POLL_INTERVAL)
+            continue
+        total = _count_verifier_verdicts(content)
+        if total > prev_consumed_count:
+            if stable_count == total:
+                # Determine which verdict appeared last (VERIFIED or
+                # FLAGGED_END). Scan from bottom for whichever marker
+                # appears most recently.
+                last_v = None
+                for m in _VERIFIED_RE.finditer(content):
+                    last_v = ("VERIFIED", m.start())
+                for m in _FLAGGED_END_RE.finditer(content):
+                    if last_v is None or m.start() > last_v[1]:
+                        last_v = ("FLAGGED_END", m.start())
+                if last_v is not None:
+                    return last_v[0], total
                 stable_count = None
             else:
                 stable_count = total
@@ -1653,7 +1725,10 @@ def _launch_workers_in_tmux(
                          worker_index, exc_info=True)
             return
 
-        wp = _WorkerPanes(concretizer_pane=concretizer_pane)
+        wp = _WorkerPanes(
+            concretizer_pane=concretizer_pane,
+            instruction_contents=dict(instruction_contents),
+        )
 
         # 2) Block until Scenario 1 refined steps are available.
         def _stop():
@@ -1744,6 +1819,30 @@ def _launch_workers_in_tmux(
             if worker_panes_out is not None:
                 worker_panes_out[worker_index] = wp
 
+            # Eagerly create the persistent verifier pane, split off the
+            # evaluator. Uses the same batched verifier prompt approach
+            # as the concretizer — session waits silently for
+            # `VERIFY SCENARIO <N>` follow-ups.
+            verifier_pane = None
+            try:
+                verifier_prompt = prompt_gen.generate_qa_batched_verifier_prompt(
+                    scenarios, worker_index, branch, base_branch)
+                _verify_resolution = _resolve_qa_model(
+                    pr_data, data, session_type="qa_verification")
+                verifier_cmd = build_claude_shell_cmd(
+                    prompt=verifier_prompt,
+                    model=_verify_resolution.model,
+                    provider=_verify_resolution.provider,
+                    effort=_verify_resolution.effort,
+                    cwd=scenario_cwd)
+                verifier_pane = tmux_mod.split_pane_at(
+                    evaluator_pane, "v", verifier_cmd, background=True)
+            except Exception:
+                _log.warning("Failed to launch verifier pane for worker %d",
+                             worker_index, exc_info=True)
+                verifier_pane = None
+            wp.verifier_pane = verifier_pane
+
             _log.info("Launched worker %d (%d scenarios) in window %s",
                       worker_index, len(scenarios), win_name)
 
@@ -1753,7 +1852,7 @@ def _launch_workers_in_tmux(
                 next_sc = scenarios[1]
                 if next_sc.index not in wp.concretizer_kicked:
                     followup = prompt_gen.generate_concretizer_followup_message(
-                        next_sc, instruction_contents.get(next_sc.index))
+                        next_sc, wp.instruction_contents.get(next_sc.index))
                     try:
                         tmux_mod.send_keys(concretizer_pane, followup)
                         for _ in range(2):
@@ -1770,12 +1869,18 @@ def _launch_workers_in_tmux(
                 from pm_core import pane_layout
                 win_id = tmux_mod.pane_window_id(evaluator_pane)
                 if win_id:
-                    pane_layout.register_and_rebalance(session, win_id, [
+                    panes_to_register = [
                         (concretizer_pane, f"qa-conc-w{worker_index}",
                          "concretizer"),
                         (evaluator_pane, f"qa-worker-w{worker_index}",
                          worker_cmd),
-                    ])
+                    ]
+                    if verifier_pane:
+                        panes_to_register.append(
+                            (verifier_pane, f"qa-verify-w{worker_index}",
+                             "verifier"))
+                    pane_layout.register_and_rebalance(
+                        session, win_id, panes_to_register)
             except Exception:
                 _log.debug("Registration/rebalance failed for worker %d",
                            worker_index, exc_info=True)
@@ -1902,7 +2007,10 @@ def _launch_workers_in_containers(
                          worker_index, exc_info=True)
             return
 
-        wp = _WorkerPanes(concretizer_pane=concretizer_pane)
+        wp = _WorkerPanes(
+            concretizer_pane=concretizer_pane,
+            instruction_contents=dict(instruction_contents),
+        )
 
         def _stop():
             return state.stop_requested
@@ -1987,6 +2095,30 @@ def _launch_workers_in_containers(
             if worker_panes_out is not None:
                 worker_panes_out[worker_index] = wp
 
+            # Eagerly create the persistent verifier pane — another
+            # docker exec into the same worker container.
+            verifier_pane = None
+            try:
+                verifier_prompt = prompt_gen.generate_qa_batched_verifier_prompt(
+                    scenarios, worker_index, branch, base_branch)
+                _verify_resolution = _resolve_qa_model(
+                    pr_data, data, session_type="qa_verification")
+                verifier_claude_cmd = build_claude_shell_cmd(
+                    prompt=verifier_prompt,
+                    model=_verify_resolution.model,
+                    provider=_verify_resolution.provider,
+                    effort=_verify_resolution.effort,
+                    cwd=container_workdir, write_dir=str(clone_path))
+                verifier_exec = container_mod.build_exec_cmd(
+                    cname, verifier_claude_cmd, cleanup=False)
+                verifier_pane = tmux_mod.split_pane_at(
+                    evaluator_pane, "v", verifier_exec, background=True)
+            except Exception:
+                _log.warning("Failed to launch verifier pane for worker %d",
+                             worker_index, exc_info=True)
+                verifier_pane = None
+            wp.verifier_pane = verifier_pane
+
             _log.info("Launched worker %d (%d scenarios) in container %s (window %s)",
                       worker_index, len(scenarios), cname, win_name)
 
@@ -1994,7 +2126,7 @@ def _launch_workers_in_containers(
                 next_sc = scenarios[1]
                 if next_sc.index not in wp.concretizer_kicked:
                     followup = prompt_gen.generate_concretizer_followup_message(
-                        next_sc, instruction_contents.get(next_sc.index))
+                        next_sc, wp.instruction_contents.get(next_sc.index))
                     try:
                         tmux_mod.send_keys(concretizer_pane, followup)
                         for _ in range(2):
@@ -2011,12 +2143,18 @@ def _launch_workers_in_containers(
                 from pm_core import pane_layout
                 win_id = tmux_mod.pane_window_id(evaluator_pane)
                 if win_id:
-                    pane_layout.register_and_rebalance(session, win_id, [
+                    panes_to_register = [
                         (concretizer_pane, f"qa-conc-w{worker_index}",
                          "concretizer"),
                         (evaluator_pane, f"qa-worker-w{worker_index}",
                          exec_cmd),
-                    ])
+                    ]
+                    if verifier_pane:
+                        panes_to_register.append(
+                            (verifier_pane, f"qa-verify-w{worker_index}",
+                             "verifier"))
+                    pane_layout.register_and_rebalance(
+                        session, win_id, panes_to_register)
             except Exception:
                 _log.debug("Registration/rebalance failed for worker %d",
                            worker_index, exc_info=True)
@@ -2229,9 +2367,12 @@ def _poll_worker_verdicts(
         deadline = time.monotonic() + _VERIFICATION_TIMEOUT
         def _stop():
             return state.stop_requested or time.monotonic() > deadline
+        wi = scenario_to_worker.get(scenario.index)
+        wp = worker_panes.get(wi) if wi is not None else None
         try:
-            passed, reason, _vpane = _verify_single_scenario(
-                scenario, verdict, content, pr_data, data,
+            passed, reason = _verify_scenario_in_worker(
+                scenario, verdict, content, wp,
+                pr_data, data,
                 session=session, stop_check=_stop,
                 qa_workdir=state.qa_workdir,
             )
@@ -2241,14 +2382,6 @@ def _poll_worker_verdicts(
             passed, reason = True, ""
         with verification_lock:
             verification_results[scenario.index] = (passed, reason)
-
-    def _get_instruction_content(sc: QAScenario) -> str | None:
-        # pm_root is available via the outer parameter. We only need this
-        # when a worker's concretizer was initialised without having read
-        # the instruction file — but our concretizer prompt already bakes
-        # the content in up front, so the follow-up doesn't strictly need
-        # it. We pass None safely here.
-        return None
 
     def _send_proceed(worker_index: int, pos_next: int):
         """Send PROCEED TO SCENARIO to the evaluator pane.
@@ -2313,7 +2446,7 @@ def _poll_worker_verdicts(
                     and tmux_mod.pane_exists(wp.concretizer_pane)):
                 try:
                     followup = _pg.generate_concretizer_followup_message(
-                        further, _get_instruction_content(further))
+                        further, wp.instruction_contents.get(further.index))
                     tmux_mod.send_keys(wp.concretizer_pane, followup)
                     for _ in range(2):
                         time.sleep(1)
@@ -3276,6 +3409,98 @@ def _verify_single_scenario(
                      scenario.index, verify_pane)
 
     return passed, reason, verify_pane
+
+
+def _verify_scenario_in_worker(
+    scenario: QAScenario,
+    verdict: str,
+    pane_output: str,
+    wp: "_WorkerPanes | None",
+    pr_data: dict,
+    project_data: dict | None,
+    session: str | None,
+    stop_check: Callable[[], bool],
+    qa_workdir: str | None,
+) -> tuple[bool, str]:
+    """Verify a scenario using the worker's persistent verifier pane.
+
+    If the worker's verifier pane is None or dead, falls back to the
+    legacy per-scenario ``_verify_single_scenario`` (one-off split
+    pane). Returns (passed, reason).
+    """
+    from pm_core import tmux as tmux_mod, prompt_gen as _pg
+
+    if wp is None or not wp.verifier_pane or not tmux_mod.pane_exists(wp.verifier_pane):
+        _log.warning(
+            "Verifier pane missing/dead for scenario %d — falling "
+            "back to one-off verification pane",
+            scenario.index)
+        try:
+            passed, reason, _ = _verify_single_scenario(
+                scenario, verdict, pane_output, pr_data, project_data,
+                session=session, stop_check=stop_check,
+                qa_workdir=qa_workdir,
+            )
+            return passed, reason
+        except Exception:
+            _log.warning("Fallback verification crashed for scenario %d",
+                         scenario.index, exc_info=True)
+            return True, ""
+
+    # Prefer transcript file if present.
+    transcript_path: str | None = scenario.transcript_path
+    if transcript_path:
+        tp = Path(transcript_path)
+        if tp.is_symlink():
+            resolved = str(tp.resolve())
+            transcript_path = resolved if Path(resolved).exists() else None
+        elif not tp.exists():
+            transcript_path = None
+
+    followup = _pg.generate_qa_verifier_followup_message(
+        scenario, verdict,
+        transcript_path=transcript_path,
+        pane_output=pane_output if not transcript_path else None,
+    )
+
+    try:
+        tmux_mod.send_keys(wp.verifier_pane, followup)
+        for _ in range(2):
+            time.sleep(1)
+            tmux_mod.send_keys(wp.verifier_pane, "")
+    except Exception:
+        _log.warning("Failed to send verification follow-up to worker "
+                     "verifier pane for scenario %d — trusting verdict",
+                     scenario.index, exc_info=True)
+        return True, ""
+
+    marker, new_count = _poll_verifier_for_next(
+        wp.verifier_pane,
+        prev_consumed_count=wp.verifier_verdicts_consumed,
+        stop_check=stop_check,
+        timeout=_VERIFICATION_TIMEOUT,
+    )
+    if marker is None:
+        _log.warning("Verifier pane timed out/died for scenario %d — "
+                     "trusting original verdict", scenario.index)
+        return True, ""
+
+    wp.verifier_verdicts_consumed = new_count
+
+    if marker == "VERIFIED":
+        _log.info("Verifier (worker pane): scenario %d VERIFIED",
+                  scenario.index)
+        return True, ""
+
+    # FLAGGED — extract the reason from the pane
+    try:
+        content = tmux_mod.capture_pane(wp.verifier_pane, full_scrollback=True)
+    except Exception:
+        content = ""
+    reason = _extract_flagged_reason(content)
+    _log.info("Verifier (worker pane): scenario %d FLAGGED: %s",
+              scenario.index, reason)
+    return False, reason
 
 
 # ---------------------------------------------------------------------------

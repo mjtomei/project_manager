@@ -2866,22 +2866,86 @@ class TestGenerateQAWorkerProceedMessage:
 
 
 class TestGenerateQABatchedConcretizerPrompt:
-    def test_embeds_all_scenarios_but_refines_only_first(self):
+    def test_only_scenario_one_draft_embedded(self):
         from pm_core.prompt_gen import generate_qa_batched_concretizer_prompt
         scs = [
-            QAScenario(index=1, title="Login", focus="auth", steps="do login"),
-            QAScenario(index=2, title="Logout", focus="auth", steps="do logout"),
+            QAScenario(index=1, title="Login", focus="auth",
+                       steps="SCENARIO_ONE_UNIQUE_STEPS"),
+            QAScenario(index=2, title="Logout", focus="auth",
+                       steps="SCENARIO_TWO_UNIQUE_STEPS"),
         ]
         prompt = generate_qa_batched_concretizer_prompt(
-            scs, "pm/pr-x", "master", {1: None, 2: "instr 2 body"})
+            scs, "pm/pr-x", "master",
+            {1: "instr 1 body", 2: "SCENARIO_TWO_INSTR"})
+        # Scenario 1's steps + instruction must be in the initial prompt.
+        assert "SCENARIO_ONE_UNIQUE_STEPS" in prompt
+        assert "instr 1 body" in prompt
+        # Scenario 2's draft + instruction must NOT be in the initial prompt.
+        assert "SCENARIO_TWO_UNIQUE_STEPS" not in prompt
+        assert "SCENARIO_TWO_INSTR" not in prompt
+        # Titles of both scenarios must still appear in the roster.
         assert "Scenario 1: Login" in prompt
         assert "Scenario 2: Logout" in prompt
-        assert "instr 2 body" in prompt
+        # Output contract + follow-up rule must still be documented.
         assert "REFINED_STEPS_START" in prompt
         assert "REFINED_STEPS_END" in prompt
         assert "CONCRETIZE SCENARIO" in prompt
-        # It must tell the model to refine only Scenario 1 right now.
-        assert "Scenario 1" in prompt
+
+
+class TestGenerateQABatchedVerifierPrompt:
+    def test_role_roster_and_markers(self):
+        from pm_core.prompt_gen import generate_qa_batched_verifier_prompt
+        scs = [
+            QAScenario(index=3, title="Auth flow", focus="auth",
+                       steps="UNIQ_VERIF_SCN_STEPS_A"),
+            QAScenario(index=4, title="Settings", focus="ui",
+                       steps="UNIQ_VERIF_SCN_STEPS_B"),
+        ]
+        prompt = generate_qa_batched_verifier_prompt(
+            scs, worker_index=2, pr_branch="pm/pr-x", base_branch="master")
+        # Role + worker index.
+        assert "verifier" in prompt.lower()
+        assert "worker 2" in prompt
+        # Roster — titles should be listed.
+        assert "Scenario 3: Auth flow" in prompt
+        assert "Scenario 4: Settings" in prompt
+        # Marker convention.
+        assert "VERIFIED" in prompt
+        assert "FLAGGED_START" in prompt
+        assert "FLAGGED_END" in prompt
+        # Must wait-for-first-request semantics.
+        assert "VERIFY SCENARIO" in prompt
+        # Must NOT contain per-scenario planned steps or transcripts.
+        assert "UNIQ_VERIF_SCN_STEPS_A" not in prompt
+        assert "UNIQ_VERIF_SCN_STEPS_B" not in prompt
+
+
+class TestGenerateQAVerifierFollowupMessage:
+    def test_with_transcript_path(self):
+        from pm_core.prompt_gen import generate_qa_verifier_followup_message
+        scn = QAScenario(index=7, title="Cart checkout", focus="shop",
+                         steps="steps")
+        msg = generate_qa_verifier_followup_message(
+            scn, "PASS",
+            transcript_path="/tmp/qa/transcript-s7.jsonl")
+        assert "VERIFY SCENARIO 7" in msg
+        assert "Cart checkout" in msg
+        assert "PASS" in msg
+        assert "/tmp/qa/transcript-s7.jsonl" in msg
+        assert "VERIFIED" in msg
+        assert "FLAGGED_START" in msg
+        assert "FLAGGED_END" in msg
+
+    def test_with_pane_output_fallback(self):
+        from pm_core.prompt_gen import generate_qa_verifier_followup_message
+        scn = QAScenario(index=8, title="Search", focus="search",
+                         steps="steps")
+        msg = generate_qa_verifier_followup_message(
+            scn, "NEEDS_WORK", transcript_path=None,
+            pane_output="PANE_OUTPUT_UNIQ_MARK")
+        assert "VERIFY SCENARIO 8" in msg
+        assert "NEEDS_WORK" in msg
+        assert "PANE_OUTPUT_UNIQ_MARK" in msg
 
 
 class TestGenerateQAWorkerPromptInitialOnly:

@@ -1449,32 +1449,38 @@ def generate_qa_batched_concretizer_prompt(
     The concretizer refines one scenario at a time, serially, across all
     of the worker's scenarios. The initial response refines Scenario 1.
     Subsequent refinements are triggered by follow-up messages of the
-    form `CONCRETIZE SCENARIO <N>`.  Each refinement is bracketed by the
-    `REFINED_STEPS_START` / `REFINED_STEPS_END` markers so the
+    form `CONCRETIZE SCENARIO <N>` which carry that scenario's planned
+    steps + instruction content lazily. Each refinement is bracketed by
+    the `REFINED_STEPS_START` / `REFINED_STEPS_END` markers so the
     orchestrator can extract them from pane scrollback.
     """
-    # Build per-scenario sections (all scenarios up front so follow-ups
-    # don't need to reship planned steps or instruction content).
-    scenario_sections = []
-    for sc in scenarios:
-        instr = instruction_contents.get(sc.index)
-        instr_block = ""
-        if instr:
-            instr_block = f"""
-**Instruction file contents for Scenario {sc.index}**:
-{instr}
-"""
-        scenario_sections.append(f"""### Scenario {sc.index}: {sc.title}
-
-**Focus**: {sc.focus}
-
-**Planned steps**:
-{sc.steps}
-{instr_block}""")
-
-    all_scenarios_text = "\n".join(scenario_sections)
     first = scenarios[0]
     scenario_indices = ", ".join(str(sc.index) for sc in scenarios)
+
+    # Roster: titles only so the session knows what's coming, but no
+    # drafts or instructions for scenarios 2+ (those are delivered
+    # lazily via follow-up messages).
+    roster_lines = []
+    for sc in scenarios:
+        roster_lines.append(f"- Scenario {sc.index}: {sc.title}")
+    roster_text = "\n".join(roster_lines)
+
+    # Scenario 1's draft + instruction content (the one we're about
+    # to refine).
+    first_instr = instruction_contents.get(first.index)
+    first_instr_block = ""
+    if first_instr:
+        first_instr_block = f"""
+**Instruction file contents for Scenario {first.index}**:
+{first_instr}
+"""
+    first_scenario_block = f"""### Scenario {first.index}: {first.title}
+
+**Focus**: {first.focus}
+
+**Planned steps**:
+{first.steps}
+{first_instr_block}"""
 
     return f"""You are the step concretizer for a batch of QA scenarios on branch `{pr_branch}` (base `{base_branch}`).
 
@@ -1488,13 +1494,19 @@ You will handle scenarios **one at a time, serially**, across {len(scenarios)}
 scenarios ({scenario_indices}). Do NOT refine more than one scenario per
 response.
 
-## All scenarios in this worker
+## Scenarios in this worker (roster)
 
-All scenarios are listed below so you have their planned steps and
-instruction content up front. DO NOT refine them all now — only refine
-the one you are currently asked about.
+These are the scenarios you will refine, in order. Only Scenario 1's
+draft steps and instruction content are included below. For each
+subsequent scenario, you will receive a `CONCRETIZE SCENARIO <N>`
+follow-up message carrying that scenario's draft steps and instruction
+content when it's time to refine it.
 
-{all_scenarios_text}
+{roster_text}
+
+## Scenario 1 (refine this one right now)
+
+{first_scenario_block}
 
 ## Output format (used for every refinement)
 
@@ -1549,6 +1561,121 @@ Refine the steps for Scenario {scenario.index} only. Output the refined
 steps between `REFINED_STEPS_START` / `REFINED_STEPS_END` markers and end
 your response with `REFINED_STEPS_END`. Do not refine any other scenario
 in this response."""
+
+
+def generate_qa_batched_verifier_prompt(
+    scenarios: list,
+    worker_index: int,
+    pr_branch: str,
+    base_branch: str,
+) -> str:
+    """Prompt for the persistent per-worker verifier session.
+
+    The verifier confirms, one scenario at a time, that the evaluator's
+    stated verdict (PASS / NEEDS_WORK / INPUT_REQUIRED) is supported by
+    real runtime evidence in the session transcript. It waits for
+    `VERIFY SCENARIO <N>` follow-up messages and responds with either
+    `VERIFIED` or a `FLAGGED_START` ... `FLAGGED_END` block.
+    """
+    roster_lines = []
+    for sc in scenarios:
+        roster_lines.append(f"- Scenario {sc.index}: {sc.title}")
+    roster_text = "\n".join(roster_lines)
+
+    return f"""You are the QA verifier for worker {worker_index} on branch `{pr_branch}` (base `{base_branch}`).
+
+Your job: for each scenario the evaluator completes, confirm that the
+evaluator's stated verdict is supported by actual runtime evidence in
+the evaluator's transcript (or pane output). You will receive
+per-scenario verification requests as follow-up messages of the form
+`VERIFY SCENARIO <N>`. Each request will include:
+
+- the scenario's title and index,
+- the stated verdict (PASS / NEEDS_WORK / INPUT_REQUIRED),
+- a path to the evaluator's transcript file (or inline pane output as a
+  fallback if no transcript is available).
+
+For each request, read the transcript, determine whether the stated
+verdict is supported by real runtime evidence (tests actually ran,
+results match the verdict, etc.), and respond with exactly one of:
+
+- `VERIFIED` on its own line, if the stated verdict is supported; OR
+- a `FLAGGED_START` ... `FLAGGED_END` block containing a brief reason,
+  if the stated verdict is NOT supported (e.g. tests didn't run, output
+  contradicts the verdict, evaluator hallucinated results, etc.).
+
+Example flagged response:
+
+FLAGGED_START
+<explanation of what went wrong — can be multiple lines>
+FLAGGED_END
+
+IMPORTANT: Your response for each verification must end with either
+`VERIFIED` on its own line OR `FLAGGED_END` on its own line. Do not
+include any text after that final marker.
+
+## Scenarios in this worker (roster)
+
+These are the scenarios you will be asked to verify, in order. No
+drafts, instructions, or transcripts are included now — each
+`VERIFY SCENARIO <N>` follow-up will carry the stated verdict and the
+transcript path for that scenario at the time of the request.
+
+{roster_text}
+
+## What to do right now
+
+Do NOT produce any output yet. Wait silently for the first
+`VERIFY SCENARIO <N>` follow-up message. When it arrives, read the
+referenced transcript, then emit exactly one `VERIFIED` line or one
+`FLAGGED_START` / `FLAGGED_END` block as described above, and wait
+again for the next follow-up.
+
+Each of your responses must contain exactly one `VERIFIED` line OR
+exactly one `FLAGGED_START` / `FLAGGED_END` pair, and must end with
+that marker."""
+
+
+def generate_qa_verifier_followup_message(
+    scenario,
+    verdict: str,
+    transcript_path: str | None = None,
+    pane_output: str | None = None,
+) -> str:
+    """Follow-up message sent to the verifier pane for one scenario.
+
+    Either *transcript_path* (preferred) or *pane_output* (fallback)
+    should be provided. Body tells the verifier which scenario, the
+    stated verdict, and where to read the evidence from.
+    """
+    if transcript_path:
+        source_block = (
+            f"**Evaluator transcript**: `{transcript_path}`\n\n"
+            f"Read the transcript, confirm the test steps actually ran "
+            f"and the evidence supports the stated verdict."
+        )
+    else:
+        inline = pane_output or "(no pane output available)"
+        source_block = (
+            f"**Evaluator pane output (inline)**:\n\n```\n{inline}\n```\n\n"
+            f"Read the pane output, confirm the test steps actually ran "
+            f"and the evidence supports the stated verdict."
+        )
+
+    return f"""VERIFY SCENARIO {scenario.index}
+
+### Scenario {scenario.index}: {scenario.title}
+
+**Stated verdict**: {verdict}
+
+{source_block}
+
+Reply with exactly one of:
+- `VERIFIED` on its own line, OR
+- a `FLAGGED_START` ... `FLAGGED_END` block with your reason.
+
+Your response must end with either `VERIFIED` or `FLAGGED_END` on its
+own line."""
 
 
 def generate_standalone_qa_prompt(data: dict, instruction_id: str,
