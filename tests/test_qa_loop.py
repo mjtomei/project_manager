@@ -2987,3 +2987,66 @@ class TestWorkerWindowName:
     def test_without_gh_pr_number(self):
         pr_data = {"id": "abc123"}
         assert _worker_window_name(pr_data, 3) == "qa-abc123-w3"
+
+
+class TestWorkerPaneDeath:
+    """When a worker pane dies mid-run, remaining scenarios must be
+    marked INPUT_REQUIRED while already-recorded verdicts are preserved."""
+
+    def test_worker_pane_death_marks_remaining_input_required(
+        self, tmp_path, monkeypatch
+    ):
+        import itertools
+        from pm_core.qa_loop import (
+            _poll_worker_verdicts,
+            QALoopState,
+            QAScenario,
+            VERDICT_PASS,
+            VERDICT_INPUT_REQUIRED,
+        )
+        import pm_core.qa_loop as qa_loop_mod
+
+        scenarios = [
+            QAScenario(index=i, title=f"S{i}", focus="f") for i in (1, 2, 3)
+        ]
+        for sc in scenarios:
+            sc.window_name = "qa-w0"
+            sc.pane_id = "%10"
+        worker_groups = {0: scenarios}
+
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = scenarios
+        state.scenario_verdicts = {1: VERDICT_PASS}
+
+        monkeypatch.setattr(qa_loop_mod, "_VERDICT_GRACE_PERIOD", 0)
+        monkeypatch.setattr(
+            qa_loop_mod, "_is_verification_enabled", lambda: False
+        )
+        monkeypatch.setattr(
+            qa_loop_mod, "_write_status_file", lambda *a, **k: None
+        )
+        monkeypatch.setattr(qa_loop_mod.time, "sleep", lambda *a, **k: None)
+
+        pane_exists_results = itertools.chain([True], itertools.repeat(False))
+        import pm_core.tmux as tmux_mod
+        monkeypatch.setattr(
+            tmux_mod, "pane_exists", lambda *a, **k: next(pane_exists_results)
+        )
+        monkeypatch.setattr(
+            tmux_mod, "capture_pane", lambda *a, **k: ""
+        )
+
+        _poll_worker_verdicts(
+            state,
+            {},
+            {},
+            "sess",
+            "/tmp/work",
+            tmp_path / "status.json",
+            lambda *a, **k: None,
+            worker_groups,
+        )
+
+        assert state.scenario_verdicts[1] == VERDICT_PASS
+        assert state.scenario_verdicts[2] == VERDICT_INPUT_REQUIRED
+        assert state.scenario_verdicts[3] == VERDICT_INPUT_REQUIRED
