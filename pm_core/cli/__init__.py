@@ -43,6 +43,8 @@ def cli(ctx, project_dir: str | None):
     """pm — Project Manager for Claude Code sessions."""
     if project_dir:
         set_project_override(Path(project_dir).resolve())
+    else:
+        set_project_override(None)
     if ctx.invoked_subcommand is None:
         # No subcommand: launch TUI if project found, else show help
         try:
