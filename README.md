@@ -30,12 +30,12 @@ boring, repetitive parts so they can focus on what matters.
 
 ## Demo
 
-Three lines of notes became a working multiplayer Tetris game with real-time
-networking, lobby system, adaptive handicapping, and end-to-end test coverage —
-50+ merged PRs and 30,000+ lines of code from ~2 hours of human input.
+Three lines of notes became a working multiplayer tetromino stacking game with
+real-time networking, lobby system, adaptive handicapping, and end-to-end test
+coverage — 50+ merged PRs and 30,000+ lines of code from ~2 hours of human input.
 
-See the [full narrative](https://github.com/mjtomei/tetris/blob/main/docs/pm-demo-narrative.md)
-and the [resulting repo](https://github.com/mjtomei/tetris).
+See the [full narrative](https://github.com/mjtomei/tomino/blob/master/docs/pm-demo-narrative.md)
+and the [resulting repo](https://github.com/mjtomei/tomino).
 
 ## Install
 
