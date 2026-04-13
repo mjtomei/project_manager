@@ -2624,6 +2624,108 @@ class TestSpecGateRunningFlag:
         assert state.latest_verdict == VERDICT_INPUT_REQUIRED
 
 
+class TestRunQaSyncWorkerCountBranching:
+    """run_qa_sync must branch between batched and standard paths on worker_count."""
+
+    def _setup(self, tmp_path):
+        from pm_core import store
+
+        pr_id = "pr-wcbranch"
+        pm_dir = tmp_path / "pm"
+        pm_dir.mkdir()
+        workdir = tmp_path / "work"
+        workdir.mkdir()
+        (workdir / ".git").mkdir()
+
+        pr_entry = {
+            "id": pr_id,
+            "title": "Test PR",
+            "description": "Test",
+            "branch": "pm/test",
+            "status": "qa",
+            "workdir": str(workdir),
+        }
+        data = {
+            "project": {
+                "name": "test",
+                "repo": str(tmp_path),
+                "base_branch": "master",
+                "backend": "local",
+            },
+            "prs": [pr_entry],
+            "plans": [],
+        }
+        store.save(data, pm_dir)
+
+        state = QALoopState(pr_id=pr_id)
+        state.planning_phase = False
+        state.scenarios = [
+            QAScenario(index=1, title="T1", focus="f1"),
+            QAScenario(index=2, title="T2", focus="f2"),
+        ]
+        return state, pm_dir, pr_entry, data, workdir
+
+    def test_worker_count_zero_uses_standard_path(self, tmp_path):
+        from pm_core.qa_loop import run_qa_sync
+
+        state, pm_dir, pr_entry, data, workdir = self._setup(tmp_path)
+
+        with patch("pm_core.qa_loop.get_pm_session", return_value="s"), \
+             patch("pm_core.store.load", return_value=data), \
+             patch("pm_core.store.get_pr", return_value=pr_entry), \
+             patch("pm_core.qa_loop._get_qa_spec", return_value={"content": "spec"}), \
+             patch("pm_core.qa_loop._resolve_qa_model", return_value=(None, None, None)), \
+             patch("pm_core.qa_loop._get_worker_count", return_value=0), \
+             patch("pm_core.qa_loop._get_max_scenarios", return_value=0), \
+             patch("pm_core.tmux.find_window_by_name",
+                   return_value={"index": "0", "id": "@0"}), \
+             patch("pm_core.tmux.get_pane_indices", return_value=[("0.0",)]), \
+             patch("pm_core.qa_loop._write_status_file"), \
+             patch("pm_core.qa_loop._add_status_pane") as add_status, \
+             patch("pm_core.qa_loop._launch_scenarios_in_tmux") as launch_std, \
+             patch("pm_core.qa_loop._launch_workers_in_tmux") as launch_batched, \
+             patch("pm_core.qa_loop._poll_tmux_verdicts"), \
+             patch("pm_core.qa_loop._poll_worker_verdicts"), \
+             patch("pm_core.cli.helpers._ensure_workdir", return_value=str(workdir)):
+            run_qa_sync(state, pm_dir, pr_entry, lambda *a: None)
+
+        assert launch_std.called is True
+        assert launch_batched.called is False
+        assert add_status.call_count == 1
+
+    def test_worker_count_nonzero_uses_batched_path(self, tmp_path):
+        from pm_core.qa_loop import run_qa_sync
+
+        state, pm_dir, pr_entry, data, workdir = self._setup(tmp_path)
+        grouped = {0: [state.scenarios[0]], 1: [state.scenarios[1]]}
+
+        with patch("pm_core.qa_loop.get_pm_session", return_value="s"), \
+             patch("pm_core.store.load", return_value=data), \
+             patch("pm_core.store.get_pr", return_value=pr_entry), \
+             patch("pm_core.qa_loop._get_qa_spec", return_value={"content": "spec"}), \
+             patch("pm_core.qa_loop._resolve_qa_model", return_value=(None, None, None)), \
+             patch("pm_core.qa_loop._get_worker_count", return_value=2), \
+             patch("pm_core.qa_loop._get_max_scenarios", return_value=0), \
+             patch("pm_core.qa_loop.group_scenarios_into_workers",
+                   return_value=grouped), \
+             patch("pm_core.tmux.find_window_by_name",
+                   return_value={"index": "0", "id": "@0"}), \
+             patch("pm_core.tmux.get_pane_indices", return_value=[("0.0",)]), \
+             patch("pm_core.qa_loop._write_status_file"), \
+             patch("pm_core.qa_loop._add_status_pane") as add_status, \
+             patch("pm_core.qa_loop._launch_scenarios_in_tmux") as launch_std, \
+             patch("pm_core.qa_loop._launch_workers_in_tmux") as launch_batched, \
+             patch("pm_core.qa_loop._poll_tmux_verdicts"), \
+             patch("pm_core.qa_loop._poll_worker_verdicts"), \
+             patch("pm_core.cli.helpers._ensure_workdir", return_value=str(workdir)):
+            run_qa_sync(state, pm_dir, pr_entry, lambda *a: None)
+
+        assert launch_batched.called is True
+        assert launch_std.called is False
+        assert add_status.call_count == 1
+        assert launch_batched.call_args.kwargs["worker_groups"] == grouped
+
+
 class TestParseNewMocksFromPlan:
     def _wrap(self, body: str) -> str:
         return f"QA_PLAN_START\n{body}\nQA_PLAN_END"
