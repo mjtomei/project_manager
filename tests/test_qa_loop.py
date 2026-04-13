@@ -434,6 +434,44 @@ class TestCleanupStaleScenarioWindows:
         assert "@1" not in killed_ids  # tui — should not be killed
         assert "@5" not in killed_ids  # other-window — should not be killed
 
+    def test_kills_worker_windows(self):
+        """_cleanup_stale_scenario_windows also kills qa-{display_id}-w* windows."""
+        windows = [
+            {"id": "@1", "index": "0", "name": "tui"},
+            {"id": "@2", "index": "1", "name": "qa-#42"},
+            {"id": "@3", "index": "2", "name": "qa-#42-s1"},
+            {"id": "@4", "index": "3", "name": "qa-#42-w0"},
+            {"id": "@5", "index": "4", "name": "qa-#42-w3"},
+            {"id": "@6", "index": "5", "name": "other-window"},
+        ]
+        pr_data = {"id": "pr-abc", "gh_pr_number": 42}
+
+        def run(include_main):
+            mock_tmux = MagicMock()
+            mock_tmux.list_windows.return_value = list(windows)
+            with patch("pm_core.qa_loop._log"), \
+                 patch("pm_core.tmux.list_windows", mock_tmux.list_windows), \
+                 patch("pm_core.tmux.kill_window", mock_tmux.kill_window):
+                _cleanup_stale_scenario_windows("pm-test", pr_data,
+                                                include_main=include_main)
+            return [c[0][1] for c in mock_tmux.kill_window.call_args_list]
+
+        killed = run(include_main=True)
+        assert "@4" in killed  # qa-#42-w0
+        assert "@5" in killed  # qa-#42-w3
+        assert "@3" in killed  # qa-#42-s1
+        assert "@2" in killed  # qa-#42 (main)
+        assert "@1" not in killed  # tui
+        assert "@6" not in killed  # other-window
+
+        killed_no_main = run(include_main=False)
+        assert "@4" in killed_no_main  # qa-#42-w0 still killed
+        assert "@5" in killed_no_main  # qa-#42-w3 still killed
+        assert "@3" in killed_no_main  # qa-#42-s1 still killed
+        assert "@2" not in killed_no_main  # qa-#42 preserved
+        assert "@1" not in killed_no_main
+        assert "@6" not in killed_no_main
+
     def test_include_main_false_keeps_main_window(self):
         """include_main=False kills scenario windows but keeps the main QA window."""
         pr_data = {"id": "pr-abc", "gh_pr_number": 42}
