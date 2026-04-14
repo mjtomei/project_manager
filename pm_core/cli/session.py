@@ -104,6 +104,16 @@ def _register_tmux_bindings(session_name: str) -> None:
     subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gu", "after-resize-window"),
             check=False)
 
+    # Popup bindings: PR action picker (prefix+P) and pm command runner (prefix+M)
+    subprocess.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", "P",
+             "display-popup", "-E", "-w", "80", "-h", "80%",
+             "pm _popup-picker '#{session_name}' '#{window_name}'"),
+            check=False)
+    subprocess.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", "M",
+             "display-popup", "-E", "-w", "80", "-h", "50%",
+             "pm _popup-cmd '#{session_name}'"),
+            check=False)
+
 
 def _schedule_rebalance(session_name: str) -> None:
     """Spawn a background process to rebalance all windows after a short delay.
@@ -737,6 +747,365 @@ def rebalance_cmd():
     tmux_mod.unzoom_pane(session, window)
     pane_layout.rebalance(session, window)
     click.echo("Layout rebalanced.")
+
+
+# --- Popup commands ---
+
+# All available actions.  Each entry is (action_label, pm_command_template).
+# Templates use {pr_id} for the internal PR ID.
+# Commands prefixed with "tui:" are routed through the TUI command bar.
+_ALL_ACTIONS: list[tuple[str, str]] = [
+    ("start", "pr start {pr_id}"),
+    ("review", "pr review {pr_id}"),
+    ("review-loop", "tui:review-loop {pr_id}"),
+    ("review-loop strict", "tui:review-loop strict {pr_id}"),
+    ("qa", "tui:pr qa {pr_id}"),
+    ("merge", "pr merge {pr_id}"),
+]
+
+# Map action labels to tmux window name patterns.
+# None means no associated window (loops, not windows).
+_ACTION_WINDOW_PATTERNS: dict[str, str | None] = {
+    "start": "{display_id}",
+    "review": "review-{display_id}",
+    "review-loop": None,
+    "review-loop strict": None,
+    "qa": "qa-{display_id}",
+    "merge": "merge-{display_id}",
+}
+
+# Terminal statuses — PRs in these states have no actions.
+_TERMINAL_STATUSES = {"merged", "closed"}
+
+# Map status to the action label representing the current phase.
+_STATUS_PHASE: dict[str, str] = {
+    "in_progress": "start",
+    "in_review": "review",
+    "qa": "qa",
+}
+
+
+def _actions_for_status(status: str) -> list[tuple[str, str]]:
+    """Return (action_label, command_template) pairs for a PR status.
+
+    All actions are returned for non-terminal statuses.
+    """
+    if status in _TERMINAL_STATUSES:
+        return []
+    return list(_ALL_ACTIONS)
+
+
+def _status_phase(status: str) -> str | None:
+    """Return the action label representing the current phase for a status."""
+    return _STATUS_PHASE.get(status)
+
+
+def _current_window_pr_id(window_name: str) -> str | None:
+    """Extract PR display ID from a window name."""
+    import re
+    m = re.match(
+        r'^(?:review-|merge-|qa-)?(#\d+|pr-[a-zA-Z0-9]+)(?:-s\d+)?$',
+        window_name,
+    )
+    return m.group(1) if m else None
+
+
+def _build_picker_lines(
+    prs: list[dict],
+    current_pr_display: str | None,
+    open_windows: set[str] | None = None,
+) -> list[tuple[str, str, str]]:
+    """Build display lines for the action-based PR picker.
+
+    Only shows actions for the PR matching `current_pr_display`.
+    Returns list of (display_line, pm_command, pr_display_id) tuples.
+    pm_command is empty for non-selectable header lines.
+
+    If `open_windows` is provided (set of tmux window names), actions
+    whose windows are already open are annotated with ``[open]``.
+    """
+    from pm_core.cli.helpers import _pr_display_id
+
+    if not current_pr_display:
+        return []
+
+    # Find the PR matching the current window
+    pr = None
+    display_id = None
+    for p in prs:
+        did = _pr_display_id(p)
+        if did == current_pr_display:
+            pr = p
+            display_id = did
+            break
+
+    if not pr:
+        return []
+
+    status = pr.get("status", "")
+    actions = _actions_for_status(status)
+    if not actions:
+        return []
+
+    lines: list[tuple[str, str, str]] = []
+    title = pr.get("title", "")
+    max_title = 40
+    short_title = (title[:max_title - 1] + "…") if len(title) > max_title else title
+
+    lines.append((f"  {display_id}  ({status})  {short_title}", "", display_id))
+
+    phase = _status_phase(status)
+    for label, cmd_template in actions:
+        cmd = cmd_template.format(pr_id=pr["id"])
+        indicator = "●" if label == phase else " "
+
+        # Check if this action's window is open
+        open_tag = ""
+        if open_windows is not None:
+            pattern = _ACTION_WINDOW_PATTERNS.get(label)
+            if pattern:
+                win_name = pattern.format(display_id=display_id)
+                # qa windows can have scenario suffixes (qa-#158-s1)
+                if label == "qa":
+                    if any(w == win_name or w.startswith(win_name + "-")
+                           for w in open_windows):
+                        open_tag = " [open]"
+                elif win_name in open_windows:
+                    open_tag = " [open]"
+
+        lines.append((f"  {indicator} {label:<18s}{display_id}{open_tag}", cmd, display_id))
+
+    return lines
+
+
+def _run_picker_command(cmd: str, session: str) -> None:
+    """Execute a picker command — either direct CLI or routed through TUI."""
+    import sys
+
+    if cmd.startswith("tui:"):
+        # Route through the TUI command bar
+        tui_cmd = cmd[4:]
+        from pm_core.cli.helpers import _find_tui_pane
+        base = pane_registry.base_session_name(session)
+        pane_id, _ = _find_tui_pane(base)
+        if not pane_id:
+            click.echo("TUI pane not found — cannot run this command.")
+            try:
+                input("\nPress Enter to close...")
+            except (EOFError, KeyboardInterrupt):
+                pass
+            return
+        # Send the command to the TUI command bar:
+        # Escape (ensure clean state) → / (open command bar) → command → Enter
+        subprocess.run(tmux_mod._tmux_cmd("send-keys", "-t", pane_id, "Escape"),
+                       check=False)
+        subprocess.run(tmux_mod._tmux_cmd("send-keys", "-t", pane_id, "/"),
+                       check=False)
+        subprocess.run(tmux_mod._tmux_cmd("send-keys", "-t", pane_id,
+                                           "-l", tui_cmd),
+                       check=False)
+        subprocess.run(tmux_mod._tmux_cmd("send-keys", "-t", pane_id, "Enter"),
+                       check=False)
+    else:
+        # Run pm command directly
+        full_cmd = [sys.executable, "-m", "pm_core.wrapper"] + shlex.split(cmd)
+        result = subprocess.run(full_cmd, text=True)
+        if result.returncode != 0:
+            try:
+                input("\nPress Enter to close...")
+            except (EOFError, KeyboardInterrupt):
+                pass
+
+
+@cli.command("_popup-picker", hidden=True)
+@click.argument("session")
+@click.argument("window_name", default="")
+def popup_picker_cmd(session: str, window_name: str):
+    """Internal: action-based PR picker for tmux popup.
+
+    Lists all active PRs with available actions (start, review, qa, merge,
+    review-loop) based on PR status.  Selecting an action runs the
+    corresponding pm command.
+    """
+    import shutil
+
+    base = pane_registry.base_session_name(session)
+    if not tmux_mod.session_exists(base):
+        click.echo("Not a pm session.")
+        raise SystemExit(1)
+
+    try:
+        root = state_root()
+        data = store.load(root)
+    except FileNotFoundError:
+        click.echo("No project.yaml found.")
+        raise SystemExit(1)
+
+    prs = data.get("prs") or []
+    current_pr = _current_window_pr_id(window_name)
+
+    if not current_pr:
+        click.echo("PR Actions (prefix+P)")
+        click.echo("Switch to a PR window to use this picker.")
+        raise SystemExit(0)
+
+    # Gather open windows to annotate the picker
+    open_windows = {w["name"] for w in tmux_mod.list_windows(base)}
+
+    lines = _build_picker_lines(prs, current_pr, open_windows)
+
+    if not lines:
+        click.echo(f"PR Actions — {current_pr}")
+        click.echo("No actions available (PR is merged or closed).")
+        raise SystemExit(0)
+
+    has_fzf = shutil.which("fzf") is not None
+
+    # Shortcut keys: press a key to immediately run an action.
+    # Ordered to match _ALL_ACTIONS display order.
+    _SHORTCUT_KEYS = {
+        "s": "start",
+        "d": "review",
+        "l": "review-loop",
+        "L": "review-loop strict",
+        "q": "qa",
+        "g": "merge",
+    }
+    # Build label → command map from the action lines
+    action_cmds = [cmd for _, cmd, _ in lines if cmd]
+    _label_to_cmd: dict[str, str] = {}
+    for (label, _), cmd in zip(_ALL_ACTIONS, action_cmds):
+        _label_to_cmd[label] = cmd
+
+    if has_fzf:
+        fzf_input_lines = [display for display, _, _ in lines]
+
+        expect_keys = ",".join(_SHORTCUT_KEYS.keys())
+        shortcut_hint = "  ".join(
+            f"{key}={label}" for key, label in _SHORTCUT_KEYS.items()
+        )
+        header = f"PR Actions — {current_pr}  (Esc to cancel)\n{shortcut_hint}"
+        fzf_cmd = ["fzf", "--ansi", "--no-sort", "--reverse",
+                   f"--header={header}",
+                   "--no-info",
+                   f"--expect={expect_keys}"]
+
+        proc = subprocess.Popen(
+            fzf_cmd,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True,
+        )
+        stdout, _ = proc.communicate(input="\n".join(fzf_input_lines))
+
+        if proc.returncode != 0:
+            raise SystemExit(0)
+
+        out_lines = stdout.strip().split("\n")
+        pressed_key = out_lines[0] if out_lines else ""
+        selected = out_lines[1] if len(out_lines) > 1 else ""
+
+        if pressed_key and pressed_key in _SHORTCUT_KEYS:
+            target_label = _SHORTCUT_KEYS[pressed_key]
+            cmd = _label_to_cmd.get(target_label)
+            if cmd:
+                _run_picker_command(cmd, session)
+        elif selected:
+            for display, cmd, _ in lines:
+                if display == selected:
+                    if cmd:
+                        _run_picker_command(cmd, session)
+                    break
+    else:
+        # Fallback: numbered list with shortcut keys
+        click.echo("Tip: install fzf for a better experience"
+                    " (brew install fzf / apt install fzf)\n")
+        click.echo(f"PR Actions — {current_pr}\n")
+
+        numbered: list[tuple[int, str]] = []  # (num, command)
+        num = 0
+        for display, cmd, _ in lines:
+            if not cmd:
+                click.echo(display)
+            else:
+                num += 1
+                numbered.append((num, cmd))
+                click.echo(f"  {num}) {display.strip()}")
+
+        if not numbered:
+            raise SystemExit(0)
+
+        shortcut_hint = "  ".join(
+            f"{key}={label}" for key, label in _SHORTCUT_KEYS.items()
+        )
+        click.echo(f"\nShortcuts: {shortcut_hint}")
+        try:
+            choice = input(f"Select [1-{num}] or shortcut key: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            raise SystemExit(0)
+
+        # Check if it's a shortcut key
+        if choice in _SHORTCUT_KEYS:
+            target_label = _SHORTCUT_KEYS[choice]
+            cmd = _label_to_cmd.get(target_label)
+            if cmd:
+                _run_picker_command(cmd, session)
+        else:
+            try:
+                choice_num = int(choice)
+            except ValueError:
+                raise SystemExit(0)
+
+            for n, cmd in numbered:
+                if n == choice_num:
+                    _run_picker_command(cmd, session)
+                    break
+
+
+@cli.command("_popup-cmd", hidden=True)
+@click.argument("session")
+def popup_cmd_cmd(session: str):
+    """Internal: pm command prompt for tmux popup."""
+    import sys
+
+    base = pane_registry.base_session_name(session)
+    if not tmux_mod.session_exists(base):
+        click.echo("Not a pm session.")
+        raise SystemExit(1)
+
+    try:
+        cmd = input("pm> ").strip()
+    except (EOFError, KeyboardInterrupt):
+        raise SystemExit(0)
+
+    if not cmd:
+        raise SystemExit(0)
+
+    # Route TUI-dependent commands through the TUI command bar
+    try:
+        parts = shlex.split(cmd)
+    except ValueError as e:
+        click.echo(f"Invalid command syntax: {e}")
+        try:
+            input("\nPress Enter to close...")
+        except (EOFError, KeyboardInterrupt):
+            pass
+        raise SystemExit(1)
+    _cmd_norm = cmd.replace("review loop", "review-loop")
+    if (_cmd_norm.startswith("pr qa")
+            or _cmd_norm.startswith("review-loop")):
+        _run_picker_command(f"tui:{_cmd_norm}", session)
+        return
+
+    full_cmd = [sys.executable, "-m", "pm_core.wrapper"] + parts
+
+    result = subprocess.run(full_cmd, text=True)
+
+    if result.returncode != 0:
+        # Keep popup open so user can see error
+        try:
+            input("\nPress Enter to close...")
+        except (EOFError, KeyboardInterrupt):
+            pass
 
 
 # --- Session registry commands ---
