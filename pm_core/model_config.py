@@ -47,7 +47,7 @@ _HAIKU_PATTERNS = ("haiku",)
 
 # ── Session types ────────────────────────────────────────────────────
 
-SESSION_TYPES = ("impl", "review", "qa", "qa_planning", "qa_scenario", "qa_verification", "watcher", "merge")
+SESSION_TYPES = ("impl", "review", "qa", "qa_planning", "qa_scenario", "qa_verification", "watcher", "supervisor", "merge")
 
 DEFAULT_SESSION_MODELS: dict[str, str] = {
     # Empty — use Claude CLI defaults unless explicitly configured via
@@ -62,6 +62,7 @@ _FALLBACK_TYPES: dict[str, str] = {
     "qa_planning": "qa",
     "qa_scenario": "qa",
     "qa_verification": "qa",
+    "supervisor": "watcher",
 }
 
 # Valid effort levels for the Claude CLI --effort flag.
@@ -75,10 +76,10 @@ _NO_EFFORT_MODELS = {
 }
 
 DEFAULT_SESSION_EFFORT: dict[str, str] = {
-    # Empty — use Claude CLI defaults unless explicitly configured via
-    # project.yaml, global settings, or PM_EFFORT env var.
+    # Supervisors default to high effort — they need Opus-level analysis
+    # to effectively coach lower-effort sessions.
+    "supervisor": "high",
 }
-
 
 
 @dataclass

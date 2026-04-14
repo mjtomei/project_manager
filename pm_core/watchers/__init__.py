@@ -6,10 +6,12 @@ discover them by type name.
 """
 
 from pm_core.watchers.auto_start_watcher import AutoStartWatcher
+from pm_core.watchers.supervisor_watcher import SupervisorWatcher
 
 # Registry mapping watcher type name -> class
 WATCHER_REGISTRY: dict[str, type] = {
     AutoStartWatcher.WATCHER_TYPE: AutoStartWatcher,
+    SupervisorWatcher.WATCHER_TYPE: SupervisorWatcher,
 }
 
 
