@@ -1435,7 +1435,7 @@ def _finalize_merge(root, pr_entry: dict, pr_id: str,
         if session:
             kill_pr_windows(session, pr_entry)
     except Exception:
-        pass
+        _log.exception("Failed to kill tmux windows for merged PR %s", pr_id)
 
     # Finalize merge transcript if provided
     if transcript:

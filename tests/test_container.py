@@ -19,6 +19,7 @@ from pm_core.container import (
     image_exists,
     remove_container,
     cleanup_qa_containers,
+    cleanup_pr_containers,
     cleanup_session_containers,
     cleanup_all_containers,
     wrap_claude_cmd,
@@ -838,6 +839,25 @@ class TestCleanupContainers:
         count = cleanup_all_containers()
         assert count == 3
         assert mock_rm.call_count == 3
+
+
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_docker")
+    def test_cleanup_pr_containers(self, mock_docker, mock_rm):
+        mock_docker.return_value = MagicMock(
+            returncode=0,
+            stdout="pm-impl-pr-abc123\npm-review-pr-abc123\npm-qa-pr-abc123-loop1-s0\n",
+        )
+        count = cleanup_pr_containers("pr-abc123")
+        assert count == 3
+        mock_rm.assert_any_call("pm-impl-pr-abc123")
+        mock_rm.assert_any_call("pm-review-pr-abc123")
+
+    @patch("pm_core.container._run_docker")
+    def test_cleanup_pr_containers_docker_failure(self, mock_docker):
+        mock_docker.return_value = MagicMock(returncode=1, stdout="")
+        count = cleanup_pr_containers("pr-abc123")
+        assert count == 0
 
 
 class TestIntegration:
