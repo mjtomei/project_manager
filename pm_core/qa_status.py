@@ -119,15 +119,17 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
             padded.append(" " * cols)
         return _CLEAR_SCREEN + "\n".join(padded)
 
-    # Fixed columns: prefix(2) + idx(3) + gap(2) + gap(2) + verdict(14) = 23
-    title_width = max(cols - 28, 10)
-    lines.append(f"  {'#':>3}  {'Scenario':<{title_width}}  {'Verdict'}")
-    lines.append(f"  {'---':>3}  {'-' * title_width}  {'-' * 14}")
+    # Fixed columns: prefix(2) + idx(3) + gap(2) + grp(3) + gap(2) + title + gap(2) + verdict(14)
+    title_width = max(cols - 33, 10)
+    lines.append(f"  {'#':>3}  {'Grp':>3}  {'Scenario':<{title_width}}  {'Verdict'}")
+    lines.append(f"  {'---':>3}  {'---':>3}  {'-' * title_width}  {'-' * 14}")
 
     spinner = _SPINNER_FRAMES[tick % len(_SPINNER_FRAMES)]
 
     for i, sc in enumerate(scenarios):
         idx = sc.get("index", "?")
+        group = sc.get("group")
+        group_display = str(group) if group is not None else "-"
         title = _truncate(sc.get("title", ""), title_width)
         verdict = sc.get("verdict", "")
 
@@ -160,7 +162,7 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
             prefix = f"{_REVERSE}  "
             suffix = _RESET
 
-        lines.append(f"{prefix}{idx:>3}  {title:<{title_width}}  {verdict_display}{suffix}")
+        lines.append(f"{prefix}{idx:>3}  {group_display:>3}  {title:<{title_width}}  {verdict_display}{suffix}")
 
     lines.append("")
 

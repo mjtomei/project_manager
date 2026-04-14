@@ -258,8 +258,8 @@ def which_cmd():
 
 _BOOLEAN_SETTINGS = {"hide-assist", "hide-merged", "beginner-mode", "auto-cleanup",
                      "qa-verify-pass"}
-_INT_SETTINGS = {"min-pane-width", "qa-max-scenarios", "qa-verify-retries",
-                 "qa-verdict-reminder-timeout"}
+_INT_SETTINGS = {"min-pane-width", "qa-max-scenarios", "qa-worker-count",
+                 "qa-verify-retries", "qa-verdict-reminder-timeout"}
 _ENUM_SETTINGS = {"spec-mode": {"auto", "review", "prompt"},
                   "container-runtime": {"docker", "podman"}}
 _SETTING_DEFAULTS = {
@@ -270,6 +270,7 @@ _SETTING_DEFAULTS = {
     "qa-verify-pass": "on",
     "min-pane-width": "100",
     "qa-max-scenarios": "(unset)",
+    "qa-worker-count": "-1",
     "qa-verify-retries": "(unset)",
     "qa-verdict-reminder-timeout": "(unset)",
     "spec-mode": "prompt",
@@ -314,7 +315,10 @@ def set_cmd(setting, value):
 
       min-pane-width       Minimum characters per horizontal pane (default 100)
 
-      qa-max-scenarios     Max QA scenarios to run (0 = unlimited, default 0)
+      qa-max-scenarios     Max QA scenarios to run concurrently (0 = unlimited, default 0)
+
+      qa-worker-count      Batch scenarios into worker sessions (-1 = planner decides,
+                           0 = disabled/one-per-scenario, N = fixed count; default -1)
 
       qa-verify-retries    Max verification retries before marking NEEDS_WORK (default 3)
 

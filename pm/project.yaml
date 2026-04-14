@@ -8958,6 +8958,8 @@ prs:
   reviewed_at: '2026-04-10T16:56:47.454801+00:00'
   merged_at: null
   notes: []
+  spec_impl: /workspace/pm/specs/pr-d8cfa16/impl.md
+  spec_qa: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-d8cfa16-batched-qa-scenario-execution-ebce8630/pm/specs/pr-d8cfa16/qa.md
 - id: pr-4db3696
   plan: null
   title: Add pm pr split command for breaking large PRs into smaller pieces

@@ -13,11 +13,13 @@ from pm_core.qa_loop import (
     QALoopState,
     create_qa_workdir,
     create_scenario_workdir,
+    group_scenarios_into_workers,
     VERDICT_PASS,
     VERDICT_NEEDS_WORK,
     VERDICT_INPUT_REQUIRED,
     ALL_VERDICTS,
     _scenario_window_name,
+    _worker_window_name,
     _cleanup_stale_scenario_windows,
     _tail_has_marker_on_own_line,
     _build_verification_prompt,
@@ -26,6 +28,7 @@ from pm_core.qa_loop import (
     _extract_flagged_reason,
     _get_verification_max_retries,
     _install_instruction_file,
+    _extract_worker_verdicts,
     _verdict_context_fingerprint,
     _VERIFICATION_MAX_PANE_LINES,
     _DEFAULT_VERIFICATION_MAX_RETRIES,
@@ -407,6 +410,8 @@ class TestCleanupStaleScenarioWindows:
         {"id": "@3", "index": "2", "name": "qa-#42-s1"},
         {"id": "@4", "index": "3", "name": "qa-#42-s2"},
         {"id": "@5", "index": "4", "name": "other-window"},
+        {"id": "@6", "index": "5", "name": "qa-#42-w0"},
+        {"id": "@7", "index": "6", "name": "qa-#42-w1"},
     ]
 
     def _run_cleanup(self, pr_data, include_main=True):
@@ -430,6 +435,46 @@ class TestCleanupStaleScenarioWindows:
         assert "@4" in killed_ids  # qa-#42-s2
         assert "@1" not in killed_ids  # tui — should not be killed
         assert "@5" not in killed_ids  # other-window — should not be killed
+        assert "@6" in killed_ids  # qa-#42-w0 — worker window
+        assert "@7" in killed_ids  # qa-#42-w1 — worker window
+
+    def test_kills_worker_windows(self):
+        """_cleanup_stale_scenario_windows also kills qa-{display_id}-w* windows."""
+        windows = [
+            {"id": "@1", "index": "0", "name": "tui"},
+            {"id": "@2", "index": "1", "name": "qa-#42"},
+            {"id": "@3", "index": "2", "name": "qa-#42-s1"},
+            {"id": "@4", "index": "3", "name": "qa-#42-w0"},
+            {"id": "@5", "index": "4", "name": "qa-#42-w3"},
+            {"id": "@6", "index": "5", "name": "other-window"},
+        ]
+        pr_data = {"id": "pr-abc", "gh_pr_number": 42}
+
+        def run(include_main):
+            mock_tmux = MagicMock()
+            mock_tmux.list_windows.return_value = list(windows)
+            with patch("pm_core.qa_loop._log"), \
+                 patch("pm_core.tmux.list_windows", mock_tmux.list_windows), \
+                 patch("pm_core.tmux.kill_window", mock_tmux.kill_window):
+                _cleanup_stale_scenario_windows("pm-test", pr_data,
+                                                include_main=include_main)
+            return [c[0][1] for c in mock_tmux.kill_window.call_args_list]
+
+        killed = run(include_main=True)
+        assert "@4" in killed  # qa-#42-w0
+        assert "@5" in killed  # qa-#42-w3
+        assert "@3" in killed  # qa-#42-s1
+        assert "@2" in killed  # qa-#42 (main)
+        assert "@1" not in killed  # tui
+        assert "@6" not in killed  # other-window
+
+        killed_no_main = run(include_main=False)
+        assert "@4" in killed_no_main  # qa-#42-w0 still killed
+        assert "@5" in killed_no_main  # qa-#42-w3 still killed
+        assert "@3" in killed_no_main  # qa-#42-s1 still killed
+        assert "@2" not in killed_no_main  # qa-#42 preserved
+        assert "@1" not in killed_no_main
+        assert "@6" not in killed_no_main
 
     def test_include_main_false_keeps_main_window(self):
         """include_main=False kills scenario windows but keeps the main QA window."""
@@ -443,6 +488,9 @@ class TestCleanupStaleScenarioWindows:
         assert "@2" not in killed_ids  # qa-#42 — should be kept
         assert "@1" not in killed_ids  # tui — should not be killed
         assert "@5" not in killed_ids  # other-window — should not be killed
+        # Worker windows still killed when include_main=False
+        assert "@6" in killed_ids  # qa-#42-w0
+        assert "@7" in killed_ids  # qa-#42-w1
 
 
 class TestVerdictConstants:
@@ -2583,6 +2631,108 @@ class TestSpecGateRunningFlag:
         assert state.latest_verdict == VERDICT_INPUT_REQUIRED
 
 
+class TestRunQaSyncWorkerCountBranching:
+    """run_qa_sync must branch between batched and standard paths on worker_count."""
+
+    def _setup(self, tmp_path):
+        from pm_core import store
+
+        pr_id = "pr-wcbranch"
+        pm_dir = tmp_path / "pm"
+        pm_dir.mkdir()
+        workdir = tmp_path / "work"
+        workdir.mkdir()
+        (workdir / ".git").mkdir()
+
+        pr_entry = {
+            "id": pr_id,
+            "title": "Test PR",
+            "description": "Test",
+            "branch": "pm/test",
+            "status": "qa",
+            "workdir": str(workdir),
+        }
+        data = {
+            "project": {
+                "name": "test",
+                "repo": str(tmp_path),
+                "base_branch": "master",
+                "backend": "local",
+            },
+            "prs": [pr_entry],
+            "plans": [],
+        }
+        store.save(data, pm_dir)
+
+        state = QALoopState(pr_id=pr_id)
+        state.planning_phase = False
+        state.scenarios = [
+            QAScenario(index=1, title="T1", focus="f1"),
+            QAScenario(index=2, title="T2", focus="f2"),
+        ]
+        return state, pm_dir, pr_entry, data, workdir
+
+    def test_worker_count_zero_uses_standard_path(self, tmp_path):
+        from pm_core.qa_loop import run_qa_sync
+
+        state, pm_dir, pr_entry, data, workdir = self._setup(tmp_path)
+
+        with patch("pm_core.qa_loop.get_pm_session", return_value="s"), \
+             patch("pm_core.store.load", return_value=data), \
+             patch("pm_core.store.get_pr", return_value=pr_entry), \
+             patch("pm_core.qa_loop._get_qa_spec", return_value={"content": "spec"}), \
+             patch("pm_core.qa_loop._resolve_qa_model", return_value=(None, None, None)), \
+             patch("pm_core.qa_loop._get_worker_count", return_value=0), \
+             patch("pm_core.qa_loop._get_max_scenarios", return_value=0), \
+             patch("pm_core.tmux.find_window_by_name",
+                   return_value={"index": "0", "id": "@0"}), \
+             patch("pm_core.tmux.get_pane_indices", return_value=[("0.0",)]), \
+             patch("pm_core.qa_loop._write_status_file"), \
+             patch("pm_core.qa_loop._add_status_pane") as add_status, \
+             patch("pm_core.qa_loop._launch_scenarios_in_tmux") as launch_std, \
+             patch("pm_core.qa_loop._launch_workers_in_tmux") as launch_batched, \
+             patch("pm_core.qa_loop._poll_tmux_verdicts"), \
+             patch("pm_core.qa_loop._poll_worker_verdicts"), \
+             patch("pm_core.cli.helpers._ensure_workdir", return_value=str(workdir)):
+            run_qa_sync(state, pm_dir, pr_entry, lambda *a: None)
+
+        assert launch_std.called is True
+        assert launch_batched.called is False
+        assert add_status.call_count == 1
+
+    def test_worker_count_nonzero_uses_batched_path(self, tmp_path):
+        from pm_core.qa_loop import run_qa_sync
+
+        state, pm_dir, pr_entry, data, workdir = self._setup(tmp_path)
+        grouped = {0: [state.scenarios[0]], 1: [state.scenarios[1]]}
+
+        with patch("pm_core.qa_loop.get_pm_session", return_value="s"), \
+             patch("pm_core.store.load", return_value=data), \
+             patch("pm_core.store.get_pr", return_value=pr_entry), \
+             patch("pm_core.qa_loop._get_qa_spec", return_value={"content": "spec"}), \
+             patch("pm_core.qa_loop._resolve_qa_model", return_value=(None, None, None)), \
+             patch("pm_core.qa_loop._get_worker_count", return_value=2), \
+             patch("pm_core.qa_loop._get_max_scenarios", return_value=0), \
+             patch("pm_core.qa_loop.group_scenarios_into_workers",
+                   return_value=grouped), \
+             patch("pm_core.tmux.find_window_by_name",
+                   return_value={"index": "0", "id": "@0"}), \
+             patch("pm_core.tmux.get_pane_indices", return_value=[("0.0",)]), \
+             patch("pm_core.qa_loop._write_status_file"), \
+             patch("pm_core.qa_loop._add_status_pane") as add_status, \
+             patch("pm_core.qa_loop._launch_scenarios_in_tmux") as launch_std, \
+             patch("pm_core.qa_loop._launch_workers_in_tmux") as launch_batched, \
+             patch("pm_core.qa_loop._poll_tmux_verdicts"), \
+             patch("pm_core.qa_loop._poll_worker_verdicts"), \
+             patch("pm_core.cli.helpers._ensure_workdir", return_value=str(workdir)):
+            run_qa_sync(state, pm_dir, pr_entry, lambda *a: None)
+
+        assert launch_batched.called is True
+        assert launch_std.called is False
+        assert add_status.call_count == 1
+        assert launch_batched.call_args.kwargs["worker_groups"] == grouped
+
+
 class TestParseNewMocksFromPlan:
     def _wrap(self, body: str) -> str:
         return f"QA_PLAN_START\n{body}\nQA_PLAN_END"
@@ -2665,3 +2815,510 @@ STEPS: do something
 QA_PLAN_END"""
         scenarios = parse_qa_plan(output)
         assert scenarios[0].mock_ids == []
+
+
+class TestParseQAPlanGroupField:
+    """Tests for GROUP field parsing in batched worker mode."""
+
+    def test_group_parsed(self):
+        output = """QA_PLAN_START
+SCENARIO 1: Test A
+FOCUS: area-a
+INSTRUCTION: none
+MOCKS: none
+GROUP: 2
+STEPS: do something
+QA_PLAN_END"""
+        scenarios = parse_qa_plan(output)
+        assert len(scenarios) == 1
+        assert scenarios[0].group == 2
+
+    def test_group_missing_defaults_to_none(self):
+        output = """QA_PLAN_START
+SCENARIO 1: Test A
+FOCUS: area-a
+INSTRUCTION: none
+MOCKS: none
+STEPS: do something
+QA_PLAN_END"""
+        scenarios = parse_qa_plan(output)
+        assert scenarios[0].group is None
+
+    def test_multiple_scenarios_different_groups(self):
+        output = """QA_PLAN_START
+SCENARIO 1: Test A
+FOCUS: area-a
+INSTRUCTION: none
+MOCKS: none
+GROUP: 1
+STEPS: step a
+
+SCENARIO 2: Test B
+FOCUS: area-b
+INSTRUCTION: none
+MOCKS: none
+GROUP: 2
+STEPS: step b
+
+SCENARIO 3: Test C
+FOCUS: area-c
+INSTRUCTION: none
+MOCKS: none
+GROUP: 1
+STEPS: step c
+QA_PLAN_END"""
+        scenarios = parse_qa_plan(output)
+        assert len(scenarios) == 3
+        assert scenarios[0].group == 1
+        assert scenarios[1].group == 2
+        assert scenarios[2].group == 1
+
+    def test_steps_not_truncated_by_group_field(self):
+        """GROUP field before STEPS should not eat into step content."""
+        output = """QA_PLAN_START
+SCENARIO 1: Test
+FOCUS: area
+INSTRUCTION: none
+MOCKS: none
+GROUP: 1
+STEPS: first step
+second step
+third step
+QA_PLAN_END"""
+        scenarios = parse_qa_plan(output)
+        assert "third step" in scenarios[0].steps
+
+    def test_group_non_numeric_defaults_to_none(self):
+        output = """QA_PLAN_START
+SCENARIO 1: Test
+FOCUS: area
+INSTRUCTION: none
+MOCKS: none
+GROUP: abc
+STEPS: do something
+QA_PLAN_END"""
+        scenarios = parse_qa_plan(output)
+        assert len(scenarios) == 1
+        assert scenarios[0].group is None
+
+    def test_steps_stops_at_group_field(self):
+        output = """QA_PLAN_START
+SCENARIO 1: Test
+FOCUS: area
+STEPS: real step content
+GROUP: 3
+QA_PLAN_END"""
+        scenarios = parse_qa_plan(output)
+        assert scenarios[0].steps == "real step content"
+        assert scenarios[0].group == 3
+
+    def test_steps_multiline_then_next_scenario_group(self):
+        output = """QA_PLAN_START
+SCENARIO 1: First
+FOCUS: area-a
+STEPS: line one
+line two
+line three
+GROUP: 1
+
+SCENARIO 2: Second
+FOCUS: area-b
+GROUP: 2
+STEPS: other step
+QA_PLAN_END"""
+        scenarios = parse_qa_plan(output)
+        assert len(scenarios) == 2
+        assert "line one" in scenarios[0].steps
+        assert "line two" in scenarios[0].steps
+        assert "line three" in scenarios[0].steps
+        assert "GROUP" not in scenarios[0].steps
+        assert scenarios[0].group == 1
+        assert scenarios[1].group == 2
+        assert "other step" in scenarios[1].steps
+
+
+class TestGroupScenariosIntoWorkers:
+    """Tests for group_scenarios_into_workers."""
+
+    def _make_scenario(self, index, group=None):
+        return QAScenario(index=index, title=f"S{index}", focus="f",
+                          steps="s", group=group)
+
+    def test_disabled_returns_empty(self):
+        scs = [self._make_scenario(1)]
+        assert group_scenarios_into_workers(scs, worker_count=0) == {}
+
+    def test_empty_scenarios_returns_empty(self):
+        assert group_scenarios_into_workers([], worker_count=3) == {}
+
+    def test_fixed_count_with_groups(self):
+        scs = [self._make_scenario(1, group=1),
+               self._make_scenario(2, group=2),
+               self._make_scenario(3, group=1)]
+        result = group_scenarios_into_workers(scs, worker_count=2)
+        assert len(result) == 2
+        assert len(result[1]) == 2  # scenarios 1 and 3
+        assert len(result[2]) == 1  # scenario 2
+
+    def test_round_robin_fallback_for_unassigned(self):
+        scs = [self._make_scenario(1), self._make_scenario(2),
+               self._make_scenario(3)]
+        result = group_scenarios_into_workers(scs, worker_count=2)
+        # Should distribute across 2 workers
+        total = sum(len(v) for v in result.values())
+        assert total == 3
+        assert len(result) == 2
+
+    def test_planner_decides_groups(self):
+        scs = [self._make_scenario(1, group=1),
+               self._make_scenario(2, group=2),
+               self._make_scenario(3, group=3)]
+        result = group_scenarios_into_workers(scs, worker_count=-1)
+        assert len(result) == 3
+
+    def test_planner_decides_no_groups_defaults_to_one(self):
+        scs = [self._make_scenario(1), self._make_scenario(2)]
+        result = group_scenarios_into_workers(scs, worker_count=-1)
+        assert len(result) == 1
+        assert len(result[1]) == 2
+
+    def test_out_of_range_group_gets_round_robin(self):
+        scs = [self._make_scenario(1, group=1),
+               self._make_scenario(2, group=99)]  # out of range
+        result = group_scenarios_into_workers(scs, worker_count=2)
+        # Scenario 2 should be round-robined
+        total = sum(len(v) for v in result.values())
+        assert total == 2
+
+    def test_empty_workers_removed(self):
+        scs = [self._make_scenario(1, group=1)]
+        result = group_scenarios_into_workers(scs, worker_count=3)
+        # Workers 2 and 3 should be removed
+        assert 2 not in result
+        assert 3 not in result
+        assert 1 in result
+
+    def test_single_worker_preserves_order(self):
+        scs = [self._make_scenario(i, group=g) for i, g in
+               enumerate([1, None, 5, 2], start=1)]
+        result = group_scenarios_into_workers(scs, worker_count=1)
+        assert list(result.keys()) == [1]
+        assert [s.index for s in result[1]] == [1, 2, 3, 4]
+
+    def test_out_of_range_groups_balanced_and_mutated(self):
+        # groups [5, 7, None, 1] with worker_count=2
+        scs = [self._make_scenario(1, group=5),
+               self._make_scenario(2, group=7),
+               self._make_scenario(3, group=None),
+               self._make_scenario(4, group=1)]
+        result = group_scenarios_into_workers(scs, worker_count=2)
+        assert set(result.keys()) == {1, 2}
+        total = sum(len(v) for v in result.values())
+        assert total == 4
+        # Worker 1 started with scenario 4 (group=1). Round-robin assigns
+        # least-loaded: sc1 -> worker 2, sc2 -> worker 1 (tie, min key=1),
+        # sc3 -> worker 2.
+        assert scs[0].group in {1, 2}
+        assert scs[1].group in {1, 2}
+        assert scs[2].group in {1, 2}
+        # Originally-valid group=1 is not mutated
+        assert scs[3].group == 1
+        # Balanced: 2 and 2
+        assert len(result[1]) == 2
+        assert len(result[2]) == 2
+
+    def test_planner_decides_with_sparse_groups(self):
+        # groups [1, 3, 3] with worker_count=-1 -> derive 3, keys {1,3}
+        scs = [self._make_scenario(1, group=1),
+               self._make_scenario(2, group=3),
+               self._make_scenario(3, group=3)]
+        result = group_scenarios_into_workers(scs, worker_count=-1)
+        assert set(result.keys()) == {1, 3}
+        assert len(result[1]) == 1
+        assert len(result[3]) == 2
+
+    def test_more_workers_than_scenarios(self):
+        scs = [self._make_scenario(1), self._make_scenario(2),
+               self._make_scenario(3)]
+        result = group_scenarios_into_workers(scs, worker_count=5)
+        assert set(result.keys()) == {1, 2, 3}
+        for k in (1, 2, 3):
+            assert len(result[k]) == 1
+
+
+class TestExtractWorkerVerdicts:
+    """Tests for _extract_worker_verdicts."""
+
+    def test_basic_extraction(self):
+        content = "SCENARIO_1_VERDICT: PASS\nSCENARIO_3_VERDICT: NEEDS_WORK\n"
+        result = _extract_worker_verdicts(content)
+        assert result == {1: "PASS", 3: "NEEDS_WORK"}
+
+    def test_input_required(self):
+        content = "SCENARIO_2_VERDICT: INPUT_REQUIRED\n"
+        result = _extract_worker_verdicts(content)
+        assert result == {2: "INPUT_REQUIRED"}
+
+    def test_no_verdicts(self):
+        content = "just some output\nno verdicts here\n"
+        assert _extract_worker_verdicts(content) == {}
+
+    def test_leading_whitespace(self):
+        content = "  SCENARIO_5_VERDICT: PASS\n"
+        result = _extract_worker_verdicts(content)
+        assert result == {5: "PASS"}
+
+    def test_multiple_verdicts_last_wins(self):
+        """If a scenario re-emits a verdict, the last one should win."""
+        content = ("SCENARIO_1_VERDICT: NEEDS_WORK\n"
+                   "some output\n"
+                   "SCENARIO_1_VERDICT: PASS\n")
+        result = _extract_worker_verdicts(content)
+        assert result == {1: "PASS"}
+
+    def test_mixed_content(self):
+        content = """Running tests...
+All tests passed.
+SCENARIO_1_VERDICT: PASS
+Now checking scenario 2...
+Found issue in handler.
+SCENARIO_2_VERDICT: NEEDS_WORK
+"""
+        result = _extract_worker_verdicts(content)
+        assert result == {1: "PASS", 2: "NEEDS_WORK"}
+
+    def test_all_three_verdict_tokens(self):
+        content = ("SCENARIO_1_VERDICT: PASS\n"
+                   "SCENARIO_2_VERDICT: NEEDS_WORK\n"
+                   "SCENARIO_3_VERDICT: INPUT_REQUIRED\n")
+        result = _extract_worker_verdicts(content)
+        assert result == {1: "PASS", 2: "NEEDS_WORK", 3: "INPUT_REQUIRED"}
+
+    def test_mid_line_verdict_ignored(self):
+        """Verdict embedded mid-line (no newline before) must not match."""
+        content = "prefix SCENARIO_4_VERDICT: PASS\n"
+        assert _extract_worker_verdicts(content) == {}
+
+    def test_verdict_in_fenced_code_block(self):
+        """Verdict on its own line within code fences still matches."""
+        content = "```\nSCENARIO_7_VERDICT: PASS\n```\n"
+        assert _extract_worker_verdicts(content) == {7: "PASS"}
+
+    def test_malformed_tokens_ignored(self):
+        content = (
+            "SCENARIO_X_VERDICT: PASS\n"
+            "SCENARIO_1_VERDICT: MAYBE\n"
+            "SCENARIO__VERDICT: PASS\n"
+            "scenario_1_verdict: pass\n"
+        )
+        assert _extract_worker_verdicts(content) == {}
+
+    def test_trailing_whitespace_tolerated(self):
+        content = "SCENARIO_9_VERDICT: PASS   \n"
+        assert _extract_worker_verdicts(content) == {9: "PASS"}
+
+
+class TestGenerateQAWorkerProceedMessage:
+    def test_contains_header_title_steps_and_report_path(self):
+        from pm_core.prompt_gen import generate_qa_worker_proceed_message
+        sc = QAScenario(
+            index=3,
+            title="Logout Flow",
+            focus="Session cleanup",
+            steps="planned",
+            report_path="/tmp/qa/report-s3.md",
+        )
+        refined = "1. Run `logout`\n2. Verify cookie cleared"
+        body = generate_qa_worker_proceed_message(sc, refined)
+        assert "PROCEED TO SCENARIO 3" in body
+        assert "Logout Flow" in body
+        assert refined in body
+        assert "/tmp/qa/report-s3.md" in body
+        assert "SCENARIO_3_VERDICT" in body
+
+
+class TestGenerateQABatchedConcretizerPrompt:
+    def test_only_scenario_one_draft_embedded(self):
+        from pm_core.prompt_gen import generate_qa_batched_concretizer_prompt
+        scs = [
+            QAScenario(index=1, title="Login", focus="auth",
+                       steps="SCENARIO_ONE_UNIQUE_STEPS"),
+            QAScenario(index=2, title="Logout", focus="auth",
+                       steps="SCENARIO_TWO_UNIQUE_STEPS"),
+        ]
+        prompt = generate_qa_batched_concretizer_prompt(
+            scs, "pm/pr-x", "master",
+            {1: "instr 1 body", 2: "SCENARIO_TWO_INSTR"})
+        # Scenario 1's steps + instruction must be in the initial prompt.
+        assert "SCENARIO_ONE_UNIQUE_STEPS" in prompt
+        assert "instr 1 body" in prompt
+        # Scenario 2's draft + instruction must NOT be in the initial prompt.
+        assert "SCENARIO_TWO_UNIQUE_STEPS" not in prompt
+        assert "SCENARIO_TWO_INSTR" not in prompt
+        # Titles of both scenarios must still appear in the roster.
+        assert "Scenario 1: Login" in prompt
+        assert "Scenario 2: Logout" in prompt
+        # Output contract + follow-up rule must still be documented.
+        assert "REFINED_STEPS_START" in prompt
+        assert "REFINED_STEPS_END" in prompt
+        assert "CONCRETIZE SCENARIO" in prompt
+
+
+class TestGenerateQABatchedVerifierPrompt:
+    def test_role_roster_and_markers(self):
+        from pm_core.prompt_gen import generate_qa_batched_verifier_prompt
+        scs = [
+            QAScenario(index=3, title="Auth flow", focus="auth",
+                       steps="UNIQ_VERIF_SCN_STEPS_A"),
+            QAScenario(index=4, title="Settings", focus="ui",
+                       steps="UNIQ_VERIF_SCN_STEPS_B"),
+        ]
+        prompt = generate_qa_batched_verifier_prompt(
+            scs, worker_index=2, pr_branch="pm/pr-x", base_branch="master")
+        # Role + worker index.
+        assert "verifier" in prompt.lower()
+        assert "worker 2" in prompt
+        # Roster — titles should be listed.
+        assert "Scenario 3: Auth flow" in prompt
+        assert "Scenario 4: Settings" in prompt
+        # Marker convention.
+        assert "VERIFIED" in prompt
+        assert "FLAGGED_START" in prompt
+        assert "FLAGGED_END" in prompt
+        # Must wait-for-first-request semantics.
+        assert "VERIFY SCENARIO" in prompt
+        # Must NOT contain per-scenario planned steps or transcripts.
+        assert "UNIQ_VERIF_SCN_STEPS_A" not in prompt
+        assert "UNIQ_VERIF_SCN_STEPS_B" not in prompt
+
+
+class TestGenerateQAVerifierFollowupMessage:
+    def test_with_transcript_path(self):
+        from pm_core.prompt_gen import generate_qa_verifier_followup_message
+        scn = QAScenario(index=7, title="Cart checkout", focus="shop",
+                         steps="steps")
+        msg = generate_qa_verifier_followup_message(
+            scn, "PASS",
+            transcript_path="/tmp/qa/transcript-s7.jsonl")
+        assert "VERIFY SCENARIO 7" in msg
+        assert "Cart checkout" in msg
+        assert "PASS" in msg
+        assert "/tmp/qa/transcript-s7.jsonl" in msg
+        assert "VERIFIED" in msg
+        assert "FLAGGED_START" in msg
+        assert "FLAGGED_END" in msg
+
+    def test_with_pane_output_fallback(self):
+        from pm_core.prompt_gen import generate_qa_verifier_followup_message
+        scn = QAScenario(index=8, title="Search", focus="search",
+                         steps="steps")
+        msg = generate_qa_verifier_followup_message(
+            scn, "NEEDS_WORK", transcript_path=None,
+            pane_output="PANE_OUTPUT_UNIQ_MARK")
+        assert "VERIFY SCENARIO 8" in msg
+        assert "NEEDS_WORK" in msg
+        assert "PANE_OUTPUT_UNIQ_MARK" in msg
+
+
+class TestGenerateQAWorkerPromptInitialOnly:
+    def test_only_first_scenario_steps_embedded(self):
+        from pm_core.prompt_gen import generate_qa_worker_prompt
+        scs = [
+            QAScenario(index=1, title="Login", focus="auth",
+                       steps="UNIQUE_STEP_ONE"),
+            QAScenario(index=2, title="Logout", focus="auth",
+                       steps="UNIQUE_STEP_TWO"),
+        ]
+        data = {"project": {"base_branch": "master"}}
+        with patch("pm_core.prompt_gen.store.get_pr",
+                   return_value={"title": "t", "branch": "b", "workdir": "/w"}), \
+             patch("pm_core.prompt_gen._format_pr_notes", return_value=""), \
+             patch("pm_core.prompt_gen.get_spec_mocks_section", return_value=""):
+            out = generate_qa_worker_prompt(
+                data, "pr-x", scs, worker_index=1,
+                workdir="/tmp/w", qa_workdir="/tmp/qa")
+        assert "UNIQUE_STEP_ONE" in out
+        assert "UNIQUE_STEP_TWO" not in out
+        # Titles of all scenarios must be listed.
+        assert "Scenario 1: Login" in out
+        assert "Scenario 2: Logout" in out
+        # PROCEED contract must be documented.
+        assert "PROCEED TO SCENARIO" in out
+
+
+class TestWorkerWindowName:
+    def test_with_gh_pr_number(self):
+        pr_data = {"gh_pr_number": 42}
+        assert _worker_window_name(pr_data, 1) == "qa-#42-w1"
+
+    def test_without_gh_pr_number(self):
+        pr_data = {"id": "abc123"}
+        assert _worker_window_name(pr_data, 3) == "qa-abc123-w3"
+
+
+class TestWorkerPaneDeath:
+    """When a worker pane dies mid-run, remaining scenarios must be
+    marked INPUT_REQUIRED while already-recorded verdicts are preserved."""
+
+    def test_worker_pane_death_marks_remaining_input_required(
+        self, tmp_path, monkeypatch
+    ):
+        import itertools
+        from pm_core.qa_loop import (
+            _poll_worker_verdicts,
+            QALoopState,
+            QAScenario,
+            _WorkerPanes,
+            VERDICT_PASS,
+            VERDICT_INPUT_REQUIRED,
+        )
+        import pm_core.qa_loop as qa_loop_mod
+
+        scenarios = [
+            QAScenario(index=i, title=f"S{i}", focus="f") for i in (1, 2, 3)
+        ]
+        for sc in scenarios:
+            sc.window_name = "qa-w0"
+            sc.pane_id = "%10"
+        worker_groups = {0: scenarios}
+        worker_panes = {
+            0: _WorkerPanes(concretizer_pane="%11", evaluator_pane="%10")
+        }
+
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = scenarios
+        state.scenario_verdicts = {1: VERDICT_PASS}
+
+        monkeypatch.setattr(qa_loop_mod, "_VERDICT_GRACE_PERIOD", 0)
+        monkeypatch.setattr(
+            qa_loop_mod, "_is_verification_enabled", lambda: False
+        )
+        monkeypatch.setattr(
+            qa_loop_mod, "_write_status_file", lambda *a, **k: None
+        )
+        monkeypatch.setattr(qa_loop_mod.time, "sleep", lambda *a, **k: None)
+
+        pane_exists_results = itertools.chain([True], itertools.repeat(False))
+        import pm_core.tmux as tmux_mod
+        monkeypatch.setattr(
+            tmux_mod, "pane_exists", lambda *a, **k: next(pane_exists_results)
+        )
+        monkeypatch.setattr(
+            tmux_mod, "capture_pane", lambda *a, **k: ""
+        )
+
+        _poll_worker_verdicts(
+            state,
+            {},
+            {},
+            "sess",
+            "/tmp/work",
+            tmp_path / "status.json",
+            lambda *a, **k: None,
+            worker_groups=worker_groups,
+            worker_panes=worker_panes,
+        )
+
+        assert state.scenario_verdicts[1] == VERDICT_PASS
+        assert state.scenario_verdicts[2] == VERDICT_INPUT_REQUIRED
+        assert state.scenario_verdicts[3] == VERDICT_INPUT_REQUIRED

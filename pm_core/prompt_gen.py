@@ -827,13 +827,54 @@ def generate_review_loop_prompt(data: dict, pr_id: str) -> str:
 # QA prompts
 # ---------------------------------------------------------------------------
 
+
+def _worker_group_field(worker_count: int) -> str:
+    """Return the GROUP field line for the planner output format."""
+    if worker_count == 0:
+        return ""
+    if worker_count < 0:
+        return "\nGROUP: <worker group number, starting from 1>"
+    return f"\nGROUP: <worker group number, 1 to {worker_count}>"
+
+
+def _worker_grouping_instructions(worker_count: int) -> str:
+    """Return instructions for the planner to group scenarios into workers."""
+    if worker_count == 0:
+        return ""
+    if worker_count < 0:
+        # Planner decides grouping
+        return """
+## Worker Grouping
+
+Scenarios will be batched into worker sessions.  Each worker executes its
+assigned scenarios sequentially, sharing diff review and file loading.
+
+Assign each scenario a GROUP number (starting from 1). Group scenarios that 
+share functional area or related files together.
+"""
+    return f"""
+## Worker Grouping
+
+Scenarios will be batched into worker sessions.  Each worker executes its
+assigned scenarios sequentially, sharing diff review and file loading.
+
+Assign each scenario a GROUP number.  Use up to {worker_count} groups.
+Group scenarios that share functional area or related files together.
+"""
+
+
 def generate_qa_planner_prompt(data: dict, pr_id: str,
                                session_name: str | None = None,
-                               scenario_start: int = 1) -> str:
+                               scenario_start: int = 1,
+                               worker_count: int = 0) -> str:
     """Generate a prompt for the QA planning session.
 
     The planner analyzes the PR and the instruction library to generate
     a structured QA plan with test scenarios.
+
+    When *worker_count* != 0, the prompt asks the planner to assign each
+    scenario to a worker group.  -1 lets the planner decide how many groups;
+    >0 fixes the number of groups.
     """
     from pm_core import qa_instructions
 
@@ -948,13 +989,13 @@ QA_PLAN_START
 SCENARIO {scenario_start}: <descriptive title for this scenario>
 FOCUS: <what area or behavior to test>
 INSTRUCTION: <filename from the library above, or "none" if no existing instruction applies>
-MOCKS: <comma-separated mock IDs this scenario uses, or "none">
+MOCKS: <comma-separated mock IDs this scenario uses, or "none">{_worker_group_field(worker_count)}
 STEPS: <concrete test steps to perform>
 
 SCENARIO {scenario_start + 1}: <descriptive title for next scenario>
 FOCUS: <what area or behavior to test>
 INSTRUCTION: <filename or "none">
-MOCKS: <mock IDs or "none">
+MOCKS: <mock IDs or "none">{_worker_group_field(worker_count)}
 STEPS: <concrete test steps>
 
 QA_PLAN_END
@@ -964,7 +1005,7 @@ Number scenarios starting from {scenario_start}.
 Include as many scenarios as required to fully exercise the functionality
 of the PR.  Exercise the core functionality as well as any edge cases
 that may expose bugs.
-
+{_worker_grouping_instructions(worker_count)}
 {general_notes_block}{qa_specific_block}"""
     return prompt.strip()
 
@@ -1188,12 +1229,460 @@ final verdict.
 **Steps**:
 {scenario.steps}
 {instruction_block}
+## Report File
+
+Before emitting your verdict, write a short report to `{scenario.report_path}`
+containing: the scenario title, your verdict (PASS/NEEDS_WORK/INPUT_REQUIRED),
+a brief summary of findings, and any issues encountered.  Use your Write tool
+to create the file.
+
 ## Execution
 
 {execution_block}
 
 IMPORTANT: Always end your response with the verdict keyword on its own line."""
     return prompt.strip()
+
+
+def generate_qa_worker_prompt(data: dict, pr_id: str,
+                              scenarios: list,
+                              worker_index: int,
+                              workdir: str,
+                              qa_workdir: str,
+                              session_name: str | None = None,
+                              worktree_mode: bool = False,
+                              scratch_dir: str | None = None) -> str:
+    """Generate a prompt for a batched QA worker session.
+
+    A worker executes multiple scenarios sequentially in a single session,
+    sharing diff review and file loading across scenarios.
+
+    Args:
+        data: Project data dict.
+        pr_id: PR identifier.
+        scenarios: List of QAScenario objects assigned to this worker.
+        worker_index: 1-based worker index.
+        workdir: Worker's workdir (clone path).
+        qa_workdir: QA session workdir (for report files).
+        session_name: tmux session name.
+        worktree_mode: When True, the worker runs in an isolated clone.
+        scratch_dir: Path to a scratch directory for throwaway test projects.
+    """
+    pr = store.get_pr(data, pr_id)
+    if not pr:
+        raise ValueError(f"PR {pr_id} not found")
+
+    title = pr.get("title", "")
+    branch = pr.get("branch", f"pm/{pr_id}")
+    pr_workdir = pr.get("workdir", "")
+    base_branch = data.get("project", {}).get("base_branch", "master")
+
+    # Include PR notes and mocks
+    pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
+    mocks_block = get_spec_mocks_section(pr)
+
+    # Workdir description
+    backend_name = data.get("project", {}).get("backend", "vanilla")
+    has_remote = backend_name != "local"
+
+    scratch_line = f"\n- **Scratch dir** (throwaway test projects): {scratch_dir}" if scratch_dir else ""
+    if worktree_mode:
+        workdir_block = f"""\
+- **Your workdir** (isolated clone): {workdir}{scratch_line}
+- **PR workdir** (canonical source): {pr_workdir}"""
+    else:
+        workdir_block = f"""\
+- **PR workdir** (source code): {pr_workdir}
+- **Your workdir** (throwaway test projects): {workdir}"""
+
+    # Build scenario list — for the INITIAL prompt, only Scenario 1's
+    # refined steps are embedded. All other scenarios arrive later via
+    # PROCEED TO SCENARIO N follow-ups (see generate_qa_worker_proceed_message).
+    first_sc = scenarios[0]
+    first_report_path = f"{qa_workdir}/report-s{first_sc.index}.md"
+    first_scenario_block = f"""### Scenario {first_sc.index}: {first_sc.title}
+
+**Focus**: {first_sc.focus}
+
+**Steps**:
+{first_sc.steps}
+
+**Report file**: `{first_report_path}`"""
+
+    # Titles-only listing of all scenarios so the evaluator knows how
+    # many to expect and their order.
+    scenario_titles_lines = []
+    for sc in scenarios:
+        scenario_titles_lines.append(f"- Scenario {sc.index}: {sc.title}")
+    scenario_titles_text = "\n".join(scenario_titles_lines)
+
+    scenarios_text = first_scenario_block
+    scenario_indices = ", ".join(str(sc.index) for sc in scenarios)
+
+    # Once-only setup steps (pull, diff review) before the per-scenario loop
+    setup_lines = ["1. Review the diff and relevant files — you will reuse this "
+                   "understanding across all scenarios in this batch"]
+    if has_remote:
+        setup_lines.append(
+            f"2. Pull the latest changes: `git pull origin {branch}`. "
+            f"Resolve any merge conflicts."
+        )
+    setup_steps = "\n".join(setup_lines)
+
+    push_instructions = ""
+    if worktree_mode:
+        push_instructions = f"""- If you find and fix issues, commit with message prefix `qa: `
+- Push: `git push origin {branch}`
+- If push fails: `git pull --rebase origin {branch} && git push origin {branch}`"""
+
+    prompt = f"""You are a QA worker (Worker {worker_index}) running {len(scenarios)} scenarios sequentially for PR {pr_id}: "{title}"
+
+## Context
+
+- **PR**: {pr_id} — "{title}"
+- **Branch**: {branch}
+- **Base branch**: {base_branch}
+{workdir_block}
+{pr_notes_block}{mocks_block}
+## How This Works
+
+You are a batched QA worker. You will execute {len(scenarios)} scenario(s) sequentially
+(scenarios {scenario_indices}).  An orchestrator is monitoring your tmux pane.
+
+**Once, at the start:**
+{setup_steps}
+
+**Then, for each scenario in order:**
+1. Execute the test steps for the current scenario (steps are embedded in
+   this prompt for Scenario {scenarios[0].index}; for every subsequent scenario the
+   orchestrator will send you a `PROCEED TO SCENARIO <N>` message that
+   contains that scenario's refined steps inline).
+2. Write a per-scenario report file at the path given in the scenario block.
+3. Output the scenario verdict in this exact format on its own line:
+   `SCENARIO_<N>_VERDICT: <VERDICT>`
+   where N is the scenario number and VERDICT is PASS, NEEDS_WORK, or INPUT_REQUIRED
+4. **WAIT** — do not proceed to the next scenario until you receive a
+   `PROCEED TO SCENARIO <M>` message from the orchestrator. That message
+   will carry Scenario M's full refined steps, focus, and report path.
+   Do NOT attempt to execute any scenario whose steps you have not yet
+   been shown.
+
+## Important: When to use each verdict
+
+- **PASS** — You executed the test steps AND they succeeded. A PASS is only valid
+  when you have **runtime evidence** (command output, observed behavior, test results).
+- **NEEDS_WORK** — You executed the test steps and found concrete bugs or issues.
+{push_instructions}
+- **INPUT_REQUIRED** — You could not execute one or more test steps because of
+  missing tools, unavailable commands, environment limitations, or ambiguity.
+  **Stop and wait for human input** — do NOT proceed to the next scenario.
+
+## Report File Format
+
+For each scenario, write a markdown report to the specified path BEFORE outputting
+the verdict. Use this format:
+
+```
+# Scenario <N>: <title>
+
+## Verdict: <PASS|NEEDS_WORK|INPUT_REQUIRED>
+
+## Summary
+<brief summary of what you tested and found>
+
+## Details
+<detailed findings, command outputs, issues discovered>
+```
+
+Write the report atomically: write to a `.tmp` file first, then rename it.
+
+## Scenarios in this Worker
+
+You will run the scenarios below, in order. Only Scenario {first_sc.index}'s refined
+steps are embedded in this prompt. For every subsequent scenario you must
+wait for a `PROCEED TO SCENARIO <N>` message that will carry that
+scenario's steps inline.
+
+{scenario_titles_text}
+
+## Current Scenario (start here)
+
+{scenarios_text}
+
+## Execution Order
+
+Execute scenarios in this order: {scenario_indices}.
+Start with Scenario {scenarios[0].index} now. After emitting its
+`SCENARIO_{scenarios[0].index}_VERDICT:` line, WAIT for the orchestrator
+to send `PROCEED TO SCENARIO <next>` with the next scenario's steps.
+
+IMPORTANT: After each scenario's verdict, WAIT for the orchestrator to tell you
+to proceed. Do not start the next scenario until instructed."""
+    return prompt.strip()
+
+
+def generate_qa_worker_proceed_message(scenario, refined_steps: str) -> str:
+    """Return the body of a PROCEED TO SCENARIO N follow-up message.
+
+    Sent by the orchestrator to the evaluator pane after an accepted
+    verdict for the previous scenario. Carries the refined steps for the
+    next scenario inline so the evaluator's initial prompt does not need
+    to embed them.
+    """
+    idx = scenario.index
+    report_path = scenario.report_path or f"report-s{idx}.md"
+    return f"""PROCEED TO SCENARIO {idx}
+
+### Scenario {idx}: {scenario.title}
+
+**Focus**: {scenario.focus}
+
+**Steps**:
+{refined_steps}
+
+**Report file**: `{report_path}`
+
+Execute this scenario, write the report, then output `SCENARIO_{idx}_VERDICT: <verdict>` on its own line."""
+
+
+def generate_qa_batched_concretizer_prompt(
+    scenarios: list,
+    pr_branch: str,
+    base_branch: str,
+    instruction_contents: dict,
+) -> str:
+    """Prompt for the persistent per-worker concretizer session.
+
+    The concretizer refines one scenario at a time, serially, across all
+    of the worker's scenarios. The initial response refines Scenario 1.
+    Subsequent refinements are triggered by follow-up messages of the
+    form `CONCRETIZE SCENARIO <N>` which carry that scenario's planned
+    steps + instruction content lazily. Each refinement is bracketed by
+    the `REFINED_STEPS_START` / `REFINED_STEPS_END` markers so the
+    orchestrator can extract them from pane scrollback.
+    """
+    first = scenarios[0]
+    scenario_indices = ", ".join(str(sc.index) for sc in scenarios)
+
+    # Roster: titles only so the session knows what's coming, but no
+    # drafts or instructions for scenarios 2+ (those are delivered
+    # lazily via follow-up messages).
+    roster_lines = []
+    for sc in scenarios:
+        roster_lines.append(f"- Scenario {sc.index}: {sc.title}")
+    roster_text = "\n".join(roster_lines)
+
+    # Scenario 1's draft + instruction content (the one we're about
+    # to refine).
+    first_instr = instruction_contents.get(first.index)
+    first_instr_block = ""
+    if first_instr:
+        first_instr_block = f"""
+**Instruction file contents for Scenario {first.index}**:
+{first_instr}
+"""
+    first_scenario_block = f"""### Scenario {first.index}: {first.title}
+
+**Focus**: {first.focus}
+
+**Planned steps**:
+{first.steps}
+{first_instr_block}"""
+
+    return f"""You are the step concretizer for a batch of QA scenarios on branch `{pr_branch}` (base `{base_branch}`).
+
+Your job: for each scenario in turn, verify the planned steps against the
+actual codebase and produce refined, concrete, executable steps. You can
+add, remove, or correct steps. If an instruction file is provided for a
+scenario, incorporate its setup steps into the refined list so the
+evaluator doesn't need to read the file separately.
+
+You will handle scenarios **one at a time, serially**, across {len(scenarios)}
+scenarios ({scenario_indices}). Do NOT refine more than one scenario per
+response.
+
+## Scenarios in this worker (roster)
+
+These are the scenarios you will refine, in order. Only Scenario 1's
+draft steps and instruction content are included below. For each
+subsequent scenario, you will receive a `CONCRETIZE SCENARIO <N>`
+follow-up message carrying that scenario's draft steps and instruction
+content when it's time to refine it.
+
+{roster_text}
+
+## Scenario 1 (refine this one right now)
+
+{first_scenario_block}
+
+## Output format (used for every refinement)
+
+When asked to refine a scenario, output **only** the refined steps for
+that one scenario, bracketed by these markers on their own lines:
+
+REFINED_STEPS_START
+<corrected, numbered, concrete, executable steps for the requested scenario>
+REFINED_STEPS_END
+
+Your response MUST end with `REFINED_STEPS_END`. Do not include any text
+after it.
+
+## What to do right now
+
+Refine **Scenario {first.index}: {first.title}** only. Output the refined
+steps between `REFINED_STEPS_START` / `REFINED_STEPS_END`, then STOP and
+wait for a follow-up message.
+
+After you output `REFINED_STEPS_END` for Scenario {first.index}, wait
+silently. The orchestrator will send you a follow-up message of the form
+`CONCRETIZE SCENARIO <N>` naming the next scenario to refine. When you
+receive such a follow-up, refine that scenario (and ONLY that scenario)
+using the same `REFINED_STEPS_START` / `REFINED_STEPS_END` format, then
+wait again.
+
+IMPORTANT: Refine only the scenario you are currently asked about. Each
+of your responses must contain exactly one `REFINED_STEPS_START` /
+`REFINED_STEPS_END` pair and must end with `REFINED_STEPS_END`."""
+
+
+def generate_concretizer_followup_message(scenario, instruction_content: str | None) -> str:
+    """Follow-up message sent to the concretizer pane for scenario N>1.
+
+    The concretizer already has the planned steps and instruction content
+    from its initial prompt, but we repeat the essentials here so the
+    model doesn't have to hunt for them in scrollback.
+    """
+    instr_block = ""
+    if instruction_content:
+        instr_block = f"\n**Instruction file contents**:\n{instruction_content}\n"
+    return f"""CONCRETIZE SCENARIO {scenario.index}
+
+### Scenario {scenario.index}: {scenario.title}
+
+**Focus**: {scenario.focus}
+
+**Planned steps**:
+{scenario.steps}
+{instr_block}
+Refine the steps for Scenario {scenario.index} only. Output the refined
+steps between `REFINED_STEPS_START` / `REFINED_STEPS_END` markers and end
+your response with `REFINED_STEPS_END`. Do not refine any other scenario
+in this response."""
+
+
+def generate_qa_batched_verifier_prompt(
+    scenarios: list,
+    worker_index: int,
+    pr_branch: str,
+    base_branch: str,
+) -> str:
+    """Prompt for the persistent per-worker verifier session.
+
+    The verifier confirms, one scenario at a time, that the evaluator's
+    stated verdict (PASS / NEEDS_WORK / INPUT_REQUIRED) is supported by
+    real runtime evidence in the session transcript. It waits for
+    `VERIFY SCENARIO <N>` follow-up messages and responds with either
+    `VERIFIED` or a `FLAGGED_START` ... `FLAGGED_END` block.
+    """
+    roster_lines = []
+    for sc in scenarios:
+        roster_lines.append(f"- Scenario {sc.index}: {sc.title}")
+    roster_text = "\n".join(roster_lines)
+
+    return f"""You are the QA verifier for worker {worker_index} on branch `{pr_branch}` (base `{base_branch}`).
+
+Your job: for each scenario the evaluator completes, confirm that the
+evaluator's stated verdict is supported by actual runtime evidence in
+the evaluator's transcript (or pane output). You will receive
+per-scenario verification requests as follow-up messages of the form
+`VERIFY SCENARIO <N>`. Each request will include:
+
+- the scenario's title and index,
+- the stated verdict (PASS / NEEDS_WORK / INPUT_REQUIRED),
+- a path to the evaluator's transcript file (or inline pane output as a
+  fallback if no transcript is available).
+
+For each request, read the transcript, determine whether the stated
+verdict is supported by real runtime evidence (tests actually ran,
+results match the verdict, etc.), and respond with exactly one of:
+
+- `VERIFIED` on its own line, if the stated verdict is supported; OR
+- a `FLAGGED_START` ... `FLAGGED_END` block containing a brief reason,
+  if the stated verdict is NOT supported (e.g. tests didn't run, output
+  contradicts the verdict, evaluator hallucinated results, etc.).
+
+Example flagged response:
+
+FLAGGED_START
+<explanation of what went wrong — can be multiple lines>
+FLAGGED_END
+
+IMPORTANT: Your response for each verification must end with either
+`VERIFIED` on its own line OR `FLAGGED_END` on its own line. Do not
+include any text after that final marker.
+
+## Scenarios in this worker (roster)
+
+These are the scenarios you will be asked to verify, in order. No
+drafts, instructions, or transcripts are included now — each
+`VERIFY SCENARIO <N>` follow-up will carry the stated verdict and the
+transcript path for that scenario at the time of the request.
+
+{roster_text}
+
+## What to do right now
+
+Do NOT produce any output yet. Wait silently for the first
+`VERIFY SCENARIO <N>` follow-up message. When it arrives, read the
+referenced transcript, then emit exactly one `VERIFIED` line or one
+`FLAGGED_START` / `FLAGGED_END` block as described above, and wait
+again for the next follow-up.
+
+Each of your responses must contain exactly one `VERIFIED` line OR
+exactly one `FLAGGED_START` / `FLAGGED_END` pair, and must end with
+that marker."""
+
+
+def generate_qa_verifier_followup_message(
+    scenario,
+    verdict: str,
+    transcript_path: str | None = None,
+    pane_output: str | None = None,
+) -> str:
+    """Follow-up message sent to the verifier pane for one scenario.
+
+    Either *transcript_path* (preferred) or *pane_output* (fallback)
+    should be provided. Body tells the verifier which scenario, the
+    stated verdict, and where to read the evidence from.
+    """
+    if transcript_path:
+        source_block = (
+            f"**Evaluator transcript**: `{transcript_path}`\n\n"
+            f"Read the transcript, confirm the test steps actually ran "
+            f"and the evidence supports the stated verdict."
+        )
+    else:
+        inline = pane_output or "(no pane output available)"
+        source_block = (
+            f"**Evaluator pane output (inline)**:\n\n```\n{inline}\n```\n\n"
+            f"Read the pane output, confirm the test steps actually ran "
+            f"and the evidence supports the stated verdict."
+        )
+
+    return f"""VERIFY SCENARIO {scenario.index}
+
+### Scenario {scenario.index}: {scenario.title}
+
+**Stated verdict**: {verdict}
+
+{source_block}
+
+Reply with exactly one of:
+- `VERIFIED` on its own line, OR
+- a `FLAGGED_START` ... `FLAGGED_END` block with your reason.
+
+Your response must end with either `VERIFIED` or `FLAGGED_END` on its
+own line."""
 
 
 def generate_standalone_qa_prompt(data: dict, instruction_id: str,
