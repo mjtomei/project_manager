@@ -1014,8 +1014,23 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     if pm_session:
         if tmux_mod.session_exists(pm_session):
             window_name = _pr_display_id(pr_entry)
+            # When running in a container, Claude's cwd is /workspace —
+            # transcript symlinks must target where Claude actually writes
+            # (see pr_review for the same pattern).
+            from pm_core.container import (
+                is_container_mode_enabled as _is_container_enabled,
+                _CONTAINER_WORKDIR,
+            )
+            if _is_container_enabled():
+                _claude_cwd = _CONTAINER_WORKDIR
+                _claude_write_dir = str(work_path)
+            else:
+                _claude_cwd = str(work_path)
+                _claude_write_dir = None
             cmd = build_claude_shell_cmd(prompt=prompt,
-                                         transcript=transcript, cwd=str(work_path),
+                                         transcript=transcript,
+                                         cwd=_claude_cwd,
+                                         write_dir=_claude_write_dir,
                                          model=resolved_model,
                                          provider=resolved_provider,
                                          effort=_resolution.effort)
