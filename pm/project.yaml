@@ -9222,7 +9222,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/166
   gh_pr_number: 166
   created_at: '2026-04-21T17:07:01.779432+00:00'
-  updated_at: '2026-04-24T16:35:07.695266+00:00'
+  updated_at: '2026-04-24T17:06:30.996166+00:00'
   started_at: '2026-04-24T02:48:10.332243+00:00'
   reviewed_at: '2026-04-24T13:47:52.280824+00:00'
   merged_at: null
@@ -9236,6 +9236,23 @@ prs:
       drifts from the spec.'
     created_at: '2026-04-24T16:35:07Z'
     last_edited: '2026-04-24T16:35:07Z'
+  - id: note-ba327a3
+    text: 'Scope creep in this review loop iteration (captured here since several
+      unrelated-to-hooks changes landed on this branch): (1) Removed PASS_WITH_SUGGESTIONS
+      verdict entirely — review now uses only PASS, NEEDS_WORK, INPUT_REQUIRED. Non-blocking
+      suggestions now roll into NEEDS_WORK with the expectation that Claude implements
+      them in the same iteration. (2) Removed the zzz prefix — zz is the only multi-z
+      modifier now. Collapsed zz d / zzz d and zz t / zzz t into just zz d / zz t.
+      Dropped stop_on_suggestions and QA strict/lenient distinctions. (3) Manual zz
+      t no longer triggers auto-merge — merge is now strictly an auto-start action.
+      _maybe_auto_merge lost its force= param. (4) Sharpened INPUT_REQUIRED prompt
+      guidance — reviewers should prefer INPUT_REQUIRED over NEEDS_WORK whenever in
+      doubt; explicit exclusion for manual testing (that belongs in QA). (5) Fixed
+      markdown-bold verdict detection (**PASS** was being missed by the JSONL extractor).
+      (6) Fixed /home/pm/.pm root-ownership bug introduced by the hooks bind-mount
+      — entrypoint now chowns it back to pm.'
+    created_at: '2026-04-24T17:06:30Z'
+    last_edited: '2026-04-24T17:06:30Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-014f93f-use-claude-code-hooks-idle-prompt-st-33742570
 - id: pr-e3595fe
   plan: plan-cb4ef69
