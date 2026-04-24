@@ -2622,7 +2622,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/113
   gh_pr_number: 113
   created_at: '2026-03-02T02:29:03.713168+00:00'
-  updated_at: '2026-03-23T13:13:42.135194+00:00'
+  updated_at: '2026-04-24T17:09:35.785711+00:00'
   started_at: '2026-03-02T02:34:58.036488+00:00'
   reviewed_at: '2026-03-02T02:56:54.736623+00:00'
   merged_at: null
@@ -2638,6 +2638,16 @@ prs:
       to QA scenario workers and implementation sessions.'
     created_at: '2026-03-06T13:46:24Z'
     last_edited: '2026-03-06T13:46:24Z'
+  - id: note-81da103
+    text: 'Heads up: PR #166 (pr-014f93f) dropped PASS_WITH_SUGGESTIONS verdict entirely
+      and removed the zzz prefix. Review loop verdicts are now PASS/NEEDS_WORK/INPUT_REQUIRED
+      only (non-blocking suggestions roll into NEEDS_WORK). zzz d and zzz t are gone
+      — only zz d / zz t remain. ReviewLoopState.stop_on_suggestions is gone. QA strict/lenient
+      distinction is gone. _maybe_auto_merge lost its force= param — manual zz t no
+      longer triggers auto-merge. If your branch has stale references to any of those,
+      expect conflicts when rebasing on master after #166 lands.'
+    created_at: '2026-04-24T17:09:35Z'
+    last_edited: '2026-04-24T17:09:35Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-923f22b-add-tui-watchdog-for-dead-background-ab512a43
 - id: pr-7f958f3
   plan: tui-ux
@@ -2667,7 +2677,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/114
   gh_pr_number: 114
   created_at: '2026-03-02T02:56:06.968805+00:00'
-  updated_at: '2026-03-23T13:16:05.060755+00:00'
+  updated_at: '2026-04-24T17:09:30.452938+00:00'
   started_at: '2026-03-02T02:56:46.721498+00:00'
   reviewed_at: '2026-03-02T03:08:03.583632+00:00'
   merged_at: null
@@ -2698,6 +2708,16 @@ prs:
       found in codebase. All changes are correct and complete.'
     created_at: '2026-03-02T03:38:04Z'
     last_edited: '2026-03-02T03:38:04Z'
+  - id: note-192ab95
+    text: 'Heads up: PR #166 (pr-014f93f) dropped PASS_WITH_SUGGESTIONS verdict entirely
+      and removed the zzz prefix. Review loop verdicts are now PASS/NEEDS_WORK/INPUT_REQUIRED
+      only (non-blocking suggestions roll into NEEDS_WORK). zzz d and zzz t are gone
+      — only zz d / zz t remain. ReviewLoopState.stop_on_suggestions is gone. QA strict/lenient
+      distinction is gone. _maybe_auto_merge lost its force= param — manual zz t no
+      longer triggers auto-merge. If your branch has stale references to any of those,
+      expect conflicts when rebasing on master after #166 lands.'
+    created_at: '2026-04-24T17:09:30Z'
+    last_edited: '2026-04-24T17:09:30Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-7f958f3-change-tui-restart-from-ctrl-r-to-a--ab512a43
 - id: pr-7122c11
   plan: watchers
@@ -4447,11 +4467,21 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/131
   gh_pr_number: 131
   created_at: '2026-03-07T15:58:50.876583+00:00'
-  updated_at: '2026-04-07T13:53:48.512780+00:00'
+  updated_at: '2026-04-24T17:09:32.729022+00:00'
   started_at: '2026-03-08T22:27:50.279825+00:00'
   reviewed_at: '2026-03-09T17:23:26.156810+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-e204001
+    text: 'Heads up: PR #166 (pr-014f93f) dropped PASS_WITH_SUGGESTIONS verdict entirely
+      and removed the zzz prefix. Review loop verdicts are now PASS/NEEDS_WORK/INPUT_REQUIRED
+      only (non-blocking suggestions roll into NEEDS_WORK). zzz d and zzz t are gone
+      — only zz d / zz t remain. ReviewLoopState.stop_on_suggestions is gone. QA strict/lenient
+      distinction is gone. _maybe_auto_merge lost its force= param — manual zz t no
+      longer triggers auto-merge. If your branch has stale references to any of those,
+      expect conflicts when rebasing on master after #166 lands.'
+    created_at: '2026-04-24T17:09:32Z'
+    last_edited: '2026-04-24T17:09:32Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-4c41017-refactor-techtree-split-pr-nodes-int-ab512a43
 - id: pr-e9d4b24
   plan: bugs
@@ -4566,7 +4596,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/129
   gh_pr_number: 129
   created_at: '2026-03-08T01:38:37.869518+00:00'
-  updated_at: '2026-04-02T13:51:23.889527+00:00'
+  updated_at: '2026-04-24T17:09:35.012827+00:00'
   started_at: '2026-03-08T01:41:11.161062+00:00'
   reviewed_at: '2026-03-08T02:10:07.745342+00:00'
   merged_at: null
@@ -4595,6 +4625,16 @@ prs:
       /home/matt/.pm/workdirs/qa/pr-fd54424-438336bf7dacd96b)'
     created_at: '2026-03-08T20:16:53Z'
     last_edited: '2026-03-08T20:16:53Z'
+  - id: note-8d4f2df
+    text: 'Heads up: PR #166 (pr-014f93f) dropped PASS_WITH_SUGGESTIONS verdict entirely
+      and removed the zzz prefix. Review loop verdicts are now PASS/NEEDS_WORK/INPUT_REQUIRED
+      only (non-blocking suggestions roll into NEEDS_WORK). zzz d and zzz t are gone
+      — only zz d / zz t remain. ReviewLoopState.stop_on_suggestions is gone. QA strict/lenient
+      distinction is gone. _maybe_auto_merge lost its force= param — manual zz t no
+      longer triggers auto-merge. If your branch has stale references to any of those,
+      expect conflicts when rebasing on master after #166 lands.'
+    created_at: '2026-04-24T17:09:34Z'
+    last_edited: '2026-04-24T17:09:34Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-fd54424-add-interactive-pm-tutorial-command--ab512a43
 - id: pr-3032fb6
   plan: watchers
@@ -4730,7 +4770,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/137
   gh_pr_number: 137
   created_at: '2026-03-08T21:45:42.636585+00:00'
-  updated_at: '2026-04-24T14:52:34.726470+00:00'
+  updated_at: '2026-04-24T17:09:31.971909+00:00'
   started_at: '2026-03-10T21:38:57.198809+00:00'
   reviewed_at: '2026-03-23T13:18:57.337047+00:00'
   merged_at: null
@@ -4804,6 +4844,16 @@ prs:
       applied there.
     created_at: '2026-04-24T14:52:34Z'
     last_edited: '2026-04-24T14:52:34Z'
+  - id: note-3002bcd
+    text: 'Heads up: PR #166 (pr-014f93f) dropped PASS_WITH_SUGGESTIONS verdict entirely
+      and removed the zzz prefix. Review loop verdicts are now PASS/NEEDS_WORK/INPUT_REQUIRED
+      only (non-blocking suggestions roll into NEEDS_WORK). zzz d and zzz t are gone
+      — only zz d / zz t remain. ReviewLoopState.stop_on_suggestions is gone. QA strict/lenient
+      distinction is gone. _maybe_auto_merge lost its force= param — manual zz t no
+      longer triggers auto-merge. If your branch has stale references to any of those,
+      expect conflicts when rebasing on master after #166 lands.'
+    created_at: '2026-04-24T17:09:31Z'
+    last_edited: '2026-04-24T17:09:31Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b827df-add-running-tasks-pane-to-tui-with-w-cbe54f5e
 - id: pr-341100c
   plan: tui-ux
@@ -5536,11 +5586,21 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/145
   gh_pr_number: 145
   created_at: '2026-03-09T20:05:57.251516+00:00'
-  updated_at: '2026-03-23T13:14:52.951803+00:00'
+  updated_at: '2026-04-24T17:09:31.219040+00:00'
   started_at: '2026-03-14T21:52:27.806921+00:00'
   reviewed_at: '2026-03-14T22:12:44.106792+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-b58bd04
+    text: 'Heads up: PR #166 (pr-014f93f) dropped PASS_WITH_SUGGESTIONS verdict entirely
+      and removed the zzz prefix. Review loop verdicts are now PASS/NEEDS_WORK/INPUT_REQUIRED
+      only (non-blocking suggestions roll into NEEDS_WORK). zzz d and zzz t are gone
+      — only zz d / zz t remain. ReviewLoopState.stop_on_suggestions is gone. QA strict/lenient
+      distinction is gone. _maybe_auto_merge lost its force= param — manual zz t no
+      longer triggers auto-merge. If your branch has stale references to any of those,
+      expect conflicts when rebasing on master after #166 lands.'
+    created_at: '2026-04-24T17:09:30Z'
+    last_edited: '2026-04-24T17:09:30Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-4a89e52-qa-verdict-collection-survives-tui-r-d0f78a09
 - id: pr-9bf8b0b
   plan: improvements
@@ -6669,7 +6729,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/160
   gh_pr_number: 160
   created_at: '2026-03-14T03:46:00.421065+00:00'
-  updated_at: '2026-04-07T22:54:01.562371+00:00'
+  updated_at: '2026-04-24T17:09:33.492294+00:00'
   started_at: '2026-04-07T16:49:46.605414+00:00'
   reviewed_at: '2026-04-07T22:54:01.562371+00:00'
   merged_at: null
@@ -6715,6 +6775,16 @@ prs:
       security bypasses'
     created_at: '2026-03-14T03:58:23Z'
     last_edited: '2026-03-14T03:58:23Z'
+  - id: note-d6f87ac
+    text: 'Heads up: PR #166 (pr-014f93f) dropped PASS_WITH_SUGGESTIONS verdict entirely
+      and removed the zzz prefix. Review loop verdicts are now PASS/NEEDS_WORK/INPUT_REQUIRED
+      only (non-blocking suggestions roll into NEEDS_WORK). zzz d and zzz t are gone
+      — only zz d / zz t remain. ReviewLoopState.stop_on_suggestions is gone. QA strict/lenient
+      distinction is gone. _maybe_auto_merge lost its force= param — manual zz t no
+      longer triggers auto-merge. If your branch has stale references to any of those,
+      expect conflicts when rebasing on master after #166 lands.'
+    created_at: '2026-04-24T17:09:33Z'
+    last_edited: '2026-04-24T17:09:33Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-8aa9411-review-and-qa-regression-benchmark-s-5da5b1da
 - id: pr-4eb96ff
   plan: plan-qa
@@ -6928,11 +6998,21 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/148
   gh_pr_number: 148
   created_at: '2026-03-18T16:31:56.522254+00:00'
-  updated_at: '2026-03-23T13:15:07.491165+00:00'
+  updated_at: '2026-04-24T17:09:34.251001+00:00'
   started_at: '2026-03-18T16:42:13.266300+00:00'
   reviewed_at: '2026-03-19T16:25:44.605020+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-abd8475
+    text: 'Heads up: PR #166 (pr-014f93f) dropped PASS_WITH_SUGGESTIONS verdict entirely
+      and removed the zzz prefix. Review loop verdicts are now PASS/NEEDS_WORK/INPUT_REQUIRED
+      only (non-blocking suggestions roll into NEEDS_WORK). zzz d and zzz t are gone
+      — only zz d / zz t remain. ReviewLoopState.stop_on_suggestions is gone. QA strict/lenient
+      distinction is gone. _maybe_auto_merge lost its force= param — manual zz t no
+      longer triggers auto-merge. If your branch has stale references to any of those,
+      expect conflicts when rebasing on master after #166 lands.'
+    created_at: '2026-04-24T17:09:34Z'
+    last_edited: '2026-04-24T17:09:34Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-abcf70f-fakeclaudesession-scriptable-claude--cbe54f5e
 - id: pr-a7927b6
   plan: plan-qa
@@ -8076,11 +8156,21 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/156
   gh_pr_number: 156
   created_at: '2026-04-06T19:14:44.223134+00:00'
-  updated_at: '2026-04-07T13:30:18.816990+00:00'
+  updated_at: '2026-04-24T17:09:29.690246+00:00'
   started_at: '2026-04-06T19:17:16.583998+00:00'
   reviewed_at: '2026-04-07T13:30:18.816990+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-8fe4f6f
+    text: 'Heads up: PR #166 (pr-014f93f) dropped PASS_WITH_SUGGESTIONS verdict entirely
+      and removed the zzz prefix. Review loop verdicts are now PASS/NEEDS_WORK/INPUT_REQUIRED
+      only (non-blocking suggestions roll into NEEDS_WORK). zzz d and zzz t are gone
+      — only zz d / zz t remain. ReviewLoopState.stop_on_suggestions is gone. QA strict/lenient
+      distinction is gone. _maybe_auto_merge lost its force= param — manual zz t no
+      longer triggers auto-merge. If your branch has stale references to any of those,
+      expect conflicts when rebasing on master after #166 lands.'
+    created_at: '2026-04-24T17:09:29Z'
+    last_edited: '2026-04-24T17:09:29Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-fc6db6a-prevent-plain-d-from-opening-duplica-5a6a6c1c
 - id: pr-177dec0
   plan: bugs
