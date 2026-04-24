@@ -101,7 +101,7 @@ def _sweep_stale_events() -> None:
     if not _HOOKS_BASE.exists():
         return
     now = time.time()
-    for p in _HOOKS_BASE.rglob("*.json"):
+    for p in _HOOKS_BASE.glob("*.json"):
         if not p.is_file():
             continue
         try:

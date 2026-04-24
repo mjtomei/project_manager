@@ -301,7 +301,6 @@ def poll_for_verdict(
     wait_timeout: float = 15,
     stop_check: Callable[[], bool] | None = None,
     log_prefix: str = "loop_shared",
-    session_tag: str | None = None,
 ) -> str | None:
     """Block until Claude signals idle, then extract a verdict from the pane.
 
@@ -324,8 +323,6 @@ def poll_for_verdict(
             before re-checking pane existence / stop conditions.
         stop_check: Optional callable; if it returns True, we return None.
         log_prefix: Prefix for log messages.
-        session_tag: Optional override for the hook directory tag (defaults
-            to the session tag derived from cwd).
     """
     from pm_core import tmux as tmux_mod
     from pm_core import hook_events
@@ -352,7 +349,6 @@ def poll_for_verdict(
             timeout=wait_timeout,
             newer_than=hook_baseline,
             stop_check=stop_check,
-            session_tag=session_tag,
         )
         if stop_check and stop_check():
             return None
@@ -395,7 +391,6 @@ def wait_for_follow_up_verdict(
     wait_timeout: float = 15,
     stop_check: Callable[[], bool] | None = None,
     log_prefix: str = "loop_shared",
-    session_tag: str | None = None,
 ) -> str | None:
     """Block for the next hook-driven idle on an existing pane and
     extract a follow-up verdict.  Hook-driven only — requires session_id.
@@ -417,7 +412,6 @@ def wait_for_follow_up_verdict(
             timeout=wait_timeout,
             newer_than=hook_baseline,
             stop_check=stop_check,
-            session_tag=session_tag,
         )
         if stop_check and stop_check():
             return None

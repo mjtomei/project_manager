@@ -21,9 +21,8 @@ def tmp_hooks_home(tmp_path, monkeypatch):
 
 
 def _write_event(home: Path, session_id: str, event_type: str,
-                 ts: float | None = None,
-                 session_tag: str = "_notag") -> dict:
-    d = home / ".pm" / "hooks" / session_tag
+                 ts: float | None = None) -> dict:
+    d = home / ".pm" / "hooks"
     d.mkdir(parents=True, exist_ok=True)
     record = {
         "event_type": event_type,
@@ -37,7 +36,6 @@ def _write_event(home: Path, session_id: str, event_type: str,
 
 
 def test_hook_receiver_writes_event(tmp_hooks_home):
-    # cwd is /tmp (not a git repo) so session_tag is None → "_notag".
     payload = json.dumps({"session_id": "abc-123", "cwd": "/tmp"})
     result = subprocess.run(
         [sys.executable, "-m", "pm_core.hook_receiver", "idle_prompt"],
@@ -48,11 +46,10 @@ def test_hook_receiver_writes_event(tmp_hooks_home):
         },
     )
     assert result.returncode == 0, result.stderr
-    # The receiver writes into a session-tag subdirectory
-    hooks_root = tmp_hooks_home / ".pm" / "hooks"
-    matches = list(hooks_root.rglob("abc-123.json"))
-    assert matches, f"no abc-123.json under {hooks_root}"
-    data = json.loads(matches[0].read_text())
+    # Flat layout: events land directly under ~/.pm/hooks/
+    event_file = tmp_hooks_home / ".pm" / "hooks" / "abc-123.json"
+    assert event_file.exists(), f"no event file at {event_file}"
+    data = json.loads(event_file.read_text())
     assert data["event_type"] == "idle_prompt"
     assert data["session_id"] == "abc-123"
     assert isinstance(data["timestamp"], (int, float))
@@ -69,7 +66,7 @@ def test_hook_receiver_silent_on_bad_input(tmp_hooks_home):
     )
     assert result.returncode == 0
     hooks_root = tmp_hooks_home / ".pm" / "hooks"
-    assert list(hooks_root.rglob("*.json")) == []
+    assert list(hooks_root.glob("*.json")) == []
 
 
 def _reload_hook_events():
@@ -82,17 +79,15 @@ def _reload_hook_events():
 def test_wait_for_event_returns_matching(tmp_hooks_home):
     hook_events = _reload_hook_events()
     sid = "sid-wait-1"
-    tag = "_notag"
 
     def writer():
         time.sleep(0.1)
         _write_event(tmp_hooks_home, sid, "idle_prompt",
-                     ts=time.time() + 1, session_tag=tag)
+                     ts=time.time() + 1)
 
     t = threading.Thread(target=writer)
     t.start()
-    ev = hook_events.wait_for_event(sid, {"idle_prompt"}, timeout=2.0, tick=0.05,
-                                    session_tag=tag)
+    ev = hook_events.wait_for_event(sid, {"idle_prompt"}, timeout=2.0, tick=0.05)
     t.join()
     assert ev is not None
     assert ev["event_type"] == "idle_prompt"
@@ -101,22 +96,20 @@ def test_wait_for_event_returns_matching(tmp_hooks_home):
 def test_wait_for_event_times_out(tmp_hooks_home):
     hook_events = _reload_hook_events()
     ev = hook_events.wait_for_event("no-such-sid", {"idle_prompt"}, timeout=0.2,
-                                    tick=0.05, session_tag="_notag")
+                                    tick=0.05)
     assert ev is None
 
 
 def test_wait_for_event_respects_newer_than(tmp_hooks_home):
     hook_events = _reload_hook_events()
     sid = "sid-newer"
-    tag = "_notag"
     old_ts = time.time() - 10
-    _write_event(tmp_hooks_home, sid, "idle_prompt", ts=old_ts, session_tag=tag)
+    _write_event(tmp_hooks_home, sid, "idle_prompt", ts=old_ts)
 
     # Baseline is now — the stale event must NOT be returned
     ev = hook_events.wait_for_event(
         sid, {"idle_prompt"}, timeout=0.2, tick=0.05,
         newer_than=time.time(),
-        session_tag=tag,
     )
     assert ev is None
 
@@ -247,12 +240,11 @@ def test_poll_for_verdict_hook_fast_path(tmp_hooks_home, monkeypatch):
     monkeypatch.setattr(tmux_mod, "capture_pane", fake_capture_pane)
 
     sid = "sid-poll-1"
-    tag = "_notag"
 
     def writer():
         time.sleep(0.1)
         _write_event(tmp_hooks_home, sid, "idle_prompt",
-                     ts=time.time() + 5, session_tag=tag)
+                     ts=time.time() + 5)
 
     t = threading.Thread(target=writer)
     t.start()
@@ -263,7 +255,6 @@ def test_poll_for_verdict_hook_fast_path(tmp_hooks_home, monkeypatch):
         verdicts=("PASS", "FAIL"),
         keywords=("PASS", "FAIL"),
         session_id=sid,
-        session_tag=tag,
         wait_timeout=5,
         log_prefix="test",
     )

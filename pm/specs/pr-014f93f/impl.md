@@ -26,12 +26,11 @@ pm obtains a `session_id` for every Claude session it launches. Two routes:
 
 - Reads a JSON payload from stdin (the Claude Code hook event).
 - Extracts `session_id`, `cwd`, and event-specific fields.
-- Derives a `session_tag` from `cwd` via `pm_core.paths.get_session_tag(start_path=cwd, use_github_name=False)`. Falls back to the literal `"_notag"` when no git repo is found.
-- Writes an event record to `~/.pm/hooks/{session_tag}/{session_id}.json` atomically (tempfile in the same directory + `os.replace`).
-- The file stores the **latest** event per session as `{"event_type": "...", "timestamp": <epoch>, "session_id": "...", "session_tag": "...", "matcher": "...", "cwd": "..."}`. Older events are overwritten — callers only care about the most recent turn-boundary.
+- Writes an event record to `~/.pm/hooks/{session_id}.json` atomically (tempfile in the same directory + `os.replace`).
+- The file stores the **latest** event per session as `{"event_type": "...", "timestamp": <epoch>, "session_id": "...", "matcher": "...", "cwd": "..."}`. Older events are overwritten — callers only care about the most recent turn-boundary.
 - Exits 0 silently on any error (hook failures must not block Claude).
 
-Using `pm_core.paths.get_session_tag` adds an import cost (~50–100 ms) but is the single source of truth for session-tag computation, so host-side readers and container-side writers agree on the path even when the receiver runs inside a container.
+A flat layout (no session-tag subdirectory) is used because session_ids are UUIDs and cannot collide across concurrent pm sessions. It also ensures the writer (possibly inside a container with `cwd=/workspace`) and the host-side reader agree on the path — a previous session-tag scheme hashed the cwd and silently mismatched whenever Claude's cwd differed from the host pm reader's cwd (containerized scenarios, PR worktrees). The receiver no longer needs to import `pm_core.paths`.
 
 ### R2: Hook installation
 
@@ -50,11 +49,11 @@ Using `pm_core.paths.get_session_tag` adds an import cost (~50–100 ms) but is 
 
 Module exposes:
 
-- `hooks_dir(session_tag=None) -> Path` — returns `~/.pm/hooks/{tag}` (or `_notag`). `session_tag=None` computes the tag from cwd via `get_session_tag(use_github_name=False)`.
-- `event_path(session_id, session_tag=None) -> Path`.
-- `read_event(session_id, session_tag=None) -> dict | None`.
-- `clear_event(session_id, session_tag=None)`.
-- `wait_for_event(session_id, event_types, timeout, newer_than=0.0, tick=0.2, stop_check=None, session_tag=None) -> dict | None` — busy-waits on the event file, returning the first event whose `event_type` is in `event_types` and whose `timestamp > newer_than`. Returns None on timeout or when `stop_check()` returns True.
+- `hooks_dir() -> Path` — returns `~/.pm/hooks`.
+- `event_path(session_id) -> Path`.
+- `read_event(session_id) -> dict | None`.
+- `clear_event(session_id)`.
+- `wait_for_event(session_id, event_types, timeout, newer_than=0.0, tick=0.2, stop_check=None) -> dict | None` — busy-waits on the event file, returning the first event whose `event_type` is in `event_types` and whose `timestamp > newer_than`. Returns None on timeout or when `stop_check()` returns True.
 - `hooks_available() -> bool` — True when `~/.claude/settings.json` has at least one hook pointing at `pm_core.hook_receiver`. Used by tests and by `PaneIdleTracker` to decide whether to consult events.
 
 The file-poll tick is fast (200 ms); this is still "polling" but an order of magnitude lighter than pane-capture polling and needs no stability logic.
@@ -68,7 +67,6 @@ def poll_for_verdict(
     pane_id, verdicts, keywords, session_id,  # session_id required
     prompt_text="", exclude_verdicts=None, grace_period=0,
     wait_timeout=15, stop_check=None, log_prefix="loop_shared",
-    session_tag=None,
 ) -> str | None
 ```
 
@@ -140,11 +138,11 @@ Both entry points run the installer idempotently; it only writes when the settin
 
 ### R11: Container bind-mount
 
-`pm_core/container.py::create_qa_container` bind-mounts `~/.pm/hooks` into the container at `$HOME/.pm/hooks`, so hook events from containerised Claude processes land in the host `~/.pm/hooks/{session_tag}/{session_id}.json` that the host-side pm reader watches. The directory is created on the host before the mount so the bind is safe.
+`pm_core/container.py::create_qa_container` bind-mounts `~/.pm/hooks` into the container at `$HOME/.pm/hooks`, so hook events from containerised Claude processes land in the host `~/.pm/hooks/{session_id}.json` that the host-side pm reader watches. The directory is created on the host before the mount so the bind is safe.
 
 ### R12: Tests (`tests/test_hook_events.py`)
 
-- Receiver writes the expected event file under a session-tag subdirectory.
+- Receiver writes the expected event file under the flat `~/.pm/hooks/` directory.
 - Receiver is silent on invalid JSON stdin.
 - `wait_for_event` returns a matching event; times out correctly; respects `newer_than`.
 - `hooks_available` reads `~/.claude/settings.json`.
@@ -163,7 +161,7 @@ QA retry tests (`tests/test_qa_loop.py::TestScenarioRetryLogic`) were updated: s
 
 2. **Baseline timestamp per wait**: `wait_for_event(..., newer_than=<float>)` must not return an old event left over from a previous turn. Each caller captures `time.time()` when it starts a wait and passes it as `newer_than`. Consumers update the baseline to the consumed event's timestamp before the next call.
 
-3. **Stale event file cleanup**: the installer sweeps event files under `~/.pm/hooks/` older than 7 days (recursive — traverses session-tag subdirectories). Cheap — directory has at most a few dozen entries per tag.
+3. **Stale event file cleanup**: the installer sweeps event files under `~/.pm/hooks/` older than 7 days. Cheap — directory has at most a few dozen entries.
 
 4. **Settings.json discovery**: pm installs into `~/.claude/settings.json` (user-level) so every Claude process pm launches — host and containerised — inherits the hooks via the existing `~/.claude` bind mount.
 
@@ -173,14 +171,14 @@ QA retry tests (`tests/test_qa_loop.py::TestScenarioRetryLogic`) were updated: s
 
 7. **Atomic vs concurrent hooks**: Notification and Stop may fire in rapid succession. Both write to the same `{session_id}.json`; last writer wins. `Stop` after `idle_prompt` is the intended final state.
 
-8. **Session tag consistency**: host-side readers (`hook_events`) and the receiver both call `pm_core.paths.get_session_tag(use_github_name=False)`. Using the same function — not a hand-rolled duplicate — guarantees writer and reader agree on the directory path.
+8. **Flat directory guarantees writer/reader agreement**: events live in `~/.pm/hooks/{session_id}.json` with no cwd-derived subdirectory, so the writer (which may run inside a container at `cwd=/workspace`, or in a worktree whose path the host pm process does not share) and the host-side reader always agree on the file path. Session_ids are UUIDs so there is no collision risk across concurrent pm sessions.
 
 9. **Hook conflict safety**: the installer never overwrites third-party idle_prompt/Stop hooks. `HookConflictError` is raised and `pm session` / TUI launch refuse to proceed.
 
 ## Ambiguities (resolved)
 
 ### A1: Hook event storage — single file vs per-event
-**Resolution**: single file per `(session_tag, session_id)`. Consumers only care about the latest turn-boundary; the `timestamp` + `newer_than` baseline prevents double-processing a single event.
+**Resolution**: single file per `session_id`. Consumers only care about the latest turn-boundary; the `timestamp` + `newer_than` baseline prevents double-processing a single event.
 
 ### A2: How finely to split the Notification matcher
 **Resolution**: install a matcher for `idle_prompt` only. Other Notification reasons (e.g. `waiting_for_tool_permission`) are not useful to pm and would cause false verdict captures.
@@ -192,7 +190,7 @@ QA retry tests (`tests/test_qa_loop.py::TestScenarioRetryLogic`) were updated: s
 **Resolution**: the hook-driven code paths require `session_id`. Scenarios without one are marked `INPUT_REQUIRED` (R6). Review/watcher launches that somehow lack a resolvable transcript raise `RuntimeError` — this is a configuration bug, not a runtime fallback. The TUI `PaneIdleTracker` retains its hash-based fallback for tracking user-launched impl panes where session_id is not plumbed through.
 
 ### A5: Session-scoped vs global hook directory (new)
-**Resolution**: session-scoped `~/.pm/hooks/{session_tag}/{session_id}.json`. Multiple concurrent pm sessions don't share a flat directory; the receiver and readers both derive the tag from cwd via `pm_core.paths.get_session_tag` so they agree on the path.
+**Resolution**: flat `~/.pm/hooks/{session_id}.json`. Session_ids are UUIDs so multiple concurrent pm sessions can safely share the directory without collision. A flat layout avoids the writer/reader mismatch that session-tag subdirectories caused when Claude's cwd (the worktree or `/workspace`) did not match the host pm reader's cwd.
 
 ### A6: Clobbering pre-existing user hooks (new)
 **Resolution**: refuse. `HookConflictError` surfaces the conflict; the user resolves it manually. Every `pm session` and TUI launch runs `ensure_hooks_installed` to guarantee our hooks are present and up-to-date.
@@ -211,11 +209,11 @@ QA retry tests (`tests/test_qa_loop.py::TestScenarioRetryLogic`) were updated: s
 
 6. **Interactive selection menus (gum / trust prompts)**: `idle_prompt` fires while Claude is at a gum-style permission prompt. TUI callers continue to gate on `content_has_interactive_prompt` before acting on idle.
 
-7. **pm outside a git repo**: `get_session_tag` returns None → session_tag becomes `"_notag"`. Hooks still fire and land under `~/.pm/hooks/_notag/`. Install still succeeds because `~/.claude/settings.json` is user-global.
+7. **pm outside a git repo**: hook events still land in `~/.pm/hooks/{session_id}.json` regardless of cwd. `~/.claude/settings.json` is user-global so install always succeeds.
 
-8. **Multiple pm instances on the same host**: each pm's session_tag differs (repo root path mixes into the MD5), so their event files live in separate subdirectories. `~/.claude/settings.json` is shared but the hook command is identical across instances.
+8. **Multiple pm instances on the same host**: all pm instances share `~/.pm/hooks/`, but session_ids are UUIDs so there is no collision. `~/.claude/settings.json` is shared and the hook command is identical across instances.
 
-9. **Hook receiver latency**: receiver imports `pm_core.paths` → `pm_core.git_ops` (subprocess for `git rev-parse`). Measured overhead ~50–100 ms per turn. Acceptable because turn boundaries are infrequent relative to pane rendering.
+9. **Hook receiver latency**: receiver has no heavy imports — just stdlib. Overhead is negligible.
 
 ## Implementation notes (as landed)
 
