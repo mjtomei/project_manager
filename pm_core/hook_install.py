@@ -230,7 +230,21 @@ def ensure_hooks_installed(settings_path: Path | None = None) -> bool:
 
     merged_hooks = dict(current_hooks)
     for event, entries in desired.items():
-        merged_hooks[event] = list(entries)
+        if event == "Notification":
+            existing_entries = current_hooks.get(event)
+            preserved: list = []
+            if isinstance(existing_entries, list):
+                for e in existing_entries:
+                    if not isinstance(e, dict):
+                        continue
+                    matcher = e.get("matcher")
+                    # Drop pm-owned idle_prompt entries (replaced below).
+                    if matcher == "idle_prompt" or _entry_is_pm(e):
+                        continue
+                    preserved.append(e)
+            merged_hooks[event] = preserved + list(entries)
+        else:
+            merged_hooks[event] = list(entries)
 
     existing["hooks"] = merged_hooks
     try:
