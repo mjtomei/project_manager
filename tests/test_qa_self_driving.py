@@ -1,9 +1,9 @@
-"""Tests for self-driving QA loop with zz t and zzz t modifiers.
+"""Tests for the self-driving QA loop (zz t).
 
-Covers scenario 4 steps:
- - z-prefix dispatch (z=0,1,2,3)
- - Self-driving state initialization (strict/lenient, pass_count, required_passes)
- - Pass counting and auto-merge trigger
+Covers:
+ - z-prefix dispatch (z=0,1,2)
+ - Self-driving state initialization (pass_count, required_passes)
+ - Pass counting and (auto-start-only) merge trigger
  - NEEDS_WORK resets pass_count, transitions to in_review, starts review loop
  - INPUT_REQUIRED pauses the loop
  - Toggle stop (zz t on running loop)
@@ -76,11 +76,8 @@ class TestZZTStart:
 
 
 # ---------------------------------------------------------------------------
-# Step 6: zzz t starts strict QA loop
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
-# Step 4-5: PASS increments pass_count, triggers auto-merge when sufficient
+# PASS increments pass_count; reaching required passes clears state and
+# (when auto-start is enabled) triggers merge
 # ---------------------------------------------------------------------------
 
 class TestPassCountAndAutoMerge:

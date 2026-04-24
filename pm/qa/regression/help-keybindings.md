@@ -15,7 +15,7 @@ It lists all available keybindings grouped by category:
 - Panes & Views: c, H, /, n, m, L, p, t, q, b
 - Companion Pane: S, G
 - Other: z, r, C, Ctrl+R, ?, ctrl+b d
-- Review Loop: zz d, zzz d, z d
+- Review Loop: zz d, z d
 
 When the QA view is active, the help screen shows QA-specific navigation
 instead of Tree Navigation (j/k, Enter, e, a, q=back).
@@ -64,7 +64,7 @@ ctrl+b d to detach from the tmux session.
      * F - Cycle sort field
    - PR Actions section:
      * s - Start selected PR
-     * d - Review (zz d: loop, zzz d: strict)
+     * d - Review (zz d: loop)
      * g - Merge PR
      * e / Enter - Edit selected PR
      * v - View plan file
@@ -94,7 +94,6 @@ ctrl+b d to detach from the tmux session.
      * ctrl+b d - Detach from session
    - Review Loop section:
      * zz d - Start loop
-     * zzz d - Start strict loop
      * z d - Stop loop / fresh done
 
 3. Verify footer says: "Press Esc/? to close  |  h to discuss pm"
