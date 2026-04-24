@@ -155,40 +155,25 @@ class BaseWatcher(ABC):
                 f"Watcher window launch failed (rc={result.returncode}): {detail}"
             )
 
-    def _poll_for_verdict(self, pane_id: str, session_id: str,
-                          prompt_text: str = "",
-                          exclude_verdicts: set[str] | None = None,
+    def _poll_for_verdict(self, pane_id: str, transcript_path: str,
                           grace_period: float = 0) -> str | None:
-        """Poll pane for a verdict via hook events."""
+        """Poll pane for a verdict via hook events + JSONL transcript."""
         return _poll_for_verdict_shared(
-            pane_id,
+            pane_id, transcript_path,
             verdicts=self.VERDICTS,
-            keywords=self.KEYWORDS,
-            session_id=session_id,
-            prompt_text=prompt_text,
-            exclude_verdicts=exclude_verdicts,
             grace_period=grace_period,
             stop_check=lambda: self.state.stop_requested,
             log_prefix=f"watcher[{self.WATCHER_TYPE}]",
         )
 
-    def _wait_for_follow_up(self, prompt_text: str,
-                            session_id: str | None = None) -> str | None:
+    def _wait_for_follow_up(self, transcript_path: str | None) -> str | None:
         """Wait for a follow-up verdict after INPUT_REQUIRED (hook-driven)."""
         session = get_pm_session()
-        if not session:
-            return None
-        if not session_id:
-            _log.warning("watcher[%s]: no session_id for follow-up wait",
-                         self.WATCHER_TYPE)
+        if not session or not transcript_path:
             return None
         return _wait_for_follow_up_shared(
-            session, self.WINDOW_NAME,
+            session, self.WINDOW_NAME, transcript_path,
             verdicts=self.VERDICTS,
-            keywords=self.KEYWORDS,
-            session_id=session_id,
-            prompt_text=prompt_text,
-            exclude_verdicts={"INPUT_REQUIRED"},
             stop_check=lambda: self.state.stop_requested,
             log_prefix=f"watcher[{self.WATCHER_TYPE}]",
         )
@@ -206,10 +191,6 @@ class BaseWatcher(ABC):
 
         self._launch_window(iteration, transcript=transcript)
 
-        prompt_text = self.generate_prompt(iteration)
-        _log.info("watcher[%s]: prompt_text for filtering: %d chars",
-                  self.WATCHER_TYPE, len(prompt_text))
-
         time.sleep(2)
 
         pane_id = find_claude_pane(session, self.WINDOW_NAME)
@@ -221,19 +202,13 @@ class BaseWatcher(ABC):
         _log.info("watcher[%s]: polling pane %s in window %s",
                   self.WATCHER_TYPE, pane_id, self.WINDOW_NAME)
 
-        from pm_core.claude_launcher import session_id_from_transcript
-        watcher_session_id = (
-            session_id_from_transcript(transcript) if transcript else None
-        )
-        if not watcher_session_id:
+        if not transcript:
             raise RuntimeError(
-                f"Watcher[{self.WATCHER_TYPE}] launched without a recoverable "
-                f"Claude session_id (transcript={transcript!r})"
+                f"Watcher[{self.WATCHER_TYPE}] launched without a transcript"
             )
 
         content = self._poll_for_verdict(
-            pane_id, watcher_session_id,
-            prompt_text=prompt_text,
+            pane_id, transcript,
             grace_period=self.VERDICT_GRACE_PERIOD,
         )
         if content is None:
@@ -359,17 +334,12 @@ class BaseWatcher(ABC):
         state.input_required = True
         state._ui_notified_input = False
 
-        prompt_text = self.generate_prompt(state.iteration)
-        from pm_core.claude_launcher import session_id_from_transcript
-        follow_up_session_id: str | None = None
+        iter_transcript: str | None = None
         if state._transcript_dir:
             iter_transcript = (
                 f"{state._transcript_dir}/{self.WATCHER_TYPE}-i{state.iteration}.jsonl"
             )
-            follow_up_session_id = session_id_from_transcript(iter_transcript)
-        follow_up_output = self._wait_for_follow_up(
-            prompt_text, session_id=follow_up_session_id,
-        )
+        follow_up_output = self._wait_for_follow_up(iter_transcript)
         state.input_required = False
 
         if follow_up_output is None:

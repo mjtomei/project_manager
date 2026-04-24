@@ -292,45 +292,47 @@ def extract_between_markers(content: str, start_marker: str,
 
 def poll_for_verdict(
     pane_id: str,
+    transcript_path: str,
     verdicts: tuple[str, ...],
-    keywords: tuple[str, ...],
-    session_id: str,
-    prompt_text: str = "",
-    exclude_verdicts: set[str] | None = None,
+    *,
     grace_period: float = 0,
     wait_timeout: float = 15,
     stop_check: Callable[[], bool] | None = None,
     log_prefix: str = "loop_shared",
 ) -> str | None:
-    """Block until Claude signals idle, then extract a verdict from the pane.
+    """Block until Claude signals idle, then extract a verdict from the
+    JSONL transcript.
 
-    Requires a Claude ``session_id`` — this function is hook-driven and
-    has no polling fallback.  On each ``idle_prompt`` hook event the pane
-    is captured once and scanned; on ``Stop`` (or pane disappearance) the
-    function returns None.
+    Returns the assistant text from the latest turn when a verdict is
+    found, or ``None`` when the pane disappears / ``stop_check`` fires.
+    Callers can pass the returned string to downstream parsers (e.g.
+    :func:`extract_between_markers`) or to
+    :func:`pm_core.verdict_transcript.extract_verdict_from_transcript`
+    for pure verdict detection.
 
-    Args:
-        pane_id: tmux pane to capture when an idle event fires.
-        verdicts: Valid verdict keyword strings.
-        keywords: Keyword strings used for prompt-line filtering.
-        session_id: Claude session_id whose hook events we consume.
-        prompt_text: Prompt text for filtering out prompt lines.
-        exclude_verdicts: Optional verdict strings to skip.
-        grace_period: Seconds at the start of polling during which
-            idle_prompt events are ignored (used by the review flow
-            where Claude may briefly go idle before actually starting).
-        wait_timeout: Max seconds to block on a single ``wait_for_event``
-            before re-checking pane existence / stop conditions.
-        stop_check: Optional callable; if it returns True, we return None.
-        log_prefix: Prefix for log messages.
+    Hook-driven only — requires *transcript_path* so we can recover the
+    Claude ``session_id`` via the symlink target and read the assistant
+    output from the JSONL.  No pane-capture fallback.
     """
     from pm_core import tmux as tmux_mod
     from pm_core import hook_events
+    from pm_core.claude_launcher import session_id_from_transcript
+    from pm_core.verdict_transcript import (
+        extract_verdict_from_transcript,
+        read_latest_assistant_text,
+    )
 
-    _log.info("%s: poll_for_verdict (hook) — pane_id=%s, verdicts=%s, "
-              "prompt_text=%d chars, grace=%.0fs, session_id=%s",
-              log_prefix, pane_id, verdicts, len(prompt_text), grace_period,
-              session_id)
+    session_id = session_id_from_transcript(transcript_path)
+    if not session_id:
+        raise RuntimeError(
+            f"poll_for_verdict: could not recover session_id from "
+            f"transcript={transcript_path!r}"
+        )
+
+    _log.info("%s: poll_for_verdict (hook+jsonl) — pane_id=%s, "
+              "transcript=%s, session_id=%s, verdicts=%s, grace=%.0fs",
+              log_prefix, pane_id, transcript_path, session_id, verdicts,
+              grace_period)
 
     poll_start = time.monotonic()
     hook_baseline = time.time()
@@ -353,27 +355,17 @@ def poll_for_verdict(
         if stop_check and stop_check():
             return None
         if ev is None:
-            # No event within wait_timeout — loop to re-check pane/stop.
             continue
 
         hook_baseline = float(ev.get("timestamp") or hook_baseline)
-        # Honour grace period: ignore events that fired before grace ends.
         if grace_period > 0 and (time.monotonic() - poll_start) < grace_period:
             continue
 
-        if not tmux_mod.pane_exists(pane_id):
-            _log.warning("%s: pane %s disappeared", log_prefix, pane_id)
-            return None
-
-        content = tmux_mod.capture_pane(pane_id, full_scrollback=True)
-        verdict = extract_verdict_from_content(
-            content, verdicts=verdicts, keywords=keywords,
-            prompt_text=prompt_text, exclude_verdicts=exclude_verdicts,
-            log_prefix=log_prefix,
-        )
+        verdict = extract_verdict_from_transcript(transcript_path, verdicts)
         if verdict:
-            _log.info("%s: hook-driven verdict %s", log_prefix, verdict)
-            return content
+            _log.info("%s: hook-driven verdict %s (session_id=%s)",
+                      log_prefix, verdict, session_id)
+            return read_latest_assistant_text(transcript_path) or verdict
         if ev.get("event_type") == "Stop":
             _log.info("%s: Stop event without verdict for session_id=%s",
                       log_prefix, session_id)
@@ -383,20 +375,30 @@ def poll_for_verdict(
 def wait_for_follow_up_verdict(
     session: str,
     window_name: str,
+    transcript_path: str,
     verdicts: tuple[str, ...],
-    keywords: tuple[str, ...],
-    session_id: str,
-    prompt_text: str = "",
-    exclude_verdicts: set[str] | None = None,
+    *,
     wait_timeout: float = 15,
     stop_check: Callable[[], bool] | None = None,
     log_prefix: str = "loop_shared",
 ) -> str | None:
-    """Block for the next hook-driven idle on an existing pane and
-    extract a follow-up verdict.  Hook-driven only — requires session_id.
+    """Block for the next hook-driven idle on an existing pane and return
+    the assistant text of the follow-up turn (or ``None``).
+
+    Hook-driven only — requires *transcript_path*.
     """
-    from pm_core import tmux as tmux_mod
     from pm_core import hook_events
+    from pm_core.claude_launcher import session_id_from_transcript
+    from pm_core.verdict_transcript import (
+        extract_verdict_from_transcript,
+        read_latest_assistant_text,
+    )
+
+    session_id = session_id_from_transcript(transcript_path)
+    if not session_id:
+        _log.warning("%s: could not recover session_id from transcript=%s",
+                     log_prefix, transcript_path)
+        return None
 
     hook_baseline = time.time()
 
@@ -419,15 +421,10 @@ def wait_for_follow_up_verdict(
             continue
         hook_baseline = float(ev.get("timestamp") or hook_baseline)
 
-        content = tmux_mod.capture_pane(pane_id, full_scrollback=True)
-        verdict = extract_verdict_from_content(
-            content, verdicts=verdicts, keywords=keywords,
-            prompt_text=prompt_text, exclude_verdicts=exclude_verdicts,
-            log_prefix=log_prefix,
-        )
+        verdict = extract_verdict_from_transcript(transcript_path, verdicts)
         if verdict:
             _log.info("%s: hook-driven follow-up verdict %s", log_prefix, verdict)
-            return content
+            return read_latest_assistant_text(transcript_path) or verdict
         if ev.get("event_type") == "Stop":
             return None
 

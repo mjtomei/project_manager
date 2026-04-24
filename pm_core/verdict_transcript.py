@@ -28,8 +28,15 @@ Design:
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
+
+
+# Tolerate whitespace between key and value (``"type":"assistant"`` from
+# real Claude transcripts, ``"type": "assistant"`` from ``json.dumps``).
+_ASSISTANT_RE = re.compile(r'"type"\s*:\s*"assistant"')
+_USER_RE = re.compile(r'"type"\s*:\s*"user"')
 
 
 def extract_verdict_from_transcript(
@@ -59,15 +66,10 @@ def extract_verdict_from_transcript(
         for v in ordered
     ]
 
-    # Tolerate whitespace between key and value ( ``"type":"assistant"``
-    # from real transcripts, ``"type": "assistant"`` from ``json.dumps``).
-    ASSISTANT_RE = re.compile(r'"type"\s*:\s*"assistant"')
-    USER_RE = re.compile(r'"type"\s*:\s*"user"')
-
     in_turn = False
     for line in reversed(text.splitlines()):
-        is_assistant = bool(ASSISTANT_RE.search(line))
-        is_user = bool(USER_RE.search(line))
+        is_assistant = bool(_ASSISTANT_RE.search(line))
+        is_user = bool(_USER_RE.search(line))
         if not in_turn:
             if is_assistant:
                 in_turn = True
@@ -84,3 +86,64 @@ def extract_verdict_from_transcript(
             if verdict in line and pat.search(line):
                 return verdict
     return None
+
+
+def read_latest_assistant_text(transcript_path: str | Path | None) -> str:
+    """Return the concatenated ``text`` content of the latest assistant turn.
+
+    Used by callers that need to post-process the assistant's output
+    (e.g. :func:`pm_core.loop_shared.extract_between_markers` scanning
+    for ``REFINED_STEPS_START``/``REFINED_STEPS_END`` markers).  Returns
+    an empty string when the transcript is missing or the latest turn
+    has no text content.
+
+    This *is* mildly schema-dependent: it parses each assistant JSONL
+    record and looks for ``message.content[].type == "text"`` entries.
+    If Anthropic changes that shape we update this helper.  Verdict
+    extraction (:func:`extract_verdict_from_transcript`) remains purely
+    text-based and is not affected.
+    """
+    if not transcript_path:
+        return ""
+    try:
+        text = Path(transcript_path).read_text(errors="replace")
+    except (OSError, FileNotFoundError):
+        return ""
+    if not text:
+        return ""
+
+    # Walk backward, collect the contiguous block of assistant records
+    # that forms the latest turn (i.e. everything between the last user
+    # record and the end of file, bypassing meta records).
+    turn_lines: list[str] = []
+    in_turn = False
+    for line in reversed(text.splitlines()):
+        is_assistant = bool(_ASSISTANT_RE.search(line))
+        is_user = bool(_USER_RE.search(line))
+        if not in_turn:
+            if is_assistant:
+                in_turn = True
+                turn_lines.append(line)
+            continue
+        if is_user:
+            break
+        if is_assistant:
+            turn_lines.append(line)
+
+    turn_lines.reverse()  # back to file order
+    chunks: list[str] = []
+    for raw in turn_lines:
+        try:
+            rec = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        msg = rec.get("message") if isinstance(rec, dict) else None
+        content = msg.get("content") if isinstance(msg, dict) else None
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                piece = block.get("text")
+                if isinstance(piece, str):
+                    chunks.append(piece)
+    return "\n".join(chunks)

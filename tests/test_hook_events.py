@@ -246,7 +246,8 @@ def test_installer_refuses_foreign_stop_hook(tmp_hooks_home):
         ensure_hooks_installed(settings_path)
 
 
-def test_poll_for_verdict_hook_fast_path(tmp_hooks_home, monkeypatch):
+def test_poll_for_verdict_hook_fast_path(tmp_hooks_home, monkeypatch, tmp_path):
+    import json as _json
     hook_events = _reload_hook_events()
     from pm_core.hook_install import ensure_hooks_installed
     settings_path = tmp_hooks_home / ".claude" / "settings.json"
@@ -255,19 +256,21 @@ def test_poll_for_verdict_hook_fast_path(tmp_hooks_home, monkeypatch):
 
     from pm_core import loop_shared
 
-    fake_pane_content = "some output\nPASS\n"
+    # Valid UUID so session_id_from_transcript can recover it.
+    sid = "12345678-1234-1234-1234-123456789abc"
 
-    def fake_pane_exists(pane_id):
-        return True
-
-    def fake_capture_pane(pane_id, full_scrollback=False):
-        return fake_pane_content
+    transcript_target = tmp_path / f"{sid}.jsonl"
+    transcript_target.write_text("\n".join([
+        _json.dumps({"type": "user", "message": {"role": "user",
+                                                 "content": [{"type": "text", "text": "go"}]}}),
+        _json.dumps({"type": "assistant", "message": {"role": "assistant",
+                                                      "content": [{"type": "text", "text": "done\nPASS\n"}]}}),
+    ]) + "\n")
+    transcript_link = tmp_path / "t.jsonl"
+    transcript_link.symlink_to(transcript_target)
 
     import pm_core.tmux as tmux_mod
-    monkeypatch.setattr(tmux_mod, "pane_exists", fake_pane_exists)
-    monkeypatch.setattr(tmux_mod, "capture_pane", fake_capture_pane)
-
-    sid = "sid-poll-1"
+    monkeypatch.setattr(tmux_mod, "pane_exists", lambda pane_id: True)
 
     def writer():
         time.sleep(0.1)
@@ -280,9 +283,8 @@ def test_poll_for_verdict_hook_fast_path(tmp_hooks_home, monkeypatch):
     start = time.time()
     content = loop_shared.poll_for_verdict(
         pane_id="%0",
+        transcript_path=str(transcript_link),
         verdicts=("PASS", "FAIL"),
-        keywords=("PASS", "FAIL"),
-        session_id=sid,
         wait_timeout=5,
         log_prefix="test",
     )
