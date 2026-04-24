@@ -24,6 +24,10 @@ hierarchy-aware, checking both summary accuracy and cross-level consistency.
   reflect hierarchy)
 - Add a "collapse all leaf plans" action so users can see the hierarchy overview,
   then selectively expand the plan they want to drill into
+- Allow child plans to live in **external pm projects** (separate repos with their
+  own `project.yaml`). External child plans aggregate status and PR counts from
+  the referenced repo and participate in tree rendering, review, and the parent
+  plan's `## Plans` summaries like any other child.
 
 ## Goals
 
@@ -114,6 +118,43 @@ a PR to a different plan. Both trigger a check on affected parent plans to flag
 summaries that need updating. The user can then run `pm plan review` on the
 parent to reconcile.
 
+### 7. External child plans (cross-repo composition)
+
+A child plan entry can declare an `external` field pointing to another pm project
+(a directory containing `pm/project.yaml`). The local project.yaml stores only
+the pointer; status, PR counts, and any further sub-plans are read from the
+external project on demand.
+
+```yaml
+plans:
+- id: plan-top
+  name: Horus
+  file: plans/plan-top.md
+  status: active
+  parent: null
+- id: plan-food
+  name: Food app
+  status: active
+  parent: plan-top
+  external: /home/matt/claude-work/food   # has its own pm/project.yaml
+```
+
+Rules:
+
+- An external plan entry has no local `file` and no PRs in this project.yaml.
+- External entries can be reparented within this project's hierarchy like any
+  other plan, but PRs cannot be moved into them from this side (the external
+  repo owns its PRs).
+- Status and aggregate PR counts come from the external repo. A simple read of
+  `<external>/pm/project.yaml` is sufficient — no recursion into nested
+  externals beyond one level on the first pass.
+- Tree rendering and the parent plan's `## Plans` section treat external
+  children identically to local children, with a small visual marker so users
+  know the data lives elsewhere.
+- Review of a parent plan with external children instructs the reviewer to
+  read the external repo's `pm/project.yaml` (and plan files under
+  `<external>/pm/plans/`) to verify the parent's `## Plans` summaries.
+
 ## Constraints
 
 - **Backward compatible**: Plans without `parent` are root plans. Existing
@@ -125,6 +166,12 @@ parent to reconcile.
   auto-generate summaries — that would defeat the purpose of having a curated
   high-level view.
 - **Acyclic**: A plan cannot be its own ancestor. Reparent must validate this.
+- **External plans are leaves from this project's view**: Their internal
+  hierarchy lives in the external repo. We don't try to flatten or merge it
+  into this project's tree — we just summarize.
+- **External path resolution**: Stored as given (absolute or repo-relative).
+  Missing/invalid external repos surface as a clear error in the plans pane
+  and review prompts, not a crash.
 
 ## PRs
 
@@ -229,3 +276,59 @@ parent to reconcile.
 - **tests**: Test that `R` key fires the correct PlanAction. Test that `M` key fires the correct PlanAction. Test footer rendering includes new shortcuts.
 - **files**: pm_core/tui/plans_pane.py, pm_core/tui/app.py, pm_core/tui/pane_ops.py, tests/test_plans_pane.py
 - **depends_on**: TUI plans pane tree rendering, `pm plan reparent` command, `pm pr move` with cross-plan integrity checks
+
+---
+
+### PR: Add external field to plan schema
+- **description**: Add optional `external` field to plan entries in project.yaml. Value is a path (absolute or relative to project root) pointing to another pm project directory (one containing `pm/project.yaml`). Update `store.load()` validation: an external plan entry must not also have a local `file` field, and no PR entries may reference it via their `plan` field. The path itself is stored as-given; existence is not validated at load time (external repos may be temporarily unavailable). Add a small helper `is_external(plan)` for downstream callers.
+- **tests**: Test that loading a plan with both `external` and `file` raises a validation error. Test that loading a project with a PR pointing to an external plan raises a validation error. Test that `is_external` returns True for entries with the field set and False otherwise. Test that `parent` validation still works for external entries (cycle detection, valid parent ID).
+- **files**: pm_core/store.py, tests/test_store.py
+- **depends_on**: Add `parent` field to plan schema
+
+---
+
+### PR: External pm project loader and status aggregation
+- **description**: Add a small module (e.g. `pm_core/external.py`) that knows how to read another pm project. `load_external_project(path)` resolves the path, opens `<path>/pm/project.yaml`, and returns the parsed data dict — or a structured error sentinel for missing-path / missing-yaml / parse-error cases (do not raise; callers must render gracefully). Cache results per-call via a simple dict so a single TUI render or review run doesn't re-read the same external repo multiple times. Add aggregation helpers: `external_pr_counts(plan)` returns a dict of status→count summed across the external project's PRs; `external_status(plan)` derives an aggregate status (active/blocked/done) using the same rules used today for local plans. Treat external plans as leaves of this project's tree — do not recurse into the external project's own hierarchy on the first pass.
+- **tests**: Test the loader against a fixture external project. Test missing path, missing pm/project.yaml, and malformed yaml return error sentinels (not exceptions). Test PR count aggregation across statuses. Test that the call-scoped cache prevents duplicate reads. Test status derivation for projects with mixed PR statuses.
+- **files**: pm_core/external.py, pm_core/store.py, tests/test_external.py
+- **depends_on**: Add external field to plan schema, Add hierarchy traversal helpers to store
+
+---
+
+### PR: `pm plan add --external` and `## Plans` external pointer support
+- **description**: Add `--external <path>` option to `pm plan add`. When set, creates a plan entry with the external field and no local markdown file; mutually exclusive with the normal plan-development flow (no Claude session is launched, no plan markdown is created in this repo). Validates that the path exists and contains `pm/project.yaml` at `pm plan add` time (unlike load-time, where missing paths must be tolerated). Extend the `## Plans` block format in `plan_parser.py` to recognize an `- **external**: <path>` field. Update `pm plan load` so that child blocks with `external` create external plan entries (no markdown file written for them). Document the new field in the plan markdown convention.
+- **tests**: Test `pm plan add --external /path` creates an entry with external set and no file field. Test that a path without pm/project.yaml is rejected. Test that combining --external with normal plan creation flags errors clearly. Test that `## Plans` parser extracts the external field. Test that `pm plan load` creates external child entries from a parent plan markdown that uses the external field.
+- **files**: pm_core/cli/plan.py, pm_core/plan_parser.py, tests/test_plan_cli.py, tests/test_plan_parser.py
+- **depends_on**: Add external field to plan schema, `pm plan load` handles `## Plans` section
+
+---
+
+### PR: TUI plans pane: render external child plans
+- **description**: Update `PlansPane` tree rendering to handle external child plans. External entries render with a small marker (e.g. a trailing `↗` glyph or `[ext]` tag) and show aggregate PR counts pulled from the external project via `external_pr_counts`. Show the external path (truncated as needed) on a hover/secondary line or in the side detail panel. If the external project is unreachable (loader returned an error), render the entry with an error indicator and the reason rather than crashing. Expand/collapse on an external entry is a no-op for the first pass — its internal hierarchy is not flattened into this view. **Human-guided testing needed**: visual marker placement, behavior with missing/broken external repos, refresh after the external repo's project.yaml changes.
+- **tests**: Test rendering of an external plan entry includes the marker and aggregate counts. Test that an unreachable external entry renders with an error indicator. Test that aggregate counts come from the external project's PRs. Test that flat (non-external) plans render unchanged.
+- **files**: pm_core/tui/plans_pane.py, pm_core/tui/detail_panel.py, tests/test_plans_pane.py
+- **depends_on**: External pm project loader and status aggregation, TUI plans pane tree rendering
+
+---
+
+### PR: Plan review reaches into external child repos
+- **description**: When reviewing a parent plan that has external children, extend the parent-review prompt (from the parent-plan summary accuracy PR) to list each external child with its repo path and the location of its `pm/project.yaml` and `pm/plans/` directory. Instruct the reviewer to read the external project.yaml (and plan files within it) to verify that the parent's `## Plans` summary for each external child is still accurate. The full content of external plans must NOT be embedded in the prompt — Claude reads them on demand, the same pattern used for local children. If an external repo is unreachable, the prompt should note that explicitly so the reviewer can flag the parent's summary as unverifiable rather than silently passing.
+- **tests**: Test that parent-plan-review prompt lists external children with their repo path and project.yaml location. Test that full external plan content is not embedded in the prompt. Test that an unreachable external child surfaces in the prompt as a flagged item. Test that a parent with only external children still produces a coherent review prompt.
+- **files**: pm_core/cli/plan.py, pm_core/review.py, tests/test_plan_review.py
+- **depends_on**: External pm project loader and status aggregation, Plan review: summary accuracy checking for parent plans
+
+---
+
+### PR: Tech tree: external plan groups as label-only summaries
+- **description**: Extend the tech tree's plan group rendering to handle external child plans. External plan groups appear as a label row (with the same hierarchical prefix from the tech-tree-hierarchical-labels PR and the external marker) and a single summary line showing aggregate PR counts from the external project. They have no expandable PR nodes in this view since the PRs live in another repo. Plan-jump navigation (`{`/`}`) must skip cleanly across external groups. **Human-guided testing needed**: label rendering, plan-jump across externals, behavior when an external repo's counts change between refreshes.
+- **tests**: Test that an external plan group renders as a label row with aggregate counts and no PR nodes. Test plan-jump navigation across mixed local and external groups. Test that hierarchical label prefix is applied to external groups. Test rendering when an external repo is unreachable (label with error indicator).
+- **files**: pm_core/tui/tech_tree.py, pm_core/tui/tree_layout.py, tests/test_tech_tree.py
+- **depends_on**: External pm project loader and status aggregation, Tech tree hierarchical plan group labels
+
+---
+
+### PR: Mutation safety guards for external plans
+- **description**: Add safety guards around hierarchy mutations involving external plans. `pm pr move --plan <target>` rejects external targets with a clear error explaining that the external repo owns its PRs (suggest using the external repo's pm CLI instead). `pm plan reparent` is allowed for external entries — they're still local entries and can be moved within this project's hierarchy — but rejects making an external plan the parent of a local plan (a local plan whose markdown file lives in this repo cannot semantically belong to another repo's project). Emit the same affected-summaries warning that the existing reparent/move commands emit.
+- **tests**: Test that `pm pr move` to an external plan errors with a clear message. Test that reparenting an external entry under a local parent succeeds. Test that reparenting a local plan under an external parent errors. Test that the affected-summaries warning fires on successful reparenting of external entries.
+- **files**: pm_core/cli/plan.py, pm_core/cli/pr.py, tests/test_plan_cli.py, tests/test_pr_cli.py
+- **depends_on**: Add external field to plan schema, `pm plan reparent` command, `pm pr move` with cross-plan integrity checks

@@ -1042,7 +1042,6 @@ prs:
       PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-f38005f-c31d04be54fae4fa)'
     created_at: '2026-04-09T23:47:57Z'
     last_edited: '2026-04-09T23:47:57Z'
-  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-f38005f/qa.md
   merged_at: '2026-04-12T14:35:12.425448+00:00'
 - id: pr-c11d04f
   plan: plan-003
@@ -9032,7 +9031,6 @@ prs:
     created_at: '2026-04-13T23:04:24Z'
     last_edited: '2026-04-13T23:04:24Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-4db3696-add-pm-pr-split-command-for-breaking-7efdf042
-  spec_qa: /home/mjtomei/project_manager/pm/specs/pr-4db3696/qa.md
 - id: pr-8a56712
   plan: bugs
   title: 'Bug: auto-start silently swallows command launch failures'
@@ -9147,7 +9145,7 @@ prs:
   plan: null
   title: Use Claude Code hooks (idle_prompt, Stop) for verdict and session–end detection
   branch: pm/pr-014f93f-use-claude-code-hooks-idle-prompt-stop-for-verdict
-  status: pending
+  status: qa
   depends_on: []
   description: 'Replace all polling–based idle/verdict detection with Claude Code
     hooks for reliable, instant signaling.
@@ -9191,15 +9189,16 @@ prs:
     This should eliminate false positives from prompt–text matching, remove the need
     for grace periods and stability polls, and make verdict detection near–instant
     instead of up to 15s delayed.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/166
+  gh_pr_number: 166
   created_at: '2026-04-21T17:07:01.779432+00:00'
-  updated_at: '2026-04-24T02:47:04.601899+00:00'
-  started_at: null
-  reviewed_at: null
+  updated_at: '2026-04-24T03:39:25.102963+00:00'
+  started_at: '2026-04-24T02:48:10.332243+00:00'
+  reviewed_at: '2026-04-24T03:39:25.102963+00:00'
   merged_at: null
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-014f93f-use-claude-code-hooks-idle-prompt-st-33742570
 - id: pr-e3595fe
   plan: plan-cb4ef69
   title: Add external field to plan schema
