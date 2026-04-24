@@ -252,8 +252,8 @@ def edit_cmd():
 @cli.command("which")
 def which_cmd():
     """Print the path to the pm_core package being used."""
-    import pm_core
-    click.echo(pm_core.__path__[0])
+    from pm_core.paths import pm_core_path
+    click.echo(str(pm_core_path()))
 
 
 _BOOLEAN_SETTINGS = {"hide-assist", "hide-merged", "beginner-mode", "auto-cleanup",

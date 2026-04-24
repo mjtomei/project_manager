@@ -352,6 +352,9 @@ def _resolve_claude_binary() -> Path | None:
     return Path(which).resolve()
 
 
+_CONTAINER_PM_SRC = "/opt/pm-src"
+
+
 # ---------------------------------------------------------------------------
 # Container naming
 # ---------------------------------------------------------------------------
@@ -527,6 +530,17 @@ def create_container(
         _log.debug("hook receiver %s missing; containerised Claude hooks will no-op",
                    _receiver_path)
 
+    # pm source: bind-mount read-only so the setup script can ``pip install``
+    # it into the container.  Makes the ``pm`` CLI available inside any
+    # container regardless of target project — the wrapper still prefers a
+    # local ``pm_core`` under /workspace when running in a pm PR workdir.
+    # The repo root is the parent of the pm_core package dir (same path
+    # ``pm which`` prints) when pm is installed editably — the only install
+    # mode ``install.sh`` produces today.
+    from pm_core.paths import pm_core_path
+    _pm_src = pm_core_path().parent
+    cmd.extend(["-v", f"{_pm_src}:{_CONTAINER_PM_SRC}:ro"])
+
     # NOTE: .claude.json is NOT bind-mounted.  Claude writes it atomically
     # (write tmp + rename) which replaces the inode — a single-file bind
     # mount keeps the old inode so the container sees stale content.
@@ -634,6 +648,16 @@ def create_container(
             )
     if git_setup:
         setup_parts.append(git_setup)
+    # Install pm into the container user's ~/.local so ``pm`` is on PATH.
+    # pm's runtime deps are pre-installed system-wide in the base image,
+    # so this only installs the pm package itself and drops the entry
+    # point script at ~/.local/bin/pm.  Works for any target project —
+    # when /workspace is a pm source tree the wrapper still prefers the
+    # local pm_core under cwd.
+    setup_parts.append(
+        f"pip3 install --user --no-deps --quiet {_CONTAINER_PM_SRC} || "
+        f"echo 'pm install failed; pm CLI will be unavailable in container' >&2"
+    )
     setup_parts.append(f"touch {_READY_SENTINEL}")
     setup_parts.append("exec sleep infinity")
     setup = "; ".join(setup_parts)
