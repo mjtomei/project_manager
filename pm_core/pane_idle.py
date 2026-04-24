@@ -64,6 +64,11 @@ class PaneIdleState:
     idle: bool = False
     gone: bool = False
     idle_notified: bool = False  # True once caller has been told about idle transition
+    # Hook-driven idle detection: when session_id is known we can short-
+    # circuit hash comparison with the idle_prompt hook event written by
+    # pm_core.hook_receiver.
+    session_id: str | None = None
+    last_hook_ts: float = 0.0
 
 
 class PaneIdleTracker:
@@ -79,13 +84,19 @@ class PaneIdleTracker:
 
     # -- Registration --
 
-    def register(self, key: str, pane_id: str) -> None:
+    def register(self, key: str, pane_id: str,
+                 session_id: str | None = None) -> None:
         """Start tracking a pane.  Resets state if the pane_id changed."""
         with self._lock:
             existing = self._states.get(key)
             if existing and existing.pane_id == pane_id and not existing.gone:
+                # Late-arriving session_id for an already-tracked pane: record it.
+                if session_id and not existing.session_id:
+                    existing.session_id = session_id
                 return  # already tracking this exact pane
-            self._states[key] = PaneIdleState(pane_id=pane_id)
+            self._states[key] = PaneIdleState(
+                pane_id=pane_id, session_id=session_id,
+            )
 
     def unregister(self, key: str) -> None:
         """Stop tracking a pane."""
@@ -108,6 +119,8 @@ class PaneIdleTracker:
             if not state:
                 return False
             pane_id = state.pane_id
+            session_id = state.session_id
+            last_hook_ts = state.last_hook_ts
 
         # Subprocess calls outside lock
         if not tmux_mod.pane_exists(pane_id):
@@ -117,6 +130,16 @@ class PaneIdleTracker:
                     state.gone = True
                     state.idle = False
             return False
+
+        # Hook-driven fast path: if session_id is known and an idle_prompt
+        # event has been written for this session, mark idle immediately.
+        hook_event = None
+        if session_id:
+            try:
+                from pm_core import hook_events
+                hook_event = hook_events.read_event(session_id)
+            except Exception:
+                hook_event = None
 
         content = tmux_mod.capture_pane(pane_id)
         content_hash = hashlib.md5(content.encode()).hexdigest()
@@ -130,6 +153,23 @@ class PaneIdleTracker:
 
             state.gone = False
             state.last_content = content
+
+            # Consume fresh hook events (idle_prompt / Stop) if present.
+            if hook_event:
+                ev_ts = float(hook_event.get("timestamp") or 0)
+                if ev_ts > state.last_hook_ts:
+                    state.last_hook_ts = ev_ts
+                    etype = hook_event.get("event_type")
+                    if etype == "idle_prompt":
+                        state.last_content_hash = content_hash
+                        state.last_change_time = now
+                        state.idle = True
+                        return state.idle
+                    if etype == "Stop":
+                        state.gone = True
+                        state.idle = False
+                        return False
+
             if content_hash != state.last_content_hash:
                 state.last_content_hash = content_hash
                 state.last_change_time = now

@@ -139,6 +139,7 @@ class QAScenario:
     worktree_path: str | None = None
     container_name: str | None = None
     transcript_path: str | None = None
+    session_id: str | None = None
 
 
 @dataclass
@@ -1107,6 +1108,11 @@ def _launch_scenarios_in_tmux(
             scenario.window_name = win_name
             scenario.pane_id = scenario_pane
             scenario.transcript_path = transcript
+            try:
+                from pm_core.claude_launcher import session_id_from_transcript
+                scenario.session_id = session_id_from_transcript(transcript)
+            except Exception:
+                scenario.session_id = None
         except Exception:
             _log.warning("Failed to split scenario pane for scenario %d",
                          scenario.index, exc_info=True)
@@ -1325,6 +1331,11 @@ def _launch_scenarios_in_containers(
             scenario.window_name = win_name
             scenario.pane_id = scenario_pane
             scenario.transcript_path = transcript
+            try:
+                from pm_core.claude_launcher import session_id_from_transcript
+                scenario.session_id = session_id_from_transcript(transcript)
+            except Exception:
+                scenario.session_id = None
         except Exception:
             _log.warning("Failed to split scenario pane for scenario %d",
                          scenario.index, exc_info=True)
@@ -1434,6 +1445,11 @@ def _relaunch_scenario_window(
         scenario.window_name = win_name
         scenario.pane_id = pane_id
         scenario.transcript_path = transcript
+        try:
+            from pm_core.claude_launcher import session_id_from_transcript
+            scenario.session_id = session_id_from_transcript(transcript)
+        except Exception:
+            scenario.session_id = None
         _log.info("Relaunched scenario %d in window %s", scenario.index, win_name)
         try:
             from pm_core import pane_layout
@@ -2048,12 +2064,15 @@ def _verify_single_scenario(
         _verify_cwd = str(Path(scenario.worktree_path).parent.parent)  # s-N/repo -> qa_workdir
     elif qa_workdir:
         _verify_cwd = qa_workdir
+    import uuid as _uuid
+    verify_session_id = str(_uuid.uuid4())
     verify_cmd = build_claude_shell_cmd(
         prompt=prompt,
         model=resolution.model,
         provider=resolution.provider,
         effort=resolution.effort,
         cwd=_verify_cwd,
+        session_id=verify_session_id,
     )
 
     # Split the scenario window using the standard pane management system
@@ -2108,6 +2127,7 @@ def _verify_single_scenario(
             tick_interval=_TICK_INTERVAL,
             stop_check=stop_check,
             log_prefix=f"qa-verify-{scenario.index}",
+            session_id=verify_session_id,
         )
     except Exception:
         _log.warning("Verification: polling failed for scenario %d",

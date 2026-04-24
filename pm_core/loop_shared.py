@@ -333,6 +333,7 @@ def poll_for_verdict(
     tick_interval: float = 1,
     stop_check: Callable[[], bool] | None = None,
     log_prefix: str = "loop_shared",
+    session_id: str | None = None,
 ) -> str | None:
     """Poll a pane until a verdict is stable.
 
@@ -353,14 +354,18 @@ def poll_for_verdict(
         log_prefix: Prefix for log messages.
     """
     from pm_core import tmux as tmux_mod
+    from pm_core import hook_events
 
+    use_hooks = bool(session_id) and hook_events.hooks_available()
     _log.info("%s: poll_for_verdict starting — pane_id=%s, verdicts=%s, "
-              "prompt_text=%d chars, grace=%.0fs",
-              log_prefix, pane_id, verdicts, len(prompt_text), grace_period)
+              "prompt_text=%d chars, grace=%.0fs, hooks=%s",
+              log_prefix, pane_id, verdicts, len(prompt_text), grace_period, use_hooks)
 
     last_verdict = None
     stable_count = 0
     poll_start = time.monotonic()
+    # Baseline for hook-based waits — only accept events newer than now.
+    hook_baseline = time.time() if use_hooks else 0.0
 
     while True:
         if stop_check and stop_check():
@@ -371,6 +376,45 @@ def poll_for_verdict(
             return None
 
         in_grace = grace_period > 0 and (time.monotonic() - poll_start) < grace_period
+
+        if use_hooks and not in_grace:
+            # Block until Claude signals idle (or we time out and fall through
+            # to a single capture). Timeout bounds worst-case latency to the
+            # polling-fallback interval so hook crashes don't wedge pm.
+            ev = hook_events.wait_for_event(
+                session_id,
+                event_types={"idle_prompt", "Stop"},
+                timeout=poll_interval * 3,
+                newer_than=hook_baseline,
+                stop_check=stop_check,
+            )
+            if stop_check and stop_check():
+                return None
+            if not tmux_mod.pane_exists(pane_id):
+                _log.warning("%s: pane %s disappeared", log_prefix, pane_id)
+                return None
+            if ev is None:
+                # Timed out — fall through to a single capture + extract
+                pass
+            else:
+                hook_baseline = float(ev.get("timestamp") or hook_baseline)
+                if ev.get("event_type") == "Stop":
+                    _log.info("%s: Stop event for session_id=%s", log_prefix, session_id)
+                    # Still do one capture for a final verdict check
+            content = tmux_mod.capture_pane(pane_id, full_scrollback=True)
+            verdict = extract_verdict_from_content(
+                content, verdicts=verdicts, keywords=keywords,
+                prompt_text=prompt_text, exclude_verdicts=exclude_verdicts,
+                log_prefix=log_prefix,
+            )
+            if verdict:
+                _log.info("%s: hook-driven verdict %s", log_prefix, verdict)
+                return content
+            if ev is not None and ev.get("event_type") == "Stop":
+                # Claude stopped without a verdict — no point polling more
+                return None
+            # Loop around; wait_for_event will block on the next turn boundary.
+            continue
 
         content = tmux_mod.capture_pane(pane_id, full_scrollback=True)
         if not content.strip():
@@ -421,6 +465,7 @@ def wait_for_follow_up_verdict(
     tick_interval: float = 1,
     stop_check: Callable[[], bool] | None = None,
     log_prefix: str = "loop_shared",
+    session_id: str | None = None,
 ) -> str | None:
     """Poll an existing pane for a follow-up verdict (after INPUT_REQUIRED).
 
@@ -443,15 +488,44 @@ def wait_for_follow_up_verdict(
         log_prefix: Prefix for log messages.
     """
     from pm_core import tmux as tmux_mod
+    from pm_core import hook_events
 
+    use_hooks = bool(session_id) and hook_events.hooks_available()
     last_verdict: str | None = None
     stable_count = 0
+    hook_baseline = time.time() if use_hooks else 0.0
 
     while not (stop_check and stop_check()):
         pane_id = find_claude_pane(session, window_name)
         if not pane_id:
             _log.warning("%s: pane gone during follow-up wait", log_prefix)
             return None
+
+        if use_hooks:
+            ev = hook_events.wait_for_event(
+                session_id,
+                event_types={"idle_prompt", "Stop"},
+                timeout=poll_interval * 3,
+                newer_than=hook_baseline,
+                stop_check=stop_check,
+            )
+            if stop_check and stop_check():
+                return None
+            if ev is not None:
+                hook_baseline = float(ev.get("timestamp") or hook_baseline)
+            content = tmux_mod.capture_pane(pane_id, full_scrollback=True)
+            if content.strip():
+                verdict = extract_verdict_from_content(
+                    content, verdicts=verdicts, keywords=keywords,
+                    prompt_text=prompt_text, exclude_verdicts=exclude_verdicts,
+                    log_prefix=log_prefix,
+                )
+                if verdict:
+                    _log.info("%s: hook-driven follow-up verdict %s", log_prefix, verdict)
+                    return content
+            if ev is not None and ev.get("event_type") == "Stop":
+                return None
+            continue
 
         content = tmux_mod.capture_pane(pane_id, full_scrollback=True)
         if content.strip():

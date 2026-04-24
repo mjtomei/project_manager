@@ -414,6 +414,34 @@ def build_claude_shell_cmd(
     return cmd
 
 
+def session_id_from_transcript(transcript_path: str | Path) -> str | None:
+    """Return the Claude session_id associated with a transcript symlink.
+
+    ``build_claude_shell_cmd(transcript=...)`` writes a symlink pointing at
+    ``~/.claude/projects/<mangled>/<session-id>.jsonl``.  This helper lets
+    callers recover the session_id without threading it through subprocess
+    boundaries.
+    """
+    p = Path(transcript_path)
+    target: Path
+    try:
+        if p.is_symlink():
+            target = Path(os.readlink(p))
+        elif p.exists():
+            target = p
+        else:
+            return None
+    except OSError:
+        return None
+    name = target.name
+    if name.endswith(".jsonl"):
+        name = name[:-6]
+    # Basic sanity check — session ids are UUIDs (32 hex + 4 dashes = 36 chars)
+    if len(name) == 36 and name.count("-") == 4:
+        return name
+    return None
+
+
 def finalize_transcript(transcript_path: Path) -> None:
     """Replace a transcript symlink with a copy of the target file.
 

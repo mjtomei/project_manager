@@ -157,7 +157,8 @@ class BaseWatcher(ABC):
 
     def _poll_for_verdict(self, pane_id: str, prompt_text: str = "",
                           exclude_verdicts: set[str] | None = None,
-                          grace_period: float = 0) -> str | None:
+                          grace_period: float = 0,
+                          session_id: str | None = None) -> str | None:
         """Poll pane until a verdict is stable."""
         return _poll_for_verdict_shared(
             pane_id,
@@ -170,9 +171,11 @@ class BaseWatcher(ABC):
             tick_interval=self.TICK_INTERVAL,
             stop_check=lambda: self.state.stop_requested,
             log_prefix=f"watcher[{self.WATCHER_TYPE}]",
+            session_id=session_id,
         )
 
-    def _wait_for_follow_up(self, prompt_text: str) -> str | None:
+    def _wait_for_follow_up(self, prompt_text: str,
+                            session_id: str | None = None) -> str | None:
         """Poll for a follow-up verdict after INPUT_REQUIRED."""
         session = get_pm_session()
         if not session:
@@ -187,6 +190,7 @@ class BaseWatcher(ABC):
             tick_interval=self.TICK_INTERVAL,
             stop_check=lambda: self.state.stop_requested,
             log_prefix=f"watcher[{self.WATCHER_TYPE}]",
+            session_id=session_id,
         )
 
     def _run_iteration(self, iteration: int,
@@ -217,9 +221,18 @@ class BaseWatcher(ABC):
         _log.info("watcher[%s]: polling pane %s in window %s",
                   self.WATCHER_TYPE, pane_id, self.WINDOW_NAME)
 
+        watcher_session_id: str | None = None
+        if transcript:
+            try:
+                from pm_core.claude_launcher import session_id_from_transcript
+                watcher_session_id = session_id_from_transcript(transcript)
+            except Exception:
+                watcher_session_id = None
+
         content = self._poll_for_verdict(
             pane_id, prompt_text=prompt_text,
             grace_period=self.VERDICT_GRACE_PERIOD,
+            session_id=watcher_session_id,
         )
         if content is None:
             if self.state.stop_requested:
@@ -345,7 +358,21 @@ class BaseWatcher(ABC):
         state._ui_notified_input = False
 
         prompt_text = self.generate_prompt(state.iteration)
-        follow_up_output = self._wait_for_follow_up(prompt_text)
+        # Recover session_id from the current iteration's transcript if any,
+        # so follow-up polling can use hook-driven idle detection.
+        follow_up_session_id: str | None = None
+        try:
+            if state._transcript_dir:
+                from pm_core.claude_launcher import session_id_from_transcript
+                iter_transcript = (
+                    f"{state._transcript_dir}/{self.WATCHER_TYPE}-i{state.iteration}.jsonl"
+                )
+                follow_up_session_id = session_id_from_transcript(iter_transcript)
+        except Exception:
+            follow_up_session_id = None
+        follow_up_output = self._wait_for_follow_up(
+            prompt_text, session_id=follow_up_session_id,
+        )
         state.input_required = False
 
         if follow_up_output is None:

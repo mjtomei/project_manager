@@ -47,6 +47,13 @@ def tui_cmd():
     threading.excepthook = _thread_excepthook
 
     try:
+        # Install Claude Code hooks so pm can receive idle_prompt / Stop
+        # events from every Claude process launched during this session.
+        try:
+            from pm_core.hook_install import ensure_hooks_installed
+            ensure_hooks_installed()
+        except Exception:
+            log.warning("failed to install Claude Code hooks", exc_info=True)
         from pm_core.tui.app import ProjectManagerApp
         app = ProjectManagerApp()
         app.run()
