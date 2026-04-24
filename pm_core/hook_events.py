@@ -70,7 +70,10 @@ def hooks_available() -> bool:
         for entry in entries:
             for hook in (entry or {}).get("hooks", []) or []:
                 cmd = (hook or {}).get("command", "")
-                if "pm_core.hook_receiver" in cmd:
+                # Recognise both the current standalone-receiver form
+                # (``python3 /.../.pm/hook_receiver.py ...``) and the
+                # legacy ``-m pm_core.hook_receiver`` form.
+                if "hook_receiver" in cmd:
                     return True
     return False
 

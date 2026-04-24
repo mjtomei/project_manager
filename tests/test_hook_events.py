@@ -123,7 +123,7 @@ def test_hooks_available_reads_settings(tmp_hooks_home):
             "Notification": [
                 {"matcher": "idle_prompt",
                  "hooks": [{"type": "command",
-                            "command": f"{sys.executable} -m pm_core.hook_receiver idle_prompt"}]}
+                            "command": "python3 /home/user/.pm/hook_receiver.py idle_prompt"}]}
             ]
         }
     }))
@@ -133,6 +133,34 @@ def test_hooks_available_reads_settings(tmp_hooks_home):
 def test_hooks_unavailable_when_missing(tmp_hooks_home):
     hook_events = _reload_hook_events()
     assert hook_events.hooks_available() is False
+
+
+def test_installer_writes_standalone_receiver(tmp_hooks_home):
+    """ensure_hooks_installed must drop a standalone copy of the receiver
+    at ~/.pm/hook_receiver.py so containers can run it without pm_core."""
+    # Re-import hook_install so RECEIVER_PATH picks up the tmp HOME.
+    import importlib
+    from pm_core import hook_install
+    hook_install = importlib.reload(hook_install)
+
+    settings_path = tmp_hooks_home / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+
+    hook_install.ensure_hooks_installed(settings_path)
+
+    receiver = tmp_hooks_home / ".pm" / "hook_receiver.py"
+    assert receiver.exists(), "standalone receiver was not installed"
+    text = receiver.read_text()
+    # Standalone receiver must not import pm_core — otherwise it cannot
+    # run inside a container that doesn't ship pm_core.
+    assert "from pm_core" not in text
+    assert "import pm_core" not in text
+    # And the settings.json hook command must reference that path.
+    data = json.loads(settings_path.read_text())
+    notif_cmds = [h.get("command", "")
+                  for entry in data["hooks"]["Notification"]
+                  for h in entry.get("hooks", [])]
+    assert any(str(receiver) in c for c in notif_cmds)
 
 
 def test_installer_installs_clean(tmp_hooks_home):
@@ -148,12 +176,12 @@ def test_installer_installs_clean(tmp_hooks_home):
     assert data["theme"] == "dark"
     notif = data["hooks"]["Notification"]
     assert any(
-        "pm_core.hook_receiver" in h.get("command", "")
+        "hook_receiver" in h.get("command", "")
         for entry in notif for h in entry.get("hooks", [])
     )
     stop = data["hooks"]["Stop"]
     assert any(
-        "pm_core.hook_receiver" in h.get("command", "")
+        "hook_receiver" in h.get("command", "")
         for entry in stop for h in entry.get("hooks", [])
     )
     # Second call must be a no-op
@@ -181,7 +209,7 @@ def test_installer_preserves_unrelated_notification_matcher(tmp_hooks_home):
     # so this is a known limitation — assert the pm entry exists.
     notif = data["hooks"]["Notification"]
     assert any(
-        "pm_core.hook_receiver" in h.get("command", "")
+        "hook_receiver" in h.get("command", "")
         for entry in notif for h in entry.get("hooks", [])
     )
 

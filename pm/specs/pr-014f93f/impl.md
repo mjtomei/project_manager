@@ -22,22 +22,25 @@ pm obtains a `session_id` for every Claude session it launches. Two routes:
 
 ### R1: Hook receiver script
 
-`pm_core/hook_receiver.py` (invokable as `python -m pm_core.hook_receiver <event_type>`):
+`pm_core/hook_receiver.py` is a **standalone** script — zero `pm_core` imports, only stdlib.
 
 - Reads a JSON payload from stdin (the Claude Code hook event).
 - Extracts `session_id`, `cwd`, and event-specific fields.
-- Writes an event record to `~/.pm/hooks/{session_id}.json` atomically (tempfile in the same directory + `os.replace`).
+- Writes an event record to `~/.pm/hooks/{session_id}.json` atomically (tempfile in the same directory + `os.replace`). `~` resolves via `Path.home()` — on the host it points at the user HOME, inside a container it points at `$CONTAINER_HOME` where the bind mount lands.
 - The file stores the **latest** event per session as `{"event_type": "...", "timestamp": <epoch>, "session_id": "...", "matcher": "...", "cwd": "..."}`. Older events are overwritten — callers only care about the most recent turn-boundary.
 - Exits 0 silently on any error (hook failures must not block Claude).
 
-A flat layout (no session-tag subdirectory) is used because session_ids are UUIDs and cannot collide across concurrent pm sessions. It also ensures the writer (possibly inside a container with `cwd=/workspace`) and the host-side reader agree on the path — a previous session-tag scheme hashed the cwd and silently mismatched whenever Claude's cwd differed from the host pm reader's cwd (containerized scenarios, PR worktrees). The receiver no longer needs to import `pm_core.paths`.
+A flat layout (no session-tag subdirectory) is used because session_ids are UUIDs and cannot collide across concurrent pm sessions. It also ensures the writer (possibly inside a container with `cwd=/workspace`) and the host-side reader agree on the path — a previous session-tag scheme hashed the cwd and silently mismatched whenever Claude's cwd differed from the host pm reader's cwd.
+
+The receiver is shipped into QA containers by bind-mounting it at its host absolute path (see R11); `ensure_hooks_installed` keeps `~/.pm/hook_receiver.py` in sync with `pm_core/hook_receiver.py` on every invocation.
 
 ### R2: Hook installation
 
 `pm_core/hook_install.py`:
 
-- `ensure_hooks_installed(settings_path=None)` writes Notification(`idle_prompt`) and `Stop` hooks into `~/.claude/settings.json`, pointing at `{sys.executable} -m pm_core.hook_receiver <event_type>`.
-- The current interpreter path (`sys.executable`) is baked in at install time so the hook is self-contained; re-running the installer updates the path if the user upgraded python.
+- `ensure_hooks_installed(settings_path=None)` writes Notification(`idle_prompt`) and `Stop` hooks into `~/.claude/settings.json`, pointing at `python3 <HOST_ABS_PATH>/.pm/hook_receiver.py <event_type>`.
+- Before writing settings, the installer copies `pm_core/hook_receiver.py` to `~/.pm/hook_receiver.py` on the host (`RECEIVER_PATH`). The absolute host path is what gets embedded in the hook command so the same string works on the host and inside any container that bind-mounts the file back at that same path (see R11).
+- `python3` is used (PATH lookup) rather than `sys.executable` because host and container interpreters differ; both environments have `python3` on PATH in practice.
 - **No clobbering**: before writing, the installer calls `_detect_foreign_hooks(existing_hooks)`. If `~/.claude/settings.json` already contains any Notification(`idle_prompt`) or `Stop` hook that does not reference `pm_core.hook_receiver`, the installer raises `HookConflictError` with a message listing the offending entries. The user must remove or migrate them before pm can run.
 - Idempotent: if pm's hooks are already present and the embedded command matches the current interpreter, returns `False` and does nothing. If pm's hooks are present with a stale interpreter path, the file is rewritten.
 - Unrelated top-level settings keys (e.g. `"theme": "dark"`) are preserved. Notification hooks on matchers pm does not own are left untouched only when pm's hooks are already present; on a fresh install the entire `Notification` array is replaced (acceptable because the conflict guard rejects foreign idle_prompt entries upfront).
@@ -136,9 +139,14 @@ Retained only for the TUI merge-verdict flow (`tui/review_loop_ui.py:_merge_verd
 
 Both entry points run the installer idempotently; it only writes when the settings file needs to be updated.
 
-### R11: Container bind-mount
+### R11: Container bind-mounts
 
-`pm_core/container.py::create_qa_container` bind-mounts `~/.pm/hooks` into the container at `$HOME/.pm/hooks`, so hook events from containerised Claude processes land in the host `~/.pm/hooks/{session_id}.json` that the host-side pm reader watches. The directory is created on the host before the mount so the bind is safe.
+`pm_core/container.py::create_qa_container` adds two mounts so containerised Claude processes can fire pm's hooks:
+
+1. **Events dir**: host `~/.pm/hooks` → container `$CONTAINER_HOME/.pm/hooks`. Inside the container `Path.home()/.pm/hooks` resolves to the bind-mount target, so the receiver's writes land on the host filesystem.
+2. **Receiver script**: host `~/.pm/hook_receiver.py` → container at the **same absolute host path** (e.g. `/home/<user>/.pm/hook_receiver.py`). The container runtime creates any needed intermediate directories. Because the hook command embedded in `~/.claude/settings.json` is already an absolute host path, this mount makes `python3 <path>` resolve correctly inside the container without changing the settings command.
+
+No `pm_core` is needed inside the container — the receiver is a self-contained script. If either mount is missing, the container-side hook silently no-ops (the receiver catches all exceptions) and that scenario's `_poll_tmux_verdicts` will not see events. `_poll_tmux_verdicts` marks scenarios without fresh events as `INPUT_REQUIRED` after the grace window so the failure surfaces rather than stalling.
 
 ### R12: Tests (`tests/test_hook_events.py`)
 
@@ -165,9 +173,9 @@ QA retry tests (`tests/test_qa_loop.py::TestScenarioRetryLogic`) were updated: s
 
 4. **Settings.json discovery**: pm installs into `~/.claude/settings.json` (user-level) so every Claude process pm launches — host and containerised — inherits the hooks via the existing `~/.claude` bind mount.
 
-5. **Container event visibility**: `~/.pm/hooks` is bind-mounted read-write into the container at `$HOME/.pm/hooks` (see R11). Without this mount, the hook receiver would write inside the container and the host-side reader would never see the events. The receiver's `sys.executable` is a host path; if the container doesn't expose that interpreter the hook command silently fails (the receiver catches all exceptions), which is acceptable because the bind mount is the primary channel.
+5. **Container event visibility**: the container gets two bind mounts — `~/.pm/hooks` (event dir) and `~/.pm/hook_receiver.py` (self-contained script at its host absolute path). The hook command is `python3 <abs_host_path>` with no `pm_core` dependency, so it runs the same way on host and inside the container. See R11.
 
-6. **Hook receiver ≠ virtualenv-dependent**: the hook command uses the absolute `sys.executable` captured at install time, so no virtualenv activation is needed. Re-running pm in a new interpreter context re-installs with the new path.
+6. **Hook receiver ≠ virtualenv-dependent**: the receiver has zero third-party imports, so `python3` from PATH always works. No `sys.executable`, no virtualenv activation, no `pm_core` on sys.path — which is what lets the same `~/.claude/settings.json` hook command run correctly on the host and inside QA containers.
 
 7. **Atomic vs concurrent hooks**: Notification and Stop may fire in rapid succession. Both write to the same `{session_id}.json`; last writer wins. `Stop` after `idle_prompt` is the intended final state.
 

@@ -502,15 +502,30 @@ def create_container(
     # ~/.pm/hooks bind-mount: Claude Code hooks installed at startup write
     # idle_prompt / Stop event files keyed by session_id.  When Claude runs
     # inside this container, the hook receiver writes *inside* the
-    # container — mounting the host's ~/.pm/hooks makes those events
-    # visible to pm on the host so hook-driven verdict detection works
-    # for containerized scenarios too.
+    # container — mounting the host's ~/.pm/hooks at the container user's
+    # HOME makes those events visible to pm on the host (the receiver
+    # computes its output path via ``Path.home() / ".pm" / "hooks"``, which
+    # resolves to $CONTAINER_HOME/.pm/hooks inside the container).
     pm_hooks_dir = Path.home() / ".pm" / "hooks"
     try:
         pm_hooks_dir.mkdir(parents=True, exist_ok=True)
         cmd.extend(["-v", f"{pm_hooks_dir}:{_CONTAINER_HOME}/.pm/hooks"])
     except OSError:
         _log.debug("could not create %s; hook events from container will fall back to polling", pm_hooks_dir)
+
+    # Standalone hook receiver: the command embedded in
+    # ~/.claude/settings.json references the receiver at its *host*
+    # absolute path (e.g. /home/<user>/.pm/hook_receiver.py).  Bind-mount
+    # that exact path into the container so the same command works on
+    # the host and inside the container — no pm_core import required.
+    # Path is derived directly (no pm_core.hook_install import) to keep
+    # create_container import-clean for tests that patch Path internals.
+    _receiver_path = Path.home() / ".pm" / "hook_receiver.py"
+    if _receiver_path.is_file():
+        cmd.extend(["-v", f"{_receiver_path}:{_receiver_path}:ro"])
+    else:
+        _log.debug("hook receiver %s missing; containerised Claude hooks will no-op",
+                   _receiver_path)
 
     # NOTE: .claude.json is NOT bind-mounted.  Claude writes it atomically
     # (write tmp + rename) which replaces the inode — a single-file bind

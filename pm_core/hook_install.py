@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import shlex
-import sys
+import shutil
 import time
 from pathlib import Path
 
@@ -23,6 +23,10 @@ _log = configure_logger("pm.hook_install")
 
 _SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
 _HOOKS_BASE = Path.home() / ".pm" / "hooks"
+# Standalone copy of pm_core/hook_receiver.py lives here so it can be
+# invoked without pm_core on sys.path (e.g. from inside a QA container
+# that bind-mounts this exact host path back into itself).
+RECEIVER_PATH = Path.home() / ".pm" / "hook_receiver.py"
 _STALE_SECONDS = 7 * 24 * 60 * 60  # 7 days
 
 
@@ -31,9 +35,32 @@ class HookConflictError(RuntimeError):
 
 
 def _hook_command_for(event_type: str) -> str:
-    """Build the hook command string, embedding the current interpreter."""
-    python = shlex.quote(sys.executable or "python3")
-    return f"{python} -m pm_core.hook_receiver {shlex.quote(event_type)}"
+    """Build the hook command string.
+
+    Runs the standalone receiver at its host absolute path via ``python3``
+    (PATH lookup) so the same command string works on the host and inside
+    containers that bind-mount the receiver at the same path.
+    """
+    return f"python3 {shlex.quote(str(RECEIVER_PATH))} {shlex.quote(event_type)}"
+
+
+def _install_receiver() -> None:
+    """Copy pm_core/hook_receiver.py to RECEIVER_PATH.
+
+    The receiver has no pm_core imports so it runs standalone inside
+    containers where pm_core is not available.
+    """
+    from pm_core import hook_receiver as _receiver_mod
+    src = Path(_receiver_mod.__file__)
+    try:
+        RECEIVER_PATH.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, RECEIVER_PATH)
+        # chmod so `python3 <path>` works even if a filesystem mount would
+        # otherwise treat it as non-executable — execution bit not strictly
+        # required when invoked as an argument to python3, but harmless.
+        RECEIVER_PATH.chmod(0o644)
+    except OSError as e:
+        _log.warning("could not copy hook receiver to %s: %s", RECEIVER_PATH, e)
 
 
 _MANAGED_EVENTS = ("Notification", "Stop")
@@ -61,9 +88,13 @@ def _desired_hooks() -> dict:
 
 
 def _entry_is_pm(entry: dict) -> bool:
+    receiver_str = str(RECEIVER_PATH)
     for hook in (entry or {}).get("hooks", []) or []:
         cmd = (hook or {}).get("command", "")
-        if "pm_core.hook_receiver" in cmd:
+        # Current format references the standalone receiver path.
+        # Also recognise the legacy ``-m pm_core.hook_receiver`` form so
+        # installs upgrading from the old command get rewritten cleanly.
+        if receiver_str in cmd or "pm_core.hook_receiver" in cmd:
             return True
     return False
 
@@ -183,11 +214,13 @@ def ensure_hooks_installed(settings_path: Path | None = None) -> bool:
             + "\nRemove these entries (or migrate them) and re-run pm."
         )
 
-    # Ensure hook dir exists regardless
+    # Ensure hook dir exists and the standalone receiver is up to date
+    # before we reference its path in settings.json.
     try:
         _HOOKS_BASE.mkdir(parents=True, exist_ok=True)
     except OSError:
         pass
+    _install_receiver()
     _sweep_stale_events()
 
     desired = _desired_hooks()
