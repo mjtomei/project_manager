@@ -61,6 +61,8 @@ def hooks_available() -> bool:
         data = json.loads(_SETTINGS_PATH.read_text())
     except (json.JSONDecodeError, OSError):
         return False
+    if not isinstance(data, dict):
+        return False
     hooks = data.get("hooks")
     if not isinstance(hooks, dict):
         return False
