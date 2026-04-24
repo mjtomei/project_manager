@@ -1018,6 +1018,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         data["project"]["active_pr"] = pr_id
 
     data = store.locked_update(root, apply)
+    # Reload pr_entry from updated data (now contains gh_pr_number)
+    pr_entry = store.get_pr(data, pr_id) or pr_entry
     trigger_tui_refresh()
 
     click.echo(f"\nPR {_pr_display_id(pr_entry)} is now in_progress on {machine}")
