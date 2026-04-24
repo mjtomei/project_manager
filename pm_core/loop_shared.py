@@ -160,9 +160,12 @@ def poll_for_verdict(
             _log.warning("%s: pane %s disappeared", log_prefix, pane_id)
             return None
 
+        # Stop fires every turn, not only at session exit — listening to
+        # it caused false "session gone" returns.  pane_exists is the
+        # authoritative session-gone signal; we only consume idle_prompt.
         ev = hook_events.wait_for_event(
             session_id,
-            event_types={"idle_prompt", "Stop"},
+            event_types={"idle_prompt"},
             timeout=wait_timeout,
             newer_than=hook_baseline,
             stop_check=stop_check,
@@ -181,10 +184,6 @@ def poll_for_verdict(
             _log.info("%s: hook-driven verdict %s (session_id=%s)",
                       log_prefix, verdict, session_id)
             return read_latest_assistant_text(transcript_path) or verdict
-        if ev.get("event_type") == "Stop":
-            _log.info("%s: Stop event without verdict for session_id=%s",
-                      log_prefix, session_id)
-            return None
 
 
 def wait_for_follow_up_verdict(
@@ -225,7 +224,7 @@ def wait_for_follow_up_verdict(
 
         ev = hook_events.wait_for_event(
             session_id,
-            event_types={"idle_prompt", "Stop"},
+            event_types={"idle_prompt"},
             timeout=wait_timeout,
             newer_than=hook_baseline,
             stop_check=stop_check,
@@ -240,7 +239,5 @@ def wait_for_follow_up_verdict(
         if verdict:
             _log.info("%s: hook-driven follow-up verdict %s", log_prefix, verdict)
             return read_latest_assistant_text(transcript_path) or verdict
-        if ev.get("event_type") == "Stop":
-            return None
 
     return None

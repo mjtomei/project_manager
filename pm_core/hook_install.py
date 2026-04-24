@@ -67,7 +67,16 @@ _MANAGED_EVENTS = ("Notification", "Stop")
 
 
 def _desired_hooks() -> dict:
-    """Return the hook config we want present in settings.json."""
+    """Return the hook config we want present in settings.json.
+
+    ``idle_prompt`` — agent turn ended, waiting for next user message.
+    ``permission_prompt`` — Claude Code is about to show its own
+        tool-approval dialog; the session is blocked waiting for the
+        user to approve or deny.  Used by the TUI/tech-tree to render a
+        "waiting for input" indicator distinct from plain idle.
+    ``Stop`` — retained for future use (fires per-turn, not session
+        exit) but the reader currently ignores it.
+    """
     return {
         "Notification": [
             {
@@ -75,7 +84,13 @@ def _desired_hooks() -> dict:
                 "hooks": [
                     {"type": "command", "command": _hook_command_for("idle_prompt")},
                 ],
-            }
+            },
+            {
+                "matcher": "permission_prompt",
+                "hooks": [
+                    {"type": "command", "command": _hook_command_for("permission_prompt")},
+                ],
+            },
         ],
         "Stop": [
             {
@@ -114,8 +129,10 @@ def _detect_foreign_hooks(existing_hooks: dict) -> list[str]:
             if not isinstance(entry, dict):
                 continue
             matcher = entry.get("matcher")
-            # For Notification we only conflict with idle_prompt
-            if event == "Notification" and matcher not in (None, "idle_prompt"):
+            # For Notification we conflict on the matchers pm manages.
+            if event == "Notification" and matcher not in (
+                None, "idle_prompt", "permission_prompt",
+            ):
                 continue
             if _entry_is_pm(entry):
                 continue
@@ -159,22 +176,17 @@ def hooks_already_installed(settings_path: Path | None = None) -> bool:
         current = hooks.get(event)
         if not isinstance(current, list):
             return False
-        need = desired[event]
-        # Require at least one pm-owned entry present with our current command
-        if not any(_entry_is_pm(e) for e in current):
-            return False
-        # And the embedded command must match the current interpreter
-        want_cmd = need[0]["hooks"][0]["command"]
-        found_cmd = False
-        for e in current:
-            for h in (e or {}).get("hooks", []) or []:
-                if h.get("command") == want_cmd:
-                    found_cmd = True
-                    break
-            if found_cmd:
-                break
-        if not found_cmd:
-            return False
+        # Every desired entry's embedded command must be present — this
+        # catches added matchers on upgrade (e.g. new permission_prompt).
+        for need in desired[event]:
+            want_cmd = need["hooks"][0]["command"]
+            found = any(
+                h.get("command") == want_cmd
+                for e in current
+                for h in (e or {}).get("hooks", []) or []
+            )
+            if not found:
+                return False
     return True
 
 

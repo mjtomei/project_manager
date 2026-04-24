@@ -84,6 +84,39 @@ class TestPolling:
         assert tracker.became_idle("k") is True
         assert tracker.became_idle("k") is False
 
+    def test_permission_prompt_marks_waiting_for_input(self, tracker, transcript, monkeypatch):
+        tracker.register("k", "%0", str(transcript))
+        monkeypatch.setattr("pm_core.pane_idle.tmux_mod.pane_exists",
+                            lambda p: True)
+        monkeypatch.setattr(
+            "pm_core.hook_events.read_event",
+            lambda sid: {"event_type": "permission_prompt", "timestamp": 1.0,
+                         "session_id": sid},
+        )
+        tracker.poll("k")
+        assert tracker.is_waiting_for_input("k") is True
+        assert tracker.is_idle("k") is False
+
+    def test_idle_after_permission_clears_waiting(self, tracker, transcript, monkeypatch):
+        tracker.register("k", "%0", str(transcript))
+        monkeypatch.setattr("pm_core.pane_idle.tmux_mod.pane_exists",
+                            lambda p: True)
+
+        sequence = [
+            {"event_type": "permission_prompt", "timestamp": 1.0, "session_id": "s"},
+            {"event_type": "idle_prompt", "timestamp": 2.0, "session_id": "s"},
+        ]
+
+        def read_event(sid):
+            return sequence.pop(0) if sequence else None
+
+        monkeypatch.setattr("pm_core.hook_events.read_event", read_event)
+        tracker.poll("k")
+        assert tracker.is_waiting_for_input("k") is True
+        tracker.poll("k")
+        assert tracker.is_waiting_for_input("k") is False
+        assert tracker.is_idle("k") is True
+
     def test_stop_event_does_not_flip_idle(self, tracker, transcript, monkeypatch):
         tracker.register("k", "%0", str(transcript))
         monkeypatch.setattr("pm_core.pane_idle.tmux_mod.pane_exists",

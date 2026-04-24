@@ -526,15 +526,24 @@ class TechTree(Widget):
                 marker_offset = 2 + len(status_text) + 1  # side + space + base text + space
                 status_text += f" {loop_marker}"
             else:
-                # Show activity spinner for in_progress/in_review PRs
-                # (suppressed when the implementation pane is idle or untracked)
+                # Show activity state for in_progress/in_review PRs:
+                #   ⏸  — agent is blocked on Claude's permission dialog
+                #        (waiting_for_input from the permission_prompt hook).
+                #   spinner — agent is actively working (neither idle nor
+                #        waiting_for_input).
+                #   (no marker) — agent is idle / pane untracked.
                 if status in ("in_progress", "in_review") and pr.get("workdir"):
                     tracker = self.app._pane_idle_tracker
-                    if tracker.is_tracked(pr_id) and not tracker.is_idle(pr_id):
-                        spinner = SPINNER_FRAMES[self._anim_frame % len(SPINNER_FRAMES)]
-                        marker_offset = 2 + len(status_text) + 1
-                        loop_style = "bold cyan"
-                        status_text += f" {spinner}"
+                    if tracker.is_tracked(pr_id):
+                        if tracker.is_waiting_for_input(pr_id):
+                            marker_offset = 2 + len(status_text) + 1
+                            loop_style = "bold yellow"
+                            status_text += " ⏸"
+                        elif not tracker.is_idle(pr_id):
+                            spinner = SPINNER_FRAMES[self._anim_frame % len(SPINNER_FRAMES)]
+                            marker_offset = 2 + len(status_text) + 1
+                            loop_style = "bold cyan"
+                            status_text += f" {spinner}"
             # Show spec-pending marker
             if pr.get("spec_pending") and not loop_marker:
                 marker_offset = 2 + len(status_text) + 1

@@ -32,7 +32,24 @@ _log = configure_logger("pm.pane_idle")
 
 @dataclass
 class PaneIdleState:
-    """Per-pane idle tracking state (hook-event driven)."""
+    """Per-pane state derived from Claude Code hook events.
+
+    Three orthogonal flags:
+
+    * ``idle`` — the agent emitted ``idle_prompt`` (turn ended, waiting
+      for the next user message).
+    * ``waiting_for_input`` — the agent emitted ``permission_prompt``
+      (Claude Code is showing its own tool-approval dialog and is
+      blocked until the user responds).  This is a distinct "the user
+      needs to do something *right now*" state that the TUI renders
+      differently from plain idle.
+    * ``gone`` — the tmux pane disappeared (session exited / crashed).
+
+    ``idle`` and ``waiting_for_input`` are mutually exclusive: the
+    latest hook event wins.  Subprocess-level prompts (gum, fzf, git
+    rebase -i) do not fire any hook and therefore don't flip either
+    flag — they're only visible in the pane content.
+    """
 
     pane_id: str
     transcript_path: str
@@ -40,6 +57,7 @@ class PaneIdleState:
     last_hook_ts: float = 0.0
     last_content: str = ""  # captured on idle transition so callers can render
     idle: bool = False
+    waiting_for_input: bool = False
     gone: bool = False
     idle_notified: bool = False
 
@@ -127,11 +145,18 @@ class PaneIdleTracker:
                     if not state.idle:
                         state.idle_notified = False
                     state.idle = True
+                    state.waiting_for_input = False
+                elif etype == "permission_prompt":
+                    # Agent is blocked on Claude Code's tool-approval
+                    # dialog.  Flag as waiting for input and clear the
+                    # idle flag so the TUI renders a distinct indicator.
+                    state.waiting_for_input = True
+                    state.idle = False
+                    state.idle_notified = False
                 elif etype == "Stop":
-                    # Stop alone is ambiguous (fires per-turn, not only
-                    # at session end), so we don't flip state on it —
-                    # idle_prompt is authoritative.  If the pane is
-                    # actually gone, ``pane_exists`` will flag it above.
+                    # Stop fires per-turn (not only at session end), so
+                    # we don't flip state on it.  pane_exists is the
+                    # authoritative session-gone signal.
                     pass
             return state.idle
 
@@ -141,6 +166,19 @@ class PaneIdleTracker:
         with self._lock:
             state = self._states.get(key)
             return state.idle if state else False
+
+    def is_waiting_for_input(self, key: str) -> bool:
+        """Return True when the agent is blocked on Claude's permission dialog.
+
+        Distinct from :meth:`is_idle` — ``is_idle`` means "turn done,
+        waiting for next user prompt"; ``is_waiting_for_input`` means
+        "turn in progress but blocked on a tool-approval decision".
+        TUI renderers should surface this as a separate indicator so
+        users know to respond in the pane.
+        """
+        with self._lock:
+            state = self._states.get(key)
+            return state.waiting_for_input if state else False
 
     def get_content(self, key: str) -> str:
         """Return the cached transcript-derived content (empty by default).
@@ -181,6 +219,7 @@ class PaneIdleTracker:
             state = self._states.get(key)
             if state:
                 state.idle = False
+                state.waiting_for_input = False
                 state.gone = False
                 state.idle_notified = False
                 state.last_hook_ts = time.time()
