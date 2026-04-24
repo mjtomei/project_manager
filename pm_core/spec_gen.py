@@ -541,8 +541,7 @@ Use your best judgement to resolve any ambiguities based on your understanding
 of the codebase and common patterns.  Document all resolved ambiguities and
 your reasoning in the spec's "Ambiguities" section.
 
-Save the spec to `{file_path}` and then run:
-  `pm pr spec-save {pr_id} {phase}`
+Save the spec to `{file_path}`.
 {commit_step}
 Then proceed with the {label} work below."""
 
@@ -553,8 +552,7 @@ If you encounter a genuinely unresolvable ambiguity — multiple valid
 interpretations with materially different outcomes — include it in the spec's
 "Ambiguities" section marked **[UNRESOLVED]** with a clear question.
 
-Save the spec to `{file_path}` and then run:
-  `pm pr spec-save {pr_id} {phase}`
+Save the spec to `{file_path}`.
 {commit_step}
 If the spec contains any **[UNRESOLVED]** ambiguities, present them to the
 user and wait for their response before proceeding.  Update the spec with
@@ -566,8 +564,7 @@ ambiguities, proceed with the {label} work below."""
 Identify all ambiguities and present your proposed resolution for each in the
 spec's "Ambiguities" section.
 
-Save the spec to `{file_path}` and then run:
-  `pm pr spec-save {pr_id} {phase}`
+Save the spec to `{file_path}`.
 {commit_step}
 Then present a brief summary of the spec to the user and ask whether they
 approve or want changes.  If they request changes, update the spec file,
@@ -689,7 +686,7 @@ def format_spec_for_prompt(pr: dict, phase: str) -> str:
         "and PR notes — the code or notes may have changed since the spec was "
         "generated. If you find requirements that no longer match the "
         "implementation, or PR notes that contradict or extend the spec, update "
-        f"the spec in `{file_path}` and run `pm pr spec-save {pr_id} {phase}`."
+        f"the spec in `{file_path}`."
     )
 
     if mode == "auto":
@@ -697,8 +694,8 @@ def format_spec_for_prompt(pr: dict, phase: str) -> str:
             "Before proceeding, check the spec's Ambiguities section for any open "
             "questions left unanswered (the session that generated it may have exited "
             "before resolving them). If you find any, resolve them using your best "
-            "judgment, document the resolution in the spec, re-save to "
-            f"`{file_path}`, and run `pm pr spec-save {pr_id} {phase}` before continuing. "
+            "judgment, document the resolution in the spec, and re-save to "
+            f"`{file_path}` before continuing. "
             + staleness_note
         )
     elif mode == "prompt":
@@ -706,8 +703,7 @@ def format_spec_for_prompt(pr: dict, phase: str) -> str:
             "Before proceeding, check the spec's Ambiguities section for any items "
             "marked **[UNRESOLVED]** (the session that generated it may have exited "
             "before resolving them). Resolve any you can confidently handle based on "
-            f"the codebase and document them in the spec. Re-save to `{file_path}` "
-            f"and run `pm pr spec-save {pr_id} {phase}`. "
+            f"the codebase and document them in the spec. Re-save to `{file_path}`. "
             "If any remain genuinely unresolvable, present them to the user and wait "
             "for their response before proceeding. "
             + staleness_note
@@ -718,7 +714,7 @@ def format_spec_for_prompt(pr: dict, phase: str) -> str:
             "questions left unanswered (the session that generated it may have exited "
             "before resolving them). If you find any, present them to the user along "
             "with your proposed resolutions. Update the spec with their answers, "
-            f"re-save to `{file_path}`, run `pm pr spec-save {pr_id} {phase}`, "
+            f"re-save to `{file_path}`, "
             "and ask for approval before continuing. "
             + staleness_note
         )

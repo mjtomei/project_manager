@@ -478,7 +478,7 @@ class TestSpecGenerationPreamble:
         assert "How This Session Works" in result
         assert "Step 0" in result
         assert "best judgement" in result
-        assert "spec-save" in result
+        assert "Save the spec to" in result
 
     @patch("pm_core.spec_gen.get_global_setting_value", return_value="prompt")
     def test_prompt_mode_generates_preamble(self, mock_setting, tmp_path):
@@ -488,7 +488,7 @@ class TestSpecGenerationPreamble:
         assert "How This Session Works" in result
         assert "Step 0" in result
         assert "UNRESOLVED" in result
-        assert "spec-save" in result
+        assert "Save the spec to" in result
 
     @patch("pm_core.spec_gen.get_global_setting_value", return_value="review")
     def test_review_mode_generates_preamble(self, mock_setting, tmp_path):
@@ -498,7 +498,7 @@ class TestSpecGenerationPreamble:
         assert "How This Session Works" in result
         assert "Step 0" in result
         assert "approve" in result
-        assert "spec-save" in result
+        assert "Save the spec to" in result
 
     @patch("pm_core.spec_gen.get_global_setting_value", return_value="auto")
     def test_existing_spec_returns_empty(self, mock_setting, tmp_path):
@@ -514,7 +514,7 @@ class TestSpecGenerationPreamble:
         pr = {"id": "pr-1"}
         result = spec_gen.spec_generation_preamble(pr, "qa", root=tmp_path)
         assert "QA" in result
-        assert "spec-save" in result
+        assert "Save the spec to" in result
 
     @patch("pm_core.spec_gen.get_global_setting_value", return_value="auto")
     def test_auto_mode_documents_ambiguities(self, mock_setting, tmp_path):
