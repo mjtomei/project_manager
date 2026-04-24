@@ -45,89 +45,39 @@ def _make_app(tmp_path, *, pr_status="qa", auto_start=True):
 # Step 2-3: zz t starts lenient QA loop with correct state
 # ---------------------------------------------------------------------------
 
-class TestZZTLenientStart:
-    """zz t (strict=False) should create self-driving state with strict=False."""
+class TestZZTStart:
+    """zz t should create self-driving state and start a QA background thread."""
 
-    def test_lenient_creates_self_driving_state(self, tmp_path):
-        """Step 2-3: zz t registers self-driving with strict=False, pass_count=0."""
+    def test_creates_self_driving_state(self, tmp_path):
         from pm_core.tui.qa_loop_ui import start_or_stop_qa_loop
 
         app = _make_app(tmp_path)
 
         with patch("pm_core.tui.qa_loop_ui.start_qa_background"), \
              patch("pm_core.tui.qa_loop_ui._get_qa_pass_count", return_value=1):
-            start_or_stop_qa_loop(app, "pr-001", strict=False)
+            start_or_stop_qa_loop(app, "pr-001")
 
         sd = app._self_driving_qa.get("pr-001")
         assert sd is not None
-        assert sd["strict"] is False
         assert sd["pass_count"] == 0
         assert sd["required_passes"] == 1
 
-    def test_lenient_starts_qa_background(self, tmp_path):
-        """zz t should start a QA background thread."""
+    def test_starts_qa_background(self, tmp_path):
         from pm_core.tui.qa_loop_ui import start_or_stop_qa_loop
 
         app = _make_app(tmp_path)
 
         with patch("pm_core.tui.qa_loop_ui.start_qa_background") as mock_bg, \
              patch("pm_core.tui.qa_loop_ui._get_qa_pass_count", return_value=1):
-            start_or_stop_qa_loop(app, "pr-001", strict=False)
+            start_or_stop_qa_loop(app, "pr-001")
 
         mock_bg.assert_called_once()
         assert "pr-001" in app._qa_loops
-
-    def test_lenient_logs_mode_label(self, tmp_path):
-        """zz t should log 'lenient' mode."""
-        from pm_core.tui.qa_loop_ui import start_or_stop_qa_loop
-
-        app = _make_app(tmp_path)
-
-        with patch("pm_core.tui.qa_loop_ui.start_qa_background"), \
-             patch("pm_core.tui.qa_loop_ui._get_qa_pass_count", return_value=1):
-            start_or_stop_qa_loop(app, "pr-001", strict=False)
-
-        # Check log message contains 'lenient'
-        log_calls = [str(c) for c in app.log_message.call_args_list]
-        assert any("lenient" in c for c in log_calls)
 
 
 # ---------------------------------------------------------------------------
 # Step 6: zzz t starts strict QA loop
 # ---------------------------------------------------------------------------
-
-class TestZZZTStrictStart:
-    """zzz t (strict=True) should create self-driving state with strict=True."""
-
-    def test_strict_creates_self_driving_state(self, tmp_path):
-        """Step 6: zzz t registers self-driving with strict=True."""
-        from pm_core.tui.qa_loop_ui import start_or_stop_qa_loop
-
-        app = _make_app(tmp_path)
-
-        with patch("pm_core.tui.qa_loop_ui.start_qa_background"), \
-             patch("pm_core.tui.qa_loop_ui._get_qa_pass_count", return_value=1):
-            start_or_stop_qa_loop(app, "pr-001", strict=True)
-
-        sd = app._self_driving_qa.get("pr-001")
-        assert sd is not None
-        assert sd["strict"] is True
-        assert sd["pass_count"] == 0
-        assert sd["required_passes"] == 1
-
-    def test_strict_logs_strict_mode_label(self, tmp_path):
-        """zzz t should log 'strict (PASS only)' mode."""
-        from pm_core.tui.qa_loop_ui import start_or_stop_qa_loop
-
-        app = _make_app(tmp_path)
-
-        with patch("pm_core.tui.qa_loop_ui.start_qa_background"), \
-             patch("pm_core.tui.qa_loop_ui._get_qa_pass_count", return_value=1):
-            start_or_stop_qa_loop(app, "pr-001", strict=True)
-
-        log_calls = [str(c) for c in app.log_message.call_args_list]
-        assert any("strict" in c for c in log_calls)
-
 
 # ---------------------------------------------------------------------------
 # Step 4-5: PASS increments pass_count, triggers auto-merge when sufficient
@@ -142,7 +92,7 @@ class TestPassCountAndAutoMerge:
 
         app = _make_app(tmp_path)
         app._self_driving_qa["pr-001"] = {
-            "strict": False, "pass_count": 0, "required_passes": 2
+            "pass_count": 0, "required_passes": 2
         }
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_PASS
@@ -164,7 +114,7 @@ class TestPassCountAndAutoMerge:
 
         app = _make_app(tmp_path)
         app._self_driving_qa["pr-001"] = {
-            "strict": False, "pass_count": 0, "required_passes": 1
+            "pass_count": 0, "required_passes": 1
         }
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_PASS
@@ -184,7 +134,7 @@ class TestPassCountAndAutoMerge:
 
         app = _make_app(tmp_path)
         app._self_driving_qa["pr-001"] = {
-            "strict": True, "pass_count": 1, "required_passes": 2
+            "pass_count": 1, "required_passes": 2
         }
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_PASS
@@ -203,7 +153,7 @@ class TestPassCountAndAutoMerge:
 
         app = _make_app(tmp_path)
         app._self_driving_qa["pr-001"] = {
-            "strict": False, "pass_count": 1, "required_passes": 3
+            "pass_count": 1, "required_passes": 3
         }
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_PASS
@@ -233,7 +183,7 @@ class TestNeedsWorkStrict:
 
         app = _make_app(tmp_path)
         app._self_driving_qa["pr-001"] = {
-            "strict": True, "pass_count": 2, "required_passes": 3
+            "pass_count": 2, "required_passes": 3
         }
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_NEEDS_WORK
@@ -251,7 +201,7 @@ class TestNeedsWorkStrict:
 
         app = _make_app(tmp_path)
         app._self_driving_qa["pr-001"] = {
-            "strict": True, "pass_count": 1, "required_passes": 2
+            "pass_count": 1, "required_passes": 2
         }
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_NEEDS_WORK
@@ -271,7 +221,7 @@ class TestNeedsWorkStrict:
 
         app = _make_app(tmp_path)
         app._self_driving_qa["pr-001"] = {
-            "strict": True, "pass_count": 1, "required_passes": 2
+            "pass_count": 1, "required_passes": 2
         }
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_NEEDS_WORK
@@ -281,25 +231,7 @@ class TestNeedsWorkStrict:
              patch("pm_core.tui.qa_loop_ui._start_self_driving_review") as mock_review:
             _on_qa_complete(app, state)
 
-        mock_review.assert_called_once_with(app, "pr-001", True)  # strict=True
-
-    def test_needs_work_lenient_passes_strict_false(self, tmp_path):
-        """In lenient mode, NEEDS_WORK passes strict=False to review loop."""
-        from pm_core.tui.qa_loop_ui import _on_qa_complete
-
-        app = _make_app(tmp_path)
-        app._self_driving_qa["pr-001"] = {
-            "strict": False, "pass_count": 0, "required_passes": 1
-        }
-        state = QALoopState(pr_id="pr-001")
-        state.latest_verdict = VERDICT_NEEDS_WORK
-
-
-        with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
-             patch("pm_core.tui.qa_loop_ui._start_self_driving_review") as mock_review:
-            _on_qa_complete(app, state)
-
-        mock_review.assert_called_once_with(app, "pr-001", False)  # strict=False
+        mock_review.assert_called_once_with(app, "pr-001")
 
 
 # ---------------------------------------------------------------------------
@@ -315,7 +247,7 @@ class TestReviewToQAAutoRestart:
 
         app = _make_app(tmp_path, pr_status="in_review")
         app._self_driving_qa["pr-001"] = {
-            "strict": True, "pass_count": 0, "required_passes": 2
+            "pass_count": 0, "required_passes": 2
         }
 
         with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
@@ -333,7 +265,7 @@ class TestReviewToQAAutoRestart:
 
         app = _make_app(tmp_path, pr_status="in_review", auto_start=False)
         app._self_driving_qa["pr-001"] = {
-            "strict": False, "pass_count": 0, "required_passes": 1
+            "pass_count": 0, "required_passes": 1
         }
 
         with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
@@ -362,10 +294,10 @@ class TestToggleStop:
         running_state.running = True
         app._qa_loops["pr-001"] = running_state
         app._self_driving_qa["pr-001"] = {
-            "strict": False, "pass_count": 1, "required_passes": 2
+            "pass_count": 1, "required_passes": 2
         }
 
-        start_or_stop_qa_loop(app, "pr-001", strict=False)
+        start_or_stop_qa_loop(app, "pr-001")
 
         # Stop should be requested
         assert running_state.stop_requested is True
@@ -381,10 +313,10 @@ class TestToggleStop:
         running_state.running = True
         app._qa_loops["pr-001"] = running_state
         app._self_driving_qa["pr-001"] = {
-            "strict": False, "pass_count": 0, "required_passes": 1
+            "pass_count": 0, "required_passes": 1
         }
 
-        start_or_stop_qa_loop(app, "pr-001", strict=False)
+        start_or_stop_qa_loop(app, "pr-001")
 
         log_calls = [str(c) for c in app.log_message.call_args_list]
         assert any("QA loop stopping" in c for c in log_calls)
@@ -446,7 +378,7 @@ class TestFreshStartZT:
         running_state.running = True
         app._qa_loops["pr-001"] = running_state
         app._self_driving_qa["pr-001"] = {
-            "strict": True, "pass_count": 2, "required_passes": 3
+            "pass_count": 2, "required_passes": 3
         }
 
         with patch("pm_core.tui.qa_loop_ui.start_qa"):
@@ -531,7 +463,7 @@ class TestInputRequiredPause:
 
         app = _make_app(tmp_path)
         app._self_driving_qa["pr-001"] = {
-            "strict": False, "pass_count": 1, "required_passes": 2
+            "pass_count": 1, "required_passes": 2
         }
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_INPUT_REQUIRED
@@ -555,7 +487,7 @@ class TestInputRequiredPause:
 
         app = _make_app(tmp_path)
         app._self_driving_qa["pr-001"] = {
-            "strict": True, "pass_count": 0, "required_passes": 1
+            "pass_count": 0, "required_passes": 1
         }
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_INPUT_REQUIRED
@@ -574,7 +506,7 @@ class TestInputRequiredPause:
 
         app = _make_app(tmp_path)
         app._self_driving_qa["pr-001"] = {
-            "strict": False, "pass_count": 0, "required_passes": 1
+            "pass_count": 0, "required_passes": 1
         }
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_INPUT_REQUIRED
@@ -592,7 +524,7 @@ class TestInputRequiredPause:
 
         app = _make_app(tmp_path)
         app._self_driving_qa["pr-001"] = {
-            "strict": False, "pass_count": 1, "required_passes": 2
+            "pass_count": 1, "required_passes": 2
         }
 
         # Phase 1: QA completes with INPUT_REQUIRED — loop pauses
@@ -611,7 +543,7 @@ class TestInputRequiredPause:
 
         # Phase 2: User does manual intervention, then presses zz t to restart
         with patch("pm_core.tui.qa_loop_ui.start_qa_background") as mock_bg:
-            start_or_stop_qa_loop(app, "pr-001", strict=False)
+            start_or_stop_qa_loop(app, "pr-001")
 
         # Should have started a new loop
         mock_bg.assert_called_once()
@@ -626,7 +558,7 @@ class TestInputRequiredPause:
 
         app = _make_app(tmp_path)
         app._self_driving_qa["pr-001"] = {
-            "strict": True, "pass_count": 0, "required_passes": 1
+            "pass_count": 0, "required_passes": 1
         }
 
         # Phase 1: QA completes with INPUT_REQUIRED
@@ -644,7 +576,7 @@ class TestInputRequiredPause:
 
         # Phase 2: User presses zz t — should still work
         with patch("pm_core.tui.qa_loop_ui.start_qa_background") as mock_bg:
-            start_or_stop_qa_loop(app, "pr-001", strict=True)
+            start_or_stop_qa_loop(app, "pr-001")
 
         # New loop should have started (stale state replaced)
         mock_bg.assert_called_once()
@@ -685,10 +617,10 @@ class TestZPrefixDispatch:
                 qa_loop_ui.fresh_start_qa(app, "pr-001")
             elif z == 2:
                 from pm_core.tui import qa_loop_ui
-                qa_loop_ui.start_or_stop_qa_loop(app, "pr-001", strict=False)
+                qa_loop_ui.start_or_stop_qa_loop(app, "pr-001")
             else:
                 from pm_core.tui import qa_loop_ui
-                qa_loop_ui.start_or_stop_qa_loop(app, "pr-001", strict=True)
+                qa_loop_ui.start_or_stop_qa_loop(app, "pr-001")
 
         mock_focus.assert_called_once_with(app, "pr-001")
         mock_fresh.assert_not_called()
@@ -724,65 +656,9 @@ class TestZPrefixDispatch:
             app._z_count = 0
             if z == 2:
                 from pm_core.tui import qa_loop_ui
-                qa_loop_ui.start_or_stop_qa_loop(app, "pr-001", strict=False)
+                qa_loop_ui.start_or_stop_qa_loop(app, "pr-001")
 
-        mock_loop.assert_called_once_with(app, "pr-001", strict=False)
-
-    def test_z3_calls_loop_strict(self):
-        """z=3 (zzz t) calls start_or_stop_qa_loop(strict=True)."""
-        app = MagicMock()
-        app._z_count = 3
-
-        with patch("pm_core.tui.qa_loop_ui.start_or_stop_qa_loop") as mock_loop:
-            z = app._z_count
-            app._z_count = 0
-            if z >= 3:
-                from pm_core.tui import qa_loop_ui
-                qa_loop_ui.start_or_stop_qa_loop(app, "pr-001", strict=True)
-
-        mock_loop.assert_called_once_with(app, "pr-001", strict=True)
-
-
-# ---------------------------------------------------------------------------
-# _start_self_driving_review maps strict correctly
-# ---------------------------------------------------------------------------
-
-class TestStartSelfDrivingReview:
-    """_start_self_driving_review maps strict flag to stop_on_suggestions."""
-
-    def test_strict_true_maps_to_stop_on_suggestions_false(self, tmp_path):
-        """strict=True → stop_on_suggestions=False (strict review)."""
-        from pm_core.tui.qa_loop_ui import _start_self_driving_review
-
-        app = _make_app(tmp_path, pr_status="in_review")
-
-        with patch("pm_core.tui.review_loop_ui._start_loop") as mock_loop:
-            _start_self_driving_review(app, "pr-001", strict=True)
-
-        mock_loop.assert_called_once()
-        _, kwargs = mock_loop.call_args
-        assert kwargs.get("stop_on_suggestions") is False or \
-               mock_loop.call_args[0][3] is False  # positional fallback
-
-    def test_strict_false_maps_to_stop_on_suggestions_true(self, tmp_path):
-        """strict=False → stop_on_suggestions=True (lenient review)."""
-        from pm_core.tui.qa_loop_ui import _start_self_driving_review
-
-        app = _make_app(tmp_path, pr_status="in_review")
-
-        with patch("pm_core.tui.review_loop_ui._start_loop") as mock_loop:
-            _start_self_driving_review(app, "pr-001", strict=False)
-
-        mock_loop.assert_called_once()
-        # Check stop_on_suggestions=True was passed
-        call_args = mock_loop.call_args
-        # Could be positional or keyword
-        if "stop_on_suggestions" in (call_args.kwargs or {}):
-            assert call_args.kwargs["stop_on_suggestions"] is True
-        else:
-            # positional: (app, pr_id, pr, stop_on_suggestions)
-            assert call_args[0][3] is True
-
+        mock_loop.assert_called_once_with(app, "pr-001")
 
 # ---------------------------------------------------------------------------
 # Edge cases: changes with PASS, qa-pass-count setting
@@ -819,56 +695,38 @@ class TestEdgeCases:
         with patch("pm_core.tui.qa_loop_ui.get_global_setting_value", return_value="abc"):
             assert _get_qa_pass_count() == 1
 
-    def test_self_driving_merge_uses_force(self, tmp_path):
-        """Self-driving QA should call _maybe_auto_merge with force=True.
-
-        Without force, _maybe_auto_merge early-returns when auto-start is
-        disabled, which would break the zz t / zzz t flow.
-        """
-        from pm_core.tui.qa_loop_ui import _trigger_auto_merge
-
-        app = _make_app(tmp_path, auto_start=False)
-        app._self_driving_qa["pr-001"] = {
-            "strict": False, "pass_count": 1, "required_passes": 1
-        }
-
-        with patch("pm_core.tui.review_loop_ui._maybe_auto_merge") as mock_merge:
-            _trigger_auto_merge(app, "pr-001")
-
-        mock_merge.assert_called_once_with(app, "pr-001", force=True)
-
-    def test_non_self_driving_merge_no_force(self, tmp_path):
-        """Non-self-driving QA should call _maybe_auto_merge without force."""
+    def test_trigger_auto_merge_calls_maybe_auto_merge(self, tmp_path):
+        """_trigger_auto_merge delegates to _maybe_auto_merge (which
+        itself checks auto-start state — merge is auto-start-only)."""
         from pm_core.tui.qa_loop_ui import _trigger_auto_merge
 
         app = _make_app(tmp_path, auto_start=True)
-        # No self-driving state
 
         with patch("pm_core.tui.review_loop_ui._maybe_auto_merge") as mock_merge:
             _trigger_auto_merge(app, "pr-001")
 
-        mock_merge.assert_called_once_with(app, "pr-001", force=False)
+        mock_merge.assert_called_once_with(app, "pr-001")
 
-    def test_self_driving_merge_force_in_full_flow(self, tmp_path):
-        """End-to-end: _on_qa_complete with pass_count reaching required_passes
-        should call _maybe_auto_merge with force=True even though it also
-        removes the self-driving entry (pop must happen AFTER merge trigger)."""
+    def test_manual_zz_t_pass_does_not_trigger_merge(self, tmp_path):
+        """End-to-end: manual zz t reaching required_passes clears state
+        and does NOT auto-merge when auto-start is disabled."""
         from pm_core.tui.qa_loop_ui import _on_qa_complete
 
         app = _make_app(tmp_path, auto_start=False)
         app._self_driving_qa["pr-001"] = {
-            "strict": False, "pass_count": 0, "required_passes": 1
+            "pass_count": 0, "required_passes": 1
         }
         state = QALoopState(pr_id="pr-001")
         state.latest_verdict = VERDICT_PASS
 
 
         with patch("pm_core.tui.review_loop_ui._maybe_auto_merge") as mock_merge, \
+             patch("pm_core.tui.auto_start.is_enabled", return_value=False), \
              patch("pm_core.tui.qa_loop_ui._record_qa_note"):
             _on_qa_complete(app, state)
 
-        mock_merge.assert_called_once_with(app, "pr-001", force=True)
-        # Self-driving state should still be cleaned up after merge
+        mock_merge.assert_not_called()
+        # Self-driving state cleaned up regardless.
         assert "pr-001" not in app._self_driving_qa
 
     def test_stale_loop_removed_on_new_start(self, tmp_path):
@@ -881,7 +739,7 @@ class TestEdgeCases:
         app._qa_loops["pr-001"] = stale
 
         with patch("pm_core.tui.qa_loop_ui.start_qa_background"):
-            start_or_stop_qa_loop(app, "pr-001", strict=False)
+            start_or_stop_qa_loop(app, "pr-001")
 
         # Should have created a new state, not the stale one
         new_state = app._qa_loops["pr-001"]

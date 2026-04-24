@@ -22,9 +22,10 @@ Design:
     markdown bold/code markers (``**PASS**`` / ```` `PASS` ````).  That
     rejects incidental mentions like "PASS this file" while accepting
     bare or lightly-formatted ``PASS`` as the entire message.
-  * Longest-match-first.  ``PASS`` is a prefix of
-    ``PASS_WITH_SUGGESTIONS``; verdicts are scanned in descending
-    length order so the more specific keyword wins.
+  * Longest-match-first.  Verdicts are scanned in descending length
+    order so any longer candidate would take precedence over a shorter
+    prefix (kept for robustness — today's verdicts have no prefix
+    overlap).
 """
 
 from __future__ import annotations

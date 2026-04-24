@@ -172,7 +172,7 @@ def generate_review_prompt(data: dict, pr_id: str, session_name: str | None = No
         pr_id: The PR identifier.
         session_name: If provided, include TUI interaction instructions.
         review_loop: When True, append fix/commit/push instructions for
-            the automated review loop (``zz d`` / ``zzz d``).
+            the automated review loop (``zz d``).
         review_iteration: Current iteration number (1-based) for commit
             message tagging.  Only used when ``review_loop`` is True.
         review_loop_id: Short unique loop identifier for commit message
@@ -276,9 +276,8 @@ Review the code changes in this PR for quality, correctness, and architectural f
 {n+4}. Output per-file notes: **filename** — GOOD / FIX / RETHINK
 {n+5}. End with an overall verdict on its own line — one of:
    - **PASS** — No changes needed. The code is ready to merge as-is.
-   - **PASS_WITH_SUGGESTIONS** — Only non-blocking suggestions remain (style nits, minor refactors, optional improvements). The PR could merge now, but would benefit from small tweaks. List suggestions clearly.
-   - **NEEDS_WORK** — Blocking issues found (bugs, missing error handling, architectural problems, test gaps). Separate code-quality fixes from architectural concerns.
-   - **INPUT_REQUIRED** — Reserved for genuine ambiguities in the PR spec or architectural decisions that need human judgment. Do NOT use this for manual testing — QA handles testing separately. Include specific questions that need the user's decision."""
+   - **NEEDS_WORK** — Blocking issues or non-blocking suggestions found — either way, fix them in this iteration. Separate code-quality fixes from architectural concerns.
+   - **INPUT_REQUIRED** — Any issue that needs the user's attention before the PR can proceed: ambiguities in the PR spec, architectural decisions you can't make alone, something that looks broken but you can't tell if it's intentional, a dependency or environmental problem you can't resolve, or anything else you'd want a human to look at before moving on. If in doubt between NEEDS_WORK and INPUT_REQUIRED, prefer INPUT_REQUIRED — an unresolved concern silently rolled into a PASS is the worst outcome. Do NOT use INPUT_REQUIRED for manual testing — QA handles testing separately. Include specific questions that need the user's decision."""
 
     base = prompt.strip()
     base += review_specific_block
@@ -303,28 +302,26 @@ def _review_loop_addendum(branch: str, iteration: int = 0,
 
 This review is running in an automated loop.  After completing your review:
 
-1. If you find issues (**NEEDS_WORK**):
-   - Implement ALL the fixes you identified
-   - Run any relevant tests to verify your fixes
+1. If you find anything worth changing — bugs, missing error handling,
+   architectural problems, test gaps, OR non-blocking suggestions (style
+   nits, minor refactors, optional improvements) — that's **NEEDS_WORK**:
+   - Implement ALL the fixes and suggestions you identified
+   - Run any relevant tests to verify your changes
    - Stage and commit your changes — prefix the message with `{commit_prefix}` (e.g. `{commit_prefix}fix null check, add tests`)
    - Push to the remote: `git push origin {branch}`
-   - Then output your verdict: **NEEDS_WORK** with a summary of what you fixed and what may still need attention on the next iteration
+   - Then output your verdict: **NEEDS_WORK** with a summary of what you changed and what may still need attention on the next iteration
 
-2. If only non-blocking suggestions remain (**PASS_WITH_SUGGESTIONS**):
-   - Implement the suggestions
-   - Commit (same `{commit_prefix}` prefix) and push
-   - Output: **PASS_WITH_SUGGESTIONS**
-
-3. If the code is ready to merge as-is (**PASS**):
+2. If the code is ready to merge as-is with nothing you'd change (**PASS**):
    - Output: **PASS**
 
-4. If you have a genuine question requiring human judgment (**INPUT_REQUIRED**):
-   - Reserved for genuine ambiguities in the PR spec or architectural decisions that need human judgment
-   - Do NOT use this for manual testing — QA handles testing separately
-   - Include specific questions that need the user's decision
+3. If ANY issue needs the user's attention before the PR can proceed (**INPUT_REQUIRED**):
+   - Use this for: ambiguities in the PR spec, architectural decisions you can't make alone, code that looks broken but you can't tell if it's intentional, a dependency/environment problem you can't resolve, or anything else you'd want a human to look at before moving on.
+   - If in doubt between NEEDS_WORK and INPUT_REQUIRED, prefer INPUT_REQUIRED — an unresolved concern silently rolled into a PASS is the worst outcome.
+   - Do NOT use this for manual testing — QA handles testing separately.
+   - Include specific questions that need the user's decision.
    - Output: **INPUT_REQUIRED** — the user will respond directly in this pane
 
-IMPORTANT: Always end your response with the verdict keyword on its own line — one of **PASS**, **PASS_WITH_SUGGESTIONS**, **NEEDS_WORK**, or **INPUT_REQUIRED**."""
+IMPORTANT: Always end your response with the verdict keyword on its own line — one of **PASS**, **NEEDS_WORK**, or **INPUT_REQUIRED**."""
 
 
 def _beginner_addendum() -> str:
@@ -660,7 +657,7 @@ mechanics will help you distinguish normal operation from genuine problems.
 - `pending` -- Waiting for dependencies to be merged. Auto-start picks up
   PRs whose dependencies are all `merged` and runs `pm pr start`.
 - `in_progress` -- A Claude implementation session is running in a tmux window.
-- `in_review` -- A review loop is running (iterates until PASS/PASS_WITH_SUGGESTIONS).
+- `in_review` -- A review loop is running (iterates until PASS).
 - `qa` -- QA testing is running. QA scenarios execute in parallel; if they find
   issues and commit fixes, the PR returns to `in_review` for another review cycle.
 - `merged` -- PR merged to `{base_branch}`. Auto-start then checks for newly-unblocked dependents.
@@ -674,8 +671,8 @@ mechanics will help you distinguish normal operation from genuine problems.
   launching a review loop. **This means there is a normal ~30 second delay between Claude
   finishing its work and the review starting.** During this window, the pane will appear
   idle but the transition has not happened yet -- this is expected, not a problem.
-- **in_review -> qa**: When the review loop reaches a PASS or PASS_WITH_SUGGESTIONS
-  verdict, auto-start transitions the PR to `qa` and launches QA scenarios.
+- **in_review -> qa**: When the review loop reaches a PASS verdict,
+  auto-start transitions the PR to `qa` and launches QA scenarios.
 - **qa -> merged**: When QA passes with no changes, auto-start runs `pm pr merge`.
   If QA finds issues or commits fixes, the PR returns to `in_review` for re-review.
 - **in_review/qa -> merged (merge conflicts)**: If the merge has conflicts, a
@@ -683,8 +680,8 @@ mechanics will help you distinguish normal operation from genuine problems.
   polling), the merge is re-attempted.
 
 Note: `d` in the TUI starts a single one-shot review. To start a review **loop** (which
-auto-start uses), the TUI chord is `zzz d`. If you need to manually kick off a review
-loop for a PR, use `pm tui send` to send `zzz d` while the PR is selected.
+auto-start uses), the TUI chord is `zz d`. If you need to manually kick off a review
+loop for a PR, use `pm tui send` to send `zz d` while the PR is selected.
 
 **Normal things that look like problems (but aren't):**
 - An `in_progress` PR whose pane has been static for < 60 seconds -- idle detection
@@ -818,7 +815,7 @@ def generate_review_loop_prompt(data: dict, pr_id: str) -> str:
 
     Wraps the normal review prompt with instructions to implement fixes,
     commit, and push before reporting the verdict.  This is used by the
-    review loop (``zz d`` / ``zzz d``) where Claude iterates until PASS.
+    review loop (``zz d``) where Claude iterates until PASS.
     """
     return generate_review_prompt(data, pr_id, review_loop=True)
 

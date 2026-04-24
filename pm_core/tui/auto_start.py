@@ -44,7 +44,7 @@ def get_transcript_dir(app) -> Path:
        auto-start is active.
     2. A lazily-created ``manual-<token>`` run dir cached on the app as
        ``_manual_transcript_run_id``.  Used for manually-started review
-       loops (``zz d`` / ``zzz d``) that never go through auto-start.
+       loops (``zz d``) that never go through auto-start.
 
     The returned path is always under ``app._root / "transcripts"``.
     The directory itself is created by callers on demand when they
@@ -93,7 +93,6 @@ def save_breadcrumb(app) -> None:
         review_loops[pr_id] = {
             "iteration": rstate.iteration,
             "latest_verdict": rstate.latest_verdict,
-            "stop_on_suggestions": rstate.stop_on_suggestions,
             "loop_id": rstate.loop_id,
             "input_required": rstate.input_required,
             "_transcript_dir": rstate._transcript_dir,
@@ -183,7 +182,6 @@ async def consume_breadcrumb(app) -> None:
                 pr_id=pr_id,
                 iteration=loop_data.get("iteration", 0),
                 latest_verdict=loop_data.get("latest_verdict", ""),
-                stop_on_suggestions=loop_data.get("stop_on_suggestions", True),
                 loop_id=loop_data.get("loop_id", secrets.token_hex(2)),
                 input_required=loop_data.get("input_required", False),
                 _transcript_dir=loop_data.get("_transcript_dir"),
@@ -217,7 +215,7 @@ async def consume_breadcrumb(app) -> None:
                 if pr and pr.get("status") == "in_review":
                     tdir = get_transcript_dir(app)
                     _start_loop(
-                        app, pr_id, pr, rstate.stop_on_suggestions,
+                        app, pr_id, pr,
                         transcript_dir=str(tdir),
                         resume_state=rstate,
                     )
@@ -448,8 +446,7 @@ def _auto_start_review_loops(app, target: str | None = None,
         app.log_message(f"Auto-start: review loop for {pr_id}")
         from pm_core.tui.review_loop_ui import _start_loop
         tdir = get_transcript_dir(app)
-        _start_loop(app, pr_id, pr, stop_on_suggestions=False,
-                     transcript_dir=str(tdir))
+        _start_loop(app, pr_id, pr, transcript_dir=str(tdir))
 
 
 def _auto_start_qa_loops(app, target: str | None = None,

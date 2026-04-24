@@ -14,7 +14,6 @@ from pm_core.review_loop import (
     ReviewIteration,
     _match_verdict,
     VERDICT_PASS,
-    VERDICT_PASS_WITH_SUGGESTIONS,
     VERDICT_NEEDS_WORK,
     VERDICT_INPUT_REQUIRED,
     VERDICT_KILLED,
@@ -30,13 +29,6 @@ class TestParseReviewVerdict:
     def test_pass_plain(self):
         assert parse_review_verdict("PASS") == VERDICT_PASS
 
-    def test_pass_with_suggestions(self):
-        output = "Minor style issues.\n\n**PASS_WITH_SUGGESTIONS**\n\n- Consider renaming foo"
-        assert parse_review_verdict(output) == VERDICT_PASS_WITH_SUGGESTIONS
-
-    def test_pass_with_suggestions_bold(self):
-        assert parse_review_verdict("**PASS_WITH_SUGGESTIONS**") == VERDICT_PASS_WITH_SUGGESTIONS
-
     def test_needs_work(self):
         output = "Found bugs.\n\n**NEEDS_WORK**\n\n- Fix the null check"
         assert parse_review_verdict(output) == VERDICT_NEEDS_WORK
@@ -49,11 +41,6 @@ class TestParseReviewVerdict:
 
     def test_no_verdict_defaults_to_needs_work(self):
         assert parse_review_verdict("This code has issues but no clear verdict") == VERDICT_NEEDS_WORK
-
-    def test_pass_not_confused_with_suggestions(self):
-        """A line with just PASS should not match PASS_WITH_SUGGESTIONS."""
-        output = "All good.\n\nPASS"
-        assert parse_review_verdict(output) == VERDICT_PASS
 
     def test_verdict_on_own_line_wins(self):
         """Only a keyword on its own line is detected."""
@@ -103,9 +90,6 @@ class TestMatchVerdictFalsePositives:
     def test_pr_title_with_needs_work(self):
         assert _match_verdict("Fix NEEDS_WORK detection in review loop verdict parser") is None
 
-    def test_pr_title_with_pass_with_suggestions(self):
-        assert _match_verdict("Handle PASS_WITH_SUGGESTIONS in auto-merge logic") is None
-
     def test_pm_pr_list_table_row(self):
         assert _match_verdict("| pr-473ac84 | Add INPUT_REQUIRED verdict to review loop | merged |") is None
 
@@ -117,7 +101,6 @@ class TestMatchVerdictFalsePositives:
         """Bare keyword on a line by itself."""
         assert _match_verdict("PASS") == VERDICT_PASS
         assert _match_verdict("NEEDS_WORK") == VERDICT_NEEDS_WORK
-        assert _match_verdict("PASS_WITH_SUGGESTIONS") == VERDICT_PASS_WITH_SUGGESTIONS
         assert _match_verdict("INPUT_REQUIRED") == VERDICT_INPUT_REQUIRED
 
     def test_bold_verdicts_match(self):
@@ -125,7 +108,6 @@ class TestMatchVerdictFalsePositives:
         assert _match_verdict("**PASS**") == VERDICT_PASS
         assert _match_verdict("**NEEDS_WORK**") == VERDICT_NEEDS_WORK
         assert _match_verdict("**INPUT_REQUIRED**") == VERDICT_INPUT_REQUIRED
-        assert _match_verdict("**PASS_WITH_SUGGESTIONS**") == VERDICT_PASS_WITH_SUGGESTIONS
 
     def test_whitespace_around_keyword(self):
         """Leading/trailing whitespace should be stripped."""
@@ -177,23 +159,14 @@ from tests.conftest import simulate_terminal_wrap as _simulate_terminal_wrap
 
 
 class TestShouldStop:
-    def test_pass_always_stops(self):
+    def test_pass_stops(self):
         assert should_stop(VERDICT_PASS) is True
-        assert should_stop(VERDICT_PASS, stop_on_suggestions=False) is True
-
-    def test_suggestions_stops_by_default(self):
-        assert should_stop(VERDICT_PASS_WITH_SUGGESTIONS) is True
-
-    def test_suggestions_continues_when_configured(self):
-        assert should_stop(VERDICT_PASS_WITH_SUGGESTIONS, stop_on_suggestions=False) is False
 
     def test_needs_work_never_stops(self):
         assert should_stop(VERDICT_NEEDS_WORK) is False
-        assert should_stop(VERDICT_NEEDS_WORK, stop_on_suggestions=False) is False
 
     def test_input_required_never_stops(self):
         assert should_stop(VERDICT_INPUT_REQUIRED) is False
-        assert should_stop(VERDICT_INPUT_REQUIRED, stop_on_suggestions=False) is False
 
 
 # --- ReviewLoopState tests ---
@@ -207,13 +180,8 @@ class TestReviewLoopState:
         assert state.iteration == 0
         assert state.latest_verdict == ""
         assert state.history == []
-        assert state.stop_on_suggestions is True
         # loop_id is auto-generated
         assert len(state.loop_id) == 4  # 2 bytes = 4 hex chars
-
-    def test_strict_mode(self):
-        state = ReviewLoopState(pr_id="pr-001", stop_on_suggestions=False)
-        assert state.stop_on_suggestions is False
 
     def test_unique_loop_ids(self):
         """Each state gets a unique loop_id."""
@@ -266,27 +234,6 @@ class TestRunReviewLoopSync:
         assert calls[0].kwargs["loop_id"] == state.loop_id
         assert calls[1].kwargs["iteration"] == 2
         assert calls[1].kwargs["loop_id"] == state.loop_id
-
-    @patch("pm_core.review_loop._run_claude_review")
-    def test_stops_on_suggestions_by_default(self, mock_review):
-        mock_review.return_value = "Minor nits.\n\n**PASS_WITH_SUGGESTIONS**"
-        state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
-        assert result.iteration == 1
-        assert result.latest_verdict == VERDICT_PASS_WITH_SUGGESTIONS
-        assert result.running is False
-
-    @patch("pm_core.review_loop._run_claude_review")
-    def test_continues_past_suggestions_when_configured(self, mock_review):
-        mock_review.side_effect = [
-            "Minor nits.\n\n**PASS_WITH_SUGGESTIONS**",
-            "All good.\n\n**PASS**",
-        ]
-        state = ReviewLoopState(pr_id="pr-001", stop_on_suggestions=False)
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
-        assert result.iteration == 2
-        assert result.latest_verdict == VERDICT_PASS
-        assert len(result.history) == 2
 
     @patch("pm_core.review_loop._run_claude_review")
     def test_loops_on_needs_work(self, mock_review):
@@ -429,13 +376,14 @@ class TestGenerateReviewPrompt:
         prompt = generate_review_prompt(data, "pr-001", review_loop=True)
         assert "pm/pr-001-add-feature" in prompt
 
-    def test_includes_all_three_verdicts(self):
+    def test_includes_all_verdicts(self):
         from pm_core.prompt_gen import generate_review_prompt
         data = self._make_data()
         prompt = generate_review_prompt(data, "pr-001", review_loop=True)
         assert "PASS" in prompt
-        assert "PASS_WITH_SUGGESTIONS" in prompt
         assert "NEEDS_WORK" in prompt
+        assert "INPUT_REQUIRED" in prompt
+        assert "PASS_WITH_SUGGESTIONS" not in prompt
 
     def test_includes_base_review_content(self):
         from pm_core.prompt_gen import generate_review_prompt
@@ -485,7 +433,7 @@ class TestMultipleLoops:
         """Two loops for different PRs track state independently."""
         mock_review.return_value = "**PASS**"
         state_a = ReviewLoopState(pr_id="pr-001")
-        state_b = ReviewLoopState(pr_id="pr-002", stop_on_suggestions=False)
+        state_b = ReviewLoopState(pr_id="pr-002")
 
         pr_data_a = {"id": "pr-001", "branch": "pm/pr-001"}
         pr_data_b = {"id": "pr-002", "branch": "pm/pr-002"}
@@ -497,8 +445,6 @@ class TestMultipleLoops:
         assert state_b.pr_id == "pr-002"
         assert state_a.iteration == 1
         assert state_b.iteration == 1
-        assert state_a.stop_on_suggestions is True
-        assert state_b.stop_on_suggestions is False
         # Each loop has a unique ID
         assert state_a.loop_id != state_b.loop_id
 
@@ -596,7 +542,7 @@ class TestGenerateReviewPromptInputRequired:
         data = self._make_data()
         prompt = generate_review_prompt(data, "pr-001")
         assert "INPUT_REQUIRED" in prompt
-        assert "human judgment" in prompt
+        assert "needs the user's attention" in prompt
 
     def test_review_loop_prompt_includes_input_required(self):
         from pm_core.prompt_gen import generate_review_prompt
@@ -604,4 +550,4 @@ class TestGenerateReviewPromptInputRequired:
         prompt = generate_review_prompt(data, "pr-001", review_loop=True)
         assert "INPUT_REQUIRED" in prompt
         # Should explain that it's reserved for genuine ambiguities
-        assert "human judgment" in prompt
+        assert "needs the user's attention" in prompt

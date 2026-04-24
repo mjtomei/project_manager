@@ -22,7 +22,6 @@ STATUS_ICONS = {
 
 VERDICT_MARKERS = {
     "PASS": "✓",
-    "PASS_WITH_SUGGESTIONS": "~",
     "NEEDS_WORK": "✗",
     "KILLED": "☠",
     "TIMEOUT": "⏱",
@@ -32,7 +31,6 @@ VERDICT_MARKERS = {
 
 VERDICT_STYLES = {
     "PASS": "bold green",
-    "PASS_WITH_SUGGESTIONS": "bold yellow",
     "NEEDS_WORK": "bold red",
     "KILLED": "bold red",
     "TIMEOUT": "bold red",

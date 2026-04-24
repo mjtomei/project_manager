@@ -97,7 +97,7 @@ Schema-light JSONL reader.
 - Walks the transcript text **backward** by line.
 - Uses substring detection on `"type":"assistant"` / `"type":"user"` (whitespace-tolerant via regex) to bound the **latest assistant turn**. Records from earlier turns are not scanned, so a stale verdict from a previous turn can never leak.
 - For each candidate line, matches `(?:\\[nr]|")<verdict>(?:\\[nr]|")` — the verdict must be bounded by a JSON newline-escape or a JSON string quote, i.e. it occupies its own line in the assistant's actual output. Incidental mentions like "PASS this file" are rejected.
-- Verdicts are scanned longest-first so `PASS_WITH_SUGGESTIONS` wins over `PASS`.
+- Verdicts are scanned longest-first so any longer candidate wins over a shorter prefix (kept for robustness; today's verdicts have no prefix overlap).
 
 `read_latest_assistant_text(transcript_path)` is a companion helper that decodes and concatenates the `text` content blocks of the latest assistant turn. This one *is* mildly schema-dependent (looks for `message.content[].type == "text"`); callers use it to feed downstream parsers like `extract_between_markers` for `REFINED_STEPS_END` / `FLAGGED_END` markers. If Anthropic changes that shape the helper can be updated in isolation — verdict detection is unaffected.
 

@@ -10,7 +10,7 @@ import pytest
 from pm_core.verdict_transcript import extract_verdict_from_transcript
 
 
-VERDICTS = ("INPUT_REQUIRED", "PASS_WITH_SUGGESTIONS", "NEEDS_WORK", "PASS")
+VERDICTS = ("INPUT_REQUIRED", "NEEDS_WORK", "PASS")
 
 
 def _assistant_line(text: str) -> str:
@@ -67,11 +67,15 @@ def test_verdict_as_entire_text(tmp_path: Path) -> None:
 
 
 def test_longest_match_wins(tmp_path: Path) -> None:
+    # Verdicts list has no prefix overlap today, but the extractor still
+    # scans longest-first defensively so a future longer verdict would
+    # win over any shorter prefix.
+    custom = ("PASS", "PASS_EXTRA")
     p = _write(tmp_path, [
         _user_line("review"),
-        _assistant_line("Summary.\nPASS_WITH_SUGGESTIONS\n"),
+        _assistant_line("Summary.\nPASS_EXTRA\n"),
     ])
-    assert extract_verdict_from_transcript(p, VERDICTS) == "PASS_WITH_SUGGESTIONS"
+    assert extract_verdict_from_transcript(p, custom) == "PASS_EXTRA"
 
 
 def test_incidental_mention_not_matched(tmp_path: Path) -> None:
@@ -138,9 +142,9 @@ def test_markdown_bold_verdict(tmp_path: Path) -> None:
     # Reviewers commonly wrap their verdict in markdown bold.  Must match.
     p = _write(tmp_path, [
         _user_line("q"),
-        _assistant_line("Summary.\n\n**PASS_WITH_SUGGESTIONS**\n"),
+        _assistant_line("Summary.\n\n**NEEDS_WORK**\n"),
     ])
-    assert extract_verdict_from_transcript(p, VERDICTS) == "PASS_WITH_SUGGESTIONS"
+    assert extract_verdict_from_transcript(p, VERDICTS) == "NEEDS_WORK"
 
 
 def test_markdown_code_verdict(tmp_path: Path) -> None:
@@ -160,11 +164,13 @@ def test_bold_incidental_still_rejected(tmp_path: Path) -> None:
     assert extract_verdict_from_transcript(p, VERDICTS) is None
 
 
-def test_pass_prefix_does_not_mask_pass_with_suggestions(tmp_path: Path) -> None:
-    # If the extractor naively scans for PASS first it would see
-    # PASS_WITH_SUGGESTIONS but match only PASS.  Longest-first fixes it.
+def test_longer_verdict_not_masked_by_shorter_prefix(tmp_path: Path) -> None:
+    # If the extractor naively scans PASS first it would match only PASS
+    # when the real verdict is a longer PASS_* variant.  Longest-first
+    # guards against that regardless of which verdicts are registered.
+    custom = ("PASS", "PASS_AND_THEN_SOME")
     p = _write(tmp_path, [
         _user_line("q"),
-        _assistant_line("PASS_WITH_SUGGESTIONS\n"),
+        _assistant_line("PASS_AND_THEN_SOME\n"),
     ])
-    assert extract_verdict_from_transcript(p, VERDICTS) == "PASS_WITH_SUGGESTIONS"
+    assert extract_verdict_from_transcript(p, custom) == "PASS_AND_THEN_SOME"

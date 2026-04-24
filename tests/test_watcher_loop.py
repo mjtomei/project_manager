@@ -102,7 +102,6 @@ class TestMatchWatcherVerdictFalsePositives:
         """Watcher should not match review loop verdicts."""
         assert _match_watcher_verdict("PASS") is None
         assert _match_watcher_verdict("NEEDS_WORK") is None
-        assert _match_watcher_verdict("PASS_WITH_SUGGESTIONS") is None
 
 
 # --- prompt verdict filtering tests ---

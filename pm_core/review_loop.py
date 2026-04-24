@@ -1,26 +1,22 @@
 """Review loop: repeatedly run Claude review until PASS.
 
 The loop launches a visible tmux review window (via ``pm pr review
---fresh --review-loop``) and polls the Claude pane with
-``tmux capture-pane`` to detect the verdict.
+--fresh --review-loop``) and polls the Claude pane for a verdict via
+Claude Code hook events + JSONL transcript.
 
 Verdicts:
-  PASS                 — No changes needed, code is ready to merge.
-  PASS_WITH_SUGGESTIONS — Only non-blocking suggestions remain.
-  NEEDS_WORK           — Blocking issues found.
-  INPUT_REQUIRED       — Human-guided testing needed before sign-off.
+  PASS            — No changes needed, code is ready to merge.
+  NEEDS_WORK      — Blocking issues found; loop iterates after fixes.
+  INPUT_REQUIRED  — Human-guided testing needed before sign-off.
 
-The loop stops on PASS always. By default it also stops on
-PASS_WITH_SUGGESTIONS; set `stop_on_suggestions=False` to keep going
-until full PASS.
+The loop stops on PASS.
 
 When INPUT_REQUIRED is detected, the loop marks the PR as paused and
 polls the existing review pane for a follow-up verdict.  The user
 interacts directly with Claude in the review pane (e.g. performing
 the requested tests and reporting results).  Once Claude emits a new
-verdict (PASS, PASS_WITH_SUGGESTIONS, or NEEDS_WORK), the loop picks
-it up automatically and resumes normal flow — no TUI interaction
-required.
+verdict (PASS or NEEDS_WORK), the loop picks it up automatically and
+resumes normal flow — no TUI interaction required.
 """
 
 import secrets
@@ -45,16 +41,11 @@ _log = configure_logger("pm.review_loop")
 
 # Review verdicts in order of severity
 VERDICT_PASS = "PASS"
-VERDICT_PASS_WITH_SUGGESTIONS = "PASS_WITH_SUGGESTIONS"
 VERDICT_NEEDS_WORK = "NEEDS_WORK"
 VERDICT_INPUT_REQUIRED = "INPUT_REQUIRED"
 VERDICT_KILLED = "KILLED"
 
-ALL_VERDICTS = (VERDICT_PASS, VERDICT_PASS_WITH_SUGGESTIONS, VERDICT_NEEDS_WORK,
-                VERDICT_INPUT_REQUIRED)
-
-# Keywords used for prompt line filtering (all verdict keywords)
-_REVIEW_KEYWORDS = ("PASS_WITH_SUGGESTIONS", "INPUT_REQUIRED", "NEEDS_WORK", "PASS")
+ALL_VERDICTS = (VERDICT_PASS, VERDICT_NEEDS_WORK, VERDICT_INPUT_REQUIRED)
 
 # How often to check pane content for a verdict (seconds)
 _POLL_INTERVAL = 5
@@ -90,7 +81,6 @@ class ReviewLoopState:
     latest_verdict: str = ""
     latest_output: str = ""
     history: list[ReviewIteration] = field(default_factory=list)
-    stop_on_suggestions: bool = True
     loop_id: str = field(default_factory=_generate_loop_id)
     _ui_notified_done: bool = False
     _ui_notified_input: bool = False
@@ -238,13 +228,9 @@ def _wait_for_follow_up_verdict(pr_data: dict,
     )
 
 
-def should_stop(verdict: str, stop_on_suggestions: bool = True) -> bool:
+def should_stop(verdict: str) -> bool:
     """Determine if the loop should stop based on the verdict."""
-    if verdict == VERDICT_PASS:
-        return True
-    if verdict == VERDICT_PASS_WITH_SUGGESTIONS and stop_on_suggestions:
-        return True
-    return False
+    return verdict == VERDICT_PASS
 
 
 def run_review_loop_sync(
@@ -366,7 +352,7 @@ def run_review_loop_sync(
                     except Exception:
                         _log.exception("review_loop: on_iteration callback failed")
 
-            if should_stop(verdict, state.stop_on_suggestions):
+            if should_stop(verdict):
                 _log.info("review_loop: stopping — verdict=%s", verdict)
                 break
 

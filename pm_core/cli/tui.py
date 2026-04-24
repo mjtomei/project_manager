@@ -236,10 +236,10 @@ Navigation:
 
 PR Actions:
   s                Start selected PR
-  d                Review (zz d: loop, zzz d: strict)
+  d                Review (zz d: loop)
   g                Merge PR
   e                Edit selected PR
-  t                Start QA (z t: fresh, zz t: loop, zzz t: strict)
+  t                Start QA (z t: fresh, zz t: loop)
 
 Views:
   p                Toggle plans view

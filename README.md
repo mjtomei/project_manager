@@ -220,13 +220,12 @@ meta session, and immediately benefit from the improvement.
 When a PR is ready for review, the review loop automates the review-fix cycle:
 
 1. Claude reviews the diff against the base branch
-2. If issues are found (NEEDS_WORK), Claude fixes them, commits, and pushes
+2. If issues or suggestions are found (NEEDS_WORK), Claude fixes them, commits, and pushes
 3. A new review iteration starts automatically
-4. The loop stops when the PR receives PASS or PASS_WITH_SUGGESTIONS
+4. The loop stops when the PR receives PASS
 
 From the TUI:
-- `zz d` — start a review loop (stops on PASS or PASS_WITH_SUGGESTIONS)
-- `zzz d` — start a strict loop (stops only on full PASS)
+- `zz d` — start a review loop (iterates until PASS)
 - `z d` — stop a running loop, or do a single fresh review
 
 The loop runs in the background without stealing focus from your active window,

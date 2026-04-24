@@ -7,9 +7,7 @@ Keybindings (mapped to the ``d`` key — "Review" — in the TUI):
   d       — Mark PR as in_review and open review window.
   z d     — If a loop is running for the selected PR, make this iteration
              the last one.  Otherwise, perform a fresh ``pr review``.
-  zz d    — Start a review loop (stops on PASS or PASS_WITH_SUGGESTIONS).
-             If a loop is already running, make this iteration the last one.
-  zzz d   — Start a strict review loop (stops only on full PASS).
+  zz d    — Start a review loop (iterates until PASS).
              If a loop is already running, make this iteration the last one.
 """
 
@@ -19,7 +17,6 @@ from pm_core.review_loop import (
     ReviewLoopState,
     start_review_loop_background,
     VERDICT_PASS,
-    VERDICT_PASS_WITH_SUGGESTIONS,
     VERDICT_NEEDS_WORK,
     VERDICT_INPUT_REQUIRED,
 )
@@ -29,7 +26,6 @@ _log = configure_logger("pm.tui.review_loop_ui")
 # Icons for review verdicts (used in log line)
 VERDICT_ICONS = {
     VERDICT_PASS: "[green bold]✓ PASS[/]",
-    VERDICT_PASS_WITH_SUGGESTIONS: "[yellow bold]~ PASS_WITH_SUGGESTIONS[/]",
     VERDICT_NEEDS_WORK: "[red bold]✗ NEEDS_WORK[/]",
     VERDICT_INPUT_REQUIRED: "[red bold]⏸ INPUT_REQUIRED[/]",
     "KILLED": "[red bold]☠ KILLED[/]",
@@ -72,11 +68,11 @@ def stop_loop_or_fresh_done(app) -> None:
 
 
 # ---------------------------------------------------------------------------
-# zz d / zzz d  — start or stop loop
+# zz d  — start or stop loop
 # ---------------------------------------------------------------------------
 
-def start_or_stop_loop(app, stop_on_suggestions: bool) -> None:
-    """Handle ``zz d`` / ``zzz d``: start loop or stop if one is running."""
+def start_or_stop_loop(app) -> None:
+    """Handle ``zz d``: start loop or stop if one is running."""
     from pm_core.tui import auto_start as _auto_start
 
     pr_id, pr = _get_selected_pr(app)
@@ -89,7 +85,7 @@ def start_or_stop_loop(app, stop_on_suggestions: bool) -> None:
         _stop_loop(app, pr_id)
         return
 
-    _start_loop(app, pr_id, pr, stop_on_suggestions,
+    _start_loop(app, pr_id, pr,
                 transcript_dir=str(_auto_start.get_transcript_dir(app)))
 
 
@@ -97,7 +93,7 @@ def start_or_stop_loop(app, stop_on_suggestions: bool) -> None:
 # Core start / stop
 # ---------------------------------------------------------------------------
 
-def _start_loop(app, pr_id: str, pr: dict | None, stop_on_suggestions: bool,
+def _start_loop(app, pr_id: str, pr: dict | None,
                 transcript_dir: str,
                 resume_state: ReviewLoopState | None = None) -> None:
     """Start a review loop for the given PR.
@@ -153,13 +149,12 @@ def _start_loop(app, pr_id: str, pr: dict | None, stop_on_suggestions: bool,
         mode_label = f"resumed at iteration {state.iteration}"
         _log.info("review_loop_ui: resuming loop for %s at iteration %d", pr_id, state.iteration)
     else:
-        state = ReviewLoopState(pr_id=pr_id, stop_on_suggestions=stop_on_suggestions)
+        state = ReviewLoopState(pr_id=pr_id)
         app._review_loops[pr_id] = state
-        mode_label = "strict (PASS only)" if not stop_on_suggestions else "normal"
-        _log.info("review_loop_ui: starting %s loop for %s", mode_label, pr_id)
+        _log.info("review_loop_ui: starting loop for %s", pr_id)
 
     app.log_message(
-        f"[bold]Review loop started[/] for {pr_id} [{mode_label}] loop={state.loop_id} — z d to stop",
+        f"[bold]Review loop started[/] for {pr_id} loop={state.loop_id} — z d to stop",
         sticky=3,
     )
 
@@ -316,7 +311,7 @@ def _poll_loop_state_inner(app) -> None:
         app.log_message(msg, sticky=10)
 
         # Auto-start next step: review pass → QA (then QA pass → merge)
-        if state.latest_verdict in (VERDICT_PASS, VERDICT_PASS_WITH_SUGGESTIONS):
+        if state.latest_verdict == VERDICT_PASS:
             _maybe_start_qa(app, state.pr_id)
 
     # Stop the timer if no loops are running AND no active PRs need animation
@@ -353,7 +348,7 @@ def _maybe_start_qa(app, pr_id: str) -> None:
 
     Called when review passes.  Works in two modes:
 
-    - **Self-driving QA** (``zz t`` / ``zzz t``): always transitions,
+    - **Self-driving QA** (``zz t``): always transitions,
       independent of auto-start.  The self-driving NEEDS_WORK path starts
       a review loop directly, so the review→QA transition must also be
       independent.
@@ -382,12 +377,14 @@ def _maybe_start_qa(app, pr_id: str) -> None:
             if pr_id not in allowed:
                 return
 
-    # If project has skip_qa enabled, skip QA and go straight to merge
+    # If project has skip_qa enabled, skip QA and go straight to merge.
+    # Merge only happens via _maybe_auto_merge (which requires
+    # auto-start to be enabled) — manual zz d / zz t do not auto-merge.
     project = (app._data or {}).get("project") or {}
     if project.get("skip_qa"):
         _log.info("auto_qa: skip_qa enabled, skipping QA for %s", pr_id)
         app.log_message(f"Auto-start: {pr_id} review passed, skipping QA (skip_qa enabled)")
-        _maybe_auto_merge(app, pr_id, force=bool(sd))
+        _maybe_auto_merge(app, pr_id)
         return
 
     # Transition PR status to "qa"
@@ -425,8 +422,12 @@ def _maybe_start_qa(app, pr_id: str) -> None:
 # Auto-merge passing reviews
 # ---------------------------------------------------------------------------
 
-def _maybe_auto_merge(app, pr_id: str, *, force: bool = False) -> None:
+def _maybe_auto_merge(app, pr_id: str) -> None:
     """Auto-merge a PR after a passing review/QA.
+
+    Only runs when auto-start is enabled and the PR is in the active
+    auto-start target's dependency tree.  Manual ``zz d`` / ``zz t``
+    never trigger merges — merge is an auto-start-only action.
 
     Runs ``pm pr merge --resolve-window --background <pr_id>``
     synchronously, then triggers ``auto_start.check_and_start()`` to
@@ -434,24 +435,19 @@ def _maybe_auto_merge(app, pr_id: str, *, force: bool = False) -> None:
     ``--resolve-window`` causes a Claude merge-resolution window to open;
     we register ``merge:<pr_id>`` in the idle tracker so
     ``_poll_impl_idle`` can detect when it finishes and re-attempt.
-
-    Args:
-        force: Skip the auto-start enabled/scope checks.  Used by
-            self-driving QA which operates independently of auto-start.
     """
     from pm_core.tui import auto_start as _auto_start
-    if not force and not _auto_start.is_enabled(app):
+    if not _auto_start.is_enabled(app):
         return
 
     # Scope to auto-start target's dependency tree
-    if not force:
-        target = _auto_start.get_target(app)
-        if target:
-            prs = app._data.get("prs") or []
-            allowed = _auto_start._transitive_deps(prs, target)
-            allowed.add(target)
-            if pr_id not in allowed:
-                return
+    target = _auto_start.get_target(app)
+    if target:
+        prs = app._data.get("prs") or []
+        allowed = _auto_start._transitive_deps(prs, target)
+        allowed.add(target)
+        if pr_id not in allowed:
+            return
 
     _log.info("auto_merge: review passed for %s, merging", pr_id)
     app.log_message(f"Auto-merge: {pr_id} review passed, merging")
@@ -866,5 +862,5 @@ def _auto_review_idle_prs(app, newly_idle: list[tuple[str, dict]]) -> None:
             # Start a review loop (same as _auto_start_review_loops)
             loop = app._review_loops.get(pr_id)
             if not loop:
-                _start_loop(app, pr_id, updated_pr, stop_on_suggestions=False,
+                _start_loop(app, pr_id, updated_pr,
                              transcript_dir=str(tdir))

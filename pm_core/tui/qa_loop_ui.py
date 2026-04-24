@@ -6,8 +6,7 @@ updating the TUI display.
 Keybinding variants (set up by app.action_start_qa_on_pr):
   t      — one-shot QA run
   z t    — fresh start (stop running QA, kill old windows, restart)
-  zz t   — start/stop QA loop (lenient: PASS or PASS_WITH_SUGGESTIONS)
-  zzz t  — start/stop QA loop (strict: only clean PASS)
+  zz t   — start/stop QA loop
 """
 
 from pm_core.paths import configure_logger, get_global_setting_value
@@ -188,14 +187,11 @@ def fresh_start_qa(app, pr_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# zz t / zzz t — QA loop (start or stop)
+# zz t — QA loop (start or stop)
 # ---------------------------------------------------------------------------
 
-def start_or_stop_qa_loop(app, pr_id: str, strict: bool) -> None:
+def start_or_stop_qa_loop(app, pr_id: str) -> None:
     """Start or stop a QA loop for the given PR.
-
-    ``zz t`` (strict=False): lenient — stop on PASS (accept minor suggestions).
-    ``zzz t`` (strict=True): strict — stop only on clean PASS with no changes.
 
     If a QA loop is already running, this stops it instead.
     """
@@ -219,9 +215,8 @@ def start_or_stop_qa_loop(app, pr_id: str, strict: bool) -> None:
         existing.stop_requested = True
         # Also remove self-driving registration
         app._self_driving_qa.pop(pr_id, None)
-        mode = "strict" if strict else "lenient"
         app.log_message(f"[bold]QA loop stopping[/] for {pr_id} (finishing current run)...")
-        _log.info("qa_loop_ui: stopping QA loop for %s (mode=%s)", pr_id, mode)
+        _log.info("qa_loop_ui: stopping QA loop for %s", pr_id)
         return
 
     # Remove stale loop state — run_qa_sync will clean up old windows
@@ -230,7 +225,6 @@ def start_or_stop_qa_loop(app, pr_id: str, strict: bool) -> None:
 
     # Register self-driving QA state
     app._self_driving_qa[pr_id] = {
-        "strict": strict,
         "pass_count": 0,
         "required_passes": _get_qa_pass_count(),
     }
@@ -244,14 +238,12 @@ def start_or_stop_qa_loop(app, pr_id: str, strict: bool) -> None:
     app._qa_loops[pr_id] = state
 
     required = app._self_driving_qa[pr_id]["required_passes"]
-    mode_label = "strict (PASS only)" if strict else "lenient"
-    passes_label = f", {required} pass{'es' if required > 1 else ''} required" if required > 1 else ""
+    passes_label = f" ({required} pass{'es' if required > 1 else ''} required)" if required > 1 else ""
     app.log_message(
-        f"[bold]QA loop started[/] for {pr_id} [{mode_label}{passes_label}] — z t to stop",
+        f"[bold]QA loop started[/] for {pr_id}{passes_label} — z t to stop",
         sticky=3,
     )
-    _log.info("qa_loop_ui: starting QA loop for %s (mode=%s, passes=%d)",
-              pr_id, mode_label, required)
+    _log.info("qa_loop_ui: starting QA loop for %s (passes=%d)", pr_id, required)
 
     start_qa_background(state, app._root, pr, on_update)
 
@@ -299,15 +291,17 @@ def _on_qa_update(app, state: QALoopState) -> None:
 def _on_qa_complete(app, state: QALoopState) -> None:
     """Handle QA completion — trigger appropriate lifecycle transition.
 
-    Self-driving mode (zz t / zzz t):
+    Self-driving mode (zz t):
       - PASS (no changes): increment pass_count; if >= required_passes,
-        remove from self-driving and trigger merge. Otherwise restart QA.
+        clear self-driving state and defer to auto-start (or the user)
+        for merge — manual ``zz t`` does NOT trigger a merge itself.
+        Otherwise restart QA.
       - NEEDS_WORK / changes: reset pass_count, transition to in_review,
         and directly start a review loop (independent of auto-start).
       - INPUT_REQUIRED: pause self-driving loop for human input.
 
     Legacy mode (plain t or auto-start):
-      - PASS: trigger auto-merge.
+      - PASS: trigger auto-merge when auto-start is enabled.
       - NEEDS_WORK: transition to in_review, rely on auto-start.
     """
     if state._ui_complete_notified:
@@ -326,15 +320,22 @@ def _on_qa_complete(app, state: QALoopState) -> None:
             sd["pass_count"] += 1
             required = sd["required_passes"]
             if sd["pass_count"] >= required:
-                app.log_message(
-                    f"[green bold]QA PASS[/] for {pr_id} "
-                    f"({sd['pass_count']}/{required} consecutive) — ready to merge"
-                )
-                # Trigger merge BEFORE removing self-driving state so
-                # _trigger_auto_merge sees the entry and uses force=True
-                # (bypassing auto-start scope checks).
-                _trigger_auto_merge(app, pr_id)
+                # Manual zz t does NOT auto-merge.  Clear self-driving
+                # state and defer to auto-start (if active) or the user.
                 app._self_driving_qa.pop(pr_id, None)
+                from pm_core.tui import auto_start as _auto_start
+                if _auto_start.is_enabled(app):
+                    app.log_message(
+                        f"[green bold]QA PASS[/] for {pr_id} "
+                        f"({sd['pass_count']}/{required} consecutive) — ready to merge"
+                    )
+                    _trigger_auto_merge(app, pr_id)
+                else:
+                    app.log_message(
+                        f"[green bold]QA PASS[/] for {pr_id} "
+                        f"({sd['pass_count']}/{required} consecutive) — "
+                        "merge manually or enable auto-start"
+                    )
             else:
                 app.log_message(
                     f"[green]QA PASS[/] for {pr_id} "
@@ -373,7 +374,7 @@ def _on_qa_complete(app, state: QALoopState) -> None:
             # Self-driving: reset pass count and directly start review loop
             sd["pass_count"] = 0
             _log.info("QA self-driving: NEEDS_WORK — starting review loop directly")
-            _start_self_driving_review(app, pr_id, sd["strict"])
+            _start_self_driving_review(app, pr_id)
         else:
             # Legacy: rely on auto-start
             from pm_core.tui import auto_start as _auto_start
@@ -393,14 +394,9 @@ def _on_qa_complete(app, state: QALoopState) -> None:
     _record_qa_note(app, state)
 
 
-def _start_self_driving_review(app, pr_id: str, strict: bool) -> None:
-    """Start a review loop for a self-driving QA PR (independent of auto-start).
-
-    The z-prefix carries through:
-      zz t  (strict=False) → review stop_on_suggestions=True
-      zzz t (strict=True)  → review stop_on_suggestions=False
-    """
-    from pm_core.tui import review_loop_ui
+def _start_self_driving_review(app, pr_id: str) -> None:
+    """Start a review loop for a self-driving QA PR (independent of auto-start)."""
+    from pm_core.tui import review_loop_ui, auto_start as _auto_start
 
     if not app._root:
         return
@@ -415,28 +411,22 @@ def _start_self_driving_review(app, pr_id: str, strict: bool) -> None:
         _log.warning("_start_self_driving_review: PR %s not found", pr_id)
         return
 
-    stop_on_suggestions = not strict
-    _log.info("Self-driving review for %s (stop_on_suggestions=%s)",
-              pr_id, stop_on_suggestions)
-    review_loop_ui._start_loop(app, pr_id, pr,
-                                stop_on_suggestions=stop_on_suggestions)
+    _log.info("Self-driving review for %s", pr_id)
+    review_loop_ui._start_loop(
+        app, pr_id, pr,
+        transcript_dir=str(_auto_start.get_transcript_dir(app)),
+    )
 
 
 def _trigger_auto_merge(app, pr_id: str) -> None:
     """Trigger auto-merge after QA passes.
 
-    Works in two modes:
-    - Self-driving QA (zz t / zzz t): always triggers merge (independent
-      of auto-start) via ``force=True``.
-    - Auto-start / legacy: delegates to ``_maybe_auto_merge`` which
-      checks auto-start status and scope.
+    Only called when auto-start is active — merge is never triggered by
+    a manual ``zz t`` run.  Delegates to ``_maybe_auto_merge`` which
+    re-checks auto-start status and scope.
     """
     from pm_core.tui.review_loop_ui import _maybe_auto_merge
-
-    # Self-driving QA operates independently of auto-start — use
-    # force=True so _maybe_auto_merge skips the enabled/scope checks.
-    sd = getattr(app, '_self_driving_qa', {}).get(pr_id)
-    _maybe_auto_merge(app, pr_id, force=bool(sd))
+    _maybe_auto_merge(app, pr_id)
 
 
 def _transition_pr_status(app, pr_id: str, from_status: str, to_status: str) -> None:
