@@ -169,9 +169,8 @@ class TestGenerateSpec:
         assert spec == "## Requirements\n- Add widget"
         assert not needs_review
         mock_claude.assert_called_once()
-        # Spec should be saved — PR entry has file path
-        pr = data["prs"][0]
-        assert Path(pr["spec_impl"]).exists()
+        # Spec should be saved at the convention path
+        assert (tmp_path / "specs" / "pr-abc1234" / "impl.md").exists()
 
     @patch("pm_core.spec_gen.launch_claude_print")
     @patch("pm_core.spec_gen.get_global_setting_value", return_value="prompt")
@@ -193,7 +192,7 @@ class TestGenerateSpec:
     def test_force_regenerate(self, mock_setting, mock_claude, tmp_path):
         mock_claude.return_value = "new spec"
         spec_path = _make_spec_file(tmp_path, "pr-abc1234", "impl", "existing spec")
-        data = _make_data({"spec_impl": spec_path})
+        data = _make_data({"workdir": str(tmp_path)})
         _save_to_disk(data, tmp_path)
 
         spec, needs_review = spec_gen.generate_spec(
@@ -259,12 +258,10 @@ class TestGenerateSpec:
 
         spec_gen.generate_spec(data, "pr-abc1234", "impl", root=tmp_path)
 
-        # Verify spec file was created in the project directory
-        pr = data["prs"][0]
-        spec_path = Path(pr["spec_impl"])
+        # Verify spec file was created at the convention path
+        spec_path = tmp_path / "specs" / "pr-abc1234" / "impl.md"
         assert spec_path.exists()
         assert spec_path.read_text() == "test spec"
-        assert str(tmp_path) in str(spec_path)
 
 
 # ---------------------------------------------------------------------------
@@ -361,10 +358,8 @@ class TestPendingSpec:
 
 class TestApproveSpec:
     def test_approve_clears_pending(self, tmp_path):
-        spec_file = tmp_path / "impl.md"
-        spec_file.write_text("original spec")
+        _make_spec_file(tmp_path, "pr-abc1234", "impl", "original spec")
         data = _make_data({
-            "spec_impl": str(spec_file),
             "spec_pending": {"phase": "impl", "generated_at": "2025-01-01"},
         })
 
@@ -373,10 +368,9 @@ class TestApproveSpec:
         assert "spec_pending" not in data["prs"][0]
 
     def test_approve_with_edits(self, tmp_path):
-        spec_file = tmp_path / "impl.md"
-        spec_file.write_text("original spec")
+        _make_spec_file(tmp_path, "pr-abc1234", "impl", "original spec")
         data = _make_data({
-            "spec_impl": str(spec_file),
+            "workdir": str(tmp_path),
             "spec_pending": {"phase": "impl", "generated_at": "2025-01-01"},
         })
         _save_to_disk(data, tmp_path)
@@ -384,10 +378,10 @@ class TestApproveSpec:
         phase = spec_gen.approve_spec(data, "pr-abc1234", root=tmp_path,
                                        edited_text="edited spec")
         assert phase == "impl"
-        # The file should be updated
-        pr = data["prs"][0]
-        assert Path(pr["spec_impl"]).read_text() == "edited spec"
-        assert "spec_pending" not in pr
+        # The file should be updated at the convention path
+        spec_path = tmp_path / "specs" / "pr-abc1234" / "impl.md"
+        assert spec_path.read_text() == "edited spec"
+        assert "spec_pending" not in data["prs"][0]
 
     def test_approve_no_pending(self):
         data = _make_data()
@@ -536,16 +530,16 @@ class TestSpecGenerationPreamble:
         result = spec_gen.spec_generation_preamble(pr, "impl", root=tmp_path)
         assert "impl.md" in result
         assert "specs" in result
-        # Path should be under the project root, not ~/.pm
-        assert str(tmp_path) in result
+        # Path should be relative (works inside containers)
+        assert "specs/pr-1/impl.md" in result
 
     @patch("pm_core.spec_gen.get_global_setting_value", return_value="auto")
     def test_preamble_path_in_project_dir(self, mock_setting, tmp_path):
         """Spec path in preamble should be in the pm project directory."""
         pr = {"id": "pr-xyz"}
         result = spec_gen.spec_generation_preamble(pr, "impl", root=tmp_path)
-        expected_path = str(tmp_path / "specs" / "pr-xyz" / "impl.md")
-        assert expected_path in result
+        # Path should be relative for container compatibility
+        assert "specs/pr-xyz/impl.md" in result
 
 
 # ---------------------------------------------------------------------------

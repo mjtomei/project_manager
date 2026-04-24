@@ -310,10 +310,6 @@ def generate_spec(data: dict, pr_id: str, phase: str,
             fresh_pr = store.get_pr(fresh_data, pr_id)
             if not fresh_pr:
                 return
-            # Record the spec file path
-            field = _SPEC_FIELD.get(phase)
-            if field and pr.get(field):
-                fresh_pr[field] = pr[field]
             # Set or clear spec_pending
             if pending_value:
                 fresh_pr["spec_pending"] = pending_value
@@ -375,14 +371,10 @@ def approve_spec(data: dict, pr_id: str, root: Path | None = None,
     del pr["spec_pending"]
 
     if root:
-        spec_path = pr.get(_SPEC_FIELD.get(phase, ""))
-
         def apply(fresh_data):
             fresh_pr = store.get_pr(fresh_data, pr_id)
             if not fresh_pr:
                 return
-            if edited_text is not None and spec_path:
-                fresh_pr[_SPEC_FIELD[phase]] = spec_path
             fresh_pr.pop("spec_pending", None)
 
         store.locked_update(root, apply)
