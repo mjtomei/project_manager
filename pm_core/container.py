@@ -648,16 +648,11 @@ def create_container(
             )
     if git_setup:
         setup_parts.append(git_setup)
-    # Install pm into the container user's ~/.local so ``pm`` is on PATH.
-    # pm's runtime deps are pre-installed system-wide in the base image,
-    # so this only installs the pm package itself and drops the entry
-    # point script at ~/.local/bin/pm.  Works for any target project —
-    # when /workspace is a pm source tree the wrapper still prefers the
-    # local pm_core under cwd.
-    setup_parts.append(
-        f"pip3 install --user --no-deps --quiet {_CONTAINER_PM_SRC} || "
-        f"echo 'pm install failed; pm CLI will be unavailable in container' >&2"
-    )
+    # pm is made available inside the container via a shim at
+    # /usr/local/bin/pm (installed in the base image) that execs
+    # ``python3 -m pm_core.wrapper``, picking up pm_core through
+    # PYTHONPATH=/opt/pm-src.  No per-container install step — keeping
+    # container startup fast enough to beat the QA grace period.
     setup_parts.append(f"touch {_READY_SENTINEL}")
     setup_parts.append("exec sleep infinity")
     setup = "; ".join(setup_parts)
