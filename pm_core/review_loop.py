@@ -37,7 +37,6 @@ from pm_core.loop_shared import (
     get_pm_session as _get_pm_session_shared,
     find_claude_pane as _find_claude_pane_shared,
     match_verdict,
-    extract_verdict_from_content,
     poll_for_verdict as _poll_for_verdict_shared,
     wait_for_follow_up_verdict as _wait_for_follow_up_shared,
 )
@@ -122,27 +121,6 @@ def parse_review_verdict(output: str) -> str:
     return VERDICT_NEEDS_WORK if output.strip() else VERDICT_PASS
 
 
-def _regenerate_prompt_text(pm_root: str, pr_id: str, iteration: int = 0,
-                            loop_id: str = "") -> str:
-    """Regenerate the review prompt text for verdict filtering.
-
-    Used to distinguish prompt instructions (which mention verdict keywords)
-    from Claude's actual verdict output.  Returns an empty string on failure.
-    """
-    try:
-        from pathlib import Path
-        from pm_core import store
-        from pm_core.prompt_gen import generate_review_prompt
-        data = store.load(Path(pm_root))
-        return generate_review_prompt(
-            data, pr_id, review_loop=True,
-            review_iteration=iteration, review_loop_id=loop_id,
-        )
-    except Exception as exc:
-        _log.warning("review_loop: could not regenerate prompt text for filtering: %s", exc)
-        return ""
-
-
 def _compute_review_window_name(pr_data: dict) -> str:
     """Compute the review window name from PR data (matches cli/pr.py)."""
     gh = pr_data.get("gh_pr_number")
@@ -184,16 +162,6 @@ def _poll_for_verdict(pane_id: str, transcript_path: str,
     return _poll_for_verdict_shared(
         pane_id, transcript_path, verdicts=ALL_VERDICTS,
         grace_period=grace_period, log_prefix="review_loop",
-    )
-
-
-def _extract_verdict_from_content(content: str, prompt_text: str = "",
-                                   exclude_verdicts: set[str] | None = None) -> str | None:
-    """Check if the tail of captured pane content contains a verdict keyword."""
-    return extract_verdict_from_content(
-        content, verdicts=ALL_VERDICTS, keywords=_REVIEW_KEYWORDS,
-        prompt_text=prompt_text, exclude_verdicts=exclude_verdicts,
-        log_prefix="review_loop",
     )
 
 

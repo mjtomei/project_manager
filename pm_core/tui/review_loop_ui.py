@@ -15,10 +15,6 @@ Keybindings (mapped to the ``d`` key — "Review" — in the TUI):
 
 from pm_core.paths import configure_logger
 from pm_core import store
-from pm_core.loop_shared import (
-    extract_verdict_from_content,
-    VerdictStabilityTracker,
-)
 from pm_core.review_loop import (
     ReviewLoopState,
     start_review_loop_background,
@@ -29,10 +25,6 @@ from pm_core.review_loop import (
 )
 
 _log = configure_logger("pm.tui.review_loop_ui")
-
-# Tracks consecutive polls where MERGED was detected per merge key.
-# Uses the same stability mechanism as review/watcher verdict detection.
-_merge_verdict_tracker = VerdictStabilityTracker()
 
 # Icons for review verdicts (used in log line)
 VERDICT_ICONS = {
@@ -507,7 +499,6 @@ def _on_merge_success(app, pr_id: str, merge_key: str, tracker,
     pending_merges.discard(pr_id)
     tracker.unregister(merge_key)
     active_merge_keys.discard(merge_key)
-    _merge_verdict_tracker.reset(merge_key)
     # check_and_start returns early if auto-start is off
     app.run_worker(_auto_start.check_and_start(app))
 
@@ -565,7 +556,6 @@ def _finalize_detected_merge(app, pr_id: str, merge_key: str,
     _kill_merge_window(app, pr_id)
     tracker.unregister(merge_key)
     active_merge_keys.discard(merge_key)
-    _merge_verdict_tracker.reset(merge_key)
 
     in_propagation = pr_id in app._merge_propagation_phase
 
@@ -622,7 +612,6 @@ def _handle_merge_input_required(app, pr_id: str, merge_key: str) -> None:
     app._merge_input_required_prs.add(pr_id)
 
     # Reset the verdict tracker so we can detect MERGED after the user helps
-    _merge_verdict_tracker.reset(merge_key)
 
     app.log_message(
         f"[red bold]⏸ Merge INPUT_REQUIRED[/] for {pr_id}: "
@@ -684,26 +673,29 @@ def _poll_impl_idle(app) -> None:
         active_pr_ids.add(pr_id)
         window_name = _pr_display_id(pr)
 
-        # Lazy pane resolution: register if not yet tracked or pane gone
+        # Lazy pane resolution: register if not yet tracked or pane gone.
+        # Hook-driven tracking requires the transcript path launched by
+        # ``pm pr start --transcript``; skip PRs without one (e.g. manual
+        # launches) — they won't auto-advance but also won't misfire.
         if not tracker.is_tracked(pr_id) or tracker.is_gone(pr_id):
             pane_id = _find_impl_pane(session, window_name)
-            if pane_id:
-                tracker.register(pr_id, pane_id)
-            else:
-                continue  # window not found, skip
+            if not pane_id:
+                continue
+            tdir = _auto_start.get_transcript_dir(app)
+            if not tdir:
+                continue
+            impl_transcript = str(tdir / f"impl-{pr_id}.jsonl")
+            try:
+                tracker.register(pr_id, pane_id, impl_transcript)
+            except ValueError:
+                # Symlink not yet created — try again next tick.
+                continue
 
         tracker.poll(pr_id)
 
         # Detect newly-idle in_progress PRs for auto-review
         if status == "in_progress" and tracker.became_idle(pr_id):
-            # Check if Claude is on an interactive selection screen (trust
-            # prompt, permission prompt, etc.) — that's not "done".
-            from pm_core.pane_idle import content_has_interactive_prompt
-            content = tracker.get_content(pr_id)
-            if content_has_interactive_prompt(content):
-                _log.info("impl_idle: %s idle but showing interactive prompt, resetting", pr_id)
-                tracker.mark_active(pr_id)
-            elif pr.get("spec_pending"):
+            if pr.get("spec_pending"):
                 # Spec generation paused for user input (ambiguity
                 # resolution).  The session is waiting, not done.
                 _log.info("impl_idle: %s idle but spec_pending, resetting", pr_id)
@@ -734,41 +726,46 @@ def _poll_impl_idle(app) -> None:
             pending_merges.discard(pr_id)
             merge_key = f"merge:{pr_id}"
             tracker.unregister(merge_key)
-            _merge_verdict_tracker.reset(merge_key)
             continue
 
         merge_key = f"merge:{pr_id}"
         window_name = f"merge-{_pr_display_id(pr)}"
 
-        # Lazy pane resolution
+        # Lazy pane resolution — requires the merge transcript launched
+        # by ``pm pr merge --resolve-window --transcript``.
         if not tracker.is_tracked(merge_key) or tracker.is_gone(merge_key):
             pane_id = _find_impl_pane(session, window_name)
-            if pane_id:
-                tracker.register(merge_key, pane_id)
-            else:
+            if not pane_id:
+                continue
+            tdir = _auto_start.get_transcript_dir(app)
+            if not tdir:
+                continue
+            merge_transcript = str(tdir / f"merge-{pr_id}.jsonl")
+            try:
+                tracker.register(merge_key, pane_id, merge_transcript)
+            except ValueError:
                 continue
 
         active_merge_keys.add(merge_key)
         tracker.poll(merge_key)
 
         # --- Primary: check for MERGED or INPUT_REQUIRED verdict ---
-        merge_content = tracker.get_content(merge_key)
-        if merge_content:
-            verdict = extract_verdict_from_content(
-                merge_content,
-                verdicts=("MERGED", "INPUT_REQUIRED"),
-                keywords=("MERGED", "INPUT_REQUIRED"),
-                log_prefix="merge_verdict",
+        state = tracker._states.get(merge_key)
+        merge_transcript_path = state.transcript_path if state else None
+        if merge_transcript_path:
+            from pm_core.verdict_transcript import extract_verdict_from_transcript
+            verdict = extract_verdict_from_transcript(
+                merge_transcript_path, ("MERGED", "INPUT_REQUIRED"),
             )
-            if _merge_verdict_tracker.update(merge_key, verdict):
-                if verdict == "MERGED":
-                    _log.info("merge_verdict: MERGED detected for %s (stable)", pr_id)
-                    app.log_message(f"MERGED detected for {pr_id}, finalizing merge")
-                    _finalize_detected_merge(app, pr_id, merge_key, tracker,
-                                             pending_merges, active_merge_keys)
-                elif verdict == "INPUT_REQUIRED":
-                    _log.info("merge_verdict: INPUT_REQUIRED detected for %s (stable)", pr_id)
-                    _handle_merge_input_required(app, pr_id, merge_key)
+            if verdict == "MERGED":
+                _log.info("merge_verdict: MERGED detected for %s", pr_id)
+                app.log_message(f"MERGED detected for {pr_id}, finalizing merge")
+                _finalize_detected_merge(app, pr_id, merge_key, tracker,
+                                         pending_merges, active_merge_keys)
+                continue
+            if verdict == "INPUT_REQUIRED":
+                _log.info("merge_verdict: INPUT_REQUIRED detected for %s", pr_id)
+                _handle_merge_input_required(app, pr_id, merge_key)
                 continue
 
         # --- Fallback: idle detection (for _pending_merge_prs entries only) ---
@@ -776,14 +773,6 @@ def _poll_impl_idle(app) -> None:
             continue
 
         if tracker.became_idle(merge_key):
-            # Check for interactive prompt before treating as idle
-            from pm_core.pane_idle import content_has_interactive_prompt
-            merge_content = tracker.get_content(merge_key)
-            if content_has_interactive_prompt(merge_content):
-                _log.info("merge_idle: %s idle but showing interactive prompt, resetting", pr_id)
-                tracker.mark_active(merge_key)
-                continue
-
             _log.info("merge_idle: merge window idle for %s, re-attempting merge", pr_id)
             app.log_message(f"Merge window idle for {pr_id}, re-attempting merge")
 
@@ -800,7 +789,6 @@ def _poll_impl_idle(app) -> None:
     for key in tracker.tracked_keys():
         if key.startswith("merge:") and key not in active_merge_keys:
             tracker.unregister(key)
-            _merge_verdict_tracker.reset(key)
 
     # Unregister PRs no longer active
     for key in tracker.tracked_keys():

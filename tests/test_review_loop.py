@@ -12,18 +12,12 @@ from pm_core.review_loop import (
     PaneKilledError,
     ReviewLoopState,
     ReviewIteration,
-    _extract_verdict_from_content,
     _match_verdict,
     VERDICT_PASS,
     VERDICT_PASS_WITH_SUGGESTIONS,
     VERDICT_NEEDS_WORK,
     VERDICT_INPUT_REQUIRED,
     VERDICT_KILLED,
-    _REVIEW_KEYWORDS,
-)
-from pm_core.loop_shared import (
-    build_prompt_verdict_lines as _build_prompt_verdict_lines,
-    is_prompt_line as _is_prompt_line,
 )
 
 
@@ -181,180 +175,6 @@ def _get_real_prompt() -> str:
 from tests.conftest import simulate_terminal_wrap as _simulate_terminal_wrap
 
 
-class TestExtractVerdictFromContent:
-    """Tests for _extract_verdict_from_content with prompt filtering."""
-
-    def test_real_verdict_detected_without_prompt(self):
-        content = "\n".join(["line"] * 40 + ["**PASS**"])
-        assert _extract_verdict_from_content(content) == VERDICT_PASS
-
-    def test_real_verdict_after_prompt(self):
-        """A standalone verdict after long Claude output IS detected."""
-        prompt = _get_real_prompt()
-        content = prompt + "\n\n" + "\n".join(["review text"] * 40) + "\n\n**PASS**"
-        assert _extract_verdict_from_content(content, prompt_text=prompt) == VERDICT_PASS
-
-    def test_real_needs_work_after_prompt(self):
-        prompt = _get_real_prompt()
-        content = prompt + "\n\n" + "\n".join(["review text"] * 40) + "\n\n**NEEDS_WORK**"
-        assert _extract_verdict_from_content(content, prompt_text=prompt) == VERDICT_NEEDS_WORK
-
-    def test_real_pass_with_suggestions_after_prompt(self):
-        prompt = _get_real_prompt()
-        content = prompt + "\n\n" + "\n".join(["review text"] * 40) + "\n\n**PASS_WITH_SUGGESTIONS**"
-        assert _extract_verdict_from_content(content, prompt_text=prompt) == VERDICT_PASS_WITH_SUGGESTIONS
-
-    def test_no_prompt_text_no_false_positive(self):
-        """Without prompt text, verdict keywords embedded in sentences are NOT detected."""
-        prompt = _get_real_prompt()
-        assert _extract_verdict_from_content(prompt) is None
-
-    # --- Reproduce the actual failure from the log ---
-    # The pane shows the prompt as a CLI argument.  The terminal wraps
-    # the long command line.  Verdict keywords from the prompt end up
-    # in the tail 30 lines of captured pane content.
-
-    def test_raw_prompt_not_detected(self):
-        """The raw prompt text (unwrapped) should not produce a verdict."""
-        prompt = _get_real_prompt()
-        assert _extract_verdict_from_content(prompt, prompt_text=prompt) is None
-
-    def test_terminal_wrapped_prompt_not_detected(self):
-        """The prompt displayed on a terminal (wrapped at 80 cols) should not produce a verdict."""
-        prompt = _get_real_prompt()
-        wrapped = _simulate_terminal_wrap(prompt, width=80)
-        assert _extract_verdict_from_content(wrapped, prompt_text=prompt) is None
-
-    def test_terminal_wrapped_prompt_narrow_not_detected(self):
-        """Same test but for a narrow terminal (e.g. split pane at 60 cols)."""
-        prompt = _get_real_prompt()
-        wrapped = _simulate_terminal_wrap(prompt, width=60)
-        assert _extract_verdict_from_content(wrapped, prompt_text=prompt) is None
-
-    def test_exact_failure_from_log(self):
-        """Reproduce the exact line that caused a false positive in the log.
-
-        The log showed:
-          ACCEPTED verdict line: [PASS**, **PASS_WITH_SUGGESTIONS**, or **NEEDS_WORK**.]
-        This is a terminal-wrapped fragment of the IMPORTANT line in the prompt.
-        The IMPORTANT line now includes INPUT_REQUIRED, so test the updated fragment.
-        """
-        prompt = _get_real_prompt()
-        # Build pane content where the tail contains wrapped IMPORTANT line fragments
-        pane_lines = ["$ claude 'prompt...'"] + ["loading..."] * 60
-        # Old format (without INPUT_REQUIRED)
-        pane_lines.append("PASS**, **PASS_WITH_SUGGESTIONS**, **NEEDS_WORK**, or **INPUT_REQUIRED**.")
-        content = "\n".join(pane_lines)
-        assert _extract_verdict_from_content(content, prompt_text=prompt) is None
-
-    def test_important_line_fragments_at_various_widths(self):
-        """The IMPORTANT line wraps differently at different terminal widths.
-
-        All fragments must be filtered as prompt text, not real verdicts.
-        """
-        prompt = _get_real_prompt()
-        # Find the IMPORTANT line in the prompt
-        important_line = ""
-        for line in prompt.splitlines():
-            if "IMPORTANT" in line and "PASS" in line:
-                important_line = line
-                break
-        assert important_line, "Prompt should contain an IMPORTANT line with verdict keywords"
-
-        # Wrap at various widths and check each fragment
-        for width in (60, 80, 100, 120):
-            wrapped_lines = []
-            remaining = important_line
-            while len(remaining) > width:
-                wrapped_lines.append(remaining[:width])
-                remaining = remaining[width:]
-            wrapped_lines.append(remaining)
-
-            for fragment in wrapped_lines:
-                stripped = fragment.strip().strip("*").strip()
-                if any(v in stripped for v in ("PASS", "NEEDS_WORK")):
-                    # This fragment has a verdict keyword — it must be identified as prompt
-                    pane = "\n".join(["other text"] * 40 + [fragment])
-                    result = _extract_verdict_from_content(pane, prompt_text=prompt)
-                    assert result is None, (
-                        f"Fragment at width={width} falsely detected as {result}: [{fragment}]"
-                    )
-
-    def test_verdict_line_variations_from_prompt_all_filtered(self):
-        """Every line in the prompt that contains a verdict keyword should be filtered."""
-        prompt = _get_real_prompt()
-        for line in prompt.splitlines():
-            stripped = line.strip().strip("*").strip()
-            if not stripped:
-                continue
-            has_verdict = any(v in stripped for v in ("PASS_WITH_SUGGESTIONS", "NEEDS_WORK", "PASS"))
-            if not has_verdict:
-                continue
-            # This prompt line has a verdict keyword — build pane content
-            # with it in the tail and check it's filtered
-            pane = "\n".join(["other text"] * 40 + [line])
-            result = _extract_verdict_from_content(pane, prompt_text=prompt)
-            assert result is None, (
-                f"Prompt line falsely detected as {result}: [{line.strip()}]"
-            )
-
-
-class TestBuildPromptVerdictLines:
-    def test_extracts_verdict_lines_from_real_prompt(self):
-        prompt = _get_real_prompt()
-        lines = _build_prompt_verdict_lines(prompt, _REVIEW_KEYWORDS)
-        assert any("PASS" in line for line in lines)
-        assert any("NEEDS_WORK" in line for line in lines)
-        assert any("PASS_WITH_SUGGESTIONS" in line for line in lines)
-        assert len(lines) >= 7  # at least 7 lines in the prompt mention verdicts (including INPUT_REQUIRED)
-
-    def test_empty_prompt(self):
-        assert _build_prompt_verdict_lines("", _REVIEW_KEYWORDS) == set()
-
-
-class TestIsPromptLine:
-    def test_exact_match(self):
-        prompt_lines = {"PASS — No changes needed. The code is ready to merge as-is."}
-        assert _is_prompt_line("PASS — No changes needed. The code is ready to merge as-is.", prompt_lines, _REVIEW_KEYWORDS) is True
-
-    def test_substring_match_wrapped_line(self):
-        prompt_lines = {"PASS_WITH_SUGGESTIONS — Only non-blocking suggestions remain (style nits, minor refactors, optional improvements)."}
-        assert _is_prompt_line("PASS_WITH_SUGGESTIONS — Only non-blocking suggestions remain", prompt_lines, _REVIEW_KEYWORDS) is True
-
-    def test_standalone_verdict_not_prompt(self):
-        """A standalone verdict keyword like 'PASS' is NOT from the prompt."""
-        prompt_lines = {"PASS — No changes needed. The code is ready to merge as-is."}
-        assert _is_prompt_line("PASS", prompt_lines, _REVIEW_KEYWORDS) is False
-
-    def test_standalone_needs_work_not_prompt(self):
-        prompt_lines = {"NEEDS_WORK — Blocking issues found."}
-        assert _is_prompt_line("NEEDS_WORK", prompt_lines, _REVIEW_KEYWORDS) is False
-
-    def test_standalone_pass_with_suggestions_not_prompt(self):
-        prompt_lines = {"PASS_WITH_SUGGESTIONS — Only non-blocking suggestions remain."}
-        assert _is_prompt_line("PASS_WITH_SUGGESTIONS", prompt_lines, _REVIEW_KEYWORDS) is False
-
-    def test_real_verdict_with_context_from_claude(self):
-        """Claude says 'Overall: PASS' — context 'Overall' not in prompt."""
-        prompt_lines = {"PASS — No changes needed. The code is ready to merge as-is."}
-        assert _is_prompt_line("Overall: PASS", prompt_lines, _REVIEW_KEYWORDS) is False
-
-    def test_prompt_output_line(self):
-        """The prompt line 'Output: PASS' IS from the prompt."""
-        prompt_lines = {"- Output: PASS"}
-        assert _is_prompt_line("Output: PASS", prompt_lines, _REVIEW_KEYWORDS) is True
-
-    def test_exact_failure_line_from_log(self):
-        """The exact line from the log that caused a false positive."""
-        prompt = _get_real_prompt()
-        prompt_lines = _build_prompt_verdict_lines(prompt, _REVIEW_KEYWORDS)
-        # After strip().strip("*").strip(), the log showed a wrapped fragment
-        # of the IMPORTANT line.  Updated to include INPUT_REQUIRED.
-        line = "PASS**, **PASS_WITH_SUGGESTIONS**, **NEEDS_WORK**, or **INPUT_REQUIRED**."
-        assert _is_prompt_line(line, prompt_lines, _REVIEW_KEYWORDS) is True
-
-
-# --- should_stop tests ---
 
 class TestShouldStop:
     def test_pass_always_stops(self):

@@ -2093,7 +2093,10 @@ def _verify_single_scenario(
 
     # Poll the verification pane for VERIFIED or FLAGGED.
     from pm_core.claude_launcher import transcript_path_for
-    from pm_core.verdict_transcript import extract_verdict_from_transcript
+    if not _verify_cwd:
+        _log.warning("Verification: no cwd available for scenario %d, "
+                     "trusting original verdict", scenario.index)
+        return True, "", verify_pane
     verify_transcript = str(transcript_path_for(_verify_cwd, verify_session_id))
     _log.info("Verification: polling verify_pane=%s for scenario %d "
               "(transcript=%s)", verify_pane, scenario.index, verify_transcript)
