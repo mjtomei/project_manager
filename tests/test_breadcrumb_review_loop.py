@@ -430,7 +430,7 @@ class TestStartLoopResumeState:
              patch("pm_core.tui.review_loop_ui.start_review_loop_background") as mock_bg, \
              patch("pm_core.tui.review_loop_ui._ensure_poll_timer"):
             mock_store.find_project_root.return_value = Path("/tmp/pm")
-            _start_loop(app, "pr-001", pr, stop_on_suggestions=False,
+            _start_loop(app, "pr-001", pr, stop_on_suggestions=False, transcript_dir="/tmp",
                         resume_state=state)
 
         # State should be in app._review_loops
@@ -459,7 +459,7 @@ class TestStartLoopResumeState:
              patch("pm_core.tui.review_loop_ui.start_review_loop_background"), \
              patch("pm_core.tui.review_loop_ui._ensure_poll_timer"):
             mock_store.find_project_root.return_value = Path("/tmp/pm")
-            _start_loop(app, "pr-002", pr, stop_on_suggestions=True)
+            _start_loop(app, "pr-002", pr, stop_on_suggestions=True, transcript_dir="/tmp")
 
         state = app._review_loops["pr-002"]
         assert state.pr_id == "pr-002"

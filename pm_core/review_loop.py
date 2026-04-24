@@ -175,14 +175,19 @@ class PaneKilledError(Exception):
 
 
 def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
-                       iteration: int = 0, loop_id: str = "",
-                       transcript: str | None = None) -> str:
-    """Launch a review window and poll capture-pane for the verdict.
+                       transcript: str,
+                       iteration: int = 0, loop_id: str = "") -> str:
+    """Launch a review window and poll its JSONL transcript for the verdict.
 
-    Returns the captured pane content containing the verdict.
-    Raises PaneKilledError if the pane disappears before a verdict.
-    Raises RuntimeError for setup failures (no tmux session, window
-    failed to launch).
+    ``transcript`` is required — it is the path to the per-iteration
+    JSONL symlink that ``pm pr review --transcript ...`` writes into,
+    and it is how :func:`_poll_for_verdict` recovers the Claude
+    session_id and reads assistant output.
+
+    Returns the captured assistant text containing the verdict.
+    Raises :class:`PaneKilledError` if the pane disappears before a
+    verdict.  Raises :class:`RuntimeError` for setup failures (no tmux
+    session, window failed to launch).
     """
     from pm_core import tmux as tmux_mod
 
@@ -204,16 +209,8 @@ def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
     if not pane_id:
         raise RuntimeError(f"Review window '{window_name}' not found after launch")
 
-    _log.info("review_loop: polling pane %s in window %s", pane_id, window_name)
-
-    # Hook + JSONL driven: the review pane always launches with a
-    # transcript so we can recover the session_id via the symlink and
-    # read the assistant output directly from the JSONL.
-    if not transcript:
-        raise RuntimeError(
-            "Review pane launched without a transcript — hook+jsonl "
-            "verdict polling requires one."
-        )
+    _log.info("review_loop: polling pane %s in window %s (transcript=%s)",
+              pane_id, window_name, transcript)
 
     content = _poll_for_verdict(pane_id, transcript,
                                  grace_period=_VERDICT_GRACE_PERIOD)
@@ -254,19 +251,23 @@ def run_review_loop_sync(
     state: ReviewLoopState,
     pm_root: str,
     pr_data: dict,
+    transcript_dir: str,
     on_iteration: Callable[[ReviewLoopState], None] | None = None,
     max_iterations: int = 10,
-    transcript_dir: str | None = None,
 ) -> ReviewLoopState:
     """Run the review loop synchronously (intended for a background thread).
+
+    ``transcript_dir`` is required: hook-driven verdict polling needs a
+    per-iteration JSONL transcript symlink, and the path is embedded in
+    the ``pm pr review`` command so Claude writes to a known location.
 
     Args:
         state: Mutable state object — the caller can read it to track progress.
         pm_root: Path to the pm project root (for running ``pm pr review``).
         pr_data: The PR dict from project data.
+        transcript_dir: Directory for per-iteration transcript symlinks.
         on_iteration: Optional callback fired after each iteration completes.
         max_iterations: Safety cap on number of iterations.
-        transcript_dir: Directory for transcript symlinks (optional).
 
     Returns:
         The final state.
@@ -285,10 +286,7 @@ def run_review_loop_sync(
             state.iteration += 1
             _log.info("review_loop: iteration %d for %s", state.iteration, state.pr_id)
 
-            # Compute per-iteration transcript path
-            iter_transcript = None
-            if transcript_dir:
-                iter_transcript = f"{transcript_dir}/review-{state.pr_id}-i{state.iteration}.jsonl"
+            iter_transcript = f"{transcript_dir}/review-{state.pr_id}-i{state.iteration}.jsonl"
 
             try:
                 output = _run_claude_review(
@@ -388,21 +386,22 @@ def start_review_loop_background(
     state: ReviewLoopState,
     pm_root: str,
     pr_data: dict,
+    transcript_dir: str,
     on_iteration: Callable[[ReviewLoopState], None] | None = None,
     on_complete: Callable[[ReviewLoopState], None] | None = None,
     max_iterations: int = 10,
-    transcript_dir: str | None = None,
 ) -> threading.Thread:
     """Start the review loop in a background thread.
 
-    Returns the thread so the caller can join it if needed.
+    ``transcript_dir`` is required (hook-driven verdict polling needs a
+    per-iteration JSONL symlink).  Returns the thread so the caller can
+    join it if needed.
     """
     def _run():
         run_review_loop_sync(
-            state, pm_root, pr_data,
+            state, pm_root, pr_data, transcript_dir,
             on_iteration=on_iteration,
             max_iterations=max_iterations,
-            transcript_dir=transcript_dir,
         )
         if on_complete:
             try:

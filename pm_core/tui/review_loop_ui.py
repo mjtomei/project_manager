@@ -77,6 +77,8 @@ def stop_loop_or_fresh_done(app) -> None:
 
 def start_or_stop_loop(app, stop_on_suggestions: bool) -> None:
     """Handle ``zz d`` / ``zzz d``: start loop or stop if one is running."""
+    from pm_core.tui import auto_start as _auto_start
+
     pr_id, pr = _get_selected_pr(app)
     if not pr_id:
         app.log_message("No PR selected")
@@ -87,7 +89,8 @@ def start_or_stop_loop(app, stop_on_suggestions: bool) -> None:
         _stop_loop(app, pr_id)
         return
 
-    _start_loop(app, pr_id, pr, stop_on_suggestions)
+    _start_loop(app, pr_id, pr, stop_on_suggestions,
+                transcript_dir=str(_auto_start.get_transcript_dir(app)))
 
 
 # ---------------------------------------------------------------------------
@@ -95,9 +98,15 @@ def start_or_stop_loop(app, stop_on_suggestions: bool) -> None:
 # ---------------------------------------------------------------------------
 
 def _start_loop(app, pr_id: str, pr: dict | None, stop_on_suggestions: bool,
-                transcript_dir: str | None = None,
+                transcript_dir: str,
                 resume_state: ReviewLoopState | None = None) -> None:
     """Start a review loop for the given PR.
+
+    ``transcript_dir`` is required — hook-driven verdict polling needs a
+    per-iteration JSONL transcript.  Callers resolve it via
+    :func:`pm_core.tui.auto_start.get_transcript_dir` which is total
+    (lazily synthesises a ``manual-<token>`` run dir when auto-start
+    isn't active).
 
     When *resume_state* is provided, the loop continues from the saved
     iteration count and history instead of starting fresh.  Used by
@@ -116,6 +125,19 @@ def _start_loop(app, pr_id: str, pr: dict | None, stop_on_suggestions: bool,
     workdir = pr.get("workdir")
     if not workdir:
         app.log_message(f"No workdir for {pr_id}. Start the PR first.")
+        return
+
+    # Ensure the transcript directory exists on disk.  Fail fast here
+    # (before launching a podman container + review pane) if creation
+    # fails — better than surfacing the error after the pane is up.
+    try:
+        from pathlib import Path as _Path
+        _Path(transcript_dir).mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        app.log_message(
+            f"[red]Cannot create transcript dir[/] {transcript_dir}: {e}"
+        )
+        _log.warning("_start_loop: mkdir %s failed: %s", transcript_dir, e)
         return
 
     # Get pm_root for launching the review window
@@ -846,4 +868,4 @@ def _auto_review_idle_prs(app, newly_idle: list[tuple[str, dict]]) -> None:
             loop = app._review_loops.get(pr_id)
             if not loop:
                 _start_loop(app, pr_id, updated_pr, stop_on_suggestions=False,
-                             transcript_dir=str(tdir) if tdir else None)
+                             transcript_dir=str(tdir))

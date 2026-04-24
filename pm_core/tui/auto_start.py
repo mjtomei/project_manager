@@ -35,12 +35,29 @@ def get_target(app) -> str | None:
     return app._auto_start_target
 
 
-def get_transcript_dir(app) -> Path | None:
-    """Return the transcript directory for the current auto-start run, or None."""
+def get_transcript_dir(app) -> Path:
+    """Return the transcript directory for the current TUI session.
+
+    Total function: callers always receive a usable directory.  Priority:
+
+    1. The active auto-start run dir (``app._auto_start_run_id``) when
+       auto-start is active.
+    2. A lazily-created ``manual-<token>`` run dir cached on the app as
+       ``_manual_transcript_run_id``.  Used for manually-started review
+       loops (``zz d`` / ``zzz d``) that never go through auto-start.
+
+    The returned path is always under ``app._root / "transcripts"``.
+    The directory itself is created by callers on demand when they
+    write files into it.
+    """
     run_id = app._auto_start_run_id
-    if not run_id or not app._root:
-        return None
-    return app._root / "transcripts" / run_id
+    if not run_id:
+        run_id = getattr(app, "_manual_transcript_run_id", None)
+        if not run_id:
+            run_id = f"manual-{secrets.token_hex(3)}"
+            app._manual_transcript_run_id = run_id
+    root = app._root or pm_home()
+    return root / "transcripts" / run_id
 
 
 def has_merge_restart_marker() -> bool:
@@ -201,7 +218,7 @@ async def consume_breadcrumb(app) -> None:
                     tdir = get_transcript_dir(app)
                     _start_loop(
                         app, pr_id, pr, rstate.stop_on_suggestions,
-                        transcript_dir=str(tdir) if tdir else rstate._transcript_dir,
+                        transcript_dir=str(tdir),
                         resume_state=rstate,
                     )
                     app.log_message(
@@ -219,7 +236,7 @@ async def consume_breadcrumb(app) -> None:
         for wd in watchers_data:
             watcher_ui.start_watcher(
                 app,
-                transcript_dir=str(tdir) if tdir else None,
+                transcript_dir=str(tdir),
                 meta_pm_root=wd.get("meta_pm_root"),
                 watcher_type=wd.get("type", "auto-start"),
             )
@@ -432,7 +449,7 @@ def _auto_start_review_loops(app, target: str | None = None,
         from pm_core.tui.review_loop_ui import _start_loop
         tdir = get_transcript_dir(app)
         _start_loop(app, pr_id, pr, stop_on_suggestions=False,
-                     transcript_dir=str(tdir) if tdir else None)
+                     transcript_dir=str(tdir))
 
 
 def _auto_start_qa_loops(app, target: str | None = None,

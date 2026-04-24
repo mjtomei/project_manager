@@ -244,7 +244,7 @@ class TestRunReviewLoopSync:
     def test_stops_on_pass(self, mock_review):
         mock_review.return_value = "All good.\n\n**PASS**"
         state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA)
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
         assert result.iteration == 1
         assert result.latest_verdict == VERDICT_PASS
         assert result.running is False
@@ -259,7 +259,7 @@ class TestRunReviewLoopSync:
             "All good.\n\n**PASS**",
         ]
         state = ReviewLoopState(pr_id="pr-001")
-        run_review_loop_sync(state, "/tmp", _PR_DATA)
+        run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
         # First call: iteration=1, second call: iteration=2
         calls = mock_review.call_args_list
         assert calls[0].kwargs["iteration"] == 1
@@ -271,7 +271,7 @@ class TestRunReviewLoopSync:
     def test_stops_on_suggestions_by_default(self, mock_review):
         mock_review.return_value = "Minor nits.\n\n**PASS_WITH_SUGGESTIONS**"
         state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA)
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
         assert result.iteration == 1
         assert result.latest_verdict == VERDICT_PASS_WITH_SUGGESTIONS
         assert result.running is False
@@ -283,7 +283,7 @@ class TestRunReviewLoopSync:
             "All good.\n\n**PASS**",
         ]
         state = ReviewLoopState(pr_id="pr-001", stop_on_suggestions=False)
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA)
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
         assert result.iteration == 2
         assert result.latest_verdict == VERDICT_PASS
         assert len(result.history) == 2
@@ -296,7 +296,7 @@ class TestRunReviewLoopSync:
             "All good.\n\n**PASS**",
         ]
         state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA)
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
         assert result.iteration == 3
         assert result.latest_verdict == VERDICT_PASS
         assert len(result.history) == 3
@@ -305,7 +305,7 @@ class TestRunReviewLoopSync:
     def test_respects_max_iterations(self, mock_review):
         mock_review.return_value = "**NEEDS_WORK**"
         state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA, max_iterations=3)
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp", max_iterations=3)
         assert result.iteration == 3
         assert result.latest_verdict == VERDICT_NEEDS_WORK
         assert mock_review.call_count == 3
@@ -320,7 +320,7 @@ class TestRunReviewLoopSync:
 
         mock_review.side_effect = side_effect
         state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA)
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
         assert result.iteration == 1
         assert result.running is False
 
@@ -334,7 +334,7 @@ class TestRunReviewLoopSync:
 
         mock_review.side_effect = side_effect
         state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA)
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
         assert result.iteration == 1
         assert result.running is False
         # Iteration completed and verdict was recorded
@@ -346,14 +346,14 @@ class TestRunReviewLoopSync:
         mock_review.return_value = "**PASS**"
         callback = MagicMock()
         state = ReviewLoopState(pr_id="pr-001")
-        run_review_loop_sync(state, "/tmp", _PR_DATA, on_iteration=callback)
+        run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp", on_iteration=callback)
         callback.assert_called_once_with(state)
 
     @patch("pm_core.review_loop._run_claude_review")
     def test_handles_exception(self, mock_review):
         mock_review.side_effect = RuntimeError("setup failure")
         state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA)
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
         assert result.latest_verdict == "ERROR"
         assert result.running is False
 
@@ -362,7 +362,7 @@ class TestRunReviewLoopSync:
         """When the pane is killed externally, loop stops with KILLED verdict."""
         mock_review.side_effect = PaneKilledError("pane disappeared")
         state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA)
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
         assert result.latest_verdict == VERDICT_KILLED
         assert result.running is False
         assert result.iteration == 1
@@ -376,7 +376,7 @@ class TestStartReviewLoopBackground:
         state = ReviewLoopState(pr_id="pr-001")
         complete_callback = MagicMock()
         thread = start_review_loop_background(
-            state, "/tmp", _PR_DATA,
+            state, "/tmp", _PR_DATA, transcript_dir="/tmp",
             on_complete=complete_callback,
         )
         thread.join(timeout=5)
@@ -490,8 +490,8 @@ class TestMultipleLoops:
         pr_data_a = {"id": "pr-001", "branch": "pm/pr-001"}
         pr_data_b = {"id": "pr-002", "branch": "pm/pr-002"}
 
-        run_review_loop_sync(state_a, "/tmp/a", pr_data_a)
-        run_review_loop_sync(state_b, "/tmp/b", pr_data_b)
+        run_review_loop_sync(state_a, "/tmp/a", pr_data_a, transcript_dir="/tmp/a")
+        run_review_loop_sync(state_b, "/tmp/b", pr_data_b, transcript_dir="/tmp/b")
 
         assert state_a.pr_id == "pr-001"
         assert state_b.pr_id == "pr-002"
@@ -514,7 +514,7 @@ class TestInputRequired:
         mock_follow_up.return_value = "Tests passed.\n\n**PASS**"
 
         state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA)
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
 
         assert result.latest_verdict == VERDICT_PASS
         assert result.iteration == 1
@@ -535,7 +535,7 @@ class TestInputRequired:
         mock_follow_up.return_value = "Issues found after testing.\n\n**NEEDS_WORK**"
 
         state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA)
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
 
         # First iteration: INPUT_REQUIRED → NEEDS_WORK from follow-up
         # Second iteration: PASS from fresh review
@@ -550,7 +550,7 @@ class TestInputRequired:
         mock_follow_up.return_value = None  # pane disappeared
 
         state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA)
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
 
         assert result.latest_verdict == VERDICT_KILLED
         assert result.input_required is False
@@ -570,7 +570,7 @@ class TestInputRequired:
         state = ReviewLoopState(pr_id="pr-001")
         mock_follow_up.side_effect = side_effect
 
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA)
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
 
         assert result.input_required is False
         assert result.running is False
