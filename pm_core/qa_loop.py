@@ -31,10 +31,10 @@ from pm_core.spec_gen import get_spec as _get_qa_spec
 from pm_core.loop_shared import (
     find_claude_pane,
     get_pm_session,
-    extract_verdict_from_content,
     poll_for_verdict,
     VERDICT_TAIL_LINES,
 )
+from pm_core.verdict_transcript import extract_verdict_from_transcript
 
 _log = configure_logger("pm.qa_loop")
 
@@ -308,29 +308,6 @@ def _scenario_window_name(pr_data: dict, scenario_index: int) -> str:
 
 # Alias for backward compat with tests; prefer find_claude_pane directly.
 _get_scenario_pane = find_claude_pane
-
-# Number of lines before the verdict to use as a fingerprint for
-# detecting stale re-detections of the same verdict.
-_VERDICT_CONTEXT_LINES = 5
-
-
-def _verdict_context_fingerprint(content: str, verdict: str) -> str:
-    """Return the lines immediately before *verdict* in *content*.
-
-    Searches from the bottom of *content* (matching the behaviour of
-    ``extract_verdict_from_content``) and returns the
-    ``_VERDICT_CONTEXT_LINES`` lines that precede the verdict keyword.
-    Two captures with the same fingerprint mean the verdict hasn't
-    changed — it's the same stale output.
-    """
-    lines = content.strip().splitlines()
-    for i in range(len(lines) - 1, -1, -1):
-        cleaned = re.sub(r'[*`]', '', lines[i]).strip()
-        if cleaned == verdict:
-            start = max(0, i - _VERDICT_CONTEXT_LINES)
-            return "\n".join(lines[start:i])
-    return ""
-
 
 def _cleanup_stale_scenario_windows(session: str, pr_data: dict,
                                     include_main: bool = True) -> None:
@@ -795,6 +772,7 @@ def _concretize_scenario(
     project_data: dict,
     pane_id: str,
     session_id: str,
+    scenario_cwd: str,
     instruction_content: str | None = None,
 ) -> str | None:
     """Poll a concretization pane and return refined steps.
@@ -804,24 +782,15 @@ def _concretize_scenario(
     Returns None if concretization failed/timed out.
     The pane is left open for user review.
     """
-    from pm_core import tmux as tmux_mod
-
-    base_branch = project_data.get("project", {}).get("base_branch", "master")
-    pr_branch = pr_data.get("branch", "")
-    prompt = _build_concretization_prompt(scenario, pr_branch, base_branch,
-                                          instruction_content=instruction_content)
+    from pm_core.claude_launcher import transcript_path_for
 
     _log.info("Concretization started for scenario %d in pane %s",
               scenario.index, pane_id)
 
-    # Poll for REFINED_STEPS_END — uses prompt_text filtering to skip
-    # the example marker in the prompt itself.
+    transcript_path = str(transcript_path_for(scenario_cwd, session_id))
     content = poll_for_verdict(
-        pane_id,
+        pane_id, transcript_path,
         verdicts=_CONCRETIZE_VERDICTS,
-        keywords=_CONCRETIZE_KEYWORDS,
-        session_id=session_id,
-        prompt_text=prompt,
         grace_period=_CONCRETIZE_GRACE,
         log_prefix=f"qa-concretize-{scenario.index}",
     )
@@ -1088,9 +1057,12 @@ def _launch_scenarios_in_tmux(
             win_name: str,
             instruction_content: str | None = None,
     ) -> None:
-        refined_steps = _concretize_scenario(scenario, pr_data, data, concretize_pane,
-                                             instruction_content=instruction_content,
-                                             session_id=scenario.concretize_session_id)
+        refined_steps = _concretize_scenario(
+            scenario, pr_data, data, concretize_pane,
+            session_id=scenario.concretize_session_id,
+            scenario_cwd=scenario_cwd,
+            instruction_content=instruction_content,
+        )
         if refined_steps:
             scenario.steps = refined_steps
 
@@ -1311,9 +1283,12 @@ def _launch_scenarios_in_containers(
             clone_path: Path,
             instruction_content: str | None = None,
     ) -> None:
-        refined_steps = _concretize_scenario(scenario, pr_data, data, concretize_pane,
-                                             instruction_content=instruction_content,
-                                             session_id=scenario.concretize_session_id)
+        refined_steps = _concretize_scenario(
+            scenario, pr_data, data, concretize_pane,
+            session_id=scenario.concretize_session_id,
+            scenario_cwd=scenario_cwd,
+            instruction_content=instruction_content,
+        )
         if refined_steps:
             scenario.steps = refined_steps
 
@@ -1528,14 +1503,8 @@ def _poll_tmux_verdicts(
     # Results from background verification threads
     verification_results: dict[int, tuple[bool, str]] = {}
     verification_lock = threading.Lock()
-    # Fingerprint of the lines before the verdict when it was last
-    # accepted — used to detect stale re-detections.
-    verdict_context: dict[int, str] = {}
-    # Idle-reminder state: track last seen content hash and when it changed,
-    # plus when we last sent a reminder, keyed by scenario index.
+    # Idle-reminder state: when we last sent a reminder, keyed by scenario index.
     _reminder_timeout = _get_verdict_reminder_timeout()
-    _last_content_hash: dict[int, str] = {}
-    _last_content_change: dict[int, float] = {}
     _last_reminder_sent: dict[int, float] = {}
     # Hook-driven idle detection: gate verdict extraction on fresh
     # idle_prompt events for each scenario's Claude session.  Scenarios
@@ -1706,14 +1675,12 @@ def _poll_tmux_verdicts(
                             tmux_mod.send_keys(pane_id, "")
                         _log.info("Sent follow-up message to scenario %d pane",
                                   scenario_idx)
-                        # Clear verdict and put back in pending.
-                        # Keep verdict_context so the old stale PASS is
-                        # still recognised and skipped — only a genuinely
-                        # new verdict (with different surrounding lines)
+                        # Clear verdict and put back in pending.  The next
+                        # idle_prompt event for this scenario re-triggers
+                        # JSONL extraction; only a genuinely new assistant
+                        # turn (written after the cleared hook timestamp)
                         # will be accepted.
                         state.scenario_verdicts.pop(scenario_idx, None)
-                        # Allow the next idle_prompt event to trigger another
-                        # verdict extraction for this scenario.
                         _last_scenario_hook_ts.pop(scenario_idx, None)
                         pending.add(scenario_idx)
                         state.latest_output = (
@@ -1795,59 +1762,35 @@ def _poll_tmux_verdicts(
                 continue
             _last_scenario_hook_ts[scenario.index] = ev_ts
 
-            content = tmux_mod.capture_pane(
-                pane_id, full_scrollback=True,
+            # Read verdict straight from the JSONL transcript.  The hook
+            # event is the turn-boundary gate; the transcript is the
+            # source of truth for what the agent actually said.
+            verdict = extract_verdict_from_transcript(
+                scenario.transcript_path, ALL_VERDICTS,
             )
 
-            # Track content changes for idle-reminder logic.
-            # Only active after the agent pane exists (pane_id is the agent,
-            # not the concretizer) to avoid noisy reminders during setup.
-            if _reminder_timeout is not None and scenario.pane_id:
-                content_hash = str(hash(content))
+            # Idle-reminder: when the agent emits idle_prompt without a
+            # verdict, nudge once per _reminder_timeout window.
+            if (verdict is None and _reminder_timeout is not None
+                    and scenario.pane_id
+                    and ev.get("event_type") == "idle_prompt"):
                 now = time.monotonic()
-                if _last_content_hash.get(scenario.index) != content_hash:
-                    _last_content_hash[scenario.index] = content_hash
-                    _last_content_change[scenario.index] = now
-                else:
-                    idle_secs = now - _last_content_change.get(scenario.index, now)
-                    last_reminded = _last_reminder_sent.get(scenario.index, 0.0)
-                    if (idle_secs >= _reminder_timeout
-                            and now - last_reminded >= _reminder_timeout):
-                        reminder = (
-                            "Reminder: your verdict must appear alone on its own "
-                            "line — the line must contain only PASS, NEEDS_WORK, "
-                            "or INPUT_REQUIRED with no other text. Please output "
-                            "your verdict now if you have reached a conclusion."
-                        )
-                        tmux_mod.send_keys(pane_id, reminder)
-                        _last_reminder_sent[scenario.index] = now
-                        _log.info(
-                            "Sent verdict-format reminder to scenario %d "
-                            "(idle %.0fs)", scenario.index, idle_secs,
-                        )
-
-            verdict = extract_verdict_from_content(
-                content,
-                verdicts=ALL_VERDICTS,
-                keywords=_QA_KEYWORDS,
-                log_prefix=f"qa-{scenario.index}",
-            )
-
-            # Check if this is the same stale verdict we already
-            # accepted by comparing the lines immediately before the
-            # verdict keyword.  New output means a genuine re-verdict.
-            if verdict:
-                ctx = _verdict_context_fingerprint(content, verdict)
-                prev_ctx = verdict_context.get(scenario.index)
-                if prev_ctx is not None and ctx == prev_ctx:
-                    # Same context before the verdict — stale, skip
-                    continue
+                last_reminded = _last_reminder_sent.get(scenario.index, 0.0)
+                if now - last_reminded >= _reminder_timeout:
+                    reminder = (
+                        "Reminder: your verdict must appear alone on its own "
+                        "line — the line must contain only PASS, NEEDS_WORK, "
+                        "or INPUT_REQUIRED with no other text. Please output "
+                        "your verdict now if you have reached a conclusion."
+                    )
+                    tmux_mod.send_keys(pane_id, reminder)
+                    _last_reminder_sent[scenario.index] = now
+                    _log.info(
+                        "Sent verdict-format reminder to scenario %d",
+                        scenario.index,
+                    )
 
             if verdict:
-                # Hook-driven gate already ensured this is a turn boundary —
-                # a non-stale verdict is accepted immediately, no stability
-                # polling needed.
-                verdict_context[scenario.index] = _verdict_context_fingerprint(content, verdict)
                 state.scenario_verdicts[scenario.index] = verdict
                 pending.discard(scenario.index)
                 verdicts_changed = True
@@ -2149,18 +2092,15 @@ def _verify_single_scenario(
                    scenario.index, exc_info=True)
 
     # Poll the verification pane for VERIFIED or FLAGGED.
-    # Pass prompt_text so the prompt's example FLAGGED_END marker
-    # is filtered out — only the verifier's actual output counts.
+    from pm_core.claude_launcher import transcript_path_for
+    from pm_core.verdict_transcript import extract_verdict_from_transcript
+    verify_transcript = str(transcript_path_for(_verify_cwd, verify_session_id))
     _log.info("Verification: polling verify_pane=%s for scenario %d "
-              "(prompt_text=%d chars)",
-              verify_pane, scenario.index, len(prompt))
+              "(transcript=%s)", verify_pane, scenario.index, verify_transcript)
     try:
         content = poll_for_verdict(
-            verify_pane,
+            verify_pane, verify_transcript,
             verdicts=_VERIFICATION_VERDICTS,
-            keywords=_VERIFICATION_KEYWORDS,
-            session_id=verify_session_id,
-            prompt_text=prompt,
             grace_period=_VERDICT_GRACE_PERIOD,
             stop_check=stop_check,
             log_prefix=f"qa-verify-{scenario.index}",
@@ -2178,12 +2118,8 @@ def _verify_single_scenario(
     if content:
         _log.info("Verification: got %d chars of content from verify_pane=%s "
                   "for scenario %d", len(content), verify_pane, scenario.index)
-        v = extract_verdict_from_content(
-            content,
-            verdicts=_VERIFICATION_VERDICTS,
-            keywords=_VERIFICATION_KEYWORDS,
-            prompt_text=prompt,
-            log_prefix=f"qa-verify-{scenario.index}",
+        v = extract_verdict_from_transcript(
+            verify_transcript, _VERIFICATION_VERDICTS,
         )
         if v == "VERIFIED":
             _log.info("Verification: scenario %d VERIFIED", scenario.index)

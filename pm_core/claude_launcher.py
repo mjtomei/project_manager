@@ -423,14 +423,15 @@ def session_id_from_transcript(transcript_path: str | Path) -> str | None:
     boundaries.
     """
     p = Path(transcript_path)
-    target: Path
+    target: Path = p
     try:
         if p.is_symlink():
             target = Path(os.readlink(p))
         elif p.exists():
             target = p
-        else:
-            return None
+        # else: fall through and parse the path literally — callers
+        # (QA verification/planner panes) may pass a path that Claude
+        # has not yet opened.
     except OSError:
         return None
     name = target.name
@@ -440,6 +441,16 @@ def session_id_from_transcript(transcript_path: str | Path) -> str | None:
     if len(name) == 36 and name.count("-") == 4:
         return name
     return None
+
+
+def transcript_path_for(cwd: str, session_id: str) -> Path:
+    """Return Claude's native transcript path for a cwd + session_id.
+
+    Lets callers pass a concrete JSONL path to hook-driven pollers when
+    they generated the session_id themselves (no symlink) rather than
+    letting ``build_claude_shell_cmd(transcript=...)`` create one.
+    """
+    return _claude_project_dir(cwd) / f"{session_id}.jsonl"
 
 
 def finalize_transcript(transcript_path: Path) -> None:
