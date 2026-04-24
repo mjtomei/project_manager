@@ -772,8 +772,7 @@ def _poll_impl_idle(app) -> None:
         tracker.poll(merge_key)
 
         # --- Primary: check for MERGED or INPUT_REQUIRED verdict ---
-        state = tracker._states.get(merge_key)
-        merge_transcript_path = state.transcript_path if state else None
+        merge_transcript_path = tracker.get_transcript_path(merge_key)
         if merge_transcript_path:
             from pm_core.verdict_transcript import extract_verdict_from_transcript
             verdict = extract_verdict_from_transcript(

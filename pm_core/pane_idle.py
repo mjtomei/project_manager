@@ -180,6 +180,17 @@ class PaneIdleTracker:
             state = self._states.get(key)
             return state.waiting_for_input if state else False
 
+    def get_transcript_path(self, key: str) -> str | None:
+        """Return the transcript path registered for *key*, or None.
+
+        Callers can use this to read the JSONL directly
+        (e.g. :func:`pm_core.verdict_transcript.extract_verdict_from_transcript`)
+        without reaching into the tracker's internal state map.
+        """
+        with self._lock:
+            state = self._states.get(key)
+            return state.transcript_path if state else None
+
     def get_content(self, key: str) -> str:
         """Return the cached transcript-derived content (empty by default).
 

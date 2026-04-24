@@ -1757,8 +1757,11 @@ def _poll_tmux_verdicts(
             ev = _hook_events.read_event(scenario.session_id)
             ev_ts = float((ev or {}).get("timestamp") or 0)
             last_ts = _last_scenario_hook_ts.get(scenario.index, 0.0)
-            if ev is None or ev_ts <= last_ts or ev.get("event_type") not in ("idle_prompt", "Stop"):
-                # No new turn boundary — skip this scenario this tick.
+            if ev is None or ev_ts <= last_ts or ev.get("event_type") != "idle_prompt":
+                # No new idle_prompt — skip this scenario this tick.
+                # Stop fires per-turn (not just at session end); relying
+                # on it here would drift from spec R9 and introduce
+                # false turn-boundary signals for multi-turn work.
                 continue
             _last_scenario_hook_ts[scenario.index] = ev_ts
 
@@ -1772,8 +1775,7 @@ def _poll_tmux_verdicts(
             # Idle-reminder: when the agent emits idle_prompt without a
             # verdict, nudge once per _reminder_timeout window.
             if (verdict is None and _reminder_timeout is not None
-                    and scenario.pane_id
-                    and ev.get("event_type") == "idle_prompt"):
+                    and scenario.pane_id):
                 now = time.monotonic()
                 last_reminded = _last_reminder_sent.get(scenario.index, 0.0)
                 if now - last_reminded >= _reminder_timeout:
@@ -2333,13 +2335,13 @@ def run_qa_sync(
             _remaining = max(0.0, deadline - time.monotonic())
             ev = _hook_events.wait_for_event(
                 planner_session_id,
-                event_types={"idle_prompt", "Stop"},
+                event_types={"idle_prompt"},
                 timeout=min(15.0, _remaining),
                 newer_than=_hook_baseline,
                 stop_check=lambda: state.stop_requested,
             )
             if ev is None:
-                # No turn boundary yet — loop so we re-check deadline/stop.
+                # No idle_prompt yet — loop so we re-check deadline/stop.
                 continue
             _hook_baseline = float(ev.get("timestamp") or _hook_baseline)
 
@@ -2359,9 +2361,6 @@ def run_qa_sync(
                     break
                 _log.info("planner poll: has_end but 0 scenarios, "
                           "likely prompt template — continuing")
-            if ev.get("event_type") == "Stop":
-                _log.info("Planner Stop event without valid plan")
-                break
 
         if not plan_found and not state.plan_output:
             # Try capturing whatever the planner produced

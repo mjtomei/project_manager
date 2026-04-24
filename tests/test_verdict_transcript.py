@@ -134,6 +134,32 @@ def test_empty_verdicts_returns_none(tmp_path: Path) -> None:
     assert extract_verdict_from_transcript(p, ()) is None
 
 
+def test_markdown_bold_verdict(tmp_path: Path) -> None:
+    # Reviewers commonly wrap their verdict in markdown bold.  Must match.
+    p = _write(tmp_path, [
+        _user_line("q"),
+        _assistant_line("Summary.\n\n**PASS_WITH_SUGGESTIONS**\n"),
+    ])
+    assert extract_verdict_from_transcript(p, VERDICTS) == "PASS_WITH_SUGGESTIONS"
+
+
+def test_markdown_code_verdict(tmp_path: Path) -> None:
+    p = _write(tmp_path, [
+        _user_line("q"),
+        _assistant_line("`PASS`\n"),
+    ])
+    assert extract_verdict_from_transcript(p, VERDICTS) == "PASS"
+
+
+def test_bold_incidental_still_rejected(tmp_path: Path) -> None:
+    # Markdown tolerance must not swallow incidental prose mentions.
+    p = _write(tmp_path, [
+        _user_line("q"),
+        _assistant_line("I will **PASS** this along to the next agent."),
+    ])
+    assert extract_verdict_from_transcript(p, VERDICTS) is None
+
+
 def test_pass_prefix_does_not_mask_pass_with_suggestions(tmp_path: Path) -> None:
     # If the extractor naively scans for PASS first it would see
     # PASS_WITH_SUGGESTIONS but match only PASS.  Longest-first fixes it.

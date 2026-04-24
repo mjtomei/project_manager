@@ -18,9 +18,10 @@ Design:
     assistant turn at its last line, and stop at the next user line.
   * Boundary-aware.  A verdict keyword must sit on its own text-line
     within the assistant's output, i.e. bounded by a JSON newline-escape
-    (``\\n`` / ``\\r\\n``) or a JSON string quote.  That rejects
-    incidental mentions like "PASS this file" while accepting bare
-    ``PASS`` as the entire message.
+    (``\\n`` / ``\\r\\n``) or a JSON string quote, optionally wrapped in
+    markdown bold/code markers (``**PASS**`` / ```` `PASS` ````).  That
+    rejects incidental mentions like "PASS this file" while accepting
+    bare or lightly-formatted ``PASS`` as the entire message.
   * Longest-match-first.  ``PASS`` is a prefix of
     ``PASS_WITH_SUGGESTIONS``; verdicts are scanned in descending
     length order so the more specific keyword wins.
@@ -61,8 +62,15 @@ def extract_verdict_from_transcript(
     ordered = sorted({v for v in verdicts if v}, key=len, reverse=True)
     if not ordered:
         return None
+    # Boundary: JSON newline-escape (``\n`` / ``\r``) or string quote.
+    # Between the boundary and the verdict we tolerate markdown bold/code
+    # markers (``*``, `` ` ``) so ``**PASS**`` on its own line still
+    # matches — the pane-scraping path used to strip those before
+    # comparing, and reviewers routinely wrap verdicts in bold.
     patterns = [
-        (v, re.compile(r'(?:\\[nr]|")' + re.escape(v) + r'(?:\\[nr]|")'))
+        (v, re.compile(
+            r'(?:\\[nr]|")[*`]*' + re.escape(v) + r'[*`]*(?:\\[nr]|")'
+        ))
         for v in ordered
     ]
 
