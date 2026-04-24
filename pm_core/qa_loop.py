@@ -2467,7 +2467,7 @@ def run_qa_sync(
         _notify()
 
     # --- Spec gate: verify the planner generated a QA spec ---
-    # Reload data from disk — the planner may have run `pm pr spec-save`
+    # Reload data from disk — the planner may have updated state
     # during execution, which writes to disk but doesn't update our copy.
     if pm_root:
         data = store.load(pm_root)

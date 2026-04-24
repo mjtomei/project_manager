@@ -655,41 +655,6 @@ def pr_spec_path(pr_id: str, phase: str):
     click.echo(path)
 
 
-@pr.command("spec-save")
-@click.argument("pr_id")
-@click.argument("phase")
-def pr_spec_save(pr_id: str, phase: str):
-    """Register a spec file for a PR phase (used by Claude sessions).
-
-    Validates that the spec file exists at the canonical path
-    (<pm-root>/specs/<pr-id>/<phase>.md) and is non-empty.
-    The Claude session writes the file first, then runs this command.
-    """
-    root = state_root()
-    data = store.load(root)
-    pr_entry = _require_pr(data, pr_id)
-    pr_id = pr_entry["id"]
-
-    if phase not in spec_gen.PHASES:
-        click.echo(f"Invalid phase: {phase}. Must be one of: {', '.join(spec_gen.PHASES)}", err=True)
-        raise SystemExit(1)
-
-    spec_path = spec_gen.spec_file_path(root, pr_id, phase)
-
-    if not spec_path.exists():
-        click.echo(f"Spec file not found: {spec_path}", err=True)
-        click.echo(f"Write the spec to this path first, then run this command.")
-        raise SystemExit(1)
-
-    content = spec_path.read_text().strip()
-    if not content:
-        click.echo(f"Spec file is empty: {spec_path}", err=True)
-        raise SystemExit(1)
-
-    click.echo(f"Saved {phase} spec for {_pr_display_id(pr_entry)} ({len(content)} chars).")
-    trigger_tui_refresh()
-
-
 @pr.command("spec-approve")
 @click.argument("pr_id")
 def pr_spec_approve(pr_id: str):
@@ -1018,6 +983,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         data["project"]["active_pr"] = pr_id
 
     data = store.locked_update(root, apply)
+    # Reload pr_entry from updated data (now contains gh_pr_number)
+    pr_entry = store.get_pr(data, pr_id) or pr_entry
     trigger_tui_refresh()
 
     click.echo(f"\nPR {_pr_display_id(pr_entry)} is now in_progress on {machine}")
