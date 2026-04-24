@@ -47,7 +47,6 @@ ALL_VERDICTS = (VERDICT_PASS, VERDICT_NEEDS_WORK, VERDICT_INPUT_REQUIRED)
 _QA_KEYWORDS = ("INPUT_REQUIRED", "NEEDS_WORK", "PASS")
 
 _POLL_INTERVAL = 5
-_TICK_INTERVAL = 1
 _VERDICT_GRACE_PERIOD = 30  # QA sessions take a while to run
 _PLANNER_TIMEOUT = 60 * 60  # seconds to wait for planner output
 _PLANNER_GRACE = 15  # seconds before accepting planner completion

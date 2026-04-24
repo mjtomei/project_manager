@@ -1,10 +1,17 @@
 """Install pm's Claude Code hooks into ~/.claude/settings.json.
 
-Claude Code fires configured hooks on lifecycle events. We install a
-Notification(idle_prompt) hook — fires when Claude finishes its turn
-and waits at the prompt — and a Stop hook — fires when a response
-ends. Both point at ``python -m pm_core.hook_receiver`` which writes
-a file under ~/.pm/hooks/ keyed by session_id.
+Claude Code fires configured hooks on lifecycle events.  We install
+three entries that all point at the standalone ``hook_receiver.py``
+and write a file under ``~/.pm/hooks/`` keyed by session_id:
+
+  * ``Notification[idle_prompt]`` — Claude finished its turn and is
+    waiting for the next user message.  Drives verdict detection.
+  * ``Notification[permission_prompt]`` — Claude Code is blocked on
+    its own tool-approval dialog.  Drives the TUI's "waiting for
+    input" indicator.
+  * ``Stop`` — fires per-turn.  Retained for future use; readers
+    currently ignore it (``pane_exists`` is the authoritative
+    session-gone signal).
 
 The installer is idempotent and merges into any existing user hooks.
 """

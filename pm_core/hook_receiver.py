@@ -2,9 +2,9 @@
 
 Invoked by Claude Code hooks configured in ~/.claude/settings.json.
 Reads a JSON payload on stdin (session_id, transcript_path, cwd, ...),
-plus an event type argv[1] (e.g. "idle_prompt", "Stop"), and writes an
-event record to ~/.pm/hooks/{session_id}.json atomically so pm can
-observe turn boundaries without polling.
+plus an event type argv[1] (``idle_prompt``, ``permission_prompt``, or
+``Stop``), and writes an event record to ``~/.pm/hooks/{session_id}.json``
+atomically so pm can observe turn boundaries without polling.
 
 Events are keyed by session_id alone — session_ids are UUIDs, so
 concurrent pm sessions cannot collide.  A flat directory also keeps

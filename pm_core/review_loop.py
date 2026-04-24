@@ -47,10 +47,6 @@ VERDICT_KILLED = "KILLED"
 
 ALL_VERDICTS = (VERDICT_PASS, VERDICT_NEEDS_WORK, VERDICT_INPUT_REQUIRED)
 
-# How often to check pane content for a verdict (seconds)
-_POLL_INTERVAL = 5
-# How often to check pane liveness / stop_requested between content polls (seconds)
-_TICK_INTERVAL = 1
 # Minimum seconds after poll start before accepting verdicts.
 # Claude reviews take minutes; verdicts found in the first few seconds are
 # almost certainly false positives from prompt text shown in the pane.
