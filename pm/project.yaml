@@ -9222,11 +9222,20 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/166
   gh_pr_number: 166
   created_at: '2026-04-21T17:07:01.779432+00:00'
-  updated_at: '2026-04-24T13:47:52.280824+00:00'
+  updated_at: '2026-04-24T16:35:07.695266+00:00'
   started_at: '2026-04-24T02:48:10.332243+00:00'
   reviewed_at: '2026-04-24T13:47:52.280824+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-ba7ef7b
+    text: 'Post-merge follow-ups from review: (1) add a public PaneIdleTracker.get_transcript_path(key)
+      accessor and replace the tracker._states.get(merge_key) reach-in in pm_core/tui/review_loop_ui.py:775.
+      (2) Narrow qa_loop hook-event filters to {''idle_prompt''} only (planner poll
+      in run_qa_sync and scenario poll in _poll_tmux_verdicts) to match spec R9; currently
+      both accept Stop as well, which is harmless today due to last-writer-wins but
+      drifts from the spec.'
+    created_at: '2026-04-24T16:35:07Z'
+    last_edited: '2026-04-24T16:35:07Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-014f93f-use-claude-code-hooks-idle-prompt-st-33742570
 - id: pr-e3595fe
   plan: plan-cb4ef69
