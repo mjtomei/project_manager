@@ -3832,11 +3832,20 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-06T14:02:50.658436+00:00'
-  updated_at: '2026-03-08T22:40:42.482901+00:00'
+  updated_at: '2026-04-24T14:52:43.091051+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-e5f6fed
+    text: pr-014f93f installs Notification[permission_prompt] hooks and exposes is_waiting_for_input(key)
+      on PaneIdleTracker. For a risk/permission dashboard this is the canonical 'session
+      is currently blocked on a permission decision' signal — consume it rather than
+      pane-scraping. It is last-writer-wins vs idle_prompt (approving clears waiting_for_input).
+      Subprocess-level prompts (gum, fzf, git rebase -i) are NOT observable via hooks
+      — document that limitation in the dashboard.
+    created_at: '2026-04-24T14:52:42Z'
+    last_edited: '2026-04-24T14:52:42Z'
 - id: pr-8fdda09
   plan: plan-qa
   title: Add QA scenario verification step before final verdict
@@ -4721,7 +4730,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/137
   gh_pr_number: 137
   created_at: '2026-03-08T21:45:42.636585+00:00'
-  updated_at: '2026-03-23T13:18:57.337047+00:00'
+  updated_at: '2026-04-24T14:52:34.726470+00:00'
   started_at: '2026-03-10T21:38:57.198809+00:00'
   reviewed_at: '2026-03-23T13:18:57.337047+00:00'
   merged_at: null
@@ -4786,6 +4795,15 @@ prs:
       /home/mjtomei/.pm/workdirs/qa/pr-0b827df-c16f3600a94a4026)'
     created_at: '2026-03-23T13:50:21Z'
     last_edited: '2026-03-23T13:50:21Z'
+  - id: note-da0a8f5
+    text: pr-014f93f landed a hook-driven PaneIdleTracker with a new is_waiting_for_input(key)
+      read (permission_prompt Notification). When this tasks pane shows per-PR session
+      activity, render a distinct 'waiting for input' indicator (e.g. ⏸) for PRs where
+      tracker.is_waiting_for_input(pr_id) is True — this is the Claude Code tool-approval
+      dialog, not plain idle. See pm_core/tui/tech_tree.py for the pattern already
+      applied there.
+    created_at: '2026-04-24T14:52:34Z'
+    last_edited: '2026-04-24T14:52:34Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b827df-add-running-tasks-pane-to-tui-with-w-cbe54f5e
 - id: pr-341100c
   plan: tui-ux
@@ -8848,11 +8866,22 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-09T21:58:09.533708+00:00'
-  updated_at: '2026-04-09T21:58:09.533708+00:00'
+  updated_at: '2026-04-24T14:52:52.176398+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-5e6afea
+    text: 'pr-014f93f replaced pane-scrape verdict detection with JSONL-transcript
+      extraction gated by the idle_prompt Notification hook. That change addresses
+      the root cause of this bug: verdicts are now read only when Claude has actually
+      finished a turn (hook event), not when the pane stops changing. Check whether
+      this bug is still reproducible after pr-014f93f merges; if it is, the remaining
+      work is likely about the concretize pane (_CONCRETIZE_VERDICTS) or planner-marker
+      path (_tail_has_marker_on_own_line in qa_loop.py), both of which still touch
+      pane content.'
+    created_at: '2026-04-24T14:52:51Z'
+    last_edited: '2026-04-24T14:52:51Z'
 - id: pr-d8cfa16
   plan: plan-qa
   title: Batched QA scenario execution
@@ -9145,7 +9174,7 @@ prs:
   plan: null
   title: Use Claude Code hooks (idle_prompt, Stop) for verdict and session–end detection
   branch: pm/pr-014f93f-use-claude-code-hooks-idle-prompt-stop-for-verdict
-  status: qa
+  status: in_review
   depends_on: []
   description: 'Replace all polling–based idle/verdict detection with Claude Code
     hooks for reliable, instant signaling.
@@ -9193,9 +9222,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/166
   gh_pr_number: 166
   created_at: '2026-04-21T17:07:01.779432+00:00'
-  updated_at: '2026-04-24T03:39:25.102963+00:00'
+  updated_at: '2026-04-24T13:47:52.280824+00:00'
   started_at: '2026-04-24T02:48:10.332243+00:00'
-  reviewed_at: '2026-04-24T03:39:25.102963+00:00'
+  reviewed_at: '2026-04-24T13:47:52.280824+00:00'
   merged_at: null
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-014f93f-use-claude-code-hooks-idle-prompt-st-33742570

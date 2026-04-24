@@ -1,233 +1,198 @@
-# Implementation Spec: Use Claude Code hooks for verdict and session-end detection
+# Implementation Spec: Use Claude Code hooks + JSONL transcripts for verdict and waiting-state detection
 
 ## Summary
 
-Replace polling-based idle/verdict detection with Claude Code hooks. Previously pm polled tmux pane content every 5s (`poll_for_verdict` in `loop_shared.py`, `PaneIdleTracker` in `pane_idle.py`) using MD5 hashing and tail-line scanning to detect turn completion. Claude Code supports lifecycle hooks (`Notification` with `idle_prompt` matcher, `Stop`) that fire the instant Claude finishes a turn or exits — removing the need for stability polls, grace periods, and prompt-text filtering.
+Pane-scraping-based verdict and idle detection is gone. Every code path that used to poll `tmux capture-pane` to decide whether Claude was done, had emitted a verdict keyword, or was waiting on input now reads state from two cooperating sources:
 
-**Hook-driven detection is mandatory.** There is no polling fallback in the main loop paths (review, watcher, QA concretize/planner/scenarios/verification). Callers that cannot supply a Claude `session_id` cannot use `poll_for_verdict` or `wait_for_follow_up_verdict` — they either acquire one (via the transcript symlink or by pre-generating and passing one to `build_claude_shell_cmd`) or use one of the remaining idle-only helpers (`PaneIdleTracker` hash fallback, `VerdictStabilityTracker` on the TUI merge-verdict timer).
+1. **Claude Code Notification hooks** (`idle_prompt` and `permission_prompt`) tell pm *when* the session crosses a state boundary. A standalone receiver writes the latest event to `~/.pm/hooks/{session_id}.json`.
+2. **The Claude JSONL transcript** (`~/.claude/projects/<mangled>/<session_id>.jsonl`) tells pm *what* the assistant actually said, via a schema-light extractor that walks the raw JSON text backward.
 
-## Background: how Claude Code hooks work
+The result is reliable, near-instant detection with no stability polls, grace periods, prompt-text filtering, or tail-line heuristics.
 
-Hooks are configured in a `settings.json` file (user-level `~/.claude/settings.json` or project-level `.claude/settings.json`). Each hook runs a shell command when its event fires; the hook receives a JSON payload on stdin including `session_id`, `transcript_path`, `cwd`, and event-specific fields. The two relevant events:
+## Background: Claude Code hooks and matchers
 
-- **`Notification`** with `matcher: "idle_prompt"` — fires when Claude has finished its turn and is waiting at the input prompt. This is the "became idle" signal.
-- **`Stop`** — fires when Claude finishes a response.
+Hooks live in `~/.claude/settings.json` (user-level). The installer merges pm's entries without touching unrelated keys and refuses to overwrite any `Notification[idle_prompt]`, `Notification[permission_prompt]`, or `Stop` hook that pm did not install.
 
-pm obtains a `session_id` for every Claude session it launches. Two routes:
+pm registers three entries:
 
-1. When `build_claude_shell_cmd(transcript=...)` is called, it generates a UUID, creates a symlink `transcript → ~/.claude/projects/<mangled>/<uuid>.jsonl`, and writes the symlink. `claude_launcher.session_id_from_transcript(path)` recovers the UUID from the symlink target, avoiding plumbing `session_id` through every subprocess boundary.
-2. Callers that do not use a transcript pre-generate `uuid.uuid4()` and pass it as `build_claude_shell_cmd(session_id=...)` so they retain the reference.
+| Event | Matcher | Purpose |
+|---|---|---|
+| `Notification` | `idle_prompt` | Agent emitted `end_turn` and is waiting for the next user message. |
+| `Notification` | `permission_prompt` | Claude Code is showing its own tool-approval dialog — the session is blocked until the user approves or denies. |
+| `Stop` | *(none)* | Fires on every response. pm writes the event but does not use it — see R4 below. |
+
+Each hook command is `python3 <HOST_ABS_PATH>/.pm/hook_receiver.py <event_type>`. The receiver has zero `pm_core` imports and is bind-mounted into QA containers at its host absolute path.
+
+Explicitly not observable via hooks:
+
+* `elicitation_dialog` — MCP-server elicitation (not relevant to pm today).
+* Subprocess-level interactive prompts — `gum choose`, `fzf`, `git rebase -i`. These are part of a tool execution; Claude is still mid-turn from its own perspective and never fires a Notification. The TUI cannot know about them without pane scraping, which the old approach did with `content_has_interactive_prompt`. That guard was dropped as part of this work — we accept the blind spot because the PR's empirical data showed `idle_prompt` does not actually fire during these subprocess blocks (the earlier spec R8 was wrong on that point).
 
 ## Requirements
 
-### R1: Hook receiver script
+### R1: Hook receiver
 
-`pm_core/hook_receiver.py` is a **standalone** script — zero `pm_core` imports, only stdlib.
+`pm_core/hook_receiver.py` — standalone, stdlib only.
 
-- Reads a JSON payload from stdin (the Claude Code hook event).
-- Extracts `session_id`, `cwd`, and event-specific fields.
-- Writes an event record to `~/.pm/hooks/{session_id}.json` atomically (tempfile in the same directory + `os.replace`). `~` resolves via `Path.home()` — on the host it points at the user HOME, inside a container it points at `$CONTAINER_HOME` where the bind mount lands.
-- The file stores the **latest** event per session as `{"event_type": "...", "timestamp": <epoch>, "session_id": "...", "matcher": "...", "cwd": "..."}`. Older events are overwritten — callers only care about the most recent turn-boundary.
-- Exits 0 silently on any error (hook failures must not block Claude).
-
-A flat layout (no session-tag subdirectory) is used because session_ids are UUIDs and cannot collide across concurrent pm sessions. It also ensures the writer (possibly inside a container with `cwd=/workspace`) and the host-side reader agree on the path — a previous session-tag scheme hashed the cwd and silently mismatched whenever Claude's cwd differed from the host pm reader's cwd.
-
-The receiver is shipped into QA containers by bind-mounting it at its host absolute path (see R11); `ensure_hooks_installed` keeps `~/.pm/hook_receiver.py` in sync with `pm_core/hook_receiver.py` on every invocation.
+- Reads a JSON payload from stdin.
+- Writes `~/.pm/hooks/{session_id}.json` atomically (tempfile + `os.replace` in the same directory).
+- Record shape: `{event_type, timestamp, session_id, matcher, cwd}`. Last-writer-wins per session_id — the latest turn-boundary is all pm cares about.
+- Never propagates exceptions; exits 0 so Claude never blocks on a broken hook.
+- Event types it may write: `idle_prompt`, `permission_prompt`, `Stop`. (Anything else passed in argv works too; the receiver is event-type agnostic.)
 
 ### R2: Hook installation
 
 `pm_core/hook_install.py`:
 
-- `ensure_hooks_installed(settings_path=None)` writes Notification(`idle_prompt`) and `Stop` hooks into `~/.claude/settings.json`, pointing at `python3 <HOST_ABS_PATH>/.pm/hook_receiver.py <event_type>`.
-- Before writing settings, the installer copies `pm_core/hook_receiver.py` to `~/.pm/hook_receiver.py` on the host (`RECEIVER_PATH`). The absolute host path is what gets embedded in the hook command so the same string works on the host and inside any container that bind-mounts the file back at that same path (see R11).
-- `python3` is used (PATH lookup) rather than `sys.executable` because host and container interpreters differ; both environments have `python3` on PATH in practice.
-- **No clobbering**: before writing, the installer calls `_detect_foreign_hooks(existing_hooks)`. If `~/.claude/settings.json` already contains any Notification(`idle_prompt`) or `Stop` hook that does not reference `pm_core.hook_receiver`, the installer raises `HookConflictError` with a message listing the offending entries. The user must remove or migrate them before pm can run.
-- Idempotent: if pm's hooks are already present and the embedded command matches the current interpreter, returns `False` and does nothing. If pm's hooks are present with a stale interpreter path, the file is rewritten.
-- Unrelated top-level settings keys (e.g. `"theme": "dark"`) are preserved. Notification hooks on matchers pm does not own are left untouched only when pm's hooks are already present; on a fresh install the entire `Notification` array is replaced (acceptable because the conflict guard rejects foreign idle_prompt entries upfront).
-- Always creates the event base dir (`~/.pm/hooks/`) and sweeps event files older than 7 days.
+- `ensure_hooks_installed()` merges three hook entries (two Notification matchers + one Stop) into `~/.claude/settings.json`.
+- Before writing, `_detect_foreign_hooks` rejects any existing `Notification[idle_prompt]`, `Notification[permission_prompt]`, or `Stop` hook pm did not install by raising `HookConflictError`.
+- `_install_receiver()` copies `pm_core/hook_receiver.py` to `~/.pm/hook_receiver.py` so the same absolute path works on the host and inside any container that bind-mounts the file back at that path.
+- `hooks_already_installed()` verifies **every** desired entry's command is present so adding a new matcher in the future correctly triggers a rewrite on upgrade.
+- Creates `~/.pm/hooks/` and sweeps stale `*.json` files older than 7 days.
 
-`hooks_already_installed(settings_path=None)` is a read-only check that returns True iff pm's hooks are present with the expected command string — used by tests and by the runtime to detect whether a reinstall is needed.
+Called at the top of `pm_core/cli/session.py::_session_start` and `pm_core/cli/tui.py::tui_cmd`. `HookConflictError` aborts startup.
 
 ### R3: Event-file watcher API (`pm_core/hook_events.py`)
 
-Module exposes:
+Exposes `hooks_dir()`, `event_path(session_id)`, `read_event(session_id)`, `clear_event(session_id)`, `wait_for_event(session_id, event_types, timeout, newer_than, stop_check)`, and `hooks_available()`. Default poll tick 200 ms.
 
-- `hooks_dir() -> Path` — returns `~/.pm/hooks`.
-- `event_path(session_id) -> Path`.
-- `read_event(session_id) -> dict | None`.
-- `clear_event(session_id)`.
-- `wait_for_event(session_id, event_types, timeout, newer_than=0.0, tick=0.2, stop_check=None) -> dict | None` — busy-waits on the event file, returning the first event whose `event_type` is in `event_types` and whose `timestamp > newer_than`. Returns None on timeout or when `stop_check()` returns True.
-- `hooks_available() -> bool` — True when `~/.claude/settings.json` has at least one hook pointing at `pm_core.hook_receiver`. Used by tests and by `PaneIdleTracker` to decide whether to consult events.
-
-The file-poll tick is fast (200 ms); this is still "polling" but an order of magnitude lighter than pane-capture polling and needs no stability logic.
-
-### R4: `poll_for_verdict` and `wait_for_follow_up_verdict` are hook-driven only
+### R4: `poll_for_verdict` and `wait_for_follow_up_verdict` (hook + JSONL driven)
 
 `pm_core/loop_shared.py`:
 
 ```python
 def poll_for_verdict(
-    pane_id, verdicts, keywords, session_id,  # session_id required
-    prompt_text="", exclude_verdicts=None, grace_period=0,
-    wait_timeout=15, stop_check=None, log_prefix="loop_shared",
+    pane_id, transcript_path, verdicts, *,
+    grace_period=0, wait_timeout=15,
+    stop_check=None, log_prefix="loop_shared",
 ) -> str | None
 ```
 
-- No polling / stability / grace-period fallback remains.
-- Each iteration: check `stop_check`, check `pane_exists`, then block on `wait_for_event(session_id, {"idle_prompt", "Stop"}, timeout=wait_timeout, newer_than=hook_baseline)`.
-- On `idle_prompt`: capture pane once, extract verdict. Return content on match.
-- On `Stop` without a verdict: return None.
-- `wait_timeout` (default 15 s) bounds how long `wait_for_event` blocks so we re-check pane liveness and `stop_check` periodically. Not a polling fallback — we simply re-enter `wait_for_event`.
-- `grace_period` means "ignore events that fire before `grace_period` seconds have elapsed from the start of polling". Used by the review flow where Claude briefly emits idle during setup.
+- Recovers `session_id` via `claude_launcher.session_id_from_transcript(transcript_path)`. Raises `RuntimeError` when no UUID is recoverable — hook+JSONL polling has no pane-scrape fallback.
+- Each iteration blocks on `wait_for_event(session_id, {"idle_prompt"}, timeout=wait_timeout, newer_than=hook_baseline)`. `Stop` is explicitly excluded — it fires every turn, not only at session exit. Session-gone is detected via `tmux.pane_exists`.
+- On a fresh `idle_prompt` event: run `verdict_transcript.extract_verdict_from_transcript(transcript_path, verdicts)`. On match, return `verdict_transcript.read_latest_assistant_text(transcript_path)` (falling back to the verdict string if the assistant text can't be decoded).
+- `grace_period` means "ignore events that fire within N seconds of polling start" — used by review where Claude may briefly idle during setup.
+- `wait_timeout` bounds a single `wait_for_event` so we can re-check `pane_exists` and `stop_check` periodically.
 
-`wait_for_follow_up_verdict` has the same shape with `session_id` required.
+`wait_for_follow_up_verdict` is the same shape with `session+window_name` in place of `pane_id` for finding the existing pane.
 
-### R5: Callers supply session_id
+### R5: Callers supply a transcript_path
 
-| Caller | How session_id is obtained |
+| Caller | How the transcript is provided |
 |---|---|
-| `review_loop._run_claude_review` | `session_id_from_transcript(transcript)` — review windows always launch with a transcript |
-| `review_loop._wait_for_follow_up_verdict` | `session_id_from_transcript(iter_transcript)` from `state._transcript_dir` |
-| `watcher_base._run_iteration` | `session_id_from_transcript(transcript)` — watchers require a transcript |
-| `watcher_base._handle_input_required` | Same, with a log-and-return if the iteration transcript cannot be resolved |
-| `qa_loop` concretize (`_concretize_scenario`) | `QAScenario.concretize_session_id` pre-generated by `_launch_scenarios_in_tmux` / `_launch_scenarios_in_containers` |
-| `qa_loop` scenario agent | `QAScenario.session_id` populated from the transcript symlink right after the pane launches |
-| `qa_loop` scenario relaunch (`_relaunch_scenario_window`) | Re-derives from the new transcript and overwrites `scenario.session_id` |
-| `qa_loop` planner inline loop | `planner_session_id = uuid.uuid4()` passed into `build_claude_shell_cmd(session_id=...)` |
-| `qa_loop` verification (`_verify_single_scenario`) | `verify_session_id = uuid.uuid4()` passed into `build_claude_shell_cmd(session_id=...)` |
+| `review_loop._run_claude_review` | Passes the per-iteration `--transcript` path launched by `pm pr review` |
+| `review_loop._wait_for_follow_up_verdict` | Derives `review-<pr>-i<iter>.jsonl` under `state._transcript_dir` |
+| `watcher_base._run_iteration` | Passes the per-iteration transcript launched by the watcher |
+| `watcher_base._handle_input_required` | Same derivation under `state._transcript_dir` |
+| `qa_loop._poll_tmux_verdicts` | Reads `scenario.transcript_path` (set when the scenario pane launched) |
+| `qa_loop._concretize_scenario` | Computes `claude_launcher.transcript_path_for(scenario_cwd, concretize_session_id)` |
+| `qa_loop._verify_single_scenario` | Computes `transcript_path_for(_verify_cwd, verify_session_id)` |
 
-### R6: QAScenario session fields
+`claude_launcher.transcript_path_for(cwd, session_id)` is the helper for callers that pre-generate a session_id and don't go through `build_claude_shell_cmd(transcript=...)`. `session_id_from_transcript` tolerates a path pointing at a not-yet-created `.jsonl` with a UUID filename.
 
-`QAScenario` (`pm_core/qa_loop.py`) stores two session_ids:
+### R6: `extract_verdict_from_transcript` (`pm_core/verdict_transcript.py`)
 
-- `session_id` — the scenario-agent Claude session (set after the agent pane launches).
-- `concretize_session_id` — the concretizer pass (set before the concretize pane launches).
+Schema-light JSONL reader.
 
-Scenarios without a `session_id` at the time `_poll_tmux_verdicts` runs are marked `INPUT_REQUIRED` immediately (hook-driven polling requires one). This surfaces the problem rather than hanging silently.
+- Walks the transcript text **backward** by line.
+- Uses substring detection on `"type":"assistant"` / `"type":"user"` (whitespace-tolerant via regex) to bound the **latest assistant turn**. Records from earlier turns are not scanned, so a stale verdict from a previous turn can never leak.
+- For each candidate line, matches `(?:\\[nr]|")<verdict>(?:\\[nr]|")` — the verdict must be bounded by a JSON newline-escape or a JSON string quote, i.e. it occupies its own line in the assistant's actual output. Incidental mentions like "PASS this file" are rejected.
+- Verdicts are scanned longest-first so `PASS_WITH_SUGGESTIONS` wins over `PASS`.
 
-### R7: `_poll_tmux_verdicts` is event-gated
+`read_latest_assistant_text(transcript_path)` is a companion helper that decodes and concatenates the `text` content blocks of the latest assistant turn. This one *is* mildly schema-dependent (looks for `message.content[].type == "text"`); callers use it to feed downstream parsers like `extract_between_markers` for `REFINED_STEPS_END` / `FLAGGED_END` markers. If Anthropic changes that shape the helper can be updated in isolation — verdict detection is unaffected.
 
-`_poll_tmux_verdicts` still owns the scenario fan-out (relaunches, verification threading, queue launches, idle-reminder send), but the per-scenario verdict path is now event-gated:
+### R7: `PaneIdleTracker` — session + hook only
 
-- Per scenario, read the latest hook event for `scenario.session_id`.
-- Skip unless the event is a new `idle_prompt` or `Stop` whose timestamp exceeds `_last_scenario_hook_ts[index]`.
-- When a fresh event arrives, capture the pane once and run `extract_verdict_from_content`. Accept the verdict immediately on first non-stale detection — no `VerdictStabilityTracker`, no stability counter.
-- `_verdict_context_fingerprint` is still used to skip stale re-detections after a verification follow-up round-trip.
+`pm_core/pane_idle.py`:
 
-On scenario relaunch, `_last_scenario_hook_ts[index]` is cleared so the new session's first idle_prompt triggers verdict extraction.
+- `register(key, pane_id, transcript_path)` — transcript required. `session_id_from_transcript` recovers the UUID; `ValueError` if no session_id is recoverable.
+- `poll(key)` — reads the latest hook event, updates state, returns `is_idle`.
+- State has three orthogonal flags:
+  * `idle` — most recent event was `idle_prompt`.
+  * `waiting_for_input` — most recent event was `permission_prompt`.
+  * `gone` — pane disappeared (from `tmux.pane_exists`).
+- `Stop` events do not flip any flag (see R4).
+- New public read: `is_waiting_for_input(key)` for TUI consumers.
+- The old hash-based fallback (`_compute_hash` + `capture_pane`) is gone.
 
-### R8: `PaneIdleTracker`
+### R8: TUI — transcripts threaded through, waiting_for_input rendered
 
-`pm_core/pane_idle.py` remains a hash-based tracker with a hook-aware fast path:
+- `tui/review_loop_ui.py::_poll_impl_idle` looks up the transcript path from `auto_start.get_transcript_dir(app) / f"impl-{pr_id}.jsonl"` and passes it to `tracker.register`. Merge-pane registration uses `f"merge-{pr_id}.jsonl"` from the same directory.
+- If the transcript dir isn't available (no auto-start session → no pm-managed launch), the impl/merge pane simply doesn't get tracked. Hook-driven automation doesn't apply to manual launches.
+- `tui/tech_tree.py` renders a yellow `⏸` when `tracker.is_waiting_for_input(pr_id)`, the spinner when the pane is tracked-and-not-idle-and-not-waiting, and nothing when idle. The `pr-d3ae95e` permission-risk dashboard and `#137` tasks pane are expected to consume the same read.
 
-- `register(key, pane_id, session_id=None)` accepts an optional session_id.
-- When `session_id` is set, `poll(key)` reads the latest hook event. A fresh `idle_prompt` event flips `idle=True` immediately; a `Stop` event marks the pane `gone=True`.
-- When `session_id` is None, the hash fallback runs as before.
+### R9: QA scenario polling is event-gated + transcript-driven
 
-The hash fallback is retained because several TUI call sites (`tui/app.py`, `tui/review_loop_ui.py`, `tui/tech_tree.py`) don't have a session_id at registration time — they track arbitrary impl panes launched via `pm pr start` that don't always use a transcript. `content_has_interactive_prompt` is still checked by callers before acting on idle, so a gum-style permission prompt does not trigger auto-actions even when hooks say "idle".
+`_poll_tmux_verdicts`:
 
-### R9: `VerdictStabilityTracker`
+- Per scenario, reads the latest hook event for `scenario.session_id`. Skip unless it's a fresh `idle_prompt` whose timestamp exceeds `_last_scenario_hook_ts[index]`.
+- On a fresh event, call `extract_verdict_from_transcript(scenario.transcript_path, ALL_VERDICTS)`. Accept the verdict immediately on first non-`None` return — no fingerprint, no stability counter.
+- Idle-reminder: when the hook fires with no verdict extractable, send a reminder to the pane (rate-limited by `_reminder_timeout`). The old content-hash tracking for "is the pane changing" is gone — hook events *are* the progress signal.
 
-Retained only for the TUI merge-verdict flow (`tui/review_loop_ui.py:_merge_verdict_tracker`), which polls the merge pane on the TUI timer without an available session_id. All other uses (review, watcher, QA) were removed because hook events are discrete turn boundaries — a verdict detected at an `idle_prompt` event is already "stable".
-
-`STABILITY_POLLS` is kept as the tracker's internal constant.
+`VerdictStabilityTracker`, `_verdict_context_fingerprint`, `_last_content_hash`, `_last_content_change`, and `extract_verdict_from_content` are all deleted.
 
 ### R10: Installed at every session start
 
-- `pm_core/cli/session.py::_session_start` — calls `ensure_hooks_installed()` before tmux setup. `HookConflictError` aborts the session with a user-facing error.
-- `pm_core/cli/tui.py::tui_cmd` — calls `ensure_hooks_installed()` before `ProjectManagerApp().run()`. `HookConflictError` writes to the TUI stderr log and re-raises so the user sees it.
-
-Both entry points run the installer idempotently; it only writes when the settings file needs to be updated.
+`pm_core/cli/session.py::_session_start` and `pm_core/cli/tui.py::tui_cmd` call `ensure_hooks_installed()`. `HookConflictError` aborts startup.
 
 ### R11: Container bind-mounts
 
-`pm_core/container.py::create_qa_container` adds two mounts so containerised Claude processes can fire pm's hooks:
+`pm_core/container.py::create_qa_container` bind-mounts `~/.pm/hooks` and `~/.pm/hook_receiver.py` (at the host absolute path) so containerised Claude processes fire hooks that land on the host filesystem.
 
-1. **Events dir**: host `~/.pm/hooks` → container `$CONTAINER_HOME/.pm/hooks`. Inside the container `Path.home()/.pm/hooks` resolves to the bind-mount target, so the receiver's writes land on the host filesystem.
-2. **Receiver script**: host `~/.pm/hook_receiver.py` → container at the **same absolute host path** (e.g. `/home/<user>/.pm/hook_receiver.py`). The container runtime creates any needed intermediate directories. Because the hook command embedded in `~/.claude/settings.json` is already an absolute host path, this mount makes `python3 <path>` resolve correctly inside the container without changing the settings command.
+### R12: Tests
 
-No `pm_core` is needed inside the container — the receiver is a self-contained script. If either mount is missing, the container-side hook silently no-ops (the receiver catches all exceptions) and that scenario's `_poll_tmux_verdicts` will not see events. `_poll_tmux_verdicts` marks scenarios without fresh events as `INPUT_REQUIRED` after the grace window so the failure surfaces rather than stalling.
-
-### R12: Tests (`tests/test_hook_events.py`)
-
-- Receiver writes the expected event file under the flat `~/.pm/hooks/` directory.
-- Receiver is silent on invalid JSON stdin.
-- `wait_for_event` returns a matching event; times out correctly; respects `newer_than`.
-- `hooks_available` reads `~/.claude/settings.json`.
-- Installer installs cleanly, preserves unrelated top-level keys, is idempotent.
-- Installer preserves Notification hooks on matchers other than `idle_prompt`.
-- Installer raises `HookConflictError` when a foreign `Notification[idle_prompt]` hook is present.
-- Installer raises `HookConflictError` when a foreign `Stop` hook is present.
-- `poll_for_verdict` hook fast path returns within the timeout when an event is written mid-flight.
-- `session_id_from_transcript` resolves a session_id from a symlink and returns None when the path is missing.
-
-QA retry tests (`tests/test_qa_loop.py::TestScenarioRetryLogic`) were updated: scenarios set `session_id` and `pm_core.hook_events.read_event` is patched to return a fresh `idle_prompt` event.
-
-## Implicit Requirements
-
-1. **Atomic writes from hook receiver**: write via `tempfile.mkstemp` + `os.replace` in the same directory so readers never see partial JSON.
-
-2. **Baseline timestamp per wait**: `wait_for_event(..., newer_than=<float>)` must not return an old event left over from a previous turn. Each caller captures `time.time()` when it starts a wait and passes it as `newer_than`. Consumers update the baseline to the consumed event's timestamp before the next call.
-
-3. **Stale event file cleanup**: the installer sweeps event files under `~/.pm/hooks/` older than 7 days. Cheap — directory has at most a few dozen entries.
-
-4. **Settings.json discovery**: pm installs into `~/.claude/settings.json` (user-level) so every Claude process pm launches — host and containerised — inherits the hooks via the existing `~/.claude` bind mount.
-
-5. **Container event visibility**: the container gets two bind mounts — `~/.pm/hooks` (event dir) and `~/.pm/hook_receiver.py` (self-contained script at its host absolute path). The hook command is `python3 <abs_host_path>` with no `pm_core` dependency, so it runs the same way on host and inside the container. See R11.
-
-6. **Hook receiver ≠ virtualenv-dependent**: the receiver has zero third-party imports, so `python3` from PATH always works. No `sys.executable`, no virtualenv activation, no `pm_core` on sys.path — which is what lets the same `~/.claude/settings.json` hook command run correctly on the host and inside QA containers.
-
-7. **Atomic vs concurrent hooks**: Notification and Stop may fire in rapid succession. Both write to the same `{session_id}.json`; last writer wins. `Stop` after `idle_prompt` is the intended final state.
-
-8. **Flat directory guarantees writer/reader agreement**: events live in `~/.pm/hooks/{session_id}.json` with no cwd-derived subdirectory, so the writer (which may run inside a container at `cwd=/workspace`, or in a worktree whose path the host pm process does not share) and the host-side reader always agree on the file path. Session_ids are UUIDs so there is no collision risk across concurrent pm sessions.
-
-9. **Hook conflict safety**: the installer never overwrites third-party idle_prompt/Stop hooks. `HookConflictError` is raised and `pm session` / TUI launch refuse to proceed.
+- `tests/test_verdict_transcript.py` — extractor: schema-agnostic boundary match, latest-turn only (stale PASS not leaked), longest-first, meta-line tolerance, incidental-mention rejection, multi-record turns.
+- `tests/test_hook_events.py` — receiver writes the right file, `wait_for_event` timeouts + `newer_than`, `hooks_available`, installer idempotence, `HookConflictError` for foreign entries, `poll_for_verdict` hook fast path, `session_id_from_transcript`.
+- `tests/test_pane_idle.py` — `register` requires a recoverable transcript, hook-event-driven idle/gone/waiting_for_input transitions, `became_idle` one-shot, `Stop` no-op, permission_prompt → waiting_for_input, subsequent idle_prompt clears waiting_for_input.
+- QA retry tests patched to mock `extract_verdict_from_transcript` at the qa_loop boundary.
 
 ## Ambiguities (resolved)
 
 ### A1: Hook event storage — single file vs per-event
-**Resolution**: single file per `session_id`. Consumers only care about the latest turn-boundary; the `timestamp` + `newer_than` baseline prevents double-processing a single event.
+Single file per session_id. `timestamp` + `newer_than` baseline prevents double-consumption.
 
-### A2: How finely to split the Notification matcher
-**Resolution**: install a matcher for `idle_prompt` only. Other Notification reasons (e.g. `waiting_for_tool_permission`) are not useful to pm and would cause false verdict captures.
+### A2: Which Notification matchers to install
+`idle_prompt` (turn end) and `permission_prompt` (tool-approval dialog). `auth_success` and `elicitation_dialog` aren't useful to pm. Subprocess prompts don't fire any matcher — accepted as a hook blind spot.
 
-### A3: Fallback detection for existing Claude processes
-**Resolution**: no migration. Claude re-reads `~/.claude/settings.json` per session, so hooks fire for all subsequent turns.
+### A3: Migration for existing Claude processes
+No migration. Claude re-reads settings per session.
 
-### A4: What to do when `session_id` is not knowable
-**Resolution**: the hook-driven code paths require `session_id`. Scenarios without one are marked `INPUT_REQUIRED` (R6). Review/watcher launches that somehow lack a resolvable transcript raise `RuntimeError` — this is a configuration bug, not a runtime fallback. The TUI `PaneIdleTracker` retains its hash-based fallback for tracking user-launched impl panes where session_id is not plumbed through.
+### A4: What when `session_id` is not knowable
+Hook-driven code paths require a transcript. Scenarios without one are marked `INPUT_REQUIRED`. Review/watcher launches that lack a transcript raise `RuntimeError` — configuration bug, not runtime fallback. The TUI doesn't track manually-launched impl panes (no auto-start transcript dir).
 
-### A5: Session-scoped vs global hook directory (new)
-**Resolution**: flat `~/.pm/hooks/{session_id}.json`. Session_ids are UUIDs so multiple concurrent pm sessions can safely share the directory without collision. A flat layout avoids the writer/reader mismatch that session-tag subdirectories caused when Claude's cwd (the worktree or `/workspace`) did not match the host pm reader's cwd.
+### A5: Session-scoped vs global hook directory
+Flat `~/.pm/hooks/{session_id}.json`. UUIDs prevent collisions; container and host agree on the path.
 
-### A6: Clobbering pre-existing user hooks (new)
-**Resolution**: refuse. `HookConflictError` surfaces the conflict; the user resolves it manually. Every `pm session` and TUI launch runs `ensure_hooks_installed` to guarantee our hooks are present and up-to-date.
+### A6: Clobbering pre-existing user hooks
+Refuse. `HookConflictError` surfaces the conflict.
+
+### A7: Stop vs idle_prompt for turn-end signalling (corrected)
+Prior spec R3/R4 listened on both `idle_prompt` and `Stop`. `Stop` fires per-turn (not only at session exit), so treating it as a session-end signal produced false "session gone" returns mid-session. Fixed: we listen on `idle_prompt` only; `pane_exists` is the authoritative session-gone signal. The `Stop` hook is still installed (and written by the receiver) so future features can consume it, but `poll_for_verdict` / `PaneIdleTracker.poll` ignore it.
+
+### A8: Distinguishing idle from waiting-on-user (new)
+`permission_prompt` is installed as a second Notification matcher. Last-writer-wins semantics on the event file mean a subsequent `idle_prompt` (user approved, turn ended) cleanly replaces an earlier `permission_prompt`. `PaneIdleTracker.is_waiting_for_input(key)` exposes the state; `tech_tree` and downstream consumers (PR #137 tasks pane, `pr-d3ae95e` permission dashboard) render the indicator.
 
 ## Edge Cases
 
-1. **Verdict appears mid-turn, not at idle_prompt**: rare, but the hook fires at turn end, at which point the verdict is the last meaningful line in the pane — `extract_verdict_from_content` still finds it.
-
-2. **Multiple rapid turns**: after consuming an event, the caller updates its baseline to the event's `timestamp` before re-calling `wait_for_event`. `poll_for_verdict` and the planner loop both do this.
-
-3. **Hook script crash**: the receiver catches all exceptions and exits 0 — Claude never blocks. Reader-side `wait_for_event` times out every `wait_timeout` (15 s) and re-checks `pane_exists` / `stop_check`, so a persistently broken hook results in the loop idling rather than wedging. Pane death is still detected.
-
-4. **Scenario pane relaunch**: `_relaunch_scenario_window` generates a new transcript + `session_id`, overwrites `QAScenario.session_id`, and `_poll_tmux_verdicts` clears `_last_scenario_hook_ts[index]` so the new session's first `idle_prompt` fires verdict extraction.
-
-5. **Verification panes**: `_verify_single_scenario` pre-generates a UUID, threads it through `build_claude_shell_cmd(session_id=...)`, and passes it to `poll_for_verdict`. Hook-driven throughout.
-
-6. **Interactive selection menus (gum / trust prompts)**: `idle_prompt` fires while Claude is at a gum-style permission prompt. TUI callers continue to gate on `content_has_interactive_prompt` before acting on idle.
-
-7. **pm outside a git repo**: hook events still land in `~/.pm/hooks/{session_id}.json` regardless of cwd. `~/.claude/settings.json` is user-global so install always succeeds.
-
-8. **Multiple pm instances on the same host**: all pm instances share `~/.pm/hooks/`, but session_ids are UUIDs so there is no collision. `~/.claude/settings.json` is shared and the hook command is identical across instances.
-
-9. **Hook receiver latency**: receiver has no heavy imports — just stdlib. Overhead is negligible.
+1. **Verdict mid-turn, not at idle_prompt**: the hook fires at turn end; at that point the verdict is the last meaningful text in the transcript — extractor finds it.
+2. **Multiple rapid turns**: caller updates `hook_baseline` to the consumed event's timestamp before re-calling `wait_for_event`.
+3. **Hook script crash**: receiver catches everything and exits 0. Readers time out every `wait_timeout` and re-check pane liveness / stop_check, so a broken hook means the loop idles instead of wedging.
+4. **Scenario pane relaunch**: `_relaunch_scenario_window` creates a new transcript + session_id, overwrites `QAScenario.session_id`/`transcript_path`, and `_poll_tmux_verdicts` clears `_last_scenario_hook_ts[index]` so the new session's first `idle_prompt` triggers verdict extraction.
+5. **Verification / concretize panes**: both pre-generate a UUID, pass it to `build_claude_shell_cmd(session_id=...)`, and call `transcript_path_for(cwd, session_id)` to get the JSONL path before Claude has opened it.
+6. **Subprocess / gum menus**: no hook fires; `PaneIdleTracker` stays in its previous state. The user still sees the menu in the pane and responds there; pm just doesn't emit a "waiting" indicator for it. This is accepted.
+7. **pm outside a git repo**: hook events are host-absolute (`~/.pm/hooks/`), independent of cwd.
+8. **Multiple pm instances on the same host**: UUID session_ids keep event files unique; `~/.claude/settings.json` hook command is identical across instances.
+9. **Hook receiver latency**: stdlib only, no pm_core imports. Overhead is negligible.
 
 ## Implementation notes (as landed)
 
-- `claude_launcher.session_id_from_transcript(path)` — central helper used by `review_loop`, `watcher_base`, and `qa_loop` scenario pane setup to recover the Claude UUID from the transcript symlink target. No subprocess plumbing needed.
-- `build_claude_shell_cmd(session_id=...)` is used by callers that don't have a transcript (verification pane, planner pane, concretize). They generate `uuid.uuid4()` themselves so they retain the reference.
-- `STABILITY_POLLS` and `VerdictStabilityTracker` are kept only for the TUI merge-verdict flow. All blocking paths (review, watcher, qa) drop them; qa accepts the first non-stale verdict on each idle_prompt.
-- `sleep_checking_pane` helper removed — no callers after the rewrite.
-- Container runs bind-mount `~/.pm/hooks` so containerised Claude processes write events visible to the host reader.
-- Installer at every session start (`pm session`, TUI launch) guarantees hooks are live; `HookConflictError` aborts startup if a foreign idle_prompt/Stop hook is present.
+- `verdict_transcript.extract_verdict_from_transcript` — schema-light.
+- `verdict_transcript.read_latest_assistant_text` — schema-dependent helper, used by concretize/verify marker parsing.
+- `claude_launcher.transcript_path_for(cwd, session_id)` — new helper.
+- `claude_launcher.session_id_from_transcript` — tolerates non-existent paths with UUID names.
+- `PaneIdleTracker.is_waiting_for_input(key)` — new public read.
+- `loop_shared` lost: `extract_verdict_from_content`, `build_prompt_verdict_lines`, `is_prompt_line`, `is_prompt_line_with_neighbors`, `VerdictStabilityTracker`, `STABILITY_POLLS`. `match_verdict` stays for `auto_start_watcher` and its tests. `extract_between_markers` stays for QA planner output parsing (`QA_PLAN_END`, `REFINED_STEPS_END`, `FLAGGED_END`).
+- `pane_idle` lost: `content_has_interactive_prompt`, `_compute_hash`, the `capture_pane` idle path. The tracker is session-only.
+- `tui/review_loop_ui` lost: `VerdictStabilityTracker`-based merge-verdict stability; merge verdict is now a direct JSONL read.
+- Container runs still bind-mount `~/.pm/hooks` and the receiver script at its host absolute path.
+- Installer runs idempotently at every session start; `HookConflictError` aborts if foreign entries exist.
