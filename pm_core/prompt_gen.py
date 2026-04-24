@@ -312,8 +312,8 @@ This review is running in an automated loop.  After completing your review:
 
 2. If only non-blocking suggestions remain (**PASS_WITH_SUGGESTIONS**):
    - Implement the suggestions
-   - If you made changes, commit (same `{commit_prefix}` prefix) and push
-   - Output: **PASS_WITH_SUGGESTIONS** with a list of any remaining optional improvements you chose not to implement
+   - Commit (same `{commit_prefix}` prefix) and push
+   - Output: **PASS_WITH_SUGGESTIONS**
 
 3. If the code is ready to merge as-is (**PASS**):
    - Output: **PASS**
