@@ -670,6 +670,28 @@ def create_container(
             f"containers with 'pm session cleanup')."
         )
 
+    # Repair ownership of ~/.pm inside the container.  When we bind-mount
+    # ~/.pm/hooks, the container runtime auto-creates the parent
+    # /home/pm/.pm as root-owned (uid 0 in the container's user namespace).
+    # That blocks the pm user from creating siblings under ~/.pm (debug
+    # logs, session registry, etc.) which crashes any ``pm`` invocation
+    # inside the container on first logger setup.  Chown as root — under
+    # podman with --userns=keep-id the container command runs as the pm
+    # user and cannot chown a root-owned path, so we need an explicit
+    # --user 0 exec; under docker the default exec user is already root.
+    try:
+        exec_args = ["exec"]
+        if _is_podman:
+            exec_args.extend(["--user", "0"])
+        exec_args.extend([
+            name, "chown", f"{host_uid}:{host_gid}",
+            f"{_CONTAINER_HOME}/.pm",
+        ])
+        _run_runtime(*exec_args, timeout=5, check=False)
+    except Exception:
+        _log.debug("chown %s/.pm failed in container %s",
+                   _CONTAINER_HOME, name, exc_info=True)
+
     # Copy .claude.json into the container (not bind-mounted — see note above)
     if _claude_json_src.exists():
         try:
