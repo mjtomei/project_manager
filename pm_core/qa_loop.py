@@ -1807,9 +1807,13 @@ def _poll_tmux_verdicts(
                     _notify()
 
                     verifying.add(scenario.index)
+                    # pane_output fallback is only consulted when the
+                    # transcript is missing — which it never is in the
+                    # hook-driven path — so pass "" here instead of
+                    # scraping the pane.
                     t = threading.Thread(
                         target=_run_verification,
-                        args=(scenario, verdict, content),
+                        args=(scenario, verdict, ""),
                         daemon=True,
                         name=f"qa-verify-{state.pr_id}-{scenario.index}",
                     )
