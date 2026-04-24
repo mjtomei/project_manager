@@ -69,6 +69,11 @@ class TestBuildImage:
 
 
 class TestImageExists:
+    def setup_method(self):
+        # image_exists caches results across calls; clear between tests.
+        from pm_core.container import _invalidate_image_exists_cache
+        _invalidate_image_exists_cache()
+
     @patch("subprocess.run")
     @patch("pm_core.container._get_runtime", return_value="docker")
     def test_exists(self, mock_runtime, mock_run):
@@ -86,6 +91,28 @@ class TestImageExists:
     def test_runtime_not_installed(self, mock_runtime, mock_run):
         mock_run.side_effect = FileNotFoundError
         assert image_exists("pm-dev:latest") is False
+
+    @patch("subprocess.run")
+    @patch("pm_core.container._get_runtime", return_value="docker")
+    def test_result_is_cached_across_calls(self, mock_runtime, mock_run):
+        """Concurrent callers coalesce onto one ``podman image inspect``."""
+        mock_run.return_value = MagicMock(returncode=0)
+        for _ in range(5):
+            assert image_exists("pm-dev:latest") is True
+        assert mock_run.call_count == 1
+
+    @patch("subprocess.run")
+    @patch("pm_core.container._get_runtime", return_value="docker")
+    def test_cache_invalidated_on_build(self, mock_runtime, mock_run):
+        from pm_core.container import _invalidate_image_exists_cache
+        # Cache a False result
+        mock_run.return_value = MagicMock(returncode=1)
+        assert image_exists("pm-dev:latest") is False
+        # Simulate a successful build clearing the cache
+        _invalidate_image_exists_cache("pm-dev:latest")
+        mock_run.return_value = MagicMock(returncode=0)
+        assert image_exists("pm-dev:latest") is True
+        assert mock_run.call_count == 2
 
 
 class TestContainerConfig:

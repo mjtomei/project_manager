@@ -43,6 +43,7 @@ import shlex
 import shutil
 import subprocess
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -131,22 +132,56 @@ def build_image(tag: str = DEFAULT_IMAGE, quiet: bool = False) -> None:
         msg = result.stderr if quiet else "see output above"
         raise RuntimeError(f"Image build failed: {msg}")
     _log.info("Built image %s", tag)
+    _invalidate_image_exists_cache(tag)
 
 
 _build_lock = threading.Lock()
 
+# Cached image-existence results. When many QA scenarios launch in
+# parallel, each one's ``create_container`` call invokes ``image_exists``
+# concurrently; under load, ``podman image inspect`` hits the 10 s
+# subprocess timeout and reports false negatives, so scenarios spuriously
+# fail with "image not found".  Coalesce concurrent callers onto a
+# single inspect and cache the result for a short TTL.
+_image_exists_cache: dict[str, tuple[float, bool]] = {}
+_image_exists_lock = threading.Lock()
+_IMAGE_EXISTS_TTL = 30.0
+
 
 def image_exists(tag: str = DEFAULT_IMAGE) -> bool:
-    """Check if the container image exists locally."""
-    runtime = _get_runtime()
-    try:
-        result = subprocess.run(
-            [runtime, "image", "inspect", tag],
-            capture_output=True, timeout=10,
-        )
-        return result.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return False
+    """Check if the container image exists locally.
+
+    Thread-safe and cached for ``_IMAGE_EXISTS_TTL`` seconds.  The lock is
+    held across the subprocess call so N concurrent callers collapse onto
+    a single ``podman image inspect``; slow ones wait instead of racing
+    and timing out.  Cache expiry lets pm notice rebuilds/removals
+    without requiring a process restart.
+    """
+    now = time.monotonic()
+    with _image_exists_lock:
+        cached = _image_exists_cache.get(tag)
+        if cached and now - cached[0] < _IMAGE_EXISTS_TTL:
+            return cached[1]
+        runtime = _get_runtime()
+        try:
+            result = subprocess.run(
+                [runtime, "image", "inspect", tag],
+                capture_output=True, timeout=10,
+            )
+            exists = result.returncode == 0
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            exists = False
+        _image_exists_cache[tag] = (time.monotonic(), exists)
+        return exists
+
+
+def _invalidate_image_exists_cache(tag: str | None = None) -> None:
+    """Clear the image_exists cache (all tags or just one)."""
+    with _image_exists_lock:
+        if tag is None:
+            _image_exists_cache.clear()
+        else:
+            _image_exists_cache.pop(tag, None)
 
 
 def _runtime_available() -> bool:
