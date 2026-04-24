@@ -22,14 +22,21 @@ from pm_core.paths import configure_logger
 _log = configure_logger("pm.hook_install")
 
 _SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
-_HOOKS_DIR = Path.home() / ".pm" / "hooks"
+_HOOKS_BASE = Path.home() / ".pm" / "hooks"
 _STALE_SECONDS = 7 * 24 * 60 * 60  # 7 days
+
+
+class HookConflictError(RuntimeError):
+    """Raised when ~/.claude/settings.json already has hooks pm did not install."""
 
 
 def _hook_command_for(event_type: str) -> str:
     """Build the hook command string, embedding the current interpreter."""
     python = shlex.quote(sys.executable or "python3")
     return f"{python} -m pm_core.hook_receiver {shlex.quote(event_type)}"
+
+
+_MANAGED_EVENTS = ("Notification", "Stop")
 
 
 def _desired_hooks() -> dict:
@@ -53,7 +60,7 @@ def _desired_hooks() -> dict:
     }
 
 
-def _entry_has_pm_receiver(entry: dict) -> bool:
+def _entry_is_pm(entry: dict) -> bool:
     for hook in (entry or {}).get("hooks", []) or []:
         cmd = (hook or {}).get("command", "")
         if "pm_core.hook_receiver" in cmd:
@@ -61,31 +68,40 @@ def _entry_has_pm_receiver(entry: dict) -> bool:
     return False
 
 
-def _merge_hooks(existing: dict, desired: dict) -> tuple[dict, bool]:
-    """Merge *desired* hooks into *existing*. Returns (merged, changed)."""
-    merged = dict(existing)
-    changed = False
-    for event, new_entries in desired.items():
-        current = merged.get(event)
-        if not isinstance(current, list):
-            merged[event] = list(new_entries)
-            changed = True
-            continue
+def _detect_foreign_hooks(existing_hooks: dict) -> list[str]:
+    """Return human-readable descriptions of hooks pm did not install.
 
-        kept = [e for e in current if not _entry_has_pm_receiver(e)]
-        new_list = kept + list(new_entries)
-        # Compare stringified to detect change (simple but sufficient)
-        if json.dumps(new_list, sort_keys=True) != json.dumps(current, sort_keys=True):
-            merged[event] = new_list
-            changed = True
-    return merged, changed
+    We only care about events pm manages (Notification idle_prompt,
+    Stop).  Other events are the user's business and we leave them alone.
+    """
+    foreign: list[str] = []
+    for event in _MANAGED_EVENTS:
+        entries = existing_hooks.get(event)
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            matcher = entry.get("matcher")
+            # For Notification we only conflict with idle_prompt
+            if event == "Notification" and matcher not in (None, "idle_prompt"):
+                continue
+            if _entry_is_pm(entry):
+                continue
+            for hook in entry.get("hooks", []) or []:
+                cmd = (hook or {}).get("command", "")
+                label = f"{event}"
+                if matcher:
+                    label += f"[{matcher}]"
+                foreign.append(f"{label}: {cmd or '(no command)'}")
+    return foreign
 
 
 def _sweep_stale_events() -> None:
-    if not _HOOKS_DIR.exists():
+    if not _HOOKS_BASE.exists():
         return
     now = time.time()
-    for p in _HOOKS_DIR.iterdir():
+    for p in _HOOKS_BASE.rglob("*.json"):
         if not p.is_file():
             continue
         try:
@@ -95,8 +111,46 @@ def _sweep_stale_events() -> None:
             continue
 
 
+def hooks_already_installed(settings_path: Path | None = None) -> bool:
+    """Return True when ~/.claude/settings.json already has pm's hooks."""
+    path = settings_path or _SETTINGS_PATH
+    if not path.exists():
+        return False
+    try:
+        data = json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return False
+    hooks = data.get("hooks") if isinstance(data.get("hooks"), dict) else {}
+    desired = _desired_hooks()
+    for event in _MANAGED_EVENTS:
+        current = hooks.get(event)
+        if not isinstance(current, list):
+            return False
+        need = desired[event]
+        # Require at least one pm-owned entry present with our current command
+        if not any(_entry_is_pm(e) for e in current):
+            return False
+        # And the embedded command must match the current interpreter
+        want_cmd = need[0]["hooks"][0]["command"]
+        found_cmd = False
+        for e in current:
+            for h in (e or {}).get("hooks", []) or []:
+                if h.get("command") == want_cmd:
+                    found_cmd = True
+                    break
+            if found_cmd:
+                break
+        if not found_cmd:
+            return False
+    return True
+
+
 def ensure_hooks_installed(settings_path: Path | None = None) -> bool:
     """Install Claude Code hooks for verdict/session-end detection.
+
+    Refuses to overwrite any pre-existing Notification(idle_prompt) or
+    Stop hook that pm did not install — raises :class:`HookConflictError`
+    in that case so the user can resolve the conflict manually.
 
     Returns True if the settings file was modified. Idempotent.
     """
@@ -118,17 +172,32 @@ def ensure_hooks_installed(settings_path: Path | None = None) -> bool:
             return False
 
     current_hooks = existing.get("hooks") if isinstance(existing.get("hooks"), dict) else {}
-    merged_hooks, changed = _merge_hooks(current_hooks, _desired_hooks())
+
+    # Guard against foreign hooks pm did not install.
+    foreign = _detect_foreign_hooks(current_hooks)
+    if foreign:
+        raise HookConflictError(
+            "Refusing to install pm's Claude Code hooks: "
+            f"{path} already contains hooks pm did not install:\n  - "
+            + "\n  - ".join(foreign)
+            + "\nRemove these entries (or migrate them) and re-run pm."
+        )
 
     # Ensure hook dir exists regardless
     try:
-        _HOOKS_DIR.mkdir(parents=True, exist_ok=True)
+        _HOOKS_BASE.mkdir(parents=True, exist_ok=True)
     except OSError:
         pass
     _sweep_stale_events()
 
-    if not changed:
+    desired = _desired_hooks()
+    # Fast path: our hooks are already present and up to date.
+    if hooks_already_installed(path):
         return False
+
+    merged_hooks = dict(current_hooks)
+    for event, entries in desired.items():
+        merged_hooks[event] = list(entries)
 
     existing["hooks"] = merged_hooks
     try:

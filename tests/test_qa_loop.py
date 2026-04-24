@@ -2355,6 +2355,14 @@ class TestScenarioRetryLogic:
 
         status_path = tmp_path / "status.json"
 
+        # With hook-driven polling, the scenario must have a session_id
+        # and read_event must return a fresh idle_prompt.
+        scenario.session_id = "sid-dead-window-1"
+        import time as _time
+        fake_event = {"event_type": "idle_prompt",
+                      "timestamp": _time.time() + 1000,
+                      "session_id": scenario.session_id}
+
         with patch("pm_core.qa_loop._get_scenario_pane", side_effect=pane_side_effect), \
              patch("pm_core.qa_loop._relaunch_scenario_window", return_value=True) as mock_relaunch, \
              patch("pm_core.qa_loop.time.sleep"), \
@@ -2366,13 +2374,11 @@ class TestScenarioRetryLogic:
                  200,  # 2nd poll: relaunch grace reset -> new grace_start
                  300,  # 3rd poll: past grace
              ]), \
-             patch("pm_core.qa_loop.VerdictStabilityTracker") as MockTracker, \
+             patch("pm_core.hook_events.read_event", return_value=fake_event), \
              patch("pm_core.qa_loop.extract_verdict_from_content", return_value="PASS"), \
              patch("pm_core.tmux.capture_pane", return_value="PASS"), \
              patch("pm_core.tmux.pane_exists", return_value=True), \
              patch("pm_core.qa_loop._is_verification_enabled", return_value=False):
-            tracker_inst = MockTracker.return_value
-            tracker_inst.update.return_value = True  # Verdict is stable
 
             _poll_tmux_verdicts(
                 state, {}, {}, "sess", "/tmp/work", status_path, lambda *a: None,
@@ -2442,17 +2448,21 @@ class TestScenarioRetryLogic:
             300,  # poll 3 in_grace check (past grace) → pane alive → read verdict
         ]
 
+        scenario.session_id = "sid-failed-relaunch-1"
+        import time as _time
+        fake_event = {"event_type": "idle_prompt",
+                      "timestamp": _time.time() + 1000,
+                      "session_id": scenario.session_id}
+
         with patch("pm_core.qa_loop._get_scenario_pane", side_effect=pane_results), \
              patch("pm_core.qa_loop._relaunch_scenario_window", side_effect=relaunch_results) as mock_relaunch, \
              patch("pm_core.qa_loop.time.sleep"), \
              patch("pm_core.qa_loop.time.monotonic", side_effect=monotonic_vals), \
-             patch("pm_core.qa_loop.VerdictStabilityTracker") as MockTracker, \
+             patch("pm_core.hook_events.read_event", return_value=fake_event), \
              patch("pm_core.qa_loop.extract_verdict_from_content", return_value="PASS"), \
              patch("pm_core.tmux.capture_pane", return_value="PASS"), \
              patch("pm_core.tmux.pane_exists", return_value=True), \
              patch("pm_core.qa_loop._is_verification_enabled", return_value=False):
-            tracker_inst = MockTracker.return_value
-            tracker_inst.update.return_value = True
 
             _poll_tmux_verdicts(
                 state, {}, {}, "sess", "/tmp/work", status_path, lambda *a: None,

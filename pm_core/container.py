@@ -499,6 +499,19 @@ def create_container(
     if claude_config.is_dir():
         cmd.extend(["-v", f"{claude_config}:{_CONTAINER_HOME}/.claude"])
 
+    # ~/.pm/hooks bind-mount: Claude Code hooks installed at startup write
+    # idle_prompt / Stop event files keyed by session_id.  When Claude runs
+    # inside this container, the hook receiver writes *inside* the
+    # container — mounting the host's ~/.pm/hooks makes those events
+    # visible to pm on the host so hook-driven verdict detection works
+    # for containerized scenarios too.
+    pm_hooks_dir = Path.home() / ".pm" / "hooks"
+    try:
+        pm_hooks_dir.mkdir(parents=True, exist_ok=True)
+        cmd.extend(["-v", f"{pm_hooks_dir}:{_CONTAINER_HOME}/.pm/hooks"])
+    except OSError:
+        _log.debug("could not create %s; hook events from container will fall back to polling", pm_hooks_dir)
+
     # NOTE: .claude.json is NOT bind-mounted.  Claude writes it atomically
     # (write tmp + rename) which replaces the inode — a single-file bind
     # mount keeps the old inode so the container sees stale content.

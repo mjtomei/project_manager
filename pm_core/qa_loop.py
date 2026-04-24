@@ -34,7 +34,6 @@ from pm_core.loop_shared import (
     extract_verdict_from_content,
     poll_for_verdict,
     VERDICT_TAIL_LINES,
-    VerdictStabilityTracker,
 )
 
 _log = configure_logger("pm.qa_loop")
@@ -140,6 +139,7 @@ class QAScenario:
     container_name: str | None = None
     transcript_path: str | None = None
     session_id: str | None = None
+    concretize_session_id: str | None = None
 
 
 @dataclass
@@ -763,6 +763,7 @@ def _build_concretize_cmd(
     container_name: str | None = None,
     instruction_content: str | None = None,
     write_dir: str | None = None,
+    session_id: str | None = None,
 ) -> str:
     """Build the shell command for the concretization step."""
     from pm_core.claude_launcher import build_claude_shell_cmd
@@ -778,6 +779,7 @@ def _build_concretize_cmd(
         prompt=prompt,
         model=resolution.model, provider=resolution.provider,
         effort=resolution.effort, cwd=cwd, write_dir=write_dir,
+        session_id=session_id,
     )
 
     if container_name:
@@ -792,6 +794,7 @@ def _concretize_scenario(
     pr_data: dict,
     project_data: dict,
     pane_id: str,
+    session_id: str,
     instruction_content: str | None = None,
 ) -> str | None:
     """Poll a concretization pane and return refined steps.
@@ -817,10 +820,9 @@ def _concretize_scenario(
         pane_id,
         verdicts=_CONCRETIZE_VERDICTS,
         keywords=_CONCRETIZE_KEYWORDS,
+        session_id=session_id,
         prompt_text=prompt,
         grace_period=_CONCRETIZE_GRACE,
-        poll_interval=_POLL_INTERVAL,
-        tick_interval=_TICK_INTERVAL,
         log_prefix=f"qa-concretize-{scenario.index}",
     )
 
@@ -1029,9 +1031,12 @@ def _launch_scenarios_in_tmux(
         transcript = _scenario_transcript_path(state.qa_workdir, scenario.index)
         win_name = _scenario_window_name(pr_data, scenario.index)
 
+        import uuid as _uuid
+        scenario.concretize_session_id = str(_uuid.uuid4())
         concretize_cmd = _build_concretize_cmd(
             scenario, pr_data, data, cwd=scenario_cwd,
-            instruction_content=instruction_content)
+            instruction_content=instruction_content,
+            session_id=scenario.concretize_session_id)
         try:
             concretize_pane = tmux_mod.new_window_get_pane(
                 session, win_name, concretize_cmd,
@@ -1084,7 +1089,8 @@ def _launch_scenarios_in_tmux(
             instruction_content: str | None = None,
     ) -> None:
         refined_steps = _concretize_scenario(scenario, pr_data, data, concretize_pane,
-                                             instruction_content=instruction_content)
+                                             instruction_content=instruction_content,
+                                             session_id=scenario.concretize_session_id)
         if refined_steps:
             scenario.steps = refined_steps
 
@@ -1249,10 +1255,13 @@ def _launch_scenarios_in_containers(
 
         win_name = _scenario_window_name(pr_data, scenario.index)
 
+        import uuid as _uuid
+        scenario.concretize_session_id = str(_uuid.uuid4())
         concretize_cmd = _build_concretize_cmd(
             scenario, pr_data, data, cwd=container_workdir,
             container_name=cname, instruction_content=instruction_content,
-            write_dir=str(clone_path))
+            write_dir=str(clone_path),
+            session_id=scenario.concretize_session_id)
         try:
             concretize_pane = tmux_mod.new_window_get_pane(
                 session, win_name, concretize_cmd,
@@ -1303,7 +1312,8 @@ def _launch_scenarios_in_containers(
             instruction_content: str | None = None,
     ) -> None:
         refined_steps = _concretize_scenario(scenario, pr_data, data, concretize_pane,
-                                             instruction_content=instruction_content)
+                                             instruction_content=instruction_content,
+                                             session_id=scenario.concretize_session_id)
         if refined_steps:
             scenario.steps = refined_steps
 
@@ -1509,7 +1519,6 @@ def _poll_tmux_verdicts(
     _launch_queue: list[QAScenario] = list(queued_scenarios or [])
     _queued_indices: set[int] = {s.index for s in _launch_queue}
 
-    tracker = VerdictStabilityTracker()
     pending = {s.index for s in state.scenarios if s.window_name}
     retry_counts: dict[int, int] = {}  # scenario_index -> retries used
     # Track how many verification failures each scenario has had
@@ -1528,6 +1537,11 @@ def _poll_tmux_verdicts(
     _last_content_hash: dict[int, str] = {}
     _last_content_change: dict[int, float] = {}
     _last_reminder_sent: dict[int, float] = {}
+    # Hook-driven idle detection: gate verdict extraction on fresh
+    # idle_prompt events for each scenario's Claude session.  Scenarios
+    # without a session_id cannot be polled and are marked INPUT_REQUIRED.
+    from pm_core import hook_events as _hook_events
+    _last_scenario_hook_ts: dict[int, float] = {}
 
     # Scenarios that failed to create a window get INPUT_REQUIRED immediately
     # (but skip queued scenarios — they don't have windows yet by design)
@@ -1698,7 +1712,9 @@ def _poll_tmux_verdicts(
                         # new verdict (with different surrounding lines)
                         # will be accepted.
                         state.scenario_verdicts.pop(scenario_idx, None)
-                        tracker.reset(f"qa-{state.pr_id}-{scenario_idx}")
+                        # Allow the next idle_prompt event to trigger another
+                        # verdict extraction for this scenario.
+                        _last_scenario_hook_ts.pop(scenario_idx, None)
                         pending.add(scenario_idx)
                         state.latest_output = (
                             f"Scenario {scenario_idx} ({scenario.title}): "
@@ -1743,6 +1759,7 @@ def _poll_tmux_verdicts(
                     ):
                         # Reset grace period for this retry
                         grace_start = time.monotonic()
+                        _last_scenario_hook_ts.pop(scenario.index, None)
                         continue
                     # Relaunch failed — will retry on next poll iteration
                     continue
@@ -1757,6 +1774,26 @@ def _poll_tmux_verdicts(
 
             if in_grace:
                 continue
+
+            # Hook-driven gate: require a fresh idle_prompt/Stop event
+            # before doing any pane work.  Scenarios without a session_id
+            # cannot participate in hook-driven polling — mark them
+            # INPUT_REQUIRED so they don't silently stall.
+            if not scenario.session_id:
+                _log.warning("Scenario %d has no session_id — marking INPUT_REQUIRED "
+                             "(hook-driven polling requires one)", scenario.index)
+                state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+                pending.discard(scenario.index)
+                verdicts_changed = True
+                _launch_next_queued()
+                continue
+            ev = _hook_events.read_event(scenario.session_id)
+            ev_ts = float((ev or {}).get("timestamp") or 0)
+            last_ts = _last_scenario_hook_ts.get(scenario.index, 0.0)
+            if ev is None or ev_ts <= last_ts or ev.get("event_type") not in ("idle_prompt", "Stop"):
+                # No new turn boundary — skip this scenario this tick.
+                continue
+            _last_scenario_hook_ts[scenario.index] = ev_ts
 
             content = tmux_mod.capture_pane(
                 pane_id, full_scrollback=True,
@@ -1806,10 +1843,11 @@ def _poll_tmux_verdicts(
                     # Same context before the verdict — stale, skip
                     continue
 
-            key = f"qa-{state.pr_id}-{scenario.index}"
-            if tracker.update(key, verdict):
-                if verdict:
-                    verdict_context[scenario.index] = _verdict_context_fingerprint(content, verdict)
+            if verdict:
+                # Hook-driven gate already ensured this is a turn boundary —
+                # a non-stale verdict is accepted immediately, no stability
+                # polling needed.
+                verdict_context[scenario.index] = _verdict_context_fingerprint(content, verdict)
                 state.scenario_verdicts[scenario.index] = verdict
                 pending.discard(scenario.index)
                 verdicts_changed = True
@@ -2121,13 +2159,11 @@ def _verify_single_scenario(
             verify_pane,
             verdicts=_VERIFICATION_VERDICTS,
             keywords=_VERIFICATION_KEYWORDS,
+            session_id=verify_session_id,
             prompt_text=prompt,
             grace_period=_VERDICT_GRACE_PERIOD,
-            poll_interval=_POLL_INTERVAL,
-            tick_interval=_TICK_INTERVAL,
             stop_check=stop_check,
             log_prefix=f"qa-verify-{scenario.index}",
-            session_id=verify_session_id,
         )
     except Exception:
         _log.warning("Verification: polling failed for scenario %d",
@@ -2266,10 +2302,13 @@ def run_qa_sync(
             data, state.pr_id, session,
             scenario_start=scenario_start,
         )
+        import uuid as _uuid
+        planner_session_id = str(_uuid.uuid4())
         cmd = build_claude_shell_cmd(
             prompt=planner_prompt,
             model=_qa_planning_resolution.model, provider=_qa_planning_resolution.provider, effort=_qa_planning_resolution.effort,
-            cwd=workdir_path)
+            cwd=workdir_path,
+            session_id=planner_session_id)
 
         # If the main QA window already exists, remember which sessions
         # were watching it so we can switch them to the replacement window
@@ -2339,12 +2378,27 @@ def run_qa_sync(
         plan_found = False
         deadline = time.monotonic() + _PLANNER_TIMEOUT
         poll_start = time.monotonic()
+        from pm_core import hook_events as _hook_events
+        _hook_baseline = time.time()
         while time.monotonic() < deadline:
             if state.stop_requested:
                 break
             if not tmux_mod.pane_exists(planner_pane):
                 _log.info("Planner pane exited")
                 break
+
+            _remaining = max(0.0, deadline - time.monotonic())
+            ev = _hook_events.wait_for_event(
+                planner_session_id,
+                event_types={"idle_prompt", "Stop"},
+                timeout=min(15.0, _remaining),
+                newer_than=_hook_baseline,
+                stop_check=lambda: state.stop_requested,
+            )
+            if ev is None:
+                # No turn boundary yet — loop so we re-check deadline/stop.
+                continue
+            _hook_baseline = float(ev.get("timestamp") or _hook_baseline)
 
             content = tmux_mod.capture_pane(planner_pane, full_scrollback=True)
             elapsed = time.monotonic() - poll_start
@@ -2353,7 +2407,6 @@ def run_qa_sync(
                       has_end, len(content), elapsed)
 
             if has_end and elapsed >= _PLANNER_GRACE:
-                # Try parsing — only accept if we get real scenarios
                 trial = parse_qa_plan(content, pm_root=pm_root)
                 if trial:
                     _log.info("planner poll: parsed %d scenario(s), accepting",
@@ -2361,11 +2414,11 @@ def run_qa_sync(
                     state.plan_output = content
                     plan_found = True
                     break
-                else:
-                    _log.info("planner poll: has_end but 0 scenarios, "
-                              "likely prompt template — continuing")
-
-            time.sleep(5)
+                _log.info("planner poll: has_end but 0 scenarios, "
+                          "likely prompt template — continuing")
+            if ev.get("event_type") == "Stop":
+                _log.info("Planner Stop event without valid plan")
+                break
 
         if not plan_found and not state.plan_output:
             # Try capturing whatever the planner produced

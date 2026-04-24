@@ -16,20 +16,29 @@ from pm_core.paths import configure_logger
 
 _log = configure_logger("pm.hook_events")
 
-_HOOKS_DIR = Path.home() / ".pm" / "hooks"
+_HOOKS_BASE = Path.home() / ".pm" / "hooks"
 _SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
 
 
-def hooks_dir() -> Path:
-    return _HOOKS_DIR
+def _current_session_tag() -> str | None:
+    try:
+        from pm_core.paths import get_session_tag
+        return get_session_tag(use_github_name=False)
+    except Exception:
+        return None
 
 
-def event_path(session_id: str) -> Path:
-    return _HOOKS_DIR / f"{session_id}.json"
+def hooks_dir(session_tag: str | None = None) -> Path:
+    tag = session_tag or _current_session_tag()
+    return _HOOKS_BASE / tag if tag else _HOOKS_BASE / "_notag"
 
 
-def read_event(session_id: str) -> dict | None:
-    path = event_path(session_id)
+def event_path(session_id: str, session_tag: str | None = None) -> Path:
+    return hooks_dir(session_tag) / f"{session_id}.json"
+
+
+def read_event(session_id: str, session_tag: str | None = None) -> dict | None:
+    path = event_path(session_id, session_tag)
     if not path.exists():
         return None
     try:
@@ -38,8 +47,8 @@ def read_event(session_id: str) -> dict | None:
         return None
 
 
-def clear_event(session_id: str) -> None:
-    path = event_path(session_id)
+def clear_event(session_id: str, session_tag: str | None = None) -> None:
+    path = event_path(session_id, session_tag)
     try:
         path.unlink()
     except FileNotFoundError:
@@ -78,6 +87,7 @@ def wait_for_event(
     newer_than: float = 0.0,
     tick: float = 0.2,
     stop_check: Callable[[], bool] | None = None,
+    session_tag: str | None = None,
 ) -> dict | None:
     """Wait up to *timeout* seconds for a matching hook event.
 
@@ -88,13 +98,13 @@ def wait_for_event(
     Returns None on timeout or when stop_check() returns True.
     """
     deadline = time.monotonic() + max(0.0, timeout)
-    path = event_path(session_id)
+    path = event_path(session_id, session_tag)
     while True:
         if stop_check and stop_check():
             return None
         try:
             if path.exists():
-                data = read_event(session_id)
+                data = read_event(session_id, session_tag)
                 if data and data.get("event_type") in event_types:
                     ts = float(data.get("timestamp") or 0)
                     if ts > newer_than:

@@ -49,11 +49,16 @@ def tui_cmd():
     try:
         # Install Claude Code hooks so pm can receive idle_prompt / Stop
         # events from every Claude process launched during this session.
+        # Refuses to clobber existing third-party hooks — surfaces the
+        # conflict to the user instead.
+        from pm_core.hook_install import ensure_hooks_installed, HookConflictError
         try:
-            from pm_core.hook_install import ensure_hooks_installed
             ensure_hooks_installed()
-        except Exception:
-            log.warning("failed to install Claude Code hooks", exc_info=True)
+        except HookConflictError as e:
+            stderr_file.write(f"\n--- Hook install conflict ---\n{e}\n")
+            stderr_file.flush()
+            log.error("hook install conflict: %s", e)
+            raise
         from pm_core.tui.app import ProjectManagerApp
         app = ProjectManagerApp()
         app.run()

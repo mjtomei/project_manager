@@ -178,22 +178,16 @@ def _find_claude_pane(session: str, window_name: str) -> str | None:
     return _find_claude_pane_shared(session, window_name)
 
 
-def _poll_for_verdict(pane_id: str, prompt_text: str = "",
+def _poll_for_verdict(pane_id: str, session_id: str,
+                      prompt_text: str = "",
                       exclude_verdicts: set[str] | None = None,
-                      grace_period: float = 0,
-                      session_id: str | None = None) -> str | None:
-    """Poll a pane with capture-pane until verdict is stable.
-
-    Delegates to the shared ``poll_for_verdict`` in ``loop_shared``.
-    Does NOT check ``stop_requested`` — that is handled between iterations
-    by ``run_review_loop_sync`` so the current iteration runs to completion.
-    """
+                      grace_period: float = 0) -> str | None:
+    """Poll a pane for a verdict via Claude Code hook events."""
     return _poll_for_verdict_shared(
         pane_id, verdicts=ALL_VERDICTS, keywords=_REVIEW_KEYWORDS,
-        prompt_text=prompt_text, exclude_verdicts=exclude_verdicts,
-        grace_period=grace_period, poll_interval=_POLL_INTERVAL,
-        tick_interval=_TICK_INTERVAL, log_prefix="review_loop",
         session_id=session_id,
+        prompt_text=prompt_text, exclude_verdicts=exclude_verdicts,
+        grace_period=grace_period, log_prefix="review_loop",
     )
 
 
@@ -255,19 +249,23 @@ def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
 
     _log.info("review_loop: polling pane %s in window %s", pane_id, window_name)
 
-    # Try to recover the Claude session_id from the transcript symlink so
-    # poll_for_verdict can use hook-driven idle detection when available.
-    review_session_id: str | None = None
-    if transcript:
-        try:
-            from pm_core.claude_launcher import session_id_from_transcript
-            review_session_id = session_id_from_transcript(transcript)
-        except Exception:
-            review_session_id = None
+    # The review loop always launches with a transcript so we can recover
+    # the Claude session_id from the symlink target.  Hook-driven polling
+    # is required — no fallback.
+    from pm_core.claude_launcher import session_id_from_transcript
+    review_session_id = (
+        session_id_from_transcript(transcript) if transcript else None
+    )
+    if not review_session_id:
+        raise RuntimeError(
+            f"Review pane launched without a recoverable Claude session_id "
+            f"(transcript={transcript!r}) — hook-driven verdict polling "
+            f"requires one."
+        )
 
-    content = _poll_for_verdict(pane_id, prompt_text=prompt_text,
-                                 grace_period=_VERDICT_GRACE_PERIOD,
-                                 session_id=review_session_id)
+    content = _poll_for_verdict(pane_id, review_session_id,
+                                 prompt_text=prompt_text,
+                                 grace_period=_VERDICT_GRACE_PERIOD)
     if content is None:
         raise PaneKilledError(f"Review pane disappeared (window: {window_name})")
     return content
@@ -285,21 +283,21 @@ def _wait_for_follow_up_verdict(pr_data: dict, prompt_text: str,
         return None
 
     window_name = _compute_review_window_name(pr_data)
-    # Recover session_id from the most recent transcript symlink if available
-    review_session_id: str | None = None
-    try:
-        if getattr(state, "_transcript_dir", None):
-            from pm_core.claude_launcher import session_id_from_transcript
-            iter_transcript = f"{state._transcript_dir}/review-{state.pr_id}-i{state.iteration}.jsonl"
-            review_session_id = session_id_from_transcript(iter_transcript)
-    except Exception:
-        review_session_id = None
+    # Recover session_id from the iteration's transcript symlink.
+    from pm_core.claude_launcher import session_id_from_transcript
+    if not getattr(state, "_transcript_dir", None):
+        _log.warning("review_loop: no transcript_dir on state; cannot wait for follow-up")
+        return None
+    iter_transcript = f"{state._transcript_dir}/review-{state.pr_id}-i{state.iteration}.jsonl"
+    review_session_id = session_id_from_transcript(iter_transcript)
+    if not review_session_id:
+        _log.warning("review_loop: could not recover session_id from %s", iter_transcript)
+        return None
     return _wait_for_follow_up_shared(
         session, window_name, verdicts=ALL_VERDICTS, keywords=_REVIEW_KEYWORDS,
-        prompt_text=prompt_text, exclude_verdicts={VERDICT_INPUT_REQUIRED},
-        poll_interval=_POLL_INTERVAL, tick_interval=_TICK_INTERVAL,
-        stop_check=lambda: state.stop_requested, log_prefix="review_loop",
         session_id=review_session_id,
+        prompt_text=prompt_text, exclude_verdicts={VERDICT_INPUT_REQUIRED},
+        stop_check=lambda: state.stop_requested, log_prefix="review_loop",
     )
 
 
