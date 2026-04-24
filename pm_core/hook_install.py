@@ -151,6 +151,8 @@ def hooks_already_installed(settings_path: Path | None = None) -> bool:
         data = json.loads(path.read_text())
     except (json.JSONDecodeError, OSError):
         return False
+    if not isinstance(data, dict):
+        return False
     hooks = data.get("hooks") if isinstance(data.get("hooks"), dict) else {}
     desired = _desired_hooks()
     for event in _MANAGED_EVENTS:
