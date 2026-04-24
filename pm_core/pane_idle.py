@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from pm_core import tmux as tmux_mod
 from pm_core.claude_launcher import session_id_from_transcript
@@ -55,7 +55,6 @@ class PaneIdleState:
     transcript_path: str
     session_id: str
     last_hook_ts: float = 0.0
-    last_content: str = ""  # captured on idle transition so callers can render
     idle: bool = False
     waiting_for_input: bool = False
     gone: bool = False
@@ -190,18 +189,6 @@ class PaneIdleTracker:
         with self._lock:
             state = self._states.get(key)
             return state.transcript_path if state else None
-
-    def get_content(self, key: str) -> str:
-        """Return the cached transcript-derived content (empty by default).
-
-        Kept for API compatibility with the previous hash-based tracker;
-        callers that need the assistant's text should read the
-        transcript directly via
-        :func:`pm_core.verdict_transcript.read_latest_assistant_text`.
-        """
-        with self._lock:
-            state = self._states.get(key)
-            return state.last_content if state else ""
 
     def became_idle(self, key: str) -> bool:
         with self._lock:
