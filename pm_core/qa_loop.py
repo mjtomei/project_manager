@@ -1285,7 +1285,7 @@ def _launch_scenarios_in_containers(
         refined_steps = _concretize_scenario(
             scenario, pr_data, data, concretize_pane,
             session_id=scenario.concretize_session_id,
-            scenario_cwd=scenario_cwd,
+            scenario_cwd=container_workdir,
             instruction_content=instruction_content,
         )
         if refined_steps:
