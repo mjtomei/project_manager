@@ -103,6 +103,49 @@ def _get_runtime() -> str:
     return get_global_setting_value("container-runtime", DEFAULT_RUNTIME)
 
 
+def _nested_podman_enabled() -> bool:
+    """True when the active pm project sets ``nested_podman: true``.
+
+    Used to opt into a relaxed container sandbox so a podman process inside
+    the container can spawn its own containers (rootless podman-in-podman).
+    Default off — the relaxations remove defense-in-depth layers (AppArmor,
+    /proc masks) and should only apply to projects that genuinely need it.
+    """
+    try:
+        from pm_core.store import find_project_root, load
+        data = load(find_project_root(), validate=False)
+        return bool(data.get("project", {}).get("nested_podman", False))
+    except Exception:
+        return False
+
+
+def _apparmor_enforcing() -> bool:
+    try:
+        return Path("/sys/module/apparmor/parameters/enabled").read_text().strip() == "Y"
+    except OSError:
+        return False
+
+
+def _selinux_enabled() -> bool:
+    return Path("/sys/fs/selinux/enforce").exists()
+
+
+def _nested_podman_run_args() -> list[str]:
+    """Extra ``podman run`` flags needed for nested rootless podman.
+
+    Image-side prerequisites (already baked into pm-dev): ``uidmap`` package
+    with setuid ``newuidmap``/``newgidmap``, ``/etc/subuid`` + ``/etc/subgid``
+    entries for the pm user, and ``storage.driver = vfs`` (so ``/dev/fuse``
+    is not required).
+    """
+    args: list[str] = ["--security-opt", "unmask=ALL"]
+    if _apparmor_enforcing():
+        args.extend(["--security-opt", "apparmor=unconfined"])
+    if _selinux_enabled():
+        args.extend(["--security-opt", "label=disable"])
+    return args
+
+
 def _get_dockerfile_path() -> Path:
     """Return the path to the bundled Dockerfile."""
     return Path(__file__).resolve().parent.parent / "Dockerfile"
@@ -517,6 +560,8 @@ def create_container(
     # useradd/groupadd.  Harmless under Podman rootful (no-op).
     if "podman" in runtime:
         cmd.extend(["--userns=keep-id"])
+        if _nested_podman_enabled():
+            cmd.extend(_nested_podman_run_args())
 
     # --- Claude binary ---
     # Mount the resolved claude binary into the container so the

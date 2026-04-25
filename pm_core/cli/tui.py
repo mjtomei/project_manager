@@ -79,10 +79,18 @@ def tui_cmd():
         stderr_file.close()
 
 
-@cli.group()
-def tui():
-    """Control and monitor the TUI from the command line."""
-    pass
+@cli.group(invoke_without_command=True)
+@click.pass_context
+def tui(ctx):
+    """Launch the interactive TUI (alias for ``pm session``).
+
+    Subcommands control and monitor a running TUI from the command line.
+    """
+    if ctx.invoked_subcommand is not None:
+        return
+    from pm_core.cli.session import _session_start
+    _session_start(share_global=False, share_group=None,
+                   start_dir=None, disconnect_others=False)
 
 
 TUI_HISTORY_DIR = pane_registry_dir() / "tui-history"

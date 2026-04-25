@@ -15,6 +15,7 @@ project:
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
   hide_merged: false
   skip_qa: false
+  nested_podman: true
 plans:
 - id: plan-001
   name: Import from existing repo
@@ -9264,7 +9265,7 @@ prs:
   plan: null
   title: Use Claude Code hooks (idle_prompt, Stop) for verdict and session–end detection
   branch: pm/pr-014f93f-use-claude-code-hooks-idle-prompt-stop-for-verdict
-  status: in_review
+  status: qa
   depends_on: []
   description: 'Replace all polling–based idle/verdict detection with Claude Code
     hooks for reliable, instant signaling.
@@ -9312,9 +9313,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/166
   gh_pr_number: 166
   created_at: '2026-04-21T17:07:01.779432+00:00'
-  updated_at: '2026-04-24T17:06:30.996166+00:00'
+  updated_at: '2026-04-24T21:37:08.675525+00:00'
   started_at: '2026-04-24T02:48:10.332243+00:00'
-  reviewed_at: '2026-04-24T13:47:52.280824+00:00'
+  reviewed_at: '2026-04-24T21:37:08.675525+00:00'
   merged_at: null
   notes:
   - id: note-ba7ef7b
@@ -9343,6 +9344,62 @@ prs:
       — entrypoint now chowns it back to pm.'
     created_at: '2026-04-24T17:06:30Z'
     last_edited: '2026-04-24T17:06:30Z'
+  - id: note-32bc189
+    text: 'QA INPUT_REQUIRED: Hook receiver writes events atomically and handles bad
+      input: INPUT_REQUIRED; Hook installer — fresh install, idempotence, stale-python
+      rewrite, 7-day sweep: INPUT_REQUIRED; Installer refuses to clobber foreign hooks:
+      INPUT_REQUIRED; wait_for_event honors timeout, event_types filter, and newer_than
+      baseline: INPUT_REQUIRED; poll_for_verdict is hook-driven with no polling fallback:
+      INPUT_REQUIRED; Call sites thread a session_id (review / watcher / qa_loop /
+      planner / verification): INPUT_REQUIRED; _poll_tmux_verdicts event-gating, INPUT_REQUIRED
+      fallback, relaunch reset: INPUT_REQUIRED; PaneIdleTracker hook-aware fast path
+      + hash fallback: INPUT_REQUIRED; Container QA bind-mounts propagate hook events
+      host ↔ container: INPUT_REQUIRED; pm session + TUI install hooks on launch;
+      foreign hook aborts startup: INPUT_REQUIRED; Unit + integration test suite green
+      on the branch: INPUT_REQUIRED (workdir: /home/matt/.pm/workdirs/qa/pr-014f93f-385682084e70b3c1)'
+    created_at: '2026-04-24T20:07:57Z'
+    last_edited: '2026-04-24T20:07:57Z'
+  - id: note-d576e5e
+    text: 'QA INPUT_REQUIRED: Hook receiver writes events atomically and handles bad
+      input: INPUT_REQUIRED; Hook installer — fresh install, idempotence, stale-python
+      rewrite, 7-day sweep: INPUT_REQUIRED; Installer refuses to clobber foreign hooks:
+      INPUT_REQUIRED; wait_for_event honors timeout, event types, and newer_than baseline:
+      INPUT_REQUIRED; poll_for_verdict is hook-driven (no polling fallback): INPUT_REQUIRED;
+      Call sites pass a session_id (review / watcher / qa_loop / planner / verification):
+      INPUT_REQUIRED; _poll_tmux_verdicts event-gating, INPUT_REQUIRED fallback, relaunch
+      reset: INPUT_REQUIRED; PaneIdleTracker hook-aware fast path + hash fallback
+      preserved: INPUT_REQUIRED; Container QA bind-mounts propagate hook events host
+      ↔ container: INPUT_REQUIRED; pm session + TUI install hooks on launch; foreign
+      hook aborts startup: INPUT_REQUIRED; Unit + integration test suite green on
+      the branch: INPUT_REQUIRED (workdir: /home/matt/.pm/workdirs/qa/pr-014f93f-cc0f6d1147a0ae38)'
+    created_at: '2026-04-24T20:35:52Z'
+    last_edited: '2026-04-24T20:35:52Z'
+  - id: note-2fc9ada
+    text: 'QA INPUT_REQUIRED: Hook receiver writes events atomically and handles bad
+      input: PASS; Hook installer — fresh install, idempotence, stale-python rewrite,
+      7-day sweep: PASS; Installer refuses to clobber foreign hooks: PASS; wait_for_event
+      honors timeout, event types, and newer_than baseline: PASS; poll_for_verdict
+      is hook-driven (no polling fallback): PASS; Call sites pass a session_id (review
+      / watcher / qa_loop / planner / verification): INPUT_REQUIRED; _poll_tmux_verdicts
+      event-gating, INPUT_REQUIRED fallback, relaunch reset: PASS; PaneIdleTracker
+      hook-aware fast path + hash fallback preserved: INPUT_REQUIRED; Container QA
+      bind-mounts carry events host ↔ container: INPUT_REQUIRED; pm session + TUI
+      install hooks on launch; foreign hook aborts startup: INPUT_REQUIRED; Unit +
+      integration test suite green on the branch: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-014f93f-14868015b1b65a34)'
+    created_at: '2026-04-24T21:14:32Z'
+    last_edited: '2026-04-24T21:14:32Z'
+  - id: note-aef6d5c
+    text: 'QA INPUT_REQUIRED: Hook receiver writes events atomically and handles bad:
+      PASS; Hook installer — fresh install, idempotence, stale-python: PASS; Installer
+      refuses to clobber foreign hooks: PASS; wait_for_event honors timeout, event
+      types, and newer_than: PASS; poll_for_verdict is hook-driven (no polling fallback):
+      PASS; Call sites pass a session_id (review / watcher / qa_loop /: PASS; _poll_tmux_verdicts
+      is event-gated and handles relaunch: PASS; PaneIdleTracker hook-aware fast path
+      + hash fallback: PASS; Container QA bind mounts carry events host ↔ container:
+      INPUT_REQUIRED; Hooks installed on pm session and TUI launch; conflict: INPUT_REQUIRED;
+      Unit + integration test suite green on the branch: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-014f93f-3a1bc34a7a49dee9)'
+    created_at: '2026-04-24T22:03:15Z'
+    last_edited: '2026-04-24T22:03:15Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-014f93f-use-claude-code-hooks-idle-prompt-st-33742570
 - id: pr-e3595fe
   plan: plan-cb4ef69
