@@ -9649,3 +9649,47 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-d43d362
+  plan: bugs
+  title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
+  branch: pm/pr-d43d362-container-pm-user-hardcoded-at-uid-1000-breaks-for
+  status: pending
+  depends_on: []
+  description: 'Today the pm user is created at UID 1000 in both the base Dockerfile
+    (added in PR pr-014f93f) and project-specific images built via ''pm container
+    build''. With podman --userns=keep-id, the inner UID is the host user''s UID.
+    If the host user is not at UID 1000 (e.g. a second user account), there is a UID
+    mismatch:
+
+
+    - Inner namespace UID matches the host UID (say 1001), but no /etc/passwd entry
+    exists for it inside the container — the inner pm shell user (UID 1000) is a different
+    user from the bind-mount owner.
+
+    - Bind-mounted /workspace files appear owned by an unmapped UID inside the container;
+    the pm user can''t write to them by default.
+
+    - /etc/subuid ''pm:1:999,pm:1001:64535'' (set up for nested rootless podman) only
+    matches the pm user by name; the runtime caller at UID 1001 is not ''pm'' and
+    newuidmap won''t grant subuids.
+
+
+    Fix sketch: move the pm user creation and /etc/subuid setup out of the Dockerfile
+    and into container.py''s runtime entrypoint, parameterized on the actual host
+    UID. The entrypoint already runs as root in the docker path; for the podman keep-id
+    path, similar runtime config writes need to happen as the host user inside the
+    container (which has the host UID and can write to /etc/passwd/subuid only with
+    root, so we''d need to either run setup as root via a separate exec or pre-stage
+    tmp files and chown).
+
+
+    Reported during review of PR pr-014f93f.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-25T14:45:27.562266+00:00'
+  updated_at: '2026-04-25T14:45:27.562266+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []

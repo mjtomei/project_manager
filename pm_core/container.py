@@ -133,12 +133,18 @@ def _selinux_enabled() -> bool:
 def _nested_podman_run_args() -> list[str]:
     """Extra ``podman run`` flags needed for nested rootless podman.
 
-    Image-side prerequisites (already baked into pm-dev): ``uidmap`` package
-    with setuid ``newuidmap``/``newgidmap``, ``/etc/subuid`` + ``/etc/subgid``
-    entries for the pm user, and ``storage.driver = vfs`` (so ``/dev/fuse``
-    is not required).
+    Image-side prerequisites (baked into pm-dev): ``uidmap`` with
+    ``newuidmap``/``newgidmap`` granted ``cap_setuid``/``cap_setgid`` via
+    file capabilities (NOT setuid — file caps are evaluated within the
+    user namespace), ``/etc/subuid`` + ``/etc/subgid`` entries for ``pm``
+    constrained to the inner namespace's UID range, and overlay storage
+    via ``fuse-overlayfs``.
     """
-    args: list[str] = ["--security-opt", "unmask=ALL"]
+    args: list[str] = [
+        "--device", "/dev/fuse",
+        "--device", "/dev/net/tun",
+        "--security-opt", "unmask=ALL",
+    ]
     if _apparmor_enforcing():
         args.extend(["--security-opt", "apparmor=unconfined"])
     if _selinux_enabled():
