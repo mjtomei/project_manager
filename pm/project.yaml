@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-014f93f
+  active_pr: pr-1139060
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -9443,6 +9443,91 @@ prs:
   gh_pr_number: null
   created_at: '2026-04-21T20:55:06.933672+00:00'
   updated_at: '2026-04-21T20:55:06.933672+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-1a100cb
+  plan: null
+  title: 'Bug: container image is a global setting, should be per-project'
+  branch: pm/pr-1a100cb-bug-container-image-is-a-global-setting-should-be-
+  status: pending
+  depends_on: []
+  description: "pm_core/container.py:load_container_config reads container-image from\
+    \ global pm settings, so every pm-managed project on the host shares one image.\
+    \ That breaks projects that need different base images (different language runtimes,\
+    \ pre-baked toolchains, etc.).\n\nMake the image resolution per-project: let pm/project.yaml\
+    \ declare project.container.image (and optionally memory/cpu limits), falling\
+    \ back to the global container-image setting and then DEFAULT_IMAGE. load_container_config\
+    \ should accept the project dict (or pm_root) so callers pass the project context\
+    \ they already have — see call sites in:\n\n  - pm_core/container.py (create_container\
+    \ path)\n  - pm_core/qa_loop.py (~line 1157)\n  - pm_core/cli/qa.py (~line 327)\n\
+    \  - pm_core/cli/container.py (pm container status / build)\n\nAcceptance:\n-\
+    \ pm/project.yaml supports project.container.image (and optionally .memory_limit,\
+    \ .cpu_limit).\n- Resolution order per project: project.yaml > global container-image\
+    \ > DEFAULT_IMAGE.\n- pm container build builds the project-specific image when\
+    \ a per-project image name is configured.\n- Default pm-dev:latest is still auto-built\
+    \ if neither is set and it does not exist.\n- Test covering the per-project override.\n\
+    \nDiscovered while working on pr-014f93f — noted but out of scope for that PR."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-24T20:51:08.238725+00:00'
+  updated_at: '2026-04-24T20:51:08.238725+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-1139060
+  plan: null
+  title: 'Bug: QA orphan-container cleanup is slow and containers leak across runs'
+  branch: pm/pr-1139060-bug-qa-orphan-container-cleanup-is-slow-and-contai
+  status: pending
+  depends_on: []
+  description: 'Every QA run starts with a ~100-second stall before planning can begin,
+    because cleanup_orphaned_qa_containers (pm_core/container.py:969) serially removes
+    stale containers from the previous run. With 11 orphans and podman inspect taking
+    ~10s per non-existent object on this host (remove_container loops inspect with
+    a 5s timeout inside a 10s deadline), that''s ~110s of pre-planning overhead —
+    during which the user sees no progress and scenarios don''t launch.
+
+
+    Two related issues:
+
+
+    1. Sequential cleanup — the loop in cleanup_orphaned_qa_containers calls remove_container
+    one at a time. These removals are independent; a ThreadPoolExecutor (~8 workers)
+    would collapse 11 × 10s → ~15s.
+
+
+    2. Container leak at source — QA completion does not remove its own containers
+    when the loop exits (INPUT_REQUIRED, user-cancel, or pass). Every run therefore
+    starts by paying the previous run''s debt. Ideally the prior run cleans up on
+    finish so the next run has nothing to orphan-reap.
+
+
+    Acceptance:
+
+    - cleanup_orphaned_qa_containers parallelises remove_container across orphans.
+
+    - QA completion (success, INPUT_REQUIRED, stopped) removes its scenario containers
+    before returning, so the next run''s orphan sweep has nothing to do in the common
+    case.
+
+    - A new QA run after a normal completion starts the planner in well under 30s
+    on a host with similar podman timings.
+
+    - Test: run QA twice in succession; assert second run''s cleanup_orphaned_qa_containers
+    removes 0 orphans (or near it).
+
+
+    Observed during pr-014f93f testing. The 100-second delay is user-visible as "QA
+    stuck" before the planner pane even appears.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-24T20:54:20.188876+00:00'
+  updated_at: '2026-04-24T20:54:20.188876+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
