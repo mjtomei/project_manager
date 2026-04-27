@@ -845,7 +845,7 @@ def pr_split_load(pr_id: str):
         workdir_pm = store.find_project_root(start=workdir)
     except FileNotFoundError:
         workdir_pm = root
-    manifest_path = spec_gen.spec_dir(workdir_pm, pr_id) / "split.md"
+    manifest_path = workdir_pm / "specs" / pr_id / "split.md"
     if not manifest_path.exists():
         click.echo(f"Split manifest not found: {manifest_path}", err=True)
         click.echo("Run `pm pr split` first to create the manifest.")
