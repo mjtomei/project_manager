@@ -441,15 +441,7 @@ def handle_command_submitted(app, cmd: str) -> None:
     parts = shlex.split(cmd)
     if cmd in ("review-loop", "review loop"):
         from pm_core.tui import review_loop_ui
-        review_loop_ui.start_or_stop_loop(app, stop_on_suggestions=True)
-        if app._plans_visible:
-            app.query_one("#plans-pane", PlansPane).focus()
-        else:
-            app.query_one("#tech-tree", TechTree).focus()
-        return
-    if cmd in ("review-loop strict", "review loop strict"):
-        from pm_core.tui import review_loop_ui
-        review_loop_ui.start_or_stop_loop(app, stop_on_suggestions=False)
+        review_loop_ui.start_or_stop_loop(app)
         if app._plans_visible:
             app.query_one("#plans-pane", PlansPane).focus()
         else:

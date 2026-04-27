@@ -47,6 +47,18 @@ def tui_cmd():
     threading.excepthook = _thread_excepthook
 
     try:
+        # Install Claude Code hooks so pm can receive idle_prompt / Stop
+        # events from every Claude process launched during this session.
+        # Refuses to clobber existing third-party hooks — surfaces the
+        # conflict to the user instead.
+        from pm_core.hook_install import ensure_hooks_installed, HookConflictError
+        try:
+            ensure_hooks_installed()
+        except HookConflictError as e:
+            stderr_file.write(f"\n--- Hook install conflict ---\n{e}\n")
+            stderr_file.flush()
+            log.error("hook install conflict: %s", e)
+            raise
         from pm_core.tui.app import ProjectManagerApp
         app = ProjectManagerApp()
         app.run()
@@ -67,10 +79,18 @@ def tui_cmd():
         stderr_file.close()
 
 
-@cli.group()
-def tui():
-    """Control and monitor the TUI from the command line."""
-    pass
+@cli.group(invoke_without_command=True)
+@click.pass_context
+def tui(ctx):
+    """Launch the interactive TUI (alias for ``pm session``).
+
+    Subcommands control and monitor a running TUI from the command line.
+    """
+    if ctx.invoked_subcommand is not None:
+        return
+    from pm_core.cli.session import _session_start
+    _session_start(share_global=False, share_group=None,
+                   start_dir=None, disconnect_others=False)
 
 
 TUI_HISTORY_DIR = pane_registry_dir() / "tui-history"
@@ -224,10 +244,10 @@ Navigation:
 
 PR Actions:
   s                Start selected PR
-  d                Review (zz d: loop, zzz d: strict)
+  d                Review (zz d: loop)
   g                Merge PR
   e                Edit selected PR
-  t                Start QA (z t: fresh, zz t: loop, zzz t: strict)
+  t                Start QA (z t: fresh, zz t: loop)
 
 Views:
   p                Toggle plans view

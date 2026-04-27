@@ -35,12 +35,29 @@ def get_target(app) -> str | None:
     return app._auto_start_target
 
 
-def get_transcript_dir(app) -> Path | None:
-    """Return the transcript directory for the current auto-start run, or None."""
+def get_transcript_dir(app) -> Path:
+    """Return the transcript directory for the current TUI session.
+
+    Total function: callers always receive a usable directory.  Priority:
+
+    1. The active auto-start run dir (``app._auto_start_run_id``) when
+       auto-start is active.
+    2. A lazily-created ``manual-<token>`` run dir cached on the app as
+       ``_manual_transcript_run_id``.  Used for manually-started review
+       loops (``zz d``) that never go through auto-start.
+
+    The returned path is always under ``app._root / "transcripts"``.
+    The directory itself is created by callers on demand when they
+    write files into it.
+    """
     run_id = app._auto_start_run_id
-    if not run_id or not app._root:
-        return None
-    return app._root / "transcripts" / run_id
+    if not run_id:
+        run_id = getattr(app, "_manual_transcript_run_id", None)
+        if not run_id:
+            run_id = f"manual-{secrets.token_hex(3)}"
+            app._manual_transcript_run_id = run_id
+    root = app._root or pm_home()
+    return root / "transcripts" / run_id
 
 
 def has_merge_restart_marker() -> bool:
@@ -76,7 +93,6 @@ def save_breadcrumb(app) -> None:
         review_loops[pr_id] = {
             "iteration": rstate.iteration,
             "latest_verdict": rstate.latest_verdict,
-            "stop_on_suggestions": rstate.stop_on_suggestions,
             "loop_id": rstate.loop_id,
             "input_required": rstate.input_required,
             "_transcript_dir": rstate._transcript_dir,
@@ -166,7 +182,6 @@ async def consume_breadcrumb(app) -> None:
                 pr_id=pr_id,
                 iteration=loop_data.get("iteration", 0),
                 latest_verdict=loop_data.get("latest_verdict", ""),
-                stop_on_suggestions=loop_data.get("stop_on_suggestions", True),
                 loop_id=loop_data.get("loop_id", secrets.token_hex(2)),
                 input_required=loop_data.get("input_required", False),
                 _transcript_dir=loop_data.get("_transcript_dir"),
@@ -200,8 +215,8 @@ async def consume_breadcrumb(app) -> None:
                 if pr and pr.get("status") == "in_review":
                     tdir = get_transcript_dir(app)
                     _start_loop(
-                        app, pr_id, pr, rstate.stop_on_suggestions,
-                        transcript_dir=str(tdir) if tdir else rstate._transcript_dir,
+                        app, pr_id, pr,
+                        transcript_dir=str(tdir),
                         resume_state=rstate,
                     )
                     app.log_message(
@@ -219,7 +234,7 @@ async def consume_breadcrumb(app) -> None:
         for wd in watchers_data:
             watcher_ui.start_watcher(
                 app,
-                transcript_dir=str(tdir) if tdir else None,
+                transcript_dir=str(tdir),
                 meta_pm_root=wd.get("meta_pm_root"),
                 watcher_type=wd.get("type", "auto-start"),
             )
@@ -431,8 +446,7 @@ def _auto_start_review_loops(app, target: str | None = None,
         app.log_message(f"Auto-start: review loop for {pr_id}")
         from pm_core.tui.review_loop_ui import _start_loop
         tdir = get_transcript_dir(app)
-        _start_loop(app, pr_id, pr, stop_on_suggestions=False,
-                     transcript_dir=str(tdir) if tdir else None)
+        _start_loop(app, pr_id, pr, transcript_dir=str(tdir))
 
 
 def _auto_start_qa_loops(app, target: str | None = None,

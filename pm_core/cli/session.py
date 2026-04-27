@@ -151,6 +151,16 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
                           before attaching.
     """
     _log.info("session_cmd started")
+    # Install Claude Code hooks so idle_prompt / Stop events can drive
+    # pm's verdict detection without pane polling.  Conflicts with
+    # existing third-party hooks abort the session so the user can
+    # resolve the conflict rather than having pm silently step on it.
+    from pm_core.hook_install import ensure_hooks_installed, HookConflictError
+    try:
+        ensure_hooks_installed()
+    except HookConflictError as e:
+        click.echo(str(e), err=True)
+        raise SystemExit(1)
     if not tmux_mod.has_tmux():
         click.echo("tmux is required for 'pm session'. Install it first.", err=True)
         raise SystemExit(1)

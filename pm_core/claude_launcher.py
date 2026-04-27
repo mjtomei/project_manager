@@ -390,16 +390,22 @@ def build_claude_shell_cmd(
 
     if prompt and not resume:
         # Write the prompt to a file and use "$(cat file)" to avoid tmux
-        # command-length limits (~16 KB) with large prompts.
+        # command-length limits (~16 KB) with large prompts.  Stored in a
+        # ``pm/prompts/`` subdir so the host workdir root stays clean — the
+        # cleanup ``rm -f`` at the end of the shell pipeline doesn't always
+        # run (claude killed by container teardown skips trailing commands),
+        # so leftovers accumulate.
         _host_dir = Path(write_dir) if write_dir else (Path(cwd) if cwd else None)
         _prompt_written = False
         if _host_dir:
             try:
                 if _host_dir.is_dir():
+                    _prompts_subdir = _host_dir / "pm" / "prompts"
+                    _prompts_subdir.mkdir(parents=True, exist_ok=True)
                     _fname = f"pm_prompt_{session_id or uuid.uuid4()}.txt"
-                    (_host_dir / _fname).write_text(prompt)
-                    _ref_dir = cwd if cwd else str(_host_dir)
-                    _prompt_ref = Path(_ref_dir) / _fname
+                    (_prompts_subdir / _fname).write_text(prompt)
+                    _ref_base = Path(cwd) if cwd else _host_dir
+                    _prompt_ref = _ref_base / "pm" / "prompts" / _fname
                     # Delete the temp file after claude reads it via $(cat ...).
                     # The semicolon ensures cleanup runs whether claude succeeds or fails.
                     cmd += f' "$(cat {_prompt_ref})"; rm -f {shlex.quote(str(_prompt_ref))}'
@@ -412,6 +418,45 @@ def build_claude_shell_cmd(
 
     log_shell_command(cmd, prefix="claude")
     return cmd
+
+
+def session_id_from_transcript(transcript_path: str | Path) -> str | None:
+    """Return the Claude session_id associated with a transcript symlink.
+
+    ``build_claude_shell_cmd(transcript=...)`` writes a symlink pointing at
+    ``~/.claude/projects/<mangled>/<session-id>.jsonl``.  This helper lets
+    callers recover the session_id without threading it through subprocess
+    boundaries.
+    """
+    p = Path(transcript_path)
+    target: Path = p
+    try:
+        if p.is_symlink():
+            target = Path(os.readlink(p))
+        elif p.exists():
+            target = p
+        # else: fall through and parse the path literally — callers
+        # (QA verification/planner panes) may pass a path that Claude
+        # has not yet opened.
+    except OSError:
+        return None
+    name = target.name
+    if name.endswith(".jsonl"):
+        name = name[:-6]
+    # Basic sanity check — session ids are UUIDs (32 hex + 4 dashes = 36 chars)
+    if len(name) == 36 and name.count("-") == 4:
+        return name
+    return None
+
+
+def transcript_path_for(cwd: str, session_id: str) -> Path:
+    """Return Claude's native transcript path for a cwd + session_id.
+
+    Lets callers pass a concrete JSONL path to hook-driven pollers when
+    they generated the session_id themselves (no symlink) rather than
+    letting ``build_claude_shell_cmd(transcript=...)`` create one.
+    """
+    return _claude_project_dir(cwd) / f"{session_id}.jsonl"
 
 
 def finalize_transcript(transcript_path: Path) -> None:

@@ -158,7 +158,7 @@ class ProjectManagerApp(App):
     def on_key(self, event) -> None:
         """Handle z and w modifier prefix keys.
 
-        z supports z, zz, zzz modifiers for review/QA loop control.
+        z supports z and zz modifiers for review/QA loop control.
         w is a prefix key for watcher commands: wf=focus, ww=list, ws=start/stop.
 
         Also buffers keystrokes when / was pressed but the command bar
@@ -209,8 +209,9 @@ class ProjectManagerApp(App):
             event.stop()
             return
         if event.key == "z":
-            if self._z_count >= 3:
-                # zzz → cancel (toggle off)
+            if self._z_count >= 2:
+                # zzz → cancel (toggle off).  Only z and zz are valid prefixes;
+                # a third z resets.
                 self._z_count = 0
                 self._clear_log_message()
             else:
@@ -276,7 +277,7 @@ class ProjectManagerApp(App):
         # In-flight PR action tracking (prevents concurrent/duplicate PR commands)
         self._inflight_pr_action: str | None = None
         self._log_sticky_until: float = 0.0  # monotonic time until which log line is protected
-        # z modifier key state (vim-style prefix, supports z/zz/zzz)
+        # z modifier key state (vim-style prefix, supports z/zz)
         self._z_count: int = 0
         # Review loop state: dict of pr_id -> ReviewLoopState (supports multiple)
         self._review_loops: dict = {}
@@ -304,7 +305,7 @@ class ProjectManagerApp(App):
         self._w_cancel_timer = None
         # QA loop state (purely in-memory)
         self._qa_loops: dict = {}
-        # Self-driving QA state (zz t / zzz t — tracks pass counts per PR)
+        # Self-driving QA state (zz t — tracks pass counts per PR)
         self._self_driving_qa: dict = {}
         # Command-input race condition fix: buffer keystrokes between / and focus
         self._command_pending: bool = False
@@ -313,7 +314,7 @@ class ProjectManagerApp(App):
     def _consume_z(self) -> int:
         """Atomically read and clear the z modifier count.
 
-        Returns 0 (no z), 1 (z), 2 (zz), or 3 (zzz).
+        Returns 0 (no z), 1 (z), or 2 (zz).
         Non-zero is truthy, so ``if app._consume_z():`` still works
         for callers that only care about "was z pressed".
         """
@@ -675,14 +676,10 @@ class ProjectManagerApp(App):
         elif z == 1:
             # z d = fresh done (kill existing review window), OR stop loop if running
             review_loop_ui.stop_loop_or_fresh_done(self)
-        elif z == 2:
-            # zz d = start review loop (stops on PASS or PASS_WITH_SUGGESTIONS),
-            #        or stop loop if running
-            review_loop_ui.start_or_stop_loop(self, stop_on_suggestions=True)
         else:
-            # zzz d = start strict review loop (stops only on PASS),
-            #         or stop loop if running
-            review_loop_ui.start_or_stop_loop(self, stop_on_suggestions=False)
+            # zz d = start review loop (iterates until PASS),
+            #        or stop loop if running
+            review_loop_ui.start_or_stop_loop(self)
 
     def action_merge_pr(self) -> None:
         pr_view.merge_pr(self)
@@ -1050,11 +1047,10 @@ class ProjectManagerApp(App):
     def action_start_qa_on_pr(self) -> None:
         """Start QA on the selected PR.
 
-        Keybinding variants (same z-prefix pattern as review):
+        Keybinding variants:
           t      — one-shot QA run (or focus existing window)
           z t    — fresh start (stop running QA, kill old windows, restart)
-          zz t   — start/stop QA loop (lenient)
-          zzz t  — start/stop QA loop (strict)
+          zz t   — start/stop QA loop
         """
         from pm_core.tui import qa_loop_ui
         tree = self.query_one("#tech-tree", TechTree)
@@ -1067,10 +1063,8 @@ class ProjectManagerApp(App):
             qa_loop_ui.focus_or_start_qa(self, pr_id)
         elif z == 1:
             qa_loop_ui.fresh_start_qa(self, pr_id)
-        elif z == 2:
-            qa_loop_ui.start_or_stop_qa_loop(self, pr_id, strict=False)
         else:
-            qa_loop_ui.start_or_stop_qa_loop(self, pr_id, strict=True)
+            qa_loop_ui.start_or_stop_qa_loop(self, pr_id)
 
     def on_qaitem_selected(self, message: QAItemSelected) -> None:
         _log.debug("qa item selected: %s", message.item_id)

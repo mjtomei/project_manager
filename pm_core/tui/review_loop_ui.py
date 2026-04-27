@@ -7,37 +7,25 @@ Keybindings (mapped to the ``d`` key — "Review" — in the TUI):
   d       — Mark PR as in_review and open review window.
   z d     — If a loop is running for the selected PR, make this iteration
              the last one.  Otherwise, perform a fresh ``pr review``.
-  zz d    — Start a review loop (stops on PASS or PASS_WITH_SUGGESTIONS).
-             If a loop is already running, make this iteration the last one.
-  zzz d   — Start a strict review loop (stops only on full PASS).
+  zz d    — Start a review loop (iterates until PASS).
              If a loop is already running, make this iteration the last one.
 """
 
 from pm_core.paths import configure_logger
 from pm_core import store
-from pm_core.loop_shared import (
-    extract_verdict_from_content,
-    VerdictStabilityTracker,
-)
 from pm_core.review_loop import (
     ReviewLoopState,
     start_review_loop_background,
     VERDICT_PASS,
-    VERDICT_PASS_WITH_SUGGESTIONS,
     VERDICT_NEEDS_WORK,
     VERDICT_INPUT_REQUIRED,
 )
 
 _log = configure_logger("pm.tui.review_loop_ui")
 
-# Tracks consecutive polls where MERGED was detected per merge key.
-# Uses the same stability mechanism as review/watcher verdict detection.
-_merge_verdict_tracker = VerdictStabilityTracker()
-
 # Icons for review verdicts (used in log line)
 VERDICT_ICONS = {
     VERDICT_PASS: "[green bold]✓ PASS[/]",
-    VERDICT_PASS_WITH_SUGGESTIONS: "[yellow bold]~ PASS_WITH_SUGGESTIONS[/]",
     VERDICT_NEEDS_WORK: "[red bold]✗ NEEDS_WORK[/]",
     VERDICT_INPUT_REQUIRED: "[red bold]⏸ INPUT_REQUIRED[/]",
     "KILLED": "[red bold]☠ KILLED[/]",
@@ -80,11 +68,13 @@ def stop_loop_or_fresh_done(app) -> None:
 
 
 # ---------------------------------------------------------------------------
-# zz d / zzz d  — start or stop loop
+# zz d  — start or stop loop
 # ---------------------------------------------------------------------------
 
-def start_or_stop_loop(app, stop_on_suggestions: bool) -> None:
-    """Handle ``zz d`` / ``zzz d``: start loop or stop if one is running."""
+def start_or_stop_loop(app) -> None:
+    """Handle ``zz d``: start loop or stop if one is running."""
+    from pm_core.tui import auto_start as _auto_start
+
     pr_id, pr = _get_selected_pr(app)
     if not pr_id:
         app.log_message("No PR selected")
@@ -95,17 +85,24 @@ def start_or_stop_loop(app, stop_on_suggestions: bool) -> None:
         _stop_loop(app, pr_id)
         return
 
-    _start_loop(app, pr_id, pr, stop_on_suggestions)
+    _start_loop(app, pr_id, pr,
+                transcript_dir=str(_auto_start.get_transcript_dir(app)))
 
 
 # ---------------------------------------------------------------------------
 # Core start / stop
 # ---------------------------------------------------------------------------
 
-def _start_loop(app, pr_id: str, pr: dict | None, stop_on_suggestions: bool,
-                transcript_dir: str | None = None,
+def _start_loop(app, pr_id: str, pr: dict | None,
+                transcript_dir: str,
                 resume_state: ReviewLoopState | None = None) -> None:
     """Start a review loop for the given PR.
+
+    ``transcript_dir`` is required — hook-driven verdict polling needs a
+    per-iteration JSONL transcript.  Callers resolve it via
+    :func:`pm_core.tui.auto_start.get_transcript_dir` which is total
+    (lazily synthesises a ``manual-<token>`` run dir when auto-start
+    isn't active).
 
     When *resume_state* is provided, the loop continues from the saved
     iteration count and history instead of starting fresh.  Used by
@@ -126,6 +123,19 @@ def _start_loop(app, pr_id: str, pr: dict | None, stop_on_suggestions: bool,
         app.log_message(f"No workdir for {pr_id}. Start the PR first.")
         return
 
+    # Ensure the transcript directory exists on disk.  Fail fast here
+    # (before launching a podman container + review pane) if creation
+    # fails — better than surfacing the error after the pane is up.
+    try:
+        from pathlib import Path as _Path
+        _Path(transcript_dir).mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        app.log_message(
+            f"[red]Cannot create transcript dir[/] {transcript_dir}: {e}"
+        )
+        _log.warning("_start_loop: mkdir %s failed: %s", transcript_dir, e)
+        return
+
     # Get pm_root for launching the review window
     pm_root = str(store.find_project_root())
 
@@ -139,13 +149,12 @@ def _start_loop(app, pr_id: str, pr: dict | None, stop_on_suggestions: bool,
         mode_label = f"resumed at iteration {state.iteration}"
         _log.info("review_loop_ui: resuming loop for %s at iteration %d", pr_id, state.iteration)
     else:
-        state = ReviewLoopState(pr_id=pr_id, stop_on_suggestions=stop_on_suggestions)
+        state = ReviewLoopState(pr_id=pr_id)
         app._review_loops[pr_id] = state
-        mode_label = "strict (PASS only)" if not stop_on_suggestions else "normal"
-        _log.info("review_loop_ui: starting %s loop for %s", mode_label, pr_id)
+        _log.info("review_loop_ui: starting loop for %s", pr_id)
 
     app.log_message(
-        f"[bold]Review loop started[/] for {pr_id} [{mode_label}] loop={state.loop_id} — z d to stop",
+        f"[bold]Review loop started[/] for {pr_id} loop={state.loop_id} — z d to stop",
         sticky=3,
     )
 
@@ -302,7 +311,7 @@ def _poll_loop_state_inner(app) -> None:
         app.log_message(msg, sticky=10)
 
         # Auto-start next step: review pass → QA (then QA pass → merge)
-        if state.latest_verdict in (VERDICT_PASS, VERDICT_PASS_WITH_SUGGESTIONS):
+        if state.latest_verdict == VERDICT_PASS:
             _maybe_start_qa(app, state.pr_id)
 
     # Stop the timer if no loops are running AND no active PRs need animation
@@ -339,7 +348,7 @@ def _maybe_start_qa(app, pr_id: str) -> None:
 
     Called when review passes.  Works in two modes:
 
-    - **Self-driving QA** (``zz t`` / ``zzz t``): always transitions,
+    - **Self-driving QA** (``zz t``): always transitions,
       independent of auto-start.  The self-driving NEEDS_WORK path starts
       a review loop directly, so the review→QA transition must also be
       independent.
@@ -368,12 +377,14 @@ def _maybe_start_qa(app, pr_id: str) -> None:
             if pr_id not in allowed:
                 return
 
-    # If project has skip_qa enabled, skip QA and go straight to merge
+    # If project has skip_qa enabled, skip QA and go straight to merge.
+    # Merge only happens via _maybe_auto_merge (which requires
+    # auto-start to be enabled) — manual zz d / zz t do not auto-merge.
     project = (app._data or {}).get("project") or {}
     if project.get("skip_qa"):
         _log.info("auto_qa: skip_qa enabled, skipping QA for %s", pr_id)
         app.log_message(f"Auto-start: {pr_id} review passed, skipping QA (skip_qa enabled)")
-        _maybe_auto_merge(app, pr_id, force=bool(sd))
+        _maybe_auto_merge(app, pr_id)
         return
 
     # Transition PR status to "qa"
@@ -411,8 +422,12 @@ def _maybe_start_qa(app, pr_id: str) -> None:
 # Auto-merge passing reviews
 # ---------------------------------------------------------------------------
 
-def _maybe_auto_merge(app, pr_id: str, *, force: bool = False) -> None:
+def _maybe_auto_merge(app, pr_id: str) -> None:
     """Auto-merge a PR after a passing review/QA.
+
+    Only runs when auto-start is enabled and the PR is in the active
+    auto-start target's dependency tree.  Manual ``zz d`` / ``zz t``
+    never trigger merges — merge is an auto-start-only action.
 
     Runs ``pm pr merge --resolve-window --background <pr_id>``
     synchronously, then triggers ``auto_start.check_and_start()`` to
@@ -420,24 +435,19 @@ def _maybe_auto_merge(app, pr_id: str, *, force: bool = False) -> None:
     ``--resolve-window`` causes a Claude merge-resolution window to open;
     we register ``merge:<pr_id>`` in the idle tracker so
     ``_poll_impl_idle`` can detect when it finishes and re-attempt.
-
-    Args:
-        force: Skip the auto-start enabled/scope checks.  Used by
-            self-driving QA which operates independently of auto-start.
     """
     from pm_core.tui import auto_start as _auto_start
-    if not force and not _auto_start.is_enabled(app):
+    if not _auto_start.is_enabled(app):
         return
 
     # Scope to auto-start target's dependency tree
-    if not force:
-        target = _auto_start.get_target(app)
-        if target:
-            prs = app._data.get("prs") or []
-            allowed = _auto_start._transitive_deps(prs, target)
-            allowed.add(target)
-            if pr_id not in allowed:
-                return
+    target = _auto_start.get_target(app)
+    if target:
+        prs = app._data.get("prs") or []
+        allowed = _auto_start._transitive_deps(prs, target)
+        allowed.add(target)
+        if pr_id not in allowed:
+            return
 
     _log.info("auto_merge: review passed for %s, merging", pr_id)
     app.log_message(f"Auto-merge: {pr_id} review passed, merging")
@@ -507,7 +517,6 @@ def _on_merge_success(app, pr_id: str, merge_key: str, tracker,
     pending_merges.discard(pr_id)
     tracker.unregister(merge_key)
     active_merge_keys.discard(merge_key)
-    _merge_verdict_tracker.reset(merge_key)
     # check_and_start returns early if auto-start is off
     app.run_worker(_auto_start.check_and_start(app))
 
@@ -565,7 +574,6 @@ def _finalize_detected_merge(app, pr_id: str, merge_key: str,
     _kill_merge_window(app, pr_id)
     tracker.unregister(merge_key)
     active_merge_keys.discard(merge_key)
-    _merge_verdict_tracker.reset(merge_key)
 
     in_propagation = pr_id in app._merge_propagation_phase
 
@@ -622,7 +630,6 @@ def _handle_merge_input_required(app, pr_id: str, merge_key: str) -> None:
     app._merge_input_required_prs.add(pr_id)
 
     # Reset the verdict tracker so we can detect MERGED after the user helps
-    _merge_verdict_tracker.reset(merge_key)
 
     app.log_message(
         f"[red bold]⏸ Merge INPUT_REQUIRED[/] for {pr_id}: "
@@ -684,26 +691,29 @@ def _poll_impl_idle(app) -> None:
         active_pr_ids.add(pr_id)
         window_name = _pr_display_id(pr)
 
-        # Lazy pane resolution: register if not yet tracked or pane gone
+        # Lazy pane resolution: register if not yet tracked or pane gone.
+        # Hook-driven tracking requires the transcript path launched by
+        # ``pm pr start --transcript``; skip PRs without one (e.g. manual
+        # launches) — they won't auto-advance but also won't misfire.
         if not tracker.is_tracked(pr_id) or tracker.is_gone(pr_id):
             pane_id = _find_impl_pane(session, window_name)
-            if pane_id:
-                tracker.register(pr_id, pane_id)
-            else:
-                continue  # window not found, skip
+            if not pane_id:
+                continue
+            tdir = _auto_start.get_transcript_dir(app)
+            if not tdir:
+                continue
+            impl_transcript = str(tdir / f"impl-{pr_id}.jsonl")
+            try:
+                tracker.register(pr_id, pane_id, impl_transcript)
+            except ValueError:
+                # Symlink not yet created — try again next tick.
+                continue
 
         tracker.poll(pr_id)
 
         # Detect newly-idle in_progress PRs for auto-review
         if status == "in_progress" and tracker.became_idle(pr_id):
-            # Check if Claude is on an interactive selection screen (trust
-            # prompt, permission prompt, etc.) — that's not "done".
-            from pm_core.pane_idle import content_has_interactive_prompt
-            content = tracker.get_content(pr_id)
-            if content_has_interactive_prompt(content):
-                _log.info("impl_idle: %s idle but showing interactive prompt, resetting", pr_id)
-                tracker.mark_active(pr_id)
-            elif pr.get("spec_pending"):
+            if pr.get("spec_pending"):
                 # Spec generation paused for user input (ambiguity
                 # resolution).  The session is waiting, not done.
                 _log.info("impl_idle: %s idle but spec_pending, resetting", pr_id)
@@ -734,41 +744,45 @@ def _poll_impl_idle(app) -> None:
             pending_merges.discard(pr_id)
             merge_key = f"merge:{pr_id}"
             tracker.unregister(merge_key)
-            _merge_verdict_tracker.reset(merge_key)
             continue
 
         merge_key = f"merge:{pr_id}"
         window_name = f"merge-{_pr_display_id(pr)}"
 
-        # Lazy pane resolution
+        # Lazy pane resolution — requires the merge transcript launched
+        # by ``pm pr merge --resolve-window --transcript``.
         if not tracker.is_tracked(merge_key) or tracker.is_gone(merge_key):
             pane_id = _find_impl_pane(session, window_name)
-            if pane_id:
-                tracker.register(merge_key, pane_id)
-            else:
+            if not pane_id:
+                continue
+            tdir = _auto_start.get_transcript_dir(app)
+            if not tdir:
+                continue
+            merge_transcript = str(tdir / f"merge-{pr_id}.jsonl")
+            try:
+                tracker.register(merge_key, pane_id, merge_transcript)
+            except ValueError:
                 continue
 
         active_merge_keys.add(merge_key)
         tracker.poll(merge_key)
 
         # --- Primary: check for MERGED or INPUT_REQUIRED verdict ---
-        merge_content = tracker.get_content(merge_key)
-        if merge_content:
-            verdict = extract_verdict_from_content(
-                merge_content,
-                verdicts=("MERGED", "INPUT_REQUIRED"),
-                keywords=("MERGED", "INPUT_REQUIRED"),
-                log_prefix="merge_verdict",
+        merge_transcript_path = tracker.get_transcript_path(merge_key)
+        if merge_transcript_path:
+            from pm_core.verdict_transcript import extract_verdict_from_transcript
+            verdict = extract_verdict_from_transcript(
+                merge_transcript_path, ("MERGED", "INPUT_REQUIRED"),
             )
-            if _merge_verdict_tracker.update(merge_key, verdict):
-                if verdict == "MERGED":
-                    _log.info("merge_verdict: MERGED detected for %s (stable)", pr_id)
-                    app.log_message(f"MERGED detected for {pr_id}, finalizing merge")
-                    _finalize_detected_merge(app, pr_id, merge_key, tracker,
-                                             pending_merges, active_merge_keys)
-                elif verdict == "INPUT_REQUIRED":
-                    _log.info("merge_verdict: INPUT_REQUIRED detected for %s (stable)", pr_id)
-                    _handle_merge_input_required(app, pr_id, merge_key)
+            if verdict == "MERGED":
+                _log.info("merge_verdict: MERGED detected for %s", pr_id)
+                app.log_message(f"MERGED detected for {pr_id}, finalizing merge")
+                _finalize_detected_merge(app, pr_id, merge_key, tracker,
+                                         pending_merges, active_merge_keys)
+                continue
+            if verdict == "INPUT_REQUIRED":
+                _log.info("merge_verdict: INPUT_REQUIRED detected for %s", pr_id)
+                _handle_merge_input_required(app, pr_id, merge_key)
                 continue
 
         # --- Fallback: idle detection (for _pending_merge_prs entries only) ---
@@ -776,14 +790,6 @@ def _poll_impl_idle(app) -> None:
             continue
 
         if tracker.became_idle(merge_key):
-            # Check for interactive prompt before treating as idle
-            from pm_core.pane_idle import content_has_interactive_prompt
-            merge_content = tracker.get_content(merge_key)
-            if content_has_interactive_prompt(merge_content):
-                _log.info("merge_idle: %s idle but showing interactive prompt, resetting", pr_id)
-                tracker.mark_active(merge_key)
-                continue
-
             _log.info("merge_idle: merge window idle for %s, re-attempting merge", pr_id)
             app.log_message(f"Merge window idle for {pr_id}, re-attempting merge")
 
@@ -800,7 +806,6 @@ def _poll_impl_idle(app) -> None:
     for key in tracker.tracked_keys():
         if key.startswith("merge:") and key not in active_merge_keys:
             tracker.unregister(key)
-            _merge_verdict_tracker.reset(key)
 
     # Unregister PRs no longer active
     for key in tracker.tracked_keys():
@@ -857,5 +862,5 @@ def _auto_review_idle_prs(app, newly_idle: list[tuple[str, dict]]) -> None:
             # Start a review loop (same as _auto_start_review_loops)
             loop = app._review_loops.get(pr_id)
             if not loop:
-                _start_loop(app, pr_id, updated_pr, stop_on_suggestions=False,
-                             transcript_dir=str(tdir) if tdir else None)
+                _start_loop(app, pr_id, updated_pr,
+                             transcript_dir=str(tdir))

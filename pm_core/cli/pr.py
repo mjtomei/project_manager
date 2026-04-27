@@ -1014,8 +1014,23 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     if pm_session:
         if tmux_mod.session_exists(pm_session):
             window_name = _pr_display_id(pr_entry)
+            # When running in a container, Claude's cwd is /workspace —
+            # transcript symlinks must target where Claude actually writes
+            # (see pr_review for the same pattern).
+            from pm_core.container import (
+                is_container_mode_enabled as _is_container_enabled,
+                _CONTAINER_WORKDIR,
+            )
+            if _is_container_enabled():
+                _claude_cwd = _CONTAINER_WORKDIR
+                _claude_write_dir = str(work_path)
+            else:
+                _claude_cwd = str(work_path)
+                _claude_write_dir = None
             cmd = build_claude_shell_cmd(prompt=prompt,
-                                         transcript=transcript, cwd=str(work_path),
+                                         transcript=transcript,
+                                         cwd=_claude_cwd,
+                                         write_dir=_claude_write_dir,
                                          model=resolved_model,
                                          provider=resolved_provider,
                                          effort=_resolution.effort)
@@ -1167,8 +1182,22 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                                                       review_loop=review_loop,
                                                       review_iteration=review_iteration,
                                                       review_loop_id=review_loop_id)
+    # When the review runs in a container, Claude's cwd is /workspace —
+    # the transcript symlink must target ~/.claude/projects/-workspace/
+    # where Claude actually writes, not the host workdir's mangled dir.
+    # Host path is passed as write_dir so the prompt file lands on the
+    # mounted volume.  Matches the QA pattern in qa_loop.py.
+    from pm_core.container import is_container_mode_enabled as _is_container_enabled, _CONTAINER_WORKDIR
+    if _is_container_enabled():
+        _claude_cwd = _CONTAINER_WORKDIR
+        _claude_write_dir = workdir
+    else:
+        _claude_cwd = workdir
+        _claude_write_dir = None
     claude_cmd = build_claude_shell_cmd(prompt=review_prompt,
-                                         transcript=transcript, cwd=workdir,
+                                         transcript=transcript,
+                                         cwd=_claude_cwd,
+                                         write_dir=_claude_write_dir,
                                          model=_resolution.model,
                                          provider=_resolution.provider,
                                          effort=_resolution.effort)

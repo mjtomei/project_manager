@@ -31,11 +31,10 @@ from pm_core.spec_gen import get_spec as _get_qa_spec
 from pm_core.loop_shared import (
     find_claude_pane,
     get_pm_session,
-    extract_verdict_from_content,
     poll_for_verdict,
     VERDICT_TAIL_LINES,
-    VerdictStabilityTracker,
 )
+from pm_core.verdict_transcript import extract_verdict_from_transcript
 
 _log = configure_logger("pm.qa_loop")
 
@@ -48,7 +47,6 @@ ALL_VERDICTS = (VERDICT_PASS, VERDICT_NEEDS_WORK, VERDICT_INPUT_REQUIRED)
 _QA_KEYWORDS = ("INPUT_REQUIRED", "NEEDS_WORK", "PASS")
 
 _POLL_INTERVAL = 5
-_TICK_INTERVAL = 1
 _VERDICT_GRACE_PERIOD = 30  # QA sessions take a while to run
 _PLANNER_TIMEOUT = 60 * 60  # seconds to wait for planner output
 _PLANNER_GRACE = 15  # seconds before accepting planner completion
@@ -139,6 +137,8 @@ class QAScenario:
     worktree_path: str | None = None
     container_name: str | None = None
     transcript_path: str | None = None
+    session_id: str | None = None
+    concretize_session_id: str | None = None
 
 
 @dataclass
@@ -307,29 +307,6 @@ def _scenario_window_name(pr_data: dict, scenario_index: int) -> str:
 
 # Alias for backward compat with tests; prefer find_claude_pane directly.
 _get_scenario_pane = find_claude_pane
-
-# Number of lines before the verdict to use as a fingerprint for
-# detecting stale re-detections of the same verdict.
-_VERDICT_CONTEXT_LINES = 5
-
-
-def _verdict_context_fingerprint(content: str, verdict: str) -> str:
-    """Return the lines immediately before *verdict* in *content*.
-
-    Searches from the bottom of *content* (matching the behaviour of
-    ``extract_verdict_from_content``) and returns the
-    ``_VERDICT_CONTEXT_LINES`` lines that precede the verdict keyword.
-    Two captures with the same fingerprint mean the verdict hasn't
-    changed — it's the same stale output.
-    """
-    lines = content.strip().splitlines()
-    for i in range(len(lines) - 1, -1, -1):
-        cleaned = re.sub(r'[*`]', '', lines[i]).strip()
-        if cleaned == verdict:
-            start = max(0, i - _VERDICT_CONTEXT_LINES)
-            return "\n".join(lines[start:i])
-    return ""
-
 
 def _cleanup_stale_scenario_windows(session: str, pr_data: dict,
                                     include_main: bool = True) -> None:
@@ -762,6 +739,7 @@ def _build_concretize_cmd(
     container_name: str | None = None,
     instruction_content: str | None = None,
     write_dir: str | None = None,
+    session_id: str | None = None,
 ) -> str:
     """Build the shell command for the concretization step."""
     from pm_core.claude_launcher import build_claude_shell_cmd
@@ -777,6 +755,7 @@ def _build_concretize_cmd(
         prompt=prompt,
         model=resolution.model, provider=resolution.provider,
         effort=resolution.effort, cwd=cwd, write_dir=write_dir,
+        session_id=session_id,
     )
 
     if container_name:
@@ -791,6 +770,8 @@ def _concretize_scenario(
     pr_data: dict,
     project_data: dict,
     pane_id: str,
+    session_id: str,
+    scenario_cwd: str,
     instruction_content: str | None = None,
 ) -> str | None:
     """Poll a concretization pane and return refined steps.
@@ -800,26 +781,16 @@ def _concretize_scenario(
     Returns None if concretization failed/timed out.
     The pane is left open for user review.
     """
-    from pm_core import tmux as tmux_mod
-
-    base_branch = project_data.get("project", {}).get("base_branch", "master")
-    pr_branch = pr_data.get("branch", "")
-    prompt = _build_concretization_prompt(scenario, pr_branch, base_branch,
-                                          instruction_content=instruction_content)
+    from pm_core.claude_launcher import transcript_path_for
 
     _log.info("Concretization started for scenario %d in pane %s",
               scenario.index, pane_id)
 
-    # Poll for REFINED_STEPS_END — uses prompt_text filtering to skip
-    # the example marker in the prompt itself.
+    transcript_path = str(transcript_path_for(scenario_cwd, session_id))
     content = poll_for_verdict(
-        pane_id,
+        pane_id, transcript_path,
         verdicts=_CONCRETIZE_VERDICTS,
-        keywords=_CONCRETIZE_KEYWORDS,
-        prompt_text=prompt,
         grace_period=_CONCRETIZE_GRACE,
-        poll_interval=_POLL_INTERVAL,
-        tick_interval=_TICK_INTERVAL,
         log_prefix=f"qa-concretize-{scenario.index}",
     )
 
@@ -1028,9 +999,12 @@ def _launch_scenarios_in_tmux(
         transcript = _scenario_transcript_path(state.qa_workdir, scenario.index)
         win_name = _scenario_window_name(pr_data, scenario.index)
 
+        import uuid as _uuid
+        scenario.concretize_session_id = str(_uuid.uuid4())
         concretize_cmd = _build_concretize_cmd(
             scenario, pr_data, data, cwd=scenario_cwd,
-            instruction_content=instruction_content)
+            instruction_content=instruction_content,
+            session_id=scenario.concretize_session_id)
         try:
             concretize_pane = tmux_mod.new_window_get_pane(
                 session, win_name, concretize_cmd,
@@ -1082,8 +1056,12 @@ def _launch_scenarios_in_tmux(
             win_name: str,
             instruction_content: str | None = None,
     ) -> None:
-        refined_steps = _concretize_scenario(scenario, pr_data, data, concretize_pane,
-                                             instruction_content=instruction_content)
+        refined_steps = _concretize_scenario(
+            scenario, pr_data, data, concretize_pane,
+            session_id=scenario.concretize_session_id,
+            scenario_cwd=scenario_cwd,
+            instruction_content=instruction_content,
+        )
         if refined_steps:
             scenario.steps = refined_steps
 
@@ -1107,6 +1085,11 @@ def _launch_scenarios_in_tmux(
             scenario.window_name = win_name
             scenario.pane_id = scenario_pane
             scenario.transcript_path = transcript
+            try:
+                from pm_core.claude_launcher import session_id_from_transcript
+                scenario.session_id = session_id_from_transcript(transcript)
+            except Exception:
+                scenario.session_id = None
         except Exception:
             _log.warning("Failed to split scenario pane for scenario %d",
                          scenario.index, exc_info=True)
@@ -1243,10 +1226,13 @@ def _launch_scenarios_in_containers(
 
         win_name = _scenario_window_name(pr_data, scenario.index)
 
+        import uuid as _uuid
+        scenario.concretize_session_id = str(_uuid.uuid4())
         concretize_cmd = _build_concretize_cmd(
             scenario, pr_data, data, cwd=container_workdir,
             container_name=cname, instruction_content=instruction_content,
-            write_dir=str(clone_path))
+            write_dir=str(clone_path),
+            session_id=scenario.concretize_session_id)
         try:
             concretize_pane = tmux_mod.new_window_get_pane(
                 session, win_name, concretize_cmd,
@@ -1296,8 +1282,12 @@ def _launch_scenarios_in_containers(
             clone_path: Path,
             instruction_content: str | None = None,
     ) -> None:
-        refined_steps = _concretize_scenario(scenario, pr_data, data, concretize_pane,
-                                             instruction_content=instruction_content)
+        refined_steps = _concretize_scenario(
+            scenario, pr_data, data, concretize_pane,
+            session_id=scenario.concretize_session_id,
+            scenario_cwd=container_workdir,
+            instruction_content=instruction_content,
+        )
         if refined_steps:
             scenario.steps = refined_steps
 
@@ -1325,6 +1315,11 @@ def _launch_scenarios_in_containers(
             scenario.window_name = win_name
             scenario.pane_id = scenario_pane
             scenario.transcript_path = transcript
+            try:
+                from pm_core.claude_launcher import session_id_from_transcript
+                scenario.session_id = session_id_from_transcript(transcript)
+            except Exception:
+                scenario.session_id = None
         except Exception:
             _log.warning("Failed to split scenario pane for scenario %d",
                          scenario.index, exc_info=True)
@@ -1434,6 +1429,11 @@ def _relaunch_scenario_window(
         scenario.window_name = win_name
         scenario.pane_id = pane_id
         scenario.transcript_path = transcript
+        try:
+            from pm_core.claude_launcher import session_id_from_transcript
+            scenario.session_id = session_id_from_transcript(transcript)
+        except Exception:
+            scenario.session_id = None
         _log.info("Relaunched scenario %d in window %s", scenario.index, win_name)
         try:
             from pm_core import pane_layout
@@ -1493,7 +1493,6 @@ def _poll_tmux_verdicts(
     _launch_queue: list[QAScenario] = list(queued_scenarios or [])
     _queued_indices: set[int] = {s.index for s in _launch_queue}
 
-    tracker = VerdictStabilityTracker()
     pending = {s.index for s in state.scenarios if s.window_name}
     retry_counts: dict[int, int] = {}  # scenario_index -> retries used
     # Track how many verification failures each scenario has had
@@ -1503,15 +1502,14 @@ def _poll_tmux_verdicts(
     # Results from background verification threads
     verification_results: dict[int, tuple[bool, str]] = {}
     verification_lock = threading.Lock()
-    # Fingerprint of the lines before the verdict when it was last
-    # accepted — used to detect stale re-detections.
-    verdict_context: dict[int, str] = {}
-    # Idle-reminder state: track last seen content hash and when it changed,
-    # plus when we last sent a reminder, keyed by scenario index.
+    # Idle-reminder state: when we last sent a reminder, keyed by scenario index.
     _reminder_timeout = _get_verdict_reminder_timeout()
-    _last_content_hash: dict[int, str] = {}
-    _last_content_change: dict[int, float] = {}
     _last_reminder_sent: dict[int, float] = {}
+    # Hook-driven idle detection: gate verdict extraction on fresh
+    # idle_prompt events for each scenario's Claude session.  Scenarios
+    # without a session_id cannot be polled and are marked INPUT_REQUIRED.
+    from pm_core import hook_events as _hook_events
+    _last_scenario_hook_ts: dict[int, float] = {}
 
     # Scenarios that failed to create a window get INPUT_REQUIRED immediately
     # (but skip queued scenarios — they don't have windows yet by design)
@@ -1676,13 +1674,13 @@ def _poll_tmux_verdicts(
                             tmux_mod.send_keys(pane_id, "")
                         _log.info("Sent follow-up message to scenario %d pane",
                                   scenario_idx)
-                        # Clear verdict and put back in pending.
-                        # Keep verdict_context so the old stale PASS is
-                        # still recognised and skipped — only a genuinely
-                        # new verdict (with different surrounding lines)
+                        # Clear verdict and put back in pending.  The next
+                        # idle_prompt event for this scenario re-triggers
+                        # JSONL extraction; only a genuinely new assistant
+                        # turn (written after the cleared hook timestamp)
                         # will be accepted.
                         state.scenario_verdicts.pop(scenario_idx, None)
-                        tracker.reset(f"qa-{state.pr_id}-{scenario_idx}")
+                        _last_scenario_hook_ts.pop(scenario_idx, None)
                         pending.add(scenario_idx)
                         state.latest_output = (
                             f"Scenario {scenario_idx} ({scenario.title}): "
@@ -1727,6 +1725,7 @@ def _poll_tmux_verdicts(
                     ):
                         # Reset grace period for this retry
                         grace_start = time.monotonic()
+                        _last_scenario_hook_ts.pop(scenario.index, None)
                         continue
                     # Relaunch failed — will retry on next poll iteration
                     continue
@@ -1742,58 +1741,57 @@ def _poll_tmux_verdicts(
             if in_grace:
                 continue
 
-            content = tmux_mod.capture_pane(
-                pane_id, full_scrollback=True,
+            # Hook-driven gate: require a fresh idle_prompt/Stop event
+            # before doing any pane work.  Scenarios without a session_id
+            # cannot participate in hook-driven polling — mark them
+            # INPUT_REQUIRED so they don't silently stall.
+            if not scenario.session_id:
+                _log.warning("Scenario %d has no session_id — marking INPUT_REQUIRED "
+                             "(hook-driven polling requires one)", scenario.index)
+                state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+                pending.discard(scenario.index)
+                verdicts_changed = True
+                _launch_next_queued()
+                continue
+            ev = _hook_events.read_event(scenario.session_id)
+            ev_ts = float((ev or {}).get("timestamp") or 0)
+            last_ts = _last_scenario_hook_ts.get(scenario.index, 0.0)
+            if ev is None or ev_ts <= last_ts or ev.get("event_type") != "idle_prompt":
+                # No new idle_prompt — skip this scenario this tick.
+                # Stop fires per-turn (not just at session end); relying
+                # on it here would drift from spec R9 and introduce
+                # false turn-boundary signals for multi-turn work.
+                continue
+            _last_scenario_hook_ts[scenario.index] = ev_ts
+
+            # Read verdict straight from the JSONL transcript.  The hook
+            # event is the turn-boundary gate; the transcript is the
+            # source of truth for what the agent actually said.
+            verdict = extract_verdict_from_transcript(
+                scenario.transcript_path, ALL_VERDICTS,
             )
 
-            # Track content changes for idle-reminder logic.
-            # Only active after the agent pane exists (pane_id is the agent,
-            # not the concretizer) to avoid noisy reminders during setup.
-            if _reminder_timeout is not None and scenario.pane_id:
-                content_hash = str(hash(content))
+            # Idle-reminder: when the agent emits idle_prompt without a
+            # verdict, nudge once per _reminder_timeout window.
+            if (verdict is None and _reminder_timeout is not None
+                    and scenario.pane_id):
                 now = time.monotonic()
-                if _last_content_hash.get(scenario.index) != content_hash:
-                    _last_content_hash[scenario.index] = content_hash
-                    _last_content_change[scenario.index] = now
-                else:
-                    idle_secs = now - _last_content_change.get(scenario.index, now)
-                    last_reminded = _last_reminder_sent.get(scenario.index, 0.0)
-                    if (idle_secs >= _reminder_timeout
-                            and now - last_reminded >= _reminder_timeout):
-                        reminder = (
-                            "Reminder: your verdict must appear alone on its own "
-                            "line — the line must contain only PASS, NEEDS_WORK, "
-                            "or INPUT_REQUIRED with no other text. Please output "
-                            "your verdict now if you have reached a conclusion."
-                        )
-                        tmux_mod.send_keys(pane_id, reminder)
-                        _last_reminder_sent[scenario.index] = now
-                        _log.info(
-                            "Sent verdict-format reminder to scenario %d "
-                            "(idle %.0fs)", scenario.index, idle_secs,
-                        )
+                last_reminded = _last_reminder_sent.get(scenario.index, 0.0)
+                if now - last_reminded >= _reminder_timeout:
+                    reminder = (
+                        "Reminder: your verdict must appear alone on its own "
+                        "line — the line must contain only PASS, NEEDS_WORK, "
+                        "or INPUT_REQUIRED with no other text. Please output "
+                        "your verdict now if you have reached a conclusion."
+                    )
+                    tmux_mod.send_keys(pane_id, reminder)
+                    _last_reminder_sent[scenario.index] = now
+                    _log.info(
+                        "Sent verdict-format reminder to scenario %d",
+                        scenario.index,
+                    )
 
-            verdict = extract_verdict_from_content(
-                content,
-                verdicts=ALL_VERDICTS,
-                keywords=_QA_KEYWORDS,
-                log_prefix=f"qa-{scenario.index}",
-            )
-
-            # Check if this is the same stale verdict we already
-            # accepted by comparing the lines immediately before the
-            # verdict keyword.  New output means a genuine re-verdict.
             if verdict:
-                ctx = _verdict_context_fingerprint(content, verdict)
-                prev_ctx = verdict_context.get(scenario.index)
-                if prev_ctx is not None and ctx == prev_ctx:
-                    # Same context before the verdict — stale, skip
-                    continue
-
-            key = f"qa-{state.pr_id}-{scenario.index}"
-            if tracker.update(key, verdict):
-                if verdict:
-                    verdict_context[scenario.index] = _verdict_context_fingerprint(content, verdict)
                 state.scenario_verdicts[scenario.index] = verdict
                 pending.discard(scenario.index)
                 verdicts_changed = True
@@ -1810,9 +1808,13 @@ def _poll_tmux_verdicts(
                     _notify()
 
                     verifying.add(scenario.index)
+                    # pane_output fallback is only consulted when the
+                    # transcript is missing — which it never is in the
+                    # hook-driven path — so pass "" here instead of
+                    # scraping the pane.
                     t = threading.Thread(
                         target=_run_verification,
-                        args=(scenario, verdict, content),
+                        args=(scenario, verdict, ""),
                         daemon=True,
                         name=f"qa-verify-{state.pr_id}-{scenario.index}",
                     )
@@ -2048,12 +2050,15 @@ def _verify_single_scenario(
         _verify_cwd = str(Path(scenario.worktree_path).parent.parent)  # s-N/repo -> qa_workdir
     elif qa_workdir:
         _verify_cwd = qa_workdir
+    import uuid as _uuid
+    verify_session_id = str(_uuid.uuid4())
     verify_cmd = build_claude_shell_cmd(
         prompt=prompt,
         model=resolution.model,
         provider=resolution.provider,
         effort=resolution.effort,
         cwd=_verify_cwd,
+        session_id=verify_session_id,
     )
 
     # Split the scenario window using the standard pane management system
@@ -2092,20 +2097,19 @@ def _verify_single_scenario(
                    scenario.index, exc_info=True)
 
     # Poll the verification pane for VERIFIED or FLAGGED.
-    # Pass prompt_text so the prompt's example FLAGGED_END marker
-    # is filtered out — only the verifier's actual output counts.
+    from pm_core.claude_launcher import transcript_path_for
+    if not _verify_cwd:
+        _log.warning("Verification: no cwd available for scenario %d, "
+                     "trusting original verdict", scenario.index)
+        return True, "", verify_pane
+    verify_transcript = str(transcript_path_for(_verify_cwd, verify_session_id))
     _log.info("Verification: polling verify_pane=%s for scenario %d "
-              "(prompt_text=%d chars)",
-              verify_pane, scenario.index, len(prompt))
+              "(transcript=%s)", verify_pane, scenario.index, verify_transcript)
     try:
         content = poll_for_verdict(
-            verify_pane,
+            verify_pane, verify_transcript,
             verdicts=_VERIFICATION_VERDICTS,
-            keywords=_VERIFICATION_KEYWORDS,
-            prompt_text=prompt,
             grace_period=_VERDICT_GRACE_PERIOD,
-            poll_interval=_POLL_INTERVAL,
-            tick_interval=_TICK_INTERVAL,
             stop_check=stop_check,
             log_prefix=f"qa-verify-{scenario.index}",
         )
@@ -2122,12 +2126,8 @@ def _verify_single_scenario(
     if content:
         _log.info("Verification: got %d chars of content from verify_pane=%s "
                   "for scenario %d", len(content), verify_pane, scenario.index)
-        v = extract_verdict_from_content(
-            content,
-            verdicts=_VERIFICATION_VERDICTS,
-            keywords=_VERIFICATION_KEYWORDS,
-            prompt_text=prompt,
-            log_prefix=f"qa-verify-{scenario.index}",
+        v = extract_verdict_from_transcript(
+            verify_transcript, _VERIFICATION_VERDICTS,
         )
         if v == "VERIFIED":
             _log.info("Verification: scenario %d VERIFIED", scenario.index)
@@ -2246,10 +2246,13 @@ def run_qa_sync(
             data, state.pr_id, session,
             scenario_start=scenario_start,
         )
+        import uuid as _uuid
+        planner_session_id = str(_uuid.uuid4())
         cmd = build_claude_shell_cmd(
             prompt=planner_prompt,
             model=_qa_planning_resolution.model, provider=_qa_planning_resolution.provider, effort=_qa_planning_resolution.effort,
-            cwd=workdir_path)
+            cwd=workdir_path,
+            session_id=planner_session_id)
 
         # If the main QA window already exists, remember which sessions
         # were watching it so we can switch them to the replacement window
@@ -2319,12 +2322,27 @@ def run_qa_sync(
         plan_found = False
         deadline = time.monotonic() + _PLANNER_TIMEOUT
         poll_start = time.monotonic()
+        from pm_core import hook_events as _hook_events
+        _hook_baseline = time.time()
         while time.monotonic() < deadline:
             if state.stop_requested:
                 break
             if not tmux_mod.pane_exists(planner_pane):
                 _log.info("Planner pane exited")
                 break
+
+            _remaining = max(0.0, deadline - time.monotonic())
+            ev = _hook_events.wait_for_event(
+                planner_session_id,
+                event_types={"idle_prompt"},
+                timeout=min(15.0, _remaining),
+                newer_than=_hook_baseline,
+                stop_check=lambda: state.stop_requested,
+            )
+            if ev is None:
+                # No idle_prompt yet — loop so we re-check deadline/stop.
+                continue
+            _hook_baseline = float(ev.get("timestamp") or _hook_baseline)
 
             content = tmux_mod.capture_pane(planner_pane, full_scrollback=True)
             elapsed = time.monotonic() - poll_start
@@ -2333,7 +2351,6 @@ def run_qa_sync(
                       has_end, len(content), elapsed)
 
             if has_end and elapsed >= _PLANNER_GRACE:
-                # Try parsing — only accept if we get real scenarios
                 trial = parse_qa_plan(content, pm_root=pm_root)
                 if trial:
                     _log.info("planner poll: parsed %d scenario(s), accepting",
@@ -2341,11 +2358,8 @@ def run_qa_sync(
                     state.plan_output = content
                     plan_found = True
                     break
-                else:
-                    _log.info("planner poll: has_end but 0 scenarios, "
-                              "likely prompt template — continuing")
-
-            time.sleep(5)
+                _log.info("planner poll: has_end but 0 scenarios, "
+                          "likely prompt template — continuing")
 
         if not plan_found and not state.plan_output:
             # Try capturing whatever the planner produced
