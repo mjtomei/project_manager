@@ -455,6 +455,32 @@ class TestCreateContainer:
     @patch("pm_core.container._resolve_claude_binary", return_value=None)
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_runtime")
+    def test_mounts_pm_hooks_dir_and_receiver(self, mock_docker, mock_rm, mock_bin, mock_exists, _mock_running, _mock_runtime):
+        """Host ~/.pm/hooks and ~/.pm/hook_receiver.py are bind-mounted so
+        Claude Code hooks running inside the container surface events to
+        the host (R-Container-Mounts)."""
+        mock_docker.return_value = MagicMock(stdout="id\n", returncode=0)
+        config = ContainerConfig()
+
+        with patch("pm_core.container.Path.home", return_value=Path("/home/user")), \
+             patch.object(Path, "mkdir", return_value=None), \
+             patch.object(Path, "is_dir", return_value=True), \
+             patch.object(Path, "is_file", return_value=True), \
+             patch.object(Path, "exists", return_value=True):
+            create_container(name="test", config=config, workdir=Path("/w"))
+
+        args_str = " ".join(mock_docker.call_args_list[0][0])
+        # Hooks dir bind-mount: host ~/.pm/hooks → $CONTAINER_HOME/.pm/hooks
+        assert f"/home/user/.pm/hooks:{_CONTAINER_HOME}/.pm/hooks" in args_str
+        # Standalone receiver bind-mounted at the same absolute host path,
+        # read-only, so the hook command (which embeds that absolute path)
+        # works identically on the host and inside the container.
+        assert "/home/user/.pm/hook_receiver.py:/home/user/.pm/hook_receiver.py:ro" in args_str
+
+    @patch("pm_core.container.image_exists", return_value=True)
+    @patch("pm_core.container._resolve_claude_binary", return_value=None)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
     def test_copies_claude_json(self, mock_docker, mock_rm, mock_bin, mock_exists, _mock_running, _mock_runtime):
         """.claude.json is copied (not bind-mounted) into the container."""
         mock_docker.return_value = MagicMock(stdout="id\n", returncode=0)
