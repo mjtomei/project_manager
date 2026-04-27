@@ -294,11 +294,11 @@ class TestAutoMergeDirectly:
 
 
 # ---------------------------------------------------------------------------
-# 8. Self-driving QA not registered without explicit zz/zzz
+# 8. Self-driving QA not registered without explicit zz
 # ---------------------------------------------------------------------------
 
 class TestSelfDrivingNotRegistered:
-    """Without explicit zz t / zzz t, no self-driving state exists."""
+    """Without an explicit zz t, no self-driving state exists."""
 
     def test_no_self_driving_by_default(self, tmp_path):
         pm_dir, app = _make_project(tmp_path)

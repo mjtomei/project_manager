@@ -1,115 +1,122 @@
-"""Shared pane idle detection for the TUI.
+"""Pane idle detection backed entirely by Claude Code hook events.
 
-Tracks tmux panes and detects when their visible content stops changing,
-indicating that Claude (or whatever process is running) has gone idle.
+Tracks tmux panes that are running a Claude session; "idle" means the
+session has emitted an ``idle_prompt`` hook event (i.e. Claude's turn
+is over and it is waiting for the next user message).  The TUI polls
+this tracker on its timer; pane liveness is verified via
+``tmux.pane_exists`` but the *content* is never scraped.
 
-Thread-safe: the review loop runs in a background thread, while the TUI
-poll timer runs on the main thread.
+Every ``register`` caller must supply a ``transcript_path`` — either a
+symlink created by ``build_claude_shell_cmd(transcript=...)`` or a
+direct path computed via
+``claude_launcher.transcript_path_for(cwd, session_id)``.  The
+session_id is recovered from that path so callers don't have to thread
+the UUID through subprocess boundaries.
+
+Thread-safe: the review loop runs in a background thread while the
+TUI poll timer runs on the main thread.
 """
 
-import hashlib
-import re
+from __future__ import annotations
+
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from pm_core import tmux as tmux_mod
+from pm_core.claude_launcher import session_id_from_transcript
 from pm_core.paths import configure_logger
 
 _log = configure_logger("pm.pane_idle")
 
-# How long (seconds) content must be unchanged before we consider the pane idle.
-DEFAULT_IDLE_THRESHOLD = 30.0
-
-# Gum-style selection UIs show a list of options, one marked with ❯.
-# The other options are indented to the same level but without ❯.
-# We detect this by looking for a ❯ line with sibling option lines
-# above or below it at the same indent level — distinguishing it from
-# Claude Code's single input cursor (❯ with a proposed message).
-_GUM_SELECTOR_RE = re.compile(r"^\s*❯\s+\S", re.MULTILINE)
-_GUM_OPTION_RE = re.compile(r"^\s{2,}\S", re.MULTILINE)
-
-
-def content_has_interactive_prompt(content: str) -> bool:
-    """Return True if pane content shows a Claude interactive selection screen.
-
-    Detects gum-style selection UIs (trust prompt, permission prompt, etc.)
-    where Claude is waiting for user input rather than being genuinely idle.
-
-    A gum selection menu has a ❯ on the selected option with other options
-    on adjacent lines at similar indentation.  A bare Claude input cursor
-    (❯ with a proposed message) does NOT have neighbouring option lines,
-    so it won't match.
-    """
-    lines = content.splitlines()
-    for i, line in enumerate(lines):
-        if not _GUM_SELECTOR_RE.match(line):
-            continue
-        # Check if there's at least one sibling option line adjacent
-        above = lines[i - 1] if i > 0 else ""
-        below = lines[i + 1] if i < len(lines) - 1 else ""
-        if _GUM_OPTION_RE.match(above) or _GUM_OPTION_RE.match(below):
-            return True
-    return False
-
 
 @dataclass
 class PaneIdleState:
-    """Per-pane idle tracking state."""
+    """Per-pane state derived from Claude Code hook events.
+
+    Three orthogonal flags:
+
+    * ``idle`` — the agent emitted ``idle_prompt`` (turn ended, waiting
+      for the next user message).
+    * ``waiting_for_input`` — the agent emitted ``permission_prompt``
+      (Claude Code is showing its own tool-approval dialog and is
+      blocked until the user responds).  This is a distinct "the user
+      needs to do something *right now*" state that the TUI renders
+      differently from plain idle.
+    * ``gone`` — the tmux pane disappeared (session exited / crashed).
+
+    ``idle`` and ``waiting_for_input`` are mutually exclusive: the
+    latest hook event wins.  Subprocess-level prompts (gum, fzf, git
+    rebase -i) do not fire any hook and therefore don't flip either
+    flag — they're only visible in the pane content.
+    """
 
     pane_id: str
-    last_content_hash: str = ""
-    last_content: str = ""  # raw content for inspection by callers
-    last_change_time: float = field(default_factory=time.monotonic)
+    transcript_path: str
+    session_id: str
+    last_hook_ts: float = 0.0
     idle: bool = False
+    waiting_for_input: bool = False
     gone: bool = False
-    idle_notified: bool = False  # True once caller has been told about idle transition
+    idle_notified: bool = False
 
 
 class PaneIdleTracker:
-    """Track multiple panes for idle detection.
+    """Track multiple panes for hook-driven idle detection.
 
     Keys are arbitrary strings (typically pr_id).
     """
 
-    def __init__(self, idle_threshold: float = DEFAULT_IDLE_THRESHOLD) -> None:
+    def __init__(self) -> None:
         self._states: dict[str, PaneIdleState] = {}
         self._lock = threading.Lock()
-        self._idle_threshold = idle_threshold
 
     # -- Registration --
 
-    def register(self, key: str, pane_id: str) -> None:
-        """Start tracking a pane.  Resets state if the pane_id changed."""
+    def register(self, key: str, pane_id: str,
+                 transcript_path: str) -> None:
+        """Start tracking a pane.
+
+        *transcript_path* must resolve to a Claude session_id (either a
+        pm-generated symlink or a direct JSONL path with a UUID name).
+        Raises ValueError when no session_id can be recovered — callers
+        that don't have one should not register a pane here.
+        """
+        session_id = session_id_from_transcript(transcript_path)
+        if not session_id:
+            raise ValueError(
+                f"PaneIdleTracker.register: no session_id recoverable "
+                f"from transcript_path={transcript_path!r}"
+            )
         with self._lock:
             existing = self._states.get(key)
-            if existing and existing.pane_id == pane_id and not existing.gone:
-                return  # already tracking this exact pane
-            self._states[key] = PaneIdleState(pane_id=pane_id)
+            if (existing and existing.pane_id == pane_id and not existing.gone
+                    and existing.session_id == session_id):
+                return
+            self._states[key] = PaneIdleState(
+                pane_id=pane_id,
+                transcript_path=str(transcript_path),
+                session_id=session_id,
+            )
 
     def unregister(self, key: str) -> None:
-        """Stop tracking a pane."""
         with self._lock:
             self._states.pop(key, None)
 
-    # -- Polling (called from timer, does subprocess work) --
+    # -- Polling (called from timer) --
 
     def poll(self, key: str) -> bool:
-        """Capture pane content, update idle state, return *is_idle*.
+        """Check hook events + pane liveness.  Returns *is_idle*."""
+        from pm_core import hook_events
 
-        Performs one ``capture_pane`` + one ``pane_exists`` call per
-        invocation.  The subprocess calls run *outside* the lock.
-
-        Returns True if idle, False otherwise (including if key is unknown).
-        """
-        # Read state under lock
         with self._lock:
             state = self._states.get(key)
             if not state:
                 return False
             pane_id = state.pane_id
+            session_id = state.session_id
+            last_hook_ts = state.last_hook_ts
 
-        # Subprocess calls outside lock
         if not tmux_mod.pane_exists(pane_id):
             with self._lock:
                 state = self._states.get(key)
@@ -118,49 +125,72 @@ class PaneIdleTracker:
                     state.idle = False
             return False
 
-        content = tmux_mod.capture_pane(pane_id)
-        content_hash = hashlib.md5(content.encode()).hexdigest()
-        now = time.monotonic()
+        event = hook_events.read_event(session_id)
+        if not event:
+            with self._lock:
+                state = self._states.get(key)
+                return bool(state and state.idle)
 
-        # Update state under lock
+        ev_ts = float(event.get("timestamp") or 0)
         with self._lock:
             state = self._states.get(key)
             if not state or state.pane_id != pane_id:
-                return False  # re-registered while we were polling
-
+                return False
             state.gone = False
-            state.last_content = content
-            if content_hash != state.last_content_hash:
-                state.last_content_hash = content_hash
-                state.last_change_time = now
-                state.idle = False
-                state.idle_notified = False
-            elif now - state.last_change_time >= self._idle_threshold:
-                state.idle = True
-
+            if ev_ts > state.last_hook_ts:
+                state.last_hook_ts = ev_ts
+                etype = event.get("event_type")
+                if etype == "idle_prompt":
+                    if not state.idle:
+                        state.idle_notified = False
+                    state.idle = True
+                    state.waiting_for_input = False
+                elif etype == "permission_prompt":
+                    # Agent is blocked on Claude Code's tool-approval
+                    # dialog.  Flag as waiting for input and clear the
+                    # idle flag so the TUI renders a distinct indicator.
+                    state.waiting_for_input = True
+                    state.idle = False
+                    state.idle_notified = False
+                elif etype == "Stop":
+                    # Stop fires per-turn (not only at session end), so
+                    # we don't flip state on it.  pane_exists is the
+                    # authoritative session-gone signal.
+                    pass
             return state.idle
 
-    # -- Pure reads (safe from render path, zero cost) --
+    # -- Pure reads --
 
     def is_idle(self, key: str) -> bool:
-        """Return cached idle state.  Zero-cost read, no subprocess calls."""
         with self._lock:
             state = self._states.get(key)
             return state.idle if state else False
 
-    def get_content(self, key: str) -> str:
-        """Return last captured pane content.  Zero-cost read."""
+    def is_waiting_for_input(self, key: str) -> bool:
+        """Return True when the agent is blocked on Claude's permission dialog.
+
+        Distinct from :meth:`is_idle` — ``is_idle`` means "turn done,
+        waiting for next user prompt"; ``is_waiting_for_input`` means
+        "turn in progress but blocked on a tool-approval decision".
+        TUI renderers should surface this as a separate indicator so
+        users know to respond in the pane.
+        """
         with self._lock:
             state = self._states.get(key)
-            return state.last_content if state else ""
+            return state.waiting_for_input if state else False
+
+    def get_transcript_path(self, key: str) -> str | None:
+        """Return the transcript path registered for *key*, or None.
+
+        Callers can use this to read the JSONL directly
+        (e.g. :func:`pm_core.verdict_transcript.extract_verdict_from_transcript`)
+        without reaching into the tracker's internal state map.
+        """
+        with self._lock:
+            state = self._states.get(key)
+            return state.transcript_path if state else None
 
     def became_idle(self, key: str) -> bool:
-        """Return True once when a pane first transitions to idle.
-
-        Subsequent calls return False until the pane becomes active and
-        then idle again.  Used to trigger one-shot actions (e.g. auto-
-        starting a review loop).
-        """
         with self._lock:
             state = self._states.get(key)
             if state and state.idle and not state.idle_notified:
@@ -169,18 +199,15 @@ class PaneIdleTracker:
             return False
 
     def is_gone(self, key: str) -> bool:
-        """Return True if the pane has disappeared."""
         with self._lock:
             state = self._states.get(key)
             return state.gone if state else False
 
     def is_tracked(self, key: str) -> bool:
-        """Return True if the key is being tracked."""
         with self._lock:
             return key in self._states
 
     def tracked_keys(self) -> list[str]:
-        """Return a snapshot of all tracked keys."""
         with self._lock:
             return list(self._states.keys())
 
@@ -190,6 +217,7 @@ class PaneIdleTracker:
             state = self._states.get(key)
             if state:
                 state.idle = False
+                state.waiting_for_input = False
                 state.gone = False
                 state.idle_notified = False
-                state.last_change_time = time.monotonic()
+                state.last_hook_ts = time.time()

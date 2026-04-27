@@ -43,6 +43,7 @@ import shlex
 import shutil
 import subprocess
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -102,6 +103,55 @@ def _get_runtime() -> str:
     return get_global_setting_value("container-runtime", DEFAULT_RUNTIME)
 
 
+def _nested_podman_enabled() -> bool:
+    """True when the active pm project sets ``nested_podman: true``.
+
+    Used to opt into a relaxed container sandbox so a podman process inside
+    the container can spawn its own containers (rootless podman-in-podman).
+    Default off — the relaxations remove defense-in-depth layers (AppArmor,
+    /proc masks) and should only apply to projects that genuinely need it.
+    """
+    try:
+        from pm_core.store import find_project_root, load
+        data = load(find_project_root(), validate=False)
+        return bool(data.get("project", {}).get("nested_podman", False))
+    except Exception:
+        return False
+
+
+def _apparmor_enforcing() -> bool:
+    try:
+        return Path("/sys/module/apparmor/parameters/enabled").read_text().strip() == "Y"
+    except OSError:
+        return False
+
+
+def _selinux_enabled() -> bool:
+    return Path("/sys/fs/selinux/enforce").exists()
+
+
+def _nested_podman_run_args() -> list[str]:
+    """Extra ``podman run`` flags needed for nested rootless podman.
+
+    Image-side prerequisites (baked into pm-dev): ``uidmap`` with
+    ``newuidmap``/``newgidmap`` granted ``cap_setuid``/``cap_setgid`` via
+    file capabilities (NOT setuid — file caps are evaluated within the
+    user namespace), ``/etc/subuid`` + ``/etc/subgid`` entries for ``pm``
+    constrained to the inner namespace's UID range, and overlay storage
+    via ``fuse-overlayfs``.
+    """
+    args: list[str] = [
+        "--device", "/dev/fuse",
+        "--device", "/dev/net/tun",
+        "--security-opt", "unmask=ALL",
+    ]
+    if _apparmor_enforcing():
+        args.extend(["--security-opt", "apparmor=unconfined"])
+    if _selinux_enabled():
+        args.extend(["--security-opt", "label=disable"])
+    return args
+
+
 def _get_dockerfile_path() -> Path:
     """Return the path to the bundled Dockerfile."""
     return Path(__file__).resolve().parent.parent / "Dockerfile"
@@ -131,22 +181,56 @@ def build_image(tag: str = DEFAULT_IMAGE, quiet: bool = False) -> None:
         msg = result.stderr if quiet else "see output above"
         raise RuntimeError(f"Image build failed: {msg}")
     _log.info("Built image %s", tag)
+    _invalidate_image_exists_cache(tag)
 
 
 _build_lock = threading.Lock()
 
+# Cached image-existence results. When many QA scenarios launch in
+# parallel, each one's ``create_container`` call invokes ``image_exists``
+# concurrently; under load, ``podman image inspect`` hits the 10 s
+# subprocess timeout and reports false negatives, so scenarios spuriously
+# fail with "image not found".  Coalesce concurrent callers onto a
+# single inspect and cache the result for a short TTL.
+_image_exists_cache: dict[str, tuple[float, bool]] = {}
+_image_exists_lock = threading.Lock()
+_IMAGE_EXISTS_TTL = 30.0
+
 
 def image_exists(tag: str = DEFAULT_IMAGE) -> bool:
-    """Check if the container image exists locally."""
-    runtime = _get_runtime()
-    try:
-        result = subprocess.run(
-            [runtime, "image", "inspect", tag],
-            capture_output=True, timeout=10,
-        )
-        return result.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return False
+    """Check if the container image exists locally.
+
+    Thread-safe and cached for ``_IMAGE_EXISTS_TTL`` seconds.  The lock is
+    held across the subprocess call so N concurrent callers collapse onto
+    a single ``podman image inspect``; slow ones wait instead of racing
+    and timing out.  Cache expiry lets pm notice rebuilds/removals
+    without requiring a process restart.
+    """
+    now = time.monotonic()
+    with _image_exists_lock:
+        cached = _image_exists_cache.get(tag)
+        if cached and now - cached[0] < _IMAGE_EXISTS_TTL:
+            return cached[1]
+        runtime = _get_runtime()
+        try:
+            result = subprocess.run(
+                [runtime, "image", "inspect", tag],
+                capture_output=True, timeout=10,
+            )
+            exists = result.returncode == 0
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            exists = False
+        _image_exists_cache[tag] = (time.monotonic(), exists)
+        return exists
+
+
+def _invalidate_image_exists_cache(tag: str | None = None) -> None:
+    """Clear the image_exists cache (all tags or just one)."""
+    with _image_exists_lock:
+        if tag is None:
+            _image_exists_cache.clear()
+        else:
+            _image_exists_cache.pop(tag, None)
 
 
 def _runtime_available() -> bool:
@@ -352,6 +436,9 @@ def _resolve_claude_binary() -> Path | None:
     return Path(which).resolve()
 
 
+_CONTAINER_PM_SRC = "/opt/pm-src"
+
+
 # ---------------------------------------------------------------------------
 # Container naming
 # ---------------------------------------------------------------------------
@@ -479,6 +566,8 @@ def create_container(
     # useradd/groupadd.  Harmless under Podman rootful (no-op).
     if "podman" in runtime:
         cmd.extend(["--userns=keep-id"])
+        if _nested_podman_enabled():
+            cmd.extend(_nested_podman_run_args())
 
     # --- Claude binary ---
     # Mount the resolved claude binary into the container so the
@@ -498,6 +587,45 @@ def create_container(
     claude_config = Path.home() / ".claude"
     if claude_config.is_dir():
         cmd.extend(["-v", f"{claude_config}:{_CONTAINER_HOME}/.claude"])
+
+    # ~/.pm/hooks bind-mount: Claude Code hooks installed at startup write
+    # idle_prompt / Stop event files keyed by session_id.  When Claude runs
+    # inside this container, the hook receiver writes *inside* the
+    # container — mounting the host's ~/.pm/hooks at the container user's
+    # HOME makes those events visible to pm on the host (the receiver
+    # computes its output path via ``Path.home() / ".pm" / "hooks"``, which
+    # resolves to $CONTAINER_HOME/.pm/hooks inside the container).
+    pm_hooks_dir = Path.home() / ".pm" / "hooks"
+    try:
+        pm_hooks_dir.mkdir(parents=True, exist_ok=True)
+        cmd.extend(["-v", f"{pm_hooks_dir}:{_CONTAINER_HOME}/.pm/hooks"])
+    except OSError:
+        _log.debug("could not create %s; hook events from container will fall back to polling", pm_hooks_dir)
+
+    # Standalone hook receiver: the command embedded in
+    # ~/.claude/settings.json references the receiver at its *host*
+    # absolute path (e.g. /home/<user>/.pm/hook_receiver.py).  Bind-mount
+    # that exact path into the container so the same command works on
+    # the host and inside the container — no pm_core import required.
+    # Path is derived directly (no pm_core.hook_install import) to keep
+    # create_container import-clean for tests that patch Path internals.
+    _receiver_path = Path.home() / ".pm" / "hook_receiver.py"
+    if _receiver_path.is_file():
+        cmd.extend(["-v", f"{_receiver_path}:{_receiver_path}:ro"])
+    else:
+        _log.debug("hook receiver %s missing; containerised Claude hooks will no-op",
+                   _receiver_path)
+
+    # pm source: bind-mount read-only so the setup script can ``pip install``
+    # it into the container.  Makes the ``pm`` CLI available inside any
+    # container regardless of target project — the wrapper still prefers a
+    # local ``pm_core`` under /workspace when running in a pm PR workdir.
+    # The repo root is the parent of the pm_core package dir (same path
+    # ``pm which`` prints) when pm is installed editably — the only install
+    # mode ``install.sh`` produces today.
+    from pm_core.paths import pm_core_path
+    _pm_src = pm_core_path().parent
+    cmd.extend(["-v", f"{_pm_src}:{_CONTAINER_PM_SRC}:ro"])
 
     # NOTE: .claude.json is NOT bind-mounted.  Claude writes it atomically
     # (write tmp + rename) which replaces the inode — a single-file bind
@@ -606,6 +734,11 @@ def create_container(
             )
     if git_setup:
         setup_parts.append(git_setup)
+    # pm is made available inside the container via a shim at
+    # /usr/local/bin/pm (installed in the base image) that execs
+    # ``python3 -m pm_core.wrapper``, picking up pm_core through
+    # PYTHONPATH=/opt/pm-src.  No per-container install step — keeping
+    # container startup fast enough to beat the QA grace period.
     setup_parts.append(f"touch {_READY_SENTINEL}")
     setup_parts.append("exec sleep infinity")
     setup = "; ".join(setup_parts)
@@ -641,6 +774,28 @@ def create_container(
             f"The system may be under memory pressure (try stopping unused "
             f"containers with 'pm session cleanup')."
         )
+
+    # Repair ownership of ~/.pm inside the container.  When we bind-mount
+    # ~/.pm/hooks, the container runtime auto-creates the parent
+    # /home/pm/.pm as root-owned (uid 0 in the container's user namespace).
+    # That blocks the pm user from creating siblings under ~/.pm (debug
+    # logs, session registry, etc.) which crashes any ``pm`` invocation
+    # inside the container on first logger setup.  Chown as root — under
+    # podman with --userns=keep-id the container command runs as the pm
+    # user and cannot chown a root-owned path, so we need an explicit
+    # --user 0 exec; under docker the default exec user is already root.
+    try:
+        exec_args = ["exec"]
+        if _is_podman:
+            exec_args.extend(["--user", "0"])
+        exec_args.extend([
+            name, "chown", f"{host_uid}:{host_gid}",
+            f"{_CONTAINER_HOME}/.pm",
+        ])
+        _run_runtime(*exec_args, timeout=5, check=False)
+    except Exception:
+        _log.debug("chown %s/.pm failed in container %s",
+                   _CONTAINER_HOME, name, exc_info=True)
 
     # Copy .claude.json into the container (not bind-mounted — see note above)
     if _claude_json_src.exists():

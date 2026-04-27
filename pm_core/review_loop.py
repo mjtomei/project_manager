@@ -1,26 +1,22 @@
 """Review loop: repeatedly run Claude review until PASS.
 
 The loop launches a visible tmux review window (via ``pm pr review
---fresh --review-loop``) and polls the Claude pane with
-``tmux capture-pane`` to detect the verdict.
+--fresh --review-loop``) and polls the Claude pane for a verdict via
+Claude Code hook events + JSONL transcript.
 
 Verdicts:
-  PASS                 — No changes needed, code is ready to merge.
-  PASS_WITH_SUGGESTIONS — Only non-blocking suggestions remain.
-  NEEDS_WORK           — Blocking issues found.
-  INPUT_REQUIRED       — Human-guided testing needed before sign-off.
+  PASS            — No changes needed, code is ready to merge.
+  NEEDS_WORK      — Blocking issues found; loop iterates after fixes.
+  INPUT_REQUIRED  — Human-guided testing needed before sign-off.
 
-The loop stops on PASS always. By default it also stops on
-PASS_WITH_SUGGESTIONS; set `stop_on_suggestions=False` to keep going
-until full PASS.
+The loop stops on PASS.
 
 When INPUT_REQUIRED is detected, the loop marks the PR as paused and
 polls the existing review pane for a follow-up verdict.  The user
 interacts directly with Claude in the review pane (e.g. performing
 the requested tests and reporting results).  Once Claude emits a new
-verdict (PASS, PASS_WITH_SUGGESTIONS, or NEEDS_WORK), the loop picks
-it up automatically and resumes normal flow — no TUI interaction
-required.
+verdict (PASS or NEEDS_WORK), the loop picks it up automatically and
+resumes normal flow — no TUI interaction required.
 """
 
 import secrets
@@ -37,7 +33,6 @@ from pm_core.loop_shared import (
     get_pm_session as _get_pm_session_shared,
     find_claude_pane as _find_claude_pane_shared,
     match_verdict,
-    extract_verdict_from_content,
     poll_for_verdict as _poll_for_verdict_shared,
     wait_for_follow_up_verdict as _wait_for_follow_up_shared,
 )
@@ -46,21 +41,12 @@ _log = configure_logger("pm.review_loop")
 
 # Review verdicts in order of severity
 VERDICT_PASS = "PASS"
-VERDICT_PASS_WITH_SUGGESTIONS = "PASS_WITH_SUGGESTIONS"
 VERDICT_NEEDS_WORK = "NEEDS_WORK"
 VERDICT_INPUT_REQUIRED = "INPUT_REQUIRED"
 VERDICT_KILLED = "KILLED"
 
-ALL_VERDICTS = (VERDICT_PASS, VERDICT_PASS_WITH_SUGGESTIONS, VERDICT_NEEDS_WORK,
-                VERDICT_INPUT_REQUIRED)
+ALL_VERDICTS = (VERDICT_PASS, VERDICT_NEEDS_WORK, VERDICT_INPUT_REQUIRED)
 
-# Keywords used for prompt line filtering (all verdict keywords)
-_REVIEW_KEYWORDS = ("PASS_WITH_SUGGESTIONS", "INPUT_REQUIRED", "NEEDS_WORK", "PASS")
-
-# How often to check pane content for a verdict (seconds)
-_POLL_INTERVAL = 5
-# How often to check pane liveness / stop_requested between content polls (seconds)
-_TICK_INTERVAL = 1
 # Minimum seconds after poll start before accepting verdicts.
 # Claude reviews take minutes; verdicts found in the first few seconds are
 # almost certainly false positives from prompt text shown in the pane.
@@ -91,7 +77,6 @@ class ReviewLoopState:
     latest_verdict: str = ""
     latest_output: str = ""
     history: list[ReviewIteration] = field(default_factory=list)
-    stop_on_suggestions: bool = True
     loop_id: str = field(default_factory=_generate_loop_id)
     _ui_notified_done: bool = False
     _ui_notified_input: bool = False
@@ -120,27 +105,6 @@ def parse_review_verdict(output: str) -> str:
             return verdict
     # If no clear verdict, assume needs work if there's output
     return VERDICT_NEEDS_WORK if output.strip() else VERDICT_PASS
-
-
-def _regenerate_prompt_text(pm_root: str, pr_id: str, iteration: int = 0,
-                            loop_id: str = "") -> str:
-    """Regenerate the review prompt text for verdict filtering.
-
-    Used to distinguish prompt instructions (which mention verdict keywords)
-    from Claude's actual verdict output.  Returns an empty string on failure.
-    """
-    try:
-        from pathlib import Path
-        from pm_core import store
-        from pm_core.prompt_gen import generate_review_prompt
-        data = store.load(Path(pm_root))
-        return generate_review_prompt(
-            data, pr_id, review_loop=True,
-            review_iteration=iteration, review_loop_id=loop_id,
-        )
-    except Exception as exc:
-        _log.warning("review_loop: could not regenerate prompt text for filtering: %s", exc)
-        return ""
 
 
 def _compute_review_window_name(pr_data: dict) -> str:
@@ -178,30 +142,12 @@ def _find_claude_pane(session: str, window_name: str) -> str | None:
     return _find_claude_pane_shared(session, window_name)
 
 
-def _poll_for_verdict(pane_id: str, prompt_text: str = "",
-                      exclude_verdicts: set[str] | None = None,
+def _poll_for_verdict(pane_id: str, transcript_path: str,
                       grace_period: float = 0) -> str | None:
-    """Poll a pane with capture-pane until verdict is stable.
-
-    Delegates to the shared ``poll_for_verdict`` in ``loop_shared``.
-    Does NOT check ``stop_requested`` — that is handled between iterations
-    by ``run_review_loop_sync`` so the current iteration runs to completion.
-    """
+    """Poll a pane for a verdict via Claude Code hook events."""
     return _poll_for_verdict_shared(
-        pane_id, verdicts=ALL_VERDICTS, keywords=_REVIEW_KEYWORDS,
-        prompt_text=prompt_text, exclude_verdicts=exclude_verdicts,
-        grace_period=grace_period, poll_interval=_POLL_INTERVAL,
-        tick_interval=_TICK_INTERVAL, log_prefix="review_loop",
-    )
-
-
-def _extract_verdict_from_content(content: str, prompt_text: str = "",
-                                   exclude_verdicts: set[str] | None = None) -> str | None:
-    """Check if the tail of captured pane content contains a verdict keyword."""
-    return extract_verdict_from_content(
-        content, verdicts=ALL_VERDICTS, keywords=_REVIEW_KEYWORDS,
-        prompt_text=prompt_text, exclude_verdicts=exclude_verdicts,
-        log_prefix="review_loop",
+        pane_id, transcript_path, verdicts=ALL_VERDICTS,
+        grace_period=grace_period, log_prefix="review_loop",
     )
 
 
@@ -215,14 +161,19 @@ class PaneKilledError(Exception):
 
 
 def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
-                       iteration: int = 0, loop_id: str = "",
-                       transcript: str | None = None) -> str:
-    """Launch a review window and poll capture-pane for the verdict.
+                       transcript: str,
+                       iteration: int = 0, loop_id: str = "") -> str:
+    """Launch a review window and poll its JSONL transcript for the verdict.
 
-    Returns the captured pane content containing the verdict.
-    Raises PaneKilledError if the pane disappears before a verdict.
-    Raises RuntimeError for setup failures (no tmux session, window
-    failed to launch).
+    ``transcript`` is required — it is the path to the per-iteration
+    JSONL symlink that ``pm pr review --transcript ...`` writes into,
+    and it is how :func:`_poll_for_verdict` recovers the Claude
+    session_id and reads assistant output.
+
+    Returns the captured assistant text containing the verdict.
+    Raises :class:`PaneKilledError` if the pane disappears before a
+    verdict.  Raises :class:`RuntimeError` for setup failures (no tmux
+    session, window failed to launch).
     """
     from pm_core import tmux as tmux_mod
 
@@ -237,13 +188,6 @@ def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
     _launch_review_window(pr_id, pm_root, iteration=iteration, loop_id=loop_id,
                           transcript=transcript)
 
-    # Regenerate the prompt text so we can filter out prompt lines from
-    # verdict detection.  The prompt contains verdict keywords as
-    # instructions which would otherwise cause false matches.
-    prompt_text = _regenerate_prompt_text(pm_root, pr_id, iteration, loop_id)
-
-    _log.info("review_loop: prompt_text for filtering: %d chars", len(prompt_text))
-
     # Wait briefly for the window to appear
     time.sleep(2)
 
@@ -251,61 +195,61 @@ def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
     if not pane_id:
         raise RuntimeError(f"Review window '{window_name}' not found after launch")
 
-    _log.info("review_loop: polling pane %s in window %s", pane_id, window_name)
+    _log.info("review_loop: polling pane %s in window %s (transcript=%s)",
+              pane_id, window_name, transcript)
 
-    content = _poll_for_verdict(pane_id, prompt_text=prompt_text,
+    content = _poll_for_verdict(pane_id, transcript,
                                  grace_period=_VERDICT_GRACE_PERIOD)
     if content is None:
         raise PaneKilledError(f"Review pane disappeared (window: {window_name})")
     return content
 
 
-def _wait_for_follow_up_verdict(pr_data: dict, prompt_text: str,
+def _wait_for_follow_up_verdict(pr_data: dict,
                                  state: ReviewLoopState) -> str | None:
-    """Poll the existing review pane for a non-INPUT_REQUIRED verdict.
-
-    Delegates to the shared ``wait_for_follow_up_verdict`` in ``loop_shared``.
-    """
+    """Poll the existing review pane for a follow-up verdict."""
     session = _get_pm_session()
     if not session:
         _log.warning("review_loop: no pm session for follow-up polling")
         return None
 
     window_name = _compute_review_window_name(pr_data)
+    if not getattr(state, "_transcript_dir", None):
+        _log.warning("review_loop: no transcript_dir on state; cannot wait for follow-up")
+        return None
+    iter_transcript = f"{state._transcript_dir}/review-{state.pr_id}-i{state.iteration}.jsonl"
     return _wait_for_follow_up_shared(
-        session, window_name, verdicts=ALL_VERDICTS, keywords=_REVIEW_KEYWORDS,
-        prompt_text=prompt_text, exclude_verdicts={VERDICT_INPUT_REQUIRED},
-        poll_interval=_POLL_INTERVAL, tick_interval=_TICK_INTERVAL,
+        session, window_name, iter_transcript, verdicts=ALL_VERDICTS,
         stop_check=lambda: state.stop_requested, log_prefix="review_loop",
     )
 
 
-def should_stop(verdict: str, stop_on_suggestions: bool = True) -> bool:
+def should_stop(verdict: str) -> bool:
     """Determine if the loop should stop based on the verdict."""
-    if verdict == VERDICT_PASS:
-        return True
-    if verdict == VERDICT_PASS_WITH_SUGGESTIONS and stop_on_suggestions:
-        return True
-    return False
+    return verdict == VERDICT_PASS
 
 
 def run_review_loop_sync(
     state: ReviewLoopState,
     pm_root: str,
     pr_data: dict,
+    transcript_dir: str,
     on_iteration: Callable[[ReviewLoopState], None] | None = None,
     max_iterations: int = 10,
-    transcript_dir: str | None = None,
 ) -> ReviewLoopState:
     """Run the review loop synchronously (intended for a background thread).
+
+    ``transcript_dir`` is required: hook-driven verdict polling needs a
+    per-iteration JSONL transcript symlink, and the path is embedded in
+    the ``pm pr review`` command so Claude writes to a known location.
 
     Args:
         state: Mutable state object — the caller can read it to track progress.
         pm_root: Path to the pm project root (for running ``pm pr review``).
         pr_data: The PR dict from project data.
+        transcript_dir: Directory for per-iteration transcript symlinks.
         on_iteration: Optional callback fired after each iteration completes.
         max_iterations: Safety cap on number of iterations.
-        transcript_dir: Directory for transcript symlinks (optional).
 
     Returns:
         The final state.
@@ -324,10 +268,7 @@ def run_review_loop_sync(
             state.iteration += 1
             _log.info("review_loop: iteration %d for %s", state.iteration, state.pr_id)
 
-            # Compute per-iteration transcript path
-            iter_transcript = None
-            if transcript_dir:
-                iter_transcript = f"{transcript_dir}/review-{state.pr_id}-i{state.iteration}.jsonl"
+            iter_transcript = f"{transcript_dir}/review-{state.pr_id}-i{state.iteration}.jsonl"
 
             try:
                 output = _run_claude_review(
@@ -375,12 +316,7 @@ def run_review_loop_sync(
                 # rounds within the same loop still show a notification.
                 state._ui_notified_input = False
 
-                follow_up_prompt = _regenerate_prompt_text(
-                    pm_root, state.pr_id, state.iteration, state.loop_id,
-                )
-                follow_up_output = _wait_for_follow_up_verdict(
-                    pr_data, follow_up_prompt, state,
-                )
+                follow_up_output = _wait_for_follow_up_verdict(pr_data, state)
                 state.input_required = False
 
                 if follow_up_output is None:
@@ -412,7 +348,7 @@ def run_review_loop_sync(
                     except Exception:
                         _log.exception("review_loop: on_iteration callback failed")
 
-            if should_stop(verdict, state.stop_on_suggestions):
+            if should_stop(verdict):
                 _log.info("review_loop: stopping — verdict=%s", verdict)
                 break
 
@@ -432,21 +368,22 @@ def start_review_loop_background(
     state: ReviewLoopState,
     pm_root: str,
     pr_data: dict,
+    transcript_dir: str,
     on_iteration: Callable[[ReviewLoopState], None] | None = None,
     on_complete: Callable[[ReviewLoopState], None] | None = None,
     max_iterations: int = 10,
-    transcript_dir: str | None = None,
 ) -> threading.Thread:
     """Start the review loop in a background thread.
 
-    Returns the thread so the caller can join it if needed.
+    ``transcript_dir`` is required (hook-driven verdict polling needs a
+    per-iteration JSONL symlink).  Returns the thread so the caller can
+    join it if needed.
     """
     def _run():
         run_review_loop_sync(
-            state, pm_root, pr_data,
+            state, pm_root, pr_data, transcript_dir,
             on_iteration=on_iteration,
             max_iterations=max_iterations,
-            transcript_dir=transcript_dir,
         )
         if on_complete:
             try:

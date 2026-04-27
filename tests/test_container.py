@@ -69,6 +69,11 @@ class TestBuildImage:
 
 
 class TestImageExists:
+    def setup_method(self):
+        # image_exists caches results across calls; clear between tests.
+        from pm_core.container import _invalidate_image_exists_cache
+        _invalidate_image_exists_cache()
+
     @patch("subprocess.run")
     @patch("pm_core.container._get_runtime", return_value="docker")
     def test_exists(self, mock_runtime, mock_run):
@@ -86,6 +91,28 @@ class TestImageExists:
     def test_runtime_not_installed(self, mock_runtime, mock_run):
         mock_run.side_effect = FileNotFoundError
         assert image_exists("pm-dev:latest") is False
+
+    @patch("subprocess.run")
+    @patch("pm_core.container._get_runtime", return_value="docker")
+    def test_result_is_cached_across_calls(self, mock_runtime, mock_run):
+        """Concurrent callers coalesce onto one ``podman image inspect``."""
+        mock_run.return_value = MagicMock(returncode=0)
+        for _ in range(5):
+            assert image_exists("pm-dev:latest") is True
+        assert mock_run.call_count == 1
+
+    @patch("subprocess.run")
+    @patch("pm_core.container._get_runtime", return_value="docker")
+    def test_cache_invalidated_on_build(self, mock_runtime, mock_run):
+        from pm_core.container import _invalidate_image_exists_cache
+        # Cache a False result
+        mock_run.return_value = MagicMock(returncode=1)
+        assert image_exists("pm-dev:latest") is False
+        # Simulate a successful build clearing the cache
+        _invalidate_image_exists_cache("pm-dev:latest")
+        mock_run.return_value = MagicMock(returncode=0)
+        assert image_exists("pm-dev:latest") is True
+        assert mock_run.call_count == 2
 
 
 class TestContainerConfig:
@@ -423,6 +450,32 @@ class TestCreateContainer:
         assert f"/home/user/.claude:{_CONTAINER_HOME}/.claude" in args_str
         # Should NOT be read-only
         assert f"/home/user/.claude:{_CONTAINER_HOME}/.claude:ro" not in args_str
+
+    @patch("pm_core.container.image_exists", return_value=True)
+    @patch("pm_core.container._resolve_claude_binary", return_value=None)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
+    def test_mounts_pm_hooks_dir_and_receiver(self, mock_docker, mock_rm, mock_bin, mock_exists, _mock_running, _mock_runtime):
+        """Host ~/.pm/hooks and ~/.pm/hook_receiver.py are bind-mounted so
+        Claude Code hooks running inside the container surface events to
+        the host (R-Container-Mounts)."""
+        mock_docker.return_value = MagicMock(stdout="id\n", returncode=0)
+        config = ContainerConfig()
+
+        with patch("pm_core.container.Path.home", return_value=Path("/home/user")), \
+             patch.object(Path, "mkdir", return_value=None), \
+             patch.object(Path, "is_dir", return_value=True), \
+             patch.object(Path, "is_file", return_value=True), \
+             patch.object(Path, "exists", return_value=True):
+            create_container(name="test", config=config, workdir=Path("/w"))
+
+        args_str = " ".join(mock_docker.call_args_list[0][0])
+        # Hooks dir bind-mount: host ~/.pm/hooks → $CONTAINER_HOME/.pm/hooks
+        assert f"/home/user/.pm/hooks:{_CONTAINER_HOME}/.pm/hooks" in args_str
+        # Standalone receiver bind-mounted at the same absolute host path,
+        # read-only, so the hook command (which embeds that absolute path)
+        # works identically on the host and inside the container.
+        assert "/home/user/.pm/hook_receiver.py:/home/user/.pm/hook_receiver.py:ro" in args_str
 
     @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container._resolve_claude_binary", return_value=None)

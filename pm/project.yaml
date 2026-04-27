@@ -15,6 +15,7 @@ project:
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
   hide_merged: false
   skip_qa: false
+  nested_podman: true
 plans:
 - id: plan-001
   name: Import from existing repo
@@ -2622,7 +2623,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/113
   gh_pr_number: 113
   created_at: '2026-03-02T02:29:03.713168+00:00'
-  updated_at: '2026-03-23T13:13:42.135194+00:00'
+  updated_at: '2026-04-24T17:09:35.785711+00:00'
   started_at: '2026-03-02T02:34:58.036488+00:00'
   reviewed_at: '2026-03-02T02:56:54.736623+00:00'
   merged_at: null
@@ -2638,6 +2639,16 @@ prs:
       to QA scenario workers and implementation sessions.'
     created_at: '2026-03-06T13:46:24Z'
     last_edited: '2026-03-06T13:46:24Z'
+  - id: note-81da103
+    text: 'Heads up: PR #166 (pr-014f93f) dropped PASS_WITH_SUGGESTIONS verdict entirely
+      and removed the zzz prefix. Review loop verdicts are now PASS/NEEDS_WORK/INPUT_REQUIRED
+      only (non-blocking suggestions roll into NEEDS_WORK). zzz d and zzz t are gone
+      — only zz d / zz t remain. ReviewLoopState.stop_on_suggestions is gone. QA strict/lenient
+      distinction is gone. _maybe_auto_merge lost its force= param — manual zz t no
+      longer triggers auto-merge. If your branch has stale references to any of those,
+      expect conflicts when rebasing on master after #166 lands.'
+    created_at: '2026-04-24T17:09:35Z'
+    last_edited: '2026-04-24T17:09:35Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-923f22b-add-tui-watchdog-for-dead-background-ab512a43
 - id: pr-7f958f3
   plan: tui-ux
@@ -2667,7 +2678,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/114
   gh_pr_number: 114
   created_at: '2026-03-02T02:56:06.968805+00:00'
-  updated_at: '2026-03-23T13:16:05.060755+00:00'
+  updated_at: '2026-04-24T17:09:30.452938+00:00'
   started_at: '2026-03-02T02:56:46.721498+00:00'
   reviewed_at: '2026-03-02T03:08:03.583632+00:00'
   merged_at: null
@@ -2698,6 +2709,16 @@ prs:
       found in codebase. All changes are correct and complete.'
     created_at: '2026-03-02T03:38:04Z'
     last_edited: '2026-03-02T03:38:04Z'
+  - id: note-192ab95
+    text: 'Heads up: PR #166 (pr-014f93f) dropped PASS_WITH_SUGGESTIONS verdict entirely
+      and removed the zzz prefix. Review loop verdicts are now PASS/NEEDS_WORK/INPUT_REQUIRED
+      only (non-blocking suggestions roll into NEEDS_WORK). zzz d and zzz t are gone
+      — only zz d / zz t remain. ReviewLoopState.stop_on_suggestions is gone. QA strict/lenient
+      distinction is gone. _maybe_auto_merge lost its force= param — manual zz t no
+      longer triggers auto-merge. If your branch has stale references to any of those,
+      expect conflicts when rebasing on master after #166 lands.'
+    created_at: '2026-04-24T17:09:30Z'
+    last_edited: '2026-04-24T17:09:30Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-7f958f3-change-tui-restart-from-ctrl-r-to-a--ab512a43
 - id: pr-7122c11
   plan: watchers
@@ -3832,11 +3853,20 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-06T14:02:50.658436+00:00'
-  updated_at: '2026-03-08T22:40:42.482901+00:00'
+  updated_at: '2026-04-24T14:52:43.091051+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-e5f6fed
+    text: pr-014f93f installs Notification[permission_prompt] hooks and exposes is_waiting_for_input(key)
+      on PaneIdleTracker. For a risk/permission dashboard this is the canonical 'session
+      is currently blocked on a permission decision' signal — consume it rather than
+      pane-scraping. It is last-writer-wins vs idle_prompt (approving clears waiting_for_input).
+      Subprocess-level prompts (gum, fzf, git rebase -i) are NOT observable via hooks
+      — document that limitation in the dashboard.
+    created_at: '2026-04-24T14:52:42Z'
+    last_edited: '2026-04-24T14:52:42Z'
 - id: pr-8fdda09
   plan: plan-qa
   title: Add QA scenario verification step before final verdict
@@ -4438,11 +4468,21 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/131
   gh_pr_number: 131
   created_at: '2026-03-07T15:58:50.876583+00:00'
-  updated_at: '2026-04-07T13:53:48.512780+00:00'
+  updated_at: '2026-04-24T17:09:32.729022+00:00'
   started_at: '2026-03-08T22:27:50.279825+00:00'
   reviewed_at: '2026-03-09T17:23:26.156810+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-e204001
+    text: 'Heads up: PR #166 (pr-014f93f) dropped PASS_WITH_SUGGESTIONS verdict entirely
+      and removed the zzz prefix. Review loop verdicts are now PASS/NEEDS_WORK/INPUT_REQUIRED
+      only (non-blocking suggestions roll into NEEDS_WORK). zzz d and zzz t are gone
+      — only zz d / zz t remain. ReviewLoopState.stop_on_suggestions is gone. QA strict/lenient
+      distinction is gone. _maybe_auto_merge lost its force= param — manual zz t no
+      longer triggers auto-merge. If your branch has stale references to any of those,
+      expect conflicts when rebasing on master after #166 lands.'
+    created_at: '2026-04-24T17:09:32Z'
+    last_edited: '2026-04-24T17:09:32Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-4c41017-refactor-techtree-split-pr-nodes-int-ab512a43
 - id: pr-e9d4b24
   plan: bugs
@@ -4557,7 +4597,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/129
   gh_pr_number: 129
   created_at: '2026-03-08T01:38:37.869518+00:00'
-  updated_at: '2026-04-02T13:51:23.889527+00:00'
+  updated_at: '2026-04-24T17:09:35.012827+00:00'
   started_at: '2026-03-08T01:41:11.161062+00:00'
   reviewed_at: '2026-03-08T02:10:07.745342+00:00'
   merged_at: null
@@ -4586,6 +4626,16 @@ prs:
       /home/matt/.pm/workdirs/qa/pr-fd54424-438336bf7dacd96b)'
     created_at: '2026-03-08T20:16:53Z'
     last_edited: '2026-03-08T20:16:53Z'
+  - id: note-8d4f2df
+    text: 'Heads up: PR #166 (pr-014f93f) dropped PASS_WITH_SUGGESTIONS verdict entirely
+      and removed the zzz prefix. Review loop verdicts are now PASS/NEEDS_WORK/INPUT_REQUIRED
+      only (non-blocking suggestions roll into NEEDS_WORK). zzz d and zzz t are gone
+      — only zz d / zz t remain. ReviewLoopState.stop_on_suggestions is gone. QA strict/lenient
+      distinction is gone. _maybe_auto_merge lost its force= param — manual zz t no
+      longer triggers auto-merge. If your branch has stale references to any of those,
+      expect conflicts when rebasing on master after #166 lands.'
+    created_at: '2026-04-24T17:09:34Z'
+    last_edited: '2026-04-24T17:09:34Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-fd54424-add-interactive-pm-tutorial-command--ab512a43
 - id: pr-3032fb6
   plan: watchers
@@ -4721,7 +4771,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/137
   gh_pr_number: 137
   created_at: '2026-03-08T21:45:42.636585+00:00'
-  updated_at: '2026-03-23T13:18:57.337047+00:00'
+  updated_at: '2026-04-24T17:09:31.971909+00:00'
   started_at: '2026-03-10T21:38:57.198809+00:00'
   reviewed_at: '2026-03-23T13:18:57.337047+00:00'
   merged_at: null
@@ -4786,6 +4836,25 @@ prs:
       /home/mjtomei/.pm/workdirs/qa/pr-0b827df-c16f3600a94a4026)'
     created_at: '2026-03-23T13:50:21Z'
     last_edited: '2026-03-23T13:50:21Z'
+  - id: note-da0a8f5
+    text: pr-014f93f landed a hook-driven PaneIdleTracker with a new is_waiting_for_input(key)
+      read (permission_prompt Notification). When this tasks pane shows per-PR session
+      activity, render a distinct 'waiting for input' indicator (e.g. ⏸) for PRs where
+      tracker.is_waiting_for_input(pr_id) is True — this is the Claude Code tool-approval
+      dialog, not plain idle. See pm_core/tui/tech_tree.py for the pattern already
+      applied there.
+    created_at: '2026-04-24T14:52:34Z'
+    last_edited: '2026-04-24T14:52:34Z'
+  - id: note-3002bcd
+    text: 'Heads up: PR #166 (pr-014f93f) dropped PASS_WITH_SUGGESTIONS verdict entirely
+      and removed the zzz prefix. Review loop verdicts are now PASS/NEEDS_WORK/INPUT_REQUIRED
+      only (non-blocking suggestions roll into NEEDS_WORK). zzz d and zzz t are gone
+      — only zz d / zz t remain. ReviewLoopState.stop_on_suggestions is gone. QA strict/lenient
+      distinction is gone. _maybe_auto_merge lost its force= param — manual zz t no
+      longer triggers auto-merge. If your branch has stale references to any of those,
+      expect conflicts when rebasing on master after #166 lands.'
+    created_at: '2026-04-24T17:09:31Z'
+    last_edited: '2026-04-24T17:09:31Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b827df-add-running-tasks-pane-to-tui-with-w-cbe54f5e
 - id: pr-341100c
   plan: tui-ux
@@ -5518,11 +5587,21 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/145
   gh_pr_number: 145
   created_at: '2026-03-09T20:05:57.251516+00:00'
-  updated_at: '2026-03-23T13:14:52.951803+00:00'
+  updated_at: '2026-04-24T17:09:31.219040+00:00'
   started_at: '2026-03-14T21:52:27.806921+00:00'
   reviewed_at: '2026-03-14T22:12:44.106792+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-b58bd04
+    text: 'Heads up: PR #166 (pr-014f93f) dropped PASS_WITH_SUGGESTIONS verdict entirely
+      and removed the zzz prefix. Review loop verdicts are now PASS/NEEDS_WORK/INPUT_REQUIRED
+      only (non-blocking suggestions roll into NEEDS_WORK). zzz d and zzz t are gone
+      — only zz d / zz t remain. ReviewLoopState.stop_on_suggestions is gone. QA strict/lenient
+      distinction is gone. _maybe_auto_merge lost its force= param — manual zz t no
+      longer triggers auto-merge. If your branch has stale references to any of those,
+      expect conflicts when rebasing on master after #166 lands.'
+    created_at: '2026-04-24T17:09:30Z'
+    last_edited: '2026-04-24T17:09:30Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-4a89e52-qa-verdict-collection-survives-tui-r-d0f78a09
 - id: pr-9bf8b0b
   plan: improvements
@@ -6651,7 +6730,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/160
   gh_pr_number: 160
   created_at: '2026-03-14T03:46:00.421065+00:00'
-  updated_at: '2026-04-07T22:54:01.562371+00:00'
+  updated_at: '2026-04-24T17:09:33.492294+00:00'
   started_at: '2026-04-07T16:49:46.605414+00:00'
   reviewed_at: '2026-04-07T22:54:01.562371+00:00'
   merged_at: null
@@ -6697,6 +6776,16 @@ prs:
       security bypasses'
     created_at: '2026-03-14T03:58:23Z'
     last_edited: '2026-03-14T03:58:23Z'
+  - id: note-d6f87ac
+    text: 'Heads up: PR #166 (pr-014f93f) dropped PASS_WITH_SUGGESTIONS verdict entirely
+      and removed the zzz prefix. Review loop verdicts are now PASS/NEEDS_WORK/INPUT_REQUIRED
+      only (non-blocking suggestions roll into NEEDS_WORK). zzz d and zzz t are gone
+      — only zz d / zz t remain. ReviewLoopState.stop_on_suggestions is gone. QA strict/lenient
+      distinction is gone. _maybe_auto_merge lost its force= param — manual zz t no
+      longer triggers auto-merge. If your branch has stale references to any of those,
+      expect conflicts when rebasing on master after #166 lands.'
+    created_at: '2026-04-24T17:09:33Z'
+    last_edited: '2026-04-24T17:09:33Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-8aa9411-review-and-qa-regression-benchmark-s-5da5b1da
 - id: pr-4eb96ff
   plan: plan-qa
@@ -6910,11 +6999,21 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/148
   gh_pr_number: 148
   created_at: '2026-03-18T16:31:56.522254+00:00'
-  updated_at: '2026-03-23T13:15:07.491165+00:00'
+  updated_at: '2026-04-24T17:09:34.251001+00:00'
   started_at: '2026-03-18T16:42:13.266300+00:00'
   reviewed_at: '2026-03-19T16:25:44.605020+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-abd8475
+    text: 'Heads up: PR #166 (pr-014f93f) dropped PASS_WITH_SUGGESTIONS verdict entirely
+      and removed the zzz prefix. Review loop verdicts are now PASS/NEEDS_WORK/INPUT_REQUIRED
+      only (non-blocking suggestions roll into NEEDS_WORK). zzz d and zzz t are gone
+      — only zz d / zz t remain. ReviewLoopState.stop_on_suggestions is gone. QA strict/lenient
+      distinction is gone. _maybe_auto_merge lost its force= param — manual zz t no
+      longer triggers auto-merge. If your branch has stale references to any of those,
+      expect conflicts when rebasing on master after #166 lands.'
+    created_at: '2026-04-24T17:09:34Z'
+    last_edited: '2026-04-24T17:09:34Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-abcf70f-fakeclaudesession-scriptable-claude--cbe54f5e
 - id: pr-a7927b6
   plan: plan-qa
@@ -8058,11 +8157,21 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/156
   gh_pr_number: 156
   created_at: '2026-04-06T19:14:44.223134+00:00'
-  updated_at: '2026-04-07T13:30:18.816990+00:00'
+  updated_at: '2026-04-24T17:09:29.690246+00:00'
   started_at: '2026-04-06T19:17:16.583998+00:00'
   reviewed_at: '2026-04-07T13:30:18.816990+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-8fe4f6f
+    text: 'Heads up: PR #166 (pr-014f93f) dropped PASS_WITH_SUGGESTIONS verdict entirely
+      and removed the zzz prefix. Review loop verdicts are now PASS/NEEDS_WORK/INPUT_REQUIRED
+      only (non-blocking suggestions roll into NEEDS_WORK). zzz d and zzz t are gone
+      — only zz d / zz t remain. ReviewLoopState.stop_on_suggestions is gone. QA strict/lenient
+      distinction is gone. _maybe_auto_merge lost its force= param — manual zz t no
+      longer triggers auto-merge. If your branch has stale references to any of those,
+      expect conflicts when rebasing on master after #166 lands.'
+    created_at: '2026-04-24T17:09:29Z'
+    last_edited: '2026-04-24T17:09:29Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-fc6db6a-prevent-plain-d-from-opening-duplica-5a6a6c1c
 - id: pr-177dec0
   plan: bugs
@@ -8848,11 +8957,22 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-09T21:58:09.533708+00:00'
-  updated_at: '2026-04-09T21:58:09.533708+00:00'
+  updated_at: '2026-04-24T14:52:52.176398+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-5e6afea
+    text: 'pr-014f93f replaced pane-scrape verdict detection with JSONL-transcript
+      extraction gated by the idle_prompt Notification hook. That change addresses
+      the root cause of this bug: verdicts are now read only when Claude has actually
+      finished a turn (hook event), not when the pane stops changing. Check whether
+      this bug is still reproducible after pr-014f93f merges; if it is, the remaining
+      work is likely about the concretize pane (_CONCRETIZE_VERDICTS) or planner-marker
+      path (_tail_has_marker_on_own_line in qa_loop.py), both of which still touch
+      pane content.'
+    created_at: '2026-04-24T14:52:51Z'
+    last_edited: '2026-04-24T14:52:51Z'
 - id: pr-d8cfa16
   plan: plan-qa
   title: Batched QA scenario execution
@@ -9193,11 +9313,93 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/166
   gh_pr_number: 166
   created_at: '2026-04-21T17:07:01.779432+00:00'
-  updated_at: '2026-04-24T03:39:25.102963+00:00'
+  updated_at: '2026-04-24T21:37:08.675525+00:00'
   started_at: '2026-04-24T02:48:10.332243+00:00'
-  reviewed_at: '2026-04-24T03:39:25.102963+00:00'
+  reviewed_at: '2026-04-24T21:37:08.675525+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-ba7ef7b
+    text: 'Post-merge follow-ups from review: (1) add a public PaneIdleTracker.get_transcript_path(key)
+      accessor and replace the tracker._states.get(merge_key) reach-in in pm_core/tui/review_loop_ui.py:775.
+      (2) Narrow qa_loop hook-event filters to {''idle_prompt''} only (planner poll
+      in run_qa_sync and scenario poll in _poll_tmux_verdicts) to match spec R9; currently
+      both accept Stop as well, which is harmless today due to last-writer-wins but
+      drifts from the spec.'
+    created_at: '2026-04-24T16:35:07Z'
+    last_edited: '2026-04-24T16:35:07Z'
+  - id: note-ba327a3
+    text: 'Scope creep in this review loop iteration (captured here since several
+      unrelated-to-hooks changes landed on this branch): (1) Removed PASS_WITH_SUGGESTIONS
+      verdict entirely — review now uses only PASS, NEEDS_WORK, INPUT_REQUIRED. Non-blocking
+      suggestions now roll into NEEDS_WORK with the expectation that Claude implements
+      them in the same iteration. (2) Removed the zzz prefix — zz is the only multi-z
+      modifier now. Collapsed zz d / zzz d and zz t / zzz t into just zz d / zz t.
+      Dropped stop_on_suggestions and QA strict/lenient distinctions. (3) Manual zz
+      t no longer triggers auto-merge — merge is now strictly an auto-start action.
+      _maybe_auto_merge lost its force= param. (4) Sharpened INPUT_REQUIRED prompt
+      guidance — reviewers should prefer INPUT_REQUIRED over NEEDS_WORK whenever in
+      doubt; explicit exclusion for manual testing (that belongs in QA). (5) Fixed
+      markdown-bold verdict detection (**PASS** was being missed by the JSONL extractor).
+      (6) Fixed /home/pm/.pm root-ownership bug introduced by the hooks bind-mount
+      — entrypoint now chowns it back to pm.'
+    created_at: '2026-04-24T17:06:30Z'
+    last_edited: '2026-04-24T17:06:30Z'
+  - id: note-32bc189
+    text: 'QA INPUT_REQUIRED: Hook receiver writes events atomically and handles bad
+      input: INPUT_REQUIRED; Hook installer — fresh install, idempotence, stale-python
+      rewrite, 7-day sweep: INPUT_REQUIRED; Installer refuses to clobber foreign hooks:
+      INPUT_REQUIRED; wait_for_event honors timeout, event_types filter, and newer_than
+      baseline: INPUT_REQUIRED; poll_for_verdict is hook-driven with no polling fallback:
+      INPUT_REQUIRED; Call sites thread a session_id (review / watcher / qa_loop /
+      planner / verification): INPUT_REQUIRED; _poll_tmux_verdicts event-gating, INPUT_REQUIRED
+      fallback, relaunch reset: INPUT_REQUIRED; PaneIdleTracker hook-aware fast path
+      + hash fallback: INPUT_REQUIRED; Container QA bind-mounts propagate hook events
+      host ↔ container: INPUT_REQUIRED; pm session + TUI install hooks on launch;
+      foreign hook aborts startup: INPUT_REQUIRED; Unit + integration test suite green
+      on the branch: INPUT_REQUIRED (workdir: /home/matt/.pm/workdirs/qa/pr-014f93f-385682084e70b3c1)'
+    created_at: '2026-04-24T20:07:57Z'
+    last_edited: '2026-04-24T20:07:57Z'
+  - id: note-d576e5e
+    text: 'QA INPUT_REQUIRED: Hook receiver writes events atomically and handles bad
+      input: INPUT_REQUIRED; Hook installer — fresh install, idempotence, stale-python
+      rewrite, 7-day sweep: INPUT_REQUIRED; Installer refuses to clobber foreign hooks:
+      INPUT_REQUIRED; wait_for_event honors timeout, event types, and newer_than baseline:
+      INPUT_REQUIRED; poll_for_verdict is hook-driven (no polling fallback): INPUT_REQUIRED;
+      Call sites pass a session_id (review / watcher / qa_loop / planner / verification):
+      INPUT_REQUIRED; _poll_tmux_verdicts event-gating, INPUT_REQUIRED fallback, relaunch
+      reset: INPUT_REQUIRED; PaneIdleTracker hook-aware fast path + hash fallback
+      preserved: INPUT_REQUIRED; Container QA bind-mounts propagate hook events host
+      ↔ container: INPUT_REQUIRED; pm session + TUI install hooks on launch; foreign
+      hook aborts startup: INPUT_REQUIRED; Unit + integration test suite green on
+      the branch: INPUT_REQUIRED (workdir: /home/matt/.pm/workdirs/qa/pr-014f93f-cc0f6d1147a0ae38)'
+    created_at: '2026-04-24T20:35:52Z'
+    last_edited: '2026-04-24T20:35:52Z'
+  - id: note-2fc9ada
+    text: 'QA INPUT_REQUIRED: Hook receiver writes events atomically and handles bad
+      input: PASS; Hook installer — fresh install, idempotence, stale-python rewrite,
+      7-day sweep: PASS; Installer refuses to clobber foreign hooks: PASS; wait_for_event
+      honors timeout, event types, and newer_than baseline: PASS; poll_for_verdict
+      is hook-driven (no polling fallback): PASS; Call sites pass a session_id (review
+      / watcher / qa_loop / planner / verification): INPUT_REQUIRED; _poll_tmux_verdicts
+      event-gating, INPUT_REQUIRED fallback, relaunch reset: PASS; PaneIdleTracker
+      hook-aware fast path + hash fallback preserved: INPUT_REQUIRED; Container QA
+      bind-mounts carry events host ↔ container: INPUT_REQUIRED; pm session + TUI
+      install hooks on launch; foreign hook aborts startup: INPUT_REQUIRED; Unit +
+      integration test suite green on the branch: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-014f93f-14868015b1b65a34)'
+    created_at: '2026-04-24T21:14:32Z'
+    last_edited: '2026-04-24T21:14:32Z'
+  - id: note-aef6d5c
+    text: 'QA INPUT_REQUIRED: Hook receiver writes events atomically and handles bad:
+      PASS; Hook installer — fresh install, idempotence, stale-python: PASS; Installer
+      refuses to clobber foreign hooks: PASS; wait_for_event honors timeout, event
+      types, and newer_than: PASS; poll_for_verdict is hook-driven (no polling fallback):
+      PASS; Call sites pass a session_id (review / watcher / qa_loop /: PASS; _poll_tmux_verdicts
+      is event-gated and handles relaunch: PASS; PaneIdleTracker hook-aware fast path
+      + hash fallback: PASS; Container QA bind mounts carry events host ↔ container:
+      INPUT_REQUIRED; Hooks installed on pm session and TUI launch; conflict: INPUT_REQUIRED;
+      Unit + integration test suite green on the branch: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-014f93f-3a1bc34a7a49dee9)'
+    created_at: '2026-04-24T22:03:15Z'
+    last_edited: '2026-04-24T22:03:15Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-014f93f-use-claude-code-hooks-idle-prompt-st-33742570
 - id: pr-e3595fe
   plan: plan-cb4ef69
@@ -9443,6 +9645,50 @@ prs:
   gh_pr_number: null
   created_at: '2026-04-21T20:55:06.933672+00:00'
   updated_at: '2026-04-21T20:55:06.933672+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-d43d362
+  plan: bugs
+  title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
+  branch: pm/pr-d43d362-container-pm-user-hardcoded-at-uid-1000-breaks-for
+  status: pending
+  depends_on: []
+  description: 'Today the pm user is created at UID 1000 in both the base Dockerfile
+    (added in PR pr-014f93f) and project-specific images built via ''pm container
+    build''. With podman --userns=keep-id, the inner UID is the host user''s UID.
+    If the host user is not at UID 1000 (e.g. a second user account), there is a UID
+    mismatch:
+
+
+    - Inner namespace UID matches the host UID (say 1001), but no /etc/passwd entry
+    exists for it inside the container — the inner pm shell user (UID 1000) is a different
+    user from the bind-mount owner.
+
+    - Bind-mounted /workspace files appear owned by an unmapped UID inside the container;
+    the pm user can''t write to them by default.
+
+    - /etc/subuid ''pm:1:999,pm:1001:64535'' (set up for nested rootless podman) only
+    matches the pm user by name; the runtime caller at UID 1001 is not ''pm'' and
+    newuidmap won''t grant subuids.
+
+
+    Fix sketch: move the pm user creation and /etc/subuid setup out of the Dockerfile
+    and into container.py''s runtime entrypoint, parameterized on the actual host
+    UID. The entrypoint already runs as root in the docker path; for the podman keep-id
+    path, similar runtime config writes need to happen as the host user inside the
+    container (which has the host UID and can write to /etc/passwd/subuid only with
+    root, so we''d need to either run setup as root via a separate exec or pre-stage
+    tmp files and chown).
+
+
+    Reported during review of PR pr-014f93f.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-25T14:45:27.562266+00:00'
+  updated_at: '2026-04-25T14:45:27.562266+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

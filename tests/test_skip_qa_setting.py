@@ -59,7 +59,7 @@ class TestSkipQaReviewPass:
             from pm_core.tui.review_loop_ui import _maybe_start_qa
             _maybe_start_qa(app, "pr-001")
 
-        mock_merge.assert_called_once_with(app, "pr-001", force=False)
+        mock_merge.assert_called_once_with(app, "pr-001")
         mock_qa.assert_not_called()
 
     def test_skip_qa_does_not_transition_to_qa_status(self, tmp_path):
@@ -94,20 +94,24 @@ class TestSkipQaReviewPass:
 
 
 class TestSkipQaSelfDriving:
-    """skip_qa also applies to self-driving QA (zz t / zzz t)."""
+    """skip_qa also applies to self-driving QA (zz t).  Manual zz t
+    never triggers a merge itself — merge only fires when auto-start
+    is enabled."""
 
-    def test_self_driving_skip_qa_uses_force(self, tmp_path):
-        """Self-driving + skip_qa should call merge with force=True."""
+    def test_self_driving_skip_qa_without_auto_start_does_not_merge(self, tmp_path):
+        """Self-driving + skip_qa but auto-start off should not merge."""
         pm_dir, app = _make_project(tmp_path, skip_qa=True, auto_start=False)
         app._self_driving_qa = {"pr-001": MagicMock()}
 
         with patch("pm_core.tui.auto_start.is_enabled", return_value=False), \
-             patch("pm_core.tui.review_loop_ui._maybe_auto_merge") as mock_merge, \
+             patch("pm_core.tui.review_loop_ui._attempt_merge") as mock_attempt, \
              patch("pm_core.tui.qa_loop_ui.start_qa") as mock_qa:
             from pm_core.tui.review_loop_ui import _maybe_start_qa
             _maybe_start_qa(app, "pr-001")
 
-        mock_merge.assert_called_once_with(app, "pr-001", force=True)
+        # _maybe_auto_merge is called but returns early because auto-start
+        # is disabled — so the underlying merge attempt never runs.
+        mock_attempt.assert_not_called()
         mock_qa.assert_not_called()
 
 
