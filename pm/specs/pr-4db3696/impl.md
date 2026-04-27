@@ -57,7 +57,7 @@
    e. Triggers TUI refresh
    f. For GitHub backend: optionally creates draft PRs for each child (like `pr_start` does)
 
-5. **TUI keybinding** in `pm_core/tui/app.py` — Add a `P` keybinding for `action_split_pr()`.
+5. **TUI keybinding** in `pm_core/tui/app.py` — Add an `a` keybinding for `action_split_pr()`. The key is dual-purpose: if a split manifest already exists it triggers `split-load`, otherwise it launches the split session.
 
 6. **TUI action delegate** — Add `split_pr()` function in `pm_core/tui/pr_view.py` following the `start_pr()` pattern. Gets selected PR, guards against concurrent actions, dispatches `run_command(app, f"pr split {pr_id}", ...)`.
 
@@ -80,7 +80,7 @@
 ## Ambiguities
 
 1. **Which TUI keybinding to use?**
-   - Resolution: `P` (capital P). Not assigned in current BINDINGS. Mnemonic: "sPlit PR".
+   - Resolution: `a` (lowercase). The TUI binding is dual-purpose — runs `split-load` when a manifest already exists, otherwise launches the split session.
 
 2. **Should the original PR status change?**
    - Resolution: No automatic status change. The user decides what to do with the original PR after splitting.

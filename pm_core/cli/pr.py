@@ -734,8 +734,9 @@ def pr_split(pr_id: str | None, fresh: bool):
 
     Opens an interactive session where Claude helps decompose the PR.
     The session creates branches for each child PR and writes a split
-    manifest.  After the session, run ``pm pr split-load <pr_id>`` (the
-    session does this automatically) to push branches and create PR entries.
+    manifest.  After the session writes the manifest, press ``a`` in the
+    TUI on the parent PR (or run ``pm pr split-load <pr_id>`` from the
+    project root) to push branches and create PR entries.
     """
     root = state_root()
     data = store.load(root)
