@@ -188,7 +188,6 @@ def split_pr(app) -> None:
     the interactive split session via ``pm pr split``.
     """
     from pm_core.tui.tech_tree import TechTree
-    from pm_core import spec_gen
 
     fresh = app._consume_z()
     tree = app.query_one("#tech-tree", TechTree)
@@ -206,7 +205,7 @@ def split_pr(app) -> None:
     if workdir and Path(workdir).exists():
         try:
             wd_root = store.find_project_root(start=workdir)
-            manifest = spec_gen.spec_dir(wd_root, pr_id) / "split.md"
+            manifest = wd_root / "specs" / pr_id / "split.md"
             has_manifest = manifest.exists()
         except FileNotFoundError:
             pass
