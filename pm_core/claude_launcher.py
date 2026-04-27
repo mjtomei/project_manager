@@ -390,16 +390,22 @@ def build_claude_shell_cmd(
 
     if prompt and not resume:
         # Write the prompt to a file and use "$(cat file)" to avoid tmux
-        # command-length limits (~16 KB) with large prompts.
+        # command-length limits (~16 KB) with large prompts.  Stored in a
+        # ``pm/prompts/`` subdir so the host workdir root stays clean — the
+        # cleanup ``rm -f`` at the end of the shell pipeline doesn't always
+        # run (claude killed by container teardown skips trailing commands),
+        # so leftovers accumulate.
         _host_dir = Path(write_dir) if write_dir else (Path(cwd) if cwd else None)
         _prompt_written = False
         if _host_dir:
             try:
                 if _host_dir.is_dir():
+                    _prompts_subdir = _host_dir / "pm" / "prompts"
+                    _prompts_subdir.mkdir(parents=True, exist_ok=True)
                     _fname = f"pm_prompt_{session_id or uuid.uuid4()}.txt"
-                    (_host_dir / _fname).write_text(prompt)
-                    _ref_dir = cwd if cwd else str(_host_dir)
-                    _prompt_ref = Path(_ref_dir) / _fname
+                    (_prompts_subdir / _fname).write_text(prompt)
+                    _ref_base = Path(cwd) if cwd else _host_dir
+                    _prompt_ref = _ref_base / "pm" / "prompts" / _fname
                     # Delete the temp file after claude reads it via $(cat ...).
                     # The semicolon ensures cleanup runs whether claude succeeds or fails.
                     cmd += f' "$(cat {_prompt_ref})"; rm -f {shlex.quote(str(_prompt_ref))}'
