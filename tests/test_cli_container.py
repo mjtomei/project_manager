@@ -264,6 +264,22 @@ class TestContainerSetValidation:
         assert "Set system-memory-history-size = 10" in result.output
         mock_set.assert_called_once_with("container-system-memory-history-size", "10")
 
+    @patch("pm_core.paths.set_global_setting_value")
+    def test_valid_system_memory_queue_policy_fifo(self, mock_set):
+        result = self._invoke("system-memory-queue-policy", "fifo")
+        assert result.exit_code == 0
+        mock_set.assert_called_once_with("container-system-memory-queue-policy", "fifo")
+
+    @patch("pm_core.paths.set_global_setting_value")
+    def test_valid_system_memory_queue_policy_priority_drain(self, mock_set):
+        result = self._invoke("system-memory-queue-policy", "priority-drain")
+        assert result.exit_code == 0
+
+    def test_invalid_system_memory_queue_policy(self):
+        result = self._invoke("system-memory-queue-policy", "lifo")
+        assert result.exit_code == 1
+        assert "system-memory-queue-policy must be one of" in result.stderr
+
     # --- Invalid inputs ---
 
     def test_invalid_system_memory_scope_both(self):
