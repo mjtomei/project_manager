@@ -68,6 +68,13 @@ def container_status():
     if waiting or acquired:
         click.echo(f"  Queue depth:   {len(waiting)} waiting, {len(acquired)} acquired")
 
+    from pm_core.memory_governor import get_stop_idle_policy
+    click.echo("")
+    click.echo("Stop-on-idle:")
+    click.echo(f"  impl:          {'on' if get_stop_idle_policy('impl') else 'off'}")
+    click.echo(f"  review:        {'on' if get_stop_idle_policy('review') else 'off'}")
+    click.echo(f"  qa:            {'on' if get_stop_idle_policy('qa_scenario') else 'off'}")
+
     if enabled and not docker_ok:
         click.echo(
             "\nWarning: Container mode is enabled but Docker is not available.",
@@ -105,6 +112,7 @@ def container_disable():
     "system-memory-target", "system-memory-scope",
     "system-memory-default-projection", "system-memory-history-size",
     "system-memory-queue-policy",
+    "stop-idle-impl", "stop-idle-review", "stop-idle-qa",
 ]))
 @click.argument("value")
 def container_set(key: str, value: str):
@@ -113,12 +121,16 @@ def container_set(key: str, value: str):
     Keys: image, memory-limit, cpu-limit,
           system-memory-target, system-memory-scope,
           system-memory-default-projection, system-memory-history-size,
-          system-memory-queue-policy
+          system-memory-queue-policy,
+          stop-idle-impl, stop-idle-review, stop-idle-qa
     """
     from pm_core.paths import set_global_setting_value
 
     if key == "system-memory-scope" and value not in ("pm", "system"):
         click.echo("Error: system-memory-scope must be 'pm' or 'system'", err=True)
+        raise SystemExit(1)
+    if key.startswith("stop-idle-") and value not in ("on", "off"):
+        click.echo("Error: stop-idle value must be 'on' or 'off'", err=True)
         raise SystemExit(1)
     if key == "system-memory-queue-policy":
         from pm_core.launch_queue import VALID_POLICIES

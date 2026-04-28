@@ -193,6 +193,28 @@ def container_is_running(name: str) -> bool:
     return result.returncode == 0 and result.stdout.strip() == "true"
 
 
+
+def _ensure_push_proxy(name: str, workdir: str,
+                       allowed_push_branch: str | None,
+                       session_tag: str | None = None,
+                       pr_id: str | None = None) -> None:
+    """Ensure the push proxy is running for a container (start/restart if needed)."""
+    if not allowed_push_branch:
+        return
+    from pm_core.push_proxy import (
+        start_push_proxy, get_proxy_socket_path, proxy_is_alive,
+    )
+    sock = get_proxy_socket_path(name, session_tag=session_tag,
+                                 pr_id=pr_id)
+    if not sock or not proxy_is_alive(sock):
+        _log.warning("Push proxy dead/missing for container %s — "
+                     "restarting proxy", name)
+        start_push_proxy(
+            name, workdir, allowed_push_branch,
+            session_tag=session_tag, pr_id=pr_id,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Git push proxy integration
 # ---------------------------------------------------------------------------
@@ -401,23 +423,12 @@ def create_container(
             check=False, timeout=10,
         )
         container_id = result.stdout.strip()
-        _log.info("Reusing existing container %s (id=%s)", name, container_id[:12])
-        # Ensure the push proxy is running (it may have died in a crash)
-        if allowed_push_branch:
-            from pm_core.push_proxy import (
-                start_push_proxy, get_proxy_socket_path, proxy_is_alive,
-            )
-            sock = get_proxy_socket_path(name, session_tag=session_tag,
-                                         pr_id=pr_id)
-            if not sock or not proxy_is_alive(sock):
-                _log.warning("Push proxy dead/missing for container %s — "
-                             "restarting proxy", name)
-                start_push_proxy(
-                    name, str(workdir), allowed_push_branch,
-                    session_tag=session_tag, pr_id=pr_id,
-                )
+        _log.info("Reusing running container %s (id=%s)", name, container_id[:12])
+        _ensure_push_proxy(name, str(workdir), allowed_push_branch,
+                           session_tag=session_tag, pr_id=pr_id)
         return container_id
 
+    # No existing container or it's in an unexpected state — remove and recreate
     remove_container(name)
 
     # Auto-build the pm-dev image if it's the default and not yet built.
@@ -638,9 +649,20 @@ def remove_container(name: str) -> None:
     If another 'docker rm -f' is already in flight (e.g. the previous session's
     EXIT trap), this still blocks until the container has fully disappeared so
     that the caller can safely create a fresh container with the same name.
+
+    Captures memory stats before removal for the memory governor.
     """
     import time
     from pm_core.push_proxy import stop_push_proxy
+
+    # Capture memory stats before removing (best-effort)
+    try:
+        from pm_core.memory_governor import capture_and_record
+        capture_and_record(name)
+    except Exception:
+        _log.debug("Failed to capture stats for %s before removal", name,
+                    exc_info=True)
+
     stop_push_proxy(name)
     _run_docker("rm", "-f", name, check=False, timeout=30)
     # Wait for the container to be fully gone.  When another rm is already in
@@ -653,6 +675,56 @@ def remove_container(name: str) -> None:
             return  # container is gone
         time.sleep(0.1)
     _log.warning("remove_container: %s still present after 10 s", name)
+
+
+def stop_container(name: str, pane_ids: list[str] | None = None) -> None:
+    """Stop and remove a container to free memory.
+
+    Captures memory stats before removal.  The workdir is bind-mounted
+    from the host, so all project state (packages, venv, source) survives
+    container removal — only ephemeral container-internal state is lost.
+
+    If *pane_ids* are provided, sets ``remain-on-exit on`` on those tmux
+    panes before stopping so the session text is preserved for inspection.
+    """
+    # Preserve tmux panes before stopping (the docker exec processes will
+    # die when the container stops, which would normally close the panes).
+    if pane_ids:
+        from pm_core import tmux as tmux_mod
+        for pid in pane_ids:
+            try:
+                tmux_mod.set_pane_option(pid, "remain-on-exit", "on")
+            except Exception:
+                _log.debug("Failed to set remain-on-exit for pane %s", pid)
+
+    # remove_container captures memory stats and removes the push proxy.
+    remove_container(name)
+    _log.info("Stop-on-idle: removed container %s", name)
+
+
+def find_containers_by_keywords(*keywords: str) -> list[str]:
+    """Return names of running pm containers whose name contains all *keywords*.
+
+    Useful for finding a PR's container by matching the PR ID and type
+    (e.g. ``find_containers_by_keywords(pr_id, "review")``).
+    Returns an empty list on Docker failure.
+    """
+    try:
+        result = _run_docker(
+            "ps", "--filter", f"name={CONTAINER_PREFIX}",
+            "--format", "{{.Names}}",
+            check=False, timeout=10,
+        )
+        if result.returncode != 0:
+            return []
+    except Exception:
+        return []
+    matches = []
+    for line in result.stdout.strip().splitlines():
+        name = line.strip()
+        if name and all(kw in name for kw in keywords):
+            matches.append(name)
+    return matches
 
 
 # ---------------------------------------------------------------------------
@@ -693,6 +765,27 @@ def wrap_claude_cmd(
     if not is_container_mode_enabled():
         return claude_cmd, ""
 
+    # Memory governor gate check for impl/review containers.
+    # QA containers are gated separately in qa_loop.py.
+    from pm_core.memory_governor import (
+        check_single_container_fits, infer_container_type,
+    )
+    from pm_core.launch_queue import enqueue_and_try_acquire, dequeue
+    ctype = infer_container_type(
+        _make_container_name(label, session_tag=session_tag))
+    _queue_entry_id: str | None = None
+    if ctype and ctype not in ("qa_scenario", "qa_planner"):
+        fits, fits_reason = check_single_container_fits(ctype)
+        if not fits:
+            raise ContainerError(fits_reason)
+        _queue_entry_id, acquired = enqueue_and_try_acquire(ctype)
+        if not acquired:
+            dequeue(_queue_entry_id)
+            raise ContainerError(
+                f"Memory governor blocked launch. "
+                f"Free memory by stopping containers or raise the target."
+            )
+
     config = load_container_config()
     cname = _make_container_name(label, session_tag=session_tag)
 
@@ -708,6 +801,8 @@ def wrap_claude_cmd(
             pr_id=pr_id,
         )
     except Exception:
+        if _queue_entry_id:
+            dequeue(_queue_entry_id)
         _log.error("Failed to create container %s — aborting (container mode is enabled)",
                    cname, exc_info=True)
         raise ContainerError(
@@ -715,6 +810,10 @@ def wrap_claude_cmd(
             f"Is Docker running? Disable container mode with 'pm container disable' "
             f"to run without containers."
         )
+
+    # Container created — dequeue the queue entry
+    if _queue_entry_id:
+        dequeue(_queue_entry_id)
 
     # Rewrite any prompt-file reference that used the host workdir path.
     # build_claude_shell_cmd writes the file to the host and embeds

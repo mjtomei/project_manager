@@ -446,6 +446,14 @@ def set_session_option(session: str, option: str, value: str, socket_path: str |
     )
 
 
+def set_pane_option(pane_id: str, option: str, value: str) -> None:
+    """Set a tmux pane option (e.g. remain-on-exit)."""
+    _run(
+        _tmux_cmd("set-option", "-p", "-t", pane_id, option, value),
+        check=False,
+    )
+
+
 def set_shared_window_size(session: str, window: str) -> None:
     """For shared sessions, set per-window window-size to smallest.
 

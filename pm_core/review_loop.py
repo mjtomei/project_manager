@@ -424,6 +424,39 @@ def run_review_loop_sync(
 
     finally:
         state.running = False
+        # Stop-on-idle: stop the review container if policy enabled
+        # and the final verdict is not INPUT_REQUIRED (user may need it)
+        if (state.latest_verdict
+                and state.latest_verdict != VERDICT_INPUT_REQUIRED):
+            try:
+                from pm_core.container import is_container_mode_enabled
+                if is_container_mode_enabled():
+                    from pm_core.memory_governor import get_stop_idle_policy
+                    if get_stop_idle_policy("review"):
+                        from pm_core.container import (
+                            stop_container, find_containers_by_keywords,
+                        )
+                        # Find the review pane so we can preserve its
+                        # text (remain-on-exit) before stopping.
+                        pane_ids: list[str] = []
+                        try:
+                            from pm_core import tmux as tmux_mod
+                            win_name = _compute_review_window_name(pr_data)
+                            session = _get_pm_session()
+                            if session:
+                                pane_id = _find_claude_pane(session, win_name)
+                                if pane_id:
+                                    pane_ids = [pane_id]
+                        except Exception:
+                            pass
+                        for name in find_containers_by_keywords(
+                                state.pr_id, "review"):
+                            _log.info("review_loop: stop-on-idle "
+                                      "stopping %s", name)
+                            stop_container(name, pane_ids=pane_ids)
+            except Exception:
+                _log.debug("review_loop: stop-on-idle failed",
+                           exc_info=True)
 
     return state
 

@@ -34,6 +34,34 @@ _log = configure_logger("pm.tui.review_loop_ui")
 # Uses the same stability mechanism as review/watcher verdict detection.
 _merge_verdict_tracker = VerdictStabilityTracker()
 
+
+def _try_stop_idle_container(pr_id: str, container_type: str,
+                             pane_id: str | None = None) -> None:
+    """Stop a PR's container if stop-on-idle is enabled for the type.
+
+    Finds the container by looking up all running pm containers and
+    matching the PR ID in the container name.  If *pane_id* is given,
+    sets ``remain-on-exit`` on that pane so session text is preserved.
+    """
+    from pm_core.container import is_container_mode_enabled
+    if not is_container_mode_enabled():
+        return
+
+    from pm_core.memory_governor import get_stop_idle_policy
+    if not get_stop_idle_policy(container_type):
+        return
+
+    from pm_core.container import stop_container, find_containers_by_keywords
+    pane_ids = [pane_id] if pane_id else None
+    try:
+        for name in find_containers_by_keywords(pr_id, container_type):
+            _log.info("stop-on-idle: stopping %s container %s for %s",
+                      container_type, name, pr_id)
+            stop_container(name, pane_ids=pane_ids)
+    except Exception:
+        _log.debug("stop-on-idle: failed for %s/%s", container_type, pr_id,
+                    exc_info=True)
+
 # Icons for review verdicts (used in log line)
 VERDICT_ICONS = {
     VERDICT_PASS: "[green bold]✓ PASS[/]",
@@ -677,7 +705,35 @@ def _poll_impl_idle(app) -> None:
                 _log.info("impl_idle: %s idle but showing interactive prompt, resetting", pr_id)
                 tracker.mark_active(pr_id)
             else:
+                # Stop-on-idle: stop impl container if policy enabled
+                _try_stop_idle_container(pr_id, "impl",
+                                         pane_id=tracker.get_pane_id(pr_id))
                 newly_idle.append((pr_id, pr))
+
+        # Detect newly-idle in_review PRs for standalone review stop-on-idle.
+        # (Review loops are handled in run_review_loop_sync.)
+        # The review pane lives in window "review-{display_id}", not the
+        # impl window, so we track it under a separate key — same pattern
+        # as merge windows above.
+        if status == "in_review":
+            review_key = f"review:{pr_id}"
+            review_window = f"review-{window_name}"
+            active_pr_ids.add(review_key)
+            if not tracker.is_tracked(review_key) or tracker.is_gone(review_key):
+                review_pane = _find_impl_pane(session, review_window)
+                if review_pane:
+                    tracker.register(review_key, review_pane)
+            if tracker.is_tracked(review_key):
+                tracker.poll(review_key)
+                if tracker.became_idle(review_key):
+                    from pm_core.pane_idle import content_has_interactive_prompt
+                    content = tracker.get_content(review_key)
+                    if content_has_interactive_prompt(content):
+                        tracker.mark_active(review_key)
+                    else:
+                        _try_stop_idle_container(
+                            pr_id, "review",
+                            pane_id=tracker.get_pane_id(review_key))
 
     # --- Second pass: merge resolution windows ---
     # Discover merge windows for ALL in_review PRs, not just

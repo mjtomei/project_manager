@@ -265,6 +265,25 @@ class TestContainerSetValidation:
         mock_set.assert_called_once_with("container-system-memory-history-size", "10")
 
     @patch("pm_core.paths.set_global_setting_value")
+    def test_valid_stop_idle_impl_on(self, mock_set):
+        result = self._invoke("stop-idle-impl", "on")
+        assert result.exit_code == 0
+        assert "Set stop-idle-impl = on" in result.output
+        mock_set.assert_called_once_with("container-stop-idle-impl", "on")
+
+    @patch("pm_core.paths.set_global_setting_value")
+    def test_valid_stop_idle_qa_off(self, mock_set):
+        result = self._invoke("stop-idle-qa", "off")
+        assert result.exit_code == 0
+        assert "Set stop-idle-qa = off" in result.output
+        mock_set.assert_called_once_with("container-stop-idle-qa", "off")
+
+    def test_invalid_stop_idle_impl_maybe(self):
+        result = self._invoke("stop-idle-impl", "maybe")
+        assert result.exit_code == 1
+        assert "stop-idle value must be 'on' or 'off'" in result.stderr
+
+    @patch("pm_core.paths.set_global_setting_value")
     def test_valid_system_memory_queue_policy_fifo(self, mock_set):
         result = self._invoke("system-memory-queue-policy", "fifo")
         assert result.exit_code == 0
