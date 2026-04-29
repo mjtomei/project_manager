@@ -958,9 +958,33 @@ QA_PLAN_END
 
 Number scenarios starting from {scenario_start}.
 
-Include as many scenarios as required to fully exercise the functionality
-of the PR.  Exercise the core functionality as well as any edge cases
-that may expose bugs.
+## Scenario Sizing — consolidate related checks
+
+Prefer fewer, broader scenarios over many narrow ones.  A single scenario
+should validate a coherent slice of behavior, not just one assertion.
+Group related checks together when they share setup or context:
+
+- **Multiple flags / options of the same command** — verify them in one
+  scenario whose STEPS run each variant in turn.
+- **Related edge cases of the same function or code path** — empty input,
+  oversized input, malformed input — belong together if the setup is the same.
+- **Happy-path + closely related error handling** for one feature usually
+  fits in one scenario.
+- **Round-trip checks** (write then read back, encode then decode, create
+  then list) belong in one scenario.
+
+Keep scenarios separate when:
+
+- They exercise unrelated code paths or modules (failure isolation matters).
+- Setup/teardown differs materially (different fixtures, mocks, or
+  environment).
+- One scenario depends on another's side effects — split so each is
+  self-contained.
+
+Aim for the smallest number of scenarios that still gives full coverage of
+the PR's behavior.  A moderate PR should typically need a handful of
+scenarios, not one per assertion.  Within each scenario, list multiple
+concrete checks in STEPS rather than splitting them out.
 
 {general_notes_block}{qa_specific_block}"""
     return prompt.strip()
