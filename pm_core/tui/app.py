@@ -363,6 +363,10 @@ class ProjectManagerApp(App):
                 self._session_name = result.stdout.strip().split("~")[0]
             except Exception:
                 pass
+        # External-reload IPC: write a pidfile and install a SIGUSR1 handler
+        # so CLI commands can ask us to reload state without depending on
+        # tmux send-keys (which gets eaten by whichever widget has focus).
+        self._install_reload_signal()
         # Load any existing capture config
         frame_capture.load_capture_config(self)
         # Set up watchers on child widgets for frame capture
@@ -863,6 +867,45 @@ class ProjectManagerApp(App):
                 await self._do_normal_sync(is_manual=True)
             self.run_worker(do_refresh())
             self.log_message("Refreshing...")
+
+    def _reload_pidfile(self) -> Path | None:
+        """Path to this app's reload pidfile, keyed by tmux session name."""
+        if not self._session_name:
+            return None
+        from pm_core.paths import pm_home
+        return pm_home() / f"tui-{self._session_name}.pid"
+
+    def _install_reload_signal(self) -> None:
+        """Write pidfile and register SIGUSR1 -> action_reload."""
+        import os
+        import signal
+        import asyncio
+        pidfile = self._reload_pidfile()
+        if pidfile is None:
+            _log.debug("No session name yet, skipping reload-signal install")
+            return
+        try:
+            pidfile.write_text(str(os.getpid()))
+        except OSError as e:
+            _log.debug("Could not write TUI pidfile %s: %s", pidfile, e)
+            return
+        try:
+            loop = asyncio.get_event_loop()
+            loop.add_signal_handler(signal.SIGUSR1, self.action_reload)
+            _log.info("Installed SIGUSR1 reload handler (pidfile=%s)", pidfile)
+        except (NotImplementedError, RuntimeError) as e:
+            # add_signal_handler isn't available on Windows; not relevant
+            # for our tmux flow but log so it's visible if it ever fires.
+            _log.debug("Could not install SIGUSR1 handler: %s", e)
+
+    def on_unmount(self) -> None:
+        """Clean up the reload pidfile on shutdown."""
+        pidfile = self._reload_pidfile()
+        if pidfile is not None:
+            try:
+                pidfile.unlink(missing_ok=True)
+            except OSError as e:
+                _log.debug("Could not remove TUI pidfile %s: %s", pidfile, e)
 
     def action_reload(self) -> None:
         """Reload state from disk without triggering PR sync.

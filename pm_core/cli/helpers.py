@@ -291,21 +291,53 @@ def _record_status_timestamp(pr_entry: dict, status: str | None = None) -> None:
         pr_entry["merged_at"] = now
 
 
-def trigger_tui_refresh() -> None:
-    """Send reload key to TUI pane in the pm session for the current directory.
+def _tui_pidfile_for_session(session: str) -> Path:
+    """Path to the pidfile a TUI in ``session`` writes at startup."""
+    from pm_core.paths import pm_home
+    return pm_home() / f"tui-{session}.pid"
 
-    Sends 'R' (reload) which reloads state from disk without triggering
-    an expensive PR sync. Use 'r' (refresh) for full sync with GitHub.
+
+def trigger_tui_reload(session: str | None = None) -> None:
+    """Ask the TUI to reload state from disk via SIGUSR1.
+
+    The TUI registers a SIGUSR1 handler at startup that runs
+    ``action_reload`` (state-only reload, no GitHub sync). This is
+    focus-independent — unlike send-keys, it can't be eaten by the
+    command input or any other focused widget.
+
+    Resolves the target TUI by session: if ``session`` is given it is
+    used directly, otherwise we look up the TUI for the current
+    cwd/tmux context (same logic as ``_find_tui_pane``).
     """
+    import signal
     try:
-        if not tmux_mod.has_tmux():
+        if session is None:
+            _, session = _find_tui_pane()
+        if not session:
             return
-        tui_pane, session = _find_tui_pane()
-        if tui_pane and session:
-            tmux_mod.send_keys_literal(tui_pane, "R")
-            _log.debug("Sent reload to TUI pane %s in session %s", tui_pane, session)
+        pidfile = _tui_pidfile_for_session(session)
+        if not pidfile.exists():
+            _log.debug("No TUI pidfile for session %s", session)
+            return
+        try:
+            pid = int(pidfile.read_text().strip())
+        except (ValueError, OSError) as e:
+            _log.debug("Could not read TUI pidfile %s: %s", pidfile, e)
+            return
+        try:
+            os.kill(pid, signal.SIGUSR1)
+            _log.debug("Sent SIGUSR1 to TUI pid %d (session %s)", pid, session)
+        except ProcessLookupError:
+            _log.debug("TUI pid %d gone, removing stale pidfile", pid)
+            pidfile.unlink(missing_ok=True)
+        except PermissionError as e:
+            _log.debug("Cannot signal TUI pid %d: %s", pid, e)
     except Exception as e:
-        _log.debug("Could not trigger TUI refresh: %s", e)
+        _log.debug("Could not trigger TUI reload: %s", e)
+
+
+# Backwards-compatible alias for existing callers.
+trigger_tui_refresh = trigger_tui_reload
 
 
 def trigger_tui_restart() -> None:
@@ -342,11 +374,7 @@ def trigger_tui_merge_lock(pr_display_id: str) -> None:
         lock.write_text(pr_display_id)
         _log.debug("Wrote merge-lock marker for %s", pr_display_id)
         # Signal TUI to reload — it will see the lock and show overlay
-        if not tmux_mod.has_tmux():
-            return
-        tui_pane, session = _find_tui_pane()
-        if tui_pane and session:
-            tmux_mod.send_keys_literal(tui_pane, "R")
+        trigger_tui_reload()
     except Exception as e:
         _log.debug("Could not set merge lock: %s", e)
 

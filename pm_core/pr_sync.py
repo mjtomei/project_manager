@@ -21,48 +21,9 @@ _log = configure_logger("pm.pr_sync")
 
 
 def _trigger_tui_refresh() -> None:
-    """Send refresh key to TUI pane if running in a pm session."""
-    try:
-        import subprocess
-        import hashlib
-
-        # Get current working directory to compute session name
-        cwd = Path.cwd()
-
-        # Find the pm root to get repo_id
-        try:
-            root = store.find_project_root()
-            data = store.load(root, validate=False)
-            repo_id = data.get("project", {}).get("repo_id", "")
-            name = data.get("project", {}).get("name", "unknown")
-            if repo_id:
-                session_hash = repo_id[:8]
-            else:
-                session_hash = hashlib.sha256(str(root).encode()).hexdigest()[:8]
-            session_name = f"pm-{name}-{session_hash}"
-        except Exception:
-            return
-
-        # Find TUI pane in the session
-        from pm_core.tmux import _tmux_cmd
-        result = subprocess.run(
-            _tmux_cmd("list-panes", "-t", session_name, "-F", "#{pane_id}:#{pane_current_command}"),
-            capture_output=True, text=True, timeout=5
-        )
-        if result.returncode != 0:
-            return
-
-        for line in result.stdout.strip().split("\n"):
-            if ":pm" in line or ":python" in line:
-                pane_id = line.split(":")[0]
-                subprocess.run(
-                    _tmux_cmd("send-keys", "-t", f"{session_name}:{pane_id}", "R"),
-                    check=False, timeout=5
-                )
-                _log.debug("Sent refresh to TUI pane %s", pane_id)
-                break
-    except Exception as e:
-        _log.debug("Could not trigger TUI refresh: %s", e)
+    """Ask the TUI to reload state via SIGUSR1 (focus-independent)."""
+    from pm_core.cli.helpers import trigger_tui_reload
+    trigger_tui_reload()
 
 
 # Minimum interval between syncs (in seconds)
