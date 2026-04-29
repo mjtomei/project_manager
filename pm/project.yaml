@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-d39a7fb
+  active_pr: pr-e84b43c
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -9895,39 +9895,46 @@ prs:
   status: pending
   depends_on:
   - pr-539110b
-  description: 'Regression test-runner worker. Dumb component: runs pytest and Claude-guided
-    regression scenarios on demand and emits raw failure records. Scheduling, throughput
-    limits, dedup, prioritization, and work-log management live in the regression-flow
-    supervisor (pr-271cb3a) — this PR does none of those.
+  description: 'Unified discovery worker: runs the Claude-based regression test functionality
+    with a prompt tuned to surface both bugs (test failures, incorrect behavior) and
+    improvements (UX/quality issues — state not surfaced, relationships not wired,
+    affordances missing). Single worker for both autonomous tracks; no separate UX-review
+    pass.
+
+
+    Dumb component: runs on demand and emits raw findings. Scheduling, throughput
+    limits, dedup, prioritization, and work-log management live in the discovery supervisor
+    (pr-271cb3a).
 
 
     Behavior:
 
     - Exposes a single ''run now'' entry point the supervisor invokes
 
-    - Runs pytest and any guided test scenarios
+    - Runs pytest, Claude-guided regression scenarios, and a quality/UX review prompt
+    over recent merges + current state
 
-    - Parses each failure into a structured record (failing test name, assertion,
-    stack trace excerpt, repro command)
+    - Parses each finding into a typed record: `{type: bug | improvement, ...details}`.
+    Bug records include failing test name, assertion, stack trace excerpt, repro command.
+    Improvement records include description, suggested scope, confidence score.
 
-    - Emits the records to the supervisor (return value or queue) — does not file
-    PRs itself
+    - Emits the records to the supervisor — does not file PRs itself
 
     - Builds on the watcher framework (pr-3032fb6, merged)
 
 
-    The supervisor decides what to do with the emitted records (dedup against open
-    bugs, merge into existing, file new with priority).
+    The supervisor decides what to do (route to plan=bugs or plan=ux, dedup, file
+    new with priority).
 
 
     Manual testing: invoke the worker directly and inspect emitted records for shape
-    and accuracy on a known-failing test. End-to-end behavior is exercised via the
-    supervisor''s manual test.'
+    and accuracy on (a) a known-failing test and (b) a known UX-shaped issue. End-to-end
+    behavior is exercised via the supervisor''s manual test.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-28T11:07:54.142407+00:00'
-  updated_at: '2026-04-29T15:34:19.873293+00:00'
+  updated_at: '2026-04-29T15:55:28.228163+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -10041,44 +10048,6 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
-- id: pr-1766d74
-  plan: plan-regression
-  title: 'UX-review watcher: file UX-quality candidates into ux plan'
-  branch: pm/pr-1766d74-ux-review-watcher-file-ux-quality-candidates-into-
-  status: pending
-  depends_on: []
-  description: 'UX-review worker. Dumb component: runs a UX-review pass over recent
-    merges plus current TUI/state on demand and emits raw candidate records. Scheduling,
-    throughput limits, dedup, prioritization, and work-log management live in the
-    improvement-flow supervisor (pr-d39a7fb) — this PR does none of those.
-
-
-    Discovery prompt focuses on: state that exists but is not surfaced, relationships
-    not wired up (deps, back-refs), affordances missing after a feature lands. Example
-    class: a split-PR command that creates children without dependencies and without
-    any TUI indicator on the parent — works correctly but reads as broken.
-
-
-    Behavior:
-
-    - Exposes a single ''run now'' entry point the supervisor invokes
-
-    - Runs the review pass and emits candidate records (description, suggested plan/scope,
-    confidence score) to the supervisor — does not file PRs itself
-
-
-    Manual testing: invoke the worker directly and inspect emitted candidates for
-    shape and signal-to-noise on a known UX-shaped issue in the project. End-to-end
-    behavior is exercised via the supervisor''s manual test.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-04-29T14:13:43.763077+00:00'
-  updated_at: '2026-04-29T15:34:26.434496+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
 - id: pr-84e6510
   plan: plan-regression
   title: 'Auto-pool with merge gate: rate-limited auto-sequence with no-auto-merge
@@ -10086,7 +10055,7 @@ prs:
   branch: pm/pr-84e6510-auto-pool-with-merge-gate-rate-limited-auto-sequen
   status: pending
   depends_on:
-  - pr-1766d74
+  - pr-47940bc
   - pr-45db518
   description: 'Configure a pool (via the auto-pool executor in pr-45db518) for UX-quality
     PRs filed by the UX-review watcher. Pool config: source = `plan=ux and status=pending`,
@@ -10117,7 +10086,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-29T14:13:49.809083+00:00'
-  updated_at: '2026-04-29T14:31:05.350412+00:00'
+  updated_at: '2026-04-29T15:57:16.596404+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -10183,93 +10152,203 @@ prs:
   notes: []
 - id: pr-271cb3a
   plan: plan-regression
-  title: Regression-flow supervisor watcher
+  title: Discovery supervisor watcher (unified for bugs and improvements)
   branch: pm/pr-271cb3a-regression-flow-supervisor-watcher
   status: pending
   depends_on:
   - pr-47940bc
   - pr-45db518
-  description: 'Supervisor watcher that owns the autonomous regression-fix loop. Drives
-    the regression test-runner worker (pr-47940bc) and converts raw failures into
-    prioritized, deduplicated bug filings.
+  description: 'Single discovery supervisor watcher. Drives the unified discovery
+    worker (pr-47940bc) and converts raw findings into prioritized, deduplicated PR
+    filings — routing each finding into plan=bugs or plan=ux based on its type.
 
 
     Responsibilities:
 
-    - **Trigger**: kicks off regression test runs on its own cadence with throughput
-    constraints — max-concurrent runs, max-per-window, back-off when failures storm.
-    The worker (pr-47940bc) does not schedule itself.
+    - **Trigger**: kicks off discovery runs on its own cadence with throughput constraints
+    (max-concurrent runs, max-per-window, back-off when failures storm).
 
-    - **Dedup**: when the worker emits raw failures, the supervisor checks them against
-    open bug PRs and recent work-log entries. Decisions: drop (already filed), merge
-    (append note + bump priority on existing), or file new. The work log gives it
-    the context the worker lacks.
+    - **Route**: each raw record is filed into plan=bugs (type=bug) or plan=ux (type=improvement).
+
+    - **Dedup**: checks raw findings against open PRs in the target plan and recent
+    work-log entries. Decisions: drop, merge (append note + bump priority on existing),
+    or file new.
 
     - **Prioritize**: sets priority on new filings (via `pm pr edit --priority`) based
-    on failure severity, recency of related failures, and work-log signals.
+    on severity / confidence and work-log signals.
 
     - **Log**: maintains a structured work log of runs, findings, filings, dedup decisions,
-    and fixes landed. This is the source of truth used by pr-558ca3f''s reporting.
+    and routing rationale. Source of truth for the watcher review window (pr-WATCHERVIEW)
+    and summary reporting (pr-558ca3f).
 
     - **Exception handling**: detects stuck/crashed worker runs and restarts or escalates.
 
 
-    Manual testing: configure the supervisor against a fake worker that emits scripted
-    failure sequences. Verify throughput limits hold under burst, dedup correctly
-    merges repeat failures into existing PRs with note + priority bump, and the work
-    log reflects all decisions. Use INPUT_REQUIRED to drive this.'
+    Manual testing: configure against a fake worker emitting scripted mixed bug/improvement
+    record sequences. Verify throughput limits, correct routing, dedup, priority assignment,
+    and work log accuracy. Use INPUT_REQUIRED to drive this.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-29T15:34:01.804130+00:00'
-  updated_at: '2026-04-29T15:34:01.804130+00:00'
+  updated_at: '2026-04-29T15:55:37.842828+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
   notes: []
 - id: pr-d39a7fb
   plan: plan-regression
-  title: Improvement-flow supervisor watcher
+  title: Improvement-fix implementation watcher
   branch: pm/pr-d39a7fb-improvement-flow-supervisor-watcher
   status: pending
   depends_on:
-  - pr-1766d74
   - pr-45db518
-  description: 'Supervisor watcher that owns the autonomous UX-improvement loop. Drives
-    the UX-review worker (pr-1766d74) and converts raw candidates into prioritized,
-    deduplicated UX PR filings.
+  - pr-84e6510
+  description: 'Implementation-side watcher for the improvement-fix flow. Distinct
+    from the pool (which is generic execution) and from the discovery supervisor (which
+    handles filing). Monitors the UX pool''s in-flight sessions and reacts to execution-side
+    signals.
 
 
-    Responsibilities mirror the regression-flow supervisor:
+    Responsibilities:
 
-    - **Trigger**: schedules UX review passes on its own cadence with throughput constraints
-    (max-concurrent, max-per-window, back-off).
+    - **Health**: detect stuck/crashed fix sessions, repeated NEEDS_WORK loops, and
+    other execution-side anomalies. Restart or escalate. May reuse pr-18ac983 (session
+    health watcher) as substrate if it lands first.
 
-    - **Dedup**: checks raw candidates against open UX PRs and recent work-log entries.
-    Drop / merge (note + priority bump) / file new.
+    - **Dynamic priority**: as the work log accumulates, adjust priority on queued
+    PRs (e.g. boost a UX fix that other queued candidates depend on, demote one that''s
+    been deferred too many times).
 
-    - **Prioritize**: sets priority on new filings based on the worker''s confidence
-    score, age of the related code, and work-log signals.
+    - **Implementation log**: per-flow metrics — typical fix-session duration, success/NEEDS_WORK
+    rates, merge cadence. Feeds the watcher review window.
 
-    - **Log**: structured work log of passes run, candidates surfaced, filings, dedup
-    decisions, fixes landed and merged.
-
-    - **Exception handling**: detects stuck/crashed worker passes; restart or escalate.
-
-
-    Cadence and judgment differ from the regression supervisor (confidence-based vs.
-    severity-based), so this is a separate watcher rather than a unified one — keeps
-    each flow''s tuning independent.
+    - **Throttle interactions**: pause its pool if the system is under load (e.g.
+    another flow is consuming resources), resume when capacity returns.
 
 
-    Manual testing: configure against a fake UX worker emitting scripted candidate
-    batches. Verify throughput limits, dedup behavior, priority assignment, and work
-    log accuracy. Use INPUT_REQUIRED to drive this.'
+    Mirror of pr-BUGFIXWATCHER but tuned for UX-fix concerns (slower cadence, gated
+    merge, taste-driven). Separate watcher because flow-specific signals justify independent
+    tuning.
+
+
+    Manual testing: scripted scenarios — stuck session, repeated NEEDS_WORK, dependent-PR
+    boost — verifying each is detected and handled. Use INPUT_REQUIRED to drive this.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-29T15:34:08.487870+00:00'
-  updated_at: '2026-04-29T15:34:08.487870+00:00'
+  updated_at: '2026-04-29T15:56:26.783633+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-e3a711c
+  plan: plan-regression
+  title: Bug-fix implementation watcher
+  branch: pm/pr-e3a711c-bug-fix-implementation-watcher
+  status: pending
+  depends_on:
+  - pr-45db518
+  - pr-ea3c851
+  description: 'Implementation-side watcher for the bug-fix flow. Peer of pr-d39a7fb
+    (improvement-fix watcher). Distinct from the pool (which is generic execution)
+    and from the discovery supervisor (which handles filing). Monitors the bug-fix
+    pool''s in-flight sessions and reacts to execution-side signals.
+
+
+    Responsibilities:
+
+    - **Health**: detect stuck/crashed fix sessions, repeated NEEDS_WORK loops, reproduce-step
+    failures (the bug-fix flow requires a failing test first; if the impl can''t write
+    one, surface that). Restart or escalate. May reuse pr-18ac983 (session health
+    watcher) as substrate if it lands first.
+
+    - **Dynamic priority**: adjust priority on queued bug PRs as the work log accumulates
+    — e.g. boost when a related bug just regressed again, demote when a fix attempt
+    has failed multiple times and needs human triage.
+
+    - **Implementation log**: per-flow metrics — fix-session duration, reproduce-step
+    success rate, time-to-merge, regression-after-fix rate. Feeds the watcher review
+    session.
+
+    - **Throttle interactions**: pause its pool when bug-fix throughput is overwhelming
+    review/QA capacity.
+
+
+    Mirror of pr-d39a7fb but tuned for bug-fix concerns (faster cadence, auto-merge,
+    severity-driven). Separate watcher because signals like reproduce-step failure
+    are bug-flow specific.
+
+
+    Manual testing: scripted scenarios — reproduce-step failure, repeated NEEDS_WORK
+    on a single bug, regression-after-fix detection — verifying each is detected and
+    handled. Use INPUT_REQUIRED to drive this.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-29T15:56:05.110130+00:00'
+  updated_at: '2026-04-29T15:56:26.129150+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-e84b43c
+  plan: plan-regression
+  title: 'Watcher review session: Claude pane with work-log access'
+  branch: pm/pr-e84b43c-watcher-review-session-claude-pane-with-work-log-a
+  status: pending
+  depends_on:
+  - pr-271cb3a
+  description: 'Dedicated Claude session for human review of the autonomous watchers.
+    Launched from the TUI; opens with a summary of what''s happened recently across
+    all three watchers (discovery supervisor pr-271cb3a, bug-fix watcher, improvement-fix
+    watcher pr-d39a7fb) and then conversational from there.
+
+
+    Why a session instead of a static TUI panel:
+
+    - Humans can ask follow-up questions (''why was this bug deduplicated against
+    that one?'', ''show me the last three improvement candidates that got dropped'')
+
+    - Can request remediation (''boost priority on pr-X'', ''pause the improvement
+    pool for an hour'') with the session translating to the right pm commands
+
+    - Reasoning surface, not just metrics — the human gets explanations, not raw logs
+
+
+    Behavior:
+
+    - TUI keypress launches a Claude session in a new pane with the project context
+    loaded
+
+    - System prompt grants read access to all three watchers'' work-logs (paths or
+    queryable interface), lists current pool state and in-flight PRs, and explains
+    the watcher architecture
+
+    - Opens with a summary turn: what was discovered, filed, fixed, merged, or stuck
+    since the last review session
+
+    - From there, chat-driven: human asks, session answers using the logs and pm CLI
+    as needed
+
+    - Read-mostly by default — write actions (priority changes, pool pause/resume)
+    require explicit human confirmation in the session
+
+
+    Workers and supervisors emit logs in a uniform shape (jsonl or similar) so the
+    review session has a single ingestion path.
+
+
+    Manual testing: launch the review session in a project with simulated watcher
+    activity, confirm the opening summary covers all three watchers, exercise follow-up
+    questions and a remediation flow (priority bump). Use INPUT_REQUIRED to drive
+    this.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-29T15:56:16.156179+00:00'
+  updated_at: '2026-04-29T15:56:16.156179+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
