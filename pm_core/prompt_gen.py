@@ -14,14 +14,15 @@ If you spot a bug or quality issue that isn't part of this PR's stated
 scope, try to fix it if the fix doesn't require separate planning or user
 input. If you do decide to fix it, then record what you did with:
   ```
-  pm pr note <pr-id> '<short summary of the incidental fix>'
+  pm pr note add <pr-id> '<short summary of the incidental fix>'
   ```
 
 If you don't, file a separate bug PR so it doesn't get lost:
   ```
   pm pr add '<title>' --plan bugs --description '<location, repro>'
   ```
-  Skim `pm pr list --plan bugs` first to avoid duplicates.
+  Skim `pm pr list` first (filter for the `bugs` plan in the output) to
+  avoid duplicates.
 """
 
 
