@@ -9,6 +9,16 @@ Establish a continuous quality improvement loop where tests run automatically, b
 - Enforce a disciplined reproduce-first bug fix flow
 - Deliver regular summaries of what was found and fixed
 
+## Architecture
+
+Two autonomous flows (regression bug-fix, UX improvement), each with three layers:
+
+- **Worker** — dumb component that runs the discovery action on demand and emits raw findings (test failures or UX candidates). No scheduling, dedup, prioritization, or logging.
+- **Supervisor watcher** — owns scheduling with throughput constraints, dedup against open PRs and recent work-log, prioritization on filings, work-log of all decisions, and exception handling for stuck/crashed workers.
+- **Pool** — generic rate-limited PR executor (start → review → QA chain) ordered by per-PR priority. The pool reads priority; it doesn't care who set it.
+
+This separation lets each layer be tuned independently and keeps the workers minimal.
+
 ## Prerequisites
 
 - Watcher framework (`pr-3032fb6`, merged)
@@ -28,54 +38,62 @@ Teach review and QA agents to use `pm pr add --plan bugs` when they spot issues 
 ### PR: Bug fix flow: reproduce with test, fix, verify
 `pr-30588a7`
 
-Different impl prompt for bug PRs: write a failing test first, fix the code, verify the test passes. Reviewers should check that a reproduction test exists. At session end, reconcile against other open bugs and add cross-reference notes for likely overlap.
+Different impl prompt for bug PRs: write a failing test first, fix the code, verify the test passes. Reviewers check that a reproduction test exists. The session-end reconcile step is verification-only — primary dedup is owned by the supervisor (pr-271cb3a) at file time.
 
 ### PR: Auto-sequence button: chain start → review → QA on a single PR
 `pr-e58459b`
 
-TUI keypress that chains start → done (review) → qa loop on one PR, halting at existing pause conditions and stopping before merge. Shared primitive used by both the bug fix loop and the UX taste loop.
+TUI keypress that chains start → done (review) → qa loop on one PR, halting at existing pause conditions and stopping before merge. Shared primitive used by both autonomous tracks.
 
 ### PR: Auto-pool executor: rate-limited PR queue with prioritization
 `pr-45db518` (depends on: pr-e58459b)
 
-Foundational queue primitive consumed by every autonomous track in this plan. A pool watches a configurable PR source (plan id, status filter), drives selected PRs through the auto-sequence chain under a configurable rate limit (max-concurrent and/or max-per-window), and orders them by a per-PR `priority` field. Auto-merge mode is per-pool (on for bug fixes, gated for UX). Priority is adjustable via `pm pr edit --priority`, so the regression runner, UX watcher, and bug-fix reconcile step can all influence ordering.
+Foundational queue primitive consumed by every autonomous track. Watches a configurable PR source, drives selected PRs through the auto-sequence chain under a rate limit (max-concurrent and/or max-per-window), orders by per-PR `priority`. Auto-merge mode is per-pool. Priority is set by supervisors via `pm pr edit --priority`; the pool is agnostic to who sets it.
 
-## Phase 2: Regression runner (after Phase 1)
+## Phase 2: Workers (after Phase 1)
 
-### PR: Regression runner watcher: run tests on schedule and report failures
+### PR: Regression test-runner worker
 `pr-47940bc` (depends on: pr-539110b)
 
-New watcher that runs pytest and guided scenarios on a schedule, files bugs from failures. Dedup is deferred to the bug fix flow (see `pr-30588a7`) — the watcher files freely and overlap is reconciled at fix-completion time.
+Dumb worker that runs pytest and guided scenarios on demand and emits raw failure records. No scheduling or filing — that's the supervisor's job.
+
+### PR: UX-review worker
+`pr-1766d74`
+
+Dumb worker that runs a UX-review pass over recent merges and current state and emits raw candidate records. No scheduling or filing — that's the supervisor's job.
+
+## Phase 3: Supervisors (after Phase 2)
+
+### PR: Regression-flow supervisor watcher
+`pr-271cb3a` (depends on: pr-47940bc, pr-45db518)
+
+Owns scheduling (with throughput constraints), dedup against open bug PRs and the work-log, priority assignment on new filings, structured work-log, and exception handling for the regression worker. Decides drop / merge / file-new for each raw failure the worker emits.
+
+### PR: Improvement-flow supervisor watcher
+`pr-d39a7fb` (depends on: pr-1766d74, pr-45db518)
+
+Mirror of the regression supervisor for the UX flow. Separate watcher because cadence and judgment criteria (confidence-based vs. severity-based) differ enough to keep tuning independent.
 
 ### PR: Regression loop summary reporting
 `pr-558ca3f` (depends on: pr-47940bc)
 
-Periodic digests of loop activity: tests run, bugs filed, fixes landed.
+Renders the supervisors' work-logs into periodic markdown digests. Mostly a presentation layer — the source of truth lives in the supervisor's log.
 
-## Phase 3: Autonomous loop (after Phase 2 + bug fix flow + auto-pool)
+## Phase 4: Pool configurations (after Phase 3)
 
-### PR: Auto-start bug fix PRs from regression failures
+### PR: Bug-fix pool config (auto-merge on)
 `pr-ea3c851` (depends on: pr-30588a7, pr-47940bc, pr-45db518)
 
-Configure the auto-pool (pr-45db518) for bug fixes: source = `plan=bugs`, auto-merge on, priority from failure severity. Mostly pool configuration plus glue to wire severity → initial priority and let the reconcile step bump priority on overlapping bugs.
+Pool config: source = `plan=bugs`, auto-merge on. Picks up bug PRs filed by the regression supervisor and runs them through the bug-fix flow.
 
-## Phase 4: Taste-driven loop (parallel track)
-
-Mirrors Phases 2–3 for UX-quality issues that LLMs miss during spec design — features that work correctly but read as broken (e.g. children created without deps, no parent indicator). Discover via review pass rather than test failure, auto-implement but gate on human review.
-
-### PR: UX-review watcher: file UX-quality candidates into ux plan
-`pr-1766d74`
-
-Watcher that does a UX-review pass over recent merges and current state, files candidates via `pm pr add --plan ux`. Same file-freely / reconcile-later dedup pattern as `pr-47940bc`.
-
-### PR: UX pool: merge-gated auto-sequence for UX candidates
+### PR: UX pool config (merge-gated)
 `pr-84e6510` (depends on: pr-1766d74, pr-45db518)
 
-Configure the auto-pool (pr-45db518) for UX fixes: source = `plan=ux`, auto-merge gated, priority from watcher confidence. UX PRs auto-sequence to ready-for-merge then wait for a human taste check; the human merge cadence is the throttle.
+Pool config: source = `plan=ux`, auto-merge gated. UX PRs auto-sequence to ready-for-merge then wait for a human taste check.
 
 ## Success criteria
 
-- Regression suite runs unattended on a configurable schedule
-- Bugs from test failures are automatically filed with reproduction steps
+- Regression suite runs unattended under throughput constraints
+- Bugs from test failures are filed with reproduction steps and deduplicated against existing PRs at file time
 - Bug fixes follow reproduce→fix→verify and land without manual kickoff
-- Daily/weekly summary shows what was found, fixed, and still open
+- Supervisors maintain a structured work-log; summary reporting renders it for human review

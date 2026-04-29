@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-3b2847c
+  active_pr: pr-d39a7fb
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -9801,7 +9801,7 @@ prs:
   plan: plan-regression
   title: 'QA planner: consolidate related assertions into fewer scenarios'
   branch: pm/pr-3b2847c-qa-planner-consolidate-related-assertions-into-few
-  status: pending
+  status: merged
   depends_on: []
   description: Update the QA scenario planner prompt to instruct it to group related
     checks into single scenarios when possible. Currently the planner tends to create
@@ -9810,20 +9810,21 @@ prs:
     multiple flags of the same command, verifying related edge cases together). This
     is a prompt-only change — no changes to the qa_loop execution machinery. The goal
     is fewer, more comprehensive scenarios rather than many narrow ones.
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/167
+  gh_pr_number: 167
   created_at: '2026-04-28T11:07:24.236206+00:00'
-  updated_at: '2026-04-28T11:09:27.484930+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
+  updated_at: '2026-04-29T15:19:21.251952+00:00'
+  started_at: '2026-04-29T14:56:59.297406+00:00'
+  reviewed_at: '2026-04-29T15:03:38.866798+00:00'
+  merged_at: '2026-04-29T15:19:21.251952+00:00'
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-3b2847c-qa-planner-consolidate-related-asser-347488c6
 - id: pr-539110b
   plan: plan-regression
   title: Review and QA agents file bugs for out-of-scope issues via pm pr add
   branch: pm/pr-539110b-review-and-qa-agents-file-bugs-for-out-of-scope-is
-  status: pending
+  status: merged
   depends_on: []
   description: 'Update the review loop and QA scenario prompts to instruct agents
     that when they discover a bug or issue that is out of scope for the current PR,
@@ -9833,15 +9834,16 @@ prs:
     based on the PR''s own changes — the bug filing is a side effect, not a verdict
     change. Touches: review prompt templates, QA planner/scenario prompts, and possibly
     the qa_loop to allow tool use for pm commands.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/168
+  gh_pr_number: 168
   created_at: '2026-04-28T11:07:32.856038+00:00'
-  updated_at: '2026-04-28T11:09:28.123822+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
+  updated_at: '2026-04-29T15:34:49.691667+00:00'
+  started_at: '2026-04-29T15:04:00.142035+00:00'
+  reviewed_at: '2026-04-29T15:17:55.839686+00:00'
+  merged_at: '2026-04-29T15:34:49.691667+00:00'
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-539110b-review-and-qa-agents-file-bugs-for-o-9c30b38a
 - id: pr-30588a7
   plan: plan-regression
   title: 'Bug fix flow: reproduce with test, fix, verify'
@@ -9860,11 +9862,17 @@ prs:
 
     3. Verify: Run the test to confirm it passes
 
-    4. Reconcile: At the end of the session, scan other open bugs (plan=bugs, status=pending)
-    for ones that look similar or whose fix likely overlaps with this one. For each
-    such bug, append a note via `pm pr note <id> --append` cross-referencing this
-    PR and the suspected overlap. Do not close or modify those PRs — just leave a
-    pointer for the human or the next fix session.
+    4. Reconcile (verification only): At session end, scan the supervisor''s cross-references
+    on this PR. Confirm any linked overlapping bugs still exist after the fix; for
+    each that''s now also resolved, append a note marking the link as confirmed-overlap.
+    For any newly-noticed overlap not already in the supervisor''s notes, append a
+    pointer.
+
+
+    The reconcile step is *not* the primary dedup mechanism — that''s handled file-time
+    by the regression-flow supervisor (pr-271cb3a) which has the work-log context.
+    Reconcile is a backstop that verifies the supervisor''s links and catches anything
+    the supervisor missed.
 
 
     This changes the impl prompt generation (prompt_gen.py) to detect bug PRs and
@@ -9875,7 +9883,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-28T11:07:43.274357+00:00'
-  updated_at: '2026-04-28T11:15:41.535553+00:00'
+  updated_at: '2026-04-29T15:34:36.376056+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -9887,38 +9895,39 @@ prs:
   status: pending
   depends_on:
   - pr-539110b
-  description: 'New watcher type that periodically runs the test suite and Claude-guided
-    regression scenarios. On failure, files bugs via `pm pr add --plan bugs` with
-    reproduction details. Builds on the watcher framework (pr-3032fb6, merged). Depends
-    on pr-539110b for the bug-filing pattern.
+  description: 'Regression test-runner worker. Dumb component: runs pytest and Claude-guided
+    regression scenarios on demand and emits raw failure records. Scheduling, throughput
+    limits, dedup, prioritization, and work-log management live in the regression-flow
+    supervisor (pr-271cb3a) — this PR does none of those.
 
 
-    The watcher should:
+    Behavior:
 
-    - Run pytest and any guided test scenarios on a configurable interval
+    - Exposes a single ''run now'' entry point the supervisor invokes
 
-    - Parse failures into actionable bug descriptions (failing test name, assertion,
+    - Runs pytest and any guided test scenarios
+
+    - Parses each failure into a structured record (failing test name, assertion,
     stack trace excerpt, repro command)
 
-    - File each failure as its own bug PR — no dedup at file time
+    - Emits the records to the supervisor (return value or queue) — does not file
+    PRs itself
 
-    - Emit a summary of results to the pm log
-
-
-    Dedup strategy: deferred to the bug fix flow. The fix session (pr-30588a7) is
-    responsible for scanning open bugs for overlap at the end of its work and adding
-    cross-reference notes. This keeps the watcher simple and avoids false-negative
-    dedup that would suppress real regressions.
+    - Builds on the watcher framework (pr-3032fb6, merged)
 
 
-    Manual testing: this PR should be exercised end-to-end during review (let the
-    watcher run, observe a real failure get filed). Reviewers should use INPUT_REQUIRED
-    to drive a loop smoke test rather than relying on code reading alone.'
+    The supervisor decides what to do with the emitted records (dedup against open
+    bugs, merge into existing, file new with priority).
+
+
+    Manual testing: invoke the worker directly and inspect emitted records for shape
+    and accuracy on a known-failing test. End-to-end behavior is exercised via the
+    supervisor''s manual test.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-28T11:07:54.142407+00:00'
-  updated_at: '2026-04-29T14:21:55.140133+00:00'
+  updated_at: '2026-04-29T15:34:19.873293+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -10038,9 +10047,10 @@ prs:
   branch: pm/pr-1766d74-ux-review-watcher-file-ux-quality-candidates-into-
   status: pending
   depends_on: []
-  description: 'New watcher mirroring the regression runner, but instead of running
-    tests it does a UX-review pass over recent merges plus current TUI/state and files
-    candidate PRs via `pm pr add --plan ux`.
+  description: 'UX-review worker. Dumb component: runs a UX-review pass over recent
+    merges plus current TUI/state on demand and emits raw candidate records. Scheduling,
+    throughput limits, dedup, prioritization, and work-log management live in the
+    improvement-flow supervisor (pr-d39a7fb) — this PR does none of those.
 
 
     Discovery prompt focuses on: state that exists but is not surfaced, relationships
@@ -10049,19 +10059,22 @@ prs:
     any TUI indicator on the parent — works correctly but reads as broken.
 
 
-    Same dedup-deferral pattern as pr-47940bc: file freely, reconcile at fix-completion
-    via the bug-fix-flow reconcile step.
+    Behavior:
+
+    - Exposes a single ''run now'' entry point the supervisor invokes
+
+    - Runs the review pass and emits candidate records (description, suggested plan/scope,
+    confidence score) to the supervisor — does not file PRs itself
 
 
-    Manual testing: this PR should be exercised end-to-end during review. A reviewer
-    should let the watcher run against the live project, observe at least one candidate
-    PR get filed, and judge whether the candidate is a real UX issue (not noise).
-    Use INPUT_REQUIRED to drive this rather than code reading alone.'
+    Manual testing: invoke the worker directly and inspect emitted candidates for
+    shape and signal-to-noise on a known UX-shaped issue in the project. End-to-end
+    behavior is exercised via the supervisor''s manual test.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-29T14:13:43.763077+00:00'
-  updated_at: '2026-04-29T14:15:35.329626+00:00'
+  updated_at: '2026-04-29T15:34:26.434496+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -10144,10 +10157,10 @@ prs:
 
     - `pm pr edit <id> --priority +N` / `-N` to bump relative
 
-    - Other PRs/sessions can adjust via the same CLI (e.g. the bug-fix reconcile step
-    in pr-30588a7 can bump priority on overlapping bugs; the UX watcher in pr-1766d74
-    can set initial priority from its confidence score; the regression runner in pr-47940bc
-    can set priority from failure severity)
+
+    Priority is set by the flow supervisors (pr-271cb3a, pr-d39a7fb), not by the workers
+    that file PRs. The pool itself is agnostic to who sets priority — it just reads
+    the field and orders accordingly.
 
 
     The pool is the discover-and-queue + scheduler layer. Per-PR execution still goes
@@ -10163,7 +10176,100 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-29T14:30:38.744727+00:00'
-  updated_at: '2026-04-29T14:44:16.234004+00:00'
+  updated_at: '2026-04-29T15:34:50.113337+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-271cb3a
+  plan: plan-regression
+  title: Regression-flow supervisor watcher
+  branch: pm/pr-271cb3a-regression-flow-supervisor-watcher
+  status: pending
+  depends_on:
+  - pr-47940bc
+  - pr-45db518
+  description: 'Supervisor watcher that owns the autonomous regression-fix loop. Drives
+    the regression test-runner worker (pr-47940bc) and converts raw failures into
+    prioritized, deduplicated bug filings.
+
+
+    Responsibilities:
+
+    - **Trigger**: kicks off regression test runs on its own cadence with throughput
+    constraints — max-concurrent runs, max-per-window, back-off when failures storm.
+    The worker (pr-47940bc) does not schedule itself.
+
+    - **Dedup**: when the worker emits raw failures, the supervisor checks them against
+    open bug PRs and recent work-log entries. Decisions: drop (already filed), merge
+    (append note + bump priority on existing), or file new. The work log gives it
+    the context the worker lacks.
+
+    - **Prioritize**: sets priority on new filings (via `pm pr edit --priority`) based
+    on failure severity, recency of related failures, and work-log signals.
+
+    - **Log**: maintains a structured work log of runs, findings, filings, dedup decisions,
+    and fixes landed. This is the source of truth used by pr-558ca3f''s reporting.
+
+    - **Exception handling**: detects stuck/crashed worker runs and restarts or escalates.
+
+
+    Manual testing: configure the supervisor against a fake worker that emits scripted
+    failure sequences. Verify throughput limits hold under burst, dedup correctly
+    merges repeat failures into existing PRs with note + priority bump, and the work
+    log reflects all decisions. Use INPUT_REQUIRED to drive this.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-29T15:34:01.804130+00:00'
+  updated_at: '2026-04-29T15:34:01.804130+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-d39a7fb
+  plan: plan-regression
+  title: Improvement-flow supervisor watcher
+  branch: pm/pr-d39a7fb-improvement-flow-supervisor-watcher
+  status: pending
+  depends_on:
+  - pr-1766d74
+  - pr-45db518
+  description: 'Supervisor watcher that owns the autonomous UX-improvement loop. Drives
+    the UX-review worker (pr-1766d74) and converts raw candidates into prioritized,
+    deduplicated UX PR filings.
+
+
+    Responsibilities mirror the regression-flow supervisor:
+
+    - **Trigger**: schedules UX review passes on its own cadence with throughput constraints
+    (max-concurrent, max-per-window, back-off).
+
+    - **Dedup**: checks raw candidates against open UX PRs and recent work-log entries.
+    Drop / merge (note + priority bump) / file new.
+
+    - **Prioritize**: sets priority on new filings based on the worker''s confidence
+    score, age of the related code, and work-log signals.
+
+    - **Log**: structured work log of passes run, candidates surfaced, filings, dedup
+    decisions, fixes landed and merged.
+
+    - **Exception handling**: detects stuck/crashed worker passes; restart or escalate.
+
+
+    Cadence and judgment differ from the regression supervisor (confidence-based vs.
+    severity-based), so this is a separate watcher rather than a unified one — keeps
+    each flow''s tuning independent.
+
+
+    Manual testing: configure against a fake UX worker emitting scripted candidate
+    batches. Verify throughput limits, dedup behavior, priority assignment, and work
+    log accuracy. Use INPUT_REQUIRED to drive this.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-04-29T15:34:08.487870+00:00'
+  updated_at: '2026-04-29T15:34:08.487870+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
