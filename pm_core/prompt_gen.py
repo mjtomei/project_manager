@@ -899,8 +899,13 @@ declare them as NEW_MOCK blocks before the scenarios.
 ## Task
 
 Analyze this PR's changes and the available QA instruction library to generate
-a structured test plan.  Your goal is to identify the most important scenarios
+a structured test plan. Your goal is to fully exercise the impacted code
 to verify this PR works correctly.
+
+Prefer fewer, broader scenarios over many narrow ones.  Group checks that
+share setup into one scenario with multi-step STEPS. Split scenarios only
+when code paths are unrelated, setup differs materially, or one would depend
+on another's side effects.
 
 ## PR Context
 
@@ -957,19 +962,6 @@ STEPS: <concrete test steps>
 QA_PLAN_END
 
 Number scenarios starting from {scenario_start}.
-
-## Scenario Sizing
-
-Prefer fewer, broader scenarios over many narrow ones.  Group checks that
-share setup into one scenario with multi-step STEPS — e.g. multiple flags
-of one command, related edge cases of one function, happy-path plus its
-error handling, round-trip write/read pairs.
-
-Split scenarios only when code paths are unrelated, setup differs
-materially, or one would depend on another's side effects.
-
-Aim for the smallest scenario count that still covers the PR.  A moderate
-PR should need a handful of scenarios, not one per assertion.
 
 {general_notes_block}{qa_specific_block}"""
     return prompt.strip()
