@@ -7,6 +7,25 @@ from pm_core.spec_gen import (format_spec_for_prompt, spec_generation_preamble,
                                get_spec_mocks_section)
 
 
+_OUT_OF_SCOPE_BUGS_BLOCK = """
+## Out-of-Scope Bugs
+
+If you spot a bug, gap, or quality issue that is **not caused by this PR's
+changes** (i.e. it exists on the base branch, or is unrelated to the diff),
+do NOT let it change your verdict for this PR. Instead, file it as a
+separate bug PR so it doesn't get lost:
+
+```
+pm pr add '<short imperative title>' --plan bugs --description '<location, \
+repro, and why this is out of scope for the current PR>'
+```
+
+Skim `pm pr list --plan bugs` first to avoid filing a duplicate. Filing
+is a side effect — the verdict for this PR must still reflect only the
+PR's own changes.
+"""
+
+
 def tui_section(session_name: str) -> str:
     """Build a TUI interaction section for prompts running in a tmux session.
 
@@ -280,6 +299,7 @@ Review the code changes in this PR for quality, correctness, and architectural f
    - **INPUT_REQUIRED** — Any issue that needs the user's attention before the PR can proceed: ambiguities in the PR spec, architectural decisions you can't make alone, something that looks broken but you can't tell if it's intentional, a dependency or environmental problem you can't resolve, or anything else you'd want a human to look at before moving on. If in doubt between NEEDS_WORK and INPUT_REQUIRED, prefer INPUT_REQUIRED — an unresolved concern silently rolled into a PASS is the worst outcome. Do NOT use INPUT_REQUIRED for manual testing — QA handles testing separately. Include specific questions that need the user's decision."""
 
     base = prompt.strip()
+    base += "\n" + _OUT_OF_SCOPE_BUGS_BLOCK
     base += review_specific_block
     base += _beginner_addendum()
     if review_loop:
@@ -313,6 +333,7 @@ This review is running in an automated loop.  After completing your review:
 
 2. If the code is ready to merge as-is with nothing you'd change (**PASS**):
    - Output: **PASS**
+   - Out-of-scope bugs do NOT block PASS — file them via `pm pr add ... --plan bugs` (see Out-of-Scope Bugs above) and still verdict **PASS** if this PR's own changes are sound.
 
 3. If ANY issue needs the user's attention before the PR can proceed (**INPUT_REQUIRED**):
    - Use this for: ambiguities in the PR spec, architectural decisions you can't make alone, code that looks broken but you can't tell if it's intentional, a dependency/environment problem you can't resolve, or anything else you'd want a human to look at before moving on.
@@ -961,7 +982,7 @@ Number scenarios starting from {scenario_start}.
 Include as many scenarios as required to fully exercise the functionality
 of the PR.  Exercise the core functionality as well as any edge cases
 that may expose bugs.
-
+{_OUT_OF_SCOPE_BUGS_BLOCK}
 {general_notes_block}{qa_specific_block}"""
     return prompt.strip()
 
@@ -1058,7 +1079,7 @@ Help the user with whatever they need:
 
 You do NOT need to produce a verdict.  This session stays open until QA
 completes — take your time and be thorough.
-{tui_block}"""
+{_OUT_OF_SCOPE_BUGS_BLOCK}{tui_block}"""
     return prompt.strip()
 
 
@@ -1188,7 +1209,7 @@ final verdict.
 ## Execution
 
 {execution_block}
-
+{_OUT_OF_SCOPE_BUGS_BLOCK}
 IMPORTANT: Always end your response with the verdict keyword on its own line."""
     return prompt.strip()
 
@@ -1245,7 +1266,7 @@ You are testing the current state of the codebase.
    - **PASS** — All checks passed
    - **NEEDS_WORK** — Issues found (describe them)
    - **INPUT_REQUIRED** — Need human input
-
+{_OUT_OF_SCOPE_BUGS_BLOCK}
 IMPORTANT: Always end your response with the verdict keyword on its own line."""
     return prompt.strip()
 
