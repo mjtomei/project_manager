@@ -8,21 +8,28 @@ from pm_core.spec_gen import (format_spec_for_prompt, spec_generation_preamble,
 
 
 _OUT_OF_SCOPE_BUGS_BLOCK = """
-## Out-of-Scope Bugs
+## Incidental Bugs
 
-If you spot a bug, gap, or quality issue that is **not caused by this PR's
-changes** (i.e. it exists on the base branch, or is unrelated to the diff),
-do NOT let it change your verdict for this PR. Instead, file it as a
-separate bug PR so it doesn't get lost:
+If you spot a bug or quality issue that isn't part of this PR's stated
+scope, decide based on size:
 
-```
-pm pr add '<short imperative title>' --plan bugs --description '<location, \
-repro, and why this is out of scope for the current PR>'
-```
+- **Small fixes** (a one-liner, an obvious typo, a tiny correction in
+  functionality this PR is already touching) — just fix it as part of
+  this PR, then record what you did with:
+  ```
+  pm pr note <pr-id> '<one-line summary of the incidental fix>'
+  ```
+- **Anything bigger** (its own design decision, larger diff, unrelated
+  area of the codebase) — do NOT fix it here. File a separate bug PR so
+  it doesn't get lost:
+  ```
+  pm pr add '<short imperative title>' --plan bugs --description \
+'<location, repro, and why this is its own PR>'
+  ```
+  Skim `pm pr list --plan bugs` first to avoid duplicates.
 
-Skim `pm pr list --plan bugs` first to avoid filing a duplicate. Filing
-is a side effect — the verdict for this PR must still reflect only the
-PR's own changes.
+Either way, the verdict for this PR reflects only the work in scope —
+filing or noting an incidental fix is a side effect, not a downgrade.
 """
 
 
@@ -333,7 +340,7 @@ This review is running in an automated loop.  After completing your review:
 
 2. If the code is ready to merge as-is with nothing you'd change (**PASS**):
    - Output: **PASS**
-   - Out-of-scope bugs do NOT block PASS — file them via `pm pr add ... --plan bugs` (see Out-of-Scope Bugs above) and still verdict **PASS** if this PR's own changes are sound.
+   - Incidental bugs do NOT block PASS — handle them per the **Incidental Bugs** section above (small fixes inline + `pm pr note`, larger ones via `pm pr add ... --plan bugs`) and still verdict **PASS** if this PR's own changes are sound.
 
 3. If ANY issue needs the user's attention before the PR can proceed (**INPUT_REQUIRED**):
    - Use this for: ambiguities in the PR spec, architectural decisions you can't make alone, code that looks broken but you can't tell if it's intentional, a dependency/environment problem you can't resolve, or anything else you'd want a human to look at before moving on.
