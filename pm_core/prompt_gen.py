@@ -11,20 +11,15 @@ _OUT_OF_SCOPE_BUGS_BLOCK = """
 ## Incidental Bugs
 
 If you spot a bug or quality issue that isn't part of this PR's stated
-scope, decide based on size:
+scope, try to fix it if the fix doesn't require separate planning or user
+input. If you do decide to fix it, then record what you did with:
+  ```
+  pm pr note <pr-id> '<short summary of the incidental fix>'
+  ```
 
-- **Small fixes** (a one-liner, an obvious typo, a tiny correction in
-  functionality this PR is already touching) — just fix it as part of
-  this PR, then record what you did with:
+If you don't, file a separate bug PR so it doesn't get lost:
   ```
-  pm pr note <pr-id> '<one-line summary of the incidental fix>'
-  ```
-- **Anything bigger** (its own design decision, larger diff, unrelated
-  area of the codebase) — do NOT fix it here. File a separate bug PR so
-  it doesn't get lost:
-  ```
-  pm pr add '<short imperative title>' --plan bugs --description \
-'<location, repro, and why this is its own PR>'
+  pm pr add '<title>' --plan bugs --description '<location, repro>'
   ```
   Skim `pm pr list --plan bugs` first to avoid duplicates.
 """
