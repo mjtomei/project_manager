@@ -902,10 +902,11 @@ Analyze this PR's changes and the available QA instruction library to generate
 a structured test plan. Your goal is to fully exercise the impacted code
 to verify this PR works correctly.
 
-Prefer fewer, broader scenarios over many narrow ones.  Group checks that
-share setup into one scenario with multi-step STEPS. Split scenarios only
-when code paths are unrelated, setup differs materially, or one would depend
-on another's side effects.
+Prefer fewer, broader scenarios over many narrow ones. Group checks that
+share setup into one scenario with multi-step STEPS, including related
+edge cases that may expose bugs. Split scenarios only when code paths are
+unrelated, setup differs materially, or one would depend on another's
+side effects.
 
 ## PR Context
 
