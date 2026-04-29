@@ -21,8 +21,7 @@ If you don't, file a separate bug PR so it doesn't get lost:
   ```
   pm pr add '<title>' --plan bugs --description '<location, repro>'
   ```
-  Skim `pm pr list` first (filter for the `bugs` plan in the output) to
-  avoid duplicates.
+  Skim `pm pr list --plan bugs` first to avoid duplicates.
 """
 
 
