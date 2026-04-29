@@ -1079,7 +1079,7 @@ Help the user with whatever they need:
 
 You do NOT need to produce a verdict.  This session stays open until QA
 completes — take your time and be thorough.
-{_OUT_OF_SCOPE_BUGS_BLOCK}{tui_block}"""
+{tui_block}"""
     return prompt.strip()
 
 
