@@ -494,7 +494,8 @@ def pr_cd(identifier: str):
 @click.option("-t", "--timestamps", is_flag=True, default=False, help="Show updated_at timestamp and sort by most recently updated")
 @click.option("--open", "open_only", is_flag=True, default=False, help="Exclude closed and merged PRs")
 @click.option("--status", "filter_status", default=None, help="Show only PRs with this status (e.g. in_progress, qa, merged)")
-def pr_list(workdirs: bool, timestamps: bool, open_only: bool, filter_status: str | None):
+@click.option("--plan", "filter_plan", default=None, help="Show only PRs in this plan (use '_standalone' for PRs with no plan)")
+def pr_list(workdirs: bool, timestamps: bool, open_only: bool, filter_status: str | None, filter_plan: str | None):
     """List all PRs with status."""
     root = state_root()
     data = store.load(root)
@@ -508,6 +509,8 @@ def pr_list(workdirs: bool, timestamps: bool, open_only: bool, filter_status: st
         prs = [p for p in prs if p.get("status") not in ("closed", "merged")]
     if filter_status:
         prs = [p for p in prs if p.get("status") == filter_status]
+    if filter_plan:
+        prs = [p for p in prs if (p.get("plan") or "_standalone") == filter_plan]
 
     if timestamps:
         prs = sorted(prs, key=lambda p: p.get("updated_at") or p.get("created_at") or "", reverse=True)

@@ -7,6 +7,24 @@ from pm_core.spec_gen import (format_spec_for_prompt, spec_generation_preamble,
                                get_spec_mocks_section)
 
 
+_OUT_OF_SCOPE_BUGS_BLOCK = """
+## Incidental Bugs
+
+If you spot a bug or quality issue that isn't part of this PR's stated
+scope, try to fix it if the fix doesn't require separate planning or user
+input. If you do decide to fix it, then record what you did with:
+  ```
+  pm pr note add <pr-id> '<short summary of the incidental fix>'
+  ```
+
+If you don't, file a separate bug PR so it doesn't get lost:
+  ```
+  pm pr add '<title>' --plan bugs --description '<location, repro>'
+  ```
+  Skim `pm pr list --plan bugs` first to avoid duplicates.
+"""
+
+
 def tui_section(session_name: str) -> str:
     """Build a TUI interaction section for prompts running in a tmux session.
 
@@ -280,6 +298,7 @@ Review the code changes in this PR for quality, correctness, and architectural f
    - **INPUT_REQUIRED** — Any issue that needs the user's attention before the PR can proceed: ambiguities in the PR spec, architectural decisions you can't make alone, something that looks broken but you can't tell if it's intentional, a dependency or environmental problem you can't resolve, or anything else you'd want a human to look at before moving on. If in doubt between NEEDS_WORK and INPUT_REQUIRED, prefer INPUT_REQUIRED — an unresolved concern silently rolled into a PASS is the worst outcome. Do NOT use INPUT_REQUIRED for manual testing — QA handles testing separately. Include specific questions that need the user's decision."""
 
     base = prompt.strip()
+    base += "\n" + _OUT_OF_SCOPE_BUGS_BLOCK
     base += review_specific_block
     base += _beginner_addendum()
     if review_loop:
@@ -964,6 +983,7 @@ QA_PLAN_END
 
 Number scenarios starting from {scenario_start}.
 
+{_OUT_OF_SCOPE_BUGS_BLOCK}
 {general_notes_block}{qa_specific_block}"""
     return prompt.strip()
 
@@ -1190,7 +1210,7 @@ final verdict.
 ## Execution
 
 {execution_block}
-
+{_OUT_OF_SCOPE_BUGS_BLOCK}
 IMPORTANT: Always end your response with the verdict keyword on its own line."""
     return prompt.strip()
 
@@ -1247,7 +1267,7 @@ You are testing the current state of the codebase.
    - **PASS** — All checks passed
    - **NEEDS_WORK** — Issues found (describe them)
    - **INPUT_REQUIRED** — Need human input
-
+{_OUT_OF_SCOPE_BUGS_BLOCK}
 IMPORTANT: Always end your response with the verdict keyword on its own line."""
     return prompt.strip()
 
