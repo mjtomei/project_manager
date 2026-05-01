@@ -192,6 +192,8 @@ class ProjectManagerApp(App):
                 self._action_focus_watcher()
             elif key == "s":
                 self._action_watcher_toggle()
+            elif key == "r":
+                self._action_watcher_review()
             else:
                 self.log_message("[dim]w cancelled[/]")
             event.prevent_default()
@@ -202,7 +204,7 @@ class ProjectManagerApp(App):
             if not self.check_action("focus_watcher", ()):
                 return
             self._w_mode = True
-            self.log_message("[bold]w …[/] [dim](w=list f=focus s=start/stop)[/]")
+            self.log_message("[bold]w …[/] [dim](w=list f=focus s=start/stop r=review)[/]")
             # Auto-cancel after 2 seconds
             self._w_cancel_timer = self.set_timer(2.0, self._cancel_w_mode)
             event.prevent_default()
@@ -817,6 +819,11 @@ class ProjectManagerApp(App):
             transcript_dir=str(tdir) if tdir else None,
             meta_pm_root=str(meta_root) if meta_root else None,
         )
+
+    def _action_watcher_review(self) -> None:
+        """Launch the watcher review session (wr key chord)."""
+        _log.info("action: watcher_review")
+        pane_ops.launch_watcher_review(self)
 
     def action_review_spec(self) -> None:
         """Open the oldest pending spec for review (V key)."""
