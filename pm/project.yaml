@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-abcf70f
+  active_pr: pr-7e19be4
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -3231,7 +3231,20 @@ prs:
     project.yaml overwrites master's, reverting other PRs' statuses. Need to exclude
     project.yaml from branch merges or always take master's version.
   created_at: null
-  updated_at: null
+  updated_at: '2026-05-01T21:41:09.889159+00:00'
+  notes:
+  - id: note-e3fda82
+    text: 'Observed cross-workdir stash-pop conflict in project.yaml on 2026-05-01:
+      pr-271cb3a was reviewed in its workdir clone (setting started_at/reviewed_at/workdir)
+      while the main repo concurrently added a note via pm pr note. The merge-propagation
+      path (git stash + pop, used by pr-83b98d5 to merge notes across clones) bypassed
+      the file lock from pr-f38005f and left literal <<<<<<< Updated upstream / =======
+      / >>>>>>> Stashed changes markers in project.yaml, breaking yaml parsing for
+      all pm commands until manually resolved. Resolution: keep timestamps + workdir
+      from the workdir side, keep the new note from the main side. Likely shares root
+      cause with this bug.'
+    created_at: '2026-05-01T21:41:09Z'
+    last_edited: '2026-05-01T21:41:09Z'
 - id: pr-ad7bd98
   plan: bugs
   title: Fix arrow crossing in TUI tech tree when dependencies are vertically stacked
@@ -7024,7 +7037,7 @@ prs:
       expect conflicts when rebasing on master after #166 lands.'
     created_at: '2026-04-24T17:09:34Z'
     last_edited: '2026-04-24T17:09:34Z'
-  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-abcf70f-fakeclaudesession-scriptable-claude--cbe54f5e
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-abcf70f-fakeclaudesession-scriptable-claude--96cede9b
 - id: pr-a7927b6
   plan: plan-qa
   title: Implement review phase spec (spec_review) with mock planning
@@ -9853,7 +9866,7 @@ prs:
   plan: plan-regression
   title: 'Bug fix flow: reproduce with test, fix, verify'
   branch: pm/pr-30588a7-bug-fix-flow-reproduce-with-test-fix-verify
-  status: in_progress
+  status: merged
   depends_on: []
   description: 'Differentiate the bug fix workflow from feature implementation. When
     a PR has plan=bugs (or a new type=bug field), the implementation prompt should
@@ -9888,17 +9901,17 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/169
   gh_pr_number: 169
   created_at: '2026-04-28T11:07:43.274357+00:00'
-  updated_at: '2026-05-01T17:46:23.567023+00:00'
+  updated_at: '2026-05-01T21:58:01.600658+00:00'
   started_at: '2026-04-29T15:58:35.820024+00:00'
-  reviewed_at: null
-  merged_at: null
+  reviewed_at: '2026-05-01T21:54:41.621766+00:00'
+  merged_at: '2026-05-01T21:58:01.600658+00:00'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-30588a7-bug-fix-flow-reproduce-with-test-fix-0e4c4acb
 - id: pr-47940bc
   plan: plan-regression
   title: Regression test sessions file bugs and improvements into correct plans
   branch: pm/pr-47940bc-regression-runner-watcher-run-tests-on-schedule-an
-  status: pending
+  status: merged
   depends_on:
   - pr-539110b
   description: 'Pattern mirror of pr-539110b (merged), but for the existing Claude-based
@@ -9930,20 +9943,21 @@ prs:
 
     The discovery supervisor (pr-271cb3a) drives this list and handles dedup/prioritization/work-log;
     the test sessions themselves only need to know where to file.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/171
+  gh_pr_number: 171
   created_at: '2026-04-28T11:07:54.142407+00:00'
-  updated_at: '2026-05-01T17:41:02.141842+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
+  updated_at: '2026-05-01T19:06:31.451231+00:00'
+  started_at: '2026-05-01T19:01:01.573337+00:00'
+  reviewed_at: '2026-05-01T19:04:07.966576+00:00'
+  merged_at: '2026-05-01T19:06:31.451231+00:00'
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-47940bc-regression-runner-watcher-run-tests--96cede9b
 - id: pr-e58459b
   plan: plan-regression
   title: 'Auto-sequence button: chain start → review → QA on a single PR'
   branch: pm/pr-e58459b-auto-sequence-button-chain-start-review-qa-on-a-si
-  status: pending
+  status: merged
   depends_on: []
   description: 'Make the start → done (review) → qa loop chain runnable two ways:
 
@@ -9967,20 +9981,21 @@ prs:
     through each phase, and confirm it halts correctly at each documented pause condition.
     Also exercise the CLI form non-interactively. Use INPUT_REQUIRED to drive this
     rather than code reading alone.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/172
+  gh_pr_number: 172
   created_at: '2026-04-29T14:13:36.865010+00:00'
-  updated_at: '2026-05-01T18:05:07.180533+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
+  updated_at: '2026-05-01T21:51:13.488124+00:00'
+  started_at: '2026-05-01T19:01:08.034638+00:00'
+  reviewed_at: '2026-05-01T19:15:03.147733+00:00'
+  merged_at: '2026-05-01T21:51:13.488124+00:00'
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-e58459b-auto-sequence-button-chain-start-rev-96cede9b
 - id: pr-271cb3a
   plan: plan-regression
   title: Discovery supervisor watcher (unified for bugs and improvements)
   branch: pm/pr-271cb3a-regression-flow-supervisor-watcher
-  status: pending
+  status: merged
   depends_on:
   - pr-47940bc
   - pr-97ddabf
@@ -10033,14 +10048,14 @@ prs:
     Manual testing: run the watcher against the real regression test list at a short
     interval. Verify each tick reads the log, makes sensible launch decisions, dedups
     filed PRs, and emits READY or INPUT_REQUIRED. Use INPUT_REQUIRED to drive this.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/174
+  gh_pr_number: 174
   created_at: '2026-04-29T15:34:01.804130+00:00'
-  updated_at: '2026-05-01T19:22:58.989508+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
+  updated_at: '2026-05-01T21:38:08.737486+00:00'
+  started_at: '2026-05-01T19:12:46.327086+00:00'
+  reviewed_at: '2026-05-01T19:19:58.516045+00:00'
+  merged_at: '2026-05-01T21:38:08.737486+00:00'
   notes:
   - id: note-d7058db
     text: qa launch shim duplicates ~25 lines of prompt construction (regression filing
@@ -10049,11 +10064,12 @@ prs:
       the next caller appears
     created_at: '2026-05-01T19:22:58Z'
     last_edited: '2026-05-01T19:22:58Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-271cb3a-regression-flow-supervisor-watcher-473dc6d5
 - id: pr-d39a7fb
   plan: plan-regression
   title: Improvement-fix implementation watcher
   branch: pm/pr-d39a7fb-improvement-flow-supervisor-watcher
-  status: pending
+  status: merged
   depends_on:
   - pr-e58459b
   description: 'Improvement-fix implementation watcher. Mirror of pr-e3a711c (bug-fix
@@ -10097,20 +10113,21 @@ prs:
     Manual testing: scripted scenarios — full happy path (file → auto-sequence → PASS
     → wait for human merge), repeated NEEDS_WORK, dependent-PR boost. Use INPUT_REQUIRED
     to drive this.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/176
+  gh_pr_number: 176
   created_at: '2026-04-29T15:34:08.487870+00:00'
-  updated_at: '2026-05-01T18:05:43.485569+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
+  updated_at: '2026-05-01T22:02:03.489755+00:00'
+  started_at: '2026-05-01T21:51:19.953439+00:00'
+  reviewed_at: '2026-05-01T21:58:25.033476+00:00'
+  merged_at: '2026-05-01T22:02:03.489755+00:00'
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-d39a7fb-improvement-flow-supervisor-watcher-c016c6f9
 - id: pr-e3a711c
   plan: plan-regression
   title: Bug-fix implementation watcher
   branch: pm/pr-e3a711c-bug-fix-implementation-watcher
-  status: pending
+  status: merged
   depends_on:
   - pr-e58459b
   - pr-30588a7
@@ -10165,20 +10182,21 @@ prs:
     Manual testing: scripted scenarios — full happy path (file → auto-sequence → PASS
     → auto-merge), reproduce-step failure, repeated NEEDS_WORK on a single bug, regression-after-fix
     detection. Use INPUT_REQUIRED to drive this.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/177
+  gh_pr_number: 177
   created_at: '2026-04-29T15:56:05.110130+00:00'
-  updated_at: '2026-05-01T18:52:54.544929+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
+  updated_at: '2026-05-01T22:25:23.920723+00:00'
+  started_at: '2026-05-01T21:58:07.814710+00:00'
+  reviewed_at: '2026-05-01T22:02:56.976134+00:00'
+  merged_at: '2026-05-01T22:25:23.920723+00:00'
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-e3a711c-bug-fix-implementation-watcher-07bb0393
 - id: pr-e84b43c
   plan: plan-regression
   title: 'Watcher review session: Claude pane with work-log access'
   branch: pm/pr-e84b43c-watcher-review-session-claude-pane-with-work-log-a
-  status: pending
+  status: merged
   depends_on:
   - pr-271cb3a
   description: 'Dedicated Claude session for human review of the autonomous watchers.
@@ -10227,15 +10245,16 @@ prs:
     activity, confirm the opening summary covers all three watchers, exercise follow-up
     questions and a remediation flow (add a watcher-section note, then verify it shows
     up in the next watcher tick). Use INPUT_REQUIRED to drive this.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/175
+  gh_pr_number: 175
   created_at: '2026-04-29T15:56:16.156179+00:00'
-  updated_at: '2026-05-01T18:05:57.578355+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
+  updated_at: '2026-05-01T21:48:11.999410+00:00'
+  started_at: '2026-05-01T21:38:13.700898+00:00'
+  reviewed_at: '2026-05-01T21:45:38.013370+00:00'
+  merged_at: '2026-05-01T21:48:11.999410+00:00'
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-e84b43c-watcher-review-session-claude-pane-w-c6248035
 - id: pr-4702a11
   plan: plan-ambient
   title: pm rc mobile voice document viewer and editor
@@ -10509,21 +10528,31 @@ prs:
   depends_on:
   - pr-4702a11
   description: 'Define the shape every ambient surface exposes, in pm_core/surfaces/protocol.py.
-    Types: SurfaceKind enum (rc, browse, doc, ...), SurfaceIdentity (id, kind, host,
-    lan_url, started_at, pid), DisplayState (path, version, document text or other
-    rendered content), AttentionState (viewport_top, viewport_bottom, selection, focus_target,
-    last_user_input_at). Surfaces serve GET /api/surface returning {identity, display,
-    attention} as a single payload. The rc viewer''s GET /api/doc is refactored to
-    construct its response from this shape (with the existing field names preserved
-    as a transitional alias so the rc webapp keeps working unchanged). No new behavior
-    — pure extraction so subsequent surfaces have a target to implement against. Tests:
-    type round-trip, rc /api/doc still serves the same shape it did before, /api/surface
-    on rc returns the new structured payload.'
+    Types: SurfaceKind enum (rc, browse, doc, tts, ...), SurfaceIdentity (id, kind,
+    host, lan_url, started_at, pid), DisplayState (path, version, document text or
+    other rendered content), AttentionState (viewport_top, viewport_bottom, selection,
+    focus_target, last_user_input_at, signals: SignalHistories). SignalHistories is
+    a per-signal time-series — every signal type retains history. Histories persist
+    indefinitely via the archive (see persistent-archive PR); the protocol-level SignalHistories
+    object is an in-memory cache of the recent past (default ~10 minutes, configurable
+    per signal) populated from the archive on surface start, NOT the source of truth.
+    Long-tail queries hit the archive directly through pm_core/surfaces/archive.py.
+    Initial signal types: viewport_changes, selection_changes, focus_changes, scroll_events,
+    touch_events. Gaze and implicit-signal histories slot into the same shape when
+    their PRs land — no protocol redesign needed. Surfaces serve GET /api/surface
+    returning {identity, display, attention} as a single payload. The rc viewer''s
+    GET /api/doc is refactored to construct its response from this shape (with the
+    existing field names preserved as a transitional alias so the rc webapp keeps
+    working unchanged). No new behavior — pure extraction so subsequent surfaces have
+    a target to implement against. Tests: type round-trip, rc /api/doc still serves
+    the same shape it did before, /api/surface on rc returns the new structured payload,
+    in-memory cache rehydrates from archive on surface restart, cache eviction does
+    not lose data (still queryable from archive).'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-01T16:12:14.685514+00:00'
-  updated_at: '2026-05-01T16:12:14.685514+00:00'
+  updated_at: '2026-05-01T22:38:36.102510+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -10672,21 +10701,28 @@ prs:
   description: 'Extend AttentionState with optional gaze: {x, y, region_id, last_at}.
     x/y are normalized 0..1 in the surface viewport coordinate space. region_id is
     the data-region attribute of the visible element under the gaze point if known.
-    Add a JS provider at pm_core/surfaces/static/gaze.js using an in-browser library
-    (e.g. WebGazer or equivalent — vendored as a static asset) that: requests camera
-    permission with a clear on-page consent prompt, runs a brief calibration flow
-    on first use, computes gaze coordinates, posts to a new POST /api/attention {gaze:
-    {...}} endpoint with debounce ~200ms. Surfaces opt in by including the provider
-    script tag — it is not enabled by default for any surface. The context query exposes
+    Add a JS provider at pm_core/surfaces/static/gaze.js that wraps WebGazer (Brown
+    University, brownhci/WebGazer) — vendored as a static asset under pm_core/surfaces/static/vendor/webgazer/.
+    WebGazer was chosen because: (a) runs entirely client-side so no video data leaves
+    the device (privacy framing solved), (b) self-calibrates from observed user interactions
+    (clicks/touches correlate with gaze targets — no explicit calibration ceremony
+    needed), (c) uses MediaPipe Facemesh by default with ridge/weightedRidge regression
+    modules, (d) MIT-licensed, actively maintained. The provider: requests camera
+    permission with a clear on-page consent prompt, runs WebGazer''s interaction-driven
+    calibration silently in the background, computes gaze coordinates, posts to a
+    new POST /api/attention {gaze: {...}} endpoint with debounce ~200ms. Gaze events
+    accumulate in the protocol''s SignalHistories alongside other signals (bounded
+    by the same retention rules). Surfaces opt in by including the provider script
+    tag — it is not enabled by default for any surface. The context query exposes
     gaze when present, omits it when not. Surfaces without gaze keep working — purely
     additive. Tests: protocol payload round-trip with and without gaze, surfaces that
-    opt out have no gaze field, the calibration flow saves a per-device profile that
-    persists across reloads.'
+    opt out have no gaze field, calibration confidence improves with simulated clicks,
+    the per-device WebGazer profile persists across reloads via its localStorage hook.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-01T16:13:05.440742+00:00'
-  updated_at: '2026-05-01T16:13:05.440742+00:00'
+  updated_at: '2026-05-01T22:12:34.970370+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -10700,22 +10736,26 @@ prs:
   - pr-8c21624
   - pr-7b6ae74
   description: 'Compute implicit attention signals on the surface side and surface
-    them in ''pm context'' as soft weights: dwell time per region (time gaze or scroll-position
-    has been within a region''s bounds), saccade entropy (variance of gaze movement,
-    used as an attention-quality score — low entropy = focused, high = scanning),
-    scroll-stop events (timestamps of scroll-rest moments and the region they ended
-    on). When gaze data is available these come from the gaze provider; when not,
-    they fall back to scroll/touch event tracking with reduced fidelity. Exposed via
-    AttentionState.signals: {dwell_ms_by_region, saccade_entropy, scroll_stops}. The
-    ''pm context resolve'' command uses these to break ties more confidently — a region
-    with high dwell + low saccade entropy is preferred over one merely visible. Tests:
-    dwell accumulation, saccade entropy on synthetic gaze tracks, scroll-stop detection
-    from input events, resolver tiebreaking improves with signals present vs absent.'
+    them via the protocol''s SignalHistories: dwell time per region (time gaze or
+    scroll-position has been within a region''s bounds), saccade entropy (variance
+    of gaze movement, used as an attention-quality score — low entropy = focused,
+    high = scanning), scroll-stop events (timestamps of scroll-rest moments and the
+    region they ended on). When gaze data is available these come from the gaze provider;
+    when not, they fall back to scroll/touch event tracking with reduced fidelity.
+    All persisted to the archive (no expiry by default) — Claude can ask ''where has
+    the user dwelt most over the last month?'' or ''what was the saccade entropy 30
+    seconds ago?'' with equal cost. The ''pm context resolve'' command uses these
+    histories to break ties more confidently — a region with high recent dwell + low
+    saccade entropy is preferred over one merely visible. Tests: dwell accumulation,
+    saccade entropy on synthetic gaze tracks, scroll-stop detection from input events,
+    archive write integrity under high-rate signals, resolver tiebreaking improves
+    with signal histories present vs absent, history-aware queries against the archive
+    (e.g. dwell-in-last-30s, dwell-in-last-week) return correct subsets.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-01T16:13:15.137776+00:00'
-  updated_at: '2026-05-01T16:13:15.137776+00:00'
+  updated_at: '2026-05-01T22:38:47.303450+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -10724,7 +10764,7 @@ prs:
   plan: plan-regression
   title: Watcher-target window for regression test launches
   branch: pm/pr-97ddabf-watcher-target-window-for-regression-test-launches
-  status: pending
+  status: merged
   depends_on:
   - pr-47940bc
   description: 'Today `pm_core/tui/pane_ops.py:launch_qa_item()` always launches the
@@ -10748,20 +10788,21 @@ prs:
     This is a small ergonomics change but important — without it, watcher-launched
     tests would either pollute the main window or require a parallel tmux launcher
     that duplicates code.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/173
+  gh_pr_number: 173
   created_at: '2026-05-01T17:41:07.519468+00:00'
-  updated_at: '2026-05-01T17:41:07.519468+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
+  updated_at: '2026-05-01T19:12:39.815806+00:00'
+  started_at: '2026-05-01T19:06:37.839864+00:00'
+  reviewed_at: '2026-05-01T19:10:44.793750+00:00'
+  merged_at: '2026-05-01T19:12:39.815806+00:00'
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-97ddabf-watcher-target-window-for-regression-acd02b85
 - id: pr-d60d185
   plan: plan-regression
   title: End-to-end QA review and auto-start command for the regression loop
   branch: pm/pr-d60d185-end-to-end-qa-review-and-auto-start-command-for-th
-  status: pending
+  status: merged
   depends_on:
   - pr-271cb3a
   - pr-e3a711c
@@ -10795,11 +10836,186 @@ prs:
     cycle (test failure → bug filed → fix landed) and a complete improvement cycle
     (improvement filed → fix ready-for-merge → human merge). Use INPUT_REQUIRED to
     drive the multi-hour observation.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/178
+  gh_pr_number: 178
+  created_at: '2026-05-01T18:22:08.893095+00:00'
+  updated_at: '2026-05-01T22:34:01.145738+00:00'
+  started_at: '2026-05-01T22:25:30.605966+00:00'
+  reviewed_at: '2026-05-01T22:31:42.334593+00:00'
+  merged_at: '2026-05-01T22:34:01.145738+00:00'
+  notes:
+  - id: note-01040e4
+    text: 'QA should specifically exercise the three integration paths flagged during
+      pr-e58459b implementation that unit tests couldn''t fully cover: (1) the O keypress
+      flow end-to-end including the _stop_before_merge short-circuit in _maybe_auto_merge
+      against a live session; (2) _check_impl_idle in pm_core/cli/pr.py against a
+      real PaneIdleTracker — verify that a fresh CLI invocation against an existing
+      transcript correctly resolves session_id_from_transcript and picks up an existing
+      idle_prompt event from hook_events (concern was that session-keyed read-once
+      events could make a transient CLI falsely report ''running''); (3) _launch_qa_detached
+      running run_qa_sync from a fresh detached process — verify pm_session env vars
+      and signal handlers behave correctly outside the TUI thread context that function
+      was originally designed for. The bug-fix watcher (pr-e3a711c) will exercise
+      these naturally; this PR''s QA pass should confirm.'
+    created_at: '2026-05-01T21:44:20Z'
+    last_edited: '2026-05-01T21:44:20Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-d60d185-end-to-end-qa-review-and-auto-start--d80609f2
+- id: pr-41be77d
+  plan: bugs
+  title: 'Bug: auto-start doesn''t advance pre-existing idle impl windows when enabled
+    mid-flight'
+  branch: pm/pr-41be77d-bug-auto-start-doesn-t-advance-pre-existing-idle-i
+  status: pending
+  depends_on: []
+  description: 'Repro observed 2026-05-01: pr-30588a7''s impl window had already pushed
+    work and gone idle ("Sautéed for 4m 6s", at the prompt with no further activity)
+    before auto-start was enabled on pr-d60d185. Once auto-start was toggled on for
+    pr-d60d185, it propagated through the dep chain and started/advanced multiple
+    downstream PRs (pr-47940bc, pr-97ddabf, pr-271cb3a, pr-e84b43c all merged; pr-e58459b
+    in_review), but pr-30588a7 stayed in_progress for ~50 minutes despite its impl
+    session having pushed and idled.
+
+
+    Symptoms:
+
+    - Status remains in_progress
+
+    - pm log shows periodic ''gh pr view'' polling every ~5 minutes (so the watcher
+    knows about the PR) but no transition to in_review
+
+    - The impl tmux window is alive but idle at the Claude prompt with no further
+    engagement
+
+
+    Hypothesis: the auto-start machinery likely tracks impl-session idle state via
+    a PaneIdleTracker or hook event registered when auto-start launches the impl session.
+    If the impl window was opened before auto-start was enabled, no tracker was registered
+    and the idle/done signal is never observed. Auto-start then sees the PR in in_progress,
+    sees the window exists, and assumes work is still happening.
+
+
+    Manual workaround: select the PR and press zzd to start the review loop manually,
+    which advances status.
+
+
+    Proposed fix:
+
+    - When auto-start is enabled (or each tick), scan for in_progress PRs in the chain
+    that have an existing impl window but no idle tracker, and either: (a) register
+    a tracker against the existing pane and check transcript for idle-prompt events
+    post-hoc, or (b) detect ''commits pushed since started_at and pane idle for >N
+    minutes'' and advance regardless.
+
+
+    Manual testing during review: reproduce by starting an impl session manually (pm
+    pr start), letting it complete and idle, then enabling auto-start on a downstream
+    PR — verify the in_progress PR now advances. Use INPUT_REQUIRED to drive.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
-  created_at: '2026-05-01T18:22:08.893095+00:00'
-  updated_at: '2026-05-01T18:46:20.614841+00:00'
+  created_at: '2026-05-01T21:55:42.232512+00:00'
+  updated_at: '2026-05-01T21:55:42.232512+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-10fd776
+  plan: plan-ambient
+  title: TTS audio surface — pm tts (folded in from plan-ff4f1a7)
+  branch: pm/pr-10fd776-tts-audio-surface-pm-tts-folded-in-from-plan-ff4f1
+  status: pending
+  depends_on:
+  - pr-dc4f5fe
+  description: 'New ''pm tts on'' / ''pm tts off'' per-session toggle. Folded in from
+    plan-ff4f1a7 which had not yet implemented it; an ambient audio output surface
+    is the more natural home and shares the protocol, registry, and context model
+    with visual surfaces. Two complementary modes behind the same surface kind. Active
+    push (preferred): ''pm tts say'' CLI / API endpoint Claude invokes to speak specific
+    text — bypasses terminal scraping entirely. Passive capture (fallback for unmodified
+    Claude sessions): the original plan-ff4f1a7 design — a daemon that polls ''tmux
+    capture-pane'' every ~200ms, strips ANSI, diffs against the prior snapshot, suppresses
+    chrome / tool calls / code, and speaks new prose lines. TTS implements the surface
+    protocol: registers with kind=tts in the registry, GET /api/surface returns identity
+    + display (recent spoken-text history bounded by retention window) + attention
+    (currently-playing, user-interrupted, last-spoken-at). Backend pluggable via env
+    var: ''say'' (macOS) and ''piper'' (Linux, local) by default. No cloud requirement.
+    Per-session toggle preserved. Latency target: speech begins within ~1s of a sentence
+    becoming available. Tests: active-push API speaks given text; passive-capture
+    daemon detects new prose lines; chrome/tool-call/code suppression in passive mode;
+    surface registration; GET /api/surface returns recent spoken-text history; per-session
+    toggle; backend selection via env var; idle/active state correctly reported in
+    attention.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-01T22:08:17.870968+00:00'
+  updated_at: '2026-05-01T22:08:17.870968+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-3fee106
+  plan: plan-ambient
+  title: Persistent attention archive — SQLite time-series store
+  branch: pm/pr-3fee106-persistent-attention-archive-sqlite-time-series-st
+  status: pending
+  depends_on:
+  - pr-39a4e66
+  description: 'Per-host persistent archive for all surface signals (display state,
+    attention state, signal histories). Stored as SQLite (one DB per host at ~/.pm/surfaces/archive.db)
+    with a schema designed to scale to long-horizon retention (years, terabytes) and
+    to swap to a remote time-series store later without protocol changes. Schema:
+    events(id, surface_id, signal_name, timestamp_ns, payload_json, confidence) —
+    single wide table indexed by (surface_id, signal_name, timestamp_ns) and (timestamp_ns)
+    for cross-surface global queries. Each surface implementation writes events through
+    a shared writer in pm_core/surfaces/archive.py that batches writes (~100ms windows)
+    to keep per-event write cost low. Read API: archive.query(surface_id=None, signal=None,
+    since=None, until=None, limit=None) → iterator of typed events. The protocol''s
+    in-memory SignalHistories continues to exist as a cache for recent-past queries
+    (last few minutes) but is no longer the source of truth — it is rebuilt from the
+    archive on surface restart. Long-tail queries (e.g. ''where has the user dwelt
+    most over the last month?'') hit the archive directly. No automatic expiry: retention
+    is configurable per-host and per-signal-class but defaults to ''keep everything.''
+    Tests: write/read round-trip, batched writer correctness under concurrent surfaces,
+    query performance over 1M synthetic events, in-memory cache reconstruction on
+    surface restart, schema-evolution path (adding a new signal type doesn''t break
+    existing queries).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-01T22:38:14.688368+00:00'
+  updated_at: '2026-05-01T22:38:14.688368+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-7e19be4
+  plan: plan-ambient
+  title: Privacy controls — export, delete, inspect, opt-in
+  branch: pm/pr-7e19be4-privacy-controls-export-delete-inspect-opt-in
+  status: pending
+  depends_on:
+  - pr-39a4e66
+  description: 'Implement the privacy/consent principles set in the plan. CLI commands:
+    ''pm history inspect [--surface <id>]'' shows what is currently being recorded
+    for each surface (signal classes enabled, retention setting, last write timestamp);
+    ''pm history export [--surface <id>] [--since T] [--until T] [--out path]'' exports
+    archive contents as OTel-shaped JSONL inside a zip; ''pm history delete [--surface
+    <id>] [--signal <name>] [--since T] [--until T]'' performs real row deletion against
+    the archive (with a confirmation prompt unless --yes); ''pm history opt-in <surface>
+    <signal>'' / ''pm history opt-out <surface> <signal>'' toggle high-sensitivity
+    signal classes (gaze, camera-derived, future biometric) — these are off by default
+    and require explicit opt-in per surface. When a high-sensitivity signal is active
+    on a surface, the surface displays a visible recording indicator. Tests: inspect
+    output shape, export round-trips through delete-and-restore, scoped deletion (by
+    surface / signal / time / combination), opt-in/opt-out persistence across surface
+    restarts, recording indicator appears when expected.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-01T22:38:20.388463+00:00'
+  updated_at: '2026-05-01T22:38:20.388463+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
