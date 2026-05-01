@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-e84b43c
+  active_pr: pr-4702a11
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -9848,7 +9848,7 @@ prs:
   plan: plan-regression
   title: 'Bug fix flow: reproduce with test, fix, verify'
   branch: pm/pr-30588a7-bug-fix-flow-reproduce-with-test-fix-verify
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'Differentiate the bug fix workflow from feature implementation. When
     a PR has plan=bugs (or a new type=bug field), the implementation prompt should
@@ -9879,15 +9879,16 @@ prs:
     inject the reproduce→fix→verify→reconcile sequence. The review and QA prompts
     should also be aware — reviewers should check that a reproduction test exists
     before passing.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/169
+  gh_pr_number: 169
   created_at: '2026-04-28T11:07:43.274357+00:00'
-  updated_at: '2026-04-29T15:34:36.376056+00:00'
-  started_at: null
+  updated_at: '2026-04-29T15:58:35.820024+00:00'
+  started_at: '2026-04-29T15:58:35.820024+00:00'
   reviewed_at: null
   merged_at: null
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-30588a7-bug-fix-flow-reproduce-with-test-fix-0e4c4acb
 - id: pr-47940bc
   plan: plan-regression
   title: 'Regression runner watcher: run tests on schedule and report failures'
@@ -10349,6 +10350,263 @@ prs:
   gh_pr_number: null
   created_at: '2026-04-29T15:56:16.156179+00:00'
   updated_at: '2026-04-29T15:56:16.156179+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-4702a11
+  plan: improvements
+  title: pm rc mobile voice document viewer and editor
+  branch: pm/pr-4702a11-pm-rc-mobile-voice-document-viewer-and-editor
+  status: pending
+  depends_on: []
+  description: 'New `pm rc start <path> [--port N]` command (pm-session only) that
+    lets a user review and edit a document by voice from a remote device while the
+    host runs the Claude Code session locally. The host can be any machine that runs
+    Claude Code. The remote device only needs a browser and a Claude voice client.
+
+
+    ## Surfaces
+
+
+    There are three independent surfaces, possibly on three separate devices:
+
+
+    1. **The host** — any machine on the LAN running the pm session, the rc-driver
+    Claude Code instance (in a tmux pane), and the FastAPI viewer server (background
+    daemon).
+
+    2. **The voice/control surface** — a Claude voice client running on a phone, tablet,
+    or any other device, talking to the rc-driver Claude Code session on the host.
+    This is where the user speaks and where Claude''s text replies render.
+
+    3. **The viewer surface** — a browser pointed at the LAN URL, showing the webapp
+    document viewer. This is where the document, selections, and proposed diffs render.
+
+
+    The viewer and the voice client are expected to be on different devices in the
+    common case (e.g. phone for voice, tablet or laptop browser for reading), and
+    must not assume they''re co-located. The viewer is a vanilla browser client —
+    nothing about it depends on being launched from the voice client, sharing storage
+    with it, or running on the same OS. They communicate only through the host''s
+    API.
+
+
+    This is also why touch scroll exists as a fallback even though Claude drives focus
+    — the user reading on a separate device can''t speak commands without picking
+    up the voice device, so a thumb scroll has to work.
+
+
+    ## Architecture
+
+
+    `pm rc start <path> [--port N]` reuses the existing tmux window/pane registry
+    plumbing (pm_core/pane_layout, pm_core/pane_registry) to open one new tmux window
+    in the current pm session. That window contains exactly one pane: the Claude session
+    being remote-controlled, registered with role `rc-driver`. The FastAPI server
+    backing the document viewer is started as a background daemon (not in a visible
+    pane) — the user never needs to see server logs. The server''s PID and port are
+    tracked in the pane registry under role `rc-server` so cleanup follows existing
+    patterns.
+
+
+    If `--port` is given, binds to that port; errors clearly if it''s in use. Otherwise
+    picks a free port. Binds to the LAN IP so other devices can reach it. No auth
+    — logs a clear "LAN-only, no auth" warning at startup. The command prints the
+    LAN URL the user opens in any browser.
+
+
+    The document viewer itself is the webapp — a single HTML page served by the FastAPI
+    server. All rendering, selection highlighting, diff display, and touch interaction
+    happen in the browser. There is no separate viewer process and no terminal-based
+    viewer.
+
+
+    ## API
+
+
+    All endpoints are JSON in/out unless noted. Line numbers are 1-indexed, inclusive
+    ranges.
+
+
+    - `GET /` → HTML viewer page (the webapp).
+
+    - `GET /api/doc` → `{path: str, text: str, version: int, viewport: {top: int,
+    bottom: int} | null, selection: {start: int, end: int} | null, proposal: {text:
+    str} | null}`. Used by the page on initial load and on reconnect to fully re-sync.
+
+    - `GET /api/events` → SSE stream. Each event has `event: state` and `data:` containing
+    the same shape as `/api/doc` minus `text` (text only changes on accept, which
+    bumps `version` and triggers a follow-up `event: doc` with the new text). Client
+    uses `version` to detect missed events on reconnect.
+
+    - `POST /api/select {start: int, end: int}` → `{ok: true}`. Sets selection and
+    auto-focuses (sets viewport top to `max(1, start - context_lines)` where `context_lines`
+    defaults to 3). Errors 400 if `start > end` or out of range.
+
+    - `POST /api/focus {top_line: int}` → `{ok: true, viewport: {top, bottom}}`. Sets
+    viewport so `top_line` is the topmost visible line. Top-anchored, not centered.
+    Server returns the resulting viewport (the page reports actual visible lines back
+    via /api/viewport once it renders).
+
+    - `POST /api/propose {text: str}` → `{ok: true}`. Sets proposed replacement for
+    the current selection. Errors 400 if no selection.
+
+    - `POST /api/accept` → `{ok: true, version: int}`. Writes the proposal into the
+    file on disk in place of the selection, increments version, clears proposal+selection,
+    broadcasts state and doc events.
+
+    - `POST /api/reject` → `{ok: true}`. Clears proposal only; selection preserved.
+
+    - `POST /api/viewport {top: int, bottom: int}` → `{ok: true}`. Page reports its
+    actual visible range back (debounced ~150ms client-side). Server stores this;
+    visible to Claude in `pm rc status`.
+
+
+    Multiple viewer clients can connect concurrently. Each receives the same SSE state
+    events. /api/viewport posts from different clients overwrite the stored viewport
+    on a last-write-wins basis — `pm rc status` reflects whichever client most recently
+    reported.
+
+
+    ## Webapp (HTML page)
+
+
+    Single template, no build step. Markdown rendered with readable typography for
+    small screens (~70ch line length, large default text size, generous line-height).
+    Selection rendered as a background highlight on the affected lines. Proposal rendered
+    as an inline diff strip beneath the selection (red for removed, green for added).
+    Native touch scrolling enabled as a backup — Claude is the primary driver of scroll
+    position via `focus`, with the prompt expectation that selection+proposal stay
+    in view; touch is the fallback for when Claude''s focus is wrong or the user wants
+    to glance elsewhere. The page reports any viewport changes back via debounced
+    /api/viewport posts so Claude can read user-driven scroll from `pm rc status`
+    and reorient.
+
+
+    SSE handling: subscribe on load, explicit reconnect-on-error with exponential
+    backoff (250ms → 4s cap), and a `visibilitychange → visible` handler that re-syncs
+    via `GET /api/doc` because mobile browsers commonly kill SSE connections when
+    the tab backgrounds or screen locks; without this the page silently goes stale.
+
+
+    ## Claude-driving CLI
+
+
+    Runs in the rc-driver pane, hits localhost:N:
+
+
+    - `pm rc select <start> [end]` — line-numbered selection. If `end` omitted, selects
+    single line.
+
+    - `pm rc focus <top_line>` — set viewport top.
+
+    - `pm rc propose` — reads replacement text from stdin.
+
+    - `pm rc accept` — apply proposal.
+
+    - `pm rc reject` — discard proposal.
+
+    - `pm rc status` — prints doc path, current viewport (top/bottom), selection range,
+    and a short proposal preview if one exists. This is what Claude reads to know
+    what''s actually on the user''s screen.
+
+
+    ## rc-driver system prompt
+
+
+    The Claude session in the rc-driver pane is started with a system prompt that
+    explains:
+
+
+    1. The user is interacting by voice from a remote device. Claude decides what
+    they see in the viewer.
+
+    2. The viewer is likely on a different device than the voice client. Don''t assume
+    the user can see Claude''s text replies and the document at the same time without
+    looking back and forth.
+
+    3. Read `pm rc status` before choosing any focus line — viewport height varies
+    with device, orientation, and font scaling, so use the reported top/bottom range
+    to know what fits.
+
+    4. After every selection / proposal / accept / reject, set focus so both the selection
+    and the proposal stay visible together with as much surrounding context as fits.
+
+    5. When they don''t all fit, prioritize keeping the proposal in view — the user
+    has already seen the selection, the proposal is what they''re judging.
+
+    6. Narrate non-trivial moves ("scrolling down to the goals section now") so the
+    user isn''t surprised when the page jumps.
+
+    7. The user can scroll by touch as a fallback. After their next turn, re-read
+    `pm rc status` to see where they actually are before assuming.
+
+
+    ## Cross-reference
+
+
+    plan-ff4f1a7 already references `/rc` as the mobile-reach mechanism for its voice/TTS
+    work and ships `pm tts` for desktop hands-free. This PR is the first place `/rc`''s
+    underlying `pm rc` machinery is actually defined. Complementary to that plan''s
+    terminal-capture-to-speech path: this one is for visual+voice via a remote voice
+    client, that one is for terminal+voice on the host.
+
+
+    ## Tests
+
+
+    - `pm rc start` requires a pm session and errors clearly outside one.
+
+    - `--port` binds to the requested port and errors clearly if it''s in use; without
+    `--port` the command picks a free one.
+
+    - The command opens a new tmux window with the rc-driver pane (single visible
+    pane), starts the server as a background daemon registered with role `rc-server`,
+    and prints the LAN URL.
+
+    - Server endpoints: select sets selection and auto-focuses; focus sets top line
+    without changing selection; propose stores replacement and errors without a selection;
+    accept writes the proposal back to the file on disk, increments version, and clears
+    state; reject clears proposal but preserves selection.
+
+    - SSE delivery: a client connected to /api/events receives state-change events
+    when selection/proposal/viewport change.
+
+    - Multiple concurrent viewer clients each receive SSE events; /api/viewport last-write-wins
+    is observable in `pm rc status`.
+
+    - Viewport reporting: a client posting /api/viewport updates the server''s known
+    viewport, visible in `pm rc status`.
+
+    - Cleanup: closing the rc-driver pane / tmux window terminates the background
+    server cleanly.
+
+
+    Human-guided testing needed: open the URL on an actual mobile browser, verify
+    markdown renders readably and touch scrolling is smooth; lock screen and unlock
+    — verify SSE reconnect re-syncs state correctly; drive a full select→propose→accept
+    loop by voice and confirm the page updates accordingly; specifically test the
+    cross-device case (one device for voice, another for viewer).
+
+
+    ## Files
+
+
+    - pm_core/rc/__init__.py
+
+    - pm_core/rc/server.py
+
+    - pm_core/rc/templates/viewer.html
+
+    - pm_core/cli/rc.py
+
+    - pm_core/cli/__init__.py'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-01T15:07:09.683797+00:00'
+  updated_at: '2026-05-01T15:19:42.692220+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
