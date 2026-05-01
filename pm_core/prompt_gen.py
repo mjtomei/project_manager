@@ -829,6 +829,151 @@ IMPORTANT: Always end your response with the verdict keyword on its own line -- 
     return prompt.strip()
 
 
+def generate_discovery_supervisor_prompt(data: dict, session_name: str | None = None,
+                                         iteration: int = 0, loop_id: str = "",
+                                         meta_pm_root: str | None = None) -> str:
+    """Generate a prompt for one tick of the discovery supervisor watcher.
+
+    The discovery supervisor schedules regression tests and reconciles their
+    filings (newly-opened bug/improvement PRs) against existing open PRs in
+    the ``bugs`` and ``ux`` plans.
+    """
+    if not meta_pm_root:
+        meta_pm_root = "pm"
+
+    project_name = data.get("project", {}).get("name", "unknown")
+    base_branch = data.get("project", {}).get("base_branch", "master")
+
+    tui_block = tui_section(session_name) if session_name else ""
+
+    general_notes_block = ""
+    watcher_specific_block = ""
+    try:
+        root = store.find_project_root()
+        general_notes_block, watcher_specific_block = notes.notes_for_prompt(root, "watcher")
+    except FileNotFoundError:
+        pass
+
+    id_label = f" [{loop_id}]" if loop_id else ""
+    iteration_label = f" (iteration {iteration}){id_label}" if iteration else id_label
+
+    prompt = f"""This is one tick of the **Discovery Supervisor** watcher for project "{project_name}".{iteration_label}
+
+## Role
+
+You schedule regression tests from the project's regression library, watch
+for newly-filed bug / improvement PRs they produce, and reconcile those
+filings against existing open PRs (dedup, merge notes, or close-and-merge).
+
+This is an unattended loop. Each tick is short. Do the minimum work needed
+this tick, append a one-line work-log entry, then emit a verdict.
+
+Base branch: `{base_branch}`
+{tui_block}{general_notes_block}
+## Work Log
+
+The persistent work log lives at `{meta_pm_root}/watchers/discovery.log` (relative
+to the project root). It is the source of truth for what this watcher has done
+across ticks — schedule decisions, launches, dedup actions.
+
+**Step 1.** Ensure the log directory exists, then read the last ~40 lines:
+```
+mkdir -p {meta_pm_root}/watchers
+touch {meta_pm_root}/watchers/discovery.log
+tail -n 40 {meta_pm_root}/watchers/discovery.log
+```
+
+Use it to decide what is in flight and what was filed recently so you do not
+re-launch a still-running test or re-file a duplicate bug.
+
+## Per-Tick Procedure
+
+### 1. Inventory regression tests
+
+```
+ls {meta_pm_root}/qa/regression/*.md
+```
+
+Each file is a regression test definition. Cross-reference with the work log
+to see when each was last run.
+
+### 2. Detect in-flight tests from prior ticks
+
+The discovery watcher's tmux window is named `discovery`. Regression tests
+launched from this watcher run as additional panes in that same window. List
+panes:
+
+```
+tmux list-panes -t {{session}}:discovery -F "#{{pane_id}} #{{pane_current_command}}"
+```
+
+(Substitute the pm session name — see TUI section above.) If a regression-test
+pane is still running, do **not** launch a new test this tick. Note the in-flight
+state in your work-log entry and reconcile after it finishes (next tick or
+later).
+
+### 3. Decide whether a test is due
+
+A simple cadence: each regression test should run roughly once per day (more
+often if the watcher notes section says so, less often if recently run with no
+findings). Use the work log to judge.
+
+If nothing is due, skip to step 5.
+
+### 4. Launch a due test
+
+Use the headless launcher:
+
+```
+pm qa launch regression:<id> --target-window discovery
+```
+
+This spawns a Claude pane in the discovery window running the regression test.
+The test session itself files any bugs / improvements into the `bugs` / `ux`
+plans (see the regression filing addendum baked into its prompt).
+
+### 5. Reconcile recently-filed PRs
+
+For tests that completed since the last tick (visible in the work log or by a
+pane that has since exited), inspect any new PRs in the `bugs` and `ux` plans:
+
+```
+pm pr list --plan bugs
+pm pr list --plan ux
+```
+
+For each newly-filed PR:
+- Skim title + description against existing open PRs in the same plan.
+- If it duplicates an open PR, merge useful detail into the existing one with
+  `pm pr note <existing-id> '<additional context>'` and close the duplicate
+  via the standard pm flow. Record the dedup decision in the work log.
+- If it is genuinely new, leave it.
+
+Do not try to fix any of the bugs yourself — filing and dedup only.
+
+### 6. Append a work-log entry
+
+One line, ISO timestamp + concise summary, e.g.:
+
+```
+echo "$(date -Iseconds) tick {iteration}: launched regression:auth-flow; deduped pr-abc123 into pr-xyz789; READY" \\
+  >> {meta_pm_root}/watchers/discovery.log
+```
+
+## Verdict
+
+End your response with the verdict on its own line:
+
+- **READY** — tick complete, continue watching on the next interval.
+- **INPUT_REQUIRED** — something needs human attention (ambiguous dedup,
+  missing/misconfigured plan, repeated test failures with no clear filing,
+  etc.). Describe the situation and wait for a follow-up.
+
+IMPORTANT: Always end with **READY** or **INPUT_REQUIRED** on its own line.{watcher_specific_block}"""
+
+    return prompt.strip()
+
+
 def generate_review_loop_prompt(data: dict, pr_id: str) -> str:
     """Generate a review prompt for the automated review loop.
 

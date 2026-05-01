@@ -90,10 +90,13 @@ def _run_user_watcher_loop(wait: int, max_iterations: int) -> None:
               help="Auto-start target PR ID (passed by watcher loop engine)")
 @click.option("--meta-pm-root", default=None, hidden=True,
               help="Absolute path to meta workdir pm/ dir (passed by watcher loop engine)")
+@click.option("--watcher-type", default="auto-start", hidden=True,
+              help="Watcher type for internal --iteration mode")
 @click.pass_context
 def watcher_cmd(ctx, iteration: int | None, loop_id: str | None,
                 transcript: str | None, wait: int, max_iterations: int,
-                auto_start_target: str | None, meta_pm_root: str | None):
+                auto_start_target: str | None, meta_pm_root: str | None,
+                watcher_type: str):
     """Manage watchers.
 
     With no subcommand, starts a blocking watcher loop that periodically
@@ -124,7 +127,8 @@ def watcher_cmd(ctx, iteration: int | None, loop_id: str | None,
         # Internal mode: create a single tmux window for this iteration
         _create_watcher_window(iteration, loop_id or "", transcript,
                                auto_start_target=auto_start_target,
-                               meta_pm_root=meta_pm_root)
+                               meta_pm_root=meta_pm_root,
+                               watcher_type=watcher_type)
     else:
         # User mode: run the full blocking loop
         _run_user_watcher_loop(wait, max_iterations)
@@ -219,8 +223,11 @@ def watcher_list():
 def _create_watcher_window(iteration: int, loop_id: str,
                            transcript: str | None,
                            auto_start_target: str | None = None,
-                           meta_pm_root: str | None = None) -> None:
+                           meta_pm_root: str | None = None,
+                           watcher_type: str = "auto-start") -> None:
     """Create (or recreate) the watcher tmux window for one iteration."""
+    from pm_core.watchers import get_watcher_class
+
     root = state_root()
     data = store.load(root)
 
@@ -233,13 +240,26 @@ def _create_watcher_window(iteration: int, loop_id: str,
         click.echo(f"Watcher: tmux session '{pm_session}' not found.", err=True)
         raise SystemExit(1)
 
-    # Generate watcher prompt
-    watcher_prompt = prompt_gen.generate_watcher_prompt(
-        data, session_name=pm_session,
-        iteration=iteration, loop_id=loop_id,
-        auto_start_target=auto_start_target,
-        meta_pm_root=meta_pm_root,
-    )
+    cls = get_watcher_class(watcher_type)
+    if cls is None:
+        click.echo(f"Unknown watcher type: {watcher_type}", err=True)
+        raise SystemExit(1)
+    window_name = cls.WINDOW_NAME
+
+    # Generate watcher prompt (per-type)
+    if watcher_type == "discovery":
+        watcher_prompt = prompt_gen.generate_discovery_supervisor_prompt(
+            data, session_name=pm_session,
+            iteration=iteration, loop_id=loop_id,
+            meta_pm_root=meta_pm_root,
+        )
+    else:
+        watcher_prompt = prompt_gen.generate_watcher_prompt(
+            data, session_name=pm_session,
+            iteration=iteration, loop_id=loop_id,
+            auto_start_target=auto_start_target,
+            meta_pm_root=meta_pm_root,
+        )
 
     # Determine a working directory -- use the repo root (parent of pm/ dir)
     repo_dir = str(root.parent) if store.is_internal_pm_dir(root) else str(root)
@@ -261,7 +281,7 @@ def _create_watcher_window(iteration: int, loop_id: str,
     # Track which sessions were watching the old window so we can switch
     # them to the new one (same pattern as review windows).
     sessions_watching: list[str] = []
-    existing = tmux_mod.find_window_by_name(pm_session, AutoStartWatcher.WINDOW_NAME)
+    existing = tmux_mod.find_window_by_name(pm_session, window_name)
     _log.info("_create_watcher_window: iteration=%d pm_session=%s existing=%s",
                iteration, pm_session, existing)
     if existing:
@@ -274,10 +294,10 @@ def _create_watcher_window(iteration: int, loop_id: str,
     # Create the watcher window without switching focus (background)
     try:
         tmux_mod.new_window_get_pane(
-            pm_session, AutoStartWatcher.WINDOW_NAME, claude_cmd, repo_dir,
+            pm_session, window_name, claude_cmd, repo_dir,
             switch=False,
         )
-        new_win = tmux_mod.find_window_by_name(pm_session, AutoStartWatcher.WINDOW_NAME)
+        new_win = tmux_mod.find_window_by_name(pm_session, window_name)
         _log.info("_create_watcher_window: new window created: %s", new_win)
         if new_win:
             tmux_mod.set_shared_window_size(pm_session, new_win["id"])
@@ -290,6 +310,6 @@ def _create_watcher_window(iteration: int, loop_id: str,
     if sessions_watching:
         _log.info("_create_watcher_window: switching %s to new watcher window", sessions_watching)
         tmux_mod.switch_sessions_to_window(
-            sessions_watching, pm_session, AutoStartWatcher.WINDOW_NAME)
+            sessions_watching, pm_session, window_name)
     else:
         _log.info("_create_watcher_window: no sessions_watching, skipping switch")
