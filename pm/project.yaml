@@ -9,12 +9,12 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-d60d185
+  active_pr: pr-abcf70f
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
   hide_merged: false
-  skip_qa: false
+  skip_qa: true
   nested_podman: true
 plans:
 - id: plan-001
@@ -10106,6 +10106,7 @@ prs:
   status: pending
   depends_on:
   - pr-e58459b
+  - pr-30588a7
   description: 'Bug-fix implementation watcher implemented as a `BaseWatcher` subclass.
     Drives the bug-fix flow: reads pending PRs in plan=bugs, picks the best candidate
     dynamically each tick, advances chosen PRs through the auto-sequence chain (pr-e58459b),
@@ -10161,7 +10162,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-29T15:56:05.110130+00:00'
-  updated_at: '2026-05-01T18:05:35.008767+00:00'
+  updated_at: '2026-05-01T18:52:54.544929+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -10609,13 +10610,17 @@ prs:
     field rather than dropped. Available to any Claude session on the host — this
     is the disambiguation primitive Claude calls before responding to ambiguous requests.
     Output schema is versioned so prompts can include it directly. Optional --surface
-    <id> filter to query just one. Tests: concurrent query of multiple surfaces, dead-surface
-    handling, JSON shape stability, --surface filter.'
+    <id> filter to query just one. Top-level derived signals included in the output:
+    global_last_input_at (max of last_user_input_at across all surfaces) and idle_seconds
+    (now - global_last_input_at) — these tell Claude how stale the whole context is,
+    regardless of which surface is most recent. Tests: concurrent query of multiple
+    surfaces, dead-surface handling, JSON shape stability, --surface filter, idle_seconds
+    correctness across multiple surfaces.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-01T16:12:46.606257+00:00'
-  updated_at: '2026-05-01T16:12:46.606257+00:00'
+  updated_at: '2026-05-01T18:52:00.321553+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -10634,14 +10639,18 @@ prs:
     ''over there'') and returns the most-likely referent surface + region as JSON,
     or returns ambiguity metadata when multiple candidates are within tolerance so
     Claude can ask the user. Resolution uses display content + attention state from
-    the context query. Tests: two-surface tie case (most-recent-touched wins), recency-decay
-    case (older attention loses), ambiguity-metadata case (returns candidates instead
-    of guessing), resolve-by-content matching (''the second list'').'
+    the context query. Global idleness gates confidence: if idle_seconds exceeds a
+    threshold (default 120s, configurable), the resolver returns low confidence and
+    recommends asking the user rather than guessing — even if there is technically
+    a most-recent-attended surface, deictic references go stale fast. Tests: two-surface
+    tie case (most-recent-touched wins), recency-decay case (older attention loses),
+    ambiguity-metadata case (returns candidates instead of guessing), resolve-by-content
+    matching (''the second list''), idle-gating case (long idle drops resolver confidence).'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-01T16:12:55.077235+00:00'
-  updated_at: '2026-05-01T16:12:55.077235+00:00'
+  updated_at: '2026-05-01T18:52:07.650774+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
