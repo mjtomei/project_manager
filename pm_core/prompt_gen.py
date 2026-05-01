@@ -1055,6 +1055,174 @@ IMPORTANT: Always end with **READY** or **INPUT_REQUIRED** on its own line.{watc
     return prompt.strip()
 
 
+def generate_bug_fix_impl_prompt(data: dict, session_name: str | None = None,
+                                 iteration: int = 0, loop_id: str = "",
+                                 meta_pm_root: str | None = None) -> str:
+    """Generate a prompt for one tick of the bug-fix implementation watcher.
+
+    Drives the bug-fix flow: reads pending PRs in ``plan=bugs``, picks the
+    best candidate dynamically each tick, advances chosen PRs through the
+    auto-sequence chain (``pm pr auto-sequence``), and auto-merges on PASS.
+    """
+    if not meta_pm_root:
+        meta_pm_root = "pm"
+
+    project_name = data.get("project", {}).get("name", "unknown")
+    base_branch = data.get("project", {}).get("base_branch", "master")
+
+    tui_block = tui_section(session_name) if session_name else ""
+
+    general_notes_block = ""
+    watcher_specific_block = ""
+    try:
+        root = store.find_project_root()
+        general_notes_block, watcher_specific_block = notes.notes_for_prompt(root, "watcher")
+    except FileNotFoundError:
+        pass
+
+    id_label = f" [{loop_id}]" if loop_id else ""
+    iteration_label = f" (iteration {iteration}){id_label}" if iteration else id_label
+
+    concurrency_cap = 2
+
+    prompt = f"""This is one tick of the **Bug-Fix Implementation Watcher** for project "{project_name}".{iteration_label}
+
+## Role
+
+You drive the bug-fix flow end-to-end: pick the highest-priority pending bug
+PR, advance in-flight bug PRs through the auto-sequence chain
+(`pm pr auto-sequence`), and **auto-merge** on PASS. This is what
+distinguishes the bug-fix flow from the improvement-fix flow — bugs
+auto-merge once they are green; improvements wait for human review.
+
+This is an unattended loop. Each tick is short. Do the minimum work needed
+this tick, append a one-line work-log entry, then emit a verdict.
+
+Base branch: `{base_branch}`
+Concurrency cap: **{concurrency_cap}** in-flight bug PRs (statuses:
+`in_progress`, `in_review`, `qa`).
+{tui_block}{general_notes_block}
+## Work Log
+
+The persistent work log lives at `{meta_pm_root}/watchers/bug-fix-impl.log`
+(relative to the project root). It is the source of truth for what this
+watcher has done across ticks — which PRs are in flight, what just merged,
+what is stuck, repeated NEEDS_WORK counts.
+
+**Step 1.** Ensure the log directory exists, then read the last ~40 lines:
+```
+mkdir -p {meta_pm_root}/watchers
+touch {meta_pm_root}/watchers/bug-fix-impl.log
+tail -n 40 {meta_pm_root}/watchers/bug-fix-impl.log
+```
+
+Use it to decide what is in flight, which PRs have been bouncing, and what
+was filed recently.
+
+## Per-Tick Procedure
+
+### 1. Inventory bug PRs
+
+```
+pm pr list --plan bugs
+```
+
+Group rows by status:
+- **in-flight** = `in_progress`, `in_review`, `qa`
+- **pending** = `pending`
+- **done** = `merged`
+- **other** = anything else (paused, error)
+
+### 2. Advance every in-flight bug PR
+
+For each in-flight bug PR, run:
+
+```
+pm pr auto-sequence <pr-id>
+```
+
+The output is a single status line. Interpret it:
+- `started`, `advanced: ...`, `running: ...`, `restarted: ...`,
+  `review: needs_work, retrying ...`, `qa: needs_work, returning to review ...`
+  → progress is happening, no action needed this tick.
+- `paused: input_required (review)` or `paused: input_required (qa)` →
+  the loop pane is already paused. Note in the log; do **not** escalate
+  via watcher INPUT_REQUIRED (the loop pane already surfaced it). Same
+  policy as the auto-start watcher.
+- `paused: spec_pending` → spec needs approval. Note in the log; emit
+  INPUT_REQUIRED at end of tick.
+- `ready_to_merge` or `ready_to_merge (skip_qa)` → **auto-merge now**:
+  ```
+  pm pr merge <pr-id>
+  ```
+  Capture the merge result in the work log.
+
+### 3. Pick a new pending PR (if under cap)
+
+Count in-flight bug PRs after step 2. If the count is **< {concurrency_cap}**,
+pick one pending bug PR to start.
+
+There is no persisted priority field — judge priority dynamically from:
+- **Severity signals** in the PR description (crashes, data-loss,
+  blocker-of-other-work outrank cosmetic / nit fixes).
+- **Recurrence** in the work log (a bug seen multiple times across
+  regression runs is higher priority).
+- **Age** (older pending bugs gradually float up to avoid starvation).
+- **Watcher notes** (any user-supplied guidance below; user guidance wins).
+
+Once chosen, run:
+
+```
+pm pr auto-sequence <pr-id>
+```
+
+This will move the PR from `pending` → `in_progress` (`started`).
+
+If no pending bug PRs exist, skip this step.
+
+### 4. Stuck / loop-failing PR detection
+
+For each in-flight bug PR, scan the work log for repeated
+NEEDS_WORK iterations or reproduce-step failures (the bug-fix flow from
+pr-30588a7 requires a failing reproduction test before fix code lands).
+Heuristic: if the same PR has hit NEEDS_WORK on **3 or more** consecutive
+ticks, treat it as stuck.
+
+For stuck PRs:
+- Append a `stuck:` line to the work log noting the PR and the symptom
+  (e.g. "stuck: pr-abc12345 — 3x NEEDS_WORK on reproduce step").
+- Emit `INPUT_REQUIRED` at the end of the tick so a human can triage.
+  Otherwise emit `READY`.
+
+You can inspect review-loop transcripts under
+`transcripts/auto-sequence/<pr-id>/review-*.jsonl` for context if needed.
+
+### 5. Append a work-log entry
+
+One line, ISO timestamp + concise summary, e.g.:
+
+```
+echo "$(date -Iseconds) tick {iteration}: in-flight=2 (pr-aaa,pr-bbb); merged pr-ccc; picked pr-ddd; READY" \\
+  >> {meta_pm_root}/watchers/bug-fix-impl.log
+```
+
+Always include in-flight count, any merges, any new pick, and the verdict
+keyword you're about to emit.
+
+## Verdict
+
+End your response with the verdict on its own line:
+
+- **READY** — tick complete, continue watching on the next interval.
+- **INPUT_REQUIRED** — a stuck PR needs human triage, a spec is pending
+  approval, or another situation requires intervention. Describe what you
+  need clearly and wait for a follow-up.
+
+IMPORTANT: Always end with **READY** or **INPUT_REQUIRED** on its own line.{watcher_specific_block}"""
+
+    return prompt.strip()
+
+
 def generate_review_loop_prompt(data: dict, pr_id: str) -> str:
     """Generate a review prompt for the automated review loop.
 
