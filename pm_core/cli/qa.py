@@ -367,6 +367,86 @@ End with a summary of which steps work and which don't, then one of:
         click.echo(f"  Window: {window_name}")
 
 
+@qa.command("launch")
+@click.argument("item_id")
+@click.option("--target-window", default=None,
+              help="tmux window to launch into (split as a new pane). "
+                   "If omitted, opens a new window named after the item.")
+def qa_launch(item_id: str, target_window: str | None):
+    """Launch a QA instruction or regression test as a Claude pane.
+
+    Headless equivalent of the TUI's ``launch_qa_item`` — meant for
+    watchers that need to spawn QA sessions without going through the TUI
+    process.
+
+    *item_id* has the form ``category:id`` (e.g. ``regression:auth-flow``).
+    """
+    from pm_core import qa_instructions
+    from pm_core.claude_launcher import build_claude_shell_cmd
+    from pm_core import tmux as tmux_mod
+
+    parts = item_id.split(":", 1)
+    if len(parts) != 2:
+        click.echo(f"Invalid QA item id (expected 'category:id'): {item_id}", err=True)
+        raise SystemExit(1)
+    category, qa_id = parts
+
+    root = state_root()
+    item = qa_instructions.get_instruction(root, qa_id, category=category)
+    if item is None:
+        click.echo(f"QA item not found: {item_id}", err=True)
+        raise SystemExit(1)
+
+    if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
+        click.echo("pm qa launch requires tmux.", err=True)
+        raise SystemExit(1)
+
+    session = tmux_mod.get_session_name()
+    if not session:
+        click.echo("No tmux session detected.", err=True)
+        raise SystemExit(1)
+
+    sess_label = os.environ.get("PM_SESSION") or session
+    title = item.get("title", qa_id)
+    body = item.get("body", "")
+    full_prompt = f"""\
+## Session Context
+
+You are running a QA instruction against tmux session: {sess_label}
+
+To interact with this session, use commands like:
+- pm tui view -s {sess_label}
+- pm tui send <keys> -s {sess_label}
+- tmux list-panes -t {sess_label} -F "#{{pane_id}} #{{pane_width}}x#{{pane_height}} #{{pane_current_command}}"
+- cat ~/.pm/pane-registry/{sess_label}.json
+
+## QA Instruction: {title}
+
+{body}
+"""
+
+    if category == "regression":
+        # Mirror the TUI's regression filing addendum so headless launches
+        # produce filings consistent with TUI launches.
+        from pm_core.tui.pane_ops import _REGRESSION_FILING_ADDENDUM
+        full_prompt += _REGRESSION_FILING_ADDENDUM
+
+    cmd = build_claude_shell_cmd(prompt=full_prompt)
+    cwd = str(root.parent) if root.name == "pm" else str(root)
+
+    if target_window:
+        win = tmux_mod.find_window_by_name(session, target_window)
+        if not win:
+            click.echo(f"Target window not found: {target_window}", err=True)
+            raise SystemExit(1)
+        pane_id = tmux_mod.split_pane(session, "h", cmd, window=win["id"])
+        click.echo(f"Launched {item_id} in window '{target_window}' (pane {pane_id})")
+    else:
+        window_name = f"qa-{qa_id}"
+        tmux_mod.new_window(session, window_name, cmd, cwd=cwd, switch=False)
+        click.echo(f"Launched {item_id} in new window '{window_name}'")
+
+
 @qa.command("standalone")
 @click.argument("instruction_id")
 def qa_standalone(instruction_id: str):
