@@ -150,16 +150,22 @@ def get_session_and_window(app) -> tuple[str, str] | None:
     return session, window
 
 
-def launch_pane(app, cmd: str, role: str, fresh: bool = False) -> None:
+def launch_pane(app, cmd: str, role: str, fresh: bool = False,
+                target_window: str | None = None) -> None:
     """Launch a wrapped pane, register it, and rebalance.
 
     If a pane with this role already exists and is alive, focuses it instead
     of creating a duplicate. When fresh=True, kills the existing pane first.
+
+    When *target_window* is provided, the pane is launched (and dedup'd) in
+    that tmux window rather than the TUI's current window. Used by watchers
+    that need to keep launched sessions alongside their own work log.
     """
     info = get_session_and_window(app)
     if not info:
         return
-    session, window = info
+    session, current_window = info
+    window = target_window if target_window is not None else current_window
     _log.info("launch_pane: session=%s window=%s role=%s fresh=%s", session, window, role, fresh)
 
     # Check if a pane with this role already exists
@@ -181,7 +187,7 @@ def launch_pane(app, cmd: str, role: str, fresh: bool = False) -> None:
     wrap = f"bash -c 'trap \"pm _pane-exited {session} {window} {gen} $TMUX_PANE\" EXIT; {escaped}'"
     try:
         direction = pane_layout.preferred_split_direction(session, window)
-        pane_id = tmux_mod.split_pane(session, direction, wrap)
+        pane_id = tmux_mod.split_pane(session, direction, wrap, window=window)
         pane_layout.register_and_rebalance(session, window, [(pane_id, role, cmd)])
         tmux_mod.select_pane_smart(pane_id, session, window)
         app.log_message(f"Launched {role} pane")
@@ -413,11 +419,15 @@ Ask the user what they'd like to know about."""
     launch_pane(app, cmd, "discuss", fresh=fresh)
 
 
-def launch_qa_item(app, item_id: str) -> None:
+def launch_qa_item(app, item_id: str, target_window: str | None = None) -> None:
     """Launch Claude with a QA instruction prompt.
 
     *item_id* has the form ``category:id`` (e.g. ``instructions:login-flow``
     or ``regression:pane-layout``).
+
+    *target_window* optionally directs the launched pane into a specific
+    tmux window. When omitted (e.g. the human Enter-key path from the QA
+    pane), the pane opens in the TUI's current window.
     """
     from pm_core import qa_instructions
     from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
@@ -463,7 +473,7 @@ To interact with this session, use commands like:
         full_prompt += _REGRESSION_FILING_ADDENDUM
 
     cmd = build_claude_shell_cmd(prompt=full_prompt)
-    launch_pane(app, cmd, "qa-item")
+    launch_pane(app, cmd, "qa-item", target_window=target_window)
 
 
 # ---------------------------------------------------------------------------
