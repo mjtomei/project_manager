@@ -74,14 +74,18 @@ def create_session(name: str, cwd: str, cmd: str, socket_path: str | None = None
     )
 
 
-def split_pane(session: str, direction: str, cmd: str) -> str:
+def split_pane(session: str, direction: str, cmd: str,
+               window: str | None = None) -> str:
     """Split a pane and run cmd. Returns new pane ID.
 
     direction: 'h' for horizontal (left/right), 'v' for vertical (top/bottom)
+    window: optional tmux window id/name to target. When omitted, splits
+        the active pane of the session's active window.
     """
     flag = "-h" if direction == "h" else "-v"
+    target = f"{session}:{window}" if window else session
     result = _run(
-        _tmux_cmd("split-window", flag, "-t", session, "-P", "-F", "#{pane_id}", cmd),
+        _tmux_cmd("split-window", flag, "-t", target, "-P", "-F", "#{pane_id}", cmd),
         text=True,
         check=True,
     )
