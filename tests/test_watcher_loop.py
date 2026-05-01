@@ -532,7 +532,7 @@ class TestWatcherCLI:
         from pm_core.cli import cli
         runner = CliRunner()
         result = runner.invoke(cli, ["watcher", "--iteration", "3"])
-        mock_create.assert_called_once_with(3, "", None, auto_start_target=None, meta_pm_root=None)
+        mock_create.assert_called_once_with(3, "", None, auto_start_target=None, meta_pm_root=None, watcher_type="auto-start")
 
     def test_list_subcommand(self):
         from click.testing import CliRunner
@@ -542,6 +542,80 @@ class TestWatcherCLI:
         assert result.exit_code == 0
         assert "auto-start" in result.output
         assert "Auto-Start Watcher" in result.output
+        assert "regression-loop" in result.output
+
+
+class TestRegressionLoopStart:
+    """Test ``pm watcher start regression-loop`` meta-type."""
+
+    @patch("pm_core.cli.watcher.tmux_mod")
+    def test_starts_three_watchers(self, mock_tmux):
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+
+        mock_tmux.has_tmux.return_value = True
+        mock_tmux.in_tmux.return_value = True
+
+        registered: list = []
+        started: list = []
+
+        class FakeManager:
+            def register(self, w):
+                registered.append(w)
+            def start(self, wid, on_iteration=None, transcript_dir=None):
+                started.append(wid)
+                return True
+            def is_any_running(self):
+                return False
+            def stop_all(self):
+                pass
+
+        with patch("pm_core.watcher_manager.WatcherManager", FakeManager):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["watcher", "start", "regression-loop"])
+
+        assert result.exit_code == 0, result.output
+        types = sorted(w.WATCHER_TYPE for w in registered)
+        assert types == ["bug-fix-impl", "discovery", "improvement-fix-impl"]
+        assert len(started) == 3
+
+    @patch("pm_core.cli.watcher.tmux_mod")
+    def test_wait_override_propagates(self, mock_tmux):
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+
+        mock_tmux.has_tmux.return_value = True
+        mock_tmux.in_tmux.return_value = True
+
+        registered: list = []
+
+        class FakeManager:
+            def register(self, w):
+                registered.append(w)
+            def start(self, *a, **k):
+                return True
+            def is_any_running(self):
+                return False
+            def stop_all(self):
+                pass
+
+        with patch("pm_core.watcher_manager.WatcherManager", FakeManager):
+            runner = CliRunner()
+            result = runner.invoke(
+                cli, ["watcher", "start", "regression-loop", "--wait", "42"])
+
+        assert result.exit_code == 0, result.output
+        assert all(w.state.iteration_wait == 42 for w in registered)
+        assert len(registered) == 3
+
+    def test_unknown_type_lists_regression_loop(self):
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+        runner = CliRunner()
+        result = runner.invoke(cli, ["watcher", "start", "no-such-watcher"])
+        assert result.exit_code != 0
+        assert "Unknown watcher type" in result.output
+        assert "regression-loop" in result.output
 
 
 # --- Watcher registry tests ---
