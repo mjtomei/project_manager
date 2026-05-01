@@ -9,19 +9,45 @@ Establish a continuous quality improvement loop where a Claude-based regression 
 - Enforce a disciplined reproduce-first bug fix flow
 - Give humans a conversational surface for checking in on the autonomous loops
 
+## Reuse: existing QA infrastructure
+
+The autonomous loops drive the same Claude-based regression tests a human runs from the QA pane — not parallel infrastructure, not a new test runner.
+
+- **Test list**: `pm/qa/regression/*.md`. Each test is a markdown file with YAML frontmatter and a body that already contains its prompt for the Claude session it spawns. Loaded by `qa_instructions.list_all()` (`pm_core/qa_instructions.py`).
+- **Launch path**: `launch_qa_item()` (`pm_core/tui/pane_ops.py`) wraps the markdown body with session context and spawns Claude via `build_claude_shell_cmd()`. The QA pane's Enter key invokes this for human launches.
+- **Verdict collection**: existing `poll_for_verdict()` (`pm_core/loop_shared.py`) and `extract_verdict_from_transcript()` (`pm_core/verdict_transcript.py`). PASS / NEEDS_WORK / INPUT_REQUIRED parsing is unchanged.
+- **Status surface**: per-session transcript files plus the supervisor's own work log. Implementation watchers and the watcher review session read these directly — same surface a human watches.
+
+What this plan adds:
+- A small prompt addendum at the launch-path layer that teaches the spawned regression-test sessions to file bugs (`plan=bugs`) and improvements (`plan=ux`) when they discover them — analogous to `pr-539110b` for review/QA agents.
+- A `target_window` option on `launch_qa_item()` so watcher-driven launches stay in the watcher's pane while human launches keep their current main-window behavior.
+- The autonomous machinery (scheduling with throughput limits, post-hoc dedup, prioritization, work-log, dynamic priority).
+
+What this plan does **not** add:
+- New worker prompts (existing test markdown bodies stay as-is).
+- A new test execution path (the existing `launch_qa_item()` flow is reused).
+- New verdict shapes or IPC surfaces.
+
 ## Architecture
 
 **Three watchers** total:
 
-1. **Discovery supervisor** (`pr-271cb3a`) — drives one unified discovery worker (`pr-47940bc`) that runs Claude-based regression testing with a prompt tuned to surface both bugs and improvements. Files findings into `plan=bugs` or `plan=ux` based on type. Owns scheduling with throughput constraints, file-time dedup, prioritization, and work-log.
+1. **Discovery supervisor** (`pr-271cb3a`) — schedules runs of the existing Claude-based regression tests at `pm/qa/regression/*.md` with throughput constraints. The test sessions themselves discover and file bugs/improvements directly via `pm pr add` (taught by `pr-47940bc`); the supervisor reconciles the filed PRs post-hoc (dedup, prioritize, route confirmation), maintains the work-log, and handles stuck/crashed test sessions.
 2. **Bug-fix implementation watcher** (`pr-e3a711c`) — supervises the bug-fix pool's execution. Health checks, dynamic priority, implementation metrics, throttle.
 3. **Improvement-fix implementation watcher** (`pr-d39a7fb`) — same shape as the bug-fix watcher, but for the UX pool. Separate watcher because flow-specific signals (taste-driven, gated merge) justify independent tuning.
 
-**Worker** (one) — `pr-47940bc`, the unified discovery worker. No separate UX-review pass.
+**No discovery worker.** The existing test list is the discovery surface; each test already spawns its own Claude session through `launch_qa_item()`. This plan adds a prompt addendum (`pr-47940bc`) and a target-window option (`pr-97ddabf`); it does not introduce a new worker.
 
 **Pools** (two parallel) — `pr-ea3c851` (bug-fix, auto-merge on) and `pr-84e6510` (UX, merge-gated). Generic execution layer; reads priority but doesn't set it.
 
 **Human surface** — `pr-e84b43c`, a Claude session launched from the TUI that has read access to all three watchers' work-logs. Opens with a summary of recent activity, then chat-driven for follow-ups and remediation (priority bumps, pool pause/resume) with explicit confirmation for writes.
+
+## Status
+
+- ✅ Merged (2): `pr-3b2847c` (QA planner consolidate), `pr-539110b` (agents file out-of-scope bugs)
+- 🔨 In progress (1): `pr-30588a7` (bug fix flow reproduce-fix-verify)
+- ⏳ Pending (11): everything else
+- Phase 1 is mostly done; the auto-sequence button (`pr-e58459b`) and auto-pool (`pr-45db518`) are the next foundation pieces to start. Phase 2+ unblocks once foundations land.
 
 ## Prerequisites
 
@@ -29,20 +55,20 @@ Establish a continuous quality improvement loop where a Claude-based regression 
 
 ## Phase 1: Foundation (independent, can start now)
 
-### PR: QA planner: consolidate related assertions into fewer scenarios
+### PR: QA planner: consolidate related assertions into fewer scenarios ✅ MERGED (#167)
 `pr-3b2847c`
 
 Prompt-only change to reduce scenario count by grouping related assertions. Unblocks faster QA runs which makes the whole loop more practical.
 
-### PR: Review and QA agents file bugs for out-of-scope issues via pm pr add
+### PR: Review and QA agents file bugs for out-of-scope issues via pm pr add ✅ MERGED (#168)
 `pr-539110b`
 
 Teach review and QA agents to use `pm pr add --plan bugs` when they spot issues outside the current PR's scope. No verdict changes — agents still PASS/NEEDS_WORK on the PR itself, but file bugs as a side effect.
 
-### PR: Bug fix flow: reproduce with test, fix, verify
+### PR: Bug fix flow: reproduce with test, fix, verify 🔨 IN PROGRESS (#169)
 `pr-30588a7`
 
-Different impl prompt for bug PRs: write a failing test first, fix the code, verify the test passes. Reviewers check that a reproduction test exists. Session-end reconcile is verification-only — primary dedup is owned by the discovery supervisor at file time.
+Different impl prompt for bug PRs: write a failing test first, fix the code, verify the test passes. Reviewers check that a reproduction test exists. Session-end reconcile is verification-only — primary dedup is owned by the discovery supervisor (post-hoc, after test sessions file).
 
 ### PR: Auto-sequence button: chain start → review → QA on a single PR
 `pr-e58459b`
@@ -56,22 +82,27 @@ Foundational queue primitive consumed by every autonomous track. Watches a confi
 
 ## Phase 2: Discovery (after Phase 1)
 
-### PR: Unified discovery worker
+### PR: Regression test sessions file bugs and improvements into correct plans
 `pr-47940bc` (depends on: pr-539110b)
 
-Dumb worker that runs Claude-based regression testing with a prompt tuned to surface both bug-shaped failures and improvement-shaped findings. Emits typed records (`type: bug | improvement`) on demand. No scheduling, dedup, priority, or filing.
+Prompt-addendum change at the launch-path wrapper in `launch_qa_item()` so the existing Claude-based regression test sessions know to file findings via `pm pr add --plan bugs` or `--plan ux`. Mirror of pr-539110b but for regression tests instead of review/QA agents. Verdicts (PASS/NEEDS_WORK/INPUT_REQUIRED) unchanged — filing is a side effect.
+
+### PR: Watcher-target window for regression test launches
+`pr-97ddabf` (depends on: pr-47940bc)
+
+Add an optional `target_window` parameter to `launch_qa_item()` so watcher-driven launches stay in the watcher's pane and human launches from the QA pane keep their current main-window behavior.
 
 ### PR: Discovery supervisor watcher (unified for bugs and improvements)
-`pr-271cb3a` (depends on: pr-47940bc, pr-45db518)
+`pr-271cb3a` (depends on: pr-47940bc, pr-97ddabf, pr-45db518)
 
-Owns scheduling with throughput constraints, type-based routing into `plan=bugs` / `plan=ux`, file-time dedup against open PRs and work-log, priority assignment, structured work-log, and worker exception handling.
+Drives the existing test list at `pm/qa/regression/*.md` directly via `qa_instructions.list_all()` and `launch_qa_item()`. Owns scheduling with throughput constraints, post-hoc dedup of bug/improvement PRs the test sessions filed, priority assignment, structured work-log, and exception handling. No new worker, no new prompt — just a scheduler over an existing list.
 
 ## Phase 3: Pool configurations (after Phase 1)
 
 ### PR: Bug-fix pool config (auto-merge on)
 `pr-ea3c851` (depends on: pr-30588a7, pr-47940bc, pr-45db518)
 
-Pool config: source = `plan=bugs`, auto-merge on. Picks up bug PRs filed by the discovery supervisor and runs them through the bug-fix flow.
+Pool config: source = `plan=bugs`, auto-merge on. Picks up bug PRs filed by the regression test sessions (and curated by the discovery supervisor) and runs them through the bug-fix flow.
 
 ### PR: UX pool config (merge-gated)
 `pr-84e6510` (depends on: pr-47940bc, pr-45db518)
@@ -107,7 +138,7 @@ Periodic markdown digests rendered from the discovery supervisor's work-log. Com
 ## Success criteria
 
 - Discovery runs unattended under throughput constraints, surfacing both bugs and improvements
-- Findings are deduplicated against existing PRs at file time and routed to the correct plan
+- Findings are deduplicated post-hoc by the discovery supervisor and routed to the correct plan
 - Bug fixes follow reproduce→fix→verify and land without manual kickoff
 - UX fixes auto-sequence to ready-for-merge then wait for human taste check
 - Implementation watchers detect and handle stuck/loop-failing fix sessions

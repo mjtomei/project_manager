@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-4702a11
+  active_pr: pr-97ddabf
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -85,6 +85,11 @@ plans:
 - id: plan-regression
   name: Automated regression and bug fix loop
   file: plans/plan-regression.md
+  status: draft
+  parent: null
+- id: plan-ambient
+  name: Ambient interface — context-aware multi-surface UX
+  file: plans/plan-ambient.md
   status: draft
   parent: null
 prs:
@@ -9869,10 +9874,10 @@ prs:
     pointer.
 
 
-    The reconcile step is *not* the primary dedup mechanism — that''s handled file-time
-    by the regression-flow supervisor (pr-271cb3a) which has the work-log context.
-    Reconcile is a backstop that verifies the supervisor''s links and catches anything
-    the supervisor missed.
+    The reconcile step is *not* the primary dedup mechanism — that''s handled post-hoc
+    by the discovery supervisor (pr-271cb3a) after the test sessions file. Reconcile
+    is a backstop that verifies the supervisor''s links and catches anything the supervisor
+    missed.
 
 
     This changes the impl prompt generation (prompt_gen.py) to detect bug PRs and
@@ -9883,7 +9888,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/169
   gh_pr_number: 169
   created_at: '2026-04-28T11:07:43.274357+00:00'
-  updated_at: '2026-04-29T15:58:35.820024+00:00'
+  updated_at: '2026-05-01T17:46:23.567023+00:00'
   started_at: '2026-04-29T15:58:35.820024+00:00'
   reviewed_at: null
   merged_at: null
@@ -9891,51 +9896,45 @@ prs:
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-30588a7-bug-fix-flow-reproduce-with-test-fix-0e4c4acb
 - id: pr-47940bc
   plan: plan-regression
-  title: 'Regression runner watcher: run tests on schedule and report failures'
+  title: Regression test sessions file bugs and improvements into correct plans
   branch: pm/pr-47940bc-regression-runner-watcher-run-tests-on-schedule-an
   status: pending
   depends_on:
   - pr-539110b
-  description: 'Unified discovery worker: runs the Claude-based regression test functionality
-    with a prompt tuned to surface both bugs (test failures, incorrect behavior) and
-    improvements (UX/quality issues — state not surfaced, relationships not wired,
-    affordances missing). Single worker for both autonomous tracks; no separate UX-review
-    pass.
+  description: 'Pattern mirror of pr-539110b (merged), but for the existing Claude-based
+    regression tests at `pm/qa/regression/*.md` (loaded by `pm_core/qa_instructions.py:list_all()`,
+    launched by `pm_core/tui/pane_ops.py:launch_qa_item()`).
 
 
-    Dumb component: runs on demand and emits raw findings. Scheduling, throughput
-    limits, dedup, prioritization, and work-log management live in the discovery supervisor
-    (pr-271cb3a).
+    These tests already spawn Claude sessions — they have their own prompts in the
+    markdown body. We do not add a new worker or new prompt; we teach the existing
+    launch path to append a small addendum so the spawned session knows where to file
+    findings:
 
 
-    Behavior:
+    - If the test discovers a bug (failing assertion, incorrect behavior, regression):
+    `pm pr add --plan bugs --description ''...''`
 
-    - Exposes a single ''run now'' entry point the supervisor invokes
+    - If the test discovers an improvement (UX/quality issue surfaced incidentally):
+    `pm pr add --plan ux --description ''...''`
 
-    - Runs pytest, Claude-guided regression scenarios, and a quality/UX review prompt
-    over recent merges + current state
-
-    - Parses each finding into a typed record: `{type: bug | improvement, ...details}`.
-    Bug records include failing test name, assertion, stack trace excerpt, repro command.
-    Improvement records include description, suggested scope, confidence score.
-
-    - Emits the records to the supervisor — does not file PRs itself
-
-    - Builds on the watcher framework (pr-3032fb6, merged)
+    - The verdict (PASS / NEEDS_WORK / INPUT_REQUIRED) for the test itself is unchanged
+    — bug/improvement filing is a side effect, not a verdict change
 
 
-    The supervisor decides what to do (route to plan=bugs or plan=ux, dedup, file
-    new with priority).
+    Implementation: extend the wrapper in `launch_qa_item()` (the same place that
+    wraps the markdown body with session context today) so the appended addendum is
+    part of the spawned session''s prompt. No changes to the individual regression
+    test markdown files.
 
 
-    Manual testing: invoke the worker directly and inspect emitted records for shape
-    and accuracy on (a) a known-failing test and (b) a known UX-shaped issue. End-to-end
-    behavior is exercised via the supervisor''s manual test.'
+    The discovery supervisor (pr-271cb3a) drives this list and handles dedup/prioritization/work-log;
+    the test sessions themselves only need to know where to file.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-28T11:07:54.142407+00:00'
-  updated_at: '2026-04-29T15:55:28.228163+00:00'
+  updated_at: '2026-05-01T17:41:02.141842+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -10158,41 +10157,60 @@ prs:
   status: pending
   depends_on:
   - pr-47940bc
+  - pr-97ddabf
   - pr-45db518
-  description: 'Single discovery supervisor watcher. Drives the unified discovery
-    worker (pr-47940bc) and converts raw findings into prioritized, deduplicated PR
-    filings — routing each finding into plan=bugs or plan=ux based on its type.
+  description: 'Single discovery supervisor watcher. Drives the existing list of Claude-based
+    regression tests at `pm/qa/regression/*.md` directly — no new worker, no new prompt.
+
+
+    How it works:
+
+    - Reads the test list via `qa_instructions.list_all()` (`pm_core/qa_instructions.py`)
+
+    - Launches selected tests via the existing `launch_qa_item()` (`pm_core/tui/pane_ops.py`),
+    passing its own window as `target_window` (see pr-WATCHERWINDOW) so launches are
+    observable inline with the supervisor''s work log
+
+    - Each test session has been taught (via pr-47940bc) to file bugs/improvements
+    into `plan=bugs` / `plan=ux` directly using `pm pr add` — the supervisor does
+    not file PRs itself
+
+    - Polls verdicts using the existing `poll_for_verdict()` (`pm_core/loop_shared.py`)
+    and `extract_verdict_from_transcript()` (`pm_core/verdict_transcript.py`)
 
 
     Responsibilities:
 
-    - **Trigger**: kicks off discovery runs on its own cadence with throughput constraints
-    (max-concurrent runs, max-per-window, back-off when failures storm).
+    - **Trigger**: schedules test runs on its own cadence with throughput constraints
+    (max-concurrent runs, max-per-window, back-off on failure storms). Decides which
+    tests to run, when, and in what order.
 
-    - **Route**: each raw record is filed into plan=bugs (type=bug) or plan=ux (type=improvement).
+    - **Dedup**: watches for newly-filed bug/improvement PRs after each test run completes
+    and reconciles them against existing open PRs and recent work-log entries. Decisions:
+    keep, merge into existing (note + priority bump and close the new one), drop.
+    The supervisor cannot prevent the test session from filing in the first place
+    — it cleans up post-hoc.
 
-    - **Dedup**: checks raw findings against open PRs in the target plan and recent
-    work-log entries. Decisions: drop, merge (append note + bump priority on existing),
-    or file new.
+    - **Prioritize**: sets priority on retained filings (via `pm pr edit --priority`)
+    based on test name, severity signals in the description, and work-log context.
 
-    - **Prioritize**: sets priority on new filings (via `pm pr edit --priority`) based
-    on severity / confidence and work-log signals.
+    - **Log**: maintains a structured work log (jsonl) of test runs, verdicts, filings,
+    dedup decisions. Source of truth for the watcher review session (pr-e84b43c) and
+    summary reporting (pr-558ca3f).
 
-    - **Log**: maintains a structured work log of runs, findings, filings, dedup decisions,
-    and routing rationale. Source of truth for the watcher review window (pr-WATCHERVIEW)
-    and summary reporting (pr-558ca3f).
-
-    - **Exception handling**: detects stuck/crashed worker runs and restarts or escalates.
+    - **Exception handling**: detects stuck/crashed test sessions via the supervisor''s
+    window and standard verdict polling; restarts or escalates.
 
 
-    Manual testing: configure against a fake worker emitting scripted mixed bug/improvement
-    record sequences. Verify throughput limits, correct routing, dedup, priority assignment,
-    and work log accuracy. Use INPUT_REQUIRED to drive this.'
+    Manual testing: run the supervisor against a small subset of `pm/qa/regression/*.md`.
+    Verify throughput limits, that test launches appear in the supervisor''s window,
+    that filed bugs/improvements are correctly deduped post-hoc, and that the work
+    log captures all decisions. Use INPUT_REQUIRED to drive this.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-29T15:34:01.804130+00:00'
-  updated_at: '2026-04-29T15:55:37.842828+00:00'
+  updated_at: '2026-05-01T17:41:25.433342+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -10207,8 +10225,13 @@ prs:
   - pr-84e6510
   description: 'Implementation-side watcher for the improvement-fix flow. Distinct
     from the pool (which is generic execution) and from the discovery supervisor (which
-    handles filing). Monitors the UX pool''s in-flight sessions and reacts to execution-side
-    signals.
+    handles filing). Monitors the UX pool''s in-flight sessions by reading the same
+    surfaces a human watches in the QA pane.
+
+
+    Reuse: `qa_status.json` and per-scenario transcript files are the primary signal
+    source. `extract_verdict_from_transcript()` provides verdict parsing. `poll_for_verdict()`
+    provides the polling loop pattern. No new IPC.
 
 
     Responsibilities:
@@ -10218,18 +10241,18 @@ prs:
     health watcher) as substrate if it lands first.
 
     - **Dynamic priority**: as the work log accumulates, adjust priority on queued
-    PRs (e.g. boost a UX fix that other queued candidates depend on, demote one that''s
+    PRs (boost a UX fix that other queued candidates depend on, demote one that''s
     been deferred too many times).
 
     - **Implementation log**: per-flow metrics — typical fix-session duration, success/NEEDS_WORK
-    rates, merge cadence. Feeds the watcher review window.
+    rates, merge cadence. Feeds the watcher review session.
 
-    - **Throttle interactions**: pause its pool if the system is under load (e.g.
-    another flow is consuming resources), resume when capacity returns.
+    - **Throttle**: pause its pool if the system is under load (e.g. another flow
+    is consuming resources), resume when capacity returns.
 
 
-    Mirror of pr-BUGFIXWATCHER but tuned for UX-fix concerns (slower cadence, gated
-    merge, taste-driven). Separate watcher because flow-specific signals justify independent
+    Mirror of pr-e3a711c but tuned for UX-fix concerns (slower cadence, gated merge,
+    taste-driven). Separate watcher because flow-specific signals justify independent
     tuning.
 
 
@@ -10239,7 +10262,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-29T15:34:08.487870+00:00'
-  updated_at: '2026-04-29T15:56:26.783633+00:00'
+  updated_at: '2026-05-01T17:34:54.751737+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -10255,7 +10278,13 @@ prs:
   description: 'Implementation-side watcher for the bug-fix flow. Peer of pr-d39a7fb
     (improvement-fix watcher). Distinct from the pool (which is generic execution)
     and from the discovery supervisor (which handles filing). Monitors the bug-fix
-    pool''s in-flight sessions and reacts to execution-side signals.
+    pool''s in-flight sessions by reading the same surfaces a human watches in the
+    QA pane.
+
+
+    Reuse: `qa_status.json` and per-scenario transcript files are the primary signal
+    source. `extract_verdict_from_transcript()` provides verdict parsing. `poll_for_verdict()`
+    provides the polling loop pattern. No new IPC.
 
 
     Responsibilities:
@@ -10266,15 +10295,15 @@ prs:
     watcher) as substrate if it lands first.
 
     - **Dynamic priority**: adjust priority on queued bug PRs as the work log accumulates
-    — e.g. boost when a related bug just regressed again, demote when a fix attempt
-    has failed multiple times and needs human triage.
+    — boost when a related bug just regressed again, demote when a fix attempt has
+    failed multiple times and needs human triage.
 
     - **Implementation log**: per-flow metrics — fix-session duration, reproduce-step
     success rate, time-to-merge, regression-after-fix rate. Feeds the watcher review
     session.
 
-    - **Throttle interactions**: pause its pool when bug-fix throughput is overwhelming
-    review/QA capacity.
+    - **Throttle**: pause its pool when bug-fix throughput is overwhelming review/QA
+    capacity.
 
 
     Mirror of pr-d39a7fb but tuned for bug-fix concerns (faster cadence, auto-merge,
@@ -10289,7 +10318,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-29T15:56:05.110130+00:00'
-  updated_at: '2026-04-29T15:56:26.129150+00:00'
+  updated_at: '2026-05-01T17:34:48.499033+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -10303,8 +10332,8 @@ prs:
   - pr-271cb3a
   description: 'Dedicated Claude session for human review of the autonomous watchers.
     Launched from the TUI; opens with a summary of what''s happened recently across
-    all three watchers (discovery supervisor pr-271cb3a, bug-fix watcher, improvement-fix
-    watcher pr-d39a7fb) and then conversational from there.
+    all three watchers (discovery supervisor pr-271cb3a, bug-fix watcher pr-e3a711c,
+    improvement-fix watcher pr-d39a7fb) and then conversational from there.
 
 
     Why a session instead of a static TUI panel:
@@ -10318,14 +10347,18 @@ prs:
     - Reasoning surface, not just metrics — the human gets explanations, not raw logs
 
 
+    Reuse: the session reads the supervisors'' work-logs (jsonl), the existing `qa_status.json`
+    files for in-flight scenario state, and per-scenario transcripts. Same surfaces
+    a human watching the QA pane uses today; no new ingestion path.
+
+
     Behavior:
 
     - TUI keypress launches a Claude session in a new pane with the project context
     loaded
 
-    - System prompt grants read access to all three watchers'' work-logs (paths or
-    queryable interface), lists current pool state and in-flight PRs, and explains
-    the watcher architecture
+    - System prompt grants read access to all three watchers'' work-logs, current
+    pool state, in-flight `qa_status.json`, and explains the watcher architecture
 
     - Opens with a summary turn: what was discovered, filed, fixed, merged, or stuck
     since the last review session
@@ -10337,10 +10370,6 @@ prs:
     require explicit human confirmation in the session
 
 
-    Workers and supervisors emit logs in a uniform shape (jsonl or similar) so the
-    review session has a single ingestion path.
-
-
     Manual testing: launch the review session in a project with simulated watcher
     activity, confirm the opening summary covers all three watchers, exercise follow-up
     questions and a remediation flow (priority bump). Use INPUT_REQUIRED to drive
@@ -10349,16 +10378,16 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-29T15:56:16.156179+00:00'
-  updated_at: '2026-04-29T15:56:16.156179+00:00'
+  updated_at: '2026-05-01T17:35:11.284699+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
   notes: []
 - id: pr-4702a11
-  plan: improvements
+  plan: plan-ambient
   title: pm rc mobile voice document viewer and editor
   branch: pm/pr-4702a11-pm-rc-mobile-voice-document-viewer-and-editor
-  status: pending
+  status: qa
   depends_on: []
   description: 'New `pm rc start <path> [--port N]` command (pm-session only) that
     lets a user review and edit a document by voice from a remote device while the
@@ -10602,11 +10631,267 @@ prs:
     - pm_core/cli/rc.py
 
     - pm_core/cli/__init__.py'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/170
+  gh_pr_number: 170
+  created_at: '2026-05-01T15:07:09.683797+00:00'
+  updated_at: '2026-05-01T16:07:53.479420+00:00'
+  started_at: '2026-05-01T15:21:01.117727+00:00'
+  reviewed_at: '2026-05-01T15:42:13.613594+00:00'
+  merged_at: null
+  notes:
+  - id: note-1404198
+    text: 'QA PASS: Server endpoint behavior — select/focus/propose/accept/reject/viewport:
+      PASS; SSE broadcast plumbing and slow-subscriber handling: PASS; CLI guards
+      and registry helpers: PASS; Cleanup hook semantics: PASS; Viewer HTML self-containment
+      and SSE/visibility behaviors (static inspection): PASS (workdir: /home/matt/.pm/workdirs/qa/pr-4702a11-7dc1d092809969cd)'
+    created_at: '2026-05-01T16:23:55Z'
+    last_edited: '2026-05-01T16:23:55Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-4702a11-pm-rc-mobile-voice-document-viewer-a-372f0fc3
+- id: pr-39a4e66
+  plan: plan-ambient
+  title: Common surface protocol — extract from pm rc
+  branch: pm/pr-39a4e66-common-surface-protocol-extract-from-pm-rc
+  status: pending
+  depends_on:
+  - pr-4702a11
+  description: 'Define the shape every ambient surface exposes, in pm_core/surfaces/protocol.py.
+    Types: SurfaceKind enum (rc, browse, doc, ...), SurfaceIdentity (id, kind, host,
+    lan_url, started_at, pid), DisplayState (path, version, document text or other
+    rendered content), AttentionState (viewport_top, viewport_bottom, selection, focus_target,
+    last_user_input_at). Surfaces serve GET /api/surface returning {identity, display,
+    attention} as a single payload. The rc viewer''s GET /api/doc is refactored to
+    construct its response from this shape (with the existing field names preserved
+    as a transitional alias so the rc webapp keeps working unchanged). No new behavior
+    — pure extraction so subsequent surfaces have a target to implement against. Tests:
+    type round-trip, rc /api/doc still serves the same shape it did before, /api/surface
+    on rc returns the new structured payload.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
-  created_at: '2026-05-01T15:07:09.683797+00:00'
-  updated_at: '2026-05-01T15:19:42.692220+00:00'
+  created_at: '2026-05-01T16:12:14.685514+00:00'
+  updated_at: '2026-05-01T16:12:14.685514+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-dc4f5fe
+  plan: plan-ambient
+  title: Host-local surface registry
+  branch: pm/pr-dc4f5fe-host-local-surface-registry
+  status: pending
+  depends_on:
+  - pr-39a4e66
+  description: 'File-backed registry at ~/.pm/surfaces/<id>.json — each surface writes
+    its descriptor (identity + URL + pid) on startup, removes on shutdown. Stale-entry
+    cleanup on read when the pid is no longer alive. Library API in pm_core/surfaces/registry.py:
+    list_surfaces(), get_surface(id), register(identity), deregister(id). New CLI
+    ''pm surfaces list'' as a debug aid. The rc server is updated to register on serve
+    start and deregister on shutdown; existing rc-server pane registry tracking continues
+    unchanged. Tests: register/deregister round-trip, stale cleanup when pid is gone,
+    ''pm surfaces list'' output, rc server registers correctly on startup.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-01T16:12:22.561919+00:00'
+  updated_at: '2026-05-01T16:12:22.561919+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-a0d778e
+  plan: plan-ambient
+  title: Project browser surface
+  branch: pm/pr-a0d778e-project-browser-surface
+  status: pending
+  depends_on:
+  - pr-dc4f5fe
+  description: 'New ''pm browse start [--port N]'' command (pm-session only). Webapp
+    surface that renders the current pm project tree (plans → PRs → files) as a touch-navigable
+    list. Reuses pane plumbing established by pr-4702a11 (single rc-driver-style pane
+    in a new tmux window, server as background daemon). Implements the surface protocol:
+    GET /api/surface returns identity (kind=browse) + display (current view path:
+    /plans, /plans/<id>, /prs/<id>, /files/<path>) + attention (which item is selected,
+    viewport offset). Claude drives via ''pm browse navigate <path>'' and ''pm browse
+    focus <item>''. User can also tap to navigate. Read-only — taps select but do
+    not mutate project state. Registers with the surface registry. Tests: tree rendering
+    for plans/PRs/files, navigation API, attention reporting back, registry registration.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-01T16:12:31.737027+00:00'
+  updated_at: '2026-05-01T16:12:31.737027+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-101fae8
+  plan: plan-ambient
+  title: Doc reader surface
+  branch: pm/pr-101fae8-doc-reader-surface
+  status: pending
+  depends_on:
+  - pr-dc4f5fe
+  description: 'New ''pm doc start <path> [--port N]'' command (pm-session only).
+    Like rc but read-only and Claude-only-driven — the user does not edit, only reads.
+    For reference material: codebase files, generated docs, screenshots Claude wants
+    to point the user at. CLI ops: ''pm doc focus <top_line>'', ''pm doc highlight
+    <start> [end]'' (visual highlight without ''selection'' semantics — purely indicative),
+    ''pm doc status''. No propose/accept/reject. Implements the surface protocol;
+    registers with the registry. Useful for narrating during voice sessions (''look
+    at the goals section here''). Tests: file rendering, focus and highlight ops,
+    viewport reporting, registry registration.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-01T16:12:39.353078+00:00'
+  updated_at: '2026-05-01T16:12:39.353078+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-dce4cbb
+  plan: plan-ambient
+  title: Active-surface context query
+  branch: pm/pr-dce4cbb-active-surface-context-query
+  status: pending
+  depends_on:
+  - pr-a0d778e
+  - pr-101fae8
+  description: 'New ''pm context'' CLI. Reads the surface registry, queries each active
+    surface''s GET /api/surface concurrently, returns a stable JSON summary: per-surface
+    identity + display + attention. Non-responsive surfaces are reported with a status
+    field rather than dropped. Available to any Claude session on the host — this
+    is the disambiguation primitive Claude calls before responding to ambiguous requests.
+    Output schema is versioned so prompts can include it directly. Optional --surface
+    <id> filter to query just one. Tests: concurrent query of multiple surfaces, dead-surface
+    handling, JSON shape stability, --surface filter.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-01T16:12:46.606257+00:00'
+  updated_at: '2026-05-01T16:12:46.606257+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-7b6ae74
+  plan: plan-ambient
+  title: Cross-surface attention ranking
+  branch: pm/pr-7b6ae74-cross-surface-attention-ranking
+  status: pending
+  depends_on:
+  - pr-dce4cbb
+  description: 'Augment ''pm context'' with a ranked most-recent-attention list across
+    all active surfaces. Ranking combines last_user_input_at and a touch-recency weight
+    (default exponential decay, half-life ~30s). Add ''pm context resolve <phrase>''
+    that takes a natural-language pointer (''this paragraph'', ''the second one'',
+    ''over there'') and returns the most-likely referent surface + region as JSON,
+    or returns ambiguity metadata when multiple candidates are within tolerance so
+    Claude can ask the user. Resolution uses display content + attention state from
+    the context query. Tests: two-surface tie case (most-recent-touched wins), recency-decay
+    case (older attention loses), ambiguity-metadata case (returns candidates instead
+    of guessing), resolve-by-content matching (''the second list'').'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-01T16:12:55.077235+00:00'
+  updated_at: '2026-05-01T16:12:55.077235+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-8c21624
+  plan: plan-ambient
+  title: Gaze tracking — protocol extension and browser provider
+  branch: pm/pr-8c21624-gaze-tracking-protocol-extension-and-browser-provi
+  status: pending
+  depends_on:
+  - pr-39a4e66
+  description: 'Extend AttentionState with optional gaze: {x, y, region_id, last_at}.
+    x/y are normalized 0..1 in the surface viewport coordinate space. region_id is
+    the data-region attribute of the visible element under the gaze point if known.
+    Add a JS provider at pm_core/surfaces/static/gaze.js using an in-browser library
+    (e.g. WebGazer or equivalent — vendored as a static asset) that: requests camera
+    permission with a clear on-page consent prompt, runs a brief calibration flow
+    on first use, computes gaze coordinates, posts to a new POST /api/attention {gaze:
+    {...}} endpoint with debounce ~200ms. Surfaces opt in by including the provider
+    script tag — it is not enabled by default for any surface. The context query exposes
+    gaze when present, omits it when not. Surfaces without gaze keep working — purely
+    additive. Tests: protocol payload round-trip with and without gaze, surfaces that
+    opt out have no gaze field, the calibration flow saves a per-device profile that
+    persists across reloads.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-01T16:13:05.440742+00:00'
+  updated_at: '2026-05-01T16:13:05.440742+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-34421be
+  plan: plan-ambient
+  title: Implicit attention signals — dwell, saccade, scroll-stop
+  branch: pm/pr-34421be-implicit-attention-signals-dwell-saccade-scroll-st
+  status: pending
+  depends_on:
+  - pr-8c21624
+  - pr-7b6ae74
+  description: 'Compute implicit attention signals on the surface side and surface
+    them in ''pm context'' as soft weights: dwell time per region (time gaze or scroll-position
+    has been within a region''s bounds), saccade entropy (variance of gaze movement,
+    used as an attention-quality score — low entropy = focused, high = scanning),
+    scroll-stop events (timestamps of scroll-rest moments and the region they ended
+    on). When gaze data is available these come from the gaze provider; when not,
+    they fall back to scroll/touch event tracking with reduced fidelity. Exposed via
+    AttentionState.signals: {dwell_ms_by_region, saccade_entropy, scroll_stops}. The
+    ''pm context resolve'' command uses these to break ties more confidently — a region
+    with high dwell + low saccade entropy is preferred over one merely visible. Tests:
+    dwell accumulation, saccade entropy on synthetic gaze tracks, scroll-stop detection
+    from input events, resolver tiebreaking improves with signals present vs absent.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-01T16:13:15.137776+00:00'
+  updated_at: '2026-05-01T16:13:15.137776+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-97ddabf
+  plan: plan-regression
+  title: Watcher-target window for regression test launches
+  branch: pm/pr-97ddabf-watcher-target-window-for-regression-test-launches
+  status: pending
+  depends_on:
+  - pr-47940bc
+  description: 'Today `pm_core/tui/pane_ops.py:launch_qa_item()` always launches the
+    Claude session for a regression test in the main TUI window. The discovery supervisor
+    (pr-271cb3a) needs to launch tests in its own pane/window so it can monitor them
+    inline with its work log.
+
+
+    Changes:
+
+    - Add an optional `target_window` parameter to `launch_qa_item()` (or the underlying
+    tmux launcher it calls). When set, the test session opens in that window; when
+    omitted, current behavior preserved (main window).
+
+    - The discovery supervisor passes its own window when launching tests programmatically.
+
+    - The QA pane''s Enter-key path (human launches) does not pass the parameter and
+    behaves as today.
+
+
+    This is a small ergonomics change but important — without it, watcher-launched
+    tests would either pollute the main window or require a parallel tmux launcher
+    that duplicates code.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-01T17:41:07.519468+00:00'
+  updated_at: '2026-05-01T17:41:07.519468+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
