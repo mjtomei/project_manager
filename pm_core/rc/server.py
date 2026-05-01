@@ -17,7 +17,6 @@ import asyncio
 import json
 import queue
 import threading
-import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -205,10 +204,11 @@ def create_app(path: Path) -> FastAPI:
 
     @app.post("/api/viewport")
     def _viewport(body: ViewportBody) -> dict:
+        # Intentionally does NOT broadcast: viewer devices are expected to
+        # be independent (e.g. phone vs tablet) and must not scroll-sync
+        # off each other. The stored value is read by `pm rc status`.
         with state.lock:
             state.viewport = {"top": body.top, "bottom": body.bottom}
-            snap = state.snapshot(include_text=False)
-        state.broadcast("state", snap)
         return {"ok": True}
 
     @app.get("/api/events")
@@ -224,10 +224,15 @@ def create_app(path: Path) -> FastAPI:
                 while True:
                     if await request.is_disconnected():
                         break
+                    # Run the blocking queue read in a worker thread so a
+                    # quiet stream doesn't pin the asyncio event loop —
+                    # otherwise every subscriber would serialize all other
+                    # request handling for up to the timeout.
                     try:
-                        event, data = q.get(timeout=0.5)
+                        event, data = await asyncio.to_thread(
+                            q.get, True, 0.5
+                        )
                     except queue.Empty:
-                        # Heartbeat keeps proxies from killing the conn
                         yield ": ping\n\n"
                         continue
                     yield _sse_format(event, data)

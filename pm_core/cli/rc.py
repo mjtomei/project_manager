@@ -230,6 +230,17 @@ def start_cmd(path: str, port: int | None):
         click.echo("pm rc start: must be run from inside a pm session", err=True)
         raise SystemExit(1)
 
+    try:
+        import fastapi  # noqa: F401
+        import uvicorn  # noqa: F401
+    except ImportError:
+        click.echo(
+            "pm rc start: missing optional deps. Install with: "
+            "pip install 'pm[rc]'",
+            err=True,
+        )
+        raise SystemExit(1)
+
     file_path = Path(path).resolve()
     host_bind = "0.0.0.0"
     lan_ip = _detect_lan_ip()
