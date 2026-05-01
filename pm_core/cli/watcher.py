@@ -134,6 +134,9 @@ def watcher_cmd(ctx, iteration: int | None, loop_id: str | None,
         _run_user_watcher_loop(wait, max_iterations)
 
 
+REGRESSION_LOOP_TYPES = ("discovery", "bug-fix-impl", "improvement-fix-impl")
+
+
 @watcher_cmd.command("start")
 @click.argument("watcher_type", default="auto-start")
 @click.option("--wait", default=None, type=int,
@@ -147,12 +150,18 @@ def watcher_start(watcher_type: str, wait: int | None):
       bug-fix-impl           Drive the bug-fix flow (auto-merge on PASS)
       discovery              Schedule regression tests and reconcile filings
       improvement-fix-impl   Drive plan=ux PRs through auto-sequence (gated at QA PASS)
+      regression-loop        Meta: start discovery + bug-fix-impl + improvement-fix-impl
+                             together (the canonical "turn on the regression loop" command)
     """
     from pm_core.watchers import get_watcher_class, list_watcher_types
 
+    if watcher_type == "regression-loop":
+        _run_regression_loop(wait)
+        return
+
     cls = get_watcher_class(watcher_type)
     if not cls:
-        types = [t["type"] for t in list_watcher_types()]
+        types = [t["type"] for t in list_watcher_types()] + ["regression-loop"]
         click.echo(f"Unknown watcher type: {watcher_type}", err=True)
         click.echo(f"Available types: {', '.join(types)}", err=True)
         raise SystemExit(1)
@@ -195,6 +204,79 @@ def watcher_start(watcher_type: str, wait: int | None):
     )
 
 
+def _run_regression_loop(wait: int | None) -> None:
+    """Start discovery, bug-fix-impl, and improvement-fix-impl together.
+
+    Runs the three regression-loop watchers as background threads via a
+    ``WatcherManager``, then blocks the foreground until Ctrl+C, printing
+    per-iteration verdicts prefixed by each watcher's display name.
+    """
+    import time
+    from pm_core.watcher_manager import WatcherManager
+    from pm_core.watchers import get_watcher_class
+
+    if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
+        click.echo("Watcher requires tmux.", err=True)
+        raise SystemExit(1)
+
+    root = state_root()
+    pm_root = str(root)
+    manager = WatcherManager()
+
+    started: list[str] = []
+    for wtype in REGRESSION_LOOP_TYPES:
+        cls = get_watcher_class(wtype)
+        if cls is None:
+            click.echo(f"regression-loop: missing watcher class for '{wtype}'",
+                       err=True)
+            raise SystemExit(1)
+        watcher = cls(pm_root=pm_root)
+        if wait is not None:
+            watcher.state.iteration_wait = wait
+        manager.register(watcher)
+
+        tdir = root / "transcripts" / f"{wtype}-{secrets.token_hex(4)}"
+        tdir.mkdir(parents=True, exist_ok=True)
+
+        def _make_cb(name: str):
+            def _cb(s):
+                ts = datetime.now().strftime("%H:%M:%S")
+                click.echo(
+                    f"[{ts}] [{name}] iter {s.iteration}: {s.latest_verdict}"
+                )
+            return _cb
+
+        if manager.start(
+            watcher.state.watcher_id,
+            on_iteration=_make_cb(watcher.DISPLAY_NAME),
+            transcript_dir=str(tdir),
+        ):
+            started.append(watcher.DISPLAY_NAME)
+            click.echo(f"Started {watcher.DISPLAY_NAME} (transcripts: {tdir})")
+
+    if not started:
+        click.echo("regression-loop: no watchers started.", err=True)
+        raise SystemExit(1)
+
+    click.echo(
+        f"\nregression-loop running ({len(started)} watcher"
+        f"{'s' if len(started) != 1 else ''}). Press Ctrl+C to stop.\n"
+    )
+
+    try:
+        while manager.is_any_running():
+            time.sleep(1.0)
+    except KeyboardInterrupt:
+        click.echo("\nStopping regression-loop watchers...")
+        manager.stop_all()
+        # Give threads a chance to wind down on their next iteration boundary.
+        deadline = time.monotonic() + 30.0
+        while manager.is_any_running() and time.monotonic() < deadline:
+            time.sleep(0.5)
+
+    click.echo("regression-loop stopped.")
+
+
 @watcher_cmd.command("stop")
 @click.argument("watcher_type", default="auto-start")
 def watcher_stop(watcher_type: str):
@@ -221,6 +303,9 @@ def watcher_list():
         click.echo(f"  {'':20} window: {t['window_name']}, "
                    f"interval: {t['default_interval']}s")
         click.echo()
+    click.echo("  regression-loop      Meta: discovery + bug-fix-impl + improvement-fix-impl")
+    click.echo(f"  {'':20} use 'pm watcher start regression-loop'")
+    click.echo()
 
 
 def _create_watcher_window(iteration: int, loop_id: str,
