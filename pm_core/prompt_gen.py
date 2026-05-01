@@ -7,6 +7,84 @@ from pm_core.spec_gen import (format_spec_for_prompt, spec_generation_preamble,
                                get_spec_mocks_section)
 
 
+def _is_bug_pr(pr: dict) -> bool:
+    """Return True when this PR should follow the bug-fix flow.
+
+    Triggers on `plan == "bugs"` (today's signal) or `type == "bug"`
+    (forward-looking schema). Keeps detection in one place so impl/review/QA
+    prompts stay in sync.
+    """
+    return pr.get("plan") == "bugs" or pr.get("type") == "bug"
+
+
+_BUG_FIX_FLOW_BLOCK = """
+## Bug Fix Flow (reproduce → fix → verify → reconcile)
+
+This PR is a bug fix. Follow this sequence rather than a feature-style
+implementation:
+
+1. **Reproduce** — Write or identify a failing test that demonstrates the
+   bug. The test must fail *for the right reason* (matching the reported
+   symptom) before you change any product code.
+   - If the bug involves Claude session behavior, prefer a Claude-guided
+     integration test using `FakeClaudeSession` (or the `fake-claude`
+     binary) so the reproduction is deterministic.
+   - For non-Claude bugs, a plain unit or integration test is fine.
+   - If the bug is genuinely untestable in code (e.g. a visual TUI
+     regression), record a manual repro in a PR note and, if appropriate,
+     a regression instruction file under `pm/qa/regression/`. The reviewer
+     will accept that as a substitute, but the substitute must exist.
+
+2. **Fix** — Implement the smallest change that addresses the root cause.
+   Avoid drive-by refactors.
+
+3. **Verify** — Re-run the reproduction test to confirm it now passes.
+   Run any related suite to check for regressions.
+
+4. **Reconcile** (verification-only, at session end) — Scan this PR's notes
+   (`pm pr note list <pr-id>` or read the PR Notes section above) for
+   cross-references the discovery supervisor (`pr-271cb3a`) may have filed
+   linking overlapping bug PRs. For each linked overlap:
+   - Check whether the linked bug still reproduces against the current code.
+   - If it's *also* resolved by your fix, append a confirmation note:
+     ```
+     pm pr note add <this-pr-id> 'confirmed-overlap: <other-pr-id>'
+     ```
+   - If you independently notice an overlap that the supervisor did **not**
+     link, append a pointer note:
+     ```
+     pm pr note add <this-pr-id> 'noticed-overlap: <other-pr-id> — <one-line reason>'
+     ```
+   If the PR has no cross-references and you noticed no overlaps, do
+   nothing for this step — it's a backstop, not the primary dedup
+   mechanism. The discovery supervisor handles dedup at file time with
+   work-log context the session does not have.
+"""
+
+
+_BUG_FIX_REVIEW_BLOCK = """
+
+## Bug Fix Review Checklist
+
+This PR is a bug fix. In addition to the generic checks above, verify:
+
+- **Reproduction test exists** — the diff includes a new (or modified)
+  test that fails without the fix and passes with it. Prefer tests that
+  exercise the same surface a user hits (Claude-guided via
+  `FakeClaudeSession` for session bugs, plain unit/integration tests
+  otherwise).
+- **The test fails for the right reason** — read the test and confirm
+  it would have caught the original bug, not just any change in the
+  area.
+- **Acceptable substitute** — if no automated reproduction is possible
+  (e.g. visual TUI regression), the PR should include a manual repro
+  PR note and ideally a regression instruction file. A bug fix with no
+  reproduction artifact at all is **NEEDS_WORK**.
+- **Scope discipline** — the diff should be focused on the bug. Flag
+  drive-by refactors that aren't part of the fix.
+"""
+
+
 _OUT_OF_SCOPE_BUGS_BLOCK = """
 ## Incidental Bugs
 
@@ -155,6 +233,8 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
     impl_spec_block = format_spec_for_prompt(pr, "impl")
     impl_spec_preamble = spec_generation_preamble(pr, "impl", root=root)
 
+    bug_fix_block = _BUG_FIX_FLOW_BLOCK if _is_bug_pr(pr) else ""
+
     prompt = f"""You're working on PR {pr_id}: "{title}"
 
 This session is managed by `pm`. Run `pm help` to see available commands.
@@ -165,7 +245,7 @@ This session is managed by `pm`. Run `pm help` to see available commands.
 
 ## Task
 {description}
-{pr_notes_block}{impl_spec_block}{impl_spec_preamble}
+{pr_notes_block}{impl_spec_block}{impl_spec_preamble}{bug_fix_block}
 ## Tips
 - This session may be resuming after a restart. Check `git status` and `git log` to see if previous work exists on this branch — if so, continue from there. The directory may contain uncommitted implementation work from a previous session.
 - Before referencing existing code (imports, function calls, class usage), read the source to verify the interface.
@@ -298,6 +378,8 @@ Review the code changes in this PR for quality, correctness, and architectural f
    - **INPUT_REQUIRED** — Any issue that needs the user's attention before the PR can proceed: ambiguities in the PR spec, architectural decisions you can't make alone, something that looks broken but you can't tell if it's intentional, a dependency or environmental problem you can't resolve, or anything else you'd want a human to look at before moving on. If in doubt between NEEDS_WORK and INPUT_REQUIRED, prefer INPUT_REQUIRED — an unresolved concern silently rolled into a PASS is the worst outcome. Do NOT use INPUT_REQUIRED for manual testing — QA handles testing separately. Include specific questions that need the user's decision."""
 
     base = prompt.strip()
+    if _is_bug_pr(pr):
+        base += _BUG_FIX_REVIEW_BLOCK
     base += "\n" + _OUT_OF_SCOPE_BUGS_BLOCK
     base += review_specific_block
     base += _beginner_addendum()
@@ -1057,6 +1139,19 @@ dependencies (Claude sessions, git operations, tmux, network calls, etc.),
 declare them as NEW_MOCK blocks before the scenarios.
 """
 
+    bug_fix_qa_block = ""
+    if _is_bug_pr(pr):
+        bug_fix_qa_block = """
+## Bug Fix Note
+
+This PR is a bug fix. The implementation should already include a
+reproduction test that fails without the fix. At least one scenario
+must assert that the original bug no longer reproduces — ideally by
+running the reproduction test from the diff, or by exercising the same
+user-visible surface that triggered it. Other scenarios should cover
+adjacent regressions the fix could have introduced.
+"""
+
     prompt = f"""You are a QA planner analyzing PR {pr_id}: "{title}"
 
 ## Task
@@ -1064,6 +1159,7 @@ declare them as NEW_MOCK blocks before the scenarios.
 Analyze this PR's changes and the available QA instruction library to generate
 a structured test plan. Your goal is to fully exercise the impacted code
 to verify this PR works correctly.
+{bug_fix_qa_block}
 
 Prefer fewer, broader scenarios over many narrow ones. Group checks that
 share setup into one scenario with multi-step STEPS, including related
@@ -1316,6 +1412,18 @@ If a setup step fails or a required tool is unavailable, report
    - **NEEDS_WORK** — Issues found and fixed (the fix is committed and pushed)
    - **INPUT_REQUIRED** — Issues found that you could not fix, or genuine ambiguity requiring human judgment"""
 
+    bug_fix_scenario_block = ""
+    if _is_bug_pr(pr):
+        bug_fix_scenario_block = """
+## Bug Fix Note
+
+This PR is a bug fix. Your scenario may be exercising the original bug's
+reproduction path — focus on whether the reported symptom still occurs
+against the fixed code, not just whether code paths execute. If the diff
+contains a reproduction test, running that test is a fast way to confirm
+the fix.
+"""
+
     prompt = f"""You are running QA scenario {scenario.index}: "{scenario.title}"
 
 ## Context
@@ -1324,7 +1432,7 @@ If a setup step fails or a required tool is unavailable, report
 - **Branch**: {branch}
 - **Base branch**: {base_branch}
 {workdir_block}
-{pr_notes_block}{mocks_block}
+{pr_notes_block}{mocks_block}{bug_fix_scenario_block}
 ## How QA Works
 
 You are in one of several QA scenarios running in parallel, each in its own
