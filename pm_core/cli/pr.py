@@ -2745,11 +2745,15 @@ def pr_auto_sequence(pr_id: str):
         if not idle:
             click.echo("running: implementation")
             return
-        # Idle and no spec_pending → advance to review
+        # Idle and no spec_pending → advance to review.  Persist the
+        # transcript symlink under the auto-sequence dir so the next tick
+        # can locate the verdict.  Use review-loop iteration 1 naming so
+        # NEEDS_WORK retries (iteration 2+) follow the same scheme.
+        iter_transcript = tdir / f"review-{pr_id}-i1.jsonl"
         ctx = click.get_current_context()
         ctx.invoke(pr_review, pr_id=pr_id, fresh=False, background=True,
-                   review_loop=False, review_iteration=0,
-                   review_loop_id="", transcript=None)
+                   review_loop=False, review_iteration=1,
+                   review_loop_id="", transcript=str(iter_transcript))
         click.echo("advanced: in_review")
         return
 

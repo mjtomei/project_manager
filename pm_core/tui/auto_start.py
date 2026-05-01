@@ -175,16 +175,16 @@ async def consume_breadcrumb(app) -> None:
         app._auto_start_target = target
         app._auto_start_run_id = run_id
 
+        # Recreate transcript directory if needed
+        if run_id and app._root:
+            tdir = app._root / "transcripts" / run_id
+            tdir.mkdir(parents=True, exist_ok=True)
+
     # Restore auto-sequence stop-before-merge set
     sbm = data.get("stop_before_merge")
     if sbm:
         app._stop_before_merge.update(sbm)
         _log.info("consume_breadcrumb: restored stop_before_merge=%s", sbm)
-
-        # Recreate transcript directory if needed
-        if run_id and app._root:
-            tdir = app._root / "transcripts" / run_id
-            tdir.mkdir(parents=True, exist_ok=True)
 
     # Restore review loop state before check_and_start so it sees existing loops
     review_loops_data = data.get("review_loops", {})
