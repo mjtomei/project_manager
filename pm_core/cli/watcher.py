@@ -143,9 +143,10 @@ def watcher_start(watcher_type: str, wait: int | None):
 
     \b
     Available types:
-      auto-start    Monitor auto-start sessions for issues (default)
-      bug-fix-impl  Drive the bug-fix flow (auto-merge on PASS)
-      discovery     Schedule regression tests and reconcile filings
+      auto-start             Monitor auto-start sessions for issues (default)
+      bug-fix-impl           Drive the bug-fix flow (auto-merge on PASS)
+      discovery              Schedule regression tests and reconcile filings
+      improvement-fix-impl   Drive plan=ux PRs through auto-sequence (gated at QA PASS)
     """
     from pm_core.watchers import get_watcher_class, list_watcher_types
 
@@ -257,6 +258,12 @@ def _create_watcher_window(iteration: int, loop_id: str,
         )
     elif watcher_type == "bug-fix-impl":
         watcher_prompt = prompt_gen.generate_bug_fix_impl_prompt(
+            data, session_name=pm_session,
+            iteration=iteration, loop_id=loop_id,
+            meta_pm_root=meta_pm_root,
+        )
+    elif watcher_type == "improvement-fix-impl":
+        watcher_prompt = prompt_gen.generate_improvement_fix_impl_prompt(
             data, session_name=pm_session,
             iteration=iteration, loop_id=loop_id,
             meta_pm_root=meta_pm_root,
