@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-97ddabf
+  active_pr: pr-d60d185
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -9939,47 +9939,6 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
-- id: pr-ea3c851
-  plan: plan-regression
-  title: Auto-start bug fix PRs from regression failures
-  branch: pm/pr-ea3c851-auto-start-bug-fix-prs-from-regression-failures
-  status: pending
-  depends_on:
-  - pr-30588a7
-  - pr-47940bc
-  - pr-45db518
-  description: 'Configure a pool (via the auto-pool executor in pr-45db518) for bug-fix
-    PRs filed by the regression runner. Pool config: source = `plan=bugs and status=pending`,
-    auto-merge = on (PRs that PASS review+QA auto-merge), priority source = per-PR
-    field. Each picked PR runs through the bug-fix flow (reproduce→fix→verify→reconcile,
-    pr-30588a7) via the auto-sequence chain.
-
-
-    This PR is mostly configuration plus a small amount of glue:
-
-    - Define the bug-fix pool in settings (max-concurrent default 2, can be overridden)
-
-    - Wire regression-runner-filed bugs (pr-47940bc) to set initial priority from
-    failure severity
-
-    - Confirm reconcile step (pr-30588a7) can bump priority on overlapping bugs so
-    they get fixed sooner
-
-
-    Manual testing: end-to-end loop smoke test required during review. A reviewer
-    should let the regression runner trip, observe the bug get filed, observe the
-    pool pick it up under the concurrency limit, observe the bug-fix flow run, and
-    confirm the reconcile step at fix-end produces sensible cross-references. Use
-    INPUT_REQUIRED to drive this rather than code reading alone.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-04-28T11:08:02.888051+00:00'
-  updated_at: '2026-04-29T14:31:01.989186+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
 - id: pr-558ca3f
   plan: plan-regression
   title: Regression loop summary reporting
@@ -9987,35 +9946,20 @@ prs:
   status: pending
   depends_on:
   - pr-47940bc
-  description: 'Periodic digest of regression loop activity. Writes structured reports
-    to `pm/reports/regression-<timestamp>.md` and maintains a rolling `pm/reports/regression-latest.md`
-    symlink/copy.
+  description: 'Periodic markdown digests rendered from the discovery supervisor''s
+    work log at `pm/watchers/discovery.log` (and optionally the implementation watchers''
+    logs). Complementary to the watcher review session — the session is for ad-hoc
+    check-ins, the digests for archival/standup use.
 
 
-    Metrics covered:
-
-    - Tests run (count, pass/fail/skip, runtime)
-
-    - Bugs filed this period (with PR ids and titles)
-
-    - Bug fixes implemented this period (PR ids, time-to-fix)
-
-    - Bug fixes merged this period
-
-    - Open bug backlog size and trend
-
-    - Dedup notes added (cross-references between overlapping bugs from pr-30588a7
-    reconcile step)
-
-
-    Both single-run and rolling-window summaries (configurable, e.g. 24h / 7d). Optionally
-    surfaced in the TUI as a pane or status line item — TUI integration can be a follow-up
-    if it adds scope.'
+    Could be a small CLI (`pm watcher report`) that scans the log files, aggregates
+    counts (tests run, bugs filed, fixes landed, PRs merged), and writes the digest.
+    No new log infrastructure — just reads what the watchers already wrote.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-28T11:08:13.897708+00:00'
-  updated_at: '2026-04-28T11:15:51.389019+00:00'
+  updated_at: '2026-05-01T18:06:01.680713+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -10026,126 +9970,33 @@ prs:
   branch: pm/pr-e58459b-auto-sequence-button-chain-start-review-qa-on-a-si
   status: pending
   depends_on: []
-  description: 'TUI keypress on a PR that chains start → done (review) → qa loop,
-    stopping at each existing pause condition (idle-no-spec in impl, INPUT_REQUIRED
-    in review, etc.) and stopping before merge. Reuses existing per-phase flows —
-    the only new machinery is wait-for-session-end glue that fires the next phase.
-    Foundational primitive used by both the regression bug fix loop and the UX taste
-    loop.
+  description: 'Make the start → done (review) → qa loop chain runnable two ways:
 
 
-    Manual testing: this PR should be exercised end-to-end during review. A reviewer
-    should press the auto-sequence key on a real PR, observe the chain advance through
-    each phase, and confirm it halts correctly at each documented pause condition
-    (idle-no-spec, INPUT_REQUIRED, before merge). Use INPUT_REQUIRED to drive this
+    1. **TUI keypress** on a selected PR — chains the three phases, halting at existing
+    pause conditions (idle-no-spec in impl, INPUT_REQUIRED in review, etc.) and stopping
+    before merge. The original framing.
+
+    2. **Programmatic CLI**: `pm pr auto-sequence <id>` — runs the same chain non-interactively.
+    This is what the implementation watcher Claude sessions invoke each tick to advance
+    a chosen PR through the next phase. Without this, watcher sessions would have
+    to drive the chain via tmux send-keys against the TUI, which is fragile.
+
+
+    Reuses existing per-phase flows. The only new machinery is wait-for-session-end
+    glue that fires the next phase, plus the CLI wrapper. Foundational primitive used
+    by both implementation watchers (pr-e3a711c bug-fix, pr-d39a7fb improvement-fix).
+
+
+    Manual testing: press the auto-sequence key on a real PR, observe the chain advance
+    through each phase, and confirm it halts correctly at each documented pause condition.
+    Also exercise the CLI form non-interactively. Use INPUT_REQUIRED to drive this
     rather than code reading alone.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-29T14:13:36.865010+00:00'
-  updated_at: '2026-04-29T14:15:29.660874+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
-- id: pr-84e6510
-  plan: plan-regression
-  title: 'Auto-pool with merge gate: rate-limited auto-sequence with no-auto-merge
-    mode'
-  branch: pm/pr-84e6510-auto-pool-with-merge-gate-rate-limited-auto-sequen
-  status: pending
-  depends_on:
-  - pr-47940bc
-  - pr-45db518
-  description: 'Configure a pool (via the auto-pool executor in pr-45db518) for UX-quality
-    PRs filed by the UX-review watcher. Pool config: source = `plan=ux and status=pending`,
-    auto-merge = gated (PRs land at ready-for-merge and wait for human taste check),
-    priority source = per-PR field set by the watcher''s confidence score.
-
-
-    This PR is mostly configuration:
-
-    - Define the UX pool in settings (max-concurrent default 2-3, rate-limited so
-    human review speed is the throttle)
-
-    - Wire UX-watcher-filed candidates (pr-1766d74) to set initial priority from confidence
-
-    - Confirm the gated mode holds PRs at ready-for-merge until a human merges
-
-
-    Bug-fix pool (pr-ea3c851) and UX pool (this PR) are peer consumers of the auto-pool
-    executor — neither depends on the other.
-
-
-    Manual testing: end-to-end loop smoke test required during review. A reviewer
-    should let the UX watcher file candidates, observe the pool pick them up under
-    the concurrency limit, confirm UX PRs land at ready-for-merge and wait, and verify
-    a human merge advances the queue. Use INPUT_REQUIRED to drive this rather than
-    code reading alone.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-04-29T14:13:49.809083+00:00'
-  updated_at: '2026-04-29T15:57:16.596404+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
-- id: pr-45db518
-  plan: plan-regression
-  title: 'Auto-pool executor: rate-limited PR queue with prioritization'
-  branch: pm/pr-45db518-auto-pool-executor-rate-limited-pr-queue-with-prio
-  status: pending
-  depends_on:
-  - pr-e58459b
-  description: 'Foundational primitive that both the regression bug-fix loop and the
-    UX taste loop consume. A pool watches a configurable PR source (plan id, status
-    filter, or explicit list) and drives selected PRs through the auto-sequence chain
-    (start → review → QA, see pr-e58459b) under a rate limit and priority order.
-
-
-    Pool configuration (per-pool, defined in project settings or a pool registry):
-
-    - Source: plan id, status set, or filter expression (e.g. plan=bugs and status=pending)
-
-    - Rate limit: either max-concurrent (e.g. 3 in-flight) or max-per-window (e.g.
-    10 per 24h). Pools can use one or both.
-
-    - Auto-merge mode: on (PRs that PASS QA auto-merge) or gated (PRs land at ready-for-merge
-    and wait for human verdict)
-
-    - Priority source: per-PR `priority` field (integer; higher = sooner), with optional
-    tiebreaker (created-at, severity)
-
-
-    Priority adjustment mechanism:
-
-    - New `priority` field on PR records (default 0)
-
-    - `pm pr edit <id> --priority N` to set explicitly
-
-    - `pm pr edit <id> --priority +N` / `-N` to bump relative
-
-
-    Priority is set by the flow supervisors (pr-271cb3a, pr-d39a7fb), not by the workers
-    that file PRs. The pool itself is agnostic to who sets priority — it just reads
-    the field and orders accordingly.
-
-
-    The pool is the discover-and-queue + scheduler layer. Per-PR execution still goes
-    through pr-e58459b''s auto-sequence chain. Without the pool, you get manual one-at-a-time
-    auto-sequence; with it, you get governed throughput across a queue.
-
-
-    Manual testing: configure a test pool with max-concurrent=2 against a fake source,
-    queue 5 PRs at varying priorities, observe the pool start in priority order and
-    hold at 2 in-flight. Bump a queued PR''s priority via CLI mid-run and observe
-    reordering. Use INPUT_REQUIRED to drive this.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-04-29T14:30:38.744727+00:00'
-  updated_at: '2026-04-29T15:34:50.113337+00:00'
+  updated_at: '2026-05-01T18:05:07.180533+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -10158,59 +10009,60 @@ prs:
   depends_on:
   - pr-47940bc
   - pr-97ddabf
-  - pr-45db518
-  description: 'Single discovery supervisor watcher. Drives the existing list of Claude-based
-    regression tests at `pm/qa/regression/*.md` directly — no new worker, no new prompt.
+  description: 'Discovery supervisor watcher implemented as a `BaseWatcher` subclass
+    (mirror of `pm_core/watchers/auto_start_watcher.py`).
 
 
-    How it works:
+    Implementation:
 
-    - Reads the test list via `qa_instructions.list_all()` (`pm_core/qa_instructions.py`)
+    - New file `pm_core/watchers/discovery_supervisor.py` defining the subclass with
+    its own `DEFAULT_INTERVAL` (probably longer than auto-start since regression tests
+    are heavier — start at 30 minutes)
 
-    - Launches selected tests via the existing `launch_qa_item()` (`pm_core/tui/pane_ops.py`),
-    passing its own window as `target_window` (see pr-WATCHERWINDOW) so launches are
-    observable inline with the supervisor''s work log
+    - New `generate_discovery_supervisor_prompt()` in `pm_core/prompt_gen.py` paralleling
+    `generate_watcher_prompt()`
 
-    - Each test session has been taught (via pr-47940bc) to file bugs/improvements
-    into `plan=bugs` / `plan=ux` directly using `pm pr add` — the supervisor does
-    not file PRs itself
+    - Reuses framework primitives: subprocess invocation per tick, READY / INPUT_REQUIRED
+    verdict extraction via idle_prompt hook, automatic injection of `notes.txt` General
+    + Watcher sections via `notes_for_prompt(root, ''watcher'')`
 
-    - Polls verdicts using the existing `poll_for_verdict()` (`pm_core/loop_shared.py`)
-    and `extract_verdict_from_transcript()` (`pm_core/verdict_transcript.py`)
-
-
-    Responsibilities:
-
-    - **Trigger**: schedules test runs on its own cadence with throughput constraints
-    (max-concurrent runs, max-per-window, back-off on failure storms). Decides which
-    tests to run, when, and in what order.
-
-    - **Dedup**: watches for newly-filed bug/improvement PRs after each test run completes
-    and reconciles them against existing open PRs and recent work-log entries. Decisions:
-    keep, merge into existing (note + priority bump and close the new one), drop.
-    The supervisor cannot prevent the test session from filing in the first place
-    — it cleans up post-hoc.
-
-    - **Prioritize**: sets priority on retained filings (via `pm pr edit --priority`)
-    based on test name, severity signals in the description, and work-log context.
-
-    - **Log**: maintains a structured work log (jsonl) of test runs, verdicts, filings,
-    dedup decisions. Source of truth for the watcher review session (pr-e84b43c) and
-    summary reporting (pr-558ca3f).
-
-    - **Exception handling**: detects stuck/crashed test sessions via the supervisor''s
-    window and standard verdict polling; restarts or escalates.
+    - Work log file at `pm/watchers/discovery.log`. Each tick prompt instructs Claude
+    to read the log first for context (recent runs, recent filings, recent dedup decisions)
+    and append a one-line summary before emitting the verdict
 
 
-    Manual testing: run the supervisor against a small subset of `pm/qa/regression/*.md`.
-    Verify throughput limits, that test launches appear in the supervisor''s window,
-    that filed bugs/improvements are correctly deduped post-hoc, and that the work
-    log captures all decisions. Use INPUT_REQUIRED to drive this.'
+    Per-tick behavior described in the prompt:
+
+    - Read the regression test list (`pm/qa/regression/*.md` via `qa_instructions.list_all()`)
+
+    - Read recent work-log entries
+
+    - Decide: is a test due to run? are any from the last tick still in flight?
+
+    - If due, launch via `launch_qa_item()` with target_window=watcher''s window (pr-97ddabf)
+
+    - After in-flight tests complete (verdict in transcript), check for newly-filed
+    bug/improvement PRs and reconcile post-hoc: dedup against open PRs in plan=bugs/plan=ux
+    using existing `pm pr list` + `pm pr note` (merge into existing) or close-and-merge
+    logic
+
+    - Append work-log entry, emit READY (or INPUT_REQUIRED if something needs human
+    eyes)
+
+
+    Notes infrastructure: users can leave watcher-scoped guidance in `notes.txt` Watcher
+    section (e.g. ''always run the auth-regression test daily'', ''prioritize fixing
+    memory leaks before UI bugs'') and it flows into every tick automatically.
+
+
+    Manual testing: run the watcher against the real regression test list at a short
+    interval. Verify each tick reads the log, makes sensible launch decisions, dedups
+    filed PRs, and emits READY or INPUT_REQUIRED. Use INPUT_REQUIRED to drive this.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-29T15:34:01.804130+00:00'
-  updated_at: '2026-05-01T17:41:25.433342+00:00'
+  updated_at: '2026-05-01T18:05:22.460543+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -10221,48 +10073,53 @@ prs:
   branch: pm/pr-d39a7fb-improvement-flow-supervisor-watcher
   status: pending
   depends_on:
-  - pr-45db518
-  - pr-84e6510
-  description: 'Implementation-side watcher for the improvement-fix flow. Distinct
-    from the pool (which is generic execution) and from the discovery supervisor (which
-    handles filing). Monitors the UX pool''s in-flight sessions by reading the same
-    surfaces a human watches in the QA pane.
+  - pr-e58459b
+  description: 'Improvement-fix implementation watcher. Mirror of pr-e3a711c (bug-fix
+    watcher) but for the UX flow with two key differences:
 
 
-    Reuse: `qa_status.json` and per-scenario transcript files are the primary signal
-    source. `extract_verdict_from_transcript()` provides verdict parsing. `poll_for_verdict()`
-    provides the polling loop pattern. No new IPC.
+    1. **Source plan**: `plan=ux` instead of `plan=bugs`
+
+    2. **Merge behavior**: gated, not auto. PRs that PASS QA are advanced to ready-for-merge
+    and held for a human taste check. The watcher does not merge them. Human merge
+    cadence is the throttle.
 
 
-    Responsibilities:
+    Implementation:
 
-    - **Health**: detect stuck/crashed fix sessions, repeated NEEDS_WORK loops, and
-    other execution-side anomalies. Restart or escalate. May reuse pr-18ac983 (session
-    health watcher) as substrate if it lands first.
+    - New file `pm_core/watchers/improvement_fix_impl_watcher.py` mirroring `auto_start_watcher.py`
 
-    - **Dynamic priority**: as the work log accumulates, adjust priority on queued
-    PRs (boost a UX fix that other queued candidates depend on, demote one that''s
-    been deferred too many times).
+    - New `generate_improvement_fix_impl_prompt()` in `prompt_gen.py`
 
-    - **Implementation log**: per-flow metrics — typical fix-session duration, success/NEEDS_WORK
-    rates, merge cadence. Feeds the watcher review session.
+    - Reuses: subprocess per tick, READY/INPUT_REQUIRED verdicts, notes injection,
+    work-log pattern
 
-    - **Throttle**: pause its pool if the system is under load (e.g. another flow
-    is consuming resources), resume when capacity returns.
+    - Work log at `pm/watchers/improvement-fix-impl.log`
+
+    - Cadence likely longer than the bug-fix watcher (UX is taste-driven, no urgency)
 
 
-    Mirror of pr-e3a711c but tuned for UX-fix concerns (slower cadence, gated merge,
-    taste-driven). Separate watcher because flow-specific signals justify independent
-    tuning.
+    Per-tick prompt behavior is the same shape as the bug-fix watcher except:
+
+    - Pick from `plan=ux` pending
+
+    - After QA PASS, mark ready-for-review and stop (do not merge)
+
+    - Prioritization guidance is taste-shaped (recency of related code, user feedback
+    signals in notes, confidence signals in the original filing) rather than severity-shaped
 
 
-    Manual testing: scripted scenarios — stuck session, repeated NEEDS_WORK, dependent-PR
-    boost — verifying each is detected and handled. Use INPUT_REQUIRED to drive this.'
+    Same pool=plan / dynamic-prioritization / no-priority-field pattern as pr-e3a711c.
+
+
+    Manual testing: scripted scenarios — full happy path (file → auto-sequence → PASS
+    → wait for human merge), repeated NEEDS_WORK, dependent-PR boost. Use INPUT_REQUIRED
+    to drive this.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-29T15:34:08.487870+00:00'
-  updated_at: '2026-05-01T17:34:54.751737+00:00'
+  updated_at: '2026-05-01T18:05:43.485569+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -10273,52 +10130,63 @@ prs:
   branch: pm/pr-e3a711c-bug-fix-implementation-watcher
   status: pending
   depends_on:
-  - pr-45db518
-  - pr-ea3c851
-  description: 'Implementation-side watcher for the bug-fix flow. Peer of pr-d39a7fb
-    (improvement-fix watcher). Distinct from the pool (which is generic execution)
-    and from the discovery supervisor (which handles filing). Monitors the bug-fix
-    pool''s in-flight sessions by reading the same surfaces a human watches in the
-    QA pane.
+  - pr-e58459b
+  description: 'Bug-fix implementation watcher implemented as a `BaseWatcher` subclass.
+    Drives the bug-fix flow: reads pending PRs in plan=bugs, picks the best candidate
+    dynamically each tick, advances chosen PRs through the auto-sequence chain (pr-e58459b),
+    and auto-merges on PASS.
 
 
-    Reuse: `qa_status.json` and per-scenario transcript files are the primary signal
-    source. `extract_verdict_from_transcript()` provides verdict parsing. `poll_for_verdict()`
-    provides the polling loop pattern. No new IPC.
+    Implementation:
+
+    - New file `pm_core/watchers/bug_fix_impl_watcher.py` mirroring `auto_start_watcher.py`
+
+    - New `generate_bug_fix_impl_prompt()` in `prompt_gen.py`
+
+    - Reuses: subprocess per tick, READY/INPUT_REQUIRED verdicts, notes injection
+    (General + Watcher sections), work-log pattern
+
+    - Work log at `pm/watchers/bug-fix-impl.log`
 
 
-    Responsibilities:
+    Per-tick prompt behavior:
 
-    - **Health**: detect stuck/crashed fix sessions, repeated NEEDS_WORK loops, reproduce-step
-    failures (the bug-fix flow requires a failing test first; if the impl can''t write
-    one, surface that). Restart or escalate. May reuse pr-18ac983 (session health
-    watcher) as substrate if it lands first.
+    - Read recent work-log entries for context (which PRs are in flight, what just
+    merged, what''s stuck)
 
-    - **Dynamic priority**: adjust priority on queued bug PRs as the work log accumulates
-    — boost when a related bug just regressed again, demote when a fix attempt has
-    failed multiple times and needs human triage.
+    - List in-flight PRs (`pm pr list --plan bugs` filtered by status); if at concurrency
+    cap (default 2), do nothing this tick
 
-    - **Implementation log**: per-flow metrics — fix-session duration, reproduce-step
-    success rate, time-to-merge, regression-after-fix rate. Feeds the watcher review
-    session.
+    - If under cap, scan pending bug PRs and pick the highest-priority candidate using
+    prompt-supplied guidance (severity signals in the description, recurrence in the
+    work log, age) plus user-specified guidance from `notes.txt` Watcher section.
+    No persisted priority field.
 
-    - **Throttle**: pause its pool when bug-fix throughput is overwhelming review/QA
-    capacity.
+    - Invoke `pm pr auto-sequence <id>` (programmatic chain from pr-e58459b) on the
+    picked PR
+
+    - For PRs where QA verdict is PASS, merge them (this watcher is auto-merge — distinguishes
+    the bug-fix flow from the improvement-fix flow)
+
+    - Detect stuck/loop-failing PRs (repeated NEEDS_WORK, reproduce-step failures
+    from pr-30588a7) and either escalate via INPUT_REQUIRED or note in the log for
+    human triage
+
+    - Append work-log entry, emit verdict
 
 
-    Mirror of pr-d39a7fb but tuned for bug-fix concerns (faster cadence, auto-merge,
-    severity-driven). Separate watcher because signals like reproduce-step failure
-    are bug-flow specific.
+    Pool = pm plan: there is no separate pool config or priority field. The ''pool''
+    is just `plan=bugs`, and ordering is judged dynamically.
 
 
-    Manual testing: scripted scenarios — reproduce-step failure, repeated NEEDS_WORK
-    on a single bug, regression-after-fix detection — verifying each is detected and
-    handled. Use INPUT_REQUIRED to drive this.'
+    Manual testing: scripted scenarios — full happy path (file → auto-sequence → PASS
+    → auto-merge), reproduce-step failure, repeated NEEDS_WORK on a single bug, regression-after-fix
+    detection. Use INPUT_REQUIRED to drive this.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-29T15:56:05.110130+00:00'
-  updated_at: '2026-05-01T17:34:48.499033+00:00'
+  updated_at: '2026-05-01T18:05:35.008767+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -10331,25 +10199,27 @@ prs:
   depends_on:
   - pr-271cb3a
   description: 'Dedicated Claude session for human review of the autonomous watchers.
-    Launched from the TUI; opens with a summary of what''s happened recently across
-    all three watchers (discovery supervisor pr-271cb3a, bug-fix watcher pr-e3a711c,
-    improvement-fix watcher pr-d39a7fb) and then conversational from there.
+    Launched from the TUI; opens with a summary of recent activity across all three
+    watchers (discovery supervisor pr-271cb3a, bug-fix watcher pr-e3a711c, improvement-fix
+    watcher pr-d39a7fb) and is conversational from there.
 
 
     Why a session instead of a static TUI panel:
 
-    - Humans can ask follow-up questions (''why was this bug deduplicated against
-    that one?'', ''show me the last three improvement candidates that got dropped'')
+    - Humans can ask follow-up questions (''why was this bug deduped against that
+    one?'', ''show me the last three improvement candidates that got dropped'')
 
-    - Can request remediation (''boost priority on pr-X'', ''pause the improvement
-    pool for an hour'') with the session translating to the right pm commands
+    - Can request remediation (''add a note to the watcher section saying ...'', ''pause
+    the improvement watcher for an hour'') with the session translating to the right
+    pm commands
 
     - Reasoning surface, not just metrics — the human gets explanations, not raw logs
 
 
-    Reuse: the session reads the supervisors'' work-logs (jsonl), the existing `qa_status.json`
-    files for in-flight scenario state, and per-scenario transcripts. Same surfaces
-    a human watching the QA pane uses today; no new ingestion path.
+    Reuse: the session reads the watchers'' text-file work logs at `pm/watchers/discovery.log`,
+    `pm/watchers/bug-fix-impl.log`, `pm/watchers/improvement-fix-impl.log`. It can
+    also tail per-test transcripts and use `pm pr list` / `pm pr graph` for project
+    state. Same surfaces a human watching the TUI uses today; no new ingestion path.
 
 
     Behavior:
@@ -10357,8 +10227,8 @@ prs:
     - TUI keypress launches a Claude session in a new pane with the project context
     loaded
 
-    - System prompt grants read access to all three watchers'' work-logs, current
-    pool state, in-flight `qa_status.json`, and explains the watcher architecture
+    - System prompt grants read access to all three watchers'' work logs, current
+    plan/PR state, in-flight scenario transcripts, and explains the watcher architecture
 
     - Opens with a summary turn: what was discovered, filed, fixed, merged, or stuck
     since the last review session
@@ -10366,19 +10236,19 @@ prs:
     - From there, chat-driven: human asks, session answers using the logs and pm CLI
     as needed
 
-    - Read-mostly by default — write actions (priority changes, pool pause/resume)
-    require explicit human confirmation in the session
+    - Read-mostly by default — write actions (adding notes to influence priority,
+    pausing a watcher) require explicit human confirmation
 
 
     Manual testing: launch the review session in a project with simulated watcher
     activity, confirm the opening summary covers all three watchers, exercise follow-up
-    questions and a remediation flow (priority bump). Use INPUT_REQUIRED to drive
-    this.'
+    questions and a remediation flow (add a watcher-section note, then verify it shows
+    up in the next watcher tick). Use INPUT_REQUIRED to drive this.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-29T15:56:16.156179+00:00'
-  updated_at: '2026-05-01T17:35:11.284699+00:00'
+  updated_at: '2026-05-01T18:05:57.578355+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -10892,6 +10762,54 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-01T17:41:07.519468+00:00'
   updated_at: '2026-05-01T17:41:07.519468+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-d60d185
+  plan: plan-regression
+  title: End-to-end QA review and auto-start command for the regression loop
+  branch: pm/pr-d60d185-end-to-end-qa-review-and-auto-start-command-for-th
+  status: pending
+  depends_on:
+  - pr-271cb3a
+  - pr-e3a711c
+  - pr-d39a7fb
+  - pr-e84b43c
+  - pr-558ca3f
+  description: 'Final integration PR for the regression loop. Two purposes:
+
+
+    1. **End-to-end QA review**: Once all upstream PRs in this plan have merged, run
+    a full QA pass to verify the autonomous loop actually works under realistic conditions.
+    Exercises the full path: discovery supervisor launches a regression test → test
+    session files a bug into plan=bugs → discovery supervisor reconciles/dedups →
+    bug-fix watcher picks it up → auto-sequence runs start/review/QA → auto-merge
+    on PASS. Same for the improvement track but with gated merge (verify the human-merge
+    wait actually happens). Catches integration gaps the per-PR reviews can''t see.
+
+
+    2. **Auto-start command**: A single command (`pm watcher start regression-loop`
+    or similar) that brings up all three watchers at once with sensible defaults.
+    Without this, a user has to start each watcher individually, which is friction
+    that will keep the loops from being used.
+
+
+    The auto-start command also serves as documentation — its argument-parsing and
+    defaults are the canonical way to express ''turn on the regression loop.'' Per-watcher
+    start commands remain available for advanced use.
+
+
+    Manual testing: launch the auto-start command in a fresh project, verify all three
+    watchers come up, leave the loop running long enough to observe a complete bug-fix
+    cycle (test failure → bug filed → fix landed) and a complete improvement cycle
+    (improvement filed → fix ready-for-merge → human merge). Use INPUT_REQUIRED to
+    drive the multi-hour observation.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-01T18:22:08.893095+00:00'
+  updated_at: '2026-05-01T18:22:08.893095+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
