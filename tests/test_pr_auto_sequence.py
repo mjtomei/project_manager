@@ -206,27 +206,50 @@ class TestQA:
         assert result.exit_code == 0
         assert "paused: input_required" in result.output
 
-    def test_needs_work_returns_to_review(self, runner, tmp_path):
+    def test_needs_work_relaunches_review(self, runner, tmp_path):
         pr = _pr("qa")
         with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
              patch("pm_core.cli.pr.store.load", return_value=_data_with(pr)), \
              patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
              patch("pm_core.cli.pr._qa_status_for",
                    return_value=("NEEDS_WORK", Path("/tmp/qa.json"))), \
-             patch("pm_core.cli.pr.store.locked_update"):
+             patch("pm_core.cli.pr._check_review_verdict",
+                   return_value=("PASS", 1)), \
+             patch("pm_core.cli.pr.store.locked_update"), \
+             patch("pm_core.cli.pr.pr_review") as mock_review:
+            mock_review.callback = MagicMock()
             result = runner.invoke(pr_auto_sequence, ["pr-001"])
         assert result.exit_code == 0
         assert "qa: needs_work" in result.output
+        assert "iteration 2" in result.output
 
-    def test_no_status_launches_qa(self, runner, tmp_path):
+    def test_no_status_no_window_launches_qa(self, runner, tmp_path):
         pr = _pr("qa")
         with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
              patch("pm_core.cli.pr.store.load", return_value=_data_with(pr)), \
              patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
              patch("pm_core.cli.pr._qa_status_for",
                    return_value=(None, None)), \
+             patch("pm_core.cli.pr.tmux_mod.find_window_by_name",
+                   return_value=None), \
              patch("pm_core.cli.pr._launch_qa_detached") as mock_qa:
             result = runner.invoke(pr_auto_sequence, ["pr-001"])
         assert result.exit_code == 0
         assert "running: qa (launched)" in result.output
         mock_qa.assert_called_once()
+
+    def test_no_status_with_window_does_not_relaunch(self, runner, tmp_path):
+        """Race guard: if the qa tmux window exists, treat as still starting."""
+        pr = _pr("qa")
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=_data_with(pr)), \
+             patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
+             patch("pm_core.cli.pr._qa_status_for",
+                   return_value=(None, None)), \
+             patch("pm_core.cli.pr.tmux_mod.find_window_by_name",
+                   return_value={"id": "@7", "index": "3"}), \
+             patch("pm_core.cli.pr._launch_qa_detached") as mock_qa:
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert result.exit_code == 0
+        assert result.output.strip() == "running: qa"
+        mock_qa.assert_not_called()

@@ -2820,17 +2820,41 @@ def pr_auto_sequence(pr_id: str):
             click.echo("paused: input_required (qa)")
             return
         if overall == "NEEDS_WORK":
-            # Return to review.
+            # Flip status to in_review and immediately launch a fresh
+            # review-loop iteration with QA feedback.  Without launching
+            # here, the next tick's in_review path would pick up the
+            # *previous* iteration's PASS verdict and bounce straight
+            # back to qa.  Mirrors the TUI's qa_loop_ui NEEDS_WORK path.
             def _to_review(d):
                 p = store.get_pr(d, pr_id)
                 if p and p.get("status") == "qa":
                     p["status"] = "in_review"
                     _record_status_timestamp(p, "in_review")
             store.locked_update(root, _to_review)
-            click.echo("qa: needs_work, returning to review")
+            _verdict, latest_iter = _check_review_verdict(tdir, pr_id)
+            next_iter = latest_iter + 1
+            iter_transcript = tdir / f"review-{pr_id}-i{next_iter}.jsonl"
+            ctx = click.get_current_context()
+            ctx.invoke(pr_review, pr_id=pr_id, fresh=True, background=True,
+                       review_loop=True, review_iteration=next_iter,
+                       review_loop_id="", transcript=str(iter_transcript))
+            click.echo(
+                f"qa: needs_work, returning to review (iteration {next_iter})"
+            )
             return
         if overall is None:
-            # No qa_status.json yet — likely never started; launch QA.
+            # No qa_status.json yet.  Could be a never-started run *or*
+            # a freshly-launched run whose first status write hasn't
+            # landed yet.  Check for the qa tmux window before
+            # re-launching to avoid stacking duplicate QA subprocesses
+            # during the launch→first-write race window.
+            display_id = _pr_display_id(pr_entry)
+            qa_win = tmux_mod.find_window_by_name(
+                pm_session, f"qa-{display_id}",
+            ) if pm_session else None
+            if qa_win:
+                click.echo("running: qa")
+                return
             _launch_qa_detached(root, pr_id)
             click.echo("running: qa (launched)")
             return
