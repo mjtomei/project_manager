@@ -38,7 +38,7 @@ The autonomous loops are deliberately built on existing primitives. New code is 
 
 - ✅ Merged (2): `pr-3b2847c` (QA planner consolidate), `pr-539110b` (agents file out-of-scope bugs)
 - 🔨 In progress (1): `pr-30588a7` (bug fix flow reproduce-fix-verify)
-- ⏳ Pending (9): everything else
+- ⏳ Pending (8): everything else
 
 ## Prerequisites
 
@@ -104,17 +104,10 @@ Mirror of `pr-e3a711c` against `plan=ux`. Differences: longer cadence, gated mer
 
 Dedicated Claude session launched from the TUI with read access to all three watchers' work logs at `pm/watchers/*.log`, current plan/PR state, and per-test transcripts. Opens with a summary of recent activity, then chat-driven. Write actions (notes additions, pausing a watcher) require explicit confirmation.
 
-## Phase 5: Reporting
-
-### PR: Regression loop summary reporting
-`pr-558ca3f` (depends on: pr-271cb3a)
-
-Periodic markdown digests rendered from the watchers' text-file work logs. Probably a small `pm watcher report` CLI. No new log infrastructure — just reads what the watchers already wrote.
-
-## Phase 6: Activation (final)
+## Phase 5: Activation (final)
 
 ### PR: End-to-end QA review and auto-start command
-`pr-d60d185` (depends on: pr-271cb3a, pr-e3a711c, pr-d39a7fb, pr-e84b43c, pr-558ca3f)
+`pr-d60d185` (depends on: pr-271cb3a, pr-e3a711c, pr-d39a7fb, pr-e84b43c)
 
 Final integration PR. Single command (`pm watcher start regression-loop` or similar) that brings up all three watchers with sensible defaults — without this, users have to start each watcher individually. Also serves as the end-to-end QA pass: once everything else has merged, exercise the full autonomous loop and catch integration gaps the per-PR reviews can't see.
 

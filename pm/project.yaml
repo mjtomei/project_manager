@@ -9939,31 +9939,6 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
-- id: pr-558ca3f
-  plan: plan-regression
-  title: Regression loop summary reporting
-  branch: pm/pr-558ca3f-regression-loop-summary-reporting
-  status: pending
-  depends_on:
-  - pr-47940bc
-  description: 'Periodic markdown digests rendered from the discovery supervisor''s
-    work log at `pm/watchers/discovery.log` (and optionally the implementation watchers''
-    logs). Complementary to the watcher review session — the session is for ad-hoc
-    check-ins, the digests for archival/standup use.
-
-
-    Could be a small CLI (`pm watcher report`) that scans the log files, aggregates
-    counts (tests run, bugs filed, fixes landed, PRs merged), and writes the digest.
-    No new log infrastructure — just reads what the watchers already wrote.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-04-28T11:08:13.897708+00:00'
-  updated_at: '2026-05-01T18:06:01.680713+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
 - id: pr-e58459b
   plan: plan-regression
   title: 'Auto-sequence button: chain start → review → QA on a single PR'
@@ -10776,7 +10751,6 @@ prs:
   - pr-e3a711c
   - pr-d39a7fb
   - pr-e84b43c
-  - pr-558ca3f
   description: 'Final integration PR for the regression loop. Two purposes:
 
 
@@ -10809,7 +10783,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-01T18:22:08.893095+00:00'
-  updated_at: '2026-05-01T18:22:08.893095+00:00'
+  updated_at: '2026-05-01T18:46:20.614841+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
