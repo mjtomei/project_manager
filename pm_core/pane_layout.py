@@ -550,6 +550,14 @@ def handle_pane_exited(session: str, window: str, generation: str,
             _logger.info("handle_pane_exited: no panes were removed from registry")
             return
 
+    # If this window had an rc-server daemon (pm rc start), tear it
+    # down once no rc-driver pane remains.
+    try:
+        from pm_core.rc.cleanup import maybe_kill_server
+        maybe_kill_server(session, window)
+    except Exception:
+        _logger.exception("handle_pane_exited: rc cleanup failed")
+
     # The EXIT trap runs while the dying pane is still alive in tmux.
     # If we rebalance now, the layout includes the dying pane; when it
     # dies moments later tmux recalculates the layout and unzooms.

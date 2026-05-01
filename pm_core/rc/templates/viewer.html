@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<title>pm rc viewer</title>
+<style>
+  :root {
+    --bg: #fafafa;
+    --fg: #1a1a1a;
+    --muted: #666;
+    --sel: rgba(255, 220, 80, 0.45);
+    --del: rgba(255, 100, 100, 0.18);
+    --add: rgba(80, 200, 120, 0.20);
+    --del-fg: #b00020;
+    --add-fg: #1b6f3a;
+    --rule: #ddd;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a;
+      --fg: #e8e8ec;
+      --muted: #888;
+      --sel: rgba(255, 220, 80, 0.22);
+      --del: rgba(255, 100, 100, 0.18);
+      --add: rgba(80, 200, 120, 0.22);
+      --del-fg: #ff7a90;
+      --add-fg: #7ad79a;
+      --rule: #2a2d33;
+    }
+  }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
+  body {
+    font: 18px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI",
+          Helvetica, Arial, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  #status {
+    position: sticky; top: 0; z-index: 5;
+    padding: 6px 14px; font-size: 13px; color: var(--muted);
+    background: var(--bg); border-bottom: 1px solid var(--rule);
+    display: flex; gap: 12px; align-items: center;
+  }
+  #status .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #888; display: inline-block;
+  }
+  #status.live .dot { background: #2a9d3a; }
+  #status.dead .dot { background: #b00020; }
+  #doc {
+    max-width: 70ch; margin: 0 auto; padding: 18px 14px 60vh;
+  }
+  .ln {
+    position: relative;
+    padding: 1px 6px; margin: 0;
+    border-radius: 3px;
+    white-space: pre-wrap; word-wrap: break-word;
+  }
+  .ln.sel { background: var(--sel); }
+  h1, h2, h3, h4 { line-height: 1.25; margin: 1.1em 0 .35em; }
+  h1 { font-size: 1.8em; }
+  h2 { font-size: 1.45em; }
+  h3 { font-size: 1.2em; }
+  pre {
+    background: rgba(127,127,127,0.10);
+    padding: 8px 10px; border-radius: 6px;
+    overflow-x: auto; font-size: 0.92em;
+  }
+  code { background: rgba(127,127,127,0.10); padding: 1px 4px; border-radius: 3px; }
+  pre code { background: none; padding: 0; }
+  .diff {
+    margin: 6px 0 14px; border-left: 3px solid var(--rule);
+    padding-left: 8px; font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 0.92em;
+  }
+  .diff .d-del { background: var(--del); color: var(--del-fg); text-decoration: line-through; display: block; padding: 1px 4px; }
+  .diff .d-add { background: var(--add); color: var(--add-fg); display: block; padding: 1px 4px; }
+</style>
+</head>
+<body>
+<div id="status"><span class="dot"></span><span id="status-text">connecting…</span><span id="meta"></span></div>
+<div id="doc"></div>
+<script>
+"use strict";
+
+const $doc = document.getElementById("doc");
+const $status = document.getElementById("status");
+const $statusText = document.getElementById("status-text");
+const $meta = document.getElementById("meta");
+
+let state = { text: "", version: -1, selection: null, proposal: null, viewport: null, path: "" };
+let lineEls = []; // 1-indexed: lineEls[i] is the DOM node for line i
+let backoff = 250;
+let es = null;
+
+function setStatus(label, cls) {
+  $status.className = cls || "";
+  $statusText.textContent = label;
+}
+
+// --- minimal markdown renderer with line tracking ---
+// We render line-by-line so we can preserve a 1:1 mapping from source
+// line number to a DOM element, which selection highlighting requires.
+function escapeHtml(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+function renderInline(s) {
+  s = escapeHtml(s);
+  s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
+  s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  s = s.replace(/(^|[^\*])\*([^*]+)\*/g, "$1<em>$2</em>");
+  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g,
+                '<a href="$2" rel="noopener">$1</a>');
+  return s;
+}
+function renderDoc(text) {
+  $doc.innerHTML = "";
+  lineEls = [null]; // index 0 unused
+  const lines = text.split("\n");
+  // If text ends with \n, split yields an empty trailing item; drop it
+  if (lines.length && lines[lines.length - 1] === "" && text.endsWith("\n")) {
+    lines.pop();
+  }
+  let i = 0;
+  let inCode = false;
+  let codeBuf = [];
+  let codeStartLine = 0;
+  while (i < lines.length) {
+    const lineNum = i + 1;
+    const raw = lines[i];
+    if (inCode) {
+      if (/^```/.test(raw)) {
+        // close code block
+        const pre = document.createElement("pre");
+        const code = document.createElement("code");
+        code.textContent = codeBuf.join("\n");
+        pre.appendChild(code);
+        pre.className = "ln";
+        pre.dataset.lineStart = codeStartLine;
+        pre.dataset.lineEnd = lineNum;
+        for (let k = codeStartLine; k <= lineNum; k++) lineEls[k] = pre;
+        $doc.appendChild(pre);
+        inCode = false;
+        codeBuf = [];
+        i++;
+        continue;
+      } else {
+        codeBuf.push(raw);
+        i++;
+        continue;
+      }
+    }
+    if (/^```/.test(raw)) {
+      inCode = true;
+      codeStartLine = lineNum;
+      i++;
+      continue;
+    }
+    let el;
+    let m;
+    if ((m = raw.match(/^(#{1,4})\s+(.*)$/))) {
+      el = document.createElement("h" + m[1].length);
+      el.innerHTML = renderInline(m[2]);
+    } else if (/^\s*[-*]\s+/.test(raw)) {
+      el = document.createElement("div");
+      el.innerHTML = "• " + renderInline(raw.replace(/^\s*[-*]\s+/, ""));
+    } else if (raw.trim() === "") {
+      el = document.createElement("div");
+      el.innerHTML = "&nbsp;";
+    } else {
+      el = document.createElement("div");
+      el.innerHTML = renderInline(raw);
+    }
+    el.classList.add("ln");
+    el.dataset.lineStart = lineNum;
+    el.dataset.lineEnd = lineNum;
+    lineEls[lineNum] = el;
+    $doc.appendChild(el);
+    i++;
+  }
+  applyOverlays();
+}
+
+function applyOverlays() {
+  // Clear previous selection classes / diff strips
+  for (let i = 1; i < lineEls.length; i++) {
+    if (lineEls[i]) lineEls[i].classList.remove("sel");
+  }
+  document.querySelectorAll(".diff").forEach(n => n.remove());
+
+  if (state.selection) {
+    const { start, end } = state.selection;
+    const seen = new Set();
+    for (let i = start; i <= end; i++) {
+      const el = lineEls[i];
+      if (el && !seen.has(el)) { el.classList.add("sel"); seen.add(el); }
+    }
+    if (state.proposal) {
+      const anchor = lineEls[end];
+      if (anchor) {
+        const diff = document.createElement("div");
+        diff.className = "diff";
+        // removed lines
+        const removedText = state.text.split("\n").slice(start - 1, end).join("\n");
+        const removed = document.createElement("span");
+        removed.className = "d-del";
+        removed.textContent = removedText;
+        const added = document.createElement("span");
+        added.className = "d-add";
+        added.textContent = state.proposal.text;
+        diff.appendChild(removed);
+        diff.appendChild(added);
+        anchor.parentNode.insertBefore(diff, anchor.nextSibling);
+      }
+    }
+  }
+}
+
+function applyState(s, fullSync) {
+  if (typeof s.version === "number") state.version = s.version;
+  state.path = s.path || state.path;
+  state.selection = s.selection;
+  state.proposal = s.proposal;
+  state.viewport = s.viewport;
+  if (fullSync && typeof s.text === "string") {
+    state.text = s.text;
+    renderDoc(state.text);
+  } else {
+    applyOverlays();
+  }
+  $meta.textContent = state.path + " (v" + state.version + ")";
+}
+
+function focusToTop(top) {
+  const el = lineEls[top];
+  if (!el) return;
+  const rect = el.getBoundingClientRect();
+  const stickyH = $status.getBoundingClientRect().height;
+  window.scrollBy({ top: rect.top - stickyH, behavior: "instant" });
+}
+
+let lastViewportSent = null;
+let viewportTimer = null;
+function scheduleViewportReport() {
+  if (viewportTimer) clearTimeout(viewportTimer);
+  viewportTimer = setTimeout(() => {
+    const stickyH = $status.getBoundingClientRect().height;
+    const winBottom = window.innerHeight;
+    let top = null, bottom = null;
+    for (let i = 1; i < lineEls.length; i++) {
+      const el = lineEls[i];
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (r.bottom < stickyH) continue;
+      if (r.top > winBottom) break;
+      const lineStart = parseInt(el.dataset.lineStart, 10);
+      const lineEnd = parseInt(el.dataset.lineEnd, 10);
+      if (top === null) top = lineStart;
+      bottom = lineEnd;
+    }
+    if (top === null) return;
+    const key = top + ":" + bottom;
+    if (key === lastViewportSent) return;
+    lastViewportSent = key;
+    fetch("/api/viewport", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ top, bottom })
+    }).catch(() => {});
+  }, 150);
+}
+
+window.addEventListener("scroll", scheduleViewportReport, { passive: true });
+window.addEventListener("resize", scheduleViewportReport);
+
+async function fullResync() {
+  try {
+    const r = await fetch("/api/doc");
+    if (!r.ok) throw new Error("doc fetch failed");
+    const s = await r.json();
+    applyState(s, true);
+    if (s.viewport && s.viewport.top) focusToTop(s.viewport.top);
+    scheduleViewportReport();
+  } catch (e) {
+    setStatus("offline", "dead");
+  }
+}
+
+function connectSSE() {
+  if (es) try { es.close(); } catch (_) {}
+  es = new EventSource("/api/events");
+  es.addEventListener("state", (ev) => {
+    backoff = 250;
+    setStatus("live", "live");
+    try {
+      const s = JSON.parse(ev.data);
+      const focusChanged = state.viewport
+        ? (!s.viewport || s.viewport.top !== state.viewport.top)
+        : !!s.viewport;
+      applyState(s, false);
+      if (focusChanged && s.viewport && s.viewport.top) {
+        focusToTop(s.viewport.top);
+      }
+    } catch (_) {}
+  });
+  es.addEventListener("doc", (ev) => {
+    try {
+      const s = JSON.parse(ev.data);
+      applyState(s, true);
+    } catch (_) {}
+  });
+  es.onerror = () => {
+    setStatus("reconnecting", "dead");
+    try { es.close(); } catch (_) {}
+    setTimeout(connectSSE, backoff);
+    backoff = Math.min(backoff * 2, 4000);
+  };
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    fullResync();
+    connectSSE();
+  }
+});
+
+fullResync().then(connectSSE);
+</script>
+</body>
+</html>
