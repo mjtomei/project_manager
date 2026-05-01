@@ -151,6 +151,7 @@ class ProjectManagerApp(App):
         Binding("H", "launch_guide", "Guide", show=True),
         Binding("C", "show_connect", "Connect", show=False),
         Binding("A", "toggle_auto_start", "Auto-start", show=False),
+        Binding("O", "auto_sequence_pr", "Auto-seq", show=True),
         Binding("w", "focus_watcher", "Watcher", show=False),
         Binding("V", "review_spec", "Review Spec", show=False),
     ]
@@ -237,7 +238,7 @@ class ProjectManagerApp(App):
                        "launch_meta", "launch_claude", "launch_guide",
                        "view_log", "refresh", "rebalance", "show_help",
                        "toggle_plans", "toggle_qa", "start_qa_on_pr", "hide_plan", "move_to_plan", "toggle_merged",
-                       "cycle_filter", "cycle_sort", "toggle_auto_start", "focus_watcher",
+                       "cycle_filter", "cycle_sort", "toggle_auto_start", "auto_sequence_pr", "focus_watcher",
                        "review_spec"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus or self._command_pending:
@@ -297,6 +298,10 @@ class ProjectManagerApp(App):
         self._auto_start: bool = False
         self._auto_start_target: str | None = None
         self._auto_start_run_id: str | None = None
+        # Per-PR opt-out of auto-merge (set by the auto-sequence keypress).
+        # When a PR is in this set, _maybe_auto_merge stops at "ready to
+        # merge" instead of launching the merge window.
+        self._stop_before_merge: set[str] = set()
         # Watcher framework manager (purely in-memory, lost on TUI restart)
         from pm_core.watcher_manager import WatcherManager
         self._watcher_manager = WatcherManager()
@@ -739,6 +744,15 @@ class ProjectManagerApp(App):
         from pm_core.tui.auto_start import toggle
         tree = self.query_one("#tech-tree", TechTree)
         self.run_worker(toggle(self, selected_pr_id=tree.selected_pr_id))
+
+    def action_auto_sequence_pr(self) -> None:
+        from pm_core.tui.auto_start import auto_sequence_for_pr
+        tree = self.query_one("#tech-tree", TechTree)
+        pr_id = tree.selected_pr_id
+        if not pr_id:
+            self.log_message("No PR selected")
+            return
+        self.run_worker(auto_sequence_for_pr(self, pr_id))
 
     def _cancel_w_mode(self) -> None:
         """Auto-cancel w prefix mode after timeout."""

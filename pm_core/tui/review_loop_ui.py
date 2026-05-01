@@ -449,6 +449,15 @@ def _maybe_auto_merge(app, pr_id: str) -> None:
         if pr_id not in allowed:
             return
 
+    # Auto-sequence keypress: stop before merge.
+    if pr_id in getattr(app, "_stop_before_merge", set()):
+        _log.info("auto_merge: %s in stop_before_merge — skipping merge", pr_id)
+        app.log_message(
+            f"[green bold]✓ {pr_id} ready to merge[/] "
+            f"(auto-sequence armed — press 'g' to merge)"
+        )
+        return
+
     _log.info("auto_merge: review passed for %s, merging", pr_id)
     app.log_message(f"Auto-merge: {pr_id} review passed, merging")
 
