@@ -419,6 +419,58 @@ Ask the user what they'd like to know about."""
     launch_pane(app, cmd, "discuss", fresh=fresh)
 
 
+def launch_watcher_review(app) -> None:
+    """Launch a Claude session for chat-driven review of the watcher loops.
+
+    Reads the three watcher work logs (discovery, bug-fix, improvement-fix)
+    plus current PR/plan state, opens with a summary of recent activity,
+    then is conversational. Read-mostly by default; write actions require
+    explicit human confirmation.
+    """
+    fresh = app._consume_z()
+    _log.info("launch_watcher_review fresh=%s", fresh)
+    from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
+    from pm_core.prompt_gen import generate_watcher_review_prompt
+
+    claude = find_claude()
+    if not claude:
+        app.log_message("Claude CLI not found")
+        return
+
+    # Resolve the meta workdir's pm/ root — that's where the watchers
+    # actually write their logs (see generate_discovery_supervisor_prompt).
+    # If it can't be ensured, fall back to the current project's pm/ dir
+    # so the session still launches and reports missing logs gracefully.
+    meta_pm_root: str | None = None
+    try:
+        from pm_core.cli.meta import ensure_meta_workdir
+        meta_workdir = ensure_meta_workdir()
+        meta_pm_root = str(meta_workdir / "pm")
+    except Exception:
+        _log.exception("launch_watcher_review: could not ensure meta workdir")
+        if app._root:
+            meta_pm_root = str(Path(app._root) / "pm")
+
+    transcript_dir: str | None = None
+    try:
+        from pm_core.tui import auto_start
+        tdir = auto_start.get_transcript_dir(app)
+        if tdir:
+            transcript_dir = str(tdir)
+    except Exception:
+        _log.exception("launch_watcher_review: could not resolve transcript dir")
+
+    sess = app._session_name or "default"
+    prompt = generate_watcher_review_prompt(
+        session_name=sess,
+        meta_pm_root=meta_pm_root,
+        transcript_dir=transcript_dir,
+    )
+
+    cmd = build_claude_shell_cmd(prompt=prompt)
+    launch_pane(app, cmd, "watcher-review", fresh=fresh)
+
+
 def launch_qa_item(app, item_id: str, target_window: str | None = None) -> None:
     """Launch Claude with a QA instruction prompt.
 
