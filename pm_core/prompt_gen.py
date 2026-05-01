@@ -1055,6 +1055,159 @@ IMPORTANT: Always end with **READY** or **INPUT_REQUIRED** on its own line.{watc
     return prompt.strip()
 
 
+def generate_improvement_fix_impl_prompt(data: dict, session_name: str | None = None,
+                                         iteration: int = 0, loop_id: str = "",
+                                         meta_pm_root: str | None = None) -> str:
+    """Generate a prompt for one tick of the improvement-fix implementation watcher.
+
+    Picks a candidate from ``plan=ux`` and advances it via
+    ``pm pr auto-sequence``.  Unlike the bug-fix watcher, PRs that PASS
+    QA are NOT auto-merged — they are held in their post-QA state for a
+    human taste check.  The watcher does not call ``pm pr merge``.
+    """
+    if not meta_pm_root:
+        meta_pm_root = "pm"
+
+    project_name = data.get("project", {}).get("name", "unknown")
+    base_branch = data.get("project", {}).get("base_branch", "master")
+
+    tui_block = tui_section(session_name) if session_name else ""
+
+    general_notes_block = ""
+    watcher_specific_block = ""
+    try:
+        root = store.find_project_root()
+        general_notes_block, watcher_specific_block = notes.notes_for_prompt(root, "watcher")
+    except FileNotFoundError:
+        pass
+
+    id_label = f" [{loop_id}]" if loop_id else ""
+    iteration_label = f" (iteration {iteration}){id_label}" if iteration else id_label
+
+    work_log = f"{meta_pm_root}/watchers/improvement-fix-impl.log"
+
+    prompt = f"""This is one tick of the **Improvement-Fix Implementation Watcher** for project "{project_name}".{iteration_label}
+
+## Role
+
+You drive PRs in the `ux` plan through implementation → review → QA
+using `pm pr auto-sequence`. **You do NOT merge.** PRs that pass QA are
+left in their post-QA state and held for a human taste check. The
+human merge cadence is the throttle — your job ends at "ready_to_merge".
+
+This is an unattended loop. Each tick is short. Advance at most one PR
+this tick, append a one-line work-log entry, then emit a verdict.
+
+Base branch: `{base_branch}`
+{tui_block}{general_notes_block}
+## Work Log
+
+The persistent work log lives at `{work_log}` (relative to the project
+root). It is the source of truth for what this watcher has done across
+ticks — which PR was advanced, what auto-sequence reported, and which
+PRs are held for human merge.
+
+**Step 1.** Ensure the log directory exists, then read the last ~40 lines:
+```
+mkdir -p {meta_pm_root}/watchers
+touch {work_log}
+tail -n 40 {work_log}
+```
+
+Use it to see what is already in flight and what is held awaiting human
+merge so you do not pick the same candidate redundantly.
+
+## Per-Tick Procedure
+
+### 1. Inventory candidates
+
+```
+pm pr list --plan ux
+```
+
+Build the candidate set: PRs in `plan=ux` whose status is `pending`,
+`in_progress`, `in_review`, or `qa`. Skip `merged` PRs and skip PRs
+already noted in the work log as "ready_to_merge — held for human"
+on a recent tick (re-pinging auto-sequence on those is harmless but
+wastes a tick).
+
+### 2. Prioritize (taste-shaped, no priority field)
+
+There is no priority field on these PRs. Use these signals, in order,
+to pick the best candidate this tick:
+
+1. **In-flight first** — if any candidate is `in_progress`, `in_review`,
+   or `qa`, prefer advancing it over starting a new one. Finish what
+   was started.
+2. **Recency of related code** — `git log --oneline -20 -- <files>` on
+   the PR's listed files. Recently-touched code means the PR's premise
+   is likely still accurate.
+3. **User feedback signals in notes** — `pm pr show <id>` and look for
+   note phrases like "user reported", "feedback", "saw this in", etc.
+4. **Confidence signals in the original filing** — clear repro,
+   specific files, concrete acceptance criteria.
+
+Skip any PR whose dependencies (`depends_on`) are not all `merged`.
+
+If nothing is eligible, log "no candidates" and emit READY.
+
+### 3. Advance one PR
+
+```
+pm pr auto-sequence <pr-id>
+```
+
+This advances the PR by at most one phase (idempotent, non-blocking).
+Capture the single-line status it prints. Common outcomes:
+
+- `started` — implementation window launched.
+- `running: implementation` / `running: review` / `running: qa` — a
+  phase is in progress; come back next tick.
+- `advanced: in_review` / `advanced: qa` — phase transition just fired.
+- `review: needs_work, retrying iteration N` — review loop bounced.
+- `qa: needs_work, returning to review (iteration N)` — QA bounced
+  back to review.
+- `paused: input_required (review)` / `paused: input_required (qa)` —
+  the inner loop is paused on its own INPUT_REQUIRED. **Do not**
+  escalate to watcher-level INPUT_REQUIRED for these; the inner loop
+  has already notified the human. Note in the log and move on.
+- `paused: spec_pending` — spec is awaiting human review. Same:
+  log and move on.
+- `ready_to_merge` — QA PASSED. **Do not run `pm pr merge`.** This PR
+  is now held for human taste check. Log it explicitly.
+
+### 4. Append a work-log entry
+
+One line, ISO timestamp + concise summary, e.g.:
+
+```
+echo "$(date -Iseconds) tick {iteration}: pr-abcd1234 → advanced: in_review" \\
+  >> {work_log}
+```
+
+For ready-to-merge holds, make it obvious in the log line:
+
+```
+echo "$(date -Iseconds) tick {iteration}: pr-abcd1234 → ready_to_merge (held for human taste check)" \\
+  >> {work_log}
+```
+
+## Verdict
+
+End your response with the verdict on its own line:
+
+- **READY** — tick complete, continue watching on the next interval.
+  This is the right verdict even when an inner review/QA loop is
+  paused on INPUT_REQUIRED — that loop is handling its own branch.
+- **INPUT_REQUIRED** — a project-wide blocker exists (broken base
+  branch, plan misconfiguration, repeated unexplained auto-sequence
+  failures across multiple PRs). Describe the situation and wait.
+
+IMPORTANT: Always end with **READY** or **INPUT_REQUIRED** on its own line.{watcher_specific_block}"""
+
+    return prompt.strip()
+
+
 def generate_review_loop_prompt(data: dict, pr_id: str) -> str:
     """Generate a review prompt for the automated review loop.
 
