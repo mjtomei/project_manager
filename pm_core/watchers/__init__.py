@@ -7,11 +7,13 @@ discover them by type name.
 
 from pm_core.watchers.auto_start_watcher import AutoStartWatcher
 from pm_core.watchers.discovery_supervisor import DiscoverySupervisorWatcher
+from pm_core.watchers.improvement_fix_impl_watcher import ImprovementFixImplWatcher
 
 # Registry mapping watcher type name -> class
 WATCHER_REGISTRY: dict[str, type] = {
     AutoStartWatcher.WATCHER_TYPE: AutoStartWatcher,
     DiscoverySupervisorWatcher.WATCHER_TYPE: DiscoverySupervisorWatcher,
+    ImprovementFixImplWatcher.WATCHER_TYPE: ImprovementFixImplWatcher,
 }
 
 
