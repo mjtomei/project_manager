@@ -19,6 +19,32 @@ from pm_core.tui.screens import ConnectScreen
 _log = configure_logger("pm.tui.pane_ops")
 
 
+_REGRESSION_FILING_ADDENDUM = """
+## Filing Findings
+
+This regression test runs unattended. If you discover something worth
+fixing while running it, file it as a separate PR so it doesn't get lost
+— this is independent of your PASS / NEEDS_WORK / INPUT_REQUIRED verdict
+for the test itself.
+
+- **Bug** (failing assertion, incorrect behavior, regression):
+  ```
+  pm pr add '<short imperative title>' --plan bugs --description \
+'<location, repro, expected vs actual>'
+  ```
+- **Improvement** (UX/quality issue surfaced incidentally — not a bug,
+  but something that would make the product better):
+  ```
+  pm pr add '<short imperative title>' --plan ux --description \
+'<what you noticed and why it matters>'
+  ```
+
+Skim `pm pr list --plan bugs` (or `--plan ux`) first to avoid filing a
+duplicate. Filing is a side effect — your verdict for this regression
+test must still reflect only the test's own pass/fail state.
+"""
+
+
 # ---------------------------------------------------------------------------
 # Registry healing
 # ---------------------------------------------------------------------------
@@ -432,6 +458,9 @@ To interact with this session, use commands like:
 
 {body}
 """
+
+    if category == "regression":
+        full_prompt += _REGRESSION_FILING_ADDENDUM
 
     cmd = build_claude_shell_cmd(prompt=full_prompt)
     launch_pane(app, cmd, "qa-item")
