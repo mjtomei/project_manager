@@ -904,11 +904,10 @@ launched from this watcher run as additional panes in that same window. List
 panes:
 
 ```
-tmux list-panes -t {{session}}:discovery -F "#{{pane_id}} #{{pane_current_command}}"
+tmux list-panes -t {session_name or "<session>"}:discovery -F "#{{pane_id}} #{{pane_current_command}}"
 ```
 
-(Substitute the pm session name — see TUI section above.) If a regression-test
-pane is still running, do **not** launch a new test this tick. Note the in-flight
+If a regression-test pane is still running, do **not** launch a new test this tick. Note the in-flight
 state in your work-log entry and reconcile after it finishes (next tick or
 later).
 

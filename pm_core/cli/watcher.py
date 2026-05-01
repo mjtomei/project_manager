@@ -144,6 +144,7 @@ def watcher_start(watcher_type: str, wait: int | None):
     \b
     Available types:
       auto-start   Monitor auto-start sessions for issues (default)
+      discovery    Schedule regression tests and reconcile filings
     """
     from pm_core.watchers import get_watcher_class, list_watcher_types
 

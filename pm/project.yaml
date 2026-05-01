@@ -10037,11 +10037,18 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-29T15:34:01.804130+00:00'
-  updated_at: '2026-05-01T18:05:22.460543+00:00'
+  updated_at: '2026-05-01T19:22:58.989508+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-d7058db
+    text: qa launch shim duplicates ~25 lines of prompt construction (regression filing
+      addendum, prompt template, session label) from tui.pane_ops.launch_qa_item;
+      consider extracting build_qa_launch_prompt() helper to qa_instructions when
+      the next caller appears
+    created_at: '2026-05-01T19:22:58Z'
+    last_edited: '2026-05-01T19:22:58Z'
 - id: pr-d39a7fb
   plan: plan-regression
   title: Improvement-fix implementation watcher
