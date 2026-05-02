@@ -532,6 +532,58 @@ To interact with this session, use commands like:
 # Plan and test pane actions
 # ---------------------------------------------------------------------------
 
+PLANS_WINDOW_NAME = "plans"
+
+
+def _ensure_plans_window(app) -> str | None:
+    """Return the tmux window id for the dedicated plans window.
+
+    Creates the window with a benign placeholder shell if it does not
+    yet exist. Returns None when not in tmux or on tmux failures so
+    callers can fall back to current-window behavior.
+    """
+    if not tmux_mod.in_tmux():
+        return None
+    try:
+        session = tmux_mod.get_session_name()
+        if not session:
+            return None
+        win = tmux_mod.find_window_by_name(session, PLANS_WINDOW_NAME)
+        if not win:
+            cwd = str(app._root) if app._root else "."
+            tmux_mod.new_window_get_pane(
+                session, PLANS_WINDOW_NAME, "bash -l",
+                cwd=cwd, switch=False,
+            )
+            win = tmux_mod.find_window_by_name(session, PLANS_WINDOW_NAME)
+        if not win:
+            return None
+        return win["id"]
+    except Exception:
+        _log.exception("_ensure_plans_window failed")
+        return None
+
+
+def _focus_plans_window(app) -> None:
+    """Switch the user's grouped session to the plans window."""
+    if not tmux_mod.in_tmux():
+        return
+    try:
+        session = tmux_mod.get_session_name()
+        if session:
+            tmux_mod.select_window(session, PLANS_WINDOW_NAME)
+    except Exception:
+        _log.exception("_focus_plans_window failed")
+
+
+def _launch_in_plans_window(app, cmd: str, role: str, fresh: bool = False) -> None:
+    """Launch a pane in the dedicated plans window and switch focus to it."""
+    plans_win = _ensure_plans_window(app)
+    launch_pane(app, cmd, role, fresh=fresh, target_window=plans_win)
+    if plans_win:
+        _focus_plans_window(app)
+
+
 def handle_plan_action(app, action: str, plan_id: str | None) -> None:
     """Handle plan action shortcuts that involve pane operations."""
     if action == "edit":
@@ -541,19 +593,19 @@ def handle_plan_action(app, action: str, plan_id: str | None) -> None:
                 plan_path = app._root / plan.get("file", "")
                 if plan_path.exists():
                     editor = find_editor()
-                    launch_pane(app, f"{editor} {plan_path}", "plan-edit")
+                    _launch_in_plans_window(app, f"{editor} {plan_path}", "plan-edit")
     elif action == "breakdown":
         if plan_id:
-            launch_pane(app, f"pm plan breakdown {plan_id}", "plan-breakdown")
+            _launch_in_plans_window(app, f"pm plan breakdown {plan_id}", "plan-breakdown")
     elif action == "deps":
-        launch_pane(app, "pm plan deps", "plan-deps")
+        _launch_in_plans_window(app, "pm plan deps", "plan-deps")
     elif action == "load":
         if plan_id:
             app._run_command(f"plan load {plan_id}",
                              working_message="Loading PRs from plan")
     elif action == "review":
         if plan_id:
-            launch_pane(app, f"pm plan review {plan_id}", "plan-review")
+            _launch_in_plans_window(app, f"pm plan review {plan_id}", "plan-review")
 
 
 def handle_plan_add(app, result: tuple[str, str] | None) -> None:
@@ -566,7 +618,7 @@ def handle_plan_add(app, result: tuple[str, str] | None) -> None:
         return
     name, _description = result  # description is always empty now
     cmd = f"pm plan add {shlex.quote(name)}"
-    launch_pane(app, cmd, "plan-add")
+    _launch_in_plans_window(app, cmd, "plan-add")
 
 
 def launch_plan_activated(app, plan_id: str) -> None:
@@ -577,7 +629,7 @@ def launch_plan_activated(app, plan_id: str) -> None:
         return
     plan_path = app._root / plan.get("file", "")
     if plan_path.exists():
-        launch_pane(app, f"less {plan_path}", "plan")
+        _launch_in_plans_window(app, f"less {plan_path}", "plan")
 
 
 # ---------------------------------------------------------------------------
