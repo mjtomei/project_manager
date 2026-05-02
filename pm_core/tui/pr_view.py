@@ -498,8 +498,6 @@ def cleanup_then_action(app, key: str) -> None:
 
     if key == "s":
         start_pr(app)
-    elif key == "S":
-        start_pr(app, companion=True)
     elif key == "d":
         done_pr(app)
     elif key == "t":

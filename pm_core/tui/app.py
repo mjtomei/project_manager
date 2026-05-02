@@ -209,7 +209,7 @@ class ProjectManagerApp(App):
                 self._a_cancel_timer = None
             self._clear_log_message()
             key = event.character or event.key
-            if key in ("s", "S", "d", "t"):
+            if key in ("s", "d", "t"):
                 pr_view.cleanup_then_action(self, key)
             else:
                 self.log_message("[dim]a cancelled[/]")
@@ -221,7 +221,7 @@ class ProjectManagerApp(App):
                 return
             self._a_mode = True
             self._z_count = 0
-            self.log_message("[bold]a …[/] [dim](cleanup-then: s=start S=start+companion d=review t=qa)[/]")
+            self.log_message("[bold]a …[/] [dim](cleanup-then: s=start d=review t=qa)[/]")
             self._a_cancel_timer = self.set_timer(2.0, self._cancel_a_mode)
             event.prevent_default()
             event.stop()
