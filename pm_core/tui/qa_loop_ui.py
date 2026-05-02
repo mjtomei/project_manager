@@ -268,11 +268,30 @@ def stop_qa(app, pr_id: str) -> None:
 
 def poll_qa_state(app) -> None:
     """Called from the shared poll timer to update QA state in the TUI."""
+    tracker = app._pane_idle_tracker
     for pr_id, state in list(app._qa_loops.items()):
+        # Wire each scenario pane into the idle tracker so the tech tree
+        # can animate a spinner while QA is active.  Mirrors the lazy
+        # registration used by review_loop_ui._poll_impl_idle.
+        for sc in list(state.scenarios):
+            if not sc.pane_id or not sc.transcript_path:
+                continue
+            key = f"qa:{pr_id}:s{sc.index}"
+            if not tracker.is_tracked(key) or tracker.is_gone(key):
+                try:
+                    tracker.register(key, sc.pane_id, sc.transcript_path)
+                except ValueError:
+                    continue
+            tracker.poll(key)
+
         if not state.running and state.latest_verdict:
             _on_qa_complete(app, state)
             # Remove completed loops (keep for one poll cycle)
             if state._ui_complete_notified:
+                # Drop tracker entries for this PR's QA panes so the
+                # spinner stops and tracked_keys() doesn't grow.
+                for sc in state.scenarios:
+                    tracker.unregister(f"qa:{pr_id}:s{sc.index}")
                 del app._qa_loops[pr_id]
             else:
                 state._ui_complete_notified = True

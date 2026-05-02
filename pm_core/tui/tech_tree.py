@@ -40,6 +40,28 @@ VERDICT_STYLES = {
 
 SPINNER_FRAMES = "◐◓◑◒"
 
+
+def qa_pane_state(tracker, pr_id: str) -> str:
+    """Aggregate QA-pane activity for *pr_id* in the idle tracker.
+
+    QA runs N parallel scenarios, each registered under a key
+    ``qa:<pr_id>:s<index>``. Returns ``"waiting"`` if any pane is blocked
+    on a permission prompt, ``"active"`` if any pane is tracked and
+    neither idle nor waiting, otherwise ``"idle"`` (which also covers
+    the no-tracked-keys case). Mirrors the ``in_progress``/``in_review``
+    spinner precedence: waiting wins over active.
+    """
+    prefix = f"qa:{pr_id}:"
+    keys = [k for k in tracker.tracked_keys() if k.startswith(prefix)]
+    if not keys:
+        return "idle"
+    if any(tracker.is_waiting_for_input(k) for k in keys):
+        return "waiting"
+    if any(not tracker.is_idle(k) and not tracker.is_waiting_for_input(k)
+           for k in keys):
+        return "active"
+    return "idle"
+
 STATUS_STYLES = {
     "pending": "white",
     "in_progress": "bold yellow",
@@ -542,6 +564,17 @@ class TechTree(Widget):
                             marker_offset = 2 + len(status_text) + 1
                             loop_style = "bold cyan"
                             status_text += f" {spinner}"
+                elif status == "qa" and pr.get("workdir"):
+                    qa_state = qa_pane_state(self.app._pane_idle_tracker, pr_id)
+                    if qa_state == "waiting":
+                        marker_offset = 2 + len(status_text) + 1
+                        loop_style = "bold yellow"
+                        status_text += " ⏸"
+                    elif qa_state == "active":
+                        spinner = SPINNER_FRAMES[self._anim_frame % len(SPINNER_FRAMES)]
+                        marker_offset = 2 + len(status_text) + 1
+                        loop_style = "bold cyan"
+                        status_text += f" {spinner}"
             # Show spec-pending marker
             if pr.get("spec_pending") and not loop_marker:
                 marker_offset = 2 + len(status_text) + 1
