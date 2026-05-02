@@ -648,6 +648,13 @@ def create_container(
         if val:
             cmd.extend(["-e", f"{env_var}={val}"])
 
+    # PM_HOST_HOME tells code inside the container (notably
+    # pm_core.hook_install) to embed the host's home path in any file
+    # that is bind-mounted back to the host (~/.claude/settings.json).
+    # Without this, hook commands written from the container would
+    # reference /home/pm/... which does not exist on the host.
+    cmd.extend(["-e", f"PM_HOST_HOME={Path.home()}"])
+
     for k, v in config.env.items():
         cmd.extend(["-e", f"{k}={v}"])
 
