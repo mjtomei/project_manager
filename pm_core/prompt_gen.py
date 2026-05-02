@@ -1482,11 +1482,16 @@ a structured test plan. Your goal is to fully exercise the impacted code
 to verify this PR works correctly.
 {bug_fix_qa_block}
 
-Prefer fewer, broader scenarios over many narrow ones. Group checks that
-share setup into one scenario with multi-step STEPS, including related
-edge cases that may expose bugs. Split scenarios only when code paths are
-unrelated, setup differs materially, or one would depend on another's
+Each scenario runs in its own isolated container — scenarios cannot share
+state or depend on each other's side effects. STEPS must include all setup
+the scenario needs; do not reference other scenarios' projects, PRs, or
 side effects.
+
+Prefer fewer, broader scenarios over many narrow ones. Group related checks
+that share setup into one scenario with multi-step STEPS, including edge
+cases that may expose bugs. Split scenarios only when code paths are
+unrelated or setup differs materially enough that combining them would
+bloat the steps.
 
 ## PR Context
 
