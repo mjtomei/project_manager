@@ -474,9 +474,9 @@ def cleanup_pr(app) -> None:
 
 
 def cleanup_then_action(app, key: str) -> None:
-    """k <key> — clean up the selected PR, then dispatch the follow-up action.
+    """a <key> — clean up the selected PR, then dispatch the follow-up action.
 
-    No confirmation modal — the user opted in by pressing the k prefix.
+    No confirmation modal — the user opted in by pressing the a prefix.
     """
     from pm_core.tui.tech_tree import TechTree
 

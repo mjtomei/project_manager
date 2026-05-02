@@ -201,28 +201,28 @@ class ProjectManagerApp(App):
             event.prevent_default()
             event.stop()
             return
-        # k prefix mode: dispatch second key as cleanup-then-action
-        if self._k_mode:
-            self._k_mode = False
-            if self._k_cancel_timer:
-                self._k_cancel_timer.stop()
-                self._k_cancel_timer = None
+        # a prefix mode: dispatch second key as cleanup-then-action
+        if self._a_mode:
+            self._a_mode = False
+            if self._a_cancel_timer:
+                self._a_cancel_timer.stop()
+                self._a_cancel_timer = None
             self._clear_log_message()
             key = event.character or event.key
             if key in ("s", "S", "d", "t"):
                 pr_view.cleanup_then_action(self, key)
             else:
-                self.log_message("[dim]k cancelled[/]")
+                self.log_message("[dim]a cancelled[/]")
             event.prevent_default()
             event.stop()
             return
-        if (event.key == "k" or event.character == "k"):
+        if (event.key == "a" or event.character == "a"):
             if not self.check_action("cleanup_pr", ()):
                 return
-            self._k_mode = True
+            self._a_mode = True
             self._z_count = 0
-            self.log_message("[bold]k …[/] [dim](cleanup-then: s=start S=start+companion d=review t=qa)[/]")
-            self._k_cancel_timer = self.set_timer(2.0, self._cancel_k_mode)
+            self.log_message("[bold]a …[/] [dim](cleanup-then: s=start S=start+companion d=review t=qa)[/]")
+            self._a_cancel_timer = self.set_timer(2.0, self._cancel_a_mode)
             event.prevent_default()
             event.stop()
             return
@@ -248,18 +248,18 @@ class ProjectManagerApp(App):
                 self.log_message(f"[bold]{'z' * self._z_count} …[/]")
             event.prevent_default()
             event.stop()
-        elif event.key == "escape" and (self._z_count > 0 or self._w_mode or self._k_mode):
+        elif event.key == "escape" and (self._z_count > 0 or self._w_mode or self._a_mode):
             self._z_count = 0
             if self._w_mode:
                 self._w_mode = False
                 if self._w_cancel_timer:
                     self._w_cancel_timer.stop()
                     self._w_cancel_timer = None
-            if self._k_mode:
-                self._k_mode = False
-                if self._k_cancel_timer:
-                    self._k_cancel_timer.stop()
-                    self._k_cancel_timer = None
+            if self._a_mode:
+                self._a_mode = False
+                if self._a_cancel_timer:
+                    self._a_cancel_timer.stop()
+                    self._a_cancel_timer = None
             self._clear_log_message()
             # Don't prevent — let escape also do its normal thing
 
@@ -341,9 +341,9 @@ class ProjectManagerApp(App):
         # w prefix key state
         self._w_mode: bool = False
         self._w_cancel_timer = None
-        # k prefix key state (cleanup-then-action)
-        self._k_mode: bool = False
-        self._k_cancel_timer = None
+        # a prefix key state (cleanup/abandon-then-action)
+        self._a_mode: bool = False
+        self._a_cancel_timer = None
         # QA loop state (purely in-memory)
         self._qa_loops: dict = {}
         # Self-driving QA state (zz t — tracks pass counts per PR)
@@ -796,10 +796,10 @@ class ProjectManagerApp(App):
             self._w_mode = False
             self._clear_log_message()
 
-    def _cancel_k_mode(self) -> None:
-        """Auto-cancel k prefix mode after timeout."""
-        if self._k_mode:
-            self._k_mode = False
+    def _cancel_a_mode(self) -> None:
+        """Auto-cancel a prefix mode after timeout."""
+        if self._a_mode:
+            self._a_mode = False
             self._clear_log_message()
 
     def action_cleanup_pr(self) -> None:

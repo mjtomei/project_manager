@@ -76,10 +76,10 @@ maps mnemonically to "Kill resources". On press:
 
 ### Prefix modifier
 
-Add **`k`** (lowercase) as a new prefix key, modelled on the existing `z` and
+Add **`a`** (lowercase) as a new prefix key, modelled on the existing `z` and
 `w` prefixes (`pm_core/tui/app.py:160-213`). Sequence:
 
-1. Press `k` → enter `_k_mode = True`, log `[bold]k …[/] [dim](cleanup-then: s=start d=review t=qa)[/]`,
+1. Press `a` → enter `_a_mode = True`, log `[bold]a …[/] [dim](cleanup-then: s=start d=review t=qa)[/]`,
    start a 2-second auto-cancel timer.
 2. Next key dispatches: `s` → cleanup then start, `d` → cleanup then review,
    `t` → cleanup then QA, `S` → cleanup then start+companion. Any other key
