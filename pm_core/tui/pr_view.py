@@ -438,8 +438,27 @@ def _do_cleanup(app, pr_id: str) -> dict | None:
     return summary
 
 
+async def _cleanup_worker(app, pr_id: str, action_key: str,
+                          follow_up: str | None = None) -> None:
+    """Run cleanup off the UI thread, then optionally dispatch a follow-up."""
+    import asyncio
+    try:
+        await asyncio.to_thread(_do_cleanup, app, pr_id)
+    finally:
+        app._inflight_pr_action = None
+        app._load_state()
+
+    if follow_up == "s":
+        start_pr(app)
+    elif follow_up == "d":
+        done_pr(app)
+    elif follow_up == "t":
+        from pm_core.tui import qa_loop_ui
+        qa_loop_ui.focus_or_start_qa(app, pr_id)
+
+
 def cleanup_pr(app) -> None:
-    """K key — confirm, then tear down all resources for the selected PR."""
+    """Y key — confirm, then tear down all resources for the selected PR."""
     from pm_core.tui.tech_tree import TechTree
     from pm_core.tui.screens import ConfirmCleanupScreen
     from pm_core.cli.helpers import _pr_display_id
@@ -464,11 +483,7 @@ def cleanup_pr(app) -> None:
         if not guard_pr_action(app, action_key):
             return
         app._inflight_pr_action = action_key
-        try:
-            _do_cleanup(app, pr_id)
-        finally:
-            app._inflight_pr_action = None
-            app._load_state()
+        app.run_worker(_cleanup_worker(app, pr_id, action_key))
 
     app.push_screen(ConfirmCleanupScreen(display_id), after_confirm)
 
@@ -491,18 +506,7 @@ def cleanup_then_action(app, key: str) -> None:
     if not guard_pr_action(app, action_key):
         return
     app._inflight_pr_action = action_key
-    try:
-        _do_cleanup(app, pr_id)
-    finally:
-        app._inflight_pr_action = None
-
-    if key == "s":
-        start_pr(app)
-    elif key == "d":
-        done_pr(app)
-    elif key == "t":
-        from pm_core.tui import qa_loop_ui
-        qa_loop_ui.focus_or_start_qa(app, pr_id)
+    app.run_worker(_cleanup_worker(app, pr_id, action_key, follow_up=key))
 
 
 # ---------------------------------------------------------------------------
