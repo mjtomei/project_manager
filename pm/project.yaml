@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-7e19be4
+  active_pr: pr-fbda1a8
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -11016,6 +11016,54 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-01T22:38:20.388463+00:00'
   updated_at: '2026-05-01T22:38:20.388463+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-fbda1a8
+  plan: plan-regression
+  title: Claude-based tests for watcher classes and prompt generation gaps
+  branch: pm/pr-fbda1a8-claude-based-tests-for-watcher-classes-and-prompt-
+  status: pending
+  depends_on:
+  - pr-d60d185
+  description: "Fill the testing gaps identified after the regression-loop landing.\
+    \ The three new concrete watcher classes and their prompt builders shipped without\
+    \ direct unit tests — covered only by framework-level tests and a live operator\
+    \ markdown. This PR adds Claude-based integration tests using FakeClaudeSession\
+    \ (pr-abcf70f, merged) so the watchers can be exercised without real Claude calls.\n\
+    \nTargets:\n\n1. **Watcher class tests** — new `tests/test_discovery_supervisor.py`,\
+    \ `tests/test_bug_fix_impl_watcher.py`, `tests/test_improvement_fix_impl_watcher.py`.\
+    \ Each script a sequence of FakeClaudeSession responses for a few ticks, verifying:\n\
+    \   - The watcher reads its work log and project state correctly\n   - It writes\
+    \ expected entries on each tick\n   - It emits READY / INPUT_REQUIRED at the right\
+    \ times\n   - For the discovery supervisor: it launches regression tests via the\
+    \ existing launch_qa_item path (mocked to record the call) and reconciles filed\
+    \ PRs post-hoc\n   - For the impl watchers: they pick the right PR from their\
+    \ plan, invoke pm pr auto-sequence on it, and (for bug-fix) auto-merge on PASS\n\
+    \n2. **Watcher prompt generation tests** — extend `tests/test_bug_fix_flow_prompts.py`\
+    \ patterns to the four new prompt builders in prompt_gen.py (discovery_supervisor,\
+    \ bug_fix_impl, improvement_fix_impl, watcher_review_session). Direct prompt-string\
+    \ assertions: notes injection works, work-log path is referenced, plan source\
+    \ is correct, merge mode (auto vs gated) is encoded.\n\n3. **Auto-sequence integration\
+    \ backstop** — `tests/test_pr_auto_sequence_integration.py` that exercises the\
+    \ three integration paths flagged during pr-e58459b's review (O keypress + _stop_before_merge,\
+    \ _check_impl_idle against a real PaneIdleTracker, _launch_qa_detached running\
+    \ run_qa_sync from a detached process). FakeClaudeSession + the existing TUI test\
+    \ framework (pr-ac3625d) substrate.\n\n4. **Pane_ops behavioral tests** — add\
+    \ tests for launch_qa_item's new target_window parameter (pr-97ddabf) and the\
+    \ regression filing addendum (pr-47940bc): assert the addendum text appears in\
+    \ the wrapped session prompt and that target_window correctly routes to the watcher's\
+    \ pane.\n\nManual testing during review: run `pytest tests/test_discovery_supervisor.py\
+    \ tests/test_bug_fix_impl_watcher.py tests/test_improvement_fix_impl_watcher.py\
+    \ tests/test_pr_auto_sequence_integration.py -v` and confirm all pass. The new\
+    \ tests should be deterministic — no real Claude calls, no real tmux operations\
+    \ beyond what the existing test substrate supports."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-02T20:49:18.500977+00:00'
+  updated_at: '2026-05-02T20:49:18.500977+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

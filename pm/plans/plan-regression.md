@@ -36,9 +36,8 @@ The autonomous loops are deliberately built on existing primitives. New code is 
 
 ## Status
 
-- ✅ Merged (2): `pr-3b2847c` (QA planner consolidate), `pr-539110b` (agents file out-of-scope bugs)
-- 🔨 In progress (1): `pr-30588a7` (bug fix flow reproduce-fix-verify)
-- ⏳ Pending (8): everything else
+- ✅ Merged (11): all original plan PRs (pr-3b2847c, pr-539110b, pr-30588a7, pr-e58459b, pr-47940bc, pr-97ddabf, pr-271cb3a, pr-e84b43c, pr-d39a7fb, pr-e3a711c, pr-d60d185)
+- ⏳ Pending (1): `pr-fbda1a8` (test backfill — added 2026-05-02 after observing gaps)
 
 ## Prerequisites
 
@@ -110,6 +109,13 @@ Dedicated Claude session launched from the TUI with read access to all three wat
 `pr-d60d185` (depends on: pr-271cb3a, pr-e3a711c, pr-d39a7fb, pr-e84b43c)
 
 Final integration PR. Single command (`pm watcher start regression-loop` or similar) that brings up all three watchers with sensible defaults — without this, users have to start each watcher individually. Also serves as the end-to-end QA pass: once everything else has merged, exercise the full autonomous loop and catch integration gaps the per-PR reviews can't see.
+
+## Phase 6: Test backfill
+
+### PR: Claude-based tests for watcher classes and prompt generation gaps
+`pr-fbda1a8` (depends on: pr-d60d185)
+
+The three concrete watcher classes and four new prompt builders shipped without direct unit tests — covered only by the BaseWatcher framework tests and the live operator markdown. This PR backfills using FakeClaudeSession (`pr-abcf70f`, merged) so watchers can be exercised deterministically: per-class watcher tests, prompt-string assertions for the new builders, integration backstop for the three auto-sequence paths flagged during `pr-e58459b`'s review, and behavioral tests for `launch_qa_item`'s new `target_window` parameter and regression-filing addendum.
 
 ## Success criteria
 
