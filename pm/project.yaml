@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-fbda1a8
+  active_pr: pr-c3762f7
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -8940,7 +8940,7 @@ prs:
   plan: improvements
   title: TUI command for PR resource cleanup
   branch: pm/pr-f8abc94-tui-command-for-pr-resource-cleanup
-  status: pending
+  status: in_review
   depends_on: []
   description: 'Add two ways to clean up all resources for a PR across all phases
     (implementation, review, QA): (1) A dedicated TUI key on a selected PR that tears
@@ -8954,15 +8954,23 @@ prs:
     — useful for freeing resources after a failed QA run, abandoning a review, or
     general housekeeping. Should confirm the action in the TUI before proceeding and
     report what was cleaned up.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/180
+  gh_pr_number: 180
   created_at: '2026-04-09T21:37:50.239172+00:00'
-  updated_at: '2026-04-09T21:50:06.546946+00:00'
-  started_at: null
-  reviewed_at: null
+  updated_at: '2026-05-02T21:31:24.071044+00:00'
+  started_at: '2026-05-02T21:00:42.908445+00:00'
+  reviewed_at: '2026-05-02T21:31:24.071044+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-502c061
+    text: 'QA NEEDS_WORK: CLI --resources flag — happy path, errors, and workdir-cleanup
+      isolation: PASS; TUI Y key — confirmation modal, confirm/cancel paths, summary
+      log: NEEDS_WORK; TUI y prefix — cleanup-then-action, auto-cancel, invalid keys,
+      Esc: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-f8abc94-501125830aa20b3d)'
+    created_at: '2026-05-02T22:02:30Z'
+    last_edited: '2026-05-02T22:02:30Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-f8abc94-tui-command-for-pr-resource-cleanup-89be975f
 - id: pr-ee2dae6
   plan: improvements
   title: 'Bug: QA verdict detection triggers during active progress animation'
@@ -9260,20 +9268,21 @@ prs:
   title: Launch plan pane actions in a dedicated plans window instead of the main
     window
   branch: pm/pr-a353c3d-launch-plan-pane-actions-in-dedicated-plans
-  status: pending
+  status: qa
   depends_on: []
   description: Plan actions from the plans pane (add, review, breakdown, worker) currently
     split panes in the main tmux window, cluttering it. They should open in a separate
     dedicated plans window so plan work does not interfere with PR work. This also
     enables running multiple plan actions in parallel (e.g. plan add on two plans
     at the same time).
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/179
+  gh_pr_number: 179
   created_at: '2026-04-11T21:35:26.923277+00:00'
-  updated_at: '2026-04-11T21:35:26.923277+00:00'
-  started_at: null
-  reviewed_at: null
+  updated_at: '2026-05-02T21:33:55.912666+00:00'
+  started_at: '2026-05-02T20:58:28.467538+00:00'
+  reviewed_at: '2026-05-02T21:33:55.912666+00:00'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a353c3d-launch-plan-pane-actions-in-dedicate-89be975f
 - id: pr-1e0785e
   plan: null
   title: qa_loop tmux session target fails when base session in a group is destroyed
@@ -11064,6 +11073,193 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-02T20:49:18.500977+00:00'
   updated_at: '2026-05-02T20:49:18.500977+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-f01eabb
+  plan: improvements
+  title: 'TUI: animate spinner for PRs in QA status'
+  branch: pm/pr-f01eabb-tui-animate-spinner-for-prs-in-qa-status
+  status: pending
+  depends_on: []
+  description: 'The tech tree spinner currently animates only for PRs in in_progress
+    or in_review status (tech_tree.py:533) and for active review loops. PRs in qa
+    status get no animation — while QA scenarios are running for a long time, the
+    tree shows static text giving no signal that anything is happening. Add qa to
+    the conditional that drives the spinner: when status == ''qa'' AND the PR has
+    a workdir AND the QA pane is being tracked, show the same spinner glyph used for
+    impl/review with the same idle/waiting/active state semantics. The pane idle tracker
+    (_pane_idle_tracker) already supports arbitrary panes, so wire QA panes into it
+    the same way impl and review panes are wired in. No new glyphs, no per-scenario
+    count — that is a separate richer-progress PR. Files: pm_core/tui/tech_tree.py
+    (extend the status check around line 533), pm_core/pane_idle.py or wherever pane
+    tracking is set up for QA. Tests: PR in qa status with active QA pane shows spinner;
+    same PR with idle QA pane shows no spinner; same PR with no QA pane shows no spinner;
+    non-qa statuses behavior is unchanged.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-02T21:45:33.441103+00:00'
+  updated_at: '2026-05-02T21:45:33.441103+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-2173cf1
+  plan: bugs
+  title: 'Bug: hook_install writes wrong hook_receiver path when run inside a container'
+  branch: pm/pr-2173cf1-bug-hook-install-writes-wrong-hook-receiver-path-w
+  status: pending
+  depends_on: []
+  description: 'ensure_hooks_installed() (pm_core/hook_install.py) is called from
+    pm session and pm tui startup. It writes hook commands using Path.home() to compute
+    RECEIVER_PATH (line 36: RECEIVER_PATH = Path.home() / .pm / hook_receiver.py).
+    Containers bind-mount the host''s ~/.claude read-write at /home/pm/.claude (container.py:587-589),
+    so any settings.json change inside a container propagates back to the host. When
+    pm session or pm tui runs inside a containerized Claude (impl, review, QA), Path.home()
+    resolves to /home/pm and ensure_hooks_installed writes /home/pm/.pm/hook_receiver.py
+    into the bind-mounted settings.json. The host then fires hooks pointing at /home/pm/.pm/hook_receiver.py,
+    which does not exist on the host, and Claude reports ''Stop hook feedback: ...
+    can''t open file ...: No such file or directory'' on every Stop event. The receiver
+    design (per pr-014f93f spec) intentionally uses the host absolute path as the
+    bind-mount target inside the container, so the same command works in both contexts
+    — but only if the path written into settings.json is always the host''s path.
+    Today nothing enforces that.
+
+
+    Fix: have pm export PM_HOST_HOME (the host user''s home) into every container
+    it creates, then have hook_install.py prefer PM_HOST_HOME over Path.home() when
+    computing RECEIVER_PATH. On the host, PM_HOST_HOME is unset and Path.home() is
+    correct. Inside a container, PM_HOST_HOME is set by container.py at create time
+    and overrides the container''s /home/pm. Alternative shape: hook_install detects
+    container context (e.g. /.dockerenv exists, or a pm-set marker) and skips the
+    install entirely, on the assumption that the host has already done it correctly.
+    Either works; the env var approach is more robust because it also fixes _HOOKS_BASE
+    on line 32 (which has the same Path.home() issue and would write hook event files
+    to the wrong location inside containers if it ever needed to).
+
+
+    Reproduce: from any containerized pm session (e.g. an impl pane Claude), run pm
+    session or pm tui. Inspect ~/.claude/settings.json on the host — hook commands
+    now reference /home/pm/.pm/hook_receiver.py. Trigger a Stop event in any Claude
+    session and the hook fails with file-not-found.
+
+
+    Tests: ensure_hooks_installed with PM_HOST_HOME set writes the host path regardless
+    of Path.home(); without PM_HOST_HOME falls back to Path.home() (host behavior
+    unchanged); container.py sets PM_HOST_HOME to the host user home when creating
+    containers; integration test that simulates running ensure_hooks_installed in
+    a fake container env (HOME=/home/pm, PM_HOST_HOME=/home/matt) and asserts the
+    written path is /home/matt/....'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-02T21:47:10.307175+00:00'
+  updated_at: '2026-05-02T21:47:10.307175+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-c3762f7
+  plan: bugs
+  title: 'Bug: containers missing vi and less editors/pagers'
+  branch: pm/pr-c3762f7-bug-containers-missing-vi-and-less-editors-pagers
+  status: pending
+  depends_on: []
+  description: "Containerized Claude sessions (impl, review, QA) fail when they try\
+    \ to use 'vi' or 'less' because neither is installed in the base pm container\
+    \ image. Common triggers: Claude opens a file with vi/vim by reflex, git log /\
+    \ man / pip output paginates through less. The errors look like 'vi: command not\
+    \ found' or 'less: command not found' and surface mid-session, often blocking\
+    \ the agent from finishing a task it was otherwise capable of doing.\n\nRoot cause:\
+    \ the base Dockerfile (Dockerfile, lines 17-32) installs build-essential, curl,\
+    \ git, jq, python3, podman, fuse-overlayfs, and a few related packages — no editor\
+    \ and no pager. Dockerfile.pm-project inherits from it so the gap propagates to\
+    \ every project-specific image.\n\nFix: two coordinated changes in one PR.\n\n\
+    (1) Add vim-tiny (~3 MB) and less (~600 KB) to the apt-get install list in the\
+    \ base Dockerfile, alongside the existing dev-tools block. vim-tiny is sufficient\
+    \ to satisfy the 'vi' command and stays small; less is needed for any git/man/pip\
+    \ flow that pages output. Both are negligible image-size cost relative to the\
+    \ existing build-essential.\n\n(2) Update the 'pm container build' prompt template\
+    \ at pm_core/cli/container.py:256 (the section currently titled 'pm container\
+    \ runtime requirements' that the build prompt embeds for Claude when bootstrapping\
+    \ a per-project image). The section currently lists 5 requirements (pm user exists,\
+    \ PATH ordering, USER directive, no ENTRYPOINT, git installed). Add a sixth: 'An\
+    \ editor and a pager must be available — \e[?1049h\e[?1h\e=\e[?2004h\e[1;24r\e\
+    [27m\e[24m\e[23m\e[0m\e[H\e[J\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e\
+    [?25l\e[1;1H\e[38;5;130m  1 \e[0m\r\n\e[94m~                                 \
+    \                                              \e[3;1H~                      \
+    \                                                         \e[4;1H~           \
+    \                                                                    \e[5;1H~\
+    \                                                                            \
+    \   \e[6;1H~                                                                 \
+    \              \e[7;1H~                                                      \
+    \                         \e[8;1H~                                           \
+    \                                    \e[9;1H~                                \
+    \                                               \e[10;1H~                    \
+    \                                                           \e[11;1H~        \
+    \                                                                       \e[12;1H~\
+    \                                                                            \
+    \   \e[13;1H~                                                                \
+    \               \e[14;1H~                                                    \
+    \                           \e[15;1H~                                        \
+    \                                       \e[16;1H~                            \
+    \                                                   \e[17;1H~                \
+    \                                                               \e[18;1H~    \
+    \                                                                           \e\
+    [19;1H~                                                                      \
+    \         \e[20;1H~                                                          \
+    \                     \e[21;1H~                                              \
+    \                                 \e[22;1H~                                  \
+    \                                             \e[23;1H~                      \
+    \                                                         \e[0m\e[24;63H0,0-1\e\
+    [9CAll\e[6;32HVIM - Vi IMproved\e[8;33Hversion 9.1.697\e[9;29Hby Bram Moolenaar\
+    \ et al.\e[10;21HModified by team+vim@tracker.debian.org\e[11;19HVim is open source\
+    \ and freely distributable\e[13;26HHelp poor children in Uganda!\e[14;18Htype\
+    \  :help iccf\e[34m<Enter>\e[0m       for information \e[16;18Htype  :q\e[34m<Enter>\e\
+    [0m               to exit         \e[17;18Htype  :help\e[34m<Enter>\e[0m  or \
+    \ \e[34m<F1>\e[0m  for on-line help\e[18;18Htype  :help version9\e[34m<Enter>\e\
+    [0m   for version info\e[1;5H\e[34h\e[?25h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e\
+    [?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e\
+    [?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e\
+    [?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e\
+    [?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e\
+    [?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e\
+    [?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e\
+    [?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e\
+    [?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e\
+    [?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e\
+    [?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e\
+    [?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e\
+    [?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e\
+    [?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e\
+    [?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e\
+    [?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e\
+    [?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e\
+    [?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e\
+    [?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e\
+    [?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e\
+    [?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e\
+    [?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e\
+    [?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e\
+    [24;1H\e[?2004l\e[?2004l\e[?1l\e>\e[?1049lVim: Error reading input, exiting...\n\
+    Vim: Finished.\r\n\e[24;1H\e[J (or vim-tiny/nano) and . The base pm image provides\
+    \ these; if you build from a different base, install them.' Without this note,\
+    \ anyone bootstrapping a custom base image from scratch hits the same gap.\n\n\
+    Files: Dockerfile (apt-get install line), pm_core/cli/container.py (prompt template\
+    \ runtime-requirements section).\n\nTests: existing container-build sanity tests\
+    \ still pass; new smoke test asserts that 'vi --version' and 'less --version'\
+    \ both exit 0 inside a freshly built container; the build prompt template includes\
+    \ the new requirement string verbatim.\n\nOut of scope (potential follow-ups):\
+    \ nano as an alternative editor (vim-tiny is sufficient and present in default\
+    \ Ubuntu), pagers like more (less is the standard fallback), per-project editor\
+    \ preferences. Keep this PR scoped to the missing-deps fix."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-02T22:06:47.034939+00:00'
+  updated_at: '2026-05-02T22:06:47.034939+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
