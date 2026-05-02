@@ -60,7 +60,7 @@ the default behavior of `pm pr cleanup`.
 
 ### Dedicated key
 
-Use **`K`** (uppercase) bound on the selected PR. `K` is currently unbound
+Use **`Y`** (uppercase) bound on the selected PR. `Y` is currently unbound
 (verified against the BINDINGS list at `pm_core/tui/app.py:123-157`) and
 maps mnemonically to "Kill resources". On press:
 
@@ -76,10 +76,10 @@ maps mnemonically to "Kill resources". On press:
 
 ### Prefix modifier
 
-Add **`a`** (lowercase) as a new prefix key, modelled on the existing `z` and
+Add **`y`** (lowercase) as a new prefix key, modelled on the existing `z` and
 `w` prefixes (`pm_core/tui/app.py:160-213`). Sequence:
 
-1. Press `a` → enter `_a_mode = True`, log `[bold]a …[/] [dim](cleanup-then: s=start d=review t=qa)[/]`,
+1. Press `y` → enter `_y_mode = True`, log `[bold]y …[/] [dim](cleanup-then: s=start d=review t=qa)[/]`,
    start a 2-second auto-cancel timer.
 2. Next key dispatches: `s` → cleanup then start, `d` → cleanup then review,
    `t` → cleanup then QA, `S` → cleanup then start+companion. Any other key
@@ -153,7 +153,7 @@ flag.
 
 None unresolved. Resolved-with-judgment items:
 
-- **Specific keys**: `K` (dedicated) and `k` (prefix). Both currently free;
+- **Specific keys**: `Y` (dedicated) and `y` (prefix). Both currently free;
   mnemonic; capital/lowercase pair mirrors `s`/`S` and `g`/`G` pattern.
 - **Command-bar prefix syntax**: skipped in favor of the explicit
   `pr cleanup --resources` flag; adding new modifier syntax to the command
@@ -170,7 +170,7 @@ None unresolved. Resolved-with-judgment items:
 - `pm_core/container.py` — add `cleanup_pr_containers(pr_id, session_tag)`
 - `pm_core/pane_registry.py` — add `unregister_windows(session, window_names)`
 - `pm_core/cli/pr.py` — add `--resources` flag to `pr cleanup`
-- `pm_core/tui/app.py` — add `K` binding, `k` prefix mode, `action_cleanup_pr`,
+- `pm_core/tui/app.py` — add `Y` binding, `y` prefix mode, `action_cleanup_pr`,
   prefix dispatch in `on_key`
 - `pm_core/tui/screens.py` — add `ConfirmCleanupScreen` modal
 - `pm_core/tui/pr_view.py` — add `cleanup_pr(app)` and the
