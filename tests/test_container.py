@@ -331,6 +331,27 @@ class TestCreateContainerPodman:
     @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_runtime")
+    def test_pm_host_home_exported(self, mock_runtime_cmd, mock_rm,
+                                    mock_exists, mock_get_runtime,
+                                    _mock_running):
+        """create_container exports PM_HOST_HOME=<host home> so hook_install
+        inside the container writes the host path into the bind-mounted
+        settings.json instead of /home/pm/."""
+        mock_runtime_cmd.return_value = MagicMock(stdout="id\n", returncode=0)
+        config = ContainerConfig()
+
+        with patch.object(Path, "is_dir", return_value=False):
+            create_container(name="test", config=config, workdir=Path("/w"))
+
+        run_call = mock_runtime_cmd.call_args_list[0]
+        args = list(run_call[0])
+        host_home = str(Path.home())
+        assert f"PM_HOST_HOME={host_home}" in args
+
+    @patch("pm_core.container._get_runtime", return_value="docker")
+    @patch("pm_core.container.image_exists", return_value=True)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
     def test_docker_uses_useradd(self, mock_runtime_cmd, mock_rm,
                                   mock_exists, mock_get_runtime,
                                   _mock_running):
