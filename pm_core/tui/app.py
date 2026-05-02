@@ -169,6 +169,10 @@ class ProjectManagerApp(App):
         cmd_bar = self.query_one("#command-bar", CommandBar)
         if cmd_bar.has_focus:
             return
+        # When a modal/screen is on top of the default screen, let it handle
+        # its own keys — App-level prefix keys (y/w/z) must not swallow them.
+        if len(self.screen_stack) > 1:
+            return
         # Buffer keystrokes between / press and command bar gaining focus
         if self._command_pending:
             if event.key == "escape":
