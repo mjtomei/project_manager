@@ -1091,6 +1091,14 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
                 except OSError:
                     ch = ""
                 if ch in ("q", "Q", "\x1b"):  # Esc
+                    # Tell the TUI to skip its window-switch for this
+                    # action — the user explicitly dismissed; don't
+                    # steal focus when the launch eventually completes.
+                    try:
+                        from pm_core import runtime_state as _rs
+                        _rs.request_suppress_switch(pr_id, action)
+                    except Exception:
+                        pass
                     if old_attrs is not None:
                         try:
                             termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)

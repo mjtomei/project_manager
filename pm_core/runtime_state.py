@@ -162,6 +162,31 @@ def clear_action(pr_id: str, action: str) -> None:
     set_action_state(pr_id, action, None)
 
 
+def request_suppress_switch(pr_id: str, action: str) -> None:
+    """Mark *(pr_id, action)*'s pending TUI window-switch as cancelled.
+
+    Used when the user dismisses the popup spinner with q/Esc — the
+    queued command continues to run but the TUI should not steal focus
+    to the action's window.  Writing only the flag (state=None, extras
+    set) leaves any other recorded fields alone.
+    """
+    set_action_state(pr_id, action, None, suppress_switch=True)
+
+
+def consume_suppress_switch(pr_id: str, action: str) -> bool:
+    """Read and atomically clear the suppress-switch flag.
+
+    Returns True when the flag was set (and is now cleared); the
+    caller should skip its window-switch.  Returns False when no flag
+    was present, in which case the caller proceeds normally.
+    """
+    entry = get_action_state(pr_id, action)
+    if not entry.get("suppress_switch"):
+        return False
+    set_action_state(pr_id, action, None, suppress_switch=None)
+    return True
+
+
 def derive_action_status(pr_id: str, action: str) -> dict:
     """Combine the persisted entry with the latest hook event.
 

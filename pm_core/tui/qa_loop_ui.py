@@ -73,15 +73,23 @@ def focus_or_start_qa(app, pr_id: str) -> None:
         app.log_message(f"PR not found: {pr_id}")
         return
 
-    # If the main QA window already exists, just focus it
+    # If the main QA window already exists, just focus it.  Honor a
+    # popup-spinner-dismissed suppress_switch flag so q/Esc in the
+    # picker doesn't have its qa run still steal focus.
     from pm_core import tmux as tmux_mod
+    from pm_core import runtime_state as _rs
+    suppress = _rs.consume_suppress_switch(pr_id, "qa")
     session = get_pm_session()
     if session:
         window_name = _compute_qa_window_name(pr)
         win = tmux_mod.find_window_by_name(session, window_name)
         if win:
-            tmux_mod.select_window(session, window_name)
-            app.log_message(f"Focused QA window for {pr_id}")
+            if not suppress:
+                tmux_mod.select_window(session, window_name)
+                app.log_message(f"Focused QA window for {pr_id}")
+            else:
+                app.log_message(
+                    f"QA window for {pr_id} ready (focus suppressed)")
             return
 
     # No existing window — start a new QA session

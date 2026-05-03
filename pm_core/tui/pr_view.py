@@ -582,7 +582,11 @@ def handle_command_submitted(app, cmd: str) -> None:
                 # may not be there yet on the first start; that's fine —
                 # select_window is a no-op when the window is missing
                 # and the user can rerun once iteration 1 spawns it.
-                if pr and app._session_name:
+                # Honor a popup-spinner-dismissed suppress_switch flag.
+                from pm_core import runtime_state as _rs
+                if (pr and app._session_name
+                        and not _rs.consume_suppress_switch(pr["id"],
+                                                            "review-loop")):
                     from pm_core.cli.helpers import _pr_display_id
                     from pm_core import tmux as tmux_mod
                     win_name = f"review-{_pr_display_id(pr)}"
