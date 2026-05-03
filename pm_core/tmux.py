@@ -395,15 +395,135 @@ def find_window_by_name(session: str, name: str) -> dict | None:
 
 
 def select_window(session: str, window: str) -> bool:
-    """Select (switch to) a window by index or name. Returns True on success.
+    """Refocus *window* and bring along all sessions co-viewing it.
 
-    Targets the current grouped session so only the caller's terminal switches.
+    Thin wrapper around :func:`focus_window` for legacy call sites. New code
+    should call ``focus_window`` directly so an originating session and a
+    pre-captured co-viewer list can be threaded through.
     """
-    target = current_or_base_session(session)
-    result = _run(
-        _tmux_cmd("select-window", "-t", f"{target}:{window}"),
+    return focus_window(session, window)
+
+
+def focus_window(
+    base: str,
+    window: str,
+    origin_session: str | None = None,
+    co_viewers: list[str] | None = None,
+) -> bool:
+    """Switch *window* into view for the originating session and co-viewers.
+
+    Resolves the target window inside *base* (a name, index, or ``@id``),
+    then identifies which sessions in the group are currently watching the
+    same window as *origin_session* and switches all of them together. This
+    replaces the older split between ``select_window`` (one session) and
+    ``switch_sessions_to_window`` (a pre-captured list).
+
+    Parameters
+    ----------
+    base:
+        The base pm session (e.g. ``pm-foo-c5a1006b``). All grouped sessions
+        considered for co-viewer detection must belong to this group.
+    window:
+        Window id (``@N``), numeric index, or window name.
+    origin_session:
+        The session that initiated the refocus. Captured at command-launch
+        time so async flows refocus the correct user instead of whoever the
+        TUI happens to be focused on at the moment of the call. Defaults to
+        ``$PM_ORIGIN_SESSION`` (set by the TUI when spawning subprocesses),
+        then falls back to :func:`current_or_base_session` for legacy calls.
+    co_viewers:
+        Pre-captured list of session names. When provided, skips the
+        co-viewer lookup — used by review/watcher/qa flows that snapshot the
+        old window's viewers *before* killing it. Must include the origin
+        session if it should be switched.
+
+    Coordination note: pr-291e891 introduces a richer action-context
+    structure for TUI operations. When that lands, the env-var transport
+    here can be replaced by passing the action context explicitly.
+    """
+    window = str(window)
+    win_id, win_index = _resolve_window_target(base, window)
+    if not win_index:
+        _log.warning("focus_window: window %r not found in %s", window, base)
+        return False
+
+    if co_viewers is None:
+        if origin_session is None:
+            origin_session = os.environ.get("PM_ORIGIN_SESSION") or None
+        if origin_session is None:
+            origin_session = current_or_base_session(base)
+
+        # Find the window the origin session is currently viewing, then all
+        # sessions in the group viewing the same window.
+        cur_id = _current_window_id(origin_session)
+        if cur_id:
+            sessions = sessions_on_window(base, cur_id)
+            if origin_session not in sessions:
+                sessions.append(origin_session)
+        else:
+            sessions = [origin_session]
+    else:
+        sessions = list(co_viewers)
+
+    _log.info("focus_window: base=%s window=%s origin=%s sessions=%s",
+               base, window, origin_session, sessions)
+    if not sessions:
+        return False
+
+    client_map = _list_clients_by_session()
+    any_ok = False
+    for sess in sessions:
+        sel = _run(_tmux_cmd("select-window", "-t", f"{sess}:{win_index}"))
+        if sel.returncode == 0:
+            any_ok = True
+        client_tty = client_map.get(sess)
+        if client_tty:
+            _run(_tmux_cmd("switch-client", "-t", sess, "-c", client_tty))
+    return any_ok
+
+
+def _resolve_window_target(base: str, window: str) -> tuple[str, str]:
+    """Resolve *window* (name, index, or @id) into (id, index-or-id-token).
+
+    Returns ("", "") if the window cannot be found. The second element is a
+    token suitable for ``select-window -t base:<token>`` — id, numeric
+    index, or name; if a name was passed we resolve to its index so each
+    co-viewing session targets the same window even if their MRU differs.
+    """
+    if window.startswith("@"):
+        return window, window
+    if window.isdigit():
+        return window, window
+    win = find_window_by_name(base, window)
+    if not win:
+        return "", ""
+    return win["id"], win["index"]
+
+
+def _current_window_id(session: str) -> str:
+    """Return the active window id for *session*, or "" on error."""
+    r = _run(
+        _tmux_cmd("display-message", "-t", session, "-p", "#{window_id}"),
+        text=True,
     )
-    return result.returncode == 0
+    if r.returncode != 0:
+        return ""
+    return r.stdout.strip()
+
+
+def _list_clients_by_session() -> dict[str, str]:
+    """Return ``{session_name: client_tty}`` for all attached clients."""
+    r = _run(
+        _tmux_cmd("list-clients", "-F", "#{session_name} #{client_tty}"),
+        text=True,
+    )
+    out: dict[str, str] = {}
+    if r.returncode == 0:
+        for line in r.stdout.strip().splitlines():
+            parts = line.split(None, 1)
+            if len(parts) == 2:
+                out[parts[0]] = parts[1]
+    return out
 
 
 def refresh_client(session: str, window: str = "") -> None:
@@ -620,54 +740,15 @@ def sessions_on_window(base: str, window_id: str) -> list[str]:
 
 
 def switch_sessions_to_window(sessions: list[str], session: str, window_name: str) -> None:
-    """Switch the given sessions to the named window.
+    """Switch *sessions* to *window_name* in *session*'s group.
 
-    Used after killing and recreating a window (review, watcher, etc.)
-    to move sessions that were watching the old window to the new one.
-
-    ``select-window`` alone does NOT update tmux's client tracking.
-    ``switch-client`` to the same session is a visible no-op but
-    triggers tmux to recalculate the window size for the correct display.
+    Thin wrapper around :func:`focus_window` for legacy call sites that
+    have already snapshotted the co-viewer list (e.g. before killing and
+    recreating a window).
     """
-    _log.info("switch_sessions_to_window: sessions=%s session=%s window_name=%s",
-               sessions, session, window_name)
     if not sessions:
-        _log.info("switch_sessions_to_window: no sessions, returning")
         return
-    win = find_window_by_name(session, window_name)
-    if not win:
-        _log.warning("switch_sessions_to_window: window '%s' not found!", window_name)
-        return
-    _log.info("switch_sessions_to_window: found window %s (index=%s)", win["id"], win["index"])
-
-    # Map session names → client TTYs for switch-client.
-    client_map: dict[str, str] = {}
-    r = _run(
-        _tmux_cmd("list-clients", "-F", "#{session_name} #{client_tty}"),
-        text=True,
-    )
-    if r.returncode == 0:
-        for line in r.stdout.strip().splitlines():
-            parts = line.split(None, 1)
-            if len(parts) == 2:
-                client_map[parts[0]] = parts[1]
-    _log.info("switch_sessions_to_window: client_map=%s", client_map)
-
-    for sess_name in sessions:
-        sel_r = _run(
-            _tmux_cmd("select-window", "-t", f"{sess_name}:{win['index']}"),
-        )
-        _log.info("switch_sessions_to_window: select-window -t %s:%s → rc=%d",
-                   sess_name, win["index"], sel_r.returncode)
-        client_tty = client_map.get(sess_name)
-        if client_tty:
-            sw_r = _run(
-                _tmux_cmd("switch-client", "-t", sess_name, "-c", client_tty),
-            )
-            _log.info("switch_sessions_to_window: switch-client -t %s -c %s → rc=%d",
-                       sess_name, client_tty, sw_r.returncode)
-        else:
-            _log.warning("switch_sessions_to_window: no client_tty for %s, skipping switch-client", sess_name)
+    focus_window(session, window_name, co_viewers=sessions)
 
 
 def set_environment(session: str, key: str, value: str, socket_path: str | None = None) -> None:

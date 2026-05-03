@@ -571,7 +571,7 @@ def _focus_plans_window(app) -> None:
     try:
         session = tmux_mod.get_session_name()
         if session:
-            tmux_mod.select_window(session, PLANS_WINDOW_NAME)
+            tmux_mod.focus_window(session, PLANS_WINDOW_NAME, origin_session=session)
     except Exception:
         _log.exception("_focus_plans_window failed")
 

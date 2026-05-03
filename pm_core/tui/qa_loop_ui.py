@@ -80,7 +80,7 @@ def focus_or_start_qa(app, pr_id: str) -> None:
         window_name = _compute_qa_window_name(pr)
         win = tmux_mod.find_window_by_name(session, window_name)
         if win:
-            tmux_mod.select_window(session, window_name)
+            tmux_mod.focus_window(session, window_name, origin_session=session)
             app.log_message(f"Focused QA window for {pr_id}")
             return
 

@@ -830,7 +830,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                     impl_workdir = pr_entry.get("workdir") or workdir
                     if impl_workdir:
                         _add_companion_pane(pm_session, existing, impl_workdir, "impl")
-                    tmux_mod.select_window(pm_session, existing["id"])
+                    tmux_mod.focus_window(pm_session, existing["id"])
                     click.echo(f"Switched to existing window '{window_name}' (session: {pm_session})")
                     return
                 elif background:
@@ -838,7 +838,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                     click.echo(f"Window '{window_name}' already exists (background mode, no focus change)")
                     return
                 else:
-                    tmux_mod.select_window(pm_session, existing["id"])
+                    tmux_mod.focus_window(pm_session, existing["id"])
                     click.echo(f"Switched to existing window '{window_name}' (session: {pm_session})")
                     return
 
@@ -1167,7 +1167,7 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
             tmux_mod.kill_window(pm_session, existing["id"])
             click.echo(f"Killed existing review window '{window_name}'")
         else:
-            tmux_mod.select_window(pm_session, existing["id"])
+            tmux_mod.focus_window(pm_session, existing["id"])
             click.echo(f"Switched to existing review window '{window_name}'")
             return
 
@@ -1308,8 +1308,8 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         # Switch ALL grouped sessions that were watching the old review
         # window to the new one.
         if sessions_on_review:
-            tmux_mod.switch_sessions_to_window(
-                sessions_on_review, pm_session, window_name)
+            tmux_mod.focus_window(
+                pm_session, window_name, co_viewers=sessions_on_review)
 
         # Rebalance AFTER session switches so get_reliable_window_size()
         # sees the correct dimensions.
@@ -1516,7 +1516,7 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
         if background:
             click.echo(f"Merge window '{window_name}' already exists (background mode, no-op)")
             return
-        tmux_mod.select_window(pm_session, existing["id"])
+        tmux_mod.focus_window(pm_session, existing["id"])
         click.echo(f"Switched to existing merge window '{window_name}'")
         return
 

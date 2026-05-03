@@ -164,7 +164,7 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
         if tmux_mod.session_exists(pm_session):
             existing = tmux_mod.find_window_by_name(pm_session, window_name)
             if existing:
-                tmux_mod.select_window(pm_session, existing["index"])
+                tmux_mod.focus_window(pm_session, existing["index"])
                 click.echo(f"Switched to existing window '{window_name}'")
                 return
 
