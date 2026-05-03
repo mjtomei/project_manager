@@ -968,7 +968,7 @@ def _build_picker_lines(
 
     lines: list[tuple[str, str, str]] = []
     title = pr.get("title", "")
-    max_title = 30
+    max_title = 40
     short_title = (title[:max_title - 1] + "…") if len(title) > max_title else title
 
     lines.append((f"  {display_id}  ({status})  {short_title}", "", display_id))
