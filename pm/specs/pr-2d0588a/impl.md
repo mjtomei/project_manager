@@ -95,7 +95,7 @@ The spinner uses `--height=100%` on fzf so the picker contents stay visible afte
 - Phase indicator (`●`) is computed from `_current_window_phase(window_name)` (not the PR's status), so it reflects where the user *is* — sitting in the impl window of an `in_review` PR highlights `start`.
 - `q`/`Esc` inside the chord prompt returns to the fzf picker (so dismissing a chord doesn't dismiss the popup); `q`/`Esc` in fzf itself dismisses the popup. `popup_picker_cmd` ends with an explicit `raise SystemExit(0)` after dispatching so `display-popup -E` tears the overlay down promptly after the spinner switches windows.
 - Picker shortcut for `qa` is `t` to mirror the TUI's `t` binding (was previously `a`).
-- fzf input is fully suppressed: `--no-input` on fzf 0.49+ (detected via `_fzf_supports_no_input`) and a per-key `--bind a:ignore,b:ignore,...` over every alphanumeric not in `--expect` regardless of fzf version, so unsupported keystrokes (`j`, `k`, etc.) never echo into the popup.
+- fzf input is fully suppressed: `--no-input` on fzf 0.59+ (detected via `_fzf_supports_no_input`) and a per-key `--bind a:ignore,b:ignore,...` over every alphanumeric not in `--expect` regardless of fzf version, so unsupported keystrokes (`j`, `k`, etc.) never echo into the popup.
 
 ### R8: zz d / z d Always Start Fresh
 

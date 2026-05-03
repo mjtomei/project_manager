@@ -1020,7 +1020,7 @@ def _build_picker_lines(
 
 
 def _fzf_supports_no_input() -> bool:
-    """Whether the installed fzf accepts ``--no-input`` (fzf 0.49+).
+    """Whether the installed fzf accepts ``--no-input`` (fzf 0.59+).
 
     Cached on the module so we don't fork a subprocess every time the
     picker re-launches fzf during chord-state transitions.
@@ -1033,13 +1033,13 @@ def _fzf_supports_no_input() -> bool:
             ["fzf", "--version"], capture_output=True, text=True,
             timeout=2,
         ).stdout
-        # fzf --version prints e.g. "0.55.0 (...)".  Compare numerically
+        # fzf --version prints e.g. "0.59.0 (...)".  Compare numerically
         # against the (major, minor) tuple where --no-input landed.
         version = out.split()[0] if out.split() else ""
         parts = version.split(".")
         major = int(parts[0]) if parts and parts[0].isdigit() else 0
         minor = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
-        supported = (major, minor) >= (0, 49)
+        supported = (major, minor) >= (0, 59)
     except (OSError, ValueError, subprocess.TimeoutExpired):
         supported = False
     _fzf_supports_no_input._cached = supported  # type: ignore[attr-defined]
@@ -1390,7 +1390,7 @@ def popup_picker_cmd(session: str, window_name: str):
         )
         chord_hint = "z d/t: fresh   zz d/t: loop"
 
-        # fzf 0.49+ supports --no-input which hides the entire input
+        # fzf 0.59+ supports --no-input which hides the entire input
         # box, so unrecognized keystrokes don't echo anywhere in the
         # popup.  Detect support up-front so we can fall back to the
         # older --disabled + --prompt= combo on older versions (which
