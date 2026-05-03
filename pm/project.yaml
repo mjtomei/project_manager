@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-f8abc94
+  active_pr: pr-6bf587b
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -11327,6 +11327,84 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-02T22:38:22.256223+00:00'
   updated_at: '2026-05-02T22:38:22.256223+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-6bf587b
+  plan: bugs
+  title: 'Bug: sync kills merge propagation window (variants 1/2) when PR detected
+    as merged on GitHub mid-flow'
+  branch: pm/pr-6bf587b-bug-sync-kills-merge-propagation-window-variants-1
+  status: pending
+  depends_on: []
+  description: 'Race between PR sync detecting a merge on GitHub and the local post-merge
+    propagation flow leaves the local repo out of sync with origin.
+
+
+    Repro / observed behavior:
+
+    1. User runs ''pm pr merge <pr>'' locally.
+
+    2. Variant 3 of generate_merge_prompt launches in tmux window ''merge-#<num>''
+    to resolve a conflict between the PR branch and base.
+
+    3. Claude resolves the conflict, pushes to origin (or ''gh pr merge'' finalizes
+    the merge remotely), emits MERGED verdict.
+
+    4. TUI verdict scanner (pm_core/tui/review_loop_ui.py around line 591) detects
+    MERGED, kills the variant-3 window, and re-attempts the merge command with --propagation-only
+    --resolve-window. Propagation fails because the local checkout needs to pull base
+    from origin (vanilla/github backend) or from the workdir (local backend).
+
+    5. Variant 1 (pull-from-origin) or variant 2 (pull-from-workdir) launches in a
+    NEW window with the SAME name ''merge-#<num>'' — kill_pr_windows doesn''t differentiate.
+
+    6. Background sync (5-minute timer in tui/sync.py:do_normal_sync, or any manual
+    refresh) runs pr_sync.sync_from_github, sees the PR merged on GitHub, calls _kill_merged_pr_windows.
+
+    7. _kill_merged_pr_windows -> kill_pr_windows (cli/helpers.py:147) kills any window
+    matching ''merge-#<num>'' by literal name — INCLUDING the in-flight variant 1/2
+    propagation window.
+
+    8. The variant 1/2 Claude session is killed mid-resolution. Local repo never gets
+    pulled. master falls behind origin silently.
+
+
+    This is what happened to PR 180 in the current session — local master ended up
+    10 commits behind origin/master with no obvious failure signal because the propagation
+    window was killed before it could finish pulling.
+
+
+    Root cause: kill_pr_windows (cli/helpers.py:156-157) targets the window by literal
+    name and the propagation-phase window reuses the same name as the variant-3 window.
+    Sync code has no awareness that a propagation phase is in flight.
+
+
+    Fix (preferred — option B from analysis): make _kill_merged_pr_windows (pm_core/tui/sync.py:22)
+    check whether the PR is in app._merge_propagation_phase (already a tracked set
+    in the TUI app) and skip killing the merge window for those PRs. Also worth checking
+    whether the merge window''s claude pane is currently active before killing — defense
+    in depth. The propagation phase is itself short-lived, so the skip only delays
+    cleanup; the variant 1/2 window kills itself when it emits its own MERGED verdict
+    via the existing review_loop_ui flow at line 611-613.
+
+
+    Alternative fix (option A — cheaper): rename the propagation-phase window to ''merge-#<num>-prop''
+    so kill_pr_windows naturally misses it. Cleaner but requires changes in _launch_merge_window
+    and probably the kill set in helpers.py to recognize the new naming.
+
+
+    Tests: simulate the race — start a propagation-phase window (PR in _merge_propagation_phase
+    set), call _kill_merged_pr_windows for that PR, assert the window is not killed;
+    assert it IS killed once the PR leaves the propagation phase; integration test
+    that the full merge flow (variant 3 -> propagation -> variant 1/2 -> MERGED) completes
+    successfully even when sync runs at any point during the flow.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-03T00:16:07.755219+00:00'
+  updated_at: '2026-05-03T00:16:07.755219+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
