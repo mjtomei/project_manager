@@ -57,6 +57,40 @@ Also accept `edit [PR_ID]`: selects the PR (when given) and invokes `pane_ops.ed
 
 Also accept `pr qa [fresh|loop] [PR_ID]`: parses an optional `fresh` or `loop` modifier and dispatches to `qa_loop_ui.fresh_start_qa` / `start_or_stop_qa_loop` / `focus_or_start_qa` accordingly. Mirrors the TUI's `t` / `z t` / `zz t` chord variants and powers the picker's `z a` / `zz a` chord.
 
+### R4: Cross-Process Runtime State (`pm_core/runtime_state.py`)
+
+A flock-protected JSON file per PR at `~/.pm/runtime/{pr_id}.json` records per-action live state so external processes (popup picker, post-enqueue spinner) can observe what the TUI is doing. Schema described in module docstring; valid `state` values are `queued`/`launching`/`running`/`idle`/`waiting`/`done`/`failed`. There is no explicit "gone" state — pane disappearance and stale-entry sweeps clear entries entirely; the live tmux window list is the authoritative liveness signal.
+
+Mirrors:
+- `review_loop_ui` writes on loop start, every iteration (with `iteration` and `verdict`), and completion.
+- `PaneIdleTracker.register/unregister` and the pane-gone path mirror impl panes (key=pr_id → action `start`) and QA scenarios (key starts with `qa-` → action `qa`). The pane-gone path clears the entry rather than recording a state.
+- `pr_view`'s `edit` handler writes a brief `done` so the popup spinner exits without polling for a window the edit pane will never create.
+
+`derive_action_status(pr_id, action)` cross-references the latest hook event (`hook_events.read_event(session_id)`) so callers see fresh idle/waiting transitions without requiring the TUI to record every hook event.
+
+### R5: Stale-Entry Sweep on TUI Mount
+
+`runtime_state.sweep_stale_states(reason)` is called from `app.on_mount` alongside the SIGUSR1/SIGUSR2 handler install. It deletes any action entry still in an in-flight state (`queued`/`launching`/`running`/`idle`/`waiting`) — those belong to a previous TUI process and aren't live anymore. Terminal states (`done` / `failed`) are preserved so post-mortem info like the last review-loop verdict survives restart.
+
+### R6: Post-Enqueue Spinner With Fresh-Window Awareness
+
+After enqueueing a `tui:` command, the popup runs `_wait_for_tui_command(session, tui_cmd)` which:
+
+- Polls `runtime_state` and `tmux list-windows` until the action's target window appears.
+- For "fresh" actions (`review-loop start`, `pr qa fresh`, `pr qa loop` — every iteration of these recreates the window), `_parse_tui_action` returns `fresh=True`. The spinner snapshots the original window-id at the start and waits for either a different id under the same name or a disappearance-then-reappearance, so a stale window snapshot doesn't trigger an immediate switch to the about-to-be-killed window. Spinner label switches to `rebuilding window…` during that wait.
+- Animates a Braille spinner; prints a header line so the launch state is visible behind the picker.
+- Polls `stdin` in cbreak mode so `q`/`Q`/`Esc` dismiss the popup immediately. Dismissal also calls `runtime_state.request_suppress_switch(pr_id, action)`; the spinner-driven `select_window` and `qa_loop_ui.focus_or_start_qa` both call `consume_suppress_switch` and skip the focus-steal in that case.
+- On window appearance, the popup itself calls `tmux_mod.select_window(session, target_window)` (unless suppressed). This keeps the switch consistent with `pr review`'s direct-CLI switch and avoids the previous race in which `pr_view` switched before iteration 1 had created the window.
+- Skipped entirely for `edit` (no window to wait for; current-window pane).
+
+The spinner uses `--height=100%` on fzf so the picker contents stay visible after fzf exits and the spinner renders below them in the same popup pane.
+
+### R7: Picker / Spinner UX
+
+- Only `start`/`review`/`qa`/`merge` get rows in the picker (`_LIST_ACTIONS`); `edit` and `review-loop` are shortcut/chord-only. `review-loop`'s `[loop iN]` status badge is folded into the `review` row via `_SHORTCUT_FOLD_INTO`.
+- Phase indicator (`●`) is computed from `_current_window_phase(window_name)` (not the PR's status), so it reflects where the user *is* — sitting in the impl window of an `in_review` PR highlights `start`.
+- `q`/`Esc` inside the chord prompt returns to the fzf picker (so dismissing a chord doesn't dismiss the popup); `q`/`Esc` in fzf itself dismisses the popup. `popup_picker_cmd` ends with an explicit `raise SystemExit(0)` after dispatching so `display-popup -E` tears the overlay down promptly after the spinner switches windows.
+
 ## Implicit Requirements
 
 ### IR1: Picker Uses pm CLI Internally

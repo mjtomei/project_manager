@@ -8242,7 +8242,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/158
   gh_pr_number: 158
   created_at: '2026-04-07T12:46:56.964240+00:00'
-  updated_at: '2026-05-03T14:50:54.726691+00:00'
+  updated_at: '2026-05-03T15:07:59.447094+00:00'
   started_at: '2026-04-07T12:49:34.016669+00:00'
   reviewed_at: '2026-04-07T22:35:47.013280+00:00'
   merged_at: null
@@ -8336,6 +8336,49 @@ prs:
       pr qa for the popup are stale relative to this design.'
     created_at: '2026-05-03T14:50:54Z'
     last_edited: '2026-05-03T14:50:54Z'
+  - id: note-b1b3fa7
+    text: 'Fix: fold loop iterated _ALL_ACTIONS (which omits review-loop), so the
+      [loop iN] badge was never being folded onto the review row. Iterate _SHORTCUT_FOLD_INTO
+      directly so any current/future shortcut-only action is correctly folded.'
+    created_at: '2026-05-03T14:54:36Z'
+    last_edited: '2026-05-03T14:54:36Z'
+  - id: note-906acbe
+    text: 'QA: z/zz chord prefixes (mirrors TUI). ''d'' plain review, ''z d'' fresh
+      review, ''zz d'' review-loop start, ''a'' plain qa, ''z a'' fresh qa, ''zz a''
+      qa-loop start. Verify each chord routes correctly. q/Esc inside the chord prompt
+      should return to fzf picker (not dismiss popup); q/Esc in fzf itself dismisses.'
+    created_at: '2026-05-03T15:07:55Z'
+    last_edited: '2026-05-03T15:07:55Z'
+  - id: note-de1f65f
+    text: 'QA: fresh-window-aware spinner. When a fresh/loop action is invoked AND
+      the target window already exists (e.g. running review-loop again with stale
+      review window), spinner should NOT switch to the existing window immediately.
+      Should show ''rebuilding window…'' until the window is killed and a new one
+      with the same name appears (different tmux window-id), then switch.'
+    created_at: '2026-05-03T15:07:56Z'
+    last_edited: '2026-05-03T15:07:56Z'
+  - id: note-e774a16
+    text: 'QA: TUI restart sweeps stale runtime_state. Trigger a review-loop, observe
+      [loop iN] badge in picker. Restart the TUI (Ctrl+R or kill+restart). Re-open
+      picker — the loop badge should be gone (entry cleared) since the loop didn''t
+      survive the restart. Terminal states like [done VERDICT] should survive.'
+    created_at: '2026-05-03T15:07:57Z'
+    last_edited: '2026-05-03T15:07:57Z'
+  - id: note-d397fa7
+    text: 'QA: picker stays visible behind spinner. fzf is launched with --height=100%
+      so the picker contents remain on screen after fzf exits, and the spinner renders
+      below them in the same popup pane. Verify continuous visual flow from picker
+      selection → header (── starting fresh: ACTION for PR ──) → spinner → ✓ message
+      → popup closes.'
+    created_at: '2026-05-03T15:07:58Z'
+    last_edited: '2026-05-03T15:07:58Z'
+  - id: note-667d9e1
+    text: 'QA: review-loop and edit are shortcut-only (no list rows). The picker should
+      show only start/review/qa/merge as rows. review-loop''s iteration status ([loop
+      iN]) is folded onto the review row. Verify shortcuts (e for edit, zz d for review-loop)
+      still work.'
+    created_at: '2026-05-03T15:07:59Z'
+    last_edited: '2026-05-03T15:07:59Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d0588a-tmux-popup-pr-switcher-and-prefix-ke-f6381eb7
 - id: pr-1735d44
   plan: bugs
