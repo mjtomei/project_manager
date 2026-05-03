@@ -1004,11 +1004,13 @@ def popup_picker_cmd(session: str, window_name: str):
 
     # Shortcut keys: press a key to immediately run an action.
     # Ordered to match _ALL_ACTIONS display order.
+    # Note: q is reserved for quitting the picker (mapped to fzf abort
+    # below), so qa uses 'a'.
     _SHORTCUT_KEYS = {
         "s": "start",
         "d": "review",
         "l": "review-loop",
-        "q": "qa",
+        "a": "qa",
         "g": "merge",
     }
     # Build label → command map from the action lines
@@ -1024,16 +1026,21 @@ def popup_picker_cmd(session: str, window_name: str):
         shortcut_hint = "  ".join(
             f"{key}={label}" for key, label in _SHORTCUT_KEYS.items()
         )
-        header = f"PR Actions — {current_pr}  (Esc to cancel)\n{shortcut_hint}"
+        header = (f"PR Actions — {current_pr}  "
+                  f"(q/Esc: quit  {shortcut_hint})")
         fzf_cmd = ["fzf", "--ansi", "--no-sort", "--reverse",
                    f"--header={header}",
                    "--no-info",
+                   "--bind=q:abort",
                    f"--expect={expect_keys}"]
 
+        # Don't capture stderr — let fzf render its UI to the popup tty.
+        # Capturing stdout via PIPE is fine because fzf opens /dev/tty
+        # for its display when stdout is not a tty.
         proc = subprocess.Popen(
             fzf_cmd,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, text=True,
+            text=True,
         )
         stdout, _ = proc.communicate(input="\n".join(fzf_input_lines))
 
