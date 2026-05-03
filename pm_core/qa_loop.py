@@ -2300,8 +2300,12 @@ def run_qa_sync(
             tmux_mod.switch_sessions_to_window(
                 sessions_on_qa, session, window_name)
         elif not existing_win:
-            # First-time creation — select the window so user sees it
-            tmux_mod.select_window(session, window_name)
+            # First-time creation — select the window so user sees it,
+            # unless the popup spinner was dismissed (q/Esc) and the
+            # user explicitly asked to keep focus where they were.
+            from pm_core import runtime_state as _rs
+            if not _rs.consume_suppress_switch(state.pr_id, "qa"):
+                tmux_mod.select_window(session, window_name)
 
         # Wait for the planner to finish (poll for plan output)
         planner_pane = find_claude_pane(session, window_name)

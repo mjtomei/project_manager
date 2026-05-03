@@ -75,15 +75,18 @@ def focus_or_start_qa(app, pr_id: str) -> None:
 
     # If the main QA window already exists, just focus it.  Honor a
     # popup-spinner-dismissed suppress_switch flag so q/Esc in the
-    # picker doesn't have its qa run still steal focus.
+    # picker doesn't have its qa run still steal focus.  When the
+    # window doesn't exist yet, leave the flag in place — qa_loop's
+    # first-time-creation path consumes it before its own select_window
+    # call so the suppression survives the start → run path.
     from pm_core import tmux as tmux_mod
     from pm_core import runtime_state as _rs
-    suppress = _rs.consume_suppress_switch(pr_id, "qa")
     session = get_pm_session()
     if session:
         window_name = _compute_qa_window_name(pr)
         win = tmux_mod.find_window_by_name(session, window_name)
         if win:
+            suppress = _rs.consume_suppress_switch(pr_id, "qa")
             if not suppress:
                 tmux_mod.select_window(session, window_name)
                 app.log_message(f"Focused QA window for {pr_id}")
@@ -92,7 +95,8 @@ def focus_or_start_qa(app, pr_id: str) -> None:
                     f"QA window for {pr_id} ready (focus suppressed)")
             return
 
-    # No existing window — start a new QA session
+    # No existing window — start a new QA session.  qa_loop will
+    # consume any suppress_switch flag at its window-creation step.
     start_qa(app, pr_id)
 
 
