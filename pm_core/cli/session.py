@@ -105,29 +105,32 @@ def _register_tmux_bindings(session_name: str) -> None:
             check=False)
 
     # Popup bindings: PR action picker (prefix+P) and pm command runner (prefix+M).
-    # Pass session/window via -e environment vars: tmux always expands
-    # format strings in -e values, but expansion of #{...} inside the
-    # shell-command argument is unreliable across tmux versions.
+    # Query tmux from inside the popup shell to resolve session/window —
+    # tmux's expansion of #{session_name} in display-popup arguments
+    # (both shell-command and -e values) is unreliable across versions,
+    # so we let the popup's shell call tmux itself.
     # Wrap in a shell that pauses on launch failure (e.g. pm not on PATH) so
     # the popup stays visible long enough to read the error instead of
     # vanishing instantly with display-popup -E.
-    _picker_inner = ('pm _popup-picker "$PM_POPUP_SESSION" "$PM_POPUP_WINDOW"'
-                     " || { echo; echo 'pm popup failed (exit '$?').';"
-                     " read -p 'Press Enter to close...'; }")
-    _cmd_inner = ('pm _popup-cmd "$PM_POPUP_SESSION"'
-                  " || { echo; echo 'pm popup failed (exit '$?').';"
-                  " read -p 'Press Enter to close...'; }")
+    _picker_inner = (
+        'S=$(tmux display-message -p "#{session_name}");'
+        ' W=$(tmux display-message -p "#{window_name}");'
+        ' pm _popup-picker "$S" "$W"'
+        " || { echo; echo 'pm popup failed (exit '$?').';"
+        " read -p 'Press Enter to close...'; }"
+    )
+    _cmd_inner = (
+        'S=$(tmux display-message -p "#{session_name}");'
+        ' pm _popup-cmd "$S"'
+        " || { echo; echo 'pm popup failed (exit '$?').';"
+        " read -p 'Press Enter to close...'; }"
+    )
     subprocess.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", "P",
-             "display-popup", "-E",
-             "-e", "PM_POPUP_SESSION=#{session_name}",
-             "-e", "PM_POPUP_WINDOW=#{window_name}",
-             "-w", "80", "-h", "80%",
+             "display-popup", "-E", "-w", "80", "-h", "80%",
              _picker_inner),
             check=False)
     subprocess.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", "M",
-             "display-popup", "-E",
-             "-e", "PM_POPUP_SESSION=#{session_name}",
-             "-w", "80", "-h", "50%",
+             "display-popup", "-E", "-w", "80", "-h", "50%",
              _cmd_inner),
             check=False)
 
