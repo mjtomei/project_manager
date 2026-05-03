@@ -98,10 +98,12 @@ class PaneIdleTracker:
                 transcript_path=str(transcript_path),
                 session_id=session_id,
             )
+        _runtime_mirror_register(key, pane_id, session_id)
 
     def unregister(self, key: str) -> None:
         with self._lock:
             self._states.pop(key, None)
+        _runtime_mirror_clear(key)
 
     # -- Polling (called from timer) --
 
@@ -123,6 +125,7 @@ class PaneIdleTracker:
                 if state and state.pane_id == pane_id:
                     state.gone = True
                     state.idle = False
+            _runtime_mirror_state(key, "gone")
             return False
 
         event = hook_events.read_event(session_id)
@@ -221,3 +224,64 @@ class PaneIdleTracker:
                 state.gone = False
                 state.idle_notified = False
                 state.last_hook_ts = time.time()
+
+
+# ---------------------------------------------------------------------------
+# runtime_state mirror
+# ---------------------------------------------------------------------------
+
+# Two key conventions in the codebase: a bare ``pr_id`` is the
+# implementation pane (the picker's ``start`` action), while
+# ``qa-<pr_id>(-sN)?`` denotes a QA scenario.  External readers (popup
+# picker, status spinner) want to know which PR/action a pane belongs
+# to so they can resolve idle/working via :func:`hook_events.read_event`.
+
+def _runtime_target(key: str) -> tuple[str, str] | None:
+    """Map a tracker key to (pr_id, action), or None when unknown."""
+    if key.startswith("qa-"):
+        rest = key[3:]
+        pr_part = rest.split("-s", 1)[0]
+        return pr_part, "qa"
+    if key.startswith("pr-") or key.startswith("#"):
+        return key, "start"
+    return None
+
+
+def _runtime_mirror_register(key: str, pane_id: str, session_id: str) -> None:
+    target = _runtime_target(key)
+    if not target:
+        return
+    pr_id, action = target
+    try:
+        from pm_core import runtime_state as _rs
+        _rs.set_action_state(pr_id, action, "running",
+                             pane_id=pane_id, session_id=session_id)
+    except Exception:
+        _log.debug("runtime_state mirror_register failed for %s", key,
+                   exc_info=True)
+
+
+def _runtime_mirror_clear(key: str) -> None:
+    target = _runtime_target(key)
+    if not target:
+        return
+    pr_id, action = target
+    try:
+        from pm_core import runtime_state as _rs
+        _rs.clear_action(pr_id, action)
+    except Exception:
+        _log.debug("runtime_state mirror_clear failed for %s", key,
+                   exc_info=True)
+
+
+def _runtime_mirror_state(key: str, state: str) -> None:
+    target = _runtime_target(key)
+    if not target:
+        return
+    pr_id, action = target
+    try:
+        from pm_core import runtime_state as _rs
+        _rs.set_action_state(pr_id, action, state)
+    except Exception:
+        _log.debug("runtime_state mirror_state failed for %s", key,
+                   exc_info=True)

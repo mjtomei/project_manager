@@ -860,6 +860,46 @@ def _current_window_phase(window_name: str) -> str | None:
     return "start"
 
 
+def _format_action_status(pr_id: str, action: str) -> str:
+    """Return a short status badge for an action, or '' when nothing useful.
+
+    Reads the persisted runtime state and cross-references the latest
+    hook event for the action's pane (when applicable) so the badge
+    reflects the same idle/waiting/working signals the TUI uses.
+    """
+    try:
+        from pm_core import runtime_state as _rs
+        entry = _rs.derive_action_status(pr_id, action)
+    except Exception:
+        return ""
+    if not entry:
+        return ""
+    state = entry.get("state")
+    if action == "review-loop":
+        if state == "running":
+            it = entry.get("iteration")
+            return f" [loop i{it}]" if it else " [loop]"
+        if state == "done":
+            it = entry.get("iteration")
+            v = entry.get("verdict")
+            return (f" [done i{it} {v}]" if it and v
+                    else f" [done {v}]" if v
+                    else " [done]")
+        if state == "failed":
+            return " [failed]"
+        return ""
+    # start / qa: hook-event-derived states from derive_action_status
+    if state == "idle":
+        return " [idle]"
+    if state == "waiting":
+        return " [wait]"
+    if state == "running":
+        return " [working]"
+    if state == "gone":
+        return " [gone]"
+    return ""
+
+
 def _build_picker_lines(
     prs: list[dict],
     current_pr_display: str | None,
@@ -927,9 +967,112 @@ def _build_picker_lines(
                 elif win_name in open_windows:
                     open_tag = " [open]"
 
-        lines.append((f"  {indicator} {label:<18s}{display_id}{open_tag}", cmd, display_id))
+        # Live status from the shared runtime-state file (loop iteration,
+        # idle/waiting derived from the latest hook event, etc.).
+        status_tag = _format_action_status(pr["id"], label)
+
+        lines.append((f"  {indicator} {label:<18s}{display_id}"
+                      f"{open_tag}{status_tag}", cmd, display_id))
 
     return lines
+
+
+def _parse_tui_action(tui_cmd: str) -> tuple[str | None, str | None]:
+    """Best-effort: extract (pr_id, picker_action) from a queued tui: cmd.
+
+    Used by the post-enqueue spinner to decide what to poll.  Falls
+    back to ``(None, None)`` for shapes we don't recognize, which
+    makes the spinner skip polling and exit immediately.
+    """
+    parts = shlex.split(tui_cmd) if tui_cmd else []
+    if not parts:
+        return None, None
+    if parts[0] == "review-loop":
+        # 'review-loop start <pr>' / 'review-loop stop <pr>' / 'review-loop <pr>'
+        rest = [t for t in parts[1:] if t not in ("start", "stop")]
+        return (rest[0] if rest else None), "review-loop"
+    if len(parts) >= 3 and parts[0] == "pr" and parts[1] == "qa":
+        return parts[2], "qa"
+    if parts[0] == "edit":
+        return (parts[1] if len(parts) >= 2 else None), "edit"
+    return None, None
+
+
+def _wait_for_tui_command(session: str, tui_cmd: str,
+                          timeout_s: float = 3.0,
+                          tick_s: float = 0.15) -> None:
+    """Show a spinner while a queued TUI command transitions states.
+
+    Polls the shared runtime-state file and the tmux window list until
+    the target window appears or the action's state moves out of
+    ``queued`` (e.g. into ``running``) — whichever comes first.
+    Always exits within ``timeout_s`` so the popup never feels stuck.
+    """
+    import time
+    pr_id, action = _parse_tui_action(tui_cmd)
+    if not pr_id or not action:
+        return
+    # Resolve display_id for the window-name pattern (preferred for
+    # 'start' which doesn't have a runtime-state record until the pane
+    # registers in the tracker).
+    try:
+        root = state_root()
+        data = store.load(root)
+        from pm_core.cli.helpers import _pr_display_id
+        display_id = None
+        for p in data.get("prs") or []:
+            if p.get("id") == pr_id:
+                display_id = _pr_display_id(p)
+                break
+    except Exception:
+        display_id = None
+    pattern = _ACTION_WINDOW_PATTERNS.get(action)
+    target_window = pattern.format(display_id=display_id) if (
+        pattern and display_id) else None
+
+    frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    deadline = time.time() + timeout_s
+    i = 0
+    last_state: str | None = None
+    try:
+        while time.time() < deadline:
+            from pm_core import runtime_state as _rs
+            entry = _rs.get_action_state(pr_id, action)
+            cur_state = entry.get("state") if entry else None
+            # Window-appearance check (covers 'start' which is the
+            # implementation pane and writes to runtime_state lazily).
+            window_open = False
+            if target_window:
+                try:
+                    open_names = {w["name"]
+                                  for w in tmux_mod.list_windows(session)}
+                except Exception:
+                    open_names = set()
+                if action == "qa":
+                    window_open = any(
+                        n == target_window
+                        or n.startswith(target_window + "-")
+                        for n in open_names)
+                else:
+                    window_open = target_window in open_names
+            if window_open or (cur_state and cur_state != "queued"
+                               and cur_state != last_state):
+                # Something happened — show the resolved label and exit.
+                label = (f"window {target_window} is open" if window_open
+                         else f"state: {cur_state}")
+                click.echo(f"\r✓ {action}: {label}                     ")
+                return
+            last_state = cur_state
+            spin = frames[i % len(frames)]
+            label = cur_state or "queued"
+            click.echo(f"\r{spin} {action}: {label}…   ", nl=False)
+            time.sleep(tick_s)
+            i += 1
+    except KeyboardInterrupt:
+        return
+    finally:
+        # Newline so subsequent output isn't on the spinner line.
+        click.echo("")
 
 
 def _run_picker_command(cmd: str, session: str) -> None:
@@ -950,6 +1093,11 @@ def _run_picker_command(cmd: str, session: str) -> None:
                 input("\nPress Enter to close...")
             except (EOFError, KeyboardInterrupt):
                 pass
+            return
+        # Brief progress display: poll runtime_state for the action to
+        # transition out of 'queued' / into 'running'.  Exits early on
+        # state transition or when the target window appears.
+        _wait_for_tui_command(base, tui_cmd)
     else:
         # Run pm command directly
         full_cmd = [sys.executable, "-m", "pm_core.wrapper"] + shlex.split(cmd)

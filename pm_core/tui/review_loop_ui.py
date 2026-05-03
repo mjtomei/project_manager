@@ -161,6 +161,13 @@ def _start_loop(app, pr_id: str, pr: dict | None,
     # Ensure the poll timer is running
     _ensure_poll_timer(app)
 
+    # Persist to the shared runtime state so external readers (popup
+    # picker, status spinner) can see the loop is active.
+    from pm_core import runtime_state as _rs
+    _rs.set_action_state(pr_id, "review-loop", "running",
+                         iteration=state.iteration,
+                         loop_id=state.loop_id)
+
     # Start the background loop
     start_review_loop_background(
         state=state,
@@ -197,12 +204,21 @@ def _on_iteration_from_thread(app, state: ReviewLoopState) -> None:
     """Called from the background thread after each iteration."""
     _log.info("review_loop_ui: iteration %d verdict=%s for %s",
               state.iteration, state.latest_verdict, state.pr_id)
+    from pm_core import runtime_state as _rs
+    _rs.set_action_state(state.pr_id, "review-loop", "running",
+                         iteration=state.iteration,
+                         loop_id=state.loop_id,
+                         verdict=state.latest_verdict)
 
 
 def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
     """Called from the background thread when the loop finishes."""
     _log.info("review_loop_ui: loop complete for %s — verdict=%s iterations=%d",
               state.pr_id, state.latest_verdict, state.iteration)
+    from pm_core import runtime_state as _rs
+    _rs.set_action_state(state.pr_id, "review-loop", "done",
+                         iteration=state.iteration,
+                         verdict=state.latest_verdict)
 
     # Finalize review transcript symlinks for this loop's iterations
     tdir = getattr(state, '_transcript_dir', None)
