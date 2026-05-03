@@ -537,10 +537,17 @@ PLANS_WINDOW_FALLBACK = "plans"
 
 
 def _plans_window_name(plan_id: str | None) -> str:
-    """Per-plan tmux window name so concurrent plan actions don't collide."""
-    if plan_id:
-        return f"plans-{plan_id}"
-    return PLANS_WINDOW_FALLBACK
+    """Per-plan tmux window name so concurrent plan actions don't collide.
+
+    All actions for the same plan share one window (different panes by role);
+    different plans get different windows. Strips the redundant ``plan-``
+    prefix that ``store.generate_plan_id`` adds, so a plan ``plan-a3f2b1c``
+    yields window ``plans-a3f2b1c`` rather than ``plans-plan-a3f2b1c``.
+    """
+    if not plan_id:
+        return PLANS_WINDOW_FALLBACK
+    short = plan_id[5:] if plan_id.startswith("plan-") else plan_id
+    return f"plans-{short}"
 
 
 def _ensure_plans_window(app, plan_id: str | None) -> str | None:

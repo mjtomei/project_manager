@@ -12,8 +12,8 @@ def _make_app():
     app = MagicMock()
     app._root = None
     app._data = {"plans": [
-        {"id": "plan-A", "file": "a.md"},
-        {"id": "plan-B", "file": "b.md"},
+        {"id": "plan-AAA", "file": "a.md"},
+        {"id": "plan-BBB", "file": "b.md"},
     ]}
     return app
 
@@ -47,20 +47,55 @@ def test_per_plan_review_actions_use_distinct_windows():
          patch.object(pane_ops, "launch_pane",
                       side_effect=lambda app, cmd, role, fresh=False, target_window=None:
                       launches.append((cmd, role, target_window))):
-        pane_ops.handle_plan_action(app, "review", "plan-A")
-        pane_ops.handle_plan_action(app, "review", "plan-B")
-        pane_ops.handle_plan_action(app, "review", "plan-A")  # reuse
+        pane_ops.handle_plan_action(app, "review", "plan-AAA")
+        pane_ops.handle_plan_action(app, "review", "plan-BBB")
+        pane_ops.handle_plan_action(app, "review", "plan-AAA")  # reuse
 
-    assert "plans-plan-A" in windows
-    assert "plans-plan-B" in windows
-    # only two distinct windows created (third call reuses plan-A's)
-    assert len([k for k in windows if k.startswith("plans-plan-")]) == 2
+    assert "plans-AAA" in windows
+    assert "plans-BBB" in windows
+    # only two distinct per-plan windows created (third call reuses AAA's)
+    plan_windows = [k for k in windows if k.startswith("plans-") and k != "plans-deps"]
+    assert sorted(plan_windows) == ["plans-AAA", "plans-BBB"]
     # All three launches targeted some window id
     assert len(launches) == 3
     a1, b, a2 = launches
-    assert a1[2] == "@plans-plan-A"
-    assert b[2] == "@plans-plan-B"
-    assert a2[2] == "@plans-plan-A"
+    assert a1[2] == "@plans-AAA"
+    assert b[2] == "@plans-BBB"
+    assert a2[2] == "@plans-AAA"
+
+
+def test_different_actions_same_plan_share_one_window():
+    """edit/breakdown/review on the same plan all land in one window
+    (as separate panes by role) — they're steps of one workflow."""
+    app = _make_app()
+    # Make the plan file exist so 'edit' actually launches.
+    import tempfile, pathlib
+    tmp = pathlib.Path(tempfile.mkdtemp())
+    (tmp / "a.md").write_text("# plan")
+    app._root = tmp
+    app._data = {"plans": [{"id": "plan-AAA", "file": "a.md"}]}
+
+    windows: dict = {}
+    find, new = _patch_tmux(windows)
+    launches = []
+
+    with patch.object(pane_ops.tmux_mod, "in_tmux", return_value=True), \
+         patch.object(pane_ops.tmux_mod, "get_session_name", return_value="sess"), \
+         patch.object(pane_ops.tmux_mod, "find_window_by_name", side_effect=find), \
+         patch.object(pane_ops.tmux_mod, "new_window_get_pane", side_effect=new), \
+         patch.object(pane_ops.tmux_mod, "select_window"), \
+         patch.object(pane_ops, "find_editor", return_value="vi"), \
+         patch.object(pane_ops, "launch_pane",
+                      side_effect=lambda app, cmd, role, fresh=False, target_window=None:
+                      launches.append((cmd, role, target_window))):
+        pane_ops.handle_plan_action(app, "edit", "plan-AAA")
+        pane_ops.handle_plan_action(app, "breakdown", "plan-AAA")
+        pane_ops.handle_plan_action(app, "review", "plan-AAA")
+
+    assert list(windows.keys()) == ["plans-AAA"]
+    assert all(target == "@plans-AAA" for _, _, target in launches)
+    roles = sorted(role for _, role, _ in launches)
+    assert roles == ["plan-breakdown", "plan-edit", "plan-review"]
 
 
 def test_deps_action_uses_cross_plan_window():
