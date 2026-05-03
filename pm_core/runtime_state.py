@@ -155,6 +155,11 @@ def set_action_state(pr_id: str, action: str, state: str | None,
                 f.seek(0)
                 f.truncate()
                 json.dump(data, f, indent=2, sort_keys=True)
+                # Flush Python's buffer to the kernel *before* releasing
+                # the lock so a reader that grabs LOCK_SH the moment we
+                # release sees the new bytes, not whatever was on disk
+                # from the previous write.
+                f.flush()
             finally:
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)
     except OSError as e:

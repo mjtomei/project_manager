@@ -52,7 +52,17 @@ def _get_selected_pr(app) -> tuple[str | None, dict | None]:
 # ---------------------------------------------------------------------------
 
 def stop_loop_or_fresh_done(app) -> None:
-    """Handle ``z d``: stop a running loop, or do a fresh done."""
+    """Handle ``z d``: stop any running loop and start a fresh review.
+
+    Used to be "stop loop OR fresh done" — if a loop was running you
+    only got the stop, no fresh review.  Now the two are combined:
+    any running loop is killed (matching ``zz d``'s supersede path —
+    set stop_requested + kill the review window so the running
+    iteration's verdict-poll bails) and then ``done_pr(fresh=True)``
+    opens a fresh review window for the user.
+
+    Function name kept for stability of the import in ``action_done_pr``.
+    """
     pr_id, pr = _get_selected_pr(app)
     if not pr_id:
         app.log_message("No PR selected")
@@ -60,11 +70,27 @@ def stop_loop_or_fresh_done(app) -> None:
 
     loop = app._review_loops.get(pr_id)
     if loop and loop.running:
-        _stop_loop(app, pr_id)
-    else:
-        # Original z d behaviour: fresh done
-        from pm_core.tui import pr_view
-        pr_view.done_pr(app, fresh=True)
+        loop.stop_requested = True
+        # Kill the review window so the running iteration's
+        # _poll_for_verdict (which doesn't check stop_requested)
+        # detects pane-gone, raises PaneKilledError, and the loop
+        # exits at once instead of running to completion.
+        from pm_core import tmux as tmux_mod
+        from pm_core.cli.helpers import _pr_display_id
+        if pr and app._session_name:
+            win_name = f"review-{_pr_display_id(pr)}"
+            try:
+                tmux_mod.kill_window(app._session_name, win_name)
+            except Exception:
+                _log.debug(
+                    "review_loop_ui: kill of review window for z d failed"
+                    " for %s", pr_id, exc_info=True)
+        _log.info("review_loop_ui: z d killed running loop for %s", pr_id)
+        app.log_message(
+            f"[bold]Stopped review loop[/] for {pr_id} — opening fresh review")
+
+    from pm_core.tui import pr_view
+    pr_view.done_pr(app, fresh=True)
 
 
 # ---------------------------------------------------------------------------
@@ -194,14 +220,13 @@ def _start_loop(app, pr_id: str, pr: dict | None,
 
     if superseded:
         msg = (f"[bold]Fresh review loop started[/] for {pr_id} "
-               f"loop={state.loop_id} (superseded previous) — z d to stop")
+               f"loop={state.loop_id}")
     elif resume_state:
         msg = (f"[bold]Review loop resumed[/] for {pr_id} "
-               f"at iteration {state.iteration} loop={state.loop_id}"
-               " — z d to stop")
+               f"at iteration {state.iteration} loop={state.loop_id}")
     else:
         msg = (f"[bold]Review loop started[/] for {pr_id} "
-               f"loop={state.loop_id} — z d to stop")
+               f"loop={state.loop_id}")
     app.log_message(msg, sticky=3)
 
     # Ensure the poll timer is running
