@@ -21,7 +21,7 @@ class TestActionsForStatus:
         for status in ("pending", "in_progress", "in_review", "qa"):
             actions = _actions_for_status(status)
             labels = [a[0] for a in actions]
-            assert labels == ["open", "start", "review", "review-loop",
+            assert labels == ["start", "review", "review-loop",
                               "qa", "merge"]
 
     def test_merged_has_no_actions(self):
@@ -33,7 +33,7 @@ class TestActionsForStatus:
     def test_unknown_status_returns_all_actions(self):
         """Non-terminal unknown statuses still get all actions."""
         labels = [a[0] for a in _actions_for_status("bogus")]
-        assert labels == ["open", "start", "review", "review-loop",
+        assert labels == ["start", "review", "review-loop",
                           "qa", "merge"]
 
     def test_qa_command_routes_through_tui(self):
@@ -126,7 +126,7 @@ class TestBuildPickerLines:
         prs = [_pr("pr-001", "pending", "New PR", gh_pr_number=158)]
         lines = _build_picker_lines(prs, "#158")
         action_lines = [d for d, cmd, _ in lines if cmd]
-        assert len(action_lines) == 6
+        assert len(action_lines) == 5
         assert any("start" in d for d in action_lines)
         assert any("merge" in d for d in action_lines)
         rl_lines = [d for d in action_lines if "review-loop" in d]
