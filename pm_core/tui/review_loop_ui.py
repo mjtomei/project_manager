@@ -274,6 +274,10 @@ def _on_iteration_from_thread(app, state: ReviewLoopState) -> None:
     _log.info("review_loop_ui: iteration %d verdict=%s for %s",
               state.iteration, state.latest_verdict, state.pr_id)
     from pm_core import runtime_state as _rs
+    if not _is_active_loop(state):
+        _log.debug("review_loop_ui: skipping iteration mirror for "
+                   "superseded loop_id=%s", state.loop_id)
+        return
     _rs.set_action_state(state.pr_id, "review-loop", "running",
                          iteration=state.iteration,
                          loop_id=state.loop_id,
@@ -285,9 +289,34 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
     _log.info("review_loop_ui: loop complete for %s — verdict=%s iterations=%d",
               state.pr_id, state.latest_verdict, state.iteration)
     from pm_core import runtime_state as _rs
+    if not _is_active_loop(state):
+        # We were superseded by a fresh loop; don't overwrite its
+        # 'running' entry with our terminal (often KILLED) verdict.
+        _log.debug("review_loop_ui: skipping completion mirror for "
+                   "superseded loop_id=%s verdict=%s",
+                   state.loop_id, state.latest_verdict)
+        return
     _rs.set_action_state(state.pr_id, "review-loop", "done",
                          iteration=state.iteration,
                          verdict=state.latest_verdict)
+
+
+def _is_active_loop(state: ReviewLoopState) -> bool:
+    """True when the recorded loop_id in runtime_state still matches.
+
+    A loop superseded by ``start_or_stop_loop`` keeps running its
+    background thread until it hits a checkpoint, then fires its
+    completion callback.  By that time runtime_state holds the new
+    loop's loop_id; comparing IDs lets the old callbacks bow out
+    instead of clobbering the new entry.
+    """
+    from pm_core import runtime_state as _rs
+    cur = _rs.get_action_state(state.pr_id, "review-loop")
+    cur_id = cur.get("loop_id")
+    # If nothing's recorded yet, this loop is the only candidate; allow
+    # the write so iteration mirrors still work for the very first
+    # iteration after a restart.
+    return not cur_id or cur_id == state.loop_id
 
     # Finalize review transcript symlinks for this loop's iterations
     tdir = getattr(state, '_transcript_dir', None)
