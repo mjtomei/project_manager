@@ -979,13 +979,10 @@ def _build_picker_lines(
     # shortcut-only — they don't get a row in the picker; their status
     # (where meaningful) is folded into a related list action's row.
     fold_status: dict[str, str] = {}
-    for label, _ in _ALL_ACTIONS:
-        if label not in _LIST_ACTIONS:
-            host = _SHORTCUT_FOLD_INTO.get(label)
-            if host:
-                tag = _format_action_status(pr["id"], label)
-                if tag:
-                    fold_status[host] = fold_status.get(host, "") + tag
+    for label, host in _SHORTCUT_FOLD_INTO.items():
+        tag = _format_action_status(pr["id"], label)
+        if tag:
+            fold_status[host] = fold_status.get(host, "") + tag
     for label, cmd_template in actions:
         if label not in _LIST_ACTIONS:
             continue  # shortcut-only; status (if any) folded in above
@@ -1319,6 +1316,7 @@ def popup_picker_cmd(session: str, window_name: str):
     corresponding pm command.
     """
     import shutil
+    import sys
 
     def _pause_and_exit(code: int = 0):
         # display-popup -E closes when the command exits, so wait for Enter
@@ -1419,25 +1417,32 @@ def popup_picker_cmd(session: str, window_name: str):
                    "--bind=q:abort",
                    f"--expect={expect_keys}"]
 
-        proc = subprocess.Popen(
-            fzf_cmd,
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            text=True,
-        )
-        stdout, _ = proc.communicate(input="\n".join(fzf_input_lines))
-
-        if proc.returncode != 0:
-            raise SystemExit(0)
-
-        out_lines = stdout.strip().split("\n")
-        pressed_key = out_lines[0] if out_lines else ""
-        selected = out_lines[1] if len(out_lines) > 1 else ""
-
         cmd_to_run: str | None = None
-        if pressed_key == "z":
-            modifier, action_key = _read_chord_action(_SHORTCUT_KEYS,
-                                                       current_pr)
-            if modifier and action_key:
+        # Loop so chord prompts can return to the fzf picker on q/Esc
+        # instead of dismissing the popup entirely.  Pressing q/Esc in
+        # the *fzf* picker still exits via fzf's nonzero rc below.
+        while True:
+            proc = subprocess.Popen(
+                fzf_cmd,
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                text=True,
+            )
+            stdout, _ = proc.communicate(input="\n".join(fzf_input_lines))
+
+            if proc.returncode != 0:
+                # User cancelled fzf (q/Esc) → close popup.
+                raise SystemExit(0)
+
+            out_lines = stdout.strip().split("\n")
+            pressed_key = out_lines[0] if out_lines else ""
+            selected = out_lines[1] if len(out_lines) > 1 else ""
+
+            if pressed_key == "z":
+                modifier, action_key = _read_chord_action(_SHORTCUT_KEYS,
+                                                          current_pr)
+                if not modifier or not action_key:
+                    # Chord cancelled with q/Esc — go back to fzf.
+                    continue
                 action_label = _SHORTCUT_KEYS.get(action_key)
                 if action_label:
                     template = _MODIFIED_ACTION_CMDS.get(
@@ -1445,19 +1450,31 @@ def popup_picker_cmd(session: str, window_name: str):
                     if template and _picked_pr is not None:
                         cmd_to_run = template.format(pr_id=_picked_pr["id"])
                     else:
-                        # No fresh/loop variant for this action — fall
-                        # through to the plain shortcut.
                         cmd_to_run = _label_to_cmd.get(action_label)
-        elif pressed_key in _SHORTCUT_KEYS:
-            cmd_to_run = _label_to_cmd.get(_SHORTCUT_KEYS[pressed_key])
-        elif selected:
-            for display, cmd, _ in lines:
-                if display == selected:
-                    cmd_to_run = cmd or None
-                    break
+                break
+            elif pressed_key in _SHORTCUT_KEYS:
+                cmd_to_run = _label_to_cmd.get(_SHORTCUT_KEYS[pressed_key])
+                break
+            elif selected:
+                for display, cmd, _ in lines:
+                    if display == selected:
+                        cmd_to_run = cmd or None
+                        break
+                break
+            else:
+                break
 
         if cmd_to_run:
             _run_picker_command(cmd_to_run, session)
+        # Always exit the popup process explicitly after dispatching —
+        # display-popup -E ties the overlay to this process's lifetime,
+        # so an explicit exit (with stdout flush) ensures the overlay
+        # closes promptly after the spinner switches windows.
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+        raise SystemExit(0)
     else:
         # Fallback: numbered list with shortcut keys
         click.echo("Tip: install fzf for a better experience"
