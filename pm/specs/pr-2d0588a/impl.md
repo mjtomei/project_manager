@@ -6,32 +6,30 @@
 
 Register a tmux prefix key binding (prefix+P) in `_register_tmux_bindings()` (`pm_core/cli/session.py`) that opens a `tmux display-popup` containing an action-based PR picker.
 
-**Action-based design**: Instead of discovering existing tmux windows, the picker loads all PRs from `project.yaml` and shows available actions per PR based on status. This is more robust than window tracking — the pm commands themselves handle window creation/switching.
+**Action-based design**: Instead of discovering existing tmux windows, the picker loads all PRs from `project.yaml` and shows available actions for the PR of the current window, based on status. This is more robust than window tracking — the pm commands themselves handle window creation/switching.
 
-**PR discovery**: Use `store.load(state_root())` to load all PRs. Filter to PRs with actionable statuses (not merged/closed).
+**PR discovery**: Use `store.load(state_root())` to load all PRs. The picker is **scoped to the current window's PR** only — it determines the active PR by parsing `#{window_name}` and shows only that PR's actions. From a non-PR window the picker shows a "Switch to a PR window" hint and exits.
 
-**Available actions per status**:
-- `pending` → start
-- `in_progress` → start, review, qa, review-loop
-- `in_review` → start, review, qa, review-loop, merge
-- `qa` → start, review, qa, review-loop
+**Available actions** (all returned for any non-terminal status; merged/closed PRs have no actions):
+- start, review, review-loop, qa, merge
 
-**Display format**: Each PR gets a header line (non-selectable) showing display ID, status, and title. Below it, indented action lines are selectable:
+The action representing the PR's current phase is marked with a `●` indicator. If the action's tmux window is already open, the line is annotated with `[open]`.
+
+**Display format**: One header line (non-selectable) showing display ID, status, and title; one selectable line per action below:
 ```
-> #158  (in_progress)  Add popup picker
-    start          #158
-    review         #158
-    qa             #158
-    review-loop    #158
-  #160  (pending)  Fix login bug
-    start          #160
+  #158  (in_progress)  Add popup picker
+  ● start              #158
+    review             #158
+    review-loop        #158
+    qa                 #158
+    merge              #158
 ```
 
-**Default selection**: The picker defaults to highlighting actions for the PR of the current active window, determined by parsing `#{window_name}`.
+**Shortcut keys** (fzf `--expect`): `s`=start, `d`=review, `l`=review-loop, `a`=qa, `g`=merge. `q`/`Esc` quits.
 
 **Command execution**: On selection:
 - Direct CLI commands (start, review, merge): run `pm pr <action> <pr_id>` as subprocess
-- TUI-routed commands (qa, review-loop): send the command to the TUI command bar via `tmux send-keys` to the TUI pane
+- TUI-routed commands (qa, review-loop): enqueue via `trigger_tui_command()` (SIGUSR2 + per-session queue file)
 
 **Popup lifecycle**: The popup opens, runs the picker, and closes on selection or Escape. It must not resize or reflow the underlying window/pane layout.
 
@@ -51,7 +49,7 @@ Register a tmux prefix key binding (prefix+M) in `_register_tmux_bindings()` tha
 
 ### R3: TUI Command Bar Enhancement (review-loop PR_ID)
 
-Extend `handle_command_submitted` in `pm_core/tui/pr_view.py` to accept `review-loop PR_ID` (e.g., `review-loop pr-001`, `review-loop strict pr-001`). This allows the popup picker to route review-loop commands through the TUI command bar with a specific PR target, rather than relying on the currently selected tree item.
+Extend `handle_command_submitted` in `pm_core/tui/pr_view.py` to accept `review-loop [start|stop] [PR_ID]`. With no subcommand it toggles (current behavior). `start` always starts (idempotent — logs a message if a loop is already running for that PR), so repeated picker presses don't accidentally stop a running loop. `stop` stops. The optional `PR_ID` selects the PR in the tree before acting. This lets the popup picker route review-loop commands with a specific target. (The `strict` variant from the original PR notes was dropped in commit b9c9b54.)
 
 ## Implicit Requirements
 

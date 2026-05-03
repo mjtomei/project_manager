@@ -1005,16 +1005,21 @@ class ProjectManagerApp(App):
         queue = self._command_queue_file()
         if queue is None or not queue.exists():
             return
+        import fcntl
         try:
-            # Atomic-ish: read then truncate.  Concurrent appenders may
-            # add lines between read and truncate; those would be lost.
-            # Acceptable here — picker invocations are user-paced and
-            # the appender takes a flock around append+signal so a
-            # second SIGUSR2 fires for any racing line.
+            # Take the same exclusive flock the appender uses around
+            # write+signal so a racing append can't slip a line in
+            # between our read and truncate (which would silently drop
+            # it — the appender's later SIGUSR2 would then drain an
+            # empty file).
             with open(queue, "r+") as f:
-                content = f.read()
-                f.seek(0)
-                f.truncate()
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                try:
+                    content = f.read()
+                    f.seek(0)
+                    f.truncate()
+                finally:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
         except OSError as e:
             _log.debug("Could not read TUI command queue %s: %s", queue, e)
             return
