@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-2c060b2
+  active_pr: pr-30888b1
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -9032,7 +9032,7 @@ prs:
   plan: plan-qa
   title: Batched QA scenario execution
   branch: pm/pr-d8cfa16-batched-qa-scenario-execution
-  status: in_review
+  status: closed
   depends_on: []
   description: 'Instead of spawning one session per QA scenario, batch scenarios into
     a configurable number of worker sessions. The scenario generator/concretizer groups
@@ -9052,7 +9052,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/163
   gh_pr_number: 163
   created_at: '2026-04-09T22:50:59.769426+00:00'
-  updated_at: '2026-04-10T18:43:57.689457+00:00'
+  updated_at: '2026-05-03T13:11:22.393684+00:00'
   started_at: '2026-04-09T23:30:04.624901+00:00'
   reviewed_at: '2026-04-10T18:43:57.689457+00:00'
   merged_at: null
@@ -9111,7 +9111,7 @@ prs:
   plan: improvements
   title: Double-tap for destructive TUI shortcuts to prevent accidental triggers
   branch: pm/pr-5471329-double-tap-for-destructive-tui-shortcuts-to-preven
-  status: in_review
+  status: closed
   depends_on: []
   description: Require a quick double-tap (within 300-400ms) for destructive single-key
     TUI shortcuts like s (start PR), d (review), g (merge), and t (QA run). First
@@ -9123,7 +9123,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/163
   gh_pr_number: 163
   created_at: '2026-04-09T22:50:59.769426+00:00'
-  updated_at: '2026-04-10T16:56:47.454801+00:00'
+  updated_at: '2026-05-03T13:11:22.393697+00:00'
   started_at: null
   reviewed_at: '2026-04-10T16:56:47.454801+00:00'
   merged_at: null
@@ -11509,7 +11509,7 @@ prs:
   title: 'Bug: dedicated plans window is shared across all plans, defeating multi-plan
     parallelism'
   branch: pm/pr-98b2a95-bug-dedicated-plans-window-is-shared-across-all-pl
-  status: qa
+  status: merged
   depends_on: []
   description: 'PR pr-a353c3d (''Launch plan pane actions in a dedicated plans window
     instead of the main window'', merged today as #179) routes all plan actions through
@@ -11558,10 +11558,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/183
   gh_pr_number: 183
   created_at: '2026-05-03T00:43:42.010298+00:00'
-  updated_at: '2026-05-03T01:09:11.962034+00:00'
+  updated_at: '2026-05-03T13:05:50.828076+00:00'
   started_at: '2026-05-03T00:45:34.578199+00:00'
   reviewed_at: '2026-05-03T01:09:11.962034+00:00'
-  merged_at: null
+  merged_at: '2026-05-03T13:05:50.828076+00:00'
   notes:
   - id: note-26c75c7
     text: 'QA PASS: Per-plan window regression unit tests: PASS; Manual TUI exercise

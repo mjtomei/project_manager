@@ -1033,11 +1033,19 @@ def popup_picker_cmd(session: str, window_name: str):
         "a": "qa",
         "g": "merge",
     }
-    # Build label → command map from the action lines
-    action_cmds = [cmd for _, cmd, _ in lines if cmd]
+    # Build label → command map directly from the PR's actions so it
+    # stays correct even if action filtering is added per-status later
+    # (zipping against _ALL_ACTIONS would silently mismap shortcut keys
+    # in that case).
+    from pm_core.cli.helpers import _pr_display_id
+    _picked_pr = next(
+        (p for p in prs if _pr_display_id(p) == current_pr), None)
     _label_to_cmd: dict[str, str] = {}
-    for (label, _), cmd in zip(_ALL_ACTIONS, action_cmds):
-        _label_to_cmd[label] = cmd
+    if _picked_pr is not None:
+        for label, cmd_template in _actions_for_status(
+                _picked_pr.get("status", "")):
+            _label_to_cmd[label] = cmd_template.format(
+                pr_id=_picked_pr["id"])
 
     if has_fzf:
         fzf_input_lines = [display for display, _, _ in lines]
