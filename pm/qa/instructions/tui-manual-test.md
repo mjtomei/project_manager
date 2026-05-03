@@ -10,17 +10,12 @@ tags: [tui, manual]
    python3 -m venv /tmp/pm-venv && source /tmp/pm-venv/bin/activate
    pip install -e .   # run from the project_manager clone
    ```
-   The container image pre-bakes a `pm` checkout at `/opt/pm-src` and
-   sets `PYTHONPATH=/opt/pm-src` globally, which shadows the editable
-   install above. Override it before launching the session so the TUI
-   loads the branch you're testing:
+   The container sets `PYTHONPATH=/opt/pm-src` (master), shadowing the
+   editable install. Override before launching the session:
    ```
-   export PYTHONPATH=/workspace   # or wherever the editable clone lives
+   export PYTHONPATH=/workspace   # path to your editable clone
    ```
-   Verify with `python3 -c "import pm_core.tui.pane_ops as p; print(p.__file__)"` —
-   it should print a path under your clone, not `/opt/pm-src`. Without
-   this, `pm session` spawns a TUI running master code and any branch
-   fixes will appear absent.
+   Confirm with `pm which` — it should print your clone, not `/opt/pm-src`.
 2. Create a throwaway test project. Use your workdir if you have one, otherwise `/tmp`, for example:
    ```
    TEST_DIR=<workdir>/pm-test-$(date +%s)
