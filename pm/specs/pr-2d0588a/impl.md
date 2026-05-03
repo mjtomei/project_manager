@@ -68,7 +68,7 @@ A flock-protected JSON file per PR at `~/.pm/runtime/{pr_id}.json` records per-a
 Mirrors:
 - `review_loop_ui` writes on loop start, every iteration (with `iteration` and `verdict`), and completion.
 - `PaneIdleTracker.register/unregister` and the pane-gone path mirror impl panes (key=pr_id → action `start`) and QA scenarios (key starts with `qa-` → action `qa`). The pane-gone path clears the entry rather than recording a state.
-- `pr_view`'s `edit` handler writes a brief `done` so the popup spinner exits without polling for a window the edit pane will never create.
+- `pr_view`'s `edit` handler does not need a runtime_state mirror — the popup spinner returns early for `edit` (no window-appearance signal exists since edit opens in the current window).
 
 `derive_action_status(pr_id, action)` cross-references the latest hook event (`hook_events.read_event(session_id)`) so callers see fresh idle/waiting transitions without requiring the TUI to record every hook event.
 
@@ -216,7 +216,7 @@ If QA or review-loop is selected but the TUI pane can't be found, show an error 
 
 2. **`pm_core/tui/pr_view.py`** — Enhanced `handle_command_submitted()`:
    - `review-loop [start|stop] [PR_ID]`: select PR in tree, then start (idempotent) or stop. The window switch is *not* performed here — the popup spinner (`_wait_for_tui_command`) owns the switch so it can honor the `suppress_switch` flag set when the user dismisses the spinner with q/Esc.
-   - `edit [PR_ID]`: select PR (if given) and run `pane_ops.edit_plan(app)`. Records `runtime_state.set_action_state(pr_id, "edit", "done")` so the spinner exits without polling for a window that never appears (edit opens in the current window).
+   - `edit [PR_ID]`: select PR (if given) and run `pane_ops.edit_plan(app)`. No runtime_state write needed — the popup spinner (`_wait_for_tui_command`) returns early for `action == "edit"`.
    - `pr qa [fresh|loop] [PR_ID]`: route to `qa_loop_ui.focus_or_start_qa` (default), `fresh_start_qa` (`fresh`), or `start_or_stop_qa_loop` (`loop`). Mirrors the TUI `t`/`z t`/`zz t` chord variants; used by the picker's `z a` / `zz a` chord.
 
 3. **`tests/test_popup_picker.py`** — Tests for action-based picker logic

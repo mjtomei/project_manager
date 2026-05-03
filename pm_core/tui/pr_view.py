@@ -572,22 +572,10 @@ def handle_command_submitted(app, cmd: str) -> None:
     # (same effect as the 'e' key binding).  PR_ID is optional; without
     # it, edits whatever is currently selected.
     if parts and parts[0] == "edit":
-        edit_pr_id: str | None = None
         if len(parts) >= 2:
             tree = app.query_one("#tech-tree", TechTree)
             tree.select_pr(parts[1])
-            edit_pr_id = parts[1]
-        else:
-            tree = app.query_one("#tech-tree", TechTree)
-            edit_pr_id = tree.selected_pr_id
         pane_ops.edit_plan(app)
-        # Tell the popup spinner the action ran; edit opens in the
-        # current window so there's no window-appearance signal to
-        # poll for, and without this the spinner sits at "queued…"
-        # until its short deadline elapses.
-        if edit_pr_id:
-            from pm_core import runtime_state as _rs
-            _rs.set_action_state(edit_pr_id, "edit", "done")
         return
 
     # Handle auto-start commands
