@@ -1400,21 +1400,10 @@ def popup_picker_cmd(session: str, window_name: str):
     if home_pr and home_pr not in seen:
         nav_pr_ids.insert(0, home_pr)
 
-    # If nothing has an open window and the user isn't on a PR, the
-    # picker is still useful — fall back to every non-terminal PR so
-    # the popup is always actionable from any tmux window.
-    if not nav_pr_ids:
-        for p in prs:
-            if p.get("status", "") in _TERMINAL_STATUSES:
-                continue
-            did = _pr_display_id(p)
-            if did and did not in seen:
-                nav_pr_ids.append(did)
-                seen.add(did)
-
     if not nav_pr_ids:
         click.echo("PR Actions (prefix+P)")
-        click.echo("No actionable PRs.")
+        click.echo("No PR windows open." if not home_pr
+                   else "Switch to a PR window to use this picker.")
         _pause_and_exit(0)
 
     try:
