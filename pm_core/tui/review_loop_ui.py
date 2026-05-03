@@ -77,10 +77,12 @@ def start_or_stop_loop(app) -> None:
     Previously this toggled — pressing ``zz d`` while a loop ran would
     stop it.  That left no way to restart a loop without first
     cancelling, and it wasn't obvious that ``zz d`` cancelled rather
-    than restarted.  Now any existing loop for the same PR is
-    superseded: we set its ``stop_requested`` flag (so its background
-    thread exits at the next iteration boundary) and start a fresh
-    loop in its place.
+    than restarted.  Behavior now matches ``z d`` (fresh review): if a
+    loop is already running for the same PR, we set its
+    ``stop_requested`` flag and **kill the review window** so the
+    iteration's verdict-poll detects pane-gone and bails immediately
+    (rather than running to completion before checking the flag).
+    Then a fresh loop starts.
 
     Cancelling a loop is now done via TUI restart (which sweeps the
     in-memory loop registry on remount) or by Ctrl+C in the loop's
@@ -96,11 +98,26 @@ def start_or_stop_loop(app) -> None:
     existing = app._review_loops.get(pr_id)
     if existing and existing.running:
         existing.stop_requested = True
+        # Force the running iteration to terminate now: the
+        # _run_claude_review path blocks in _poll_for_verdict (which
+        # doesn't check stop_requested) until the pane is gone.
+        # Killing the review window makes that poll return None →
+        # PaneKilledError → the loop exits.
+        from pm_core import tmux as tmux_mod
+        from pm_core.cli.helpers import _pr_display_id
+        if pr and app._session_name:
+            win_name = f"review-{_pr_display_id(pr)}"
+            try:
+                tmux_mod.kill_window(app._session_name, win_name)
+            except Exception:
+                _log.debug("review_loop_ui: kill of review window for"
+                           " supersede failed for %s", pr_id,
+                           exc_info=True)
         _log.info("review_loop_ui: superseding running loop for %s "
                   "with a fresh one", pr_id)
         app.log_message(
             f"[bold]Restarting review loop[/] for {pr_id} "
-            "(superseding running loop)")
+            "(killed running iteration)")
 
     _start_loop(app, pr_id, pr,
                 transcript_dir=str(_auto_start.get_transcript_dir(app)))
