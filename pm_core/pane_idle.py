@@ -261,6 +261,13 @@ def _runtime_target(key: str) -> tuple[str, str] | None:
     return None
 
 
+def _qa_scenario_subkey(key: str) -> str:
+    """Extract the scenario portion (e.g. ``s1``) from a qa tracker key."""
+    rest = key[len("qa:"):]
+    _pr, _, scenario = rest.partition(":")
+    return scenario or rest
+
+
 def _runtime_mirror_register(key: str, pane_id: str, session_id: str) -> None:
     target = _runtime_target(key)
     if not target:
@@ -268,8 +275,24 @@ def _runtime_mirror_register(key: str, pane_id: str, session_id: str) -> None:
     pr_id, action = target
     try:
         from pm_core import runtime_state as _rs
-        _rs.set_action_state(pr_id, action, "running",
-                             pane_id=pane_id, session_id=session_id)
+        if action == "qa":
+            # Multiple scenario panes share the qa action.  Track each
+            # by its scenario subkey so derive_action_status can
+            # aggregate idle/working across all live scenarios — without
+            # this the last register would clobber the previous one and
+            # the picker would show [idle] as soon as *any* scenario
+            # went idle even if others were still working.
+            subkey = _qa_scenario_subkey(key)
+            cur = _rs.get_action_state(pr_id, "qa") or {}
+            panes = dict(cur.get("panes") or {})
+            panes[subkey] = {"pane_id": pane_id, "session_id": session_id}
+            # Reset verdict on fresh registration: a previous loop's
+            # [done VERDICT] should not bleed into the new run.
+            _rs.set_action_state(pr_id, "qa", "running",
+                                 panes=panes, verdict=None)
+        else:
+            _rs.set_action_state(pr_id, action, "running",
+                                 pane_id=pane_id, session_id=session_id)
     except Exception:
         _log.debug("runtime_state mirror_register failed for %s", key,
                    exc_info=True)
@@ -282,7 +305,22 @@ def _runtime_mirror_clear(key: str) -> None:
     pr_id, action = target
     try:
         from pm_core import runtime_state as _rs
-        _rs.clear_action(pr_id, action)
+        if action == "qa":
+            subkey = _qa_scenario_subkey(key)
+            cur = _rs.get_action_state(pr_id, "qa") or {}
+            panes = dict(cur.get("panes") or {})
+            panes.pop(subkey, None)
+            if panes:
+                # Other scenarios still alive — keep the entry.
+                _rs.set_action_state(pr_id, "qa", "running", panes=panes)
+            elif cur.get("state") == "done" and cur.get("verdict"):
+                # Verdict already recorded by the loop's completion path;
+                # drop only the panes dict, keep [done VERDICT] visible.
+                _rs.set_action_state(pr_id, "qa", None, panes=None)
+            else:
+                _rs.clear_action(pr_id, "qa")
+        else:
+            _rs.clear_action(pr_id, action)
     except Exception:
         _log.debug("runtime_state mirror_clear failed for %s", key,
                    exc_info=True)

@@ -252,29 +252,78 @@ def consume_suppress_switch(pr_id: str, action: str) -> bool:
     return True
 
 
+def _hook_state_for(session_id: str) -> str | None:
+    """Return ``idle``/``waiting`` for the latest hook event, or None."""
+    if not session_id:
+        return None
+    try:
+        from pm_core import hook_events
+        ev = hook_events.read_event(session_id)
+    except Exception:
+        return None
+    if not ev:
+        return None
+    etype = ev.get("event_type")
+    if etype == "idle_prompt":
+        return "idle"
+    if etype == "permission_prompt":
+        return "waiting"
+    return None
+
+
 def derive_action_status(pr_id: str, action: str) -> dict:
     """Combine the persisted entry with the latest hook event.
 
-    For pane-backed actions (``start``, ``qa``) the persisted entry
-    records ``session_id``; we cross-reference
+    For pane-backed actions (``start``, ``review``, ``merge``) the
+    persisted entry records ``session_id``; we cross-reference
     :func:`pm_core.hook_events.read_event` so callers see fresh
     idle/waiting state without the writer having to record every hook
     transition.
+
+    QA is special: the entry holds a ``panes`` dict keyed by scenario
+    subkey (e.g. ``s1``), each value containing its own ``session_id``.
+    We aggregate the worst state across all live scenarios so the
+    picker shows [working] when *any* scenario is active and only
+    flips to [idle] when *all* scenarios have gone idle.  Terminal
+    entries (``state=done`` with a ``verdict``) are returned as-is so
+    the [done VERDICT] badge survives picker invocations.
     """
     entry = dict(get_action_state(pr_id, action))
     if not entry:
         return {}
-    sid = entry.get("session_id")
-    if sid:
-        try:
-            from pm_core import hook_events
-            ev = hook_events.read_event(sid)
-        except Exception:
-            ev = None
-        if ev:
-            etype = ev.get("event_type")
-            if etype == "idle_prompt":
-                entry["state"] = "idle"
-            elif etype == "permission_prompt":
-                entry["state"] = "waiting"
+    if action == "qa":
+        if entry.get("state") == "done" and entry.get("verdict"):
+            return entry
+        panes = entry.get("panes") or {}
+        if not panes:
+            return entry
+        # Worst-state aggregation: any working ⇒ working; else any
+        # waiting ⇒ waiting; else if everyone idle ⇒ idle.
+        any_working = False
+        any_waiting = False
+        any_idle = False
+        for p in panes.values():
+            if not isinstance(p, dict):
+                continue
+            sub = _hook_state_for(p.get("session_id", ""))
+            if sub == "idle":
+                any_idle = True
+            elif sub == "waiting":
+                any_waiting = True
+            else:
+                # No event yet, or non-idle/non-waiting event — treat as
+                # active.  The pane is registered (we wouldn't have a
+                # session_id otherwise) and we have no positive idle/
+                # waiting signal, so default to running.
+                any_working = True
+        if any_working:
+            entry["state"] = "running"
+        elif any_waiting:
+            entry["state"] = "waiting"
+        elif any_idle:
+            entry["state"] = "idle"
+        return entry
+    sub = _hook_state_for(entry.get("session_id", ""))
+    if sub:
+        entry["state"] = sub
     return entry
