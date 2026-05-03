@@ -8,6 +8,7 @@ import platform
 import re
 import shutil
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -39,6 +40,8 @@ from pm_core.cli.helpers import (
     _resolve_repo_dir,
     _resolve_repo_id,
     _workdirs_dir,
+    echo_record,
+    emit_paged,
     kill_pr_windows,
     state_root,
     trigger_tui_merge_lock,
@@ -528,6 +531,7 @@ def pr_list(workdirs: bool, timestamps: bool, open_only: bool, filter_status: st
         "closed": "🚫",
         "blocked": "🚫",
     }
+    out: list[str] = []
     for p in prs:
         icon = status_icons.get(p.get("status", "pending"), "?")
         deps = p.get("depends_on") or []
@@ -544,17 +548,18 @@ def pr_list(workdirs: bool, timestamps: bool, open_only: bool, filter_status: st
                     ts_str = f" [{dt.strftime('%Y-%m-%d %H:%M')}]"
                 except ValueError:
                     ts_str = f" [{ts}]"
-        click.echo(f"  {icon} {_pr_display_id(p)}: {p.get('title', '???')} [{p.get('status', '?')}]{dep_str}{machine_str}{active_str}{ts_str}")
+        out.append(f"  {icon} {_pr_display_id(p)}: {p.get('title', '???')} [{p.get('status', '?')}]{dep_str}{machine_str}{active_str}{ts_str}")
         if workdirs:
             wd = p.get("workdir")
             if wd and Path(wd).exists():
                 dirty = _workdir_is_dirty(Path(wd))
                 dirty_str = " (dirty)" if dirty else " (clean)"
-                click.echo(f"      workdir: {wd}{dirty_str}")
+                out.append(f"      workdir: {wd}{dirty_str}")
             elif wd:
-                click.echo(f"      workdir: {wd} (missing)")
+                out.append(f"      workdir: {wd} (missing)")
             else:
-                click.echo(f"      workdir: none")
+                out.append(f"      workdir: none")
+    emit_paged(out)
 
 
 @pr.command("graph")
@@ -578,8 +583,7 @@ def pr_ready():
     if not ready:
         click.echo("No PRs are ready to start.")
         return
-    for p in ready:
-        click.echo(f"  ⏳ {_pr_display_id(p)}: {p.get('title', '???')}")
+    emit_paged([f"  ⏳ {_pr_display_id(p)}: {p.get('title', '???')}" for p in ready])
 
 
 @pr.command("spec")
@@ -2299,15 +2303,42 @@ def _cleanup_pr(pr_entry: dict, root: Path, force: bool) -> bool:
 @click.option("--force", is_flag=True, default=False, help="Remove even if workdir has uncommitted changes")
 @click.option("--all", "cleanup_all", is_flag=True, default=False, help="Clean up all PR workdirs")
 @click.option("--prune", is_flag=True, default=False, help="Clear workdir references for paths that no longer exist")
-def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool):
+@click.option("--resources", is_flag=True, default=False,
+              help="Tear down live resources (tmux windows, QA containers, "
+                   "pane registry, push-proxy sockets) instead of the workdir")
+def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
+               resources: bool):
     """Remove work directory for a PR.
 
     Refuses to delete workdirs with uncommitted changes unless --force is given.
     Use --all to clean up all PR workdirs at once.
     Use --prune to clear stale workdir references from project.yaml.
+    Use --resources to kill live tmux/docker/registry resources for a PR.
     """
     root = state_root()
     data = store.load(root)
+
+    if resources:
+        if pr_id is None:
+            click.echo("--resources requires a PR id.", err=True)
+            raise SystemExit(1)
+        target = _resolve_pr_id(data, pr_id)
+        if not target:
+            click.echo(f"PR '{pr_id}' not found.", err=True)
+            raise SystemExit(1)
+        from pm_core import pr_cleanup as pr_cleanup_mod
+        from pm_core.loop_shared import get_pm_session
+        session = get_pm_session()
+        summary = pr_cleanup_mod.cleanup_pr_resources(session, target)
+        click.echo(f"Cleaned {target['id']}: {pr_cleanup_mod.format_summary(summary)}")
+        if summary["windows"]:
+            click.echo(f"  windows: {', '.join(summary['windows'])}")
+        if summary["containers"]:
+            click.echo(f"  containers: {', '.join(summary['containers'])}")
+        if summary["registry_windows"]:
+            click.echo(f"  registry: {', '.join(summary['registry_windows'])}")
+        trigger_tui_refresh()
+        return
 
     if prune:
         pruned = 0
@@ -2587,3 +2618,329 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool):
     store.locked_update(root, apply)
     click.echo(f"Removed {pr_id}: {pr_entry.get('title', '???')}")
     trigger_tui_refresh()
+
+
+# ---------------------------------------------------------------------------
+# Auto-sequence: chain start → review → QA on a single PR (stops before merge)
+# ---------------------------------------------------------------------------
+
+def _auto_seq_transcript_dir(root: Path, pr_id: str) -> Path:
+    """Return the deterministic transcript dir for auto-sequence on *pr_id*.
+
+    Stable across CLI ticks so successive invocations resolve the same
+    impl/review/QA transcript symlinks.
+    """
+    return root / "transcripts" / "auto-sequence" / pr_id
+
+
+def _impl_window_pane(session: str, pr_entry: dict) -> str | None:
+    """Return the first pane id of the impl tmux window, or None."""
+    win = tmux_mod.find_window_by_name(session, _pr_display_id(pr_entry))
+    if not win:
+        return None
+    panes = tmux_mod.get_pane_indices(session, win["index"])
+    return panes[0][0] if panes else None
+
+
+def _review_window_pane(session: str, pr_entry: dict) -> str | None:
+    """Return the first pane id of the review tmux window, or None."""
+    name = f"review-{_pr_display_id(pr_entry)}"
+    win = tmux_mod.find_window_by_name(session, name)
+    if not win:
+        return None
+    panes = tmux_mod.get_pane_indices(session, win["index"])
+    return panes[0][0] if panes else None
+
+
+def _check_review_verdict(tdir: Path, pr_id: str) -> tuple[str | None, int]:
+    """Return (verdict, latest_iteration) by scanning iteration transcripts.
+
+    Verdicts: PASS / NEEDS_WORK / INPUT_REQUIRED.  Returns (None, 0) when
+    no iteration transcripts exist.
+    """
+    from pm_core.verdict_transcript import extract_verdict_from_transcript
+
+    if not tdir.is_dir():
+        return None, 0
+    iters: list[tuple[int, Path]] = []
+    for p in tdir.iterdir():
+        m = re.match(rf"review-{re.escape(pr_id)}-i(\d+)\.jsonl$", p.name)
+        if m and (p.is_file() or p.is_symlink()):
+            iters.append((int(m.group(1)), p))
+    if not iters:
+        return None, 0
+    iters.sort()
+    latest_iter, latest_path = iters[-1]
+    verdict = extract_verdict_from_transcript(
+        str(latest_path), ("PASS", "NEEDS_WORK", "INPUT_REQUIRED"),
+    )
+    return verdict, latest_iter
+
+
+def _check_impl_idle(session: str, pr_entry: dict, tdir: Path) -> tuple[bool, bool]:
+    """Return (idle, gone): polls the impl pane via PaneIdleTracker.
+
+    *idle* is True when the Claude session has emitted ``idle_prompt``.
+    *gone* is True when the tmux pane disappeared.
+    """
+    from pm_core.pane_idle import PaneIdleTracker
+
+    pr_id = pr_entry["id"]
+    pane_id = _impl_window_pane(session, pr_entry)
+    if not pane_id:
+        return False, True
+    transcript = tdir / f"impl-{pr_id}.jsonl"
+    if not transcript.exists():
+        return False, False
+    tracker = PaneIdleTracker()
+    try:
+        tracker.register(pr_id, pane_id, str(transcript))
+    except ValueError:
+        return False, False
+    tracker.poll(pr_id)
+    return tracker.is_idle(pr_id), tracker.is_gone(pr_id)
+
+
+def _qa_status_for(pr_id: str) -> tuple[str | None, Path | None]:
+    """Find the latest QA status.json for *pr_id*; return (overall, path)."""
+    import json
+    qa_dirs = Path.home() / ".pm" / "workdirs" / "qa"
+    if not qa_dirs.is_dir():
+        return None, None
+    candidates = sorted(qa_dirs.glob(f"{pr_id}-*/qa_status.json"),
+                        key=lambda p: p.stat().st_mtime if p.exists() else 0)
+    if not candidates:
+        return None, None
+    latest = candidates[-1]
+    try:
+        data = json.loads(latest.read_text())
+    except (OSError, ValueError):
+        return None, latest
+    return data.get("overall") or None, latest
+
+
+@pr.command("auto-sequence")
+@click.argument("pr_id")
+def pr_auto_sequence(pr_id: str):
+    """Advance a PR through start → review → QA, stopping before merge.
+
+    Idempotent and non-blocking: each invocation examines the PR's current
+    state and advances it by at most one phase.  Designed to be called
+    repeatedly (e.g. by an implementation watcher) until the PR reports
+    ``ready_to_merge`` or ``paused: ...``.
+
+    Output is a single status line on stdout.  Exit codes:
+      0 — advanced or status reported normally
+      2 — PR not found / unknown state
+    """
+    root = state_root()
+    data = store.load(root)
+    pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
+    status = pr_entry.get("status", "")
+    pm_session = _get_pm_session()
+    tdir = _auto_seq_transcript_dir(root, pr_id)
+    tdir.mkdir(parents=True, exist_ok=True)
+
+    if status == "merged":
+        click.echo("merged")
+        return
+
+    if status == "pending":
+        impl_transcript = tdir / f"impl-{pr_id}.jsonl"
+        ctx = click.get_current_context()
+        ctx.invoke(pr_start, pr_id=pr_id, workdir=None, fresh=False,
+                   background=True, transcript=str(impl_transcript),
+                   companion=False)
+        click.echo("started")
+        return
+
+    if status == "in_progress":
+        if spec_gen.has_pending_spec(pr_entry):
+            click.echo("paused: spec_pending")
+            return
+        if not pm_session:
+            click.echo("paused: no pm tmux session")
+            return
+        idle, gone = _check_impl_idle(pm_session, pr_entry, tdir)
+        if gone:
+            # Window was killed — relaunch impl
+            impl_transcript = tdir / f"impl-{pr_id}.jsonl"
+            ctx = click.get_current_context()
+            ctx.invoke(pr_start, pr_id=pr_id, workdir=None, fresh=False,
+                       background=True, transcript=str(impl_transcript),
+                       companion=False)
+            click.echo("restarted: impl window relaunched")
+            return
+        if not idle:
+            click.echo("running: implementation")
+            return
+        # Idle and no spec_pending → advance to review.  Persist the
+        # transcript symlink under the auto-sequence dir so the next tick
+        # can locate the verdict.  Use review-loop iteration 1 naming so
+        # NEEDS_WORK retries (iteration 2+) follow the same scheme.
+        iter_transcript = tdir / f"review-{pr_id}-i1.jsonl"
+        ctx = click.get_current_context()
+        ctx.invoke(pr_review, pr_id=pr_id, fresh=False, background=True,
+                   review_loop=False, review_iteration=1,
+                   review_loop_id="", transcript=str(iter_transcript))
+        click.echo("advanced: in_review")
+        return
+
+    if status == "in_review":
+        if not pm_session:
+            click.echo("paused: no pm tmux session")
+            return
+        verdict, latest_iter = _check_review_verdict(tdir, pr_id)
+
+        if verdict == "PASS":
+            project = data.get("project") or {}
+            if project.get("skip_qa"):
+                click.echo("ready_to_merge (skip_qa)")
+                return
+            # Transition to qa and launch QA in a detached subprocess.
+            def _to_qa(d):
+                p = store.get_pr(d, pr_id)
+                if p and p.get("status") == "in_review":
+                    p["status"] = "qa"
+                    _record_status_timestamp(p, "qa")
+            store.locked_update(root, _to_qa)
+            _launch_qa_detached(root, pr_id)
+            click.echo("advanced: qa")
+            return
+
+        if verdict == "INPUT_REQUIRED":
+            click.echo("paused: input_required (review)")
+            return
+
+        if verdict == "NEEDS_WORK":
+            # Launch a fresh review-loop iteration.  Reuse pr_review with
+            # --fresh + --review-loop so the existing review-loop
+            # machinery in the launched window writes to the next
+            # iteration transcript.
+            next_iter = latest_iter + 1
+            iter_transcript = tdir / f"review-{pr_id}-i{next_iter}.jsonl"
+            ctx = click.get_current_context()
+            ctx.invoke(pr_review, pr_id=pr_id, fresh=True, background=True,
+                       review_loop=True, review_iteration=next_iter,
+                       review_loop_id="", transcript=str(iter_transcript))
+            click.echo(f"review: needs_work, retrying iteration {next_iter}")
+            return
+
+        # No verdict yet
+        if _review_window_pane(pm_session, pr_entry) is None:
+            # Review window absent — launch a review-loop iteration.
+            next_iter = max(latest_iter, 0) + 1
+            iter_transcript = tdir / f"review-{pr_id}-i{next_iter}.jsonl"
+            ctx = click.get_current_context()
+            ctx.invoke(pr_review, pr_id=pr_id, fresh=False, background=True,
+                       review_loop=True, review_iteration=next_iter,
+                       review_loop_id="", transcript=str(iter_transcript))
+            click.echo("advanced: review_relaunched")
+            return
+        click.echo("running: review")
+        return
+
+    if status == "qa":
+        overall, _path = _qa_status_for(pr_id)
+        if overall == "PASS":
+            click.echo("ready_to_merge")
+            return
+        if overall == "INPUT_REQUIRED":
+            click.echo("paused: input_required (qa)")
+            return
+        if overall == "NEEDS_WORK":
+            # Flip status to in_review and immediately launch a fresh
+            # review-loop iteration with QA feedback.  Without launching
+            # here, the next tick's in_review path would pick up the
+            # *previous* iteration's PASS verdict and bounce straight
+            # back to qa.  Mirrors the TUI's qa_loop_ui NEEDS_WORK path.
+            def _to_review(d):
+                p = store.get_pr(d, pr_id)
+                if p and p.get("status") == "qa":
+                    p["status"] = "in_review"
+                    _record_status_timestamp(p, "in_review")
+            store.locked_update(root, _to_review)
+            _verdict, latest_iter = _check_review_verdict(tdir, pr_id)
+            next_iter = latest_iter + 1
+            iter_transcript = tdir / f"review-{pr_id}-i{next_iter}.jsonl"
+            ctx = click.get_current_context()
+            ctx.invoke(pr_review, pr_id=pr_id, fresh=True, background=True,
+                       review_loop=True, review_iteration=next_iter,
+                       review_loop_id="", transcript=str(iter_transcript))
+            click.echo(
+                f"qa: needs_work, returning to review (iteration {next_iter})"
+            )
+            return
+        if overall is None:
+            # No qa_status.json yet.  Could be a never-started run *or*
+            # a freshly-launched run whose first status write hasn't
+            # landed yet.  Check for the qa tmux window before
+            # re-launching to avoid stacking duplicate QA subprocesses
+            # during the launch→first-write race window.
+            display_id = _pr_display_id(pr_entry)
+            qa_win = tmux_mod.find_window_by_name(
+                pm_session, f"qa-{display_id}",
+            ) if pm_session else None
+            if qa_win:
+                click.echo("running: qa")
+                return
+            _launch_qa_detached(root, pr_id)
+            click.echo("running: qa (launched)")
+            return
+        click.echo("running: qa")
+        return
+
+    click.echo(f"unknown status: {status}", err=True)
+    raise SystemExit(2)
+
+
+def _launch_qa_detached(root: Path, pr_id: str) -> None:
+    """Spawn a detached subprocess to drive the QA loop for *pr_id*.
+
+    Uses the hidden ``pm pr qa-run-bg`` subcommand so the QA scenarios
+    run in tmux windows under their own long-lived process.  Subsequent
+    auto-sequence ticks read the resulting ``qa_status.json``.
+    """
+    cmd = [sys.executable, "-m", "pm_core.wrapper",
+           "pr", "qa-run-bg", pr_id]
+    # start_new_session detaches from the parent process group so the
+    # caller can exit while QA continues.
+    subprocess.Popen(
+        cmd, cwd=str(root), start_new_session=True,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL,
+    )
+
+
+@pr.command("qa-run-bg", hidden=True)
+@click.argument("pr_id")
+def pr_qa_run_bg(pr_id: str):
+    """Hidden: run the QA loop synchronously to completion.
+
+    Used by ``pm pr auto-sequence`` to spawn a detached QA driver.  Not
+    intended for direct human use — prefer the TUI ``t`` key.
+    """
+    from pm_core.qa_loop import QALoopState, run_qa_sync
+
+    root = state_root()
+    data = store.load(root)
+    pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
+
+    # Transition to qa if necessary
+    def _to_qa(d):
+        p = store.get_pr(d, pr_id)
+        if p and p.get("status") == "in_review":
+            p["status"] = "qa"
+            _record_status_timestamp(p, "qa")
+    store.locked_update(root, _to_qa)
+    data = store.load(root)
+    pr_entry = store.get_pr(data, pr_id) or pr_entry
+
+    state = QALoopState(pr_id=pr_id)
+    try:
+        run_qa_sync(state, root, pr_entry, on_update=None, max_scenarios=None)
+    except Exception as e:
+        _log.exception("pr_qa_run_bg: QA crashed for %s: %s", pr_id, e)
+        raise SystemExit(1)

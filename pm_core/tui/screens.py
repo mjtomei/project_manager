@@ -272,9 +272,13 @@ class HelpScreen(ModalScreen):
             yield Label("  [bold]Ctrl+R[/]  Restart TUI", classes="help-row")
             yield Label("  [bold]?[/]  Show this help", classes="help-row")
             yield Label("  [bold]ctrl+b d[/]  Detach from session", classes="help-row")
+            yield Label("Tmux Prefix Bindings", classes="help-section")
+            yield Label("  [bold]prefix P[/]  PR action picker popup (q/Esc to quit)", classes="help-row")
+            yield Label("  [bold]prefix M[/]  pm command runner popup (Ctrl+C to quit)", classes="help-row")
+            yield Label("  [bold]prefix R[/]  Rebalance panes", classes="help-row")
             yield Label("Review Loop", classes="help-section")
             yield Label("  [bold]zz d[/]  Start loop", classes="help-row")
-            yield Label("  [bold]z d[/]   Stop loop / fresh done", classes="help-row")
+            yield Label("  [bold]z d[/]   Kill loop, fresh review", classes="help-row")
             yield Label("QA Loop", classes="help-section")
             yield Label("  [bold]zz t[/]  Start QA loop", classes="help-row")
             yield Label("  [bold]z t[/]   Fresh start QA", classes="help-row")
@@ -448,3 +452,60 @@ class PlanAddScreen(ModalScreen):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+
+class ConfirmCleanupScreen(ModalScreen):
+    """Confirm tearing down all live resources for a PR."""
+
+    BINDINGS = [
+        Binding("y", "confirm", "Yes", show=False),
+        Binding("n", "cancel", "No", show=False),
+        Binding("escape", "cancel", "Cancel", show=False),
+    ]
+
+    CSS = """
+    ConfirmCleanupScreen {
+        align: center middle;
+    }
+    #cleanup-container {
+        width: 60;
+        height: auto;
+        background: $surface;
+        border: solid $warning;
+        padding: 1 2;
+    }
+    #cleanup-title {
+        text-align: center;
+        text-style: bold;
+        color: $warning;
+        margin-bottom: 1;
+    }
+    .cleanup-line {
+        margin-left: 2;
+    }
+    #cleanup-hint {
+        text-align: center;
+        margin-top: 1;
+        color: $text-muted;
+    }
+    """
+
+    def __init__(self, pr_display_id: str):
+        super().__init__()
+        self._pr_display_id = pr_display_id
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="cleanup-container"):
+            yield Label(f"Clean up {self._pr_display_id}?", id="cleanup-title")
+            yield Label("This will remove:")
+            yield Label("• tmux windows (impl, review, merge, QA)", classes="cleanup-line")
+            yield Label("• docker containers (all QA scenarios)", classes="cleanup-line")
+            yield Label("• pane registry entries", classes="cleanup-line")
+            yield Label("• push-proxy sockets", classes="cleanup-line")
+            yield Label("[bold]y[/] confirm  [bold]n[/]/[bold]Esc[/] cancel", id="cleanup-hint")
+
+    def action_confirm(self) -> None:
+        self.dismiss(True)
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)

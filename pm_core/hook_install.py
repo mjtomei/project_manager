@@ -19,6 +19,7 @@ The installer is idempotent and merges into any existing user hooks.
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import shutil
 import time
@@ -28,12 +29,40 @@ from pm_core.paths import configure_logger
 
 _log = configure_logger("pm.hook_install")
 
-_SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
-_HOOKS_BASE = Path.home() / ".pm" / "hooks"
-# Standalone copy of pm_core/hook_receiver.py lives here so it can be
-# invoked without pm_core on sys.path (e.g. from inside a QA container
-# that bind-mounts this exact host path back into itself).
-RECEIVER_PATH = Path.home() / ".pm" / "hook_receiver.py"
+
+def _host_home() -> Path:
+    """Home dir to embed in settings.json hook commands.
+
+    Inside a pm-managed container, ``~/.claude`` is bind-mounted r/w from
+    the host, so any path written into settings.json must be the *host*
+    path or the host will fire hooks against a path that doesn't exist
+    there. ``container.py`` exports ``PM_HOST_HOME`` for this purpose.
+    """
+    override = os.environ.get("PM_HOST_HOME")
+    if override:
+        return Path(override)
+    return Path.home()
+
+
+def _settings_path() -> Path:
+    return _host_home() / ".claude" / "settings.json"
+
+
+def _hooks_base() -> Path:
+    return _host_home() / ".pm" / "hooks"
+
+
+def _receiver_path() -> Path:
+    # Standalone copy of pm_core/hook_receiver.py lives here so it can be
+    # invoked without pm_core on sys.path (e.g. from inside a QA container
+    # that bind-mounts this exact host path back into itself).
+    return _host_home() / ".pm" / "hook_receiver.py"
+
+
+# Module-level constants kept for back-compat with importers/tests.
+_SETTINGS_PATH = _settings_path()
+_HOOKS_BASE = _hooks_base()
+RECEIVER_PATH = _receiver_path()
 _STALE_SECONDS = 7 * 24 * 60 * 60  # 7 days
 
 
@@ -48,7 +77,7 @@ def _hook_command_for(event_type: str) -> str:
     (PATH lookup) so the same command string works on the host and inside
     containers that bind-mount the receiver at the same path.
     """
-    return f"python3 {shlex.quote(str(RECEIVER_PATH))} {shlex.quote(event_type)}"
+    return f"python3 {shlex.quote(str(_receiver_path()))} {shlex.quote(event_type)}"
 
 
 def _install_receiver() -> None:
@@ -57,17 +86,19 @@ def _install_receiver() -> None:
     The receiver has no pm_core imports so it runs standalone inside
     containers where pm_core is not available.
     """
+    # When running inside a container, the host's receiver is bind-mounted
+    # read-only at this exact path; the host installer is the only writer.
+    if os.environ.get("PM_HOST_HOME") and Path(os.environ["PM_HOST_HOME"]) != Path.home():
+        return
     from pm_core import hook_receiver as _receiver_mod
     src = Path(_receiver_mod.__file__)
+    dest = _receiver_path()
     try:
-        RECEIVER_PATH.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(src, RECEIVER_PATH)
-        # chmod so `python3 <path>` works even if a filesystem mount would
-        # otherwise treat it as non-executable — execution bit not strictly
-        # required when invoked as an argument to python3, but harmless.
-        RECEIVER_PATH.chmod(0o644)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dest)
+        dest.chmod(0o644)
     except OSError as e:
-        _log.warning("could not copy hook receiver to %s: %s", RECEIVER_PATH, e)
+        _log.warning("could not copy hook receiver to %s: %s", dest, e)
 
 
 _MANAGED_EVENTS = ("Notification", "Stop")
@@ -110,7 +141,7 @@ def _desired_hooks() -> dict:
 
 
 def _entry_is_pm(entry: dict) -> bool:
-    receiver_str = str(RECEIVER_PATH)
+    receiver_str = str(_receiver_path())
     for hook in (entry or {}).get("hooks", []) or []:
         cmd = (hook or {}).get("command", "")
         # Current format references the standalone receiver path.
@@ -153,10 +184,11 @@ def _detect_foreign_hooks(existing_hooks: dict) -> list[str]:
 
 
 def _sweep_stale_events() -> None:
-    if not _HOOKS_BASE.exists():
+    base = _hooks_base()
+    if not base.exists():
         return
     now = time.time()
-    for p in _HOOKS_BASE.glob("*.json"):
+    for p in base.glob("*.json"):
         if not p.is_file():
             continue
         try:
@@ -168,7 +200,7 @@ def _sweep_stale_events() -> None:
 
 def hooks_already_installed(settings_path: Path | None = None) -> bool:
     """Return True when ~/.claude/settings.json already has pm's hooks."""
-    path = settings_path or _SETTINGS_PATH
+    path = settings_path or _settings_path()
     if not path.exists():
         return False
     try:
@@ -206,7 +238,7 @@ def ensure_hooks_installed(settings_path: Path | None = None) -> bool:
 
     Returns True if the settings file was modified. Idempotent.
     """
-    path = settings_path or _SETTINGS_PATH
+    path = settings_path or _settings_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
     except OSError as e:
@@ -238,7 +270,7 @@ def ensure_hooks_installed(settings_path: Path | None = None) -> bool:
     # Ensure hook dir exists and the standalone receiver is up to date
     # before we reference its path in settings.json.
     try:
-        _HOOKS_BASE.mkdir(parents=True, exist_ok=True)
+        _hooks_base().mkdir(parents=True, exist_ok=True)
     except OSError:
         pass
     _install_receiver()

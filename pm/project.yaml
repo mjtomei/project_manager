@@ -9,12 +9,12 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-4702a11
+  active_pr: pr-a5a800a
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
   hide_merged: false
-  skip_qa: false
+  skip_qa: true
   nested_podman: true
 plans:
 - id: plan-001
@@ -85,6 +85,11 @@ plans:
 - id: plan-regression
   name: Automated regression and bug fix loop
   file: plans/plan-regression.md
+  status: draft
+  parent: null
+- id: plan-ambient
+  name: Ambient interface — context-aware multi-surface UX
+  file: plans/plan-ambient.md
   status: draft
   parent: null
 prs:
@@ -3226,7 +3231,20 @@ prs:
     project.yaml overwrites master's, reverting other PRs' statuses. Need to exclude
     project.yaml from branch merges or always take master's version.
   created_at: null
-  updated_at: null
+  updated_at: '2026-05-01T21:41:09.889159+00:00'
+  notes:
+  - id: note-e3fda82
+    text: 'Observed cross-workdir stash-pop conflict in project.yaml on 2026-05-01:
+      pr-271cb3a was reviewed in its workdir clone (setting started_at/reviewed_at/workdir)
+      while the main repo concurrently added a note via pm pr note. The merge-propagation
+      path (git stash + pop, used by pr-83b98d5 to merge notes across clones) bypassed
+      the file lock from pr-f38005f and left literal <<<<<<< Updated upstream / =======
+      / >>>>>>> Stashed changes markers in project.yaml, breaking yaml parsing for
+      all pm commands until manually resolved. Resolution: keep timestamps + workdir
+      from the workdir side, keep the new note from the main side. Likely shares root
+      cause with this bug.'
+    created_at: '2026-05-01T21:41:09Z'
+    last_edited: '2026-05-01T21:41:09Z'
 - id: pr-ad7bd98
   plan: bugs
   title: Fix arrow crossing in TUI tech tree when dependencies are vertically stacked
@@ -4772,11 +4790,11 @@ prs:
     - Matches windows to PRs via naming convention (e.g. review-#128, qa-#124-s71)
 
     - Reuses existing tmux session resolution logic (current_or_base_session)'
-  agent_machine: arch-home
+  agent_machine: spark-424d
   gh_pr: https://github.com/mjtomei/project_manager/pull/137
   gh_pr_number: 137
   created_at: '2026-03-08T21:45:42.636585+00:00'
-  updated_at: '2026-04-24T17:09:31.971909+00:00'
+  updated_at: '2026-05-03T11:54:36.157297+00:00'
   started_at: '2026-03-10T21:38:57.198809+00:00'
   reviewed_at: '2026-03-23T13:18:57.337047+00:00'
   merged_at: null
@@ -4860,7 +4878,7 @@ prs:
       expect conflicts when rebasing on master after #166 lands.'
     created_at: '2026-04-24T17:09:31Z'
     last_edited: '2026-04-24T17:09:31Z'
-  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b827df-add-running-tasks-pane-to-tui-with-w-cbe54f5e
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0b827df-add-running-tasks-pane-to-tui-with-w-f6381eb7
 - id: pr-341100c
   plan: tui-ux
   title: Add per-plan standalone PM sessions within the same project
@@ -5305,7 +5323,7 @@ prs:
   plan: watchers
   title: 'Session health watcher: detect and recover stuck/dead Claude sessions'
   branch: pm/pr-18ac983-session-health-watcher-detect-and-recover-stuck-de
-  status: pending
+  status: in_progress
   depends_on:
   - pr-3032fb6
   description: 'Built-in watcher using the BaseWatcher framework that monitors all
@@ -5343,12 +5361,12 @@ prs:
 
     - pr-757a140: SSH disconnect garbage — happens outside tmux, can''t be detected
     by a watcher'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/184
+  gh_pr_number: 184
   created_at: '2026-03-09T15:17:01.313859+00:00'
-  updated_at: '2026-03-09T15:39:03.606882+00:00'
-  started_at: null
+  updated_at: '2026-05-03T11:57:41.026322+00:00'
+  started_at: '2026-05-03T11:57:41.026322+00:00'
   reviewed_at: null
   merged_at: null
   notes:
@@ -5356,7 +5374,7 @@ prs:
     text: 'QA INPUT_REQUIRED:  (workdir: /home/mjtomei/.pm/workdirs/qa/pr-18ac983-e21fdbbf66b41d89)'
     created_at: '2026-04-04T14:56:24Z'
     last_edited: '2026-04-04T14:56:24Z'
-  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-18ac983-session-health-watcher-detect-and-re-63382040
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-18ac983-session-health-watcher-detect-and-re-f6381eb7
 - id: pr-945546e
   plan: watchers
   title: 'Project state watcher: monitor project health and recommend actions'
@@ -7019,7 +7037,7 @@ prs:
       expect conflicts when rebasing on master after #166 lands.'
     created_at: '2026-04-24T17:09:34Z'
     last_edited: '2026-04-24T17:09:34Z'
-  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-abcf70f-fakeclaudesession-scriptable-claude--cbe54f5e
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-abcf70f-fakeclaudesession-scriptable-claude--96cede9b
 - id: pr-a7927b6
   plan: plan-qa
   title: Implement review phase spec (spec_review) with mock planning
@@ -8177,7 +8195,7 @@ prs:
       expect conflicts when rebasing on master after #166 lands.'
     created_at: '2026-04-24T17:09:29Z'
     last_edited: '2026-04-24T17:09:29Z'
-  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-fc6db6a-prevent-plain-d-from-opening-duplica-5a6a6c1c
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-fc6db6a-prevent-plain-d-from-opening-duplica-f6381eb7
 - id: pr-177dec0
   plan: bugs
   title: Fix pr select not scrolling selected PR into view in TUI
@@ -8190,21 +8208,21 @@ prs:
     of the screen. It appears the scroll-into-view logic is not being triggered after
     a programmatic selection change from the command bar, only from keyboard navigation
     within the tree.
-  agent_machine: arch-home
+  agent_machine: spark-424d
   gh_pr: https://github.com/mjtomei/project_manager/pull/157
   gh_pr_number: 157
   created_at: '2026-04-06T19:18:52.240715+00:00'
-  updated_at: '2026-04-06T19:20:59.040562+00:00'
+  updated_at: '2026-05-03T11:55:48.161143+00:00'
   started_at: '2026-04-06T19:20:59.040562+00:00'
   reviewed_at: null
   merged_at: null
   notes: []
-  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-177dec0-fix-pr-select-not-scrolling-selected-d18c9763
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-177dec0-fix-pr-select-not-scrolling-selected-f6381eb7
 - id: pr-2d0588a
   plan: improvements
   title: Tmux popup PR switcher and prefix-key pm command runner
   branch: pm/pr-2d0588a-tmux-popup-pr-switcher-and-prefix-key-pm-command-r
-  status: in_review
+  status: merged
   depends_on: []
   description: 'Add two tmux integrations registered via _register_tmux_bindings:
     (1) A prefix-key binding (e.g. prefix+P) that opens a tmux display-popup with
@@ -8220,16 +8238,167 @@ prs:
     the current window pane layout or resizing the TUI. Human-guided testing needed:
     popup display from various window contexts, refocus behavior after selecting a
     PR, QA collapse/expand, command execution in popup, verify TUI window is not resized.'
-  agent_machine: arch-home
+  agent_machine: spark-424d
   gh_pr: https://github.com/mjtomei/project_manager/pull/158
   gh_pr_number: 158
   created_at: '2026-04-07T12:46:56.964240+00:00'
-  updated_at: '2026-04-07T22:35:47.013280+00:00'
+  updated_at: '2026-05-03T18:04:35.578168+00:00'
   started_at: '2026-04-07T12:49:34.016669+00:00'
-  reviewed_at: '2026-04-07T22:35:47.013280+00:00'
-  merged_at: null
-  notes: []
-  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d0588a-tmux-popup-pr-switcher-and-prefix-ke-d18c9763
+  reviewed_at: '2026-05-03T17:12:06.758566+00:00'
+  merged_at: '2026-05-03T18:04:35.578168+00:00'
+  notes:
+  - id: note-ebe15c3
+    text: 'QA: prefix+P picker phase indicator (●) should reflect the current tmux
+      window — bare PR window highlights ''start'', ''review-#NN'' window highlights
+      ''review'', ''qa-#NN'' highlights ''qa'', ''merge-#NN'' highlights ''merge''.
+      Verify by switching windows and reopening picker.'
+    created_at: '2026-05-03T14:24:54Z'
+    last_edited: '2026-05-03T14:24:54Z'
+  - id: note-73ec847
+    text: 'QA: ''edit'' picker action (shortcut e) should open the same edit pane
+      as pressing ''e'' in the TUI for the current PR. Should also work via ''edit
+      PR_ID'' typed in the TUI command bar.'
+    created_at: '2026-05-03T14:25:22Z'
+    last_edited: '2026-05-03T14:25:22Z'
+  - id: note-c94c964
+    text: 'QA: review-loop popup action (''l'' shortcut) is idempotent — pressing
+      l multiple times should never stop a running loop. The plain ''review-loop''
+      typed in the TUI command bar still toggles. ''review-loop start PR_ID'' always
+      starts (logs ''already running'' message).'
+    created_at: '2026-05-03T14:25:23Z'
+    last_edited: '2026-05-03T14:25:23Z'
+  - id: note-d2d9313
+    text: 'QA: review-loop start now switches focus to the review-#NN window if it
+      exists. First-ever start may be a no-op (window created lazily by iteration
+      1) — re-running afterwards should focus.'
+    created_at: '2026-05-03T14:25:24Z'
+    last_edited: '2026-05-03T14:25:24Z'
+  - id: note-0348525
+    text: 'QA: SIGUSR2 + queue-file IPC (replaces send-keys). When the popup picker
+      fires a TUI-routed action (qa, review-loop start, edit), it appends to ~/.pm/tui-{session}.cmd-queue
+      and signals the TUI; verify the command runs even when the command bar isn''t
+      focused, when other widgets have focus, and when multiple are enqueued in rapid
+      succession from concurrent popup invocations (they should all run in order).'
+    created_at: '2026-05-03T14:25:25Z'
+    last_edited: '2026-05-03T14:25:25Z'
+  - id: note-63b5b74
+    text: 'QA: shared runtime-state file at ~/.pm/runtime/{pr_id}.json. Picker badges
+      should reflect: [open] for live windows, [loop iN] with iteration count while
+      a review-loop runs, [done VERDICT] after completion, [idle]/[wait]/[working]/[gone]
+      for impl (''start'') and qa panes (driven by Claude Code hook events). Verify
+      badges update across separate popup invocations.'
+    created_at: '2026-05-03T14:25:26Z'
+    last_edited: '2026-05-03T14:25:26Z'
+  - id: note-fceb3f0
+    text: 'QA: post-enqueue spinner. After selecting a tui:-routed action, the popup
+      shows a Braille spinner with the action label and current state (queued → running,
+      etc.). Spinner has no time limit and should remain until the target window appears.
+      Verify q/Q/Esc dismisses the popup overlay immediately, while the queued command
+      still runs in the TUI to completion.'
+    created_at: '2026-05-03T14:25:27Z'
+    last_edited: '2026-05-03T14:25:27Z'
+  - id: note-de8532c
+    text: 'QA: window-switch suppression on dismiss. Pressing q/Esc during the spinner
+      should also cancel the TUI''s would-be window switch for that action — the queued
+      review-loop / qa command runs but focus stays where the user was. The flag is
+      action-scoped (only that action''s switch is suppressed); subsequent unrelated
+      picker invocations should still switch normally.'
+    created_at: '2026-05-03T14:25:27Z'
+    last_edited: '2026-05-03T14:25:27Z'
+  - id: note-9cee834
+    text: 'QA: ''Not a pm session'' detection uses the pane-registry file rather than
+      tmux has-session, since display-popup doesn''t propagate PM_TMUX_SOCKET reliably.
+      Verify popup works in non-shared sessions, shared sessions (--global / --group),
+      and shows ''Not a pm session'' from a non-pm tmux session.'
+    created_at: '2026-05-03T14:25:28Z'
+    last_edited: '2026-05-03T14:25:28Z'
+  - id: note-c2f4567
+    text: 'QA: session/window resolution. Inside the popup we run ''tmux display-message
+      -p #{session_name}'' and #{window_name} from the popup shell because tmux''s
+      expansion of those format strings in display-popup args is unreliable across
+      versions. pm log should show the resolved values in the popup-picker invocation
+      log line.'
+    created_at: '2026-05-03T14:25:29Z'
+    last_edited: '2026-05-03T14:25:29Z'
+  - id: note-c188aaa
+    text: 'QA: fzf UX. Filter input is disabled (no ''> '' prompt; typing letters
+      doesn''t filter). Header is two lines (title then shortcut hints) with --header-first.
+      Shortcut keys s/e/d/l/a/g trigger actions; q and Esc quit cleanly. Falls back
+      to numbered-list selector when fzf isn''t installed.'
+    created_at: '2026-05-03T14:25:30Z'
+    last_edited: '2026-05-03T14:25:30Z'
+  - id: note-b477537
+    text: 'Picker shortcut redesign (commit 9d09839): top-level shortcut keys are
+      now s/e/d/a/g (review-loop dropped from list rows). Review-loop and the fresh/loop
+      QA variants are reachable via z/zz chords: z d=pr review --fresh, zz d=review-loop
+      start, z a=pr qa fresh, zz a=pr qa loop. The TUI command bar now also accepts
+      pr qa [fresh|loop] [PR_ID]. Earlier QA notes mentioning the l shortcut and bare
+      pr qa for the popup are stale relative to this design.'
+    created_at: '2026-05-03T14:50:54Z'
+    last_edited: '2026-05-03T14:50:54Z'
+  - id: note-b1b3fa7
+    text: 'Fix: fold loop iterated _ALL_ACTIONS (which omits review-loop), so the
+      [loop iN] badge was never being folded onto the review row. Iterate _SHORTCUT_FOLD_INTO
+      directly so any current/future shortcut-only action is correctly folded.'
+    created_at: '2026-05-03T14:54:36Z'
+    last_edited: '2026-05-03T14:54:36Z'
+  - id: note-906acbe
+    text: 'QA: z/zz chord prefixes (mirrors TUI). ''d'' plain review, ''z d'' fresh
+      review, ''zz d'' review-loop start, ''a'' plain qa, ''z a'' fresh qa, ''zz a''
+      qa-loop start. Verify each chord routes correctly. q/Esc inside the chord prompt
+      should return to fzf picker (not dismiss popup); q/Esc in fzf itself dismisses.'
+    created_at: '2026-05-03T15:07:55Z'
+    last_edited: '2026-05-03T15:07:55Z'
+  - id: note-de1f65f
+    text: 'QA: fresh-window-aware spinner. When a fresh/loop action is invoked AND
+      the target window already exists (e.g. running review-loop again with stale
+      review window), spinner should NOT switch to the existing window immediately.
+      Should show ''rebuilding window…'' until the window is killed and a new one
+      with the same name appears (different tmux window-id), then switch.'
+    created_at: '2026-05-03T15:07:56Z'
+    last_edited: '2026-05-03T15:07:56Z'
+  - id: note-e774a16
+    text: 'QA: TUI restart sweeps stale runtime_state. Trigger a review-loop, observe
+      [loop iN] badge in picker. Restart the TUI (Ctrl+R or kill+restart). Re-open
+      picker — the loop badge should be gone (entry cleared) since the loop didn''t
+      survive the restart. Terminal states like [done VERDICT] should survive.'
+    created_at: '2026-05-03T15:07:57Z'
+    last_edited: '2026-05-03T15:07:57Z'
+  - id: note-d397fa7
+    text: 'QA: picker stays visible behind spinner. fzf is launched with --height=100%
+      so the picker contents remain on screen after fzf exits, and the spinner renders
+      below them in the same popup pane. Verify continuous visual flow from picker
+      selection → header (── starting fresh: ACTION for PR ──) → spinner → ✓ message
+      → popup closes.'
+    created_at: '2026-05-03T15:07:58Z'
+    last_edited: '2026-05-03T15:07:58Z'
+  - id: note-667d9e1
+    text: 'QA: review-loop and edit are shortcut-only (no list rows). The picker should
+      show only start/review/qa/merge as rows. review-loop''s iteration status ([loop
+      iN]) is folded onto the review row. Verify shortcuts (e for edit, zz d for review-loop)
+      still work.'
+    created_at: '2026-05-03T15:07:59Z'
+    last_edited: '2026-05-03T15:07:59Z'
+  - id: note-1aa60af
+    text: 'QA: zz d always starts a fresh review loop. Toggle/cancel behavior removed
+      — pressing zz d (TUI or popup) while a loop is running now supersedes it: existing
+      loop''s stop_requested is set, new loop starts immediately. Old thread exits
+      at next iteration boundary. Cancel by TUI restart or Ctrl+C in the loop''s review
+      pane. Verify: start a loop, press zz d again, see ''Restarting review loop''
+      message and a fresh loop.'
+    created_at: '2026-05-03T15:20:06Z'
+    last_edited: '2026-05-03T15:20:06Z'
+  - id: note-39a1694
+    text: 'QA: picker QA shortcut is ''t'' to match the TUI''s ''t'' binding (was
+      ''a'' previously). Verify: prefix+P → press t to invoke qa, z t for fresh qa,
+      zz t for qa-loop start.'
+    created_at: '2026-05-03T15:45:11Z'
+    last_edited: '2026-05-03T15:45:11Z'
+  - id: note-e2a4eb3
+    text: 'QA INPUT_REQUIRED:  (workdir: /home/matt/.pm/workdirs/qa/pr-2d0588a-e04b4568b23b40c8)'
+    created_at: '2026-05-03T16:28:36Z'
+    last_edited: '2026-05-03T16:28:36Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d0588a-tmux-popup-pr-switcher-and-prefix-ke-f6381eb7
 - id: pr-1735d44
   plan: bugs
   title: 'Consolidate window refocus: switch all co-viewing sessions consistently'
@@ -8248,11 +8417,11 @@ prs:
     the unified function. Human-guided testing needed: verify co-viewing sessions
     follow the switch, verify sessions viewing different windows are not affected,
     test from TUI-launched commands and from CLI.'
-  agent_machine: arch-home
+  agent_machine: spark-424d
   gh_pr: https://github.com/mjtomei/project_manager/pull/159
   gh_pr_number: 159
   created_at: '2026-04-07T12:51:22.561975+00:00'
-  updated_at: '2026-04-07T14:11:26.766315+00:00'
+  updated_at: '2026-05-03T12:08:21.050718+00:00'
   started_at: '2026-04-07T13:06:32.173284+00:00'
   reviewed_at: null
   merged_at: null
@@ -8273,7 +8442,25 @@ prs:
       session that has the target window visible.'
     created_at: '2026-04-07T14:11:26Z'
     last_edited: '2026-04-07T14:11:26Z'
-  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-1735d44-consolidate-window-refocus-switch-al-1f4460f5
+  - id: note-35bb96a
+    text: 'Add to scope: capture originating session at command-launch time, not at
+      window-creation time. Separate but related bug worth folding into this consolidation:
+      when a TUI command fires off something asynchronous, the session that actually
+      gets focused when the resulting window is finally created is whichever session
+      the user happens to be in at that moment, not the session they were in when
+      they fired the command. This is because select_window / switch-client resolve
+      current session lazily via $TMUX / tmux display-message at execution time, which
+      reflects the user''s current focus rather than the command''s originating context.
+      Fix: capture (session, window) at the moment the TUI command is issued and thread
+      it through to the eventual focus_window call. The unified tmux.focus_window
+      introduced by this PR should accept an explicit originating session/window pair
+      rather than querying the environment when it runs. This is the same data already
+      proposed by pr-291e891 (action source metadata) for file-locking purposes. Coordinate
+      so both PRs use a shared action-context structure rather than duplicating the
+      capture mechanism.'
+    created_at: '2026-05-03T11:56:47Z'
+    last_edited: '2026-05-03T11:56:47Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-1735d44-consolidate-window-refocus-switch-al-d9cdab42
 - id: pr-322f503
   plan: plan-qa
   title: 'Per-PR model override: associate a model with a PR so all sessions use it'
@@ -8922,7 +9109,7 @@ prs:
   plan: improvements
   title: TUI command for PR resource cleanup
   branch: pm/pr-f8abc94-tui-command-for-pr-resource-cleanup
-  status: pending
+  status: merged
   depends_on: []
   description: 'Add two ways to clean up all resources for a PR across all phases
     (implementation, review, QA): (1) A dedicated TUI key on a selected PR that tears
@@ -8936,15 +9123,29 @@ prs:
     — useful for freeing resources after a failed QA run, abandoning a review, or
     general housekeeping. Should confirm the action in the TUI before proceeding and
     report what was cleaned up.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/180
+  gh_pr_number: 180
   created_at: '2026-04-09T21:37:50.239172+00:00'
-  updated_at: '2026-04-09T21:50:06.546946+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
+  updated_at: '2026-05-03T00:06:32.628411+00:00'
+  started_at: '2026-05-02T21:00:42.908445+00:00'
+  reviewed_at: '2026-05-02T21:31:24.071044+00:00'
+  merged_at: '2026-05-03T00:06:32.628411+00:00'
+  notes:
+  - id: note-502c061
+    text: 'QA NEEDS_WORK: CLI --resources flag — happy path, errors, and workdir-cleanup
+      isolation: PASS; TUI Y key — confirmation modal, confirm/cancel paths, summary
+      log: NEEDS_WORK; TUI y prefix — cleanup-then-action, auto-cancel, invalid keys,
+      Esc: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-f8abc94-501125830aa20b3d)'
+    created_at: '2026-05-02T22:02:30Z'
+    last_edited: '2026-05-02T22:02:30Z'
+  - id: note-21d2de9
+    text: 'QA INPUT_REQUIRED: TUI dedicated Y key — modal confirm/cancel and summary:
+      INPUT_REQUIRED; TUI y-prefix — cleanup-then-action dispatch, auto-cancel, invalid
+      keys, Esc, and ordering with worker: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-f8abc94-45e1806778a0cdd8)'
+    created_at: '2026-05-03T00:03:29Z'
+    last_edited: '2026-05-03T00:03:29Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-f8abc94-tui-command-for-pr-resource-cleanup-89be975f
 - id: pr-ee2dae6
   plan: improvements
   title: 'Bug: QA verdict detection triggers during active progress animation'
@@ -8982,7 +9183,7 @@ prs:
   plan: plan-qa
   title: Batched QA scenario execution
   branch: pm/pr-d8cfa16-batched-qa-scenario-execution
-  status: in_review
+  status: closed
   depends_on: []
   description: 'Instead of spawning one session per QA scenario, batch scenarios into
     a configurable number of worker sessions. The scenario generator/concretizer groups
@@ -9002,7 +9203,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/163
   gh_pr_number: 163
   created_at: '2026-04-09T22:50:59.769426+00:00'
-  updated_at: '2026-04-10T18:43:57.689457+00:00'
+  updated_at: '2026-05-03T13:11:22.393684+00:00'
   started_at: '2026-04-09T23:30:04.624901+00:00'
   reviewed_at: '2026-04-10T18:43:57.689457+00:00'
   merged_at: null
@@ -9034,6 +9235,16 @@ prs:
       check: NEEDS_WORK (workdir: /home/matt/.pm/workdirs/qa/pr-d8cfa16-4f429ecf2321e04d)'
     created_at: '2026-04-13T21:49:20Z'
     last_edited: '2026-04-13T21:49:20Z'
+  - id: note-917b3f8
+    text: 'Closed as superseded by #167 (QA planner: consolidate related assertions
+      into fewer scenarios). #167 reduces scenario count from the planner side via
+      prompt changes alone, which has cut scenario counts substantially without a
+      measurable run-time hit. The batched-execution flow this PR was designed to
+      ship is no longer needed for the throughput problem it was scoped to solve.
+      If batching becomes valuable again for a different reason, reopen with that
+      motivation rather than reusing this PR''s framing.'
+    created_at: '2026-05-03T22:00:00Z'
+    last_edited: '2026-05-03T22:00:00Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-d8cfa16-batched-qa-scenario-execution-ebce8630
 - id: pr-3fe2696
   plan: plan-qa
@@ -9061,7 +9272,7 @@ prs:
   plan: improvements
   title: Double-tap for destructive TUI shortcuts to prevent accidental triggers
   branch: pm/pr-5471329-double-tap-for-destructive-tui-shortcuts-to-preven
-  status: in_review
+  status: closed
   depends_on: []
   description: Require a quick double-tap (within 300-400ms) for destructive single-key
     TUI shortcuts like s (start PR), d (review), g (merge), and t (QA run). First
@@ -9073,7 +9284,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/163
   gh_pr_number: 163
   created_at: '2026-04-09T22:50:59.769426+00:00'
-  updated_at: '2026-04-10T16:56:47.454801+00:00'
+  updated_at: '2026-05-03T13:11:22.393697+00:00'
   started_at: null
   reviewed_at: '2026-04-10T16:56:47.454801+00:00'
   merged_at: null
@@ -9082,7 +9293,7 @@ prs:
   plan: null
   title: Add pm pr split command for breaking large PRs into smaller pieces
   branch: pm/pr-4db3696-add-pm-pr-split-command-for-breaking-large-prs-int
-  status: qa
+  status: in_review
   depends_on: []
   description: "Add a 'pm pr split' command (CLI + TUI keybinding) that launches a\
     \ Claude session to decompose a large PR into multiple smaller PRs.\n\nWorkflow:\n\
@@ -9106,9 +9317,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/165
   gh_pr_number: 165
   created_at: '2026-04-10T11:34:57.339723+00:00'
-  updated_at: '2026-04-10T16:01:58.038791+00:00'
+  updated_at: '2026-05-03T18:09:08.514764+00:00'
   started_at: '2026-04-10T14:17:39.293056+00:00'
-  reviewed_at: '2026-04-10T16:01:58.038791+00:00'
+  reviewed_at: '2026-05-03T18:09:08.514764+00:00'
   merged_at: null
   notes:
   - id: note-654a677
@@ -9242,20 +9453,22 @@ prs:
   title: Launch plan pane actions in a dedicated plans window instead of the main
     window
   branch: pm/pr-a353c3d-launch-plan-pane-actions-in-dedicated-plans
-  status: pending
+  status: merged
   depends_on: []
   description: Plan actions from the plans pane (add, review, breakdown, worker) currently
     split panes in the main tmux window, cluttering it. They should open in a separate
     dedicated plans window so plan work does not interfere with PR work. This also
     enables running multiple plan actions in parallel (e.g. plan add on two plans
     at the same time).
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/179
+  gh_pr_number: 179
   created_at: '2026-04-11T21:35:26.923277+00:00'
-  updated_at: '2026-04-11T21:35:26.923277+00:00'
-  started_at: null
-  reviewed_at: null
+  updated_at: '2026-05-02T22:29:43.481670+00:00'
+  started_at: '2026-05-02T20:58:28.467538+00:00'
+  reviewed_at: '2026-05-02T21:33:55.912666+00:00'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a353c3d-launch-plan-pane-actions-in-dedicate-89be975f
+  merged_at: '2026-05-02T22:29:43.481670+00:00'
 - id: pr-1e0785e
   plan: null
   title: qa_loop tmux session target fails when base session in a group is destroyed
@@ -9848,7 +10061,7 @@ prs:
   plan: plan-regression
   title: 'Bug fix flow: reproduce with test, fix, verify'
   branch: pm/pr-30588a7-bug-fix-flow-reproduce-with-test-fix-verify
-  status: in_progress
+  status: merged
   depends_on: []
   description: 'Differentiate the bug fix workflow from feature implementation. When
     a PR has plan=bugs (or a new type=bug field), the implementation prompt should
@@ -9869,10 +10082,10 @@ prs:
     pointer.
 
 
-    The reconcile step is *not* the primary dedup mechanism — that''s handled file-time
-    by the regression-flow supervisor (pr-271cb3a) which has the work-log context.
-    Reconcile is a backstop that verifies the supervisor''s links and catches anything
-    the supervisor missed.
+    The reconcile step is *not* the primary dedup mechanism — that''s handled post-hoc
+    by the discovery supervisor (pr-271cb3a) after the test sessions file. Reconcile
+    is a backstop that verifies the supervisor''s links and catches anything the supervisor
+    missed.
 
 
     This changes the impl prompt generation (prompt_gen.py) to detect bug PRs and
@@ -9883,439 +10096,326 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/169
   gh_pr_number: 169
   created_at: '2026-04-28T11:07:43.274357+00:00'
-  updated_at: '2026-04-29T15:58:35.820024+00:00'
+  updated_at: '2026-05-01T21:58:01.600658+00:00'
   started_at: '2026-04-29T15:58:35.820024+00:00'
-  reviewed_at: null
-  merged_at: null
+  reviewed_at: '2026-05-01T21:54:41.621766+00:00'
+  merged_at: '2026-05-01T21:58:01.600658+00:00'
   notes: []
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-30588a7-bug-fix-flow-reproduce-with-test-fix-0e4c4acb
 - id: pr-47940bc
   plan: plan-regression
-  title: 'Regression runner watcher: run tests on schedule and report failures'
+  title: Regression test sessions file bugs and improvements into correct plans
   branch: pm/pr-47940bc-regression-runner-watcher-run-tests-on-schedule-an
-  status: pending
+  status: merged
   depends_on:
   - pr-539110b
-  description: 'Unified discovery worker: runs the Claude-based regression test functionality
-    with a prompt tuned to surface both bugs (test failures, incorrect behavior) and
-    improvements (UX/quality issues — state not surfaced, relationships not wired,
-    affordances missing). Single worker for both autonomous tracks; no separate UX-review
-    pass.
+  description: 'Pattern mirror of pr-539110b (merged), but for the existing Claude-based
+    regression tests at `pm/qa/regression/*.md` (loaded by `pm_core/qa_instructions.py:list_all()`,
+    launched by `pm_core/tui/pane_ops.py:launch_qa_item()`).
 
 
-    Dumb component: runs on demand and emits raw findings. Scheduling, throughput
-    limits, dedup, prioritization, and work-log management live in the discovery supervisor
-    (pr-271cb3a).
+    These tests already spawn Claude sessions — they have their own prompts in the
+    markdown body. We do not add a new worker or new prompt; we teach the existing
+    launch path to append a small addendum so the spawned session knows where to file
+    findings:
 
 
-    Behavior:
+    - If the test discovers a bug (failing assertion, incorrect behavior, regression):
+    `pm pr add --plan bugs --description ''...''`
 
-    - Exposes a single ''run now'' entry point the supervisor invokes
+    - If the test discovers an improvement (UX/quality issue surfaced incidentally):
+    `pm pr add --plan ux --description ''...''`
 
-    - Runs pytest, Claude-guided regression scenarios, and a quality/UX review prompt
-    over recent merges + current state
-
-    - Parses each finding into a typed record: `{type: bug | improvement, ...details}`.
-    Bug records include failing test name, assertion, stack trace excerpt, repro command.
-    Improvement records include description, suggested scope, confidence score.
-
-    - Emits the records to the supervisor — does not file PRs itself
-
-    - Builds on the watcher framework (pr-3032fb6, merged)
+    - The verdict (PASS / NEEDS_WORK / INPUT_REQUIRED) for the test itself is unchanged
+    — bug/improvement filing is a side effect, not a verdict change
 
 
-    The supervisor decides what to do (route to plan=bugs or plan=ux, dedup, file
-    new with priority).
+    Implementation: extend the wrapper in `launch_qa_item()` (the same place that
+    wraps the markdown body with session context today) so the appended addendum is
+    part of the spawned session''s prompt. No changes to the individual regression
+    test markdown files.
 
 
-    Manual testing: invoke the worker directly and inspect emitted records for shape
-    and accuracy on (a) a known-failing test and (b) a known UX-shaped issue. End-to-end
-    behavior is exercised via the supervisor''s manual test.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+    The discovery supervisor (pr-271cb3a) drives this list and handles dedup/prioritization/work-log;
+    the test sessions themselves only need to know where to file.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/171
+  gh_pr_number: 171
   created_at: '2026-04-28T11:07:54.142407+00:00'
-  updated_at: '2026-04-29T15:55:28.228163+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
+  updated_at: '2026-05-01T19:06:31.451231+00:00'
+  started_at: '2026-05-01T19:01:01.573337+00:00'
+  reviewed_at: '2026-05-01T19:04:07.966576+00:00'
+  merged_at: '2026-05-01T19:06:31.451231+00:00'
   notes: []
-- id: pr-ea3c851
-  plan: plan-regression
-  title: Auto-start bug fix PRs from regression failures
-  branch: pm/pr-ea3c851-auto-start-bug-fix-prs-from-regression-failures
-  status: pending
-  depends_on:
-  - pr-30588a7
-  - pr-47940bc
-  - pr-45db518
-  description: 'Configure a pool (via the auto-pool executor in pr-45db518) for bug-fix
-    PRs filed by the regression runner. Pool config: source = `plan=bugs and status=pending`,
-    auto-merge = on (PRs that PASS review+QA auto-merge), priority source = per-PR
-    field. Each picked PR runs through the bug-fix flow (reproduce→fix→verify→reconcile,
-    pr-30588a7) via the auto-sequence chain.
-
-
-    This PR is mostly configuration plus a small amount of glue:
-
-    - Define the bug-fix pool in settings (max-concurrent default 2, can be overridden)
-
-    - Wire regression-runner-filed bugs (pr-47940bc) to set initial priority from
-    failure severity
-
-    - Confirm reconcile step (pr-30588a7) can bump priority on overlapping bugs so
-    they get fixed sooner
-
-
-    Manual testing: end-to-end loop smoke test required during review. A reviewer
-    should let the regression runner trip, observe the bug get filed, observe the
-    pool pick it up under the concurrency limit, observe the bug-fix flow run, and
-    confirm the reconcile step at fix-end produces sensible cross-references. Use
-    INPUT_REQUIRED to drive this rather than code reading alone.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-04-28T11:08:02.888051+00:00'
-  updated_at: '2026-04-29T14:31:01.989186+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
-- id: pr-558ca3f
-  plan: plan-regression
-  title: Regression loop summary reporting
-  branch: pm/pr-558ca3f-regression-loop-summary-reporting
-  status: pending
-  depends_on:
-  - pr-47940bc
-  description: 'Periodic digest of regression loop activity. Writes structured reports
-    to `pm/reports/regression-<timestamp>.md` and maintains a rolling `pm/reports/regression-latest.md`
-    symlink/copy.
-
-
-    Metrics covered:
-
-    - Tests run (count, pass/fail/skip, runtime)
-
-    - Bugs filed this period (with PR ids and titles)
-
-    - Bug fixes implemented this period (PR ids, time-to-fix)
-
-    - Bug fixes merged this period
-
-    - Open bug backlog size and trend
-
-    - Dedup notes added (cross-references between overlapping bugs from pr-30588a7
-    reconcile step)
-
-
-    Both single-run and rolling-window summaries (configurable, e.g. 24h / 7d). Optionally
-    surfaced in the TUI as a pane or status line item — TUI integration can be a follow-up
-    if it adds scope.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-04-28T11:08:13.897708+00:00'
-  updated_at: '2026-04-28T11:15:51.389019+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-47940bc-regression-runner-watcher-run-tests--96cede9b
 - id: pr-e58459b
   plan: plan-regression
   title: 'Auto-sequence button: chain start → review → QA on a single PR'
   branch: pm/pr-e58459b-auto-sequence-button-chain-start-review-qa-on-a-si
-  status: pending
+  status: merged
   depends_on: []
-  description: 'TUI keypress on a PR that chains start → done (review) → qa loop,
-    stopping at each existing pause condition (idle-no-spec in impl, INPUT_REQUIRED
-    in review, etc.) and stopping before merge. Reuses existing per-phase flows —
-    the only new machinery is wait-for-session-end glue that fires the next phase.
-    Foundational primitive used by both the regression bug fix loop and the UX taste
-    loop.
+  description: 'Make the start → done (review) → qa loop chain runnable two ways:
 
 
-    Manual testing: this PR should be exercised end-to-end during review. A reviewer
-    should press the auto-sequence key on a real PR, observe the chain advance through
-    each phase, and confirm it halts correctly at each documented pause condition
-    (idle-no-spec, INPUT_REQUIRED, before merge). Use INPUT_REQUIRED to drive this
+    1. **TUI keypress** on a selected PR — chains the three phases, halting at existing
+    pause conditions (idle-no-spec in impl, INPUT_REQUIRED in review, etc.) and stopping
+    before merge. The original framing.
+
+    2. **Programmatic CLI**: `pm pr auto-sequence <id>` — runs the same chain non-interactively.
+    This is what the implementation watcher Claude sessions invoke each tick to advance
+    a chosen PR through the next phase. Without this, watcher sessions would have
+    to drive the chain via tmux send-keys against the TUI, which is fragile.
+
+
+    Reuses existing per-phase flows. The only new machinery is wait-for-session-end
+    glue that fires the next phase, plus the CLI wrapper. Foundational primitive used
+    by both implementation watchers (pr-e3a711c bug-fix, pr-d39a7fb improvement-fix).
+
+
+    Manual testing: press the auto-sequence key on a real PR, observe the chain advance
+    through each phase, and confirm it halts correctly at each documented pause condition.
+    Also exercise the CLI form non-interactively. Use INPUT_REQUIRED to drive this
     rather than code reading alone.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/172
+  gh_pr_number: 172
   created_at: '2026-04-29T14:13:36.865010+00:00'
-  updated_at: '2026-04-29T14:15:29.660874+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
+  updated_at: '2026-05-01T21:51:13.488124+00:00'
+  started_at: '2026-05-01T19:01:08.034638+00:00'
+  reviewed_at: '2026-05-01T19:15:03.147733+00:00'
+  merged_at: '2026-05-01T21:51:13.488124+00:00'
   notes: []
-- id: pr-84e6510
-  plan: plan-regression
-  title: 'Auto-pool with merge gate: rate-limited auto-sequence with no-auto-merge
-    mode'
-  branch: pm/pr-84e6510-auto-pool-with-merge-gate-rate-limited-auto-sequen
-  status: pending
-  depends_on:
-  - pr-47940bc
-  - pr-45db518
-  description: 'Configure a pool (via the auto-pool executor in pr-45db518) for UX-quality
-    PRs filed by the UX-review watcher. Pool config: source = `plan=ux and status=pending`,
-    auto-merge = gated (PRs land at ready-for-merge and wait for human taste check),
-    priority source = per-PR field set by the watcher''s confidence score.
-
-
-    This PR is mostly configuration:
-
-    - Define the UX pool in settings (max-concurrent default 2-3, rate-limited so
-    human review speed is the throttle)
-
-    - Wire UX-watcher-filed candidates (pr-1766d74) to set initial priority from confidence
-
-    - Confirm the gated mode holds PRs at ready-for-merge until a human merges
-
-
-    Bug-fix pool (pr-ea3c851) and UX pool (this PR) are peer consumers of the auto-pool
-    executor — neither depends on the other.
-
-
-    Manual testing: end-to-end loop smoke test required during review. A reviewer
-    should let the UX watcher file candidates, observe the pool pick them up under
-    the concurrency limit, confirm UX PRs land at ready-for-merge and wait, and verify
-    a human merge advances the queue. Use INPUT_REQUIRED to drive this rather than
-    code reading alone.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-04-29T14:13:49.809083+00:00'
-  updated_at: '2026-04-29T15:57:16.596404+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
-- id: pr-45db518
-  plan: plan-regression
-  title: 'Auto-pool executor: rate-limited PR queue with prioritization'
-  branch: pm/pr-45db518-auto-pool-executor-rate-limited-pr-queue-with-prio
-  status: pending
-  depends_on:
-  - pr-e58459b
-  description: 'Foundational primitive that both the regression bug-fix loop and the
-    UX taste loop consume. A pool watches a configurable PR source (plan id, status
-    filter, or explicit list) and drives selected PRs through the auto-sequence chain
-    (start → review → QA, see pr-e58459b) under a rate limit and priority order.
-
-
-    Pool configuration (per-pool, defined in project settings or a pool registry):
-
-    - Source: plan id, status set, or filter expression (e.g. plan=bugs and status=pending)
-
-    - Rate limit: either max-concurrent (e.g. 3 in-flight) or max-per-window (e.g.
-    10 per 24h). Pools can use one or both.
-
-    - Auto-merge mode: on (PRs that PASS QA auto-merge) or gated (PRs land at ready-for-merge
-    and wait for human verdict)
-
-    - Priority source: per-PR `priority` field (integer; higher = sooner), with optional
-    tiebreaker (created-at, severity)
-
-
-    Priority adjustment mechanism:
-
-    - New `priority` field on PR records (default 0)
-
-    - `pm pr edit <id> --priority N` to set explicitly
-
-    - `pm pr edit <id> --priority +N` / `-N` to bump relative
-
-
-    Priority is set by the flow supervisors (pr-271cb3a, pr-d39a7fb), not by the workers
-    that file PRs. The pool itself is agnostic to who sets priority — it just reads
-    the field and orders accordingly.
-
-
-    The pool is the discover-and-queue + scheduler layer. Per-PR execution still goes
-    through pr-e58459b''s auto-sequence chain. Without the pool, you get manual one-at-a-time
-    auto-sequence; with it, you get governed throughput across a queue.
-
-
-    Manual testing: configure a test pool with max-concurrent=2 against a fake source,
-    queue 5 PRs at varying priorities, observe the pool start in priority order and
-    hold at 2 in-flight. Bump a queued PR''s priority via CLI mid-run and observe
-    reordering. Use INPUT_REQUIRED to drive this.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-04-29T14:30:38.744727+00:00'
-  updated_at: '2026-04-29T15:34:50.113337+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-e58459b-auto-sequence-button-chain-start-rev-96cede9b
 - id: pr-271cb3a
   plan: plan-regression
   title: Discovery supervisor watcher (unified for bugs and improvements)
   branch: pm/pr-271cb3a-regression-flow-supervisor-watcher
-  status: pending
+  status: merged
   depends_on:
   - pr-47940bc
-  - pr-45db518
-  description: 'Single discovery supervisor watcher. Drives the unified discovery
-    worker (pr-47940bc) and converts raw findings into prioritized, deduplicated PR
-    filings — routing each finding into plan=bugs or plan=ux based on its type.
+  - pr-97ddabf
+  description: 'Discovery supervisor watcher implemented as a `BaseWatcher` subclass
+    (mirror of `pm_core/watchers/auto_start_watcher.py`).
 
 
-    Responsibilities:
+    Implementation:
 
-    - **Trigger**: kicks off discovery runs on its own cadence with throughput constraints
-    (max-concurrent runs, max-per-window, back-off when failures storm).
+    - New file `pm_core/watchers/discovery_supervisor.py` defining the subclass with
+    its own `DEFAULT_INTERVAL` (probably longer than auto-start since regression tests
+    are heavier — start at 30 minutes)
 
-    - **Route**: each raw record is filed into plan=bugs (type=bug) or plan=ux (type=improvement).
+    - New `generate_discovery_supervisor_prompt()` in `pm_core/prompt_gen.py` paralleling
+    `generate_watcher_prompt()`
 
-    - **Dedup**: checks raw findings against open PRs in the target plan and recent
-    work-log entries. Decisions: drop, merge (append note + bump priority on existing),
-    or file new.
+    - Reuses framework primitives: subprocess invocation per tick, READY / INPUT_REQUIRED
+    verdict extraction via idle_prompt hook, automatic injection of `notes.txt` General
+    + Watcher sections via `notes_for_prompt(root, ''watcher'')`
 
-    - **Prioritize**: sets priority on new filings (via `pm pr edit --priority`) based
-    on severity / confidence and work-log signals.
-
-    - **Log**: maintains a structured work log of runs, findings, filings, dedup decisions,
-    and routing rationale. Source of truth for the watcher review window (pr-WATCHERVIEW)
-    and summary reporting (pr-558ca3f).
-
-    - **Exception handling**: detects stuck/crashed worker runs and restarts or escalates.
+    - Work log file at `pm/watchers/discovery.log`. Each tick prompt instructs Claude
+    to read the log first for context (recent runs, recent filings, recent dedup decisions)
+    and append a one-line summary before emitting the verdict
 
 
-    Manual testing: configure against a fake worker emitting scripted mixed bug/improvement
-    record sequences. Verify throughput limits, correct routing, dedup, priority assignment,
-    and work log accuracy. Use INPUT_REQUIRED to drive this.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+    Per-tick behavior described in the prompt:
+
+    - Read the regression test list (`pm/qa/regression/*.md` via `qa_instructions.list_all()`)
+
+    - Read recent work-log entries
+
+    - Decide: is a test due to run? are any from the last tick still in flight?
+
+    - If due, launch via `launch_qa_item()` with target_window=watcher''s window (pr-97ddabf)
+
+    - After in-flight tests complete (verdict in transcript), check for newly-filed
+    bug/improvement PRs and reconcile post-hoc: dedup against open PRs in plan=bugs/plan=ux
+    using existing `pm pr list` + `pm pr note` (merge into existing) or close-and-merge
+    logic
+
+    - Append work-log entry, emit READY (or INPUT_REQUIRED if something needs human
+    eyes)
+
+
+    Notes infrastructure: users can leave watcher-scoped guidance in `notes.txt` Watcher
+    section (e.g. ''always run the auth-regression test daily'', ''prioritize fixing
+    memory leaks before UI bugs'') and it flows into every tick automatically.
+
+
+    Manual testing: run the watcher against the real regression test list at a short
+    interval. Verify each tick reads the log, makes sensible launch decisions, dedups
+    filed PRs, and emits READY or INPUT_REQUIRED. Use INPUT_REQUIRED to drive this.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/174
+  gh_pr_number: 174
   created_at: '2026-04-29T15:34:01.804130+00:00'
-  updated_at: '2026-04-29T15:55:37.842828+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
+  updated_at: '2026-05-01T21:38:08.737486+00:00'
+  started_at: '2026-05-01T19:12:46.327086+00:00'
+  reviewed_at: '2026-05-01T19:19:58.516045+00:00'
+  merged_at: '2026-05-01T21:38:08.737486+00:00'
+  notes:
+  - id: note-d7058db
+    text: qa launch shim duplicates ~25 lines of prompt construction (regression filing
+      addendum, prompt template, session label) from tui.pane_ops.launch_qa_item;
+      consider extracting build_qa_launch_prompt() helper to qa_instructions when
+      the next caller appears
+    created_at: '2026-05-01T19:22:58Z'
+    last_edited: '2026-05-01T19:22:58Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-271cb3a-regression-flow-supervisor-watcher-473dc6d5
 - id: pr-d39a7fb
   plan: plan-regression
   title: Improvement-fix implementation watcher
   branch: pm/pr-d39a7fb-improvement-flow-supervisor-watcher
-  status: pending
+  status: merged
   depends_on:
-  - pr-45db518
-  - pr-84e6510
-  description: 'Implementation-side watcher for the improvement-fix flow. Distinct
-    from the pool (which is generic execution) and from the discovery supervisor (which
-    handles filing). Monitors the UX pool''s in-flight sessions and reacts to execution-side
-    signals.
+  - pr-e58459b
+  description: 'Improvement-fix implementation watcher. Mirror of pr-e3a711c (bug-fix
+    watcher) but for the UX flow with two key differences:
 
 
-    Responsibilities:
+    1. **Source plan**: `plan=ux` instead of `plan=bugs`
 
-    - **Health**: detect stuck/crashed fix sessions, repeated NEEDS_WORK loops, and
-    other execution-side anomalies. Restart or escalate. May reuse pr-18ac983 (session
-    health watcher) as substrate if it lands first.
-
-    - **Dynamic priority**: as the work log accumulates, adjust priority on queued
-    PRs (e.g. boost a UX fix that other queued candidates depend on, demote one that''s
-    been deferred too many times).
-
-    - **Implementation log**: per-flow metrics — typical fix-session duration, success/NEEDS_WORK
-    rates, merge cadence. Feeds the watcher review window.
-
-    - **Throttle interactions**: pause its pool if the system is under load (e.g.
-    another flow is consuming resources), resume when capacity returns.
+    2. **Merge behavior**: gated, not auto. PRs that PASS QA are advanced to ready-for-merge
+    and held for a human taste check. The watcher does not merge them. Human merge
+    cadence is the throttle.
 
 
-    Mirror of pr-BUGFIXWATCHER but tuned for UX-fix concerns (slower cadence, gated
-    merge, taste-driven). Separate watcher because flow-specific signals justify independent
-    tuning.
+    Implementation:
+
+    - New file `pm_core/watchers/improvement_fix_impl_watcher.py` mirroring `auto_start_watcher.py`
+
+    - New `generate_improvement_fix_impl_prompt()` in `prompt_gen.py`
+
+    - Reuses: subprocess per tick, READY/INPUT_REQUIRED verdicts, notes injection,
+    work-log pattern
+
+    - Work log at `pm/watchers/improvement-fix-impl.log`
+
+    - Cadence likely longer than the bug-fix watcher (UX is taste-driven, no urgency)
 
 
-    Manual testing: scripted scenarios — stuck session, repeated NEEDS_WORK, dependent-PR
-    boost — verifying each is detected and handled. Use INPUT_REQUIRED to drive this.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+    Per-tick prompt behavior is the same shape as the bug-fix watcher except:
+
+    - Pick from `plan=ux` pending
+
+    - After QA PASS, mark ready-for-review and stop (do not merge)
+
+    - Prioritization guidance is taste-shaped (recency of related code, user feedback
+    signals in notes, confidence signals in the original filing) rather than severity-shaped
+
+
+    Same pool=plan / dynamic-prioritization / no-priority-field pattern as pr-e3a711c.
+
+
+    Manual testing: scripted scenarios — full happy path (file → auto-sequence → PASS
+    → wait for human merge), repeated NEEDS_WORK, dependent-PR boost. Use INPUT_REQUIRED
+    to drive this.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/176
+  gh_pr_number: 176
   created_at: '2026-04-29T15:34:08.487870+00:00'
-  updated_at: '2026-04-29T15:56:26.783633+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
+  updated_at: '2026-05-01T22:02:03.489755+00:00'
+  started_at: '2026-05-01T21:51:19.953439+00:00'
+  reviewed_at: '2026-05-01T21:58:25.033476+00:00'
+  merged_at: '2026-05-01T22:02:03.489755+00:00'
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-d39a7fb-improvement-flow-supervisor-watcher-c016c6f9
 - id: pr-e3a711c
   plan: plan-regression
   title: Bug-fix implementation watcher
   branch: pm/pr-e3a711c-bug-fix-implementation-watcher
-  status: pending
+  status: merged
   depends_on:
-  - pr-45db518
-  - pr-ea3c851
-  description: 'Implementation-side watcher for the bug-fix flow. Peer of pr-d39a7fb
-    (improvement-fix watcher). Distinct from the pool (which is generic execution)
-    and from the discovery supervisor (which handles filing). Monitors the bug-fix
-    pool''s in-flight sessions and reacts to execution-side signals.
+  - pr-e58459b
+  - pr-30588a7
+  description: 'Bug-fix implementation watcher implemented as a `BaseWatcher` subclass.
+    Drives the bug-fix flow: reads pending PRs in plan=bugs, picks the best candidate
+    dynamically each tick, advances chosen PRs through the auto-sequence chain (pr-e58459b),
+    and auto-merges on PASS.
 
 
-    Responsibilities:
+    Implementation:
 
-    - **Health**: detect stuck/crashed fix sessions, repeated NEEDS_WORK loops, reproduce-step
-    failures (the bug-fix flow requires a failing test first; if the impl can''t write
-    one, surface that). Restart or escalate. May reuse pr-18ac983 (session health
-    watcher) as substrate if it lands first.
+    - New file `pm_core/watchers/bug_fix_impl_watcher.py` mirroring `auto_start_watcher.py`
 
-    - **Dynamic priority**: adjust priority on queued bug PRs as the work log accumulates
-    — e.g. boost when a related bug just regressed again, demote when a fix attempt
-    has failed multiple times and needs human triage.
+    - New `generate_bug_fix_impl_prompt()` in `prompt_gen.py`
 
-    - **Implementation log**: per-flow metrics — fix-session duration, reproduce-step
-    success rate, time-to-merge, regression-after-fix rate. Feeds the watcher review
-    session.
+    - Reuses: subprocess per tick, READY/INPUT_REQUIRED verdicts, notes injection
+    (General + Watcher sections), work-log pattern
 
-    - **Throttle interactions**: pause its pool when bug-fix throughput is overwhelming
-    review/QA capacity.
+    - Work log at `pm/watchers/bug-fix-impl.log`
 
 
-    Mirror of pr-d39a7fb but tuned for bug-fix concerns (faster cadence, auto-merge,
-    severity-driven). Separate watcher because signals like reproduce-step failure
-    are bug-flow specific.
+    Per-tick prompt behavior:
+
+    - Read recent work-log entries for context (which PRs are in flight, what just
+    merged, what''s stuck)
+
+    - List in-flight PRs (`pm pr list --plan bugs` filtered by status); if at concurrency
+    cap (default 2), do nothing this tick
+
+    - If under cap, scan pending bug PRs and pick the highest-priority candidate using
+    prompt-supplied guidance (severity signals in the description, recurrence in the
+    work log, age) plus user-specified guidance from `notes.txt` Watcher section.
+    No persisted priority field.
+
+    - Invoke `pm pr auto-sequence <id>` (programmatic chain from pr-e58459b) on the
+    picked PR
+
+    - For PRs where QA verdict is PASS, merge them (this watcher is auto-merge — distinguishes
+    the bug-fix flow from the improvement-fix flow)
+
+    - Detect stuck/loop-failing PRs (repeated NEEDS_WORK, reproduce-step failures
+    from pr-30588a7) and either escalate via INPUT_REQUIRED or note in the log for
+    human triage
+
+    - Append work-log entry, emit verdict
 
 
-    Manual testing: scripted scenarios — reproduce-step failure, repeated NEEDS_WORK
-    on a single bug, regression-after-fix detection — verifying each is detected and
-    handled. Use INPUT_REQUIRED to drive this.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+    Pool = pm plan: there is no separate pool config or priority field. The ''pool''
+    is just `plan=bugs`, and ordering is judged dynamically.
+
+
+    Manual testing: scripted scenarios — full happy path (file → auto-sequence → PASS
+    → auto-merge), reproduce-step failure, repeated NEEDS_WORK on a single bug, regression-after-fix
+    detection. Use INPUT_REQUIRED to drive this.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/177
+  gh_pr_number: 177
   created_at: '2026-04-29T15:56:05.110130+00:00'
-  updated_at: '2026-04-29T15:56:26.129150+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
+  updated_at: '2026-05-01T22:25:23.920723+00:00'
+  started_at: '2026-05-01T21:58:07.814710+00:00'
+  reviewed_at: '2026-05-01T22:02:56.976134+00:00'
+  merged_at: '2026-05-01T22:25:23.920723+00:00'
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-e3a711c-bug-fix-implementation-watcher-07bb0393
 - id: pr-e84b43c
   plan: plan-regression
   title: 'Watcher review session: Claude pane with work-log access'
   branch: pm/pr-e84b43c-watcher-review-session-claude-pane-with-work-log-a
-  status: pending
+  status: merged
   depends_on:
   - pr-271cb3a
   description: 'Dedicated Claude session for human review of the autonomous watchers.
-    Launched from the TUI; opens with a summary of what''s happened recently across
-    all three watchers (discovery supervisor pr-271cb3a, bug-fix watcher, improvement-fix
-    watcher pr-d39a7fb) and then conversational from there.
+    Launched from the TUI; opens with a summary of recent activity across all three
+    watchers (discovery supervisor pr-271cb3a, bug-fix watcher pr-e3a711c, improvement-fix
+    watcher pr-d39a7fb) and is conversational from there.
 
 
     Why a session instead of a static TUI panel:
 
-    - Humans can ask follow-up questions (''why was this bug deduplicated against
-    that one?'', ''show me the last three improvement candidates that got dropped'')
+    - Humans can ask follow-up questions (''why was this bug deduped against that
+    one?'', ''show me the last three improvement candidates that got dropped'')
 
-    - Can request remediation (''boost priority on pr-X'', ''pause the improvement
-    pool for an hour'') with the session translating to the right pm commands
+    - Can request remediation (''add a note to the watcher section saying ...'', ''pause
+    the improvement watcher for an hour'') with the session translating to the right
+    pm commands
 
     - Reasoning surface, not just metrics — the human gets explanations, not raw logs
+
+
+    Reuse: the session reads the watchers'' text-file work logs at `pm/watchers/discovery.log`,
+    `pm/watchers/bug-fix-impl.log`, `pm/watchers/improvement-fix-impl.log`. It can
+    also tail per-test transcripts and use `pm pr list` / `pm pr graph` for project
+    state. Same surfaces a human watching the TUI uses today; no new ingestion path.
 
 
     Behavior:
@@ -10323,9 +10423,8 @@ prs:
     - TUI keypress launches a Claude session in a new pane with the project context
     loaded
 
-    - System prompt grants read access to all three watchers'' work-logs (paths or
-    queryable interface), lists current pool state and in-flight PRs, and explains
-    the watcher architecture
+    - System prompt grants read access to all three watchers'' work logs, current
+    plan/PR state, in-flight scenario transcripts, and explains the watcher architecture
 
     - Opens with a summary turn: what was discovered, filed, fixed, merged, or stuck
     since the last review session
@@ -10333,32 +10432,29 @@ prs:
     - From there, chat-driven: human asks, session answers using the logs and pm CLI
     as needed
 
-    - Read-mostly by default — write actions (priority changes, pool pause/resume)
-    require explicit human confirmation in the session
-
-
-    Workers and supervisors emit logs in a uniform shape (jsonl or similar) so the
-    review session has a single ingestion path.
+    - Read-mostly by default — write actions (adding notes to influence priority,
+    pausing a watcher) require explicit human confirmation
 
 
     Manual testing: launch the review session in a project with simulated watcher
     activity, confirm the opening summary covers all three watchers, exercise follow-up
-    questions and a remediation flow (priority bump). Use INPUT_REQUIRED to drive
-    this.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+    questions and a remediation flow (add a watcher-section note, then verify it shows
+    up in the next watcher tick). Use INPUT_REQUIRED to drive this.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/175
+  gh_pr_number: 175
   created_at: '2026-04-29T15:56:16.156179+00:00'
-  updated_at: '2026-04-29T15:56:16.156179+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
+  updated_at: '2026-05-01T21:48:11.999410+00:00'
+  started_at: '2026-05-01T21:38:13.700898+00:00'
+  reviewed_at: '2026-05-01T21:45:38.013370+00:00'
+  merged_at: '2026-05-01T21:48:11.999410+00:00'
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-e84b43c-watcher-review-session-claude-pane-w-c6248035
 - id: pr-4702a11
-  plan: improvements
+  plan: plan-ambient
   title: pm rc mobile voice document viewer and editor
   branch: pm/pr-4702a11-pm-rc-mobile-voice-document-viewer-and-editor
-  status: pending
+  status: qa
   depends_on: []
   description: 'New `pm rc start <path> [--port N]` command (pm-session only) that
     lets a user review and edit a document by voice from a remote device while the
@@ -10602,11 +10698,1329 @@ prs:
     - pm_core/cli/rc.py
 
     - pm_core/cli/__init__.py'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/170
+  gh_pr_number: 170
+  created_at: '2026-05-01T15:07:09.683797+00:00'
+  updated_at: '2026-05-01T16:07:53.479420+00:00'
+  started_at: '2026-05-01T15:21:01.117727+00:00'
+  reviewed_at: '2026-05-01T15:42:13.613594+00:00'
+  merged_at: null
+  notes:
+  - id: note-1404198
+    text: 'QA PASS: Server endpoint behavior — select/focus/propose/accept/reject/viewport:
+      PASS; SSE broadcast plumbing and slow-subscriber handling: PASS; CLI guards
+      and registry helpers: PASS; Cleanup hook semantics: PASS; Viewer HTML self-containment
+      and SSE/visibility behaviors (static inspection): PASS (workdir: /home/matt/.pm/workdirs/qa/pr-4702a11-7dc1d092809969cd)'
+    created_at: '2026-05-01T16:23:55Z'
+    last_edited: '2026-05-01T16:23:55Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-4702a11-pm-rc-mobile-voice-document-viewer-a-372f0fc3
+- id: pr-39a4e66
+  plan: plan-ambient
+  title: Common surface protocol — extract from pm rc
+  branch: pm/pr-39a4e66-common-surface-protocol-extract-from-pm-rc
+  status: pending
+  depends_on:
+  - pr-4702a11
+  description: 'Define the shape every ambient surface exposes, in pm_core/surfaces/protocol.py.
+    Types: SurfaceKind enum (rc, browse, doc, tts, ...), SurfaceIdentity (id, kind,
+    host, lan_url, started_at, pid), DisplayState (path, version, document text or
+    other rendered content), AttentionState (viewport_top, viewport_bottom, selection,
+    focus_target, last_user_input_at, signals: SignalHistories). SignalHistories is
+    a per-signal time-series — every signal type retains history. Histories persist
+    indefinitely via the archive (see persistent-archive PR); the protocol-level SignalHistories
+    object is an in-memory cache of the recent past (default ~10 minutes, configurable
+    per signal) populated from the archive on surface start, NOT the source of truth.
+    Long-tail queries hit the archive directly through pm_core/surfaces/archive.py.
+    Initial signal types: viewport_changes, selection_changes, focus_changes, scroll_events,
+    touch_events. Gaze and implicit-signal histories slot into the same shape when
+    their PRs land — no protocol redesign needed. Surfaces serve GET /api/surface
+    returning {identity, display, attention} as a single payload. The rc viewer''s
+    GET /api/doc is refactored to construct its response from this shape (with the
+    existing field names preserved as a transitional alias so the rc webapp keeps
+    working unchanged). No new behavior — pure extraction so subsequent surfaces have
+    a target to implement against. Tests: type round-trip, rc /api/doc still serves
+    the same shape it did before, /api/surface on rc returns the new structured payload,
+    in-memory cache rehydrates from archive on surface restart, cache eviction does
+    not lose data (still queryable from archive).'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
-  created_at: '2026-05-01T15:07:09.683797+00:00'
-  updated_at: '2026-05-01T15:19:42.692220+00:00'
+  created_at: '2026-05-01T16:12:14.685514+00:00'
+  updated_at: '2026-05-01T22:38:36.102510+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-dc4f5fe
+  plan: plan-ambient
+  title: Host-local surface registry
+  branch: pm/pr-dc4f5fe-host-local-surface-registry
+  status: pending
+  depends_on:
+  - pr-39a4e66
+  description: 'File-backed registry at ~/.pm/surfaces/<id>.json — each surface writes
+    its descriptor (identity + URL + pid) on startup, removes on shutdown. Stale-entry
+    cleanup on read when the pid is no longer alive. Library API in pm_core/surfaces/registry.py:
+    list_surfaces(), get_surface(id), register(identity), deregister(id). New CLI
+    ''pm surfaces list'' as a debug aid. The rc server is updated to register on serve
+    start and deregister on shutdown; existing rc-server pane registry tracking continues
+    unchanged. Tests: register/deregister round-trip, stale cleanup when pid is gone,
+    ''pm surfaces list'' output, rc server registers correctly on startup.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-01T16:12:22.561919+00:00'
+  updated_at: '2026-05-01T16:12:22.561919+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-a0d778e
+  plan: plan-ambient
+  title: Project browser surface
+  branch: pm/pr-a0d778e-project-browser-surface
+  status: pending
+  depends_on:
+  - pr-dc4f5fe
+  description: 'New ''pm browse start [--port N]'' command (pm-session only). Webapp
+    surface that renders the current pm project tree (plans → PRs → files) as a touch-navigable
+    list. Reuses pane plumbing established by pr-4702a11 (single rc-driver-style pane
+    in a new tmux window, server as background daemon). Implements the surface protocol:
+    GET /api/surface returns identity (kind=browse) + display (current view path:
+    /plans, /plans/<id>, /prs/<id>, /files/<path>) + attention (which item is selected,
+    viewport offset). Claude drives via ''pm browse navigate <path>'' and ''pm browse
+    focus <item>''. User can also tap to navigate. Read-only — taps select but do
+    not mutate project state. Registers with the surface registry. Tests: tree rendering
+    for plans/PRs/files, navigation API, attention reporting back, registry registration.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-01T16:12:31.737027+00:00'
+  updated_at: '2026-05-01T16:12:31.737027+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-101fae8
+  plan: plan-ambient
+  title: Doc reader surface
+  branch: pm/pr-101fae8-doc-reader-surface
+  status: pending
+  depends_on:
+  - pr-dc4f5fe
+  description: 'New ''pm doc start <path> [--port N]'' command (pm-session only).
+    Like rc but read-only and Claude-only-driven — the user does not edit, only reads.
+    For reference material: codebase files, generated docs, screenshots Claude wants
+    to point the user at. CLI ops: ''pm doc focus <top_line>'', ''pm doc highlight
+    <start> [end]'' (visual highlight without ''selection'' semantics — purely indicative),
+    ''pm doc status''. No propose/accept/reject. Implements the surface protocol;
+    registers with the registry. Useful for narrating during voice sessions (''look
+    at the goals section here''). Tests: file rendering, focus and highlight ops,
+    viewport reporting, registry registration.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-01T16:12:39.353078+00:00'
+  updated_at: '2026-05-01T16:12:39.353078+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-dce4cbb
+  plan: plan-ambient
+  title: Active-surface context query
+  branch: pm/pr-dce4cbb-active-surface-context-query
+  status: pending
+  depends_on:
+  - pr-a0d778e
+  - pr-101fae8
+  description: 'New ''pm context'' CLI. Reads the surface registry, queries each active
+    surface''s GET /api/surface concurrently, returns a stable JSON summary: per-surface
+    identity + display + attention. Non-responsive surfaces are reported with a status
+    field rather than dropped. Available to any Claude session on the host — this
+    is the disambiguation primitive Claude calls before responding to ambiguous requests.
+    Output schema is versioned so prompts can include it directly. Optional --surface
+    <id> filter to query just one. Top-level derived signals included in the output:
+    global_last_input_at (max of last_user_input_at across all surfaces) and idle_seconds
+    (now - global_last_input_at) — these tell Claude how stale the whole context is,
+    regardless of which surface is most recent. Tests: concurrent query of multiple
+    surfaces, dead-surface handling, JSON shape stability, --surface filter, idle_seconds
+    correctness across multiple surfaces.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-01T16:12:46.606257+00:00'
+  updated_at: '2026-05-01T18:52:00.321553+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-7b6ae74
+  plan: plan-ambient
+  title: Cross-surface attention ranking
+  branch: pm/pr-7b6ae74-cross-surface-attention-ranking
+  status: pending
+  depends_on:
+  - pr-dce4cbb
+  description: 'Augment ''pm context'' with a ranked most-recent-attention list across
+    all active surfaces. Ranking combines last_user_input_at and a touch-recency weight
+    (default exponential decay, half-life ~30s). Add ''pm context resolve <phrase>''
+    that takes a natural-language pointer (''this paragraph'', ''the second one'',
+    ''over there'') and returns the most-likely referent surface + region as JSON,
+    or returns ambiguity metadata when multiple candidates are within tolerance so
+    Claude can ask the user. Resolution uses display content + attention state from
+    the context query. Global idleness gates confidence: if idle_seconds exceeds a
+    threshold (default 120s, configurable), the resolver returns low confidence and
+    recommends asking the user rather than guessing — even if there is technically
+    a most-recent-attended surface, deictic references go stale fast. Tests: two-surface
+    tie case (most-recent-touched wins), recency-decay case (older attention loses),
+    ambiguity-metadata case (returns candidates instead of guessing), resolve-by-content
+    matching (''the second list''), idle-gating case (long idle drops resolver confidence).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-01T16:12:55.077235+00:00'
+  updated_at: '2026-05-01T18:52:07.650774+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-8c21624
+  plan: plan-ambient
+  title: Gaze tracking — protocol extension and browser provider
+  branch: pm/pr-8c21624-gaze-tracking-protocol-extension-and-browser-provi
+  status: pending
+  depends_on:
+  - pr-39a4e66
+  description: 'Extend AttentionState with optional gaze: {x, y, region_id, last_at}.
+    x/y are normalized 0..1 in the surface viewport coordinate space. region_id is
+    the data-region attribute of the visible element under the gaze point if known.
+    Add a JS provider at pm_core/surfaces/static/gaze.js that wraps WebGazer (Brown
+    University, brownhci/WebGazer) — vendored as a static asset under pm_core/surfaces/static/vendor/webgazer/.
+    WebGazer was chosen because: (a) runs entirely client-side so no video data leaves
+    the device (privacy framing solved), (b) self-calibrates from observed user interactions
+    (clicks/touches correlate with gaze targets — no explicit calibration ceremony
+    needed), (c) uses MediaPipe Facemesh by default with ridge/weightedRidge regression
+    modules, (d) MIT-licensed, actively maintained. The provider: requests camera
+    permission with a clear on-page consent prompt, runs WebGazer''s interaction-driven
+    calibration silently in the background, computes gaze coordinates, posts to a
+    new POST /api/attention {gaze: {...}} endpoint with debounce ~200ms. Gaze events
+    accumulate in the protocol''s SignalHistories alongside other signals (bounded
+    by the same retention rules). Surfaces opt in by including the provider script
+    tag — it is not enabled by default for any surface. The context query exposes
+    gaze when present, omits it when not. Surfaces without gaze keep working — purely
+    additive. Tests: protocol payload round-trip with and without gaze, surfaces that
+    opt out have no gaze field, calibration confidence improves with simulated clicks,
+    the per-device WebGazer profile persists across reloads via its localStorage hook.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-01T16:13:05.440742+00:00'
+  updated_at: '2026-05-01T22:12:34.970370+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-34421be
+  plan: plan-ambient
+  title: Implicit attention signals — dwell, saccade, scroll-stop
+  branch: pm/pr-34421be-implicit-attention-signals-dwell-saccade-scroll-st
+  status: pending
+  depends_on:
+  - pr-8c21624
+  - pr-7b6ae74
+  description: 'Compute implicit attention signals on the surface side and surface
+    them via the protocol''s SignalHistories: dwell time per region (time gaze or
+    scroll-position has been within a region''s bounds), saccade entropy (variance
+    of gaze movement, used as an attention-quality score — low entropy = focused,
+    high = scanning), scroll-stop events (timestamps of scroll-rest moments and the
+    region they ended on). When gaze data is available these come from the gaze provider;
+    when not, they fall back to scroll/touch event tracking with reduced fidelity.
+    All persisted to the archive (no expiry by default) — Claude can ask ''where has
+    the user dwelt most over the last month?'' or ''what was the saccade entropy 30
+    seconds ago?'' with equal cost. The ''pm context resolve'' command uses these
+    histories to break ties more confidently — a region with high recent dwell + low
+    saccade entropy is preferred over one merely visible. Tests: dwell accumulation,
+    saccade entropy on synthetic gaze tracks, scroll-stop detection from input events,
+    archive write integrity under high-rate signals, resolver tiebreaking improves
+    with signal histories present vs absent, history-aware queries against the archive
+    (e.g. dwell-in-last-30s, dwell-in-last-week) return correct subsets.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-01T16:13:15.137776+00:00'
+  updated_at: '2026-05-01T22:38:47.303450+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-97ddabf
+  plan: plan-regression
+  title: Watcher-target window for regression test launches
+  branch: pm/pr-97ddabf-watcher-target-window-for-regression-test-launches
+  status: merged
+  depends_on:
+  - pr-47940bc
+  description: 'Today `pm_core/tui/pane_ops.py:launch_qa_item()` always launches the
+    Claude session for a regression test in the main TUI window. The discovery supervisor
+    (pr-271cb3a) needs to launch tests in its own pane/window so it can monitor them
+    inline with its work log.
+
+
+    Changes:
+
+    - Add an optional `target_window` parameter to `launch_qa_item()` (or the underlying
+    tmux launcher it calls). When set, the test session opens in that window; when
+    omitted, current behavior preserved (main window).
+
+    - The discovery supervisor passes its own window when launching tests programmatically.
+
+    - The QA pane''s Enter-key path (human launches) does not pass the parameter and
+    behaves as today.
+
+
+    This is a small ergonomics change but important — without it, watcher-launched
+    tests would either pollute the main window or require a parallel tmux launcher
+    that duplicates code.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/173
+  gh_pr_number: 173
+  created_at: '2026-05-01T17:41:07.519468+00:00'
+  updated_at: '2026-05-01T19:12:39.815806+00:00'
+  started_at: '2026-05-01T19:06:37.839864+00:00'
+  reviewed_at: '2026-05-01T19:10:44.793750+00:00'
+  merged_at: '2026-05-01T19:12:39.815806+00:00'
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-97ddabf-watcher-target-window-for-regression-acd02b85
+- id: pr-d60d185
+  plan: plan-regression
+  title: End-to-end QA review and auto-start command for the regression loop
+  branch: pm/pr-d60d185-end-to-end-qa-review-and-auto-start-command-for-th
+  status: merged
+  depends_on:
+  - pr-271cb3a
+  - pr-e3a711c
+  - pr-d39a7fb
+  - pr-e84b43c
+  description: 'Final integration PR for the regression loop. Two purposes:
+
+
+    1. **End-to-end QA review**: Once all upstream PRs in this plan have merged, run
+    a full QA pass to verify the autonomous loop actually works under realistic conditions.
+    Exercises the full path: discovery supervisor launches a regression test → test
+    session files a bug into plan=bugs → discovery supervisor reconciles/dedups →
+    bug-fix watcher picks it up → auto-sequence runs start/review/QA → auto-merge
+    on PASS. Same for the improvement track but with gated merge (verify the human-merge
+    wait actually happens). Catches integration gaps the per-PR reviews can''t see.
+
+
+    2. **Auto-start command**: A single command (`pm watcher start regression-loop`
+    or similar) that brings up all three watchers at once with sensible defaults.
+    Without this, a user has to start each watcher individually, which is friction
+    that will keep the loops from being used.
+
+
+    The auto-start command also serves as documentation — its argument-parsing and
+    defaults are the canonical way to express ''turn on the regression loop.'' Per-watcher
+    start commands remain available for advanced use.
+
+
+    Manual testing: launch the auto-start command in a fresh project, verify all three
+    watchers come up, leave the loop running long enough to observe a complete bug-fix
+    cycle (test failure → bug filed → fix landed) and a complete improvement cycle
+    (improvement filed → fix ready-for-merge → human merge). Use INPUT_REQUIRED to
+    drive the multi-hour observation.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/178
+  gh_pr_number: 178
+  created_at: '2026-05-01T18:22:08.893095+00:00'
+  updated_at: '2026-05-01T22:34:01.145738+00:00'
+  started_at: '2026-05-01T22:25:30.605966+00:00'
+  reviewed_at: '2026-05-01T22:31:42.334593+00:00'
+  merged_at: '2026-05-01T22:34:01.145738+00:00'
+  notes:
+  - id: note-01040e4
+    text: 'QA should specifically exercise the three integration paths flagged during
+      pr-e58459b implementation that unit tests couldn''t fully cover: (1) the O keypress
+      flow end-to-end including the _stop_before_merge short-circuit in _maybe_auto_merge
+      against a live session; (2) _check_impl_idle in pm_core/cli/pr.py against a
+      real PaneIdleTracker — verify that a fresh CLI invocation against an existing
+      transcript correctly resolves session_id_from_transcript and picks up an existing
+      idle_prompt event from hook_events (concern was that session-keyed read-once
+      events could make a transient CLI falsely report ''running''); (3) _launch_qa_detached
+      running run_qa_sync from a fresh detached process — verify pm_session env vars
+      and signal handlers behave correctly outside the TUI thread context that function
+      was originally designed for. The bug-fix watcher (pr-e3a711c) will exercise
+      these naturally; this PR''s QA pass should confirm.'
+    created_at: '2026-05-01T21:44:20Z'
+    last_edited: '2026-05-01T21:44:20Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-d60d185-end-to-end-qa-review-and-auto-start--d80609f2
+- id: pr-41be77d
+  plan: bugs
+  title: 'Bug: auto-start doesn''t advance pre-existing idle impl windows when enabled
+    mid-flight'
+  branch: pm/pr-41be77d-bug-auto-start-doesn-t-advance-pre-existing-idle-i
+  status: pending
+  depends_on: []
+  description: 'Repro observed 2026-05-01: pr-30588a7''s impl window had already pushed
+    work and gone idle ("Sautéed for 4m 6s", at the prompt with no further activity)
+    before auto-start was enabled on pr-d60d185. Once auto-start was toggled on for
+    pr-d60d185, it propagated through the dep chain and started/advanced multiple
+    downstream PRs (pr-47940bc, pr-97ddabf, pr-271cb3a, pr-e84b43c all merged; pr-e58459b
+    in_review), but pr-30588a7 stayed in_progress for ~50 minutes despite its impl
+    session having pushed and idled.
+
+
+    Symptoms:
+
+    - Status remains in_progress
+
+    - pm log shows periodic ''gh pr view'' polling every ~5 minutes (so the watcher
+    knows about the PR) but no transition to in_review
+
+    - The impl tmux window is alive but idle at the Claude prompt with no further
+    engagement
+
+
+    Hypothesis: the auto-start machinery likely tracks impl-session idle state via
+    a PaneIdleTracker or hook event registered when auto-start launches the impl session.
+    If the impl window was opened before auto-start was enabled, no tracker was registered
+    and the idle/done signal is never observed. Auto-start then sees the PR in in_progress,
+    sees the window exists, and assumes work is still happening.
+
+
+    Manual workaround: select the PR and press zzd to start the review loop manually,
+    which advances status.
+
+
+    Proposed fix:
+
+    - When auto-start is enabled (or each tick), scan for in_progress PRs in the chain
+    that have an existing impl window but no idle tracker, and either: (a) register
+    a tracker against the existing pane and check transcript for idle-prompt events
+    post-hoc, or (b) detect ''commits pushed since started_at and pane idle for >N
+    minutes'' and advance regardless.
+
+
+    Manual testing during review: reproduce by starting an impl session manually (pm
+    pr start), letting it complete and idle, then enabling auto-start on a downstream
+    PR — verify the in_progress PR now advances. Use INPUT_REQUIRED to drive.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-01T21:55:42.232512+00:00'
+  updated_at: '2026-05-01T21:55:42.232512+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-10fd776
+  plan: plan-ambient
+  title: TTS audio surface — pm tts (folded in from plan-ff4f1a7)
+  branch: pm/pr-10fd776-tts-audio-surface-pm-tts-folded-in-from-plan-ff4f1
+  status: pending
+  depends_on:
+  - pr-dc4f5fe
+  description: 'New ''pm tts on'' / ''pm tts off'' per-session toggle. Folded in from
+    plan-ff4f1a7 which had not yet implemented it; an ambient audio output surface
+    is the more natural home and shares the protocol, registry, and context model
+    with visual surfaces. Two complementary modes behind the same surface kind. Active
+    push (preferred): ''pm tts say'' CLI / API endpoint Claude invokes to speak specific
+    text — bypasses terminal scraping entirely. Passive capture (fallback for unmodified
+    Claude sessions): the original plan-ff4f1a7 design — a daemon that polls ''tmux
+    capture-pane'' every ~200ms, strips ANSI, diffs against the prior snapshot, suppresses
+    chrome / tool calls / code, and speaks new prose lines. TTS implements the surface
+    protocol: registers with kind=tts in the registry, GET /api/surface returns identity
+    + display (recent spoken-text history bounded by retention window) + attention
+    (currently-playing, user-interrupted, last-spoken-at). Backend pluggable via env
+    var: ''say'' (macOS) and ''piper'' (Linux, local) by default. No cloud requirement.
+    Per-session toggle preserved. Latency target: speech begins within ~1s of a sentence
+    becoming available. Tests: active-push API speaks given text; passive-capture
+    daemon detects new prose lines; chrome/tool-call/code suppression in passive mode;
+    surface registration; GET /api/surface returns recent spoken-text history; per-session
+    toggle; backend selection via env var; idle/active state correctly reported in
+    attention.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-01T22:08:17.870968+00:00'
+  updated_at: '2026-05-01T22:08:17.870968+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-3fee106
+  plan: plan-ambient
+  title: Persistent attention archive — SQLite time-series store
+  branch: pm/pr-3fee106-persistent-attention-archive-sqlite-time-series-st
+  status: pending
+  depends_on:
+  - pr-39a4e66
+  description: 'Per-host persistent archive for all surface signals (display state,
+    attention state, signal histories). Stored as SQLite (one DB per host at ~/.pm/surfaces/archive.db)
+    with a schema designed to scale to long-horizon retention (years, terabytes) and
+    to swap to a remote time-series store later without protocol changes. Schema:
+    events(id, surface_id, signal_name, timestamp_ns, payload_json, confidence) —
+    single wide table indexed by (surface_id, signal_name, timestamp_ns) and (timestamp_ns)
+    for cross-surface global queries. Each surface implementation writes events through
+    a shared writer in pm_core/surfaces/archive.py that batches writes (~100ms windows)
+    to keep per-event write cost low. Read API: archive.query(surface_id=None, signal=None,
+    since=None, until=None, limit=None) → iterator of typed events. The protocol''s
+    in-memory SignalHistories continues to exist as a cache for recent-past queries
+    (last few minutes) but is no longer the source of truth — it is rebuilt from the
+    archive on surface restart. Long-tail queries (e.g. ''where has the user dwelt
+    most over the last month?'') hit the archive directly. No automatic expiry: retention
+    is configurable per-host and per-signal-class but defaults to ''keep everything.''
+    Tests: write/read round-trip, batched writer correctness under concurrent surfaces,
+    query performance over 1M synthetic events, in-memory cache reconstruction on
+    surface restart, schema-evolution path (adding a new signal type doesn''t break
+    existing queries).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-01T22:38:14.688368+00:00'
+  updated_at: '2026-05-01T22:38:14.688368+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-7e19be4
+  plan: plan-ambient
+  title: Privacy controls — export, delete, inspect, opt-in
+  branch: pm/pr-7e19be4-privacy-controls-export-delete-inspect-opt-in
+  status: pending
+  depends_on:
+  - pr-39a4e66
+  description: 'Implement the privacy/consent principles set in the plan. CLI commands:
+    ''pm history inspect [--surface <id>]'' shows what is currently being recorded
+    for each surface (signal classes enabled, retention setting, last write timestamp);
+    ''pm history export [--surface <id>] [--since T] [--until T] [--out path]'' exports
+    archive contents as OTel-shaped JSONL inside a zip; ''pm history delete [--surface
+    <id>] [--signal <name>] [--since T] [--until T]'' performs real row deletion against
+    the archive (with a confirmation prompt unless --yes); ''pm history opt-in <surface>
+    <signal>'' / ''pm history opt-out <surface> <signal>'' toggle high-sensitivity
+    signal classes (gaze, camera-derived, future biometric) — these are off by default
+    and require explicit opt-in per surface. When a high-sensitivity signal is active
+    on a surface, the surface displays a visible recording indicator. Tests: inspect
+    output shape, export round-trips through delete-and-restore, scoped deletion (by
+    surface / signal / time / combination), opt-in/opt-out persistence across surface
+    restarts, recording indicator appears when expected.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-01T22:38:20.388463+00:00'
+  updated_at: '2026-05-01T22:38:20.388463+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-fbda1a8
+  plan: plan-regression
+  title: Claude-based tests for watcher classes and prompt generation gaps
+  branch: pm/pr-fbda1a8-claude-based-tests-for-watcher-classes-and-prompt-
+  status: pending
+  depends_on:
+  - pr-d60d185
+  description: "Fill the testing gaps identified after the regression-loop landing.\
+    \ The three new concrete watcher classes and their prompt builders shipped without\
+    \ direct unit tests — covered only by framework-level tests and a live operator\
+    \ markdown. This PR adds Claude-based integration tests using FakeClaudeSession\
+    \ (pr-abcf70f, merged) so the watchers can be exercised without real Claude calls.\n\
+    \nTargets:\n\n1. **Watcher class tests** — new `tests/test_discovery_supervisor.py`,\
+    \ `tests/test_bug_fix_impl_watcher.py`, `tests/test_improvement_fix_impl_watcher.py`.\
+    \ Each script a sequence of FakeClaudeSession responses for a few ticks, verifying:\n\
+    \   - The watcher reads its work log and project state correctly\n   - It writes\
+    \ expected entries on each tick\n   - It emits READY / INPUT_REQUIRED at the right\
+    \ times\n   - For the discovery supervisor: it launches regression tests via the\
+    \ existing launch_qa_item path (mocked to record the call) and reconciles filed\
+    \ PRs post-hoc\n   - For the impl watchers: they pick the right PR from their\
+    \ plan, invoke pm pr auto-sequence on it, and (for bug-fix) auto-merge on PASS\n\
+    \n2. **Watcher prompt generation tests** — extend `tests/test_bug_fix_flow_prompts.py`\
+    \ patterns to the four new prompt builders in prompt_gen.py (discovery_supervisor,\
+    \ bug_fix_impl, improvement_fix_impl, watcher_review_session). Direct prompt-string\
+    \ assertions: notes injection works, work-log path is referenced, plan source\
+    \ is correct, merge mode (auto vs gated) is encoded.\n\n3. **Auto-sequence integration\
+    \ backstop** — `tests/test_pr_auto_sequence_integration.py` that exercises the\
+    \ three integration paths flagged during pr-e58459b's review (O keypress + _stop_before_merge,\
+    \ _check_impl_idle against a real PaneIdleTracker, _launch_qa_detached running\
+    \ run_qa_sync from a detached process). FakeClaudeSession + the existing TUI test\
+    \ framework (pr-ac3625d) substrate.\n\n4. **Pane_ops behavioral tests** — add\
+    \ tests for launch_qa_item's new target_window parameter (pr-97ddabf) and the\
+    \ regression filing addendum (pr-47940bc): assert the addendum text appears in\
+    \ the wrapped session prompt and that target_window correctly routes to the watcher's\
+    \ pane.\n\nManual testing during review: run `pytest tests/test_discovery_supervisor.py\
+    \ tests/test_bug_fix_impl_watcher.py tests/test_improvement_fix_impl_watcher.py\
+    \ tests/test_pr_auto_sequence_integration.py -v` and confirm all pass. The new\
+    \ tests should be deterministic — no real Claude calls, no real tmux operations\
+    \ beyond what the existing test substrate supports."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-02T20:49:18.500977+00:00'
+  updated_at: '2026-05-02T20:49:18.500977+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-f01eabb
+  plan: improvements
+  title: 'TUI: animate spinner for PRs in QA status'
+  branch: pm/pr-f01eabb-tui-animate-spinner-for-prs-in-qa-status
+  status: merged
+  depends_on: []
+  description: 'The tech tree spinner currently animates only for PRs in in_progress
+    or in_review status (tech_tree.py:533) and for active review loops. PRs in qa
+    status get no animation — while QA scenarios are running for a long time, the
+    tree shows static text giving no signal that anything is happening. Add qa to
+    the conditional that drives the spinner: when status == ''qa'' AND the PR has
+    a workdir AND the QA pane is being tracked, show the same spinner glyph used for
+    impl/review with the same idle/waiting/active state semantics. The pane idle tracker
+    (_pane_idle_tracker) already supports arbitrary panes, so wire QA panes into it
+    the same way impl and review panes are wired in. No new glyphs, no per-scenario
+    count — that is a separate richer-progress PR. Files: pm_core/tui/tech_tree.py
+    (extend the status check around line 533), pm_core/pane_idle.py or wherever pane
+    tracking is set up for QA. Tests: PR in qa status with active QA pane shows spinner;
+    same PR with idle QA pane shows no spinner; same PR with no QA pane shows no spinner;
+    non-qa statuses behavior is unchanged.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/182
+  gh_pr_number: 182
+  created_at: '2026-05-02T21:45:33.441103+00:00'
+  updated_at: '2026-05-02T23:25:30.210563+00:00'
+  started_at: '2026-05-02T22:27:47.356239+00:00'
+  reviewed_at: '2026-05-02T22:44:22.933037+00:00'
+  merged_at: '2026-05-02T23:25:30.210563+00:00'
+  notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-f01eabb-tui-animate-spinner-for-prs-in-qa-st-32e02cc9
+- id: pr-2173cf1
+  plan: bugs
+  title: 'Bug: hook_install writes wrong hook_receiver path when run inside a container'
+  branch: pm/pr-2173cf1-bug-hook-install-writes-wrong-hook-receiver-path-w
+  status: merged
+  depends_on: []
+  description: 'ensure_hooks_installed() (pm_core/hook_install.py) is called from
+    pm session and pm tui startup. It writes hook commands using Path.home() to compute
+    RECEIVER_PATH (line 36: RECEIVER_PATH = Path.home() / .pm / hook_receiver.py).
+    Containers bind-mount the host''s ~/.claude read-write at /home/pm/.claude (container.py:587-589),
+    so any settings.json change inside a container propagates back to the host. When
+    pm session or pm tui runs inside a containerized Claude (impl, review, QA), Path.home()
+    resolves to /home/pm and ensure_hooks_installed writes /home/pm/.pm/hook_receiver.py
+    into the bind-mounted settings.json. The host then fires hooks pointing at /home/pm/.pm/hook_receiver.py,
+    which does not exist on the host, and Claude reports ''Stop hook feedback: ...
+    can''t open file ...: No such file or directory'' on every Stop event. The receiver
+    design (per pr-014f93f spec) intentionally uses the host absolute path as the
+    bind-mount target inside the container, so the same command works in both contexts
+    — but only if the path written into settings.json is always the host''s path.
+    Today nothing enforces that.
+
+
+    Fix: have pm export PM_HOST_HOME (the host user''s home) into every container
+    it creates, then have hook_install.py prefer PM_HOST_HOME over Path.home() when
+    computing RECEIVER_PATH. On the host, PM_HOST_HOME is unset and Path.home() is
+    correct. Inside a container, PM_HOST_HOME is set by container.py at create time
+    and overrides the container''s /home/pm. Alternative shape: hook_install detects
+    container context (e.g. /.dockerenv exists, or a pm-set marker) and skips the
+    install entirely, on the assumption that the host has already done it correctly.
+    Either works; the env var approach is more robust because it also fixes _HOOKS_BASE
+    on line 32 (which has the same Path.home() issue and would write hook event files
+    to the wrong location inside containers if it ever needed to).
+
+
+    Reproduce: from any containerized pm session (e.g. an impl pane Claude), run pm
+    session or pm tui. Inspect ~/.claude/settings.json on the host — hook commands
+    now reference /home/pm/.pm/hook_receiver.py. Trigger a Stop event in any Claude
+    session and the hook fails with file-not-found.
+
+
+    Tests: ensure_hooks_installed with PM_HOST_HOME set writes the host path regardless
+    of Path.home(); without PM_HOST_HOME falls back to Path.home() (host behavior
+    unchanged); container.py sets PM_HOST_HOME to the host user home when creating
+    containers; integration test that simulates running ensure_hooks_installed in
+    a fake container env (HOME=/home/pm, PM_HOST_HOME=/home/matt) and asserts the
+    written path is /home/matt/....'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/181
+  gh_pr_number: 181
+  created_at: '2026-05-02T21:47:10.307175+00:00'
+  updated_at: '2026-05-02T22:27:04.127234+00:00'
+  started_at: '2026-05-02T22:08:10.395115+00:00'
+  reviewed_at: '2026-05-02T22:13:34.550828+00:00'
+  merged_at: '2026-05-02T22:27:04.127234+00:00'
+  notes:
+  - id: note-0017457
+    text: 'QA PASS: Reproduction tests for hook path resolution: PASS; container.py
+      exports PM_HOST_HOME: PASS; Container-context integration simulation: PASS (workdir:
+      /home/matt/.pm/workdirs/qa/pr-2173cf1-84cc1de46a199c08)'
+    created_at: '2026-05-02T22:26:49Z'
+    last_edited: '2026-05-02T22:26:49Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2173cf1-bug-hook-install-writes-wrong-hook-r-47ac840c
+- id: pr-c3762f7
+  plan: bugs
+  title: 'Bug: containers missing vi and less editors/pagers'
+  branch: pm/pr-c3762f7-bug-containers-missing-vi-and-less-editors-pagers
+  status: pending
+  depends_on: []
+  description: "Containerized Claude sessions (impl, review, QA) fail when they try\
+    \ to use 'vi' or 'less' because neither is installed in the base pm container\
+    \ image. Common triggers: Claude opens a file with vi/vim by reflex, git log /\
+    \ man / pip output paginates through less. The errors look like 'vi: command not\
+    \ found' or 'less: command not found' and surface mid-session, often blocking\
+    \ the agent from finishing a task it was otherwise capable of doing.\n\nRoot cause:\
+    \ the base Dockerfile (Dockerfile, lines 17-32) installs build-essential, curl,\
+    \ git, jq, python3, podman, fuse-overlayfs, and a few related packages — no editor\
+    \ and no pager. Dockerfile.pm-project inherits from it so the gap propagates to\
+    \ every project-specific image.\n\nFix: two coordinated changes in one PR.\n\n\
+    (1) Add vim-tiny (~3 MB) and less (~600 KB) to the apt-get install list in the\
+    \ base Dockerfile, alongside the existing dev-tools block. vim-tiny is sufficient\
+    \ to satisfy the 'vi' command and stays small; less is needed for any git/man/pip\
+    \ flow that pages output. Both are negligible image-size cost relative to the\
+    \ existing build-essential.\n\n(2) Update the 'pm container build' prompt template\
+    \ at pm_core/cli/container.py:256 (the section currently titled 'pm container\
+    \ runtime requirements' that the build prompt embeds for Claude when bootstrapping\
+    \ a per-project image). The section currently lists 5 requirements (pm user exists,\
+    \ PATH ordering, USER directive, no ENTRYPOINT, git installed). Add a sixth: 'An\
+    \ editor and a pager must be available — \e[?1049h\e[?1h\e=\e[?2004h\e[1;24r\e\
+    [27m\e[24m\e[23m\e[0m\e[H\e[J\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e\
+    [?25l\e[1;1H\e[38;5;130m  1 \e[0m\r\n\e[94m~                                 \
+    \                                              \e[3;1H~                      \
+    \                                                         \e[4;1H~           \
+    \                                                                    \e[5;1H~\
+    \                                                                            \
+    \   \e[6;1H~                                                                 \
+    \              \e[7;1H~                                                      \
+    \                         \e[8;1H~                                           \
+    \                                    \e[9;1H~                                \
+    \                                               \e[10;1H~                    \
+    \                                                           \e[11;1H~        \
+    \                                                                       \e[12;1H~\
+    \                                                                            \
+    \   \e[13;1H~                                                                \
+    \               \e[14;1H~                                                    \
+    \                           \e[15;1H~                                        \
+    \                                       \e[16;1H~                            \
+    \                                                   \e[17;1H~                \
+    \                                                               \e[18;1H~    \
+    \                                                                           \e\
+    [19;1H~                                                                      \
+    \         \e[20;1H~                                                          \
+    \                     \e[21;1H~                                              \
+    \                                 \e[22;1H~                                  \
+    \                                             \e[23;1H~                      \
+    \                                                         \e[0m\e[24;63H0,0-1\e\
+    [9CAll\e[6;32HVIM - Vi IMproved\e[8;33Hversion 9.1.697\e[9;29Hby Bram Moolenaar\
+    \ et al.\e[10;21HModified by team+vim@tracker.debian.org\e[11;19HVim is open source\
+    \ and freely distributable\e[13;26HHelp poor children in Uganda!\e[14;18Htype\
+    \  :help iccf\e[34m<Enter>\e[0m       for information \e[16;18Htype  :q\e[34m<Enter>\e\
+    [0m               to exit         \e[17;18Htype  :help\e[34m<Enter>\e[0m  or \
+    \ \e[34m<F1>\e[0m  for on-line help\e[18;18Htype  :help version9\e[34m<Enter>\e\
+    [0m   for version info\e[1;5H\e[34h\e[?25h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e\
+    [?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e\
+    [?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e\
+    [?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e\
+    [?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e\
+    [?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e\
+    [?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e\
+    [?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e\
+    [?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e\
+    [?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e\
+    [?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e\
+    [?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e\
+    [?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e\
+    [?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e\
+    [?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e\
+    [?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e\
+    [?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e\
+    [?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e\
+    [?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e\
+    [?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e\
+    [?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e\
+    [?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e\
+    [?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e[?2004l\e[?2004h\e\
+    [24;1H\e[?2004l\e[?2004l\e[?1l\e>\e[?1049lVim: Error reading input, exiting...\n\
+    Vim: Finished.\r\n\e[24;1H\e[J (or vim-tiny/nano) and . The base pm image provides\
+    \ these; if you build from a different base, install them.' Without this note,\
+    \ anyone bootstrapping a custom base image from scratch hits the same gap.\n\n\
+    Files: Dockerfile (apt-get install line), pm_core/cli/container.py (prompt template\
+    \ runtime-requirements section).\n\nTests: existing container-build sanity tests\
+    \ still pass; new smoke test asserts that 'vi --version' and 'less --version'\
+    \ both exit 0 inside a freshly built container; the build prompt template includes\
+    \ the new requirement string verbatim.\n\nOut of scope (potential follow-ups):\
+    \ nano as an alternative editor (vim-tiny is sufficient and present in default\
+    \ Ubuntu), pagers like more (less is the standard fallback), per-project editor\
+    \ preferences. Keep this PR scoped to the missing-deps fix."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-02T22:06:47.034939+00:00'
+  updated_at: '2026-05-02T22:06:47.034939+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-e43e4b0
+  plan: bugs
+  title: Push-proxy fetch into PR workdir leaves index/worktree desynced from HEAD
+  branch: pm/pr-e43e4b0-push-proxy-fetch-into-pr-workdir-leaves-index-work
+  status: pending
+  depends_on: []
+  description: "## Symptom\n\nAfter a QA scenario or review session pushes a commit\
+    \ back into the PR\nworkdir via the push-proxy, the PR workdir's `git status`\
+    \ shows a \"staged\nrevert\" of that commit. The HEAD ref has moved forward, but\
+    \ the index and\nworking tree still hold the pre-push content.\n\nIf a subsequent\
+    \ agent (e.g. a review-loop agent) runs `git commit -a` or\n`git commit` on already-staged\
+    \ files without noticing, it will commit the\nrevert and undo the push-back. Observed\
+    \ during pr-f8abc94 review iter 2:\nthe modal-key fix from commit e0f4b13 (pushed\
+    \ back from QA scenario s-2)\nappeared as a staged revert in the PR workdir.\n\
+    \n## Root cause\n\n`pm_core/push_proxy.py:370` runs:\n\n    git -C target_repo\
+    \ fetch --update-head-ok <source> <branch>:<branch>\n\n`--update-head-ok` lets\
+    \ git advance HEAD on a checked-out branch, but the\nfetch only moves the ref\
+    \ — it never updates the index or working tree.\nResult:\n- HEAD = new commit\
+    \ (e.g. e0f4b13)\n- index + worktree = old content\n- `git status` shows a \"\
+    staged\" reversal of the new commit\n\nThe existing mitigation of telling review/QA\
+    \ agents to `git pull origin\n{branch}` (pm_core/prompt_gen.py:329, :1699) does\
+    \ NOT fix this: the\npush-proxy also forwards to origin (push_proxy.py:396), so\
+    \ origin already\nmatches HEAD by the time the agent pulls. `git pull` becomes\
+    \ a no-op merge\nthat doesn't touch the index or working tree, so the desync persists.\n\
+    \n## Reproduction\n\n1. PR workdir on branch B at commit X. Working tree clean.\n\
+    2. QA scenario authors commit Y on top of X and pushes via the push-proxy.\n3.\
+    \ In the PR workdir: `git log -1` shows Y. `git status` shows\n   pm_core/<file>.py\
+    \ \"staged\" with content matching X (a revert of Y).\n\n## Fix (option A from\
+    \ review discussion)\n\nIn `push_proxy._local_push` (or wherever the `fetch --update-head-ok`\
+    \ runs):\n\n1. Before the fetch, capture `git -C target_repo status --porcelain`.\n\
+    2. Run the fetch as today.\n3. After the fetch succeeds, if the pre-fetch status\
+    \ was clean, run\n   `git -C target_repo reset --hard HEAD` (or `git checkout-index\
+    \ -af`) to\n   bring the index and working tree forward to the new HEAD.\n4. If\
+    \ the pre-fetch status was dirty, log a loud warning and skip the\n   sync — don't\
+    \ clobber uncommitted user work. Today's silent desync is\n   strictly worse than\
+    \ warning + skipping.\n\n## Files\n\n- `pm_core/push_proxy.py` — add the pre-fetch\
+    \ status check and post-fetch\n  sync. The current `_local_push` returns early\
+    \ on fetch failure; add the\n  sync just after the success log line at push_proxy.py:390.\n\
+    - Tests: extend `tests/test_push_proxy.py` (or add new) — assert that after\n\
+    \  a push-back into a clean target, `git status --porcelain` is empty in\n  the\
+    \ target repo.\n\n## Out of scope\n\nOption B (push to origin only, never direct\
+    \ into a checked-out branch's\nrepo, with the PR workdir polling for ref updates)\
+    \ is a larger\narchitectural change and is not what this bug is for."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-02T22:38:22.256223+00:00'
+  updated_at: '2026-05-02T22:38:22.256223+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-6bf587b
+  plan: bugs
+  title: 'Bug: sync kills merge propagation window (variants 1/2) when PR detected
+    as merged on GitHub mid-flow'
+  branch: pm/pr-6bf587b-bug-sync-kills-merge-propagation-window-variants-1
+  status: pending
+  depends_on: []
+  description: 'Race between PR sync detecting a merge on GitHub and the local post-merge
+    propagation flow leaves the local repo out of sync with origin.
+
+
+    Repro / observed behavior:
+
+    1. User runs ''pm pr merge <pr>'' locally.
+
+    2. Variant 3 of generate_merge_prompt launches in tmux window ''merge-#<num>''
+    to resolve a conflict between the PR branch and base.
+
+    3. Claude resolves the conflict, pushes to origin (or ''gh pr merge'' finalizes
+    the merge remotely), emits MERGED verdict.
+
+    4. TUI verdict scanner (pm_core/tui/review_loop_ui.py around line 591) detects
+    MERGED, kills the variant-3 window, and re-attempts the merge command with --propagation-only
+    --resolve-window. Propagation fails because the local checkout needs to pull base
+    from origin (vanilla/github backend) or from the workdir (local backend).
+
+    5. Variant 1 (pull-from-origin) or variant 2 (pull-from-workdir) launches in a
+    NEW window with the SAME name ''merge-#<num>'' — kill_pr_windows doesn''t differentiate.
+
+    6. Background sync (5-minute timer in tui/sync.py:do_normal_sync, or any manual
+    refresh) runs pr_sync.sync_from_github, sees the PR merged on GitHub, calls _kill_merged_pr_windows.
+
+    7. _kill_merged_pr_windows -> kill_pr_windows (cli/helpers.py:147) kills any window
+    matching ''merge-#<num>'' by literal name — INCLUDING the in-flight variant 1/2
+    propagation window.
+
+    8. The variant 1/2 Claude session is killed mid-resolution. Local repo never gets
+    pulled. master falls behind origin silently.
+
+
+    This is what happened to PR 180 in the current session — local master ended up
+    10 commits behind origin/master with no obvious failure signal because the propagation
+    window was killed before it could finish pulling.
+
+
+    Root cause: kill_pr_windows (cli/helpers.py:156-157) targets the window by literal
+    name and the propagation-phase window reuses the same name as the variant-3 window.
+    Sync code has no awareness that a propagation phase is in flight.
+
+
+    Fix (preferred — option B from analysis): make _kill_merged_pr_windows (pm_core/tui/sync.py:22)
+    check whether the PR is in app._merge_propagation_phase (already a tracked set
+    in the TUI app) and skip killing the merge window for those PRs. Also worth checking
+    whether the merge window''s claude pane is currently active before killing — defense
+    in depth. The propagation phase is itself short-lived, so the skip only delays
+    cleanup; the variant 1/2 window kills itself when it emits its own MERGED verdict
+    via the existing review_loop_ui flow at line 611-613.
+
+
+    Alternative fix (option A — cheaper): rename the propagation-phase window to ''merge-#<num>-prop''
+    so kill_pr_windows naturally misses it. Cleaner but requires changes in _launch_merge_window
+    and probably the kill set in helpers.py to recognize the new naming.
+
+
+    Tests: simulate the race — start a propagation-phase window (PR in _merge_propagation_phase
+    set), call _kill_merged_pr_windows for that PR, assert the window is not killed;
+    assert it IS killed once the PR leaves the propagation phase; integration test
+    that the full merge flow (variant 3 -> propagation -> variant 1/2 -> MERGED) completes
+    successfully even when sync runs at any point during the flow.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-03T00:16:07.755219+00:00'
+  updated_at: '2026-05-03T00:16:07.755219+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-b77702b
+  plan: plan-regression
+  title: Per-plan auto-merge=false mode with dep-merge in start prompt
+  branch: pm/pr-b77702b-per-plan-auto-merge-false-mode-with-dep-merge-in-s
+  status: pending
+  depends_on: []
+  description: 'Add a per-plan setting that lets auto-start work through PRs without
+    merging them to master, and have the start prompt instruct Claude to merge in
+    any unmerged dependency branches before working. Together these enable iterating
+    on a coherent set of PRs in a plan without the changes touching master until the
+    user manually merges each one.
+
+
+    Motivation: today''s auto-start watchers (bug-fix-impl, improvement-fix-impl,
+    regression supervisor, and others) auto-merge PRs on QA PASS. That''s the right
+    default for narrow bug fixes, but for plans where the user expects to iterate
+    on the result before shipping (e.g. ambient surfaces, ux improvements, anything
+    new), there''s no way to let auto-start do the implementation work and stop short
+    of merging. Today the only way to get auto-start to chew through a plan is to
+    accept that everything will land in master.
+
+
+    Approach (chosen over a per-plan staging branch alternative because plans iterate
+    after first release — a graduate model assumes a clean ship-and-done lifecycle
+    that real plans do not have, whereas keeping each PR independently merge-able
+    composes with continuous amendment):
+
+
+    (1) Per-plan field ''auto_merge: bool'' in project.yaml plans entries, default
+    true (current behavior). When false, auto-start watchers run impl/review/QA as
+    normal but skip the merge step on QA PASS — the PR sits in qa-pass / in_review
+    state awaiting explicit human merge.
+
+
+    (2) The ''pm pr start'' prompt builder (pm_core/prompt_gen.py and the start-related
+    impl/spec prompts) gets a new preamble ONLY WHEN the PR has at least one depends_on
+    entry that is not yet merged. If the PR has no dependencies, or all its dependencies
+    are already merged, the preamble is omitted entirely (the merged deps are already
+    in the current branch via the master base — nothing to do). When the preamble
+    is added, it lists only the still-unmerged deps with their branch names and instructs
+    Claude: ''This PR depends on N PRs that have not yet merged: [pr-A: branch, pr-B:
+    branch, ...]. Before doing anything else, merge each of these into the current
+    branch. Resolve any conflicts as you would any other merge conflict.'' Topological
+    order is not needed because if B depends on A then B has already merged A in during
+    B''s own start, so when C starts depending on both, merging B alone transitively
+    brings in A. Re-runs are not an issue because if a dep merged to master in the
+    meantime its branch may be gone but its commits are already in the current branch
+    via master — the merge is a no-op. Dep-merge only happens in start; done/qa do
+    not need it because the impl session already integrated the deps and any subsequent
+    dep advances are handled when the user explicitly restarts.
+
+
+    (3) Watcher behavior: existing auto-start watchers (bug_fix_impl_watcher, improvement_fix_impl_watcher,
+    regression supervisor, plus any future ones) check the PR''s plan''s auto_merge
+    setting before invoking the merge step. When false, they stop at QA PASS, log
+    that the PR is awaiting manual merge, and move on to the next candidate.
+
+
+    Files: pm/project.yaml schema (the plans entry shape — document the field), pm_core/store.py
+    (read auto_merge with default True), pm_core/prompt_gen.py (start prompt preamble
+    for unmerged deps, omitted entirely when all deps merged or none exist), pm_core/watchers/bug_fix_impl_watcher.py
+    and improvement_fix_impl_watcher.py and any other watchers that auto-merge (skip
+    merge when plan''s auto_merge is false), tests for: schema default, watcher respects
+    flag, start prompt INCLUDES the preamble when at least one dep is unmerged and
+    lists only those unmerged deps, start prompt OMITS the preamble entirely when
+    all deps are merged, start prompt OMITS the preamble entirely when there are no
+    deps, end-to-end flow where a plan with auto_merge=false has its PRs picked up
+    by a watcher and reaches qa-pass without merging.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-03T00:39:59.719819+00:00'
+  updated_at: '2026-05-03T01:10:41.519198+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-98b2a95
+  plan: bugs
+  title: 'Bug: dedicated plans window is shared across all plans, defeating multi-plan
+    parallelism'
+  branch: pm/pr-98b2a95-bug-dedicated-plans-window-is-shared-across-all-pl
+  status: merged
+  depends_on: []
+  description: 'PR pr-a353c3d (''Launch plan pane actions in a dedicated plans window
+    instead of the main window'', merged today as #179) routes all plan actions through
+    a single hardcoded window name ''plans'' (pm_core/tui/pane_ops.py line 535: PLANS_WINDOW_NAME
+    = "plans"). _ensure_plans_window() finds-or-creates that one window regardless
+    of which plan the action was invoked on. Result: every plan action — edit, breakdown,
+    claude/c, deps, review — for every plan goes to the same shared window. The PR''s
+    stated promise (''this also enables running multiple plan actions in parallel
+    (e.g. plan add on two plans at the same time)'') is not delivered.
+
+
+    Observed: tmux window 7 named ''plans'' (no plan id), pressing c on plan A and
+    then c on plan B both target window 7. Whatever was running in there for plan
+    A is interrupted by plan B''s session.
+
+
+    Fix: window name must be plan-scoped. Concrete shape:
+
+    - Change PLANS_WINDOW_NAME to a function: window_name(plan_id) returning ''plans-<plan-id>''
+    (or ''plans/<plan-id>'' if the slash plays nicely with tmux — needs a quick check).
+
+    - _ensure_plans_window(app) becomes _ensure_plans_window(app, plan_id) — takes
+    the plan id, builds the per-plan window name, finds or creates that specific window.
+
+    - _focus_plans_window(app) becomes _focus_plans_window(app, plan_id).
+
+    - _launch_in_plans_window(app, cmd, role, fresh=False) becomes _launch_in_plans_window(app,
+    plan_id, cmd, role, fresh=False).
+
+    - handle_plan_action(app, action, plan_id) passes plan_id through every _launch_in_plans_window
+    call site (lines 596, 599, 601, etc.) — note that the ''deps'' action currently
+    has no plan_id; that one is genuinely cross-plan and can keep using a single ''plans-deps''
+    window, or be revisited.
+
+
+    Edge case: when plan_id is None (e.g. cross-plan ''deps'' command, or future actions
+    that aren''t tied to a single plan), use a fallback window name like ''plans''
+    (current behavior) so cross-plan work still has a home.
+
+
+    Tests: pressing c on plan A creates window ''plans-<A>''; pressing c on plan B
+    creates window ''plans-<B>'' (separate window); pressing c on plan A again reuses
+    ''plans-<A>'' rather than creating a duplicate; cross-plan ''deps'' action uses
+    the ''plans'' fallback window; window cleanup on plan removal still works.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/183
+  gh_pr_number: 183
+  created_at: '2026-05-03T00:43:42.010298+00:00'
+  updated_at: '2026-05-03T13:05:50.828076+00:00'
+  started_at: '2026-05-03T00:45:34.578199+00:00'
+  reviewed_at: '2026-05-03T01:09:11.962034+00:00'
+  merged_at: '2026-05-03T13:05:50.828076+00:00'
+  notes:
+  - id: note-26c75c7
+    text: 'QA PASS: Per-plan window regression unit tests: PASS; Manual TUI exercise
+      — two plans get separate windows: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-98b2a95-0f5633cad9ee8f84)'
+    created_at: '2026-05-03T12:13:36Z'
+    last_edited: '2026-05-03T12:13:36Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-98b2a95-bug-dedicated-plans-window-is-shared-f6381eb7
+- id: pr-2c060b2
+  plan: plan-regression
+  title: 'Claude-based regression test: CLI output rendering at varied terminal widths'
+  branch: pm/pr-2c060b2-claude-based-regression-test-cli-output-rendering-
+  status: pending
+  depends_on: []
+  description: "Add a Claude-driven regression scenario that exercises pm's CLI listing\
+    \ commands ('pm pr list', 'pm pr list -t', 'pm pr list -t --workdirs', 'pm pr\
+    \ ready', 'pm plan list', and any other record-style commands as they're added)\
+    \ at a range of randomly-chosen terminal widths and inspects the rendered output\
+    \ for layout bugs.\n\nMotivation: this kind of bug is hard to catch with unit\
+    \ tests because the buggy behavior depends on (a) the specific terminal width\
+    \ relative to the line length, (b) wide-char emoji status icons miscounted by\
+    \ len(), (c) interactions between our wrapping and the terminal's own edge-wrap\
+    \ behavior, and (d) less or other pagers being in the path. Two real bugs from\
+    \ a single session of manual testing motivated this:\n1. echo_record gated wrapping\
+    \ on isatty(stdout) — silently no-op'd when piped to less.\n2. _wrap_record_to_width\
+    \ used len() rather than cell_len(), so lines that were one cell over the width\
+    \ (because of a wide emoji icon) slipped past the wrap check unwrapped and got\
+    \ mid-word-broken by the renderer. Then the textwrap.fill fallback had the same\
+    \ bug for long lines without good break tokens.\n\nBoth bugs would have been caught\
+    \ immediately by a 'render this command at width 94 and verify no line exceeds\
+    \ 94 visual cells' check.\n\nScenario shape (similar to pr-fbda1a8 'Claude-based\
+    \ tests for watcher classes and prompt generation gaps' which is the established\
+    \ pattern for Claude-driven regression tests in this plan):\n\n1. Set up: ensure\
+    \ pm has a non-trivial set of PRs in project.yaml (the test project's own state\
+    \ is a good sample — many PRs with varying title lengths, status icons, deps lists,\
+    \ optional machine/timestamp suffixes).\n\n2. For each of N randomly-chosen terminal\
+    \ widths in a sensible range (say, 60-180 columns, with N ~= 8 plus a couple of\
+    \ edge values like exactly the threshold the test detects):\n   a. Open a tmux\
+    \ pane resized to that width (tmux has 'tmux resize-pane -t <pane> -x <width>').\n\
+    \   b. Run each listing command in that pane: 'pm pr list', 'pm pr list -t', 'pm\
+    \ pr list -t --workdirs', 'pm pr ready', 'pm plan list'. Pipe through cat or just\
+    \ tee to capture output as the user would see it.\n   c. Capture the rendered\
+    \ output via 'tmux capture-pane -p'.\n   d. Hand the captured output + the known\
+    \ terminal width to Claude with a prompt asking: are any lines visually wider\
+    \ than the terminal? Are any words split mid-word? Are continuation lines indented\
+    \ consistently? Does the wrapping land at the natural boundary tokens we configured\
+    \ (' <- ', ' (', ' [') when those tokens are present? Are there any other layout\
+    \ oddities?\n\n3. Aggregate Claude's per-width findings into a single PASS/NEEDS_WORK\
+    \ verdict. Each finding includes the width, the offending output, and a short\
+    \ description.\n\n4. The scenario also probes for *improvements*: Claude is asked\
+    \ to flag layouts that are technically correct but ugly or hard to read (e.g.\
+    \ a one-character spillover that we didn't catch, an awkward continuation that\
+    \ could break at a better point, an emoji that's not properly cell-counted). These\
+    \ get filed as improvements via 'pm pr add --plan improvements' rather than as\
+    \ bugs.\n\n5. Output a summary of findings and verdicts.\n\nFiles: pm/qa/regression/cli-output-widths.md\
+    \ (new scenario, follows the structure of existing regression scenarios like mobile-mode.md\
+    \ and command-dedup.md), pm_core/qa or wherever the random-width tmux-resize plumbing\
+    \ lives if a helper is needed, integration with the regression runner watcher\
+    \ (pr-47940bc) so the scenario is picked up on the regular cadence.\n\nTests:\
+    \ scenario runs to completion at multiple widths without crashing; verdict logic\
+    \ correctly distinguishes a known-good output from a synthetically broken one;\
+    \ improvement findings are filed as PRs in the improvements plan with the right\
+    \ metadata; the random-width selection is deterministic enough to reproduce a\
+    \ failure (seeded RNG, width logged in the failure)."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-03T12:32:08.900344+00:00'
+  updated_at: '2026-05-03T12:32:08.900344+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-6e23bbb
+  plan: improvements
+  title: Rename 'start' to 'implement' across the codebase
+  branch: pm/pr-6e23bbb-rename-start-to-implement-across-the-codebase
+  status: pending
+  depends_on: []
+  description: 'Rename the user-facing ''start'' concept to ''implement'' to mirror
+    the ''done'' → ''review'' rename in pr-2d0588a. Touches: (1) CLI: add ''pm pr
+    implement'' as the canonical command; keep ''pm pr start'' as a hidden Click alias
+    so existing scripts and review-loop iterations (`pm pr review --review-loop` triggers
+    `_launch_review_window` which spawns review subprocesses, etc.) keep working.
+    (2) TUI: rename action_start_pr → action_implement_pr, pr_view.start_pr → implement_pr,
+    the ''s'' binding label, and all check_action() lists. (3) Picker: rename the
+    ''start'' action label to ''implement'' and ''s'' shortcut label, update _ALL_ACTIONS,
+    _ACTION_WINDOW_PATTERNS, _LIST_ACTIONS, _MODIFIED_ACTION_CMDS. (4) auto_start.py
+    terminology, breadcrumb references, log messages, all docstrings. (5) Tests, regression
+    QA docs (pr-interaction.md, help-keybindings.md, etc.), spec docs, and any plan/improvement
+    docs that reference the action by name. Verify external callers (workdir launchers,
+    hook scripts, regression scenarios, GitHub workflows) continue to work via the
+    alias. The CLI surface should accept both names indefinitely; mark ''start'' as
+    a hidden alias with a docstring pointing users to ''implement''.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-03T15:42:10.423044+00:00'
+  updated_at: '2026-05-03T15:42:10.423044+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-1cb6e15
+  plan: bugs
+  title: pm pr review silently regresses qa → in_review status
+  branch: pm/pr-1cb6e15-pm-pr-review-silently-regresses-qa-in-review-statu
+  status: pending
+  depends_on: []
+  description: 'When ''pm pr review PR_ID'' is invoked on a PR whose status is ''qa'',
+    the command falls through the early-return branches in pm_core/cli/pr.py:1363-1376
+    (which guard against ''merged'', ''in_review'', ''pending'') and runs the apply()
+    at line 1393-1400 which sets status=''in_review''. This is a silent backward status
+    regression while the QA loop continues running in its qa-#NN window — the TUI
+    tree shows the PR as in_review even though scenarios are mid-flight.
+
+
+    Fix: when the PR is already ''qa'', treat it like ''in_review'' — skip the GitHub
+    mark-ready step and the status assignment, just call _launch_review_window() (or
+    refocus the existing review window) so the user can read the review while QA runs.
+    Only NEEDS_WORK from QA should move the PR back to in_review (qa_loop_ui already
+    does this via its own status transitions).
+
+
+    Touches: pm_core/cli/pr.py pr_review() — add a ''qa'' branch parallel to the ''in_review''
+    branch at line 1366-1373 that prints something like ''PR ... is in QA — opening
+    review window without changing status.'' and calls _launch_review_window then
+    returns. Tests: add a regression test in tests/test_pr.py asserting that ''pm
+    pr review'' on a qa-status PR leaves status=''qa'' unchanged. Also verify the
+    TUI ''d'' / picker ''d'' paths surface the new message correctly through the launched
+    subprocess output.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-03T16:02:14.081159+00:00'
+  updated_at: '2026-05-03T16:02:14.081159+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-0c530e1
+  plan: bugs
+  title: Cleanup leaves QA/review loop state stale and stops containers sequentially
+  branch: pm/pr-0c530e1-cleanup-leaves-qa-review-loop-state-stale-and-stop
+  status: pending
+  depends_on: []
+  description: 'After `yt` (cleanup-then-QA), the QA loop''s persistent state (`~/.pm/runtime/pr-<id>.json`)
+    is not cleared. The follow-up QA action re-attaches to stale state, surfacing
+    "QA already running" / spurious INPUT_REQUIRED.
+
+
+    `pr_cleanup.cleanup_pr_resources` calls `cleanup_pr_containers` which stops containers
+    serially — each `docker stop` waits its 10s SIGTERM grace, so cleanup blocks the
+    TUI for ~1 minute when several containers exist.
+
+
+    ## Fix
+
+    - Extend `cleanup_pr_resources` (`pm_core/pr_cleanup.py`) to delete the QA loop
+    state file (`~/.pm/runtime/pr-<id>.json`) and the review loop state file for the
+    PR. Audit other persistent loop state for the same issue.
+
+    - Parallelize `cleanup_pr_containers` (`pm_core/container.py`) — submit `remove_container`
+    calls to a `ThreadPoolExecutor` and join.
+
+
+    ## Acceptance
+
+    - After `yt`, the follow-up QA starts a fresh run (no "QA already running" / spurious
+    INPUT_REQUIRED).
+
+    - Cleanup of N containers takes ~max(per-container teardown time), not the sum.
+
+
+    ## Repro
+
+    1. With a PR that has an active QA loop and one or more running containers, select
+    it in the TUI.
+
+    2. Press `y` then `t`.
+
+    3. Observe: "Busy: Cleaning …" persists ~1 min (sequential `docker stop`); when
+    QA auto-starts it reports "QA already running" then "QA INPUT_REQUIRED" because
+    the on-disk loop state survived cleanup.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-03T16:30:50.168588+00:00'
+  updated_at: '2026-05-03T16:30:50.168588+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-62ad13d
+  plan: bugs
+  title: 'Bug: pm pr close removes the PR entry from project.yaml by default'
+  branch: pm/pr-62ad13d-bug-pm-pr-close-removes-the-pr-entry-from-project-
+  status: pending
+  depends_on: []
+  description: 'pm pr close (pm_core/cli/pr.py) currently removes the PR entry from
+    project.yaml entirely as part of its default behavior. The help text spells this
+    out: ''Removes the PR entry from project.yaml. By default also closes the GitHub
+    PR and deletes the remote branch if they exist.'' But this is inconsistent with
+    both (a) older closed PRs in project.yaml that retain status: closed (e.g. pr-012,
+    pr-013) and (b) how merged PRs are handled — pm pr merge sets status: merged and
+    keeps the entry around as historical record.
+
+
+    Result: closing a PR loses the entry, its notes, its dependencies, its description,
+    its workdir reference — everything is just gone from project state. Re-adding
+    the same PR later would have to re-establish all of that. There is also no audit
+    trail showing ''this PR existed and was closed for these reasons''; the only record
+    is the git diff of project.yaml at the close commit.
+
+
+    Fix: invert the default. pm pr close should set status: closed and keep the entry.
+    Add an opt-in --remove (or --purge) flag for callers who really do want the entry
+    deleted, mirroring how --keep-github / --keep-branch toggle the side effects on
+    the GitHub PR and remote branch. The remove flag is the rarer case (genuinely-mistaken
+    PRs that should never have existed); the common case is ''this work is no longer
+    relevant, file it under closed.''
+
+
+    Concretely:
+
+    - Default behavior: set status to ''closed'', preserve the entry and all its fields
+    including notes. Still close the GitHub PR and delete the remote branch unless
+    --keep-github / --keep-branch are set. Still tear down the workdir.
+
+    - --remove flag: also delete the entry from project.yaml (current default behavior).
+
+    - The status field already supports ''closed'' as a valid value (per pm_core/cli/__init__.py
+    status enum), so no schema change is needed.
+
+
+    Files: pm_core/cli/pr.py (the close command), pm_core/cli/__init__.py if any setting/help
+    text references close behavior. Tests: closing a PR by default keeps the entry
+    with status=closed and preserves all fields; --remove deletes the entry; --keep-github
+    / --keep-branch still work; closing a PR that has dependents (PRs whose depends_on
+    includes it) prints a warning naming those dependents, since with status=closed
+    they remain blocked indefinitely.
+
+
+    Motivating example from this session: pm pr close pr-d8cfa16 (#163, batched QA
+    scenario execution, superseded by #167) was used to close a PR. The entry was
+    removed and the explanatory note added just before close was lost with it. Reconstructing
+    the entry from git show HEAD:project.yaml and re-inserting with status=closed
+    manually was needed to restore the historical record.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-03T13:10:13.371978+00:00'
+  updated_at: '2026-05-03T13:10:13.371978+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-a5a800a
+  plan: bugs
+  title: 'Defensive: normalize window-size on pm session init so external ''manual''
+    override is cleared'
+  branch: pm/pr-a5a800a-defensive-normalize-window-size-on-pm-session-init
+  status: pending
+  depends_on: []
+  description: "pm session init currently only writes window-size when it wants to\
+    \ set 'smallest' for shared (--global / --group) sessions. For non-shared sessions,\
+    \ pm doesn't touch the option at all and trusts the global default ('latest').\
+    \ This is fragile: if a per-session 'window-size' override exists from outside\
+    \ pm — set by a manual tmux command, an IDE integration, a session manager, or\
+    \ any other external tool — pm silently inherits it.\n\nThe trap: window-size\
+    \ = manual disables auto-resize entirely (only explicit resize-window commands\
+    \ change sizes). When this leaks onto a pm session, all auto-resize behaviors\
+    \ break in confusing ways. Switching to a window doesn't grow it, attaching/detaching\
+    \ clients doesn't recompute, and the symptoms look like broken hooks or broken\
+    \ aggressive-resize even though those are fine.\n\nHit during a debugging session\
+    \ today on pm-project_manager-c5a1006b plus its grouped sessions: every grouped\
+    \ session had window-size = manual (origin unknown — no pm code path writes it).\
+    \ Auto-resize appeared completely broken; clearing the per-session option (set-option\
+    \ -u) restored normal behavior.\n\nFix: in pm session init (pm_core/cli/session.py:_session_start\
+    \ or _register_tmux_bindings — wherever the existing window-size = smallest write\
+    \ happens for shared sessions), add a corresponding *unset* for non-shared sessions.\
+    \ That is:\n  - shared session: tmux set-option -t <session> window-size smallest\
+    \   (existing behavior)\n  - non-shared session: tmux set-option -ut <session>\
+    \ window-size       (NEW: explicitly clear any per-session override so it falls\
+    \ through to global 'latest')\n\nThe unset is idempotent and cheap. It only matters\
+    \ when something external set the override; in the normal case it's a no-op.\n\
+    \nSame treatment for the per-window override: set_shared_window_size in pm_core/tmux.py\
+    \ writes window-size = smallest per-window when PM_SHARE_MODE is set. For non-shared\
+    \ windows, optionally unset to be safe (lower priority — per-window manual is\
+    \ rare and mostly harmless if shared sessions normalize their own).\n\nFiles:\
+    \ pm_core/cli/session.py (the session init path that already touches window-size),\
+    \ pm_core/tmux.py (set_shared_window_size, optional). Tests: a non-shared pm session\
+    \ has no per-session window-size override after init; if one is set externally\
+    \ before init, pm clears it; shared sessions still get 'smallest'."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-03T18:45:04.600941+00:00'
+  updated_at: '2026-05-03T18:45:04.600941+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

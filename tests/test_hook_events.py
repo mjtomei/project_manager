@@ -163,6 +163,57 @@ def test_installer_writes_standalone_receiver(tmp_hooks_home):
     assert any(str(receiver) in c for c in notif_cmds)
 
 
+def test_installer_uses_pm_host_home_when_set(tmp_hooks_home, tmp_path, monkeypatch):
+    """Inside a container, PM_HOST_HOME points at the host's home dir.
+
+    settings.json is bind-mounted from the host, so the hook command must
+    reference the host's receiver path — not the container's HOME.
+    """
+    import importlib
+    from pm_core import hook_install
+    host_home = tmp_path / "host_home"
+    host_home.mkdir()
+    (host_home / ".pm").mkdir()
+    monkeypatch.setenv("PM_HOST_HOME", str(host_home))
+    hook_install = importlib.reload(hook_install)
+
+    settings_path = tmp_hooks_home / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+
+    hook_install.ensure_hooks_installed(settings_path)
+
+    data = json.loads(settings_path.read_text())
+    expected = str(host_home / ".pm" / "hook_receiver.py")
+    container_path = str(tmp_hooks_home / ".pm" / "hook_receiver.py")
+    all_cmds = [
+        h.get("command", "")
+        for event in ("Notification", "Stop")
+        for entry in data["hooks"][event]
+        for h in entry.get("hooks", [])
+    ]
+    assert all(expected in c for c in all_cmds), all_cmds
+    assert not any(container_path in c for c in all_cmds), all_cmds
+
+
+def test_installer_falls_back_to_path_home_without_pm_host_home(tmp_hooks_home, monkeypatch):
+    """Host behavior unchanged: with PM_HOST_HOME unset, use Path.home()."""
+    import importlib
+    from pm_core import hook_install
+    monkeypatch.delenv("PM_HOST_HOME", raising=False)
+    hook_install = importlib.reload(hook_install)
+
+    settings_path = tmp_hooks_home / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    hook_install.ensure_hooks_installed(settings_path)
+
+    data = json.loads(settings_path.read_text())
+    expected = str(tmp_hooks_home / ".pm" / "hook_receiver.py")
+    cmds = [h.get("command", "")
+            for entry in data["hooks"]["Notification"]
+            for h in entry.get("hooks", [])]
+    assert any(expected in c for c in cmds)
+
+
 def test_installer_installs_clean(tmp_hooks_home):
     """No pre-existing hooks → install happens and is idempotent."""
     from pm_core.hook_install import ensure_hooks_installed

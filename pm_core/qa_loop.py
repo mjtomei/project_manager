@@ -949,8 +949,7 @@ def _launch_scenarios_in_tmux(
     and agent launch all happen concurrently across scenarios.  The scenario
     agent pane is split as soon as its concretizer finishes.
     """
-    from pm_core import tmux as tmux_mod, prompt_gen
-    from pm_core.claude_launcher import build_claude_shell_cmd
+    from pm_core import tmux as tmux_mod
     _qa_resolution = _resolve_qa_model(pr_data, data, session_type="qa_scenario")
 
     branch = pr_data.get("branch", "")
@@ -1065,23 +1064,15 @@ def _launch_scenarios_in_tmux(
         if refined_steps:
             scenario.steps = refined_steps
 
-        child_prompt = prompt_gen.generate_qa_child_prompt(
-            data, state.pr_id, scenario,
-            workdir=str(clone_path),
-            session_name=session,
-            worktree_mode=bool(repo_root),
-            scratch_dir=str(scratch_path),
+        child_cmd, pane_cwd = _build_scenario_run_cmd(
+            scenario, state, data, transcript, _qa_resolution,
+            session=session, workdir_path=workdir_path,
         )
-        child_cmd = build_claude_shell_cmd(
-            prompt=child_prompt,
-            model=_qa_resolution.model, provider=_qa_resolution.provider,
-            effort=_qa_resolution.effort,
-            transcript=transcript, cwd=scenario_cwd)
 
         try:
             scenario_pane = tmux_mod.split_pane_at(
                 concretize_pane, "v", child_cmd, background=True,
-                cwd=scenario_cwd)
+                cwd=pane_cwd)
             scenario.window_name = win_name
             scenario.pane_id = scenario_pane
             scenario.transcript_path = transcript
@@ -1149,9 +1140,8 @@ def _launch_scenarios_in_containers(
     claude process is isolated inside the container.  Polling and verdict
     extraction happen via tmux pane capture, identical to the tmux path.
     """
-    from pm_core import tmux as tmux_mod, prompt_gen
+    from pm_core import tmux as tmux_mod
     from pm_core import container as container_mod
-    from pm_core.claude_launcher import build_claude_shell_cmd
     _qa_resolution = _resolve_qa_model(pr_data, data, session_type="qa_scenario")
 
     config = container_mod.load_container_config()
@@ -1291,27 +1281,14 @@ def _launch_scenarios_in_containers(
         if refined_steps:
             scenario.steps = refined_steps
 
-        child_prompt = prompt_gen.generate_qa_child_prompt(
-            data, state.pr_id, scenario,
-            workdir=container_workdir,
-            session_name=None,  # No tmux session inside containers
-            worktree_mode=bool(repo_root),
-            scratch_dir=container_scratch,
+        exec_cmd, pane_cwd = _build_scenario_run_cmd(
+            scenario, state, data, transcript, _qa_resolution,
+            session=None, workdir_path=workdir_path,
         )
-        claude_cmd = build_claude_shell_cmd(
-            prompt=child_prompt,
-            model=_qa_resolution.model, provider=_qa_resolution.provider,
-            effort=_qa_resolution.effort,
-            transcript=transcript, cwd=container_workdir,
-            write_dir=str(clone_path))
-
-        # cleanup=False: containers stay alive with their windows; orphans
-        # are cleaned up at the start of the next QA run.
-        exec_cmd = container_mod.build_exec_cmd(cname, claude_cmd, cleanup=False)
         try:
             scenario_pane = tmux_mod.split_pane_at(
                 concretize_pane, "v", exec_cmd, background=True,
-                cwd=str(clone_path))
+                cwd=pane_cwd)
             scenario.window_name = win_name
             scenario.pane_id = scenario_pane
             scenario.transcript_path = transcript
@@ -1358,6 +1335,69 @@ def _launch_scenarios_in_containers(
 
 
 # ---------------------------------------------------------------------------
+# Scenario launch helpers
+# ---------------------------------------------------------------------------
+
+def _build_scenario_run_cmd(
+    scenario: QAScenario,
+    state: QALoopState,
+    data: dict,
+    transcript: str,
+    qa_resolution,
+    *,
+    session: str | None,
+    workdir_path: str,
+) -> tuple[str, str]:
+    """Build the shell command that launches a scenario's claude pane.
+
+    Returns ``(run_cmd, pane_cwd)`` — the command tmux should run, and the
+    cwd to give the new pane.  Centralising this here keeps the prompt
+    file's host write_dir consistent with the cwd claude sees at runtime
+    across both the initial-launch and retry paths.  The relaunch path
+    previously passed the outer TUI workdir as ``write_dir``, which made
+    the prompt file land outside the scenario's clone (and thus outside
+    the container's /workspace mount), so claude started with no prompt.
+    """
+    from pm_core import prompt_gen
+    from pm_core.claude_launcher import build_claude_shell_cmd
+    from pm_core import container as container_mod
+
+    use_containers = bool(scenario.container_name)
+    host_clone = scenario.worktree_path or workdir_path
+
+    if use_containers:
+        wd_in = container_mod._CONTAINER_WORKDIR
+        scratch = container_mod._CONTAINER_SCRATCH
+        sess_for_prompt = None
+    else:
+        wd_in = host_clone
+        scratch = str(Path(state.qa_workdir) / f"s-{scenario.index}" / "scratch")
+        sess_for_prompt = session
+
+    child_prompt = prompt_gen.generate_qa_child_prompt(
+        data, state.pr_id, scenario,
+        workdir=wd_in,
+        session_name=sess_for_prompt,
+        worktree_mode=bool(scenario.worktree_path),
+        scratch_dir=scratch,
+    )
+    claude_cmd = build_claude_shell_cmd(
+        prompt=child_prompt,
+        model=qa_resolution.model, provider=qa_resolution.provider,
+        effort=qa_resolution.effort,
+        transcript=transcript, cwd=wd_in, write_dir=host_clone,
+    )
+
+    if use_containers:
+        run_cmd = container_mod.build_exec_cmd(
+            scenario.container_name, claude_cmd, cleanup=False)
+    else:
+        run_cmd = claude_cmd
+
+    return run_cmd, host_clone
+
+
+# ---------------------------------------------------------------------------
 # Scenario retry helpers
 # ---------------------------------------------------------------------------
 
@@ -1377,10 +1417,8 @@ def _relaunch_scenario_window(
 
     Returns True if the window was recreated successfully.
     """
-    from pm_core import tmux as tmux_mod, prompt_gen
-    from pm_core.claude_launcher import build_claude_shell_cmd
+    from pm_core import tmux as tmux_mod
     from pm_core.container import is_container_mode_enabled, _runtime_available
-    from pm_core import container as container_mod
     _qa_resolution = _resolve_qa_model(pr_data, data, session_type="qa_scenario")
 
     win_name = _scenario_window_name(pr_data, scenario.index)
@@ -1390,41 +1428,13 @@ def _relaunch_scenario_window(
     transcript = _scenario_transcript_path(state.qa_workdir, scenario.index)
 
     try:
-        if use_containers and scenario.container_name:
-            # Container still running — just re-exec into it
-            container_workdir = container_mod._CONTAINER_WORKDIR
-            container_scratch = container_mod._CONTAINER_SCRATCH
-            child_prompt = prompt_gen.generate_qa_child_prompt(
-                data, state.pr_id, scenario,
-                workdir=container_workdir,
-                session_name=None,
-                worktree_mode=bool(scenario.worktree_path),
-                scratch_dir=container_scratch,
-            )
-            claude_cmd = build_claude_shell_cmd(
-                prompt=child_prompt,
-                model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort,
-                transcript=transcript, cwd=container_workdir, write_dir=workdir_path)
-            exec_cmd = container_mod.build_exec_cmd(
-                scenario.container_name, claude_cmd, cleanup=False)
-            pane_id = tmux_mod.new_window_get_pane(session, win_name, exec_cmd,
-                                                   cwd=workdir_path, switch=False)
-        else:
-            # Host mode — worktree still exists
-            wt_path = scenario.worktree_path or workdir_path
-            child_prompt = prompt_gen.generate_qa_child_prompt(
-                data, state.pr_id, scenario,
-                workdir=str(wt_path),
-                session_name=session,
-                worktree_mode=bool(scenario.worktree_path),
-                scratch_dir=str(Path(state.qa_workdir) / f"s-{scenario.index}" / "scratch"),
-            )
-            child_cmd = build_claude_shell_cmd(
-                prompt=child_prompt,
-                model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort,
-                transcript=transcript, cwd=str(wt_path))
-            pane_id = tmux_mod.new_window_get_pane(session, win_name, child_cmd,
-                                                   cwd=str(wt_path), switch=False)
+        run_cmd, pane_cwd = _build_scenario_run_cmd(
+            scenario, state, data, transcript, _qa_resolution,
+            session=None if (use_containers and scenario.container_name) else session,
+            workdir_path=workdir_path,
+        )
+        pane_id = tmux_mod.new_window_get_pane(session, win_name, run_cmd,
+                                               cwd=pane_cwd, switch=False)
 
         scenario.window_name = win_name
         scenario.pane_id = pane_id
@@ -2300,8 +2310,12 @@ def run_qa_sync(
             tmux_mod.switch_sessions_to_window(
                 sessions_on_qa, session, window_name)
         elif not existing_win:
-            # First-time creation — select the window so user sees it
-            tmux_mod.select_window(session, window_name)
+            # First-time creation — select the window so user sees it,
+            # unless the popup spinner was dismissed (q/Esc) and the
+            # user explicitly asked to keep focus where they were.
+            from pm_core import runtime_state as _rs
+            if not _rs.consume_suppress_switch(state.pr_id, "qa"):
+                tmux_mod.select_window(session, window_name)
 
         # Wait for the planner to finish (poll for plan output)
         planner_pane = find_claude_pane(session, window_name)

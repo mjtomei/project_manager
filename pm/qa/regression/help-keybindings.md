@@ -94,7 +94,7 @@ ctrl+b d to detach from the tmux session.
      * ctrl+b d - Detach from session
    - Review Loop section:
      * zz d - Start loop
-     * z d - Stop loop / fresh done
+     * z d - Kill loop, fresh review
 
 3. Verify footer says: "Press Esc/? to close  |  h to discuss pm"
 

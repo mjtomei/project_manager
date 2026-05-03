@@ -258,7 +258,8 @@ def which_cmd():
 
 _BOOLEAN_SETTINGS = {"hide-assist", "hide-merged", "beginner-mode", "auto-cleanup",
                      "qa-verify-pass"}
-_INT_SETTINGS = {"min-pane-width", "qa-max-scenarios", "qa-verify-retries",
+_INT_SETTINGS = {"min-pane-width", "mobile-width-threshold",
+                 "qa-max-scenarios", "qa-verify-retries",
                  "qa-verdict-reminder-timeout"}
 _ENUM_SETTINGS = {"spec-mode": {"auto", "review", "prompt"},
                   "container-runtime": {"docker", "podman"}}
@@ -269,6 +270,7 @@ _SETTING_DEFAULTS = {
     "auto-cleanup": "off",
     "qa-verify-pass": "on",
     "min-pane-width": "100",
+    "mobile-width-threshold": "110",
     "qa-max-scenarios": "(unset)",
     "qa-verify-retries": "(unset)",
     "qa-verdict-reminder-timeout": "(unset)",
@@ -313,6 +315,10 @@ def set_cmd(setting, value):
     Value settings:
 
       min-pane-width       Minimum characters per horizontal pane (default 100)
+
+      mobile-width-threshold  Window width below which mobile mode auto-activates
+                              (default 110; widen if mobile triggers on a normal
+                              terminal split, narrow if it should be more eager)
 
       qa-max-scenarios     Max QA scenarios to run (0 = unlimited, default 0)
 

@@ -124,7 +124,7 @@ class ProjectManagerApp(App):
         Binding("q", "toggle_qa", "QA"),
         Binding("s", "start_pr", "Start PR", show=True),
         Binding("S", "start_pr_companion", "Start+Companion", show=False),
-        Binding("d", "done_pr", "Review", show=True),
+        Binding("d", "review_pr", "Review", show=True),
         Binding("g", "merge_pr", "Merge", show=True),
         Binding("G", "merge_pr_companion", "Merge+Companion", show=False),
 
@@ -151,8 +151,10 @@ class ProjectManagerApp(App):
         Binding("H", "launch_guide", "Guide", show=True),
         Binding("C", "show_connect", "Connect", show=False),
         Binding("A", "toggle_auto_start", "Auto-start", show=False),
+        Binding("O", "auto_sequence_pr", "Auto-seq", show=True),
         Binding("w", "focus_watcher", "Watcher", show=False),
         Binding("V", "review_spec", "Review Spec", show=False),
+        Binding("Y", "cleanup_pr", "Cleanup", show=True),
     ]
 
     def on_key(self, event) -> None:
@@ -166,6 +168,10 @@ class ProjectManagerApp(App):
         """
         cmd_bar = self.query_one("#command-bar", CommandBar)
         if cmd_bar.has_focus:
+            return
+        # When a modal/screen is on top of the default screen, let it handle
+        # its own keys — App-level prefix keys (y/w/z) must not swallow them.
+        if len(self.screen_stack) > 1:
             return
         # Buffer keystrokes between / press and command bar gaining focus
         if self._command_pending:
@@ -192,8 +198,35 @@ class ProjectManagerApp(App):
                 self._action_focus_watcher()
             elif key == "s":
                 self._action_watcher_toggle()
+            elif key == "r":
+                self._action_watcher_review()
             else:
                 self.log_message("[dim]w cancelled[/]")
+            event.prevent_default()
+            event.stop()
+            return
+        # y prefix mode: dispatch second key as cleanup-then-action
+        if self._y_mode:
+            self._y_mode = False
+            if self._y_cancel_timer:
+                self._y_cancel_timer.stop()
+                self._y_cancel_timer = None
+            self._clear_log_message()
+            key = event.character or event.key
+            if key in ("s", "d", "t"):
+                pr_view.cleanup_then_action(self, key)
+            else:
+                self.log_message("[dim]y cancelled[/]")
+            event.prevent_default()
+            event.stop()
+            return
+        if (event.key == "y" or event.character == "y"):
+            if not self.check_action("cleanup_pr", ()):
+                return
+            self._y_mode = True
+            self._z_count = 0
+            self.log_message("[bold]y …[/] [dim](cleanup-then: s=start d=review t=qa)[/]")
+            self._y_cancel_timer = self.set_timer(2.0, self._cancel_y_mode)
             event.prevent_default()
             event.stop()
             return
@@ -202,7 +235,7 @@ class ProjectManagerApp(App):
             if not self.check_action("focus_watcher", ()):
                 return
             self._w_mode = True
-            self.log_message("[bold]w …[/] [dim](w=list f=focus s=start/stop)[/]")
+            self.log_message("[bold]w …[/] [dim](w=list f=focus s=start/stop r=review)[/]")
             # Auto-cancel after 2 seconds
             self._w_cancel_timer = self.set_timer(2.0, self._cancel_w_mode)
             event.prevent_default()
@@ -219,32 +252,37 @@ class ProjectManagerApp(App):
                 self.log_message(f"[bold]{'z' * self._z_count} …[/]")
             event.prevent_default()
             event.stop()
-        elif event.key == "escape" and (self._z_count > 0 or self._w_mode):
+        elif event.key == "escape" and (self._z_count > 0 or self._w_mode or self._y_mode):
             self._z_count = 0
             if self._w_mode:
                 self._w_mode = False
                 if self._w_cancel_timer:
                     self._w_cancel_timer.stop()
                     self._w_cancel_timer = None
+            if self._y_mode:
+                self._y_mode = False
+                if self._y_cancel_timer:
+                    self._y_cancel_timer.stop()
+                    self._y_cancel_timer = None
             self._clear_log_message()
             # Don't prevent — let escape also do its normal thing
 
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """Disable single-key shortcuts when command bar is focused or in guide mode."""
-        if action in ("start_pr", "start_pr_companion", "done_pr",
+        if action in ("start_pr", "start_pr_companion", "review_pr",
                        "merge_pr", "merge_pr_companion",
                        "edit_plan", "view_plan", "launch_notes",
                        "launch_meta", "launch_claude", "launch_guide",
                        "view_log", "refresh", "rebalance", "show_help",
                        "toggle_plans", "toggle_qa", "start_qa_on_pr", "hide_plan", "move_to_plan", "toggle_merged",
-                       "cycle_filter", "cycle_sort", "toggle_auto_start", "focus_watcher",
-                       "review_spec"):
+                       "cycle_filter", "cycle_sort", "toggle_auto_start", "auto_sequence_pr", "focus_watcher",
+                       "review_spec", "cleanup_pr"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus or self._command_pending:
                 _log.debug("check_action: blocked %s (command bar focused/pending)", action)
                 return False
         # Block PR actions when in guide mode or plans view (can't see the PR tree)
-        if action in ("start_pr", "start_pr_companion", "done_pr", "merge_pr", "merge_pr_companion", "launch_claude", "edit_plan", "view_plan", "hide_plan", "move_to_plan", "toggle_merged", "cycle_filter", "cycle_sort", "start_qa_on_pr"):
+        if action in ("start_pr", "start_pr_companion", "review_pr", "merge_pr", "merge_pr_companion", "launch_claude", "edit_plan", "view_plan", "hide_plan", "move_to_plan", "toggle_merged", "cycle_filter", "cycle_sort", "start_qa_on_pr"):
             prs = self._data.get("prs") or []
             if not prs and self._current_guide_step is not None:
                 _log.debug("check_action: blocked %s (in guide mode, no PRs)", action)
@@ -297,12 +335,19 @@ class ProjectManagerApp(App):
         self._auto_start: bool = False
         self._auto_start_target: str | None = None
         self._auto_start_run_id: str | None = None
+        # Per-PR opt-out of auto-merge (set by the auto-sequence keypress).
+        # When a PR is in this set, _maybe_auto_merge stops at "ready to
+        # merge" instead of launching the merge window.
+        self._stop_before_merge: set[str] = set()
         # Watcher framework manager (purely in-memory, lost on TUI restart)
         from pm_core.watcher_manager import WatcherManager
         self._watcher_manager = WatcherManager()
         # w prefix key state
         self._w_mode: bool = False
         self._w_cancel_timer = None
+        # y prefix key state (cleanup-then-action)
+        self._y_mode: bool = False
+        self._y_cancel_timer = None
         # QA loop state (purely in-memory)
         self._qa_loops: dict = {}
         # Self-driving QA state (zz t — tracks pass counts per PR)
@@ -367,6 +412,16 @@ class ProjectManagerApp(App):
         # so CLI commands can ask us to reload state without depending on
         # tmux send-keys (which gets eaten by whichever widget has focus).
         self._install_reload_signal()
+        # Sweep stale runtime_state entries from the previous TUI
+        # process — a freshly-started TUI doesn't own any pane or loop
+        # recorded by an old one, so anything still flagged as
+        # running/idle/queued is no longer live.  Action mirrors will
+        # rewrite real entries as panes register and loops resume.
+        try:
+            from pm_core import runtime_state as _rs
+            _rs.sweep_stale_states("tui-mount")
+        except Exception:
+            _log.debug("runtime_state sweep on mount failed", exc_info=True)
         # Load any existing capture config
         frame_capture.load_capture_config(self)
         # Set up watchers on child widgets for frame capture
@@ -672,17 +727,16 @@ class ProjectManagerApp(App):
     def action_start_pr_companion(self) -> None:
         pr_view.start_pr(self, companion=True)
 
-    def action_done_pr(self) -> None:
+    def action_review_pr(self) -> None:
         z = self._consume_z()
         if z == 0:
-            # plain d = mark done (in_progress → in_review) + open review window
-            pr_view.done_pr(self)
+            # plain d = mark in_review and open review window
+            pr_view.review_pr(self)
         elif z == 1:
-            # z d = fresh done (kill existing review window), OR stop loop if running
-            review_loop_ui.stop_loop_or_fresh_done(self)
+            # z d = kill any running loop and open a fresh review window
+            review_loop_ui.stop_loop_or_fresh_review(self)
         else:
-            # zz d = start review loop (iterates until PASS),
-            #        or stop loop if running
+            # zz d = start a fresh review loop (supersedes any running)
             review_loop_ui.start_or_stop_loop(self)
 
     def action_merge_pr(self) -> None:
@@ -740,11 +794,29 @@ class ProjectManagerApp(App):
         tree = self.query_one("#tech-tree", TechTree)
         self.run_worker(toggle(self, selected_pr_id=tree.selected_pr_id))
 
+    def action_auto_sequence_pr(self) -> None:
+        from pm_core.tui.auto_start import auto_sequence_for_pr
+        tree = self.query_one("#tech-tree", TechTree)
+        pr_id = tree.selected_pr_id
+        if not pr_id:
+            self.log_message("No PR selected")
+            return
+        self.run_worker(auto_sequence_for_pr(self, pr_id))
+
     def _cancel_w_mode(self) -> None:
         """Auto-cancel w prefix mode after timeout."""
         if self._w_mode:
             self._w_mode = False
             self._clear_log_message()
+
+    def _cancel_y_mode(self) -> None:
+        """Auto-cancel y prefix mode after timeout."""
+        if self._y_mode:
+            self._y_mode = False
+            self._clear_log_message()
+
+    def action_cleanup_pr(self) -> None:
+        pr_view.cleanup_pr(self)
 
     def _action_focus_watcher(self) -> None:
         """Focus the watcher window (wf key chord)."""
@@ -818,6 +890,11 @@ class ProjectManagerApp(App):
             meta_pm_root=str(meta_root) if meta_root else None,
         )
 
+    def _action_watcher_review(self) -> None:
+        """Launch the watcher review session (wr key chord)."""
+        _log.info("action: watcher_review")
+        pane_ops.launch_watcher_review(self)
+
     def action_review_spec(self) -> None:
         """Open the oldest pending spec for review (V key)."""
         from pm_core import spec_gen
@@ -875,37 +952,104 @@ class ProjectManagerApp(App):
         from pm_core.paths import pm_home
         return pm_home() / f"tui-{self._session_name}.pid"
 
+    def _command_queue_file(self) -> Path | None:
+        """Path to this app's external command queue, keyed by session name."""
+        if not self._session_name:
+            return None
+        from pm_core.paths import pm_home
+        return pm_home() / f"tui-{self._session_name}.cmd-queue"
+
     def _install_reload_signal(self) -> None:
-        """Write pidfile and register SIGUSR1 -> action_reload."""
+        """Write pidfile and register signal handlers.
+
+        SIGUSR1 → ``action_reload`` (state-only reload).
+        SIGUSR2 → drain the per-session command queue file and dispatch
+        each line through ``handle_command_submitted`` (same path as the
+        in-TUI ``/`` command bar).  Lets external processes (popup
+        picker, CLI helpers) submit commands without depending on
+        focus-sensitive ``tmux send-keys`` timing.
+        """
         import os
         import signal
         import asyncio
         pidfile = self._reload_pidfile()
         if pidfile is None:
-            _log.debug("No session name yet, skipping reload-signal install")
+            _log.debug("No session name yet, skipping signal-handler install")
             return
         try:
             pidfile.write_text(str(os.getpid()))
         except OSError as e:
             _log.debug("Could not write TUI pidfile %s: %s", pidfile, e)
             return
+        # Pre-create the command queue file so external writers can
+        # always open it for append without a race.
+        queue = self._command_queue_file()
+        if queue is not None:
+            try:
+                queue.touch(exist_ok=True)
+            except OSError as e:
+                _log.debug("Could not create TUI command queue %s: %s",
+                           queue, e)
         try:
             loop = asyncio.get_event_loop()
             loop.add_signal_handler(signal.SIGUSR1, self.action_reload)
-            _log.info("Installed SIGUSR1 reload handler (pidfile=%s)", pidfile)
+            loop.add_signal_handler(signal.SIGUSR2, self._drain_command_queue)
+            _log.info("Installed SIGUSR1 reload + SIGUSR2 cmd-queue handlers"
+                      " (pidfile=%s, queue=%s)", pidfile, queue)
         except (NotImplementedError, RuntimeError) as e:
             # add_signal_handler isn't available on Windows; not relevant
             # for our tmux flow but log so it's visible if it ever fires.
-            _log.debug("Could not install SIGUSR1 handler: %s", e)
+            _log.debug("Could not install signal handlers: %s", e)
+
+    def _drain_command_queue(self) -> None:
+        """Read pending commands from the queue file and dispatch them.
+
+        Each non-empty line is a command identical to what the in-TUI
+        ``/`` command bar would submit.  We dispatch via the same
+        ``handle_command_submitted`` path so behavior matches exactly.
+        Commands are processed in FIFO order; the queue is truncated
+        after a successful read.
+        """
+        from pm_core.tui import pr_view
+        queue = self._command_queue_file()
+        if queue is None or not queue.exists():
+            return
+        import fcntl
+        try:
+            # Take the same exclusive flock the appender uses around
+            # write+signal so a racing append can't slip a line in
+            # between our read and truncate (which would silently drop
+            # it — the appender's later SIGUSR2 would then drain an
+            # empty file).
+            with open(queue, "r+") as f:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                try:
+                    content = f.read()
+                    f.seek(0)
+                    f.truncate()
+                finally:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        except OSError as e:
+            _log.debug("Could not read TUI command queue %s: %s", queue, e)
+            return
+        for line in content.splitlines():
+            cmd = line.strip()
+            if not cmd:
+                continue
+            _log.info("dispatching queued TUI command: %r", cmd)
+            try:
+                pr_view.handle_command_submitted(self, cmd)
+            except Exception:
+                _log.exception("queued command failed: %r", cmd)
 
     def on_unmount(self) -> None:
-        """Clean up the reload pidfile on shutdown."""
-        pidfile = self._reload_pidfile()
-        if pidfile is not None:
-            try:
-                pidfile.unlink(missing_ok=True)
-            except OSError as e:
-                _log.debug("Could not remove TUI pidfile %s: %s", pidfile, e)
+        """Clean up the reload pidfile and command queue on shutdown."""
+        for path in (self._reload_pidfile(), self._command_queue_file()):
+            if path is not None:
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError as e:
+                    _log.debug("Could not remove TUI file %s: %s", path, e)
 
     def action_reload(self) -> None:
         """Reload state from disk without triggering PR sync.

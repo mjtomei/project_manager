@@ -85,6 +85,13 @@ def save_breadcrumb(app) -> None:
         data["target"] = app._auto_start_target
         data["run_id"] = app._auto_start_run_id
 
+    # Persist auto-sequence stop-before-merge set even when auto-start is
+    # off — a TUI restart between QA finish and merge shouldn't re-arm
+    # auto-merge for an auto-sequence PR.
+    stop_before_merge = getattr(app, "_stop_before_merge", None)
+    if isinstance(stop_before_merge, set) and stop_before_merge:
+        data["stop_before_merge"] = sorted(stop_before_merge)
+
     # Persist review loop state for running loops
     review_loops = {}
     for pr_id, rstate in app._review_loops.items():
@@ -172,6 +179,12 @@ async def consume_breadcrumb(app) -> None:
         if run_id and app._root:
             tdir = app._root / "transcripts" / run_id
             tdir.mkdir(parents=True, exist_ok=True)
+
+    # Restore auto-sequence stop-before-merge set
+    sbm = data.get("stop_before_merge")
+    if sbm:
+        app._stop_before_merge.update(sbm)
+        _log.info("consume_breadcrumb: restored stop_before_merge=%s", sbm)
 
     # Restore review loop state before check_and_start so it sees existing loops
     review_loops_data = data.get("review_loops", {})
@@ -318,6 +331,29 @@ async def toggle(app, selected_pr_id: str | None = None) -> None:
         _log.info("auto_start: disabled")
 
 
+async def auto_sequence_for_pr(app, pr_id: str) -> None:
+    """Arm the auto-sequence chain for a single PR (TUI keypress entry).
+
+    Enables auto-start with *pr_id* as the target (the existing chain
+    machinery is per-target dep-tree scoped, but for an already-ready PR
+    that means the PR itself), and registers *pr_id* in
+    ``app._stop_before_merge`` so the merge step is suppressed when QA
+    passes.  Re-pressing on the same PR is a no-op for the merge-skip set
+    but re-runs ``check_and_start`` to nudge any stuck phase.
+    """
+    if not app._auto_start:
+        # Reuse toggle()'s ON path (sets target, run_id, transcript dir,
+        # and calls check_and_start).
+        await toggle(app, selected_pr_id=pr_id)
+    else:
+        # Already on — repoint at this PR and nudge.
+        app._auto_start_target = pr_id
+        app.log_message(f"Auto-sequence: target → {pr_id}")
+        await check_and_start(app)
+    app._stop_before_merge.add(pr_id)
+    app.log_message(f"Auto-sequence armed for {pr_id} (will stop before merge)")
+
+
 def set_target(app, pr_id: str | None) -> None:
     """Set or clear the auto-start target PR."""
     if pr_id:
@@ -354,6 +390,16 @@ async def check_and_start(app) -> None:
             app.log_message(f"Auto-start: target {target} merged, disabling")
             _disable(app)
             return
+
+    # Drop merged PRs from stop_before_merge — once merged, the entry
+    # has done its job and shouldn't linger across future auto-start runs.
+    sbm = getattr(app, "_stop_before_merge", set())
+    if sbm:
+        merged = {pr["id"] for pr in (app._data.get("prs") or [])
+                  if pr.get("status") == "merged"}
+        sbm.intersection_update(
+            {pr["id"] for pr in (app._data.get("prs") or [])} - merged
+        )
 
     # Collect PRs that should be started: pending with all deps merged,
     # plus in_progress PRs (whose window may have been killed).

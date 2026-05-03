@@ -648,6 +648,13 @@ def create_container(
         if val:
             cmd.extend(["-e", f"{env_var}={val}"])
 
+    # PM_HOST_HOME tells code inside the container (notably
+    # pm_core.hook_install) to embed the host's home path in any file
+    # that is bind-mounted back to the host (~/.claude/settings.json).
+    # Without this, hook commands written from the container would
+    # reference /home/pm/... which does not exist on the host.
+    cmd.extend(["-e", f"PM_HOST_HOME={Path.home()}"])
+
     for k, v in config.env.items():
         cmd.extend(["-e", f"{k}={v}"])
 
@@ -1045,6 +1052,43 @@ def cleanup_qa_containers(pr_id: str, loop_id: str,
     if count:
         _log.info("Cleaned up %d container(s) for %s/%s", count, pr_id, loop_id)
     return count
+
+
+def cleanup_pr_containers(pr_id: str,
+                          session_tag: str | None = None) -> list[str]:
+    """Remove every QA container for a PR across all loop ids.
+
+    Matches both legacy (``pm-qa-{pr_id}-``) and session-tagged
+    (``pm-{session_tag}-qa-{pr_id}-``) name prefixes. Returns the list of
+    container names removed.
+    """
+    prefixes = []
+    if session_tag:
+        prefixes.append(f"{CONTAINER_PREFIX}{session_tag}-qa-{pr_id}-")
+    prefixes.append(f"{CONTAINER_PREFIX}qa-{pr_id}-")
+
+    removed: list[str] = []
+    seen: set[str] = set()
+    for prefix in prefixes:
+        result = _run_runtime(
+            "ps", "-a", "--filter", f"name={prefix}",
+            "--format", "{{.Names}}",
+            check=False, timeout=30,
+        )
+        if result.returncode != 0:
+            continue
+        for line in result.stdout.strip().splitlines():
+            cname = line.strip()
+            if cname and cname not in seen:
+                seen.add(cname)
+                try:
+                    remove_container(cname)
+                    removed.append(cname)
+                except Exception as e:  # pragma: no cover - best effort
+                    _log.warning("remove_container(%s) failed: %s", cname, e)
+    if removed:
+        _log.info("Cleaned up %d container(s) for %s", len(removed), pr_id)
+    return removed
 
 
 def cleanup_orphaned_qa_containers(session: str, pr_id: str,

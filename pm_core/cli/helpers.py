@@ -5,7 +5,10 @@ HelpGroup, state management, PR ID resolution, TUI refresh, and session helpers.
 """
 
 import os
+import shutil
 import subprocess
+import sys
+import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,6 +21,118 @@ from pm_core import pane_layout
 from pm_core import pane_registry
 
 _log = configure_logger("pm.cli")
+
+
+# Tokens at which record wrapping prefers to break a too-wide line, in
+# priority order.  Each token marks a natural visual boundary in pm's
+# record-style CLI output.  The leading space is stripped on continuation
+# so the tail starts cleanly with the token itself.
+_RECORD_BREAK_TOKENS = (" <- ", " (", " [")
+
+
+def _cell_aware_fill(
+    text: str, width: int, *,
+    initial_indent: str = "", subsequent_indent: str = "",
+) -> str:
+    """Wrap ``text`` to visual ``width`` based on ``rich.cells.cell_len``.
+
+    Same shape as ``textwrap.fill`` but counts cells, not codepoints.  Wide
+    characters (emoji, CJK) consume the right number of columns.  Splits
+    on whitespace only; never splits a word.  Long words that exceed the
+    width go on their own line and overflow rather than being broken.
+    """
+    from rich.cells import cell_len
+    words = text.split()
+    if not words:
+        return initial_indent
+    lines = [initial_indent + words[0]]
+    for word in words[1:]:
+        candidate = lines[-1] + " " + word
+        if cell_len(candidate) <= width:
+            lines[-1] = candidate
+        else:
+            lines.append(subsequent_indent + word)
+    return "\n".join(lines)
+
+
+def _wrap_record_to_width(line: str, width: int, indent: str) -> str:
+    """Return ``line`` possibly with embedded newlines so it fits in ``width``.
+
+    Prefers breaking at the first record boundary token (``" <- "``,
+    ``" ("``, ``" ["``).  If the indented tail still overflows, falls
+    back to whitespace wrapping on the tail.  If no boundary token gives
+    a head that fits, falls back to whitespace wrapping on the full line.
+
+    Uses ``rich.cells.cell_len`` for visual width so wide characters
+    (emoji status icons like ⏳ 👀 🧪 ✅, CJK, etc.) are counted as the
+    two columns they actually occupy in a terminal.  ``len()`` would
+    miscount them and let visually-overflowing lines slip through.
+    """
+    from rich.cells import cell_len
+    if cell_len(line) <= width:
+        return line
+    for tok in _RECORD_BREAK_TOKENS:
+        idx = line.find(tok)
+        if idx <= 0:
+            continue
+        head = line[:idx]
+        # Require the head (everything up to the leading space) to fit.
+        if cell_len(head) > width:
+            continue
+        tail = line[idx + 1:]  # drop leading space, keep token onward
+        indented_tail = indent + tail
+        if cell_len(indented_tail) <= width:
+            return head + "\n" + indented_tail
+        return head + "\n" + _cell_aware_fill(
+            tail, width,
+            initial_indent=indent, subsequent_indent=indent,
+        )
+    # No break token gave a fitting head — fall back to whitespace wrapping
+    # on the full line.  Preserve the line's own leading whitespace as the
+    # initial indent so the first output line starts in the same column as
+    # the original (e.g. ``"  ⏳ pr-..."`` keeps its two-space gutter).
+    stripped = line.lstrip()
+    leading = line[:len(line) - len(stripped)]
+    return _cell_aware_fill(
+        stripped, width,
+        initial_indent=leading, subsequent_indent=indent,
+    )
+
+
+def echo_record(line: str, *, indent: str = "      ") -> None:
+    """Echo one record-style line, wrapping at terminal width on a TTY.
+
+    When stdout is *not* a TTY (e.g. piped into ``grep`` / ``jq``), the
+    line is echoed as-is so consumers keep one-record-per-line semantics.
+    Use ``emit_paged`` for listing commands that should also auto-page.
+    """
+    if not sys.stdout.isatty():
+        click.echo(line)
+        return
+    width = shutil.get_terminal_size((80, 24)).columns
+    click.echo(_wrap_record_to_width(line, width, indent))
+
+
+def emit_paged(lines, *, indent: str = "      ") -> None:
+    """Emit a sequence of record-style lines, auto-paging on a TTY.
+
+    Mirrors the ``git log`` / ``man`` / ``journalctl`` pattern: when
+    stdout is a TTY, collect all output, wrap each line at the terminal
+    width (with the same record-boundary preferences as ``echo_record``),
+    and pipe through ``$PAGER``.  ``less -FRX`` (the typical default)
+    auto-quits when the output fits on one screen, so short listings
+    don't feel paged at all.
+
+    When stdout is piped (``grep`` / ``jq`` / a file), each line is
+    emitted as-is, one per record, with no wrapping.
+    """
+    if not sys.stdout.isatty():
+        for line in lines:
+            click.echo(line)
+        return
+    width = shutil.get_terminal_size((80, 24)).columns
+    wrapped = "\n".join(_wrap_record_to_width(line, width, indent) for line in lines)
+    click.echo_via_pager(wrapped)
 
 
 # Module-level state set by the cli() group callback via set_project_override()
@@ -338,6 +453,65 @@ def trigger_tui_reload(session: str | None = None) -> None:
 
 # Backwards-compatible alias for existing callers.
 trigger_tui_refresh = trigger_tui_reload
+
+
+def _tui_command_queue_for_session(session: str) -> Path:
+    """Path to the per-session TUI command queue file."""
+    from pm_core.paths import pm_home
+    return pm_home() / f"tui-{session}.cmd-queue"
+
+
+def trigger_tui_command(session: str, cmd: str) -> bool:
+    """Submit ``cmd`` to the TUI's command bar via SIGUSR2 + queue file.
+
+    The TUI registers a SIGUSR2 handler at startup that drains the
+    per-session queue file and dispatches each line through the same
+    code path as a typed-and-submitted command bar entry.  This is
+    focus-independent — unlike send-keys, it can't be eaten by the
+    command input or get its literal text dispatched as TUI key
+    bindings while waiting for the Input widget to focus.
+
+    Multiple callers can append in any order; appends use ``flock`` to
+    serialize and a SIGUSR2 fires per call, so racing writes are
+    drained in the same handler invocation or the next one.
+
+    Returns True if the signal was sent, False otherwise.
+    """
+    import fcntl
+    import signal
+    pidfile = _tui_pidfile_for_session(session)
+    if not pidfile.exists():
+        _log.debug("No TUI pidfile for session %s", session)
+        return False
+    try:
+        pid = int(pidfile.read_text().strip())
+    except (ValueError, OSError) as e:
+        _log.debug("Could not read TUI pidfile %s: %s", pidfile, e)
+        return False
+    queue = _tui_command_queue_for_session(session)
+    line = cmd.strip().replace("\n", " ") + "\n"
+    try:
+        with open(queue, "a") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                f.write(line)
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+    except OSError as e:
+        _log.debug("Could not append to TUI command queue %s: %s", queue, e)
+        return False
+    try:
+        os.kill(pid, signal.SIGUSR2)
+        _log.debug("Queued command %r and sent SIGUSR2 to TUI pid %d (%s)",
+                   cmd, pid, session)
+        return True
+    except ProcessLookupError:
+        _log.debug("TUI pid %d gone, removing stale pidfile", pid)
+        pidfile.unlink(missing_ok=True)
+        return False
+    except PermissionError as e:
+        _log.debug("Cannot signal TUI pid %d: %s", pid, e)
+        return False
 
 
 def trigger_tui_restart() -> None:
