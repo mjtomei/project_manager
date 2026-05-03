@@ -921,8 +921,11 @@ def _format_action_status(pr_id: str, action: str) -> str:
         return " [wait]"
     if state == "running":
         return " [working]"
-    if state == "gone":
-        return " [gone]"
+    # 'gone' is the post-sweep state for entries that belonged to a
+    # previous TUI process; treat it as no signal so the picker
+    # doesn't show stale [gone] badges across every action after a
+    # restart.  The [open] tag (computed elsewhere from the live
+    # tmux window list) remains the authoritative liveness signal.
     return ""
 
 

@@ -162,6 +162,60 @@ def clear_action(pr_id: str, action: str) -> None:
     set_action_state(pr_id, action, None)
 
 
+def sweep_stale_states(reason: str = "tui-restart") -> int:
+    """Reset any in-flight action states across all PRs.
+
+    Called by the TUI on mount: a fresh TUI process can't own panes or
+    loops recorded by a previous one, so leaving entries at
+    ``running``/``launching``/``queued``/``idle``/``waiting`` would
+    cause the picker to display loops and idle indicators that don't
+    correspond to anything live.  We mark such entries as ``gone`` so
+    readers stop treating them as live.  Terminal states (``done`` /
+    ``failed`` / ``gone`` already) are left untouched so post-mortem
+    info — e.g. last review-loop verdict — survives restart.
+
+    Returns the number of action entries that were reset.
+    """
+    runtime_dir = _runtime_dir()
+    in_flight = {"queued", "launching", "running", "idle", "waiting"}
+    swept = 0
+    try:
+        files = list(runtime_dir.iterdir())
+    except OSError:
+        return 0
+    for path in files:
+        if not path.is_file() or path.suffix != ".json":
+            continue
+        try:
+            data = _read_locked(path)
+        except Exception:
+            continue
+        actions = data.get("actions") or {}
+        if not isinstance(actions, dict):
+            continue
+        targets = [a for a, e in actions.items()
+                   if isinstance(e, dict) and e.get("state") in in_flight]
+        if not targets:
+            continue
+        pr_id = data.get("pr_id") or path.stem
+        for action in targets:
+            try:
+                set_action_state(pr_id, action, "gone",
+                                 swept_reason=reason,
+                                 # Drop pane/session metadata since
+                                 # they refer to the previous process.
+                                 pane_id=None, session_id=None,
+                                 suppress_switch=None)
+                swept += 1
+            except Exception:
+                _log.debug("runtime_state: sweep failed for %s/%s",
+                           pr_id, action, exc_info=True)
+    if swept:
+        _log.info("runtime_state: swept %d stale entries (%s)",
+                  swept, reason)
+    return swept
+
+
 def request_suppress_switch(pr_id: str, action: str) -> None:
     """Mark *(pr_id, action)*'s pending TUI window-switch as cancelled.
 
