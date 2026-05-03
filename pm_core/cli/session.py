@@ -914,18 +914,17 @@ def _format_action_status(pr_id: str, action: str) -> str:
         if state == "failed":
             return " [failed]"
         return ""
-    # start / qa: hook-event-derived states from derive_action_status
+    # start / qa: hook-event-derived states from derive_action_status.
+    # Stale/dead entries are cleared (not flagged) by the TUI-mount
+    # sweep and pane_idle's pane-gone path, so we never need to render
+    # a "no longer alive" badge — absence of an entry is the signal,
+    # and [open] from the live tmux window list is authoritative.
     if state == "idle":
         return " [idle]"
     if state == "waiting":
         return " [wait]"
     if state == "running":
         return " [working]"
-    # 'gone' is the post-sweep state for entries that belonged to a
-    # previous TUI process; treat it as no signal so the picker
-    # doesn't show stale [gone] badges across every action after a
-    # restart.  The [open] tag (computed elsewhere from the live
-    # tmux window list) remains the authoritative liveness signal.
     return ""
 
 

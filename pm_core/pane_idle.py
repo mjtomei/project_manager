@@ -125,7 +125,7 @@ class PaneIdleTracker:
                 if state and state.pane_id == pane_id:
                     state.gone = True
                     state.idle = False
-            _runtime_mirror_state(key, "gone")
+            _runtime_mirror_clear(key)
             return False
 
         event = hook_events.read_event(session_id)
@@ -274,14 +274,3 @@ def _runtime_mirror_clear(key: str) -> None:
                    exc_info=True)
 
 
-def _runtime_mirror_state(key: str, state: str) -> None:
-    target = _runtime_target(key)
-    if not target:
-        return
-    pr_id, action = target
-    try:
-        from pm_core import runtime_state as _rs
-        _rs.set_action_state(pr_id, action, state)
-    except Exception:
-        _log.debug("runtime_state mirror_state failed for %s", key,
-                   exc_info=True)

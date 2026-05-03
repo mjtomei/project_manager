@@ -39,7 +39,10 @@ Valid ``state`` values:
 * ``waiting``   — pane alive, Claude blocked on permission_prompt
 * ``done``      — finished cleanly
 * ``failed``    — error during launch / execution
-* ``gone``      — pane disappeared / loop stopped without explicit done
+
+Pane disappearances and stale-entry sweeps clear the entry entirely
+rather than recording an explicit "gone" state — the live tmux window
+list and pane-existence checks are the authoritative liveness signals.
 
 Writers should call :func:`set_action_state` for every transition; the
 function takes a flock around the read-modify-write so concurrent
@@ -62,7 +65,7 @@ _log = configure_logger("pm.runtime_state")
 
 VALID_STATES = {
     "queued", "launching", "running", "idle", "waiting",
-    "done", "failed", "gone",
+    "done", "failed",
 }
 
 
@@ -169,12 +172,11 @@ def sweep_stale_states(reason: str = "tui-restart") -> int:
     loops recorded by a previous one, so leaving entries at
     ``running``/``launching``/``queued``/``idle``/``waiting`` would
     cause the picker to display loops and idle indicators that don't
-    correspond to anything live.  We mark such entries as ``gone`` so
-    readers stop treating them as live.  Terminal states (``done`` /
-    ``failed`` / ``gone`` already) are left untouched so post-mortem
-    info — e.g. last review-loop verdict — survives restart.
+    correspond to anything live.  We delete such entries entirely.
+    Terminal states (``done`` / ``failed``) are left untouched so
+    post-mortem info — e.g. last review-loop verdict — survives restart.
 
-    Returns the number of action entries that were reset.
+    Returns the number of action entries that were cleared.
     """
     runtime_dir = _runtime_dir()
     in_flight = {"queued", "launching", "running", "idle", "waiting"}
@@ -200,12 +202,7 @@ def sweep_stale_states(reason: str = "tui-restart") -> int:
         pr_id = data.get("pr_id") or path.stem
         for action in targets:
             try:
-                set_action_state(pr_id, action, "gone",
-                                 swept_reason=reason,
-                                 # Drop pane/session metadata since
-                                 # they refer to the previous process.
-                                 pane_id=None, session_id=None,
-                                 suppress_switch=None)
+                clear_action(pr_id, action)
                 swept += 1
             except Exception:
                 _log.debug("runtime_state: sweep failed for %s/%s",
