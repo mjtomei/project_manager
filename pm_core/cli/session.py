@@ -104,14 +104,23 @@ def _register_tmux_bindings(session_name: str) -> None:
     subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gu", "after-resize-window"),
             check=False)
 
-    # Popup bindings: PR action picker (prefix+P) and pm command runner (prefix+M)
+    # Popup bindings: PR action picker (prefix+P) and pm command runner (prefix+M).
+    # Wrap in a shell that pauses on launch failure (e.g. pm not on PATH) so
+    # the popup stays visible long enough to read the error instead of
+    # vanishing instantly with display-popup -E.
+    _picker_inner = ("pm _popup-picker '#{session_name}' '#{window_name}'"
+                     " || { echo; echo 'pm popup failed (exit '$?').';"
+                     " read -p 'Press Enter to close...'; }")
+    _cmd_inner = ("pm _popup-cmd '#{session_name}'"
+                  " || { echo; echo 'pm popup failed (exit '$?').';"
+                  " read -p 'Press Enter to close...'; }")
     subprocess.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", "P",
              "display-popup", "-E", "-w", "80", "-h", "80%",
-             "pm _popup-picker '#{session_name}' '#{window_name}'"),
+             _picker_inner),
             check=False)
     subprocess.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", "M",
              "display-popup", "-E", "-w", "80", "-h", "50%",
-             "pm _popup-cmd '#{session_name}'"),
+             _cmd_inner),
             check=False)
 
 
@@ -909,17 +918,26 @@ def popup_picker_cmd(session: str, window_name: str):
     """
     import shutil
 
+    def _pause_and_exit(code: int = 0):
+        # display-popup -E closes when the command exits, so wait for Enter
+        # whenever we have a message the user needs to read.
+        try:
+            input("\nPress Enter to close...")
+        except (EOFError, KeyboardInterrupt):
+            pass
+        raise SystemExit(code)
+
     base = pane_registry.base_session_name(session)
     if not tmux_mod.session_exists(base):
         click.echo("Not a pm session.")
-        raise SystemExit(1)
+        _pause_and_exit(1)
 
     try:
         root = state_root()
         data = store.load(root)
     except FileNotFoundError:
         click.echo("No project.yaml found.")
-        raise SystemExit(1)
+        _pause_and_exit(1)
 
     prs = data.get("prs") or []
     current_pr = _current_window_pr_id(window_name)
@@ -927,7 +945,7 @@ def popup_picker_cmd(session: str, window_name: str):
     if not current_pr:
         click.echo("PR Actions (prefix+P)")
         click.echo("Switch to a PR window to use this picker.")
-        raise SystemExit(0)
+        _pause_and_exit(0)
 
     # Gather open windows to annotate the picker
     open_windows = {w["name"] for w in tmux_mod.list_windows(base)}
@@ -937,7 +955,7 @@ def popup_picker_cmd(session: str, window_name: str):
     if not lines:
         click.echo(f"PR Actions — {current_pr}")
         click.echo("No actions available (PR is merged or closed).")
-        raise SystemExit(0)
+        _pause_and_exit(0)
 
     has_fzf = shutil.which("fzf") is not None
 
@@ -1050,6 +1068,10 @@ def popup_cmd_cmd(session: str):
     base = pane_registry.base_session_name(session)
     if not tmux_mod.session_exists(base):
         click.echo("Not a pm session.")
+        try:
+            input("\nPress Enter to close...")
+        except (EOFError, KeyboardInterrupt):
+            pass
         raise SystemExit(1)
 
     try:
