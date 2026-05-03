@@ -326,7 +326,7 @@ This PR is part of plan "{plan['name']}" ({plan['id']}). Other PRs in this plan:
     else:
         diff_cmd = f"git diff origin/{base_branch}...HEAD"
         pull_step = (
-            f"1. Pull the latest changes from remote: `git pull origin {branch}`. "
+            f"1. Pull the latest changes for `{branch}` from the remote. "
             f"Resolve any merge conflicts before continuing.\n"
         )
 
@@ -449,9 +449,9 @@ def _remote_sync_tip(data: dict, branch: str) -> str:
     if backend_name == "local":
         return ""
     return (
-        f"- Pull from remote before starting work to pick up changes from "
-        f"other sessions or machines: `git pull origin {branch}`. "
-        f"If there are merge conflicts, resolve them before continuing."
+        f"- Pull `{branch}` from the remote before starting work so you pick up "
+        f"changes from other sessions or machines. Resolve any merge conflicts "
+        f"before continuing."
     )
 
 
@@ -461,10 +461,9 @@ def _base_branch_sync_tip(data: dict, base_branch: str) -> str:
     if backend_name == "local":
         return ""
     return (
-        f"- Pull the latest `{base_branch}` and merge it into your branch so you're "
-        f"building on up-to-date code: "
-        f"`git fetch origin {base_branch} && git merge origin/{base_branch}`. "
-        f"Resolve any conflicts before continuing."
+        f"- Pull the latest `{base_branch}` and merge it into your branch so "
+        f"you're building on up-to-date code. Resolve any conflicts before "
+        f"continuing."
     )
 
 
@@ -1701,7 +1700,7 @@ If a setup step fails or a required tool is unavailable, report
     backend_name = data.get("project", {}).get("backend", "vanilla")
     has_remote = backend_name != "local"
     pull_step = (
-        f"1. Pull the latest changes from remote: `git pull origin {branch}`. "
+        f"1. Pull the latest changes for `{branch}` from the remote. "
         f"Resolve any merge conflicts before continuing.\n"
     ) if has_remote else ""
     n = 2 if has_remote else 1  # first step number after optional pull
