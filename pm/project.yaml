@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-30888b1
+  active_pr: pr-2d0588a
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -8242,7 +8242,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/158
   gh_pr_number: 158
   created_at: '2026-04-07T12:46:56.964240+00:00'
-  updated_at: '2026-05-03T14:25:31.091678+00:00'
+  updated_at: '2026-05-03T14:50:54.726691+00:00'
   started_at: '2026-04-07T12:49:34.016669+00:00'
   reviewed_at: '2026-04-07T22:35:47.013280+00:00'
   merged_at: null
@@ -8327,6 +8327,15 @@ prs:
       to numbered-list selector when fzf isn''t installed.'
     created_at: '2026-05-03T14:25:30Z'
     last_edited: '2026-05-03T14:25:30Z'
+  - id: note-b477537
+    text: 'Picker shortcut redesign (commit 9d09839): top-level shortcut keys are
+      now s/e/d/a/g (review-loop dropped from list rows). Review-loop and the fresh/loop
+      QA variants are reachable via z/zz chords: z d=pr review --fresh, zz d=review-loop
+      start, z a=pr qa fresh, zz a=pr qa loop. The TUI command bar now also accepts
+      pr qa [fresh|loop] [PR_ID]. Earlier QA notes mentioning the l shortcut and bare
+      pr qa for the popup are stale relative to this design.'
+    created_at: '2026-05-03T14:50:54Z'
+    last_edited: '2026-05-03T14:50:54Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d0588a-tmux-popup-pr-switcher-and-prefix-ke-f6381eb7
 - id: pr-1735d44
   plan: bugs
