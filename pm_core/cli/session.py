@@ -117,13 +117,13 @@ def _register_tmux_bindings(session_name: str) -> None:
         ' W=$(tmux display-message -p "#{window_name}");'
         ' pm _popup-picker "$S" "$W"'
         " || { echo; echo 'pm popup failed (exit '$?').';"
-        " read -p 'Press Enter to close...'; }"
+        " read -n 1 -s -r -p 'Press any key to close...'; }"
     )
     _cmd_inner = (
         'S=$(tmux display-message -p "#{session_name}");'
         ' pm _popup-cmd "$S"'
         " || { echo; echo 'pm popup failed (exit '$?').';"
-        " read -p 'Press Enter to close...'; }"
+        " read -n 1 -s -r -p 'Press any key to close...'; }"
     )
     subprocess.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", "P",
              "display-popup", "-E", "-w", "80", "-h", "80%",
