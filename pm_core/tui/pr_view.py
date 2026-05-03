@@ -568,6 +568,18 @@ def handle_command_submitted(app, cmd: str) -> None:
 
         tree = app.query_one("#tech-tree", TechTree)
         if _rl_pr_id:
+            # Resolve the id before retargeting the tree selection so a
+            # typo doesn't silently start a loop on the previously
+            # selected PR.  Mirrors the QA branch below.
+            if app._root:
+                try:
+                    _rl_data = store.load(app._root)
+                except store.ProjectYamlParseError as e:
+                    app.log_message(f"Error: {e}")
+                    return
+                if not store.get_pr(_rl_data, _rl_pr_id):
+                    app.log_message(f"PR not found: {_rl_pr_id}")
+                    return
             tree.select_pr(_rl_pr_id)
 
         review_loop_ui.start_or_stop_loop(app)
@@ -586,8 +598,18 @@ def handle_command_submitted(app, cmd: str) -> None:
     # it, edits whatever is currently selected.
     if parts and parts[0] == "edit":
         if len(parts) >= 2:
+            edit_pr_id = parts[1]
+            if app._root:
+                try:
+                    edit_data = store.load(app._root)
+                except store.ProjectYamlParseError as e:
+                    app.log_message(f"Error: {e}")
+                    return
+                if not store.get_pr(edit_data, edit_pr_id):
+                    app.log_message(f"PR not found: {edit_pr_id}")
+                    return
             tree = app.query_one("#tech-tree", TechTree)
-            tree.select_pr(parts[1])
+            tree.select_pr(edit_pr_id)
         pane_ops.edit_plan(app)
         return
 
