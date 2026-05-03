@@ -455,6 +455,65 @@ def trigger_tui_reload(session: str | None = None) -> None:
 trigger_tui_refresh = trigger_tui_reload
 
 
+def _tui_command_queue_for_session(session: str) -> Path:
+    """Path to the per-session TUI command queue file."""
+    from pm_core.paths import pm_home
+    return pm_home() / f"tui-{session}.cmd-queue"
+
+
+def trigger_tui_command(session: str, cmd: str) -> bool:
+    """Submit ``cmd`` to the TUI's command bar via SIGUSR2 + queue file.
+
+    The TUI registers a SIGUSR2 handler at startup that drains the
+    per-session queue file and dispatches each line through the same
+    code path as a typed-and-submitted command bar entry.  This is
+    focus-independent — unlike send-keys, it can't be eaten by the
+    command input or get its literal text dispatched as TUI key
+    bindings while waiting for the Input widget to focus.
+
+    Multiple callers can append in any order; appends use ``flock`` to
+    serialize and a SIGUSR2 fires per call, so racing writes are
+    drained in the same handler invocation or the next one.
+
+    Returns True if the signal was sent, False otherwise.
+    """
+    import fcntl
+    import signal
+    pidfile = _tui_pidfile_for_session(session)
+    if not pidfile.exists():
+        _log.debug("No TUI pidfile for session %s", session)
+        return False
+    try:
+        pid = int(pidfile.read_text().strip())
+    except (ValueError, OSError) as e:
+        _log.debug("Could not read TUI pidfile %s: %s", pidfile, e)
+        return False
+    queue = _tui_command_queue_for_session(session)
+    line = cmd.strip().replace("\n", " ") + "\n"
+    try:
+        with open(queue, "a") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                f.write(line)
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+    except OSError as e:
+        _log.debug("Could not append to TUI command queue %s: %s", queue, e)
+        return False
+    try:
+        os.kill(pid, signal.SIGUSR2)
+        _log.debug("Queued command %r and sent SIGUSR2 to TUI pid %d (%s)",
+                   cmd, pid, session)
+        return True
+    except ProcessLookupError:
+        _log.debug("TUI pid %d gone, removing stale pidfile", pid)
+        pidfile.unlink(missing_ok=True)
+        return False
+    except PermissionError as e:
+        _log.debug("Cannot signal TUI pid %d: %s", pid, e)
+        return False
+
+
 def trigger_tui_restart() -> None:
     """Send Ctrl+R to the TUI pane to restart it.
 

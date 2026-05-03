@@ -48,11 +48,19 @@ def _get_selected_pr(app) -> tuple[str | None, dict | None]:
 
 
 # ---------------------------------------------------------------------------
-# z d  — fresh done or stop loop
+# z d  — kill running loop and open a fresh review
 # ---------------------------------------------------------------------------
 
-def stop_loop_or_fresh_done(app) -> None:
-    """Handle ``z d``: stop a running loop, or do a fresh done."""
+def stop_loop_or_fresh_review(app) -> None:
+    """Handle ``z d``: stop any running loop and start a fresh review.
+
+    Used to be "stop loop OR fresh review" — if a loop was running you
+    only got the stop, no fresh review.  Now the two are combined:
+    any running loop is killed (matching ``zz d``'s supersede path —
+    set stop_requested + kill the review window so the running
+    iteration's verdict-poll bails) and then ``review_pr(fresh=True)``
+    opens a fresh review window for the user.
+    """
     pr_id, pr = _get_selected_pr(app)
     if not pr_id:
         app.log_message("No PR selected")
@@ -60,11 +68,27 @@ def stop_loop_or_fresh_done(app) -> None:
 
     loop = app._review_loops.get(pr_id)
     if loop and loop.running:
-        _stop_loop(app, pr_id)
-    else:
-        # Original z d behaviour: fresh done
-        from pm_core.tui import pr_view
-        pr_view.done_pr(app, fresh=True)
+        loop.stop_requested = True
+        # Kill the review window so the running iteration's
+        # _poll_for_verdict (which doesn't check stop_requested)
+        # detects pane-gone, raises PaneKilledError, and the loop
+        # exits at once instead of running to completion.
+        from pm_core import tmux as tmux_mod
+        from pm_core.cli.helpers import _pr_display_id
+        if pr and app._session_name:
+            win_name = f"review-{_pr_display_id(pr)}"
+            try:
+                tmux_mod.kill_window(app._session_name, win_name)
+            except Exception:
+                _log.debug(
+                    "review_loop_ui: kill of review window for z d failed"
+                    " for %s", pr_id, exc_info=True)
+        _log.info("review_loop_ui: z d killed running loop for %s", pr_id)
+        app.log_message(
+            f"[bold]Stopped review loop[/] for {pr_id} — opening fresh review")
+
+    from pm_core.tui import pr_view
+    pr_view.review_pr(app, fresh=True)
 
 
 # ---------------------------------------------------------------------------
@@ -72,7 +96,22 @@ def stop_loop_or_fresh_done(app) -> None:
 # ---------------------------------------------------------------------------
 
 def start_or_stop_loop(app) -> None:
-    """Handle ``zz d``: start loop or stop if one is running."""
+    """Handle ``zz d``: always start a fresh review loop.
+
+    Previously this toggled — pressing ``zz d`` while a loop ran would
+    stop it.  That left no way to restart a loop without first
+    cancelling, and it wasn't obvious that ``zz d`` cancelled rather
+    than restarted.  Behavior now matches ``z d`` (fresh review): if a
+    loop is already running for the same PR, we set its
+    ``stop_requested`` flag and **kill the review window** so the
+    iteration's verdict-poll detects pane-gone and bails immediately
+    (rather than running to completion before checking the flag).
+    Then a fresh loop starts.
+
+    Cancelling a loop is now done via TUI restart (which sweeps the
+    in-memory loop registry on remount) or by Ctrl+C in the loop's
+    review pane.
+    """
     from pm_core.tui import auto_start as _auto_start
 
     pr_id, pr = _get_selected_pr(app)
@@ -80,13 +119,31 @@ def start_or_stop_loop(app) -> None:
         app.log_message("No PR selected")
         return
 
-    loop = app._review_loops.get(pr_id)
-    if loop and loop.running:
-        _stop_loop(app, pr_id)
-        return
+    existing = app._review_loops.get(pr_id)
+    superseded = bool(existing and existing.running)
+    if superseded:
+        existing.stop_requested = True
+        # Force the running iteration to terminate now: the
+        # _run_claude_review path blocks in _poll_for_verdict (which
+        # doesn't check stop_requested) until the pane is gone.
+        # Killing the review window makes that poll return None →
+        # PaneKilledError → the loop exits.
+        from pm_core import tmux as tmux_mod
+        from pm_core.cli.helpers import _pr_display_id
+        if pr and app._session_name:
+            win_name = f"review-{_pr_display_id(pr)}"
+            try:
+                tmux_mod.kill_window(app._session_name, win_name)
+            except Exception:
+                _log.debug("review_loop_ui: kill of review window for"
+                           " supersede failed for %s", pr_id,
+                           exc_info=True)
+        _log.info("review_loop_ui: superseding running loop for %s "
+                  "with a fresh one", pr_id)
 
     _start_loop(app, pr_id, pr,
-                transcript_dir=str(_auto_start.get_transcript_dir(app)))
+                transcript_dir=str(_auto_start.get_transcript_dir(app)),
+                superseded=superseded)
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +152,8 @@ def start_or_stop_loop(app) -> None:
 
 def _start_loop(app, pr_id: str, pr: dict | None,
                 transcript_dir: str,
-                resume_state: ReviewLoopState | None = None) -> None:
+                resume_state: ReviewLoopState | None = None,
+                superseded: bool = False) -> None:
     """Start a review loop for the given PR.
 
     ``transcript_dir`` is required — hook-driven verdict polling needs a
@@ -107,6 +165,11 @@ def _start_loop(app, pr_id: str, pr: dict | None,
     When *resume_state* is provided, the loop continues from the saved
     iteration count and history instead of starting fresh.  Used by
     breadcrumb restoration after merge-triggered TUI restarts.
+
+    Pass ``superseded=True`` when a previously-running loop for this
+    PR was killed to make room for this one — only changes the
+    user-visible status message so it's clear this is a fresh restart
+    rather than a brand-new launch.
     """
     from pm_core import tmux as tmux_mod
 
@@ -153,13 +216,26 @@ def _start_loop(app, pr_id: str, pr: dict | None,
         app._review_loops[pr_id] = state
         _log.info("review_loop_ui: starting loop for %s", pr_id)
 
-    app.log_message(
-        f"[bold]Review loop started[/] for {pr_id} loop={state.loop_id} — z d to stop",
-        sticky=3,
-    )
+    if superseded:
+        msg = (f"[bold]Fresh review loop started[/] for {pr_id} "
+               f"loop={state.loop_id}")
+    elif resume_state:
+        msg = (f"[bold]Review loop resumed[/] for {pr_id} "
+               f"at iteration {state.iteration} loop={state.loop_id}")
+    else:
+        msg = (f"[bold]Review loop started[/] for {pr_id} "
+               f"loop={state.loop_id}")
+    app.log_message(msg, sticky=3)
 
     # Ensure the poll timer is running
     _ensure_poll_timer(app)
+
+    # Persist to the shared runtime state so external readers (popup
+    # picker, status spinner) can see the loop is active.
+    from pm_core import runtime_state as _rs
+    _rs.set_action_state(pr_id, "review-loop", "running",
+                         iteration=state.iteration,
+                         loop_id=state.loop_id)
 
     # Start the background loop
     start_review_loop_background(
@@ -197,6 +273,15 @@ def _on_iteration_from_thread(app, state: ReviewLoopState) -> None:
     """Called from the background thread after each iteration."""
     _log.info("review_loop_ui: iteration %d verdict=%s for %s",
               state.iteration, state.latest_verdict, state.pr_id)
+    from pm_core import runtime_state as _rs
+    if not _is_active_loop(state):
+        _log.debug("review_loop_ui: skipping iteration mirror for "
+                   "superseded loop_id=%s", state.loop_id)
+        return
+    _rs.set_action_state(state.pr_id, "review-loop", "running",
+                         iteration=state.iteration,
+                         loop_id=state.loop_id,
+                         verdict=state.latest_verdict)
 
 
 def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
@@ -204,7 +289,10 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
     _log.info("review_loop_ui: loop complete for %s — verdict=%s iterations=%d",
               state.pr_id, state.latest_verdict, state.iteration)
 
-    # Finalize review transcript symlinks for this loop's iterations
+    # Finalize review transcript symlinks for this loop's iterations.
+    # Done before the supersede check because the transcripts are this
+    # loop's own work — they need finalizing whether or not we still
+    # own the runtime_state entry.
     tdir = getattr(state, '_transcript_dir', None)
     if tdir:
         from pathlib import Path
@@ -215,6 +303,36 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
                 if (p.is_symlink() and p.suffix == ".jsonl"
                         and p.name.startswith(f"review-{state.pr_id}-")):
                     finalize_transcript(p)
+
+    from pm_core import runtime_state as _rs
+    if not _is_active_loop(state):
+        # We were superseded by a fresh loop; don't overwrite its
+        # 'running' entry with our terminal (often KILLED) verdict.
+        _log.debug("review_loop_ui: skipping completion mirror for "
+                   "superseded loop_id=%s verdict=%s",
+                   state.loop_id, state.latest_verdict)
+        return
+    _rs.set_action_state(state.pr_id, "review-loop", "done",
+                         iteration=state.iteration,
+                         verdict=state.latest_verdict)
+
+
+def _is_active_loop(state: ReviewLoopState) -> bool:
+    """True when the recorded loop_id in runtime_state still matches.
+
+    A loop superseded by ``start_or_stop_loop`` keeps running its
+    background thread until it hits a checkpoint, then fires its
+    completion callback.  By that time runtime_state holds the new
+    loop's loop_id; comparing IDs lets the old callbacks bow out
+    instead of clobbering the new entry.
+    """
+    from pm_core import runtime_state as _rs
+    cur = _rs.get_action_state(state.pr_id, "review-loop")
+    cur_id = cur.get("loop_id")
+    # If nothing's recorded yet, this loop is the only candidate; allow
+    # the write so iteration mirrors still work for the very first
+    # iteration after a restart.
+    return not cur_id or cur_id == state.loop_id
 
 
 # ---------------------------------------------------------------------------
@@ -811,14 +929,74 @@ def _poll_impl_idle(app) -> None:
                                   pending_merges, active_merge_keys)
             # else: still not merged — keep tracking
 
+    # --- Third pass: non-loop review windows ---
+    # Track the review pane for in_review PRs that don't have a running
+    # review loop, so the picker shows [working]/[idle]/[wait] and we
+    # can pick up the review verdict from the transcript.
+    active_review_keys: set[str] = set()
+    for pr in (app._data.get("prs") or []):
+        if pr.get("status") != "in_review":
+            continue
+        pr_id = pr.get("id", "")
+        if not pr_id:
+            continue
+        loop = app._review_loops.get(pr_id)
+        if loop and loop.running:
+            continue  # loop iterations own the review window's transcript
+
+        review_key = f"review:{pr_id}"
+        window_name = f"review-{_pr_display_id(pr)}"
+
+        if not tracker.is_tracked(review_key) or tracker.is_gone(review_key):
+            pane_id = _find_impl_pane(session, window_name)
+            if not pane_id:
+                continue
+            tdir = _auto_start.get_transcript_dir(app)
+            if not tdir:
+                continue
+            review_transcript = str(tdir / f"review-{pr_id}.jsonl")
+            try:
+                tracker.register(review_key, pane_id, review_transcript)
+            except ValueError:
+                continue
+
+        active_review_keys.add(review_key)
+        tracker.poll(review_key)
+
+        # --- Mirror the review verdict ---
+        review_transcript_path = tracker.get_transcript_path(review_key)
+        if review_transcript_path:
+            from pm_core.verdict_transcript import extract_verdict_from_transcript
+            verdict = extract_verdict_from_transcript(
+                review_transcript_path,
+                ("LGTM", "NEEDS_WORK", "INPUT_REQUIRED"),
+            )
+            if verdict:
+                from pm_core import runtime_state as _rs
+                cur = _rs.get_action_state(pr_id, "review") or {}
+                if cur.get("verdict") != verdict or cur.get("state") != "done":
+                    try:
+                        _rs.set_action_state(pr_id, "review", "done",
+                                             verdict=verdict)
+                    except Exception:
+                        _log.debug("runtime_state review verdict mirror failed",
+                                   exc_info=True)
+
     # Unregister stale merge keys and clean up verdict stability state
     for key in tracker.tracked_keys():
         if key.startswith("merge:") and key not in active_merge_keys:
             tracker.unregister(key)
 
+    # Unregister stale review keys
+    for key in tracker.tracked_keys():
+        if key.startswith("review:") and key not in active_review_keys:
+            tracker.unregister(key)
+
     # Unregister PRs no longer active
     for key in tracker.tracked_keys():
-        if not key.startswith("merge:") and key not in active_pr_ids:
+        if (not key.startswith("merge:")
+                and not key.startswith("review:")
+                and key not in active_pr_ids):
             tracker.unregister(key)
 
     # Auto-start review for newly-idle implementation PRs

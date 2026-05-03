@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-2c060b2
+  active_pr: pr-fc6db6a
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -8195,7 +8195,7 @@ prs:
       expect conflicts when rebasing on master after #166 lands.'
     created_at: '2026-04-24T17:09:29Z'
     last_edited: '2026-04-24T17:09:29Z'
-  workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-fc6db6a-prevent-plain-d-from-opening-duplica-5a6a6c1c
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-fc6db6a-prevent-plain-d-from-opening-duplica-f6381eb7
 - id: pr-177dec0
   plan: bugs
   title: Fix pr select not scrolling selected PR into view in TUI
@@ -8242,11 +8242,162 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/158
   gh_pr_number: 158
   created_at: '2026-04-07T12:46:56.964240+00:00'
-  updated_at: '2026-05-03T11:54:19.547610+00:00'
+  updated_at: '2026-05-03T17:16:26.109715+00:00'
   started_at: '2026-04-07T12:49:34.016669+00:00'
-  reviewed_at: '2026-04-07T22:35:47.013280+00:00'
+  reviewed_at: '2026-05-03T17:12:06.758566+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-ebe15c3
+    text: 'QA: prefix+P picker phase indicator (●) should reflect the current tmux
+      window — bare PR window highlights ''start'', ''review-#NN'' window highlights
+      ''review'', ''qa-#NN'' highlights ''qa'', ''merge-#NN'' highlights ''merge''.
+      Verify by switching windows and reopening picker.'
+    created_at: '2026-05-03T14:24:54Z'
+    last_edited: '2026-05-03T14:24:54Z'
+  - id: note-73ec847
+    text: 'QA: ''edit'' picker action (shortcut e) should open the same edit pane
+      as pressing ''e'' in the TUI for the current PR. Should also work via ''edit
+      PR_ID'' typed in the TUI command bar.'
+    created_at: '2026-05-03T14:25:22Z'
+    last_edited: '2026-05-03T14:25:22Z'
+  - id: note-c94c964
+    text: 'QA: review-loop popup action (''l'' shortcut) is idempotent — pressing
+      l multiple times should never stop a running loop. The plain ''review-loop''
+      typed in the TUI command bar still toggles. ''review-loop start PR_ID'' always
+      starts (logs ''already running'' message).'
+    created_at: '2026-05-03T14:25:23Z'
+    last_edited: '2026-05-03T14:25:23Z'
+  - id: note-d2d9313
+    text: 'QA: review-loop start now switches focus to the review-#NN window if it
+      exists. First-ever start may be a no-op (window created lazily by iteration
+      1) — re-running afterwards should focus.'
+    created_at: '2026-05-03T14:25:24Z'
+    last_edited: '2026-05-03T14:25:24Z'
+  - id: note-0348525
+    text: 'QA: SIGUSR2 + queue-file IPC (replaces send-keys). When the popup picker
+      fires a TUI-routed action (qa, review-loop start, edit), it appends to ~/.pm/tui-{session}.cmd-queue
+      and signals the TUI; verify the command runs even when the command bar isn''t
+      focused, when other widgets have focus, and when multiple are enqueued in rapid
+      succession from concurrent popup invocations (they should all run in order).'
+    created_at: '2026-05-03T14:25:25Z'
+    last_edited: '2026-05-03T14:25:25Z'
+  - id: note-63b5b74
+    text: 'QA: shared runtime-state file at ~/.pm/runtime/{pr_id}.json. Picker badges
+      should reflect: [open] for live windows, [loop iN] with iteration count while
+      a review-loop runs, [done VERDICT] after completion, [idle]/[wait]/[working]/[gone]
+      for impl (''start'') and qa panes (driven by Claude Code hook events). Verify
+      badges update across separate popup invocations.'
+    created_at: '2026-05-03T14:25:26Z'
+    last_edited: '2026-05-03T14:25:26Z'
+  - id: note-fceb3f0
+    text: 'QA: post-enqueue spinner. After selecting a tui:-routed action, the popup
+      shows a Braille spinner with the action label and current state (queued → running,
+      etc.). Spinner has no time limit and should remain until the target window appears.
+      Verify q/Q/Esc dismisses the popup overlay immediately, while the queued command
+      still runs in the TUI to completion.'
+    created_at: '2026-05-03T14:25:27Z'
+    last_edited: '2026-05-03T14:25:27Z'
+  - id: note-de8532c
+    text: 'QA: window-switch suppression on dismiss. Pressing q/Esc during the spinner
+      should also cancel the TUI''s would-be window switch for that action — the queued
+      review-loop / qa command runs but focus stays where the user was. The flag is
+      action-scoped (only that action''s switch is suppressed); subsequent unrelated
+      picker invocations should still switch normally.'
+    created_at: '2026-05-03T14:25:27Z'
+    last_edited: '2026-05-03T14:25:27Z'
+  - id: note-9cee834
+    text: 'QA: ''Not a pm session'' detection uses the pane-registry file rather than
+      tmux has-session, since display-popup doesn''t propagate PM_TMUX_SOCKET reliably.
+      Verify popup works in non-shared sessions, shared sessions (--global / --group),
+      and shows ''Not a pm session'' from a non-pm tmux session.'
+    created_at: '2026-05-03T14:25:28Z'
+    last_edited: '2026-05-03T14:25:28Z'
+  - id: note-c2f4567
+    text: 'QA: session/window resolution. Inside the popup we run ''tmux display-message
+      -p #{session_name}'' and #{window_name} from the popup shell because tmux''s
+      expansion of those format strings in display-popup args is unreliable across
+      versions. pm log should show the resolved values in the popup-picker invocation
+      log line.'
+    created_at: '2026-05-03T14:25:29Z'
+    last_edited: '2026-05-03T14:25:29Z'
+  - id: note-c188aaa
+    text: 'QA: fzf UX. Filter input is disabled (no ''> '' prompt; typing letters
+      doesn''t filter). Header is two lines (title then shortcut hints) with --header-first.
+      Shortcut keys s/e/d/l/a/g trigger actions; q and Esc quit cleanly. Falls back
+      to numbered-list selector when fzf isn''t installed.'
+    created_at: '2026-05-03T14:25:30Z'
+    last_edited: '2026-05-03T14:25:30Z'
+  - id: note-b477537
+    text: 'Picker shortcut redesign (commit 9d09839): top-level shortcut keys are
+      now s/e/d/a/g (review-loop dropped from list rows). Review-loop and the fresh/loop
+      QA variants are reachable via z/zz chords: z d=pr review --fresh, zz d=review-loop
+      start, z a=pr qa fresh, zz a=pr qa loop. The TUI command bar now also accepts
+      pr qa [fresh|loop] [PR_ID]. Earlier QA notes mentioning the l shortcut and bare
+      pr qa for the popup are stale relative to this design.'
+    created_at: '2026-05-03T14:50:54Z'
+    last_edited: '2026-05-03T14:50:54Z'
+  - id: note-b1b3fa7
+    text: 'Fix: fold loop iterated _ALL_ACTIONS (which omits review-loop), so the
+      [loop iN] badge was never being folded onto the review row. Iterate _SHORTCUT_FOLD_INTO
+      directly so any current/future shortcut-only action is correctly folded.'
+    created_at: '2026-05-03T14:54:36Z'
+    last_edited: '2026-05-03T14:54:36Z'
+  - id: note-906acbe
+    text: 'QA: z/zz chord prefixes (mirrors TUI). ''d'' plain review, ''z d'' fresh
+      review, ''zz d'' review-loop start, ''a'' plain qa, ''z a'' fresh qa, ''zz a''
+      qa-loop start. Verify each chord routes correctly. q/Esc inside the chord prompt
+      should return to fzf picker (not dismiss popup); q/Esc in fzf itself dismisses.'
+    created_at: '2026-05-03T15:07:55Z'
+    last_edited: '2026-05-03T15:07:55Z'
+  - id: note-de1f65f
+    text: 'QA: fresh-window-aware spinner. When a fresh/loop action is invoked AND
+      the target window already exists (e.g. running review-loop again with stale
+      review window), spinner should NOT switch to the existing window immediately.
+      Should show ''rebuilding window…'' until the window is killed and a new one
+      with the same name appears (different tmux window-id), then switch.'
+    created_at: '2026-05-03T15:07:56Z'
+    last_edited: '2026-05-03T15:07:56Z'
+  - id: note-e774a16
+    text: 'QA: TUI restart sweeps stale runtime_state. Trigger a review-loop, observe
+      [loop iN] badge in picker. Restart the TUI (Ctrl+R or kill+restart). Re-open
+      picker — the loop badge should be gone (entry cleared) since the loop didn''t
+      survive the restart. Terminal states like [done VERDICT] should survive.'
+    created_at: '2026-05-03T15:07:57Z'
+    last_edited: '2026-05-03T15:07:57Z'
+  - id: note-d397fa7
+    text: 'QA: picker stays visible behind spinner. fzf is launched with --height=100%
+      so the picker contents remain on screen after fzf exits, and the spinner renders
+      below them in the same popup pane. Verify continuous visual flow from picker
+      selection → header (── starting fresh: ACTION for PR ──) → spinner → ✓ message
+      → popup closes.'
+    created_at: '2026-05-03T15:07:58Z'
+    last_edited: '2026-05-03T15:07:58Z'
+  - id: note-667d9e1
+    text: 'QA: review-loop and edit are shortcut-only (no list rows). The picker should
+      show only start/review/qa/merge as rows. review-loop''s iteration status ([loop
+      iN]) is folded onto the review row. Verify shortcuts (e for edit, zz d for review-loop)
+      still work.'
+    created_at: '2026-05-03T15:07:59Z'
+    last_edited: '2026-05-03T15:07:59Z'
+  - id: note-1aa60af
+    text: 'QA: zz d always starts a fresh review loop. Toggle/cancel behavior removed
+      — pressing zz d (TUI or popup) while a loop is running now supersedes it: existing
+      loop''s stop_requested is set, new loop starts immediately. Old thread exits
+      at next iteration boundary. Cancel by TUI restart or Ctrl+C in the loop''s review
+      pane. Verify: start a loop, press zz d again, see ''Restarting review loop''
+      message and a fresh loop.'
+    created_at: '2026-05-03T15:20:06Z'
+    last_edited: '2026-05-03T15:20:06Z'
+  - id: note-39a1694
+    text: 'QA: picker QA shortcut is ''t'' to match the TUI''s ''t'' binding (was
+      ''a'' previously). Verify: prefix+P → press t to invoke qa, z t for fresh qa,
+      zz t for qa-loop start.'
+    created_at: '2026-05-03T15:45:11Z'
+    last_edited: '2026-05-03T15:45:11Z'
+  - id: note-e2a4eb3
+    text: 'QA INPUT_REQUIRED:  (workdir: /home/matt/.pm/workdirs/qa/pr-2d0588a-e04b4568b23b40c8)'
+    created_at: '2026-05-03T16:28:36Z'
+    last_edited: '2026-05-03T16:28:36Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d0588a-tmux-popup-pr-switcher-and-prefix-ke-f6381eb7
 - id: pr-1735d44
   plan: bugs
@@ -9032,7 +9183,7 @@ prs:
   plan: plan-qa
   title: Batched QA scenario execution
   branch: pm/pr-d8cfa16-batched-qa-scenario-execution
-  status: in_review
+  status: closed
   depends_on: []
   description: 'Instead of spawning one session per QA scenario, batch scenarios into
     a configurable number of worker sessions. The scenario generator/concretizer groups
@@ -9052,7 +9203,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/163
   gh_pr_number: 163
   created_at: '2026-04-09T22:50:59.769426+00:00'
-  updated_at: '2026-04-10T18:43:57.689457+00:00'
+  updated_at: '2026-05-03T13:11:22.393684+00:00'
   started_at: '2026-04-09T23:30:04.624901+00:00'
   reviewed_at: '2026-04-10T18:43:57.689457+00:00'
   merged_at: null
@@ -9111,7 +9262,7 @@ prs:
   plan: improvements
   title: Double-tap for destructive TUI shortcuts to prevent accidental triggers
   branch: pm/pr-5471329-double-tap-for-destructive-tui-shortcuts-to-preven
-  status: in_review
+  status: closed
   depends_on: []
   description: Require a quick double-tap (within 300-400ms) for destructive single-key
     TUI shortcuts like s (start PR), d (review), g (merge), and t (QA run). First
@@ -9123,7 +9274,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/163
   gh_pr_number: 163
   created_at: '2026-04-09T22:50:59.769426+00:00'
-  updated_at: '2026-04-10T16:56:47.454801+00:00'
+  updated_at: '2026-05-03T13:11:22.393697+00:00'
   started_at: null
   reviewed_at: '2026-04-10T16:56:47.454801+00:00'
   merged_at: null
@@ -11509,7 +11660,7 @@ prs:
   title: 'Bug: dedicated plans window is shared across all plans, defeating multi-plan
     parallelism'
   branch: pm/pr-98b2a95-bug-dedicated-plans-window-is-shared-across-all-pl
-  status: qa
+  status: merged
   depends_on: []
   description: 'PR pr-a353c3d (''Launch plan pane actions in a dedicated plans window
     instead of the main window'', merged today as #179) routes all plan actions through
@@ -11558,10 +11709,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/183
   gh_pr_number: 183
   created_at: '2026-05-03T00:43:42.010298+00:00'
-  updated_at: '2026-05-03T01:09:11.962034+00:00'
+  updated_at: '2026-05-03T13:05:50.828076+00:00'
   started_at: '2026-05-03T00:45:34.578199+00:00'
   reviewed_at: '2026-05-03T01:09:11.962034+00:00'
-  merged_at: null
+  merged_at: '2026-05-03T13:05:50.828076+00:00'
   notes:
   - id: note-26c75c7
     text: 'QA PASS: Per-plan window regression unit tests: PASS; Manual TUI exercise
@@ -11630,6 +11781,126 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-03T12:32:08.900344+00:00'
   updated_at: '2026-05-03T12:32:08.900344+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-6e23bbb
+  plan: improvements
+  title: Rename 'start' to 'implement' across the codebase
+  branch: pm/pr-6e23bbb-rename-start-to-implement-across-the-codebase
+  status: pending
+  depends_on: []
+  description: 'Rename the user-facing ''start'' concept to ''implement'' to mirror
+    the ''done'' → ''review'' rename in pr-2d0588a. Touches: (1) CLI: add ''pm pr
+    implement'' as the canonical command; keep ''pm pr start'' as a hidden Click alias
+    so existing scripts and review-loop iterations (`pm pr review --review-loop` triggers
+    `_launch_review_window` which spawns review subprocesses, etc.) keep working.
+    (2) TUI: rename action_start_pr → action_implement_pr, pr_view.start_pr → implement_pr,
+    the ''s'' binding label, and all check_action() lists. (3) Picker: rename the
+    ''start'' action label to ''implement'' and ''s'' shortcut label, update _ALL_ACTIONS,
+    _ACTION_WINDOW_PATTERNS, _LIST_ACTIONS, _MODIFIED_ACTION_CMDS. (4) auto_start.py
+    terminology, breadcrumb references, log messages, all docstrings. (5) Tests, regression
+    QA docs (pr-interaction.md, help-keybindings.md, etc.), spec docs, and any plan/improvement
+    docs that reference the action by name. Verify external callers (workdir launchers,
+    hook scripts, regression scenarios, GitHub workflows) continue to work via the
+    alias. The CLI surface should accept both names indefinitely; mark ''start'' as
+    a hidden alias with a docstring pointing users to ''implement''.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-03T15:42:10.423044+00:00'
+  updated_at: '2026-05-03T15:42:10.423044+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-1cb6e15
+  plan: bugs
+  title: pm pr review silently regresses qa → in_review status
+  branch: pm/pr-1cb6e15-pm-pr-review-silently-regresses-qa-in-review-statu
+  status: pending
+  depends_on: []
+  description: 'When ''pm pr review PR_ID'' is invoked on a PR whose status is ''qa'',
+    the command falls through the early-return branches in pm_core/cli/pr.py:1363-1376
+    (which guard against ''merged'', ''in_review'', ''pending'') and runs the apply()
+    at line 1393-1400 which sets status=''in_review''. This is a silent backward status
+    regression while the QA loop continues running in its qa-#NN window — the TUI
+    tree shows the PR as in_review even though scenarios are mid-flight.
+
+
+    Fix: when the PR is already ''qa'', treat it like ''in_review'' — skip the GitHub
+    mark-ready step and the status assignment, just call _launch_review_window() (or
+    refocus the existing review window) so the user can read the review while QA runs.
+    Only NEEDS_WORK from QA should move the PR back to in_review (qa_loop_ui already
+    does this via its own status transitions).
+
+
+    Touches: pm_core/cli/pr.py pr_review() — add a ''qa'' branch parallel to the ''in_review''
+    branch at line 1366-1373 that prints something like ''PR ... is in QA — opening
+    review window without changing status.'' and calls _launch_review_window then
+    returns. Tests: add a regression test in tests/test_pr.py asserting that ''pm
+    pr review'' on a qa-status PR leaves status=''qa'' unchanged. Also verify the
+    TUI ''d'' / picker ''d'' paths surface the new message correctly through the launched
+    subprocess output.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-03T16:02:14.081159+00:00'
+  updated_at: '2026-05-03T16:02:14.081159+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-0c530e1
+  plan: bugs
+  title: Cleanup leaves QA/review loop state stale and stops containers sequentially
+  branch: pm/pr-0c530e1-cleanup-leaves-qa-review-loop-state-stale-and-stop
+  status: pending
+  depends_on: []
+  description: 'After `yt` (cleanup-then-QA), the QA loop''s persistent state (`~/.pm/runtime/pr-<id>.json`)
+    is not cleared. The follow-up QA action re-attaches to stale state, surfacing
+    "QA already running" / spurious INPUT_REQUIRED.
+
+
+    `pr_cleanup.cleanup_pr_resources` calls `cleanup_pr_containers` which stops containers
+    serially — each `docker stop` waits its 10s SIGTERM grace, so cleanup blocks the
+    TUI for ~1 minute when several containers exist.
+
+
+    ## Fix
+
+    - Extend `cleanup_pr_resources` (`pm_core/pr_cleanup.py`) to delete the QA loop
+    state file (`~/.pm/runtime/pr-<id>.json`) and the review loop state file for the
+    PR. Audit other persistent loop state for the same issue.
+
+    - Parallelize `cleanup_pr_containers` (`pm_core/container.py`) — submit `remove_container`
+    calls to a `ThreadPoolExecutor` and join.
+
+
+    ## Acceptance
+
+    - After `yt`, the follow-up QA starts a fresh run (no "QA already running" / spurious
+    INPUT_REQUIRED).
+
+    - Cleanup of N containers takes ~max(per-container teardown time), not the sum.
+
+
+    ## Repro
+
+    1. With a PR that has an active QA loop and one or more running containers, select
+    it in the TUI.
+
+    2. Press `y` then `t`.
+
+    3. Observe: "Busy: Cleaning …" persists ~1 min (sequential `docker stop`); when
+    QA auto-starts it reports "QA already running" then "QA INPUT_REQUIRED" because
+    the on-disk loop state survived cleanup.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-03T16:30:50.168588+00:00'
+  updated_at: '2026-05-03T16:30:50.168588+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

@@ -73,18 +73,30 @@ def focus_or_start_qa(app, pr_id: str) -> None:
         app.log_message(f"PR not found: {pr_id}")
         return
 
-    # If the main QA window already exists, just focus it
+    # If the main QA window already exists, just focus it.  Honor a
+    # popup-spinner-dismissed suppress_switch flag so q/Esc in the
+    # picker doesn't have its qa run still steal focus.  When the
+    # window doesn't exist yet, leave the flag in place — qa_loop's
+    # first-time-creation path consumes it before its own select_window
+    # call so the suppression survives the start → run path.
     from pm_core import tmux as tmux_mod
+    from pm_core import runtime_state as _rs
     session = get_pm_session()
     if session:
         window_name = _compute_qa_window_name(pr)
         win = tmux_mod.find_window_by_name(session, window_name)
         if win:
-            tmux_mod.select_window(session, window_name)
-            app.log_message(f"Focused QA window for {pr_id}")
+            suppress = _rs.consume_suppress_switch(pr_id, "qa")
+            if not suppress:
+                tmux_mod.select_window(session, window_name)
+                app.log_message(f"Focused QA window for {pr_id}")
+            else:
+                app.log_message(
+                    f"QA window for {pr_id} ready (focus suppressed)")
             return
 
-    # No existing window — start a new QA session
+    # No existing window — start a new QA session.  qa_loop will
+    # consume any suppress_switch flag at its window-creation step.
     start_qa(app, pr_id)
 
 
@@ -292,6 +304,18 @@ def poll_qa_state(app) -> None:
                 # spinner stops and tracked_keys() doesn't grow.
                 for sc in state.scenarios:
                     tracker.unregister(f"qa:{pr_id}:s{sc.index}")
+                # Record the verdict in runtime_state so the popup
+                # picker shows [done VERDICT] on the qa row across
+                # picker invocations.  Written *after* the unregister
+                # calls above, since unregister clears the qa entry
+                # via _runtime_mirror_clear.
+                try:
+                    from pm_core import runtime_state as _rs
+                    _rs.set_action_state(pr_id, "qa", "done",
+                                         verdict=state.latest_verdict)
+                except Exception:
+                    _log.debug("runtime_state qa verdict mirror failed",
+                               exc_info=True)
                 del app._qa_loops[pr_id]
             else:
                 state._ui_complete_notified = True

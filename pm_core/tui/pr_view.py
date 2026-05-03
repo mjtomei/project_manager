@@ -129,13 +129,13 @@ def start_pr(app, companion: bool = False) -> None:
     run_command(app, cmd, working_message=action_key, action_key=action_key)
 
 
-def done_pr(app, fresh: bool = False) -> None:
+def review_pr(app, fresh: bool = False) -> None:
     """Mark the selected PR as in_review and open a review window."""
     from pm_core.tui.tech_tree import TechTree
 
     tree = app.query_one("#tech-tree", TechTree)
     pr_id = tree.selected_pr_id
-    _log.info("action: done_pr selected=%s fresh=%s", pr_id, fresh)
+    _log.info("action: review_pr selected=%s fresh=%s", pr_id, fresh)
     if not pr_id:
         app.log_message("No PR selected")
         return
@@ -167,7 +167,20 @@ def done_pr(app, fresh: bool = False) -> None:
     if not guard_pr_action(app, action_key):
         return
     app._inflight_pr_action = action_key
-    cmd = f"pr review --fresh {pr_id}" if fresh else f"pr review {pr_id}"
+    # Pass --transcript so the resulting Claude session writes a hook
+    # transcript symlink the auto-start scheduler can poll for idle/
+    # working state and verdicts.  Mirrors the pattern used by review-
+    # loop iterations and QA scenarios.
+    from pm_core.tui import auto_start as _auto_start
+    try:
+        tdir = _auto_start.get_transcript_dir(app)
+    except Exception:
+        tdir = None
+    transcript_arg = ""
+    if tdir:
+        transcript_arg = f" --transcript {tdir}/review-{pr_id}.jsonl"
+    fresh_arg = " --fresh" if fresh else ""
+    cmd = f"pr review{fresh_arg}{transcript_arg} {pr_id}"
     run_command(app, cmd, working_message=action_key, action_key=action_key)
 
 
@@ -451,7 +464,7 @@ async def _cleanup_worker(app, pr_id: str, action_key: str,
     if follow_up == "s":
         start_pr(app)
     elif follow_up == "d":
-        done_pr(app)
+        review_pr(app)
     elif follow_up == "t":
         from pm_core.tui import qa_loop_ui
         qa_loop_ui.focus_or_start_qa(app, pr_id)
@@ -537,26 +550,67 @@ def handle_command_submitted(app, cmd: str) -> None:
             break
 
     # Handle review loop commands
+    # Accepts: review-loop [start] [PR_ID]
+    # No subcommand or 'start' → always start a fresh loop, superseding
+    # any running one for the same PR.  Cancelling a loop is via TUI
+    # restart or Ctrl+C in the loop's pane, not via this command.
     parts = shlex.split(cmd)
-    if cmd in ("review-loop", "review loop"):
+    _rl_base = cmd.replace("review loop", "review-loop")
+    _rl_parts = _rl_base.split()
+    if _rl_parts and _rl_parts[0] == "review-loop":
         from pm_core.tui import review_loop_ui
+        _rl_rest = _rl_parts[1:]
+        # Tokens other than 'start' are treated as the optional PR id.
+        # 'stop' is no longer recognised — see start_or_stop_loop's
+        # docstring for the rationale.
+        _rl_pr_id = next(
+            (t for t in _rl_rest if t != "start"), None)
+
+        tree = app.query_one("#tech-tree", TechTree)
+        if _rl_pr_id:
+            # Resolve the id before retargeting the tree selection so a
+            # typo doesn't silently start a loop on the previously
+            # selected PR.  Mirrors the QA branch below.
+            if app._root:
+                try:
+                    _rl_data = store.load(app._root)
+                except store.ProjectYamlParseError as e:
+                    app.log_message(f"Error: {e}")
+                    return
+                if not store.get_pr(_rl_data, _rl_pr_id):
+                    app.log_message(f"PR not found: {_rl_pr_id}")
+                    return
+            tree.select_pr(_rl_pr_id)
+
         review_loop_ui.start_or_stop_loop(app)
+        # Window-switch is owned by the popup spinner: it waits for
+        # review-{display_id} to appear and switches there unless the
+        # user dismissed the spinner with q/Esc.  Doing it here would
+        # race with the popup and ignore the suppress flag.
         if app._plans_visible:
             app.query_one("#plans-pane", PlansPane).focus()
         else:
-            app.query_one("#tech-tree", TechTree).focus()
+            tree.focus()
         return
-    if cmd in ("review-loop stop", "review loop stop"):
-        from pm_core.tui import review_loop_ui
-        pr_id, _ = review_loop_ui._get_selected_pr(app)
-        if pr_id:
-            review_loop_ui.stop_loop_for_pr(app, pr_id)
-        else:
-            app.log_message("No PR selected")
-        if app._plans_visible:
-            app.query_one("#plans-pane", PlansPane).focus()
-        else:
-            app.query_one("#tech-tree", TechTree).focus()
+
+    # Handle edit command: 'edit [PR_ID]' — opens the PR's edit pane
+    # (same effect as the 'e' key binding).  PR_ID is optional; without
+    # it, edits whatever is currently selected.
+    if parts and parts[0] == "edit":
+        if len(parts) >= 2:
+            edit_pr_id = parts[1]
+            if app._root:
+                try:
+                    edit_data = store.load(app._root)
+                except store.ProjectYamlParseError as e:
+                    app.log_message(f"Error: {e}")
+                    return
+                if not store.get_pr(edit_data, edit_pr_id):
+                    app.log_message(f"PR not found: {edit_pr_id}")
+                    return
+            tree = app.query_one("#tech-tree", TechTree)
+            tree.select_pr(edit_pr_id)
+        pane_ops.edit_plan(app)
         return
 
     # Handle auto-start commands
@@ -572,20 +626,28 @@ def handle_command_submitted(app, cmd: str) -> None:
         app.query_one("#tech-tree", TechTree).focus()
         return
 
-    # Handle QA commands — route to qa_loop_ui instead of CLI
+    # Handle QA commands — route to qa_loop_ui instead of CLI.
+    # Forms:
+    #   pr qa [PR_ID]           — focus existing or one-shot start (= TUI 't')
+    #   pr qa fresh [PR_ID]     — fresh restart            (= TUI 'z t')
+    #   pr qa loop  [PR_ID]     — start/stop QA loop        (= TUI 'zz t')
     if len(parts) >= 2 and parts[0] == "pr" and parts[1] == "qa":
         from pm_core.tui import qa_loop_ui
         from pm_core import store as _store
-        if len(parts) >= 3:
-            qa_pr_id = parts[2]
+        # Parse optional modifier ('fresh' or 'loop') and PR id.
+        rest = parts[2:]
+        qa_mode = None
+        if rest and rest[0] in ("fresh", "loop"):
+            qa_mode = rest[0]
+            rest = rest[1:]
+        if rest:
+            qa_pr_id = rest[0]
         else:
-            # Use the selected PR if no ID given
             tree = app.query_one("#tech-tree", TechTree)
             qa_pr_id = tree.selected_pr_id
         if not qa_pr_id:
             app.log_message("No PR specified for QA")
         else:
-            # Resolve short ID to full ID
             if app._root:
                 try:
                     qa_data = _store.load(app._root)
@@ -595,7 +657,12 @@ def handle_command_submitted(app, cmd: str) -> None:
                 if qa_data is not None:
                     qa_pr = _store.get_pr(qa_data, qa_pr_id)
                     if qa_pr:
-                        qa_loop_ui.focus_or_start_qa(app, qa_pr["id"])
+                        if qa_mode == "fresh":
+                            qa_loop_ui.fresh_start_qa(app, qa_pr["id"])
+                        elif qa_mode == "loop":
+                            qa_loop_ui.start_or_stop_qa_loop(app, qa_pr["id"])
+                        else:
+                            qa_loop_ui.focus_or_start_qa(app, qa_pr["id"])
                     else:
                         app.log_message(f"PR not found: {qa_pr_id}")
             else:
