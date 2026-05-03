@@ -41,6 +41,7 @@ from pm_core.cli.helpers import (
     _resolve_repo_id,
     _workdirs_dir,
     echo_record,
+    emit_paged,
     kill_pr_windows,
     state_root,
     trigger_tui_merge_lock,
@@ -530,6 +531,7 @@ def pr_list(workdirs: bool, timestamps: bool, open_only: bool, filter_status: st
         "closed": "🚫",
         "blocked": "🚫",
     }
+    out: list[str] = []
     for p in prs:
         icon = status_icons.get(p.get("status", "pending"), "?")
         deps = p.get("depends_on") or []
@@ -546,17 +548,18 @@ def pr_list(workdirs: bool, timestamps: bool, open_only: bool, filter_status: st
                     ts_str = f" [{dt.strftime('%Y-%m-%d %H:%M')}]"
                 except ValueError:
                     ts_str = f" [{ts}]"
-        echo_record(f"  {icon} {_pr_display_id(p)}: {p.get('title', '???')} [{p.get('status', '?')}]{dep_str}{machine_str}{active_str}{ts_str}")
+        out.append(f"  {icon} {_pr_display_id(p)}: {p.get('title', '???')} [{p.get('status', '?')}]{dep_str}{machine_str}{active_str}{ts_str}")
         if workdirs:
             wd = p.get("workdir")
             if wd and Path(wd).exists():
                 dirty = _workdir_is_dirty(Path(wd))
                 dirty_str = " (dirty)" if dirty else " (clean)"
-                click.echo(f"      workdir: {wd}{dirty_str}")
+                out.append(f"      workdir: {wd}{dirty_str}")
             elif wd:
-                click.echo(f"      workdir: {wd} (missing)")
+                out.append(f"      workdir: {wd} (missing)")
             else:
-                click.echo(f"      workdir: none")
+                out.append(f"      workdir: none")
+    emit_paged(out)
 
 
 @pr.command("graph")
@@ -580,8 +583,7 @@ def pr_ready():
     if not ready:
         click.echo("No PRs are ready to start.")
         return
-    for p in ready:
-        echo_record(f"  ⏳ {_pr_display_id(p)}: {p.get('title', '???')}")
+    emit_paged([f"  ⏳ {_pr_display_id(p)}: {p.get('title', '???')}" for p in ready])
 
 
 @pr.command("spec")

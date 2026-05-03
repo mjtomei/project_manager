@@ -24,6 +24,7 @@ from pm_core.cli.helpers import (
     _require_plan,
     _resolve_repo_dir,
     echo_record,
+    emit_paged,
     state_root,
     trigger_tui_refresh,
 )
@@ -156,8 +157,7 @@ def plan_list():
     if not plans:
         click.echo("No plans.")
         return
-    for p in plans:
-        echo_record(f"  {p['id']}: {p['name']} [{p.get('status', 'draft')}]")
+    emit_paged([f"  {p['id']}: {p['name']} [{p.get('status', 'draft')}]" for p in plans])
 
 
 @plan.command("breakdown")

@@ -23,58 +23,78 @@ from pm_core import pane_registry
 _log = configure_logger("pm.cli")
 
 
-# Tokens at which echo_record prefers to break a too-wide line, in
+# Tokens at which record wrapping prefers to break a too-wide line, in
 # priority order.  Each token marks a natural visual boundary in pm's
 # record-style CLI output.  The leading space is stripped on continuation
 # so the tail starts cleanly with the token itself.
 _RECORD_BREAK_TOKENS = (" <- ", " (", " [")
 
 
+def _wrap_record_to_width(line: str, width: int, indent: str) -> str:
+    """Return ``line`` possibly with embedded newlines so it fits in ``width``.
+
+    Prefers breaking at the first record boundary token (``" <- "``,
+    ``" ("``, ``" ["``).  If the indented tail still overflows, falls
+    back to ``textwrap.fill`` on the tail.  If no boundary token gives
+    a head that fits, falls back to whitespace wrapping on the full line.
+    """
+    if len(line) <= width:
+        return line
+    for tok in _RECORD_BREAK_TOKENS:
+        idx = line.find(tok)
+        # Require the head (everything up to the leading space) to fit.
+        if 0 < idx <= width:
+            head = line[:idx]
+            tail = line[idx + 1:]  # drop leading space, keep token onward
+            indented_tail = indent + tail
+            if len(indented_tail) <= width:
+                return head + "\n" + indented_tail
+            return head + "\n" + textwrap.fill(
+                tail, width=width,
+                initial_indent=indent, subsequent_indent=indent,
+                break_on_hyphens=False, break_long_words=False,
+            )
+    return textwrap.fill(
+        line, width=width,
+        subsequent_indent=indent, break_on_hyphens=False,
+        break_long_words=False,
+    )
+
+
 def echo_record(line: str, *, indent: str = "      ") -> None:
-    """Echo one record-style line, wrapping at terminal width.
+    """Echo one record-style line, wrapping at terminal width on a TTY.
 
-    On a TTY where the line overflows the terminal, break at the first
-    natural boundary token (``" <- "``, ``" ("``, or ``" ["`` — pm's
-    common visual record separators) and continue on the next line
-    indented by ``indent``.  If the indented tail still overflows, fall
-    back to ``textwrap.fill`` with the same indent.
-
-    When stdout is *not* a TTY (e.g. piped into ``grep`` / ``jq``),
-    the line is echoed as-is so consumers keep one-record-per-line
-    semantics.
+    When stdout is *not* a TTY (e.g. piped into ``grep`` / ``jq``), the
+    line is echoed as-is so consumers keep one-record-per-line semantics.
+    Use ``emit_paged`` for listing commands that should also auto-page.
     """
     if not sys.stdout.isatty():
         click.echo(line)
         return
     width = shutil.get_terminal_size((80, 24)).columns
-    if len(line) <= width:
-        click.echo(line)
+    click.echo(_wrap_record_to_width(line, width, indent))
+
+
+def emit_paged(lines, *, indent: str = "      ") -> None:
+    """Emit a sequence of record-style lines, auto-paging on a TTY.
+
+    Mirrors the ``git log`` / ``man`` / ``journalctl`` pattern: when
+    stdout is a TTY, collect all output, wrap each line at the terminal
+    width (with the same record-boundary preferences as ``echo_record``),
+    and pipe through ``$PAGER``.  ``less -FRX`` (the typical default)
+    auto-quits when the output fits on one screen, so short listings
+    don't feel paged at all.
+
+    When stdout is piped (``grep`` / ``jq`` / a file), each line is
+    emitted as-is, one per record, with no wrapping.
+    """
+    if not sys.stdout.isatty():
+        for line in lines:
+            click.echo(line)
         return
-    for tok in _RECORD_BREAK_TOKENS:
-        idx = line.find(tok)
-        # Require the head (everything up to the leading space of the
-        # token) to fit on the current line.  ``idx`` is the start of
-        # the leading space, so the head is ``line[:idx]``.
-        if 0 < idx <= width:
-            head = line[:idx]
-            tail = line[idx + 1:]  # drop leading space, keep token onward
-            click.echo(head)
-            indented_tail = indent + tail
-            if len(indented_tail) <= width:
-                click.echo(indented_tail)
-            else:
-                click.echo(textwrap.fill(
-                    tail, width=width,
-                    initial_indent=indent, subsequent_indent=indent,
-                    break_on_hyphens=False, break_long_words=False,
-                ))
-            return
-    # No preferred boundary — fall back to whitespace wrapping.
-    click.echo(textwrap.fill(
-        line, width=width,
-        subsequent_indent=indent, break_on_hyphens=False,
-        break_long_words=False,
-    ))
+    width = shutil.get_terminal_size((80, 24)).columns
+    wrapped = "\n".join(_wrap_record_to_width(line, width, indent) for line in lines)
+    click.echo_via_pager(wrapped)
 
 
 # Module-level state set by the cli() group callback via set_project_override()
