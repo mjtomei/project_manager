@@ -11,25 +11,26 @@ Register a tmux prefix key binding (prefix+P) in `_register_tmux_bindings()` (`p
 **PR discovery**: Use `store.load(state_root())` to load all PRs. The picker is **scoped to the current window's PR** only — it determines the active PR by parsing `#{window_name}` and shows only that PR's actions. From a non-PR window the picker shows a "Switch to a PR window" hint and exits.
 
 **Available actions** (all returned for any non-terminal status; merged/closed PRs have no actions):
-- start, review, review-loop, qa, merge
+- start, edit, review, review-loop, qa, merge
 
-The action representing the PR's current phase is marked with a `●` indicator. If the action's tmux window is already open, the line is annotated with `[open]`.
+The action representing the *current window's phase* is marked with a `●` indicator (so sitting in the impl pane of an `in_review` PR highlights `start`, not `review`). If the action's tmux window is already open, the line is annotated with `[open]`.
 
 **Display format**: One header line (non-selectable) showing display ID, status, and title; one selectable line per action below:
 ```
   #158  (in_progress)  Add popup picker
   ● start              #158
+    edit               #158
     review             #158
     review-loop        #158
     qa                 #158
     merge              #158
 ```
 
-**Shortcut keys** (fzf `--expect`): `s`=start, `d`=review, `l`=review-loop, `a`=qa, `g`=merge. `q`/`Esc` quits.
+**Shortcut keys** (fzf `--expect`): `s`=start, `e`=edit, `d`=review, `l`=review-loop, `a`=qa, `g`=merge. `q`/`Esc` quits.
 
 **Command execution**: On selection:
 - Direct CLI commands (start, review, merge): run `pm pr <action> <pr_id>` as subprocess
-- TUI-routed commands (qa, review-loop): enqueue via `trigger_tui_command()` (SIGUSR2 + per-session queue file)
+- TUI-routed commands (edit, qa, review-loop): enqueue via `trigger_tui_command()` (SIGUSR2 + per-session queue file)
 
 **Popup lifecycle**: The popup opens, runs the picker, and closes on selection or Escape. It must not resize or reflow the underlying window/pane layout.
 
@@ -49,7 +50,9 @@ Register a tmux prefix key binding (prefix+M) in `_register_tmux_bindings()` tha
 
 ### R3: TUI Command Bar Enhancement (review-loop PR_ID)
 
-Extend `handle_command_submitted` in `pm_core/tui/pr_view.py` to accept `review-loop [start|stop] [PR_ID]`. With no subcommand it toggles (current behavior). `start` always starts (idempotent — logs a message if a loop is already running for that PR), so repeated picker presses don't accidentally stop a running loop. `stop` stops. The optional `PR_ID` selects the PR in the tree before acting. This lets the popup picker route review-loop commands with a specific target. (The `strict` variant from the original PR notes was dropped in commit b9c9b54.)
+Extend `handle_command_submitted` in `pm_core/tui/pr_view.py` to accept `review-loop [start|stop] [PR_ID]`. With no subcommand it toggles (current behavior). `start` always starts (idempotent — logs a message if a loop is already running for that PR), so repeated picker presses don't accidentally stop a running loop. `stop` stops. The optional `PR_ID` selects the PR in the tree before acting. After a successful `start`, switch the invoking session to the PR's `review-{display_id}` window if it exists (`select_window` is a no-op otherwise — the loop creates the pane lazily on iteration 1). This lets the popup picker route review-loop commands with a specific target and follow up with a window switch. (The `strict` variant from the original PR notes was dropped in commit b9c9b54.)
+
+Also accept `edit [PR_ID]`: selects the PR (when given) and invokes `pane_ops.edit_plan(app)` — same effect as the `e` key. Used by the picker's edit action.
 
 ## Implicit Requirements
 
@@ -149,8 +152,8 @@ If QA or review-loop is selected but the TUI pane can't be found, show an error 
    - Two `bind-key` calls in `_register_tmux_bindings()`
 
 2. **`pm_core/tui/pr_view.py`** — Enhanced `handle_command_submitted()`:
-   - `review-loop PR_ID` support: select PR in tree before starting loop
-   - `review-loop strict PR_ID` and `review-loop stop PR_ID` variants
+   - `review-loop [start|stop] [PR_ID]`: select PR in tree, then start (idempotent) or stop. After start, switch to the `review-{display_id}` window via `tmux.select_window`.
+   - `edit [PR_ID]`: select PR (if given) and run `pane_ops.edit_plan(app)`.
 
 3. **`tests/test_popup_picker.py`** — Tests for action-based picker logic
 
