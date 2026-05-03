@@ -604,11 +604,11 @@ def session_mobile(force: bool | None):
             click.echo(f"Session: {session_name}")
             click.echo(f"Mobile active: {mobile}")
             click.echo(f"Force flag: {force_flag}")
-            click.echo(f"Window width: {width} (threshold: {pane_layout.MOBILE_WIDTH_THRESHOLD})")
+            click.echo(f"Window width: {width} (threshold: {pane_layout._get_mobile_width_threshold()})")
         else:
             click.echo(f"Session: {session_name} (not running)")
             click.echo(f"Force flag: {force_flag}")
-            click.echo(f"Threshold: {pane_layout.MOBILE_WIDTH_THRESHOLD}")
+            click.echo(f"Threshold: {pane_layout._get_mobile_width_threshold()}")
 
 
 # --- Internal pane/window commands ---
