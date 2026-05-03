@@ -1019,63 +1019,6 @@ def _build_picker_lines(
     return lines
 
 
-def _read_chord_action(shortcut_keys: dict[str, str],
-                       current_pr: str) -> tuple[str | None, str | None]:
-    """After a leading 'z', read 1-2 more keys to resolve a chord.
-
-    Returns ``(modifier, action_key)`` where ``modifier`` is ``'z'`` or
-    ``'zz'`` and ``action_key`` is one of the picker shortcut keys.
-    Either may be ``None`` if the user cancels (q/Esc) or presses an
-    unrecognized key.
-
-    Read in cbreak mode so single keystrokes resolve without Enter.
-    Echoes a one-line prompt so the user sees the partial chord while
-    the next key is awaited; the ANSI escapes clear the line on exit.
-    """
-    import sys
-    import termios
-    import tty
-    fd = sys.stdin.fileno()
-    try:
-        old_attrs = termios.tcgetattr(fd)
-    except termios.error:
-        return None, None
-    try:
-        tty.setcbreak(fd)
-        click.echo(f"\rz — {current_pr}: press z again for loop, "
-                   "or d/a for fresh review/qa (q/Esc to cancel)",
-                   nl=False)
-        try:
-            ch = sys.stdin.read(1)
-        except OSError:
-            return None, None
-        if ch in ("q", "Q", "\x1b"):
-            return None, None
-        if ch == "z":
-            click.echo(f"\rzz — {current_pr}: press d (review-loop) "
-                       "or a (qa-loop)  (q/Esc to cancel)            ",
-                       nl=False)
-            try:
-                ch2 = sys.stdin.read(1)
-            except OSError:
-                return None, None
-            if ch2 in ("q", "Q", "\x1b"):
-                return None, None
-            if ch2 in shortcut_keys:
-                return "zz", ch2
-            return None, None
-        if ch in shortcut_keys:
-            return "z", ch
-        return None, None
-    finally:
-        try:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
-        except termios.error:
-            pass
-        # Clear the prompt line.
-        click.echo("\r" + " " * 80 + "\r", nl=False)
-
-
 def _parse_tui_action(tui_cmd: str) -> tuple[str | None, str | None, bool]:
     """Best-effort: extract (pr_id, picker_action, fresh) from a tui: cmd.
 
@@ -1404,39 +1347,52 @@ def popup_picker_cmd(session: str, window_name: str):
     if has_fzf:
         fzf_input_lines = [display for display, _, _ in lines]
 
-        # 'z' is a chord prefix matching the TUI: ``z X`` = fresh
-        # variant of action X, ``zz X`` = loop variant.  We expect 'z'
-        # alongside the regular shortcuts; if pressed, we read the
-        # next 1-2 keys in cbreak mode below.
-        expect_keys_list = list(_SHORTCUT_KEYS.keys()) + ["z"]
-        expect_keys = ",".join(expect_keys_list)
         shortcut_hint = "  ".join(
             f"{key}={label}" for key, label in _SHORTCUT_KEYS.items()
         )
         chord_hint = "z d/a: fresh   zz d/a: loop"
-        header = (f"PR Actions — {current_pr}\n"
-                  f"q/Esc: quit  {shortcut_hint}\n"
-                  f"{chord_hint}")
-        fzf_cmd = ["fzf", "--ansi", "--no-sort", "--reverse",
-                   f"--header={header}",
-                   "--header-first",
-                   "--disabled",
-                   "--prompt=",
-                   "--pointer=>",
-                   "--no-info",
-                   "--bind=q:abort",
-                   # --height inhibits fzf's alt-screen mode so the
-                   # picker contents remain visible after fzf exits;
-                   # the spinner then renders below them in the same
-                   # popup pane instead of writing to a blank tty.
-                   "--height=100%",
-                   f"--expect={expect_keys}"]
+
+        # Chord state-machine: each iteration re-launches fzf with a
+        # header reflecting the current chord state (none / 'z' / 'zz')
+        # so the chord UI lives in the same picker pane.  q/Esc inside
+        # a chord state aborts that fzf invocation, and we go back to
+        # the main state on the next loop iteration; q/Esc in the main
+        # state exits the popup.
+        def _make_fzf_cmd(header: str, expect: list[str]) -> list[str]:
+            return ["fzf", "--ansi", "--no-sort", "--reverse",
+                    f"--header={header}",
+                    "--header-first",
+                    "--disabled",
+                    "--prompt=",
+                    "--pointer=>",
+                    "--no-info",
+                    "--bind=q:abort",
+                    # --height inhibits fzf's alt-screen mode so the
+                    # picker contents stay visible after fzf exits and
+                    # the spinner renders below them in the same pane.
+                    "--height=100%",
+                    f"--expect={','.join(expect)}"]
 
         cmd_to_run: str | None = None
-        # Loop so chord prompts can return to the fzf picker on q/Esc
-        # instead of dismissing the popup entirely.  Pressing q/Esc in
-        # the *fzf* picker still exits via fzf's nonzero rc below.
+        chord_state = "main"  # 'main' | 'z' | 'zz'
         while True:
+            if chord_state == "main":
+                header = (f"PR Actions — {current_pr}\n"
+                          f"q/Esc: quit  {shortcut_hint}\n"
+                          f"{chord_hint}")
+                expect = list(_SHORTCUT_KEYS.keys()) + ["z"]
+            elif chord_state == "z":
+                header = (f"z — fresh start for {current_pr}\n"
+                          f"d=fresh review   a=fresh qa   "
+                          f"z again for loop   q/Esc cancels")
+                expect = ["z", "d", "a"]
+            else:  # 'zz'
+                header = (f"zz — loop for {current_pr}\n"
+                          f"d=review-loop   a=qa-loop   "
+                          f"q/Esc cancels")
+                expect = ["d", "a"]
+
+            fzf_cmd = _make_fzf_cmd(header, expect)
             proc = subprocess.Popen(
                 fzf_cmd,
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -1445,39 +1401,53 @@ def popup_picker_cmd(session: str, window_name: str):
             stdout, _ = proc.communicate(input="\n".join(fzf_input_lines))
 
             if proc.returncode != 0:
-                # User cancelled fzf (q/Esc) → close popup.
-                raise SystemExit(0)
+                # fzf aborted (q/Esc).  In a chord state, that means
+                # "cancel chord, go back to main".  In main, it
+                # dismisses the popup.
+                if chord_state == "main":
+                    raise SystemExit(0)
+                chord_state = "main"
+                continue
 
             out_lines = stdout.strip().split("\n")
             pressed_key = out_lines[0] if out_lines else ""
             selected = out_lines[1] if len(out_lines) > 1 else ""
 
-            if pressed_key == "z":
-                modifier, action_key = _read_chord_action(_SHORTCUT_KEYS,
-                                                          current_pr)
-                if not modifier or not action_key:
-                    # Chord cancelled with q/Esc — go back to fzf.
+            if chord_state == "main":
+                if pressed_key == "z":
+                    chord_state = "z"
                     continue
-                action_label = _SHORTCUT_KEYS.get(action_key)
-                if action_label:
+                if pressed_key in _SHORTCUT_KEYS:
+                    cmd_to_run = _label_to_cmd.get(
+                        _SHORTCUT_KEYS[pressed_key])
+                    break
+                if selected:
+                    for display, cmd, _ in lines:
+                        if display == selected:
+                            cmd_to_run = cmd or None
+                            break
+                    break
+                # No actionable input — bail.
+                break
+
+            # In a chord state — resolve to a modified command.
+            if chord_state == "z" and pressed_key == "z":
+                chord_state = "zz"
+                continue
+            if pressed_key in ("d", "a"):
+                action_label = _SHORTCUT_KEYS.get(pressed_key)
+                if action_label and _picked_pr is not None:
                     template = _MODIFIED_ACTION_CMDS.get(
-                        (modifier, action_label))
-                    if template and _picked_pr is not None:
-                        cmd_to_run = template.format(pr_id=_picked_pr["id"])
+                        (chord_state, action_label))
+                    if template:
+                        cmd_to_run = template.format(
+                            pr_id=_picked_pr["id"])
                     else:
                         cmd_to_run = _label_to_cmd.get(action_label)
                 break
-            elif pressed_key in _SHORTCUT_KEYS:
-                cmd_to_run = _label_to_cmd.get(_SHORTCUT_KEYS[pressed_key])
-                break
-            elif selected:
-                for display, cmd, _ in lines:
-                    if display == selected:
-                        cmd_to_run = cmd or None
-                        break
-                break
-            else:
-                break
+            # Unrecognized key in chord — return to main.
+            chord_state = "main"
+            continue
 
         if cmd_to_run:
             _run_picker_command(cmd_to_run, session)
