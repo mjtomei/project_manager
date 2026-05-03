@@ -1097,6 +1097,8 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
     import termios
     import tty
 
+    from pm_core import runtime_state as _rs
+
     pr_id, action, fresh = _parse_tui_action(tui_cmd)
     if not pr_id or not action:
         return
@@ -1183,7 +1185,6 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
             old_attrs = None
     try:
         while True:
-            from pm_core import runtime_state as _rs
             entry = _rs.get_action_state(pr_id, action)
             cur_state = entry.get("state") if entry else None
             cur_window_id = _find_target_window_id()
@@ -1209,17 +1210,18 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
                 # 'pm pr review' subprocess, but review-loop iterations
                 # don't switch on first start, so we drive it from the
                 # popup.  qa keeps its own focus_or_start_qa switch
-                # path.
-                try:
-                    from pm_core import runtime_state as _rs
-                    suppressed = _rs.consume_suppress_switch(pr_id, action)
-                except Exception:
-                    suppressed = False
-                if not suppressed and action != "qa":
+                # path — and owns its own suppress_switch consume —
+                # so we leave the flag in place for action == "qa".
+                if action != "qa":
                     try:
-                        tmux_mod.select_window(session, target_window)
+                        suppressed = _rs.consume_suppress_switch(pr_id, action)
                     except Exception:
-                        pass
+                        suppressed = False
+                    if not suppressed:
+                        try:
+                            tmux_mod.select_window(session, target_window)
+                        except Exception:
+                            pass
                 click.echo(
                     f"\r✓ {action}: window {target_window} is open"
                     f"{CLR_EOL}")
@@ -1247,7 +1249,6 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
                     # action — the user explicitly dismissed; don't
                     # steal focus when the launch eventually completes.
                     try:
-                        from pm_core import runtime_state as _rs
                         _rs.request_suppress_switch(pr_id, action)
                     except Exception:
                         pass

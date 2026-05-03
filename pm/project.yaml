@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-1cb6e15
+  active_pr: pr-2d0588a
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -8242,9 +8242,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/158
   gh_pr_number: 158
   created_at: '2026-04-07T12:46:56.964240+00:00'
-  updated_at: '2026-05-03T15:45:11.344059+00:00'
+  updated_at: '2026-05-03T16:37:02.443567+00:00'
   started_at: '2026-04-07T12:49:34.016669+00:00'
-  reviewed_at: '2026-04-07T22:35:47.013280+00:00'
+  reviewed_at: '2026-05-03T16:37:02.443567+00:00'
   merged_at: null
   notes:
   - id: note-ebe15c3
@@ -8394,6 +8394,10 @@ prs:
       zz t for qa-loop start.'
     created_at: '2026-05-03T15:45:11Z'
     last_edited: '2026-05-03T15:45:11Z'
+  - id: note-e2a4eb3
+    text: 'QA INPUT_REQUIRED:  (workdir: /home/matt/.pm/workdirs/qa/pr-2d0588a-e04b4568b23b40c8)'
+    created_at: '2026-05-03T16:28:36Z'
+    last_edited: '2026-05-03T16:28:36Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d0588a-tmux-popup-pr-switcher-and-prefix-ke-f6381eb7
 - id: pr-1735d44
   plan: bugs
@@ -11844,6 +11848,59 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-03T16:02:14.081159+00:00'
   updated_at: '2026-05-03T16:02:14.081159+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-0c530e1
+  plan: bugs
+  title: Cleanup leaves QA/review loop state stale and stops containers sequentially
+  branch: pm/pr-0c530e1-cleanup-leaves-qa-review-loop-state-stale-and-stop
+  status: pending
+  depends_on: []
+  description: 'After `yt` (cleanup-then-QA), the QA loop''s persistent state (`~/.pm/runtime/pr-<id>.json`)
+    is not cleared. The follow-up QA action re-attaches to stale state, surfacing
+    "QA already running" / spurious INPUT_REQUIRED.
+
+
+    `pr_cleanup.cleanup_pr_resources` calls `cleanup_pr_containers` which stops containers
+    serially — each `docker stop` waits its 10s SIGTERM grace, so cleanup blocks the
+    TUI for ~1 minute when several containers exist.
+
+
+    ## Fix
+
+    - Extend `cleanup_pr_resources` (`pm_core/pr_cleanup.py`) to delete the QA loop
+    state file (`~/.pm/runtime/pr-<id>.json`) and the review loop state file for the
+    PR. Audit other persistent loop state for the same issue.
+
+    - Parallelize `cleanup_pr_containers` (`pm_core/container.py`) — submit `remove_container`
+    calls to a `ThreadPoolExecutor` and join.
+
+
+    ## Acceptance
+
+    - After `yt`, the follow-up QA starts a fresh run (no "QA already running" / spurious
+    INPUT_REQUIRED).
+
+    - Cleanup of N containers takes ~max(per-container teardown time), not the sum.
+
+
+    ## Repro
+
+    1. With a PR that has an active QA loop and one or more running containers, select
+    it in the TUI.
+
+    2. Press `y` then `t`.
+
+    3. Observe: "Busy: Cleaning …" persists ~1 min (sequential `docker stop`); when
+    QA auto-starts it reports "QA already running" then "QA INPUT_REQUIRED" because
+    the on-disk loop state survived cleanup.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-03T16:30:50.168588+00:00'
+  updated_at: '2026-05-03T16:30:50.168588+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
