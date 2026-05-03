@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-6bf587b
+  active_pr: pr-98b2a95
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -11405,6 +11405,137 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-03T00:16:07.755219+00:00'
   updated_at: '2026-05-03T00:16:07.755219+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-b77702b
+  plan: plan-regression
+  title: Per-plan auto-merge=false mode with dep-merge in start prompt
+  branch: pm/pr-b77702b-per-plan-auto-merge-false-mode-with-dep-merge-in-s
+  status: pending
+  depends_on: []
+  description: 'Add a per-plan setting that lets auto-start work through PRs without
+    merging them to master, and have the start prompt instruct Claude to merge in
+    any unmerged dependency branches before working. Together these enable iterating
+    on a coherent set of PRs in a plan without the changes touching master until the
+    user manually merges each one.
+
+
+    Motivation: today''s auto-start watchers (bug-fix-impl, improvement-fix-impl,
+    regression supervisor, and others) auto-merge PRs on QA PASS. That''s the right
+    default for narrow bug fixes, but for plans where the user expects to iterate
+    on the result before shipping (e.g. ambient surfaces, ux improvements, anything
+    new), there''s no way to let auto-start do the implementation work and stop short
+    of merging. Today the only way to get auto-start to chew through a plan is to
+    accept that everything will land in master.
+
+
+    Approach (chosen over a per-plan staging branch alternative because plans iterate
+    after first release — a graduate model assumes a clean ship-and-done lifecycle
+    that real plans do not have, whereas keeping each PR independently merge-able
+    composes with continuous amendment):
+
+
+    (1) Per-plan field ''auto_merge: bool'' in project.yaml plans entries, default
+    true (current behavior). When false, auto-start watchers run impl/review/QA as
+    normal but skip the merge step on QA PASS — the PR sits in qa-pass / in_review
+    state awaiting explicit human merge.
+
+
+    (2) The ''pm pr start'' prompt builder (pm_core/prompt_gen.py and the start-related
+    impl/spec prompts) gets a new preamble when the PR has any depends_on entries
+    that are not yet merged. The preamble lists those PRs with their branch names
+    and instructs Claude: ''This PR depends on N PRs that have not yet merged: [pr-A:
+    branch, pr-B: branch, ...]. Before doing anything else, merge each of these into
+    the current branch. Resolve any conflicts as you would any other merge conflict.''
+    Topological order is not needed because if B depends on A then B has already merged
+    A in during B''s own start, so when C starts depending on both, merging B alone
+    transitively brings in A. Re-runs are not an issue because if a dep merged to
+    master in the meantime its branch may be gone but its commits are already in the
+    current branch via master — the merge is a no-op. Dep-merge only happens in start;
+    done/qa do not need it because the impl session already integrated the deps and
+    any subsequent dep advances are handled when the user explicitly restarts.
+
+
+    (3) Watcher behavior: existing auto-start watchers (bug_fix_impl_watcher, improvement_fix_impl_watcher,
+    regression supervisor, plus any future ones) check the PR''s plan''s auto_merge
+    setting before invoking the merge step. When false, they stop at QA PASS, log
+    that the PR is awaiting manual merge, and move on to the next candidate.
+
+
+    Files: pm/project.yaml schema (the plans entry shape — document the field), pm_core/store.py
+    (read auto_merge with default True), pm_core/prompt_gen.py (start prompt preamble
+    for unmerged deps), pm_core/watchers/bug_fix_impl_watcher.py and improvement_fix_impl_watcher.py
+    and any other watchers that auto-merge (skip merge when plan''s auto_merge is
+    false), tests for: schema default, watcher respects flag, start prompt includes
+    the preamble exactly when there are unmerged deps and omits it otherwise, end-to-end
+    flow where a plan with auto_merge=false has its PRs picked up by a watcher and
+    reaches qa-pass without merging.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-03T00:39:59.719819+00:00'
+  updated_at: '2026-05-03T00:39:59.719819+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-98b2a95
+  plan: bugs
+  title: 'Bug: dedicated plans window is shared across all plans, defeating multi-plan
+    parallelism'
+  branch: pm/pr-98b2a95-bug-dedicated-plans-window-is-shared-across-all-pl
+  status: pending
+  depends_on: []
+  description: 'PR pr-a353c3d (''Launch plan pane actions in a dedicated plans window
+    instead of the main window'', merged today as #179) routes all plan actions through
+    a single hardcoded window name ''plans'' (pm_core/tui/pane_ops.py line 535: PLANS_WINDOW_NAME
+    = "plans"). _ensure_plans_window() finds-or-creates that one window regardless
+    of which plan the action was invoked on. Result: every plan action — edit, breakdown,
+    claude/c, deps, review — for every plan goes to the same shared window. The PR''s
+    stated promise (''this also enables running multiple plan actions in parallel
+    (e.g. plan add on two plans at the same time)'') is not delivered.
+
+
+    Observed: tmux window 7 named ''plans'' (no plan id), pressing c on plan A and
+    then c on plan B both target window 7. Whatever was running in there for plan
+    A is interrupted by plan B''s session.
+
+
+    Fix: window name must be plan-scoped. Concrete shape:
+
+    - Change PLANS_WINDOW_NAME to a function: window_name(plan_id) returning ''plans-<plan-id>''
+    (or ''plans/<plan-id>'' if the slash plays nicely with tmux — needs a quick check).
+
+    - _ensure_plans_window(app) becomes _ensure_plans_window(app, plan_id) — takes
+    the plan id, builds the per-plan window name, finds or creates that specific window.
+
+    - _focus_plans_window(app) becomes _focus_plans_window(app, plan_id).
+
+    - _launch_in_plans_window(app, cmd, role, fresh=False) becomes _launch_in_plans_window(app,
+    plan_id, cmd, role, fresh=False).
+
+    - handle_plan_action(app, action, plan_id) passes plan_id through every _launch_in_plans_window
+    call site (lines 596, 599, 601, etc.) — note that the ''deps'' action currently
+    has no plan_id; that one is genuinely cross-plan and can keep using a single ''plans-deps''
+    window, or be revisited.
+
+
+    Edge case: when plan_id is None (e.g. cross-plan ''deps'' command, or future actions
+    that aren''t tied to a single plan), use a fallback window name like ''plans''
+    (current behavior) so cross-plan work still has a home.
+
+
+    Tests: pressing c on plan A creates window ''plans-<A>''; pressing c on plan B
+    creates window ''plans-<B>'' (separate window); pressing c on plan A again reuses
+    ''plans-<A>'' rather than creating a duplicate; cross-plan ''deps'' action uses
+    the ''plans'' fallback window; window cleanup on plan removal still works.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-03T00:43:42.010298+00:00'
+  updated_at: '2026-05-03T00:43:42.010298+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
