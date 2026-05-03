@@ -1167,6 +1167,14 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
     initial_window_id = _find_target_window_id() if fresh else None
     saw_disappear = False
 
+    # Print a header line so the popup clearly shows what's happening
+    # underneath the picker.  The spinner below uses \r to overwrite a
+    # single line; this header stays put.
+    if fresh:
+        click.echo(f"\n── starting fresh: {action} for {pr_id} ──")
+    else:
+        click.echo(f"\n── starting: {action} for {pr_id} ──")
+
     frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
     i = 0
 
@@ -1415,6 +1423,11 @@ def popup_picker_cmd(session: str, window_name: str):
                    "--pointer=>",
                    "--no-info",
                    "--bind=q:abort",
+                   # --height inhibits fzf's alt-screen mode so the
+                   # picker contents remain visible after fzf exits;
+                   # the spinner then renders below them in the same
+                   # popup pane instead of writing to a blank tty.
+                   "--height=100%",
                    f"--expect={expect_keys}"]
 
         cmd_to_run: str | None = None
