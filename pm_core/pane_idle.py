@@ -230,17 +230,22 @@ class PaneIdleTracker:
 # runtime_state mirror
 # ---------------------------------------------------------------------------
 
-# Two key conventions in the codebase: a bare ``pr_id`` is the
-# implementation pane (the picker's ``start`` action), while
-# ``qa-<pr_id>(-sN)?`` denotes a QA scenario.  External readers (popup
-# picker, status spinner) want to know which PR/action a pane belongs
-# to so they can resolve idle/working via :func:`hook_events.read_event`.
+# Tracker key conventions:
+# * bare ``pr_id`` (e.g. ``pr-2d0588a``) — implementation pane
+#   (picker's ``start`` action).
+# * ``qa:<pr_id>:s<N>`` — QA scenario pane (set by
+#   :mod:`pm_core.tui.qa_loop_ui`).  Mirrored as the picker's ``qa`` action.
+# * ``merge:<pr_id>`` — merge resolution window; not mirrored (the
+#   picker has no per-merge runtime state to display).
+# External readers (popup picker, status spinner) want to know which
+# PR/action a pane belongs to so they can resolve idle/working via
+# :func:`hook_events.read_event`.
 
 def _runtime_target(key: str) -> tuple[str, str] | None:
     """Map a tracker key to (pr_id, action), or None when unknown."""
-    if key.startswith("qa-"):
+    if key.startswith("qa:"):
         rest = key[3:]
-        pr_part = rest.split("-s", 1)[0]
+        pr_part = rest.split(":s", 1)[0]
         return pr_part, "qa"
     if key.startswith("pr-") or key.startswith("#"):
         return key, "start"
