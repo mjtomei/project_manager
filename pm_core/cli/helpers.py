@@ -5,7 +5,10 @@ HelpGroup, state management, PR ID resolution, TUI refresh, and session helpers.
 """
 
 import os
+import shutil
 import subprocess
+import sys
+import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,6 +21,60 @@ from pm_core import pane_layout
 from pm_core import pane_registry
 
 _log = configure_logger("pm.cli")
+
+
+# Tokens at which echo_record prefers to break a too-wide line, in
+# priority order.  Each token marks a natural visual boundary in pm's
+# record-style CLI output.  The leading space is stripped on continuation
+# so the tail starts cleanly with the token itself.
+_RECORD_BREAK_TOKENS = (" <- ", " (", " [")
+
+
+def echo_record(line: str, *, indent: str = "      ") -> None:
+    """Echo one record-style line, wrapping at terminal width.
+
+    On a TTY where the line overflows the terminal, break at the first
+    natural boundary token (``" <- "``, ``" ("``, or ``" ["`` — pm's
+    common visual record separators) and continue on the next line
+    indented by ``indent``.  If the indented tail still overflows, fall
+    back to ``textwrap.fill`` with the same indent.
+
+    When stdout is *not* a TTY (e.g. piped into ``grep`` / ``jq``),
+    the line is echoed as-is so consumers keep one-record-per-line
+    semantics.
+    """
+    if not sys.stdout.isatty():
+        click.echo(line)
+        return
+    width = shutil.get_terminal_size((80, 24)).columns
+    if len(line) <= width:
+        click.echo(line)
+        return
+    for tok in _RECORD_BREAK_TOKENS:
+        idx = line.find(tok)
+        # Require the head (everything up to the leading space of the
+        # token) to fit on the current line.  ``idx`` is the start of
+        # the leading space, so the head is ``line[:idx]``.
+        if 0 < idx <= width:
+            head = line[:idx]
+            tail = line[idx + 1:]  # drop leading space, keep token onward
+            click.echo(head)
+            indented_tail = indent + tail
+            if len(indented_tail) <= width:
+                click.echo(indented_tail)
+            else:
+                click.echo(textwrap.fill(
+                    tail, width=width,
+                    initial_indent=indent, subsequent_indent=indent,
+                    break_on_hyphens=False, break_long_words=False,
+                ))
+            return
+    # No preferred boundary — fall back to whitespace wrapping.
+    click.echo(textwrap.fill(
+        line, width=width,
+        subsequent_indent=indent, break_on_hyphens=False,
+        break_long_words=False,
+    ))
 
 
 # Module-level state set by the cli() group callback via set_project_override()

@@ -40,6 +40,7 @@ from pm_core.cli.helpers import (
     _resolve_repo_dir,
     _resolve_repo_id,
     _workdirs_dir,
+    echo_record,
     kill_pr_windows,
     state_root,
     trigger_tui_merge_lock,
@@ -545,7 +546,7 @@ def pr_list(workdirs: bool, timestamps: bool, open_only: bool, filter_status: st
                     ts_str = f" [{dt.strftime('%Y-%m-%d %H:%M')}]"
                 except ValueError:
                     ts_str = f" [{ts}]"
-        click.echo(f"  {icon} {_pr_display_id(p)}: {p.get('title', '???')} [{p.get('status', '?')}]{dep_str}{machine_str}{active_str}{ts_str}")
+        echo_record(f"  {icon} {_pr_display_id(p)}: {p.get('title', '???')} [{p.get('status', '?')}]{dep_str}{machine_str}{active_str}{ts_str}")
         if workdirs:
             wd = p.get("workdir")
             if wd and Path(wd).exists():
@@ -580,7 +581,7 @@ def pr_ready():
         click.echo("No PRs are ready to start.")
         return
     for p in ready:
-        click.echo(f"  ⏳ {_pr_display_id(p)}: {p.get('title', '???')}")
+        echo_record(f"  ⏳ {_pr_display_id(p)}: {p.get('title', '???')}")
 
 
 @pr.command("spec")

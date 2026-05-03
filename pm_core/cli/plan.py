@@ -23,6 +23,7 @@ from pm_core.cli.helpers import (
     _pr_display_id,
     _require_plan,
     _resolve_repo_dir,
+    echo_record,
     state_root,
     trigger_tui_refresh,
 )
@@ -156,7 +157,7 @@ def plan_list():
         click.echo("No plans.")
         return
     for p in plans:
-        click.echo(f"  {p['id']}: {p['name']} [{p.get('status', 'draft')}]")
+        echo_record(f"  {p['id']}: {p['name']} [{p.get('status', 'draft')}]")
 
 
 @plan.command("breakdown")
