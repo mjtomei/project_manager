@@ -21,8 +21,7 @@ class TestActionsForStatus:
         for status in ("pending", "in_progress", "in_review", "qa"):
             actions = _actions_for_status(status)
             labels = [a[0] for a in actions]
-            assert labels == ["start", "edit", "review", "review-loop",
-                          "qa", "merge"]
+            assert labels == ["start", "edit", "review", "qa", "merge"]
 
     def test_merged_has_no_actions(self):
         assert _actions_for_status("merged") == []
@@ -33,18 +32,17 @@ class TestActionsForStatus:
     def test_unknown_status_returns_all_actions(self):
         """Non-terminal unknown statuses still get all actions."""
         labels = [a[0] for a in _actions_for_status("bogus")]
-        assert labels == ["start", "edit", "review", "review-loop",
-                          "qa", "merge"]
+        assert labels == ["start", "edit", "review", "qa", "merge"]
 
     def test_qa_command_routes_through_tui(self):
         actions = _actions_for_status("in_progress")
         qa_cmd = next(cmd for label, cmd in actions if label == "qa")
         assert qa_cmd.startswith("tui:")
 
-    def test_review_loop_routes_through_tui(self):
-        actions = _actions_for_status("in_progress")
-        rl_cmd = next(cmd for label, cmd in actions if label == "review-loop")
-        assert rl_cmd.startswith("tui:")
+    def test_zz_d_chord_routes_review_loop_through_tui(self):
+        from pm_core.cli.session import _MODIFIED_ACTION_CMDS
+        rl_cmd = _MODIFIED_ACTION_CMDS[("zz", "review")]
+        assert rl_cmd.startswith("tui:review-loop")
 
     def test_start_is_direct_cli(self):
         actions = _actions_for_status("in_progress")

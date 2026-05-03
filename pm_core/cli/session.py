@@ -788,10 +788,19 @@ _ALL_ACTIONS: list[tuple[str, str]] = [
     ("start", "pr start {pr_id}"),
     ("edit", "tui:edit {pr_id}"),
     ("review", "pr review {pr_id}"),
-    ("review-loop", "tui:review-loop start {pr_id}"),
     ("qa", "tui:pr qa {pr_id}"),
     ("merge", "pr merge {pr_id}"),
 ]
+
+# Modifier-key (z / zz) variants for actions that support fresh / loop.
+# Mirrors the TUI's z/zz chord behavior: ``z d`` = fresh review,
+# ``zz d`` = review loop, ``z a`` = fresh qa, ``zz a`` = qa loop.
+_MODIFIED_ACTION_CMDS: dict[tuple[str, str], str] = {
+    ("z",  "review"): "pr review --fresh {pr_id}",
+    ("zz", "review"): "tui:review-loop start {pr_id}",
+    ("z",  "qa"):     "tui:pr qa fresh {pr_id}",
+    ("zz", "qa"):     "tui:pr qa loop {pr_id}",
+}
 
 # Map action labels to tmux window name patterns.
 # ``None`` means the action doesn't open its own tmux window — it's a
@@ -802,10 +811,7 @@ _ACTION_WINDOW_PATTERNS: dict[str, str | None] = {
     "start": "{display_id}",
     "edit": None,
     "review": "review-{display_id}",
-    # review-loop iterations create panes inside the review window, so
-    # the spinner polls for the same target as 'review'.  The action
-    # is still shortcut-only (no list row) — see ``_LIST_ACTIONS``.
-    "review-loop": "review-{display_id}",
+    "review-loop": "review-{display_id}",  # used only via z d/zz d chord
     "qa": "qa-{display_id}",
     "merge": "merge-{display_id}",
 }
@@ -1014,25 +1020,89 @@ def _build_picker_lines(
     return lines
 
 
-def _parse_tui_action(tui_cmd: str) -> tuple[str | None, str | None]:
-    """Best-effort: extract (pr_id, picker_action) from a queued tui: cmd.
+def _read_chord_action(shortcut_keys: dict[str, str],
+                       current_pr: str) -> tuple[str | None, str | None]:
+    """After a leading 'z', read 1-2 more keys to resolve a chord.
 
-    Used by the post-enqueue spinner to decide what to poll.  Falls
-    back to ``(None, None)`` for shapes we don't recognize, which
-    makes the spinner skip polling and exit immediately.
+    Returns ``(modifier, action_key)`` where ``modifier`` is ``'z'`` or
+    ``'zz'`` and ``action_key`` is one of the picker shortcut keys.
+    Either may be ``None`` if the user cancels (q/Esc) or presses an
+    unrecognized key.
+
+    Read in cbreak mode so single keystrokes resolve without Enter.
+    Echoes a one-line prompt so the user sees the partial chord while
+    the next key is awaited; the ANSI escapes clear the line on exit.
+    """
+    import sys
+    import termios
+    import tty
+    fd = sys.stdin.fileno()
+    try:
+        old_attrs = termios.tcgetattr(fd)
+    except termios.error:
+        return None, None
+    try:
+        tty.setcbreak(fd)
+        click.echo(f"\rz — {current_pr}: press z again for loop, "
+                   "or d/a for fresh review/qa (q/Esc to cancel)",
+                   nl=False)
+        try:
+            ch = sys.stdin.read(1)
+        except OSError:
+            return None, None
+        if ch in ("q", "Q", "\x1b"):
+            return None, None
+        if ch == "z":
+            click.echo(f"\rzz — {current_pr}: press d (review-loop) "
+                       "or a (qa-loop)  (q/Esc to cancel)            ",
+                       nl=False)
+            try:
+                ch2 = sys.stdin.read(1)
+            except OSError:
+                return None, None
+            if ch2 in ("q", "Q", "\x1b"):
+                return None, None
+            if ch2 in shortcut_keys:
+                return "zz", ch2
+            return None, None
+        if ch in shortcut_keys:
+            return "z", ch
+        return None, None
+    finally:
+        try:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+        except termios.error:
+            pass
+        # Clear the prompt line.
+        click.echo("\r" + " " * 80 + "\r", nl=False)
+
+
+def _parse_tui_action(tui_cmd: str) -> tuple[str | None, str | None, bool]:
+    """Best-effort: extract (pr_id, picker_action, fresh) from a tui: cmd.
+
+    ``fresh`` indicates the action will kill+recreate its target window
+    (review-loop iteration, ``pr qa fresh``, ``pr qa loop``).  The
+    spinner uses this to wait for a window-id transition rather than
+    just window appearance, so a stale-window snapshot doesn't trigger
+    an immediate switch to the about-to-be-killed window.
     """
     parts = shlex.split(tui_cmd) if tui_cmd else []
     if not parts:
-        return None, None
+        return None, None, False
     if parts[0] == "review-loop":
-        # 'review-loop start <pr>' / 'review-loop stop <pr>' / 'review-loop <pr>'
         rest = [t for t in parts[1:] if t not in ("start", "stop")]
-        return (rest[0] if rest else None), "review-loop"
-    if len(parts) >= 3 and parts[0] == "pr" and parts[1] == "qa":
-        return parts[2], "qa"
+        # Every review-loop iteration recreates the review window.
+        return (rest[0] if rest else None), "review-loop", True
+    if len(parts) >= 2 and parts[0] == "pr" and parts[1] == "qa":
+        rest = parts[2:]
+        mode = None
+        if rest and rest[0] in ("fresh", "loop"):
+            mode = rest[0]
+            rest = rest[1:]
+        return (rest[0] if rest else None), "qa", mode in ("fresh", "loop")
     if parts[0] == "edit":
-        return (parts[1] if len(parts) >= 2 else None), "edit"
-    return None, None
+        return (parts[1] if len(parts) >= 2 else None), "edit", False
+    return None, None, False
 
 
 def _wait_for_tui_command(session: str, tui_cmd: str,
@@ -1051,7 +1121,7 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
     import termios
     import tty
 
-    pr_id, action = _parse_tui_action(tui_cmd)
+    pr_id, action, fresh = _parse_tui_action(tui_cmd)
     if not pr_id or not action:
         return
     # 'edit' opens in the current window — there's no window-appearance
@@ -1074,6 +1144,32 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
     target_window = pattern.format(display_id=display_id) if (
         pattern and display_id) else None
 
+    def _find_target_window_id() -> str | None:
+        """Return the tmux window id (e.g. '@42') of the target window,
+        or None when no matching window currently exists.
+        """
+        if not target_window:
+            return None
+        try:
+            wins = tmux_mod.list_windows(session)
+        except Exception:
+            return None
+        for w in wins:
+            name = w.get("name", "")
+            if action == "qa":
+                if name == target_window or name.startswith(target_window + "-"):
+                    return w.get("id")
+            elif name == target_window:
+                return w.get("id")
+        return None
+
+    # For fresh-mode actions (review-loop, qa fresh/loop) the target
+    # window may currently exist but is about to be killed and
+    # recreated.  Snapshot its window-id at the start so we can detect
+    # the recreation rather than treating the doomed window as "open".
+    initial_window_id = _find_target_window_id() if fresh else None
+    saw_disappear = False
+
     frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
     i = 0
 
@@ -1095,20 +1191,21 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
             from pm_core import runtime_state as _rs
             entry = _rs.get_action_state(pr_id, action)
             cur_state = entry.get("state") if entry else None
-            window_open = False
-            if target_window:
-                try:
-                    open_names = {w["name"]
-                                  for w in tmux_mod.list_windows(session)}
-                except Exception:
-                    open_names = set()
-                if action == "qa":
-                    window_open = any(
-                        n == target_window
-                        or n.startswith(target_window + "-")
-                        for n in open_names)
+            cur_window_id = _find_target_window_id()
+            if fresh and initial_window_id is not None:
+                # Wait for the original window to be killed and a new one
+                # with the same name to come up.  Either the id changes
+                # (new tmux window object) or we observe a moment when
+                # the window was missing and now exists again.
+                if cur_window_id is None:
+                    saw_disappear = True
+                    window_open = False
+                elif cur_window_id != initial_window_id or saw_disappear:
+                    window_open = True
                 else:
-                    window_open = target_window in open_names
+                    window_open = False
+            else:
+                window_open = cur_window_id is not None
             if window_open:
                 # Switch the invoking session to the target window
                 # unless the user pre-emptively suppressed it.  Doing
@@ -1133,7 +1230,10 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
                     "                     ")
                 return
             spin = frames[i % len(frames)]
-            label = cur_state or "queued"
+            if fresh and initial_window_id is not None and not saw_disappear:
+                label = "rebuilding window"
+            else:
+                label = cur_state or "queued"
             click.echo(f"\r{spin} {action}: {label}…   ", nl=False)
 
             # Wait up to tick_s for a keypress.  q/Esc → close the
@@ -1276,7 +1376,6 @@ def popup_picker_cmd(session: str, window_name: str):
         "s": "start",
         "e": "edit",
         "d": "review",
-        "l": "review-loop",
         "a": "qa",
         "g": "merge",
     }
@@ -1297,12 +1396,19 @@ def popup_picker_cmd(session: str, window_name: str):
     if has_fzf:
         fzf_input_lines = [display for display, _, _ in lines]
 
-        expect_keys = ",".join(_SHORTCUT_KEYS.keys())
+        # 'z' is a chord prefix matching the TUI: ``z X`` = fresh
+        # variant of action X, ``zz X`` = loop variant.  We expect 'z'
+        # alongside the regular shortcuts; if pressed, we read the
+        # next 1-2 keys in cbreak mode below.
+        expect_keys_list = list(_SHORTCUT_KEYS.keys()) + ["z"]
+        expect_keys = ",".join(expect_keys_list)
         shortcut_hint = "  ".join(
             f"{key}={label}" for key, label in _SHORTCUT_KEYS.items()
         )
+        chord_hint = "z d/a: fresh   zz d/a: loop"
         header = (f"PR Actions — {current_pr}\n"
-                  f"q/Esc: quit  {shortcut_hint}")
+                  f"q/Esc: quit  {shortcut_hint}\n"
+                  f"{chord_hint}")
         fzf_cmd = ["fzf", "--ansi", "--no-sort", "--reverse",
                    f"--header={header}",
                    "--header-first",
@@ -1313,9 +1419,6 @@ def popup_picker_cmd(session: str, window_name: str):
                    "--bind=q:abort",
                    f"--expect={expect_keys}"]
 
-        # Don't capture stderr — let fzf render its UI to the popup tty.
-        # Capturing stdout via PIPE is fine because fzf opens /dev/tty
-        # for its display when stdout is not a tty.
         proc = subprocess.Popen(
             fzf_cmd,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -1330,17 +1433,31 @@ def popup_picker_cmd(session: str, window_name: str):
         pressed_key = out_lines[0] if out_lines else ""
         selected = out_lines[1] if len(out_lines) > 1 else ""
 
-        if pressed_key and pressed_key in _SHORTCUT_KEYS:
-            target_label = _SHORTCUT_KEYS[pressed_key]
-            cmd = _label_to_cmd.get(target_label)
-            if cmd:
-                _run_picker_command(cmd, session)
+        cmd_to_run: str | None = None
+        if pressed_key == "z":
+            modifier, action_key = _read_chord_action(_SHORTCUT_KEYS,
+                                                       current_pr)
+            if modifier and action_key:
+                action_label = _SHORTCUT_KEYS.get(action_key)
+                if action_label:
+                    template = _MODIFIED_ACTION_CMDS.get(
+                        (modifier, action_label))
+                    if template and _picked_pr is not None:
+                        cmd_to_run = template.format(pr_id=_picked_pr["id"])
+                    else:
+                        # No fresh/loop variant for this action — fall
+                        # through to the plain shortcut.
+                        cmd_to_run = _label_to_cmd.get(action_label)
+        elif pressed_key in _SHORTCUT_KEYS:
+            cmd_to_run = _label_to_cmd.get(_SHORTCUT_KEYS[pressed_key])
         elif selected:
             for display, cmd, _ in lines:
                 if display == selected:
-                    if cmd:
-                        _run_picker_command(cmd, session)
+                    cmd_to_run = cmd or None
                     break
+
+        if cmd_to_run:
+            _run_picker_command(cmd_to_run, session)
     else:
         # Fallback: numbered list with shortcut keys
         click.echo("Tip: install fzf for a better experience"

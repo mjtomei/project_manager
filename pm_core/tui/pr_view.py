@@ -625,20 +625,28 @@ def handle_command_submitted(app, cmd: str) -> None:
         app.query_one("#tech-tree", TechTree).focus()
         return
 
-    # Handle QA commands — route to qa_loop_ui instead of CLI
+    # Handle QA commands — route to qa_loop_ui instead of CLI.
+    # Forms:
+    #   pr qa [PR_ID]           — focus existing or one-shot start (= TUI 't')
+    #   pr qa fresh [PR_ID]     — fresh restart            (= TUI 'z t')
+    #   pr qa loop  [PR_ID]     — start/stop QA loop        (= TUI 'zz t')
     if len(parts) >= 2 and parts[0] == "pr" and parts[1] == "qa":
         from pm_core.tui import qa_loop_ui
         from pm_core import store as _store
-        if len(parts) >= 3:
-            qa_pr_id = parts[2]
+        # Parse optional modifier ('fresh' or 'loop') and PR id.
+        rest = parts[2:]
+        qa_mode = None
+        if rest and rest[0] in ("fresh", "loop"):
+            qa_mode = rest[0]
+            rest = rest[1:]
+        if rest:
+            qa_pr_id = rest[0]
         else:
-            # Use the selected PR if no ID given
             tree = app.query_one("#tech-tree", TechTree)
             qa_pr_id = tree.selected_pr_id
         if not qa_pr_id:
             app.log_message("No PR specified for QA")
         else:
-            # Resolve short ID to full ID
             if app._root:
                 try:
                     qa_data = _store.load(app._root)
@@ -648,7 +656,12 @@ def handle_command_submitted(app, cmd: str) -> None:
                 if qa_data is not None:
                     qa_pr = _store.get_pr(qa_data, qa_pr_id)
                     if qa_pr:
-                        qa_loop_ui.focus_or_start_qa(app, qa_pr["id"])
+                        if qa_mode == "fresh":
+                            qa_loop_ui.fresh_start_qa(app, qa_pr["id"])
+                        elif qa_mode == "loop":
+                            qa_loop_ui.start_or_stop_qa_loop(app, qa_pr["id"])
+                        else:
+                            qa_loop_ui.focus_or_start_qa(app, qa_pr["id"])
                     else:
                         app.log_message(f"PR not found: {qa_pr_id}")
             else:
