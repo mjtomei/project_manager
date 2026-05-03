@@ -1296,6 +1296,42 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
         click.echo(SHOW_CURSOR)
 
 
+def _wait_dismiss(prompt: str = "\nPress q/Esc/Enter to close...") -> None:
+    """Block until the user presses q, Q, Esc, Enter, or sends EOF/Ctrl+C.
+
+    Replaces ``input()`` for popup error/info screens — ``input()`` only
+    accepts Enter, so users pressing q or Esc to dismiss the popup felt
+    stuck.  Falls back to ``input()`` if stdin isn't a tty (e.g. tests).
+    """
+    import sys
+    try:
+        if not sys.stdin.isatty():
+            try:
+                input(prompt)
+            except (EOFError, KeyboardInterrupt):
+                pass
+            return
+        click.echo(prompt, nl=False)
+        sys.stdout.flush()
+        import termios
+        import tty
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setcbreak(fd)
+            while True:
+                ch = sys.stdin.read(1)
+                if not ch:
+                    break  # EOF
+                if ch in ("q", "Q", "\r", "\n", "\x1b", "\x03", "\x04"):
+                    break
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        click.echo("")
+    except (KeyboardInterrupt, Exception):
+        pass
+
+
 def _run_picker_command(cmd: str, session: str) -> None:
     """Execute a picker command — either direct CLI or routed through TUI."""
     import sys
@@ -1310,10 +1346,7 @@ def _run_picker_command(cmd: str, session: str) -> None:
         base = pane_registry.base_session_name(session)
         if not trigger_tui_command(base, tui_cmd):
             click.echo("Could not reach the TUI (no pidfile or signal failed).")
-            try:
-                input("\nPress Enter to close...")
-            except (EOFError, KeyboardInterrupt):
-                pass
+            _wait_dismiss()
             return
         # Brief progress display: poll runtime_state for the action to
         # transition out of 'queued' / into 'running'.  Exits early on
@@ -1324,10 +1357,7 @@ def _run_picker_command(cmd: str, session: str) -> None:
         full_cmd = [sys.executable, "-m", "pm_core.wrapper"] + shlex.split(cmd)
         result = subprocess.run(full_cmd, text=True)
         if result.returncode != 0:
-            try:
-                input("\nPress Enter to close...")
-            except (EOFError, KeyboardInterrupt):
-                pass
+            _wait_dismiss()
 
 
 @cli.command("_popup-picker", hidden=True)
@@ -1346,10 +1376,7 @@ def popup_picker_cmd(session: str, window_name: str):
     def _pause_and_exit(code: int = 0):
         # display-popup -E closes when the command exits, so wait for Enter
         # whenever we have a message the user needs to read.
-        try:
-            input("\nPress Enter to close...")
-        except (EOFError, KeyboardInterrupt):
-            pass
+        _wait_dismiss()
         raise SystemExit(code)
 
     base = pane_registry.base_session_name(session)
@@ -1681,10 +1708,7 @@ def popup_cmd_cmd(session: str):
               os.environ.get("HOME"), __file__)
     if not rp.exists():
         click.echo("Not a pm session.")
-        try:
-            input("\nPress Enter to close...")
-        except (EOFError, KeyboardInterrupt):
-            pass
+        _wait_dismiss()
         raise SystemExit(1)
 
     try:
@@ -1700,10 +1724,7 @@ def popup_cmd_cmd(session: str):
         parts = shlex.split(cmd)
     except ValueError as e:
         click.echo(f"Invalid command syntax: {e}")
-        try:
-            input("\nPress Enter to close...")
-        except (EOFError, KeyboardInterrupt):
-            pass
+        _wait_dismiss()
         raise SystemExit(1)
     _cmd_norm = cmd.replace("review loop", "review-loop")
     if (_cmd_norm.startswith("pr qa")
@@ -1717,10 +1738,7 @@ def popup_cmd_cmd(session: str):
 
     if result.returncode != 0:
         # Keep popup open so user can see error
-        try:
-            input("\nPress Enter to close...")
-        except (EOFError, KeyboardInterrupt):
-            pass
+        _wait_dismiss()
 
 
 # --- Session registry commands ---
