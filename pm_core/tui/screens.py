@@ -276,7 +276,6 @@ class HelpScreen(ModalScreen):
             yield Label("  [bold]prefix P[/]  PR action picker popup", classes="help-row")
             yield Label("  [bold]prefix M[/]  pm command runner popup", classes="help-row")
             yield Label("  [bold]prefix R[/]  Rebalance panes", classes="help-row")
-            yield Label("  [bold]prefix o[/] / arrows  Switch panes", classes="help-row")
             yield Label("Review Loop", classes="help-section")
             yield Label("  [bold]zz d[/]   Start loop", classes="help-row")
             yield Label("  [bold]zzz d[/]  Start strict loop", classes="help-row")
