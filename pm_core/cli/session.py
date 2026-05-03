@@ -964,7 +964,11 @@ def popup_picker_cmd(session: str, window_name: str):
         raise SystemExit(code)
 
     base = pane_registry.base_session_name(session)
-    if not pane_registry.registry_path(base).exists():
+    rp = pane_registry.registry_path(base)
+    _log.info("popup-picker invoked: session=%r window=%r base=%r registry_path=%s exists=%s HOME=%r module=%s",
+              session, window_name, base, rp, rp.exists(),
+              os.environ.get("HOME"), __file__)
+    if not rp.exists():
         click.echo("Not a pm session.")
         _pause_and_exit(1)
 
@@ -1101,7 +1105,11 @@ def popup_cmd_cmd(session: str):
     import sys
 
     base = pane_registry.base_session_name(session)
-    if not pane_registry.registry_path(base).exists():
+    rp = pane_registry.registry_path(base)
+    _log.info("popup-cmd invoked: session=%r base=%r registry_path=%s exists=%s HOME=%r module=%s",
+              session, base, rp, rp.exists(),
+              os.environ.get("HOME"), __file__)
+    if not rp.exists():
         click.echo("Not a pm session.")
         try:
             input("\nPress Enter to close...")
