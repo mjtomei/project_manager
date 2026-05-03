@@ -1379,10 +1379,54 @@ def popup_picker_cmd(session: str, window_name: str):
     # Gather open windows to annotate the picker
     open_windows = {w["name"] for w in tmux_mod.list_windows(base)}
 
-    lines = _build_picker_lines(
-        prs, current_pr, open_windows,
-        current_phase=_current_window_phase(window_name),
-    )
+    from pm_core.cli.helpers import _pr_display_id
+
+    # Build the navigation list: PRs that the user has at least one
+    # open window for.  The invoking window's PR is always included
+    # (and is the "home" position for the 0/Home key).
+    def _pr_has_open_window(pr: dict) -> bool:
+        did = _pr_display_id(pr)
+        for pat in _ACTION_WINDOW_PATTERNS.values():
+            if pat and pat.format(display_id=did) in open_windows:
+                return True
+        return False
+
+    home_pr = current_pr
+    nav_pr_ids: list[str] = []
+    seen: set[str] = set()
+    for p in prs:
+        did = _pr_display_id(p)
+        if did and (_pr_has_open_window(p) or did == home_pr):
+            if did not in seen:
+                nav_pr_ids.append(did)
+                seen.add(did)
+    if home_pr not in seen:
+        nav_pr_ids.insert(0, home_pr)
+    try:
+        nav_index = nav_pr_ids.index(home_pr)
+    except ValueError:
+        nav_index = 0
+
+    invoking_phase = _current_window_phase(window_name)
+
+    def _resolve_for(pr_disp: str):
+        """Return (lines, picked_pr, label_to_cmd) for the given PR."""
+        picked = next(
+            (p for p in prs if _pr_display_id(p) == pr_disp), None)
+        label_to_cmd: dict[str, str] = {}
+        if picked is not None:
+            for lbl, tpl in _actions_for_status(picked.get("status", "")):
+                label_to_cmd[lbl] = tpl.format(pr_id=picked["id"])
+        # Phase indicator only meaningful for the invoking PR — when
+        # navigating to a different PR the user isn't "in" any of its
+        # phases, so let _build_picker_lines fall back to status-derived.
+        phase = invoking_phase if pr_disp == home_pr else None
+        pr_lines = _build_picker_lines(
+            prs, pr_disp, open_windows, current_phase=phase)
+        return pr_lines, picked, label_to_cmd
+
+    current_pr = nav_pr_ids[nav_index]
+    lines, _picked_pr, _label_to_cmd = _resolve_for(current_pr)
 
     if not lines:
         click.echo(f"PR Actions — {current_pr}")
@@ -1402,20 +1446,6 @@ def popup_picker_cmd(session: str, window_name: str):
         "t": "qa",
         "g": "merge",
     }
-    # Build label → command map directly from the PR's actions so it
-    # stays correct even if action filtering is added per-status later
-    # (zipping against _ALL_ACTIONS would silently mismap shortcut keys
-    # in that case).
-    from pm_core.cli.helpers import _pr_display_id
-    _picked_pr = next(
-        (p for p in prs if _pr_display_id(p) == current_pr), None)
-    _label_to_cmd: dict[str, str] = {}
-    if _picked_pr is not None:
-        for label, cmd_template in _actions_for_status(
-                _picked_pr.get("status", "")):
-            _label_to_cmd[label] = cmd_template.format(
-                pr_id=_picked_pr["id"])
-
     if has_fzf:
         fzf_input_lines = [display for display, _, _ in lines]
 
@@ -1423,6 +1453,8 @@ def popup_picker_cmd(session: str, window_name: str):
             f"{key}={label}" for key, label in _SHORTCUT_KEYS.items()
         )
         chord_hint = "z s/d/t: fresh   zz d/t: loop"
+        multi_pr = len(nav_pr_ids) > 1
+        nav_hint = "h/l: prev/next PR   0: home" if multi_pr else ""
 
         # fzf 0.59+ supports --no-input which hides the entire input
         # box, so unrecognized keystrokes don't echo anywhere in the
@@ -1471,10 +1503,17 @@ def popup_picker_cmd(session: str, window_name: str):
         chord_state = "main"  # 'main' | 'z' | 'zz'
         while True:
             if chord_state == "main":
-                header = (f"PR Actions — {current_pr}\n"
-                          f"q/Esc: quit  {shortcut_hint}\n"
-                          f"{chord_hint}")
+                pr_pos = (f"  ({nav_index + 1}/{len(nav_pr_ids)})"
+                          if multi_pr else "")
+                header_lines = [f"PR Actions — {current_pr}{pr_pos}",
+                                f"q/Esc: quit  {shortcut_hint}",
+                                chord_hint]
+                if nav_hint:
+                    header_lines.append(nav_hint)
+                header = "\n".join(header_lines)
                 expect = list(_SHORTCUT_KEYS.keys()) + ["z"]
+                if multi_pr:
+                    expect += ["h", "l", "left", "right", "0"]
             elif chord_state == "z":
                 header = (f"z — fresh start for {current_pr}\n"
                           f"s=fresh impl   d=fresh review   t=fresh qa   "
@@ -1508,6 +1547,24 @@ def popup_picker_cmd(session: str, window_name: str):
             selected = out_lines[1] if len(out_lines) > 1 else ""
 
             if chord_state == "main":
+                if multi_pr and pressed_key in ("h", "left"):
+                    nav_index = (nav_index - 1) % len(nav_pr_ids)
+                    current_pr = nav_pr_ids[nav_index]
+                    lines, _picked_pr, _label_to_cmd = _resolve_for(current_pr)
+                    fzf_input_lines = [d for d, _, _ in lines]
+                    continue
+                if multi_pr and pressed_key in ("l", "right"):
+                    nav_index = (nav_index + 1) % len(nav_pr_ids)
+                    current_pr = nav_pr_ids[nav_index]
+                    lines, _picked_pr, _label_to_cmd = _resolve_for(current_pr)
+                    fzf_input_lines = [d for d, _, _ in lines]
+                    continue
+                if multi_pr and pressed_key == "0":
+                    nav_index = nav_pr_ids.index(home_pr)
+                    current_pr = nav_pr_ids[nav_index]
+                    lines, _picked_pr, _label_to_cmd = _resolve_for(current_pr)
+                    fzf_input_lines = [d for d, _, _ in lines]
+                    continue
                 if pressed_key == "z":
                     chord_state = "z"
                     continue
