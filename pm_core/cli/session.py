@@ -999,22 +999,25 @@ def _parse_tui_action(tui_cmd: str) -> tuple[str | None, str | None]:
 
 
 def _wait_for_tui_command(session: str, tui_cmd: str,
-                          timeout_s: float = 3.0,
                           tick_s: float = 0.15) -> None:
     """Show a spinner while a queued TUI command transitions states.
 
-    Polls the shared runtime-state file and the tmux window list until
-    the target window appears or the action's state moves out of
-    ``queued`` (e.g. into ``running``) — whichever comes first.
-    Always exits within ``timeout_s`` so the popup never feels stuck.
+    Polls the shared runtime-state file and the tmux window list and
+    exits when the target window appears.  No timeout — long-running
+    launches stay visible until they complete.  The user can press
+    ``q`` or ``Esc`` at any time to dismiss the spinner *without*
+    cancelling the queued command (the TUI continues to handle it
+    once it picks the entry up off the queue).
     """
+    import select
+    import sys
+    import termios
     import time
+    import tty
+
     pr_id, action = _parse_tui_action(tui_cmd)
     if not pr_id or not action:
         return
-    # Resolve display_id for the window-name pattern (preferred for
-    # 'start' which doesn't have a runtime-state record until the pane
-    # registers in the tracker).
     try:
         root = state_root()
         data = store.load(root)
@@ -1031,16 +1034,27 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
         pattern and display_id) else None
 
     frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-    deadline = time.time() + timeout_s
     i = 0
     last_state: str | None = None
+
+    # Put stdin in cbreak mode so we can poll for q/Esc keypresses
+    # without waiting for Enter.  Restore in finally so the popup shell
+    # isn't left in a broken state if anything raises.
+    fd = sys.stdin.fileno()
     try:
-        while time.time() < deadline:
+        old_attrs = termios.tcgetattr(fd)
+    except termios.error:
+        old_attrs = None
+    if old_attrs is not None:
+        try:
+            tty.setcbreak(fd)
+        except termios.error:
+            old_attrs = None
+    try:
+        while True:
             from pm_core import runtime_state as _rs
             entry = _rs.get_action_state(pr_id, action)
             cur_state = entry.get("state") if entry else None
-            # Window-appearance check (covers 'start' which is the
-            # implementation pane and writes to runtime_state lazily).
             window_open = False
             if target_window:
                 try:
@@ -1055,23 +1069,38 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
                         for n in open_names)
                 else:
                     window_open = target_window in open_names
-            if window_open or (cur_state and cur_state != "queued"
-                               and cur_state != last_state):
-                # Something happened — show the resolved label and exit.
-                label = (f"window {target_window} is open" if window_open
-                         else f"state: {cur_state}")
-                click.echo(f"\r✓ {action}: {label}                     ")
+            if window_open:
+                click.echo(
+                    f"\r✓ {action}: window {target_window} is open"
+                    "                     ")
                 return
             last_state = cur_state
             spin = frames[i % len(frames)]
             label = cur_state or "queued"
             click.echo(f"\r{spin} {action}: {label}…   ", nl=False)
-            time.sleep(tick_s)
+
+            # Wait up to tick_s for a keypress.  q/Esc → dismiss without
+            # cancelling the queued command.  Other keys are ignored.
+            r, _, _ = select.select([sys.stdin], [], [], tick_s)
+            if r:
+                try:
+                    ch = sys.stdin.read(1)
+                except OSError:
+                    ch = ""
+                if ch in ("q", "Q", "\x1b"):  # Esc
+                    click.echo(
+                        f"\r… {action}: dismissed (still running in TUI)"
+                        "          ")
+                    return
             i += 1
     except KeyboardInterrupt:
         return
     finally:
-        # Newline so subsequent output isn't on the spinner line.
+        if old_attrs is not None:
+            try:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+            except termios.error:
+                pass
         click.echo("")
 
 
