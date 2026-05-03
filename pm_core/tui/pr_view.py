@@ -411,6 +411,105 @@ def handle_plan_pick(app, pr_id: str, result) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Cleanup
+# ---------------------------------------------------------------------------
+
+def _do_cleanup(app, pr_id: str) -> dict | None:
+    """Run the cleanup primitive for *pr_id* and log a summary."""
+    from pm_core import pr_cleanup as pr_cleanup_mod
+    from pm_core.loop_shared import get_pm_session
+
+    if not app._root:
+        app.log_message("No project root")
+        return None
+    try:
+        data = store.load(app._root)
+    except store.ProjectYamlParseError as e:
+        app.log_message(f"Error: {e}")
+        return None
+    pr_entry = store.get_pr(data, pr_id)
+    if not pr_entry:
+        app.log_message(f"PR not found: {pr_id}")
+        return None
+
+    session = get_pm_session()
+    summary = pr_cleanup_mod.cleanup_pr_resources(session, pr_entry)
+    app.log_message(f"Cleaned {pr_id}: {pr_cleanup_mod.format_summary(summary)}")
+    return summary
+
+
+async def _cleanup_worker(app, pr_id: str, action_key: str,
+                          follow_up: str | None = None) -> None:
+    """Run cleanup off the UI thread, then optionally dispatch a follow-up."""
+    import asyncio
+    try:
+        await asyncio.to_thread(_do_cleanup, app, pr_id)
+    finally:
+        app._inflight_pr_action = None
+        app._load_state()
+
+    if follow_up == "s":
+        start_pr(app)
+    elif follow_up == "d":
+        done_pr(app)
+    elif follow_up == "t":
+        from pm_core.tui import qa_loop_ui
+        qa_loop_ui.focus_or_start_qa(app, pr_id)
+
+
+def cleanup_pr(app) -> None:
+    """Y key — confirm, then tear down all resources for the selected PR."""
+    from pm_core.tui.tech_tree import TechTree
+    from pm_core.tui.screens import ConfirmCleanupScreen
+    from pm_core.cli.helpers import _pr_display_id
+
+    tree = app.query_one("#tech-tree", TechTree)
+    pr_id = tree.selected_pr_id
+    _log.info("action: cleanup_pr selected=%s", pr_id)
+    if not pr_id:
+        app.log_message("No PR selected")
+        return
+    pr_entry = store.get_pr(app._data, pr_id)
+    display_id = _pr_display_id(pr_entry) if pr_entry else pr_id
+
+    action_key = f"Cleaning {pr_id}"
+    if not guard_pr_action(app, action_key):
+        return
+
+    def after_confirm(confirmed: bool | None) -> None:
+        if not confirmed:
+            app.log_message("Cleanup cancelled")
+            return
+        if not guard_pr_action(app, action_key):
+            return
+        app._inflight_pr_action = action_key
+        app.run_worker(_cleanup_worker(app, pr_id, action_key))
+
+    app.push_screen(ConfirmCleanupScreen(display_id), after_confirm)
+
+
+def cleanup_then_action(app, key: str) -> None:
+    """y <key> — clean up the selected PR, then dispatch the follow-up action.
+
+    No confirmation modal — the user opted in by pressing the y prefix.
+    """
+    from pm_core.tui.tech_tree import TechTree
+
+    tree = app.query_one("#tech-tree", TechTree)
+    pr_id = tree.selected_pr_id
+    _log.info("action: cleanup_then_action selected=%s key=%s", pr_id, key)
+    if not pr_id:
+        app.log_message("No PR selected")
+        return
+
+    action_key = f"Cleaning {pr_id}"
+    if not guard_pr_action(app, action_key):
+        return
+    app._inflight_pr_action = action_key
+    app.run_worker(_cleanup_worker(app, pr_id, action_key, follow_up=key))
+
+
+# ---------------------------------------------------------------------------
 # Command execution
 # ---------------------------------------------------------------------------
 

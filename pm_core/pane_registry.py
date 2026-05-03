@@ -212,6 +212,25 @@ def unregister_pane(session: str, pane_id: str) -> None:
     locked_read_modify_write(registry_path(session), modifier)
 
 
+def unregister_windows(session: str, window_names: list[str]) -> list[str]:
+    """Remove the given window entries from the registry. Returns names removed."""
+    _ensure_logging()
+    removed: list[str] = []
+
+    def modifier(raw):
+        data = _prepare_registry_data(raw, session)
+        windows = data.get("windows", {})
+        for name in window_names:
+            if name in windows:
+                del windows[name]
+                removed.append(name)
+                _logger.info("unregister_windows: removed window %s", name)
+        return data
+
+    locked_read_modify_write(registry_path(session), modifier)
+    return removed
+
+
 def kill_and_unregister(session: str, pane_id: str) -> None:
     """Kill a tmux pane and remove it from the registry."""
     from pm_core import tmux as tmux_mod

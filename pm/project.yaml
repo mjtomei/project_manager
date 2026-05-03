@@ -11264,3 +11264,55 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-e43e4b0
+  plan: bugs
+  title: Push-proxy fetch into PR workdir leaves index/worktree desynced from HEAD
+  branch: pm/pr-e43e4b0-push-proxy-fetch-into-pr-workdir-leaves-index-work
+  status: pending
+  depends_on: []
+  description: "## Symptom\n\nAfter a QA scenario or review session pushes a commit\
+    \ back into the PR\nworkdir via the push-proxy, the PR workdir's `git status`\
+    \ shows a \"staged\nrevert\" of that commit. The HEAD ref has moved forward, but\
+    \ the index and\nworking tree still hold the pre-push content.\n\nIf a subsequent\
+    \ agent (e.g. a review-loop agent) runs `git commit -a` or\n`git commit` on already-staged\
+    \ files without noticing, it will commit the\nrevert and undo the push-back. Observed\
+    \ during pr-f8abc94 review iter 2:\nthe modal-key fix from commit e0f4b13 (pushed\
+    \ back from QA scenario s-2)\nappeared as a staged revert in the PR workdir.\n\
+    \n## Root cause\n\n`pm_core/push_proxy.py:370` runs:\n\n    git -C target_repo\
+    \ fetch --update-head-ok <source> <branch>:<branch>\n\n`--update-head-ok` lets\
+    \ git advance HEAD on a checked-out branch, but the\nfetch only moves the ref\
+    \ — it never updates the index or working tree.\nResult:\n- HEAD = new commit\
+    \ (e.g. e0f4b13)\n- index + worktree = old content\n- `git status` shows a \"\
+    staged\" reversal of the new commit\n\nThe existing mitigation of telling review/QA\
+    \ agents to `git pull origin\n{branch}` (pm_core/prompt_gen.py:329, :1699) does\
+    \ NOT fix this: the\npush-proxy also forwards to origin (push_proxy.py:396), so\
+    \ origin already\nmatches HEAD by the time the agent pulls. `git pull` becomes\
+    \ a no-op merge\nthat doesn't touch the index or working tree, so the desync persists.\n\
+    \n## Reproduction\n\n1. PR workdir on branch B at commit X. Working tree clean.\n\
+    2. QA scenario authors commit Y on top of X and pushes via the push-proxy.\n3.\
+    \ In the PR workdir: `git log -1` shows Y. `git status` shows\n   pm_core/<file>.py\
+    \ \"staged\" with content matching X (a revert of Y).\n\n## Fix (option A from\
+    \ review discussion)\n\nIn `push_proxy._local_push` (or wherever the `fetch --update-head-ok`\
+    \ runs):\n\n1. Before the fetch, capture `git -C target_repo status --porcelain`.\n\
+    2. Run the fetch as today.\n3. After the fetch succeeds, if the pre-fetch status\
+    \ was clean, run\n   `git -C target_repo reset --hard HEAD` (or `git checkout-index\
+    \ -af`) to\n   bring the index and working tree forward to the new HEAD.\n4. If\
+    \ the pre-fetch status was dirty, log a loud warning and skip the\n   sync — don't\
+    \ clobber uncommitted user work. Today's silent desync is\n   strictly worse than\
+    \ warning + skipping.\n\n## Files\n\n- `pm_core/push_proxy.py` — add the pre-fetch\
+    \ status check and post-fetch\n  sync. The current `_local_push` returns early\
+    \ on fetch failure; add the\n  sync just after the success log line at push_proxy.py:390.\n\
+    - Tests: extend `tests/test_push_proxy.py` (or add new) — assert that after\n\
+    \  a push-back into a clean target, `git status --porcelain` is empty in\n  the\
+    \ target repo.\n\n## Out of scope\n\nOption B (push to origin only, never direct\
+    \ into a checked-out branch's\nrepo, with the PR workdir polling for ref updates)\
+    \ is a larger\narchitectural change and is not what this bug is for."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-02T22:38:22.256223+00:00'
+  updated_at: '2026-05-02T22:38:22.256223+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []

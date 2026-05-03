@@ -1054,6 +1054,43 @@ def cleanup_qa_containers(pr_id: str, loop_id: str,
     return count
 
 
+def cleanup_pr_containers(pr_id: str,
+                          session_tag: str | None = None) -> list[str]:
+    """Remove every QA container for a PR across all loop ids.
+
+    Matches both legacy (``pm-qa-{pr_id}-``) and session-tagged
+    (``pm-{session_tag}-qa-{pr_id}-``) name prefixes. Returns the list of
+    container names removed.
+    """
+    prefixes = []
+    if session_tag:
+        prefixes.append(f"{CONTAINER_PREFIX}{session_tag}-qa-{pr_id}-")
+    prefixes.append(f"{CONTAINER_PREFIX}qa-{pr_id}-")
+
+    removed: list[str] = []
+    seen: set[str] = set()
+    for prefix in prefixes:
+        result = _run_runtime(
+            "ps", "-a", "--filter", f"name={prefix}",
+            "--format", "{{.Names}}",
+            check=False, timeout=30,
+        )
+        if result.returncode != 0:
+            continue
+        for line in result.stdout.strip().splitlines():
+            cname = line.strip()
+            if cname and cname not in seen:
+                seen.add(cname)
+                try:
+                    remove_container(cname)
+                    removed.append(cname)
+                except Exception as e:  # pragma: no cover - best effort
+                    _log.warning("remove_container(%s) failed: %s", cname, e)
+    if removed:
+        _log.info("Cleaned up %d container(s) for %s", len(removed), pr_id)
+    return removed
+
+
 def cleanup_orphaned_qa_containers(session: str, pr_id: str,
                                    session_tag: str | None = None) -> int:
     """Remove QA containers whose tmux windows no longer exist.
