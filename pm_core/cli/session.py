@@ -1013,7 +1013,7 @@ def _build_picker_lines(
         # review-loop iterations run in the review window).
         status_tag += fold_status.get(label, "")
 
-        lines.append((f"  {indicator} {label:<18s}{display_id}"
+        lines.append((f"  {indicator} {label:<18s}"
                       f"{open_tag}{status_tag}", cmd, display_id))
 
     return lines

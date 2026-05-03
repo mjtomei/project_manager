@@ -19,10 +19,10 @@ The action representing the *current window's phase* is marked with a `●` indi
 **Display format**: One header line (non-selectable) showing display ID, status, and title; one selectable line per action below (only `_LIST_ACTIONS` rows render):
 ```
   #158  (in_progress)  Add popup picker
-  ● start              #158
-    review             #158 [loop i3]
-    qa                 #158
-    merge              #158
+  ● start
+    review             [loop i3]
+    qa
+    merge
 ```
 
 **Shortcut keys** (fzf `--expect`): `s`=start, `e`=edit, `d`=review, `t`=qa, `g`=merge — matching the TUI's PR-action key bindings. `q`/`Esc` quits.
