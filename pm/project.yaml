@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-6e23bbb
+  active_pr: pr-1cb6e15
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -11807,6 +11807,43 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-03T15:42:10.423044+00:00'
   updated_at: '2026-05-03T15:42:10.423044+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-1cb6e15
+  plan: bugs
+  title: pm pr review silently regresses qa → in_review status
+  branch: pm/pr-1cb6e15-pm-pr-review-silently-regresses-qa-in-review-statu
+  status: pending
+  depends_on: []
+  description: 'When ''pm pr review PR_ID'' is invoked on a PR whose status is ''qa'',
+    the command falls through the early-return branches in pm_core/cli/pr.py:1363-1376
+    (which guard against ''merged'', ''in_review'', ''pending'') and runs the apply()
+    at line 1393-1400 which sets status=''in_review''. This is a silent backward status
+    regression while the QA loop continues running in its qa-#NN window — the TUI
+    tree shows the PR as in_review even though scenarios are mid-flight.
+
+
+    Fix: when the PR is already ''qa'', treat it like ''in_review'' — skip the GitHub
+    mark-ready step and the status assignment, just call _launch_review_window() (or
+    refocus the existing review window) so the user can read the review while QA runs.
+    Only NEEDS_WORK from QA should move the PR back to in_review (qa_loop_ui already
+    does this via its own status transitions).
+
+
+    Touches: pm_core/cli/pr.py pr_review() — add a ''qa'' branch parallel to the ''in_review''
+    branch at line 1366-1373 that prints something like ''PR ... is in QA — opening
+    review window without changing status.'' and calls _launch_review_window then
+    returns. Tests: add a regression test in tests/test_pr.py asserting that ''pm
+    pr review'' on a qa-status PR leaves status=''qa'' unchanged. Also verify the
+    TUI ''d'' / picker ''d'' paths surface the new message correctly through the launched
+    subprocess output.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-03T16:02:14.081159+00:00'
+  updated_at: '2026-05-03T16:02:14.081159+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
