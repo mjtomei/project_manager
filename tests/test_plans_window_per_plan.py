@@ -112,6 +112,24 @@ def test_deps_action_uses_cross_plan_window():
     assert list(fake.windows.keys()) == ["plan-deps"]
 
 
+def test_plan_add_window_matches_eventual_plan_id():
+    """`plan add` must open the window the new plan's later actions will use,
+    so 'edit' / 'review' on the freshly-created plan reuse the add window
+    instead of opening yet another one."""
+    from pm_core import store
+    app = _make_app()
+    app._data = {"plans": []}  # no existing plans
+
+    fake = TmuxFake()
+    with ExitStack() as stack:
+        _install(stack, fake)
+        pane_ops.handle_plan_add(app, ("my-feature", ""))
+
+    expected_id = store.generate_plan_id("my-feature", set())
+    assert list(fake.windows.keys()) == [expected_id]
+    assert fake.new_window_calls[0][1].count("pm plan add") == 1
+
+
 def test_window_opens_with_action_command_no_placeholder_pane():
     """The new window's first pane must run the action, not 'bash -l'."""
     app = _make_app()

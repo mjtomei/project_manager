@@ -6,7 +6,6 @@ access app state and call app methods (log_message, push_screen, etc.).
 
 import os
 import shlex
-import uuid
 from pathlib import Path
 
 from pm_core.paths import configure_logger, command_log_file
@@ -663,10 +662,13 @@ def handle_plan_add(app, result: tuple[str, str] | None) -> None:
         return
     name, _description = result  # description is always empty now
     cmd = f"pm plan add {shlex.quote(name)}"
-    # No plan id exists yet — give each concurrent 'plan add' its own window
-    # so two adds in parallel don't clobber each other.
-    pseudo_id = f"plan-add-{uuid.uuid4().hex[:8]}"
-    _launch_in_plans_window(app, pseudo_id, cmd, "plan-add")
+    # generate_plan_id is sha256(name + description) so the TUI and the
+    # spawned `pm plan add` process produce the same id — the window we open
+    # here will be the same one the plan's later actions (edit, breakdown,
+    # review) target, instead of a one-shot 'plan-add-<uuid>' window.
+    existing_ids = {p["id"] for p in (app._data.get("plans") or [])}
+    plan_id = store.generate_plan_id(name, existing_ids)
+    _launch_in_plans_window(app, plan_id, cmd, "plan-add")
 
 
 def launch_plan_activated(app, plan_id: str) -> None:
