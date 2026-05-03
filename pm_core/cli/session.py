@@ -49,6 +49,51 @@ def _share_mode_options(f):
     return wrapper
 
 
+# Shell bodies for the popup bindings.  Query tmux from inside the popup
+# shell to resolve session/window — tmux's expansion of #{session_name}
+# in display-popup arguments (both shell-command and -e values) is
+# unreliable across versions, so we let the popup's shell call tmux
+# itself.  The trailing failure handler pauses on launch failure (e.g.
+# pm not on PATH) so the popup stays visible long enough to read the
+# error instead of vanishing instantly with display-popup -E.
+_POPUP_PICKER_BODY = (
+    'S=$(tmux display-message -p "#{session_name}");'
+    ' W=$(tmux display-message -p "#{window_name}");'
+    ' pm _popup-picker "$S" "$W"'
+    " || { echo; echo 'pm popup failed (exit '$?').';"
+    " read -n 1 -s -r -p 'Press any key to close...'; }"
+)
+_POPUP_CMD_BODY = (
+    'S=$(tmux display-message -p "#{session_name}");'
+    ' pm _popup-cmd "$S"'
+    " || { echo; echo 'pm popup failed (exit '$?').';"
+    " read -n 1 -s -r -p 'Press any key to close...'; }"
+)
+
+
+_POPUP_KINDS = {
+    # kind -> (height, body)
+    "picker": ("80%", _POPUP_PICKER_BODY),
+    "cmd": ("50%", _POPUP_CMD_BODY),
+}
+
+
+def _bind_popups() -> None:
+    """Bind prefix+P and prefix+M to dynamic-resolve popup launchers.
+
+    The bindings are static — they invoke ``pm _popup-show <kind>``,
+    which resolves the right ``-w`` at trigger time based on the
+    smallest attached-client width.  No rebinding on resize, no stale
+    state, no tmux-parser quoting fragility.
+    """
+    subprocess.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", "P",
+             "run-shell", "pm _popup-show picker"),
+            check=False)
+    subprocess.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", "M",
+             "run-shell", "pm _popup-show cmd"),
+            check=False)
+
+
 def _register_tmux_bindings(session_name: str) -> None:
     """Register tmux keybindings and session options for pm.
 
@@ -100,39 +145,34 @@ def _register_tmux_bindings(session_name: str) -> None:
     subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gw", "window-resized",
              "run-shell 'pm _window-resized \"#{session_name}\" \"#{window_id}\"'"),
             check=False)
+    # Also rebalance on window switch.  With aggressive-resize on (or when
+    # different windows have different pane layouts), tmux defers the
+    # resize until the next input event after a switch — panes appear
+    # stale until the user presses a key.  Hooking after-select-window
+    # forces a rebalance immediately so the new window renders at the
+    # current client size.  The _window-resized handler is debounced and
+    # no-ops when the size hasn't actually changed, so this is cheap on
+    # plain window switches.
+    subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gw", "after-select-window",
+             "run-shell 'pm _window-resized \"#{session_name}\" \"#{window_id}\"'"),
+            check=False)
+    # Client-level hooks for the same staleness symptom on cross-session
+    # switches and on attach/detach (which can change the smallest-client
+    # window size when window-size=smallest is set).  Same handler — the
+    # debounce keeps it cheap when nothing actually changed.
+    for client_hook in ("client-session-changed", "client-attached",
+                        "client-detached"):
+        subprocess.run(tmux_mod._tmux_cmd("set-hook", "-g", client_hook,
+                 "run-shell 'pm _window-resized \"#{session_name}\" \"#{window_id}\"'"),
+                check=False)
     # Clean up stale hook from earlier versions that used the wrong name
     subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gu", "after-resize-window"),
             check=False)
 
-    # Popup bindings: PR action picker (prefix+P) and pm command runner (prefix+M).
-    # Query tmux from inside the popup shell to resolve session/window —
-    # tmux's expansion of #{session_name} in display-popup arguments
-    # (both shell-command and -e values) is unreliable across versions,
-    # so we let the popup's shell call tmux itself.
-    # Wrap in a shell that pauses on launch failure (e.g. pm not on PATH) so
-    # the popup stays visible long enough to read the error instead of
-    # vanishing instantly with display-popup -E.
-    _picker_inner = (
-        'S=$(tmux display-message -p "#{session_name}");'
-        ' W=$(tmux display-message -p "#{window_name}");'
-        ' pm _popup-picker "$S" "$W"'
-        " || { echo; echo 'pm popup failed (exit '$?').';"
-        " read -n 1 -s -r -p 'Press any key to close...'; }"
-    )
-    _cmd_inner = (
-        'S=$(tmux display-message -p "#{session_name}");'
-        ' pm _popup-cmd "$S"'
-        " || { echo; echo 'pm popup failed (exit '$?').';"
-        " read -n 1 -s -r -p 'Press any key to close...'; }"
-    )
-    subprocess.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", "P",
-             "display-popup", "-E", "-w", "80", "-h", "80%",
-             _picker_inner),
-            check=False)
-    subprocess.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", "M",
-             "display-popup", "-E", "-w", "80", "-h", "50%",
-             _cmd_inner),
-            check=False)
+    # Popup bindings: PR action picker (prefix+P) and pm command runner
+    # (prefix+M).  Width is resolved dynamically by ``pm _popup-show``
+    # at trigger time — see that command and the _bind_popups() helper.
+    _bind_popups()
 
 
 def _schedule_rebalance(session_name: str) -> None:
@@ -666,6 +706,51 @@ def pane_closed_cmd():
 def pane_opened_cmd(session: str, window: str, pane_id: str):
     """Internal: handle tmux after-split-window hook."""
     pane_layout.handle_pane_opened(session, window, pane_id)
+
+
+@cli.command("_popup-show", hidden=True)
+@click.argument("kind")
+def popup_show_cmd(kind: str):
+    """Internal: launch a popup picking width by smallest attached client.
+
+    Resolves popup width dynamically based on the smallest attached
+    client in the current tmux session's group: 95% (always fits)
+    when below the mobile-width threshold, fixed 80 cols otherwise.
+    Then invokes ``tmux display-popup -E -w <width> -h <height> <body>``
+    via subprocess, where each arg is passed as one argv element so we
+    sidestep tmux's parser-quoting issues that the previous
+    if-shell-with-nested-display-popup approach hit.
+    """
+    if kind not in _POPUP_KINDS:
+        _log.warning("_popup-show: unknown kind %r", kind)
+        return
+    height, body = _POPUP_KINDS[kind]
+
+    # Width is the *calling client's* current window width.  run-shell
+    # from a bind-key inherits the calling client's $TMUX context, so
+    # ``tmux display-message -p "#{window_width}"`` reports what we
+    # need — the actual size of the window we are about to overlay,
+    # not some min/max across the group.
+    result = subprocess.run(
+        tmux_mod._tmux_cmd("display-message", "-p", "#{window_width}"),
+        capture_output=True, text=True, check=False,
+    )
+    win_width: int | None = None
+    if result.returncode == 0 and result.stdout.strip().isdigit():
+        win_width = int(result.stdout.strip())
+    threshold = pane_layout._get_mobile_width_threshold()
+    if win_width is not None and win_width < threshold:
+        width = "95%"
+    else:
+        width = "80"
+
+    _log.info("_popup-show: kind=%s window_width=%s threshold=%d -> width=%s",
+              kind, win_width, threshold, width)
+    subprocess.run(
+        tmux_mod._tmux_cmd("display-popup", "-E",
+                           "-w", width, "-h", height, body),
+        check=False,
+    )
 
 
 @cli.command("_window-resized", hidden=True)

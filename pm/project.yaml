@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-fc6db6a
+  active_pr: pr-a5a800a
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -8222,7 +8222,7 @@ prs:
   plan: improvements
   title: Tmux popup PR switcher and prefix-key pm command runner
   branch: pm/pr-2d0588a-tmux-popup-pr-switcher-and-prefix-key-pm-command-r
-  status: in_review
+  status: merged
   depends_on: []
   description: 'Add two tmux integrations registered via _register_tmux_bindings:
     (1) A prefix-key binding (e.g. prefix+P) that opens a tmux display-popup with
@@ -8242,10 +8242,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/158
   gh_pr_number: 158
   created_at: '2026-04-07T12:46:56.964240+00:00'
-  updated_at: '2026-05-03T17:16:26.109715+00:00'
+  updated_at: '2026-05-03T18:04:35.578168+00:00'
   started_at: '2026-04-07T12:49:34.016669+00:00'
   reviewed_at: '2026-05-03T17:12:06.758566+00:00'
-  merged_at: null
+  merged_at: '2026-05-03T18:04:35.578168+00:00'
   notes:
   - id: note-ebe15c3
     text: 'QA: prefix+P picker phase indicator (●) should reflect the current tmux
@@ -9235,6 +9235,16 @@ prs:
       check: NEEDS_WORK (workdir: /home/matt/.pm/workdirs/qa/pr-d8cfa16-4f429ecf2321e04d)'
     created_at: '2026-04-13T21:49:20Z'
     last_edited: '2026-04-13T21:49:20Z'
+  - id: note-917b3f8
+    text: 'Closed as superseded by #167 (QA planner: consolidate related assertions
+      into fewer scenarios). #167 reduces scenario count from the planner side via
+      prompt changes alone, which has cut scenario counts substantially without a
+      measurable run-time hit. The batched-execution flow this PR was designed to
+      ship is no longer needed for the throughput problem it was scoped to solve.
+      If batching becomes valuable again for a different reason, reopen with that
+      motivation rather than reusing this PR''s framing.'
+    created_at: '2026-05-03T22:00:00Z'
+    last_edited: '2026-05-03T22:00:00Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-d8cfa16-batched-qa-scenario-execution-ebce8630
 - id: pr-3fe2696
   plan: plan-qa
@@ -9283,7 +9293,7 @@ prs:
   plan: null
   title: Add pm pr split command for breaking large PRs into smaller pieces
   branch: pm/pr-4db3696-add-pm-pr-split-command-for-breaking-large-prs-int
-  status: qa
+  status: in_review
   depends_on: []
   description: "Add a 'pm pr split' command (CLI + TUI keybinding) that launches a\
     \ Claude session to decompose a large PR into multiple smaller PRs.\n\nWorkflow:\n\
@@ -9307,9 +9317,9 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/165
   gh_pr_number: 165
   created_at: '2026-04-10T11:34:57.339723+00:00'
-  updated_at: '2026-04-10T16:01:58.038791+00:00'
+  updated_at: '2026-05-03T18:09:08.514764+00:00'
   started_at: '2026-04-10T14:17:39.293056+00:00'
-  reviewed_at: '2026-04-10T16:01:58.038791+00:00'
+  reviewed_at: '2026-05-03T18:09:08.514764+00:00'
   merged_at: null
   notes:
   - id: note-654a677
@@ -11901,6 +11911,116 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-03T16:30:50.168588+00:00'
   updated_at: '2026-05-03T16:30:50.168588+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-62ad13d
+  plan: bugs
+  title: 'Bug: pm pr close removes the PR entry from project.yaml by default'
+  branch: pm/pr-62ad13d-bug-pm-pr-close-removes-the-pr-entry-from-project-
+  status: pending
+  depends_on: []
+  description: 'pm pr close (pm_core/cli/pr.py) currently removes the PR entry from
+    project.yaml entirely as part of its default behavior. The help text spells this
+    out: ''Removes the PR entry from project.yaml. By default also closes the GitHub
+    PR and deletes the remote branch if they exist.'' But this is inconsistent with
+    both (a) older closed PRs in project.yaml that retain status: closed (e.g. pr-012,
+    pr-013) and (b) how merged PRs are handled — pm pr merge sets status: merged and
+    keeps the entry around as historical record.
+
+
+    Result: closing a PR loses the entry, its notes, its dependencies, its description,
+    its workdir reference — everything is just gone from project state. Re-adding
+    the same PR later would have to re-establish all of that. There is also no audit
+    trail showing ''this PR existed and was closed for these reasons''; the only record
+    is the git diff of project.yaml at the close commit.
+
+
+    Fix: invert the default. pm pr close should set status: closed and keep the entry.
+    Add an opt-in --remove (or --purge) flag for callers who really do want the entry
+    deleted, mirroring how --keep-github / --keep-branch toggle the side effects on
+    the GitHub PR and remote branch. The remove flag is the rarer case (genuinely-mistaken
+    PRs that should never have existed); the common case is ''this work is no longer
+    relevant, file it under closed.''
+
+
+    Concretely:
+
+    - Default behavior: set status to ''closed'', preserve the entry and all its fields
+    including notes. Still close the GitHub PR and delete the remote branch unless
+    --keep-github / --keep-branch are set. Still tear down the workdir.
+
+    - --remove flag: also delete the entry from project.yaml (current default behavior).
+
+    - The status field already supports ''closed'' as a valid value (per pm_core/cli/__init__.py
+    status enum), so no schema change is needed.
+
+
+    Files: pm_core/cli/pr.py (the close command), pm_core/cli/__init__.py if any setting/help
+    text references close behavior. Tests: closing a PR by default keeps the entry
+    with status=closed and preserves all fields; --remove deletes the entry; --keep-github
+    / --keep-branch still work; closing a PR that has dependents (PRs whose depends_on
+    includes it) prints a warning naming those dependents, since with status=closed
+    they remain blocked indefinitely.
+
+
+    Motivating example from this session: pm pr close pr-d8cfa16 (#163, batched QA
+    scenario execution, superseded by #167) was used to close a PR. The entry was
+    removed and the explanatory note added just before close was lost with it. Reconstructing
+    the entry from git show HEAD:project.yaml and re-inserting with status=closed
+    manually was needed to restore the historical record.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-03T13:10:13.371978+00:00'
+  updated_at: '2026-05-03T13:10:13.371978+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-a5a800a
+  plan: bugs
+  title: 'Defensive: normalize window-size on pm session init so external ''manual''
+    override is cleared'
+  branch: pm/pr-a5a800a-defensive-normalize-window-size-on-pm-session-init
+  status: pending
+  depends_on: []
+  description: "pm session init currently only writes window-size when it wants to\
+    \ set 'smallest' for shared (--global / --group) sessions. For non-shared sessions,\
+    \ pm doesn't touch the option at all and trusts the global default ('latest').\
+    \ This is fragile: if a per-session 'window-size' override exists from outside\
+    \ pm — set by a manual tmux command, an IDE integration, a session manager, or\
+    \ any other external tool — pm silently inherits it.\n\nThe trap: window-size\
+    \ = manual disables auto-resize entirely (only explicit resize-window commands\
+    \ change sizes). When this leaks onto a pm session, all auto-resize behaviors\
+    \ break in confusing ways. Switching to a window doesn't grow it, attaching/detaching\
+    \ clients doesn't recompute, and the symptoms look like broken hooks or broken\
+    \ aggressive-resize even though those are fine.\n\nHit during a debugging session\
+    \ today on pm-project_manager-c5a1006b plus its grouped sessions: every grouped\
+    \ session had window-size = manual (origin unknown — no pm code path writes it).\
+    \ Auto-resize appeared completely broken; clearing the per-session option (set-option\
+    \ -u) restored normal behavior.\n\nFix: in pm session init (pm_core/cli/session.py:_session_start\
+    \ or _register_tmux_bindings — wherever the existing window-size = smallest write\
+    \ happens for shared sessions), add a corresponding *unset* for non-shared sessions.\
+    \ That is:\n  - shared session: tmux set-option -t <session> window-size smallest\
+    \   (existing behavior)\n  - non-shared session: tmux set-option -ut <session>\
+    \ window-size       (NEW: explicitly clear any per-session override so it falls\
+    \ through to global 'latest')\n\nThe unset is idempotent and cheap. It only matters\
+    \ when something external set the override; in the normal case it's a no-op.\n\
+    \nSame treatment for the per-window override: set_shared_window_size in pm_core/tmux.py\
+    \ writes window-size = smallest per-window when PM_SHARE_MODE is set. For non-shared\
+    \ windows, optionally unset to be safe (lower priority — per-window manual is\
+    \ rare and mostly harmless if shared sessions normalize their own).\n\nFiles:\
+    \ pm_core/cli/session.py (the session init path that already touches window-size),\
+    \ pm_core/tmux.py (set_shared_window_size, optional). Tests: a non-shared pm session\
+    \ has no per-session window-size override after init; if one is set externally\
+    \ before init, pm clears it; shared sessions still get 'smallest'."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-03T18:45:04.600941+00:00'
+  updated_at: '2026-05-03T18:45:04.600941+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
