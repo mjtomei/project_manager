@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-c3762f7
+  active_pr: pr-f8abc94
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -8940,7 +8940,7 @@ prs:
   plan: improvements
   title: TUI command for PR resource cleanup
   branch: pm/pr-f8abc94-tui-command-for-pr-resource-cleanup
-  status: in_review
+  status: merged
   depends_on: []
   description: 'Add two ways to clean up all resources for a PR across all phases
     (implementation, review, QA): (1) A dedicated TUI key on a selected PR that tears
@@ -8958,10 +8958,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/180
   gh_pr_number: 180
   created_at: '2026-04-09T21:37:50.239172+00:00'
-  updated_at: '2026-05-02T21:31:24.071044+00:00'
+  updated_at: '2026-05-03T00:06:32.628411+00:00'
   started_at: '2026-05-02T21:00:42.908445+00:00'
   reviewed_at: '2026-05-02T21:31:24.071044+00:00'
-  merged_at: null
+  merged_at: '2026-05-03T00:06:32.628411+00:00'
   notes:
   - id: note-502c061
     text: 'QA NEEDS_WORK: CLI --resources flag — happy path, errors, and workdir-cleanup
@@ -8970,6 +8970,12 @@ prs:
       Esc: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-f8abc94-501125830aa20b3d)'
     created_at: '2026-05-02T22:02:30Z'
     last_edited: '2026-05-02T22:02:30Z'
+  - id: note-21d2de9
+    text: 'QA INPUT_REQUIRED: TUI dedicated Y key — modal confirm/cancel and summary:
+      INPUT_REQUIRED; TUI y-prefix — cleanup-then-action dispatch, auto-cancel, invalid
+      keys, Esc, and ordering with worker: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-f8abc94-45e1806778a0cdd8)'
+    created_at: '2026-05-03T00:03:29Z'
+    last_edited: '2026-05-03T00:03:29Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-f8abc94-tui-command-for-pr-resource-cleanup-89be975f
 - id: pr-ee2dae6
   plan: improvements
@@ -9268,7 +9274,7 @@ prs:
   title: Launch plan pane actions in a dedicated plans window instead of the main
     window
   branch: pm/pr-a353c3d-launch-plan-pane-actions-in-dedicated-plans
-  status: qa
+  status: merged
   depends_on: []
   description: Plan actions from the plans pane (add, review, breakdown, worker) currently
     split panes in the main tmux window, cluttering it. They should open in a separate
@@ -9279,10 +9285,11 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/179
   gh_pr_number: 179
   created_at: '2026-04-11T21:35:26.923277+00:00'
-  updated_at: '2026-05-02T21:33:55.912666+00:00'
+  updated_at: '2026-05-02T22:29:43.481670+00:00'
   started_at: '2026-05-02T20:58:28.467538+00:00'
   reviewed_at: '2026-05-02T21:33:55.912666+00:00'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a353c3d-launch-plan-pane-actions-in-dedicate-89be975f
+  merged_at: '2026-05-02T22:29:43.481670+00:00'
 - id: pr-1e0785e
   plan: null
   title: qa_loop tmux session target fails when base session in a group is destroyed
@@ -11081,7 +11088,7 @@ prs:
   plan: improvements
   title: 'TUI: animate spinner for PRs in QA status'
   branch: pm/pr-f01eabb-tui-animate-spinner-for-prs-in-qa-status
-  status: pending
+  status: merged
   depends_on: []
   description: 'The tech tree spinner currently animates only for PRs in in_progress
     or in_review status (tech_tree.py:533) and for active review loops. PRs in qa
@@ -11097,20 +11104,21 @@ prs:
     tracking is set up for QA. Tests: PR in qa status with active QA pane shows spinner;
     same PR with idle QA pane shows no spinner; same PR with no QA pane shows no spinner;
     non-qa statuses behavior is unchanged.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/182
+  gh_pr_number: 182
   created_at: '2026-05-02T21:45:33.441103+00:00'
-  updated_at: '2026-05-02T21:45:33.441103+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
+  updated_at: '2026-05-02T23:25:30.210563+00:00'
+  started_at: '2026-05-02T22:27:47.356239+00:00'
+  reviewed_at: '2026-05-02T22:44:22.933037+00:00'
+  merged_at: '2026-05-02T23:25:30.210563+00:00'
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-f01eabb-tui-animate-spinner-for-prs-in-qa-st-32e02cc9
 - id: pr-2173cf1
   plan: bugs
   title: 'Bug: hook_install writes wrong hook_receiver path when run inside a container'
   branch: pm/pr-2173cf1-bug-hook-install-writes-wrong-hook-receiver-path-w
-  status: pending
+  status: merged
   depends_on: []
   description: 'ensure_hooks_installed() (pm_core/hook_install.py) is called from
     pm session and pm tui startup. It writes hook commands using Path.home() to compute
@@ -11152,15 +11160,22 @@ prs:
     containers; integration test that simulates running ensure_hooks_installed in
     a fake container env (HOME=/home/pm, PM_HOST_HOME=/home/matt) and asserts the
     written path is /home/matt/....'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/181
+  gh_pr_number: 181
   created_at: '2026-05-02T21:47:10.307175+00:00'
-  updated_at: '2026-05-02T21:47:10.307175+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
+  updated_at: '2026-05-02T22:27:04.127234+00:00'
+  started_at: '2026-05-02T22:08:10.395115+00:00'
+  reviewed_at: '2026-05-02T22:13:34.550828+00:00'
+  merged_at: '2026-05-02T22:27:04.127234+00:00'
+  notes:
+  - id: note-0017457
+    text: 'QA PASS: Reproduction tests for hook path resolution: PASS; container.py
+      exports PM_HOST_HOME: PASS; Container-context integration simulation: PASS (workdir:
+      /home/matt/.pm/workdirs/qa/pr-2173cf1-84cc1de46a199c08)'
+    created_at: '2026-05-02T22:26:49Z'
+    last_edited: '2026-05-02T22:26:49Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2173cf1-bug-hook-install-writes-wrong-hook-r-47ac840c
 - id: pr-c3762f7
   plan: bugs
   title: 'Bug: containers missing vi and less editors/pagers'
