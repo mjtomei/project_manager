@@ -1371,19 +1371,16 @@ def popup_picker_cmd(session: str, window_name: str):
     prs = data.get("prs") or []
     current_pr = _current_window_pr_id(window_name)
 
-    if not current_pr:
-        click.echo("PR Actions (prefix+P)")
-        click.echo("Switch to a PR window to use this picker.")
-        _pause_and_exit(0)
-
     # Gather open windows to annotate the picker
     open_windows = {w["name"] for w in tmux_mod.list_windows(base)}
 
     from pm_core.cli.helpers import _pr_display_id
 
     # Build the navigation list: PRs that the user has at least one
-    # open window for.  The invoking window's PR is always included
-    # (and is the "home" position for the 0/Home key).
+    # open window for.  The invoking window's PR (if any) is included
+    # as the "home" position for the 0 key.  When the picker is opened
+    # from a non-PR window (current_pr is None), home_pr is None and
+    # navigation cycles through whichever PRs have live windows.
     def _pr_has_open_window(pr: dict) -> bool:
         did = _pr_display_id(pr)
         for pat in _ACTION_WINDOW_PATTERNS.values():
@@ -1391,7 +1388,7 @@ def popup_picker_cmd(session: str, window_name: str):
                 return True
         return False
 
-    home_pr = current_pr
+    home_pr = current_pr  # may be None when invoked from a non-PR window
     nav_pr_ids: list[str] = []
     seen: set[str] = set()
     for p in prs:
@@ -1400,10 +1397,28 @@ def popup_picker_cmd(session: str, window_name: str):
             if did not in seen:
                 nav_pr_ids.append(did)
                 seen.add(did)
-    if home_pr not in seen:
+    if home_pr and home_pr not in seen:
         nav_pr_ids.insert(0, home_pr)
+
+    # If nothing has an open window and the user isn't on a PR, the
+    # picker is still useful — fall back to every non-terminal PR so
+    # the popup is always actionable from any tmux window.
+    if not nav_pr_ids:
+        for p in prs:
+            if p.get("status", "") in _TERMINAL_STATUSES:
+                continue
+            did = _pr_display_id(p)
+            if did and did not in seen:
+                nav_pr_ids.append(did)
+                seen.add(did)
+
+    if not nav_pr_ids:
+        click.echo("PR Actions (prefix+P)")
+        click.echo("No actionable PRs.")
+        _pause_and_exit(0)
+
     try:
-        nav_index = nav_pr_ids.index(home_pr)
+        nav_index = nav_pr_ids.index(home_pr) if home_pr else 0
     except ValueError:
         nav_index = 0
 
@@ -1455,7 +1470,11 @@ def popup_picker_cmd(session: str, window_name: str):
         )
         chord_hint = "z s/d/t: fresh   zz d/t: loop"
         multi_pr = len(nav_pr_ids) > 1
-        nav_hint = "h/l: prev/next PR   0: home" if multi_pr else ""
+        if multi_pr:
+            nav_hint = ("h/l: prev/next PR   0: home" if home_pr
+                        else "h/l: prev/next PR")
+        else:
+            nav_hint = ""
 
         # fzf 0.59+ supports --no-input which hides the entire input
         # box, so unrecognized keystrokes don't echo anywhere in the
@@ -1514,7 +1533,9 @@ def popup_picker_cmd(session: str, window_name: str):
                 header = "\n".join(header_lines)
                 expect = list(_SHORTCUT_KEYS.keys()) + ["z"]
                 if multi_pr:
-                    expect += ["h", "l", "left", "right", "0"]
+                    expect += ["h", "l", "left", "right"]
+                    if home_pr:
+                        expect.append("0")
             elif chord_state == "z":
                 header = (f"z — fresh start for {current_pr}\n"
                           f"s=fresh impl   d=fresh review   t=fresh qa   "
@@ -1560,7 +1581,7 @@ def popup_picker_cmd(session: str, window_name: str):
                     lines, _picked_pr, _label_to_cmd = _resolve_for(current_pr)
                     fzf_input_lines = [d for d, _, _ in lines]
                     continue
-                if multi_pr and pressed_key == "0":
+                if multi_pr and home_pr and pressed_key == "0":
                     nav_index = nav_pr_ids.index(home_pr)
                     current_pr = nav_pr_ids[nav_index]
                     lines, _picked_pr, _label_to_cmd = _resolve_for(current_pr)
