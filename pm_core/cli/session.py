@@ -1122,30 +1122,47 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
     target_window = pattern.format(display_id=display_id) if (
         pattern and display_id) else None
 
-    def _find_target_window_id() -> str | None:
-        """Return the tmux window id (e.g. '@42') of the target window,
-        or None when no matching window currently exists.
+    def _find_target_window_ids() -> list[str]:
+        """Return all tmux window ids whose name matches the target.
+
+        For most actions this is at most one window; for ``qa`` the
+        target name is a prefix (e.g. ``qa-#158`` matches ``qa-#158-s1``,
+        ``qa-#158-s2``), so multiple ids can be live simultaneously.
         """
         if not target_window:
-            return None
+            return []
         try:
             wins = tmux_mod.list_windows(session)
         except Exception:
-            return None
+            return []
+        ids: list[str] = []
         for w in wins:
             name = w.get("name", "")
+            wid = w.get("id")
+            if not wid:
+                continue
             if action == "qa":
                 if name == target_window or name.startswith(target_window + "-"):
-                    return w.get("id")
+                    ids.append(wid)
             elif name == target_window:
-                return w.get("id")
-        return None
+                ids.append(wid)
+        return ids
+
+    def _first_target_window_id() -> str | None:
+        ids = _find_target_window_ids()
+        return ids[0] if ids else None
 
     # For fresh-mode actions (review-loop, qa fresh/loop) the target
-    # window may currently exist but is about to be killed and
-    # recreated.  Snapshot its window-id at the start so we can detect
-    # the recreation rather than treating the doomed window as "open".
-    initial_window_id = _find_target_window_id() if fresh else None
+    # window(s) may currently exist but are about to be killed and
+    # recreated.  Snapshot the *set* of initial window-ids so we can
+    # distinguish a freshly created window (id not in the snapshot)
+    # from a doomed sibling that simply hasn't been killed yet.  For
+    # QA in particular, multiple scenario windows match the prefix and
+    # they get killed one at a time — without the set we'd switch to
+    # the next-still-alive sibling instead of waiting for the rebuild.
+    initial_window_ids: set[str] = (
+        set(_find_target_window_ids()) if fresh else set()
+    )
     saw_disappear = False
 
     # Print a header line so the popup clearly shows what's happening
@@ -1187,21 +1204,28 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
         while True:
             entry = _rs.get_action_state(pr_id, action)
             cur_state = entry.get("state") if entry else None
-            cur_window_id = _find_target_window_id()
-            if fresh and initial_window_id is not None:
-                # Wait for the original window to be killed and a new one
-                # with the same name to come up.  Either the id changes
-                # (new tmux window object) or we observe a moment when
-                # the window was missing and now exists again.
-                if cur_window_id is None:
+            cur_window_ids = _find_target_window_ids()
+            if fresh and initial_window_ids:
+                # Wait for *all* original windows to be killed and a new
+                # one with the same name to appear.  A "new" window is
+                # one whose id is not in the initial set; for QA this
+                # avoids switching to a still-alive sibling scenario
+                # (e.g. qa-#158-s2) when only s1 has been killed.
+                new_ids = [i for i in cur_window_ids
+                           if i not in initial_window_ids]
+                if not cur_window_ids:
                     saw_disappear = True
                     window_open = False
-                elif cur_window_id != initial_window_id or saw_disappear:
+                elif new_ids:
                     window_open = True
+                    # Prefer switching to a freshly created window so we
+                    # never land on a doomed sibling.
+                    cur_window_id = new_ids[0]
                 else:
                     window_open = False
             else:
-                window_open = cur_window_id is not None
+                window_open = bool(cur_window_ids)
+                cur_window_id = cur_window_ids[0] if cur_window_ids else None
             if window_open:
                 # Switch the invoking session to the target window
                 # unless the user pre-emptively suppressed it.  Doing
@@ -1227,7 +1251,7 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
                     f"{CLR_EOL}")
                 return
             spin = frames[i % len(frames)]
-            if fresh and initial_window_id is not None and not saw_disappear:
+            if fresh and initial_window_ids and not saw_disappear:
                 label = "rebuilding window"
             else:
                 label = cur_state or "queued"
