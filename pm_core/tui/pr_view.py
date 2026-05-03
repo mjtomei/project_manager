@@ -577,20 +577,11 @@ def handle_command_submitted(app, cmd: str) -> None:
                             _auto_start.get_transcript_dir(app)))
                 else:
                     app.log_message(f"Review loop already running for {pr_id}")
-                # Switch to the review window if it exists.  The loop
-                # iterations create the review pane lazily so the window
-                # may not be there yet on the first start; that's fine —
-                # select_window is a no-op when the window is missing
-                # and the user can rerun once iteration 1 spawns it.
-                # Honor a popup-spinner-dismissed suppress_switch flag.
-                from pm_core import runtime_state as _rs
-                if (pr and app._session_name
-                        and not _rs.consume_suppress_switch(pr["id"],
-                                                            "review-loop")):
-                    from pm_core.cli.helpers import _pr_display_id
-                    from pm_core import tmux as tmux_mod
-                    win_name = f"review-{_pr_display_id(pr)}"
-                    tmux_mod.select_window(app._session_name, win_name)
+                # Window-switch is owned by the popup spinner: it
+                # waits for review-{display_id} to appear and switches
+                # there unless the user dismissed the spinner with
+                # q/Esc.  Doing it here as well would race with the
+                # popup and ignore the suppress flag.
         else:
             review_loop_ui.start_or_stop_loop(app)
         if app._plans_visible:
@@ -603,10 +594,22 @@ def handle_command_submitted(app, cmd: str) -> None:
     # (same effect as the 'e' key binding).  PR_ID is optional; without
     # it, edits whatever is currently selected.
     if parts and parts[0] == "edit":
+        edit_pr_id: str | None = None
         if len(parts) >= 2:
             tree = app.query_one("#tech-tree", TechTree)
             tree.select_pr(parts[1])
+            edit_pr_id = parts[1]
+        else:
+            tree = app.query_one("#tech-tree", TechTree)
+            edit_pr_id = tree.selected_pr_id
         pane_ops.edit_plan(app)
+        # Tell the popup spinner the action ran; edit opens in the
+        # current window so there's no window-appearance signal to
+        # poll for, and without this the spinner sits at "queued…"
+        # until its short deadline elapses.
+        if edit_pr_id:
+            from pm_core import runtime_state as _rs
+            _rs.set_action_state(edit_pr_id, "edit", "done")
         return
 
     # Handle auto-start commands

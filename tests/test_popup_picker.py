@@ -122,15 +122,21 @@ class TestBuildPickerLines:
         prs = [_pr("pr-001", "merged", "Done PR", gh_pr_number=158)]
         assert _build_picker_lines(prs, "#158") == []
 
-    def test_all_actions_shown_regardless_of_status(self):
+    def test_only_window_actions_get_rows(self):
+        # start / review / qa / merge each have their own window and
+        # should appear; edit and review-loop are shortcut-only.
         prs = [_pr("pr-001", "pending", "New PR", gh_pr_number=158)]
         lines = _build_picker_lines(prs, "#158")
         action_lines = [d for d, cmd, _ in lines if cmd]
-        assert len(action_lines) == 6
+        assert len(action_lines) == 4
         assert any("start" in d for d in action_lines)
+        assert any("review" in d and "review-loop" not in d
+                   for d in action_lines)
+        assert any("qa" in d for d in action_lines)
         assert any("merge" in d for d in action_lines)
-        rl_lines = [d for d in action_lines if "review-loop" in d]
-        assert len(rl_lines) == 1
+        # edit and review-loop are not list rows
+        assert not any(d.strip().startswith("edit") for d in action_lines)
+        assert not any("review-loop" in d for d in action_lines)
 
     def test_phase_indicator_shown(self):
         prs = [_pr("pr-001", "in_progress", "My PR", gh_pr_number=158)]

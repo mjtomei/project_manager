@@ -794,14 +794,34 @@ _ALL_ACTIONS: list[tuple[str, str]] = [
 ]
 
 # Map action labels to tmux window name patterns.
-# None means no associated window (loops, not windows).
+# ``None`` means the action doesn't open its own tmux window — it's a
+# *shortcut-only* action.  Such actions don't appear as rows in the
+# picker; their status (when meaningful) is folded into a list row's
+# annotation via ``_SHORTCUT_FOLD_INTO``.
 _ACTION_WINDOW_PATTERNS: dict[str, str | None] = {
     "start": "{display_id}",
     "edit": None,
     "review": "review-{display_id}",
-    "review-loop": None,
+    # review-loop iterations create panes inside the review window, so
+    # the spinner polls for the same target as 'review'.  The action
+    # is still shortcut-only (no list row) — see ``_LIST_ACTIONS``.
+    "review-loop": "review-{display_id}",
     "qa": "qa-{display_id}",
     "merge": "merge-{display_id}",
+}
+
+# Actions that get their own row in the picker.  Shortcut-only actions
+# (edit, review-loop) are reachable via their `--expect` keys but don't
+# clutter the list with an extra row.
+_LIST_ACTIONS: set[str] = {"start", "review", "qa", "merge"}
+
+# Shortcut-only actions whose runtime status should be displayed on a
+# list row alongside another action.  ``review-loop`` shares the
+# ``review-{display_id}`` window, so its `[loop iN]` badge lives on the
+# review row.  Edit isn't here because the edit pane opens in the
+# current window and there's nothing meaningful to display.
+_SHORTCUT_FOLD_INTO: dict[str, str] = {
+    "review-loop": "review",
 }
 
 # Terminal statuses — PRs in these states have no actions.
@@ -949,7 +969,20 @@ def _build_picker_lines(
     # not the PR's status — e.g. sitting in the impl window of an
     # in_review PR should highlight 'start', not 'review'.
     phase = current_phase if current_phase is not None else _status_phase(status)
+    # Actions without their own tmux window (edit, review-loop) are
+    # shortcut-only — they don't get a row in the picker; their status
+    # (where meaningful) is folded into a related list action's row.
+    fold_status: dict[str, str] = {}
+    for label, _ in _ALL_ACTIONS:
+        if label not in _LIST_ACTIONS:
+            host = _SHORTCUT_FOLD_INTO.get(label)
+            if host:
+                tag = _format_action_status(pr["id"], label)
+                if tag:
+                    fold_status[host] = fold_status.get(host, "") + tag
     for label, cmd_template in actions:
+        if label not in _LIST_ACTIONS:
+            continue  # shortcut-only; status (if any) folded in above
         cmd = cmd_template.format(pr_id=pr["id"])
         indicator = "●" if label == phase else " "
 
@@ -970,6 +1003,10 @@ def _build_picker_lines(
         # Live status from the shared runtime-state file (loop iteration,
         # idle/waiting derived from the latest hook event, etc.).
         status_tag = _format_action_status(pr["id"], label)
+        # Fold in any shortcut-only actions whose status belongs here
+        # (e.g. review-loop's '[loop i3]' lives on the review row since
+        # review-loop iterations run in the review window).
+        status_tag += fold_status.get(label, "")
 
         lines.append((f"  {indicator} {label:<18s}{display_id}"
                       f"{open_tag}{status_tag}", cmd, display_id))
@@ -1018,6 +1055,11 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
     pr_id, action = _parse_tui_action(tui_cmd)
     if not pr_id or not action:
         return
+    # 'edit' opens in the current window — there's no window-appearance
+    # signal to wait for and the launch is effectively instant.  Skip
+    # the spinner entirely so the popup closes without a visible flash.
+    if action == "edit":
+        return
     try:
         root = state_root()
         data = store.load(root)
@@ -1032,6 +1074,7 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
     pattern = _ACTION_WINDOW_PATTERNS.get(action)
     target_window = pattern.format(display_id=display_id) if (
         pattern and display_id) else None
+    import time
 
     frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
     i = 0
@@ -1070,6 +1113,24 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
                 else:
                     window_open = target_window in open_names
             if window_open:
+                # Switch the invoking session to the target window
+                # unless the user pre-emptively suppressed it.  Doing
+                # the switch here keeps review and review-loop
+                # consistent: review's switch is performed by the
+                # 'pm pr review' subprocess, but review-loop iterations
+                # don't switch on first start, so we drive it from the
+                # popup.  qa keeps its own focus_or_start_qa switch
+                # path.
+                try:
+                    from pm_core import runtime_state as _rs
+                    suppressed = _rs.consume_suppress_switch(pr_id, action)
+                except Exception:
+                    suppressed = False
+                if not suppressed and action != "qa":
+                    try:
+                        tmux_mod.select_window(session, target_window)
+                    except Exception:
+                        pass
                 click.echo(
                     f"\r✓ {action}: window {target_window} is open"
                     "                     ")
