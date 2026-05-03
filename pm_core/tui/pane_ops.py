@@ -532,56 +532,99 @@ To interact with this session, use commands like:
 # Plan and test pane actions
 # ---------------------------------------------------------------------------
 
-PLANS_WINDOW_NAME = "plans"
+PLANS_WINDOW_FALLBACK = "plans"
 
 
-def _ensure_plans_window(app) -> str | None:
-    """Return the tmux window id for the dedicated plans window.
+def _plans_window_name(plan_id: str | None) -> str:
+    """Per-plan tmux window name = the plan id itself.
 
-    Creates the window with a benign placeholder shell if it does not
-    yet exist. Returns None when not in tmux or on tmux failures so
-    callers can fall back to current-window behavior.
+    All actions for the same plan share one window (different panes by role);
+    different plans get different windows. Cross-plan actions (deps, plan add)
+    pass synthetic ids like ``plan-deps`` / ``plan-add-<uuid>`` so they ride
+    the same machinery without colliding.
     """
-    if not tmux_mod.in_tmux():
-        return None
-    try:
-        session = tmux_mod.get_session_name()
-        if not session:
-            return None
-        win = tmux_mod.find_window_by_name(session, PLANS_WINDOW_NAME)
-        if not win:
-            cwd = str(app._root) if app._root else "."
-            tmux_mod.new_window_get_pane(
-                session, PLANS_WINDOW_NAME, "bash -l",
-                cwd=cwd, switch=False,
-            )
-            win = tmux_mod.find_window_by_name(session, PLANS_WINDOW_NAME)
-        if not win:
-            return None
-        return win["id"]
-    except Exception:
-        _log.exception("_ensure_plans_window failed")
-        return None
+    return plan_id or PLANS_WINDOW_FALLBACK
 
 
-def _focus_plans_window(app) -> None:
-    """Switch the user's grouped session to the plans window."""
+def _focus_plans_window(app, plan_id: str | None) -> None:
+    """Switch the user's grouped session to the per-plan window."""
     if not tmux_mod.in_tmux():
         return
     try:
         session = tmux_mod.get_session_name()
         if session:
-            tmux_mod.select_window(session, PLANS_WINDOW_NAME)
+            tmux_mod.select_window(session, _plans_window_name(plan_id))
     except Exception:
         _log.exception("_focus_plans_window failed")
 
 
-def _launch_in_plans_window(app, cmd: str, role: str, fresh: bool = False) -> None:
-    """Launch a pane in the dedicated plans window and switch focus to it."""
-    plans_win = _ensure_plans_window(app)
-    launch_pane(app, cmd, role, fresh=fresh, target_window=plans_win)
-    if plans_win:
-        _focus_plans_window(app)
+def _wrap_pane_cmd(session: str, window: str, cmd: str) -> str:
+    """Wrap a pane command with the EXIT trap that notifies pm of pane death."""
+    data = pane_registry.load_registry(session)
+    gen = data.get("generation", "0")
+    escaped = cmd.replace("'", "'\\''")
+    return (f"bash -c 'trap \"pm _pane-exited {session} {window} {gen} "
+            f"$TMUX_PANE\" EXIT; {escaped}'")
+
+
+def _launch_in_plans_window(app, plan_id: str | None, cmd: str, role: str,
+                            fresh: bool = False) -> None:
+    """Launch a pane in the per-plan window and switch focus to it.
+
+    If the window doesn't exist yet, creates it with the wrapped command as
+    its sole pane (no placeholder shell). If it exists, defers to
+    :func:`launch_pane` which dedups by role and splits.
+    """
+    if not tmux_mod.in_tmux():
+        # Not in tmux: fall back to current-window launch.
+        launch_pane(app, cmd, role, fresh=fresh)
+        return
+    try:
+        session = tmux_mod.get_session_name()
+    except Exception:
+        _log.exception("_launch_in_plans_window: get_session_name failed")
+        launch_pane(app, cmd, role, fresh=fresh)
+        return
+    if not session:
+        launch_pane(app, cmd, role, fresh=fresh)
+        return
+
+    name = _plans_window_name(plan_id)
+    try:
+        win = tmux_mod.find_window_by_name(session, name)
+    except Exception:
+        _log.exception("_launch_in_plans_window: find_window_by_name failed")
+        win = None
+
+    if win:
+        launch_pane(app, cmd, role, fresh=fresh, target_window=win["id"])
+        _focus_plans_window(app, plan_id)
+        return
+
+    # Window doesn't exist — create it with the real command as the sole pane.
+    cwd = str(app._root) if app._root else "."
+    wrapped = _wrap_pane_cmd(session, name, cmd)
+    try:
+        pane_id = tmux_mod.new_window_get_pane(
+            session, name, wrapped, cwd=cwd, switch=False,
+        )
+        win = tmux_mod.find_window_by_name(session, name)
+        if pane_id and win:
+            pane_layout.register_and_rebalance(
+                session, win["id"], [(pane_id, role, cmd)])
+            app.log_message(f"Launched {role} pane")
+            _log.info("launched pane in new window: role=%s id=%s window=%s",
+                      role, pane_id, name)
+        _focus_plans_window(app, plan_id)
+    except Exception as e:
+        _log.exception("failed to launch %s pane in new window", role)
+        app.log_message(f"Error: {e}")
+
+
+# Synthetic plan ids for cross-plan actions that aren't tied to one plan.
+# These ride the same per-plan window machinery so each cross-plan action gets
+# its own dedicated window instead of fighting over a single shared "plans".
+_DEPS_PSEUDO_PLAN_ID = "plan-deps"
 
 
 def handle_plan_action(app, action: str, plan_id: str | None) -> None:
@@ -593,19 +636,20 @@ def handle_plan_action(app, action: str, plan_id: str | None) -> None:
                 plan_path = app._root / plan.get("file", "")
                 if plan_path.exists():
                     editor = find_editor()
-                    _launch_in_plans_window(app, f"{editor} {plan_path}", "plan-edit")
+                    _launch_in_plans_window(app, plan_id, f"{editor} {plan_path}", "plan-edit")
     elif action == "breakdown":
         if plan_id:
-            _launch_in_plans_window(app, f"pm plan breakdown {plan_id}", "plan-breakdown")
+            _launch_in_plans_window(app, plan_id, f"pm plan breakdown {plan_id}", "plan-breakdown")
     elif action == "deps":
-        _launch_in_plans_window(app, "pm plan deps", "plan-deps")
+        # Cross-plan action: use a dedicated 'plans-deps' window.
+        _launch_in_plans_window(app, _DEPS_PSEUDO_PLAN_ID, "pm plan deps", "plan-deps")
     elif action == "load":
         if plan_id:
             app._run_command(f"plan load {plan_id}",
                              working_message="Loading PRs from plan")
     elif action == "review":
         if plan_id:
-            _launch_in_plans_window(app, f"pm plan review {plan_id}", "plan-review")
+            _launch_in_plans_window(app, plan_id, f"pm plan review {plan_id}", "plan-review")
 
 
 def handle_plan_add(app, result: tuple[str, str] | None) -> None:
@@ -618,7 +662,13 @@ def handle_plan_add(app, result: tuple[str, str] | None) -> None:
         return
     name, _description = result  # description is always empty now
     cmd = f"pm plan add {shlex.quote(name)}"
-    _launch_in_plans_window(app, cmd, "plan-add")
+    # generate_plan_id is sha256(name + description) so the TUI and the
+    # spawned `pm plan add` process produce the same id — the window we open
+    # here will be the same one the plan's later actions (edit, breakdown,
+    # review) target, instead of a one-shot 'plan-add-<uuid>' window.
+    existing_ids = {p["id"] for p in (app._data.get("plans") or [])}
+    plan_id = store.generate_plan_id(name, existing_ids)
+    _launch_in_plans_window(app, plan_id, cmd, "plan-add")
 
 
 def launch_plan_activated(app, plan_id: str) -> None:
@@ -629,7 +679,7 @@ def launch_plan_activated(app, plan_id: str) -> None:
         return
     plan_path = app._root / plan.get("file", "")
     if plan_path.exists():
-        _launch_in_plans_window(app, f"less {plan_path}", "plan")
+        _launch_in_plans_window(app, plan_id, f"less {plan_path}", "plan")
 
 
 # ---------------------------------------------------------------------------
