@@ -2300,15 +2300,42 @@ def _cleanup_pr(pr_entry: dict, root: Path, force: bool) -> bool:
 @click.option("--force", is_flag=True, default=False, help="Remove even if workdir has uncommitted changes")
 @click.option("--all", "cleanup_all", is_flag=True, default=False, help="Clean up all PR workdirs")
 @click.option("--prune", is_flag=True, default=False, help="Clear workdir references for paths that no longer exist")
-def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool):
+@click.option("--resources", is_flag=True, default=False,
+              help="Tear down live resources (tmux windows, QA containers, "
+                   "pane registry, push-proxy sockets) instead of the workdir")
+def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
+               resources: bool):
     """Remove work directory for a PR.
 
     Refuses to delete workdirs with uncommitted changes unless --force is given.
     Use --all to clean up all PR workdirs at once.
     Use --prune to clear stale workdir references from project.yaml.
+    Use --resources to kill live tmux/docker/registry resources for a PR.
     """
     root = state_root()
     data = store.load(root)
+
+    if resources:
+        if pr_id is None:
+            click.echo("--resources requires a PR id.", err=True)
+            raise SystemExit(1)
+        target = _resolve_pr_id(data, pr_id)
+        if not target:
+            click.echo(f"PR '{pr_id}' not found.", err=True)
+            raise SystemExit(1)
+        from pm_core import pr_cleanup as pr_cleanup_mod
+        from pm_core.loop_shared import get_pm_session
+        session = get_pm_session()
+        summary = pr_cleanup_mod.cleanup_pr_resources(session, target)
+        click.echo(f"Cleaned {target['id']}: {pr_cleanup_mod.format_summary(summary)}")
+        if summary["windows"]:
+            click.echo(f"  windows: {', '.join(summary['windows'])}")
+        if summary["containers"]:
+            click.echo(f"  containers: {', '.join(summary['containers'])}")
+        if summary["registry_windows"]:
+            click.echo(f"  registry: {', '.join(summary['registry_windows'])}")
+        trigger_tui_refresh()
+        return
 
     if prune:
         pruned = 0

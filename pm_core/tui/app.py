@@ -154,6 +154,7 @@ class ProjectManagerApp(App):
         Binding("O", "auto_sequence_pr", "Auto-seq", show=True),
         Binding("w", "focus_watcher", "Watcher", show=False),
         Binding("V", "review_spec", "Review Spec", show=False),
+        Binding("Y", "cleanup_pr", "Cleanup", show=True),
     ]
 
     def on_key(self, event) -> None:
@@ -167,6 +168,10 @@ class ProjectManagerApp(App):
         """
         cmd_bar = self.query_one("#command-bar", CommandBar)
         if cmd_bar.has_focus:
+            return
+        # When a modal/screen is on top of the default screen, let it handle
+        # its own keys — App-level prefix keys (y/w/z) must not swallow them.
+        if len(self.screen_stack) > 1:
             return
         # Buffer keystrokes between / press and command bar gaining focus
         if self._command_pending:
@@ -200,6 +205,31 @@ class ProjectManagerApp(App):
             event.prevent_default()
             event.stop()
             return
+        # y prefix mode: dispatch second key as cleanup-then-action
+        if self._y_mode:
+            self._y_mode = False
+            if self._y_cancel_timer:
+                self._y_cancel_timer.stop()
+                self._y_cancel_timer = None
+            self._clear_log_message()
+            key = event.character or event.key
+            if key in ("s", "d", "t"):
+                pr_view.cleanup_then_action(self, key)
+            else:
+                self.log_message("[dim]y cancelled[/]")
+            event.prevent_default()
+            event.stop()
+            return
+        if (event.key == "y" or event.character == "y"):
+            if not self.check_action("cleanup_pr", ()):
+                return
+            self._y_mode = True
+            self._z_count = 0
+            self.log_message("[bold]y …[/] [dim](cleanup-then: s=start d=review t=qa)[/]")
+            self._y_cancel_timer = self.set_timer(2.0, self._cancel_y_mode)
+            event.prevent_default()
+            event.stop()
+            return
         if event.key == "w" or event.character == "w":
             # Enter w prefix mode (check_action guard for command bar etc)
             if not self.check_action("focus_watcher", ()):
@@ -222,13 +252,18 @@ class ProjectManagerApp(App):
                 self.log_message(f"[bold]{'z' * self._z_count} …[/]")
             event.prevent_default()
             event.stop()
-        elif event.key == "escape" and (self._z_count > 0 or self._w_mode):
+        elif event.key == "escape" and (self._z_count > 0 or self._w_mode or self._y_mode):
             self._z_count = 0
             if self._w_mode:
                 self._w_mode = False
                 if self._w_cancel_timer:
                     self._w_cancel_timer.stop()
                     self._w_cancel_timer = None
+            if self._y_mode:
+                self._y_mode = False
+                if self._y_cancel_timer:
+                    self._y_cancel_timer.stop()
+                    self._y_cancel_timer = None
             self._clear_log_message()
             # Don't prevent — let escape also do its normal thing
 
@@ -241,7 +276,7 @@ class ProjectManagerApp(App):
                        "view_log", "refresh", "rebalance", "show_help",
                        "toggle_plans", "toggle_qa", "start_qa_on_pr", "hide_plan", "move_to_plan", "toggle_merged",
                        "cycle_filter", "cycle_sort", "toggle_auto_start", "auto_sequence_pr", "focus_watcher",
-                       "review_spec"):
+                       "review_spec", "cleanup_pr"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus or self._command_pending:
                 _log.debug("check_action: blocked %s (command bar focused/pending)", action)
@@ -310,6 +345,9 @@ class ProjectManagerApp(App):
         # w prefix key state
         self._w_mode: bool = False
         self._w_cancel_timer = None
+        # y prefix key state (cleanup-then-action)
+        self._y_mode: bool = False
+        self._y_cancel_timer = None
         # QA loop state (purely in-memory)
         self._qa_loops: dict = {}
         # Self-driving QA state (zz t — tracks pass counts per PR)
@@ -761,6 +799,15 @@ class ProjectManagerApp(App):
         if self._w_mode:
             self._w_mode = False
             self._clear_log_message()
+
+    def _cancel_y_mode(self) -> None:
+        """Auto-cancel y prefix mode after timeout."""
+        if self._y_mode:
+            self._y_mode = False
+            self._clear_log_message()
+
+    def action_cleanup_pr(self) -> None:
+        pr_view.cleanup_pr(self)
 
     def _action_focus_watcher(self) -> None:
         """Focus the watcher window (wf key chord)."""
