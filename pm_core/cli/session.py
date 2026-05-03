@@ -1419,8 +1419,9 @@ def popup_picker_cmd(session: str, window_name: str):
                 label_to_cmd[lbl] = tpl.format(pr_id=picked["id"])
         # Phase indicator only meaningful for the invoking PR — when
         # navigating to a different PR the user isn't "in" any of its
-        # phases, so let _build_picker_lines fall back to status-derived.
-        phase = invoking_phase if pr_disp == home_pr else None
+        # phases.  Pass "" (not None) so _build_picker_lines treats it
+        # as "no phase" rather than falling back to status-derived.
+        phase = invoking_phase if pr_disp == home_pr else ""
         pr_lines = _build_picker_lines(
             prs, pr_disp, open_windows, current_phase=phase)
         return pr_lines, picked, label_to_cmd
