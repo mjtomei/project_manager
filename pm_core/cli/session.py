@@ -786,6 +786,7 @@ def rebalance_cmd():
 # Commands prefixed with "tui:" are routed through the TUI command bar.
 _ALL_ACTIONS: list[tuple[str, str]] = [
     ("start", "pr start {pr_id}"),
+    ("edit", "tui:edit {pr_id}"),
     ("review", "pr review {pr_id}"),
     ("review-loop", "tui:review-loop start {pr_id}"),
     ("qa", "tui:pr qa {pr_id}"),
@@ -796,6 +797,7 @@ _ALL_ACTIONS: list[tuple[str, str]] = [
 # None means no associated window (loops, not windows).
 _ACTION_WINDOW_PATTERNS: dict[str, str | None] = {
     "start": "{display_id}",
+    "edit": None,
     "review": "review-{display_id}",
     "review-loop": None,
     "qa": "qa-{display_id}",
@@ -838,10 +840,31 @@ def _current_window_pr_id(window_name: str) -> str | None:
     return m.group(1) if m else None
 
 
+def _current_window_phase(window_name: str) -> str | None:
+    """Map a window name's prefix to a picker action label.
+
+    Drives the ●-marker in the picker so it reflects the user's current
+    context rather than the PR's status.  Returns 'start' for an
+    unprefixed PR window (the implementation pane), 'review' for
+    ``review-…``, 'qa' for ``qa-…``, 'merge' for ``merge-…``, or None
+    if the window isn't a PR window.
+    """
+    if _current_window_pr_id(window_name) is None:
+        return None
+    if window_name.startswith("review-"):
+        return "review"
+    if window_name.startswith("qa-"):
+        return "qa"
+    if window_name.startswith("merge-"):
+        return "merge"
+    return "start"
+
+
 def _build_picker_lines(
     prs: list[dict],
     current_pr_display: str | None,
     open_windows: set[str] | None = None,
+    current_phase: str | None = None,
 ) -> list[tuple[str, str, str]]:
     """Build display lines for the action-based PR picker.
 
@@ -882,7 +905,10 @@ def _build_picker_lines(
 
     lines.append((f"  {display_id}  ({status})  {short_title}", "", display_id))
 
-    phase = _status_phase(status)
+    # Phase indicator reflects the *current window* (where the user is),
+    # not the PR's status — e.g. sitting in the impl window of an
+    # in_review PR should highlight 'start', not 'review'.
+    phase = current_phase if current_phase is not None else _status_phase(status)
     for label, cmd_template in actions:
         cmd = cmd_template.format(pr_id=pr["id"])
         indicator = "●" if label == phase else " "
@@ -983,7 +1009,10 @@ def popup_picker_cmd(session: str, window_name: str):
     # Gather open windows to annotate the picker
     open_windows = {w["name"] for w in tmux_mod.list_windows(base)}
 
-    lines = _build_picker_lines(prs, current_pr, open_windows)
+    lines = _build_picker_lines(
+        prs, current_pr, open_windows,
+        current_phase=_current_window_phase(window_name),
+    )
 
     if not lines:
         click.echo(f"PR Actions — {current_pr}")
@@ -998,6 +1027,7 @@ def popup_picker_cmd(session: str, window_name: str):
     # below), so qa uses 'a'.
     _SHORTCUT_KEYS = {
         "s": "start",
+        "e": "edit",
         "d": "review",
         "l": "review-loop",
         "a": "qa",

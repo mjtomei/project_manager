@@ -569,20 +569,40 @@ def handle_command_submitted(app, cmd: str) -> None:
                 app.log_message("No PR selected")
             else:
                 loop = app._review_loops.get(pr_id)
-                if loop and loop.running:
-                    app.log_message(f"Review loop already running for {pr_id}")
-                else:
+                if not (loop and loop.running):
                     from pm_core.tui import auto_start as _auto_start
                     review_loop_ui._start_loop(
                         app, pr_id, pr,
                         transcript_dir=str(
                             _auto_start.get_transcript_dir(app)))
+                else:
+                    app.log_message(f"Review loop already running for {pr_id}")
+                # Switch to the review window if it exists.  The loop
+                # iterations create the review pane lazily so the window
+                # may not be there yet on the first start; that's fine —
+                # select_window is a no-op when the window is missing
+                # and the user can rerun once iteration 1 spawns it.
+                if pr and app._session_name:
+                    from pm_core.cli.helpers import _pr_display_id
+                    from pm_core import tmux as tmux_mod
+                    win_name = f"review-{_pr_display_id(pr)}"
+                    tmux_mod.select_window(app._session_name, win_name)
         else:
             review_loop_ui.start_or_stop_loop(app)
         if app._plans_visible:
             app.query_one("#plans-pane", PlansPane).focus()
         else:
             tree.focus()
+        return
+
+    # Handle edit command: 'edit [PR_ID]' — opens the PR's edit pane
+    # (same effect as the 'e' key binding).  PR_ID is optional; without
+    # it, edits whatever is currently selected.
+    if parts and parts[0] == "edit":
+        if len(parts) >= 2:
+            tree = app.query_one("#tech-tree", TechTree)
+            tree.select_pr(parts[1])
+        pane_ops.edit_plan(app)
         return
 
     # Handle auto-start commands
