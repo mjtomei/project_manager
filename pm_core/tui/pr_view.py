@@ -537,7 +537,10 @@ def handle_command_submitted(app, cmd: str) -> None:
             break
 
     # Handle review loop commands
-    # Accepts: review-loop [PR_ID], review-loop stop [PR_ID]
+    # Accepts: review-loop [start|stop] [PR_ID]
+    # No subcommand → toggle (start if not running, stop if running).
+    # 'start' → always start (logs if already running) — used by the
+    # popup picker so repeated presses don't accidentally stop.
     parts = shlex.split(cmd)
     _rl_base = cmd.replace("review loop", "review-loop")
     _rl_parts = _rl_base.split()
@@ -545,8 +548,10 @@ def handle_command_submitted(app, cmd: str) -> None:
         from pm_core.tui import review_loop_ui
         _rl_rest = _rl_parts[1:]
         _rl_stop = "stop" in _rl_rest
-        # Extract PR ID: any token that isn't "stop"
-        _rl_pr_id = next((t for t in _rl_rest if t != "stop"), None)
+        _rl_start = "start" in _rl_rest
+        # Extract PR ID: any token that isn't a subcommand
+        _rl_pr_id = next(
+            (t for t in _rl_rest if t not in ("start", "stop")), None)
 
         tree = app.query_one("#tech-tree", TechTree)
         if _rl_pr_id:
@@ -558,6 +563,20 @@ def handle_command_submitted(app, cmd: str) -> None:
                 review_loop_ui.stop_loop_for_pr(app, pr_id)
             else:
                 app.log_message("No PR selected")
+        elif _rl_start:
+            pr_id, pr = review_loop_ui._get_selected_pr(app)
+            if not pr_id:
+                app.log_message("No PR selected")
+            else:
+                loop = app._review_loops.get(pr_id)
+                if loop and loop.running:
+                    app.log_message(f"Review loop already running for {pr_id}")
+                else:
+                    from pm_core.tui import auto_start as _auto_start
+                    review_loop_ui._start_loop(
+                        app, pr_id, pr,
+                        transcript_dir=str(
+                            _auto_start.get_transcript_dir(app)))
         else:
             review_loop_ui.start_or_stop_loop(app)
         if app._plans_visible:

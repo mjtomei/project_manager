@@ -787,7 +787,7 @@ def rebalance_cmd():
 _ALL_ACTIONS: list[tuple[str, str]] = [
     ("start", "pr start {pr_id}"),
     ("review", "pr review {pr_id}"),
-    ("review-loop", "tui:review-loop {pr_id}"),
+    ("review-loop", "tui:review-loop start {pr_id}"),
     ("qa", "tui:pr qa {pr_id}"),
     ("merge", "pr merge {pr_id}"),
 ]
@@ -1026,10 +1026,12 @@ def popup_picker_cmd(session: str, window_name: str):
         shortcut_hint = "  ".join(
             f"{key}={label}" for key, label in _SHORTCUT_KEYS.items()
         )
-        header = (f"PR Actions — {current_pr}  "
-                  f"(q/Esc: quit  {shortcut_hint})")
+        header = (f"PR Actions — {current_pr}\n"
+                  f"q/Esc: quit  {shortcut_hint}")
         fzf_cmd = ["fzf", "--ansi", "--no-sort", "--reverse",
                    f"--header={header}",
+                   "--header-first",
+                   "--prompt=Filter: ",
                    "--no-info",
                    "--bind=q:abort",
                    f"--expect={expect_keys}"]
