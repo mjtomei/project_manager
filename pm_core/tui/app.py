@@ -943,37 +943,99 @@ class ProjectManagerApp(App):
         from pm_core.paths import pm_home
         return pm_home() / f"tui-{self._session_name}.pid"
 
+    def _command_queue_file(self) -> Path | None:
+        """Path to this app's external command queue, keyed by session name."""
+        if not self._session_name:
+            return None
+        from pm_core.paths import pm_home
+        return pm_home() / f"tui-{self._session_name}.cmd-queue"
+
     def _install_reload_signal(self) -> None:
-        """Write pidfile and register SIGUSR1 -> action_reload."""
+        """Write pidfile and register signal handlers.
+
+        SIGUSR1 → ``action_reload`` (state-only reload).
+        SIGUSR2 → drain the per-session command queue file and dispatch
+        each line through ``handle_command_submitted`` (same path as the
+        in-TUI ``/`` command bar).  Lets external processes (popup
+        picker, CLI helpers) submit commands without depending on
+        focus-sensitive ``tmux send-keys`` timing.
+        """
         import os
         import signal
         import asyncio
         pidfile = self._reload_pidfile()
         if pidfile is None:
-            _log.debug("No session name yet, skipping reload-signal install")
+            _log.debug("No session name yet, skipping signal-handler install")
             return
         try:
             pidfile.write_text(str(os.getpid()))
         except OSError as e:
             _log.debug("Could not write TUI pidfile %s: %s", pidfile, e)
             return
+        # Pre-create the command queue file so external writers can
+        # always open it for append without a race.
+        queue = self._command_queue_file()
+        if queue is not None:
+            try:
+                queue.touch(exist_ok=True)
+            except OSError as e:
+                _log.debug("Could not create TUI command queue %s: %s",
+                           queue, e)
         try:
             loop = asyncio.get_event_loop()
             loop.add_signal_handler(signal.SIGUSR1, self.action_reload)
-            _log.info("Installed SIGUSR1 reload handler (pidfile=%s)", pidfile)
+            loop.add_signal_handler(signal.SIGUSR2, self._drain_command_queue)
+            _log.info("Installed SIGUSR1 reload + SIGUSR2 cmd-queue handlers"
+                      " (pidfile=%s, queue=%s)", pidfile, queue)
         except (NotImplementedError, RuntimeError) as e:
             # add_signal_handler isn't available on Windows; not relevant
             # for our tmux flow but log so it's visible if it ever fires.
-            _log.debug("Could not install SIGUSR1 handler: %s", e)
+            _log.debug("Could not install signal handlers: %s", e)
+
+    def _drain_command_queue(self) -> None:
+        """Read pending commands from the queue file and dispatch them.
+
+        Each non-empty line is a command identical to what the in-TUI
+        ``/`` command bar would submit.  We dispatch via the same
+        ``handle_command_submitted`` path so behavior matches exactly.
+        Commands are processed in FIFO order; the queue is truncated
+        after a successful read.
+        """
+        from pm_core.tui import pr_view
+        queue = self._command_queue_file()
+        if queue is None or not queue.exists():
+            return
+        try:
+            # Atomic-ish: read then truncate.  Concurrent appenders may
+            # add lines between read and truncate; those would be lost.
+            # Acceptable here — picker invocations are user-paced and
+            # the appender takes a flock around append+signal so a
+            # second SIGUSR2 fires for any racing line.
+            with open(queue, "r+") as f:
+                content = f.read()
+                f.seek(0)
+                f.truncate()
+        except OSError as e:
+            _log.debug("Could not read TUI command queue %s: %s", queue, e)
+            return
+        for line in content.splitlines():
+            cmd = line.strip()
+            if not cmd:
+                continue
+            _log.info("dispatching queued TUI command: %r", cmd)
+            try:
+                pr_view.handle_command_submitted(self, cmd)
+            except Exception:
+                _log.exception("queued command failed: %r", cmd)
 
     def on_unmount(self) -> None:
-        """Clean up the reload pidfile on shutdown."""
-        pidfile = self._reload_pidfile()
-        if pidfile is not None:
-            try:
-                pidfile.unlink(missing_ok=True)
-            except OSError as e:
-                _log.debug("Could not remove TUI pidfile %s: %s", pidfile, e)
+        """Clean up the reload pidfile and command queue on shutdown."""
+        for path in (self._reload_pidfile(), self._command_queue_file()):
+            if path is not None:
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError as e:
+                    _log.debug("Could not remove TUI file %s: %s", path, e)
 
     def action_reload(self) -> None:
         """Reload state from disk without triggering PR sync.

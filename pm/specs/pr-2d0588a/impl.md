@@ -69,7 +69,26 @@ For shared sessions using `PM_TMUX_SOCKET`, the popup inherits the environment o
 
 ### IR4: TUI Routing for QA and Review Loops
 
-QA (`pr qa`) and review loops require the TUI's Textual app context. The picker routes these commands by finding the TUI pane and sending keystrokes: `Escape` → `/` → command text → `Enter`. This reuses the TUI's existing command bar interception for `pr qa PR_ID` and `review-loop PR_ID`.
+QA (`pr qa`) and review loops require the TUI's Textual app context.
+Routing happens via a SIGUSR2 + per-session command-queue file IPC,
+following the SIGUSR1 reload pattern added in commit 9c30b38:
+
+- TUI on mount: writes `~/.pm/tui-{session}.cmd-queue` (initially empty)
+  and registers a SIGUSR2 handler that drains the queue file line-by-line
+  and dispatches each line through the same path as
+  `CommandSubmitted` (`handle_command_submitted`).
+- External callers (`trigger_tui_command(session, cmd)` in
+  `pm_core/cli/helpers.py`): append the command line to the queue file
+  under a file lock, then `os.kill(tui_pid, SIGUSR2)`.
+- The queue model means the picker (and any future caller) can enqueue
+  multiple commands at once and they run in order without needing
+  `tmux send-keys` or focus-dependent timing.
+
+This replaces the earlier brittle `send-keys '/' → sleep → -l "<cmd>"
+→ Enter` approach where literal text could leak to whichever widget
+held focus before Textual finished focusing the command bar (observed
+as `r`/`e` etc. firing as TUI key bindings — refresh, edit-pane —
+instead of being typed into the command bar).
 
 ### IR5: fzf Dependency
 
@@ -140,7 +159,7 @@ If QA or review-loop is selected but the TUI pane can't be found, show an error 
 ### Architecture
 
 ```
-prefix+P → display-popup 'pm _popup-picker #{session_name} #{window_name}'
+prefix+P → display-popup 'pm _popup-picker $(tmux display-message ...)'
                 ↓
          Load PRs from project.yaml
                 ↓
@@ -150,7 +169,12 @@ prefix+P → display-popup 'pm _popup-picker #{session_name} #{window_name}'
                 ↓
          On selection:
            ├─ Direct: pm pr start/review/merge PR_ID (subprocess)
-           └─ TUI:    send-keys to TUI pane → / pr qa PR_ID Enter
+           └─ TUI:    trigger_tui_command(session, "pr qa PR_ID")
+                      ├─ append cmd to ~/.pm/tui-{session}.cmd-queue
+                      └─ os.kill(tui_pid, SIGUSR2)
+                           ↓
+                    TUI SIGUSR2 handler drains queue → dispatches
+                    each line through handle_command_submitted
 
 prefix+M → display-popup 'pm _popup-cmd #{session_name}'
                 ↓

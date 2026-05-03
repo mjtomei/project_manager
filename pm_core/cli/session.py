@@ -911,39 +911,19 @@ def _run_picker_command(cmd: str, session: str) -> None:
     import sys
 
     if cmd.startswith("tui:"):
-        # Route through the TUI command bar
-        import time
+        # Route through the TUI's SIGUSR2 + queue-file IPC.  Focus-
+        # independent: doesn't depend on tmux send-keys timing, can't
+        # be eaten by whichever widget has focus, and supports queuing
+        # multiple commands across concurrent picker invocations.
+        from pm_core.cli.helpers import trigger_tui_command
         tui_cmd = cmd[4:]
-        from pm_core.cli.helpers import _find_tui_pane
         base = pane_registry.base_session_name(session)
-        pane_id, _ = _find_tui_pane(base)
-        if not pane_id:
-            click.echo("TUI pane not found — cannot run this command.")
+        if not trigger_tui_command(base, tui_cmd):
+            click.echo("Could not reach the TUI (no pidfile or signal failed).")
             try:
                 input("\nPress Enter to close...")
             except (EOFError, KeyboardInterrupt):
                 pass
-            return
-        # Send the command to the TUI command bar.
-        # / opens the command bar; we then need a brief delay so Textual
-        # finishes focusing the Input widget before the literal text
-        # arrives — without it, the first chars sometimes land on the
-        # previously-focused widget and the command never executes.
-        # No leading Escape: it can disrupt unrelated focus state and
-        # caused the picker to behave intermittently.
-        subprocess.run(tmux_mod._tmux_cmd("send-keys", "-t", pane_id, "/"),
-                       check=False)
-        # Generous delay: at 80ms we still occasionally saw the literal
-        # text dispatch as TUI bindings (e.g. 'e' opening the edit pane
-        # before the command bar had focus).  Bumping to 300ms gives
-        # Textual's event loop ample time to process the focus change.
-        time.sleep(0.3)
-        subprocess.run(tmux_mod._tmux_cmd("send-keys", "-t", pane_id,
-                                           "-l", tui_cmd),
-                       check=False)
-        time.sleep(0.05)
-        subprocess.run(tmux_mod._tmux_cmd("send-keys", "-t", pane_id, "Enter"),
-                       check=False)
     else:
         # Run pm command directly
         full_cmd = [sys.executable, "-m", "pm_core.wrapper"] + shlex.split(cmd)
