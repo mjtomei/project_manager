@@ -105,21 +105,29 @@ def _register_tmux_bindings(session_name: str) -> None:
             check=False)
 
     # Popup bindings: PR action picker (prefix+P) and pm command runner (prefix+M).
+    # Pass session/window via -e environment vars: tmux always expands
+    # format strings in -e values, but expansion of #{...} inside the
+    # shell-command argument is unreliable across tmux versions.
     # Wrap in a shell that pauses on launch failure (e.g. pm not on PATH) so
     # the popup stays visible long enough to read the error instead of
     # vanishing instantly with display-popup -E.
-    _picker_inner = ("pm _popup-picker '#{session_name}' '#{window_name}'"
+    _picker_inner = ('pm _popup-picker "$PM_POPUP_SESSION" "$PM_POPUP_WINDOW"'
                      " || { echo; echo 'pm popup failed (exit '$?').';"
                      " read -p 'Press Enter to close...'; }")
-    _cmd_inner = ("pm _popup-cmd '#{session_name}'"
+    _cmd_inner = ('pm _popup-cmd "$PM_POPUP_SESSION"'
                   " || { echo; echo 'pm popup failed (exit '$?').';"
                   " read -p 'Press Enter to close...'; }")
     subprocess.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", "P",
-             "display-popup", "-E", "-w", "80", "-h", "80%",
+             "display-popup", "-E",
+             "-e", "PM_POPUP_SESSION=#{session_name}",
+             "-e", "PM_POPUP_WINDOW=#{window_name}",
+             "-w", "80", "-h", "80%",
              _picker_inner),
             check=False)
     subprocess.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", "M",
-             "display-popup", "-E", "-w", "80", "-h", "50%",
+             "display-popup", "-E",
+             "-e", "PM_POPUP_SESSION=#{session_name}",
+             "-w", "80", "-h", "50%",
              _cmd_inner),
             check=False)
 
@@ -777,7 +785,6 @@ _ALL_ACTIONS: list[tuple[str, str]] = [
     ("start", "pr start {pr_id}"),
     ("review", "pr review {pr_id}"),
     ("review-loop", "tui:review-loop {pr_id}"),
-    ("review-loop strict", "tui:review-loop strict {pr_id}"),
     ("qa", "tui:pr qa {pr_id}"),
     ("merge", "pr merge {pr_id}"),
 ]
@@ -788,7 +795,6 @@ _ACTION_WINDOW_PATTERNS: dict[str, str | None] = {
     "start": "{display_id}",
     "review": "review-{display_id}",
     "review-loop": None,
-    "review-loop strict": None,
     "qa": "qa-{display_id}",
     "merge": "merge-{display_id}",
 }
@@ -995,7 +1001,6 @@ def popup_picker_cmd(session: str, window_name: str):
         "s": "start",
         "d": "review",
         "l": "review-loop",
-        "L": "review-loop strict",
         "q": "qa",
         "g": "merge",
     }
