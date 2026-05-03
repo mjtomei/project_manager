@@ -929,14 +929,74 @@ def _poll_impl_idle(app) -> None:
                                   pending_merges, active_merge_keys)
             # else: still not merged — keep tracking
 
+    # --- Third pass: non-loop review windows ---
+    # Track the review pane for in_review PRs that don't have a running
+    # review loop, so the picker shows [working]/[idle]/[wait] and we
+    # can pick up the review verdict from the transcript.
+    active_review_keys: set[str] = set()
+    for pr in (app._data.get("prs") or []):
+        if pr.get("status") != "in_review":
+            continue
+        pr_id = pr.get("id", "")
+        if not pr_id:
+            continue
+        loop = app._review_loops.get(pr_id)
+        if loop and loop.running:
+            continue  # loop iterations own the review window's transcript
+
+        review_key = f"review:{pr_id}"
+        window_name = f"review-{_pr_display_id(pr)}"
+
+        if not tracker.is_tracked(review_key) or tracker.is_gone(review_key):
+            pane_id = _find_impl_pane(session, window_name)
+            if not pane_id:
+                continue
+            tdir = _auto_start.get_transcript_dir(app)
+            if not tdir:
+                continue
+            review_transcript = str(tdir / f"review-{pr_id}.jsonl")
+            try:
+                tracker.register(review_key, pane_id, review_transcript)
+            except ValueError:
+                continue
+
+        active_review_keys.add(review_key)
+        tracker.poll(review_key)
+
+        # --- Mirror the review verdict ---
+        review_transcript_path = tracker.get_transcript_path(review_key)
+        if review_transcript_path:
+            from pm_core.verdict_transcript import extract_verdict_from_transcript
+            verdict = extract_verdict_from_transcript(
+                review_transcript_path,
+                ("LGTM", "NEEDS_WORK", "INPUT_REQUIRED"),
+            )
+            if verdict:
+                from pm_core import runtime_state as _rs
+                cur = _rs.get_action_state(pr_id, "review") or {}
+                if cur.get("verdict") != verdict or cur.get("state") != "done":
+                    try:
+                        _rs.set_action_state(pr_id, "review", "done",
+                                             verdict=verdict)
+                    except Exception:
+                        _log.debug("runtime_state review verdict mirror failed",
+                                   exc_info=True)
+
     # Unregister stale merge keys and clean up verdict stability state
     for key in tracker.tracked_keys():
         if key.startswith("merge:") and key not in active_merge_keys:
             tracker.unregister(key)
 
+    # Unregister stale review keys
+    for key in tracker.tracked_keys():
+        if key.startswith("review:") and key not in active_review_keys:
+            tracker.unregister(key)
+
     # Unregister PRs no longer active
     for key in tracker.tracked_keys():
-        if not key.startswith("merge:") and key not in active_pr_ids:
+        if (not key.startswith("merge:")
+                and not key.startswith("review:")
+                and key not in active_pr_ids):
             tracker.unregister(key)
 
     # Auto-start review for newly-idle implementation PRs

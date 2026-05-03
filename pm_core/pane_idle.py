@@ -235,8 +235,13 @@ class PaneIdleTracker:
 #   (picker's ``start`` action).
 # * ``qa:<pr_id>:s<N>`` — QA scenario pane (set by
 #   :mod:`pm_core.tui.qa_loop_ui`).  Mirrored as the picker's ``qa`` action.
-# * ``merge:<pr_id>`` — merge resolution window; not mirrored (the
-#   picker has no per-merge runtime state to display).
+# * ``merge:<pr_id>`` — merge resolution window; mirrored as the
+#   picker's ``merge`` action so the merge row shows [working]/[idle]/
+#   [wait] alongside the impl and QA rows.
+# * ``review:<pr_id>`` — non-loop review pane; mirrored as the picker's
+#   ``review`` action.  Loop iterations live under the same window but
+#   own runtime_state via review_loop_ui's ``review-loop`` key, which
+#   is folded onto the review row by _SHORTCUT_FOLD_INTO.
 # External readers (popup picker, status spinner) want to know which
 # PR/action a pane belongs to so they can resolve idle/working via
 # :func:`hook_events.read_event`.
@@ -247,6 +252,10 @@ def _runtime_target(key: str) -> tuple[str, str] | None:
         rest = key[3:]
         pr_part = rest.split(":s", 1)[0]
         return pr_part, "qa"
+    if key.startswith("merge:"):
+        return key[len("merge:"):], "merge"
+    if key.startswith("review:"):
+        return key[len("review:"):], "review"
     if key.startswith("pr-") or key.startswith("#"):
         return key, "start"
     return None

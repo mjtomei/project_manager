@@ -167,7 +167,20 @@ def review_pr(app, fresh: bool = False) -> None:
     if not guard_pr_action(app, action_key):
         return
     app._inflight_pr_action = action_key
-    cmd = f"pr review --fresh {pr_id}" if fresh else f"pr review {pr_id}"
+    # Pass --transcript so the resulting Claude session writes a hook
+    # transcript symlink the auto-start scheduler can poll for idle/
+    # working state and verdicts.  Mirrors the pattern used by review-
+    # loop iterations and QA scenarios.
+    from pm_core.tui import auto_start as _auto_start
+    try:
+        tdir = _auto_start.get_transcript_dir(app)
+    except Exception:
+        tdir = None
+    transcript_arg = ""
+    if tdir:
+        transcript_arg = f" --transcript {tdir}/review-{pr_id}.jsonl"
+    fresh_arg = " --fresh" if fresh else ""
+    cmd = f"pr review{fresh_arg}{transcript_arg} {pr_id}"
     run_command(app, cmd, working_message=action_key, action_key=action_key)
 
 

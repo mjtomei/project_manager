@@ -304,6 +304,18 @@ def poll_qa_state(app) -> None:
                 # spinner stops and tracked_keys() doesn't grow.
                 for sc in state.scenarios:
                     tracker.unregister(f"qa:{pr_id}:s{sc.index}")
+                # Record the verdict in runtime_state so the popup
+                # picker shows [done VERDICT] on the qa row across
+                # picker invocations.  Written *after* the unregister
+                # calls above, since unregister clears the qa entry
+                # via _runtime_mirror_clear.
+                try:
+                    from pm_core import runtime_state as _rs
+                    _rs.set_action_state(pr_id, "qa", "done",
+                                         verdict=state.latest_verdict)
+                except Exception:
+                    _log.debug("runtime_state qa verdict mirror failed",
+                               exc_info=True)
                 del app._qa_loops[pr_id]
             else:
                 state._ui_complete_notified = True

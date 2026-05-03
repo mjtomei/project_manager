@@ -67,7 +67,10 @@ A flock-protected JSON file per PR at `~/.pm/runtime/{pr_id}.json` records per-a
 
 Mirrors:
 - `review_loop_ui` writes on loop start, every iteration (with `iteration` and `verdict`), and completion.
-- `PaneIdleTracker.register/unregister` and the pane-gone path mirror impl panes (key=pr_id → action `start`) and QA scenarios (key starts with `qa-` → action `qa`). The pane-gone path clears the entry rather than recording a state.
+- `PaneIdleTracker.register/unregister` and the pane-gone path mirror impl panes (key=pr_id → action `start`), QA scenarios (key=`qa:<pr_id>:s<N>` → action `qa`), merge windows (key=`merge:<pr_id>` → action `merge`), and non-loop review windows (key=`review:<pr_id>` → action `review`). The pane-gone path clears the entry rather than recording a state.
+- `qa_loop_ui` writes `done` with `verdict` on QA loop completion (after the scenario panes are unregistered) so the picker shows `[done VERDICT]` on the qa row across invocations.
+- `review_loop_ui._poll_impl_idle` polls the non-loop review pane's transcript for verdicts (`LGTM`/`NEEDS_WORK`/`INPUT_REQUIRED`) and writes `done` with `verdict` on the `review` action.  Loop iterations skip this pass; their per-iteration verdict lives under the `review-loop` action and folds onto the review row via `_SHORTCUT_FOLD_INTO`.
+- `pr_view`'s `review_pr` passes `--transcript {tdir}/review-{pr_id}.jsonl` to `pm pr review` so the non-loop review session has a hook transcript symlink to poll.
 - `pr_view`'s `edit` handler does not need a runtime_state mirror — the popup spinner returns early for `edit` (no window-appearance signal exists since edit opens in the current window).
 
 `derive_action_status(pr_id, action)` cross-references the latest hook event (`hook_events.read_event(session_id)`) so callers see fresh idle/waiting transitions without requiring the TUI to record every hook event.
