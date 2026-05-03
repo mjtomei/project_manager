@@ -228,7 +228,8 @@ function applyState(s, fullSync) {
   } else {
     applyOverlays();
   }
-  $meta.textContent = state.path + " (v" + state.version + ")";
+  const tag = s.missing ? " [missing]" : "";
+  $meta.textContent = state.path + " (v" + state.version + ")" + tag;
 }
 
 function focusToTop(top) {

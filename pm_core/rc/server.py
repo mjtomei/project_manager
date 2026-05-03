@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import queue
 import threading
 from dataclasses import dataclass, field
@@ -42,11 +43,17 @@ class State:
     selection: tuple[int, int] | None = None
     proposal: str | None = None
     viewport: dict | None = None
+    missing: bool = False
+    last_mtime_ns: int = 0
+    last_size: int = -1
     lock: threading.Lock = field(default_factory=threading.Lock)
     subscribers: list[queue.Queue] = field(default_factory=list)
 
     def read_text(self) -> str:
-        return self.path.read_text()
+        try:
+            return self.path.read_text()
+        except FileNotFoundError:
+            return ""
 
     def line_count(self) -> int:
         text = self.read_text()
@@ -67,10 +74,56 @@ class State:
                 if self.selection else None
             ),
             "proposal": ({"text": self.proposal} if self.proposal is not None else None),
+            "missing": self.missing,
         }
         if include_text:
             d["text"] = self.read_text()
         return d
+
+    def stat_signature(self) -> tuple[int, int] | None:
+        try:
+            st = self.path.stat()
+        except FileNotFoundError:
+            return None
+        return (st.st_mtime_ns, st.st_size)
+
+    def remember_disk_state(self) -> None:
+        """Record current on-disk signature so the watcher won't re-fire."""
+        sig = self.stat_signature()
+        if sig is None:
+            self.last_mtime_ns = 0
+            self.last_size = -1
+            self.missing = True
+        else:
+            self.last_mtime_ns, self.last_size = sig
+            self.missing = False
+
+    def check_disk(self) -> tuple[bool, dict | None, dict | None]:
+        """Detect external file changes. Returns (changed, state_snap, doc_snap).
+
+        ``doc_snap`` is None if the file is missing (no text to send).
+        Caller broadcasts after releasing the lock.
+        """
+        sig = self.stat_signature()
+        with self.lock:
+            now_missing = sig is None
+            if now_missing:
+                if self.missing:
+                    return (False, None, None)
+                self.missing = True
+                self.last_mtime_ns = 0
+                self.last_size = -1
+                self.version += 1
+                return (True, self.snapshot(include_text=False), None)
+            mtime, size = sig
+            if not self.missing and mtime == self.last_mtime_ns and size == self.last_size:
+                return (False, None, None)
+            self.missing = False
+            self.last_mtime_ns = mtime
+            self.last_size = size
+            self.version += 1
+            return (True, self.snapshot(include_text=False),
+                    self.snapshot(include_text=True))
 
     def broadcast(self, event: str, data: dict) -> None:
         """Push an event to every subscriber. Drops slow subscribers."""
@@ -106,15 +159,23 @@ class ViewportBody(BaseModel):
     bottom: int
 
 
-def create_app(path: Path) -> FastAPI:
+def create_app(path: Path, watch_interval: float = 0.15) -> FastAPI:
     """Build the FastAPI app bound to *path*.
 
     Exposed as a factory so tests can construct an app against a temp
     file without spawning a uvicorn process.
+
+    A background thread polls *path* every *watch_interval* seconds and
+    broadcasts a state+doc event on external modification (and a state
+    event on file deletion / reappearance). Set ``watch_interval=0`` to
+    disable the watcher (tests drive ``state.check_disk()`` directly).
     """
     state = State(path=path.resolve())
+    state.remember_disk_state()
     app = FastAPI()
     app.state.rc = state
+    stop_event = threading.Event()
+    app.state.rc_stop = stop_event
 
     @app.get("/", response_class=HTMLResponse)
     def _root() -> str:
@@ -187,6 +248,9 @@ def create_app(path: Path) -> FastAPI:
             state.version += 1
             state.proposal = None
             state.selection = None
+            # Update the disk signature so the file watcher doesn't see
+            # our own write as an external modification and re-broadcast.
+            state.remember_disk_state()
             new_version = state.version
             snap = state.snapshot(include_text=False)
             doc = state.snapshot(include_text=True)
@@ -243,6 +307,29 @@ def create_app(path: Path) -> FastAPI:
                     pass
 
         return StreamingResponse(gen(), media_type="text/event-stream")
+
+    def _watch_loop():
+        # Polling mtime+size avoids a watchdog/inotify dependency. The
+        # 150ms interval naturally debounces editor multi-step saves
+        # (vim's write→swap→rename burst settles within the window).
+        while not stop_event.wait(watch_interval):
+            try:
+                changed, snap, doc = state.check_disk()
+            except Exception:
+                continue
+            if changed:
+                state.broadcast("state", snap)
+                if doc is not None:
+                    state.broadcast("doc", doc)
+
+    if watch_interval > 0:
+        watcher = threading.Thread(target=_watch_loop, name="rc-watcher",
+                                   daemon=True)
+        watcher.start()
+
+        @app.on_event("shutdown")
+        def _shutdown():  # pragma: no cover - lifecycle
+            stop_event.set()
 
     return app
 

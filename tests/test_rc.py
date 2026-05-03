@@ -28,7 +28,9 @@ def doc(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def client(doc: Path) -> TestClient:
-    return TestClient(create_app(doc))
+    # watch_interval=0 disables the polling thread; tests that exercise
+    # the watcher drive State.check_disk() directly.
+    return TestClient(create_app(doc, watch_interval=0))
 
 
 def test_doc_initial_snapshot(client: TestClient, doc: Path):
@@ -189,6 +191,86 @@ def test_sse_drops_slow_subscribers(doc: Path):
     state.broadcast("state", {"a": 1})  # fills queue
     state.broadcast("state", {"a": 2})  # would block — should drop
     assert q not in state.subscribers
+
+
+def test_external_modification_bumps_version_and_broadcasts(doc: Path):
+    """File touched externally should bump version and emit state+doc."""
+    from pm_core.rc.server import State
+    import queue
+    state = State(path=doc.resolve())
+    state.remember_disk_state()
+    initial_version = state.version
+
+    q: queue.Queue = queue.Queue(maxsize=10)
+    state.subscribers.append(q)
+
+    # Simulate an external editor save with new content + bumped mtime.
+    new_text = "alpha\nbravo\nCHARLIE-EDITED\ndelta\necho\nfoxtrot\n"
+    doc.write_text(new_text)
+    # write_text may produce same mtime_ns on fast filesystems; force.
+    import os
+    st = doc.stat()
+    os.utime(doc, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000))
+
+    changed, snap, docsnap = state.check_disk()
+    assert changed
+    assert snap["version"] == initial_version + 1
+    assert snap["missing"] is False
+    assert docsnap is not None
+    assert docsnap["text"] == new_text
+
+
+def test_external_deletion_emits_missing_state(doc: Path):
+    from pm_core.rc.server import State
+    state = State(path=doc.resolve())
+    state.remember_disk_state()
+
+    doc.unlink()
+    changed, snap, docsnap = state.check_disk()
+    assert changed
+    assert snap["missing"] is True
+    assert docsnap is None
+
+    # Subsequent check with no further change is a no-op
+    changed2, _, _ = state.check_disk()
+    assert not changed2
+
+
+def test_doc_endpoint_when_missing_does_not_500(doc: Path):
+    from fastapi.testclient import TestClient
+    from pm_core.rc.server import create_app, State
+
+    app = create_app(doc, watch_interval=0)
+    state: State = app.state.rc
+    doc.unlink()
+    state.check_disk()
+
+    c = TestClient(app)
+    r = c.get("/api/doc")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["missing"] is True
+    assert body["text"] == ""
+
+
+def test_accept_does_not_trigger_watcher(doc: Path):
+    """Our own writes via /api/accept should not be re-broadcast as
+    external modifications — remember_disk_state must capture the new
+    signature inside the accept handler."""
+    from fastapi.testclient import TestClient
+    from pm_core.rc.server import create_app, State
+
+    app = create_app(doc, watch_interval=0)
+    state: State = app.state.rc
+    c = TestClient(app)
+
+    c.post("/api/select", json={"start": 2, "end": 2})
+    c.post("/api/propose", json={"text": "BRAVO"})
+    c.post("/api/accept")
+
+    # Now polling the disk should report no further change.
+    changed, _, _ = state.check_disk()
+    assert changed is False
 
 
 def test_viewport_last_write_wins(client: TestClient):
