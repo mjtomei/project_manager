@@ -793,9 +793,11 @@ _ALL_ACTIONS: list[tuple[str, str]] = [
 ]
 
 # Modifier-key (z / zz) variants for actions that support fresh / loop.
-# Mirrors the TUI's z/zz chord behavior: ``z d`` = fresh review,
-# ``zz d`` = review loop, ``z a`` = fresh qa, ``zz a`` = qa loop.
+# Mirrors the TUI's z/zz chord behavior: ``z s`` = fresh start,
+# ``z d`` = fresh review, ``zz d`` = review loop,
+# ``z t`` = fresh qa, ``zz t`` = qa loop.
 _MODIFIED_ACTION_CMDS: dict[tuple[str, str], str] = {
+    ("z",  "start"):  "pr start --fresh {pr_id}",
     ("z",  "review"): "pr review --fresh {pr_id}",
     ("zz", "review"): "tui:review-loop start {pr_id}",
     ("z",  "qa"):     "tui:pr qa fresh {pr_id}",
@@ -1420,7 +1422,7 @@ def popup_picker_cmd(session: str, window_name: str):
         shortcut_hint = "  ".join(
             f"{key}={label}" for key, label in _SHORTCUT_KEYS.items()
         )
-        chord_hint = "z d/t: fresh   zz d/t: loop"
+        chord_hint = "z s/d/t: fresh   zz d/t: loop"
 
         # fzf 0.59+ supports --no-input which hides the entire input
         # box, so unrecognized keystrokes don't echo anywhere in the
@@ -1475,9 +1477,9 @@ def popup_picker_cmd(session: str, window_name: str):
                 expect = list(_SHORTCUT_KEYS.keys()) + ["z"]
             elif chord_state == "z":
                 header = (f"z — fresh start for {current_pr}\n"
-                          f"d=fresh review   t=fresh qa   "
+                          f"s=fresh impl   d=fresh review   t=fresh qa   "
                           f"z again for loop   q/Esc cancels")
-                expect = ["z", "d", "t"]
+                expect = ["z", "s", "d", "t"]
             else:  # 'zz'
                 header = (f"zz — loop for {current_pr}\n"
                           f"d=review-loop   t=qa-loop   "
@@ -1526,7 +1528,7 @@ def popup_picker_cmd(session: str, window_name: str):
             if chord_state == "z" and pressed_key == "z":
                 chord_state = "zz"
                 continue
-            if pressed_key in ("d", "t"):
+            if pressed_key in ("s", "d", "t"):
                 action_label = _SHORTCUT_KEYS.get(pressed_key)
                 if action_label and _picked_pr is not None:
                     template = _MODIFIED_ACTION_CMDS.get(

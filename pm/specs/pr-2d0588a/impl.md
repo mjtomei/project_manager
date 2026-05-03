@@ -27,7 +27,7 @@ The action representing the *current window's phase* is marked with a `●` indi
 
 **Shortcut keys** (fzf `--expect`): `s`=start, `e`=edit, `d`=review, `t`=qa, `g`=merge — matching the TUI's PR-action key bindings. `q`/`Esc` quits.
 
-**Chord modifiers** (mirror the TUI's `z`/`zz` chord behaviour): `z` is appended to fzf `--expect`. After fzf returns with `z`, the picker reads 1-2 follow-up keys in cbreak mode to resolve a `fresh`/`loop` variant — `z d` = `pr review --fresh`, `zz d` = `tui:review-loop start`, `z a` = `tui:pr qa fresh`, `zz a` = `tui:pr qa loop`. Review-loop is reachable via the chord only (it shares the `review-{display_id}` window with `pr review`, so giving it its own row would be redundant). The chord prompt clears the line on cancel.
+**Chord modifiers** (mirror the TUI's `z`/`zz` chord behaviour): `z` is appended to fzf `--expect`. After fzf returns with `z`, the picker reads 1-2 follow-up keys in cbreak mode to resolve a `fresh`/`loop` variant — `z s` = `pr start --fresh`, `z d` = `pr review --fresh`, `zz d` = `tui:review-loop start`, `z t` = `tui:pr qa fresh`, `zz t` = `tui:pr qa loop`. Review-loop is reachable via the chord only (it shares the `review-{display_id}` window with `pr review`, so giving it its own row would be redundant). The chord prompt clears the line on cancel.
 
 **Command execution**: On selection:
 - Direct CLI commands (start, review, merge): run `pm pr <action> <pr_id>` as subprocess
