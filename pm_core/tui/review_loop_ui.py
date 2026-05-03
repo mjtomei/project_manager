@@ -72,7 +72,20 @@ def stop_loop_or_fresh_done(app) -> None:
 # ---------------------------------------------------------------------------
 
 def start_or_stop_loop(app) -> None:
-    """Handle ``zz d``: start loop or stop if one is running."""
+    """Handle ``zz d``: always start a fresh review loop.
+
+    Previously this toggled — pressing ``zz d`` while a loop ran would
+    stop it.  That left no way to restart a loop without first
+    cancelling, and it wasn't obvious that ``zz d`` cancelled rather
+    than restarted.  Now any existing loop for the same PR is
+    superseded: we set its ``stop_requested`` flag (so its background
+    thread exits at the next iteration boundary) and start a fresh
+    loop in its place.
+
+    Cancelling a loop is now done via TUI restart (which sweeps the
+    in-memory loop registry on remount) or by Ctrl+C in the loop's
+    review pane.
+    """
     from pm_core.tui import auto_start as _auto_start
 
     pr_id, pr = _get_selected_pr(app)
@@ -80,10 +93,14 @@ def start_or_stop_loop(app) -> None:
         app.log_message("No PR selected")
         return
 
-    loop = app._review_loops.get(pr_id)
-    if loop and loop.running:
-        _stop_loop(app, pr_id)
-        return
+    existing = app._review_loops.get(pr_id)
+    if existing and existing.running:
+        existing.stop_requested = True
+        _log.info("review_loop_ui: superseding running loop for %s "
+                  "with a fresh one", pr_id)
+        app.log_message(
+            f"[bold]Restarting review loop[/] for {pr_id} "
+            "(superseding running loop)")
 
     _start_loop(app, pr_id, pr,
                 transcript_dir=str(_auto_start.get_transcript_dir(app)))

@@ -51,7 +51,11 @@ Register a tmux prefix key binding (prefix+M) in `_register_tmux_bindings()` tha
 
 ### R3: TUI Command Bar Enhancement (review-loop PR_ID)
 
-Extend `handle_command_submitted` in `pm_core/tui/pr_view.py` to accept `review-loop [start|stop] [PR_ID]`. With no subcommand it toggles (current behavior). `start` always starts (idempotent — logs a message if a loop is already running for that PR), so repeated picker presses don't accidentally stop a running loop. `stop` stops. The optional `PR_ID` selects the PR in the tree before acting. The window-switch on start is *not* performed here — the popup spinner owns it (it polls for the `review-{display_id}` window to appear and honors a `suppress_switch` flag set when the user dismisses the spinner with q/Esc). (The `strict` variant from the original PR notes was dropped in commit b9c9b54.)
+Extend `handle_command_submitted` in `pm_core/tui/pr_view.py` to accept `review-loop [start] [PR_ID]`. The optional `PR_ID` selects the PR in the tree before acting; the optional `start` keyword is accepted for symmetry with the picker's command template but is now redundant since the only behavior is "start fresh".
+
+`review_loop_ui.start_or_stop_loop` (the function that handles both `zz d` from the TUI and the popup's `review-loop` chord) was changed to **always start a fresh loop**. If a loop is already running for the same PR, its `stop_requested` flag is set (so its background thread exits at the next iteration boundary) and a new loop replaces it in `app._review_loops`. Cancelling a loop is done via TUI restart (which sweeps the in-memory loop registry on remount) or by Ctrl+C in the loop's review pane — `zz d` no longer cancels. The `stop` subcommand was dropped from the command-bar handler.
+
+The window-switch on start is *not* performed here — the popup spinner owns it (it polls for the `review-{display_id}` window to appear and honors a `suppress_switch` flag set when the user dismisses the spinner with q/Esc). (The `strict` variant from the original PR notes was dropped in commit b9c9b54.)
 
 Also accept `edit [PR_ID]`: selects the PR (when given) and invokes `pane_ops.edit_plan(app)` — same effect as the `e` key. Used by the picker's edit action.
 
