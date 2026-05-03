@@ -145,13 +145,22 @@ def set_action_state(pr_id: str, action: str, state: str | None,
                     if state is not None:
                         cur["state"] = state
                         cur.setdefault("started_at", _now_iso())
-                    cur["updated_at"] = _now_iso()
                     for k, v in extras.items():
                         if v is None:
                             cur.pop(k, None)
                         else:
                             cur[k] = v
-                    actions[action] = cur
+                    # Drop the action entry entirely when the resulting
+                    # dict carries no meaningful fields — e.g. a bare
+                    # consume_suppress_switch on a never-recorded action
+                    # would otherwise leave an empty {updated_at} stub.
+                    meaningful = {k for k in cur
+                                  if k not in ("updated_at", "started_at")}
+                    if state is None and not meaningful:
+                        actions.pop(action, None)
+                    else:
+                        cur["updated_at"] = _now_iso()
+                        actions[action] = cur
                 f.seek(0)
                 f.truncate()
                 json.dump(data, f, indent=2, sort_keys=True)

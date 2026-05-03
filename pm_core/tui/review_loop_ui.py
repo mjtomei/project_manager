@@ -288,6 +288,22 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
     """Called from the background thread when the loop finishes."""
     _log.info("review_loop_ui: loop complete for %s — verdict=%s iterations=%d",
               state.pr_id, state.latest_verdict, state.iteration)
+
+    # Finalize review transcript symlinks for this loop's iterations.
+    # Done before the supersede check because the transcripts are this
+    # loop's own work — they need finalizing whether or not we still
+    # own the runtime_state entry.
+    tdir = getattr(state, '_transcript_dir', None)
+    if tdir:
+        from pathlib import Path
+        from pm_core.claude_launcher import finalize_transcript
+        tdir_path = Path(tdir)
+        if tdir_path.is_dir():
+            for p in tdir_path.iterdir():
+                if (p.is_symlink() and p.suffix == ".jsonl"
+                        and p.name.startswith(f"review-{state.pr_id}-")):
+                    finalize_transcript(p)
+
     from pm_core import runtime_state as _rs
     if not _is_active_loop(state):
         # We were superseded by a fresh loop; don't overwrite its
@@ -317,18 +333,6 @@ def _is_active_loop(state: ReviewLoopState) -> bool:
     # the write so iteration mirrors still work for the very first
     # iteration after a restart.
     return not cur_id or cur_id == state.loop_id
-
-    # Finalize review transcript symlinks for this loop's iterations
-    tdir = getattr(state, '_transcript_dir', None)
-    if tdir:
-        from pathlib import Path
-        from pm_core.claude_launcher import finalize_transcript
-        tdir_path = Path(tdir)
-        if tdir_path.is_dir():
-            for p in tdir_path.iterdir():
-                if (p.is_symlink() and p.suffix == ".jsonl"
-                        and p.name.startswith(f"review-{state.pr_id}-")):
-                    finalize_transcript(p)
 
 
 # ---------------------------------------------------------------------------
