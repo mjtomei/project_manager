@@ -1049,7 +1049,6 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
     import select
     import sys
     import termios
-    import time
     import tty
 
     pr_id, action = _parse_tui_action(tui_cmd)
@@ -1074,11 +1073,9 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
     pattern = _ACTION_WINDOW_PATTERNS.get(action)
     target_window = pattern.format(display_id=display_id) if (
         pattern and display_id) else None
-    import time
 
     frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
     i = 0
-    last_state: str | None = None
 
     # Put stdin in cbreak mode so we can poll for q/Esc keypresses
     # without waiting for Enter.  Restore in finally so the popup shell
@@ -1135,7 +1132,6 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
                     f"\r✓ {action}: window {target_window} is open"
                     "                     ")
                 return
-            last_state = cur_state
             spin = frames[i % len(frames)]
             label = cur_state or "queued"
             click.echo(f"\r{spin} {action}: {label}…   ", nl=False)
