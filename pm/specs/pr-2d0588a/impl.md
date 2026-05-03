@@ -11,22 +11,23 @@ Register a tmux prefix key binding (prefix+P) in `_register_tmux_bindings()` (`p
 **PR discovery**: Use `store.load(state_root())` to load all PRs. The picker is **scoped to the current window's PR** only — it determines the active PR by parsing `#{window_name}` and shows only that PR's actions. From a non-PR window the picker shows a "Switch to a PR window" hint and exits.
 
 **Available actions** (all returned for any non-terminal status; merged/closed PRs have no actions):
-- start, edit, review, review-loop, qa, merge
+- start, edit, review, qa, merge (top-level)
+- review-loop, qa-fresh, qa-loop, review-fresh (chord-only variants)
 
-The action representing the *current window's phase* is marked with a `●` indicator (so sitting in the impl pane of an `in_review` PR highlights `start`, not `review`). If the action's tmux window is already open, the line is annotated with `[open]`.
+The action representing the *current window's phase* is marked with a `●` indicator (so sitting in the impl pane of an `in_review` PR highlights `start`, not `review`). If the action's tmux window is already open, the line is annotated with `[open]`. Live runtime status (`[loop iN]`, `[done VERDICT]`, `[idle]`/`[wait]`/`[working]`/`[gone]`) is folded into the relevant row from the shared runtime-state file. Shortcut-only actions (edit, review-loop) do not get their own list row — review-loop's `[loop iN]` badge is folded into the review row.
 
-**Display format**: One header line (non-selectable) showing display ID, status, and title; one selectable line per action below:
+**Display format**: One header line (non-selectable) showing display ID, status, and title; one selectable line per action below (only `_LIST_ACTIONS` rows render):
 ```
   #158  (in_progress)  Add popup picker
   ● start              #158
-    edit               #158
-    review             #158
-    review-loop        #158
+    review             #158 [loop i3]
     qa                 #158
     merge              #158
 ```
 
-**Shortcut keys** (fzf `--expect`): `s`=start, `e`=edit, `d`=review, `l`=review-loop, `a`=qa, `g`=merge. `q`/`Esc` quits.
+**Shortcut keys** (fzf `--expect`): `s`=start, `e`=edit, `d`=review, `a`=qa, `g`=merge. `q`/`Esc` quits.
+
+**Chord modifiers** (mirror the TUI's `z`/`zz` chord behaviour): `z` is appended to fzf `--expect`. After fzf returns with `z`, the picker reads 1-2 follow-up keys in cbreak mode to resolve a `fresh`/`loop` variant — `z d` = `pr review --fresh`, `zz d` = `tui:review-loop start`, `z a` = `tui:pr qa fresh`, `zz a` = `tui:pr qa loop`. Review-loop is reachable via the chord only (it shares the `review-{display_id}` window with `pr review`, so giving it its own row would be redundant). The chord prompt clears the line on cancel.
 
 **Command execution**: On selection:
 - Direct CLI commands (start, review, merge): run `pm pr <action> <pr_id>` as subprocess
@@ -50,9 +51,11 @@ Register a tmux prefix key binding (prefix+M) in `_register_tmux_bindings()` tha
 
 ### R3: TUI Command Bar Enhancement (review-loop PR_ID)
 
-Extend `handle_command_submitted` in `pm_core/tui/pr_view.py` to accept `review-loop [start|stop] [PR_ID]`. With no subcommand it toggles (current behavior). `start` always starts (idempotent — logs a message if a loop is already running for that PR), so repeated picker presses don't accidentally stop a running loop. `stop` stops. The optional `PR_ID` selects the PR in the tree before acting. After a successful `start`, switch the invoking session to the PR's `review-{display_id}` window if it exists (`select_window` is a no-op otherwise — the loop creates the pane lazily on iteration 1). This lets the popup picker route review-loop commands with a specific target and follow up with a window switch. (The `strict` variant from the original PR notes was dropped in commit b9c9b54.)
+Extend `handle_command_submitted` in `pm_core/tui/pr_view.py` to accept `review-loop [start|stop] [PR_ID]`. With no subcommand it toggles (current behavior). `start` always starts (idempotent — logs a message if a loop is already running for that PR), so repeated picker presses don't accidentally stop a running loop. `stop` stops. The optional `PR_ID` selects the PR in the tree before acting. The window-switch on start is *not* performed here — the popup spinner owns it (it polls for the `review-{display_id}` window to appear and honors a `suppress_switch` flag set when the user dismisses the spinner with q/Esc). (The `strict` variant from the original PR notes was dropped in commit b9c9b54.)
 
 Also accept `edit [PR_ID]`: selects the PR (when given) and invokes `pane_ops.edit_plan(app)` — same effect as the `e` key. Used by the picker's edit action.
+
+Also accept `pr qa [fresh|loop] [PR_ID]`: parses an optional `fresh` or `loop` modifier and dispatches to `qa_loop_ui.fresh_start_qa` / `start_or_stop_qa_loop` / `focus_or_start_qa` accordingly. Mirrors the TUI's `t` / `z t` / `zz t` chord variants and powers the picker's `z a` / `zz a` chord.
 
 ## Implicit Requirements
 
@@ -152,8 +155,9 @@ If QA or review-loop is selected but the TUI pane can't be found, show an error 
    - Two `bind-key` calls in `_register_tmux_bindings()`
 
 2. **`pm_core/tui/pr_view.py`** — Enhanced `handle_command_submitted()`:
-   - `review-loop [start|stop] [PR_ID]`: select PR in tree, then start (idempotent) or stop. After start, switch to the `review-{display_id}` window via `tmux.select_window`.
-   - `edit [PR_ID]`: select PR (if given) and run `pane_ops.edit_plan(app)`.
+   - `review-loop [start|stop] [PR_ID]`: select PR in tree, then start (idempotent) or stop. The window switch is *not* performed here — the popup spinner (`_wait_for_tui_command`) owns the switch so it can honor the `suppress_switch` flag set when the user dismisses the spinner with q/Esc.
+   - `edit [PR_ID]`: select PR (if given) and run `pane_ops.edit_plan(app)`. Records `runtime_state.set_action_state(pr_id, "edit", "done")` so the spinner exits without polling for a window that never appears (edit opens in the current window).
+   - `pr qa [fresh|loop] [PR_ID]`: route to `qa_loop_ui.focus_or_start_qa` (default), `fresh_start_qa` (`fresh`), or `start_or_stop_qa_loop` (`loop`). Mirrors the TUI `t`/`z t`/`zz t` chord variants; used by the picker's `z a` / `zz a` chord.
 
 3. **`tests/test_popup_picker.py`** — Tests for action-based picker logic
 
