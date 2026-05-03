@@ -94,6 +94,28 @@ The spinner uses `--height=100%` on fzf so the picker contents stay visible afte
 - Only `start`/`review`/`qa`/`merge` get rows in the picker (`_LIST_ACTIONS`); `edit` and `review-loop` are shortcut/chord-only. `review-loop`'s `[loop iN]` status badge is folded into the `review` row via `_SHORTCUT_FOLD_INTO`.
 - Phase indicator (`●`) is computed from `_current_window_phase(window_name)` (not the PR's status), so it reflects where the user *is* — sitting in the impl window of an `in_review` PR highlights `start`.
 - `q`/`Esc` inside the chord prompt returns to the fzf picker (so dismissing a chord doesn't dismiss the popup); `q`/`Esc` in fzf itself dismisses the popup. `popup_picker_cmd` ends with an explicit `raise SystemExit(0)` after dispatching so `display-popup -E` tears the overlay down promptly after the spinner switches windows.
+- Picker shortcut for `qa` is `t` to mirror the TUI's `t` binding (was previously `a`).
+- fzf input is fully suppressed: `--no-input` on fzf 0.49+ (detected via `_fzf_supports_no_input`) and a per-key `--bind a:ignore,b:ignore,...` over every alphanumeric not in `--expect` regardless of fzf version, so unsupported keystrokes (`j`, `k`, etc.) never echo into the popup.
+
+### R8: zz d / z d Always Start Fresh
+
+`zz d` (review-loop start, both TUI and picker) is no longer a toggle. Pressing it while a loop is running for the same PR supersedes the running loop: `existing.stop_requested = True` (cooperative bail) plus `tmux kill-window review-{display_id}` (forces the iteration's `_poll_for_verdict` to bail with `PaneKilledError` since that poll doesn't itself check `stop_requested`), then `_start_loop(..., superseded=True)` spawns a new loop. The supersede status message is `Fresh review loop started for ... loop=<id>`.
+
+`z d` was previously "stop loop OR fresh done"; it now always combines both — kill any running loop (same supersede mechanism) **and** open a fresh review window via `pr_view.review_pr(app, fresh=True)`. Rationale: cancelling a loop is now done via TUI restart (which sweeps the in-memory `_review_loops` and the runtime_state file) or by Ctrl+C in the loop's review pane, not via the chord. The `stop` subcommand on the `review-loop` command-bar handler is removed.
+
+To prevent the killed loop's terminal `verdict=KILLED` from clobbering the fresh loop's `running` entry in `runtime_state`, both `_on_iteration_from_thread` and `_on_complete_from_thread` consult `_is_active_loop(state)` — a `state.loop_id` vs. the currently-recorded `loop_id` comparison — and skip the write if they don't match.
+
+### R9: 'done' → 'review' Internal Rename
+
+User-facing terminology was already "Review" (binding label, picker action), but several internal symbols still said "done". Renamed:
+
+- `pr_view.done_pr` → `pr_view.review_pr`
+- `App.action_done_pr` → `App.action_review_pr` (binding `d` now references `review_pr`)
+- `review_loop_ui.stop_loop_or_fresh_done` → `stop_loop_or_fresh_review`
+
+`check_action()` lists, `tests/test_qa_pane.py`'s blocked-action set, the help screen row, and the QA-regression docs were updated. The CLI command `pm pr review` was already correctly named.
+
+A separate improvement PR (`pr-6e23bbb`) is filed for the analogous `start` → `implement` rename, which is bigger because it touches the public `pm pr start` CLI.
 
 ## Implicit Requirements
 
