@@ -30,19 +30,43 @@ _log = configure_logger("pm.cli")
 _RECORD_BREAK_TOKENS = (" <- ", " (", " [")
 
 
+def _cell_aware_fill(
+    text: str, width: int, *,
+    initial_indent: str = "", subsequent_indent: str = "",
+) -> str:
+    """Wrap ``text`` to visual ``width`` based on ``rich.cells.cell_len``.
+
+    Same shape as ``textwrap.fill`` but counts cells, not codepoints.  Wide
+    characters (emoji, CJK) consume the right number of columns.  Splits
+    on whitespace only; never splits a word.  Long words that exceed the
+    width go on their own line and overflow rather than being broken.
+    """
+    from rich.cells import cell_len
+    words = text.split()
+    if not words:
+        return initial_indent
+    lines = [initial_indent + words[0]]
+    for word in words[1:]:
+        candidate = lines[-1] + " " + word
+        if cell_len(candidate) <= width:
+            lines[-1] = candidate
+        else:
+            lines.append(subsequent_indent + word)
+    return "\n".join(lines)
+
+
 def _wrap_record_to_width(line: str, width: int, indent: str) -> str:
     """Return ``line`` possibly with embedded newlines so it fits in ``width``.
 
     Prefers breaking at the first record boundary token (``" <- "``,
     ``" ("``, ``" ["``).  If the indented tail still overflows, falls
-    back to ``textwrap.fill`` on the tail.  If no boundary token gives
+    back to whitespace wrapping on the tail.  If no boundary token gives
     a head that fits, falls back to whitespace wrapping on the full line.
 
     Uses ``rich.cells.cell_len`` for visual width so wide characters
     (emoji status icons like ⏳ 👀 🧪 ✅, CJK, etc.) are counted as the
     two columns they actually occupy in a terminal.  ``len()`` would
-    miscount them and let visually-overflowing lines slip through
-    unwrapped.
+    miscount them and let visually-overflowing lines slip through.
     """
     from rich.cells import cell_len
     if cell_len(line) <= width:
@@ -59,15 +83,19 @@ def _wrap_record_to_width(line: str, width: int, indent: str) -> str:
         indented_tail = indent + tail
         if cell_len(indented_tail) <= width:
             return head + "\n" + indented_tail
-        return head + "\n" + textwrap.fill(
-            tail, width=width,
+        return head + "\n" + _cell_aware_fill(
+            tail, width,
             initial_indent=indent, subsequent_indent=indent,
-            break_on_hyphens=False, break_long_words=False,
         )
-    return textwrap.fill(
-        line, width=width,
-        subsequent_indent=indent, break_on_hyphens=False,
-        break_long_words=False,
+    # No break token gave a fitting head — fall back to whitespace wrapping
+    # on the full line.  Preserve the line's own leading whitespace as the
+    # initial indent so the first output line starts in the same column as
+    # the original (e.g. ``"  ⏳ pr-..."`` keeps its two-space gutter).
+    stripped = line.lstrip()
+    leading = line[:len(line) - len(stripped)]
+    return _cell_aware_fill(
+        stripped, width,
+        initial_indent=leading, subsequent_indent=indent,
     )
 
 
