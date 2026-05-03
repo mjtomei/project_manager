@@ -8242,11 +8242,91 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/158
   gh_pr_number: 158
   created_at: '2026-04-07T12:46:56.964240+00:00'
-  updated_at: '2026-05-03T11:54:19.547610+00:00'
+  updated_at: '2026-05-03T14:25:31.091678+00:00'
   started_at: '2026-04-07T12:49:34.016669+00:00'
   reviewed_at: '2026-04-07T22:35:47.013280+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-ebe15c3
+    text: 'QA: prefix+P picker phase indicator (●) should reflect the current tmux
+      window — bare PR window highlights ''start'', ''review-#NN'' window highlights
+      ''review'', ''qa-#NN'' highlights ''qa'', ''merge-#NN'' highlights ''merge''.
+      Verify by switching windows and reopening picker.'
+    created_at: '2026-05-03T14:24:54Z'
+    last_edited: '2026-05-03T14:24:54Z'
+  - id: note-73ec847
+    text: 'QA: ''edit'' picker action (shortcut e) should open the same edit pane
+      as pressing ''e'' in the TUI for the current PR. Should also work via ''edit
+      PR_ID'' typed in the TUI command bar.'
+    created_at: '2026-05-03T14:25:22Z'
+    last_edited: '2026-05-03T14:25:22Z'
+  - id: note-c94c964
+    text: 'QA: review-loop popup action (''l'' shortcut) is idempotent — pressing
+      l multiple times should never stop a running loop. The plain ''review-loop''
+      typed in the TUI command bar still toggles. ''review-loop start PR_ID'' always
+      starts (logs ''already running'' message).'
+    created_at: '2026-05-03T14:25:23Z'
+    last_edited: '2026-05-03T14:25:23Z'
+  - id: note-d2d9313
+    text: 'QA: review-loop start now switches focus to the review-#NN window if it
+      exists. First-ever start may be a no-op (window created lazily by iteration
+      1) — re-running afterwards should focus.'
+    created_at: '2026-05-03T14:25:24Z'
+    last_edited: '2026-05-03T14:25:24Z'
+  - id: note-0348525
+    text: 'QA: SIGUSR2 + queue-file IPC (replaces send-keys). When the popup picker
+      fires a TUI-routed action (qa, review-loop start, edit), it appends to ~/.pm/tui-{session}.cmd-queue
+      and signals the TUI; verify the command runs even when the command bar isn''t
+      focused, when other widgets have focus, and when multiple are enqueued in rapid
+      succession from concurrent popup invocations (they should all run in order).'
+    created_at: '2026-05-03T14:25:25Z'
+    last_edited: '2026-05-03T14:25:25Z'
+  - id: note-63b5b74
+    text: 'QA: shared runtime-state file at ~/.pm/runtime/{pr_id}.json. Picker badges
+      should reflect: [open] for live windows, [loop iN] with iteration count while
+      a review-loop runs, [done VERDICT] after completion, [idle]/[wait]/[working]/[gone]
+      for impl (''start'') and qa panes (driven by Claude Code hook events). Verify
+      badges update across separate popup invocations.'
+    created_at: '2026-05-03T14:25:26Z'
+    last_edited: '2026-05-03T14:25:26Z'
+  - id: note-fceb3f0
+    text: 'QA: post-enqueue spinner. After selecting a tui:-routed action, the popup
+      shows a Braille spinner with the action label and current state (queued → running,
+      etc.). Spinner has no time limit and should remain until the target window appears.
+      Verify q/Q/Esc dismisses the popup overlay immediately, while the queued command
+      still runs in the TUI to completion.'
+    created_at: '2026-05-03T14:25:27Z'
+    last_edited: '2026-05-03T14:25:27Z'
+  - id: note-de8532c
+    text: 'QA: window-switch suppression on dismiss. Pressing q/Esc during the spinner
+      should also cancel the TUI''s would-be window switch for that action — the queued
+      review-loop / qa command runs but focus stays where the user was. The flag is
+      action-scoped (only that action''s switch is suppressed); subsequent unrelated
+      picker invocations should still switch normally.'
+    created_at: '2026-05-03T14:25:27Z'
+    last_edited: '2026-05-03T14:25:27Z'
+  - id: note-9cee834
+    text: 'QA: ''Not a pm session'' detection uses the pane-registry file rather than
+      tmux has-session, since display-popup doesn''t propagate PM_TMUX_SOCKET reliably.
+      Verify popup works in non-shared sessions, shared sessions (--global / --group),
+      and shows ''Not a pm session'' from a non-pm tmux session.'
+    created_at: '2026-05-03T14:25:28Z'
+    last_edited: '2026-05-03T14:25:28Z'
+  - id: note-c2f4567
+    text: 'QA: session/window resolution. Inside the popup we run ''tmux display-message
+      -p #{session_name}'' and #{window_name} from the popup shell because tmux''s
+      expansion of those format strings in display-popup args is unreliable across
+      versions. pm log should show the resolved values in the popup-picker invocation
+      log line.'
+    created_at: '2026-05-03T14:25:29Z'
+    last_edited: '2026-05-03T14:25:29Z'
+  - id: note-c188aaa
+    text: 'QA: fzf UX. Filter input is disabled (no ''> '' prompt; typing letters
+      doesn''t filter). Header is two lines (title then shortcut hints) with --header-first.
+      Shortcut keys s/e/d/l/a/g trigger actions; q and Esc quit cleanly. Falls back
+      to numbered-list selector when fzf isn''t installed.'
+    created_at: '2026-05-03T14:25:30Z'
+    last_edited: '2026-05-03T14:25:30Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d0588a-tmux-popup-pr-switcher-and-prefix-ke-f6381eb7
 - id: pr-1735d44
   plan: bugs
