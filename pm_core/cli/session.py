@@ -1403,13 +1403,25 @@ def popup_picker_cmd(session: str, window_name: str):
         # a chord state aborts that fzf invocation, and we go back to
         # the main state on the next loop iteration; q/Esc in the main
         # state exits the popup.
+        # Belt-and-suspenders: bind every alphanumeric key not in the
+        # current --expect set to fzf's ``ignore`` action so unsupported
+        # letters (e.g. j/k/h/l/i…) never echo anywhere — even on fzf
+        # versions that don't honor --no-input or where --disabled
+        # leaves the input box's character echo enabled.  q is bound
+        # to abort separately so it always quits the (sub-)picker.
+        import string
         def _make_fzf_cmd(header: str, expect: list[str]) -> list[str]:
+            expect_set = set(expect)
+            binds = ["q:abort"]
+            for ch in string.ascii_lowercase + string.ascii_uppercase + string.digits:
+                if ch != "q" and ch not in expect_set:
+                    binds.append(f"{ch}:ignore")
             cmd = ["fzf", "--ansi", "--no-sort", "--reverse",
                    f"--header={header}",
                    "--header-first",
                    "--pointer=>",
                    "--no-info",
-                   "--bind=q:abort",
+                   f"--bind={','.join(binds)}",
                    # --height inhibits fzf's alt-screen mode so the
                    # picker contents stay visible after fzf exits and
                    # the spinner renders below them in the same pane.
