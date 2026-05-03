@@ -158,6 +158,13 @@ class TechTree(Widget):
                 self.selected_index = idx
                 self.refresh()
             self.call_after_refresh(self._scroll_selected_into_view)
+            # Programmatic selection (e.g. from the command bar) often
+            # coincides with focus moving to the tree. Textual's focus()
+            # calls scroll_visible on the parent container, which can
+            # clobber the deferred scroll_to_region above. Re-scroll
+            # after focus events settle. _scroll_selected_into_view is
+            # idempotent, so this is a no-op if the first call won.
+            self.set_timer(0.05, self._scroll_selected_into_view)
 
     def update_plans(self, plans: list[dict]) -> None:
         """Store plan name mapping for label rendering."""
