@@ -320,7 +320,15 @@ def _runtime_mirror_clear(key: str) -> None:
             else:
                 _rs.clear_action(pr_id, "qa")
         else:
-            _rs.clear_action(pr_id, action)
+            # Preserve a recorded terminal verdict (e.g. non-loop review's
+            # [done LGTM]) when the pane goes away — only the live pane
+            # fields are stale.  Mirrors the qa branch above.
+            cur = _rs.get_action_state(pr_id, action) or {}
+            if cur.get("state") == "done" and cur.get("verdict"):
+                _rs.set_action_state(pr_id, action, None,
+                                     pane_id=None, session_id=None)
+            else:
+                _rs.clear_action(pr_id, action)
     except Exception:
         _log.debug("runtime_state mirror_clear failed for %s", key,
                    exc_info=True)
