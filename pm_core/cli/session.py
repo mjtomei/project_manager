@@ -1079,8 +1079,11 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
             label = cur_state or "queued"
             click.echo(f"\r{spin} {action}: {label}…   ", nl=False)
 
-            # Wait up to tick_s for a keypress.  q/Esc → dismiss without
-            # cancelling the queued command.  Other keys are ignored.
+            # Wait up to tick_s for a keypress.  q/Esc → close the
+            # popup immediately *without* cancelling the queued command
+            # (the TUI continues processing it).  Other keys are
+            # ignored.  We exit the whole popup process here so tmux's
+            # ``display-popup -E`` tears the overlay down right away.
             r, _, _ = select.select([sys.stdin], [], [], tick_s)
             if r:
                 try:
@@ -1088,10 +1091,12 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
                 except OSError:
                     ch = ""
                 if ch in ("q", "Q", "\x1b"):  # Esc
-                    click.echo(
-                        f"\r… {action}: dismissed (still running in TUI)"
-                        "          ")
-                    return
+                    if old_attrs is not None:
+                        try:
+                            termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+                        except termios.error:
+                            pass
+                    raise SystemExit(0)
             i += 1
     except KeyboardInterrupt:
         return
