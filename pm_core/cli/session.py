@@ -1019,6 +1019,33 @@ def _build_picker_lines(
     return lines
 
 
+def _fzf_supports_no_input() -> bool:
+    """Whether the installed fzf accepts ``--no-input`` (fzf 0.49+).
+
+    Cached on the module so we don't fork a subprocess every time the
+    picker re-launches fzf during chord-state transitions.
+    """
+    cached = getattr(_fzf_supports_no_input, "_cached", None)
+    if cached is not None:
+        return cached
+    try:
+        out = subprocess.run(
+            ["fzf", "--version"], capture_output=True, text=True,
+            timeout=2,
+        ).stdout
+        # fzf --version prints e.g. "0.55.0 (...)".  Compare numerically
+        # against the (major, minor) tuple where --no-input landed.
+        version = out.split()[0] if out.split() else ""
+        parts = version.split(".")
+        major = int(parts[0]) if parts and parts[0].isdigit() else 0
+        minor = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+        supported = (major, minor) >= (0, 49)
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        supported = False
+    _fzf_supports_no_input._cached = supported  # type: ignore[attr-defined]
+    return supported
+
+
 def _parse_tui_action(tui_cmd: str) -> tuple[str | None, str | None, bool]:
     """Best-effort: extract (pr_id, picker_action, fresh) from a tui: cmd.
 
@@ -1363,6 +1390,13 @@ def popup_picker_cmd(session: str, window_name: str):
         )
         chord_hint = "z d/a: fresh   zz d/a: loop"
 
+        # fzf 0.49+ supports --no-input which hides the entire input
+        # box, so unrecognized keystrokes don't echo anywhere in the
+        # popup.  Detect support up-front so we can fall back to the
+        # older --disabled + --prompt= combo on older versions (which
+        # still echoes typed characters into the prompt area).
+        no_input_supported = _fzf_supports_no_input()
+
         # Chord state-machine: each iteration re-launches fzf with a
         # header reflecting the current chord state (none / 'z' / 'zz')
         # so the chord UI lives in the same picker pane.  q/Esc inside
@@ -1370,19 +1404,22 @@ def popup_picker_cmd(session: str, window_name: str):
         # the main state on the next loop iteration; q/Esc in the main
         # state exits the popup.
         def _make_fzf_cmd(header: str, expect: list[str]) -> list[str]:
-            return ["fzf", "--ansi", "--no-sort", "--reverse",
-                    f"--header={header}",
-                    "--header-first",
-                    "--disabled",
-                    "--prompt=",
-                    "--pointer=>",
-                    "--no-info",
-                    "--bind=q:abort",
-                    # --height inhibits fzf's alt-screen mode so the
-                    # picker contents stay visible after fzf exits and
-                    # the spinner renders below them in the same pane.
-                    "--height=100%",
-                    f"--expect={','.join(expect)}"]
+            cmd = ["fzf", "--ansi", "--no-sort", "--reverse",
+                   f"--header={header}",
+                   "--header-first",
+                   "--pointer=>",
+                   "--no-info",
+                   "--bind=q:abort",
+                   # --height inhibits fzf's alt-screen mode so the
+                   # picker contents stay visible after fzf exits and
+                   # the spinner renders below them in the same pane.
+                   "--height=100%",
+                   f"--expect={','.join(expect)}"]
+            if no_input_supported:
+                cmd.append("--no-input")
+            else:
+                cmd.extend(["--disabled", "--prompt="])
+            return cmd
 
         cmd_to_run: str | None = None
         chord_state = "main"  # 'main' | 'z' | 'zz'
