@@ -1365,7 +1365,7 @@ def popup_picker_cmd(session: str, window_name: str):
         "s": "start",
         "e": "edit",
         "d": "review",
-        "a": "qa",
+        "t": "qa",
         "g": "merge",
     }
     # Build label → command map directly from the PR's actions so it
@@ -1388,7 +1388,7 @@ def popup_picker_cmd(session: str, window_name: str):
         shortcut_hint = "  ".join(
             f"{key}={label}" for key, label in _SHORTCUT_KEYS.items()
         )
-        chord_hint = "z d/a: fresh   zz d/a: loop"
+        chord_hint = "z d/t: fresh   zz d/t: loop"
 
         # fzf 0.49+ supports --no-input which hides the entire input
         # box, so unrecognized keystrokes don't echo anywhere in the
@@ -1431,14 +1431,14 @@ def popup_picker_cmd(session: str, window_name: str):
                 expect = list(_SHORTCUT_KEYS.keys()) + ["z"]
             elif chord_state == "z":
                 header = (f"z — fresh start for {current_pr}\n"
-                          f"d=fresh review   a=fresh qa   "
+                          f"d=fresh review   t=fresh qa   "
                           f"z again for loop   q/Esc cancels")
-                expect = ["z", "d", "a"]
+                expect = ["z", "d", "t"]
             else:  # 'zz'
                 header = (f"zz — loop for {current_pr}\n"
-                          f"d=review-loop   a=qa-loop   "
+                          f"d=review-loop   t=qa-loop   "
                           f"q/Esc cancels")
-                expect = ["d", "a"]
+                expect = ["d", "t"]
 
             fzf_cmd = _make_fzf_cmd(header, expect)
             proc = subprocess.Popen(
@@ -1482,7 +1482,7 @@ def popup_picker_cmd(session: str, window_name: str):
             if chord_state == "z" and pressed_key == "z":
                 chord_state = "zz"
                 continue
-            if pressed_key in ("d", "a"):
+            if pressed_key in ("d", "t"):
                 action_label = _SHORTCUT_KEYS.get(pressed_key)
                 if action_label and _picked_pr is not None:
                     template = _MODIFIED_ACTION_CMDS.get(
