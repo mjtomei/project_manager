@@ -1123,6 +1123,17 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
     frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
     i = 0
 
+    # ANSI escapes used to keep the spinner line clean:
+    #   \x1b[K  — erase from cursor to end of line (avoids leftover
+    #             characters when a shorter label replaces a longer
+    #             one, e.g. 'running…' over 'rebuilding window…')
+    #   \x1b[?25l / \x1b[?25h — hide / show the terminal cursor so it
+    #             doesn't sit on top of the last character of the line
+    CLR_EOL = "\x1b[K"
+    HIDE_CURSOR = "\x1b[?25l"
+    SHOW_CURSOR = "\x1b[?25h"
+    click.echo(HIDE_CURSOR, nl=False)
+
     # Put stdin in cbreak mode so we can poll for q/Esc keypresses
     # without waiting for Enter.  Restore in finally so the popup shell
     # isn't left in a broken state if anything raises.
@@ -1177,14 +1188,14 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
                         pass
                 click.echo(
                     f"\r✓ {action}: window {target_window} is open"
-                    "                     ")
+                    f"{CLR_EOL}")
                 return
             spin = frames[i % len(frames)]
             if fresh and initial_window_id is not None and not saw_disappear:
                 label = "rebuilding window"
             else:
                 label = cur_state or "queued"
-            click.echo(f"\r{spin} {action}: {label}…   ", nl=False)
+            click.echo(f"\r{spin} {action}: {label}…{CLR_EOL}", nl=False)
 
             # Wait up to tick_s for a keypress.  q/Esc → close the
             # popup immediately *without* cancelling the queued command
@@ -1221,7 +1232,7 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
                 termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
             except termios.error:
                 pass
-        click.echo("")
+        click.echo(SHOW_CURSOR + "", nl=True)
 
 
 def _run_picker_command(cmd: str, session: str) -> None:
