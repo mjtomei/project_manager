@@ -1259,7 +1259,7 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
                 termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
             except termios.error:
                 pass
-        click.echo(SHOW_CURSOR + "", nl=True)
+        click.echo(SHOW_CURSOR)
 
 
 def _run_picker_command(cmd: str, session: str) -> None:
