@@ -409,7 +409,7 @@ def _create_watcher_window(iteration: int, loop_id: str,
     # Switch sessions that were watching the old watcher window to the new one
     if sessions_watching:
         _log.info("_create_watcher_window: switching %s to new watcher window", sessions_watching)
-        tmux_mod.switch_sessions_to_window(
-            sessions_watching, pm_session, window_name)
+        tmux_mod.focus_window(
+            pm_session, window_name, co_viewers=sessions_watching)
     else:
         _log.info("_create_watcher_window: no sessions_watching, skipping switch")

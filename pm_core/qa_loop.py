@@ -2297,11 +2297,11 @@ def run_qa_sync(
 
         # Switch sessions that were watching the old QA window to the new one
         if sessions_on_qa:
-            tmux_mod.switch_sessions_to_window(
-                sessions_on_qa, session, window_name)
+            tmux_mod.focus_window(
+                session, window_name, co_viewers=sessions_on_qa)
         elif not existing_win:
             # First-time creation — select the window so user sees it
-            tmux_mod.select_window(session, window_name)
+            tmux_mod.focus_window(session, window_name)
 
         # Wait for the planner to finish (poll for plan output)
         planner_pane = find_claude_pane(session, window_name)

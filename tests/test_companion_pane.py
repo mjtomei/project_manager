@@ -108,7 +108,7 @@ class TestPrStartCompanion:
 
         assert result.exit_code == 0
         mock_tmux.split_pane_at.assert_called_once()
-        mock_tmux.select_window.assert_called()
+        mock_tmux.focus_window.assert_called()
 
     @patch.object(pr_mod, "tmux_mod")
     @patch.object(pr_mod, "pane_registry")

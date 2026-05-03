@@ -106,7 +106,8 @@ def start_pr(app, companion: bool = False) -> None:
                     display_id = _pr_display_id(pr_entry)
                     existing = tmux_mod.find_window_by_name(session, display_id)
                     if existing:
-                        tmux_mod.select_window(session, existing["id"])
+                        tmux_mod.focus_window(session, existing["id"],
+                                              origin_session=session)
                         app.log_message(f"Switched to window '{display_id}'")
                         return
 
@@ -159,7 +160,8 @@ def done_pr(app, fresh: bool = False) -> None:
                     window_name = f"review-{display_id}"
                     existing = tmux_mod.find_window_by_name(session, window_name)
                     if existing:
-                        tmux_mod.select_window(session, existing["id"])
+                        tmux_mod.focus_window(session, existing["id"],
+                                              origin_session=session)
                         app.log_message(f"Switched to review window '{window_name}'")
                         return
 
@@ -655,6 +657,34 @@ def run_command(app, cmd: str, working_message: str | None = None,
             app._inflight_pr_action = None
 
 
+def _origin_env(app) -> dict[str, str]:
+    """Capture the TUI's session+window at command-launch time.
+
+    Threaded through subprocesses via env vars so that ``focus_window`` in
+    the child refocuses the originating session — not whoever the TUI
+    happens to be focused on by the time an async command finishes.
+    """
+    import os as _os
+    from pm_core import tmux as _tmux
+    env = _os.environ.copy()
+    sess = ""
+    try:
+        sess = _tmux.get_session_name() or ""
+    except Exception:
+        pass
+    if not sess:
+        sess = getattr(app, "_session_name", "") or ""
+    if sess:
+        env["PM_ORIGIN_SESSION"] = sess
+        try:
+            wid = _tmux._current_window_id(sess)
+            if wid:
+                env["PM_ORIGIN_WINDOW"] = wid
+        except Exception:
+            pass
+    return env
+
+
 def _run_command_sync(app, parts: list[str]) -> None:
     """Run a command synchronously (for quick operations)."""
     try:
@@ -665,6 +695,7 @@ def _run_command_sync(app, parts: list[str]) -> None:
             capture_output=True,
             text=True,
             timeout=30,
+            env=_origin_env(app),
         )
         if result.returncode != 0:
             _log.info("pm exit=%d stderr=%s",
@@ -708,6 +739,7 @@ async def _run_command_async(app, cmd: str, parts: list[str], working_message: s
             cwd=cwd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=_origin_env(app),
         )
 
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)

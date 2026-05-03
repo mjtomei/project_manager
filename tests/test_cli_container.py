@@ -174,13 +174,13 @@ class TestContainerBuildCommand:
              patch("pm_core.claude_launcher.build_claude_shell_cmd", return_value="claude"), \
              patch("pm_core.tmux.session_exists", return_value=True), \
              patch("pm_core.tmux.find_window_by_name", return_value=existing_win), \
-             patch("pm_core.tmux.select_window") as mock_select:
+             patch("pm_core.tmux.focus_window") as mock_focus:
             runner = CliRunner()
             result = runner.invoke(container_build, [])
 
         assert result.exit_code == 0
         assert "Switched to existing window" in result.output
-        mock_select.assert_called_once_with("pm-test-session", 3)
+        mock_focus.assert_called_once_with("pm-test-session", 3)
 
     @patch("pm_core.cli.container._get_pm_session", return_value=None)
     @patch("pm_core.cli.container.state_root")

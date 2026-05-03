@@ -632,7 +632,7 @@ def _respawn_tui(session: str, window: str) -> str:
             pane_id, window = tmux_mod.create_window(session, "pm _tui")
             tmux_mod.set_shared_window_size(session, window)
             # Switch the client to the new window so the user sees it
-            tmux_mod.select_window(session, window)
+            tmux_mod.focus_window(session, window, origin_session=session)
 
         # Register with lowest order so TUI sorts first (leftmost)
         from pm_core.pane_registry import locked_read_modify_write, _prepare_registry_data
