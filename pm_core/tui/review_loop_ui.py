@@ -96,7 +96,8 @@ def start_or_stop_loop(app) -> None:
         return
 
     existing = app._review_loops.get(pr_id)
-    if existing and existing.running:
+    superseded = bool(existing and existing.running)
+    if superseded:
         existing.stop_requested = True
         # Force the running iteration to terminate now: the
         # _run_claude_review path blocks in _poll_for_verdict (which
@@ -115,12 +116,10 @@ def start_or_stop_loop(app) -> None:
                            exc_info=True)
         _log.info("review_loop_ui: superseding running loop for %s "
                   "with a fresh one", pr_id)
-        app.log_message(
-            f"[bold]Restarting review loop[/] for {pr_id} "
-            "(killed running iteration)")
 
     _start_loop(app, pr_id, pr,
-                transcript_dir=str(_auto_start.get_transcript_dir(app)))
+                transcript_dir=str(_auto_start.get_transcript_dir(app)),
+                superseded=superseded)
 
 
 # ---------------------------------------------------------------------------
@@ -129,7 +128,8 @@ def start_or_stop_loop(app) -> None:
 
 def _start_loop(app, pr_id: str, pr: dict | None,
                 transcript_dir: str,
-                resume_state: ReviewLoopState | None = None) -> None:
+                resume_state: ReviewLoopState | None = None,
+                superseded: bool = False) -> None:
     """Start a review loop for the given PR.
 
     ``transcript_dir`` is required — hook-driven verdict polling needs a
@@ -141,6 +141,11 @@ def _start_loop(app, pr_id: str, pr: dict | None,
     When *resume_state* is provided, the loop continues from the saved
     iteration count and history instead of starting fresh.  Used by
     breadcrumb restoration after merge-triggered TUI restarts.
+
+    Pass ``superseded=True`` when a previously-running loop for this
+    PR was killed to make room for this one — only changes the
+    user-visible status message so it's clear this is a fresh restart
+    rather than a brand-new launch.
     """
     from pm_core import tmux as tmux_mod
 
@@ -187,10 +192,17 @@ def _start_loop(app, pr_id: str, pr: dict | None,
         app._review_loops[pr_id] = state
         _log.info("review_loop_ui: starting loop for %s", pr_id)
 
-    app.log_message(
-        f"[bold]Review loop started[/] for {pr_id} loop={state.loop_id} — z d to stop",
-        sticky=3,
-    )
+    if superseded:
+        msg = (f"[bold]Fresh review loop started[/] for {pr_id} "
+               f"loop={state.loop_id} (superseded previous) — z d to stop")
+    elif resume_state:
+        msg = (f"[bold]Review loop resumed[/] for {pr_id} "
+               f"at iteration {state.iteration} loop={state.loop_id}"
+               " — z d to stop")
+    else:
+        msg = (f"[bold]Review loop started[/] for {pr_id} "
+               f"loop={state.loop_id} — z d to stop")
+    app.log_message(msg, sticky=3)
 
     # Ensure the poll timer is running
     _ensure_poll_timer(app)
