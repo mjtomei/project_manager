@@ -637,3 +637,36 @@ class TestWatcherRegistry:
     def test_unknown_type_returns_none(self):
         from pm_core.watchers import get_watcher_class
         assert get_watcher_class("nonexistent") is None
+
+    def test_session_health_registered(self):
+        from pm_core.watchers import WATCHER_REGISTRY, get_watcher_class
+        assert "session-health" in WATCHER_REGISTRY
+        cls = get_watcher_class("session-health")
+        assert cls is not None
+        assert cls.WATCHER_TYPE == "session-health"
+        assert cls.WINDOW_NAME == "session-health"
+
+    def test_session_health_parse_verdict(self):
+        from pm_core.watchers.session_health_watcher import SessionHealthWatcher
+        w = SessionHealthWatcher(pm_root="/tmp")
+        assert w.parse_verdict("scanned 3, all healthy\nREADY") == "READY"
+        assert w.parse_verdict("pr-abc stuck after 3 retries\nINPUT_REQUIRED") == "INPUT_REQUIRED"
+        # Unknown output defaults to READY (continue watching)
+        assert w.parse_verdict("nothing useful here") == "READY"
+
+    def test_session_health_prompt_contains_skip_list(self):
+        from pm_core.prompt_gen import generate_session_health_prompt
+        p = generate_session_health_prompt(
+            {"project": {"name": "demo"}},
+            session_name="pm-demo", iteration=1, loop_id="ab",
+            meta_pm_root="pm",
+        )
+        # Skips its own window and other watcher windows
+        assert "session-health" in p
+        assert "discovery" in p
+        assert "bug-fix-impl" in p
+        # Recovery vocabulary
+        assert "Nudge" in p or "nudge" in p
+        assert "retry" in p.lower()
+        # Verdict contract
+        assert "READY" in p and "INPUT_REQUIRED" in p

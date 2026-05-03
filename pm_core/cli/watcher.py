@@ -353,6 +353,12 @@ def _create_watcher_window(iteration: int, loop_id: str,
             iteration=iteration, loop_id=loop_id,
             meta_pm_root=meta_pm_root,
         )
+    elif watcher_type == "session-health":
+        watcher_prompt = prompt_gen.generate_session_health_prompt(
+            data, session_name=pm_session,
+            iteration=iteration, loop_id=loop_id,
+            meta_pm_root=meta_pm_root,
+        )
     else:
         watcher_prompt = prompt_gen.generate_watcher_prompt(
             data, session_name=pm_session,
