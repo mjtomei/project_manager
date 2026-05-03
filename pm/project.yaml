@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-2d0588a
+  active_pr: pr-6e23bbb
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -11771,6 +11771,36 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-03T12:32:08.900344+00:00'
   updated_at: '2026-05-03T12:32:08.900344+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-6e23bbb
+  plan: improvements
+  title: Rename 'start' to 'implement' across the codebase
+  branch: pm/pr-6e23bbb-rename-start-to-implement-across-the-codebase
+  status: pending
+  depends_on: []
+  description: 'Rename the user-facing ''start'' concept to ''implement'' to mirror
+    the ''done'' → ''review'' rename in pr-2d0588a. Touches: (1) CLI: add ''pm pr
+    implement'' as the canonical command; keep ''pm pr start'' as a hidden Click alias
+    so existing scripts and review-loop iterations (`pm pr review --review-loop` triggers
+    `_launch_review_window` which spawns review subprocesses, etc.) keep working.
+    (2) TUI: rename action_start_pr → action_implement_pr, pr_view.start_pr → implement_pr,
+    the ''s'' binding label, and all check_action() lists. (3) Picker: rename the
+    ''start'' action label to ''implement'' and ''s'' shortcut label, update _ALL_ACTIONS,
+    _ACTION_WINDOW_PATTERNS, _LIST_ACTIONS, _MODIFIED_ACTION_CMDS. (4) auto_start.py
+    terminology, breadcrumb references, log messages, all docstrings. (5) Tests, regression
+    QA docs (pr-interaction.md, help-keybindings.md, etc.), spec docs, and any plan/improvement
+    docs that reference the action by name. Verify external callers (workdir launchers,
+    hook scripts, regression scenarios, GitHub workflows) continue to work via the
+    alias. The CLI surface should accept both names indefinitely; mark ''start'' as
+    a hidden alias with a docstring pointing users to ''implement''.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-03T15:42:10.423044+00:00'
+  updated_at: '2026-05-03T15:42:10.423044+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
