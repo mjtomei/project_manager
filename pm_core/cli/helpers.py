@@ -37,23 +37,33 @@ def _wrap_record_to_width(line: str, width: int, indent: str) -> str:
     ``" ("``, ``" ["``).  If the indented tail still overflows, falls
     back to ``textwrap.fill`` on the tail.  If no boundary token gives
     a head that fits, falls back to whitespace wrapping on the full line.
+
+    Uses ``rich.cells.cell_len`` for visual width so wide characters
+    (emoji status icons like ⏳ 👀 🧪 ✅, CJK, etc.) are counted as the
+    two columns they actually occupy in a terminal.  ``len()`` would
+    miscount them and let visually-overflowing lines slip through
+    unwrapped.
     """
-    if len(line) <= width:
+    from rich.cells import cell_len
+    if cell_len(line) <= width:
         return line
     for tok in _RECORD_BREAK_TOKENS:
         idx = line.find(tok)
+        if idx <= 0:
+            continue
+        head = line[:idx]
         # Require the head (everything up to the leading space) to fit.
-        if 0 < idx <= width:
-            head = line[:idx]
-            tail = line[idx + 1:]  # drop leading space, keep token onward
-            indented_tail = indent + tail
-            if len(indented_tail) <= width:
-                return head + "\n" + indented_tail
-            return head + "\n" + textwrap.fill(
-                tail, width=width,
-                initial_indent=indent, subsequent_indent=indent,
-                break_on_hyphens=False, break_long_words=False,
-            )
+        if cell_len(head) > width:
+            continue
+        tail = line[idx + 1:]  # drop leading space, keep token onward
+        indented_tail = indent + tail
+        if cell_len(indented_tail) <= width:
+            return head + "\n" + indented_tail
+        return head + "\n" + textwrap.fill(
+            tail, width=width,
+            initial_indent=indent, subsequent_indent=indent,
+            break_on_hyphens=False, break_long_words=False,
+        )
     return textwrap.fill(
         line, width=width,
         subsequent_indent=indent, break_on_hyphens=False,
