@@ -785,6 +785,7 @@ def rebalance_cmd():
 # Templates use {pr_id} for the internal PR ID.
 # Commands prefixed with "tui:" are routed through the TUI command bar.
 _ALL_ACTIONS: list[tuple[str, str]] = [
+    ("open", "switch:{display_id}"),
     ("start", "pr start {pr_id}"),
     ("review", "pr review {pr_id}"),
     ("review-loop", "tui:review-loop start {pr_id}"),
@@ -795,6 +796,7 @@ _ALL_ACTIONS: list[tuple[str, str]] = [
 # Map action labels to tmux window name patterns.
 # None means no associated window (loops, not windows).
 _ACTION_WINDOW_PATTERNS: dict[str, str | None] = {
+    "open": "{display_id}",
     "start": "{display_id}",
     "review": "review-{display_id}",
     "review-loop": None,
@@ -884,7 +886,7 @@ def _build_picker_lines(
 
     phase = _status_phase(status)
     for label, cmd_template in actions:
-        cmd = cmd_template.format(pr_id=pr["id"])
+        cmd = cmd_template.format(pr_id=pr["id"], display_id=display_id)
         indicator = "●" if label == phase else " "
 
         # Check if this action's window is open
@@ -910,8 +912,21 @@ def _run_picker_command(cmd: str, session: str) -> None:
     """Execute a picker command — either direct CLI or routed through TUI."""
     import sys
 
+    if cmd.startswith("switch:"):
+        # Switch to a tmux window in the invoking session.
+        window_name = cmd[len("switch:"):]
+        base = pane_registry.base_session_name(session)
+        if not tmux_mod.select_window(base, window_name):
+            click.echo(f"Window not found: {window_name}")
+            try:
+                input("\nPress Enter to close...")
+            except (EOFError, KeyboardInterrupt):
+                pass
+        return
+
     if cmd.startswith("tui:"):
         # Route through the TUI command bar
+        import time
         tui_cmd = cmd[4:]
         from pm_core.cli.helpers import _find_tui_pane
         base = pane_registry.base_session_name(session)
@@ -923,15 +938,20 @@ def _run_picker_command(cmd: str, session: str) -> None:
             except (EOFError, KeyboardInterrupt):
                 pass
             return
-        # Send the command to the TUI command bar:
-        # Escape (ensure clean state) → / (open command bar) → command → Enter
-        subprocess.run(tmux_mod._tmux_cmd("send-keys", "-t", pane_id, "Escape"),
-                       check=False)
+        # Send the command to the TUI command bar.
+        # / opens the command bar; we then need a brief delay so Textual
+        # finishes focusing the Input widget before the literal text
+        # arrives — without it, the first chars sometimes land on the
+        # previously-focused widget and the command never executes.
+        # No leading Escape: it can disrupt unrelated focus state and
+        # caused the picker to behave intermittently.
         subprocess.run(tmux_mod._tmux_cmd("send-keys", "-t", pane_id, "/"),
                        check=False)
+        time.sleep(0.08)
         subprocess.run(tmux_mod._tmux_cmd("send-keys", "-t", pane_id,
                                            "-l", tui_cmd),
                        check=False)
+        time.sleep(0.02)
         subprocess.run(tmux_mod._tmux_cmd("send-keys", "-t", pane_id, "Enter"),
                        check=False)
     else:
@@ -1007,6 +1027,7 @@ def popup_picker_cmd(session: str, window_name: str):
     # Note: q is reserved for quitting the picker (mapped to fzf abort
     # below), so qa uses 'a'.
     _SHORTCUT_KEYS = {
+        "o": "open",
         "s": "start",
         "d": "review",
         "l": "review-loop",
