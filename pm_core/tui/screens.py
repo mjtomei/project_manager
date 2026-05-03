@@ -278,7 +278,7 @@ class HelpScreen(ModalScreen):
             yield Label("  [bold]prefix R[/]  Rebalance panes", classes="help-row")
             yield Label("Review Loop", classes="help-section")
             yield Label("  [bold]zz d[/]  Start loop", classes="help-row")
-            yield Label("  [bold]z d[/]   Stop loop / fresh done", classes="help-row")
+            yield Label("  [bold]z d[/]   Kill loop, fresh review", classes="help-row")
             yield Label("QA Loop", classes="help-section")
             yield Label("  [bold]zz t[/]  Start QA loop", classes="help-row")
             yield Label("  [bold]z t[/]   Fresh start QA", classes="help-row")

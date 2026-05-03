@@ -453,7 +453,7 @@ class TestQAPaneKeyBindings:
         # The check_action method blocks specific actions when _qa_visible=True.
         # toggle_qa must NOT be blocked so q can toggle back.
         blocked_in_qa = {
-            "start_pr", "start_pr_companion", "done_pr",
+            "start_pr", "start_pr_companion", "review_pr",
             "merge_pr", "merge_pr_companion", "launch_claude",
             "edit_plan", "view_plan", "hide_plan", "move_to_plan",
             "toggle_merged", "cycle_filter", "cycle_sort", "start_qa_on_pr",

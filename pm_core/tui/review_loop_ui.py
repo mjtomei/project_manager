@@ -48,20 +48,18 @@ def _get_selected_pr(app) -> tuple[str | None, dict | None]:
 
 
 # ---------------------------------------------------------------------------
-# z d  — fresh done or stop loop
+# z d  — kill running loop and open a fresh review
 # ---------------------------------------------------------------------------
 
-def stop_loop_or_fresh_done(app) -> None:
+def stop_loop_or_fresh_review(app) -> None:
     """Handle ``z d``: stop any running loop and start a fresh review.
 
-    Used to be "stop loop OR fresh done" — if a loop was running you
+    Used to be "stop loop OR fresh review" — if a loop was running you
     only got the stop, no fresh review.  Now the two are combined:
     any running loop is killed (matching ``zz d``'s supersede path —
     set stop_requested + kill the review window so the running
-    iteration's verdict-poll bails) and then ``done_pr(fresh=True)``
+    iteration's verdict-poll bails) and then ``review_pr(fresh=True)``
     opens a fresh review window for the user.
-
-    Function name kept for stability of the import in ``action_done_pr``.
     """
     pr_id, pr = _get_selected_pr(app)
     if not pr_id:
@@ -90,7 +88,7 @@ def stop_loop_or_fresh_done(app) -> None:
             f"[bold]Stopped review loop[/] for {pr_id} — opening fresh review")
 
     from pm_core.tui import pr_view
-    pr_view.done_pr(app, fresh=True)
+    pr_view.review_pr(app, fresh=True)
 
 
 # ---------------------------------------------------------------------------

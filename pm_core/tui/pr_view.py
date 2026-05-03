@@ -129,13 +129,13 @@ def start_pr(app, companion: bool = False) -> None:
     run_command(app, cmd, working_message=action_key, action_key=action_key)
 
 
-def done_pr(app, fresh: bool = False) -> None:
+def review_pr(app, fresh: bool = False) -> None:
     """Mark the selected PR as in_review and open a review window."""
     from pm_core.tui.tech_tree import TechTree
 
     tree = app.query_one("#tech-tree", TechTree)
     pr_id = tree.selected_pr_id
-    _log.info("action: done_pr selected=%s fresh=%s", pr_id, fresh)
+    _log.info("action: review_pr selected=%s fresh=%s", pr_id, fresh)
     if not pr_id:
         app.log_message("No PR selected")
         return
@@ -451,7 +451,7 @@ async def _cleanup_worker(app, pr_id: str, action_key: str,
     if follow_up == "s":
         start_pr(app)
     elif follow_up == "d":
-        done_pr(app)
+        review_pr(app)
     elif follow_up == "t":
         from pm_core.tui import qa_loop_ui
         qa_loop_ui.focus_or_start_qa(app, pr_id)

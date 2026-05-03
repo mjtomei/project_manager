@@ -124,7 +124,7 @@ class ProjectManagerApp(App):
         Binding("q", "toggle_qa", "QA"),
         Binding("s", "start_pr", "Start PR", show=True),
         Binding("S", "start_pr_companion", "Start+Companion", show=False),
-        Binding("d", "done_pr", "Review", show=True),
+        Binding("d", "review_pr", "Review", show=True),
         Binding("g", "merge_pr", "Merge", show=True),
         Binding("G", "merge_pr_companion", "Merge+Companion", show=False),
 
@@ -269,7 +269,7 @@ class ProjectManagerApp(App):
 
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """Disable single-key shortcuts when command bar is focused or in guide mode."""
-        if action in ("start_pr", "start_pr_companion", "done_pr",
+        if action in ("start_pr", "start_pr_companion", "review_pr",
                        "merge_pr", "merge_pr_companion",
                        "edit_plan", "view_plan", "launch_notes",
                        "launch_meta", "launch_claude", "launch_guide",
@@ -282,7 +282,7 @@ class ProjectManagerApp(App):
                 _log.debug("check_action: blocked %s (command bar focused/pending)", action)
                 return False
         # Block PR actions when in guide mode or plans view (can't see the PR tree)
-        if action in ("start_pr", "start_pr_companion", "done_pr", "merge_pr", "merge_pr_companion", "launch_claude", "edit_plan", "view_plan", "hide_plan", "move_to_plan", "toggle_merged", "cycle_filter", "cycle_sort", "start_qa_on_pr"):
+        if action in ("start_pr", "start_pr_companion", "review_pr", "merge_pr", "merge_pr_companion", "launch_claude", "edit_plan", "view_plan", "hide_plan", "move_to_plan", "toggle_merged", "cycle_filter", "cycle_sort", "start_qa_on_pr"):
             prs = self._data.get("prs") or []
             if not prs and self._current_guide_step is not None:
                 _log.debug("check_action: blocked %s (in guide mode, no PRs)", action)
@@ -727,17 +727,16 @@ class ProjectManagerApp(App):
     def action_start_pr_companion(self) -> None:
         pr_view.start_pr(self, companion=True)
 
-    def action_done_pr(self) -> None:
+    def action_review_pr(self) -> None:
         z = self._consume_z()
         if z == 0:
-            # plain d = mark done (in_progress → in_review) + open review window
-            pr_view.done_pr(self)
+            # plain d = mark in_review and open review window
+            pr_view.review_pr(self)
         elif z == 1:
-            # z d = fresh done (kill existing review window), OR stop loop if running
-            review_loop_ui.stop_loop_or_fresh_done(self)
+            # z d = kill any running loop and open a fresh review window
+            review_loop_ui.stop_loop_or_fresh_review(self)
         else:
-            # zz d = start review loop (iterates until PASS),
-            #        or stop loop if running
+            # zz d = start a fresh review loop (supersedes any running)
             review_loop_ui.start_or_stop_loop(self)
 
     def action_merge_pr(self) -> None:
