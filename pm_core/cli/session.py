@@ -1031,7 +1031,9 @@ def popup_picker_cmd(session: str, window_name: str):
         fzf_cmd = ["fzf", "--ansi", "--no-sort", "--reverse",
                    f"--header={header}",
                    "--header-first",
-                   "--prompt=Filter: ",
+                   "--disabled",
+                   "--prompt=",
+                   "--pointer=>",
                    "--no-info",
                    "--bind=q:abort",
                    f"--expect={expect_keys}"]
