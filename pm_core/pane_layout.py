@@ -24,7 +24,8 @@ from pm_core.pane_registry import (  # noqa: F401
     get_window_data,
     _iter_all_panes,
     load_registry,
-    save_registry,
+    locked_read_modify_write,
+    _prepare_registry_data,
     register_pane,
     unregister_pane,
     kill_and_unregister,
@@ -34,11 +35,30 @@ from pm_core.pane_registry import (  # noqa: F401
 
 _logger = configure_logger("pm.pane_layout")
 
-MOBILE_WIDTH_THRESHOLD = 120
+# Default mobile-mode width threshold. Overridable via
+# `pm set mobile-width-threshold <value>`. Read through
+# ``_get_mobile_width_threshold()`` — do not reference this constant
+# directly (use the function so the global setting takes effect).
+DEFAULT_MOBILE_WIDTH_THRESHOLD = 110
 
 # Default minimum character width per horizontal pane column.
 # Overridable via `pm set min-pane-width <value>`.
 DEFAULT_MIN_PANE_WIDTH = 100
+
+
+def _get_mobile_width_threshold() -> int:
+    """Read mobile-width-threshold from global settings, or default."""
+    from pm_core.paths import get_global_setting_value
+    val = get_global_setting_value("mobile-width-threshold", "")
+    try:
+        return max(1, int(val))
+    except ValueError:
+        return DEFAULT_MOBILE_WIDTH_THRESHOLD
+
+
+# Back-compat alias for callers that read the constant directly. New code
+# should call ``_get_mobile_width_threshold()`` so the setting applies.
+MOBILE_WIDTH_THRESHOLD = DEFAULT_MOBILE_WIDTH_THRESHOLD
 
 
 def get_reliable_window_size(
@@ -155,7 +175,7 @@ def is_mobile(session: str, window: str = "0") -> bool:
         _logger.info("is_mobile(%s, %s): True (force flag)", session, window)
         return True
     width, _ = get_reliable_window_size(session, window)
-    return 0 < width < MOBILE_WIDTH_THRESHOLD
+    return 0 < width < _get_mobile_width_threshold()
 
 
 # --- Layout string generation ---
@@ -337,10 +357,14 @@ def register_and_rebalance(
     from pm_core import pane_registry as _reg
     for pane_id, role, cmd in panes:
         _reg.register_pane(session, window, pane_id, role, cmd)
-    data = _reg.load_registry(session)
-    wdata = _reg.get_window_data(data, window)
-    wdata["user_modified"] = False
-    _reg.save_registry(session, data)
+
+    def _reset_user_modified(raw):
+        data = _reg._prepare_registry_data(raw, session)
+        wdata = _reg.get_window_data(data, window)
+        wdata["user_modified"] = False
+        return data
+
+    _reg.locked_read_modify_write(_reg.registry_path(session), _reset_user_modified)
     rebalance(session, window)
 
 
@@ -445,7 +469,7 @@ def rebalance(session: str, window: str, query_session: str | None = None) -> bo
     # Use already-computed width instead of re-querying via is_mobile(),
     # which might hit a different session/window and get a stale size.
     force_mobile = mobile_flag_path(session).exists()
-    if force_mobile or (0 < width < MOBILE_WIDTH_THRESHOLD):
+    if force_mobile or (0 < width < _get_mobile_width_threshold()):
         result = subprocess.run(
             tmux_mod._tmux_cmd("display", "-t", f"{qs}:{window}", "-p", "#{pane_id}"),
             capture_output=True, text=True,
@@ -465,7 +489,9 @@ def check_user_modified(session: str, window: str) -> bool:
     sets user_modified flag in the per-window registry entry.
     """
     from pm_core import tmux as tmux_mod
+    from pm_core.pane_registry import locked_read_modify_write, _prepare_registry_data
 
+    # Fast path: read-only check (unlocked, stale read is fine)
     data = load_registry(session)
     wdata = get_window_data(data, window)
     if wdata.get("user_modified"):
@@ -475,18 +501,23 @@ def check_user_modified(session: str, window: str) -> bool:
     if len(panes) < 2:
         return False
 
+    # Query tmux state outside the lock
     current = tmux_mod.get_pane_geometries(session, window)
     if not current:
         return False
 
-    # Check pane count matches
     pane_indices = tmux_mod.get_pane_indices(session, window)
     id_to_index = {pid: idx for pid, idx in pane_indices}
 
     registered_live = [p for p in panes if p["id"] in id_to_index]
     if len(registered_live) != len(current):
-        wdata["user_modified"] = True
-        save_registry(session, data)
+        def _set_user_modified(raw):
+            d = _prepare_registry_data(raw, session)
+            wd = get_window_data(d, window)
+            wd["user_modified"] = True
+            return d
+
+        locked_read_modify_write(registry_path(session), _set_user_modified)
         return True
 
     return False
@@ -604,22 +635,26 @@ def _respawn_tui(session: str, window: str) -> str:
             tmux_mod.select_window(session, window)
 
         # Register with lowest order so TUI sorts first (leftmost)
-        data = load_registry(session)
-        wdata = get_window_data(data, window)
-        min_order = min((p["order"] for p in wdata["panes"]), default=1) - 1
-        wdata["panes"].insert(0, {
-            "id": pane_id,
-            "role": "tui",
-            "order": min_order,
-            "cmd": "pm _tui",
-        })
-        # Reset user_modified — same pattern as pane_ops.launch_pane()
-        # and cli/pr.py review window (after-split-window hook may have
-        # set it before panes are registered).  Caller rebalances.
-        wdata["user_modified"] = False
-        save_registry(session, data)
-        _logger.info("_respawn_tui: created pane %s in window %s order=%d",
-                     pane_id, window, min_order)
+        from pm_core.pane_registry import locked_read_modify_write, _prepare_registry_data
+
+        def _insert_tui(raw):
+            data = _prepare_registry_data(raw, session)
+            wdata = get_window_data(data, window)
+            min_order = min((p["order"] for p in wdata["panes"]), default=1) - 1
+            wdata["panes"].insert(0, {
+                "id": pane_id,
+                "role": "tui",
+                "order": min_order,
+                "cmd": "pm _tui",
+            })
+            # Reset user_modified — same pattern as pane_ops.launch_pane()
+            # and cli/pr.py review window (after-split-window hook may have
+            # set it before panes are registered).  Caller rebalances.
+            wdata["user_modified"] = False
+            return data
+
+        locked_read_modify_write(registry_path(session), _insert_tui)
+        _logger.info("_respawn_tui: created pane %s in window %s", pane_id, window)
     except Exception:
         _logger.exception("_respawn_tui: failed to respawn TUI")
     return window
@@ -687,11 +722,17 @@ def handle_pane_opened(session: str, window: str, pane_id: str) -> None:
     _logger.info("handle_pane_opened called: session=%s window=%s pane_id=%s",
                  session, window, pane_id)
 
-    data = load_registry(session)
-    wdata = get_window_data(data, window)
-    known_ids = {p["id"] for p in wdata["panes"]}
-    if pane_id not in known_ids:
-        _logger.info("handle_pane_opened: unknown pane %s in window %s, setting user_modified",
-                     pane_id, window)
-        wdata["user_modified"] = True
-        save_registry(session, data)
+    from pm_core.pane_registry import locked_read_modify_write, _prepare_registry_data
+
+    def _mark_user_modified(raw):
+        data = _prepare_registry_data(raw, session)
+        wdata = get_window_data(data, window)
+        known_ids = {p["id"] for p in wdata["panes"]}
+        if pane_id not in known_ids:
+            _logger.info("handle_pane_opened: unknown pane %s in window %s, setting user_modified",
+                         pane_id, window)
+            wdata["user_modified"] = True
+            return data
+        return None  # pane already known, skip write
+
+    locked_read_modify_write(registry_path(session), _mark_user_modified)

@@ -151,14 +151,16 @@ class ProjectManagerApp(App):
         Binding("H", "launch_guide", "Guide", show=True),
         Binding("C", "show_connect", "Connect", show=False),
         Binding("A", "toggle_auto_start", "Auto-start", show=False),
+        Binding("O", "auto_sequence_pr", "Auto-seq", show=True),
         Binding("w", "focus_watcher", "Watcher", show=False),
         Binding("V", "review_spec", "Review Spec", show=False),
+        Binding("Y", "cleanup_pr", "Cleanup", show=True),
     ]
 
     def on_key(self, event) -> None:
         """Handle z and w modifier prefix keys.
 
-        z supports z, zz, zzz modifiers for review/QA loop control.
+        z supports z and zz modifiers for review/QA loop control.
         w is a prefix key for watcher commands: wf=focus, ww=list, ws=start/stop.
 
         Also buffers keystrokes when / was pressed but the command bar
@@ -166,6 +168,10 @@ class ProjectManagerApp(App):
         """
         cmd_bar = self.query_one("#command-bar", CommandBar)
         if cmd_bar.has_focus:
+            return
+        # When a modal/screen is on top of the default screen, let it handle
+        # its own keys — App-level prefix keys (y/w/z) must not swallow them.
+        if len(self.screen_stack) > 1:
             return
         # Buffer keystrokes between / press and command bar gaining focus
         if self._command_pending:
@@ -192,8 +198,35 @@ class ProjectManagerApp(App):
                 self._action_focus_watcher()
             elif key == "s":
                 self._action_watcher_toggle()
+            elif key == "r":
+                self._action_watcher_review()
             else:
                 self.log_message("[dim]w cancelled[/]")
+            event.prevent_default()
+            event.stop()
+            return
+        # y prefix mode: dispatch second key as cleanup-then-action
+        if self._y_mode:
+            self._y_mode = False
+            if self._y_cancel_timer:
+                self._y_cancel_timer.stop()
+                self._y_cancel_timer = None
+            self._clear_log_message()
+            key = event.character or event.key
+            if key in ("s", "d", "t"):
+                pr_view.cleanup_then_action(self, key)
+            else:
+                self.log_message("[dim]y cancelled[/]")
+            event.prevent_default()
+            event.stop()
+            return
+        if (event.key == "y" or event.character == "y"):
+            if not self.check_action("cleanup_pr", ()):
+                return
+            self._y_mode = True
+            self._z_count = 0
+            self.log_message("[bold]y …[/] [dim](cleanup-then: s=start d=review t=qa)[/]")
+            self._y_cancel_timer = self.set_timer(2.0, self._cancel_y_mode)
             event.prevent_default()
             event.stop()
             return
@@ -202,15 +235,16 @@ class ProjectManagerApp(App):
             if not self.check_action("focus_watcher", ()):
                 return
             self._w_mode = True
-            self.log_message("[bold]w …[/] [dim](w=list f=focus s=start/stop)[/]")
+            self.log_message("[bold]w …[/] [dim](w=list f=focus s=start/stop r=review)[/]")
             # Auto-cancel after 2 seconds
             self._w_cancel_timer = self.set_timer(2.0, self._cancel_w_mode)
             event.prevent_default()
             event.stop()
             return
         if event.key == "z":
-            if self._z_count >= 3:
-                # zzz → cancel (toggle off)
+            if self._z_count >= 2:
+                # zzz → cancel (toggle off).  Only z and zz are valid prefixes;
+                # a third z resets.
                 self._z_count = 0
                 self._clear_log_message()
             else:
@@ -218,13 +252,18 @@ class ProjectManagerApp(App):
                 self.log_message(f"[bold]{'z' * self._z_count} …[/]")
             event.prevent_default()
             event.stop()
-        elif event.key == "escape" and (self._z_count > 0 or self._w_mode):
+        elif event.key == "escape" and (self._z_count > 0 or self._w_mode or self._y_mode):
             self._z_count = 0
             if self._w_mode:
                 self._w_mode = False
                 if self._w_cancel_timer:
                     self._w_cancel_timer.stop()
                     self._w_cancel_timer = None
+            if self._y_mode:
+                self._y_mode = False
+                if self._y_cancel_timer:
+                    self._y_cancel_timer.stop()
+                    self._y_cancel_timer = None
             self._clear_log_message()
             # Don't prevent — let escape also do its normal thing
 
@@ -236,8 +275,8 @@ class ProjectManagerApp(App):
                        "launch_meta", "launch_claude", "launch_guide",
                        "view_log", "refresh", "rebalance", "show_help",
                        "toggle_plans", "toggle_qa", "start_qa_on_pr", "hide_plan", "move_to_plan", "toggle_merged",
-                       "cycle_filter", "cycle_sort", "toggle_auto_start", "focus_watcher",
-                       "review_spec"):
+                       "cycle_filter", "cycle_sort", "toggle_auto_start", "auto_sequence_pr", "focus_watcher",
+                       "review_spec", "cleanup_pr"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus or self._command_pending:
                 _log.debug("check_action: blocked %s (command bar focused/pending)", action)
@@ -276,7 +315,7 @@ class ProjectManagerApp(App):
         # In-flight PR action tracking (prevents concurrent/duplicate PR commands)
         self._inflight_pr_action: str | None = None
         self._log_sticky_until: float = 0.0  # monotonic time until which log line is protected
-        # z modifier key state (vim-style prefix, supports z/zz/zzz)
+        # z modifier key state (vim-style prefix, supports z/zz)
         self._z_count: int = 0
         # Review loop state: dict of pr_id -> ReviewLoopState (supports multiple)
         self._review_loops: dict = {}
@@ -296,15 +335,22 @@ class ProjectManagerApp(App):
         self._auto_start: bool = False
         self._auto_start_target: str | None = None
         self._auto_start_run_id: str | None = None
+        # Per-PR opt-out of auto-merge (set by the auto-sequence keypress).
+        # When a PR is in this set, _maybe_auto_merge stops at "ready to
+        # merge" instead of launching the merge window.
+        self._stop_before_merge: set[str] = set()
         # Watcher framework manager (purely in-memory, lost on TUI restart)
         from pm_core.watcher_manager import WatcherManager
         self._watcher_manager = WatcherManager()
         # w prefix key state
         self._w_mode: bool = False
         self._w_cancel_timer = None
+        # y prefix key state (cleanup-then-action)
+        self._y_mode: bool = False
+        self._y_cancel_timer = None
         # QA loop state (purely in-memory)
         self._qa_loops: dict = {}
-        # Self-driving QA state (zz t / zzz t — tracks pass counts per PR)
+        # Self-driving QA state (zz t — tracks pass counts per PR)
         self._self_driving_qa: dict = {}
         # Command-input race condition fix: buffer keystrokes between / and focus
         self._command_pending: bool = False
@@ -313,7 +359,7 @@ class ProjectManagerApp(App):
     def _consume_z(self) -> int:
         """Atomically read and clear the z modifier count.
 
-        Returns 0 (no z), 1 (z), 2 (zz), or 3 (zzz).
+        Returns 0 (no z), 1 (z), or 2 (zz).
         Non-zero is truthy, so ``if app._consume_z():`` still works
         for callers that only care about "was z pressed".
         """
@@ -362,6 +408,10 @@ class ProjectManagerApp(App):
                 self._session_name = result.stdout.strip().split("~")[0]
             except Exception:
                 pass
+        # External-reload IPC: write a pidfile and install a SIGUSR1 handler
+        # so CLI commands can ask us to reload state without depending on
+        # tmux send-keys (which gets eaten by whichever widget has focus).
+        self._install_reload_signal()
         # Load any existing capture config
         frame_capture.load_capture_config(self)
         # Set up watchers on child widgets for frame capture
@@ -457,6 +507,8 @@ class ProjectManagerApp(App):
             _log.warning("no project.yaml found")
             self._root = None
             self._data = {}
+        except store.ProjectYamlParseError as e:
+            _log.warning("corrupt project.yaml, keeping previous state: %s", e)
 
         # Decide which view to show based on whether PRs exist
         prs = self._data.get("prs") or []
@@ -673,14 +725,10 @@ class ProjectManagerApp(App):
         elif z == 1:
             # z d = fresh done (kill existing review window), OR stop loop if running
             review_loop_ui.stop_loop_or_fresh_done(self)
-        elif z == 2:
-            # zz d = start review loop (stops on PASS or PASS_WITH_SUGGESTIONS),
-            #        or stop loop if running
-            review_loop_ui.start_or_stop_loop(self, stop_on_suggestions=True)
         else:
-            # zzz d = start strict review loop (stops only on PASS),
-            #         or stop loop if running
-            review_loop_ui.start_or_stop_loop(self, stop_on_suggestions=False)
+            # zz d = start review loop (iterates until PASS),
+            #        or stop loop if running
+            review_loop_ui.start_or_stop_loop(self)
 
     def action_merge_pr(self) -> None:
         pr_view.merge_pr(self)
@@ -737,11 +785,29 @@ class ProjectManagerApp(App):
         tree = self.query_one("#tech-tree", TechTree)
         self.run_worker(toggle(self, selected_pr_id=tree.selected_pr_id))
 
+    def action_auto_sequence_pr(self) -> None:
+        from pm_core.tui.auto_start import auto_sequence_for_pr
+        tree = self.query_one("#tech-tree", TechTree)
+        pr_id = tree.selected_pr_id
+        if not pr_id:
+            self.log_message("No PR selected")
+            return
+        self.run_worker(auto_sequence_for_pr(self, pr_id))
+
     def _cancel_w_mode(self) -> None:
         """Auto-cancel w prefix mode after timeout."""
         if self._w_mode:
             self._w_mode = False
             self._clear_log_message()
+
+    def _cancel_y_mode(self) -> None:
+        """Auto-cancel y prefix mode after timeout."""
+        if self._y_mode:
+            self._y_mode = False
+            self._clear_log_message()
+
+    def action_cleanup_pr(self) -> None:
+        pr_view.cleanup_pr(self)
 
     def _action_focus_watcher(self) -> None:
         """Focus the watcher window (wf key chord)."""
@@ -815,6 +881,11 @@ class ProjectManagerApp(App):
             meta_pm_root=str(meta_root) if meta_root else None,
         )
 
+    def _action_watcher_review(self) -> None:
+        """Launch the watcher review session (wr key chord)."""
+        _log.info("action: watcher_review")
+        pane_ops.launch_watcher_review(self)
+
     def action_review_spec(self) -> None:
         """Open the oldest pending spec for review (V key)."""
         from pm_core import spec_gen
@@ -864,6 +935,45 @@ class ProjectManagerApp(App):
                 await self._do_normal_sync(is_manual=True)
             self.run_worker(do_refresh())
             self.log_message("Refreshing...")
+
+    def _reload_pidfile(self) -> Path | None:
+        """Path to this app's reload pidfile, keyed by tmux session name."""
+        if not self._session_name:
+            return None
+        from pm_core.paths import pm_home
+        return pm_home() / f"tui-{self._session_name}.pid"
+
+    def _install_reload_signal(self) -> None:
+        """Write pidfile and register SIGUSR1 -> action_reload."""
+        import os
+        import signal
+        import asyncio
+        pidfile = self._reload_pidfile()
+        if pidfile is None:
+            _log.debug("No session name yet, skipping reload-signal install")
+            return
+        try:
+            pidfile.write_text(str(os.getpid()))
+        except OSError as e:
+            _log.debug("Could not write TUI pidfile %s: %s", pidfile, e)
+            return
+        try:
+            loop = asyncio.get_event_loop()
+            loop.add_signal_handler(signal.SIGUSR1, self.action_reload)
+            _log.info("Installed SIGUSR1 reload handler (pidfile=%s)", pidfile)
+        except (NotImplementedError, RuntimeError) as e:
+            # add_signal_handler isn't available on Windows; not relevant
+            # for our tmux flow but log so it's visible if it ever fires.
+            _log.debug("Could not install SIGUSR1 handler: %s", e)
+
+    def on_unmount(self) -> None:
+        """Clean up the reload pidfile on shutdown."""
+        pidfile = self._reload_pidfile()
+        if pidfile is not None:
+            try:
+                pidfile.unlink(missing_ok=True)
+            except OSError as e:
+                _log.debug("Could not remove TUI pidfile %s: %s", pidfile, e)
 
     def action_reload(self) -> None:
         """Reload state from disk without triggering PR sync.
@@ -1048,11 +1158,10 @@ class ProjectManagerApp(App):
     def action_start_qa_on_pr(self) -> None:
         """Start QA on the selected PR.
 
-        Keybinding variants (same z-prefix pattern as review):
+        Keybinding variants:
           t      — one-shot QA run (or focus existing window)
           z t    — fresh start (stop running QA, kill old windows, restart)
-          zz t   — start/stop QA loop (lenient)
-          zzz t  — start/stop QA loop (strict)
+          zz t   — start/stop QA loop
         """
         from pm_core.tui import qa_loop_ui
         tree = self.query_one("#tech-tree", TechTree)
@@ -1065,10 +1174,8 @@ class ProjectManagerApp(App):
             qa_loop_ui.focus_or_start_qa(self, pr_id)
         elif z == 1:
             qa_loop_ui.fresh_start_qa(self, pr_id)
-        elif z == 2:
-            qa_loop_ui.start_or_stop_qa_loop(self, pr_id, strict=False)
         else:
-            qa_loop_ui.start_or_stop_qa_loop(self, pr_id, strict=True)
+            qa_loop_ui.start_or_stop_qa_loop(self, pr_id)
 
     def on_qaitem_selected(self, message: QAItemSelected) -> None:
         _log.debug("qa item selected: %s", message.item_id)

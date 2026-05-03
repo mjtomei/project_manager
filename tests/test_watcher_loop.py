@@ -12,12 +12,7 @@ from pm_core.watcher_base import (
     _MAX_HISTORY,
 )
 from pm_core.watchers.auto_start_watcher import AutoStartWatcher
-from pm_core.loop_shared import (
-    match_verdict,
-    extract_verdict_from_content,
-    build_prompt_verdict_lines as _build_prompt_verdict_lines,
-    is_prompt_line as _is_prompt_line,
-)
+from pm_core.loop_shared import match_verdict
 
 VERDICT_READY = "READY"
 VERDICT_INPUT_REQUIRED = "INPUT_REQUIRED"
@@ -37,14 +32,6 @@ def _parse_watcher_verdict(output: str) -> str:
 
 def _match_watcher_verdict(line):
     return match_verdict(line, ALL_WATCHER_VERDICTS)
-
-
-def _extract_verdict_from_content(content, prompt_text="", exclude_verdicts=None):
-    return extract_verdict_from_content(
-        content, verdicts=ALL_WATCHER_VERDICTS, keywords=_WATCHER_KEYWORDS,
-        prompt_text=prompt_text, exclude_verdicts=exclude_verdicts,
-        log_prefix="test_watcher",
-    )
 
 
 # --- _parse_watcher_verdict tests ---
@@ -115,7 +102,6 @@ class TestMatchWatcherVerdictFalsePositives:
         """Watcher should not match review loop verdicts."""
         assert _match_watcher_verdict("PASS") is None
         assert _match_watcher_verdict("NEEDS_WORK") is None
-        assert _match_watcher_verdict("PASS_WITH_SUGGESTIONS") is None
 
 
 # --- prompt verdict filtering tests ---
@@ -137,89 +123,6 @@ def _get_real_watcher_prompt() -> str:
 
 
 from tests.conftest import simulate_terminal_wrap as _simulate_terminal_wrap
-
-
-class TestExtractVerdictFromContent:
-    def test_real_verdict_detected_without_prompt(self):
-        content = "\n".join(["line"] * 40 + ["**READY**"])
-        assert _extract_verdict_from_content(content) == VERDICT_READY
-
-    def test_real_verdict_after_prompt(self):
-        prompt = _get_real_watcher_prompt()
-        content = prompt + "\n\n" + "\n".join(["watching text"] * 40) + "\n\n**READY**"
-        assert _extract_verdict_from_content(content, prompt_text=prompt) == VERDICT_READY
-
-    def test_input_required_after_prompt(self):
-        prompt = _get_real_watcher_prompt()
-        content = prompt + "\n\n" + "\n".join(["watching text"] * 40) + "\n\n**INPUT_REQUIRED**"
-        assert _extract_verdict_from_content(content, prompt_text=prompt) == VERDICT_INPUT_REQUIRED
-
-    def test_no_prompt_text_no_false_positive(self):
-        prompt = _get_real_watcher_prompt()
-        assert _extract_verdict_from_content(prompt) is None
-
-    def test_raw_prompt_not_detected(self):
-        prompt = _get_real_watcher_prompt()
-        assert _extract_verdict_from_content(prompt, prompt_text=prompt) is None
-
-    def test_terminal_wrapped_prompt_not_detected(self):
-        prompt = _get_real_watcher_prompt()
-        wrapped = _simulate_terminal_wrap(prompt, width=80)
-        assert _extract_verdict_from_content(wrapped, prompt_text=prompt) is None
-
-    def test_terminal_wrapped_prompt_narrow_not_detected(self):
-        prompt = _get_real_watcher_prompt()
-        wrapped = _simulate_terminal_wrap(prompt, width=60)
-        assert _extract_verdict_from_content(wrapped, prompt_text=prompt) is None
-
-    def test_exclude_verdicts(self):
-        content = "\n".join(["line"] * 40 + ["**INPUT_REQUIRED**"])
-        result = _extract_verdict_from_content(
-            content, exclude_verdicts={VERDICT_INPUT_REQUIRED}
-        )
-        assert result is None
-
-    def test_verdict_line_variations_from_prompt_all_filtered(self):
-        """Every line in the prompt that contains a verdict keyword should be filtered."""
-        prompt = _get_real_watcher_prompt()
-        for line in prompt.splitlines():
-            stripped = line.strip().strip("*").strip()
-            if not stripped:
-                continue
-            has_verdict = any(v in stripped for v in ("READY", "INPUT_REQUIRED"))
-            if not has_verdict:
-                continue
-            pane = "\n".join(["other text"] * 40 + [line])
-            result = _extract_verdict_from_content(pane, prompt_text=prompt)
-            assert result is None, (
-                f"Prompt line falsely detected as {result}: [{line.strip()}]"
-            )
-
-
-class TestBuildPromptVerdictLines:
-    def test_extracts_verdict_lines_from_real_prompt(self):
-        prompt = _get_real_watcher_prompt()
-        lines = _build_prompt_verdict_lines(prompt, _WATCHER_KEYWORDS)
-        assert any("READY" in line for line in lines)
-        assert any("INPUT_REQUIRED" in line for line in lines)
-        assert len(lines) >= 3
-
-    def test_empty_prompt(self):
-        assert _build_prompt_verdict_lines("", _WATCHER_KEYWORDS) == set()
-
-
-class TestIsPromptLine:
-    def test_exact_match(self):
-        prompt_lines = {"READY -- All issues handled (or no issues found)."}
-        assert _is_prompt_line("READY -- All issues handled (or no issues found).", prompt_lines, _WATCHER_KEYWORDS) is True
-
-    def test_standalone_verdict_not_prompt(self):
-        prompt_lines = {"READY -- All issues handled (or no issues found)."}
-        assert _is_prompt_line("READY", prompt_lines, _WATCHER_KEYWORDS) is False
-
-    def test_standalone_input_required_not_prompt(self):
-        prompt_lines = {"INPUT_REQUIRED -- You need human input."}
-        assert _is_prompt_line("INPUT_REQUIRED", prompt_lines, _WATCHER_KEYWORDS) is False
 
 
 # --- WatcherState tests ---
@@ -629,7 +532,7 @@ class TestWatcherCLI:
         from pm_core.cli import cli
         runner = CliRunner()
         result = runner.invoke(cli, ["watcher", "--iteration", "3"])
-        mock_create.assert_called_once_with(3, "", None, auto_start_target=None, meta_pm_root=None)
+        mock_create.assert_called_once_with(3, "", None, auto_start_target=None, meta_pm_root=None, watcher_type="auto-start")
 
     def test_list_subcommand(self):
         from click.testing import CliRunner
@@ -639,6 +542,80 @@ class TestWatcherCLI:
         assert result.exit_code == 0
         assert "auto-start" in result.output
         assert "Auto-Start Watcher" in result.output
+        assert "regression-loop" in result.output
+
+
+class TestRegressionLoopStart:
+    """Test ``pm watcher start regression-loop`` meta-type."""
+
+    @patch("pm_core.cli.watcher.tmux_mod")
+    def test_starts_three_watchers(self, mock_tmux):
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+
+        mock_tmux.has_tmux.return_value = True
+        mock_tmux.in_tmux.return_value = True
+
+        registered: list = []
+        started: list = []
+
+        class FakeManager:
+            def register(self, w):
+                registered.append(w)
+            def start(self, wid, on_iteration=None, transcript_dir=None):
+                started.append(wid)
+                return True
+            def is_any_running(self):
+                return False
+            def stop_all(self):
+                pass
+
+        with patch("pm_core.watcher_manager.WatcherManager", FakeManager):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["watcher", "start", "regression-loop"])
+
+        assert result.exit_code == 0, result.output
+        types = sorted(w.WATCHER_TYPE for w in registered)
+        assert types == ["bug-fix-impl", "discovery", "improvement-fix-impl"]
+        assert len(started) == 3
+
+    @patch("pm_core.cli.watcher.tmux_mod")
+    def test_wait_override_propagates(self, mock_tmux):
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+
+        mock_tmux.has_tmux.return_value = True
+        mock_tmux.in_tmux.return_value = True
+
+        registered: list = []
+
+        class FakeManager:
+            def register(self, w):
+                registered.append(w)
+            def start(self, *a, **k):
+                return True
+            def is_any_running(self):
+                return False
+            def stop_all(self):
+                pass
+
+        with patch("pm_core.watcher_manager.WatcherManager", FakeManager):
+            runner = CliRunner()
+            result = runner.invoke(
+                cli, ["watcher", "start", "regression-loop", "--wait", "42"])
+
+        assert result.exit_code == 0, result.output
+        assert all(w.state.iteration_wait == 42 for w in registered)
+        assert len(registered) == 3
+
+    def test_unknown_type_lists_regression_loop(self):
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+        runner = CliRunner()
+        result = runner.invoke(cli, ["watcher", "start", "no-such-watcher"])
+        assert result.exit_code != 0
+        assert "Unknown watcher type" in result.output
+        assert "regression-loop" in result.output
 
 
 # --- Watcher registry tests ---

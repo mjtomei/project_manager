@@ -5,7 +5,10 @@ HelpGroup, state management, PR ID resolution, TUI refresh, and session helpers.
 """
 
 import os
+import shutil
 import subprocess
+import sys
+import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,6 +21,118 @@ from pm_core import pane_layout
 from pm_core import pane_registry
 
 _log = configure_logger("pm.cli")
+
+
+# Tokens at which record wrapping prefers to break a too-wide line, in
+# priority order.  Each token marks a natural visual boundary in pm's
+# record-style CLI output.  The leading space is stripped on continuation
+# so the tail starts cleanly with the token itself.
+_RECORD_BREAK_TOKENS = (" <- ", " (", " [")
+
+
+def _cell_aware_fill(
+    text: str, width: int, *,
+    initial_indent: str = "", subsequent_indent: str = "",
+) -> str:
+    """Wrap ``text`` to visual ``width`` based on ``rich.cells.cell_len``.
+
+    Same shape as ``textwrap.fill`` but counts cells, not codepoints.  Wide
+    characters (emoji, CJK) consume the right number of columns.  Splits
+    on whitespace only; never splits a word.  Long words that exceed the
+    width go on their own line and overflow rather than being broken.
+    """
+    from rich.cells import cell_len
+    words = text.split()
+    if not words:
+        return initial_indent
+    lines = [initial_indent + words[0]]
+    for word in words[1:]:
+        candidate = lines[-1] + " " + word
+        if cell_len(candidate) <= width:
+            lines[-1] = candidate
+        else:
+            lines.append(subsequent_indent + word)
+    return "\n".join(lines)
+
+
+def _wrap_record_to_width(line: str, width: int, indent: str) -> str:
+    """Return ``line`` possibly with embedded newlines so it fits in ``width``.
+
+    Prefers breaking at the first record boundary token (``" <- "``,
+    ``" ("``, ``" ["``).  If the indented tail still overflows, falls
+    back to whitespace wrapping on the tail.  If no boundary token gives
+    a head that fits, falls back to whitespace wrapping on the full line.
+
+    Uses ``rich.cells.cell_len`` for visual width so wide characters
+    (emoji status icons like ⏳ 👀 🧪 ✅, CJK, etc.) are counted as the
+    two columns they actually occupy in a terminal.  ``len()`` would
+    miscount them and let visually-overflowing lines slip through.
+    """
+    from rich.cells import cell_len
+    if cell_len(line) <= width:
+        return line
+    for tok in _RECORD_BREAK_TOKENS:
+        idx = line.find(tok)
+        if idx <= 0:
+            continue
+        head = line[:idx]
+        # Require the head (everything up to the leading space) to fit.
+        if cell_len(head) > width:
+            continue
+        tail = line[idx + 1:]  # drop leading space, keep token onward
+        indented_tail = indent + tail
+        if cell_len(indented_tail) <= width:
+            return head + "\n" + indented_tail
+        return head + "\n" + _cell_aware_fill(
+            tail, width,
+            initial_indent=indent, subsequent_indent=indent,
+        )
+    # No break token gave a fitting head — fall back to whitespace wrapping
+    # on the full line.  Preserve the line's own leading whitespace as the
+    # initial indent so the first output line starts in the same column as
+    # the original (e.g. ``"  ⏳ pr-..."`` keeps its two-space gutter).
+    stripped = line.lstrip()
+    leading = line[:len(line) - len(stripped)]
+    return _cell_aware_fill(
+        stripped, width,
+        initial_indent=leading, subsequent_indent=indent,
+    )
+
+
+def echo_record(line: str, *, indent: str = "      ") -> None:
+    """Echo one record-style line, wrapping at terminal width on a TTY.
+
+    When stdout is *not* a TTY (e.g. piped into ``grep`` / ``jq``), the
+    line is echoed as-is so consumers keep one-record-per-line semantics.
+    Use ``emit_paged`` for listing commands that should also auto-page.
+    """
+    if not sys.stdout.isatty():
+        click.echo(line)
+        return
+    width = shutil.get_terminal_size((80, 24)).columns
+    click.echo(_wrap_record_to_width(line, width, indent))
+
+
+def emit_paged(lines, *, indent: str = "      ") -> None:
+    """Emit a sequence of record-style lines, auto-paging on a TTY.
+
+    Mirrors the ``git log`` / ``man`` / ``journalctl`` pattern: when
+    stdout is a TTY, collect all output, wrap each line at the terminal
+    width (with the same record-boundary preferences as ``echo_record``),
+    and pipe through ``$PAGER``.  ``less -FRX`` (the typical default)
+    auto-quits when the output fits on one screen, so short listings
+    don't feel paged at all.
+
+    When stdout is piped (``grep`` / ``jq`` / a file), each line is
+    emitted as-is, one per record, with no wrapping.
+    """
+    if not sys.stdout.isatty():
+        for line in lines:
+            click.echo(line)
+        return
+    width = shutil.get_terminal_size((80, 24)).columns
+    wrapped = "\n".join(_wrap_record_to_width(line, width, indent) for line in lines)
+    click.echo_via_pager(wrapped)
 
 
 # Module-level state set by the cli() group callback via set_project_override()
@@ -291,26 +406,53 @@ def _record_status_timestamp(pr_entry: dict, status: str | None = None) -> None:
         pr_entry["merged_at"] = now
 
 
-def save_and_push(data: dict, root: Path, message: str = "pm: update state") -> None:
-    """Save state. Use 'pm push' to commit and share changes."""
-    store.save(data, root)
+def _tui_pidfile_for_session(session: str) -> Path:
+    """Path to the pidfile a TUI in ``session`` writes at startup."""
+    from pm_core.paths import pm_home
+    return pm_home() / f"tui-{session}.pid"
 
 
-def trigger_tui_refresh() -> None:
-    """Send reload key to TUI pane in the pm session for the current directory.
+def trigger_tui_reload(session: str | None = None) -> None:
+    """Ask the TUI to reload state from disk via SIGUSR1.
 
-    Sends 'R' (reload) which reloads state from disk without triggering
-    an expensive PR sync. Use 'r' (refresh) for full sync with GitHub.
+    The TUI registers a SIGUSR1 handler at startup that runs
+    ``action_reload`` (state-only reload, no GitHub sync). This is
+    focus-independent — unlike send-keys, it can't be eaten by the
+    command input or any other focused widget.
+
+    Resolves the target TUI by session: if ``session`` is given it is
+    used directly, otherwise we look up the TUI for the current
+    cwd/tmux context (same logic as ``_find_tui_pane``).
     """
+    import signal
     try:
-        if not tmux_mod.has_tmux():
+        if session is None:
+            _, session = _find_tui_pane()
+        if not session:
             return
-        tui_pane, session = _find_tui_pane()
-        if tui_pane and session:
-            tmux_mod.send_keys_literal(tui_pane, "R")
-            _log.debug("Sent reload to TUI pane %s in session %s", tui_pane, session)
+        pidfile = _tui_pidfile_for_session(session)
+        if not pidfile.exists():
+            _log.debug("No TUI pidfile for session %s", session)
+            return
+        try:
+            pid = int(pidfile.read_text().strip())
+        except (ValueError, OSError) as e:
+            _log.debug("Could not read TUI pidfile %s: %s", pidfile, e)
+            return
+        try:
+            os.kill(pid, signal.SIGUSR1)
+            _log.debug("Sent SIGUSR1 to TUI pid %d (session %s)", pid, session)
+        except ProcessLookupError:
+            _log.debug("TUI pid %d gone, removing stale pidfile", pid)
+            pidfile.unlink(missing_ok=True)
+        except PermissionError as e:
+            _log.debug("Cannot signal TUI pid %d: %s", pid, e)
     except Exception as e:
-        _log.debug("Could not trigger TUI refresh: %s", e)
+        _log.debug("Could not trigger TUI reload: %s", e)
+
+
+# Backwards-compatible alias for existing callers.
+trigger_tui_refresh = trigger_tui_reload
 
 
 def trigger_tui_restart() -> None:
@@ -347,11 +489,7 @@ def trigger_tui_merge_lock(pr_display_id: str) -> None:
         lock.write_text(pr_display_id)
         _log.debug("Wrote merge-lock marker for %s", pr_display_id)
         # Signal TUI to reload — it will see the lock and show overlay
-        if not tmux_mod.has_tmux():
-            return
-        tui_pane, session = _find_tui_pane()
-        if tui_pane and session:
-            tmux_mod.send_keys_literal(tui_pane, "R")
+        trigger_tui_reload()
     except Exception as e:
         _log.debug("Could not set merge lock: %s", e)
 
@@ -498,11 +636,19 @@ def _ensure_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
     # Checkout the PR branch
     git_ops.checkout_branch(work_path, branch, create=True)
 
-    # Update and persist the new workdir path
-    pr_entry["workdir"] = str(work_path)
-    save_and_push(data, root, f"pm: ensure workdir for {pr_id}")
+    # Update and persist the new workdir path atomically
+    workdir_str = str(work_path)
+    pr_entry["workdir"] = workdir_str
+
+    def apply(fresh_data):
+        for pr in fresh_data.get("prs") or []:
+            if pr["id"] == pr_id:
+                pr["workdir"] = workdir_str
+                break
+
+    store.locked_update(root, apply)
     click.echo(f"Workdir created at {work_path}")
-    return str(work_path)
+    return workdir_str
 
 
 def _resolve_repo_id(data: dict, workdir: Path, root: Path) -> None:
@@ -512,8 +658,13 @@ def _resolve_repo_id(data: dict, workdir: Path, root: Path) -> None:
     result = git_ops.run_git("rev-list", "--max-parents=0", "HEAD", cwd=workdir, check=False)
     lines = result.stdout.strip().splitlines() if result.returncode == 0 else []
     if lines:
-        data["project"]["repo_id"] = lines[0]
-        save_and_push(data, root, "pm: cache repo_id")
+        repo_id = lines[0]
+        data["project"]["repo_id"] = repo_id
+
+        def apply(d):
+            d.setdefault("project", {})["repo_id"] = repo_id
+
+        store.locked_update(root, apply)
 
 
 def _infer_pr_id(data: dict, status_filter: tuple[str, ...] | None = None) -> str | None:

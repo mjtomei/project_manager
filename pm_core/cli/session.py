@@ -170,6 +170,16 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
                           before attaching.
     """
     _log.info("session_cmd started")
+    # Install Claude Code hooks so idle_prompt / Stop events can drive
+    # pm's verdict detection without pane polling.  Conflicts with
+    # existing third-party hooks abort the session so the user can
+    # resolve the conflict rather than having pm silently step on it.
+    from pm_core.hook_install import ensure_hooks_installed, HookConflictError
+    try:
+        ensure_hooks_installed()
+    except HookConflictError as e:
+        click.echo(str(e), err=True)
+        raise SystemExit(1)
     if not tmux_mod.has_tmux():
         click.echo("tmux is required for 'pm session'. Install it first.", err=True)
         raise SystemExit(1)
@@ -264,7 +274,15 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
                 if tui_window:
                     break
             if not tui_window:
-                tui_window = tmux_mod.get_window_id(session_name)
+                # Fall back to window named 'main' (or first window) rather
+                # than the active window, which may be a QA/work window.
+                main_win = tmux_mod.find_window_by_name(session_name, "main")
+                if main_win:
+                    tui_window = main_win["id"]
+                else:
+                    all_wins = tmux_mod.list_windows(session_name)
+                    if all_wins:
+                        tui_window = all_wins[0]["id"]
             if tui_window:
                 pane_layout._respawn_tui(session_name, tui_window)
                 pane_layout.rebalance(session_name, tui_window)
@@ -327,10 +345,10 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
     # Clear stale pane registry and bump generation to invalidate old EXIT traps
     import time as _time
     generation = str(int(_time.time()))
-    pane_registry.save_registry(session_name, {
-        "session": session_name, "windows": {},
-        "generation": generation,
-    })
+    pane_registry.locked_read_modify_write(
+        pane_registry.registry_path(session_name),
+        lambda _old: {"session": session_name, "windows": {}, "generation": generation},
+    )
 
     # Always create session with TUI in the left pane
     _log.info("creating tmux session: %s cwd=%s socket=%s", session_name, cwd, socket_path)
@@ -580,10 +598,15 @@ def session_mobile(force: bool | None):
             else:
                 # Entering mobile: unzoom current window before rebalance
                 tmux_mod.unzoom_pane(session_name, window)
-            data = pane_registry.load_registry(session_name)
-            for wdata in data.get("windows", {}).values():
-                wdata["user_modified"] = False
-            pane_registry.save_registry(session_name, data)
+
+            def _reset_all_user_modified(raw):
+                data = pane_registry._prepare_registry_data(raw, session_name)
+                for wdata in data.get("windows", {}).values():
+                    wdata["user_modified"] = False
+                return data
+
+            pane_registry.locked_read_modify_write(
+                pane_registry.registry_path(session_name), _reset_all_user_modified)
             pane_layout.rebalance(session_name, window)
             if force:
                 # Entering mobile: zoom active pane on every window
@@ -600,11 +623,11 @@ def session_mobile(force: bool | None):
             click.echo(f"Session: {session_name}")
             click.echo(f"Mobile active: {mobile}")
             click.echo(f"Force flag: {force_flag}")
-            click.echo(f"Window width: {width} (threshold: {pane_layout.MOBILE_WIDTH_THRESHOLD})")
+            click.echo(f"Window width: {width} (threshold: {pane_layout._get_mobile_width_threshold()})")
         else:
             click.echo(f"Session: {session_name} (not running)")
             click.echo(f"Force flag: {force_flag}")
-            click.echo(f"Threshold: {pane_layout.MOBILE_WIDTH_THRESHOLD}")
+            click.echo(f"Threshold: {pane_layout._get_mobile_width_threshold()}")
 
 
 # --- Internal pane/window commands ---
@@ -723,14 +746,21 @@ def rebalance_cmd():
     session = tmux_mod.get_session_name()
     window = tmux_mod.get_window_id(session)
 
+    # Check for panes (read-only) then reset user_modified under lock
     data = pane_registry.load_registry(session)
     wdata = pane_registry.get_window_data(data, window)
     if not wdata["panes"]:
         click.echo("No panes registered for this session.", err=True)
         raise SystemExit(1)
 
-    wdata["user_modified"] = False
-    pane_registry.save_registry(session, data)
+    def _reset_user_modified(raw):
+        d = pane_registry._prepare_registry_data(raw, session)
+        wd = pane_registry.get_window_data(d, window)
+        wd["user_modified"] = False
+        return d
+
+    pane_registry.locked_read_modify_write(
+        pane_registry.registry_path(session), _reset_user_modified)
 
     # Unzoom before rebalance so layout applies to all panes
     tmux_mod.unzoom_pane(session, window)

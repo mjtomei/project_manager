@@ -7,6 +7,102 @@ from pm_core.spec_gen import (format_spec_for_prompt, spec_generation_preamble,
                                get_spec_mocks_section)
 
 
+def _is_bug_pr(pr: dict) -> bool:
+    """Return True when this PR should follow the bug-fix flow.
+
+    Triggers on `plan == "bugs"` (today's signal) or `type == "bug"`
+    (forward-looking schema). Keeps detection in one place so impl/review/QA
+    prompts stay in sync.
+    """
+    return pr.get("plan") == "bugs" or pr.get("type") == "bug"
+
+
+_BUG_FIX_FLOW_BLOCK = """
+## Bug Fix Flow (reproduce → fix → verify → reconcile)
+
+This PR is a bug fix. Follow this sequence rather than a feature-style
+implementation:
+
+1. **Reproduce** — Write or identify a failing test that demonstrates the
+   bug. The test must fail *for the right reason* (matching the reported
+   symptom) before you change any product code.
+   - If the bug involves Claude session behavior, prefer a Claude-guided
+     integration test using `FakeClaudeSession` (or the `fake-claude`
+     binary) so the reproduction is deterministic.
+   - For non-Claude bugs, a plain unit or integration test is fine.
+   - If the bug is genuinely untestable in code (e.g. a visual TUI
+     regression), record a manual repro in a PR note and, if appropriate,
+     a regression instruction file under `pm/qa/regression/`. The reviewer
+     will accept that as a substitute, but the substitute must exist.
+
+2. **Fix** — Implement the smallest change that addresses the root cause.
+   Avoid drive-by refactors.
+
+3. **Verify** — Re-run the reproduction test to confirm it now passes.
+   Run any related suite to check for regressions.
+
+4. **Reconcile** (verification-only, at session end) — Scan this PR's notes
+   (`pm pr note list <pr-id>` or read the PR Notes section above) for
+   cross-references the discovery supervisor (`pr-271cb3a`) may have filed
+   linking overlapping bug PRs. For each linked overlap:
+   - Check whether the linked bug still reproduces against the current code.
+   - If it's *also* resolved by your fix, append a confirmation note:
+     ```
+     pm pr note add <this-pr-id> 'confirmed-overlap: <other-pr-id>'
+     ```
+   - If you independently notice an overlap that the supervisor did **not**
+     link, append a pointer note:
+     ```
+     pm pr note add <this-pr-id> 'noticed-overlap: <other-pr-id> — <one-line reason>'
+     ```
+   If the PR has no cross-references and you noticed no overlaps, do
+   nothing for this step — it's a backstop, not the primary dedup
+   mechanism. The discovery supervisor handles dedup at file time with
+   work-log context the session does not have.
+"""
+
+
+_BUG_FIX_REVIEW_BLOCK = """
+
+## Bug Fix Review Checklist
+
+This PR is a bug fix. In addition to the generic checks above, verify:
+
+- **Reproduction test exists** — the diff includes a new (or modified)
+  test that fails without the fix and passes with it. Prefer tests that
+  exercise the same surface a user hits (Claude-guided via
+  `FakeClaudeSession` for session bugs, plain unit/integration tests
+  otherwise).
+- **The test fails for the right reason** — read the test and confirm
+  it would have caught the original bug, not just any change in the
+  area.
+- **Acceptable substitute** — if no automated reproduction is possible
+  (e.g. visual TUI regression), the PR should include a manual repro
+  PR note and ideally a regression instruction file. A bug fix with no
+  reproduction artifact at all is **NEEDS_WORK**.
+- **Scope discipline** — the diff should be focused on the bug. Flag
+  drive-by refactors that aren't part of the fix.
+"""
+
+
+_OUT_OF_SCOPE_BUGS_BLOCK = """
+## Incidental Bugs
+
+If you spot a bug or quality issue that isn't part of this PR's stated
+scope, try to fix it if the fix doesn't require separate planning or user
+input. If you do decide to fix it, then record what you did with:
+  ```
+  pm pr note add <pr-id> '<short summary of the incidental fix>'
+  ```
+
+If you don't, file a separate bug PR so it doesn't get lost:
+  ```
+  pm pr add '<title>' --plan bugs --description '<location, repro>'
+  ```
+  Skim `pm pr list --plan bugs` first to avoid duplicates.
+"""
+
+
 def tui_section(session_name: str) -> str:
     """Build a TUI interaction section for prompts running in a tmux session.
 
@@ -137,6 +233,8 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
     impl_spec_block = format_spec_for_prompt(pr, "impl")
     impl_spec_preamble = spec_generation_preamble(pr, "impl", root=root)
 
+    bug_fix_block = _BUG_FIX_FLOW_BLOCK if _is_bug_pr(pr) else ""
+
     prompt = f"""You're working on PR {pr_id}: "{title}"
 
 This session is managed by `pm`. Run `pm help` to see available commands.
@@ -147,7 +245,7 @@ This session is managed by `pm`. Run `pm help` to see available commands.
 
 ## Task
 {description}
-{pr_notes_block}{impl_spec_block}{impl_spec_preamble}
+{pr_notes_block}{impl_spec_block}{impl_spec_preamble}{bug_fix_block}
 ## Tips
 - This session may be resuming after a restart. Check `git status` and `git log` to see if previous work exists on this branch — if so, continue from there. The directory may contain uncommitted implementation work from a previous session.
 - Before referencing existing code (imports, function calls, class usage), read the source to verify the interface.
@@ -172,7 +270,7 @@ def generate_review_prompt(data: dict, pr_id: str, session_name: str | None = No
         pr_id: The PR identifier.
         session_name: If provided, include TUI interaction instructions.
         review_loop: When True, append fix/commit/push instructions for
-            the automated review loop (``zz d`` / ``zzz d``).
+            the automated review loop (``zz d``).
         review_iteration: Current iteration number (1-based) for commit
             message tagging.  Only used when ``review_loop`` is True.
         review_loop_id: Short unique loop identifier for commit message
@@ -276,11 +374,13 @@ Review the code changes in this PR for quality, correctness, and architectural f
 {n+4}. Output per-file notes: **filename** — GOOD / FIX / RETHINK
 {n+5}. End with an overall verdict on its own line — one of:
    - **PASS** — No changes needed. The code is ready to merge as-is.
-   - **PASS_WITH_SUGGESTIONS** — Only non-blocking suggestions remain (style nits, minor refactors, optional improvements). The PR could merge now, but would benefit from small tweaks. List suggestions clearly.
-   - **NEEDS_WORK** — Blocking issues found (bugs, missing error handling, architectural problems, test gaps). Separate code-quality fixes from architectural concerns.
-   - **INPUT_REQUIRED** — Reserved for genuine ambiguities in the PR spec or architectural decisions that need human judgment. Do NOT use this for manual testing — QA handles testing separately. Include specific questions that need the user's decision."""
+   - **NEEDS_WORK** — Blocking issues or non-blocking suggestions found — either way, fix them in this iteration. Separate code-quality fixes from architectural concerns.
+   - **INPUT_REQUIRED** — Any issue that needs the user's attention before the PR can proceed: ambiguities in the PR spec, architectural decisions you can't make alone, something that looks broken but you can't tell if it's intentional, a dependency or environmental problem you can't resolve, or anything else you'd want a human to look at before moving on. If in doubt between NEEDS_WORK and INPUT_REQUIRED, prefer INPUT_REQUIRED — an unresolved concern silently rolled into a PASS is the worst outcome. Do NOT use INPUT_REQUIRED for manual testing — QA handles testing separately. Include specific questions that need the user's decision."""
 
     base = prompt.strip()
+    if _is_bug_pr(pr):
+        base += _BUG_FIX_REVIEW_BLOCK
+    base += "\n" + _OUT_OF_SCOPE_BUGS_BLOCK
     base += review_specific_block
     base += _beginner_addendum()
     if review_loop:
@@ -303,28 +403,26 @@ def _review_loop_addendum(branch: str, iteration: int = 0,
 
 This review is running in an automated loop.  After completing your review:
 
-1. If you find issues (**NEEDS_WORK**):
-   - Implement ALL the fixes you identified
-   - Run any relevant tests to verify your fixes
+1. If you find anything worth changing — bugs, missing error handling,
+   architectural problems, test gaps, OR non-blocking suggestions (style
+   nits, minor refactors, optional improvements) — that's **NEEDS_WORK**:
+   - Implement ALL the fixes and suggestions you identified
+   - Run any relevant tests to verify your changes
    - Stage and commit your changes — prefix the message with `{commit_prefix}` (e.g. `{commit_prefix}fix null check, add tests`)
    - Push to the remote: `git push origin {branch}`
-   - Then output your verdict: **NEEDS_WORK** with a summary of what you fixed and what may still need attention on the next iteration
+   - Then output your verdict: **NEEDS_WORK** with a summary of what you changed and what may still need attention on the next iteration
 
-2. If only non-blocking suggestions remain (**PASS_WITH_SUGGESTIONS**):
-   - Implement the suggestions
-   - If you made changes, commit (same `{commit_prefix}` prefix) and push
-   - Output: **PASS_WITH_SUGGESTIONS** with a list of any remaining optional improvements you chose not to implement
-
-3. If the code is ready to merge as-is (**PASS**):
+2. If the code is ready to merge as-is with nothing you'd change (**PASS**):
    - Output: **PASS**
 
-4. If you have a genuine question requiring human judgment (**INPUT_REQUIRED**):
-   - Reserved for genuine ambiguities in the PR spec or architectural decisions that need human judgment
-   - Do NOT use this for manual testing — QA handles testing separately
-   - Include specific questions that need the user's decision
+3. If ANY issue needs the user's attention before the PR can proceed (**INPUT_REQUIRED**):
+   - Use this for: ambiguities in the PR spec, architectural decisions you can't make alone, code that looks broken but you can't tell if it's intentional, a dependency/environment problem you can't resolve, or anything else you'd want a human to look at before moving on.
+   - If in doubt between NEEDS_WORK and INPUT_REQUIRED, prefer INPUT_REQUIRED — an unresolved concern silently rolled into a PASS is the worst outcome.
+   - Do NOT use this for manual testing — QA handles testing separately.
+   - Include specific questions that need the user's decision.
    - Output: **INPUT_REQUIRED** — the user will respond directly in this pane
 
-IMPORTANT: Always end your response with the verdict keyword on its own line — one of **PASS**, **PASS_WITH_SUGGESTIONS**, **NEEDS_WORK**, or **INPUT_REQUIRED**."""
+IMPORTANT: Always end your response with the verdict keyword on its own line — one of **PASS**, **NEEDS_WORK**, or **INPUT_REQUIRED**."""
 
 
 def _beginner_addendum() -> str:
@@ -660,7 +758,7 @@ mechanics will help you distinguish normal operation from genuine problems.
 - `pending` -- Waiting for dependencies to be merged. Auto-start picks up
   PRs whose dependencies are all `merged` and runs `pm pr start`.
 - `in_progress` -- A Claude implementation session is running in a tmux window.
-- `in_review` -- A review loop is running (iterates until PASS/PASS_WITH_SUGGESTIONS).
+- `in_review` -- A review loop is running (iterates until PASS).
 - `qa` -- QA testing is running. QA scenarios execute in parallel; if they find
   issues and commit fixes, the PR returns to `in_review` for another review cycle.
 - `merged` -- PR merged to `{base_branch}`. Auto-start then checks for newly-unblocked dependents.
@@ -674,8 +772,8 @@ mechanics will help you distinguish normal operation from genuine problems.
   launching a review loop. **This means there is a normal ~30 second delay between Claude
   finishing its work and the review starting.** During this window, the pane will appear
   idle but the transition has not happened yet -- this is expected, not a problem.
-- **in_review -> qa**: When the review loop reaches a PASS or PASS_WITH_SUGGESTIONS
-  verdict, auto-start transitions the PR to `qa` and launches QA scenarios.
+- **in_review -> qa**: When the review loop reaches a PASS verdict,
+  auto-start transitions the PR to `qa` and launches QA scenarios.
 - **qa -> merged**: When QA passes with no changes, auto-start runs `pm pr merge`.
   If QA finds issues or commits fixes, the PR returns to `in_review` for re-review.
 - **in_review/qa -> merged (merge conflicts)**: If the merge has conflicts, a
@@ -683,8 +781,8 @@ mechanics will help you distinguish normal operation from genuine problems.
   polling), the merge is re-attempted.
 
 Note: `d` in the TUI starts a single one-shot review. To start a review **loop** (which
-auto-start uses), the TUI chord is `zzz d`. If you need to manually kick off a review
-loop for a PR, use `pm tui send` to send `zzz d` while the PR is selected.
+auto-start uses), the TUI chord is `zz d`. If you need to manually kick off a review
+loop for a PR, use `pm tui send` to send `zz d` while the PR is selected.
 
 **Normal things that look like problems (but aren't):**
 - An `in_progress` PR whose pane has been static for < 60 seconds -- idle detection
@@ -813,12 +911,477 @@ IMPORTANT: Always end your response with the verdict keyword on its own line -- 
     return prompt.strip()
 
 
+def generate_discovery_supervisor_prompt(data: dict, session_name: str | None = None,
+                                         iteration: int = 0, loop_id: str = "",
+                                         meta_pm_root: str | None = None) -> str:
+    """Generate a prompt for one tick of the discovery supervisor watcher.
+
+    The discovery supervisor schedules regression tests and reconciles their
+    filings (newly-opened bug/improvement PRs) against existing open PRs in
+    the ``bugs`` and ``ux`` plans.
+    """
+    if not meta_pm_root:
+        meta_pm_root = "pm"
+
+    project_name = data.get("project", {}).get("name", "unknown")
+    base_branch = data.get("project", {}).get("base_branch", "master")
+
+    tui_block = tui_section(session_name) if session_name else ""
+
+    general_notes_block = ""
+    watcher_specific_block = ""
+    try:
+        root = store.find_project_root()
+        general_notes_block, watcher_specific_block = notes.notes_for_prompt(root, "watcher")
+    except FileNotFoundError:
+        pass
+
+    id_label = f" [{loop_id}]" if loop_id else ""
+    iteration_label = f" (iteration {iteration}){id_label}" if iteration else id_label
+
+    prompt = f"""This is one tick of the **Discovery Supervisor** watcher for project "{project_name}".{iteration_label}
+
+## Role
+
+You schedule regression tests from the project's regression library, watch
+for newly-filed bug / improvement PRs they produce, and reconcile those
+filings against existing open PRs (dedup, merge notes, or close-and-merge).
+
+This is an unattended loop. Each tick is short. Do the minimum work needed
+this tick, append a one-line work-log entry, then emit a verdict.
+
+Base branch: `{base_branch}`
+{tui_block}{general_notes_block}
+## Work Log
+
+The persistent work log lives at `{meta_pm_root}/watchers/discovery.log` (relative
+to the project root). It is the source of truth for what this watcher has done
+across ticks — schedule decisions, launches, dedup actions.
+
+**Step 1.** Ensure the log directory exists, then read the last ~40 lines:
+```
+mkdir -p {meta_pm_root}/watchers
+touch {meta_pm_root}/watchers/discovery.log
+tail -n 40 {meta_pm_root}/watchers/discovery.log
+```
+
+Use it to decide what is in flight and what was filed recently so you do not
+re-launch a still-running test or re-file a duplicate bug.
+
+## Per-Tick Procedure
+
+### 1. Inventory regression tests
+
+```
+ls {meta_pm_root}/qa/regression/*.md
+```
+
+Each file is a regression test definition. Cross-reference with the work log
+to see when each was last run.
+
+### 2. Detect in-flight tests from prior ticks
+
+The discovery watcher's tmux window is named `discovery`. Regression tests
+launched from this watcher run as additional panes in that same window. List
+panes:
+
+```
+tmux list-panes -t {session_name or "<session>"}:discovery -F "#{{pane_id}} #{{pane_current_command}}"
+```
+
+If a regression-test pane is still running, do **not** launch a new test this tick. Note the in-flight
+state in your work-log entry and reconcile after it finishes (next tick or
+later).
+
+### 3. Decide whether a test is due
+
+A simple cadence: each regression test should run roughly once per day (more
+often if the watcher notes section says so, less often if recently run with no
+findings). Use the work log to judge.
+
+If nothing is due, skip to step 5.
+
+### 4. Launch a due test
+
+Use the headless launcher:
+
+```
+pm qa launch regression:<id> --target-window discovery
+```
+
+This spawns a Claude pane in the discovery window running the regression test.
+The test session itself files any bugs / improvements into the `bugs` / `ux`
+plans (see the regression filing addendum baked into its prompt).
+
+### 5. Reconcile recently-filed PRs
+
+For tests that completed since the last tick (visible in the work log or by a
+pane that has since exited), inspect any new PRs in the `bugs` and `ux` plans:
+
+```
+pm pr list --plan bugs
+pm pr list --plan ux
+```
+
+For each newly-filed PR:
+- Skim title + description against existing open PRs in the same plan.
+- If it duplicates an open PR, merge useful detail into the existing one with
+  `pm pr note <existing-id> '<additional context>'` and close the duplicate
+  via the standard pm flow. Record the dedup decision in the work log.
+- If it is genuinely new, leave it.
+
+Do not try to fix any of the bugs yourself — filing and dedup only.
+
+### 6. Append a work-log entry
+
+One line, ISO timestamp + concise summary, e.g.:
+
+```
+echo "$(date -Iseconds) tick {iteration}: launched regression:auth-flow; deduped pr-abc123 into pr-xyz789; READY" \\
+  >> {meta_pm_root}/watchers/discovery.log
+```
+
+## Verdict
+
+End your response with the verdict on its own line:
+
+- **READY** — tick complete, continue watching on the next interval.
+- **INPUT_REQUIRED** — something needs human attention (ambiguous dedup,
+  missing/misconfigured plan, repeated test failures with no clear filing,
+  etc.). Describe the situation and wait for a follow-up.
+
+IMPORTANT: Always end with **READY** or **INPUT_REQUIRED** on its own line.{watcher_specific_block}"""
+
+    return prompt.strip()
+
+
+def generate_bug_fix_impl_prompt(data: dict, session_name: str | None = None,
+                                 iteration: int = 0, loop_id: str = "",
+                                 meta_pm_root: str | None = None) -> str:
+    """Generate a prompt for one tick of the bug-fix implementation watcher.
+
+    Drives the bug-fix flow: reads pending PRs in ``plan=bugs``, picks the
+    best candidate dynamically each tick, advances chosen PRs through the
+    auto-sequence chain (``pm pr auto-sequence``), and auto-merges on PASS.
+    """
+    if not meta_pm_root:
+        meta_pm_root = "pm"
+
+    project_name = data.get("project", {}).get("name", "unknown")
+    base_branch = data.get("project", {}).get("base_branch", "master")
+
+    tui_block = tui_section(session_name) if session_name else ""
+
+    general_notes_block = ""
+    watcher_specific_block = ""
+    try:
+        root = store.find_project_root()
+        general_notes_block, watcher_specific_block = notes.notes_for_prompt(root, "watcher")
+    except FileNotFoundError:
+        pass
+
+    id_label = f" [{loop_id}]" if loop_id else ""
+    iteration_label = f" (iteration {iteration}){id_label}" if iteration else id_label
+
+    concurrency_cap = 2
+
+    prompt = f"""This is one tick of the **Bug-Fix Implementation Watcher** for project "{project_name}".{iteration_label}
+
+## Role
+
+You drive the bug-fix flow end-to-end: pick the highest-priority pending bug
+PR, advance in-flight bug PRs through the auto-sequence chain
+(`pm pr auto-sequence`), and **auto-merge** on PASS. This is what
+distinguishes the bug-fix flow from the improvement-fix flow — bugs
+auto-merge once they are green; improvements wait for human review.
+
+This is an unattended loop. Each tick is short. Do the minimum work needed
+this tick, append a one-line work-log entry, then emit a verdict.
+
+Base branch: `{base_branch}`
+Concurrency cap: **{concurrency_cap}** in-flight bug PRs (statuses:
+`in_progress`, `in_review`, `qa`).
+{tui_block}{general_notes_block}
+## Work Log
+
+The persistent work log lives at `{meta_pm_root}/watchers/bug-fix-impl.log`
+(relative to the project root). It is the source of truth for what this
+watcher has done across ticks — which PRs are in flight, what just merged,
+what is stuck, repeated NEEDS_WORK counts.
+
+**Step 1.** Ensure the log directory exists, then read the last ~40 lines:
+```
+mkdir -p {meta_pm_root}/watchers
+touch {meta_pm_root}/watchers/bug-fix-impl.log
+tail -n 40 {meta_pm_root}/watchers/bug-fix-impl.log
+```
+
+Use it to decide what is in flight, which PRs have been bouncing, and what
+was filed recently.
+
+## Per-Tick Procedure
+
+### 1. Inventory bug PRs
+
+```
+pm pr list --plan bugs
+```
+
+Group rows by status:
+- **in-flight** = `in_progress`, `in_review`, `qa`
+- **pending** = `pending`
+- **done** = `merged`
+- **other** = anything else (paused, error)
+
+### 2. Advance every in-flight bug PR
+
+For each in-flight bug PR, run:
+
+```
+pm pr auto-sequence <pr-id>
+```
+
+The output is a single status line. Interpret it:
+- `started`, `advanced: ...`, `running: ...`, `restarted: ...`,
+  `review: needs_work, retrying ...`, `qa: needs_work, returning to review ...`
+  → progress is happening, no action needed this tick.
+- `paused: input_required (review)` or `paused: input_required (qa)` →
+  the loop pane is already paused. Note in the log; do **not** escalate
+  via watcher INPUT_REQUIRED (the loop pane already surfaced it). Same
+  policy as the auto-start watcher.
+- `paused: spec_pending` → spec needs approval. Note in the log; emit
+  INPUT_REQUIRED at end of tick.
+- `ready_to_merge` or `ready_to_merge (skip_qa)` → **auto-merge now**:
+  ```
+  pm pr merge <pr-id>
+  ```
+  Capture the merge result in the work log.
+
+### 3. Pick a new pending PR (if under cap)
+
+Count in-flight bug PRs after step 2. If the count is **< {concurrency_cap}**,
+pick one pending bug PR to start.
+
+There is no persisted priority field — judge priority dynamically from:
+- **Severity signals** in the PR description (crashes, data-loss,
+  blocker-of-other-work outrank cosmetic / nit fixes).
+- **Recurrence** in the work log (a bug seen multiple times across
+  regression runs is higher priority).
+- **Age** (older pending bugs gradually float up to avoid starvation).
+- **Watcher notes** (any user-supplied guidance below; user guidance wins).
+
+Once chosen, run:
+
+```
+pm pr auto-sequence <pr-id>
+```
+
+This will move the PR from `pending` → `in_progress` (`started`).
+
+If no pending bug PRs exist, skip this step.
+
+### 4. Stuck / loop-failing PR detection
+
+For each in-flight bug PR, scan the work log for repeated
+NEEDS_WORK iterations or reproduce-step failures (the bug-fix flow from
+pr-30588a7 requires a failing reproduction test before fix code lands).
+Heuristic: if the same PR has hit NEEDS_WORK on **3 or more** consecutive
+ticks, treat it as stuck.
+
+For stuck PRs:
+- Append a `stuck:` line to the work log noting the PR and the symptom
+  (e.g. "stuck: pr-abc12345 — 3x NEEDS_WORK on reproduce step").
+- Emit `INPUT_REQUIRED` at the end of the tick so a human can triage.
+  Otherwise emit `READY`.
+
+You can inspect review-loop transcripts under
+`transcripts/auto-sequence/<pr-id>/review-*.jsonl` for context if needed.
+
+### 5. Append a work-log entry
+
+One line, ISO timestamp + concise summary, e.g.:
+
+```
+echo "$(date -Iseconds) tick {iteration}: in-flight=2 (pr-aaa,pr-bbb); merged pr-ccc; picked pr-ddd; READY" \\
+  >> {meta_pm_root}/watchers/bug-fix-impl.log
+```
+
+Always include in-flight count, any merges, any new pick, and the verdict
+keyword you're about to emit.
+
+## Verdict
+
+End your response with the verdict on its own line:
+
+- **READY** — tick complete, continue watching on the next interval.
+- **INPUT_REQUIRED** — a stuck PR needs human triage, a spec is pending
+  approval, or another situation requires intervention. Describe what you
+  need clearly and wait for a follow-up.
+
+IMPORTANT: Always end with **READY** or **INPUT_REQUIRED** on its own line.{watcher_specific_block}"""
+
+    return prompt.strip()
+
+
+def generate_improvement_fix_impl_prompt(data: dict, session_name: str | None = None,
+                                         iteration: int = 0, loop_id: str = "",
+                                         meta_pm_root: str | None = None) -> str:
+    """Generate a prompt for one tick of the improvement-fix implementation watcher.
+
+    Picks a candidate from ``plan=ux`` and advances it via
+    ``pm pr auto-sequence``.  Unlike the bug-fix watcher, PRs that PASS
+    QA are NOT auto-merged — they are held in their post-QA state for a
+    human taste check.  The watcher does not call ``pm pr merge``.
+    """
+    if not meta_pm_root:
+        meta_pm_root = "pm"
+
+    project_name = data.get("project", {}).get("name", "unknown")
+    base_branch = data.get("project", {}).get("base_branch", "master")
+
+    tui_block = tui_section(session_name) if session_name else ""
+
+    general_notes_block = ""
+    watcher_specific_block = ""
+    try:
+        root = store.find_project_root()
+        general_notes_block, watcher_specific_block = notes.notes_for_prompt(root, "watcher")
+    except FileNotFoundError:
+        pass
+
+    id_label = f" [{loop_id}]" if loop_id else ""
+    iteration_label = f" (iteration {iteration}){id_label}" if iteration else id_label
+
+    work_log = f"{meta_pm_root}/watchers/improvement-fix-impl.log"
+
+    prompt = f"""This is one tick of the **Improvement-Fix Implementation Watcher** for project "{project_name}".{iteration_label}
+
+## Role
+
+You drive PRs in the `ux` plan through implementation → review → QA
+using `pm pr auto-sequence`. **You do NOT merge.** PRs that pass QA are
+left in their post-QA state and held for a human taste check. The
+human merge cadence is the throttle — your job ends at "ready_to_merge".
+
+This is an unattended loop. Each tick is short. Advance at most one PR
+this tick, append a one-line work-log entry, then emit a verdict.
+
+Base branch: `{base_branch}`
+{tui_block}{general_notes_block}
+## Work Log
+
+The persistent work log lives at `{work_log}` (relative to the project
+root). It is the source of truth for what this watcher has done across
+ticks — which PR was advanced, what auto-sequence reported, and which
+PRs are held for human merge.
+
+**Step 1.** Ensure the log directory exists, then read the last ~40 lines:
+```
+mkdir -p {meta_pm_root}/watchers
+touch {work_log}
+tail -n 40 {work_log}
+```
+
+Use it to see what is already in flight and what is held awaiting human
+merge so you do not pick the same candidate redundantly.
+
+## Per-Tick Procedure
+
+### 1. Inventory candidates
+
+```
+pm pr list --plan ux
+```
+
+Build the candidate set: PRs in `plan=ux` whose status is `pending`,
+`in_progress`, `in_review`, or `qa`. Skip `merged` PRs and skip PRs
+already noted in the work log as "ready_to_merge — held for human"
+on a recent tick (re-pinging auto-sequence on those is harmless but
+wastes a tick).
+
+### 2. Prioritize (taste-shaped, no priority field)
+
+There is no priority field on these PRs. Use these signals, in order,
+to pick the best candidate this tick:
+
+1. **In-flight first** — if any candidate is `in_progress`, `in_review`,
+   or `qa`, prefer advancing it over starting a new one. Finish what
+   was started.
+2. **Recency of related code** — `git log --oneline -20 -- <files>` on
+   the PR's listed files. Recently-touched code means the PR's premise
+   is likely still accurate.
+3. **User feedback signals in notes** — `pm pr show <id>` and look for
+   note phrases like "user reported", "feedback", "saw this in", etc.
+4. **Confidence signals in the original filing** — clear repro,
+   specific files, concrete acceptance criteria.
+
+Skip any PR whose dependencies (`depends_on`) are not all `merged`.
+
+If nothing is eligible, log "no candidates" and emit READY.
+
+### 3. Advance one PR
+
+```
+pm pr auto-sequence <pr-id>
+```
+
+This advances the PR by at most one phase (idempotent, non-blocking).
+Capture the single-line status it prints. Common outcomes:
+
+- `started` — implementation window launched.
+- `running: implementation` / `running: review` / `running: qa` — a
+  phase is in progress; come back next tick.
+- `advanced: in_review` / `advanced: qa` — phase transition just fired.
+- `review: needs_work, retrying iteration N` — review loop bounced.
+- `qa: needs_work, returning to review (iteration N)` — QA bounced
+  back to review.
+- `paused: input_required (review)` / `paused: input_required (qa)` —
+  the inner loop is paused on its own INPUT_REQUIRED. **Do not**
+  escalate to watcher-level INPUT_REQUIRED for these; the inner loop
+  has already notified the human. Note in the log and move on.
+- `paused: spec_pending` — spec is awaiting human review. Same:
+  log and move on.
+- `ready_to_merge` — QA PASSED. **Do not run `pm pr merge`.** This PR
+  is now held for human taste check. Log it explicitly.
+
+### 4. Append a work-log entry
+
+One line, ISO timestamp + concise summary, e.g.:
+
+```
+echo "$(date -Iseconds) tick {iteration}: pr-abcd1234 → advanced: in_review" \\
+  >> {work_log}
+```
+
+For ready-to-merge holds, make it obvious in the log line:
+
+```
+echo "$(date -Iseconds) tick {iteration}: pr-abcd1234 → ready_to_merge (held for human taste check)" \\
+  >> {work_log}
+```
+
+## Verdict
+
+End your response with the verdict on its own line:
+
+- **READY** — tick complete, continue watching on the next interval.
+  This is the right verdict even when an inner review/QA loop is
+  paused on INPUT_REQUIRED — that loop is handling its own branch.
+- **INPUT_REQUIRED** — a project-wide blocker exists (broken base
+  branch, plan misconfiguration, repeated unexplained auto-sequence
+  failures across multiple PRs). Describe the situation and wait.
+
+IMPORTANT: Always end with **READY** or **INPUT_REQUIRED** on its own line.{watcher_specific_block}"""
+
+    return prompt.strip()
+
+
 def generate_review_loop_prompt(data: dict, pr_id: str) -> str:
     """Generate a review prompt for the automated review loop.
 
     Wraps the normal review prompt with instructions to implement fixes,
     commit, and push before reporting the verdict.  This is used by the
-    review loop (``zz d`` / ``zzz d``) where Claude iterates until PASS.
+    review loop (``zz d``) where Claude iterates until PASS.
     """
     return generate_review_prompt(data, pr_id, review_loop=True)
 
@@ -897,13 +1460,38 @@ dependencies (Claude sessions, git operations, tmux, network calls, etc.),
 declare them as NEW_MOCK blocks before the scenarios.
 """
 
+    bug_fix_qa_block = ""
+    if _is_bug_pr(pr):
+        bug_fix_qa_block = """
+## Bug Fix Note
+
+This PR is a bug fix. The implementation should already include a
+reproduction test that fails without the fix. At least one scenario
+must assert that the original bug no longer reproduces — ideally by
+running the reproduction test from the diff, or by exercising the same
+user-visible surface that triggered it. Other scenarios should cover
+adjacent regressions the fix could have introduced.
+"""
+
     prompt = f"""You are a QA planner analyzing PR {pr_id}: "{title}"
 
 ## Task
 
 Analyze this PR's changes and the available QA instruction library to generate
-a structured test plan.  Your goal is to identify the most important scenarios
+a structured test plan. Your goal is to fully exercise the impacted code
 to verify this PR works correctly.
+{bug_fix_qa_block}
+
+Each scenario runs in its own isolated container — scenarios cannot share
+state or depend on each other's side effects. STEPS must include all setup
+the scenario needs; do not reference other scenarios' projects, PRs, or
+side effects.
+
+Prefer fewer, broader scenarios over many narrow ones. Group related checks
+that share setup into one scenario with multi-step STEPS, including edge
+cases that may expose bugs. Split scenarios only when code paths are
+unrelated or setup differs materially enough that combining them would
+bloat the steps.
 
 ## PR Context
 
@@ -961,10 +1549,7 @@ QA_PLAN_END
 
 Number scenarios starting from {scenario_start}.
 
-Include as many scenarios as required to fully exercise the functionality
-of the PR.  Exercise the core functionality as well as any edge cases
-that may expose bugs.
-
+{_OUT_OF_SCOPE_BUGS_BLOCK}
 {general_notes_block}{qa_specific_block}"""
     return prompt.strip()
 
@@ -1153,6 +1738,18 @@ If a setup step fails or a required tool is unavailable, report
    - **NEEDS_WORK** — Issues found and fixed (the fix is committed and pushed)
    - **INPUT_REQUIRED** — Issues found that you could not fix, or genuine ambiguity requiring human judgment"""
 
+    bug_fix_scenario_block = ""
+    if _is_bug_pr(pr):
+        bug_fix_scenario_block = """
+## Bug Fix Note
+
+This PR is a bug fix. Your scenario may be exercising the original bug's
+reproduction path — focus on whether the reported symptom still occurs
+against the fixed code, not just whether code paths execute. If the diff
+contains a reproduction test, running that test is a fast way to confirm
+the fix.
+"""
+
     prompt = f"""You are running QA scenario {scenario.index}: "{scenario.title}"
 
 ## Context
@@ -1161,7 +1758,7 @@ If a setup step fails or a required tool is unavailable, report
 - **Branch**: {branch}
 - **Base branch**: {base_branch}
 {workdir_block}
-{pr_notes_block}{mocks_block}
+{pr_notes_block}{mocks_block}{bug_fix_scenario_block}
 ## How QA Works
 
 You are in one of several QA scenarios running in parallel, each in its own
@@ -1191,7 +1788,7 @@ final verdict.
 ## Execution
 
 {execution_block}
-
+{_OUT_OF_SCOPE_BUGS_BLOCK}
 IMPORTANT: Always end your response with the verdict keyword on its own line."""
     return prompt.strip()
 
@@ -1248,7 +1845,138 @@ You are testing the current state of the codebase.
    - **PASS** — All checks passed
    - **NEEDS_WORK** — Issues found (describe them)
    - **INPUT_REQUIRED** — Need human input
-
+{_OUT_OF_SCOPE_BUGS_BLOCK}
 IMPORTANT: Always end your response with the verdict keyword on its own line."""
     return prompt.strip()
 
+
+
+def generate_watcher_review_prompt(session_name: str | None = None,
+                                   meta_pm_root: str | None = None,
+                                   transcript_dir: str | None = None) -> str:
+    """Generate the system prompt for the watcher review session.
+
+    The session is a chat-driven human surface for the autonomous watchers
+    described in `plan-regression`: discovery supervisor, bug-fix
+    implementation, improvement-fix implementation. It opens with a
+    summary of recent activity across all three watcher work logs, then
+    is conversational from there.
+    """
+    if not meta_pm_root:
+        meta_pm_root = "pm"
+
+    tui_block = tui_section(session_name) if session_name else ""
+
+    transcript_block = ""
+    if transcript_dir:
+        transcript_block = f"""
+## Per-test transcripts
+
+Regression-test Claude sessions launched by the discovery supervisor write
+JSONL transcripts under:
+
+```
+{transcript_dir}
+```
+
+`ls` the directory and `tail` specific files on demand if you need to dig
+into what a particular test session did. Don't read the whole tree
+proactively — it gets large.
+"""
+
+    discovery_log = f"{meta_pm_root}/watchers/discovery.log"
+    bug_fix_log = f"{meta_pm_root}/watchers/bug-fix-impl.log"
+    improvement_fix_log = f"{meta_pm_root}/watchers/improvement-fix-impl.log"
+
+    return f"""\
+# Watcher Review Session
+
+You are the human's conversational surface for the autonomous watcher
+loops running in this pm project. Your job is to read the watchers'
+work logs and answer questions about what they have been doing — not
+to run the watchers yourself.
+{tui_block}
+## Watcher architecture (background)
+
+Three `BaseWatcher` subclasses run as background threads inside the TUI,
+each on its own polling cadence. Each tick spawns a Claude session in a
+tmux window that does its specific job and emits a verdict.
+
+1. **Discovery supervisor** — schedules regression tests from
+   `pm/qa/regression/*.md`, monitors the test sessions (which file new
+   bug / improvement PRs themselves), and reconciles those filings
+   (dedup against open PRs in the `bugs` / `ux` plans).
+   Work log: `{discovery_log}`.
+
+2. **Bug-fix implementation watcher** — picks the best candidate from
+   `plan=bugs` each tick, advances it via `pm pr auto-sequence`, and
+   auto-merges on QA PASS.
+   Work log: `{bug_fix_log}`.
+
+3. **Improvement-fix implementation watcher** — same shape against
+   `plan=ux`, but with a gated merge: PRs that PASS QA wait for a
+   human taste check before merging.
+   Work log: `{improvement_fix_log}`.
+
+User-supplied guidance for all three watchers lives in the `Watcher`
+section of `notes.txt` (read via `pm notes` or directly).
+
+## Your data sources
+
+- **Work logs** (above) — primary. Each line is one tick's summary.
+- **`pm pr list`**, **`pm pr list --plan bugs`**, **`pm pr list --plan ux`**.
+- **`pm pr graph`** — full PR dependency tree.
+- **`pm plan list`** — plan inventory.
+- `notes.txt` Watcher section — current user guidance.
+{transcript_block}
+## Opening summary turn
+
+Begin by producing a single summary of recent watcher activity. Read
+each work log defensively (they may not all exist yet — bug-fix and
+improvement-fix watchers ship after the discovery supervisor):
+
+```
+tail -n 60 {discovery_log} 2>/dev/null || echo "(discovery log not yet present)"
+tail -n 60 {bug_fix_log} 2>/dev/null || echo "(bug-fix-impl log not yet present)"
+tail -n 60 {improvement_fix_log} 2>/dev/null || echo "(improvement-fix-impl log not yet present)"
+```
+
+Then organize the summary by watcher with a short bulleted list under
+each, covering what was **discovered, filed, fixed, merged, or stuck**
+since the last review.
+
+After the summary, stop and wait for the human to drive.
+
+## Read-only commands (safe to run any time)
+
+- `pm pr list`, `pm pr list --plan bugs`, `pm pr list --plan ux`
+- `pm plan list`
+- `pm pr graph`
+- `tail` / `cat` / `ls` on the work logs and transcript directory
+
+## Write actions require explicit human confirmation
+
+Some questions will lead the human to ask you to **change** something:
+
+- Adding a note to the `Watcher` section of `notes.txt` (will flow
+  into every watcher's next tick automatically) — `pm notes` or a
+  direct edit.
+- Pausing a watcher — tell the human to press `ws` in the TUI to
+  toggle it (do not run pm commands that spawn new Claude sessions
+  yourself).
+- Editing a PR's description / notes — `pm pr note add <id> '<text>'`.
+
+Before any write, read back exactly what you intend to change and wait
+for the human to say "yes" / "go ahead". Do **not** run write commands
+silently.
+
+Forbidden (must always be done via the TUI by the human):
+`pm pr start`, `pm pr done`, `pm plan add`, `pm plan breakdown`,
+`pm plan review` — anything that spawns a new Claude session.
+
+## Tone
+
+You are read-mostly and explanatory. Prefer "here's what the log shows
+and why I think X happened" over speculation. If a log entry is
+ambiguous, say so rather than guessing.
+"""

@@ -18,14 +18,24 @@ boring, repetitive parts so they can focus on what matters.
 
 ## Features
 
-- **Interactive TUI** — tmux-based dashboard with quality of life improvements in tmux hooks
-- **Guided setup** — step-by-step guide for new users to initialize projects, create plans, and start working
-- **Plan-driven workflow** — write and manage plans and associated PRs with Claude in a standardized flow
-- **Parallel Claude sessions** — spin up Claude sessions with their own branches and working directories as needed for PRs, experiments, or any task
+- **Interactive TUI** — tmux-based dashboard showing your PR dependency graph as a tech tree
+- **Plan → implement → review → QA** — write plans, break them into PRs with specs, and let agents execute the full lifecycle. Autostart picks up PRs as their dependencies merge, review loops iterate until code passes, and QA runs scenario-based tests in containers
+- **Watchers** — background agents that monitor sessions, detect failures, and record bugs and improvements
+- **Container isolation** — run review and QA sessions in Docker or Podman containers
+- **Parallel Claude sessions** — each PR gets its own branch, workdir, and Claude session
 - **Shared sessions** — share your tmux session with other users on the same machine via `--global` or `--group`
 - **Smart mobile mode** — auto-zooms the active pane on narrow terminals, usable over SSH from phones and tablets
-- **Automated review loop** — iterative code review where Claude reviews, fixes issues, and re-reviews until the PR passes (`zz d` in the TUI)
+- **Guided setup** — step-by-step guide for new users to initialize projects, create plans, and start working
 - **Meta-development** — open a Claude session targeting the pm codebase itself, to fix pain points as you encounter them
+
+## Demo
+
+Three lines of notes became a working multiplayer tetromino stacking game with
+real-time networking, lobby system, adaptive handicapping, and end-to-end test
+coverage — 50+ merged PRs and 30,000+ lines of code from ~2 hours of human input.
+
+See the [full narrative](https://github.com/mjtomei/tomino/blob/master/docs/pm-demo-narrative.md)
+and the [resulting repo](https://github.com/mjtomei/tomino).
 
 ## Install
 
@@ -210,13 +220,12 @@ meta session, and immediately benefit from the improvement.
 When a PR is ready for review, the review loop automates the review-fix cycle:
 
 1. Claude reviews the diff against the base branch
-2. If issues are found (NEEDS_WORK), Claude fixes them, commits, and pushes
+2. If issues or suggestions are found (NEEDS_WORK), Claude fixes them, commits, and pushes
 3. A new review iteration starts automatically
-4. The loop stops when the PR receives PASS or PASS_WITH_SUGGESTIONS
+4. The loop stops when the PR receives PASS
 
 From the TUI:
-- `zz d` — start a review loop (stops on PASS or PASS_WITH_SUGGESTIONS)
-- `zzz d` — start a strict loop (stops only on full PASS)
+- `zz d` — start a review loop (iterates until PASS)
 - `z d` — stop a running loop, or do a single fresh review
 
 The loop runs in the background without stealing focus from your active window,
@@ -253,5 +262,7 @@ others.
 ## Requirements
 
 - Python 3.12+
-- click, pyyaml, textual (installed via `pip install -r requirements.txt`)
-- `gh` CLI only if using the github backend
+- tmux
+- click, pyyaml, textual (installed by `install.sh`)
+- `gh` CLI (only if using the GitHub backend)
+- Docker or Podman (only if using container isolation for QA/review)

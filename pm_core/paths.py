@@ -28,6 +28,19 @@ def pm_home() -> Path:
     return d
 
 
+def pm_core_path() -> Path:
+    """Return the path to the currently-imported ``pm_core`` package dir.
+
+    This is the source the ``pm`` CLI is actually running from — for an
+    editable install (``install.sh --local``) that's the source checkout;
+    for a non-editable install it's a site-packages copy.  The repo root
+    (the dir containing ``install.sh`` / ``pyproject.toml``) is the
+    parent of this path when running from a source checkout.
+    """
+    import pm_core
+    return Path(pm_core.__path__[0])
+
+
 def pane_registry_dir() -> Path:
     """Return the pane registry directory (~/.pm/pane-registry/)."""
     d = pm_home() / "pane-registry"

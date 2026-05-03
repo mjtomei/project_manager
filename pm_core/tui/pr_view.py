@@ -47,8 +47,13 @@ def handle_pr_selected(app, pr_id: str) -> None:
 
     # Persist selection so TUI restarts on this PR
     if app._data.get("project", {}).get("active_pr") != pr_id:
-        app._data["project"]["active_pr"] = pr_id
-        store.save(app._data, app._root)
+        try:
+            app._data = store.locked_update(
+                app._root, lambda d: d["project"].__setitem__("active_pr", pr_id)
+            )
+        except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+            _log.warning("handle_pr_selected: %s", e)
+            app.log_message(f"Error: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -90,16 +95,20 @@ def start_pr(app, companion: bool = False) -> None:
         from pm_core import tmux as tmux_mod
         session = get_pm_session()
         if session and app._root:
-            data = store.load(app._root)
-            pr_entry = store.get_pr(data, pr_id)
-            if pr_entry:
-                from pm_core.cli.pr import _pr_display_id
-                display_id = _pr_display_id(pr_entry)
-                existing = tmux_mod.find_window_by_name(session, display_id)
-                if existing:
-                    tmux_mod.select_window(session, existing["id"])
-                    app.log_message(f"Switched to window '{display_id}'")
-                    return
+            try:
+                data = store.load(app._root)
+            except store.ProjectYamlParseError:
+                data = None
+            if data:
+                pr_entry = store.get_pr(data, pr_id)
+                if pr_entry:
+                    from pm_core.cli.pr import _pr_display_id
+                    display_id = _pr_display_id(pr_entry)
+                    existing = tmux_mod.find_window_by_name(session, display_id)
+                    if existing:
+                        tmux_mod.select_window(session, existing["id"])
+                        app.log_message(f"Switched to window '{display_id}'")
+                        return
 
     suffix = ""
     if fresh:
@@ -138,17 +147,21 @@ def done_pr(app, fresh: bool = False) -> None:
         from pm_core import tmux as tmux_mod, store
         session = get_pm_session()
         if session and app._root:
-            data = store.load(app._root)
-            pr_entry = store.get_pr(data, pr_id)
-            if pr_entry:
-                from pm_core.cli.pr import _pr_display_id
-                display_id = _pr_display_id(pr_entry)
-                window_name = f"review-{display_id}"
-                existing = tmux_mod.find_window_by_name(session, window_name)
-                if existing:
-                    tmux_mod.select_window(session, existing["id"])
-                    app.log_message(f"Switched to review window '{window_name}'")
-                    return
+            try:
+                data = store.load(app._root)
+            except store.ProjectYamlParseError:
+                data = None
+            if data:
+                pr_entry = store.get_pr(data, pr_id)
+                if pr_entry:
+                    from pm_core.cli.pr import _pr_display_id
+                    display_id = _pr_display_id(pr_entry)
+                    window_name = f"review-{display_id}"
+                    existing = tmux_mod.find_window_by_name(session, window_name)
+                    if existing:
+                        tmux_mod.select_window(session, existing["id"])
+                        app.log_message(f"Switched to review window '{window_name}'")
+                        return
 
     action_key = f"Reviewing {pr_id}" + (" (fresh)" if fresh else "")
     if not guard_pr_action(app, action_key):
@@ -226,8 +239,14 @@ def toggle_merged(app) -> None:
     tree = app.query_one("#tech-tree", TechTree)
     tree._hide_merged = not tree._hide_merged
     # Persist to project.yaml (per-project, overrides global)
-    app._data.setdefault("project", {})["hide_merged"] = tree._hide_merged
-    store.save(app._data, app._root)
+    hide = tree._hide_merged
+    try:
+        app._data = store.locked_update(
+            app._root, lambda d: d.setdefault("project", {}).__setitem__("hide_merged", hide)
+        )
+    except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+        _log.warning("toggle_merged: %s", e)
+        app.log_message(f"Error: {e}")
     tree._recompute()
     tree.refresh(layout=True)
     app._update_filter_status()
@@ -315,15 +334,54 @@ def handle_plan_pick(app, pr_id: str, result) -> None:
     if not pr:
         return
 
-    if result == "_standalone":
+    if isinstance(result, tuple) and result[0] == "_new":
+        # Create a new plan
+        _, title = result
+        plan_id = store.next_plan_id(app._data)
+        plan_file = f"plans/{plan_id}.md"
+        entry = store.make_plan_entry(plan_id, title, plan_file)
+        # Create plan file (idempotent, safe outside lock)
+        if app._root:
+            plan_path = app._root / plan_file
+            plan_path.parent.mkdir(parents=True, exist_ok=True)
+            plan_path.write_text(f"# {title}\n\n<!-- Describe the plan here -->\n")
+
+        def apply_new_plan(data):
+            if data.get("plans") is None:
+                data["plans"] = []
+            data["plans"].append(entry)
+            p = store.get_pr(data, pr_id)
+            if p:
+                p["plan"] = plan_id
+                _record_status_timestamp(p)
+
+        try:
+            app._data = store.locked_update(app._root, apply_new_plan)
+        except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+            _log.warning("handle_plan_pick: %s", e)
+            app.log_message(f"Error: {e}")
+            return
+        app._load_state()
+        app.log_message(f"Moved {pr_id} → {plan_id}: {title} (new)")
+    elif result == "_standalone":
         # Remove plan assignment
         old_plan = pr.get("plan")
         if not old_plan:
             app.log_message("Already standalone")
             return
-        pr.pop("plan", None)
-        _record_status_timestamp(pr)
-        store.save(app._data, app._root)
+
+        def apply_standalone(data):
+            p = store.get_pr(data, pr_id)
+            if p:
+                p.pop("plan", None)
+                _record_status_timestamp(p)
+
+        try:
+            app._data = store.locked_update(app._root, apply_standalone)
+        except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+            _log.warning("handle_plan_pick: %s", e)
+            app.log_message(f"Error: {e}")
+            return
         app._load_state()
         app.log_message(f"Moved {pr_id} → Standalone")
     elif isinstance(result, str):
@@ -332,13 +390,123 @@ def handle_plan_pick(app, pr_id: str, result) -> None:
         if result == old_plan:
             app.log_message("Already in that plan")
             return
-        pr["plan"] = result
-        _record_status_timestamp(pr)
-        store.save(app._data, app._root)
+        target_plan = result
+
+        def apply_move(data):
+            p = store.get_pr(data, pr_id)
+            if p:
+                p["plan"] = target_plan
+                _record_status_timestamp(p)
+
+        try:
+            app._data = store.locked_update(app._root, apply_move)
+        except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+            _log.warning("handle_plan_pick: %s", e)
+            app.log_message(f"Error: {e}")
+            return
         app._load_state()
         tree = app.query_one("#tech-tree", TechTree)
         display = tree.get_plan_display_name(result)
         app.log_message(f"Moved {pr_id} → {display}")
+
+
+# ---------------------------------------------------------------------------
+# Cleanup
+# ---------------------------------------------------------------------------
+
+def _do_cleanup(app, pr_id: str) -> dict | None:
+    """Run the cleanup primitive for *pr_id* and log a summary."""
+    from pm_core import pr_cleanup as pr_cleanup_mod
+    from pm_core.loop_shared import get_pm_session
+
+    if not app._root:
+        app.log_message("No project root")
+        return None
+    try:
+        data = store.load(app._root)
+    except store.ProjectYamlParseError as e:
+        app.log_message(f"Error: {e}")
+        return None
+    pr_entry = store.get_pr(data, pr_id)
+    if not pr_entry:
+        app.log_message(f"PR not found: {pr_id}")
+        return None
+
+    session = get_pm_session()
+    summary = pr_cleanup_mod.cleanup_pr_resources(session, pr_entry)
+    app.log_message(f"Cleaned {pr_id}: {pr_cleanup_mod.format_summary(summary)}")
+    return summary
+
+
+async def _cleanup_worker(app, pr_id: str, action_key: str,
+                          follow_up: str | None = None) -> None:
+    """Run cleanup off the UI thread, then optionally dispatch a follow-up."""
+    import asyncio
+    try:
+        await asyncio.to_thread(_do_cleanup, app, pr_id)
+    finally:
+        app._inflight_pr_action = None
+        app._load_state()
+
+    if follow_up == "s":
+        start_pr(app)
+    elif follow_up == "d":
+        done_pr(app)
+    elif follow_up == "t":
+        from pm_core.tui import qa_loop_ui
+        qa_loop_ui.focus_or_start_qa(app, pr_id)
+
+
+def cleanup_pr(app) -> None:
+    """Y key — confirm, then tear down all resources for the selected PR."""
+    from pm_core.tui.tech_tree import TechTree
+    from pm_core.tui.screens import ConfirmCleanupScreen
+    from pm_core.cli.helpers import _pr_display_id
+
+    tree = app.query_one("#tech-tree", TechTree)
+    pr_id = tree.selected_pr_id
+    _log.info("action: cleanup_pr selected=%s", pr_id)
+    if not pr_id:
+        app.log_message("No PR selected")
+        return
+    pr_entry = store.get_pr(app._data, pr_id)
+    display_id = _pr_display_id(pr_entry) if pr_entry else pr_id
+
+    action_key = f"Cleaning {pr_id}"
+    if not guard_pr_action(app, action_key):
+        return
+
+    def after_confirm(confirmed: bool | None) -> None:
+        if not confirmed:
+            app.log_message("Cleanup cancelled")
+            return
+        if not guard_pr_action(app, action_key):
+            return
+        app._inflight_pr_action = action_key
+        app.run_worker(_cleanup_worker(app, pr_id, action_key))
+
+    app.push_screen(ConfirmCleanupScreen(display_id), after_confirm)
+
+
+def cleanup_then_action(app, key: str) -> None:
+    """y <key> — clean up the selected PR, then dispatch the follow-up action.
+
+    No confirmation modal — the user opted in by pressing the y prefix.
+    """
+    from pm_core.tui.tech_tree import TechTree
+
+    tree = app.query_one("#tech-tree", TechTree)
+    pr_id = tree.selected_pr_id
+    _log.info("action: cleanup_then_action selected=%s key=%s", pr_id, key)
+    if not pr_id:
+        app.log_message("No PR selected")
+        return
+
+    action_key = f"Cleaning {pr_id}"
+    if not guard_pr_action(app, action_key):
+        return
+    app._inflight_pr_action = action_key
+    app.run_worker(_cleanup_worker(app, pr_id, action_key, follow_up=key))
 
 
 # ---------------------------------------------------------------------------
@@ -427,12 +595,17 @@ def handle_command_submitted(app, cmd: str) -> None:
         else:
             # Resolve short ID to full ID
             if app._root:
-                qa_data = _store.load(app._root)
-                qa_pr = _store.get_pr(qa_data, qa_pr_id)
-                if qa_pr:
-                    qa_loop_ui.focus_or_start_qa(app, qa_pr["id"])
-                else:
-                    app.log_message(f"PR not found: {qa_pr_id}")
+                try:
+                    qa_data = _store.load(app._root)
+                except _store.ProjectYamlParseError as e:
+                    app.log_message(f"Error: {e}")
+                    qa_data = None
+                if qa_data is not None:
+                    qa_pr = _store.get_pr(qa_data, qa_pr_id)
+                    if qa_pr:
+                        qa_loop_ui.focus_or_start_qa(app, qa_pr["id"])
+                    else:
+                        app.log_message(f"PR not found: {qa_pr_id}")
             else:
                 app.log_message("No project root")
         # QA is handled directly (not via run_command), so clear the guard

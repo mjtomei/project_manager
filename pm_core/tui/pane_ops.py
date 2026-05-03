@@ -19,6 +19,32 @@ from pm_core.tui.screens import ConnectScreen
 _log = configure_logger("pm.tui.pane_ops")
 
 
+_REGRESSION_FILING_ADDENDUM = """
+## Filing Findings
+
+This regression test runs unattended. If you discover something worth
+fixing while running it, file it as a separate PR so it doesn't get lost
+— this is independent of your PASS / NEEDS_WORK / INPUT_REQUIRED verdict
+for the test itself.
+
+- **Bug** (failing assertion, incorrect behavior, regression):
+  ```
+  pm pr add '<short imperative title>' --plan bugs --description \
+'<location, repro, expected vs actual>'
+  ```
+- **Improvement** (UX/quality issue surfaced incidentally — not a bug,
+  but something that would make the product better):
+  ```
+  pm pr add '<short imperative title>' --plan ux --description \
+'<what you noticed and why it matters>'
+  ```
+
+Skim `pm pr list --plan bugs` (or `--plan ux`) first to avoid filing a
+duplicate. Filing is a side effect — your verdict for this regression
+test must still reflect only the test's own pass/fail state.
+"""
+
+
 # ---------------------------------------------------------------------------
 # Registry healing
 # ---------------------------------------------------------------------------
@@ -41,56 +67,71 @@ def heal_registry(session: str | None) -> None:
         if not window:
             return
 
-        data = pane_registry.load_registry(session)
-        changed = False
-
-        # Heal every window: remove dead panes, drop empty windows
-        for win_id in list(data.get("windows", {})):
-            wdata = data["windows"][win_id]
+        # Query all tmux state OUTSIDE the lock to avoid holding it
+        # during subprocess calls (per IR3).
+        reg_snapshot = pane_registry.load_registry(session)
+        window_live_ids: dict[str, set[str]] = {}
+        for win_id in list(reg_snapshot.get("windows", {})):
             live_panes = tmux_mod.get_pane_indices(session, win_id)
-            live_ids = {pid for pid, _ in live_panes}
+            window_live_ids[win_id] = {pid for pid, _ in live_panes}
 
-            # If no live panes returned for this window, it's gone
-            if not live_ids:
-                if wdata["panes"]:
-                    _log.info("heal_registry: window %s has no live panes, removing", win_id)
+        # Also query current window's live panes for TUI re-registration
+        if window not in window_live_ids:
+            live_panes = tmux_mod.get_pane_indices(session, window)
+            window_live_ids[window] = {pid for pid, _ in live_panes}
+
+        def _heal(raw):
+            data = pane_registry._prepare_registry_data(raw, session)
+            changed = False
+
+            # Heal every window: remove dead panes, drop empty windows
+            for win_id in list(data.get("windows", {})):
+                live_ids = window_live_ids.get(win_id, set())
+                wdata = data["windows"][win_id]
+
+                # If no live panes returned for this window, it's gone
+                if not live_ids:
+                    if wdata["panes"]:
+                        _log.info("heal_registry: window %s has no live panes, removing", win_id)
+                        del data["windows"][win_id]
+                        changed = True
+                    continue
+
+                before = len(wdata["panes"])
+                wdata["panes"] = [p for p in wdata["panes"] if p["id"] in live_ids]
+                removed = before - len(wdata["panes"])
+                if removed:
+                    _log.info("heal_registry: removed %d dead pane(s) from window %s", removed, win_id)
+                    changed = True
+
+                # Drop empty window entry
+                if not wdata["panes"]:
                     del data["windows"][win_id]
                     changed = True
-                continue
 
-            before = len(wdata["panes"])
-            wdata["panes"] = [p for p in wdata["panes"] if p["id"] in live_ids]
-            removed = before - len(wdata["panes"])
-            if removed:
-                _log.info("heal_registry: removed %d dead pane(s) from window %s", removed, win_id)
-                changed = True
+            # Ensure TUI pane is registered in the current window
+            cur_live_ids = window_live_ids.get(window, set())
+            if tui_pane_id in cur_live_ids:
+                wdata = pane_registry.get_window_data(data, window)
+                if not any(p["id"] == tui_pane_id for p in wdata["panes"]):
+                    wdata["panes"].insert(0, {
+                        "id": tui_pane_id,
+                        "role": "tui",
+                        "order": 0,
+                        "cmd": "tui",
+                    })
+                    _log.info("heal_registry: re-registered TUI pane %s in window %s",
+                              tui_pane_id, window)
+                    changed = True
 
-            # Drop empty window entry
-            if not wdata["panes"]:
-                del data["windows"][win_id]
-                changed = True
-
-        # Ensure TUI pane is registered in the current window
-        live_panes = tmux_mod.get_pane_indices(session, window)
-        live_ids = {pid for pid, _ in live_panes}
-        if tui_pane_id in live_ids:
-            wdata = pane_registry.get_window_data(data, window)
-            if not any(p["id"] == tui_pane_id for p in wdata["panes"]):
-                wdata["panes"].insert(0, {
-                    "id": tui_pane_id,
-                    "role": "tui",
-                    "order": 0,
-                    "cmd": "tui",
-                })
-                _log.info("heal_registry: re-registered TUI pane %s in window %s",
-                          tui_pane_id, window)
-                changed = True
-
-        if changed:
-            pane_registry.save_registry(session, data)
-            _log.info("heal_registry: saved corrected registry")
-        else:
+            if changed:
+                _log.info("heal_registry: saved corrected registry")
+                return data
             _log.info("heal_registry: registry OK")
+            return None  # no changes, skip write
+
+        pane_registry.locked_read_modify_write(
+            pane_registry.registry_path(session), _heal)
     except Exception:
         _log.exception("heal_registry failed")
 
@@ -109,16 +150,22 @@ def get_session_and_window(app) -> tuple[str, str] | None:
     return session, window
 
 
-def launch_pane(app, cmd: str, role: str, fresh: bool = False) -> None:
+def launch_pane(app, cmd: str, role: str, fresh: bool = False,
+                target_window: str | None = None) -> None:
     """Launch a wrapped pane, register it, and rebalance.
 
     If a pane with this role already exists and is alive, focuses it instead
     of creating a duplicate. When fresh=True, kills the existing pane first.
+
+    When *target_window* is provided, the pane is launched (and dedup'd) in
+    that tmux window rather than the TUI's current window. Used by watchers
+    that need to keep launched sessions alongside their own work log.
     """
     info = get_session_and_window(app)
     if not info:
         return
-    session, window = info
+    session, current_window = info
+    window = target_window if target_window is not None else current_window
     _log.info("launch_pane: session=%s window=%s role=%s fresh=%s", session, window, role, fresh)
 
     # Check if a pane with this role already exists
@@ -140,7 +187,7 @@ def launch_pane(app, cmd: str, role: str, fresh: bool = False) -> None:
     wrap = f"bash -c 'trap \"pm _pane-exited {session} {window} {gen} $TMUX_PANE\" EXIT; {escaped}'"
     try:
         direction = pane_layout.preferred_split_direction(session, window)
-        pane_id = tmux_mod.split_pane(session, direction, wrap)
+        pane_id = tmux_mod.split_pane(session, direction, wrap, window=window)
         pane_layout.register_and_rebalance(session, window, [(pane_id, role, cmd)])
         tmux_mod.select_pane_smart(pane_id, session, window)
         app.log_message(f"Launched {role} pane")
@@ -157,10 +204,15 @@ def rebalance(app) -> None:
     if not info:
         return
     session, window = info
-    data = pane_registry.load_registry(session)
-    wdata = pane_registry.get_window_data(data, window)
-    wdata["user_modified"] = False
-    pane_registry.save_registry(session, data)
+
+    def _reset_user_modified(raw):
+        data = pane_registry._prepare_registry_data(raw, session)
+        wdata = pane_registry.get_window_data(data, window)
+        wdata["user_modified"] = False
+        return data
+
+    pane_registry.locked_read_modify_write(
+        pane_registry.registry_path(session), _reset_user_modified)
     pane_layout.rebalance(session, window)
     app.log_message("Layout rebalanced")
 
@@ -367,11 +419,67 @@ Ask the user what they'd like to know about."""
     launch_pane(app, cmd, "discuss", fresh=fresh)
 
 
-def launch_qa_item(app, item_id: str) -> None:
+def launch_watcher_review(app) -> None:
+    """Launch a Claude session for chat-driven review of the watcher loops.
+
+    Reads the three watcher work logs (discovery, bug-fix, improvement-fix)
+    plus current PR/plan state, opens with a summary of recent activity,
+    then is conversational. Read-mostly by default; write actions require
+    explicit human confirmation.
+    """
+    fresh = app._consume_z()
+    _log.info("launch_watcher_review fresh=%s", fresh)
+    from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
+    from pm_core.prompt_gen import generate_watcher_review_prompt
+
+    claude = find_claude()
+    if not claude:
+        app.log_message("Claude CLI not found")
+        return
+
+    # Resolve the meta workdir's pm/ root — that's where the watchers
+    # actually write their logs (see generate_discovery_supervisor_prompt).
+    # If it can't be ensured, fall back to the current project's pm/ dir
+    # so the session still launches and reports missing logs gracefully.
+    meta_pm_root: str | None = None
+    try:
+        from pm_core.cli.meta import ensure_meta_workdir
+        meta_workdir = ensure_meta_workdir()
+        meta_pm_root = str(meta_workdir / "pm")
+    except Exception:
+        _log.exception("launch_watcher_review: could not ensure meta workdir")
+        if app._root:
+            meta_pm_root = str(Path(app._root) / "pm")
+
+    transcript_dir: str | None = None
+    try:
+        from pm_core.tui import auto_start
+        tdir = auto_start.get_transcript_dir(app)
+        if tdir:
+            transcript_dir = str(tdir)
+    except Exception:
+        _log.exception("launch_watcher_review: could not resolve transcript dir")
+
+    sess = app._session_name or "default"
+    prompt = generate_watcher_review_prompt(
+        session_name=sess,
+        meta_pm_root=meta_pm_root,
+        transcript_dir=transcript_dir,
+    )
+
+    cmd = build_claude_shell_cmd(prompt=prompt)
+    launch_pane(app, cmd, "watcher-review", fresh=fresh)
+
+
+def launch_qa_item(app, item_id: str, target_window: str | None = None) -> None:
     """Launch Claude with a QA instruction prompt.
 
     *item_id* has the form ``category:id`` (e.g. ``instructions:login-flow``
     or ``regression:pane-layout``).
+
+    *target_window* optionally directs the launched pane into a specific
+    tmux window. When omitted (e.g. the human Enter-key path from the QA
+    pane), the pane opens in the TUI's current window.
     """
     from pm_core import qa_instructions
     from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
@@ -413,13 +521,111 @@ To interact with this session, use commands like:
 {body}
 """
 
+    if category == "regression":
+        full_prompt += _REGRESSION_FILING_ADDENDUM
+
     cmd = build_claude_shell_cmd(prompt=full_prompt)
-    launch_pane(app, cmd, "qa-item")
+    launch_pane(app, cmd, "qa-item", target_window=target_window)
 
 
 # ---------------------------------------------------------------------------
 # Plan and test pane actions
 # ---------------------------------------------------------------------------
+
+PLANS_WINDOW_FALLBACK = "plans"
+
+
+def _plans_window_name(plan_id: str | None) -> str:
+    """Per-plan tmux window name = the plan id itself.
+
+    All actions for the same plan share one window (different panes by role);
+    different plans get different windows. Cross-plan actions (deps, plan add)
+    pass synthetic ids like ``plan-deps`` / ``plan-add-<uuid>`` so they ride
+    the same machinery without colliding.
+    """
+    return plan_id or PLANS_WINDOW_FALLBACK
+
+
+def _focus_plans_window(app, plan_id: str | None) -> None:
+    """Switch the user's grouped session to the per-plan window."""
+    if not tmux_mod.in_tmux():
+        return
+    try:
+        session = tmux_mod.get_session_name()
+        if session:
+            tmux_mod.select_window(session, _plans_window_name(plan_id))
+    except Exception:
+        _log.exception("_focus_plans_window failed")
+
+
+def _wrap_pane_cmd(session: str, window: str, cmd: str) -> str:
+    """Wrap a pane command with the EXIT trap that notifies pm of pane death."""
+    data = pane_registry.load_registry(session)
+    gen = data.get("generation", "0")
+    escaped = cmd.replace("'", "'\\''")
+    return (f"bash -c 'trap \"pm _pane-exited {session} {window} {gen} "
+            f"$TMUX_PANE\" EXIT; {escaped}'")
+
+
+def _launch_in_plans_window(app, plan_id: str | None, cmd: str, role: str,
+                            fresh: bool = False) -> None:
+    """Launch a pane in the per-plan window and switch focus to it.
+
+    If the window doesn't exist yet, creates it with the wrapped command as
+    its sole pane (no placeholder shell). If it exists, defers to
+    :func:`launch_pane` which dedups by role and splits.
+    """
+    if not tmux_mod.in_tmux():
+        # Not in tmux: fall back to current-window launch.
+        launch_pane(app, cmd, role, fresh=fresh)
+        return
+    try:
+        session = tmux_mod.get_session_name()
+    except Exception:
+        _log.exception("_launch_in_plans_window: get_session_name failed")
+        launch_pane(app, cmd, role, fresh=fresh)
+        return
+    if not session:
+        launch_pane(app, cmd, role, fresh=fresh)
+        return
+
+    name = _plans_window_name(plan_id)
+    try:
+        win = tmux_mod.find_window_by_name(session, name)
+    except Exception:
+        _log.exception("_launch_in_plans_window: find_window_by_name failed")
+        win = None
+
+    if win:
+        launch_pane(app, cmd, role, fresh=fresh, target_window=win["id"])
+        _focus_plans_window(app, plan_id)
+        return
+
+    # Window doesn't exist — create it with the real command as the sole pane.
+    cwd = str(app._root) if app._root else "."
+    wrapped = _wrap_pane_cmd(session, name, cmd)
+    try:
+        pane_id = tmux_mod.new_window_get_pane(
+            session, name, wrapped, cwd=cwd, switch=False,
+        )
+        win = tmux_mod.find_window_by_name(session, name)
+        if pane_id and win:
+            pane_layout.register_and_rebalance(
+                session, win["id"], [(pane_id, role, cmd)])
+            app.log_message(f"Launched {role} pane")
+            _log.info("launched pane in new window: role=%s id=%s window=%s",
+                      role, pane_id, name)
+        _focus_plans_window(app, plan_id)
+    except Exception as e:
+        _log.exception("failed to launch %s pane in new window", role)
+        app.log_message(f"Error: {e}")
+
+
+# Synthetic plan ids for cross-plan actions that aren't tied to one plan.
+# These ride the same per-plan window machinery so each cross-plan action gets
+# its own dedicated window instead of fighting over a single shared "plans".
+_DEPS_PSEUDO_PLAN_ID = "plan-deps"
+
 
 def handle_plan_action(app, action: str, plan_id: str | None) -> None:
     """Handle plan action shortcuts that involve pane operations."""
@@ -430,19 +636,20 @@ def handle_plan_action(app, action: str, plan_id: str | None) -> None:
                 plan_path = app._root / plan.get("file", "")
                 if plan_path.exists():
                     editor = find_editor()
-                    launch_pane(app, f"{editor} {plan_path}", "plan-edit")
+                    _launch_in_plans_window(app, plan_id, f"{editor} {plan_path}", "plan-edit")
     elif action == "breakdown":
         if plan_id:
-            launch_pane(app, f"pm plan breakdown {plan_id}", "plan-breakdown")
+            _launch_in_plans_window(app, plan_id, f"pm plan breakdown {plan_id}", "plan-breakdown")
     elif action == "deps":
-        launch_pane(app, "pm plan deps", "plan-deps")
+        # Cross-plan action: use a dedicated 'plans-deps' window.
+        _launch_in_plans_window(app, _DEPS_PSEUDO_PLAN_ID, "pm plan deps", "plan-deps")
     elif action == "load":
         if plan_id:
             app._run_command(f"plan load {plan_id}",
                              working_message="Loading PRs from plan")
     elif action == "review":
         if plan_id:
-            launch_pane(app, f"pm plan review {plan_id}", "plan-review")
+            _launch_in_plans_window(app, plan_id, f"pm plan review {plan_id}", "plan-review")
 
 
 def handle_plan_add(app, result: tuple[str, str] | None) -> None:
@@ -455,7 +662,13 @@ def handle_plan_add(app, result: tuple[str, str] | None) -> None:
         return
     name, _description = result  # description is always empty now
     cmd = f"pm plan add {shlex.quote(name)}"
-    launch_pane(app, cmd, "plan-add")
+    # generate_plan_id is sha256(name + description) so the TUI and the
+    # spawned `pm plan add` process produce the same id — the window we open
+    # here will be the same one the plan's later actions (edit, breakdown,
+    # review) target, instead of a one-shot 'plan-add-<uuid>' window.
+    existing_ids = {p["id"] for p in (app._data.get("plans") or [])}
+    plan_id = store.generate_plan_id(name, existing_ids)
+    _launch_in_plans_window(app, plan_id, cmd, "plan-add")
 
 
 def launch_plan_activated(app, plan_id: str) -> None:
@@ -466,7 +679,7 @@ def launch_plan_activated(app, plan_id: str) -> None:
         return
     plan_path = app._root / plan.get("file", "")
     if plan_path.exists():
-        launch_pane(app, f"less {plan_path}", "plan")
+        _launch_in_plans_window(app, plan_id, f"less {plan_path}", "plan")
 
 
 # ---------------------------------------------------------------------------

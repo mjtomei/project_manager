@@ -31,28 +31,6 @@ def find_claude_pane(session: str, window_name: str) -> str | None:
     return None
 
 
-def sleep_checking_pane(pane_id: str, seconds: float,
-                        tick: float = 1.0,
-                        stop_check: Callable[[], bool] | None = None) -> bool:
-    """Sleep for *seconds*, checking pane liveness every tick.
-
-    Returns True if the pane is still alive, False if it disappeared.
-    If *stop_check* is provided, it is called each tick; if it returns
-    True the sleep terminates early (returns True — pane still alive).
-    """
-    from pm_core import tmux as tmux_mod
-
-    elapsed = 0.0
-    while elapsed < seconds:
-        time.sleep(tick)
-        elapsed += tick
-        if stop_check and stop_check():
-            return True  # pane alive but stopping
-        if not tmux_mod.pane_exists(pane_id):
-            return False
-    return True
-
-
 # ---------------------------------------------------------------------------
 # Verdict detection helpers (shared by review_loop and watcher_loop)
 # ---------------------------------------------------------------------------
@@ -62,48 +40,6 @@ def sleep_checking_pane(pane_id: str, seconds: float,
 # scrollback would match those immediately.
 VERDICT_TAIL_LINES = 30
 
-# Consecutive stable polls required before accepting verdict
-STABILITY_POLLS = 2
-
-
-class VerdictStabilityTracker:
-    """Track verdict stability across non-blocking polls.
-
-    Used by the TUI timer callback to detect when a verdict has been
-    stable for ``STABILITY_POLLS`` consecutive polls.  The blocking
-    ``poll_for_verdict`` has its own inline stability loop, but this
-    class serves the same purpose for callers that cannot block.
-    """
-
-    def __init__(self) -> None:
-        self._counts: dict[str, tuple[str, int]] = {}  # key -> (verdict, count)
-
-    def update(self, key: str, verdict: str | None) -> bool:
-        """Record a poll result and return True when the verdict is stable.
-
-        Args:
-            key: Tracking key (e.g. ``merge:pr-001``).
-            verdict: Detected verdict, or None if no verdict found.
-
-        Returns:
-            True if *verdict* is non-None and has been seen on
-            ``STABILITY_POLLS`` consecutive calls for *key*.
-        """
-        if verdict is None:
-            self._counts.pop(key, None)
-            return False
-        prev_verdict, prev_count = self._counts.get(key, (None, 0))
-        count = prev_count + 1 if verdict == prev_verdict else 1
-        self._counts[key] = (verdict, count)
-        return count >= STABILITY_POLLS
-
-    def reset(self, key: str) -> None:
-        """Clear stability state for *key*."""
-        self._counts.pop(key, None)
-
-    def clear(self) -> None:
-        """Clear all stability state."""
-        self._counts.clear()
 
 
 def match_verdict(line: str, verdicts: tuple[str, ...]) -> str | None:
@@ -124,159 +60,6 @@ def match_verdict(line: str, verdicts: tuple[str, ...]) -> str | None:
             return verdict
     return None
 
-
-def build_prompt_verdict_lines(prompt_text: str,
-                               keywords: tuple[str, ...]) -> set[str]:
-    """Build a set of normalized prompt lines that contain verdict keywords.
-
-    Used to distinguish prompt instructions (which mention verdict keywords)
-    from Claude's actual verdict output.  Strips markdown formatting so
-    terminal-wrapped lines can be matched against prompt lines.
-
-    Args:
-        prompt_text: The full prompt text.
-        keywords: Tuple of verdict keyword strings to search for.
-    """
-    result = set()
-    for line in prompt_text.splitlines():
-        normalized = line.replace("*", "").replace("`", "").strip()
-        if normalized and any(v in normalized for v in keywords):
-            result.add(normalized)
-    return result
-
-
-def is_prompt_line(stripped_line: str, prompt_verdict_lines: set[str],
-                   keywords: tuple[str, ...]) -> bool:
-    """Check if a verdict-containing line comes from the prompt, not Claude.
-
-    Strategy: extract the "context" around the verdict keyword (the
-    non-keyword text).  If the context also appears in a prompt line,
-    this line is from the prompt.  A standalone keyword like "PASS" or
-    "READY" has no context and is always treated as a real verdict
-    (use :func:`is_prompt_line_with_neighbors` for those).
-
-    Args:
-        stripped_line: The line to check (already stripped of outer whitespace).
-        prompt_verdict_lines: Set of normalized prompt lines containing verdicts.
-        keywords: Tuple of verdict keyword strings to strip when extracting context.
-    """
-    context = stripped_line
-    for keyword in keywords:
-        context = context.replace(keyword, "")
-    context = context.strip(" \t\u2014-:().").strip()
-
-    if len(context) > 3:
-        stripped_clean = stripped_line.replace("*", "").replace("`", "").strip()
-        for pvl in prompt_verdict_lines:
-            if context in pvl or stripped_clean in pvl or pvl in stripped_clean:
-                return True
-    return False
-
-
-# Number of lines after the keyword to include when checking whether a
-# standalone keyword came from the prompt.  We only look *after* (below)
-# the keyword so that lines scrolling off the top of the tail window
-# don't cause false negatives that let prompt keywords slip through.
-_NEIGHBOR_AFTER = 2
-
-
-def is_prompt_line_with_neighbors(
-    line_index: int,
-    tail: list[str],
-    prompt_text: str,
-) -> bool:
-    """Check if a standalone verdict keyword came from the prompt by
-    looking at the lines that follow it.
-
-    A bare keyword like ``FLAGGED_END`` on its own has no inline context
-    to match.  Instead we build a small multi-line snippet from the
-    keyword and the lines *after* it in *tail* and check whether that
-    snippet appears verbatim in *prompt_text*.  Only lines after are
-    used so that lines scrolling off the top of the tail window cannot
-    cause a real verdict to be mistakenly matched as a prompt line.
-    """
-    if not prompt_text:
-        return False
-
-    # Normalize the prompt for matching (strip markdown bold/backticks)
-    norm_prompt = prompt_text.replace("*", "").replace("`", "")
-
-    # Prefer lines *after* the keyword for context.  If the keyword is
-    # at the very end of the tail (no lines after), fall back to lines
-    # *before* it — this handles the case where the pane is just the
-    # prompt and the keyword is the prompt's last line.
-    end = min(len(tail), line_index + _NEIGHBOR_AFTER + 1)
-    if end > line_index + 1:
-        # Lines after available — use keyword + lines after
-        snippet_lines = [l.strip().replace("*", "").replace("`", "") for l in tail[line_index:end]]
-    else:
-        # Last line — use lines before + keyword
-        start = max(0, line_index - _NEIGHBOR_AFTER)
-        snippet_lines = [l.strip().replace("*", "").replace("`", "") for l in tail[start:line_index + 1]]
-
-    snippet = "\n".join(snippet_lines)
-    matched = snippet in norm_prompt
-    if not matched:
-        _log.info("is_prompt_line_with_neighbors: NO MATCH for keyword at "
-                  "tail[%d], snippet (%d chars): %r",
-                  line_index, len(snippet), snippet[:200])
-    return matched
-
-
-def extract_verdict_from_content(
-    content: str,
-    verdicts: tuple[str, ...],
-    keywords: tuple[str, ...],
-    prompt_text: str = "",
-    exclude_verdicts: set[str] | None = None,
-    log_prefix: str = "loop_shared",
-) -> str | None:
-    """Check if the tail of captured pane content contains a verdict keyword.
-
-    Lines that match the prompt text are skipped — the prompt itself contains
-    verdict keywords as instructions.  Only verdicts from Claude's actual
-    output are returned.
-
-    Args:
-        content: Captured pane content to scan.
-        verdicts: Tuple of valid verdict keyword strings.
-        keywords: Tuple of keyword strings for prompt line filtering.
-        prompt_text: Prompt text for filtering out prompt lines.
-        exclude_verdicts: Optional set of verdict strings to skip.
-        log_prefix: Prefix for log messages.
-    """
-    lines = content.strip().splitlines()
-    tail = lines[-VERDICT_TAIL_LINES:] if len(lines) > VERDICT_TAIL_LINES else lines
-
-    prompt_verdict_lines = build_prompt_verdict_lines(prompt_text, keywords) if prompt_text else set()
-    _log.info("%s: extract_verdict: %d total lines, %d tail lines, %d prompt verdict lines, prompt_text=%d chars",
-              log_prefix, len(lines), len(tail), len(prompt_verdict_lines), len(prompt_text))
-
-    for idx in range(len(tail) - 1, -1, -1):
-        stripped = tail[idx].strip().strip("*").strip()
-        # Strip leading non-alphanumeric characters (e.g. '●' bullet that
-        # Claude Code prefixes to output lines) so "● PASS" matches "PASS".
-        stripped = re.sub(r'^[^\w]+', '', stripped).strip()
-        verdict = match_verdict(stripped, verdicts)
-
-        if verdict:
-            if exclude_verdicts and verdict in exclude_verdicts:
-                continue
-            if prompt_verdict_lines and is_prompt_line(stripped, prompt_verdict_lines, keywords):
-                _log.info("%s: SKIPPED prompt verdict line: [%s] (verdict=%s)", log_prefix, stripped[:100], verdict)
-                continue
-            # For standalone keywords (bare "PASS", "FLAGGED_END", etc.)
-            # check whether the line and its neighbors appear in the
-            # prompt text.  This catches prompt examples that have no
-            # inline context but are surrounded by recognisable prompt
-            # lines.
-            if prompt_text and is_prompt_line_with_neighbors(idx, tail, prompt_text):
-                _log.info("%s: SKIPPED prompt keyword (neighbor match): [%s] (verdict=%s)",
-                          log_prefix, stripped[:100], verdict)
-                continue
-            _log.info("%s: ACCEPTED verdict line: [%s] (verdict=%s)", log_prefix, stripped[:100], verdict)
-            return verdict
-    return None
 
 
 def extract_between_markers(content: str, start_marker: str,
@@ -324,43 +107,50 @@ def extract_between_markers(content: str, start_marker: str,
 
 def poll_for_verdict(
     pane_id: str,
+    transcript_path: str,
     verdicts: tuple[str, ...],
-    keywords: tuple[str, ...],
-    prompt_text: str = "",
-    exclude_verdicts: set[str] | None = None,
+    *,
     grace_period: float = 0,
-    poll_interval: float = 5,
-    tick_interval: float = 1,
+    wait_timeout: float = 15,
     stop_check: Callable[[], bool] | None = None,
     log_prefix: str = "loop_shared",
 ) -> str | None:
-    """Poll a pane until a verdict is stable.
+    """Block until Claude signals idle, then extract a verdict from the
+    JSONL transcript.
 
-    Returns the captured pane content when a verdict is found and stable
-    for ``STABILITY_POLLS`` consecutive polls.
-    Returns None if the pane disappears or stop is requested.
+    Returns the assistant text from the latest turn when a verdict is
+    found, or ``None`` when the pane disappears / ``stop_check`` fires.
+    Callers can pass the returned string to downstream parsers (e.g.
+    :func:`extract_between_markers`) or to
+    :func:`pm_core.verdict_transcript.extract_verdict_from_transcript`
+    for pure verdict detection.
 
-    Args:
-        pane_id: tmux pane to poll.
-        verdicts: Tuple of valid verdict keyword strings.
-        keywords: Tuple of keyword strings for prompt line filtering.
-        prompt_text: Prompt text for filtering out prompt lines.
-        exclude_verdicts: Optional set of verdict strings to skip.
-        grace_period: Seconds to wait before accepting verdicts.
-        poll_interval: Seconds between verdict checks.
-        tick_interval: Seconds between liveness/stop checks.
-        stop_check: Optional callable; if it returns True, polling stops.
-        log_prefix: Prefix for log messages.
+    Hook-driven only — requires *transcript_path* so we can recover the
+    Claude ``session_id`` via the symlink target and read the assistant
+    output from the JSONL.  No pane-capture fallback.
     """
     from pm_core import tmux as tmux_mod
+    from pm_core import hook_events
+    from pm_core.claude_launcher import session_id_from_transcript
+    from pm_core.verdict_transcript import (
+        extract_verdict_from_transcript,
+        read_latest_assistant_text,
+    )
 
-    _log.info("%s: poll_for_verdict starting — pane_id=%s, verdicts=%s, "
-              "prompt_text=%d chars, grace=%.0fs",
-              log_prefix, pane_id, verdicts, len(prompt_text), grace_period)
+    session_id = session_id_from_transcript(transcript_path)
+    if not session_id:
+        raise RuntimeError(
+            f"poll_for_verdict: could not recover session_id from "
+            f"transcript={transcript_path!r}"
+        )
 
-    last_verdict = None
-    stable_count = 0
+    _log.info("%s: poll_for_verdict (hook+jsonl) — pane_id=%s, "
+              "transcript=%s, session_id=%s, verdicts=%s, grace=%.0fs",
+              log_prefix, pane_id, transcript_path, session_id, verdicts,
+              grace_period)
+
     poll_start = time.monotonic()
+    hook_baseline = time.time()
 
     while True:
         if stop_check and stop_check():
@@ -370,82 +160,61 @@ def poll_for_verdict(
             _log.warning("%s: pane %s disappeared", log_prefix, pane_id)
             return None
 
-        in_grace = grace_period > 0 and (time.monotonic() - poll_start) < grace_period
-
-        content = tmux_mod.capture_pane(pane_id, full_scrollback=True)
-        if not content.strip():
-            if not sleep_checking_pane(pane_id, poll_interval, tick=tick_interval,
-                                       stop_check=stop_check):
-                return None
-            continue
-
-        if in_grace:
-            if not sleep_checking_pane(pane_id, poll_interval, tick=tick_interval,
-                                       stop_check=stop_check):
-                return None
-            continue
-
-        verdict = extract_verdict_from_content(
-            content, verdicts=verdicts, keywords=keywords,
-            prompt_text=prompt_text, exclude_verdicts=exclude_verdicts,
-            log_prefix=log_prefix,
+        # Stop fires every turn, not only at session exit — listening to
+        # it caused false "session gone" returns.  pane_exists is the
+        # authoritative session-gone signal; we only consume idle_prompt.
+        ev = hook_events.wait_for_event(
+            session_id,
+            event_types={"idle_prompt"},
+            timeout=wait_timeout,
+            newer_than=hook_baseline,
+            stop_check=stop_check,
         )
-        if verdict:
-            if verdict == last_verdict:
-                stable_count += 1
-            else:
-                last_verdict = verdict
-                stable_count = 1
-
-            if stable_count >= STABILITY_POLLS:
-                _log.info("%s: verdict %s stable for %d polls",
-                          log_prefix, verdict, stable_count)
-                return content
-        else:
-            last_verdict = None
-            stable_count = 0
-
-        if not sleep_checking_pane(pane_id, poll_interval, tick=tick_interval,
-                                   stop_check=stop_check):
+        if stop_check and stop_check():
             return None
+        if ev is None:
+            continue
+
+        hook_baseline = float(ev.get("timestamp") or hook_baseline)
+        if grace_period > 0 and (time.monotonic() - poll_start) < grace_period:
+            continue
+
+        verdict = extract_verdict_from_transcript(transcript_path, verdicts)
+        if verdict:
+            _log.info("%s: hook-driven verdict %s (session_id=%s)",
+                      log_prefix, verdict, session_id)
+            return read_latest_assistant_text(transcript_path) or verdict
 
 
 def wait_for_follow_up_verdict(
     session: str,
     window_name: str,
+    transcript_path: str,
     verdicts: tuple[str, ...],
-    keywords: tuple[str, ...],
-    prompt_text: str = "",
-    exclude_verdicts: set[str] | None = None,
-    poll_interval: float = 5,
-    tick_interval: float = 1,
+    *,
+    wait_timeout: float = 15,
     stop_check: Callable[[], bool] | None = None,
     log_prefix: str = "loop_shared",
 ) -> str | None:
-    """Poll an existing pane for a follow-up verdict (after INPUT_REQUIRED).
+    """Block for the next hook-driven idle on an existing pane and return
+    the assistant text of the follow-up turn (or ``None``).
 
-    The user interacts with Claude in the pane; this function polls until
-    Claude emits a follow-up verdict.
-
-    Returns the captured pane content when a verdict is found, or None if
-    the pane disappeared or stop was requested.
-
-    Args:
-        session: tmux session name.
-        window_name: tmux window name containing the pane.
-        verdicts: Tuple of valid verdict keyword strings.
-        keywords: Tuple of keyword strings for prompt line filtering.
-        prompt_text: Prompt text for filtering out prompt lines.
-        exclude_verdicts: Optional set of verdict strings to skip.
-        poll_interval: Seconds between verdict checks.
-        tick_interval: Seconds between liveness/stop checks.
-        stop_check: Optional callable; if it returns True, polling stops.
-        log_prefix: Prefix for log messages.
+    Hook-driven only — requires *transcript_path*.
     """
-    from pm_core import tmux as tmux_mod
+    from pm_core import hook_events
+    from pm_core.claude_launcher import session_id_from_transcript
+    from pm_core.verdict_transcript import (
+        extract_verdict_from_transcript,
+        read_latest_assistant_text,
+    )
 
-    last_verdict: str | None = None
-    stable_count = 0
+    session_id = session_id_from_transcript(transcript_path)
+    if not session_id:
+        _log.warning("%s: could not recover session_id from transcript=%s",
+                     log_prefix, transcript_path)
+        return None
+
+    hook_baseline = time.time()
 
     while not (stop_check and stop_check()):
         pane_id = find_claude_pane(session, window_name)
@@ -453,30 +222,22 @@ def wait_for_follow_up_verdict(
             _log.warning("%s: pane gone during follow-up wait", log_prefix)
             return None
 
-        content = tmux_mod.capture_pane(pane_id, full_scrollback=True)
-        if content.strip():
-            verdict = extract_verdict_from_content(
-                content, verdicts=verdicts, keywords=keywords,
-                prompt_text=prompt_text, exclude_verdicts=exclude_verdicts,
-                log_prefix=log_prefix,
-            )
-            if verdict:
-                if verdict == last_verdict:
-                    stable_count += 1
-                else:
-                    last_verdict = verdict
-                    stable_count = 1
-                if stable_count >= STABILITY_POLLS:
-                    _log.info("%s: follow-up verdict %s stable",
-                              log_prefix, verdict)
-                    return content
-            else:
-                last_verdict = None
-                stable_count = 0
+        ev = hook_events.wait_for_event(
+            session_id,
+            event_types={"idle_prompt"},
+            timeout=wait_timeout,
+            newer_than=hook_baseline,
+            stop_check=stop_check,
+        )
+        if stop_check and stop_check():
+            return None
+        if ev is None:
+            continue
+        hook_baseline = float(ev.get("timestamp") or hook_baseline)
 
-        for _ in range(int(poll_interval / tick_interval)):
-            if stop_check and stop_check():
-                return None
-            time.sleep(tick_interval)
+        verdict = extract_verdict_from_transcript(transcript_path, verdicts)
+        if verdict:
+            _log.info("%s: hook-driven follow-up verdict %s", log_prefix, verdict)
+            return read_latest_assistant_text(transcript_path) or verdict
 
     return None

@@ -22,7 +22,6 @@ STATUS_ICONS = {
 
 VERDICT_MARKERS = {
     "PASS": "✓",
-    "PASS_WITH_SUGGESTIONS": "~",
     "NEEDS_WORK": "✗",
     "KILLED": "☠",
     "TIMEOUT": "⏱",
@@ -32,7 +31,6 @@ VERDICT_MARKERS = {
 
 VERDICT_STYLES = {
     "PASS": "bold green",
-    "PASS_WITH_SUGGESTIONS": "bold yellow",
     "NEEDS_WORK": "bold red",
     "KILLED": "bold red",
     "TIMEOUT": "bold red",
@@ -41,6 +39,28 @@ VERDICT_STYLES = {
 }
 
 SPINNER_FRAMES = "◐◓◑◒"
+
+
+def qa_pane_state(tracker, pr_id: str) -> str:
+    """Aggregate QA-pane activity for *pr_id* in the idle tracker.
+
+    QA runs N parallel scenarios, each registered under a key
+    ``qa:<pr_id>:s<index>``. Returns ``"waiting"`` if any pane is blocked
+    on a permission prompt, ``"active"`` if any pane is tracked and
+    neither idle nor waiting, otherwise ``"idle"`` (which also covers
+    the no-tracked-keys case). Mirrors the ``in_progress``/``in_review``
+    spinner precedence: waiting wins over active.
+    """
+    prefix = f"qa:{pr_id}:"
+    keys = [k for k in tracker.tracked_keys() if k.startswith(prefix)]
+    if not keys:
+        return "idle"
+    if any(tracker.is_waiting_for_input(k) for k in keys):
+        return "waiting"
+    if any(not tracker.is_idle(k) and not tracker.is_waiting_for_input(k)
+           for k in keys):
+        return "active"
+    return "idle"
 
 STATUS_STYLES = {
     "pending": "white",
@@ -526,11 +546,31 @@ class TechTree(Widget):
                 marker_offset = 2 + len(status_text) + 1  # side + space + base text + space
                 status_text += f" {loop_marker}"
             else:
-                # Show activity spinner for in_progress/in_review PRs
-                # (suppressed when the implementation pane is idle or untracked)
+                # Show activity state for in_progress/in_review PRs:
+                #   ⏸  — agent is blocked on Claude's permission dialog
+                #        (waiting_for_input from the permission_prompt hook).
+                #   spinner — agent is actively working (neither idle nor
+                #        waiting_for_input).
+                #   (no marker) — agent is idle / pane untracked.
                 if status in ("in_progress", "in_review") and pr.get("workdir"):
                     tracker = self.app._pane_idle_tracker
-                    if tracker.is_tracked(pr_id) and not tracker.is_idle(pr_id):
+                    if tracker.is_tracked(pr_id):
+                        if tracker.is_waiting_for_input(pr_id):
+                            marker_offset = 2 + len(status_text) + 1
+                            loop_style = "bold yellow"
+                            status_text += " ⏸"
+                        elif not tracker.is_idle(pr_id):
+                            spinner = SPINNER_FRAMES[self._anim_frame % len(SPINNER_FRAMES)]
+                            marker_offset = 2 + len(status_text) + 1
+                            loop_style = "bold cyan"
+                            status_text += f" {spinner}"
+                elif status == "qa" and pr.get("workdir"):
+                    qa_state = qa_pane_state(self.app._pane_idle_tracker, pr_id)
+                    if qa_state == "waiting":
+                        marker_offset = 2 + len(status_text) + 1
+                        loop_style = "bold yellow"
+                        status_text += " ⏸"
+                    elif qa_state == "active":
                         spinner = SPINNER_FRAMES[self._anim_frame % len(SPINNER_FRAMES)]
                         marker_offset = 2 + len(status_text) + 1
                         loop_style = "bold cyan"

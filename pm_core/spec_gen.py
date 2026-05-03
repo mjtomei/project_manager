@@ -32,10 +32,6 @@ _log = configure_logger("pm.spec_gen")
 # Phase names that have specs
 PHASES = ("impl", "qa")
 
-_SPEC_FIELD = {
-    "impl": "spec_impl",
-    "qa": "spec_qa",
-}
 
 
 def get_spec_mode() -> str:
@@ -84,8 +80,7 @@ def get_spec(pr: dict, phase: str) -> str | None:
     2. The local pm/specs/ (cwd-resolved root) — where specs live after
        the PR branch is merged back to the base repo.
     """
-    field = _SPEC_FIELD.get(phase)
-    if not field:
+    if phase not in PHASES:
         return None
 
     pr_id = pr.get("id", "")
@@ -119,8 +114,7 @@ def set_spec(pr: dict, phase: str, spec: str,
 
     Returns the path written, or None for invalid phases.
     """
-    field = _SPEC_FIELD.get(phase)
-    if not field:
+    if phase not in PHASES:
         return None
 
     if root is None:
@@ -133,7 +127,6 @@ def set_spec(pr: dict, phase: str, spec: str,
     path = spec_file_path(root, pr.get("id", "unknown"), phase)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(spec)
-    pr[field] = str(path)
     _log.info("spec_gen: wrote %s spec to %s (%d chars)", phase, path, len(spec))
     return path
 
@@ -290,38 +283,48 @@ def generate_spec(data: dict, pr_id: str, phase: str,
         _log.warning("spec_gen: empty spec generated for %s/%s", pr_id, phase)
         return "", False
 
-    # Save spec to file and update PR entry
-    set_spec(pr, phase, spec_text, root=root)
-    if root:
-        store.save(data, root)
-        _log.info("spec_gen: saved %s spec for %s (%d chars)",
-                  phase, pr_id, len(spec_text))
-
     # Determine if review is needed
     needs_review = False
     if mode == "review":
         needs_review = True
     elif mode == "prompt":
-        # Check for ambiguity flags
         if "AMBIGUITY_FLAG" in spec_text:
             needs_review = True
             _log.info("spec_gen: ambiguity detected in %s spec for %s, "
                       "pausing for review", phase, pr_id)
 
-    # Set spec_pending if review is needed, clear it otherwise
+    # Write spec file (safe outside lock — file writes are independent of YAML)
+    set_spec(pr, phase, spec_text, root=root)
+
+    # Build pending value for both in-memory and on-disk use
+    pending_value = None
     if needs_review:
-        pr["spec_pending"] = {
+        pending_value = {
             "phase": phase,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
-        if root:
-            store.save(data, root)
-        _log.info("spec_gen: marked spec_pending for %s/%s", pr_id, phase)
+
+    # Apply all state mutations atomically via locked_update
+    if root:
+        def apply(fresh_data):
+            fresh_pr = store.get_pr(fresh_data, pr_id)
+            if not fresh_pr:
+                return
+            # Set or clear spec_pending
+            if pending_value:
+                fresh_pr["spec_pending"] = pending_value
+            else:
+                fresh_pr.pop("spec_pending", None)
+
+        store.locked_update(root, apply)
+        _log.info("spec_gen: saved %s spec for %s (%d chars, needs_review=%s)",
+                  phase, pr_id, len(spec_text), needs_review)
+
+    # Keep caller's in-memory pr in sync
+    if pending_value:
+        pr["spec_pending"] = pending_value
     else:
-        if pr.pop("spec_pending", None) is not None:
-            if root:
-                store.save(data, root)
-            _log.info("spec_gen: cleared spec_pending for %s/%s", pr_id, phase)
+        pr.pop("spec_pending", None)
 
     return spec_text, needs_review
 
@@ -360,12 +363,22 @@ def approve_spec(data: dict, pr_id: str, root: Path | None = None,
     if not phase:
         return None
 
+    # Write edited spec file (safe outside lock)
     if edited_text is not None:
         set_spec(pr, phase, edited_text.strip(), root=root)
 
+    # Also update in-memory data for caller
     del pr["spec_pending"]
+
     if root:
-        store.save(data, root)
+        def apply(fresh_data):
+            fresh_pr = store.get_pr(fresh_data, pr_id)
+            if not fresh_pr:
+                return
+            fresh_pr.pop("spec_pending", None)
+
+        store.locked_update(root, apply)
+
     _log.info("spec_gen: approved %s spec for %s", phase, pr_id)
     return phase
 
@@ -405,7 +418,12 @@ def reject_spec(data: dict, pr_id: str, feedback: str | None = None,
             original_desc.rstrip() + f"\n\n[Spec review feedback]: {feedback}"
         )
         if root:
-            store.save(data, root)
+            def apply_feedback(fresh_data):
+                fresh_pr = store.get_pr(fresh_data, pr_id)
+                if fresh_pr:
+                    fresh_pr["description"] = pr["description"]
+
+            store.locked_update(root, apply_feedback)
 
     try:
         generate_spec(data, pr_id, phase, root=root, force=True)
@@ -414,7 +432,12 @@ def reject_spec(data: dict, pr_id: str, feedback: str | None = None,
         if feedback:
             pr["description"] = original_desc
             if root:
-                store.save(data, root)
+                def restore_desc(fresh_data):
+                    fresh_pr = store.get_pr(fresh_data, pr_id)
+                    if fresh_pr:
+                        fresh_pr["description"] = original_desc
+
+                store.locked_update(root, restore_desc)
 
     _log.info("spec_gen: regenerated %s spec for %s after rejection", phase, pr_id)
     return phase
@@ -460,13 +483,19 @@ def spec_generation_preamble(pr: dict, phase: str,
     phase_labels = {"impl": "implementation", "qa": "QA"}
     label = phase_labels.get(phase, phase)
 
-    # Derive the spec file path
+    # Derive the spec file path — use a relative path so the prompt works
+    # inside containers where the workdir is mounted at /workspace rather
+    # than the host's absolute path.
     if root is None:
         try:
             root = store.find_project_root()
         except FileNotFoundError:
             root = Path("pm")  # fallback
     file_path = spec_file_path(root, pr_id, phase)
+    try:
+        file_path = file_path.relative_to(root.parent)
+    except ValueError:
+        pass  # already relative or different mount — use as-is
 
     # Determine what kind of spec to generate
     spec_instructions = {
@@ -512,8 +541,7 @@ Use your best judgement to resolve any ambiguities based on your understanding
 of the codebase and common patterns.  Document all resolved ambiguities and
 your reasoning in the spec's "Ambiguities" section.
 
-Save the spec to `{file_path}` and then run:
-  `pm pr spec-save {pr_id} {phase}`
+Save the spec to `{file_path}`.
 {commit_step}
 Then proceed with the {label} work below."""
 
@@ -524,8 +552,7 @@ If you encounter a genuinely unresolvable ambiguity — multiple valid
 interpretations with materially different outcomes — include it in the spec's
 "Ambiguities" section marked **[UNRESOLVED]** with a clear question.
 
-Save the spec to `{file_path}` and then run:
-  `pm pr spec-save {pr_id} {phase}`
+Save the spec to `{file_path}`.
 {commit_step}
 If the spec contains any **[UNRESOLVED]** ambiguities, present them to the
 user and wait for their response before proceeding.  Update the spec with
@@ -537,8 +564,7 @@ ambiguities, proceed with the {label} work below."""
 Identify all ambiguities and present your proposed resolution for each in the
 spec's "Ambiguities" section.
 
-Save the spec to `{file_path}` and then run:
-  `pm pr spec-save {pr_id} {phase}`
+Save the spec to `{file_path}`.
 {commit_step}
 Then present a brief summary of the spec to the user and ask whether they
 approve or want changes.  If they request changes, update the spec file,
@@ -650,24 +676,37 @@ def format_spec_for_prompt(pr: dict, phase: str) -> str:
     except FileNotFoundError:
         root = Path("pm")
     file_path = spec_file_path(root, pr_id, phase)
+    try:
+        file_path = file_path.relative_to(root.parent)
+    except ValueError:
+        pass  # already relative or different mount — use as-is
+
+    staleness_note = (
+        "Also check whether the spec is still consistent with the current code "
+        "and PR notes — the code or notes may have changed since the spec was "
+        "generated. If you find requirements that no longer match the "
+        "implementation, or PR notes that contradict or extend the spec, update "
+        f"the spec in `{file_path}`."
+    )
 
     if mode == "auto":
         review_note = (
             "Before proceeding, check the spec's Ambiguities section for any open "
             "questions left unanswered (the session that generated it may have exited "
             "before resolving them). If you find any, resolve them using your best "
-            "judgment, document the resolution in the spec, re-save to "
-            f"`{file_path}`, and run `pm pr spec-save {pr_id} {phase}` before continuing."
+            "judgment, document the resolution in the spec, and re-save to "
+            f"`{file_path}` before continuing. "
+            + staleness_note
         )
     elif mode == "prompt":
         review_note = (
             "Before proceeding, check the spec's Ambiguities section for any items "
             "marked **[UNRESOLVED]** (the session that generated it may have exited "
             "before resolving them). Resolve any you can confidently handle based on "
-            f"the codebase and document them in the spec. Re-save to `{file_path}` "
-            f"and run `pm pr spec-save {pr_id} {phase}`. "
+            f"the codebase and document them in the spec. Re-save to `{file_path}`. "
             "If any remain genuinely unresolvable, present them to the user and wait "
-            "for their response before proceeding."
+            "for their response before proceeding. "
+            + staleness_note
         )
     else:  # review
         review_note = (
@@ -675,8 +714,9 @@ def format_spec_for_prompt(pr: dict, phase: str) -> str:
             "questions left unanswered (the session that generated it may have exited "
             "before resolving them). If you find any, present them to the user along "
             "with your proposed resolutions. Update the spec with their answers, "
-            f"re-save to `{file_path}`, run `pm pr spec-save {pr_id} {phase}`, "
-            "and ask for approval before continuing."
+            f"re-save to `{file_path}`, "
+            "and ask for approval before continuing. "
+            + staleness_note
         )
 
     return f"""

@@ -49,15 +49,13 @@ def _make_app(
     return app
 
 
-def _make_running_state(pr_id: str = "pr-001", iteration: int = 3,
-                        stop_on_suggestions: bool = False) -> ReviewLoopState:
+def _make_running_state(pr_id: str = "pr-001", iteration: int = 3) -> ReviewLoopState:
     """Create a ReviewLoopState that looks like a running loop."""
     state = ReviewLoopState(
         pr_id=pr_id,
         running=True,
         iteration=iteration,
         latest_verdict="NEEDS_WORK",
-        stop_on_suggestions=stop_on_suggestions,
         loop_id="ab12",
         _transcript_dir="/tmp/pm-test/transcripts/autostart-pr-001-abcd1234",
     )
@@ -104,8 +102,8 @@ class TestSaveBreadcrumbReviewLoops:
         loop_data = loops["pr-001"]
         assert loop_data["iteration"] == 3
         assert loop_data["latest_verdict"] == "NEEDS_WORK"
-        assert loop_data["stop_on_suggestions"] is False
         assert loop_data["loop_id"] == "ab12"
+        assert "stop_on_suggestions" not in loop_data
         assert len(loop_data["history"]) == 3
         assert loop_data["history"][0]["verdict"] == "NEEDS_WORK"
         assert loop_data["history"][0]["iteration"] == 1
@@ -231,7 +229,6 @@ class TestConsumeBreadcrumbReviewLoops:
                 "pr-001": {
                     "iteration": 3,
                     "latest_verdict": "NEEDS_WORK",
-                    "stop_on_suggestions": False,
                     "loop_id": "ab12",
                     "input_required": False,
                     "_transcript_dir": "/tmp/transcripts",
@@ -268,7 +265,6 @@ class TestConsumeBreadcrumbReviewLoops:
         rstate = app._review_loops["pr-001"]
         assert rstate.iteration == 3
         assert rstate.latest_verdict == "NEEDS_WORK"
-        assert rstate.stop_on_suggestions is False
         assert rstate.loop_id == "ab12"
         assert len(rstate.history) == 3
 
@@ -285,7 +281,6 @@ class TestConsumeBreadcrumbReviewLoops:
                 "pr-001": {
                     "iteration": 2,
                     "latest_verdict": "NEEDS_WORK",
-                    "stop_on_suggestions": True,
                     "loop_id": "xy99",
                     "history": [],
                 }
@@ -335,7 +330,6 @@ class TestConsumeBreadcrumbReviewLoops:
                 "pr-001": {
                     "iteration": 2,
                     "latest_verdict": "NEEDS_WORK",
-                    "stop_on_suggestions": True,
                     "loop_id": "mn56",
                     "input_required": False,
                     "_transcript_dir": "/tmp/transcripts",
@@ -415,7 +409,6 @@ class TestStartLoopResumeState:
             pr_id="pr-001",
             iteration=3,
             latest_verdict="NEEDS_WORK",
-            stop_on_suggestions=False,
             loop_id="ab12",
         )
         state.history = [
@@ -430,7 +423,7 @@ class TestStartLoopResumeState:
              patch("pm_core.tui.review_loop_ui.start_review_loop_background") as mock_bg, \
              patch("pm_core.tui.review_loop_ui._ensure_poll_timer"):
             mock_store.find_project_root.return_value = Path("/tmp/pm")
-            _start_loop(app, "pr-001", pr, stop_on_suggestions=False,
+            _start_loop(app, "pr-001", pr, transcript_dir="/tmp",
                         resume_state=state)
 
         # State should be in app._review_loops
@@ -459,12 +452,11 @@ class TestStartLoopResumeState:
              patch("pm_core.tui.review_loop_ui.start_review_loop_background"), \
              patch("pm_core.tui.review_loop_ui._ensure_poll_timer"):
             mock_store.find_project_root.return_value = Path("/tmp/pm")
-            _start_loop(app, "pr-002", pr, stop_on_suggestions=True)
+            _start_loop(app, "pr-002", pr, transcript_dir="/tmp")
 
         state = app._review_loops["pr-002"]
         assert state.pr_id == "pr-002"
         assert state.iteration == 0
-        assert state.stop_on_suggestions is True
         assert state.history == []
 
 
@@ -481,7 +473,6 @@ class TestBreadcrumbRoundTrip:
 
         # Build app with running review loop
         state = _make_running_state("pr-001", iteration=5)
-        state.stop_on_suggestions = True
         state.loop_id = "ff99"
         save_app = _make_app(
             review_loops={"pr-001": state},
@@ -513,7 +504,6 @@ class TestBreadcrumbRoundTrip:
         assert "pr-001" in restore_app._review_loops
         rstate = restore_app._review_loops["pr-001"]
         assert rstate.iteration == 5
-        assert rstate.stop_on_suggestions is True
         assert rstate.loop_id == "ff99"
         assert rstate.latest_verdict == "NEEDS_WORK"
         assert len(rstate.history) == 3

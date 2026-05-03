@@ -35,12 +35,29 @@ def get_target(app) -> str | None:
     return app._auto_start_target
 
 
-def get_transcript_dir(app) -> Path | None:
-    """Return the transcript directory for the current auto-start run, or None."""
+def get_transcript_dir(app) -> Path:
+    """Return the transcript directory for the current TUI session.
+
+    Total function: callers always receive a usable directory.  Priority:
+
+    1. The active auto-start run dir (``app._auto_start_run_id``) when
+       auto-start is active.
+    2. A lazily-created ``manual-<token>`` run dir cached on the app as
+       ``_manual_transcript_run_id``.  Used for manually-started review
+       loops (``zz d``) that never go through auto-start.
+
+    The returned path is always under ``app._root / "transcripts"``.
+    The directory itself is created by callers on demand when they
+    write files into it.
+    """
     run_id = app._auto_start_run_id
-    if not run_id or not app._root:
-        return None
-    return app._root / "transcripts" / run_id
+    if not run_id:
+        run_id = getattr(app, "_manual_transcript_run_id", None)
+        if not run_id:
+            run_id = f"manual-{secrets.token_hex(3)}"
+            app._manual_transcript_run_id = run_id
+    root = app._root or pm_home()
+    return root / "transcripts" / run_id
 
 
 def has_merge_restart_marker() -> bool:
@@ -68,6 +85,13 @@ def save_breadcrumb(app) -> None:
         data["target"] = app._auto_start_target
         data["run_id"] = app._auto_start_run_id
 
+    # Persist auto-sequence stop-before-merge set even when auto-start is
+    # off — a TUI restart between QA finish and merge shouldn't re-arm
+    # auto-merge for an auto-sequence PR.
+    stop_before_merge = getattr(app, "_stop_before_merge", None)
+    if isinstance(stop_before_merge, set) and stop_before_merge:
+        data["stop_before_merge"] = sorted(stop_before_merge)
+
     # Persist review loop state for running loops
     review_loops = {}
     for pr_id, rstate in app._review_loops.items():
@@ -76,7 +100,6 @@ def save_breadcrumb(app) -> None:
         review_loops[pr_id] = {
             "iteration": rstate.iteration,
             "latest_verdict": rstate.latest_verdict,
-            "stop_on_suggestions": rstate.stop_on_suggestions,
             "loop_id": rstate.loop_id,
             "input_required": rstate.input_required,
             "_transcript_dir": rstate._transcript_dir,
@@ -157,6 +180,12 @@ async def consume_breadcrumb(app) -> None:
             tdir = app._root / "transcripts" / run_id
             tdir.mkdir(parents=True, exist_ok=True)
 
+    # Restore auto-sequence stop-before-merge set
+    sbm = data.get("stop_before_merge")
+    if sbm:
+        app._stop_before_merge.update(sbm)
+        _log.info("consume_breadcrumb: restored stop_before_merge=%s", sbm)
+
     # Restore review loop state before check_and_start so it sees existing loops
     review_loops_data = data.get("review_loops", {})
     if review_loops_data:
@@ -166,7 +195,6 @@ async def consume_breadcrumb(app) -> None:
                 pr_id=pr_id,
                 iteration=loop_data.get("iteration", 0),
                 latest_verdict=loop_data.get("latest_verdict", ""),
-                stop_on_suggestions=loop_data.get("stop_on_suggestions", True),
                 loop_id=loop_data.get("loop_id", secrets.token_hex(2)),
                 input_required=loop_data.get("input_required", False),
                 _transcript_dir=loop_data.get("_transcript_dir"),
@@ -200,8 +228,8 @@ async def consume_breadcrumb(app) -> None:
                 if pr and pr.get("status") == "in_review":
                     tdir = get_transcript_dir(app)
                     _start_loop(
-                        app, pr_id, pr, rstate.stop_on_suggestions,
-                        transcript_dir=str(tdir) if tdir else rstate._transcript_dir,
+                        app, pr_id, pr,
+                        transcript_dir=str(tdir),
                         resume_state=rstate,
                     )
                     app.log_message(
@@ -219,7 +247,7 @@ async def consume_breadcrumb(app) -> None:
         for wd in watchers_data:
             watcher_ui.start_watcher(
                 app,
-                transcript_dir=str(tdir) if tdir else None,
+                transcript_dir=str(tdir),
                 meta_pm_root=wd.get("meta_pm_root"),
                 watcher_type=wd.get("type", "auto-start"),
             )
@@ -303,6 +331,29 @@ async def toggle(app, selected_pr_id: str | None = None) -> None:
         _log.info("auto_start: disabled")
 
 
+async def auto_sequence_for_pr(app, pr_id: str) -> None:
+    """Arm the auto-sequence chain for a single PR (TUI keypress entry).
+
+    Enables auto-start with *pr_id* as the target (the existing chain
+    machinery is per-target dep-tree scoped, but for an already-ready PR
+    that means the PR itself), and registers *pr_id* in
+    ``app._stop_before_merge`` so the merge step is suppressed when QA
+    passes.  Re-pressing on the same PR is a no-op for the merge-skip set
+    but re-runs ``check_and_start`` to nudge any stuck phase.
+    """
+    if not app._auto_start:
+        # Reuse toggle()'s ON path (sets target, run_id, transcript dir,
+        # and calls check_and_start).
+        await toggle(app, selected_pr_id=pr_id)
+    else:
+        # Already on — repoint at this PR and nudge.
+        app._auto_start_target = pr_id
+        app.log_message(f"Auto-sequence: target → {pr_id}")
+        await check_and_start(app)
+    app._stop_before_merge.add(pr_id)
+    app.log_message(f"Auto-sequence armed for {pr_id} (will stop before merge)")
+
+
 def set_target(app, pr_id: str | None) -> None:
     """Set or clear the auto-start target PR."""
     if pr_id:
@@ -339,6 +390,16 @@ async def check_and_start(app) -> None:
             app.log_message(f"Auto-start: target {target} merged, disabling")
             _disable(app)
             return
+
+    # Drop merged PRs from stop_before_merge — once merged, the entry
+    # has done its job and shouldn't linger across future auto-start runs.
+    sbm = getattr(app, "_stop_before_merge", set())
+    if sbm:
+        merged = {pr["id"] for pr in (app._data.get("prs") or [])
+                  if pr.get("status") == "merged"}
+        sbm.intersection_update(
+            {pr["id"] for pr in (app._data.get("prs") or [])} - merged
+        )
 
     # Collect PRs that should be started: pending with all deps merged,
     # plus in_progress PRs (whose window may have been killed).
@@ -431,8 +492,7 @@ def _auto_start_review_loops(app, target: str | None = None,
         app.log_message(f"Auto-start: review loop for {pr_id}")
         from pm_core.tui.review_loop_ui import _start_loop
         tdir = get_transcript_dir(app)
-        _start_loop(app, pr_id, pr, stop_on_suggestions=False,
-                     transcript_dir=str(tdir) if tdir else None)
+        _start_loop(app, pr_id, pr, transcript_dir=str(tdir))
 
 
 def _auto_start_qa_loops(app, target: str | None = None,
@@ -441,8 +501,14 @@ def _auto_start_qa_loops(app, target: str | None = None,
 
     Only activates when auto-start mode is enabled. When a target is set,
     only starts loops for PRs in the target's dependency tree.
+
+    Skipped entirely when the project-level ``skip_qa`` setting is true.
     """
     if not is_enabled(app):
+        return
+
+    project = (app._data or {}).get("project") or {}
+    if project.get("skip_qa"):
         return
 
     if prs is None:

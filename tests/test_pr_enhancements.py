@@ -1144,7 +1144,7 @@ class TestPrStartSpecGate:
              mock.patch("pm_core.cli.pr.git_ops") as mock_git, \
              mock.patch("pm_core.cli.pr.find_claude", return_value=None), \
              mock.patch("pm_core.cli.pr._get_pm_session", return_value=None), \
-             mock.patch("pm_core.cli.pr.save_and_push"), \
+             mock.patch("pm_core.cli.pr.store.locked_update"), \
              mock.patch("pm_core.cli.pr.trigger_tui_refresh"), \
              mock.patch("pm_core.cli.pr._resolve_repo_id"), \
              mock.patch("pm_core.cli.pr.prompt_gen.generate_prompt", return_value="prompt"):
@@ -1234,7 +1234,7 @@ class TestPrStartCommittedGate:
              mock.patch("pm_core.cli.pr.git_ops") as mock_git, \
              mock.patch("pm_core.cli.pr.find_claude", return_value=None), \
              mock.patch("pm_core.cli.pr._get_pm_session", return_value=None), \
-             mock.patch("pm_core.cli.pr.save_and_push"), \
+             mock.patch("pm_core.cli.pr.store.locked_update"), \
              mock.patch("pm_core.cli.pr.trigger_tui_refresh"), \
              mock.patch("pm_core.cli.pr._resolve_repo_id"), \
              mock.patch("pm_core.cli.pr.prompt_gen.generate_prompt", return_value="prompt"):
