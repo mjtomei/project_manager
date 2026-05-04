@@ -630,6 +630,29 @@ class TestFocusWindow:
     def test_unknown_window_returns_false(self, mock_fwbn, mock_run):
         assert focus_window("proj", "missing", origin_session="proj") is False
 
+    @patch("pm_core.tmux.subprocess.run")
+    @patch("pm_core.tmux.find_window_by_name",
+           return_value={"id": "@9", "index": "3", "name": "review-x"})
+    def test_falls_back_to_mru_client_when_no_origin(self, mock_fwbn, mock_run):
+        """In-process callers (no env, no explicit origin) use MRU client.
+
+        Multi-attached single-TUI: the calling Python process can't tell
+        which client typed the chord via $TMUX_PANE alone, so
+        focus_window falls through to most_recent_client_session.
+        """
+        mock_run.return_value = MagicMock(returncode=0, stdout="")
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("PM_ORIGIN_SESSION", None)
+            with patch("pm_core.tmux.most_recent_client_session",
+                       return_value="proj~7") as mock_mru, \
+                 patch("pm_core.tmux.current_or_base_session") as mock_cobs:
+                focus_window("proj", "review-x")
+                mock_mru.assert_called_once_with("proj")
+                mock_cobs.assert_not_called()
+        sw_calls = [c for c in mock_run.call_args_list
+                    if "select-window" in c.args[0]]
+        assert any("proj~7:3" in " ".join(c.args[0]) for c in sw_calls)
+
 
 class TestMostRecentClientSession:
     @patch("pm_core.tmux.subprocess.run")

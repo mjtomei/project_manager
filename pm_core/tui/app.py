@@ -824,7 +824,7 @@ class ProjectManagerApp(App):
         for w in watchers:
             win = tmux_mod.find_window_by_name(session, w["window_name"])
             if win:
-                tmux_mod.focus_window(session, w["window_name"], origin_session=session)
+                tmux_mod.focus_window(session, w["window_name"])
                 return
 
         # Check if a watcher is running but between iterations

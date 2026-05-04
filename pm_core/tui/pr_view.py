@@ -106,8 +106,7 @@ def start_pr(app, companion: bool = False) -> None:
                     display_id = _pr_display_id(pr_entry)
                     existing = tmux_mod.find_window_by_name(session, display_id)
                     if existing:
-                        tmux_mod.focus_window(session, existing["id"],
-                                              origin_session=session)
+                        tmux_mod.focus_window(session, existing["id"])
                         app.log_message(f"Switched to window '{display_id}'")
                         return
 
@@ -160,8 +159,7 @@ def done_pr(app, fresh: bool = False) -> None:
                     window_name = f"review-{display_id}"
                     existing = tmux_mod.find_window_by_name(session, window_name)
                     if existing:
-                        tmux_mod.focus_window(session, existing["id"],
-                                              origin_session=session)
+                        tmux_mod.focus_window(session, existing["id"])
                         app.log_message(f"Switched to review window '{window_name}'")
                         return
 

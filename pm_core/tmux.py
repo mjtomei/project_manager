@@ -456,6 +456,12 @@ def focus_window(
         if origin_session is None:
             origin_session = os.environ.get("PM_ORIGIN_SESSION") or None
         if origin_session is None:
+            # In-process TUI callers (wf chord, plans focus, etc.) have no
+            # subprocess env to consult — fall back to the most-recently-
+            # active client in the group so multi-attached cases route to
+            # the client that just typed the chord.
+            origin_session = most_recent_client_session(base) or None
+        if origin_session is None:
             origin_session = current_or_base_session(base)
         sessions = [origin_session]
 

@@ -21,6 +21,9 @@ R1. **Add `tmux.focus_window(base, window, origin_session=None,
     - Default behaviour: switch *only* `origin_session`.
     - `origin_session` resolution: explicit arg → `$PM_ORIGIN_SESSION`
       env (set by the TUI when spawning subprocesses) →
+      `most_recent_client_session(base)` (for in-process TUI callers
+      like the `wf` chord and `_focus_plans_window`, which run in the
+      single TUI process and have no subprocess env to thread) →
       `current_or_base_session(base)` for legacy non-TUI callers.
     - When `co_viewers` is provided, it *replaces* the origin set
       entirely. Used only by loop kill-and-recreate flows that
