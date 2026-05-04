@@ -259,6 +259,45 @@ def _pr_display_id(pr: dict) -> str:
     return f"#{gh}" if gh else pr["id"]
 
 
+PR_STATUS_ICONS = {
+    "pending": "⏳",
+    "in_progress": "🔨",
+    "in_review": "👀",
+    "qa": "🧪",
+    "merged": "✅",
+    "closed": "🚫",
+    "blocked": "🚫",
+}
+
+
+def format_pr_line(p: dict, active_pr: str | None = None,
+                   with_timestamp: bool = False) -> str:
+    """Format a single PR list line.
+
+    Shared between the `pm pr list` CLI and the home-window pr-list
+    provider so both render PRs identically.
+    """
+    icon = PR_STATUS_ICONS.get(p.get("status", "pending"), "?")
+    deps = p.get("depends_on") or []
+    dep_str = f" <- [{', '.join(deps)}]" if deps else ""
+    machine = p.get("agent_machine")
+    machine_str = f" ({machine})" if machine else ""
+    active_str = " *" if active_pr and p.get("id") == active_pr else ""
+    ts_str = ""
+    if with_timestamp:
+        ts = p.get("updated_at") or p.get("created_at") or ""
+        if ts:
+            try:
+                dt = datetime.fromisoformat(ts).astimezone()
+                ts_str = f" [{dt.strftime('%Y-%m-%d %H:%M')}]"
+            except ValueError:
+                ts_str = f" [{ts}]"
+    return (
+        f"  {icon} {_pr_display_id(p)}: {p.get('title', '???')} "
+        f"[{p.get('status', '?')}]{dep_str}{machine_str}{active_str}{ts_str}"
+    )
+
+
 def kill_pr_windows(session: str, pr: dict) -> list[str]:
     """Kill tmux work, review, merge, and QA windows for a PR.
 

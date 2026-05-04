@@ -34,6 +34,7 @@ from pm_core.cli.helpers import (
     _log,
     _make_pr_entry,
     _pr_display_id,
+    format_pr_line,
     _pr_id_sort_key,
     _record_status_timestamp,
     _require_pr,
@@ -523,33 +524,9 @@ def pr_list(workdirs: bool, timestamps: bool, open_only: bool, filter_status: st
         prs = sorted(prs, key=lambda p: (p.get("gh_pr_number") or _pr_id_sort_key(p["id"])[0], _pr_id_sort_key(p["id"])[1]), reverse=True)
 
     active_pr = data.get("project", {}).get("active_pr")
-    status_icons = {
-        "pending": "⏳",
-        "in_progress": "🔨",
-        "in_review": "👀",
-        "qa": "🧪",
-        "merged": "✅",
-        "closed": "🚫",
-        "blocked": "🚫",
-    }
     out: list[str] = []
     for p in prs:
-        icon = status_icons.get(p.get("status", "pending"), "?")
-        deps = p.get("depends_on") or []
-        dep_str = f" <- [{', '.join(deps)}]" if deps else ""
-        machine = p.get("agent_machine")
-        machine_str = f" ({machine})" if machine else ""
-        active_str = " *" if p["id"] == active_pr else ""
-        ts_str = ""
-        if timestamps:
-            ts = p.get("updated_at") or p.get("created_at") or ""
-            if ts:
-                try:
-                    dt = datetime.fromisoformat(ts).astimezone()
-                    ts_str = f" [{dt.strftime('%Y-%m-%d %H:%M')}]"
-                except ValueError:
-                    ts_str = f" [{ts}]"
-        out.append(f"  {icon} {_pr_display_id(p)}: {p.get('title', '???')} [{p.get('status', '?')}]{dep_str}{machine_str}{active_str}{ts_str}")
+        out.append(format_pr_line(p, active_pr=active_pr, with_timestamp=timestamps))
         if workdirs:
             wd = p.get("workdir")
             if wd and Path(wd).exists():

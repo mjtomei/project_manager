@@ -77,7 +77,7 @@ def _render_once() -> str:
     from datetime import datetime
 
     from pm_core import store
-    from pm_core.cli.helpers import _pr_display_id
+    from pm_core.cli.helpers import format_pr_line
 
     try:
         root = store.find_project_root()
@@ -93,44 +93,16 @@ def _render_once() -> str:
         reverse=True,
     )
 
-    status_icons = {
-        "pending": "⏳",
-        "in_progress": "🔨",
-        "in_review": "👀",
-        "qa": "🧪",
-        "merged": "✅",
-        "closed": "🚫",
-        "blocked": "🚫",
-    }
     active_pr = data.get("project", {}).get("active_pr")
-    lines: list[str] = []
     header = (
         f"pm pr list -t --open    "
         f"(updated {datetime.now().strftime('%H:%M:%S')})"
     )
-    lines.append(header)
-    lines.append("=" * len(header))
+    lines: list[str] = [header, "=" * len(header)]
     if not prs:
         lines.append("No open PRs.")
     for p in prs:
-        icon = status_icons.get(p.get("status", "pending"), "?")
-        deps = p.get("depends_on") or []
-        dep_str = f" <- [{', '.join(deps)}]" if deps else ""
-        machine = p.get("agent_machine")
-        machine_str = f" ({machine})" if machine else ""
-        active_str = " *" if p["id"] == active_pr else ""
-        ts = p.get("updated_at") or p.get("created_at") or ""
-        ts_str = ""
-        if ts:
-            try:
-                dt = datetime.fromisoformat(ts).astimezone()
-                ts_str = f" [{dt.strftime('%Y-%m-%d %H:%M')}]"
-            except ValueError:
-                ts_str = f" [{ts}]"
-        lines.append(
-            f"  {icon} {_pr_display_id(p)}: {p.get('title', '???')} "
-            f"[{p.get('status', '?')}]{dep_str}{machine_str}{active_str}{ts_str}"
-        )
+        lines.append(format_pr_line(p, active_pr=active_pr, with_timestamp=True))
     return "\n".join(lines)
 
 
