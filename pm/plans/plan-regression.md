@@ -37,7 +37,8 @@ The autonomous loops are deliberately built on existing primitives. New code is 
 ## Status
 
 - ✅ Merged (11): all original plan PRs (pr-3b2847c, pr-539110b, pr-30588a7, pr-e58459b, pr-47940bc, pr-97ddabf, pr-271cb3a, pr-e84b43c, pr-d39a7fb, pr-e3a711c, pr-d60d185)
-- ⏳ Pending (1): `pr-fbda1a8` (test backfill — added 2026-05-02 after observing gaps)
+- 🔨 In progress (1): `pr-6be8ee6` (#190 — prompt-side pre-fix repro gate, tracked under improvements but listed here as Phase 7 prerequisite)
+- ⏳ Pending (8): `pr-fbda1a8` (test backfill), `pr-b77702b` (per-plan auto-merge=false), `pr-2c060b2` (CLI width regression test), and the Phase 7 evidence/coverage stack (`pr-eb450a0`, `pr-b42059d`, `pr-8ed578d`, `pr-8422dea`, `pr-c2397e2`)
 
 ## Prerequisites
 
@@ -57,7 +58,7 @@ Prompt-only change to reduce scenario count by grouping related assertions.
 
 Teach review and QA agents to use `pm pr add --plan bugs` when they spot issues outside the current PR's scope. Filing is a side effect, not a verdict change.
 
-### PR: Bug fix flow: reproduce with test, fix, verify 🔨 IN PROGRESS (#169)
+### PR: Bug fix flow: reproduce with test, fix, verify ✅ MERGED (#169)
 `pr-30588a7`
 
 Different impl prompt for bug PRs: write a failing test first, fix the code, verify the test passes. Reviewers check that a reproduction test exists. Session-end reconcile step is verification-only — primary dedup is owned by the discovery supervisor post-hoc.
@@ -116,6 +117,54 @@ Final integration PR. Single command (`pm watcher start regression-loop` or simi
 `pr-fbda1a8` (depends on: pr-d60d185)
 
 The three concrete watcher classes and four new prompt builders shipped without direct unit tests — covered only by the BaseWatcher framework tests and the live operator markdown. This PR backfills using FakeClaudeSession (`pr-abcf70f`, merged) so watchers can be exercised deterministically: per-class watcher tests, prompt-string assertions for the new builders, integration backstop for the three auto-sequence paths flagged during `pr-e58459b`'s review, and behavioral tests for `launch_qa_item`'s new `target_window` parameter and regression-filing addendum.
+
+## Phase 7: Evidence-gated bug fix loop (post-activation hardening)
+
+Goal: tighten the bug-fix flow until the loop can run unsupervised. The earlier phases got reproduce→fix→verify into the prompt; these PRs make each step produce on-disk evidence the watcher / verdict gate can hard-check.
+
+### PR: Bug-fix flow surface TUI QA repro instructions in session prompt
+`pr-6be8ee6` (#190, in_progress, plan=improvements)
+
+Adds a "did you reproduce on pre-fix code?" gate to `_BUG_FIX_FLOW_BLOCK` and references `pm/qa/instructions/tui-manual-test.md` for TUI bugs. Tracked under improvements but is the prompt-side prerequisite for the evidence-artifact PR below — listed here for plan visibility.
+
+### PR: Persist pre-fix repro and post-fix verification evidence as artifacts
+`pr-eb450a0` (depends on: pr-6be8ee6)
+
+Make the prompt-level repro/verify gates machine-checkable. Sessions write `pm/evidence/<pr_id>/pre-fix.md` (sha + commands + captured output showing the bug, before any source modification) and `pm/evidence/<pr_id>/post-fix.md` (sha on fix branch + commands + captured output showing the bug is gone, referencing pre-fix.md). Bug-fix implementation watcher refuses to advance to review without `pre-fix.md`; review/QA verdict gate refuses PASS without `post-fix.md`.
+
+### PR: QA code coverage of exercised lines factors into PASS verdict
+`pr-b42059d` (pending)
+
+Per-line coverage data emitted from QA scenario runs and surfaced into the verdict. Foundation for the fix-line gate below.
+
+### PR: Fix-line coverage gate ties coverage to the diff
+`pr-8ed578d` (depends on: pr-b42059d)
+
+PASS additionally requires that the lines added/modified by the PR were executed by at least one QA scenario. Closes the loophole where overall coverage passes while the fix code never runs. Surfaces a separate "fix-line coverage" percentage; uncovered changed lines must be explicitly justified in PR notes.
+
+### PR: Extended coverage measures (path, user-story)
+`pr-8422dea` (pending)
+
+Beyond line coverage: branch/path coverage on the diff and user-story coverage of QA scenarios. Strengthens the verdict signal once line and fix-line gates are in place.
+
+### PR: QA refinement prompt asks for additional steps that improve coverage
+`pr-c2397e2` (pending)
+
+When coverage gates fail, the refinement prompt asks the QA planner for additional scenarios specifically targeting the uncovered fix-line set. Closes the loop between gate failure and scenario growth.
+
+## Phase 8: Post-activation refinements
+
+PRs added after the loop landed, addressing gaps surfaced once the watchers were running in anger.
+
+### PR: Per-plan auto-merge=false mode with dep-merge in start prompt
+`pr-b77702b` (pending)
+
+Adds a per-plan `auto_merge` setting (default true) so plans that need human review before shipping (ambient surfaces, UX iteration) can let watchers run impl/review/QA but stop short of merging. Also injects a dep-merge preamble into the start prompt when the PR has unmerged deps, so iteratively-developed plans stay coherent without each PR landing on master first.
+
+### PR: Claude-based regression test: CLI output rendering at varied terminal widths
+`pr-2c060b2` (pending)
+
+Extends the regression corpus consumed by the discovery supervisor (`pr-271cb3a`). New scenario at `pm/qa/regression/cli-output-widths.md` resizes a tmux pane to randomly-chosen widths, captures `pm pr list` / `pm pr ready` / `pm plan list` output, and asks Claude to flag layout bugs (overflow, mid-word breaks, miscounted wide-char icons). Findings file as bugs or improvements via the existing addendum from `pr-47940bc`. Manual testing: review the rendered output across the seeded widths to confirm the verdict logic flags real layout bugs and ignores acceptable wrapping — INPUT_REQUIRED is appropriate for the visual-judgment portion.
 
 ## Success criteria
 
