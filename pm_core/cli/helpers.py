@@ -283,7 +283,7 @@ def kill_pr_windows(session: str, pr: dict) -> list[str]:
                             if w["id"] == cur_id), None)
             cur_name = cur_win.get("name", "") if cur_win else ""
             if cur_name in target_names or cur_name.startswith(qa_prefix):
-                home_name = home_window.ensure_and_park(session)
+                home_name = home_window.ensure_home_window(session)
         except Exception:
             pass
 

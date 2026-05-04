@@ -78,7 +78,7 @@ def _render_once() -> str:
     from datetime import datetime
 
     from pm_core import store
-    from pm_core.cli.helpers import _pr_display_id, _pr_id_sort_key
+    from pm_core.cli.helpers import _pr_display_id
 
     try:
         root = store.find_project_root()
@@ -137,11 +137,21 @@ def _render_once() -> str:
 
 def _loop_main(session: str) -> None:
     sentinel = _refresh_sentinel(session)
-    last_mtime: float = 0.0
+    # Seed last_mtime from any existing sentinel so we don't double-render
+    # on startup if a stale sentinel is already on disk.
+    try:
+        last_mtime: float = sentinel.stat().st_mtime
+    except FileNotFoundError:
+        last_mtime = 0.0
     while True:
-        # Clear screen and render
+        # Clear screen and render. Catch all render errors so a transient
+        # bug doesn't kill the long-lived window.
         sys.stdout.write("\033[2J\033[H")
-        sys.stdout.write(_render_once())
+        try:
+            body = _render_once()
+        except Exception as e:
+            body = f"pm pr list (home): render error: {e}"
+        sys.stdout.write(body)
         sys.stdout.write("\n")
         sys.stdout.flush()
 

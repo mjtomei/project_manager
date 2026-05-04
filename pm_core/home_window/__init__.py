@@ -11,9 +11,12 @@ This package defines the seam:
 - ``register`` / ``get_active_provider`` — module-level registry keyed
   by name, resolved via the ``home-window-provider`` global setting
   (default ``"pr-list"``).
-- ``ensure_and_park`` — the kill-window callsite helper.  Ensures the
-  home window exists, then parks the *calling* client on it after the
-  pending kill so it lands there instead of on tmux's last-window.
+- ``ensure_home_window`` — for callers doing batch kills that want the
+  home window pre-created and want to park manually after all kills.
+- ``park_if_on`` — for single-kill callsites: ensures + parks only if
+  the calling client is currently focused on the soon-to-be-killed
+  window so the post-kill landing is the home window instead of tmux's
+  last-window.
 
 The default ``pr-list`` provider lives in ``pm_core.home_window.pr_list``.
 A future ``work-pane`` provider will register here without changing any
@@ -75,19 +78,16 @@ def _ensure_default_registered() -> None:
         register(PrListProvider())
 
 
-def ensure_and_park(session: str | None = None) -> str | None:
-    """Ensure the home window exists and queue a post-kill switch to it.
+def ensure_home_window(session: str | None = None) -> str | None:
+    """Ensure the home window exists and return its name.
 
-    Intended use: call this *just before* tmux.kill_window() at sites
-    where the user might be focused on the window being killed.  Steps:
+    Intended for callers that want to do the focus check themselves and
+    park manually after a batch of kills (see ``kill_pr_windows``).
+    Most kill-window callsites should use ``park_if_on`` instead, which
+    bundles the focus check + ensure + select in one call.
 
-    1. No-op if not inside tmux or no session given.
-    2. Ensure home window via active provider.
-    3. If the calling client's currently-active window is the one about
-       to be killed (i.e. matches the active window), schedule a switch
-       to home for the caller's grouped session only.
-
-    Returns the home window name on success, or None on no-op.
+    Returns the home window name on success, or None on no-op (not in
+    tmux, no session, provider failure).
     """
     if not tmux_mod.in_tmux():
         return None
@@ -97,11 +97,10 @@ def ensure_and_park(session: str | None = None) -> str | None:
         return None
     try:
         provider = get_active_provider()
-        win_name = provider.ensure_window(session)
+        return provider.ensure_window(session)
     except Exception:
-        _log.exception("ensure_and_park: provider.ensure_window failed")
+        _log.exception("ensure_home_window: provider.ensure_window failed")
         return None
-    return win_name
 
 
 def park_if_on(session: str | None, target_window_id: str | None) -> None:
