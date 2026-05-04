@@ -681,6 +681,30 @@ def session_mobile(force: bool | None):
             click.echo(f"Threshold: {pane_layout._get_mobile_width_threshold()}")
 
 
+@session.command("home")
+def session_home():
+    """Ensure the home window exists and switch to it.
+
+    The home window is a long-lived 'park here' tmux window providing
+    an at-a-glance overview (default: open PRs by recent activity).
+    First invocation creates it; subsequent invocations refresh and
+    re-focus.  See ``home-window-provider`` setting to swap providers.
+    """
+    from pm_core.cli.helpers import _get_pm_session
+    from pm_core import home_window
+
+    session_name = _get_pm_session()
+    if not session_name or not tmux_mod.session_exists(session_name):
+        click.echo("Not inside a pm tmux session.", err=True)
+        raise SystemExit(1)
+
+    provider = home_window.get_active_provider()
+    win_name = provider.ensure_window(session_name)
+    provider.refresh(session_name)
+    tmux_mod.select_window(session_name, win_name)
+    click.echo(f"Home window: {win_name} (provider: {provider.name})")
+
+
 # --- Internal pane/window commands ---
 
 @cli.command("_pane-exited", hidden=True)

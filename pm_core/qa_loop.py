@@ -326,13 +326,17 @@ def _cleanup_stale_scenario_windows(session: str, pr_data: dict,
     qa_prefix = f"qa-{display_id}-s"
     main_name = f"qa-{display_id}"
 
+    from pm_core import home_window
+
     all_windows = tmux_mod.list_windows(session)
     for win in all_windows:
         if win["name"].startswith(qa_prefix):
             _log.info("Killing stale QA window %s", win["name"])
+            home_window.park_if_on(session, win["id"])
             tmux_mod.kill_window(session, win["id"])
         elif include_main and win["name"] == main_name:
             _log.info("Killing stale QA window %s", win["name"])
+            home_window.park_if_on(session, win["id"])
             tmux_mod.kill_window(session, win["id"])
 
 

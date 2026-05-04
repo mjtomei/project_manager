@@ -826,6 +826,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
             existing = tmux_mod.find_window_by_name(pm_session, window_name)
             if existing:
                 if fresh:
+                    from pm_core import home_window
+                    home_window.park_if_on(pm_session, existing["id"])
                     tmux_mod.kill_window(pm_session, existing["id"])
                     click.echo(f"Killed existing window '{window_name}'")
                 elif use_companion and not background:
@@ -1167,6 +1169,8 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                 sessions_on_review = tmux_mod.sessions_on_window(
                     pm_session, existing["id"],
                 )
+            from pm_core import home_window
+            home_window.park_if_on(pm_session, existing["id"])
             tmux_mod.kill_window(pm_session, existing["id"])
             click.echo(f"Killed existing review window '{window_name}'")
         else:
