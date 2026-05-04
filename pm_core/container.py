@@ -44,6 +44,7 @@ import shutil
 import subprocess
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -1067,7 +1068,7 @@ def cleanup_pr_containers(pr_id: str,
         prefixes.append(f"{CONTAINER_PREFIX}{session_tag}-qa-{pr_id}-")
     prefixes.append(f"{CONTAINER_PREFIX}qa-{pr_id}-")
 
-    removed: list[str] = []
+    candidates: list[str] = []
     seen: set[str] = set()
     for prefix in prefixes:
         result = _run_runtime(
@@ -1081,8 +1082,15 @@ def cleanup_pr_containers(pr_id: str,
             cname = line.strip()
             if cname and cname not in seen:
                 seen.add(cname)
+                candidates.append(cname)
+
+    removed: list[str] = []
+    if candidates:
+        with ThreadPoolExecutor(max_workers=min(len(candidates), 8)) as ex:
+            futures = [(c, ex.submit(remove_container, c)) for c in candidates]
+            for cname, fut in futures:
                 try:
-                    remove_container(cname)
+                    fut.result()
                     removed.append(cname)
                 except Exception as e:  # pragma: no cover - best effort
                     _log.warning("remove_container(%s) failed: %s", cname, e)
