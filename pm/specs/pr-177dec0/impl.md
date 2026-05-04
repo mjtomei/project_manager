@@ -161,13 +161,3 @@ Remove the `self.refresh(layout=True)` at line 890 of `action_reload()`.
 `_load_state()` already handles all necessary refreshes via
 `_update_display()`. This eliminates the extra layout pass that can
 interfere with the scroll callback scheduled by `select_pr()`.
-
-### Change 3: Add a small set_timer fallback for the scroll callback (tech_tree.py)
-
-After scheduling `_scroll_selected_into_view` via `call_after_refresh`,
-also schedule it via `self.set_timer(0.05, ...)`. The command-bar path
-moves focus from the command bar back to the tree, and Textual's
-`focus()` triggers `scroll_visible` on the parent container which can
-clobber the deferred `scroll_to_region`. The set_timer fallback re-runs
-the scroll after focus events settle. `_scroll_selected_into_view` is
-idempotent so this is a no-op when the first call already won.
