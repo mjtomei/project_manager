@@ -267,6 +267,75 @@ def get_session_pm_root(session_tag: str | None = None) -> Path | None:
     return p if p.exists() else None
 
 
+COMMAND_HISTORY_CAP = 1000
+
+
+def command_history_file(session_tag: str | None = None) -> Path | None:
+    """Path to the shared command-history file for the session.
+
+    Lives at ``~/.pm/sessions/{tag}/command_history``. Both the prefix+M
+    popup and the TUI command bar append to this file so history is
+    shared across surfaces.
+    """
+    sd = session_dir(session_tag)
+    if not sd:
+        return None
+    return sd / "command_history"
+
+
+def append_command_history(cmd: str, session_tag: str | None = None) -> None:
+    """Append *cmd* to the session's command-history file.
+
+    Atomic under concurrent writers via ``fcntl.flock``. Trims the file
+    to ``COMMAND_HISTORY_CAP`` lines if it grows past the cap.
+    """
+    cmd = cmd.rstrip("\n")
+    if not cmd:
+        return
+    f = command_history_file(session_tag)
+    if f is None:
+        return
+    import fcntl
+    try:
+        with open(f, "a+") as fh:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            try:
+                fh.seek(0, os.SEEK_END)
+                fh.write(cmd + "\n")
+                fh.flush()
+                fh.seek(0)
+                lines = fh.readlines()
+                if len(lines) > COMMAND_HISTORY_CAP:
+                    keep = lines[-COMMAND_HISTORY_CAP:]
+                    tmp = f.with_suffix(f.suffix + ".tmp")
+                    tmp.write_text("".join(keep))
+                    os.replace(tmp, f)
+            finally:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    except OSError:
+        pass  # best-effort; history is not load-bearing
+
+
+def read_command_history(session_tag: str | None = None,
+                         limit: int | None = None) -> list[str]:
+    """Read the session's command history, newest-last.
+
+    Returns the last *limit* entries (or all if None). Empty / missing
+    file returns ``[]``. Lock-free read; partial last line is filtered.
+    """
+    f = command_history_file(session_tag)
+    if f is None or not f.exists():
+        return []
+    try:
+        text = f.read_text()
+    except OSError:
+        return []
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    if limit is not None:
+        lines = lines[-limit:]
+    return lines
+
+
 def get_override_path(session_tag: str | None = None) -> Path | None:
     """Get the override installation path for a session, or None if not set.
 
