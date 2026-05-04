@@ -20,7 +20,14 @@
    `concurrent.futures.ThreadPoolExecutor` submission so total wall
    time is `≈ max(per-container)` not `Σ`.
 
-3. **Surface state-clear in the summary.** Existing summary dict has
+3. **Merge-detection cleanup parity.** `_kill_merged_pr_windows` in
+   `pm_core/tui/sync.py` must call `cleanup_pr_resources` (not just
+   `kill_pr_windows`) so auto-on-merge tears down containers,
+   push-proxy sockets, pane registry entries, and runtime state —
+   matching the manual `Y`/`y` cleanup path. Without this, merged
+   PRs leave containers running indefinitely after windows are killed.
+
+4. **Surface state-clear in the summary.** Existing summary dict has
    `windows`, `containers`, `registry_windows`, `sockets`. Add a
    `runtime_state` boolean (or path string) so callers/tests can
    verify clearing happened. Keep `format_summary` backwards-compatible

@@ -20,9 +20,16 @@ _log = configure_logger("pm.tui.sync")
 
 
 def _kill_merged_pr_windows(app, merged_pr_ids: set[str]) -> None:
-    """Kill tmux windows for merged PRs since they're no longer accessible from the TUI."""
+    """Tear down all live resources for merged PRs.
+
+    Mirrors the manual `Y`/`y` cleanup path: windows, containers,
+    push-proxy sockets, pane registry entries, and the per-PR runtime
+    state file. Previously this only killed tmux windows, leaving
+    containers, sockets, and registry entries to linger indefinitely
+    after merge-detection.
+    """
+    from pm_core import pr_cleanup
     from pm_core import tmux as tmux_mod
-    from pm_core.cli.helpers import kill_pr_windows
 
     if not app._session_name or not merged_pr_ids:
         return
@@ -34,9 +41,12 @@ def _kill_merged_pr_windows(app, merged_pr_ids: set[str]) -> None:
         pr = store.get_pr(app._data, pr_id)
         if not pr:
             continue
-        killed = kill_pr_windows(session, pr)
-        for win_name in killed:
+        summary = pr_cleanup.cleanup_pr_resources(session, pr)
+        for win_name in summary.get("windows", []):
             _log.info("Killed window '%s' for merged %s", win_name, pr_id)
+        if summary.get("containers"):
+            _log.info("Cleaned %d container(s) for merged %s",
+                      len(summary["containers"]), pr_id)
 
 
 async def background_sync(app) -> None:
