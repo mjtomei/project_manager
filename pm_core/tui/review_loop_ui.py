@@ -312,7 +312,14 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
                    "superseded loop_id=%s verdict=%s",
                    state.loop_id, state.latest_verdict)
         return
-    _rs.set_action_state(state.pr_id, "review-loop", "done",
+    # ERROR/KILLED are runtime failures, not clean completions; record
+    # them as state="failed" so the popup spinner can distinguish a
+    # successful loop end from a failure and surface the verdict to the
+    # user instead of silently dismissing.
+    final_state = ("failed"
+                   if state.latest_verdict in ("ERROR", "KILLED")
+                   else "done")
+    _rs.set_action_state(state.pr_id, "review-loop", final_state,
                          iteration=state.iteration,
                          verdict=state.latest_verdict)
 
