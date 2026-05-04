@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-98b2a95
+  active_pr: pr-6be8ee6
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -8212,17 +8212,51 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/157
   gh_pr_number: 157
   created_at: '2026-04-06T19:18:52.240715+00:00'
-  updated_at: '2026-04-06T19:20:59.040562+00:00'
+  updated_at: '2026-05-04T12:37:00.078345+00:00'
   started_at: '2026-04-06T19:20:59.040562+00:00'
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-2f7aacc
+    text: 'Manual repro (no automated test possible — visual TUI regression):
+
+      1. Open the TUI in a project with >20 PRs in a single plan (enough that the
+      tree exceeds viewport height).
+
+      2. With cursor near the top, type `/pr select <id>` for a PR near the bottom
+      of the tree.
+
+      3. Bug: selected PR is hidden behind the command bar / scroll bar.
+
+      4. With fix: the tree scrolls so the selected PR is visible above the command
+      bar (bottom_padding=4 keeps it clear).
+
+
+      Note: bug was reported by user but author could not reproduce in a 30-PR
+
+      QA project at d18c976 (pre-fix). Fix is based on root-cause analysis in
+
+      pm/specs/pr-177dec0/impl.md (double-reload race between command-bar
+
+      _run_command_sync and the buffered "R" trigger_tui_refresh keystroke).
+
+      The fixes (always-refresh in select_pr; drop App-level refresh(layout=True)
+
+      in action_reload) are independently sound and do not regress keyboard
+
+      navigation. Recommend QA verify with the user''s actual environment
+
+      (terminal size, PR count, plan structure) since the trigger conditions
+
+      appear environment-dependent.'
+    created_at: '2026-05-04T12:36:59Z'
+    last_edited: '2026-05-04T12:36:59Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-177dec0-fix-pr-select-not-scrolling-selected-d18c9763
 - id: pr-2d0588a
   plan: improvements
   title: Tmux popup PR switcher and prefix-key pm command runner
   branch: pm/pr-2d0588a-tmux-popup-pr-switcher-and-prefix-key-pm-command-r
-  status: in_review
+  status: merged
   depends_on: []
   description: 'Add two tmux integrations registered via _register_tmux_bindings:
     (1) A prefix-key binding (e.g. prefix+P) that opens a tmux display-popup with
@@ -8242,10 +8276,10 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/158
   gh_pr_number: 158
   created_at: '2026-04-07T12:46:56.964240+00:00'
-  updated_at: '2026-04-07T22:35:47.013280+00:00'
+  updated_at: '2026-05-04T12:23:02.466197+00:00'
   started_at: '2026-04-07T12:49:34.016669+00:00'
   reviewed_at: '2026-04-07T22:35:47.013280+00:00'
-  merged_at: null
+  merged_at: '2026-05-04T12:23:02.466197+00:00'
   notes: []
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-2d0588a-tmux-popup-pr-switcher-and-prefix-ke-d18c9763
 - id: pr-1735d44
@@ -9014,7 +9048,7 @@ prs:
   plan: plan-qa
   title: Batched QA scenario execution
   branch: pm/pr-d8cfa16-batched-qa-scenario-execution
-  status: in_review
+  status: closed
   depends_on: []
   description: 'Instead of spawning one session per QA scenario, batch scenarios into
     a configurable number of worker sessions. The scenario generator/concretizer groups
@@ -9034,7 +9068,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/163
   gh_pr_number: 163
   created_at: '2026-04-09T22:50:59.769426+00:00'
-  updated_at: '2026-04-10T18:43:57.689457+00:00'
+  updated_at: '2026-05-04T12:23:02.466209+00:00'
   started_at: '2026-04-09T23:30:04.624901+00:00'
   reviewed_at: '2026-04-10T18:43:57.689457+00:00'
   merged_at: null
@@ -9093,7 +9127,7 @@ prs:
   plan: improvements
   title: Double-tap for destructive TUI shortcuts to prevent accidental triggers
   branch: pm/pr-5471329-double-tap-for-destructive-tui-shortcuts-to-preven
-  status: in_review
+  status: closed
   depends_on: []
   description: Require a quick double-tap (within 300-400ms) for destructive single-key
     TUI shortcuts like s (start PR), d (review), g (merge), and t (QA run). First
@@ -9105,7 +9139,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/163
   gh_pr_number: 163
   created_at: '2026-04-09T22:50:59.769426+00:00'
-  updated_at: '2026-04-10T16:56:47.454801+00:00'
+  updated_at: '2026-05-04T12:23:02.466211+00:00'
   started_at: null
   reviewed_at: '2026-04-10T16:56:47.454801+00:00'
   merged_at: null
@@ -11541,3 +11575,48 @@ prs:
   merged_at: null
   notes: []
   spec_impl: /workspace/pm/specs/pr-177dec0/impl.md
+- id: pr-6be8ee6
+  plan: improvements
+  title: 'Bug-fix flow: surface TUI QA repro instructions in session prompt'
+  branch: pm/pr-6be8ee6-bug-fix-flow-surface-tui-qa-repro-instructions-in-
+  status: pending
+  depends_on: []
+  description: "The bug-fix flow prompt (pm_core/prompt_gen.py:_BUG_FIX_FLOW_BLOCK)\
+    \ tells sessions to write a failing test or fall back to a \"manual repro note\"\
+    \ for visual TUI regressions. In practice, TUI bugs are reproducible deterministically\
+    \ by following pm/qa/instructions/tui-manual-test.md (venv-install pm, create\
+    \ a throwaway project, drive the TUI via `pm tui send`/`pm tui view`), but that\
+    \ file is never referenced from the bug-fix prompt.\n\nRecent symptom: pr-177dec0\
+    \ went through two consecutive sessions that each wrote a fix based on plausible-but-unverified\
+    \ theories about Textual's reactive/focus internals because neither session set\
+    \ up a real TUI repro. After the second session, the user pointed at the QA instruction\
+    \ file and the bug failed to reproduce on the pre-fix code in two minutes — meaning\
+    \ both fixes were speculative and one was outright reverted.\n\n## Proposed changes\
+    \ to _BUG_FIX_FLOW_BLOCK\n\n1. Reorder priority: for TUI bugs, the venv-install\
+    \ + tmux-drive repro is the *primary* reproduction path, not a fallback. Reference\
+    \ `pm/qa/instructions/tui-manual-test.md` by name.\n\n2. Add a \"did you reproduce\
+    \ on pre-fix code?\" gate before applying a fix:\n   > Before applying a fix,\
+    \ reproduce the bug against the pre-fix code (e.g. `git stash` your changes, or\
+    \ `git checkout <parent> -- <files>`). If you cannot reproduce, say so explicitly\
+    \ and ask the user before proceeding. Do not write a fix on top of an unreproduced\
+    \ bug.\n\n3. When the touched files include `pm_core/tui/`, conditionally inline\
+    \ a pointer to `tui-manual-test.md` so it shows up in the bug-fix prompt without\
+    \ the session needing to discover it.\n\n## Out of scope\n- New QA instruction\
+    \ files for non-TUI bug categories (CLI, Claude session, container) — those mostly\
+    \ already have unit/integration test patterns. This PR only addresses the TUI\
+    \ gap.\n- Changing the QA loop / qa_instructions.py infrastructure. The instruction\
+    \ file already exists; we just need to surface it in the right prompt.\n\n## Code\
+    \ paths\n- pm_core/prompt_gen.py:20 (_BUG_FIX_FLOW_BLOCK): primary edit\n- pm_core/prompt_gen.py:106\
+    \ (tui_section): could host the conditional TUI-repro pointer, or it could be\
+    \ folded into _BUG_FIX_FLOW_BLOCK gated on `_is_bug_pr(pr) and touches_tui(pr)`\n\
+    - pm/qa/instructions/tui-manual-test.md: existing instruction file — no changes\
+    \ expected, just referenced."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-04T12:22:33.932646+00:00'
+  updated_at: '2026-05-04T12:22:33.932646+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
