@@ -658,22 +658,46 @@ def run_command(app, cmd: str, working_message: str | None = None,
 
 
 def _origin_env(app) -> dict[str, str]:
-    """Capture the TUI's session+window at command-launch time.
+    """Capture the originating tmux client's session at command-launch time.
 
-    Threaded through subprocesses via env vars so that ``focus_window`` in
-    the child refocuses the originating session — not whoever the TUI
-    happens to be focused on by the time an async command finishes.
+    The TUI is a single process whose ``$TMUX_PANE`` is fixed to the pane
+    where the TUI was launched (the base session). When multiple grouped
+    sessions are attached and co-viewing the TUI pane, a keystroke from
+    any of them lands in the same TUI process — so reading the TUI's own
+    env tells us nothing about which client pressed the key. Instead we
+    ask tmux for the most-recently-active client in the group; that's
+    the one whose input just arrived. Threaded through subprocesses via
+    ``PM_ORIGIN_SESSION`` so ``focus_window`` in the child refocuses the
+    correct user even if the active client changes mid-async.
     """
     import os as _os
     from pm_core import tmux as _tmux
     env = _os.environ.copy()
+    base = getattr(app, "_session_name", "") or ""
+    if not base:
+        try:
+            base = _tmux.get_session_name() or ""
+        except Exception:
+            base = ""
+        # Strip grouped suffix to get base.
+        if base and "~" in base:
+            base = base.split("~")[0]
     sess = ""
-    try:
-        sess = _tmux.get_session_name() or ""
-    except Exception:
-        pass
+    if base:
+        try:
+            sess = _tmux.most_recent_client_session(base) or ""
+        except Exception:
+            sess = ""
     if not sess:
-        sess = getattr(app, "_session_name", "") or ""
+        # Fallback: TUI's own session (correct when only one client is
+        # attached, wrong only in the multi-attached case the helper
+        # above is meant to disambiguate).
+        try:
+            sess = _tmux.get_session_name() or ""
+        except Exception:
+            pass
+    if not sess:
+        sess = base
     if sess:
         env["PM_ORIGIN_SESSION"] = sess
         try:

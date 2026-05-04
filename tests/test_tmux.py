@@ -32,6 +32,7 @@ from pm_core.tmux import (
     find_unattached_grouped_session,
     sessions_on_window,
     focus_window,
+    most_recent_client_session,
 )
 
 
@@ -640,3 +641,26 @@ class TestFocusWindow:
         calls = [c for c in mock_run.call_args_list
                  if "select-window" in c.args[0]]
         assert any("proj~3:3" in " ".join(c.args[0]) for c in calls)
+
+
+class TestMostRecentClientSession:
+    @patch("pm_core.tmux.subprocess.run")
+    def test_picks_highest_activity_in_group(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout=(
+            "100 proj\n"
+            "300 proj~1\n"
+            "200 proj~2\n"
+            "999 other-unrelated\n"
+        ))
+        assert most_recent_client_session("proj") == "proj~1"
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_no_clients_returns_empty(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="")
+        assert most_recent_client_session("proj") == ""
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_only_unrelated_clients_returns_empty(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0,
+                                          stdout="500 some-other-session\n")
+        assert most_recent_client_session("proj") == ""

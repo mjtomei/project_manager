@@ -511,6 +511,45 @@ def _current_window_id(session: str) -> str:
     return r.stdout.strip()
 
 
+def most_recent_client_session(base: str) -> str:
+    """Return the session of the most-recently-active attached client in *base*'s group.
+
+    Used to identify which co-viewing tmux client just sent input to a
+    shared pane (e.g. the TUI). With grouped sessions, every attached
+    client is delivered the same keystrokes, so the calling Python
+    process cannot tell who typed via ``$TMUX_PANE`` alone — that env is
+    fixed at process launch. Tmux does track ``#{client_activity}`` per
+    client, so the client with the highest activity timestamp is the one
+    whose input arrived most recently. Limited to clients whose session
+    matches *base* or ``base~*`` so we ignore unrelated tmux clients.
+
+    Returns "" if no eligible client is found.
+    """
+    r = _run(
+        _tmux_cmd("list-clients", "-F", "#{client_activity} #{client_session}"),
+        text=True,
+    )
+    if r.returncode != 0:
+        return ""
+    best_ts = -1
+    best_sess = ""
+    for line in r.stdout.strip().splitlines():
+        parts = line.split(None, 1)
+        if len(parts) != 2:
+            continue
+        ts_str, sess = parts
+        if sess != base and not sess.startswith(base + "~"):
+            continue
+        try:
+            ts = int(ts_str)
+        except ValueError:
+            continue
+        if ts > best_ts:
+            best_ts = ts
+            best_sess = sess
+    return best_sess
+
+
 def _list_clients_by_session() -> dict[str, str]:
     """Return ``{session_name: client_tty}`` for all attached clients."""
     r = _run(
