@@ -143,14 +143,11 @@ def park_if_on(session: str | None, target_window_id: str | None) -> list[str]:
             return []
         # Park each watching session on the home window.  ``select_window``
         # routes through ``current_or_base_session`` which doesn't accept
-        # an explicit target session, so call tmux directly per session.
-        import subprocess
+        # an explicit target session, so use the per-session variant.
+        # Target by window-id (@N) rather than index — indices can shift
+        # if windows are added/removed concurrently.
         for sess in watching:
-            subprocess.run(
-                tmux_mod._tmux_cmd(
-                    "select-window", "-t", f"{sess}:{home_win['index']}"),
-                capture_output=True,
-            )
+            tmux_mod.select_window_in_session(sess, home_win["id"])
         return watching
     except Exception:
         _log.exception("park_if_on failed")

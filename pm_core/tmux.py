@@ -406,6 +406,18 @@ def select_window(session: str, window: str) -> bool:
     return result.returncode == 0
 
 
+def select_window_in_session(session: str, window: str) -> bool:
+    """Select a window in a specific (grouped) session, not the calling client's.
+
+    Used by cross-session park: a kill in session A may need to park session B
+    on the home window before tmux processes the kill.
+    """
+    result = _run(
+        _tmux_cmd("select-window", "-t", f"{session}:{window}"),
+    )
+    return result.returncode == 0
+
+
 def refresh_client(session: str, window: str = "") -> None:
     """Force tmux to repaint all clients attached to a session.
 
