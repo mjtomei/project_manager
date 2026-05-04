@@ -1073,7 +1073,6 @@ class ProjectManagerApp(App):
             return
         _log.info("action: reload (state only)")
         self._load_state()
-        self.refresh(layout=True)
 
     def action_focus_command(self) -> None:
         _log.debug("action: focus_command")
