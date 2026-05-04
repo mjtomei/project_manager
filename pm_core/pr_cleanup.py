@@ -2,6 +2,7 @@
 
 from pm_core import container as container_mod
 from pm_core import pane_registry, push_proxy
+from pm_core import runtime_state
 from pm_core import tmux as tmux_mod
 from pm_core.cli.helpers import _pr_display_id, kill_pr_windows
 from pm_core.paths import configure_logger
@@ -45,7 +46,7 @@ def cleanup_pr_resources(session: str | None, pr: dict) -> dict:
     pr_id = pr["id"]
     display_id = _pr_display_id(pr)
     summary = {"windows": [], "containers": [], "registry_windows": [],
-               "sockets": []}
+               "sockets": [], "runtime_state": False}
 
     if session:
         try:
@@ -77,6 +78,17 @@ def cleanup_pr_resources(session: str | None, pr: dict) -> dict:
                 session, window_names)
         except Exception as e:  # pragma: no cover
             _log.warning("unregister_windows failed: %s", e)
+
+    # Drop the per-PR runtime state file so the next QA/review-loop run
+    # starts from a clean slate. The file at ~/.pm/runtime/{pr_id}.json
+    # holds every action entry (qa, review-loop, review, start, merge);
+    # leaving it behind makes the picker think those loops are still
+    # running after we've torn their panes/containers down.
+    try:
+        runtime_state.runtime_path(pr_id).unlink(missing_ok=True)
+        summary["runtime_state"] = True
+    except OSError as e:  # pragma: no cover
+        _log.warning("runtime_state unlink failed: %s", e)
 
     _log.info("cleanup_pr_resources(%s): windows=%d containers=%d registry=%d",
               pr_id, len(summary["windows"]), len(summary["containers"]),
