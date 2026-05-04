@@ -6,12 +6,12 @@ re-rendering every ~5 seconds and on demand via a sentinel file.
 
 from __future__ import annotations
 
-import os
 import sys
 import time
 from pathlib import Path
 
 from pm_core import tmux as tmux_mod
+from pm_core.paths import pm_home
 
 
 WINDOW_NAME = "pm-home"
@@ -21,8 +21,7 @@ POLL_SECONDS = 5.0
 def _refresh_sentinel(session: str) -> Path:
     """Per-base-session sentinel file: touched by refresh(), polled by the loop."""
     base = session.split("~")[0]
-    runtime = Path(os.environ.get("XDG_RUNTIME_DIR") or
-                   (Path.home() / ".pm" / "runtime"))
+    runtime = pm_home() / "runtime"
     runtime.mkdir(parents=True, exist_ok=True)
     return runtime / f"home-refresh-{base}"
 
