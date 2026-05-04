@@ -781,7 +781,17 @@ class ProjectManagerApp(App):
         pane_ops.rebalance(self)
 
     def action_launch_claude(self) -> None:
-        pane_ops.launch_claude(self)
+        # ``c`` is now a deprecated alias for the window-attached popup
+        # (prefix+/). Shell out to the same internal command so the TUI
+        # binding behaves identically — including session persistence
+        # across dismissals.
+        import subprocess
+        subprocess.Popen(
+            ["pm", "_popup-diag"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
 
     def action_launch_guide(self) -> None:
         pane_ops.launch_guide(self)
