@@ -571,76 +571,64 @@ class TestFocusWindow:
     @patch("pm_core.tmux.subprocess.run")
     @patch("pm_core.tmux.find_window_by_name",
            return_value={"id": "@9", "index": "3", "name": "review-x"})
-    @patch("pm_core.tmux.sessions_on_window", return_value=["proj", "proj~1"])
-    @patch("pm_core.tmux._current_window_id", return_value="@7")
-    def test_uses_explicit_origin_session_not_env(
-        self, mock_curwin, mock_sow, mock_fwbn, mock_run,
-    ):
-        """Bug repro (note 3): origin must be the explicit arg, not env-resolved.
+    def test_default_switches_only_origin(self, mock_fwbn, mock_run):
+        """Default behaviour: only the originating session switches.
 
-        With an explicit origin_session, focus_window must NOT call
-        current_or_base_session (which queries the live $TMUX env and
-        causes async commands to refocus the wrong user).
+        Sessions that happen to be on the same window are not dragged
+        along — that would be wrong for the multi-attached single-TUI
+        case.
         """
         mock_run.return_value = MagicMock(returncode=0, stdout="")
-        with patch("pm_core.tmux.current_or_base_session") as mock_cobs:
-            ok = focus_window("proj", "review-x", origin_session="proj~2")
-            assert ok is True
-            mock_cobs.assert_not_called()
-        # current window of origin was queried for co-viewer detection
-        mock_curwin.assert_called_once_with("proj~2")
-        mock_sow.assert_called_once_with("proj", "@7")
+        ok = focus_window("proj", "review-x", origin_session="proj~2")
+        assert ok is True
+        sw_calls = [c for c in mock_run.call_args_list
+                    if "select-window" in c.args[0]]
+        assert len(sw_calls) == 1
+        assert "proj~2:3" in " ".join(sw_calls[0].args[0])
 
     @patch("pm_core.tmux.subprocess.run")
     @patch("pm_core.tmux.find_window_by_name",
            return_value={"id": "@9", "index": "3", "name": "review-x"})
-    @patch("pm_core.tmux.sessions_on_window", return_value=["proj", "proj~1"])
-    @patch("pm_core.tmux._current_window_id", return_value="@7")
-    def test_picks_origin_from_env(
-        self, mock_curwin, mock_sow, mock_fwbn, mock_run,
-    ):
+    def test_explicit_origin_does_not_query_env(self, mock_fwbn, mock_run):
+        """With an explicit origin_session, env/legacy fallbacks are skipped."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="")
+        with patch("pm_core.tmux.current_or_base_session") as mock_cobs:
+            focus_window("proj", "review-x", origin_session="proj~2")
+            mock_cobs.assert_not_called()
+
+    @patch("pm_core.tmux.subprocess.run")
+    @patch("pm_core.tmux.find_window_by_name",
+           return_value={"id": "@9", "index": "3", "name": "review-x"})
+    def test_picks_origin_from_env(self, mock_fwbn, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="")
         with patch.dict(os.environ, {"PM_ORIGIN_SESSION": "proj~5"}, clear=False):
             with patch("pm_core.tmux.current_or_base_session") as mock_cobs:
                 focus_window("proj", "review-x")
                 mock_cobs.assert_not_called()
-        mock_curwin.assert_called_once_with("proj~5")
+        sw_calls = [c for c in mock_run.call_args_list
+                    if "select-window" in c.args[0]]
+        assert any("proj~5:3" in " ".join(c.args[0]) for c in sw_calls)
 
     @patch("pm_core.tmux.subprocess.run")
     @patch("pm_core.tmux.find_window_by_name",
            return_value={"id": "@9", "index": "3", "name": "review-x"})
-    def test_co_viewers_override_skips_lookup(self, mock_fwbn, mock_run):
-        """Pre-captured co_viewers list bypasses runtime detection."""
+    def test_co_viewers_override_replaces_origin(self, mock_fwbn, mock_run):
+        """Pre-captured co_viewers list (loop kill+recreate) replaces origin."""
         mock_run.return_value = MagicMock(returncode=0, stdout="")
-        with patch("pm_core.tmux.sessions_on_window") as mock_sow, \
-             patch("pm_core.tmux._current_window_id") as mock_curwin:
-            ok = focus_window("proj", "review-x",
-                              co_viewers=["proj", "proj~1"])
-            assert ok is True
-            mock_sow.assert_not_called()
-            mock_curwin.assert_not_called()
+        ok = focus_window("proj", "review-x",
+                          co_viewers=["proj", "proj~1"])
+        assert ok is True
+        sw_calls = [c for c in mock_run.call_args_list
+                    if "select-window" in c.args[0]]
+        targets = [" ".join(c.args[0]) for c in sw_calls]
+        assert any("proj:3" in t for t in targets)
+        assert any("proj~1:3" in t for t in targets)
+        assert len(sw_calls) == 2
 
     @patch("pm_core.tmux.subprocess.run")
     @patch("pm_core.tmux.find_window_by_name", return_value=None)
     def test_unknown_window_returns_false(self, mock_fwbn, mock_run):
         assert focus_window("proj", "missing", origin_session="proj") is False
-
-    @patch("pm_core.tmux.subprocess.run")
-    @patch("pm_core.tmux.find_window_by_name",
-           return_value={"id": "@9", "index": "3", "name": "win"})
-    @patch("pm_core.tmux.sessions_on_window", return_value=[])
-    @patch("pm_core.tmux._current_window_id", return_value="")
-    def test_origin_alone_when_unattached(
-        self, mock_curwin, mock_sow, mock_fwbn, mock_run,
-    ):
-        """Origin with no current window still gets switched (best-effort)."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="")
-        ok = focus_window("proj", "win", origin_session="proj~3")
-        assert ok is True
-        # select-window targeted proj~3
-        calls = [c for c in mock_run.call_args_list
-                 if "select-window" in c.args[0]]
-        assert any("proj~3:3" in " ".join(c.args[0]) for c in calls)
 
 
 class TestMostRecentClientSession:

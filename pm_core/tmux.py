@@ -410,32 +410,35 @@ def focus_window(
     origin_session: str | None = None,
     co_viewers: list[str] | None = None,
 ) -> bool:
-    """Switch *window* into view for the originating session and co-viewers.
+    """Switch *window* into view for the originating session.
 
-    Resolves the target window inside *base* (a name, index, or ``@id``),
-    then identifies which sessions in the group are currently watching the
-    same window as *origin_session* and switches all of them together. This
-    replaces the older split between ``select_window`` (one session) and
-    ``switch_sessions_to_window`` (a pre-captured list).
+    Default behaviour: switch only *origin_session* — the attached client
+    that ran the command. Sessions that happen to be on the same window
+    are left alone; they are not dragged along just because they share
+    focus with the originator.
+
+    The exception is loop-window kill-and-recreate flows (review,
+    watcher, qa). Those snapshot the sessions that were watching the
+    *old* loop window before killing it and pass them as *co_viewers*;
+    those sessions get moved to the new window because the window they
+    were watching no longer exists.
 
     Parameters
     ----------
     base:
-        The base pm session (e.g. ``pm-foo-c5a1006b``). All grouped sessions
-        considered for co-viewer detection must belong to this group.
+        The base pm session (e.g. ``pm-foo-c5a1006b``).
     window:
         Window id (``@N``), numeric index, or window name.
     origin_session:
-        The session that initiated the refocus. Captured at command-launch
-        time so async flows refocus the correct user instead of whoever the
-        TUI happens to be focused on at the moment of the call. Defaults to
-        ``$PM_ORIGIN_SESSION`` (set by the TUI when spawning subprocesses),
-        then falls back to :func:`current_or_base_session` for legacy calls.
+        The session that initiated the refocus. Captured at
+        command-launch time so async flows refocus the correct user
+        instead of whoever the TUI is focused on at refocus time.
+        Defaults to ``$PM_ORIGIN_SESSION`` (set by the TUI when spawning
+        subprocesses), then falls back to :func:`current_or_base_session`.
     co_viewers:
-        Pre-captured list of session names. When provided, skips the
-        co-viewer lookup — used by review/watcher/qa flows that snapshot the
-        old window's viewers *before* killing it. Must include the origin
-        session if it should be switched.
+        Pre-captured list of session names — used only by the
+        loop-kill-and-recreate flows. When provided, replaces the
+        single-originator default.
 
     Coordination note: pr-291e891 introduces a richer action-context
     structure for TUI operations. When that lands, the env-var transport
@@ -447,23 +450,14 @@ def focus_window(
         _log.warning("focus_window: window %r not found in %s", window, base)
         return False
 
-    if co_viewers is None:
+    if co_viewers is not None:
+        sessions = list(co_viewers)
+    else:
         if origin_session is None:
             origin_session = os.environ.get("PM_ORIGIN_SESSION") or None
         if origin_session is None:
             origin_session = current_or_base_session(base)
-
-        # Find the window the origin session is currently viewing, then all
-        # sessions in the group viewing the same window.
-        cur_id = _current_window_id(origin_session)
-        if cur_id:
-            sessions = sessions_on_window(base, cur_id)
-            if origin_session not in sessions:
-                sessions.append(origin_session)
-        else:
-            sessions = [origin_session]
-    else:
-        sessions = list(co_viewers)
+        sessions = [origin_session]
 
     _log.info("focus_window: base=%s window=%s origin=%s sessions=%s",
                base, window, origin_session, sessions)

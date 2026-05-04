@@ -631,8 +631,9 @@ def _respawn_tui(session: str, window: str) -> str:
             _logger.info("_respawn_tui: window %s gone, creating new window", window)
             pane_id, window = tmux_mod.create_window(session, "pm _tui")
             tmux_mod.set_shared_window_size(session, window)
-            # Switch the client to the new window so the user sees it
-            tmux_mod.focus_window(session, window, origin_session=session)
+            # Deliberately do NOT switch any client to the new window —
+            # a TUI respawn must not yank attached sessions away from
+            # whatever they were viewing.
 
         # Register with lowest order so TUI sorts first (leftmost)
         from pm_core.pane_registry import locked_read_modify_write, _prepare_registry_data
