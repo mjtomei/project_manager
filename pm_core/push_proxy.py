@@ -636,6 +636,10 @@ def _start_proxy_subprocess(sock_path: str, workdir: str,
         [sys.executable, "-m", "pm_core.push_proxy",
          sock_path, workdir, allowed_branch],
         start_new_session=True,  # detach from parent process group
+        # Redirect stdin too: when spawned from a tmux popup (`display-popup
+        # -E pm _popup-cmd ...`), an inherited pty FD keeps the popup
+        # overlay open for the lifetime of this daemon.
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
