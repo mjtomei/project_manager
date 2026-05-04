@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-a84a939
+  active_pr: pr-748e708
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -11884,7 +11884,7 @@ prs:
   plan: bugs
   title: Cleanup leaves QA/review loop state stale and stops containers sequentially
   branch: pm/pr-0c530e1-cleanup-leaves-qa-review-loop-state-stale-and-stop
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'After `yt` (cleanup-then-QA), the QA loop''s persistent state (`~/.pm/runtime/pr-<id>.json`)
     is not cleared. The follow-up QA action re-attaches to stale state, surfacing
@@ -11924,15 +11924,38 @@ prs:
     3. Observe: "Busy: Cleaning …" persists ~1 min (sequential `docker stop`); when
     QA auto-starts it reports "QA already running" then "QA INPUT_REQUIRED" because
     the on-disk loop state survived cleanup.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/185
+  gh_pr_number: 185
   created_at: '2026-05-03T16:30:50.168588+00:00'
-  updated_at: '2026-05-03T16:30:50.168588+00:00'
-  started_at: null
+  updated_at: '2026-05-04T11:58:27.973081+00:00'
+  started_at: '2026-05-04T11:48:35.746772+00:00'
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-b3316e9
+    text: 'From another agent''s investigation: the same root cause that motivates
+      this PR also affects the merge-detection cleanup path, not just yt cleanup.
+      _kill_merged_pr_windows in pm_core/tui/sync.py:22-39 (called when background
+      sync detects a PR is merged) calls only kill_pr_windows — it does NOT call cleanup_pr_resources.
+      Result: merge-detection tears down tmux windows but leaves containers, push-proxy
+      state, sockets, and pane-registry entries hanging. Concrete observation: 6 QA
+      containers and their proxies kept running for 18 hours after the merge was detected
+      and the windows were killed.
+
+
+      Add to this PR''s scope: extend cleanup_pr_resources to also be called from
+      _kill_merged_pr_windows (and audit any other cleanup-adjacent paths for the
+      same divergence). Manual cleanup_pr (Y/y…) does the full thing; auto-on-merge
+      should match.
+
+
+      The proxy-workdir-collision finding from the same investigation is a separate
+      bug (filed as its own PR) since it''s about the proxy''s identity scheme, not
+      the cleanup-completeness issue this PR addresses.'
+    created_at: '2026-05-04T11:58:27Z'
+    last_edited: '2026-05-04T11:58:27Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0c530e1-cleanup-leaves-qa-review-loop-state--d465b8c2
 - id: pr-62ad13d
   plan: bugs
   title: 'Bug: pm pr close removes the PR entry from project.yaml by default'
@@ -12842,6 +12865,203 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-04T01:28:02.549655+00:00'
   updated_at: '2026-05-04T01:28:36.323684+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-7b3b639
+  plan: bugs
+  title: 'Bug: popup hangs after ''pr start <new-pr>'' even though impl window opens'
+  branch: pm/pr-7b3b639-bug-popup-hangs-after-pr-start-new-pr-even-though-
+  status: pending
+  depends_on: []
+  description: 'When prefix+M opens the popup and the user types ''pr start <pr_id>''
+    for a PR that has not yet been started, the implementation window opens correctly
+    and the user''s client switches to it, but the popup pane does not close — the
+    user is left stuck inside it. The same flow against an already-started PR (fast-path
+    that just switch-windows to the existing window) closes the popup cleanly.
+
+
+    User hypothesis (likely correct): the two pr_start paths return identically as
+    far as click is concerned, but something about the new-PR path keeps the popup
+    body''s subprocess.run from cleanly returning. Both paths return click exit 0
+    in the success case, so it is not a verdict-level difference visible in _popup-cmd''s
+    result.returncode check.
+
+
+    Possible mechanisms ranked by likelihood:
+
+
+    (1) wrap_claude_cmd → create_container in pr.py:1048 spawns ''podman run -d <image>
+    bash -c <setup>'' and waits up to 30s for the container''s READY sentinel file.
+    If any of that workflow inherits or re-creates a pty connected to the popup body
+    (e.g. via ''podman run'' attaching stdin to the calling tty), the popup''s pty
+    gets stolen and stays in a state where keyboard input goes nowhere even after
+    pr_start returns. Verify by adding ''stdin=subprocess.DEVNULL'' on the podman
+    invocations and seeing if the symptom changes.
+
+
+    (2) The new-window path''s ''tmux select-window'' (in tmux_mod.new_window line
+    156) does not pass check=True, so a silent failure leaves the user''s client on
+    the wrong window without raising. Pair with (1), this could leave the popup overlay
+    in an inconsistent state.
+
+
+    (3) tmux''s display-popup -E semantics: when the calling client switches windows
+    during the popup''s lifetime, the popup overlay can persist on the new window
+    without being interactive. Mitigation: pass --background to popup-launched commands
+    so focus stays put until the popup closes naturally. The user explicitly said
+    switching IS desired, so this is the *less* preferred fix; only consider if (1)
+    and (2) don''t pan out.
+
+
+    Repro: in a pm session that uses container mode, prefix+M, type ''pr start <id>''
+    for any PR with status=pending. Observe the impl window opens, but the popup pane
+    is stuck — neither Ctrl+C nor Esc nor q dismisses it. Compare with running the
+    same command for a PR with status=in_progress, which closes cleanly.
+
+
+    First diagnostic step: add INFO-level logging at the top and bottom of popup_cmd_cmd
+    (in pm_core/cli/session.py) capturing the timestamp and result.returncode before
+    _wait_dismiss is even considered. Run the broken case, check whether _popup-cmd
+    actually returns. If yes, the hang is in tmux''s overlay; if no, the hang is in
+    subprocess.run and (1) is the likely cause.
+
+
+    Tests: end-to-end test that runs ''pm _popup-cmd <session>'' with stdin piped
+    to ''pr start <new-pr-id>\n'' and asserts the process exits within a bounded time;
+    integration test that runs prefix+M against a fresh pm test session and asserts
+    the popup closes after a successful pr start.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-04T11:56:53.121732+00:00'
+  updated_at: '2026-05-04T11:56:53.121732+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-7fe2588
+  plan: bugs
+  title: 'Bug: popup should close on Ctrl+C / Esc regardless of body state'
+  branch: pm/pr-7fe2588-bug-popup-should-close-on-ctrl-c-esc-regardless-of
+  status: pending
+  depends_on: []
+  description: "Today the prefix+M / prefix+P popup closes only when the body command\
+    \ exits. If the body is in an unexpected state — subprocess hung, _wait_dismiss\
+    \ not entered, container creation blocked — the user has no way to dismiss the\
+    \ popup with Ctrl+C or Esc. Tmux's display-popup -E has no built-in keyboard escape;\
+    \ the popup is effectively hostage to whatever the body is doing.\n\nFix: wrap\
+    \ the popup body shell so Ctrl+C and Esc both unconditionally exit the body, which\
+    \ then triggers display-popup -E to close.\n\nConcretely:\n\n(1) Ctrl+C — easy.\
+    \ Add 'trap exit 130 INT' at the top of the popup body shell wrapper. Today the\
+    \ SIGINT propagates to whatever subprocess is running but the wrapper shell does\
+    \ not exit on its own. The trap makes the shell exit 130 on SIGINT, which closes\
+    \ the popup.\n\n(2) Esc — harder. The popup is a regular pty; Esc as a single\
+    \ key doesn't terminate processes. Two approaches:\n  (a) Wrap the body in a small\
+    \ Python that reads stdin in raw mode in a background thread and exits on Esc.\
+    \ While the foreground subprocess runs, the background watcher kills it on Esc.\
+    \ This works but adds complexity to every popup.\n  (b) Bind a key inside the\
+    \ popup pane: tmux 3.4+ display-popup -B doesn't exist as such, but you can bind\
+    \ keys in the calling client's table that target the popup pane. Less reliable\
+    \ across tmux versions.\n  \n  Recommended: (a) — implement once in pm_core/cli/_popup.py\
+    \ as a wrapper that the picker_inner / cmd_inner shell bodies call instead of\
+    \ directly exec'ing pm _popup-cmd. The wrapper spawns the underlying pm command\
+    \ and watches for Esc concurrently.\n\n(3) Update both prefix+M and prefix+P bodies\
+    \ to use the new wrapper. The trap-INT change is a one-liner; the Esc-watcher\
+    \ addition is the bigger piece.\n\nTests: a popup body that is intentionally hung\
+    \ via a sleep can be dismissed by Ctrl+C; same body dismissed by Esc; existing\
+    \ successful pr_start / popup-cmd flows still close cleanly when the body exits\
+    \ naturally; the wrapper does not interfere with subcommand stdin (e.g. the 'pm>'\
+    \ prompt in popup-cmd still works)."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-04T11:57:06.474649+00:00'
+  updated_at: '2026-05-04T11:57:06.474649+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-748e708
+  plan: bugs
+  title: 'Bug: push-proxy keyed only by (session_tag, pr_id) — impl and QA containers
+    fight over the same socket'
+  branch: pm/pr-748e708-bug-push-proxy-keyed-only-by-session-tag-pr-id-imp
+  status: pending
+  depends_on: []
+  description: 'Shared push-proxy implementation in pm_core/push_proxy.py:start_push_proxy
+    keys live proxies by (session_tag, pr_id). When the implementation container and
+    QA scenario containers all want a proxy for the same PR, they share the same key
+    but have different workdirs — and only one workdir can be the proxy''s source.
+    Whichever container starts second wins, and the loser''s container ends up pushing
+    git through a proxy that points at the wrong workdir.
+
+
+    Concrete observation from a debugging session today (PR 2d0588a):
+
+
+    - 04:54 — implementation proxy started with workdir = the impl PR workdir.
+
+    - 10:13 — QA spawned, called start_push_proxy with the same (session_tag, pr_id)
+    key. The ''reuse if alive'' guard at push_proxy.py:688 didn''t fire (likely the
+    socket was momentarily unlinked or transiently dead between an impl session restart
+    and QA launch). The function os.unlink''d the existing socket and spawned new
+    subprocesses with QA scenario workdirs (/home/matt/.pm/workdirs/qa/pr-2d0588a-…/s-13/repo
+    and …/s-18/repo).
+
+    - After that point: the impl container''s git push went through the live proxy
+    at /tmp/pm-push-proxy-2fd7c69049fe33cb/push.sock — but the proxy was running ''git
+    push'' from a QA scenario clone that didn''t have the impl branch''s commits.
+    Push failed silently or pushed wrong commits.
+
+
+    The design assumption ''one proxy per (session_tag, pr_id) is enough'' breaks
+    when impl and QA both want a proxy and have different workdirs. The QA containers
+    won the race because their workdir was the most recent one start_push_proxy saw.
+
+
+    Three candidate fixes (any one would close the bug; need to pick one based on
+    the proxy''s broader semantics):
+
+
+    (1) Include the workdir (or a hash of it) in the proxy key. Each unique workdir
+    gets its own proxy. Simplest. Downside: more proxies running, but they''re cheap
+    (one process per active workdir on the PR).
+
+
+    (2) Refuse to replace a live proxy with a different workdir. If start_push_proxy
+    finds a live proxy with the same (session_tag, pr_id) but a different workdir
+    than requested, it returns an error rather than os.unlink''ing the existing one.
+    Forces callers to handle the conflict explicitly. Downside: callers don''t currently
+    expect this error and would need updating.
+
+
+    (3) Make the proxy stateless about workdir: serve git push from whatever workdir
+    the *request* names, not whatever workdir the proxy was started with. The proxy
+    becomes a pure git-push relay; the workdir is part of each request. Most invasive
+    but architecturally cleanest — also fixes the analog for any future protocol that
+    needs to serve multiple clients across the same PR.
+
+
+    Recommendation: ship (1) as the fast fix; consider (3) as a follow-up cleanup.
+    (2) is a useful sanity guard regardless.
+
+
+    Files: pm_core/push_proxy.py (proxy key derivation, start_push_proxy guard logic),
+    tests for the multi-workdir case (impl + QA scenario both starting against the
+    same PR; assert each gets its own proxy or the proxy serves both correctly).
+
+
+    Cross-reference: pr-0c530e1 (cleanup-completeness on yt and merge detection) is
+    a related but separate concern. The proxy-workdir collision is about identity,
+    not lifecycle. Both PRs surfaced from the same debugging session investigating
+    containers and proxies that survived a merge.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-04T11:58:45.935220+00:00'
+  updated_at: '2026-05-04T11:58:45.935220+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
