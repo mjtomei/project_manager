@@ -103,7 +103,7 @@ def ensure_home_window(session: str | None = None) -> str | None:
         return None
 
 
-def park_if_on(session: str | None, target_window_id: str | None) -> None:
+def park_if_on(session: str | None, target_window_id: str | None) -> str | None:
     """If the caller's grouped session is on ``target_window_id``, park to home.
 
     Convenience for the kill-window pattern:
@@ -115,20 +115,29 @@ def park_if_on(session: str | None, target_window_id: str | None) -> None:
     if it matches ``target_window_id`` we ensure the home window exists
     and switch to it before the kill.  Otherwise no-op (the kill won't
     yank the user's focus, so we shouldn't either).
+
+    Returns the grouped-session name that was parked, or ``None`` if no
+    park happened.  Callers that recreate a window with the same name
+    (e.g. watcher recreate) can use this to exclude the parked session
+    from any post-recreate ``switch_sessions_to_window`` call so the
+    parked client isn't yanked back.
     """
     if not tmux_mod.in_tmux() or not session or not target_window_id:
-        return
+        return None
     try:
         if not tmux_mod.session_exists(session):
-            return
+            return None
+        target_session = tmux_mod.current_or_base_session(session)
         cur = tmux_mod.get_window_id(session)
         if cur != target_window_id:
-            return
+            return None
         provider = get_active_provider()
         home = provider.ensure_window(session)
         tmux_mod.select_window(session, home)
+        return target_session
     except Exception:
         _log.exception("park_if_on failed")
+        return None
 
 
 def park(session: str, home_window: str | None = None) -> None:
