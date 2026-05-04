@@ -28,11 +28,14 @@ Found by walking `~/.pm/` and the project tree. Each entry below corresponds to 
 | Restart breadcrumbs | `~/.pm/<flow>-restart`, `~/.pm/merge-lock`, etc. | Sentinel files | Lifecycle markers |
 | Session artifacts | `~/.pm/sessions/` | Deep tree | Session-scoped state |
 
+Also in scope (added later — see Phase 9):
+
+- Pm-internal logs at `~/.pm/debug/` — high write rate but moving them into the database makes cross-cutting queries ("last 100 errors across sessions", "what did this PR's QA loop log between T1 and T2") possible without file-globbing.
+
 Out of scope (intentionally — these are not "state" in the same sense):
 
 - Workdir clones at `~/.pm/workdirs/` — git clones, owned by git, not pm state.
-- Debug logs at `~/.pm/debug/` — append-only log files, fine as-is.
-- Claude transcripts at `pm/transcripts/` — append-only, in repo, fine as-is.
+- Claude transcripts at `pm/transcripts/` — append-only Claude session artifacts, in repo, fine as-is.
 - The standalone `hook_receiver.py` at `~/.pm/hook_receiver.py` — code, not state.
 
 ## Goals
@@ -59,6 +62,8 @@ The phases are ordered so each PR ships standalone usefulness; the keystone (`pr
 ### Phase 1 — Core infrastructure
 
 PR: Core SQLite store infrastructure — connection layer, WAL pragma, schema-version table, migration runner. Stub schema with no domain tables. Subsequent PRs add domain tables additively.
+
+PR: Change-log audit table and writer wrappers. Every domain write (INSERT / UPDATE / DELETE) emits a row into a `state_changes` table: `(id INTEGER PRIMARY KEY, timestamp_ns, actor, context, table_name, row_pk, op, before_json, after_json)`. Implemented as SQLite triggers per opted-in table, plus a thin Python wrapper that captures `actor` (user / agent session id) and `context` (the CLI command or TUI action that triggered the write). Per-table opt-in so high-volume already-event-shaped tables like `hook_events` don't double-log themselves. This makes "what changed today / over the last week / by whom" a single SELECT and gives us full replayable history of interactions for free.
 
 ### Phase 2 — Project graph (keystone)
 
@@ -94,12 +99,24 @@ PR: Migrate generated specs.
 
 PR: Migrate restart breadcrumbs and merge-lock sentinels to a typed `markers` table.
 
-### Phase 8 — Session artifacts (last)
+### Phase 8 — Session artifacts
 
-PR: Migrate `~/.pm/sessions/` deep tree. Lowest priority and most idiosyncratic; may end up partially deferred if particular subtrees are better as files (e.g. binary blobs, large logs).
+PR: Migrate `~/.pm/sessions/` deep tree. Idiosyncratic; may end up partially deferred if particular subtrees are better as files (e.g. binary blobs, large logs).
+
+### Phase 9 — Logs
+
+PR: Migrate `~/.pm/debug/*.log` and other pm-internal log streams into a `logs` table. Highest write rate of any store in this plan (every `_log.info` call lands here), so the table needs careful indexes (`timestamp_ns`, `(logger, timestamp_ns)`, `(session_id, timestamp_ns)`, `(pr_id, timestamp_ns)`) and an aggressive retention policy. The reader-side benefit is large: "show me the last 100 errors across all sessions" / "what did this PR's QA loop log between T1 and T2" become single SELECTs instead of file-globs and `grep`.
+
+### Phase 10 — Data/view separation
+
+PR: Extract a typed data-service layer between storage and every consumer of pm state. **This is a complete separation, not a TUI-only refactor.** Done means storage is internal: `pm_core/store/` is imported only from `pm_core/services/`, and every other module — TUI, CLI, watchers, qa_loop, prompt_gen, hooks, container/cleanup, pr_sync, auto_start, anything that touches state today — goes through `pm_core/services/`. An import-graph guard test enforces this on every future PR so the boundary can't be quietly punched through.
+
+The service layer returns view-ready typed objects (frozen dataclasses or Pydantic models) on read and accepts typed command objects on write. No SQL, no rows, no internal IDs leak past it. The audit log (Phase 1's `state_changes`) integrates naturally because services are the only writers — actor and context get set in one place for every mutation.
+
+With the separation complete, `plan-ambient`'s surface protocol (rc viewer, project browser, doc reader, future web frontend) becomes a UI-shaped consumer of this layer, not a parallel data path. Adding a new UI is "find or add the service methods you need" — no storage rework, no risk of state-shape drift across UIs.
 
 ## Out of scope
 
 - **Remote backend**: schema is *designed* to allow swapping to remote later, but actually shipping a remote backend (Postgres adapter, server component) is a separate plan if and when needed.
 - **Cross-host coordination**: this plan is host-local. Sharing state across hosts is a different problem (and would benefit from the same schema + a remote backend).
-- **Workdir / log / transcript migration**: per the inventory, these are intentionally not state and stay file-based.
+- **Workdir / transcript migration**: per the inventory, these are intentionally not state and stay file-based. Workdirs are git clones; transcripts are append-only Claude session artifacts.

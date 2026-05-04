@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-e6a3a99
+  active_pr: pr-a84a939
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -12642,6 +12642,206 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-03T23:16:33.693316+00:00'
   updated_at: '2026-05-03T23:16:33.693316+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-51b9f26
+  plan: plan-state
+  title: Change-log audit table for state writes
+  branch: pm/pr-51b9f26-change-log-audit-table-for-state-writes
+  status: pending
+  depends_on: []
+  description: 'Phase 1 sibling of plan-state. Add a state-change audit log so every
+    write to a domain table also produces a timestamped change record. Gives us ''what
+    happened today / over the last week / who changed this value'' as a single SELECT
+    and a full replayable history of interactions across pm.
+
+
+    Schema: state_changes(id INTEGER PRIMARY KEY, timestamp_ns INTEGER NOT NULL, actor
+    TEXT, context TEXT, table_name TEXT NOT NULL, row_pk TEXT, op TEXT NOT NULL, before_json
+    TEXT, after_json TEXT). Indexes on (timestamp_ns), (table_name, timestamp_ns),
+    and (actor, timestamp_ns).
+
+
+    Implementation: per opted-in table, install AFTER INSERT / UPDATE / DELETE triggers
+    that write a row into state_changes capturing the table name, primary key, op,
+    and the OLD / NEW row JSON. The trigger reads actor and context from SQLite session-level
+    pragmas / temp variables that the Python wrapper at pm_core/store/db.py sets before
+    each transaction (using sqlite3 connection.execute(''PRAGMA pm_actor = ?'', ...)
+    or a per-connection temp table). Actor is the user / agent session id; context
+    is the CLI command name or TUI action that triggered the write (e.g. ''pm pr start'',
+    ''tui:action_review_pr'').
+
+
+    Per-table opt-in: domain tables that are already event-shaped (notably hook_events
+    from Phase 5, or attention archive from plan-ambient pr-3fee106) skip the audit
+    triggers since they would just duplicate themselves. Most tables (project, prs,
+    plans, panes, qa_runtime, settings, specs, markers) opt in.
+
+
+    Retention: configurable per-host. Defaults to ''keep everything'' since the persistence-everywhere
+    principle from plan-ambient applies (50TB backing store assumption). A per-deployment
+    retention setting can prune old rows if needed.
+
+
+    Read API: pm_core/store/changes.py exposes query helpers — recent_changes(since=None,
+    table=None, actor=None, limit=N), changes_for_row(table, pk), most-recent-change-per-row,
+    etc. The TUI / CLI can surface ''recent activity'' views on top of this, and ambient
+    context queries (plan-ambient''s pm context) can include ''last N changes to project
+    state'' as part of the agent''s grounding.
+
+
+    Files: pm_core/store/db.py (transaction wrapper sets PRAGMA pm_actor / pm_context),
+    pm_core/store/changes.py (audit-log API), pm_core/store/schema.py (state_changes
+    table + helper to install triggers per opted-in table). Migration trigger installation
+    runs once when each domain table is created or upgraded.
+
+
+    Tests: trigger fires on INSERT / UPDATE / DELETE for an opted-in table; opted-out
+    table writes don''t produce audit rows; actor and context are captured from the
+    connection-level pragma; before_json / after_json correctly serialize the row;
+    reading the audit log as a time series gives the expected ordered history; truncation
+    of state_changes via retention policy doesn''t break referential integrity (state_changes
+    is independent of domain tables).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-03T23:34:29.555050+00:00'
+  updated_at: '2026-05-03T23:34:29.555050+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-026adcd
+  plan: plan-state
+  title: Migrate pm-internal logs to SQLite
+  branch: pm/pr-026adcd-migrate-pm-internal-logs-to-sqlite
+  status: pending
+  depends_on: []
+  description: 'Phase 9 of plan-state. Replace ~/.pm/debug/*.log files with rows in
+    a logs table.
+
+
+    Schema: logs(id INTEGER PRIMARY KEY, timestamp_ns INTEGER NOT NULL, level TEXT
+    NOT NULL, logger TEXT, message TEXT, context_json TEXT, session_id TEXT, pr_id
+    TEXT). Indexes: (timestamp_ns), (logger, timestamp_ns), (session_id, timestamp_ns),
+    (pr_id, timestamp_ns), (level, timestamp_ns).
+
+
+    This is the highest-write-rate store in the plan — every _log.info / _log.warning
+    / _log.exception call across pm lands here. Implementation strategy: a custom
+    logging.Handler in pm_core/paths.configure_logger that writes to the database
+    in batches (e.g. flush every 100 records or every 100ms, whichever first) to amortize
+    transaction overhead. Synchronous flush on critical paths (errors, shutdown).
+
+
+    Retention: configurable per-host. Defaults to ''keep 30 days'' since logs grow
+    fast and ''keep everything'' from plan-ambient''s persistence-everywhere principle
+    would be overwhelming for log streams specifically. Make the default tunable so
+    users with the 50TB budget can opt into longer retention.
+
+
+    Reader-side wins (the motivation):
+
+    - ''Last 100 errors across all sessions'': single indexed SELECT
+
+    - ''What did this PR''s QA loop log between T1 and T2'': indexed range scan, no
+    file-globbing
+
+    - ''Logs grouped by session_id during the last hour'': trivial aggregation
+
+    - TUI ''recent log'' panel becomes a live tail of the table rather than a file
+    tail
+
+
+    Migration: import existing ~/.pm/debug/*.log on first open of the new schema,
+    parsing the standard pm log format. Old log files are renamed to .migrated-<timestamp>.
+
+
+    Files: pm_core/paths.py (configure_logger uses a SQLiteLogHandler), new pm_core/store/logs.py
+    (handler implementation, batching, retention pruning), pm_core/store/schema.py
+    (logs table + indexes).
+
+
+    Tests: log writes from concurrent processes don''t corrupt rows or block each
+    other; batching coalesces correctly under bursty loads; queries return the expected
+    events; retention prunes old rows without affecting recent ones; existing log
+    files migrate cleanly with timestamps preserved; emergency exception path flushes
+    synchronously so a crash doesn''t lose the final logs.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-04T01:27:45.027356+00:00'
+  updated_at: '2026-05-04T01:27:45.027356+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-a84a939
+  plan: plan-state
+  title: Extract data-service layer between storage and UIs
+  branch: pm/pr-a84a939-extract-data-service-layer-between-storage-and-uis
+  status: pending
+  depends_on: []
+  description: "Phase 10 of plan-state. Establish a clean separation between storage\
+    \ (SQLite via pm_core/store/) and every UI / consumer by inserting a typed data-service\
+    \ layer in between. Storage becomes an internal-only package; everything outside\
+    \ pm_core/store/ and pm_core/services/ goes through services.\n\nWhy now: the\
+    \ DB migration is necessary but not sufficient. Today's TUI reaches directly into\
+    \ project.yaml structures, but the CLI commands, watchers, prompt builders, hook\
+    \ readers, qa_loop, container.py, and many other modules also read pm state directly.\
+    \ With a service layer in place, all of them — and any future UI like plan-ambient's\
+    \ rc viewer, project browser, doc reader, or a future web frontend — consume the\
+    \ same view-shaped types from pm_core/services/ without knowing whether storage\
+    \ is SQLite, Postgres, or anything else.\n\nThis PR is the *complete* separation,\
+    \ not a TUI-only refactor. Done means every entry point that reads or writes pm\
+    \ state goes through services; no direct pm_core/store/ imports remain outside\
+    \ pm_core/services/ itself.\n\nConcretely:\n\n(1) Create pm_core/services/ with\
+    \ one module per domain (project, prs, plans, panes, qa_runtime, hooks, logs,\
+    \ etc.). Each module exposes typed read methods (PrSummary, PrDetails, PlanSummary,\
+    \ PaneListing, etc.) returning frozen dataclasses or Pydantic models — no SQL,\
+    \ no rows, no internal IDs leaked.\n\n(2) Write methods accept typed command objects\
+    \ (StartPr, MovePane, etc.) and return the new state or an error type. Internally\
+    \ they use pm_core/store/ to perform the SQL; externally they hide it.\n\n(3)\
+    \ Refactor every reader/writer of pm state to go through services. The migration\
+    \ list is comprehensive, not just the TUI:\n  - pm_core/tui/* — every place app.py\
+    \ / pr_view.py / pane_ops.py / etc. reads or writes state today\n  - pm_core/cli/*\
+    \ — pr.py / plan.py / qa.py / session.py / helpers.py / container.py / meta.py\n\
+    \  - pm_core/watchers/* — every watcher that observes or modifies state\n  - pm_core/qa_loop.py\
+    \ and pm_core/qa/* — verdict tracking, scenario state\n  - pm_core/prompt_gen.py\
+    \ — pulls deps, plans, notes when building prompts; goes through services\n  -\
+    \ pm_core/hook_events.py and pm_core/hook_install.py — hook reader/writer\n  -\
+    \ pm_core/container.py and pm_core/pr_cleanup.py — workdir / container state lookups\n\
+    \  - pm_core/pr_sync.py — github-sync writes\n  - pm_core/auto_start.py, pm_core/loop_shared.py\
+    \ — auto-start / loop scheduling state\n  - Anywhere else that imports from pm_core/store/*\
+    \ or reads project.yaml / pane-registry / runtime files\n\n(4) The audit log (pr-51b9f26)\
+    \ layer captures actor and context naturally because the service-layer wrapper\
+    \ is the single place where writes happen. Each service method sets the (actor,\
+    \ context) for its transaction before delegating to store.\n\n(5) Lint / import-graph\
+    \ test enforces the separation: no module under pm_core/ outside pm_core/store/\
+    \ or pm_core/services/ may import from pm_core/store/*. Add a test that asserts\
+    \ this on every PR going forward, so a future change can't quietly punch through\
+    \ the boundary.\n\n(6) Tests at the service layer — unit-test each service method\
+    \ against an in-memory SQLite DB without spinning up a TUI or CLI. Today's tightly\
+    \ coupled UI-tests can stay where they are; service tests are added beneath them.\n\
+    \nOut of scope for this PR (follow-ups, not blockers):\n\n- Building any new UI\
+    \ on top of services — done by individual UI PRs (rc viewer, project browser,\
+    \ etc., already in plan-ambient). The service layer is what makes those PRs cheap.\n\
+    - A web/HTTP transport for services — a thin FastAPI adapter wrapping services;\
+    \ could be added later. Not required to ship the separation.\n\nFiles: new pm_core/services/\
+    \ package; refactor every module enumerated in (3); retire the public-API surface\
+    \ of pm_core/store.py (legacy module) in favor of pm_core/store/ being internal;\
+    \ add the lint/import-graph guard.\n\nTests: every service method has unit tests\
+    \ against an in-memory DB; TUI / CLI / watcher integration tests still pass after\
+    \ the refactor; the import-graph guard catches any direct pm_core/store/* import\
+    \ from outside the allowed packages; the audit log captures actor and context\
+    \ for every service-layer write."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-04T01:28:02.549655+00:00'
+  updated_at: '2026-05-04T01:28:36.323684+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
