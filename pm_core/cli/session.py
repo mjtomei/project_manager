@@ -273,6 +273,15 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
         data = None
         has_project = False
 
+    # Persist project root for popup commands so they can resolve it
+    # without relying on the launching pane's cwd (popups run with a
+    # cwd that may sit outside any pm repo, or in a deleted workdir).
+    if has_project and root is not None:
+        from pm_core.paths import get_session_tag, set_session_pm_root
+        _persist_tag = get_session_tag(start_path=root)
+        if _persist_tag:
+            set_session_pm_root(_persist_tag, root)
+
     # Generate session name with path hash (uses helper to ensure consistency)
     # Use the repo directory (parent of pm/) as the working directory
     if root and store.is_internal_pm_dir(root):
@@ -1500,6 +1509,20 @@ def _run_picker_command(cmd: str, session: str) -> None:
             click.echo(result.stderr, nl=False, err=True)
 
 
+def _resolve_root_from_session(session: str) -> Path | None:
+    """Resolve a pm session's persisted project root from its name.
+
+    The session name is ``pm-<tag>`` (see ``_get_session_name_for_cwd``).
+    Returns the persisted root if present and still on disk, else None.
+    """
+    from pm_core.paths import get_session_pm_root
+    base = pane_registry.base_session_name(session)
+    tag = base.removeprefix("pm-")
+    if tag == base:
+        return None
+    return get_session_pm_root(tag)
+
+
 @cli.command("_popup-picker", hidden=True)
 @click.argument("session")
 @click.argument("window_name", default="")
@@ -1528,12 +1551,16 @@ def popup_picker_cmd(session: str, window_name: str):
         click.echo("Not a pm session.")
         _pause_and_exit(1)
 
+    saved_root = _resolve_root_from_session(session)
     try:
-        root = state_root()
+        root = saved_root if saved_root is not None else state_root()
         data = store.load(root)
     except FileNotFoundError:
         click.echo("No project.yaml found.")
         _pause_and_exit(1)
+    # Make subcommands inherit the session's root rather than walking
+    # up from the popup's cwd (which may be outside the repo or deleted).
+    os.environ["PM_PROJECT"] = str(root)
 
     prs = data.get("prs") or []
     current_pr = _current_window_pr_id(window_name)
@@ -1850,6 +1877,13 @@ def popup_cmd_cmd(session: str):
         click.echo("Not a pm session.")
         _wait_dismiss()
         raise SystemExit(1)
+
+    # Inherit the session's persisted root so user commands resolve
+    # project state correctly even if the popup's cwd is outside the
+    # repo or in a deleted workdir.
+    saved_root = _resolve_root_from_session(session)
+    if saved_root is not None:
+        os.environ["PM_PROJECT"] = str(saved_root)
 
     try:
         cmd = input("pm> ").strip()

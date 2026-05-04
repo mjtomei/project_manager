@@ -234,6 +234,39 @@ def configure_logger(name: str, log_file: str | None = None, max_bytes: int = 10
     return logger
 
 
+def set_session_pm_root(session_tag: str, root: Path) -> None:
+    """Persist the project root for a session.
+
+    Stored at ~/.pm/sessions/{session-tag}/pm_root so popup commands can
+    resolve the root without depending on the launching pane's cwd.
+    """
+    sd = session_dir(session_tag)
+    if sd:
+        (sd / "pm_root").write_text(str(root) + "\n")
+
+
+def get_session_pm_root(session_tag: str | None = None) -> Path | None:
+    """Read the persisted project root for a session, if any.
+
+    Returns None if the file is missing, empty, or the path no longer
+    exists on disk (so callers fall back to cwd-based resolution).
+    """
+    sd = session_dir(session_tag)
+    if not sd:
+        return None
+    f = sd / "pm_root"
+    if not f.exists():
+        return None
+    try:
+        content = f.read_text().strip()
+    except (OSError, IOError):
+        return None
+    if not content:
+        return None
+    p = Path(content)
+    return p if p.exists() else None
+
+
 def get_override_path(session_tag: str | None = None) -> Path | None:
     """Get the override installation path for a session, or None if not set.
 
