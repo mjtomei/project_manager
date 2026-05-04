@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-b423bfd
+  active_pr: pr-315f753
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -93,9 +93,9 @@ plans:
   status: draft
   parent: null
 - id: plan-state
-  name: Unified persistent state store
+  name: Unified persistent state store (not pursued)
   file: plans/plan-state.md
-  status: draft
+  status: closed
   parent: null
 prs:
 - id: pr-001
@@ -7451,66 +7451,6 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
-- id: pr-945ba50
-  plan: plan-state
-  title: Replace project.yaml with SQLite database
-  branch: pm/pr-945ba50-replace-project-yaml-with-sqlite-database
-  status: pending
-  depends_on:
-  - pr-f38005f
-  description: 'Replace the YAML file-based state store with SQLite to get proper
-    ACID transactions, concurrent read safety, and atomic writes without hacks.
-
-
-    ## Motivation
-
-
-    project.yaml is a flat YAML file that requires file locking (pr-f38005f), atomic
-    staging writes, and parse-error guards to safely handle concurrent access from
-    the TUI, CLI, and background sync. These are workarounds for the absence of a
-    real database. SQLite provides all of this for free with better performance.
-
-
-    ## Approach
-
-
-    - Introduce a project.db SQLite database alongside (then replacing) project.yaml
-
-    - Schema mirrors current YAML structure: project table, prs table, plans table,
-    notes table
-
-    - store.py load/save API stays the same externally — implementation switches to
-    SQLite
-
-    - Migration: on first open, if project.yaml exists and project.db does not, import
-    from YAML
-
-    - All reads/writes go through sqlite3 with WAL mode enabled (concurrent readers,
-    single writer, no corruption on crash)
-
-    - Remove file locking, atomic staging, and parse-error guard workarounds once
-    migration is complete
-
-
-    ## Scope
-
-
-    - pm_core/store.py: replace yaml.load/dump with sqlite3 queries
-
-    - Migration path from existing project.yaml installs
-
-    - TUI reload becomes a lightweight SELECT instead of full file parse
-
-    - CLI commands unchanged from the user perspective'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-03-26T12:47:22.115142+00:00'
-  updated_at: '2026-05-03T23:15:40.187932+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
 - id: pr-6ca8113
   plan: plan-cb4ef69
   title: Add `parent` field to plan schema
@@ -12352,553 +12292,64 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
-- id: pr-e81bfaf
-  plan: plan-state
-  title: Core SQLite store infrastructure
-  branch: pm/pr-e81bfaf-core-sqlite-store-infrastructure
-  status: pending
-  depends_on: []
-  description: 'First PR of the unified-state plan. Establish the connection / migration
-    layer that all subsequent migration PRs share. No domain tables yet — those land
-    additively in later PRs.
-
-
-    Files: pm_core/store/db.py (connect, WAL pragma, busy_timeout, migration runner),
-    pm_core/store/schema.py (declarative table definitions; starts with just schema_version
-    + meta), pm_core/store/__init__.py (public package API). Database file at ~/.pm/state.db
-    (host-local). Migrations are idempotent and additive only; schema_version table
-    records applied migrations.
-
-
-    Coordinates with plan-ambient''s pr-3fee106 (Persistent attention archive): both
-    write to the same database and use the same connection helpers. Whichever lands
-    first defines the connection layer; the other adds tables additively.
-
-
-    Tests: connect creates db with WAL on first open; concurrent readers don''t block
-    each other; idempotent migration application; migrations from a stale schema_version
-    apply correctly; corrupt db triggers a clear error rather than silent miscompute.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-05-03T23:15:40.940902+00:00'
-  updated_at: '2026-05-03T23:15:40.940902+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
-- id: pr-8620ca1
-  plan: plan-state
-  title: Migrate pane / window registry to SQLite
-  branch: pm/pr-8620ca1-migrate-pane-window-registry-to-sqlite
-  status: pending
-  depends_on: []
-  description: 'Phase 3 of plan-state. Replace per-session JSON files at ~/.pm/pane-registry/<session>.json
-    with rows in a panes table.
-
-
-    Schema: panes(session, window_id, pane_id, role, kind, started_at, last_seen_at,
-    attrs JSON). Indexes on (session, window_id) and (session, role) for the common
-    lookups in pm_core/pane_registry.py.
-
-
-    Migration: on first open with the new schema, import each ~/.pm/pane-registry/<session>.json
-    into the panes table and rename the file to .migrated-<timestamp>. Idempotent.
-
-
-    pm_core/pane_registry.py rewritten over the new store while preserving its current
-    API (load_registry / get_window_data / etc.). File locking and atomic-write hacks
-    removed.
-
-
-    Depends on: pr-945ba50 (project.yaml migration; not strictly required but provides
-    the keystone), Core SQLite store infrastructure PR.
-
-
-    Tests: round-trip JSON → SQLite import; concurrent reads from TUI + CLI; pane
-    lookup performance not regressed; migration is idempotent; existing pm sessions
-    on the new schema work without manual intervention.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-05-03T23:15:47.065946+00:00'
-  updated_at: '2026-05-03T23:15:47.065946+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
-- id: pr-54bc67d
-  plan: plan-state
-  title: Migrate QA loop runtime state to SQLite
-  branch: pm/pr-54bc67d-migrate-qa-loop-runtime-state-to-sqlite
-  status: pending
-  depends_on: []
-  description: 'Phase 4 of plan-state. Replace ~/.pm/runtime/pr-<id>.json with rows
-    in a qa_runtime table.
-
-
-    Schema: qa_runtime(pr_id PRIMARY KEY, scenario_id, phase, started_at, last_update_at,
-    payload JSON). The payload column holds the per-iteration state (verdicts, scenario
-    set, retry counts) as JSON; promote individual fields to columns later if query
-    patterns demand.
-
-
-    Migration: on first open, import ~/.pm/runtime/pr-*.json into the qa_runtime table;
-    rename source files to .migrated-<timestamp>.
-
-
-    The yt cleanup bug in pr-0c530e1 (cleanup leaves QA loop state stale) is partially
-    solved by having state in the database where pr_cleanup.cleanup_pr_resources can
-    DELETE the row in the same transaction as other cleanup; coordinate scopes.
-
-
-    Tests: existing QA loops survive migration without losing iteration state; cleanup
-    deletes the row atomically; concurrent QA workers don''t clobber each other.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-05-03T23:15:53.274941+00:00'
-  updated_at: '2026-05-03T23:15:53.274941+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
-- id: pr-af845cd
-  plan: plan-state
-  title: Migrate launch queue to SQLite
-  branch: pm/pr-af845cd-migrate-launch-queue-to-sqlite
-  status: pending
-  depends_on: []
-  description: 'Phase 4 of plan-state. Replace ~/.pm/launch-queue.json with rows in
-    a launch_queue table.
-
-
-    Schema: launch_queue(id INTEGER PRIMARY KEY, target, payload JSON, priority, enqueued_at,
-    started_at NULL, completed_at NULL). FIFO by enqueued_at within priority.
-
-
-    Migration: import existing launch-queue.json on first open; rename file. Subsequent
-    enqueue/dequeue operations go through the queue API in pm_core/store/launch_queue.py.
-
-
-    Tests: enqueue/dequeue round-trip; priority ordering; concurrent producers and
-    consumers; survives crash mid-dequeue (no row lost or double-processed).'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-05-03T23:15:56.810158+00:00'
-  updated_at: '2026-05-03T23:15:56.810158+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
-- id: pr-4e075b1
-  plan: plan-state
-  title: Migrate TUI pidfiles and command queues to SQLite
-  branch: pm/pr-4e075b1-migrate-tui-pidfiles-and-command-queues-to-sqlite
-  status: pending
-  depends_on: []
-  description: 'Phase 4 of plan-state. Replace ~/.pm/tui-<session>.pid and ~/.pm/tui-<session>.cmd-queue
-    files with rows.
-
-
-    Schema: tui_processes(session PRIMARY KEY, pid, started_at, last_heartbeat_at,
-    host); tui_commands(id INTEGER PRIMARY KEY, session, command, payload JSON, enqueued_at,
-    processed_at NULL).
-
-
-    The reload IPC (SIGUSR1 from pr-2173cf1, signal-based reload) keeps using signals
-    — those are fast and don''t need the database. The PID lookup itself moves from
-    a pidfile read to a single-row SELECT, which is fine because reload is rare.
-
-
-    Migration: import existing pidfile contents on first open; queues are ephemeral
-    so re-create empty.
-
-
-    Tests: reload signal still works after migration; multiple TUIs (different sessions)
-    coexist without conflict; stale entries (pid no longer alive) are cleaned up on
-    heartbeat timeout.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-05-03T23:16:02.454808+00:00'
-  updated_at: '2026-05-03T23:16:02.454808+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
-- id: pr-c05ba7b
-  plan: plan-state
-  title: Migrate container governor lock to SQLite row lock
-  branch: pm/pr-c05ba7b-migrate-container-governor-lock-to-sqlite-row-lock
-  status: pending
-  depends_on: []
-  description: 'Phase 4 of plan-state. Replace the ~/.pm/governor.lock file with a
-    row-locked sentinel in a process_locks table.
-
-
-    Schema: process_locks(name PRIMARY KEY, holder_pid, acquired_at, host). Acquire
-    is INSERT ... ON CONFLICT DO NOTHING with a check that the existing holder is
-    still alive (PID liveness via os.kill(pid, 0)); release is DELETE WHERE holder_pid
-    = self.
-
-
-    Avoids the classic stale-lockfile-on-crash problem that flock-style locks have,
-    since SQLite''s write transaction itself is a lock and PID liveness is checked
-    on contention.
-
-
-    Migration: existing governor.lock is removed on first open of the new schema (any
-    existing holder fails over cleanly the next time it tries to acquire).
-
-
-    Tests: concurrent acquire returns one winner; release works; acquired-but-dead
-    holder is reaped on contention; same name can be reused for additional process
-    locks (e.g. push-proxy locks) later without schema changes.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-05-03T23:16:08.430373+00:00'
-  updated_at: '2026-05-03T23:16:08.430373+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
-- id: pr-1d5561d
-  plan: plan-state
-  title: Migrate Claude hook events to SQLite
-  branch: pm/pr-1d5561d-migrate-claude-hook-events-to-sqlite
-  status: pending
-  depends_on: []
-  description: 'Phase 5 of plan-state. Replace ~/.pm/hooks/<session_id> file drops
-    with rows in a hook_events table.
-
-
-    Schema: hook_events(id INTEGER PRIMARY KEY, session_id, event_type, timestamp_ns,
-    payload JSON). Indexes on (session_id, timestamp_ns) and (event_type, timestamp_ns).
-
-
-    This is the highest-write-rate store in pm — Claude lifecycle events fire many
-    times per minute across all sessions. The hook_receiver.py standalone script (currently
-    writes a file per event) is updated to write a row instead. Schema includes a
-    configurable retention policy (default: keep 30 days, configurable per-host) so
-    the table stays bounded.
-
-
-    Reader-side API (pm_core/hook_events.py) preserved; queries become SELECT instead
-    of file-glob + parse, much faster.
-
-
-    Migration: existing ~/.pm/hooks/* files imported on first open; subsequent events
-    go straight to the table.
-
-
-    Tests: write rate sustained at typical Claude-session throughput; reads find the
-    same events the file-glob found before; retention prunes correctly; session-scoped
-    queries (used by pane idle / verdict detection) return matching events.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-05-03T23:16:16.687864+00:00'
-  updated_at: '2026-05-03T23:16:16.687864+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
-- id: pr-aa2429a
-  plan: plan-state
-  title: Migrate per-session settings and mobile-mode flag to SQLite
-  branch: pm/pr-aa2429a-migrate-per-session-settings-and-mobile-mode-flag-
-  status: pending
-  depends_on: []
-  description: 'Phase 6 of plan-state. Replace ~/.pm/settings/* directory tree and
-    ~/.pm/<session>.mobile sentinel files with rows.
-
-
-    Schema: session_settings(session, key, value, set_at PRIMARY KEY (session, key)).
-    The mobile-mode force flag becomes session_settings(session, ''mobile-force'',
-    ''on''/''off'') rather than a sentinel file.
-
-
-    pm_core/paths helpers (get_global_setting, get_global_setting_value) and the mobile
-    flag readers (pane_layout.is_mobile et al.) are updated to read from the new table
-    while preserving public API.
-
-
-    Migration: import existing settings files and mobile sentinels on first open.
-
-
-    Tests: round-trip set/get; absent key returns default; mobile-mode toggle persists
-    across pm session restarts; settings files are migrated without losing values.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-05-03T23:16:19.769368+00:00'
-  updated_at: '2026-05-03T23:16:19.769368+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
-- id: pr-75f9276
-  plan: plan-state
-  title: Migrate generated specs and lifecycle markers to SQLite
-  branch: pm/pr-75f9276-migrate-generated-specs-and-lifecycle-markers-to-s
-  status: pending
-  depends_on: []
-  description: "Phase 7 of plan-state. Replace ~/.pm/specs/ directory tree and the\
-    \ various ~/.pm/<flow>-restart / ~/.pm/merge-lock sentinel files with typed tables.\n\
-    \nSchema:\n  specs(pr_id, phase, generated_at, content TEXT, model, prompt_hash,\
-    \ PRIMARY KEY (pr_id, phase))\n  markers(name, owner, set_at, expires_at NULL,\
-    \ payload JSON, PRIMARY KEY (name, owner))\n\nMarkers covers the various lifecycle\
-    \ sentinels (merge-lock, merge-restart, etc.) with a typed shape so adding new\
-    \ sentinels is a row insert rather than a file-system convention. Existing sentinels\
-    \ are migrated as rows.\n\nSpecs are stored inline in TEXT (small enough — typical\
-    \ spec is single-digit kilobytes). If specs grow significantly or become binary,\
-    \ follow PostHog's pattern (see plan-ambient open-source notes) and add a blob-store\
-    \ tier.\n\nTests: spec round-trip preserves content; marker set/check/clear semantics\
-    \ match the file-based versions; existing in-flight markers (e.g. an active merge-lock\
-    \ during migration) are imported without losing state."
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-05-03T23:16:26.725579+00:00'
-  updated_at: '2026-05-03T23:16:26.725579+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
-- id: pr-e6a3a99
-  plan: plan-state
-  title: Migrate ~/.pm/sessions/ artifact tree to SQLite
-  branch: pm/pr-e6a3a99-migrate-pm-sessions-artifact-tree-to-sqlite
-  status: pending
-  depends_on: []
-  description: 'Phase 8 of plan-state — last and lowest priority. The ~/.pm/sessions/
-    tree holds session-scoped state across many subtrees (per-PR, per-window, per-pane).
-    Some subtrees are state (good migration candidates); some are append-only logs
-    or large blobs (better as files).
-
-
-    Approach: audit the tree before designing the schema. Group entries by access
-    pattern (frequent reads, append-only, large-blob, lifecycle-bound) and migrate
-    the state-shaped subtrees first. Logs and blobs may stay file-based — the goal
-    of this plan is to consolidate STATE, not all files.
-
-
-    Migration is incremental. Each subtree gets its own schema decision and its own
-    importer; this PR is intentionally a rollup that may take multiple commits to
-    land.
-
-
-    Tests: per-subtree unit tests as each migrates; aggregate test verifying no session
-    loses state during the cutover; clear error if a subtree the implementor decided
-    to keep file-based is referenced by code that expects it in the database.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-05-03T23:16:33.693316+00:00'
-  updated_at: '2026-05-03T23:16:33.693316+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
-- id: pr-51b9f26
-  plan: plan-state
-  title: Change-log audit table for state writes
-  branch: pm/pr-51b9f26-change-log-audit-table-for-state-writes
-  status: pending
-  depends_on: []
-  description: 'Phase 1 sibling of plan-state. Add a state-change audit log so every
-    write to a domain table also produces a timestamped change record. Gives us ''what
-    happened today / over the last week / who changed this value'' as a single SELECT
-    and a full replayable history of interactions across pm.
-
-
-    Schema: state_changes(id INTEGER PRIMARY KEY, timestamp_ns INTEGER NOT NULL, actor
-    TEXT, context TEXT, table_name TEXT NOT NULL, row_pk TEXT, op TEXT NOT NULL, before_json
-    TEXT, after_json TEXT). Indexes on (timestamp_ns), (table_name, timestamp_ns),
-    and (actor, timestamp_ns).
-
-
-    Implementation: per opted-in table, install AFTER INSERT / UPDATE / DELETE triggers
-    that write a row into state_changes capturing the table name, primary key, op,
-    and the OLD / NEW row JSON. The trigger reads actor and context from SQLite session-level
-    pragmas / temp variables that the Python wrapper at pm_core/store/db.py sets before
-    each transaction (using sqlite3 connection.execute(''PRAGMA pm_actor = ?'', ...)
-    or a per-connection temp table). Actor is the user / agent session id; context
-    is the CLI command name or TUI action that triggered the write (e.g. ''pm pr start'',
-    ''tui:action_review_pr'').
-
-
-    Per-table opt-in: domain tables that are already event-shaped (notably hook_events
-    from Phase 5, or attention archive from plan-ambient pr-3fee106) skip the audit
-    triggers since they would just duplicate themselves. Most tables (project, prs,
-    plans, panes, qa_runtime, settings, specs, markers) opt in.
-
-
-    Retention: configurable per-host. Defaults to ''keep everything'' since the persistence-everywhere
-    principle from plan-ambient applies (50TB backing store assumption). A per-deployment
-    retention setting can prune old rows if needed.
-
-
-    Read API: pm_core/store/changes.py exposes query helpers — recent_changes(since=None,
-    table=None, actor=None, limit=N), changes_for_row(table, pk), most-recent-change-per-row,
-    etc. The TUI / CLI can surface ''recent activity'' views on top of this, and ambient
-    context queries (plan-ambient''s pm context) can include ''last N changes to project
-    state'' as part of the agent''s grounding.
-
-
-    Files: pm_core/store/db.py (transaction wrapper sets PRAGMA pm_actor / pm_context),
-    pm_core/store/changes.py (audit-log API), pm_core/store/schema.py (state_changes
-    table + helper to install triggers per opted-in table). Migration trigger installation
-    runs once when each domain table is created or upgraded.
-
-
-    Tests: trigger fires on INSERT / UPDATE / DELETE for an opted-in table; opted-out
-    table writes don''t produce audit rows; actor and context are captured from the
-    connection-level pragma; before_json / after_json correctly serialize the row;
-    reading the audit log as a time series gives the expected ordered history; truncation
-    of state_changes via retention policy doesn''t break referential integrity (state_changes
-    is independent of domain tables).'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-05-03T23:34:29.555050+00:00'
-  updated_at: '2026-05-03T23:34:29.555050+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
-- id: pr-026adcd
-  plan: plan-state
-  title: Migrate pm-internal logs to SQLite
-  branch: pm/pr-026adcd-migrate-pm-internal-logs-to-sqlite
-  status: pending
-  depends_on: []
-  description: 'Phase 9 of plan-state. Replace ~/.pm/debug/*.log files with rows in
-    a logs table.
-
-
-    Schema: logs(id INTEGER PRIMARY KEY, timestamp_ns INTEGER NOT NULL, level TEXT
-    NOT NULL, logger TEXT, message TEXT, context_json TEXT, session_id TEXT, pr_id
-    TEXT). Indexes: (timestamp_ns), (logger, timestamp_ns), (session_id, timestamp_ns),
-    (pr_id, timestamp_ns), (level, timestamp_ns).
-
-
-    This is the highest-write-rate store in the plan — every _log.info / _log.warning
-    / _log.exception call across pm lands here. Implementation strategy: a custom
-    logging.Handler in pm_core/paths.configure_logger that writes to the database
-    in batches (e.g. flush every 100 records or every 100ms, whichever first) to amortize
-    transaction overhead. Synchronous flush on critical paths (errors, shutdown).
-
-
-    Retention: configurable per-host. Defaults to ''keep 30 days'' since logs grow
-    fast and ''keep everything'' from plan-ambient''s persistence-everywhere principle
-    would be overwhelming for log streams specifically. Make the default tunable so
-    users with the 50TB budget can opt into longer retention.
-
-
-    Reader-side wins (the motivation):
-
-    - ''Last 100 errors across all sessions'': single indexed SELECT
-
-    - ''What did this PR''s QA loop log between T1 and T2'': indexed range scan, no
-    file-globbing
-
-    - ''Logs grouped by session_id during the last hour'': trivial aggregation
-
-    - TUI ''recent log'' panel becomes a live tail of the table rather than a file
-    tail
-
-
-    Migration: import existing ~/.pm/debug/*.log on first open of the new schema,
-    parsing the standard pm log format. Old log files are renamed to .migrated-<timestamp>.
-
-
-    Files: pm_core/paths.py (configure_logger uses a SQLiteLogHandler), new pm_core/store/logs.py
-    (handler implementation, batching, retention pruning), pm_core/store/schema.py
-    (logs table + indexes).
-
-
-    Tests: log writes from concurrent processes don''t corrupt rows or block each
-    other; batching coalesces correctly under bursty loads; queries return the expected
-    events; retention prunes old rows without affecting recent ones; existing log
-    files migrate cleanly with timestamps preserved; emergency exception path flushes
-    synchronously so a crash doesn''t lose the final logs.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-05-04T01:27:45.027356+00:00'
-  updated_at: '2026-05-04T01:27:45.027356+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
 - id: pr-a84a939
-  plan: plan-state
+  plan: improvements
   title: Extract data-service layer between storage and UIs
   branch: pm/pr-a84a939-extract-data-service-layer-between-storage-and-uis
   status: pending
   depends_on: []
-  description: "Phase 10 of plan-state. Establish a clean separation between storage\
-    \ (SQLite via pm_core/store/) and every UI / consumer by inserting a typed data-service\
-    \ layer in between. Storage becomes an internal-only package; everything outside\
-    \ pm_core/store/ and pm_core/services/ goes through services.\n\nWhy now: the\
-    \ DB migration is necessary but not sufficient. Today's TUI reaches directly into\
-    \ project.yaml structures, but the CLI commands, watchers, prompt builders, hook\
-    \ readers, qa_loop, container.py, and many other modules also read pm state directly.\
-    \ With a service layer in place, all of them — and any future UI like plan-ambient's\
-    \ rc viewer, project browser, doc reader, or a future web frontend — consume the\
-    \ same view-shaped types from pm_core/services/ without knowing whether storage\
-    \ is SQLite, Postgres, or anything else.\n\nThis PR is the *complete* separation,\
-    \ not a TUI-only refactor. Done means every entry point that reads or writes pm\
-    \ state goes through services; no direct pm_core/store/ imports remain outside\
-    \ pm_core/services/ itself.\n\nConcretely:\n\n(1) Create pm_core/services/ with\
-    \ one module per domain (project, prs, plans, panes, qa_runtime, hooks, logs,\
-    \ etc.). Each module exposes typed read methods (PrSummary, PrDetails, PlanSummary,\
-    \ PaneListing, etc.) returning frozen dataclasses or Pydantic models — no SQL,\
-    \ no rows, no internal IDs leaked.\n\n(2) Write methods accept typed command objects\
-    \ (StartPr, MovePane, etc.) and return the new state or an error type. Internally\
-    \ they use pm_core/store/ to perform the SQL; externally they hide it.\n\n(3)\
-    \ Refactor every reader/writer of pm state to go through services. The migration\
-    \ list is comprehensive, not just the TUI:\n  - pm_core/tui/* — every place app.py\
-    \ / pr_view.py / pane_ops.py / etc. reads or writes state today\n  - pm_core/cli/*\
-    \ — pr.py / plan.py / qa.py / session.py / helpers.py / container.py / meta.py\n\
-    \  - pm_core/watchers/* — every watcher that observes or modifies state\n  - pm_core/qa_loop.py\
-    \ and pm_core/qa/* — verdict tracking, scenario state\n  - pm_core/prompt_gen.py\
-    \ — pulls deps, plans, notes when building prompts; goes through services\n  -\
-    \ pm_core/hook_events.py and pm_core/hook_install.py — hook reader/writer\n  -\
-    \ pm_core/container.py and pm_core/pr_cleanup.py — workdir / container state lookups\n\
-    \  - pm_core/pr_sync.py — github-sync writes\n  - pm_core/auto_start.py, pm_core/loop_shared.py\
-    \ — auto-start / loop scheduling state\n  - Anywhere else that imports from pm_core/store/*\
-    \ or reads project.yaml / pane-registry / runtime files\n\n(4) The audit log (pr-51b9f26)\
-    \ layer captures actor and context naturally because the service-layer wrapper\
-    \ is the single place where writes happen. Each service method sets the (actor,\
-    \ context) for its transaction before delegating to store.\n\n(5) Lint / import-graph\
-    \ test enforces the separation: no module under pm_core/ outside pm_core/store/\
-    \ or pm_core/services/ may import from pm_core/store/*. Add a test that asserts\
-    \ this on every PR going forward, so a future change can't quietly punch through\
-    \ the boundary.\n\n(6) Tests at the service layer — unit-test each service method\
-    \ against an in-memory SQLite DB without spinning up a TUI or CLI. Today's tightly\
-    \ coupled UI-tests can stay where they are; service tests are added beneath them.\n\
-    \nOut of scope for this PR (follow-ups, not blockers):\n\n- Building any new UI\
-    \ on top of services — done by individual UI PRs (rc viewer, project browser,\
+  description: "Establish a clean separation between storage and every consumer of\
+    \ pm state by inserting a typed data-service layer between them. **This is a pure\
+    \ code refactor — it does NOT change pm's storage architecture (text files in\
+    \ git stay text files in git).**\n\nWhy this is valuable independent of storage:\n\
+    \n(1) Today's TUI reaches directly into project.yaml structures. The CLI commands,\
+    \ watchers, prompt builders, hook readers, qa_loop, container.py, and many other\
+    \ modules also read pm state directly. With a service layer in place, all of them\
+    \ — and any future UI like plan-ambient's rc viewer, project browser, doc reader,\
+    \ or a future web frontend — consume the same view-shaped types from pm_core/services/\
+    \ without coupling to specific file paths or YAML schemas.\n\n(2) Reading pm state\
+    \ today involves direct yaml.safe_load and dict-walking. A typed service layer\
+    \ (frozen dataclasses or Pydantic models) catches typos and shape errors at the\
+    \ service boundary, not at deep dict accesses inside the TUI.\n\n(3) New UIs in\
+    \ plan-ambient (rc viewer, project browser, doc reader) become incremental — find\
+    \ or add the service methods you need; no per-UI duplication of file-reading code.\n\
+    \n(4) Tests at the service layer can fixture state in-memory without touching\
+    \ disk, regardless of whether the underlying storage is a YAML file (today) or\
+    \ anything else (future).\n\nConcrete shape:\n\n(1) Create pm_core/services/ with\
+    \ one module per domain (project, prs, plans, panes, qa_runtime, hooks, etc.).\
+    \ Each module exposes typed read methods (PrSummary, PrDetails, PlanSummary, PaneListing,\
+    \ etc.) returning frozen dataclasses or Pydantic models — no dict-walking, no\
+    \ internal IDs leaked.\n\n(2) Write methods accept typed command objects (StartPr,\
+    \ MovePane, etc.) and return the new state or an error type. Internally they continue\
+    \ to use pm_core/store.py and other file-based readers/writers; the file-based\
+    \ architecture is preserved.\n\n(3) Refactor every reader/writer of pm state to\
+    \ go through services:\n  - pm_core/tui/* — every place app.py / pr_view.py /\
+    \ pane_ops.py reads or writes state\n  - pm_core/cli/* — pr.py / plan.py / qa.py\
+    \ / session.py / helpers.py / container.py / meta.py\n  - pm_core/watchers/* —\
+    \ every watcher\n  - pm_core/qa_loop.py and pm_core/qa/*\n  - pm_core/prompt_gen.py\n\
+    \  - pm_core/hook_events.py\n  - pm_core/pr_sync.py, pm_core/auto_start.py, pm_core/loop_shared.py\n\
+    \  - pm_core/container.py, pm_core/pr_cleanup.py\n  - Anywhere else that imports\
+    \ from pm_core/store* or reads project.yaml / pane-registry / runtime files\n\n\
+    (4) Lint / import-graph test enforces the separation: no module under pm_core/\
+    \ outside pm_core/store* or pm_core/services/ may import from pm_core/store* directly.\
+    \ A test asserts this on every PR going forward.\n\n(5) Tests at the service layer\
+    \ — unit-test each service method against fixture data without spinning up a TUI\
+    \ or CLI. Existing UI tests stay where they are; service tests are added beneath\
+    \ them.\n\nOut of scope:\n- Storage migration of any kind. project.yaml stays\
+    \ YAML in git. Everything currently in ~/.pm/ stays as files.\n- Building any\
+    \ new UI on top of services — done by individual UI PRs (rc viewer, project browser,\
     \ etc., already in plan-ambient). The service layer is what makes those PRs cheap.\n\
-    - A web/HTTP transport for services — a thin FastAPI adapter wrapping services;\
-    \ could be added later. Not required to ship the separation.\n\nFiles: new pm_core/services/\
-    \ package; refactor every module enumerated in (3); retire the public-API surface\
-    \ of pm_core/store.py (legacy module) in favor of pm_core/store/ being internal;\
-    \ add the lint/import-graph guard.\n\nTests: every service method has unit tests\
-    \ against an in-memory DB; TUI / CLI / watcher integration tests still pass after\
-    \ the refactor; the import-graph guard catches any direct pm_core/store/* import\
-    \ from outside the allowed packages; the audit log captures actor and context\
-    \ for every service-layer write."
+    - A web/HTTP transport for services — could be added later as a thin FastAPI adapter;\
+    \ not required to ship.\n\nFiles: new pm_core/services/ package, refactor every\
+    \ module enumerated in (3), import-graph guard test.\n\nTests: every service method\
+    \ has unit tests against fixture state; TUI / CLI / watcher integration tests\
+    \ still pass after the refactor; the import-graph guard catches any direct pm_core/store*\
+    \ import from outside the allowed packages."
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T01:28:02.549655+00:00'
-  updated_at: '2026-05-04T01:28:36.323684+00:00'
+  updated_at: '2026-05-04T13:49:35.821950+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -13476,7 +12927,7 @@ prs:
   title: 'Bug: review-loop fails with ''Review window not found after launch'' even
     when container created'
   branch: pm/pr-315f753-bug-review-loop-fails-with-review-window-not-found
-  status: pending
+  status: in_review
   depends_on: []
   description: 'EXACT root cause: PR titles containing single quotes (apostrophes)
     or other shell-meta characters break the diff_cmd shell pipeline that pr_review.py:_launch_review_window
@@ -13572,15 +13023,16 @@ prs:
     parens / quotes also opens cleanly; the previously-failing PRs pr-b56e079 / pr-7b3b639
     succeed end-to-end after the fix; new_window_get_pane returning None produces
     a clear log warning.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/189
+  gh_pr_number: 189
   created_at: '2026-05-04T13:07:56.002115+00:00'
-  updated_at: '2026-05-04T13:30:26.064792+00:00'
-  started_at: null
-  reviewed_at: null
+  updated_at: '2026-05-04T13:42:45.949421+00:00'
+  started_at: '2026-05-04T13:37:36.310056+00:00'
+  reviewed_at: '2026-05-04T13:42:45.949421+00:00'
   merged_at: null
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-315f753-bug-review-loop-fails-with-review-wi-8dd2c3bd
 - id: pr-b423bfd
   plan: bugs
   title: 'Bug: picker spinner shows ''review-loop: done…'' when the loop actually
