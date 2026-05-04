@@ -74,3 +74,35 @@ def test_ensure_diag_session_reuses_existing(tmp_path, monkeypatch):
     assert name == "pm-foo-abc-diag-5"
     se.assert_called_once_with("pm-foo-abc-diag-5")
     cs.assert_not_called()
+
+
+def test_ensure_diag_session_creates_when_missing(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    with patch("pm_core.tmux.session_exists", return_value=False), \
+         patch("pm_core.tmux.create_session") as cs, \
+         patch("pm_core.claude_launcher.find_claude", return_value="/usr/bin/claude"), \
+         patch("pm_core.claude_launcher.build_claude_shell_cmd",
+               return_value="claude --foo") as bc:
+        name = diag_popup.ensure_diag_session("pm-mytag-xyz", "@11")
+    assert name == "pm-mytag-xyz-diag-11"
+    cs.assert_called_once()
+    create_args = cs.call_args[0]
+    assert create_args[0] == "pm-mytag-xyz-diag-11"
+    assert create_args[2] == "claude --foo"
+    # build_claude_shell_cmd received the originating pm session_tag, not
+    # the diag session name — so skip-permissions tracks the pm session.
+    assert bc.call_args.kwargs["session_tag"] == "mytag-xyz"
+    # State map records the new session.
+    assert diag_popup._load_state("mytag-xyz") == {
+        "@11": {"name": "pm-mytag-xyz-diag-11"},
+    }
+
+
+def test_ensure_diag_session_falls_back_when_claude_missing(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    with patch("pm_core.tmux.session_exists", return_value=False), \
+         patch("pm_core.tmux.create_session") as cs, \
+         patch("pm_core.claude_launcher.find_claude", return_value=None):
+        diag_popup.ensure_diag_session("pm-foo-abc", "@3")
+    cmd = cs.call_args[0][2]
+    assert "Claude CLI not found" in cmd
