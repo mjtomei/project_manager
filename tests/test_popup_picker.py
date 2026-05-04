@@ -268,3 +268,83 @@ class TestPickerMergeDispatch:
              patch("pm_core.cli.session._wait_dismiss") as wait_mock:
             _run_picker_command("pr start pr-123", "sess")
         assert not wait_mock.called
+
+
+class TestOpenPaneForPr:
+    """Picker shortcuts c/i/Q open a split pane in the launching window."""
+
+    def _patches(self):
+        return (
+            patch("pm_core.cli.session.tmux_mod.find_window_by_name",
+                  return_value={"id": "@7", "index": "3", "name": "main"}),
+            patch("pm_core.cli.session.tmux_mod.split_pane",
+                  return_value="%42"),
+            patch("pm_core.cli.session.pane_registry.register_pane"),
+            patch("pm_core.cli.session._wait_dismiss"),
+        )
+
+    def test_shell_no_workdir_errors(self, tmp_path):
+        from pm_core.cli.session import _open_pane_for_pr
+        find, split, reg, dismiss = self._patches()
+        with find, split as split_mock, reg, dismiss as dismiss_mock:
+            _open_pane_for_pr("sess", "main",
+                              {"id": "pr-001", "workdir": None},
+                              "shell", tmp_path)
+        assert not split_mock.called
+        assert dismiss_mock.called
+
+    def test_shell_with_workdir_splits_and_registers(self, tmp_path):
+        from pm_core.cli.session import _open_pane_for_pr
+        wd = tmp_path / "work"
+        wd.mkdir()
+        find, split, reg, dismiss = self._patches()
+        with find, split as split_mock, reg as reg_mock, dismiss:
+            _open_pane_for_pr("sess", "main",
+                              {"id": "pr-001", "workdir": str(wd)},
+                              "shell", tmp_path)
+        assert split_mock.called
+        assert split_mock.call_args.kwargs.get("window") == "main"
+        cmd = split_mock.call_args.args[2]
+        assert str(wd) in cmd
+        assert reg_mock.called
+        assert reg_mock.call_args.args[3] == "pr-shell"
+
+    def test_impl_spec_missing_errors(self, tmp_path):
+        from pm_core.cli.session import _open_pane_for_pr
+        find, split, reg, dismiss = self._patches()
+        with find, split as split_mock, reg, dismiss as dismiss_mock:
+            _open_pane_for_pr("sess", "main", {"id": "pr-001"},
+                              "impl-spec", tmp_path)
+        assert not split_mock.called
+        assert dismiss_mock.called
+
+    def test_impl_spec_present_opens_pane(self, tmp_path):
+        from pm_core.cli.session import _open_pane_for_pr
+        spec_dir = tmp_path / "specs" / "pr-001"
+        spec_dir.mkdir(parents=True)
+        (spec_dir / "impl.md").write_text("# spec\n")
+        find, split, reg, dismiss = self._patches()
+        with find, split as split_mock, reg as reg_mock, dismiss:
+            _open_pane_for_pr("sess", "main", {"id": "pr-001"},
+                              "impl-spec", tmp_path)
+        cmd = split_mock.call_args.args[2]
+        assert "impl.md" in cmd
+        assert "glow" in cmd
+        assert reg_mock.call_args.args[3] == "pr-impl-spec"
+
+    def test_qa_spec_prefers_workdir_copy(self, tmp_path):
+        from pm_core.cli.session import _open_pane_for_pr
+        canon = tmp_path / "specs" / "pr-001"
+        canon.mkdir(parents=True)
+        (canon / "qa.md").write_text("canonical\n")
+        wd = tmp_path / "work"
+        (wd / "pm" / "specs" / "pr-001").mkdir(parents=True)
+        wd_spec = wd / "pm" / "specs" / "pr-001" / "qa.md"
+        wd_spec.write_text("fresh\n")
+        find, split, reg, dismiss = self._patches()
+        with find, split as split_mock, reg, dismiss:
+            _open_pane_for_pr("sess", "main",
+                              {"id": "pr-001", "workdir": str(wd)},
+                              "qa-spec", tmp_path)
+        cmd = split_mock.call_args.args[2]
+        assert str(wd_spec) in cmd
