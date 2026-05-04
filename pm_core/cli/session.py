@@ -174,6 +174,18 @@ def _register_tmux_bindings(session_name: str) -> None:
     # at trigger time — see that command and the _bind_popups() helper.
     _bind_popups()
 
+    # Window-attached persistent Claude popup (prefix+/). Each tmux window
+    # gets its own long-lived host-side Claude session; the popup attaches
+    # to it so dismissing only detaches the popup client, the diag session
+    # keeps running.  See pm_core.diag_popup and the _popup-diag command.
+    subprocess.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", "/",
+             "run-shell", "pm _popup-diag"),
+            check=False)
+    # Tear down a window's diag session when the window is closed.
+    subprocess.run(tmux_mod._tmux_cmd("set-hook", "-g", "window-unlinked",
+             "run-shell 'pm _window-diag-closed \"#{session_name}\" \"#{window_id}\"'"),
+            check=False)
+
 
 def _schedule_rebalance(session_name: str) -> None:
     """Spawn a background process to rebalance all windows after a short delay.
@@ -773,6 +785,77 @@ def popup_show_cmd(kind: str):
         tmux_mod._tmux_cmd(*popup_cmd),
         check=False,
     )
+
+
+@cli.command("_popup-diag", hidden=True)
+def popup_diag_cmd():
+    """Internal: summon the window-attached diag Claude popup.
+
+    Resolves the current tmux session/window, ensures a diag tmux session
+    exists for that window-id (creating it with a host-side Claude session
+    if needed), then opens a tmux popup attaching to it. Subsequent
+    presses re-attach to the same session, so the conversation persists.
+    """
+    from pm_core.diag_popup import ensure_diag_session
+
+    sess_r = subprocess.run(
+        tmux_mod._tmux_cmd("display-message", "-p", "#{session_name}"),
+        capture_output=True, text=True, check=False,
+    )
+    win_r = subprocess.run(
+        tmux_mod._tmux_cmd("display-message", "-p", "#{window_id}"),
+        capture_output=True, text=True, check=False,
+    )
+    if sess_r.returncode != 0 or win_r.returncode != 0:
+        _log.warning("_popup-diag: failed to resolve session/window")
+        return
+    pm_session = sess_r.stdout.strip()
+    window_id = win_r.stdout.strip()
+    if not pm_session or not window_id:
+        _log.warning("_popup-diag: empty session/window")
+        return
+
+    diag_name = ensure_diag_session(pm_session, window_id)
+
+    # Width: same dynamic logic as _popup-show — narrow clients get 95%,
+    # wider clients a fixed 80 cols. Height is taller (90%) since Claude
+    # needs vertical space for the conversation view.
+    width_r = subprocess.run(
+        tmux_mod._tmux_cmd("display-message", "-p", "#{window_width}"),
+        capture_output=True, text=True, check=False,
+    )
+    win_width: int | None = None
+    if width_r.returncode == 0 and width_r.stdout.strip().isdigit():
+        win_width = int(width_r.stdout.strip())
+    threshold = pane_layout._get_mobile_width_threshold()
+    width = "95%" if (win_width is not None and win_width < threshold) else "80"
+
+    body = f"tmux attach-session -t {shlex.quote(diag_name)}"
+    _log.info("_popup-diag: pm_session=%s window=%s diag=%s width=%s",
+              pm_session, window_id, diag_name, width)
+    subprocess.run(
+        tmux_mod._tmux_cmd(
+            "display-popup", "-E", "-w", width, "-h", "90%", body,
+        ),
+        check=False,
+    )
+
+
+@cli.command("_window-diag-closed", hidden=True)
+@click.argument("session")
+@click.argument("window")
+def window_diag_closed_cmd(session: str, window: str):
+    """Internal: tmux ``window-unlinked`` hook — terminate diag session.
+
+    Closing a pm tmux window should also tear down its host-side diag
+    Claude session. Best-effort: idempotent and silent on failure.
+    """
+    from pm_core.diag_popup import kill_diag_session_for_window
+    try:
+        kill_diag_session_for_window(session, window)
+    except Exception:
+        _log.exception("_window-diag-closed: error tearing down %s/%s",
+                       session, window)
 
 
 @cli.command("_window-resized", hidden=True)
