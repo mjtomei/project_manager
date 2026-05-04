@@ -103,41 +103,58 @@ def ensure_home_window(session: str | None = None) -> str | None:
         return None
 
 
-def park_if_on(session: str | None, target_window_id: str | None) -> str | None:
-    """If the caller's grouped session is on ``target_window_id``, park to home.
+def park_if_on(session: str | None, target_window_id: str | None) -> list[str]:
+    """Park *every* grouped session whose active window is ``target_window_id``.
 
     Convenience for the kill-window pattern:
 
         park_if_on(session, win["id"])
         tmux.kill_window(session, win["id"])
 
-    Resolves the active window of the calling client's grouped session;
-    if it matches ``target_window_id`` we ensure the home window exists
-    and switch to it before the kill.  Otherwise no-op (the kill won't
-    yank the user's focus, so we shouldn't either).
+    Cross-session aware: tmux windows are shared across grouped sessions
+    (``base`` + ``base~N``), but each grouped session can have a
+    different active window.  When pm kills a window, every grouped
+    session whose active window is the killed one will fall back to
+    that session's own previous-window history — which can land it on a
+    window already focused in another client.  To prevent that, this
+    helper enumerates every session on ``target_window_id`` (via
+    ``tmux.sessions_on_window``) and parks each on the home window
+    before the kill.
 
-    Returns the grouped-session name that was parked, or ``None`` if no
-    park happened.  Callers that recreate a window with the same name
-    (e.g. watcher recreate) can use this to exclude the parked session
-    from any post-recreate ``switch_sessions_to_window`` call so the
-    parked client isn't yanked back.
+    Returns the list of grouped-session names that were parked (empty
+    if none were on the target).  Useful for callsites that recreate
+    a same-named window and follow up with
+    ``switch_sessions_to_window`` — that switch will naturally pull
+    the parked clients onto the new window after the kill.
     """
     if not tmux_mod.in_tmux() or not session or not target_window_id:
-        return None
+        return []
     try:
         if not tmux_mod.session_exists(session):
-            return None
-        target_session = tmux_mod.current_or_base_session(session)
-        cur = tmux_mod.get_window_id(session)
-        if cur != target_window_id:
-            return None
+            return []
+        base = session.split("~")[0]
+        watching = tmux_mod.sessions_on_window(base, target_window_id)
+        if not watching:
+            return []
         provider = get_active_provider()
         home = provider.ensure_window(session)
-        tmux_mod.select_window(session, home)
-        return target_session
+        home_win = tmux_mod.find_window_by_name(session, home)
+        if not home_win:
+            return []
+        # Park each watching session on the home window.  ``select_window``
+        # routes through ``current_or_base_session`` which doesn't accept
+        # an explicit target session, so call tmux directly per session.
+        import subprocess
+        for sess in watching:
+            subprocess.run(
+                tmux_mod._tmux_cmd(
+                    "select-window", "-t", f"{sess}:{home_win['index']}"),
+                capture_output=True,
+            )
+        return watching
     except Exception:
         _log.exception("park_if_on failed")
-        return None
+        return []
 
 
 def park(session: str, home_window: str | None = None) -> None:

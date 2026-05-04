@@ -269,39 +269,26 @@ def kill_pr_windows(session: str, pr: dict) -> list[str]:
 
     killed = []
     display_id = _pr_display_id(pr)
-    target_names = {display_id, f"review-{display_id}", f"merge-{display_id}",
-                    f"qa-{display_id}"}
     qa_prefix = f"qa-{display_id}-s"
 
-    # If the calling client is currently focused on any window we're about
-    # to kill, pre-ensure the home window so we can park there afterward.
-    home_name: str | None = None
-    if tmux_mod.in_tmux():
-        try:
-            cur_id = tmux_mod.get_window_id(session)
-            cur_win = next((w for w in tmux_mod.list_windows(session)
-                            if w["id"] == cur_id), None)
-            cur_name = cur_win.get("name", "") if cur_win else ""
-            if cur_name in target_names or cur_name.startswith(qa_prefix):
-                home_name = home_window.ensure_home_window(session)
-        except Exception:
-            pass
-
+    # Park *every* grouped session whose active window is one of the
+    # windows we're about to kill — covers cross-session kills where the
+    # caller isn't on the doomed window but another grouped session is.
+    # No recreate follows here, so parked clients stay on home.
     for win_name in (display_id, f"review-{display_id}", f"merge-{display_id}",
                      f"qa-{display_id}"):
         win = tmux_mod.find_window_by_name(session, win_name)
         if win:
+            home_window.park_if_on(session, win["id"])
             tmux_mod.kill_window(session, win["id"])
             killed.append(win_name)
 
     # Also kill any QA scenario windows (qa-{display_id}-s1, etc.)
     for win in tmux_mod.list_windows(session):
         if win.get("name", "").startswith(qa_prefix):
+            home_window.park_if_on(session, win["id"])
             tmux_mod.kill_window(session, win["id"])
             killed.append(win["name"])
-
-    if home_name:
-        home_window.park(session, home_name)
 
     return killed
 

@@ -389,12 +389,13 @@ def _create_watcher_window(iteration: int, loop_id: str,
             pm_session, existing["id"])
         _log.info("_create_watcher_window: sessions_watching=%s, killing old window %s",
                     sessions_watching, existing["id"])
+        # Park as a safety net: if the recreate fails partway, parked
+        # clients stay on home instead of falling back to tmux's
+        # previous-window history.  When recreate succeeds,
+        # switch_sessions_to_window below pulls them onto the new
+        # watcher window — same end state as before.
         from pm_core import home_window
-        parked = home_window.park_if_on(pm_session, existing["id"])
-        if parked and parked in sessions_watching:
-            # The parked client deliberately landed on home — don't yank it
-            # back to the new watcher window in switch_sessions_to_window.
-            sessions_watching = [s for s in sessions_watching if s != parked]
+        home_window.park_if_on(pm_session, existing["id"])
         tmux_mod.kill_window(pm_session, existing["id"])
 
     # Create the watcher window without switching focus (background)
