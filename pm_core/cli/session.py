@@ -874,7 +874,7 @@ _ALL_ACTIONS: list[tuple[str, str]] = [
     ("edit", "tui:edit {pr_id}"),
     ("review", "pr review {pr_id}"),
     ("qa", "tui:pr qa {pr_id}"),
-    ("merge", "pr merge {pr_id}"),
+    ("merge", "pr merge --resolve-window {pr_id}"),
 ]
 
 # Modifier-key (z / zz) variants for actions that support fresh / loop.
@@ -1438,11 +1438,23 @@ def _run_picker_command(cmd: str, session: str) -> None:
         # state transition or when the target window appears.
         _wait_for_tui_command(base, tui_cmd)
     else:
-        # Run pm command directly
+        # Run pm command directly. Capture stdout/stderr so we can re-emit
+        # them ourselves — display-popup -E's raw-mode TTY mangles bytes
+        # streamed by the child, leaving the user staring at an empty
+        # popup when something fails.
         full_cmd = [sys.executable, "-m", "pm_core.wrapper"] + shlex.split(cmd)
-        result = subprocess.run(full_cmd, text=True)
+        result = subprocess.run(full_cmd, text=True, capture_output=True)
+        if result.stdout:
+            click.echo(result.stdout, nl=False)
         if result.returncode != 0:
+            err = (result.stderr or "").strip()
+            if err:
+                click.echo(f"pm error: {err}", err=True)
             _wait_dismiss()
+        elif result.stderr:
+            # Even on success some commands print informational lines to
+            # stderr; surface them so they don't vanish.
+            click.echo(result.stderr, nl=False, err=True)
 
 
 @cli.command("_popup-picker", hidden=True)

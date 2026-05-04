@@ -1760,9 +1760,20 @@ def pr_qa(pr_id: str | None):
     raise SystemExit(1)
 
 
+def _resolve_window_default() -> bool:
+    """Whether ``pr merge`` should default to launching a resolve window.
+
+    True when running inside the pm tmux session (PM_IN_TMUX_SESSION=1),
+    so picker / shell-pane / typed-in-command-bar invocations all match
+    the TUI command-bar behavior. False outside tmux.
+    """
+    return bool(os.environ.get("PM_IN_TMUX_SESSION"))
+
+
 @pr.command("merge")
 @click.argument("pr_id", default=None, required=False)
-@click.option("--resolve-window", is_flag=True, default=False, hidden=True,
+@click.option("--resolve-window/--no-resolve-window", "resolve_window",
+              default=None, hidden=True,
               help="On merge conflict, launch a Claude resolution window instead of exiting")
 @click.option("--background", is_flag=True, default=False, hidden=True,
               help="Create merge window without switching focus (used by auto-start)")
@@ -1772,7 +1783,7 @@ def pr_qa(pr_id: str | None):
               help="Open a companion shell pane alongside the merge resolution window")
 @click.option("--propagation-only", is_flag=True, default=False, hidden=True,
               help="Skip workdir merge, go straight to pull into repo dir (step 2)")
-def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
+def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
              transcript: str | None, companion: bool, propagation_only: bool):
     """Merge a PR's branch into the base branch.
 
@@ -1781,6 +1792,8 @@ def pr_merge(pr_id: str | None, resolve_window: bool, background: bool,
     directs the user to merge on GitHub manually.
     If PR_ID is omitted, infers from cwd or auto-selects.
     """
+    if resolve_window is None:
+        resolve_window = _resolve_window_default()
     root = state_root()
     data = store.load(root)
 
