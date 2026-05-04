@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-748e708
+  active_pr: pr-48cb564
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -13062,6 +13062,72 @@ prs:
   gh_pr_number: null
   created_at: '2026-05-04T11:58:45.935220+00:00'
   updated_at: '2026-05-04T11:58:45.935220+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-48cb564
+  plan: improvements
+  title: 'Picker popup: indicate per-session window-selected state with ● vs ○'
+  branch: pm/pr-48cb564-picker-popup-indicate-per-session-window-selected-
+  status: pending
+  depends_on: []
+  description: 'The prefix+P PR action picker (pm _popup-picker, pm_core/cli/session.py:1448)
+    lists active PR windows with their status and phase, but does not show which windows
+    are currently *selected* in any tmux session. With grouped sessions, the same
+    window can be the active window in one session and a non-active background window
+    in another — useful information for choosing what to do next (you wouldn''t want
+    to start a new action on a window that another collaborator''s session is actively
+    viewing).
+
+
+    Display rule:
+
+
+    - ● (filled dot) — the window is the currently-selected window in the *picker''s
+    own* tmux session (the one the user is operating from when they pressed prefix+P).
+
+    - ○ (open circle) — the window is the currently-selected window in some *other*
+    grouped session (any client other than the caller has it focused right now).
+
+    - (blank / nothing) — the window is open but not the active window in any attached
+    session.
+
+
+    A window can have both indicators if multiple sessions in the group are viewing
+    it; show the filled dot in that case (current-session takes priority for the user''s
+    mental model).
+
+
+    Implementation: pm_core/cli/session.py:popup_picker_cmd already gets the current
+    session and window name as args. Iterate over grouped sessions via tmux_mod.list_grouped_sessions(base)
+    and query each session''s active window via ''tmux display-message -t <session>
+    -p #{window_id}''. For each PR window in the picker list, mark it ● if it equals
+    the current session''s active, ○ if it equals any other session''s active, blank
+    otherwise.
+
+
+    Render: prepend the indicator (or a single space when blank) to the PR row so
+    the column lines up. Adjacent to the existing status icon (⏳ 🔨 etc.) so the line
+    reads e.g. ''● 🔨 #170: Title …'' or ''○ ⏳ pr-abc1234: Title …'' or ''  ✅ #182:
+    Title …''.
+
+
+    Files: pm_core/cli/session.py (popup_picker_cmd display logic; add a small helper
+    to build the per-session active-window map). Tests: synthetic group with caller-session
+    + two grouped sessions; verify the picker output marks windows with ●, ○, or blank
+    correctly; the same window selected in caller AND another session shows ●; the
+    same window selected only in another shows ○; an unselected window shows blank.
+
+
+    Out of scope: live-updating the indicators while the popup is open. The popup
+    is a snapshot; if a session changes its active window mid-popup, the user closes
+    and reopens to see the new state.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-04T12:02:52.811047+00:00'
+  updated_at: '2026-05-04T12:02:52.811047+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
