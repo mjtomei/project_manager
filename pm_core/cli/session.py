@@ -16,6 +16,7 @@ from pm_core import store, notes, guide
 from pm_core import tmux as tmux_mod
 from pm_core import pane_layout
 from pm_core import pane_registry
+from pm_core import paths
 from pm_core.claude_launcher import find_editor
 
 from pm_core.cli import cli
@@ -1885,37 +1886,73 @@ def popup_cmd_cmd(session: str):
     if saved_root is not None:
         os.environ["PM_PROJECT"] = str(saved_root)
 
-    try:
-        cmd = input("pm> ").strip()
-    except (EOFError, KeyboardInterrupt):
-        raise SystemExit(0)
+    # Resolve the session tag for shared-history persistence. The popup's
+    # cwd may not match the host session, so derive the tag from the
+    # saved root when available.
+    history_tag = None
+    if saved_root is not None:
+        history_tag = paths.get_session_tag(start_path=saved_root)
+    if history_tag is None:
+        history_tag = paths.get_session_tag()
 
-    if not cmd:
-        raise SystemExit(0)
+    # Wire readline + completer once per popup invocation.
+    completer = None
+    if sys.stdin.isatty():
+        try:
+            import readline  # noqa: F401
+            from pm_core.cli import completion as _completion
+            completer = _completion.install(saved_root)
+            hist_file = paths.command_history_file(history_tag)
+            if hist_file is not None and hist_file.exists():
+                try:
+                    readline.read_history_file(str(hist_file))
+                except OSError:
+                    pass
+        except ImportError:
+            completer = None
 
-    # Route TUI-dependent commands through the TUI command bar
-    try:
-        parts = shlex.split(cmd)
-    except ValueError as e:
-        click.echo(f"Invalid command syntax: {e}")
-        _wait_dismiss()
-        raise SystemExit(1)
-    _cmd_norm = cmd.replace("review loop", "review-loop")
-    if (_cmd_norm.startswith("pr qa")
-            or _cmd_norm.startswith("review-loop")):
-        _run_picker_command(f"tui:{_cmd_norm}", session)
-        return
+    click.echo("pm popup — Ctrl-D to dismiss, Esc/Ctrl-C aborts running command")
 
-    full_cmd = [sys.executable, "-m", "pm_core.wrapper"] + parts
+    while True:
+        try:
+            cmd = input("pm> ").strip()
+        except EOFError:
+            click.echo()
+            return
+        except KeyboardInterrupt:
+            click.echo("^C")
+            continue
 
-    rc = _run_with_abort_keys(full_cmd)
+        if not cmd:
+            continue
 
-    if rc == _ABORTED_BY_USER:
-        # User pressed Esc/Ctrl+C — close popup immediately, no error wait.
-        return
-    if rc != 0:
-        # Keep popup open so user can see error
-        _wait_dismiss()
+        # Persist to shared history (popup + TUI bar share this file).
+        try:
+            paths.append_command_history(cmd, history_tag)
+        except Exception:
+            pass
+
+        try:
+            parts = shlex.split(cmd)
+        except ValueError as e:
+            click.echo(f"Invalid command syntax: {e}")
+            continue
+
+        _cmd_norm = cmd.replace("review loop", "review-loop")
+        if (_cmd_norm.startswith("pr qa")
+                or _cmd_norm.startswith("review-loop")):
+            _run_picker_command(f"tui:{_cmd_norm}", session)
+            continue
+
+        full_cmd = [sys.executable, "-m", "pm_core.wrapper"] + parts
+        rc = _run_with_abort_keys(full_cmd)
+
+        if rc == _ABORTED_BY_USER:
+            click.echo("(aborted)")
+            continue
+        if rc != 0:
+            click.echo(f"(exit {rc})")
+        # On success, fall through to the next prompt.
 
 
 _ABORTED_BY_USER = -999
