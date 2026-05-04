@@ -156,7 +156,10 @@ class TechTree(Widget):
             idx = self._ordered_ids.index(pr_id)
             if idx != self.selected_index:
                 self.selected_index = idx
-                self.refresh()
+            # Always refresh so call_after_refresh has a pending repaint to
+            # fire after — without this, programmatic selection (e.g. from the
+            # command bar) may not trigger the scroll callback reliably.
+            self.refresh()
             self.call_after_refresh(self._scroll_selected_into_view)
 
     def update_plans(self, plans: list[dict]) -> None:

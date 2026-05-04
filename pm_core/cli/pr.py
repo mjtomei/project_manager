@@ -16,6 +16,7 @@ import click
 import yaml
 
 from pm_core import store, graph, git_ops, prompt_gen
+from pm_core.shell import shell_quote
 from pm_core import pr_sync as pr_sync_mod
 from pm_core import tmux as tmux_mod
 from pm_core import pane_layout
@@ -1109,7 +1110,7 @@ def _add_companion_pane(pm_session: str, window_info: dict, workdir: str,
 
     # Split horizontally with an interactive shell in the workdir
     shell = os.environ.get("SHELL", "/bin/bash")
-    companion_cmd = f"cd '{workdir}' && exec {shell}"
+    companion_cmd = f"cd {shell_quote(workdir)} && exec {shell}"
     companion_pane = tmux_mod.split_pane_at(claude_pane, "h", companion_cmd,
                                              background=True)
 
@@ -1239,7 +1240,7 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         # doesn't kill the pane (git's built-in pager can cause SIGPIPE
         # exit codes that break && chains).
         shell = os.environ.get("SHELL", "/bin/bash")
-        header = f"Review: {display_id} — {title}"
+        header = f"=== Review: {display_id} — {title} ==="
         # Use backend-appropriate diff base:
         #   local:   merge-base between base_branch and HEAD (no remote)
         #   vanilla/github: origin/{base_branch}...HEAD
@@ -1248,9 +1249,14 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
             diff_ref = base_branch
         else:
             diff_ref = f"origin/{base_branch}"
+        # User-controlled values (workdir, title via header) MUST be
+        # shell_quote'd. An apostrophe in a PR title would otherwise
+        # break the surrounding single-quote and turn the rest of the
+        # title into shell tokens, killing the pane shell before tmux
+        # can register the new window.
         diff_cmd = (
-            f"cd '{workdir}'"
-            f" && {{ echo '=== {header} ==='"
+            f"cd {shell_quote(workdir)}"
+            f" && {{ echo {shell_quote(header)}"
             f" && echo ''"
             f" && git status"
             f" && echo ''"
@@ -1273,6 +1279,14 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
             switch=switch,
         )
         if not diff_pane:
+            _log.warning(
+                "Review window: new_window_get_pane returned None for "
+                "window=%s session=%s. The diff pane shell likely exited "
+                "before tmux registered the window — check that "
+                "user-controlled values in diff_cmd are shell_quote'd "
+                "(e.g. PR title containing an apostrophe).",
+                window_name, pm_session,
+            )
             click.echo(f"Review window: failed to create tmux window '{window_name}'.")
             return
 

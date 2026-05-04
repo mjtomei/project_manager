@@ -1831,11 +1831,98 @@ def popup_cmd_cmd(session: str):
 
     full_cmd = [sys.executable, "-m", "pm_core.wrapper"] + parts
 
-    result = subprocess.run(full_cmd, text=True)
+    rc = _run_with_abort_keys(full_cmd)
 
-    if result.returncode != 0:
+    if rc == _ABORTED_BY_USER:
+        # User pressed Esc/Ctrl+C — close popup immediately, no error wait.
+        return
+    if rc != 0:
         # Keep popup open so user can see error
         _wait_dismiss()
+
+
+_ABORTED_BY_USER = -999
+
+
+def _run_with_abort_keys(cmd: list[str]) -> int:
+    """Run *cmd* inheriting stdout/stderr, but watch the popup pty for
+    Esc / Ctrl+C and terminate the child when either is pressed.
+
+    The child is spawned in its own session with ``stdin=DEVNULL`` so the
+    parent owns the pty input.  Returns the child's exit code, or
+    ``_ABORTED_BY_USER`` if the user dismissed the popup mid-run.
+    """
+    import signal
+    import sys
+
+    if not sys.stdin.isatty():
+        # Tests / non-interactive: just run it.
+        return subprocess.run(cmd, text=True).returncode
+
+    import select
+    import termios
+    import tty
+
+    proc = subprocess.Popen(
+        cmd, text=True,
+        stdin=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+    fd = sys.stdin.fileno()
+    old_attrs = termios.tcgetattr(fd)
+    aborted = False
+    try:
+        tty.setcbreak(fd)
+        # Disable ISIG so Ctrl+C arrives as the byte 0x03 we can intercept
+        # and forward, instead of raising KeyboardInterrupt in this process.
+        new_attrs = termios.tcgetattr(fd)
+        new_attrs[3] &= ~termios.ISIG  # lflags
+        termios.tcsetattr(fd, termios.TCSANOW, new_attrs)
+        while True:
+            if proc.poll() is not None:
+                break
+            try:
+                r, _, _ = select.select([fd], [], [], 0.1)
+            except (InterruptedError, OSError):
+                continue
+            if not r:
+                continue
+            try:
+                ch = os.read(fd, 1)
+            except OSError:
+                continue
+            if not ch:
+                continue
+            if ch in (b"\x1b", b"\x03"):  # Esc, Ctrl+C
+                aborted = True
+                try:
+                    os.killpg(proc.pid, signal.SIGINT)
+                except (ProcessLookupError, PermissionError):
+                    pass
+                # Give the child a moment to exit on SIGINT, then escalate.
+                try:
+                    proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(proc.pid, signal.SIGTERM)
+                    except (ProcessLookupError, PermissionError):
+                        pass
+                    try:
+                        proc.wait(timeout=1)
+                    except subprocess.TimeoutExpired:
+                        try:
+                            os.killpg(proc.pid, signal.SIGKILL)
+                        except (ProcessLookupError, PermissionError):
+                            pass
+                        proc.wait()
+                break
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+
+    if aborted:
+        return _ABORTED_BY_USER
+    return proc.returncode if proc.returncode is not None else 0
 
 
 # --- Session registry commands ---
