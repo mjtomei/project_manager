@@ -69,12 +69,19 @@ _POPUP_CMD_BODY = (
     " || { echo; echo 'pm popup failed (exit '$?').';"
     " read -n 1 -s -r -p 'Press any key to close...'; }"
 )
+_POPUP_PLANS_BODY = (
+    'S=$(tmux display-message -p "#{session_name}");'
+    ' pm _popup-plans "$S"'
+    " || { echo; echo 'pm popup failed (exit '$?').';"
+    " read -n 1 -s -r -p 'Press any key to close...'; }"
+)
 
 
 _POPUP_KINDS = {
     # kind -> (height, body)
     "picker": ("80%", _POPUP_PICKER_BODY),
     "cmd": ("50%", _POPUP_CMD_BODY),
+    "plans": ("80%", _POPUP_PLANS_BODY),
 }
 
 
@@ -91,6 +98,9 @@ def _bind_popups() -> None:
             check=False)
     subprocess.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", "M",
              "run-shell", "pm _popup-show cmd"),
+            check=False)
+    subprocess.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", "L",
+             "run-shell", "pm _popup-show plans"),
             check=False)
 
 
@@ -1916,6 +1926,219 @@ def popup_cmd_cmd(session: str):
     if rc != 0:
         # Keep popup open so user can see error
         _wait_dismiss()
+
+
+# Plan popup shortcut keys: press a key to dispatch an action against
+# whichever plan is currently highlighted.  Mirrors _SHORTCUT_KEYS for
+# PRs but without the chord state machine.  'd' (deps) and 'f' (fix)
+# are cross-plan and don't require a highlighted row.
+_PLAN_SHORTCUT_KEYS = {
+    "r": "review",
+    "b": "breakdown",
+    "e": "edit",
+    "v": "view",
+    "d": "deps",
+    "l": "load",
+    "f": "fix",
+}
+# Subset that needs a highlighted plan id; the rest are cross-plan.
+_PLAN_PER_PLAN_ACTIONS = {"review", "breakdown", "edit", "view", "load"}
+
+
+def _plan_pr_counts(prs: list[dict], plan_id: str) -> tuple[int, int, int]:
+    """(total, merged, pending) PRs for a given plan id."""
+    total = merged = pending = 0
+    for pr in prs:
+        if pr.get("plan") != plan_id:
+            continue
+        total += 1
+        status = (pr.get("status") or "").lower()
+        if status == "merged":
+            merged += 1
+        else:
+            pending += 1
+    return total, merged, pending
+
+
+@cli.command("_popup-plans", hidden=True)
+@click.argument("session")
+def popup_plans_cmd(session: str):
+    """Internal: plan picker for tmux popup.
+
+    Lists all plans with PR counts.  Single-key shortcuts dispatch an
+    action against the currently highlighted plan (or, for cross-plan
+    actions like ``deps``/``fix``, regardless of highlight).  Plan
+    actions route through the TUI command bar so window management is
+    handled by the TUI's existing per-plan window helpers.
+    """
+    import shutil
+    import sys
+
+    base = pane_registry.base_session_name(session)
+    rp = pane_registry.registry_path(base)
+    _log.info("popup-plans invoked: session=%r base=%r registry_path=%s exists=%s",
+              session, base, rp, rp.exists())
+    if not rp.exists():
+        click.echo("Not a pm session.")
+        _wait_dismiss()
+        raise SystemExit(1)
+
+    saved_root = _resolve_root_from_session(session)
+    try:
+        root = saved_root if saved_root is not None else state_root()
+        data = store.load(root)
+    except FileNotFoundError:
+        click.echo("No project.yaml found.")
+        _wait_dismiss()
+        raise SystemExit(1)
+    os.environ["PM_PROJECT"] = str(root)
+
+    plans = data.get("plans") or []
+    prs = data.get("prs") or []
+
+    rows: list[tuple[str, str]] = []  # (display, plan_id)
+    for p in plans:
+        pid = p.get("id", "")
+        if not pid:
+            continue
+        name = p.get("name", "")
+        status = p.get("status", "draft")
+        total, merged, pending = _plan_pr_counts(prs, pid)
+        counts = f"{total} PRs, {merged} merged, {pending} pending"
+        rows.append((f"{pid}: {name} [{status}] ({counts})", pid))
+
+    has_fzf = shutil.which("fzf") is not None
+
+    shortcut_hint = "  ".join(
+        f"{k}={lbl}" for k, lbl in _PLAN_SHORTCUT_KEYS.items()
+    )
+
+    def _dispatch(action: str, plan_id: str | None) -> None:
+        if action in _PLAN_PER_PLAN_ACTIONS:
+            if not plan_id:
+                return
+            cmd = f"tui:plan {action} {plan_id}"
+        elif action == "deps":
+            cmd = "tui:plan deps"
+        elif action == "fix":
+            cmd = "tui:plan fix"
+        else:
+            return
+        _run_picker_command(cmd, session)
+
+    if has_fzf:
+        import string
+
+        no_input_supported = _fzf_supports_no_input()
+
+        # Bind every alphanumeric key not in --expect to fzf's ignore
+        # action so unrecognized keystrokes don't echo.  q aborts; j/k
+        # are the standard down/up nav.
+        expect = list(_PLAN_SHORTCUT_KEYS.keys()) + ["enter"]
+        expect_set = set(expect)
+        binds = ["q:abort", "j:down", "k:up", "/:show-input"]
+        for ch in string.ascii_lowercase + string.ascii_uppercase + string.digits:
+            if ch == "q":
+                continue
+            if ch in expect_set:
+                continue
+            if ch in ("j", "k"):
+                continue
+            binds.append(f"{ch}:ignore")
+
+        header_lines = [
+            "Plans (prefix+L)",
+            f"q/Esc: quit  enter=review  {shortcut_hint}",
+            "j/k or ↑/↓ to move  /  to filter",
+        ]
+        if not rows:
+            header_lines.insert(1, "No plans — d=deps  f=fix still available")
+        header = "\n".join(header_lines)
+
+        fzf_cmd = ["fzf", "--ansi", "--no-sort", "--reverse",
+                   f"--header={header}",
+                   "--header-first",
+                   "--pointer=>",
+                   "--no-info",
+                   f"--bind={','.join(binds)}",
+                   "--height=100%",
+                   f"--expect={','.join(expect)}"]
+        if no_input_supported:
+            fzf_cmd.append("--no-input")
+        else:
+            fzf_cmd.extend(["--disabled", "--prompt="])
+
+        fzf_input = "\n".join(d for d, _ in rows) if rows else ""
+
+        proc = subprocess.Popen(
+            fzf_cmd,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            text=True,
+        )
+        stdout, _ = proc.communicate(input=fzf_input)
+
+        if proc.returncode != 0:
+            # Aborted (q/Esc).
+            raise SystemExit(0)
+
+        out_lines = stdout.strip("\n").split("\n")
+        pressed_key = out_lines[0] if out_lines else ""
+        selected = out_lines[1] if len(out_lines) > 1 else ""
+
+        # Resolve highlighted plan id from the selected display line.
+        highlighted_id: str | None = None
+        if selected:
+            for display, pid in rows:
+                if display == selected:
+                    highlighted_id = pid
+                    break
+
+        if pressed_key == "":
+            # Plain Enter without --expect match (shouldn't happen since
+            # 'enter' is in expect, but guard anyway).
+            if highlighted_id:
+                _dispatch("review", highlighted_id)
+        elif pressed_key == "enter":
+            if highlighted_id:
+                _dispatch("review", highlighted_id)
+        elif pressed_key in _PLAN_SHORTCUT_KEYS:
+            action = _PLAN_SHORTCUT_KEYS[pressed_key]
+            _dispatch(action, highlighted_id)
+
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+        raise SystemExit(0)
+
+    # Fallback: numbered list with shortcut keys.
+    click.echo("Tip: install fzf for a better experience"
+               " (brew install fzf / apt install fzf)\n")
+    click.echo("Plans (prefix+L)\n")
+    if not rows:
+        click.echo("No plans.")
+    else:
+        for i, (display, _pid) in enumerate(rows, 1):
+            click.echo(f"  {i}) {display}")
+    click.echo(f"\nShortcuts: {shortcut_hint}")
+    try:
+        choice = input(
+            f"Select [1-{len(rows)}] or shortcut key: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        raise SystemExit(0)
+
+    if choice in _PLAN_SHORTCUT_KEYS:
+        action = _PLAN_SHORTCUT_KEYS[choice]
+        # Highlighted plan = first row in fallback (no real highlight).
+        highlighted_id = rows[0][1] if rows else None
+        _dispatch(action, highlighted_id)
+        return
+    try:
+        choice_num = int(choice)
+    except ValueError:
+        return
+    if 1 <= choice_num <= len(rows):
+        _dispatch("review", rows[choice_num - 1][1])
 
 
 _ABORTED_BY_USER = -999

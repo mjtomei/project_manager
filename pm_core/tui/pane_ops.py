@@ -625,6 +625,7 @@ def _launch_in_plans_window(app, plan_id: str | None, cmd: str, role: str,
 # These ride the same per-plan window machinery so each cross-plan action gets
 # its own dedicated window instead of fighting over a single shared "plans".
 _DEPS_PSEUDO_PLAN_ID = "plan-deps"
+_FIX_PSEUDO_PLAN_ID = "plan-fix"
 
 
 def handle_plan_action(app, action: str, plan_id: str | None) -> None:
@@ -650,6 +651,15 @@ def handle_plan_action(app, action: str, plan_id: str | None) -> None:
     elif action == "review":
         if plan_id:
             _launch_in_plans_window(app, plan_id, f"pm plan review {plan_id}", "plan-review")
+    elif action == "view":
+        if plan_id:
+            plan = store.get_plan(app._data, plan_id)
+            if plan and app._root:
+                plan_path = app._root / plan.get("file", "")
+                if plan_path.exists():
+                    _launch_in_plans_window(app, plan_id, f"less {plan_path}", "plan-view")
+    elif action == "fix":
+        _launch_in_plans_window(app, _FIX_PSEUDO_PLAN_ID, "pm plan fix", "plan-fix")
 
 
 def handle_plan_add(app, result: tuple[str, str] | None) -> None:
