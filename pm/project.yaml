@@ -97,6 +97,11 @@ plans:
   file: plans/plan-state.md
   status: draft
   parent: null
+- id: plan-self-improve
+  name: Recursive pm tournament across targets
+  file: plans/plan-self-improve.md
+  status: draft
+  parent: null
 prs:
 - id: pr-001
   plan: plan-001
@@ -14467,7 +14472,7 @@ prs:
   title: 'Improvement: pm pr start auto-commits the PR''s project.yaml entry on master
     if not yet committed'
   branch: pm/pr-f74988c-improvement-pm-pr-start-auto-commits-the-pr-s-proj
-  status: pending
+  status: in_progress
   depends_on: []
   description: '## Goal
 
@@ -14624,12 +14629,13 @@ prs:
     - pm pr start on a PR not in working yaml → unchanged ''not found'' error.
 
     - Lock timeout: simulated stuck holder → clear error after 30s, no hang.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/200
+  gh_pr_number: 200
   created_at: '2026-05-04T19:50:22.167828+00:00'
-  updated_at: '2026-05-04T19:52:10.043784+00:00'
-  started_at: null
+  updated_at: '2026-05-04T19:53:30.713246+00:00'
+  started_at: '2026-05-04T19:53:30.713246+00:00'
   reviewed_at: null
   merged_at: null
   notes: []
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-f74988c-improvement-pm-pr-start-auto-commits-203ee4e9
